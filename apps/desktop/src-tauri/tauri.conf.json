@@ -12,9 +12,16 @@
   "app": {
     "windows": [
       {
-        "title": "lys-desktop",
-        "width": 800,
-        "height": 600
+        "title": "Lysiptera Caliginia",
+        "width": 1180,
+        "height": 820,
+        "minWidth": 800,
+        "minHeight": 600,
+        "center": true,
+        "resizable": true,
+        "decorations": true,
+        "hiddenTitle": true,
+        "titleBarStyle": "Overlay"
       }
     ],
     "security": {

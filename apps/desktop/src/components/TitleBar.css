@@ -1,0 +1,65 @@
+.title-bar {
+  height: 40px;
+  flex: 0 0 40px;
+  display: grid;
+  grid-template-columns: 120px 1fr 120px;
+  align-items: center;
+  background: #0e0e10;
+  border-bottom: 1px solid #1a1a1f;
+  user-select: none;
+}
+
+.title-bar__native-controls {
+  height: 100%;
+}
+
+.title-bar__title {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.title-bar__name {
+  color: #e8e4dc;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 15px;
+  letter-spacing: 0.02em;
+}
+
+.title-bar__version {
+  color: #5a5852;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.title-bar__scenario-trigger {
+  justify-self: end;
+  margin-right: 12px;
+}
+
+.title-bar__scenario-menu {
+  width: 216px;
+  border: 1px solid #2c2c34;
+  border-radius: 0;
+  background: #101016;
+  padding: 4px;
+}
+
+.title-bar__scenario-item {
+  justify-content: space-between;
+  border-radius: 0;
+  padding: 8px 10px;
+  color: #c9c4b8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.title-bar__scenario-item > span:last-child {
+  color: #5a5852;
+  font-size: 9px;
+}

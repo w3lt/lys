@@ -1,0 +1,130 @@
+.markdown-message {
+  color: #302f2a;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.markdown-message > :first-child {
+  margin-top: 0;
+}
+
+.markdown-message > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown-message p,
+.markdown-message ul,
+.markdown-message ol,
+.markdown-message blockquote,
+.markdown-message .markdown-message__code-block {
+  margin: 0 0 14px;
+}
+
+.markdown-message h1,
+.markdown-message h2,
+.markdown-message h3,
+.markdown-message h4 {
+  color: #24231f;
+  font-weight: 600;
+  line-height: 1.25;
+  margin: 22px 0 10px;
+}
+
+.markdown-message h1 {
+  font-size: 22px;
+}
+
+.markdown-message h2 {
+  font-size: 18px;
+}
+
+.markdown-message h3,
+.markdown-message h4 {
+  font-size: 15px;
+}
+
+.markdown-message ul,
+.markdown-message ol {
+  padding-left: 22px;
+}
+
+.markdown-message li + li {
+  margin-top: 5px;
+}
+
+.markdown-message a {
+  color: #625b4d;
+  text-decoration: underline;
+  text-decoration-color: #b7b0a3;
+  text-underline-offset: 3px;
+}
+
+.markdown-message :not(.markdown-message__block-code) > code,
+.markdown-message > code {
+  background: #efede7;
+  border: 1px solid #e2ded4;
+  border-radius: 3px;
+  color: #454139;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.86em;
+  padding: 0.08em 0.35em;
+}
+
+.markdown-message blockquote {
+  border-left: 2px solid #b7b0a3;
+  color: #6a665d;
+  padding-left: 14px;
+}
+
+.markdown-message__code-block {
+  background: #f7f5f0;
+  border: 1px solid #dfdad0;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.markdown-message__code-header {
+  align-items: center;
+  background: #efede7;
+  border-bottom: 1px solid #dfdad0;
+  color: #777268;
+  display: flex;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 9px;
+  justify-content: space-between;
+  letter-spacing: 0.18em;
+  padding: 7px 10px;
+  text-transform: uppercase;
+}
+
+.markdown-message__code-header [data-slot="button"] {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+}
+
+.markdown-message__block-code {
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.65;
+  overflow-x: auto;
+  padding: 12px;
+  white-space: pre;
+}
+
+.markdown-message__caret {
+  animation: markdown-message-blink 1s steps(2, start) infinite;
+  background: currentColor;
+  display: inline-block;
+  height: 1em;
+  margin-left: 3px;
+  vertical-align: -0.12em;
+  width: 2px;
+}
+
+@keyframes markdown-message-blink {
+  50% {
+    opacity: 0;
+  }
+}

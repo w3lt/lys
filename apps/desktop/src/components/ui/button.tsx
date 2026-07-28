@@ -11,17 +11,17 @@ const buttonVariants = cva(
       variant: {
         default: "bg-primary text-primary-foreground hover:bg-primary/80",
         lysPrimary:
-          "rounded-none border-[var(--lys-accent)] bg-[var(--lys-accent)] font-mono text-[10px] uppercase tracking-[0.18em] text-[#12100c] hover:bg-[#f0d6a6]",
+          "rounded-none border-[var(--app-action)] bg-[var(--app-action)] font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--app-action-foreground)] hover:bg-[var(--app-action-hover)]",
         lysOutline:
-          "rounded-none border-[#2c2c34] bg-transparent font-mono text-[10px] uppercase tracking-[0.16em] text-[#c9c4b8] hover:border-[#3e3e48] hover:bg-[#16161b] hover:text-[#f0ebe0]",
+          "rounded-none border-[var(--app-border-strong)] bg-transparent font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--app-text)] hover:border-[var(--app-border-interactive)] hover:bg-[var(--app-surface-hover)] hover:text-[var(--app-text-strong)]",
         lysGhost:
-          "rounded-none border-transparent bg-transparent font-mono text-[10px] uppercase tracking-[0.16em] text-[#6e6c66] hover:bg-transparent hover:text-[#e8e4dc]",
+          "rounded-none border-transparent bg-transparent font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--app-text-muted)] hover:bg-transparent hover:text-[var(--app-text-strong)]",
         lysDanger:
-          "rounded-none border-[#3e2c28] bg-transparent font-mono text-[10px] uppercase tracking-[0.16em] text-[#c97a6a] hover:bg-[#241715] hover:text-[#efc0af]",
+          "rounded-none border-[var(--app-border-danger)] bg-transparent font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--app-text-danger)] hover:bg-[var(--app-surface-danger)] hover:text-[var(--app-text-danger-muted)]",
         lysMeta:
-          "h-auto rounded-none border-transparent bg-transparent p-0 font-mono text-[9px] uppercase tracking-[0.18em] text-[#5a5852] hover:bg-transparent hover:text-[#c9c4b8]",
+          "h-auto rounded-none border-transparent bg-transparent p-0 font-mono text-[9px] uppercase tracking-[0.18em] text-[var(--app-text-faint)] hover:bg-transparent hover:text-[var(--app-text)]",
         lysNav:
-          "h-auto w-full justify-between rounded-none border-l-2 border-transparent bg-transparent px-[18px] py-[11px] font-mono text-[11.5px] font-normal text-[#7c7973] hover:bg-[#101016] hover:text-[#f0ebe0] data-[state=active]:border-[var(--lys-accent)] data-[state=active]:bg-[#101016] data-[state=active]:text-[#f0ebe0]",
+          "h-auto w-full justify-between rounded-none border-l-2 border-transparent bg-transparent px-[18px] py-[11px] font-mono text-[11.5px] font-normal text-[var(--app-text-muted)] hover:bg-[var(--app-surface-hover)] hover:text-[var(--app-text-strong)] data-[state=active]:border-[var(--app-action)] data-[state=active]:bg-[var(--app-surface-navigation-active)] data-[state=active]:text-[var(--app-text-strong)]",
         outline:
           "border-border bg-background hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
         secondary:
@@ -30,7 +30,7 @@ const buttonVariants = cva(
           "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
         destructive:
           "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive/40",
-        link: "text-primary underline-offset-4 hover:underline",
+        link: "text-primary underline-offset-4 hover:underline"
       },
       size: {
         default:
@@ -44,20 +44,23 @@ const buttonVariants = cva(
           "size-6 rounded-[min(var(--radius-md),10px)] in-data-[slot=button-group]:rounded-lg [&_svg:not([class*='size-'])]:size-3",
         "icon-sm":
           "size-7 rounded-[min(var(--radius-md),12px)] in-data-[slot=button-group]:rounded-lg",
-        "icon-lg": "size-9",
-      },
+        "icon-lg": "size-9"
+      }
     },
     defaultVariants: {
       variant: "default",
-      size: "default",
-    },
+      size: "default"
+    }
   }
 )
 
 const Button = React.forwardRef<
   React.ComponentRef<typeof ButtonPrimitive>,
   ButtonPrimitive.Props & VariantProps<typeof buttonVariants>
->(function Button({ className, variant = "default", size = "default", ...props }, ref) {
+>(function Button(
+  { className, variant = "default", size = "default", ...props },
+  ref
+) {
   return (
     <ButtonPrimitive
       ref={ref}

@@ -1,5 +1,5 @@
 .markdown-message {
-  color: #302f2a;
+  color: var(--app-text);
   font-size: 14px;
   line-height: 1.7;
 }
@@ -24,7 +24,7 @@
 .markdown-message h2,
 .markdown-message h3,
 .markdown-message h4 {
-  color: #24231f;
+  color: var(--app-text-strong);
   font-weight: 600;
   line-height: 1.25;
   margin: 22px 0 10px;
@@ -53,41 +53,41 @@
 }
 
 .markdown-message a {
-  color: #625b4d;
+  color: var(--app-text-link);
   text-decoration: underline;
-  text-decoration-color: #b7b0a3;
+  text-decoration-color: var(--app-border-interactive);
   text-underline-offset: 3px;
 }
 
 .markdown-message :not(.markdown-message__block-code) > code,
 .markdown-message > code {
-  background: #efede7;
-  border: 1px solid #e2ded4;
+  background: var(--app-surface-code);
+  border: 1px solid var(--app-border-default);
   border-radius: 3px;
-  color: #454139;
+  color: var(--app-text-code);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 0.86em;
   padding: 0.08em 0.35em;
 }
 
 .markdown-message blockquote {
-  border-left: 2px solid #b7b0a3;
-  color: #6a665d;
+  border-left: 2px solid var(--app-border-interactive);
+  color: var(--app-text-muted);
   padding-left: 14px;
 }
 
 .markdown-message__code-block {
-  background: #f7f5f0;
-  border: 1px solid #dfdad0;
+  background: var(--app-surface-code);
+  border: 1px solid var(--app-border-default);
   border-radius: 6px;
   overflow: hidden;
 }
 
 .markdown-message__code-header {
   align-items: center;
-  background: #efede7;
-  border-bottom: 1px solid #dfdad0;
-  color: #777268;
+  background: var(--app-surface-code-header);
+  border-bottom: 1px solid var(--app-border-default);
+  color: var(--app-text-muted);
   display: flex;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 9px;

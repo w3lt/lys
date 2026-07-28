@@ -71,10 +71,7 @@
   --lys-cyan: oklch(0.76 0.14 205);
   --lys-silver: oklch(0.9 0.025 235);
 
-  /*
-   * Light-mode fallback: a restrained pearl-violet → frost-cyan atmosphere.
-   * The intended primary Lys appearance is the .dark palette below.
-   */
+  /* A restrained pearl-violet → frost-cyan atmosphere. */
   --gradient-background:
     radial-gradient(
       circle at 86% 8%,
@@ -98,8 +95,7 @@
     oklch(0.76 0.14 205 / 68%)
   );
   --shadow-primary:
-    0 0 24px oklch(0.58 0.2 303 / 18%),
-    0 0 36px oklch(0.72 0.14 205 / 14%);
+    0 0 24px oklch(0.58 0.2 303 / 18%), 0 0 36px oklch(0.72 0.14 205 / 14%);
 
   --background: oklch(0.97 0.018 263);
   --foreground: oklch(0.19 0.045 293);
@@ -136,6 +132,64 @@
   --sidebar-accent-foreground: oklch(0.24 0.065 232);
   --sidebar-border: oklch(0.7 0.055 257 / 32%);
   --sidebar-ring: oklch(0.67 0.14 210);
+
+  /*
+   * Desktop application roles. Component styles consume these semantic
+   * tokens so the complete rendered palette remains owned by this file.
+   */
+  --app-surface: oklch(0.98 0.014 263 / 72%);
+  --app-surface-chrome: oklch(0.955 0.026 292 / 92%);
+  --app-surface-rail: oklch(0.945 0.03 296 / 88%);
+  --app-surface-content: oklch(0.985 0.012 250 / 70%);
+  --app-surface-panel: var(--card);
+  --app-surface-field: oklch(0.99 0.008 250 / 90%);
+  --app-surface-hover: var(--accent);
+  --app-surface-navigation-active: oklch(0.94 0.026 286 / 88%);
+  --app-surface-selected: oklch(0.9 0.055 215 / 78%);
+  --app-surface-code: oklch(0.92 0.025 280);
+  --app-surface-code-header: oklch(0.88 0.035 278);
+  --app-surface-danger: oklch(0.95 0.045 25);
+
+  --app-text-strong: var(--foreground);
+  --app-text: oklch(0.27 0.04 286);
+  --app-text-muted: var(--muted-foreground);
+  --app-text-faint: oklch(0.59 0.035 270);
+  --app-text-link: oklch(0.44 0.15 215);
+  --app-text-code: oklch(0.3 0.07 293);
+  --app-text-danger: var(--destructive);
+  --app-text-danger-muted: oklch(0.46 0.11 25);
+
+  --app-border-subtle: oklch(0.7 0.055 257 / 22%);
+  --app-border-default: var(--border);
+  --app-border-strong: oklch(0.61 0.075 270 / 42%);
+  --app-border-interactive: oklch(0.58 0.22 303 / 55%);
+  --app-border-danger: oklch(0.58 0.14 25 / 50%);
+
+  --app-action: var(--primary);
+  --app-action-hover: oklch(0.56 0.16 218);
+  --app-action-foreground: var(--primary-foreground);
+  --app-focus: var(--ring);
+  --app-selection: oklch(0.72 0.14 205 / 38%);
+
+  --app-control-track: oklch(0.89 0.03 276);
+  --app-control-thumb: oklch(0.64 0.055 269);
+  --app-control-selected: var(--primary);
+  --app-control-selected-thumb: var(--primary-foreground);
+
+  --app-status-neutral: oklch(0.59 0.035 270);
+  --app-status-success: oklch(0.47 0.13 150);
+  --app-status-pending: oklch(0.53 0.14 83);
+  --app-status-danger: oklch(0.56 0.17 25);
+  --app-status-neutral-ring: 0 0 0 4px oklch(0.59 0.035 270 / 12%);
+  --app-status-success-ring: 0 0 0 4px oklch(0.47 0.13 150 / 13%);
+  --app-status-pending-ring: 0 0 0 4px oklch(0.53 0.14 83 / 13%);
+
+  --app-grid-line: oklch(0.58 0.08 260 / 12%);
+  --app-scrollbar-track: oklch(0.92 0.02 275);
+  --app-scrollbar-thumb: oklch(0.66 0.055 270);
+  --shadow-card:
+    inset 0 1px 0 oklch(1 0 0 / 50%), 0 18px 52px oklch(0.22 0.07 294 / 10%);
+  --shadow-floating: 0 10px 30px oklch(0.22 0.07 294 / 14%);
 }
 
 .dark {
@@ -179,8 +233,7 @@
     oklch(0.78 0.14 205 / 68%)
   );
   --shadow-primary:
-    0 0 24px oklch(0.58 0.2 303 / 22%),
-    0 0 38px oklch(0.74 0.14 205 / 18%);
+    0 0 24px oklch(0.58 0.2 303 / 22%), 0 0 38px oklch(0.74 0.14 205 / 18%);
 
   --background: oklch(0.12 0.045 296);
   --foreground: oklch(0.95 0.018 236);
@@ -239,7 +292,7 @@
 
   ::selection {
     color: var(--foreground);
-    background: oklch(0.72 0.14 205 / 38%);
+    background: var(--app-selection);
   }
 }
 
@@ -251,9 +304,7 @@
   [data-slot="card"] {
     -webkit-backdrop-filter: blur(18px) saturate(135%);
     backdrop-filter: blur(18px) saturate(135%);
-    box-shadow:
-      inset 0 1px 0 oklch(1 0 0 / 6%),
-      0 18px 52px oklch(0.08 0.035 296 / 22%);
+    box-shadow: var(--shadow-card);
   }
 
   /*

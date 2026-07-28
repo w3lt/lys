@@ -21,17 +21,12 @@ button:focus-visible,
 textarea:focus-visible,
 input:focus-visible,
 [role="menuitem"]:focus-visible {
-  outline: 1px solid var(--lys-accent);
+  outline: 1px solid var(--app-focus);
   outline-offset: 2px;
 }
 
-::selection {
-  color: #f8f2e5;
-  background: #5b4725;
-}
-
 * {
-  scrollbar-color: #34343c #0b0b0c;
+  scrollbar-color: var(--app-scrollbar-thumb) var(--app-scrollbar-track);
   scrollbar-width: thin;
 }
 
@@ -41,12 +36,12 @@ input:focus-visible,
 }
 
 *::-webkit-scrollbar-track {
-  background: #0b0b0c;
+  background: var(--app-scrollbar-track);
 }
 
 *::-webkit-scrollbar-thumb {
-  border: 2px solid #0b0b0c;
-  background: #34343c;
+  border: 2px solid var(--app-scrollbar-track);
+  background: var(--app-scrollbar-thumb);
 }
 
 .app-shell {
@@ -55,7 +50,7 @@ input:focus-visible,
   height: 100%;
   flex-direction: column;
   color: var(--foreground);
-  background: var(--background);
+  background: var(--app-surface);
 }
 
 .app-shell__chat {
@@ -68,7 +63,7 @@ input:focus-visible,
 .app-shell__settings-route {
   min-height: 0;
   flex: 1;
-  background: var(--lys-surface);
+  background: var(--app-surface);
 }
 
 .sr-only {

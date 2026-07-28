@@ -2,8 +2,8 @@
   position: relative;
   z-index: 3;
   flex: 0 0 auto;
-  border-top: 1px solid var(--lys-border);
-  background: #09090b;
+  border-top: 1px solid var(--app-border-default);
+  background: var(--app-surface-chrome);
 }
 
 .composer__offline {
@@ -13,9 +13,9 @@
   align-items: center;
   justify-content: center;
   gap: 9px;
-  border-bottom: 1px solid #362621;
-  color: #b98a7e;
-  background: #170f0e;
+  border-bottom: 1px solid var(--app-border-danger);
+  color: var(--app-text-danger);
+  background: var(--app-surface-danger);
   font-family: var(--font-mono);
   font-size: 9px;
   letter-spacing: 0.08em;
@@ -23,7 +23,7 @@
 }
 
 .composer__offline span + span {
-  color: #78645e;
+  color: var(--app-text-danger-muted);
 }
 
 .composer__inner {
@@ -43,16 +43,16 @@
   resize: none;
   overflow-y: auto;
   padding: 17px 58px 15px 17px;
-  border-color: #292931;
+  border-color: var(--app-border-strong);
   border-radius: 0;
-  color: #e5e0d6;
-  background: #111115;
+  color: var(--app-text);
+  background: var(--app-surface-field);
   font-size: 14px;
   line-height: 1.5;
 }
 
 .composer__textarea::placeholder {
-  color: #5f5c56;
+  color: var(--app-text-faint);
 }
 
 .composer__textarea--streaming {
@@ -94,7 +94,7 @@
 
 .composer__session {
   gap: 7px;
-  color: #55534e;
+  color: var(--app-text-faint);
   font-family: var(--font-mono);
   font-size: 8.5px;
   letter-spacing: 0.12em;
@@ -114,11 +114,11 @@
   display: block;
   width: 5px;
   height: 5px;
-  background: #7f9567;
+  background: var(--app-status-success);
 }
 
 .composer__dot--off {
-  background: #a15f52;
+  background: var(--app-status-danger);
 }
 
 @media (max-width: 640px) {

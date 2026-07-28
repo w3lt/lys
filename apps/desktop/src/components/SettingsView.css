@@ -1,8 +1,8 @@
 .settings-view {
   min-height: 0;
   flex: 1;
-  color: #e8e4dc;
-  background: var(--lys-surface);
+  color: var(--app-text);
+  background: var(--app-surface);
 }
 
 .settings-view__tabs {
@@ -22,8 +22,8 @@
   justify-content: flex-start;
   gap: 0;
   padding: 0;
-  border-right: 1px solid #25252c;
-  background: #0d0d10;
+  border-right: 1px solid var(--app-border-subtle);
+  background: var(--app-surface-rail);
 }
 
 .settings-view__rail-heading {
@@ -33,14 +33,14 @@
   justify-content: flex-end;
   gap: 5px;
   padding: 22px 18px 17px;
-  border-bottom: 1px solid #25252c;
+  border-bottom: 1px solid var(--app-border-subtle);
 }
 
 .settings-view__rail-heading span {
   font-family: "Iowan Old Style", Baskerville, Georgia, serif;
   font-size: 21px;
   letter-spacing: 0.025em;
-  color: #eee8dc;
+  color: var(--app-text-strong);
 }
 
 .settings-view__rail-heading small {
@@ -48,7 +48,7 @@
   font-size: 8.5px;
   letter-spacing: 0.19em;
   text-transform: uppercase;
-  color: #5e5c57;
+  color: var(--app-text-faint);
 }
 
 .settings-view__rail-tab {
@@ -64,7 +64,7 @@
   font-weight: 400;
   letter-spacing: 0.15em;
   text-transform: uppercase;
-  color: #75736d;
+  color: var(--app-text-muted);
 }
 
 .settings-view__rail-tab::after {
@@ -72,9 +72,9 @@
 }
 
 .settings-view__rail-tab[data-active] {
-  border-left-color: var(--lys-accent);
-  color: #eee8dc;
-  background: #131318;
+  border-left-color: var(--app-action);
+  color: var(--app-text-strong);
+  background: var(--app-surface-navigation-active);
 }
 
 .settings-view__content {
@@ -83,9 +83,9 @@
   flex: 1;
   overflow-y: auto;
   background:
-    linear-gradient(90deg, rgb(255 255 255 / 1.3%) 1px, transparent 1px)
-      0 0 / 38px 100%,
-    #101014;
+    linear-gradient(90deg, var(--app-grid-line) 1px, transparent 1px) 0 0 / 38px
+      100%,
+    var(--app-surface-content);
 }
 
 .settings-view__content [data-slot="tabs-content"] {
@@ -112,7 +112,7 @@
   font-size: 8.5px;
   letter-spacing: 0.22em;
   text-transform: uppercase;
-  color: var(--lys-accent);
+  color: var(--lys-violet);
 }
 
 .settings-view__pane-heading h1 {
@@ -122,7 +122,7 @@
   font-weight: 400;
   line-height: 1.1;
   letter-spacing: 0.015em;
-  color: #f0ebe0;
+  color: var(--app-text-strong);
 }
 
 .settings-view__pane-heading span {
@@ -131,7 +131,7 @@
   margin-top: 11px;
   font-size: 12px;
   line-height: 1.55;
-  color: #716f69;
+  color: var(--app-text-muted);
 }
 
 .settings-view__stack {
@@ -144,9 +144,9 @@
 .settings-view__card {
   gap: 0;
   padding: 0;
-  border: 1px solid #2a2a31;
+  border: 1px solid var(--app-border-default);
   border-radius: 0;
-  background: #121217;
+  background: var(--app-surface-panel);
   box-shadow: none;
 }
 
@@ -158,7 +158,7 @@
   justify-content: space-between;
   padding: 16px 18px;
   border-radius: 0;
-  border-bottom: 1px solid #27272e;
+  border-bottom: 1px solid var(--app-border-subtle);
 }
 
 .settings-view__card-header [data-slot="card-description"] {
@@ -167,14 +167,18 @@
   font-size: 8.5px;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: #64625d;
+  color: var(--app-text-faint);
 }
 
 .settings-view__card-header [data-slot="card-title"] {
-  font-family: "Geist Variable", -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family:
+    "Geist Variable",
+    -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
   font-size: 14px;
   font-weight: 450;
-  color: #e5e0d6;
+  color: var(--app-text);
 }
 
 .settings-view__card-content {
@@ -185,7 +189,7 @@
   margin: 0;
   font-size: 11.5px;
   line-height: 1.55;
-  color: #797670;
+  color: var(--app-text-muted);
 }
 
 .settings-view__actions {
@@ -198,19 +202,19 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #5a5852;
-  box-shadow: 0 0 0 4px rgb(90 88 82 / 9%);
+  background: var(--app-status-neutral);
+  box-shadow: var(--app-status-neutral-ring);
 }
 
 .settings-view__status-dot--running {
-  background: #85a96f;
-  box-shadow: 0 0 0 4px rgb(133 169 111 / 10%);
+  background: var(--app-status-success);
+  box-shadow: var(--app-status-success-ring);
 }
 
 .settings-view__status-dot--starting,
 .settings-view__status-dot--stopping {
-  background: var(--lys-accent);
-  box-shadow: 0 0 0 4px rgb(216 190 139 / 10%);
+  background: var(--app-status-pending);
+  box-shadow: var(--app-status-pending-ring);
 }
 
 .settings-view__setting-row {
@@ -226,11 +230,15 @@
 .settings-view__field > label {
   display: block;
   margin: 0;
-  font-family: "Geist Variable", -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family:
+    "Geist Variable",
+    -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.035em;
-  color: #d4cfc5;
+  color: var(--app-text);
 }
 
 .settings-view__setting-row p,
@@ -238,35 +246,35 @@
   margin: 5px 0 0;
   font-size: 10.5px;
   line-height: 1.45;
-  color: #66645f;
+  color: var(--app-text-muted);
 }
 
 .settings-view__switch {
   width: 44px;
   height: 22px;
-  border: 1px solid #393941;
+  border: 1px solid var(--app-border-strong);
   border-radius: 11px;
-  background: #1b1b20;
+  background: var(--app-control-track);
 }
 
 .settings-view__switch[data-checked] {
-  border-color: #8b754c;
-  background: #9c8354;
+  border-color: var(--app-action);
+  background: var(--app-control-selected);
 }
 
 .settings-view__switch [data-slot="switch-thumb"] {
   width: 16px;
   height: 16px;
-  background: #a6a29a;
+  background: var(--app-control-thumb);
 }
 
 .settings-view__switch[data-checked] [data-slot="switch-thumb"] {
-  background: #16130e;
+  background: var(--app-control-selected-thumb);
   transform: translateX(20px);
 }
 
 .settings-view__separator {
-  background: #28282f;
+  background: var(--app-border-subtle);
 }
 
 .settings-view__model-size,
@@ -275,13 +283,13 @@
   font-family: SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 9px;
   letter-spacing: 0.08em;
-  color: #77746e;
+  color: var(--app-text-muted);
 }
 
 .settings-view__model-name {
   font-family: SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 10px !important;
-  color: #b8b2a8 !important;
+  color: var(--app-text) !important;
 }
 
 .settings-view__progress {
@@ -296,7 +304,7 @@
   font-size: 8px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: #77736c;
+  color: var(--app-text-muted);
 }
 
 .settings-view__progress [data-slot="progress"] {
@@ -306,11 +314,11 @@
 .settings-view__progress [data-slot="progress-track"] {
   height: 2px;
   border-radius: 0;
-  background: #292930;
+  background: var(--app-control-track);
 }
 
 .settings-view__progress [data-slot="progress-indicator"] {
-  background: var(--lys-accent);
+  background: var(--app-action);
 }
 
 .settings-view__log {
@@ -328,7 +336,7 @@
   padding: 0;
   margin: 13px 0 0;
   list-style: none;
-  border-top: 1px solid #25252c;
+  border-top: 1px solid var(--app-border-subtle);
 }
 
 .settings-view__log li {
@@ -336,26 +344,26 @@
   grid-template-columns: 72px 1fr;
   gap: 14px;
   padding: 8px 0;
-  border-bottom: 1px solid #222228;
+  border-bottom: 1px solid var(--app-border-subtle);
   font-family: SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 8.5px;
   line-height: 1.4;
 }
 
 .settings-view__log time {
-  color: #55534f;
+  color: var(--app-text-faint);
 }
 
 .settings-view__log-tone--ok {
-  color: #8da77a;
+  color: var(--app-status-success);
 }
 
 .settings-view__log-tone--wait {
-  color: #c4a970;
+  color: var(--app-status-pending);
 }
 
 .settings-view__log-tone--warn {
-  color: #c88474;
+  color: var(--app-status-danger);
 }
 
 .settings-view__empty-log {
@@ -363,7 +371,7 @@
   margin: 0;
   font-family: SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 8.5px;
-  color: #55534f;
+  color: var(--app-text-faint);
 }
 
 .settings-view__field {
@@ -380,10 +388,10 @@
 
 .settings-view__input,
 .settings-view__textarea {
-  border: 1px solid #303038;
+  border: 1px solid var(--app-border-strong);
   border-radius: 0;
-  color: #dbd6cc;
-  background: #0e0e12;
+  color: var(--app-text);
+  background: var(--app-surface-field);
   box-shadow: none;
 }
 
@@ -408,7 +416,7 @@
   font-family: SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 8.5px;
   line-height: 1.45;
-  color: #66635e;
+  color: var(--app-text-muted);
 }
 
 .settings-view__models {
@@ -427,15 +435,15 @@
   width: 100%;
   height: auto;
   justify-content: space-between;
-  border-color: #2c2c34;
+  border-color: var(--app-border-strong);
   padding: 13px 14px;
   text-align: left;
   text-transform: none;
 }
 
 .settings-view__model-option[aria-pressed="true"] {
-  border-color: #8c7548;
-  background: #17150f;
+  border-color: var(--app-border-interactive);
+  background: var(--app-surface-selected);
 }
 
 .settings-view__model-option > span:first-child {
@@ -448,7 +456,7 @@
   font-size: 10.5px;
   font-weight: 500;
   letter-spacing: 0.01em;
-  color: #d9d3c8;
+  color: var(--app-text);
 }
 
 .settings-view__model-option small,
@@ -456,7 +464,7 @@
   font-size: 8.5px;
   font-weight: 400;
   letter-spacing: 0.08em;
-  color: #66635e;
+  color: var(--app-text-muted);
 }
 
 .settings-view__toggle-group {
@@ -468,14 +476,14 @@
 
 .settings-view__toggle {
   height: 34px;
-  border: 1px solid #2e2e36;
+  border: 1px solid var(--app-border-default);
   border-left-width: 0;
   border-radius: 0;
   font-family: SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 9px;
   letter-spacing: 0.1em;
-  color: #77736d;
-  background: #101014;
+  color: var(--app-text-muted);
+  background: var(--app-surface-content);
 }
 
 .settings-view__toggle:first-child {
@@ -484,9 +492,9 @@
 
 .settings-view__toggle[aria-pressed="true"] {
   z-index: 1;
-  border-color: #8c7548;
-  color: #eee6d7;
-  background: #19160f;
+  border-color: var(--app-border-interactive);
+  color: var(--app-text-strong);
+  background: var(--app-surface-selected);
 }
 
 .settings-view__range {
@@ -498,19 +506,19 @@
 .settings-view__slider [data-slot="slider-track"] {
   height: 2px;
   border-radius: 0;
-  background: #303038;
+  background: var(--app-control-track);
 }
 
 .settings-view__slider [data-slot="slider-range"] {
-  background: var(--lys-accent);
+  background: var(--app-action);
 }
 
 .settings-view__slider [data-slot="slider-thumb"] {
   width: 12px;
   height: 12px;
-  border: 1px solid #dac08c;
+  border: 1px solid var(--app-action);
   border-radius: 0;
-  background: #15130e;
+  background: var(--app-control-selected-thumb);
 }
 
 .settings-view__choice-group {
@@ -524,18 +532,18 @@
   width: 100%;
   min-height: 64px;
   justify-content: flex-start;
-  border: 1px solid #2d2d35;
+  border: 1px solid var(--app-border-default);
   border-radius: 0;
   padding: 12px 14px;
   text-align: left;
-  color: #78756f;
-  background: #101014;
+  color: var(--app-text-muted);
+  background: var(--app-surface-content);
 }
 
 .settings-view__choice[aria-pressed="true"] {
-  border-color: #8c7548;
-  color: #e4ddd0;
-  background: #18150f;
+  border-color: var(--app-border-interactive);
+  color: var(--app-text-strong);
+  background: var(--app-surface-selected);
 }
 
 .settings-view__choice > span {
@@ -555,7 +563,7 @@
   font-weight: 400;
   line-height: 1.4;
   letter-spacing: 0;
-  color: #69665f;
+  color: var(--app-text-muted);
 }
 
 .settings-view__footer {
@@ -565,7 +573,7 @@
   gap: 24px;
   padding-top: 27px;
   margin-top: 38px;
-  border-top: 1px solid #28282f;
+  border-top: 1px solid var(--app-border-subtle);
 }
 
 .settings-view__footer p {
@@ -573,7 +581,7 @@
   font-family: SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 8.5px;
   line-height: 1.45;
-  color: #56544f;
+  color: var(--app-text-faint);
 }
 
 @media (max-height: 680px) {

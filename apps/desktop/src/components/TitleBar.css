@@ -4,8 +4,8 @@
   display: grid;
   grid-template-columns: 120px 1fr 120px;
   align-items: center;
-  background: #0e0e10;
-  border-bottom: 1px solid #1a1a1f;
+  background: var(--app-surface-chrome);
+  border-bottom: 1px solid var(--app-border-subtle);
   user-select: none;
 }
 
@@ -22,14 +22,14 @@
 }
 
 .title-bar__name {
-  color: #e8e4dc;
+  color: var(--app-text-strong);
   font-family: Georgia, "Times New Roman", serif;
   font-size: 15px;
   letter-spacing: 0.02em;
 }
 
 .title-bar__version {
-  color: #5a5852;
+  color: var(--app-text-faint);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 9px;
   letter-spacing: 0.18em;
@@ -43,9 +43,9 @@
 
 .title-bar__scenario-menu {
   width: 216px;
-  border: 1px solid #2c2c34;
+  border: 1px solid var(--app-border-strong);
   border-radius: 0;
-  background: #101016;
+  background: var(--popover);
   padding: 4px;
 }
 
@@ -53,13 +53,13 @@
   justify-content: space-between;
   border-radius: 0;
   padding: 8px 10px;
-  color: #c9c4b8;
+  color: var(--app-text);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 10px;
   letter-spacing: 0.08em;
 }
 
 .title-bar__scenario-item > span:last-child {
-  color: #5a5852;
+  color: var(--app-text-faint);
   font-size: 9px;
 }

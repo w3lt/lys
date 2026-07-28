@@ -1,11 +1,23 @@
 {
-    "name": "lys",
-    "version": "0.1.0",
-    "description": "Lysiptera Caliginia",
-    "private": true,
-    "author": {
-        "name": "Welt",
-        "email": "w3lt@negentropy.studio",
-        "url": "https://github.com/w3lt"
-    }
+  "name": "lys",
+  "version": "0.1.0",
+  "description": "Lysiptera Caliginia",
+  "private": true,
+  "author": {
+    "name": "Welt",
+    "email": "w3lt@negentropy.studio",
+    "url": "https://github.com/w3lt"
+  },
+  "scripts": {
+    "prettier:write": "prettier . --write"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.8.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react": "^7.37.5",
+    "globals": "^17.8.0",
+    "prettier": "3.9.6",
+    "typescript-eslint": "^8.65.0"
+  }
 }

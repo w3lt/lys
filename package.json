@@ -10,7 +10,8 @@
   },
   "scripts": {
     "prettier:write": "prettier . --write",
-    "dev": "pnpm --filter @lys/desktop run tauri dev"
+    "dev": "pnpm --filter @lys/desktop run tauri dev",
+    "backend:dev": "pnpm --filter @lys/backend run dev"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

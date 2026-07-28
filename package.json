@@ -1,0 +1,11 @@
+{
+    "name": "lys",
+    "version": "0.1.0",
+    "description": "Lysiptera Caliginia",
+    "private": true,
+    "author": {
+        "name": "Welt",
+        "email": "w3lt@negentropy.studio",
+        "url": "https://github.com/w3lt"
+    }
+}

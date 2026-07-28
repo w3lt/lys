@@ -9,7 +9,8 @@
     "url": "https://github.com/w3lt"
   },
   "scripts": {
-    "prettier:write": "prettier . --write"
+    "prettier:write": "prettier . --write",
+    "dev": "pnpm --filter @lys/desktop run tauri dev"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

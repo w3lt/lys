@@ -6,125 +6,305 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-    --font-heading: var(--font-sans);
-    --font-sans: 'Geist Variable', sans-serif;
-    --color-sidebar-ring: var(--sidebar-ring);
-    --color-sidebar-border: var(--sidebar-border);
-    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-    --color-sidebar-accent: var(--sidebar-accent);
-    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-    --color-sidebar-primary: var(--sidebar-primary);
-    --color-sidebar-foreground: var(--sidebar-foreground);
-    --color-sidebar: var(--sidebar);
-    --color-chart-5: var(--chart-5);
-    --color-chart-4: var(--chart-4);
-    --color-chart-3: var(--chart-3);
-    --color-chart-2: var(--chart-2);
-    --color-chart-1: var(--chart-1);
-    --color-ring: var(--ring);
-    --color-input: var(--input);
-    --color-border: var(--border);
-    --color-destructive: var(--destructive);
-    --color-accent-foreground: var(--accent-foreground);
-    --color-accent: var(--accent);
-    --color-muted-foreground: var(--muted-foreground);
-    --color-muted: var(--muted);
-    --color-secondary-foreground: var(--secondary-foreground);
-    --color-secondary: var(--secondary);
-    --color-primary-foreground: var(--primary-foreground);
-    --color-primary: var(--primary);
-    --color-popover-foreground: var(--popover-foreground);
-    --color-popover: var(--popover);
-    --color-card-foreground: var(--card-foreground);
-    --color-card: var(--card);
-    --color-foreground: var(--foreground);
-    --color-background: var(--background);
-    --radius-sm: calc(var(--radius) * 0.6);
-    --radius-md: calc(var(--radius) * 0.8);
-    --radius-lg: var(--radius);
-    --radius-xl: calc(var(--radius) * 1.4);
-    --radius-2xl: calc(var(--radius) * 1.8);
-    --radius-3xl: calc(var(--radius) * 2.2);
-    --radius-4xl: calc(var(--radius) * 2.6);
+  --font-heading: var(--font-sans);
+  --font-sans: "Geist Variable", sans-serif;
+
+  /* Lys brand utilities: text-lys-cyan, bg-lys-violet, etc. */
+  --color-lys-violet-black: var(--lys-violet-black);
+  --color-lys-violet: var(--lys-violet);
+  --color-lys-cyan: var(--lys-cyan);
+  --color-lys-silver: var(--lys-silver);
+
+  /* Gradient utilities: bg-lys-surface and bg-lys-primary. */
+  --background-image-lys-surface: var(--gradient-background);
+  --background-image-lys-primary: var(--gradient-primary);
+  --background-image-lys-border: var(--gradient-border);
+  --shadow-lys-glow: var(--shadow-primary);
+
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
 }
 
 :root {
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.145 0 0);
-    --card: oklch(1 0 0);
-    --card-foreground: oklch(0.145 0 0);
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.145 0 0);
-    --primary: oklch(0.205 0 0);
-    --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.97 0 0);
-    --secondary-foreground: oklch(0.205 0 0);
-    --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
-    --accent: oklch(0.97 0 0);
-    --accent-foreground: oklch(0.205 0 0);
-    --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.922 0 0);
-    --input: oklch(0.922 0 0);
-    --ring: oklch(0.708 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
-    --radius: 0.625rem;
-    --sidebar: oklch(0.985 0 0);
-    --sidebar-foreground: oklch(0.145 0 0);
-    --sidebar-primary: oklch(0.205 0 0);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.97 0 0);
-    --sidebar-accent-foreground: oklch(0.205 0 0);
-    --sidebar-border: oklch(0.922 0 0);
-    --sidebar-ring: oklch(0.708 0 0);
+  color-scheme: light;
+
+  /* Lys identity: darkness, intelligence, modernity, and cold elegance. */
+  --lys-violet-black: oklch(0.14 0.055 300);
+  --lys-violet: oklch(0.58 0.22 303);
+  --lys-cyan: oklch(0.76 0.14 205);
+  --lys-silver: oklch(0.9 0.025 235);
+
+  /*
+   * Light-mode fallback: a restrained pearl-violet → frost-cyan atmosphere.
+   * The intended primary Lys appearance is the .dark palette below.
+   */
+  --gradient-background:
+    radial-gradient(
+      circle at 86% 8%,
+      oklch(0.84 0.1 205 / 68%),
+      transparent 34%
+    ),
+    linear-gradient(
+      135deg,
+      oklch(0.95 0.032 302) 0%,
+      oklch(0.97 0.018 274) 48%,
+      oklch(0.93 0.045 214) 100%
+    );
+  --gradient-primary: linear-gradient(
+    105deg,
+    oklch(0.46 0.2 303) 0%,
+    oklch(0.53 0.135 218) 100%
+  );
+  --gradient-border: linear-gradient(
+    120deg,
+    oklch(0.58 0.22 303 / 58%),
+    oklch(0.76 0.14 205 / 68%)
+  );
+  --shadow-primary:
+    0 0 24px oklch(0.58 0.2 303 / 18%),
+    0 0 36px oklch(0.72 0.14 205 / 14%);
+
+  --background: oklch(0.97 0.018 263);
+  --foreground: oklch(0.19 0.045 293);
+  --card: oklch(1 0 0 / 74%);
+  --card-foreground: oklch(0.19 0.045 293);
+  --popover: oklch(0.99 0.008 250 / 96%);
+  --popover-foreground: oklch(0.19 0.045 293);
+  --primary: oklch(0.5 0.14 224);
+  --primary-foreground: oklch(0.985 0.005 230);
+  --secondary: oklch(0.93 0.035 294);
+  --secondary-foreground: oklch(0.27 0.085 298);
+  --muted: oklch(0.94 0.02 247);
+  --muted-foreground: oklch(0.48 0.045 275);
+  --accent: oklch(0.91 0.055 211);
+  --accent-foreground: oklch(0.24 0.065 232);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.7 0.055 257 / 35%);
+  --input: oklch(0.7 0.055 257 / 42%);
+  --ring: oklch(0.67 0.14 210);
+
+  --chart-1: oklch(0.58 0.22 303);
+  --chart-2: oklch(0.73 0.15 205);
+  --chart-3: oklch(0.67 0.15 278);
+  --chart-4: oklch(0.68 0.13 185);
+  --chart-5: oklch(0.6 0.1 245);
+
+  --radius: 0.625rem;
+
+  --sidebar: oklch(0.98 0.012 260 / 86%);
+  --sidebar-foreground: oklch(0.19 0.045 293);
+  --sidebar-primary: oklch(0.5 0.14 224);
+  --sidebar-primary-foreground: oklch(0.985 0.005 230);
+  --sidebar-accent: oklch(0.91 0.052 211);
+  --sidebar-accent-foreground: oklch(0.24 0.065 232);
+  --sidebar-border: oklch(0.7 0.055 257 / 32%);
+  --sidebar-ring: oklch(0.67 0.14 210);
 }
 
 .dark {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.922 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
-    --sidebar: oklch(0.205 0 0);
-    --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.269 0 0);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.556 0 0);
+  color-scheme: dark;
+
+  --lys-violet-black: oklch(0.12 0.045 300);
+  --lys-violet: oklch(0.65 0.22 303);
+  --lys-cyan: oklch(0.78 0.14 205);
+  --lys-silver: oklch(0.91 0.025 235);
+
+  /*
+   * Violet-black establishes Lys's dark origin. The cyan aura and final
+   * gradient stop introduce her precise, modern counterpart.
+   */
+  --gradient-background:
+    radial-gradient(
+      circle at 84% 10%,
+      oklch(0.63 0.14 205 / 20%),
+      transparent 34%
+    ),
+    radial-gradient(
+      circle at 10% 92%,
+      oklch(0.46 0.18 304 / 17%),
+      transparent 38%
+    ),
+    linear-gradient(
+      135deg,
+      oklch(0.1 0.03 296) 0%,
+      oklch(0.14 0.06 294) 42%,
+      oklch(0.15 0.052 255) 70%,
+      oklch(0.18 0.06 220) 100%
+    );
+  --gradient-primary: linear-gradient(
+    105deg,
+    oklch(0.46 0.2 303) 0%,
+    oklch(0.53 0.135 218) 100%
+  );
+  --gradient-border: linear-gradient(
+    120deg,
+    oklch(0.65 0.22 303 / 58%),
+    oklch(0.78 0.14 205 / 68%)
+  );
+  --shadow-primary:
+    0 0 24px oklch(0.58 0.2 303 / 22%),
+    0 0 38px oklch(0.74 0.14 205 / 18%);
+
+  --background: oklch(0.12 0.045 296);
+  --foreground: oklch(0.95 0.018 236);
+  --card: oklch(0.18 0.045 286 / 78%);
+  --card-foreground: oklch(0.95 0.018 236);
+  --popover: oklch(0.16 0.046 292 / 96%);
+  --popover-foreground: oklch(0.95 0.018 236);
+  --primary: oklch(0.5 0.14 224);
+  --primary-foreground: oklch(0.985 0.005 230);
+  --secondary: oklch(0.23 0.07 296);
+  --secondary-foreground: oklch(0.93 0.025 257);
+  --muted: oklch(0.2 0.03 281);
+  --muted-foreground: oklch(0.72 0.03 250);
+  --accent: oklch(0.24 0.065 223);
+  --accent-foreground: oklch(0.92 0.035 215);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(0.77 0.12 207 / 18%);
+  --input: oklch(0.77 0.12 207 / 24%);
+  --ring: oklch(0.75 0.14 205);
+
+  --chart-1: oklch(0.68 0.22 303);
+  --chart-2: oklch(0.78 0.14 205);
+  --chart-3: oklch(0.72 0.15 278);
+  --chart-4: oklch(0.72 0.13 185);
+  --chart-5: oklch(0.73 0.09 245);
+
+  --sidebar: oklch(0.145 0.05 294 / 90%);
+  --sidebar-foreground: oklch(0.95 0.018 236);
+  --sidebar-primary: oklch(0.5 0.14 224);
+  --sidebar-primary-foreground: oklch(0.985 0.005 230);
+  --sidebar-accent: oklch(0.23 0.064 292);
+  --sidebar-accent-foreground: oklch(0.94 0.025 235);
+  --sidebar-border: oklch(0.77 0.12 207 / 16%);
+  --sidebar-ring: oklch(0.75 0.14 205);
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
-    }
-  body {
-    @apply bg-background text-foreground;
-    }
+  }
+
   html {
     @apply font-sans;
-    }
+    min-height: 100%;
+  }
+
+  body {
+    @apply text-foreground;
+    min-height: 100dvh;
+    background-color: var(--background);
+    background-image: var(--gradient-background);
+    background-attachment: fixed;
+    background-position: center;
+    background-size: cover;
+  }
+
+  ::selection {
+    color: var(--foreground);
+    background: oklch(0.72 0.14 205 / 38%);
+  }
+}
+
+@layer components {
+  /*
+   * Current shadcn Card components expose data-slot="card". This gives their
+   * translucent token a glass-like finish without changing component markup.
+   */
+  [data-slot="card"] {
+    -webkit-backdrop-filter: blur(18px) saturate(135%);
+    backdrop-filter: blur(18px) saturate(135%);
+    box-shadow:
+      inset 0 1px 0 oklch(1 0 0 / 6%),
+      0 18px 52px oklch(0.08 0.035 296 / 22%);
+  }
+
+  /*
+   * Add className="lys-primary" to a shadcn Button when you want the branded
+   * violet → cyan action treatment instead of the solid primary fallback.
+   */
+  .lys-primary {
+    color: var(--primary-foreground);
+    background-image: var(--gradient-primary);
+    box-shadow: var(--shadow-primary);
+    transition:
+      filter 160ms ease,
+      box-shadow 160ms ease,
+      transform 160ms ease;
+  }
+
+  .lys-primary:hover {
+    filter: brightness(1.08) saturate(1.06);
+    transform: translateY(-1px);
+  }
+
+  .lys-primary:active {
+    filter: brightness(0.98);
+    transform: translateY(0);
+  }
+
+  .lys-primary:focus-visible {
+    outline: none;
+    box-shadow:
+      0 0 0 3px var(--background),
+      0 0 0 5px var(--ring),
+      var(--shadow-primary);
+  }
+
+  /*
+   * Optional dual-color border for cards, dialogs, or the chat composer.
+   */
+  .lys-gradient-border {
+    border: 1px solid transparent;
+    background:
+      linear-gradient(var(--card), var(--card)) padding-box,
+      var(--gradient-border) border-box;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lys-primary {
+    transition: none;
+  }
+
+  .lys-primary:hover {
+    transform: none;
+  }
 }

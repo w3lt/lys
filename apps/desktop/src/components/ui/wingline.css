@@ -1,0 +1,65 @@
+.lys-wingline[data-lys-wingline] {
+  --lys-wingline-opacity: 0;
+  --lys-wingline-shift: 0%;
+  --lys-wingline-transition:
+    width 180ms cubic-bezier(0.22, 1, 0.36, 1), opacity 120ms ease,
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+  --lys-wingline-width: clamp(0.625rem, 28%, 2.75rem);
+
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.lys-wingline[data-lys-wingline="primary"] {
+  --lys-wingline-opacity: 1;
+}
+
+.lys-wingline[data-lys-wingline="interactive"]:not(:disabled):not(
+    [aria-disabled="true"]
+  ):is(:hover, :focus-visible, [aria-pressed="true"]) {
+  --lys-wingline-opacity: 1;
+}
+
+.lys-wingline[data-lys-wingline]:not(:disabled):not([aria-disabled="true"]):is(
+    :hover,
+    :focus-visible,
+    [aria-pressed="true"]
+  ) {
+  --lys-wingline-shift: 30%;
+  --lys-wingline-width: clamp(0.875rem, 42%, 4rem);
+}
+
+.lys-wingline[data-lys-wingline]:is(:disabled, [aria-disabled="true"]) {
+  --lys-wingline-transition: none;
+}
+
+.lys-wingline[data-lys-wingline]::after {
+  position: absolute;
+  top: -1px;
+  left: 14%;
+  z-index: 1;
+  width: var(--lys-wingline-width);
+  height: 2px;
+  border-radius: 999px;
+  pointer-events: none;
+  content: "";
+  background: var(--gradient-border);
+  opacity: var(--lys-wingline-opacity);
+  transform: translateX(var(--lys-wingline-shift));
+  transform-origin: left center;
+  transition: var(--lys-wingline-transition);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lys-wingline[data-lys-wingline] {
+    --lys-wingline-transition: none;
+  }
+
+  .lys-wingline[data-lys-wingline]:not(:disabled):not(
+      [aria-disabled="true"]
+    ):is(:hover, :focus-visible, [aria-pressed="true"]) {
+    --lys-wingline-shift: 0%;
+    --lys-wingline-width: clamp(0.625rem, 28%, 2.75rem);
+  }
+}

@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
+@import "./components/ui/wingline.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -123,6 +124,7 @@
   --chart-5: oklch(0.6 0.1 245);
 
   --radius: 0.625rem;
+  --app-radius-control: 6px;
 
   --sidebar: oklch(0.98 0.012 260 / 86%);
   --sidebar-foreground: oklch(0.19 0.045 293);

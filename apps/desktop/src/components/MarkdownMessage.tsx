@@ -68,7 +68,8 @@ function CodeBlock({ children, className }: CodeElementProps) {
           aria-live="polite"
           aria-label={copied ? "copied" : "Copy code"}
           onClick={handleCopy}
-          variant="lysMeta"
+          size="sm"
+          variant="ghost"
         >
           <Copy aria-hidden="true" />
           <span>{copied ? "copied" : "copy"}</span>
@@ -99,7 +100,7 @@ const markdownComponents: Components = {
       {children}
     </a>
   ),
-  pre: MarkdownPre,
+  pre: MarkdownPre
 }
 
 export function MarkdownMessage({ text, streaming }: MarkdownMessageProps) {

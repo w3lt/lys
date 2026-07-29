@@ -85,7 +85,8 @@ export function replyForPrompt(prompt: string): string {
 
   if (/what are you|who are you|yourself/.test(value)) return REPLIES.identity
   if (/\bstop\b|cancel|abort|interrupt/.test(value)) return REPLIES.stop
-  if (/stream|sse|pipeline|lm studio|architect/.test(value)) return REPLIES.pipeline
+  if (/stream|sse|pipeline|lm studio|architect/.test(value))
+    return REPLIES.pipeline
   if (/context|trim|window|token/.test(value)) return REPLIES.context
 
   return REPLIES.generic

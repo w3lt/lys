@@ -20,9 +20,25 @@ interface ComposerProps {
   onStop: () => void
 }
 
+/*
+ * The meta row teaches the send shortcut while the chat is still empty, then
+ * hands that space over to the session counters once there is history.
+ */
+function statusParts(
+  config: LysConfig,
+  messageCount: number
+): [string, string] {
+  if (messageCount === 0) return ["Enter sends", "Shift+Enter for a newline"]
+  return [
+    `${messageCount} ${messageCount === 1 ? "message" : "messages"}`,
+    `${config.contextSize.toLocaleString()} context`
+  ]
+}
+
 function runtimeLabel(runtime: RuntimeState) {
   if (runtime.backend !== "running") return "Backend offline"
-  if (runtime.model === "loading") return `Loading model · ${runtime.modelProgress}%`
+  if (runtime.model === "loading")
+    return `Loading model · ${runtime.modelProgress}%`
   if (runtime.model === "unloading") return "Releasing model"
   if (runtime.model !== "loaded") return "No model loaded"
   return "Model ready"
@@ -38,11 +54,12 @@ export function Composer({
   onNewChat,
   onOpenModelSettings,
   onSend,
-  onStop,
+  onStop
 }: ComposerProps) {
   const runtimeAvailable =
     runtime.backend === "running" && runtime.model === "loaded"
   const sendDisabled = streaming || !runtimeAvailable || !draft.trim()
+  const [statusLead, statusTrail] = statusParts(config, messageCount)
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -80,8 +97,7 @@ export function Composer({
             className={`composer__send${streaming ? " composer__send--beside-stop" : ""}`}
             disabled={sendDisabled}
             onClick={onSend}
-            size="icon"
-            variant="lysPrimary"
+            size="icon-lg"
           >
             <ArrowDown aria-hidden="true" />
           </Button>
@@ -90,8 +106,8 @@ export function Composer({
               aria-label="Stop generating"
               className="composer__stop"
               onClick={onStop}
-              size="icon"
-              variant="lysDanger"
+              size="icon-lg"
+              variant="destructive"
             >
               <Square aria-hidden="true" />
             </Button>
@@ -99,31 +115,40 @@ export function Composer({
         </div>
 
         <div className="composer__meta">
-          <div className="composer__session">
-            <span>{messageCount} messages</span>
-            <span aria-hidden="true">·</span>
-            <span>{config.contextSize.toLocaleString()} context</span>
-          </div>
           <div className="composer__actions">
             <Button
+              aria-label="New conversation"
+              className="composer__new"
+              onClick={onNewChat}
+              size="sm"
+              variant="ghost"
+            >
+              <Plus aria-hidden="true" className="size-3" />
+              New
+            </Button>
+            <span aria-hidden="true" className="composer__divider" />
+            <Button
               aria-label="Open model settings"
+              className="composer__model"
               onClick={onOpenModelSettings}
-              variant="lysGhost"
+              size="sm"
+              variant="ghost"
             >
               <span
                 aria-hidden="true"
-                className={runtimeAvailable ? "composer__dot" : "composer__dot composer__dot--off"}
+                className={
+                  runtimeAvailable
+                    ? "composer__dot"
+                    : "composer__dot composer__dot--off"
+                }
               />
               {config.model}
             </Button>
-            <Button
-              aria-label="New conversation"
-              onClick={onNewChat}
-              variant="lysGhost"
-            >
-              <Plus aria-hidden="true" />
-              New
-            </Button>
+          </div>
+          <div className="composer__status">
+            <span>{statusLead}</span>
+            <span aria-hidden="true">·</span>
+            <span>{statusTrail}</span>
           </div>
         </div>
       </div>

@@ -103,7 +103,7 @@ describe("Lys chat", () => {
     const scrollTo = vi.fn()
     Object.defineProperty(HTMLElement.prototype, "scrollTo", {
       configurable: true,
-      value: scrollTo,
+      value: scrollTo
     })
     render(<App />)
 
@@ -139,7 +139,7 @@ describe("Lys chat", () => {
     Object.defineProperties(transcript, {
       scrollHeight: { configurable: true, value: 1200 },
       scrollTop: { configurable: true, value: 100 },
-      clientHeight: { configurable: true, value: 600 },
+      clientHeight: { configurable: true, value: 600 }
     })
 
     fireEvent.scroll(transcript)
@@ -153,7 +153,9 @@ describe("Lys chat", () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
     render(<App />)
 
-    await user.click(screen.getByRole("button", { name: "Open model settings" }))
+    await user.click(
+      screen.getByRole("button", { name: "Open model settings" })
+    )
     expect(
       screen.getByRole("tablist", { name: "Settings sections" })
     ).toHaveAttribute("aria-orientation", "vertical")
@@ -165,10 +167,9 @@ describe("Lys chat", () => {
       "aria-pressed",
       "true"
     )
-    expect(screen.getByRole("switch", { name: "Stream tokens" })).toHaveAttribute(
-      "aria-checked",
-      "false"
-    )
+    expect(
+      screen.getByRole("switch", { name: "Stream tokens" })
+    ).toHaveAttribute("aria-checked", "false")
   })
 
   it("starts the backend and loads a model deterministically", async () => {
@@ -180,7 +181,9 @@ describe("Lys chat", () => {
     await user.click(
       await screen.findByRole("menuitem", { name: /Backend stopped/ })
     )
-    await user.click(screen.getByRole("button", { name: "Open model settings" }))
+    await user.click(
+      screen.getByRole("button", { name: "Open model settings" })
+    )
     await user.click(screen.getByRole("button", { name: "Start backend" }))
     act(() => vi.advanceTimersByTime(1500))
     await user.click(screen.getByRole("button", { name: "Load model" }))
@@ -192,7 +195,9 @@ describe("Lys chat", () => {
   it("updates model and conversation configuration in memory", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
     render(<App />)
-    await user.click(screen.getByRole("button", { name: "Open model settings" }))
+    await user.click(
+      screen.getByRole("button", { name: "Open model settings" })
+    )
 
     await user.click(screen.getByRole("tab", { name: "Model" }))
     const endpoint = screen.getByRole("textbox", { name: "Server address" })
@@ -224,7 +229,9 @@ describe("Lys chat", () => {
   it("updates ranges, autostart, and runtime unload controls", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
     render(<App />)
-    await user.click(screen.getByRole("button", { name: "Open model settings" }))
+    await user.click(
+      screen.getByRole("button", { name: "Open model settings" })
+    )
 
     const autostart = screen.getByRole("switch", {
       name: "Start it when Lys opens"
@@ -259,7 +266,9 @@ describe("Lys chat", () => {
     act(() => vi.advanceTimersByTime(60))
     expect(screen.getByText(/A voice running/)).toBeInTheDocument()
 
-    await user.click(screen.getByRole("button", { name: "Open model settings" }))
+    await user.click(
+      screen.getByRole("button", { name: "Open model settings" })
+    )
     await user.click(screen.getByRole("button", { name: "Unload model" }))
 
     expect(vi.getTimerCount()).toBe(1)
@@ -282,7 +291,9 @@ describe("Lys chat", () => {
     act(() => vi.advanceTimersByTime(60))
     expect(screen.getByText(/A voice running/)).toBeInTheDocument()
 
-    await user.click(screen.getByRole("button", { name: "Open model settings" }))
+    await user.click(
+      screen.getByRole("button", { name: "Open model settings" })
+    )
     await user.click(screen.getByRole("tab", { name: "Model" }))
     await user.click(screen.getByRole("button", { name: /phi-4-mini/ }))
 
@@ -297,7 +308,9 @@ describe("Lys chat", () => {
   it("keeps model unload disabled while the backend is stopping", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
     render(<App />)
-    await user.click(screen.getByRole("button", { name: "Open model settings" }))
+    await user.click(
+      screen.getByRole("button", { name: "Open model settings" })
+    )
 
     await user.click(screen.getByRole("button", { name: "Stop backend" }))
     const unload = screen.getByRole("button", { name: "Unload model" })
@@ -331,7 +344,9 @@ describe("Lys chat", () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
     render(<App />)
     await selectReferenceScenario(user, /No model loaded/)
-    await user.click(screen.getByRole("button", { name: "Open model settings" }))
+    await user.click(
+      screen.getByRole("button", { name: "Open model settings" })
+    )
 
     await user.click(screen.getByRole("button", { name: "Load model" }))
     act(() => vi.advanceTimersByTime(220))
@@ -358,7 +373,9 @@ describe("Lys chat", () => {
     act(() => vi.advanceTimersByTime(60))
     expect(screen.getByText(/A voice running/)).toBeInTheDocument()
 
-    await user.click(screen.getByRole("button", { name: "Open model settings" }))
+    await user.click(
+      screen.getByRole("button", { name: "Open model settings" })
+    )
     await user.click(screen.getByRole("button", { name: "Stop backend" }))
     act(() => vi.advanceTimersByTime(900))
     act(() => vi.runAllTimers())
@@ -377,7 +394,9 @@ describe("Lys chat", () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
     render(<App />)
     await selectReferenceScenario(user, /No model loaded/)
-    await user.click(screen.getByRole("button", { name: "Open model settings" }))
+    await user.click(
+      screen.getByRole("button", { name: "Open model settings" })
+    )
 
     await user.click(screen.getByRole("button", { name: "Load model" }))
     act(() => vi.advanceTimersByTime(220))
@@ -416,7 +435,9 @@ describe("Lys chat", () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
     const { unmount } = render(<App />)
     await selectReferenceScenario(user, /Backend stopped/)
-    await user.click(screen.getByRole("button", { name: "Open model settings" }))
+    await user.click(
+      screen.getByRole("button", { name: "Open model settings" })
+    )
 
     await user.click(screen.getByRole("button", { name: "Start backend" }))
     expect(vi.getTimerCount()).toBe(1)
@@ -431,7 +452,9 @@ describe("Lys chat", () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
     const { unmount } = render(<App />)
     await selectReferenceScenario(user, /No model loaded/)
-    await user.click(screen.getByRole("button", { name: "Open model settings" }))
+    await user.click(
+      screen.getByRole("button", { name: "Open model settings" })
+    )
 
     await user.click(screen.getByRole("button", { name: "Load model" }))
     expect(vi.getTimerCount()).toBe(1)

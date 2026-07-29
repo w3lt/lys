@@ -1,0 +1,87 @@
+.title-bar {
+  position: relative;
+  z-index: 10;
+  display: grid;
+  height: 32px;
+  flex: 0 0 32px;
+  grid-template-columns: 120px 1fr 120px;
+  align-items: center;
+  border-bottom: 1px solid var(--app-border-subtle);
+  background: var(--app-surface-chrome);
+  user-select: none;
+}
+
+.title-bar__native-controls {
+  height: 100%;
+}
+
+.title-bar__title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.title-bar__name {
+  background-image: var(--gradient-wordmark);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+/* A version tag is short technical metadata, so mono and tracking apply. */
+.title-bar__version {
+  color: var(--app-text-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.title-bar__actions {
+  display: flex;
+  align-items: center;
+  justify-self: end;
+  gap: 4px;
+  margin-right: 8px;
+}
+
+.title-bar__scenario-menu {
+  width: 216px;
+  padding: 4px;
+  border: 1px solid var(--app-border-default);
+  border-radius: var(--radius-surface);
+  background: var(--app-surface-panel);
+}
+
+.title-bar__scenario-item {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-radius: var(--radius-control);
+  padding: 0 8px;
+  color: var(--app-text);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.title-bar__scenario-item:hover,
+.title-bar__scenario-item[data-highlighted] {
+  color: var(--app-text-strong);
+  background: var(--app-surface-hover);
+}
+
+.title-bar__scenario-item > span:last-child {
+  color: var(--app-text-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+}

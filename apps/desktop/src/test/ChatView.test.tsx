@@ -7,7 +7,7 @@ const callbacks = {
   onRetry: vi.fn(),
   onScrollPositionChange: vi.fn(),
   onSend: vi.fn(),
-  onStop: vi.fn(),
+  onStop: vi.fn()
 }
 
 describe("ChatView outcome announcements", () => {

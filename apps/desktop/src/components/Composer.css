@@ -8,16 +8,17 @@
 
 .composer__offline {
   display: flex;
-  min-height: 30px;
-  padding: 6px 20px;
+  min-height: 32px;
+  padding: 8px 24px;
   align-items: center;
   justify-content: center;
-  gap: 9px;
+  gap: 8px;
   border-bottom: 1px solid var(--app-border-danger);
   color: var(--app-text-danger);
   background: var(--app-surface-danger);
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: 11px;
+  font-weight: 500;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -30,33 +31,61 @@
   width: 100%;
   max-width: 768px;
   margin: 0 auto;
-  padding: 13px 24px 10px;
+  padding: 12px 24px;
 }
 
 .composer__input-wrap {
   position: relative;
 }
 
+/*
+ * The composer edge is the one place the brand gradient runs the full
+ * silhouette: violet at the top-left corner, cyan at the bottom-right. It is a
+ * masked 1px ring laid over the field's own transparent border, so the field
+ * keeps its translucent fill instead of sitting on the gradient.
+ */
+.composer__input-wrap::before {
+  position: absolute;
+  inset: 0;
+  padding: 1px;
+  border-radius: var(--radius-surface);
+  pointer-events: none;
+  content: "";
+  background-image: var(--gradient-border);
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+
 .composer__textarea {
   max-height: 168px;
-  min-height: 58px;
+  min-height: 56px;
   resize: none;
   overflow-y: auto;
-  padding: 17px 58px 15px 17px;
-  border-color: var(--app-border-strong);
-  border-radius: 0;
-  color: var(--app-text);
-  background: var(--app-surface-field);
+  padding: 16px 58px 16px 16px;
+  /* The gradient ring above owns this edge in every state. */
+  border-color: transparent;
+  border-radius: var(--radius-surface);
   font-size: 14px;
   line-height: 1.5;
 }
 
-.composer__textarea::placeholder {
-  color: var(--app-text-faint);
+/*
+ * The composer is the chat's default focus target, so it carries no focus ring:
+ * a permanent glow around the primary surface reads as chrome, not as state.
+ */
+.composer__textarea:focus {
+  outline: none;
+  box-shadow: none;
 }
 
 .composer__textarea--streaming {
-  padding-right: 100px;
+  padding-right: 104px;
 }
 
 .composer__send,
@@ -64,56 +93,71 @@
   position: absolute;
   right: 10px;
   bottom: 10px;
-  width: 34px;
-  height: 34px;
 }
 
 .composer__send--beside-stop {
-  right: 52px;
-}
-
-.composer__send svg,
-.composer__stop svg {
-  width: 14px;
-  height: 14px;
+  right: 54px;
 }
 
 .composer__meta,
-.composer__session,
+.composer__status,
 .composer__actions {
   display: flex;
   align-items: center;
 }
 
 .composer__meta {
-  min-height: 28px;
-  padding-top: 5px;
+  min-height: 32px;
+  padding-top: 10px;
   justify-content: space-between;
   gap: 12px;
 }
 
-.composer__session {
-  gap: 7px;
+.composer__actions {
+  /* Cancels the first button's padding so "New" aligns with the input edge. */
+  margin-left: -10px;
+  gap: 2px;
+}
+
+/*
+ * The only command in a row of status data. It drops to the row's scale and
+ * keeps the ghost variant's muted resting color, so sans against the model
+ * label's mono is what marks it as an action. The extra weight only restores
+ * optical parity: Geist Mono sets heavier than Geist Sans at a shared weight.
+ */
+.composer__new {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.composer__divider {
+  width: 1px;
+  height: 14px;
+  margin-inline: 6px;
+  background: var(--app-border-default);
+}
+
+/* Model identifiers are data, so they keep the meta row's monospace voice. */
+.composer__model {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+
+.composer__status {
+  gap: 8px;
   color: var(--app-text-faint);
   font-family: var(--font-mono);
-  font-size: 8.5px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-.composer__actions {
-  gap: 1px;
-}
-
-.composer__actions button {
-  min-height: 28px;
-  gap: 7px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
 }
 
 .composer__dot {
   display: block;
-  width: 5px;
-  height: 5px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
   background: var(--app-status-success);
 }
 
@@ -123,11 +167,11 @@
 
 @media (max-width: 640px) {
   .composer__inner {
-    padding-inline: 14px;
+    padding-inline: 16px;
   }
 
   .composer__offline span + span,
-  .composer__session {
+  .composer__status {
     display: none;
   }
 }

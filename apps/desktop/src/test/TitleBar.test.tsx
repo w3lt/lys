@@ -1,26 +1,14 @@
-import { useState } from "react"
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { describe, expect, it, vi } from "vitest"
-
-import type { ScenarioKey } from "@/app/types"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { TitleBar } from "../components/TitleBar"
 
-function ControlledTitleBar({
-  onScenarioSelect = vi.fn(),
-}: {
-  onScenarioSelect?: (key: ScenarioKey) => void
-}) {
-  const [open, setOpen] = useState(false)
+function ControlledTitleBar() {
 
   return (
     <>
-      <TitleBar
-        open={open}
-        onOpenChange={setOpen}
-        onScenarioSelect={onScenarioSelect}
-      />
+      <TitleBar />
       <button type="button">Outside target</button>
     </>
   )
@@ -31,17 +19,18 @@ async function waitForMenu() {
   return screen.findByRole("menu")
 }
 
+beforeEach(() => {
+  window.localStorage.clear()
+  document.documentElement.classList.add("dark")
+})
+
 describe("TitleBar", () => {
   it("opens the scenario menu and selects a scenario", async () => {
     const user = userEvent.setup()
     const onOpenChange = vi.fn()
     const onScenarioSelect = vi.fn()
     const { rerender } = render(
-      <TitleBar
-        open={false}
-        onOpenChange={onOpenChange}
-        onScenarioSelect={onScenarioSelect}
-      />
+      <TitleBar />
     )
 
     await user.click(screen.getByRole("button", { name: "Reference states" }))
@@ -50,11 +39,7 @@ describe("TitleBar", () => {
     expect(onOpenChange).toHaveBeenCalledTimes(1)
 
     rerender(
-      <TitleBar
-        open
-        onOpenChange={onOpenChange}
-        onScenarioSelect={onScenarioSelect}
-      />
+      <TitleBar />
     )
     await user.click(screen.getByRole("menuitem", { name: /Inline error/ }))
 
@@ -99,14 +84,55 @@ describe("TitleBar", () => {
     )
   })
 
-  it("aligns the rendered trigger at the title bar edge", () => {
+  it("aligns the rendered actions at the title bar edge", () => {
+    const { container } = render(<ControlledTitleBar />)
+
+    const actions = container.querySelector(".title-bar__actions")
+    const actionsStyle = window.getComputedStyle(actions as Element)
+
+    expect(actionsStyle.justifySelf).toBe("end")
+    expect(actionsStyle.marginRight).toBe("8px")
+  })
+
+  it("names the theme control after the appearance it switches to", () => {
     render(<ControlledTitleBar />)
 
-    const triggerStyle = window.getComputedStyle(
-      screen.getByRole("button", { name: "Reference states" })
+    expect(
+      screen.getByRole("button", { name: "Switch to light theme" })
+    ).toBeInTheDocument()
+    expect(document.documentElement).toHaveClass("dark")
+  })
+
+  it("switches the appearance and remembers the choice", async () => {
+    const user = userEvent.setup()
+    render(<ControlledTitleBar />)
+
+    await user.click(
+      screen.getByRole("button", { name: "Switch to light theme" })
     )
 
-    expect(triggerStyle.justifySelf).toBe("end")
-    expect(triggerStyle.marginRight).toBe("12px")
+    expect(document.documentElement).not.toHaveClass("dark")
+    expect(window.localStorage.getItem("lys.theme")).toBe("light")
+    expect(
+      screen.getByRole("button", { name: "Switch to dark theme" })
+    ).toBeInTheDocument()
+
+    await user.click(
+      screen.getByRole("button", { name: "Switch to dark theme" })
+    )
+
+    expect(document.documentElement).toHaveClass("dark")
+    expect(window.localStorage.getItem("lys.theme")).toBe("dark")
+  })
+
+  it("restores a stored light appearance on mount", () => {
+    window.localStorage.setItem("lys.theme", "light")
+
+    render(<ControlledTitleBar />)
+
+    expect(document.documentElement).not.toHaveClass("dark")
+    expect(
+      screen.getByRole("button", { name: "Switch to dark theme" })
+    ).toBeInTheDocument()
   })
 })

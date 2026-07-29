@@ -2,24 +2,12 @@ import { useState } from "react"
 import { Input } from "../ui/input"
 import { Button } from "../ui/button"
 import { Separator } from "../ui/separator"
-import { AppState } from "@/app/types"
 import { MODEL_OPTIONS } from "@/app/content"
-
-function modelStatusLabel(status: AppState["runtime"]["model"]) {
-  switch (status) {
-    case "loaded":
-      return "Model loaded"
-    case "loading":
-      return "Model loading"
-    case "unloading":
-      return "Model unloading"
-    case "none":
-      return "No model loaded"
-  }
-}
+import { useSettingsContext } from "./SettingsContext"
 
 export default function ModelPane() {
   const [probeResult, setProbeResult] = useState("")
+  const { state, onConfigChange, onSelectModel } = useSettingsContext()
 
   function testConnection() {
     setProbeResult(

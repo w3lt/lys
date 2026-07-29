@@ -3,6 +3,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Separator } from "@/components/ui/separator"
 import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
+import { useSettingsContext } from "./SettingsContext"
 
 const CONTEXT_OPTIONS: ReadonlyArray<{
   value: LysConfig["contextSize"]
@@ -19,6 +20,8 @@ function singleSliderValue(value: number | readonly number[]) {
 }
 
 export default function GenerationPane() {
+  const { state, onConfigChange } = useSettingsContext()
+
   function changeContext(values: string[]) {
     const selected = CONTEXT_OPTIONS.find(
       ({ value }) => String(value) === values[0]

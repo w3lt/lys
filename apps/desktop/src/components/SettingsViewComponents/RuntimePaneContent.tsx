@@ -1,9 +1,17 @@
-import { AppState } from "@/app/types"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { MODEL_OPTIONS } from "@/app/content"
+import type { AppState } from "@/app/types"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle
+} from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Separator } from "@/components/ui/separator"
 import { Progress } from "@/components/ui/progress"
+import { useSettingsContext } from "./SettingsContext"
 
 function backendStatusLabel(status: AppState["runtime"]["backend"]) {
   switch (status) {
@@ -18,7 +26,30 @@ function backendStatusLabel(status: AppState["runtime"]["backend"]) {
   }
 }
 
+function modelStatusLabel(status: AppState["runtime"]["model"]) {
+  switch (status) {
+    case "loaded":
+      return "Model loaded"
+    case "loading":
+      return "Model loading"
+    case "unloading":
+      return "Model unloading"
+    case "none":
+      return "No model loaded"
+  }
+}
+
 export default function RuntimePaneContent() {
+  const {
+    state,
+    onAutostartToggle,
+    onLoadModel,
+    onStartBackend,
+    onStopBackend,
+    onUnloadModel
+  } = useSettingsContext()
+  const { runtime } = state
+
   return (
     <div className="settings-view__stack">
       <Card className="settings-view__card">

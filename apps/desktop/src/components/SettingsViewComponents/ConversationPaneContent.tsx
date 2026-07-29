@@ -1,8 +1,11 @@
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Textarea } from "@/components/ui/textarea"
 import { Separator } from "@/components/ui/separator"
+import { useSettingsContext } from "./SettingsContext"
 
 export default function ConversationPane() {
+  const { state, onConfigChange } = useSettingsContext()
+
   function changeTrim(values: string[]) {
     const value = values[0]
     if (value === "drop" || value === "stop") {

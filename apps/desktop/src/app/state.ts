@@ -12,7 +12,9 @@ const updateMessage = (
   update: (message: Extract<Message, { role: "lys" }>) => Message
 ): Message[] =>
   messages.map((message) =>
-    message.role === "lys" && message.id === messageId ? update(message) : message
+    message.role === "lys" && message.id === messageId
+      ? update(message)
+      : message
   )
 
 export function createInitialState(now = Date.now()): AppState {
@@ -55,7 +57,10 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       }
     case "replyChunkReceived": {
       const message = state.messages.find(
-        (item) => item.role === "lys" && item.id === action.messageId && item.status === "streaming"
+        (item) =>
+          item.role === "lys" &&
+          item.id === action.messageId &&
+          item.status === "streaming"
       )
       if (!state.streaming || !message) return state
 
@@ -69,7 +74,10 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     }
     case "replyCompleted": {
       const message = state.messages.find(
-        (item) => item.role === "lys" && item.id === action.messageId && item.status === "streaming"
+        (item) =>
+          item.role === "lys" &&
+          item.id === action.messageId &&
+          item.status === "streaming"
       )
       if (!state.streaming || !message) return state
 
@@ -98,9 +106,18 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       }
     }
     case "errorsCleared":
-      return { ...state, messages: state.messages.filter((message) => message.role !== "error") }
+      return {
+        ...state,
+        messages: state.messages.filter((message) => message.role !== "error")
+      }
     case "newChat":
-      return { ...state, messages: [], draft: "", streaming: false, atBottom: true }
+      return {
+        ...state,
+        messages: [],
+        draft: "",
+        streaming: false,
+        atBottom: true
+      }
     case "scenarioSelected":
       return action.state
     case "scenarioMenuChanged":
@@ -119,7 +136,10 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         : state
     case "backendStarted":
       return state.runtime.backend === "starting"
-        ? updateRuntime(state, { backend: "running", startedAt: action.startedAt })
+        ? updateRuntime(state, {
+            backend: "running",
+            startedAt: action.startedAt
+          })
         : state
     case "backendStopRequested":
       return state.runtime.backend === "running"
@@ -127,15 +147,22 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         : state
     case "backendStopped":
       return state.runtime.backend === "stopping"
-        ? updateRuntime(state, { backend: "stopped", model: "none", modelProgress: 0 })
+        ? updateRuntime(state, {
+            backend: "stopped",
+            model: "none",
+            modelProgress: 0
+          })
         : state
     case "modelLoadStarted":
-      return state.runtime.backend === "running" && state.runtime.model === "none"
+      return state.runtime.backend === "running" &&
+        state.runtime.model === "none"
         ? updateRuntime(state, { model: "loading", modelProgress: 0 })
         : state
     case "modelLoadProgressed":
       return state.runtime.model === "loading"
-        ? updateRuntime(state, { modelProgress: Math.min(100, Math.max(0, action.progress)) })
+        ? updateRuntime(state, {
+            modelProgress: Math.min(100, Math.max(0, action.progress))
+          })
         : state
     case "modelLoaded":
       return state.runtime.model === "loading"

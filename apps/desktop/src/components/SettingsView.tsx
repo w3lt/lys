@@ -1,35 +1,23 @@
 import { useState } from "react"
 
 import { MODEL_OPTIONS } from "@/app/content"
-import type {
-  AppState,
-  LysConfig,
-  SettingsPane,
-} from "@/app/types"
+import type { AppState, LysConfig, SettingsPane } from "@/app/types"
 import { Button } from "@/components/ui/button"
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
-  CardTitle,
+  CardTitle
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
 import { Separator } from "@/components/ui/separator"
 import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@/components/ui/toggle-group"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 
 import "./SettingsView.css"
 
@@ -40,7 +28,7 @@ const SETTINGS_PANES: ReadonlyArray<{
   { value: "runtime", label: "Runtime" },
   { value: "model", label: "Model" },
   { value: "generation", label: "Generation" },
-  { value: "conversation", label: "Conversation" },
+  { value: "conversation", label: "Conversation" }
 ]
 
 const CONTEXT_OPTIONS: ReadonlyArray<{
@@ -50,7 +38,7 @@ const CONTEXT_OPTIONS: ReadonlyArray<{
   { value: 4096, label: "4k" },
   { value: 8192, label: "8k" },
   { value: 16384, label: "16k" },
-  { value: 32768, label: "32k" },
+  { value: 32768, label: "32k" }
 ]
 
 interface SettingsViewProps {
@@ -69,7 +57,7 @@ interface SettingsViewProps {
 function PaneHeading({
   eyebrow,
   title,
-  note,
+  note
 }: {
   eyebrow: string
   title: string
@@ -88,12 +76,7 @@ function PaneFooter({ onDone }: { onDone: () => void }) {
   return (
     <footer className="settings-view__footer">
       <p>Changes live in this session only. Nothing is written to disk.</p>
-      <Button
-        onClick={onDone}
-        size="lysCompact"
-        type="button"
-        variant="lysPrimary"
-      >
+      <Button onClick={onDone} type="button">
         Done
       </Button>
     </footer>
@@ -137,7 +120,7 @@ function RuntimePane({
   onLoadModel,
   onStartBackend,
   onStopBackend,
-  onUnloadModel,
+  onUnloadModel
 }: Pick<
   SettingsViewProps,
   | "state"
@@ -177,30 +160,19 @@ function RuntimePane({
             </p>
             <div className="settings-view__actions">
               {runtime.backend === "stopped" ? (
-                <Button
-                  onClick={onStartBackend}
-                  size="lysCompact"
-                  type="button"
-                  variant="lysPrimary"
-                >
+                <Button onClick={onStartBackend} type="button">
                   Start backend
                 </Button>
               ) : runtime.backend === "running" ? (
                 <Button
                   onClick={onStopBackend}
-                  size="lysCompact"
                   type="button"
-                  variant="lysDanger"
+                  variant="destructive"
                 >
                   Stop backend
                 </Button>
               ) : (
-                <Button
-                  disabled
-                  size="lysCompact"
-                  type="button"
-                  variant="lysOutline"
-                >
+                <Button disabled type="button" variant="outline">
                   {runtime.backend === "starting"
                     ? "Starting backend"
                     : "Stopping backend"}
@@ -218,7 +190,6 @@ function RuntimePane({
           <Switch
             aria-label="Start it when Lys opens"
             checked={runtime.autostart}
-            className="settings-view__switch"
             onCheckedChange={onAutostartToggle}
           />
         </div>
@@ -255,9 +226,8 @@ function RuntimePane({
                 <Button
                   disabled={runtime.backend !== "running"}
                   onClick={onUnloadModel}
-                  size="lysCompact"
                   type="button"
-                  variant="lysOutline"
+                  variant="outline"
                 >
                   Unload model
                 </Button>
@@ -265,19 +235,12 @@ function RuntimePane({
                 <Button
                   disabled={runtime.backend !== "running"}
                   onClick={onLoadModel}
-                  size="lysCompact"
                   type="button"
-                  variant="lysPrimary"
                 >
                   Load model
                 </Button>
               ) : (
-                <Button
-                  disabled
-                  size="lysCompact"
-                  type="button"
-                  variant="lysOutline"
-                >
+                <Button disabled type="button" variant="outline">
                   {runtime.model === "loading"
                     ? "Loading model"
                     : "Unloading model"}
@@ -322,7 +285,7 @@ function ModelPane({
   state,
   onConfigChange,
   onDone,
-  onSelectModel,
+  onSelectModel
 }: Pick<
   SettingsViewProps,
   "state" | "onConfigChange" | "onDone" | "onSelectModel"
@@ -359,20 +322,11 @@ function ModelPane({
               spellCheck={false}
               value={state.config.endpoint}
             />
-            <Button
-              onClick={testConnection}
-              size="lysCompact"
-              type="button"
-              variant="lysOutline"
-            >
+            <Button onClick={testConnection} type="button" variant="outline">
               Test connection
             </Button>
           </div>
-          <p
-            aria-live="polite"
-            className="settings-view__probe"
-            role="status"
-          >
+          <p aria-live="polite" className="settings-view__probe" role="status">
             {probeResult || "No network request is made by this prototype."}
           </p>
         </section>
@@ -395,7 +349,7 @@ function ModelPane({
                   key={model.name}
                   onClick={() => onSelectModel(model.name)}
                   type="button"
-                  variant="lysOutline"
+                  variant="outline"
                 >
                   <span>
                     <strong>{model.name}</strong>
@@ -420,7 +374,7 @@ function ModelPane({
 function GenerationPane({
   state,
   onConfigChange,
-  onDone,
+  onDone
 }: Pick<SettingsViewProps, "state" | "onConfigChange" | "onDone">) {
   function changeContext(values: string[]) {
     const selected = CONTEXT_OPTIONS.find(
@@ -478,12 +432,11 @@ function GenerationPane({
           </div>
           <Slider
             aria-labelledby="temperature-label"
-            className="settings-view__slider"
             max={1.5}
             min={0}
             onValueChange={(temperature) =>
               onConfigChange({
-                temperature: singleSliderValue(temperature),
+                temperature: singleSliderValue(temperature)
               })
             }
             step={0.05}
@@ -504,7 +457,6 @@ function GenerationPane({
           </div>
           <Slider
             aria-labelledby="reply-ceiling-label"
-            className="settings-view__slider"
             max={4096}
             min={256}
             onValueChange={(maxTokens) =>
@@ -526,7 +478,6 @@ function GenerationPane({
           <Switch
             aria-label="Stream tokens"
             checked={state.config.stream}
-            className="settings-view__switch"
             onCheckedChange={(stream) => onConfigChange({ stream })}
           />
         </div>
@@ -540,7 +491,7 @@ function GenerationPane({
 function ConversationPane({
   state,
   onConfigChange,
-  onDone,
+  onDone
 }: Pick<SettingsViewProps, "state" | "onConfigChange" | "onDone">) {
   function changeTrim(values: string[]) {
     const value = values[0]
@@ -632,7 +583,7 @@ export function SettingsView({
   onSelectModel,
   onStartBackend,
   onStopBackend,
-  onUnloadModel,
+  onUnloadModel
 }: SettingsViewProps) {
   return (
     <main aria-label="Settings" className="settings-view">

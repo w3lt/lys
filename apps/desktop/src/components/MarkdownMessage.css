@@ -17,7 +17,7 @@
 .markdown-message ol,
 .markdown-message blockquote,
 .markdown-message .markdown-message__code-block {
-  margin: 0 0 14px;
+  margin: 0 0 16px;
 }
 
 .markdown-message h1,
@@ -26,12 +26,13 @@
 .markdown-message h4 {
   color: var(--app-text-strong);
   font-weight: 600;
-  line-height: 1.25;
-  margin: 22px 0 10px;
+  line-height: 1.3;
+  margin: 24px 0 8px;
 }
 
 .markdown-message h1 {
-  font-size: 22px;
+  font-size: 24px;
+  line-height: 1.2;
 }
 
 .markdown-message h2 {
@@ -40,16 +41,17 @@
 
 .markdown-message h3,
 .markdown-message h4 {
-  font-size: 15px;
+  font-size: 16px;
+  line-height: 1.35;
 }
 
 .markdown-message ul,
 .markdown-message ol {
-  padding-left: 22px;
+  padding-left: 24px;
 }
 
 .markdown-message li + li {
-  margin-top: 5px;
+  margin-top: 4px;
 }
 
 .markdown-message a {
@@ -63,9 +65,9 @@
 .markdown-message > code {
   background: var(--app-surface-code);
   border: 1px solid var(--app-border-default);
-  border-radius: 3px;
+  border-radius: var(--radius-detail);
   color: var(--app-text-code);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.86em;
   padding: 0.08em 0.35em;
 }
@@ -73,39 +75,36 @@
 .markdown-message blockquote {
   border-left: 2px solid var(--app-border-interactive);
   color: var(--app-text-muted);
-  padding-left: 14px;
+  padding-left: 16px;
 }
 
 .markdown-message__code-block {
   background: var(--app-surface-code);
   border: 1px solid var(--app-border-default);
-  border-radius: 6px;
+  border-radius: var(--radius-surface);
   overflow: hidden;
 }
 
+/* A language tag is short technical metadata. */
 .markdown-message__code-header {
   align-items: center;
   background: var(--app-surface-code-header);
   border-bottom: 1px solid var(--app-border-default);
   color: var(--app-text-muted);
   display: flex;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 9px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
   justify-content: space-between;
-  letter-spacing: 0.18em;
-  padding: 7px 10px;
+  letter-spacing: 0.16em;
+  padding: 4px 8px;
   text-transform: uppercase;
 }
 
-.markdown-message__code-header [data-slot="button"] {
-  align-items: center;
-  display: inline-flex;
-  gap: 4px;
-}
-
 .markdown-message__block-code {
+  color: var(--app-text-code);
   display: block;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.65;
   overflow-x: auto;
@@ -113,12 +112,13 @@
   white-space: pre;
 }
 
+/* The caret loops only while a reply is actually streaming. */
 .markdown-message__caret {
   animation: markdown-message-blink 1s steps(2, start) infinite;
   background: currentColor;
   display: inline-block;
   height: 1em;
-  margin-left: 3px;
+  margin-left: 4px;
   vertical-align: -0.12em;
   width: 2px;
 }
@@ -126,5 +126,11 @@
 @keyframes markdown-message-blink {
   50% {
     opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .markdown-message__caret {
+    animation: none;
   }
 }

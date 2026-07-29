@@ -7,7 +7,7 @@ const writeText = vi.fn()
 
 Object.defineProperty(navigator, "clipboard", {
   configurable: true,
-  value: { writeText },
+  value: { writeText }
 })
 
 afterEach(() => {
@@ -21,7 +21,7 @@ describe("MarkdownMessage", () => {
       <MarkdownMessage
         text={"**strong**\n\n<script>window.bad = true</script>"}
         streaming={false}
-      />,
+      />
     )
 
     expect(screen.getByText("strong").tagName).toBe("STRONG")
@@ -31,7 +31,7 @@ describe("MarkdownMessage", () => {
 
   it("opens Markdown links in a separate, non-referring tab", () => {
     render(
-      <MarkdownMessage text="[Lys](https://example.com)" streaming={false} />,
+      <MarkdownMessage text="[Lys](https://example.com)" streaming={false} />
     )
 
     const link = screen.getByRole("link", { name: "Lys" })
@@ -45,7 +45,7 @@ describe("MarkdownMessage", () => {
       <MarkdownMessage
         text={"```ts\nconst answer = 42\n```"}
         streaming={false}
-      />,
+      />
     )
 
     fireEvent.click(screen.getByRole("button", { name: "Copy code" }))
@@ -60,7 +60,7 @@ describe("MarkdownMessage", () => {
       <MarkdownMessage
         text={"```ts\nconst first = 1\n```\n\n```ts\nconst second = 2\n```"}
         streaming={false}
-      />,
+      />
     )
 
     fireEvent.click(screen.getAllByRole("button", { name: "Copy code" })[1])
@@ -77,7 +77,7 @@ describe("MarkdownMessage", () => {
       <MarkdownMessage
         text={"```ts\nconst answer = 42\n```"}
         streaming={false}
-      />,
+      />
     )
 
     await act(async () => {
@@ -95,7 +95,7 @@ describe("MarkdownMessage", () => {
 
     expect(screen.getByTestId("streaming-caret")).toHaveAttribute(
       "aria-label",
-      "Lys is generating",
+      "Lys is generating"
     )
   })
 })

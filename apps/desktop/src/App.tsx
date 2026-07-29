@@ -1,14 +1,12 @@
 import { useCallback, useEffect, useReducer, useRef } from "react"
 
-import { stateForScenario } from "@/app/scenarios"
 import {
   createProgressSimulation,
   createTextSimulation,
   replyForPrompt,
-  type SimulationController,
+  type SimulationController
 } from "@/app/simulation"
 import { appReducer, createInitialState } from "@/app/state"
-import type { ScenarioKey } from "@/app/types"
 import { ChatView } from "@/components/ChatView"
 import { Composer } from "@/components/Composer"
 import { SettingsView } from "@/components/SettingsView"
@@ -31,7 +29,7 @@ function createOneShotInterval(
     cancel() {
       cancelled = true
       window.clearInterval(timer)
-    },
+    }
   }
 }
 
@@ -51,9 +49,7 @@ function App() {
   const backendSimulationRef = useRef<SimulationController | undefined>(
     undefined
   )
-  const modelSimulationRef = useRef<SimulationController | undefined>(
-    undefined
-  )
+  const modelSimulationRef = useRef<SimulationController | undefined>(undefined)
 
   const cancelTextSimulation = useCallback(() => {
     textSimulationRef.current?.cancel()
@@ -74,11 +70,7 @@ function App() {
     cancelTextSimulation()
     cancelBackendSimulation()
     cancelModelSimulation()
-  }, [
-    cancelBackendSimulation,
-    cancelModelSimulation,
-    cancelTextSimulation,
-  ])
+  }, [cancelBackendSimulation, cancelModelSimulation, cancelTextSimulation])
 
   useEffect(() => cancelActiveSimulations, [cancelActiveSimulations])
 
@@ -95,8 +87,8 @@ function App() {
         id: `runtime-${timestamp}-${id}`,
         time: formatRuntimeTime(timestamp),
         text,
-        tone,
-      },
+        tone
+      }
     })
   }
 
@@ -114,7 +106,7 @@ function App() {
 
     dispatch({
       type: "messageAdded",
-      message: { id: userMessageId, role: "user", text: prompt },
+      message: { id: userMessageId, role: "user", text: prompt }
     })
     dispatch({ type: "replyStarted", messageId: replyMessageId })
     dispatch({ type: "draftChanged", draft: "" })
@@ -127,7 +119,7 @@ function App() {
         dispatch({
           type: "replyChunkReceived",
           messageId: replyMessageId,
-          text: chunk,
+          text: chunk
         })
       },
       onComplete: () => {
@@ -135,7 +127,7 @@ function App() {
           textSimulationRef.current = undefined
         }
         dispatch({ type: "replyCompleted", messageId: replyMessageId })
-      },
+      }
     })
 
     textSimulationRef.current = controller
@@ -157,13 +149,6 @@ function App() {
     cancelTextSimulation()
     nextMessageId.current = 1
     dispatch({ type: "newChat" })
-  }
-
-  function selectScenario(key: ScenarioKey) {
-    cancelActiveSimulations()
-    nextMessageId.current = 1
-    nextRuntimeLogId.current = 1
-    dispatch({ type: "scenarioSelected", state: stateForScenario(key) })
   }
 
   function openModelSettings() {
@@ -211,10 +196,7 @@ function App() {
   }
 
   function loadModel() {
-    if (
-      state.runtime.backend !== "running" ||
-      state.runtime.model !== "none"
-    ) {
+    if (state.runtime.backend !== "running" || state.runtime.model !== "none") {
       return
     }
 
@@ -234,7 +216,7 @@ function App() {
         const loadedAt = Date.now()
         dispatch({ type: "modelLoaded" })
         addRuntimeLog(`${state.config.model} loaded`, "ok", loadedAt)
-      },
+      }
     })
     modelSimulationRef.current = controller
   }
@@ -274,13 +256,7 @@ function App() {
 
   return (
     <div className="app-shell">
-      <TitleBar
-        onOpenChange={(open) =>
-          dispatch({ type: "scenarioMenuChanged", open })
-        }
-        onScenarioSelect={selectScenario}
-        open={state.scenarioMenuOpen}
-      />
+      <TitleBar />
 
       {state.view === "chat" ? (
         <main className="app-shell__chat">
@@ -299,9 +275,7 @@ function App() {
             config={state.config}
             draft={state.draft}
             messageCount={state.messages.length}
-            onDraftChange={(draft) =>
-              dispatch({ type: "draftChanged", draft })
-            }
+            onDraftChange={(draft) => dispatch({ type: "draftChanged", draft })}
             onNewChat={newChat}
             onOpenModelSettings={openModelSettings}
             onSend={() => sendPrompt(state.draft)}
@@ -313,9 +287,7 @@ function App() {
       ) : (
         <SettingsView
           onAutostartToggle={() => dispatch({ type: "autostartToggled" })}
-          onConfigChange={(patch) =>
-            dispatch({ type: "configChanged", patch })
-          }
+          onConfigChange={(patch) => dispatch({ type: "configChanged", patch })}
           onDone={() => dispatch({ type: "viewChanged", view: "chat" })}
           onLoadModel={loadModel}
           onPaneChange={(pane) => dispatch({ type: "paneChanged", pane })}

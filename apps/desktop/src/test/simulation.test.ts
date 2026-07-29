@@ -105,15 +105,20 @@ describe("simulation controllers", () => {
 
 describe("replyForPrompt", () => {
   it("selects replies by reference priority", () => {
-    expect(replyForPrompt("Who are you? Cancel streaming after the context window fills."))
-      .toBe(REPLIES.identity)
-    expect(replyForPrompt("Cancel this streaming response before its context fills."))
-      .toBe(REPLIES.stop)
-    expect(replyForPrompt("How should an SSE pipeline handle the context?"))
-      .toBe(REPLIES.pipeline)
-    expect(replyForPrompt("What happens when the token window fills?"))
-      .toBe(REPLIES.context)
-    expect(replyForPrompt("Tell me more."))
-      .toBe(REPLIES.generic)
+    expect(
+      replyForPrompt(
+        "Who are you? Cancel streaming after the context window fills."
+      )
+    ).toBe(REPLIES.identity)
+    expect(
+      replyForPrompt("Cancel this streaming response before its context fills.")
+    ).toBe(REPLIES.stop)
+    expect(
+      replyForPrompt("How should an SSE pipeline handle the context?")
+    ).toBe(REPLIES.pipeline)
+    expect(replyForPrompt("What happens when the token window fills?")).toBe(
+      REPLIES.context
+    )
+    expect(replyForPrompt("Tell me more.")).toBe(REPLIES.generic)
   })
 })

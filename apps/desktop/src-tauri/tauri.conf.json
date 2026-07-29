@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "lys-desktop",
+  "productName": "Lys",
   "version": "0.1.0",
   "identifier": "com.w3lt.lys-desktop",
   "build": {

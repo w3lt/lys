@@ -1,0 +1,127 @@
+/*
+ * Wingline Trace — the signature Lys border detail (design system §7).
+ *
+ * A 1px line laid directly over a component's upper border, inset from the
+ * leading corner by one control radius so it starts where the corner arc
+ * ends. It introduces controlled asymmetry without altering the component
+ * silhouette, and it supplements the focus ring rather than replacing it.
+ *
+ * Set the mode with data-lys-wingline:
+ *   primary      visible at rest; one finite extend and slide on hover
+ *   interactive  hidden at rest; revealed on focus-visible or while pressed
+ *   focus        hidden at rest; revealed while the surface holds focus
+ *   selected     visible and static while the item reads as selected
+ *
+ * Disabled, invalid, and destructive components never animate the trace:
+ * semantic state has to win over brand expression.
+ */
+
+:where(.lys-wingline[data-lys-wingline]) {
+  /*
+   * A zero-specificity default so a host may still position itself, e.g. the
+   * composer's absolutely placed send button.
+   */
+  position: relative;
+}
+
+.lys-wingline[data-lys-wingline] {
+  --lys-wingline-opacity: 0;
+  --lys-wingline-length: var(--wingline-length);
+  --lys-wingline-shift: 0px;
+
+  isolation: isolate;
+}
+
+.lys-wingline[data-lys-wingline]::after {
+  position: absolute;
+  top: var(--wingline-top);
+  inset-inline-start: var(--wingline-inset);
+  z-index: 1;
+  width: var(--lys-wingline-length);
+  /* Keeps the trace inside the component's rectangular bounds. */
+  max-width: calc(
+    100% - 2 * var(--wingline-inset) - var(--wingline-translation)
+  );
+  height: var(--wingline-thickness);
+  pointer-events: none;
+  content: "";
+  background-image: var(--gradient-border);
+  opacity: var(--lys-wingline-opacity);
+  transform: translateX(var(--lys-wingline-shift));
+  transition:
+    width var(--duration-standard) var(--ease-standard),
+    transform var(--duration-standard) var(--ease-standard),
+    opacity var(--duration-standard) var(--ease-standard);
+}
+
+.lys-wingline[data-lys-wingline="primary"] {
+  --lys-wingline-opacity: 1;
+}
+
+.lys-wingline[data-lys-wingline="selected"]:is(
+    [aria-pressed="true"],
+    [aria-selected="true"],
+    [data-pressed],
+    [data-selected],
+    [data-checked],
+    [data-active]
+  ) {
+  --lys-wingline-opacity: 1;
+}
+
+/*
+ * Interactive reveal. :where() holds the enabled-and-valid guard at zero
+ * specificity so these state rules stay comparable to the mode rules above.
+ */
+.lys-wingline[data-lys-wingline]:where(
+    :not(
+      :disabled,
+      [aria-disabled="true"],
+      [aria-invalid="true"],
+      [data-invalid]
+    )
+  ):is(:focus-visible, :focus-within, [aria-pressed="true"]) {
+  --lys-wingline-opacity: 1;
+}
+
+/* One finite extension and slide toward the trailing side. */
+.lys-wingline[data-lys-wingline="primary"]:where(
+    :not(
+      :disabled,
+      [aria-disabled="true"],
+      [aria-invalid="true"],
+      [data-invalid]
+    )
+  ):hover {
+  --lys-wingline-length: calc(
+    var(--wingline-length) + var(--wingline-extension)
+  );
+  --lys-wingline-shift: var(--wingline-translation);
+}
+
+/* Pressing returns the trace toward its resting length. */
+.lys-wingline[data-lys-wingline="primary"]:active {
+  --lys-wingline-length: var(--wingline-length);
+  --lys-wingline-shift: 0px;
+}
+
+/* Semantic danger and invalid cues must not compete with a violet/cyan trace. */
+.lys-wingline[data-lys-wingline]:is([aria-invalid="true"], [data-invalid]) {
+  --lys-wingline-opacity: 0;
+}
+
+.lys-wingline[data-lys-wingline]:is(:disabled, [aria-disabled="true"])::after {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* The correct state stays visible; only the movement is removed. */
+  .lys-wingline[data-lys-wingline="primary"]:hover {
+    --lys-wingline-length: var(--wingline-length);
+    --lys-wingline-shift: 0px;
+  }
+
+  .lys-wingline[data-lys-wingline]::after {
+    transition: none;
+  }
+}

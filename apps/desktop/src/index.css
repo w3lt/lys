@@ -2,12 +2,15 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+@import "./components/ui/wingline.css";
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
   --font-heading: var(--font-sans);
   --font-sans: "Geist Variable", sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, monospace;
 
   /* Lys brand utilities: text-lys-cyan, bg-lys-violet, etc. */
   --color-lys-violet-black: var(--lys-violet-black);
@@ -94,6 +97,12 @@
     oklch(0.58 0.22 303 / 58%),
     oklch(0.76 0.14 205 / 68%)
   );
+  --gradient-wordmark: linear-gradient(
+    135deg,
+    oklch(0.83 0.08 300) 0%,
+    oklch(0.58 0.22 303) 40%,
+    oklch(0.76 0.14 205) 100%
+  );
   --shadow-primary:
     0 0 24px oklch(0.58 0.2 303 / 18%), 0 0 36px oklch(0.72 0.14 205 / 14%);
 
@@ -124,6 +133,34 @@
 
   --radius: 0.625rem;
 
+  /*
+   * Lys geometry is a symmetrical soft-square scale: controls at 6px, larger
+   * surfaces at 10px. Capsules and circles are functional exceptions (switch
+   * tracks, status dots), never the default component silhouette.
+   */
+  --radius-detail: 4px;
+  --radius-control: 6px;
+  --radius-surface: 10px;
+  --radius-capsule: 999px;
+
+  /* One restrained ease-out curve drives every interaction transition. */
+  --duration-immediate: 120ms;
+  --duration-standard: 160ms;
+  --duration-enter: 200ms;
+  --ease-standard: cubic-bezier(0.32, 0.72, 0.35, 1);
+
+  /* Wingline Trace geometry; its finite motion lives in ui/wingline.css. */
+  --wingline-inset: var(--radius-control);
+  --wingline-thickness: 1px;
+  /*
+   * Offset from the host's padding box. The default lays the trace over the
+   * host's own 1px top border; a host without a border overrides this to 0.
+   */
+  --wingline-top: calc(-1 * var(--wingline-thickness));
+  --wingline-length: clamp(12px, 28%, 40px);
+  --wingline-extension: 8px;
+  --wingline-translation: 4px;
+
   --sidebar: oklch(0.98 0.012 260 / 86%);
   --sidebar-foreground: oklch(0.19 0.045 293);
   --sidebar-primary: oklch(0.5 0.14 224);
@@ -144,7 +181,8 @@
   --app-surface-panel: var(--card);
   --app-surface-field: oklch(0.99 0.008 250 / 90%);
   --app-surface-hover: var(--accent);
-  --app-surface-navigation-active: oklch(0.94 0.026 286 / 88%);
+  /* Reads against --app-surface-rail, not --app-surface; it must stay lighter. */
+  --app-surface-navigation-active: oklch(0.995 0.008 286 / 92%);
   --app-surface-selected: oklch(0.9 0.055 215 / 78%);
   --app-surface-code: oklch(0.92 0.025 280);
   --app-surface-code-header: oklch(0.88 0.035 278);
@@ -166,7 +204,6 @@
   --app-border-danger: oklch(0.58 0.14 25 / 50%);
 
   --app-action: var(--primary);
-  --app-action-hover: oklch(0.56 0.16 218);
   --app-action-foreground: var(--primary-foreground);
   --app-focus: var(--ring);
   --app-selection: oklch(0.72 0.14 205 / 38%);
@@ -184,7 +221,6 @@
   --app-status-success-ring: 0 0 0 4px oklch(0.47 0.13 150 / 13%);
   --app-status-pending-ring: 0 0 0 4px oklch(0.53 0.14 83 / 13%);
 
-  --app-grid-line: oklch(0.58 0.08 260 / 12%);
   --app-scrollbar-track: oklch(0.92 0.02 275);
   --app-scrollbar-thumb: oklch(0.66 0.055 270);
   --shadow-card:
@@ -222,15 +258,25 @@
       oklch(0.15 0.052 255) 70%,
       oklch(0.18 0.06 220) 100%
     );
+  /*
+   * Kept dark enough that --primary-foreground clears 4.5:1 across both
+   * stops; the glow, not the fill, carries the brand energy here.
+   */
   --gradient-primary: linear-gradient(
     105deg,
-    oklch(0.46 0.2 303) 0%,
-    oklch(0.53 0.135 218) 100%
+    oklch(0.42 0.21 303) 0%,
+    oklch(0.47 0.15 216) 100%
   );
   --gradient-border: linear-gradient(
     120deg,
     oklch(0.65 0.22 303 / 58%),
     oklch(0.78 0.14 205 / 68%)
+  );
+  --gradient-wordmark: linear-gradient(
+    135deg,
+    oklch(0.86 0.08 300) 0%,
+    oklch(0.65 0.22 303) 40%,
+    oklch(0.78 0.14 205) 100%
   );
   --shadow-primary:
     0 0 24px oklch(0.58 0.2 303 / 22%), 0 0 38px oklch(0.74 0.14 205 / 18%);
@@ -268,6 +314,52 @@
   --sidebar-accent-foreground: oklch(0.94 0.025 235);
   --sidebar-border: oklch(0.77 0.12 207 / 16%);
   --sidebar-ring: oklch(0.75 0.14 205);
+
+  /*
+   * Dark is the canonical Lys appearance, so every application role is
+   * restated here. Roles that already resolve through a shadcn token
+   * (--card, --foreground, --ring) inherit their dark value automatically.
+   */
+  --app-surface: oklch(0.145 0.045 296 / 72%);
+  --app-surface-chrome: oklch(0.13 0.042 297 / 92%);
+  --app-surface-rail: oklch(0.125 0.04 298 / 88%);
+  --app-surface-content: oklch(0.155 0.04 288 / 70%);
+  --app-surface-field: oklch(0.175 0.04 288 / 90%);
+  --app-surface-navigation-active: oklch(0.21 0.055 290 / 88%);
+  --app-surface-selected: oklch(0.3 0.075 232 / 72%);
+  --app-surface-code: oklch(0.165 0.038 288);
+  --app-surface-code-header: oklch(0.2 0.045 290);
+  --app-surface-danger: oklch(0.24 0.07 25 / 72%);
+
+  --app-text: oklch(0.9 0.02 240);
+  --app-text-faint: oklch(0.66 0.03 258);
+  --app-text-link: oklch(0.81 0.11 210);
+  --app-text-code: oklch(0.88 0.04 250);
+  --app-text-danger-muted: oklch(0.82 0.09 25);
+
+  --app-border-subtle: oklch(0.77 0.12 207 / 12%);
+  --app-border-strong: oklch(0.82 0.09 215 / 45%);
+  --app-border-interactive: oklch(0.65 0.22 303 / 62%);
+  --app-border-danger: oklch(0.7 0.17 25 / 48%);
+
+  --app-selection: oklch(0.55 0.16 250 / 48%);
+
+  --app-control-track: oklch(0.28 0.04 285);
+  --app-control-thumb: oklch(0.72 0.03 250);
+
+  --app-status-neutral: oklch(0.68 0.03 258);
+  --app-status-success: oklch(0.75 0.16 152);
+  --app-status-pending: oklch(0.8 0.14 85);
+  --app-status-danger: oklch(0.7 0.18 25);
+  --app-status-neutral-ring: 0 0 0 4px oklch(0.68 0.03 258 / 16%);
+  --app-status-success-ring: 0 0 0 4px oklch(0.75 0.16 152 / 18%);
+  --app-status-pending-ring: 0 0 0 4px oklch(0.8 0.14 85 / 18%);
+
+  --app-scrollbar-track: oklch(0.17 0.04 292);
+  --app-scrollbar-thumb: oklch(0.35 0.05 285);
+  --shadow-card:
+    inset 0 1px 0 oklch(1 0 0 / 6%), 0 18px 52px oklch(0.05 0.03 294 / 45%);
+  --shadow-floating: 0 10px 30px oklch(0.05 0.02 294 / 55%);
 }
 
 @layer base {
@@ -305,57 +397,5 @@
     -webkit-backdrop-filter: blur(18px) saturate(135%);
     backdrop-filter: blur(18px) saturate(135%);
     box-shadow: var(--shadow-card);
-  }
-
-  /*
-   * Add className="lys-primary" to a shadcn Button when you want the branded
-   * violet → cyan action treatment instead of the solid primary fallback.
-   */
-  .lys-primary {
-    color: var(--primary-foreground);
-    background-image: var(--gradient-primary);
-    box-shadow: var(--shadow-primary);
-    transition:
-      filter 160ms ease,
-      box-shadow 160ms ease,
-      transform 160ms ease;
-  }
-
-  .lys-primary:hover {
-    filter: brightness(1.08) saturate(1.06);
-    transform: translateY(-1px);
-  }
-
-  .lys-primary:active {
-    filter: brightness(0.98);
-    transform: translateY(0);
-  }
-
-  .lys-primary:focus-visible {
-    outline: none;
-    box-shadow:
-      0 0 0 3px var(--background),
-      0 0 0 5px var(--ring),
-      var(--shadow-primary);
-  }
-
-  /*
-   * Optional dual-color border for cards, dialogs, or the chat composer.
-   */
-  .lys-gradient-border {
-    border: 1px solid transparent;
-    background:
-      linear-gradient(var(--card), var(--card)) padding-box,
-      var(--gradient-border) border-box;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .lys-primary {
-    transition: none;
-  }
-
-  .lys-primary:hover {
-    transform: none;
   }
 }

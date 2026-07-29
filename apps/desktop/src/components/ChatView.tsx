@@ -4,11 +4,7 @@ import { ArrowDown, ArrowRight } from "lucide-react"
 import { STARTER_PROMPTS } from "@/app/content"
 import type { Message } from "@/app/types"
 import { MarkdownMessage } from "@/components/MarkdownMessage"
-import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
-} from "@/components/ui/alert"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 
 import "./ChatView.css"
@@ -30,7 +26,7 @@ export function ChatView({
   onScrollPositionChange,
   onSend,
   onRetry,
-  onStop,
+  onStop
 }: ChatViewProps) {
   const transcriptRef = useRef<HTMLDivElement>(null)
 
@@ -70,10 +66,10 @@ export function ChatView({
         {messages.length === 0 ? (
           <div className="chat-view__empty">
             <div aria-hidden="true" className="chat-view__mark">
-              L
+              <span className="chat-view__mark-dot" />
             </div>
-            <p className="chat-view__eyebrow">local inference interface</p>
-            <h1>Lysiptera Caliginia</h1>
+            <h1>Lys</h1>
+            <p className="chat-view__eyebrow">Lysiptera Caliginia</p>
             <p className="chat-view__subtitle">
               One model. One conversation. Nothing leaves this machine.
             </p>
@@ -86,7 +82,8 @@ export function ChatView({
                   className="chat-view__starter"
                   key={prompt}
                   onClick={() => onSend(prompt)}
-                  variant="lysOutline"
+                  size="lg"
+                  variant="outline"
                 >
                   <span>{prompt}</span>
                   <ArrowRight aria-hidden="true" />
@@ -120,8 +117,8 @@ export function ChatView({
                     <Button
                       className="chat-view__retry"
                       onClick={onRetry}
-                      size="lysCompact"
-                      variant="lysDanger"
+                      size="sm"
+                      variant="destructive"
                     >
                       Retry
                     </Button>
@@ -140,7 +137,8 @@ export function ChatView({
                       <Button
                         aria-label="Stop reply"
                         onClick={onStop}
-                        variant="lysMeta"
+                        size="sm"
+                        variant="ghost"
                       >
                         Stop
                       </Button>
@@ -170,8 +168,8 @@ export function ChatView({
         <Button
           className="chat-view__jump"
           onClick={jumpToLatest}
-          size="lysCompact"
-          variant="lysOutline"
+          size="sm"
+          variant="outline"
         >
           <ArrowDown aria-hidden="true" />
           Jump to latest

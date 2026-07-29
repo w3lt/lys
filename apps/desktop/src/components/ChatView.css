@@ -2,14 +2,7 @@
   position: relative;
   min-height: 0;
   flex: 1;
-  background:
-    linear-gradient(
-      90deg,
-      transparent 49.95%,
-      var(--app-grid-line) 50%,
-      transparent 50.05%
-    ),
-    var(--app-surface);
+  background: var(--app-surface);
 }
 
 .chat-view__scroller {
@@ -30,7 +23,7 @@
 .chat-view__empty {
   display: flex;
   min-height: 100%;
-  padding: 56px 0 48px;
+  padding: 48px 0;
   align-items: center;
   flex-direction: column;
   justify-content: center;
@@ -39,15 +32,21 @@
 
 .chat-view__mark {
   display: grid;
-  width: 48px;
-  height: 48px;
+  width: 32px;
+  height: 32px;
   margin-bottom: 24px;
   place-items: center;
-  border: 1px solid var(--app-border-interactive);
-  color: var(--lys-violet);
-  font-family: var(--font-serif);
-  font-size: 25px;
-  line-height: 1;
+  border: 1px solid var(--app-border-default);
+  border-radius: var(--radius-control);
+}
+
+/* Static: an idle mark must not pulse or emit an animated glow. */
+.chat-view__mark-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-image: var(--gradient-primary);
+  box-shadow: var(--shadow-primary);
 }
 
 .chat-view__eyebrow,
@@ -56,54 +55,57 @@
 .chat-view__session-note {
   margin: 0;
   font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
   text-transform: uppercase;
 }
 
 .chat-view__eyebrow {
+  margin-top: 16px !important;
   color: var(--app-text-faint);
-  font-size: 9px;
-  letter-spacing: 0.24em;
+  letter-spacing: 0.14em;
 }
 
 .chat-view__empty h1 {
-  margin: 10px 0 4px;
-  color: var(--app-text-strong);
-  font-family: var(--font-serif);
-  font-size: 44px;
-  font-weight: 400;
-  letter-spacing: -0.025em;
+  margin: 0;
+  color: transparent;
+  background-image: var(--gradient-wordmark);
+  background-clip: text;
+  -webkit-background-clip: text;
+  font-family: var(--font-sans);
+  font-size: 32px;
+  font-weight: 620;
+  letter-spacing: -0.02em;
   line-height: 1.1;
 }
 
 .chat-view__subtitle {
-  margin: 0;
+  max-width: 380px;
+  margin: 24px 0 0;
   color: var(--app-text-muted);
-  font-family: var(--font-serif);
-  font-size: 16px;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 .chat-view__session-note {
-  margin-top: 14px;
+  margin-top: 16px;
   color: var(--app-text-faint);
-  font-size: 9px;
-  letter-spacing: 0.13em;
+  letter-spacing: 0.12em;
 }
 
 .chat-view__starters {
   display: grid;
   width: 100%;
   max-width: 580px;
-  margin-top: 42px;
+  margin-top: 48px;
   gap: 8px;
 }
 
 .chat-view__starter {
-  min-height: 46px;
   justify-content: space-between;
-  padding: 0 15px;
+  padding: 0 12px;
   text-align: left;
-  text-transform: none;
-  letter-spacing: 0.02em;
 }
 
 .chat-view__starter svg {
@@ -111,30 +113,29 @@
 }
 
 .chat-view__transcript {
-  padding: 44px 0 80px;
+  padding: 48px 0;
 }
 
 .chat-view__message {
-  padding: 0 0 34px;
+  padding: 0 0 32px;
 }
 
 .chat-view__message + .chat-view__message,
 .chat-view__message + .chat-view__error,
 .chat-view__error + .chat-view__message {
-  padding-top: 30px;
+  padding-top: 32px;
   border-top: 1px solid var(--app-border-subtle);
 }
 
 .chat-view__message-heading {
   display: flex;
-  min-height: 18px;
-  align-items: baseline;
+  min-height: 28px;
+  align-items: center;
   justify-content: space-between;
 }
 
 .chat-view__speaker {
   color: var(--app-text-faint);
-  font-size: 9px;
   letter-spacing: 0.2em;
 }
 
@@ -145,7 +146,7 @@
 .chat-view__user-copy {
   margin: 12px 0 0;
   color: var(--app-text);
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1.65;
   white-space: pre-wrap;
 }
@@ -155,90 +156,47 @@
   color: var(--app-text);
 }
 
-.chat-view__message--lys .markdown-message h1,
-.chat-view__message--lys .markdown-message h2,
-.chat-view__message--lys .markdown-message h3,
-.chat-view__message--lys .markdown-message h4 {
-  color: var(--app-text-strong);
-}
-
-.chat-view__message--lys .markdown-message a {
-  color: var(--app-text-link);
-  text-decoration-color: var(--app-border-interactive);
-}
-
-.chat-view__message--lys
-  .markdown-message
-  :not(.markdown-message__block-code)
-  > code,
-.chat-view__message--lys .markdown-message > code {
-  border-color: var(--app-border-strong);
-  border-radius: 0;
-  color: var(--app-text-code);
-  background: var(--app-surface-code);
-}
-
-.chat-view__message--lys .markdown-message blockquote {
-  border-left-color: var(--app-border-interactive);
-  color: var(--app-text-muted);
-}
-
-.chat-view__message--lys .markdown-message__code-block {
-  border-color: var(--app-border-default);
-  border-radius: 0;
-  background: var(--app-surface-code);
-}
-
-.chat-view__message--lys .markdown-message__code-header {
-  border-bottom-color: var(--app-border-default);
-  color: var(--app-text-muted);
-  background: var(--app-surface-code-header);
-}
-
-.chat-view__message--lys .markdown-message__block-code {
-  color: var(--app-text-code);
-}
-
 .chat-view__stopped {
   display: inline-block;
   margin-top: 16px;
   padding-left: 12px;
   border-left: 1px solid var(--app-border-interactive);
   color: var(--app-text-muted);
-  font-size: 9px;
   letter-spacing: 0.16em;
 }
 
 .chat-view__error {
-  margin: 0 0 34px;
+  margin: 0 0 32px;
   padding: 16px;
   border-color: var(--app-border-danger);
-  border-radius: 0;
+  border-radius: var(--radius-surface);
   background: var(--app-surface-danger);
 }
 
 .chat-view__error [data-slot="alert-title"] {
+  color: var(--app-text-danger);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 11px;
+  font-weight: 500;
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
 .chat-view__error [data-slot="alert-description"] {
-  margin-top: 7px;
+  margin-top: 8px;
   color: var(--app-text-danger-muted);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.55;
 }
 
 .chat-view__retry {
-  margin-top: 13px;
+  margin-top: 12px;
 }
 
 .chat-view__jump {
   position: absolute;
-  right: 28px;
-  bottom: 22px;
+  right: 24px;
+  bottom: 24px;
   z-index: 2;
   background: var(--app-surface-panel);
   box-shadow: var(--shadow-floating);
@@ -246,18 +204,14 @@
 
 @media (max-width: 640px) {
   .chat-view__scroller {
-    padding-inline: 14px;
+    padding-inline: 16px;
   }
 
   .chat-view__empty {
-    padding-top: 34px;
-  }
-
-  .chat-view__empty h1 {
-    font-size: 31px;
+    padding-top: 32px;
   }
 
   .chat-view__jump {
-    right: 14px;
+    right: 16px;
   }
 }

@@ -5,7 +5,7 @@ use std::{
     os::unix::process::CommandExt,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, TryLockError},
 };
 
 use serde::Serialize;
@@ -18,7 +18,22 @@ pub struct Backend {
 
 #[derive(Default)]
 struct BackendInner {
-    process: Mutex<Option<Child>>,
+    process: Mutex<Option<BackendProcess>>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BackendProcessPhase {
+    // The leader is live or an unreaped zombie, so its PID still pins the
+    // process-group identity and group signals cannot hit a recycled PGID.
+    Signalable,
+    // The final group signal was already attempted. Only reaping is allowed;
+    // retrying a negative-PGID signal from this phase would be unsafe.
+    ReapOnly,
+}
+
+struct BackendProcess {
+    child: Child,
+    phase: BackendProcessPhase,
 }
 
 #[derive(Debug, Serialize)]
@@ -37,12 +52,76 @@ impl BackendStatus {
     }
 }
 
+impl BackendProcess {
+    fn new(child: Child) -> Self {
+        Self {
+            child,
+            phase: BackendProcessPhase::Signalable,
+        }
+    }
+
+    fn process_group_id(&self) -> u32 {
+        self.child.id()
+    }
+
+    fn is_running(&self) -> io::Result<bool> {
+        match self.phase {
+            BackendProcessPhase::Signalable => {
+                process_group::leader_has_exited(&self.child).map(|exited| !exited)
+            }
+            BackendProcessPhase::ReapOnly => Ok(false),
+        }
+    }
+
+    fn stop(&mut self) -> io::Result<()> {
+        self.stop_with(process_group::terminate_group, |child| {
+            child.wait().map(|_| ())
+        })
+    }
+
+    fn stop_with<T, R>(&mut self, terminate: T, reap: R) -> io::Result<()>
+    where
+        T: FnOnce(&Child) -> io::Result<()>,
+        R: FnOnce(&mut Child) -> io::Result<()>,
+    {
+        if self.phase == BackendProcessPhase::Signalable {
+            terminate(&self.child)?;
+            // Change phase before reaping so even a wait failure cannot make a
+            // later retry signal a PGID whose leader may have been collected.
+            self.phase = BackendProcessPhase::ReapOnly;
+        }
+
+        reap(&mut self.child)
+    }
+}
+
 impl Backend {
-    fn lock_process(&self) -> Result<std::sync::MutexGuard<'_, Option<Child>>, String> {
-        self.inner
-            .process
-            .lock()
-            .map_err(|_| "backend process state is poisoned".to_owned())
+    fn lock_process(
+        &self,
+    ) -> Result<std::sync::MutexGuard<'_, Option<BackendProcess>>, String> {
+        self.lock_process_observing_contention(|| {})
+    }
+
+    fn lock_process_observing_contention<O>(
+        &self,
+        on_contention: O,
+    ) -> Result<std::sync::MutexGuard<'_, Option<BackendProcess>>, String>
+    where
+        O: FnOnce(),
+    {
+        match self.inner.process.try_lock() {
+            Ok(process) => Ok(process),
+            Err(TryLockError::WouldBlock) => {
+                on_contention();
+                self.inner
+                    .process
+                    .lock()
+                    .map_err(|_| "backend process state is poisoned".to_owned())
+            }
+            Err(TryLockError::Poisoned(_)) => {
+                Err("backend process state is poisoned".to_owned())
+            }
+        }
     }
 
     fn start(&self) -> Result<BackendStatus, String> {
@@ -53,18 +132,39 @@ impl Backend {
     where
         F: FnOnce() -> Result<Child, String>,
     {
-        let mut process = self.lock_process()?;
+        self.start_with_contention_observer(|| {}, spawn)
+    }
 
-        if let Some(process_group_id) = running_process_group_id(&mut process)? {
-            return Ok(BackendStatus {
-                running: true,
-                process_group_id: Some(process_group_id),
-            });
+    fn start_with_contention_observer<O, F>(
+        &self,
+        on_contention: O,
+        spawn: F,
+    ) -> Result<BackendStatus, String>
+    where
+        O: FnOnce(),
+        F: FnOnce() -> Result<Child, String>,
+    {
+        let mut process = self.lock_process_observing_contention(on_contention)?;
+
+        if let Some(current) = process.as_mut() {
+            if current.is_running().map_err(|error| {
+                format!("failed to inspect backend process-group leader: {error}")
+            })? {
+                return Ok(BackendStatus {
+                    running: true,
+                    process_group_id: Some(current.process_group_id()),
+                });
+            }
+
+            current.stop().map_err(|error| {
+                format!("failed to clean up exited backend process group: {error}")
+            })?;
+            *process = None;
         }
 
         let child = spawn()?;
         let process_group_id = child.id();
-        *process = Some(child);
+        *process = Some(BackendProcess::new(child));
 
         Ok(BackendStatus {
             running: true,
@@ -73,23 +173,20 @@ impl Backend {
     }
 
     fn stop(&self) -> Result<BackendStatus, String> {
-        self.stop_with(process_group::terminate)
+        self.stop_with(BackendProcess::stop)
     }
 
     fn stop_with<F>(&self, terminate: F) -> Result<BackendStatus, String>
     where
-        F: FnOnce(&mut Child) -> io::Result<()>,
+        F: FnOnce(&mut BackendProcess) -> io::Result<()>,
     {
         let mut process = self.lock_process()?;
 
-        if running_process_group_id(&mut process)?.is_none() {
+        let Some(current) = process.as_mut() else {
             return Ok(BackendStatus::stopped());
-        }
+        };
 
-        let child = process
-            .as_mut()
-            .ok_or_else(|| "backend process handle disappeared while stopping".to_owned())?;
-        terminate(child)
+        terminate(current)
             .map_err(|error| format!("failed to stop backend process group: {error}"))?;
         *process = None;
 
@@ -103,50 +200,17 @@ impl Drop for BackendInner {
             Ok(process) => process,
             Err(poisoned) => poisoned.into_inner(),
         };
-        let Some(child) = process.as_mut() else {
+        let Some(current) = process.as_mut() else {
             return;
         };
 
-        if let Err(error) = process_group::terminate(child) {
+        if let Err(error) = current.stop() {
             eprintln!("failed to stop backend process group during shutdown: {error}");
             return;
         }
 
         *process = None;
     }
-}
-
-fn running_process_group_id(child: &mut Option<Child>) -> Result<Option<u32>, String> {
-    let process_group_id = match child.as_mut() {
-        Some(process) => {
-            let process_group_id = process.id();
-            match process
-                .try_wait()
-                .map_err(|error| format!("failed to inspect backend process: {error}"))?
-            {
-                None => Some(process_group_id),
-                Some(_)
-                    if process_group::is_running(process_group_id).map_err(|error| {
-                        format!(
-                            "failed to inspect backend process group \
-                             {process_group_id}: {error}"
-                        )
-                    })? =>
-                {
-                    Some(process_group_id)
-                }
-                Some(_) => None,
-            }
-        }
-        None => None,
-    };
-
-    // Remove the handle only after the leader and all of its descendants exit.
-    if process_group_id.is_none() {
-        *child = None;
-    }
-
-    Ok(process_group_id)
 }
 
 fn repository_root() -> Result<PathBuf, String> {
@@ -200,28 +264,64 @@ pub async fn stop_backend(backend: State<'_, Backend>) -> Result<BackendStatus, 
 mod tests {
     use std::{
         ffi::OsStr,
+        fs,
         io::{self, BufRead, BufReader},
-        os::unix::process::CommandExt,
-        path::Path,
+        os::unix::{fs::PermissionsExt, process::CommandExt},
+        path::{Path, PathBuf},
+        process,
         sync::{mpsc, Barrier},
         thread,
-        time::{Duration, Instant},
+        time::{Duration, Instant, SystemTime, UNIX_EPOCH},
     };
 
     use super::*;
 
-    const ECHILD: i32 = 10;
-    const TEST_TIMEOUT: Duration = Duration::from_secs(2);
+    const TEST_TIMEOUT: Duration = Duration::from_secs(5);
     const TEST_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
-    struct ProcessGroupCleanup {
-        process_group_id: u32,
+    struct ChildCleanup {
+        child: Option<Child>,
     }
 
-    impl Drop for ProcessGroupCleanup {
+    struct TemporaryDirectory {
+        path: PathBuf,
+    }
+
+    impl Drop for ChildCleanup {
         fn drop(&mut self) {
-            let _ = process_group::force_kill(self.process_group_id);
-            let _ = process_group::reap(self.process_group_id);
+            let Some(mut child) = self.child.take() else {
+                return;
+            };
+
+            if !matches!(child.try_wait(), Ok(Some(_))) {
+                let _ = child.kill();
+            }
+            let _ = child.wait();
+        }
+    }
+
+    impl TemporaryDirectory {
+        fn new(name: &str) -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system clock should be after the Unix epoch")
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "lys-{name}-{}-{unique}",
+                process::id()
+            ));
+            fs::create_dir(&path).expect("temporary directory should be created");
+            Self { path }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TemporaryDirectory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
         }
     }
 
@@ -242,9 +342,52 @@ mod tests {
     fn backend_with_child(child: Child) -> Backend {
         Backend {
             inner: Arc::new(BackendInner {
-                process: Mutex::new(Some(child)),
+                process: Mutex::new(Some(BackendProcess::new(child))),
             }),
         }
+    }
+
+    fn spawn_group_with_descendant() -> (Child, u32) {
+        let mut child = Command::new("sh")
+            .args([
+                "-c",
+                "sleep 5 & descendant=$!; echo \"$descendant\"; wait",
+            ])
+            .process_group(0)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("test process group should start");
+        let mut ready = String::new();
+        BufReader::new(
+            child
+                .stdout
+                .take()
+                .expect("test process should expose stdout"),
+        )
+        .read_line(&mut ready)
+        .expect("test process should report descendant readiness");
+        let descendant_pid = ready
+            .trim()
+            .parse()
+            .expect("descendant readiness should contain its PID");
+
+        (child, descendant_pid)
+    }
+
+    fn join_bounded<T>(handle: thread::JoinHandle<T>) -> thread::Result<T> {
+        let deadline = Instant::now() + TEST_TIMEOUT;
+
+        while !handle.is_finished() {
+            let now = Instant::now();
+            assert!(now < deadline, "worker thread exceeded the test timeout");
+            thread::park_timeout(
+                TEST_POLL_INTERVAL.min(deadline.saturating_duration_since(now)),
+            );
+        }
+
+        handle.join()
     }
 
     #[test]
@@ -277,6 +420,36 @@ mod tests {
     }
 
     #[test]
+    fn backend_command_starts_the_child_as_its_process_group_leader() {
+        let fake_path = TemporaryDirectory::new("fake-pnpm");
+        let fake_pnpm = fake_path.path().join("pnpm");
+        fs::write(&fake_pnpm, "#!/bin/sh\nexec /bin/sleep 30\n")
+            .expect("fake pnpm should be written");
+        fs::set_permissions(&fake_pnpm, fs::Permissions::from_mode(0o755))
+            .expect("fake pnpm should be executable");
+
+        let mut command = backend_command(fake_path.path());
+        command
+            .env("PATH", fake_path.path())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+
+        let child = command
+            .spawn()
+            .expect("production backend command should spawn");
+        let child_id = child.id();
+        let _cleanup = ChildCleanup { child: Some(child) };
+
+        assert_eq!(
+            process_group::process_group_id(child_id)
+                .expect("spawned child process group should be inspectable"),
+            child_id,
+            "the backend child must lead a new process group"
+        );
+    }
+
+    #[test]
     fn start_returns_the_existing_process_group_without_spawning() {
         let child = Command::new("sh")
             .args(["-c", "sleep 30 & wait"])
@@ -299,7 +472,7 @@ mod tests {
 
     #[test]
     fn start_replaces_an_exited_process_group() {
-        let mut exited_child = Command::new("sh")
+        let exited_child = Command::new("sh")
             .args(["-c", "exit 0"])
             .process_group(0)
             .stdin(Stdio::null())
@@ -307,9 +480,16 @@ mod tests {
             .stderr(Stdio::null())
             .spawn()
             .expect("test child should start");
-        exited_child
-            .wait()
-            .expect("test child should exit before restart");
+        let deadline = Instant::now() + TEST_TIMEOUT;
+        while !process_group::leader_has_exited(&exited_child)
+            .expect("exited leader should be inspectable")
+        {
+            assert!(
+                Instant::now() < deadline,
+                "test leader did not exit before the deadline"
+            );
+            thread::sleep(TEST_POLL_INTERVAL);
+        }
         let backend = backend_with_child(exited_child);
         let replacement = Command::new("sh")
             .args(["-c", "sleep 30 & wait"])
@@ -347,6 +527,37 @@ mod tests {
     }
 
     #[test]
+    fn reap_retry_never_signals_the_process_group_again() {
+        let child = Command::new("sh")
+            .args(["-c", "exec sleep 30"])
+            .process_group(0)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("test process should start");
+        let mut process = BackendProcess::new(child);
+
+        let first_error = process
+            .stop_with(
+                |_| Ok(()),
+                |_| Err(io::Error::other("expected reap failure")),
+            )
+            .expect_err("the first reap should fail");
+        assert_eq!(first_error.to_string(), "expected reap failure");
+
+        process
+            .stop_with(
+                |_| panic!("a reap retry must not signal the process group again"),
+                |child| {
+                    child.kill()?;
+                    child.wait().map(|_| ())
+                },
+            )
+            .expect("the reap-only retry should succeed");
+    }
+
+    #[test]
     fn stop_failure_preserves_the_process_for_retry() {
         let child = Command::new("sh")
             .args(["-c", "sleep 30 & wait"])
@@ -372,7 +583,7 @@ mod tests {
     }
 
     #[test]
-    fn start_waits_for_a_concurrent_stop_before_spawning() {
+    fn start_observes_contention_before_waiting_for_a_concurrent_stop() {
         let child = Command::new("sh")
             .args(["-c", "sleep 30 & wait"])
             .process_group(0)
@@ -387,68 +598,75 @@ mod tests {
         let (stop_locked_sender, stop_locked_receiver) = mpsc::channel();
         let (release_stop_sender, release_stop_receiver) = mpsc::channel();
         let stop = thread::spawn(move || {
-            stopping_backend.stop_with(|child| {
+            stopping_backend.stop_with(|process| {
                 stop_locked_sender
                     .send(())
                     .expect("test should observe the held stop lock");
-                let _ = release_stop_receiver.recv();
-                process_group::terminate(child)
+                release_stop_receiver
+                    .recv_timeout(TEST_TIMEOUT)
+                    .map_err(|error| {
+                        io::Error::new(
+                            io::ErrorKind::TimedOut,
+                            format!("test never released the stop operation: {error}"),
+                        )
+                    })?;
+                process.stop()
             })
         });
 
         stop_locked_receiver
-            .recv()
-            .expect("stop should acquire the backend lock");
-        let (start_attempted_sender, start_attempted_receiver) = mpsc::channel();
+            .recv_timeout(TEST_TIMEOUT)
+            .expect("stop should hold the lifecycle lock");
+
+        let (contended_sender, contended_receiver) = mpsc::channel();
         let (spawned_sender, spawned_receiver) = mpsc::channel();
         let start = thread::spawn(move || {
-            start_attempted_sender
-                .send(())
-                .expect("test should observe the start attempt");
-            starting_backend.start_with(|| {
-                spawned_sender
-                    .send(())
-                    .expect("test should observe the replacement spawn");
-                Command::new("sh")
-                    .args(["-c", "sleep 30 & wait"])
-                    .process_group(0)
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .spawn()
-                    .map_err(|error| format!("replacement process should start: {error}"))
-            })
+            starting_backend.start_with_contention_observer(
+                || {
+                    contended_sender
+                        .send(())
+                        .expect("test should observe start contention");
+                },
+                || {
+                    let replacement = Command::new("sh")
+                        .args(["-c", "sleep 30 & wait"])
+                        .process_group(0)
+                        .stdin(Stdio::null())
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .spawn()
+                        .map_err(|error| format!("replacement process should start: {error}"))?;
+                    spawned_sender
+                        .send(())
+                        .expect("test should observe the replacement spawn");
+                    Ok(replacement)
+                },
+            )
         });
 
-        start_attempted_receiver
-            .recv()
-            .expect("start thread should reach the backend operation");
+        contended_receiver
+            .recv_timeout(TEST_TIMEOUT)
+            .expect("start should observe the held lifecycle lock");
         assert!(
             matches!(spawned_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)),
-            "start spawned a replacement while stop still held the backend lock"
+            "start spawned while stop still held the lifecycle lock"
         );
 
         release_stop_sender
             .send(())
             .expect("stop thread should still be waiting");
-        let stop_status = stop
-            .join()
+        let stop_status = join_bounded(stop)
             .expect("stop thread should finish")
             .expect("concurrent stop should succeed");
-        let start_status = start
-            .join()
+        let start_status = join_bounded(start)
             .expect("start thread should finish")
             .expect("start should resume after stop");
 
+        spawned_receiver
+            .recv_timeout(TEST_TIMEOUT)
+            .expect("start should spawn after stop releases the lifecycle lock");
         assert!(!stop_status.running);
         assert!(start_status.running);
-        spawned_receiver
-            .recv()
-            .expect("start should spawn exactly one replacement");
-        assert!(matches!(
-            spawned_receiver.try_recv(),
-            Err(mpsc::TryRecvError::Empty | mpsc::TryRecvError::Disconnected)
-        ));
     }
 
     #[test]
@@ -463,39 +681,25 @@ mod tests {
 
     #[test]
     fn dropping_a_backend_clone_keeps_the_shared_process_running() {
-        let child = Command::new("sh")
-            .args(["-c", "sleep 30 & wait"])
-            .process_group(0)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("test process group should start");
-        let process_group_id = child.id();
+        let (child, descendant_pid) = spawn_group_with_descendant();
         let backend = backend_with_child(child);
         let backend_clone = backend.clone();
 
         drop(backend_clone);
 
-        assert!(process_group::is_running(process_group_id)
-            .expect("process group should be inspectable"));
+        assert!(process_group::is_process_running(descendant_pid)
+            .expect("backend descendant should be inspectable"));
         drop(backend);
-        assert!(!process_group::is_running(process_group_id)
-            .expect("process group should be inspectable"));
+        assert!(
+            wait_for_process_exit(descendant_pid),
+            "backend descendant survived the final Backend drop"
+        );
     }
 
     #[test]
     fn concurrent_final_drops_terminate_the_shared_process_group() {
         for attempt in 1..=32 {
-            let child = Command::new("sh")
-                .args(["-c", "sleep 30 & wait"])
-                .process_group(0)
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .expect("test process group should start");
-            let process_group_id = child.id();
+            let (child, descendant_pid) = spawn_group_with_descendant();
             let backend = backend_with_child(child);
             let backend_clone = backend.clone();
             let start = Arc::new(Barrier::new(3));
@@ -511,22 +715,12 @@ mod tests {
             });
 
             start.wait();
-            first_drop.join().expect("first drop thread should finish");
-            second_drop
-                .join()
-                .expect("second drop thread should finish");
+            join_bounded(first_drop).expect("first drop thread should finish");
+            join_bounded(second_drop).expect("second drop thread should finish");
 
-            let still_running = process_group::is_running(process_group_id)
-                .expect("process group should be inspectable");
-            if still_running {
-                process_group::force_kill(process_group_id)
-                    .expect("failed-test cleanup should kill the process group");
-                process_group::reap(process_group_id)
-                    .expect("failed-test cleanup should reap the direct child");
-            }
             assert!(
-                !still_running,
-                "process group survived concurrent final drops on attempt {attempt}"
+                wait_for_process_exit(descendant_pid),
+                "backend descendant survived concurrent final drops on attempt {attempt}"
             );
         }
     }
@@ -556,39 +750,7 @@ mod tests {
     }
 
     #[test]
-    fn running_process_group_id_clears_an_exited_child() {
-        let child = Command::new("sh")
-            .args(["-c", "exit 0"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("test child should start");
-        let child_pid = child.id();
-        let mut process = Some(child);
-
-        let deadline = Instant::now() + TEST_TIMEOUT;
-        loop {
-            let process_group_id =
-                running_process_group_id(&mut process).expect("exited child should be inspectable");
-            if process_group_id.is_none() {
-                break;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "running_process_group_id did not observe the child exit"
-            );
-            thread::sleep(TEST_POLL_INTERVAL);
-        }
-
-        assert!(process.is_none());
-        let error = process_group::reap(child_pid)
-            .expect_err("process inspection should have already reaped the direct child");
-        assert_eq!(error.raw_os_error(), Some(ECHILD));
-    }
-
-    #[test]
-    fn running_process_group_id_retains_an_exited_leader_group() {
+    fn start_cleans_up_descendants_of_an_exited_leader_before_spawning() {
         let mut child = Command::new("sh")
             .args([
                 "-c",
@@ -600,10 +762,6 @@ mod tests {
             .stderr(Stdio::null())
             .spawn()
             .expect("test process group should start");
-        let group_pid = child.id();
-        let _cleanup = ProcessGroupCleanup {
-            process_group_id: group_pid,
-        };
 
         let mut ready = String::new();
         BufReader::new(
@@ -618,50 +776,50 @@ mod tests {
             .trim()
             .parse()
             .expect("descendant readiness should contain its PID");
-        assert!(
-            process_group::is_process_running(descendant_pid)
-                .expect("descendant should be inspectable"),
-            "descendant {descendant_pid} should exist before leader exit"
-        );
-        child.wait().expect("process-group leader should exit");
+        let deadline = Instant::now() + TEST_TIMEOUT;
+        while !process_group::leader_has_exited(&child)
+            .expect("exited leader should be inspectable")
+        {
+            assert!(
+                Instant::now() < deadline,
+                "process-group leader did not exit before the deadline"
+            );
+            thread::sleep(TEST_POLL_INTERVAL);
+        }
         assert!(
             process_group::is_process_running(descendant_pid)
                 .expect("descendant should be inspectable"),
             "descendant {descendant_pid} should remain after leader exit"
         );
-
         let backend = backend_with_child(child);
-        let inspected_pid = {
-            let mut process = backend
-                .inner
-                .process
-                .lock()
-                .expect("backend state should lock");
-            running_process_group_id(&mut process)
-                .expect("backend process group should be inspectable")
-        };
+        let status = backend
+            .start_with(move || {
+                assert!(
+                    !process_group::is_process_running(descendant_pid)
+                        .expect("stale descendant should be inspectable"),
+                    "replacement spawn began before stale descendants exited"
+                );
+                Command::new("sh")
+                    .args(["-c", "sleep 30 & wait"])
+                    .process_group(0)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .map_err(|error| format!("replacement process should start: {error}"))
+            })
+            .expect("backend should restart after cleaning stale descendants");
 
-        assert_eq!(inspected_pid, Some(group_pid));
-        let status = backend.stop().expect("backend process group should stop");
-        assert!(!status.running);
-        assert_eq!(status.process_group_id, None);
+        assert!(status.running);
         assert!(
             wait_for_process_exit(descendant_pid),
-            "descendant {descendant_pid} survived backend stop"
+            "descendant {descendant_pid} survived stale-group cleanup"
         );
     }
 
     #[test]
     fn stop_terminates_and_clears_a_live_child() {
-        let child = Command::new("sh")
-            .args(["-c", "sleep 30 & wait"])
-            .process_group(0)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("test process group should start");
-        let process_group_id = child.id();
+        let (child, descendant_pid) = spawn_group_with_descendant();
         let backend = backend_with_child(child);
 
         let status = backend.stop().expect("backend should stop");
@@ -674,33 +832,22 @@ mod tests {
             .lock()
             .expect("backend state should lock")
             .is_none());
-        assert!(!process_group::is_running(process_group_id)
-            .expect("process group should be inspectable"));
+        assert!(
+            wait_for_process_exit(descendant_pid),
+            "backend descendant survived stop"
+        );
     }
 
     #[test]
     fn dropping_backend_terminates_its_process_group() {
-        let child = Command::new("sh")
-            .args(["-c", "sleep 30 & wait"])
-            .process_group(0)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("test process group should start");
-        let process_group_id = child.id();
+        let (child, descendant_pid) = spawn_group_with_descendant();
         let backend = backend_with_child(child);
 
         drop(backend);
 
-        let still_running = process_group::is_running(process_group_id)
-            .expect("process group should be inspectable");
-        if still_running {
-            process_group::force_kill(process_group_id)
-                .expect("failed-test cleanup should kill the process group");
-            process_group::reap(process_group_id)
-                .expect("failed-test cleanup should reap the direct child");
-        }
-        assert!(!still_running);
+        assert!(
+            wait_for_process_exit(descendant_pid),
+            "backend descendant survived Backend drop"
+        );
     }
 }

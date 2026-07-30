@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 
-import { ChatView } from "../components/ChatView"
+import { ChatView } from "../views/ChatView/ChatView"
 
 const callbacks = {
   onRetry: vi.fn(),

@@ -3,7 +3,7 @@ import { lazy } from "react"
 import type { SettingsPane } from "@/app/types"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
-import "./SettingsView.css"
+import "./SettingsView.scss"
 import PaneFooter from "@/components/SettingsViewComponents/PaneFooter"
 import PaneHeading from "@/components/SettingsViewComponents/PaneHeading"
 import {

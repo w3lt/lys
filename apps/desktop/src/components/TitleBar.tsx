@@ -3,7 +3,7 @@ import { Moon, Sun } from "lucide-react"
 import { useTheme } from "@/app/theme"
 import { Button } from "@/components/ui/button"
 
-import "./TitleBar.css"
+import "./TitleBar.scss"
 
 export function TitleBar() {
   const { theme, toggleTheme } = useTheme()

@@ -12,7 +12,7 @@ import { Composer } from "@/components/Composer"
 import { SettingsView } from "@/views/SettingsView/SettingsView"
 import { TitleBar } from "@/components/TitleBar"
 
-import "./App.css"
+import "./App.scss"
 
 function createOneShotInterval(
   delayMs: number,

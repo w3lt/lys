@@ -5,7 +5,7 @@ import type { LysConfig, RuntimeState } from "@/app/types"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 
-import "./Composer.css"
+import "./Composer.scss"
 
 interface ComposerProps {
   config: LysConfig

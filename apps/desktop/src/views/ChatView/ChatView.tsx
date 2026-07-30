@@ -4,7 +4,7 @@ import { ArrowDown } from "lucide-react"
 import type { Message } from "@/app/types"
 import { Button } from "@/components/ui/button"
 
-import "./ChatView.css"
+import "./ChatView.scss"
 
 const StarterView = lazy(
   () => import("@/components/ChatViewComponents/StarterView")

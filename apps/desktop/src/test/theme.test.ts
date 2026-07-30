@@ -17,7 +17,8 @@ function collectStyleSources(directory: string): string[] {
         : collectStyleSources(path)
     }
 
-    return [".css", ".tsx"].includes(extname(entry.name)) && path !== themePath
+    return [".css", ".scss", ".tsx"].includes(extname(entry.name)) &&
+      path !== themePath
       ? [path]
       : []
   })

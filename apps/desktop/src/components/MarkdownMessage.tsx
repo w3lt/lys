@@ -4,7 +4,7 @@ import { Copy } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 
-import "./MarkdownMessage.css"
+import "./MarkdownMessage.scss"
 
 type MarkdownMessageProps = {
   text: string

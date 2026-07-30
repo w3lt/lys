@@ -7,12 +7,12 @@ import {
   type SimulationController
 } from "@/app/simulation"
 import { appReducer, createInitialState } from "@/app/state"
-import { ChatView } from "@/components/ChatView"
+import { ChatView } from "@/views/ChatView/ChatView"
 import { Composer } from "@/components/Composer"
-import { SettingsView } from "@/components/SettingsView"
+import { SettingsView } from "@/views/SettingsView/SettingsView"
 import { TitleBar } from "@/components/TitleBar"
 
-import "./App.css"
+import "./App.scss"
 
 function createOneShotInterval(
   delayMs: number,

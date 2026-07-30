@@ -11,14 +11,20 @@
   "scripts": {
     "prettier:write": "prettier . --write",
     "dev": "pnpm --filter @lys/desktop run tauri dev",
-    "backend:dev": "pnpm --filter @lys/backend run dev"
+    "backend:dev": "pnpm --filter @lys/backend run dev",
+    "prepare": "husky"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "eslint": "^10.8.0",
     "eslint-config-prettier": "^10.1.8",
     "globals": "^17.8.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.2.0",
     "prettier": "3.9.6",
     "typescript-eslint": "^8.65.0"
+  },
+  "lint-staged": {
+    "*": "prettier --write --ignore-unknown"
   }
 }

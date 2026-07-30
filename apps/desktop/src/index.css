@@ -3,7 +3,7 @@
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/geist-mono";
-@import "./components/ui/wingline.css";
+@import "./components/ui/wingline.scss";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -149,7 +149,7 @@
   --duration-enter: 200ms;
   --ease-standard: cubic-bezier(0.32, 0.72, 0.35, 1);
 
-  /* Wingline Trace geometry; its finite motion lives in ui/wingline.css. */
+  /* Wingline Trace geometry; its finite motion lives in ui/wingline.scss. */
   --wingline-inset: var(--radius-control);
   --wingline-thickness: 1px;
   /*

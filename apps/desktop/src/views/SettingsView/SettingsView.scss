@@ -75,7 +75,7 @@
  * would spill across the divider onto the content pane. Drawing the indicator
  * inside the trigger keeps keyboard focus legible within the rail bounds.
  *
- * The app-wide button outline (App.css) is unlayered, so it outranks the
+ * The app-wide button outline (App.scss) is unlayered, so it outranks the
  * primitive's own `outline-none` utility and has to be cleared here — left in
  * place it draws a second, outward ring around this inset one.
  *

@@ -14,15 +14,22 @@ export type ScenarioKey =
   | "runtime"
   | "loading"
 
-export type Message =
-  | { id: string; role: "user"; text: string }
-  | {
-      id: string
-      role: "lys"
-      text: string
-      status: "streaming" | "complete" | "stopped"
-    }
-  | { id: string; role: "error"; title: string; text: string }
+export type UserMessage = { id: string; role: "user"; text: string }
+export type LysMessage = {
+  id: string
+  role: "lys"
+  text: string
+  status: "streaming" | "complete" | "stopped"
+}
+
+export type ErrorMessage = {
+  id: string
+  role: "error"
+  title: string
+  text: string
+}
+
+export type Message = UserMessage | LysMessage | ErrorMessage
 
 export interface RuntimeState {
   backend: BackendStatus

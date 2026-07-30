@@ -23,7 +23,7 @@ export default async function registerLlmListModelsRoute(
 }
 
 async function listLlmApiHandler(
-  createClient: () => LMStudioClient 
+  createClient: () => LMStudioClient
 ): Promise<LlmListModelsApiRoute["Reply"]> {
   const lmsClient = createClient()
 

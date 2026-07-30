@@ -286,16 +286,7 @@ function App() {
         </main>
       ) : (
         <SettingsView
-          onAutostartToggle={() => dispatch({ type: "autostartToggled" })}
-          onConfigChange={(patch) => dispatch({ type: "configChanged", patch })}
           onDone={() => dispatch({ type: "viewChanged", view: "chat" })}
-          onLoadModel={loadModel}
-          onPaneChange={(pane) => dispatch({ type: "paneChanged", pane })}
-          onSelectModel={selectModel}
-          onStartBackend={startBackend}
-          onStopBackend={stopBackend}
-          onUnloadModel={unloadModel}
-          state={state}
         />
       )}
     </div>

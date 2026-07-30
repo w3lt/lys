@@ -66,7 +66,11 @@ const SETTINGS_PANES: ReadonlyArray<SettingsPaneProps> = [
   }
 ]
 
-export function SettingsView() {
+type SettingsViewProps = {
+  onDone: () => void
+}
+
+export function SettingsView({ onDone }: SettingsViewProps) {
   const [currentPane, setCurrentPane] = useState<SettingsPaneValue>("runtime")
 
   return (

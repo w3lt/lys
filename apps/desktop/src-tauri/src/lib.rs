@@ -1,4 +1,5 @@
 mod backend;
+mod settings;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -14,7 +15,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             backend::start_backend,
-            backend::stop_backend
+            backend::stop_backend,
+            backend::get_backend_status,
+            settings::load_settings,
+            settings::save_settings
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

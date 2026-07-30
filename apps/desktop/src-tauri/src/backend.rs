@@ -162,3 +162,8 @@ pub fn start_backend(backend: State<'_, Backend>) -> Result<BackendProcessStatus
 pub fn stop_backend(backend: State<'_, Backend>) -> Result<BackendProcessStatus, String> {
     backend.stop()
 }
+
+#[tauri::command]
+pub fn get_backend_status(backend: State<'_, Backend>) -> Result<BackendProcessStatus, String> {
+    backend.status()
+}

@@ -11,20 +11,10 @@ import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Separator } from "@/components/ui/separator"
 import { Progress } from "@/components/ui/progress"
-import { useSettingsContext } from "./SettingsContext"
-
-function backendStatusLabel(status: AppState["runtime"]["backend"]) {
-  switch (status) {
-    case "running":
-      return "Backend running"
-    case "starting":
-      return "Backend starting"
-    case "stopping":
-      return "Backend stopping"
-    case "stopped":
-      return "Backend stopped"
-  }
-}
+import {
+  backendStatusLabel,
+  useRuntimeSettingsContext
+} from "@/lib/hooks/runtimeSettingsContext"
 
 function modelStatusLabel(status: AppState["runtime"]["model"]) {
   switch (status) {
@@ -41,14 +31,15 @@ function modelStatusLabel(status: AppState["runtime"]["model"]) {
 
 export default function RuntimePaneContent() {
   const {
-    state,
-    onAutostartToggle,
-    onLoadModel,
-    onStartBackend,
-    onStopBackend,
-    onUnloadModel
-  } = useSettingsContext()
-  const { runtime } = state
+    settingsBuffer,
+    setSettingsBuffer,
+    startBackend,
+    stopBackend,
+    loadingSettings,
+    backendStatus
+  } = useRuntimeSettingsContext()
+
+  if (loadingSettings || !settingsBuffer) return null
 
   return (
     <div className="settings-view__stack">
@@ -56,11 +47,11 @@ export default function RuntimePaneContent() {
         <CardHeader className="settings-view__card-header">
           <div>
             <CardDescription>Inference server</CardDescription>
-            <CardTitle>{backendStatusLabel(runtime.backend)}</CardTitle>
+            <CardTitle>{backendStatusLabel(backendStatus)}</CardTitle>
           </div>
           <span
             aria-hidden="true"
-            className={`settings-view__status-dot settings-view__status-dot--${runtime.backend}`}
+            className={`settings-view__status-dot settings-view__status-dot--${backendStatus}`}
           />
         </CardHeader>
         <CardContent className="settings-view__card-content">
@@ -69,13 +60,20 @@ export default function RuntimePaneContent() {
             address.
           </p>
           <div className="settings-view__actions">
-            {runtime.backend === "stopped" ? (
-              <Button onClick={onStartBackend} type="button">
+            {backendStatus === "stopped" ? (
+              <Button
+                onClick={() => {
+                  void startBackend()
+                }}
+                type="button"
+              >
                 Start backend
               </Button>
-            ) : runtime.backend === "running" ? (
+            ) : backendStatus === "running" ? (
               <Button
-                onClick={onStopBackend}
+                onClick={() => {
+                  void stopBackend()
+                }}
                 type="button"
                 variant="destructive"
               >
@@ -83,7 +81,7 @@ export default function RuntimePaneContent() {
               </Button>
             ) : (
               <Button disabled type="button" variant="outline">
-                {runtime.backend === "starting"
+                {backendStatus === "starting"
                   ? "Starting backend"
                   : "Stopping backend"}
               </Button>
@@ -99,14 +97,19 @@ export default function RuntimePaneContent() {
         </div>
         <Switch
           aria-label="Start it when Lys opens"
-          checked={runtime.autostart}
-          onCheckedChange={onAutostartToggle}
+          checked={settingsBuffer.autoStartBackend}
+          onCheckedChange={() => {
+            setSettingsBuffer((prev) => ({
+              ...prev,
+              autoStartBackend: !prev?.autoStartBackend
+            }))
+          }}
         />
       </div>
 
       <Separator className="settings-view__separator" />
 
-      <Card className="settings-view__card">
+      {/* <Card className="settings-view__card">
         <CardHeader className="settings-view__card-header">
           <div>
             <CardDescription>Selected weights</CardDescription>
@@ -134,7 +137,7 @@ export default function RuntimePaneContent() {
           <div className="settings-view__actions">
             {runtime.model === "loaded" ? (
               <Button
-                disabled={runtime.backend !== "running"}
+                disabled={backendStatus !== "running"}
                 onClick={onUnloadModel}
                 type="button"
                 variant="outline"
@@ -143,7 +146,7 @@ export default function RuntimePaneContent() {
               </Button>
             ) : runtime.model === "none" ? (
               <Button
-                disabled={runtime.backend !== "running"}
+                disabled={backendStatus !== "running"}
                 onClick={onLoadModel}
                 type="button"
               >
@@ -158,9 +161,9 @@ export default function RuntimePaneContent() {
             )}
           </div>
         </CardContent>
-      </Card>
+      </Card> */}
 
-      <section aria-label="Runtime log" className="settings-view__log">
+      {/* <section aria-label="Runtime log" className="settings-view__log">
         <div className="settings-view__section-heading">
           <h2>Runtime log</h2>
           <span>last seven events</span>
@@ -183,7 +186,7 @@ export default function RuntimePaneContent() {
             ))}
           </ol>
         )}
-      </section>
+      </section> */}
     </div>
   )
 }

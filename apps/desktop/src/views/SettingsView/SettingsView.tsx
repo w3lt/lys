@@ -1,15 +1,10 @@
-import { lazy } from "react"
+import { lazy, useState } from "react"
 
-import type { SettingsPane } from "@/app/types"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 import "./SettingsView.scss"
 import PaneFooter from "@/components/SettingsViewComponents/PaneFooter"
 import PaneHeading from "@/components/SettingsViewComponents/PaneHeading"
-import {
-  SettingsContext,
-  SettingsContextValue
-} from "@/components/SettingsViewComponents/SettingsContext"
 
 const RuntimePaneContent = lazy(
   () => import("@/components/SettingsViewComponents/RuntimePaneContent")
@@ -71,86 +66,59 @@ const SETTINGS_PANES: ReadonlyArray<SettingsPaneProps> = [
   }
 ]
 
-interface SettingsViewProps extends SettingsContextValue {
-  onDone: () => void
-  onPaneChange: (pane: SettingsPane) => void
-}
+export function SettingsView() {
+  const [currentPane, setCurrentPane] = useState<SettingsPaneValue>("runtime")
 
-export function SettingsView({
-  state,
-  onAutostartToggle,
-  onConfigChange,
-  onDone,
-  onLoadModel,
-  onPaneChange,
-  onSelectModel,
-  onStartBackend,
-  onStopBackend,
-  onUnloadModel
-}: SettingsViewProps) {
   return (
-    <SettingsContext.Provider
-      value={{
-        state,
-        onAutostartToggle,
-        onConfigChange,
-        onLoadModel,
-        onSelectModel,
-        onStartBackend,
-        onStopBackend,
-        onUnloadModel
-      }}
-    >
-      <main aria-label="Settings" className="settings-view">
-        <Tabs
-          className="settings-view__tabs"
-          onValueChange={(value) => onPaneChange(value as SettingsPane)}
-          orientation="vertical"
-          value={state.pane}
+    <main aria-label="Settings" className="settings-view">
+      <Tabs
+        className="settings-view__tabs"
+        onValueChange={(value) => setCurrentPane(value)}
+        orientation="vertical"
+        value={currentPane}
+      >
+        <TabsList
+          aria-label="Settings sections"
+          className="settings-view__rail"
+          variant="line"
         >
-          <TabsList
-            aria-label="Settings sections"
-            className="settings-view__rail"
-            variant="line"
-          >
-            <div className="settings-view__rail-heading">
-              <span>Settings</span>
-              <small>local session</small>
-            </div>
-            {SETTINGS_PANES.map((pane) => (
-              <TabsTrigger
-                className="settings-view__rail-tab"
-                key={pane.value}
-                value={pane.value}
-              >
-                {pane.label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-
-          <div className="settings-view__content">
-            {SETTINGS_PANES.map((pane) => {
-              const ContentComponent = pane.contentComponent
-
-              return (
-                <TabsContent value={pane.value} key={pane.value}>
-                  <div className="settings-view__pane">
-                    <PaneHeading
-                      eyebrow={pane.eyebrow}
-                      note={pane.note}
-                      title={pane.label}
-                    />
-
-                    <ContentComponent />
-
-                    <PaneFooter onDone={onDone} />
-                  </div>
-                </TabsContent>
-              )
-            })}
+          <div className="settings-view__rail-heading">
+            <span>Settings</span>
+            <small>local session</small>
           </div>
-        </Tabs>
-      </main>
-    </SettingsContext.Provider>
+          {SETTINGS_PANES.map((pane) => (
+            <TabsTrigger
+              className="settings-view__rail-tab"
+              key={pane.value}
+              value={pane.value}
+            >
+              {pane.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+
+        <div className="settings-view__content">
+          {SETTINGS_PANES.map((pane) => {
+            const ContentComponent = pane.contentComponent
+
+            return (
+              <TabsContent value={pane.value} key={pane.value}>
+                <div className="settings-view__pane">
+                  <PaneHeading
+                    eyebrow={pane.eyebrow}
+                    note={pane.note}
+                    title={pane.label}
+                  />
+
+                  <ContentComponent />
+
+                  <PaneFooter onDone={onDone} />
+                </div>
+              </TabsContent>
+            )
+          })}
+        </div>
+      </Tabs>
+    </main>
   )
 }

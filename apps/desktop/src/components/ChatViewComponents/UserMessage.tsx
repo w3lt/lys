@@ -4,9 +4,7 @@ type UserMessageProps = {
   message: UserMessage
 }
 
-export default function UserMessage({
-  message
-}: UserMessageProps) {
+export default function UserMessage({ message }: UserMessageProps) {
   return (
     <article className="chat-view__message" key={message.id}>
       <p className="chat-view__speaker">you</p>

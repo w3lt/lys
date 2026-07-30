@@ -6,8 +6,12 @@ import { Button } from "@/components/ui/button"
 
 import "./ChatView.css"
 
-const StarterView = lazy(() => import("@/components/ChatViewComponents/StarterView"))
-const ConversationContent = lazy(() => import("@/components/ChatViewComponents/ConversationContent"))
+const StarterView = lazy(
+  () => import("@/components/ChatViewComponents/StarterView")
+)
+const ConversationContent = lazy(
+  () => import("@/components/ChatViewComponents/ConversationContent")
+)
 
 interface ChatViewProps {
   messages: Message[]
@@ -24,7 +28,7 @@ export function ChatView({
   streaming,
   atBottom,
   onScrollPositionChange,
-  onSend,
+  onSend
 }: ChatViewProps) {
   const transcriptRef = useRef<HTMLDivElement>(null)
 

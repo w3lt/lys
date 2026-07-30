@@ -1,3 +1,1 @@
-export default function SettingsViewLeftBar() {
-  
-}
+export default function SettingsViewLeftBar() {}

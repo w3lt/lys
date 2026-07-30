@@ -103,5 +103,5 @@ export {
   AvatarFallback,
   AvatarGroup,
   AvatarGroupCount,
-  AvatarBadge,
+  AvatarBadge
 }

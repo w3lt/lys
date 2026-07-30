@@ -2,7 +2,7 @@ import { llmLoadModelApi, LlmLoadModelApiRoute } from "@lys/protocol"
 import { FastifyInstance, FastifyRequest } from "fastify"
 import * as z from "zod"
 import { RegisterLlmRoutesOptions } from "./dependencies"
-import { LMStudioClient } from '@lmstudio/sdk'
+import { LMStudioClient } from "@lmstudio/sdk"
 
 export default async function registerLlmLoadModelRoute(
   app: FastifyInstance,

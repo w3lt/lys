@@ -6,9 +6,7 @@ type LysMessageProps = {
   message: LysMessage
 }
 
-export default function LysMessage({
-  message
-}: LysMessageProps) {
+export default function LysMessage({ message }: LysMessageProps) {
   return (
     <article
       className="chat-view__message chat-view__message--lys"

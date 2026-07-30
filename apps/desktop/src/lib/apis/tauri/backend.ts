@@ -1,10 +1,10 @@
 // Tauri commands related to backend
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from "@tauri-apps/api/core"
 
 export function startBackend() {
-  invoke('start_backend')
+  invoke("start_backend")
 }
 
 export function stopBackend() {
-  invoke('stop_backend')
+  invoke("stop_backend")
 }

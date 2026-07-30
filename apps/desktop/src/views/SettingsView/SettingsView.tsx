@@ -6,12 +6,23 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import "./SettingsView.css"
 import PaneFooter from "@/components/SettingsViewComponents/PaneFooter"
 import PaneHeading from "@/components/SettingsViewComponents/PaneHeading"
-import { SettingsContext, SettingsContextValue } from "@/components/SettingsViewComponents/SettingsContext"
+import {
+  SettingsContext,
+  SettingsContextValue
+} from "@/components/SettingsViewComponents/SettingsContext"
 
-const RuntimePaneContent = lazy(() => import("@/components/SettingsViewComponents/RuntimePaneContent"))
-const ModelPaneContent = lazy(() => import("@/components/SettingsViewComponents/ModelPaneContent"))
-const GenerationPaneContent = lazy(() => import("@/components/SettingsViewComponents/GenerationPaneContent"))
-const ConversationPaneContent = lazy(() => import("@/components/SettingsViewComponents/ConversationPaneContent"))
+const RuntimePaneContent = lazy(
+  () => import("@/components/SettingsViewComponents/RuntimePaneContent")
+)
+const ModelPaneContent = lazy(
+  () => import("@/components/SettingsViewComponents/ModelPaneContent")
+)
+const GenerationPaneContent = lazy(
+  () => import("@/components/SettingsViewComponents/GenerationPaneContent")
+)
+const ConversationPaneContent = lazy(
+  () => import("@/components/SettingsViewComponents/ConversationPaneContent")
+)
 
 type SettingsPaneValue = "runtime" | "model" | "generation" | "conversation"
 

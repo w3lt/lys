@@ -5,7 +5,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { TitleBar } from "../components/TitleBar"
 
 function ControlledTitleBar() {
-
   return (
     <>
       <TitleBar />
@@ -29,18 +28,14 @@ describe("TitleBar", () => {
     const user = userEvent.setup()
     const onOpenChange = vi.fn()
     const onScenarioSelect = vi.fn()
-    const { rerender } = render(
-      <TitleBar />
-    )
+    const { rerender } = render(<TitleBar />)
 
     await user.click(screen.getByRole("button", { name: "Reference states" }))
     await new Promise((resolve) => window.setTimeout(resolve, 50))
     expect(onOpenChange.mock.calls[0]?.[0]).toBe(true)
     expect(onOpenChange).toHaveBeenCalledTimes(1)
 
-    rerender(
-      <TitleBar />
-    )
+    rerender(<TitleBar />)
     await user.click(screen.getByRole("menuitem", { name: /Inline error/ }))
 
     expect(onScenarioSelect).toHaveBeenCalledWith("error")

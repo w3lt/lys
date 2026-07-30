@@ -9,9 +9,7 @@ type ChatMessageProps = {
   message: Message
 }
 
-export default function ChatMessage({
-  message
-}: ChatMessageProps) {
+export default function ChatMessage({ message }: ChatMessageProps) {
   switch (message.role) {
     case "user":
       return <UserMessage message={message} />

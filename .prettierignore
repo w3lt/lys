@@ -2,3 +2,5 @@
 build
 coverage
 node_modules
+.superpowers
+apps/desktop/src-tauri/target

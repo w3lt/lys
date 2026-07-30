@@ -8,7 +8,10 @@ use std::{
 
 use serde::Serialize;
 
-use super::process_group::ManagedProcessGroup;
+use super::{
+    error::{BackendError, BackendErrorKind},
+    process_group::ManagedProcessGroup,
+};
 
 #[derive(Clone, Default)]
 pub(crate) struct Backend {
@@ -26,6 +29,11 @@ struct BackendState {
     shutting_down: bool,
 }
 
+/// The lifecycle state reported to the frontend.
+///
+/// `running` means the backend process group is alive, not that the HTTP API
+/// is accepting requests. Startup observation is a liveness check only; a
+/// readiness probe against the health route would be a separate signal.
 #[derive(Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct BackendStatus {
@@ -54,6 +62,14 @@ impl Backend {
         self.lock_state_observing_contention(|| {})
     }
 
+    /// Locks the lifecycle state, recovering from poisoning.
+    ///
+    /// A panic while the guard is held would otherwise make the mutex
+    /// permanently unusable, and an unusable mutex means an owned child
+    /// process that can never be stopped. Keeping the ability to reap a real
+    /// process is worth more than refusing to touch possibly-torn state: every
+    /// field here is either `None` or a live handle, so the worst observable
+    /// outcome is a retryable cleanup error.
     fn lock_state_observing_contention<O>(&self, on_contention: O) -> MutexGuard<'_, BackendState>
     where
         O: FnOnce(),
@@ -71,7 +87,7 @@ impl Backend {
         }
     }
 
-    pub(crate) fn start(&self) -> Result<BackendStatus, String> {
+    pub(crate) fn start(&self) -> Result<BackendStatus, BackendError> {
         self.start_with(
             spawn_backend,
             ManagedProcessGroup::observe_startup,
@@ -84,9 +100,9 @@ impl Backend {
         spawn: S,
         verify_startup: V,
         cleanup: C,
-    ) -> Result<BackendStatus, String>
+    ) -> Result<BackendStatus, BackendError>
     where
-        S: FnOnce() -> Result<Child, String>,
+        S: FnOnce() -> Result<Child, BackendError>,
         V: FnOnce(&mut ManagedProcessGroup) -> io::Result<bool>,
         C: FnMut(&mut ManagedProcessGroup) -> io::Result<Option<ExitStatus>>,
     {
@@ -99,22 +115,22 @@ impl Backend {
         spawn: S,
         verify_startup: V,
         mut cleanup: C,
-    ) -> Result<BackendStatus, String>
+    ) -> Result<BackendStatus, BackendError>
     where
         O: FnOnce(),
-        S: FnOnce() -> Result<Child, String>,
+        S: FnOnce() -> Result<Child, BackendError>,
         V: FnOnce(&mut ManagedProcessGroup) -> io::Result<bool>,
         C: FnMut(&mut ManagedProcessGroup) -> io::Result<Option<ExitStatus>>,
     {
         let mut state = self.lock_state_observing_contention(on_contention);
         if state.shutting_down {
-            return Err("backend is shutting down".to_owned());
+            return Err(BackendError::shutting_down());
         }
 
         start_locked(&mut state, spawn, verify_startup, &mut cleanup)
     }
 
-    pub(crate) fn restart(&self) -> Result<BackendStatus, String> {
+    pub(crate) fn restart(&self) -> Result<BackendStatus, BackendError> {
         self.restart_with(
             spawn_backend,
             ManagedProcessGroup::observe_startup,
@@ -127,15 +143,15 @@ impl Backend {
         spawn: S,
         verify_startup: V,
         mut cleanup: C,
-    ) -> Result<BackendStatus, String>
+    ) -> Result<BackendStatus, BackendError>
     where
-        S: FnOnce() -> Result<Child, String>,
+        S: FnOnce() -> Result<Child, BackendError>,
         V: FnOnce(&mut ManagedProcessGroup) -> io::Result<bool>,
         C: FnMut(&mut ManagedProcessGroup) -> io::Result<Option<ExitStatus>>,
     {
         let mut state = self.lock_state();
         if state.shutting_down {
-            return Err("backend is shutting down".to_owned());
+            return Err(BackendError::shutting_down());
         }
 
         cleanup_stored_process(
@@ -146,11 +162,11 @@ impl Backend {
         spawn_and_verify_locked(&mut state, spawn, verify_startup, &mut cleanup)
     }
 
-    pub(crate) fn stop(&self) -> Result<BackendStatus, String> {
+    pub(crate) fn stop(&self) -> Result<BackendStatus, BackendError> {
         self.stop_with(ManagedProcessGroup::stop)
     }
 
-    fn stop_with<C>(&self, mut cleanup: C) -> Result<BackendStatus, String>
+    fn stop_with<C>(&self, mut cleanup: C) -> Result<BackendStatus, BackendError>
     where
         C: FnMut(&mut ManagedProcessGroup) -> io::Result<Option<ExitStatus>>,
     {
@@ -163,11 +179,11 @@ impl Backend {
         Ok(BackendStatus::stopped())
     }
 
-    pub(crate) fn shutdown(&self) -> Result<(), String> {
+    pub(crate) fn shutdown(&self) -> Result<(), BackendError> {
         self.shutdown_with(ManagedProcessGroup::stop)
     }
 
-    fn shutdown_with<C>(&self, mut cleanup: C) -> Result<(), String>
+    fn shutdown_with<C>(&self, mut cleanup: C) -> Result<(), BackendError>
     where
         C: FnMut(&mut ManagedProcessGroup) -> io::Result<Option<ExitStatus>>,
     {
@@ -201,17 +217,19 @@ fn start_locked<S, V, C>(
     spawn: S,
     verify_startup: V,
     cleanup: &mut C,
-) -> Result<BackendStatus, String>
+) -> Result<BackendStatus, BackendError>
 where
-    S: FnOnce() -> Result<Child, String>,
+    S: FnOnce() -> Result<Child, BackendError>,
     V: FnOnce(&mut ManagedProcessGroup) -> io::Result<bool>,
     C: FnMut(&mut ManagedProcessGroup) -> io::Result<Option<ExitStatus>>,
 {
     if let Some(current) = state.process.as_mut() {
-        if current
-            .is_running()
-            .map_err(|error| format!("failed to inspect backend leader: {error}"))?
-        {
+        if current.is_running().map_err(|error| {
+            BackendError::new(
+                BackendErrorKind::Inspect,
+                format!("failed to inspect backend leader: {error}"),
+            )
+        })? {
             return Ok(BackendStatus::running(current.id()));
         }
 
@@ -226,23 +244,37 @@ fn spawn_and_verify_locked<S, V, C>(
     spawn: S,
     verify_startup: V,
     cleanup: &mut C,
-) -> Result<BackendStatus, String>
+) -> Result<BackendStatus, BackendError>
 where
-    S: FnOnce() -> Result<Child, String>,
+    S: FnOnce() -> Result<Child, BackendError>,
     V: FnOnce(&mut ManagedProcessGroup) -> io::Result<bool>,
     C: FnMut(&mut ManagedProcessGroup) -> io::Result<Option<ExitStatus>>,
 {
+    // Overwriting a stored process would drop its `Child` without signalling or
+    // reaping it, orphaning a whole process group and leaking a zombie. Callers
+    // must clean up first; refuse rather than corrupt ownership if they do not.
+    // This is a returned error rather than a `debug_assert!` so the invariant is
+    // enforced in release builds too, where an orphan would be unrecoverable.
+    if state.process.is_some() {
+        return Err(BackendError::new(
+            BackendErrorKind::Internal,
+            "internal backend lifecycle error: refusing to spawn a replacement while a previous \
+             process group is still owned",
+        ));
+    }
+
     let child = spawn()?;
-    let group = ManagedProcessGroup::new(child)
-        .map_err(|error| format!("failed to register backend process group: {error}"))?;
+    let group = ManagedProcessGroup::new(child).map_err(|error| {
+        BackendError::new(
+            BackendErrorKind::Spawn,
+            format!("failed to register backend process group: {error}"),
+        )
+    })?;
     let process_group_id = group.id();
     // Store ownership before observing startup. Every inspection and
     // cleanup error therefore leaves a reachable child handle.
-    state.process = Some(group);
+    let process = state.process.insert(group);
 
-    let process = state.process.as_mut().ok_or_else(|| {
-        "internal backend lifecycle error: spawned process ownership was not retained".to_owned()
-    })?;
     let startup_result = verify_startup(process);
     match startup_result {
         Ok(true) => Ok(BackendStatus::running(process_group_id)),
@@ -252,13 +284,17 @@ where
                 cleanup,
                 "failed to clean up the backend after startup failure",
             ) {
-                Ok(status) => Err(format!(
-                    "backend exited during startup ({})",
-                    describe_exit_status(status),
+                Ok(status) => Err(BackendError::new(
+                    BackendErrorKind::Startup,
+                    format!(
+                        "backend exited during startup ({})",
+                        describe_exit_status(status),
+                    ),
                 )),
-                Err(cleanup_error) => {
-                    Err(format!("backend exited during startup; {cleanup_error}"))
-                }
+                Err(cleanup_error) => Err(BackendError::new(
+                    BackendErrorKind::Startup,
+                    format!("backend exited during startup; {cleanup_error}"),
+                )),
             }
         }
         Err(inspection_error) => {
@@ -267,11 +303,16 @@ where
                 cleanup,
                 "failed to clean up the backend after startup inspection failed",
             ) {
-                Ok(_) => Err(format!(
-                    "failed to inspect backend during startup: {inspection_error}"
+                Ok(_) => Err(BackendError::new(
+                    BackendErrorKind::Inspect,
+                    format!("failed to inspect backend during startup: {inspection_error}"),
                 )),
-                Err(cleanup_error) => Err(format!(
-                    "failed to inspect backend during startup: {inspection_error}; {cleanup_error}"
+                Err(cleanup_error) => Err(BackendError::new(
+                    BackendErrorKind::Inspect,
+                    format!(
+                        "failed to inspect backend during startup: {inspection_error}; \
+                         {cleanup_error}"
+                    ),
                 )),
             }
         }
@@ -301,7 +342,7 @@ fn cleanup_stored_process<C>(
     state: &mut BackendState,
     cleanup: &mut C,
     error_context: &str,
-) -> Result<Option<ExitStatus>, String>
+) -> Result<Option<ExitStatus>, BackendError>
 where
     C: FnMut(&mut ManagedProcessGroup) -> io::Result<Option<ExitStatus>>,
 {
@@ -309,7 +350,14 @@ where
         return Ok(None);
     };
 
-    let status = cleanup(process).map_err(|error| format!("{error_context}: {error}"))?;
+    // On failure the process stays stored on purpose: the caller can retry the
+    // same cleanup instead of losing the only handle to a live process group.
+    let status = cleanup(process).map_err(|error| {
+        BackendError::new(
+            BackendErrorKind::Cleanup,
+            format!("{error_context}: {error}"),
+        )
+    })?;
     state.process = None;
     Ok(status)
 }
@@ -320,11 +368,16 @@ fn describe_exit_status(status: Option<ExitStatus>) -> String {
     })
 }
 
-fn repository_root() -> Result<PathBuf, String> {
+fn repository_root() -> Result<PathBuf, BackendError> {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")
         .canonicalize()
-        .map_err(|error| format!("failed to locate repository root: {error}"))
+        .map_err(|error| {
+            BackendError::new(
+                BackendErrorKind::Spawn,
+                format!("failed to locate repository root: {error}"),
+            )
+        })
 }
 
 fn backend_command(repository_root: &Path) -> Command {
@@ -339,10 +392,29 @@ fn backend_command(repository_root: &Path) -> Command {
     command
 }
 
-fn spawn_backend() -> Result<Child, String> {
+fn spawn_backend() -> Result<Child, BackendError> {
+    // The launcher runs `pnpm` from the source checkout, so it only exists in a
+    // development build. A bundled release has neither the checkout path baked
+    // into this binary nor a `pnpm` on PATH, and blindly trying would surface a
+    // confusing "No such file or directory". Fail with an explicit reason until
+    // the backend ships as a Tauri sidecar.
+    if !cfg!(debug_assertions) {
+        return Err(BackendError::new(
+            BackendErrorKind::LaunchUnavailable,
+            "this build cannot launch the backend: the development launcher requires the source \
+             checkout and pnpm. Run the desktop app with `pnpm dev`, or ship the backend as a \
+             Tauri sidecar for release builds.",
+        ));
+    }
+
     backend_command(&repository_root()?)
         .spawn()
-        .map_err(|error| format!("failed to start backend: {error}"))
+        .map_err(|error| {
+            BackendError::new(
+                BackendErrorKind::Spawn,
+                format!("failed to start backend: {error}"),
+            )
+        })
 }
 
 #[cfg(test)]
@@ -353,7 +425,10 @@ mod tests {
         os::unix::process::CommandExt,
         path::Path,
         process::{Command, Stdio},
-        sync::mpsc,
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            mpsc,
+        },
         thread,
         time::Duration,
     };
@@ -362,15 +437,19 @@ mod tests {
 
     const TEST_TIMEOUT: Duration = Duration::from_secs(5);
 
-    fn spawn_group(script: &str) -> ManagedProcessGroup {
-        let child = Command::new("sh")
+    fn spawn_test_child(script: &str) -> Result<Child, BackendError> {
+        Command::new("sh")
             .args(["-c", script])
             .process_group(0)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
-            .expect("test process should start");
+            .map_err(|error| BackendError::new(BackendErrorKind::Spawn, error.to_string()))
+    }
+
+    fn spawn_group(script: &str) -> ManagedProcessGroup {
+        let child = spawn_test_child(script).expect("test process should start");
         ManagedProcessGroup::new(child).expect("test process group should be valid")
     }
 
@@ -424,6 +503,20 @@ mod tests {
         assert_eq!(command.get_current_dir(), Some(repository_root));
     }
 
+    // Only meaningful under `cargo test --release`. A debug build would have to
+    // actually launch `pnpm backend:dev` to observe the other branch, which is
+    // not something a unit test should do.
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn release_builds_report_that_they_cannot_launch_a_backend() {
+        assert_eq!(
+            spawn_backend()
+                .expect_err("a release build must not attempt the dev launcher")
+                .kind,
+            BackendErrorKind::LaunchUnavailable,
+        );
+    }
+
     #[test]
     fn backend_defaults_to_stopped() {
         let backend = Backend::default();
@@ -474,23 +567,15 @@ mod tests {
 
         let error = backend
             .start_with(
-                || {
-                    Command::new("sh")
-                        .args(["-c", "exit 7"])
-                        .process_group(0)
-                        .stdin(Stdio::null())
-                        .stdout(Stdio::null())
-                        .stderr(Stdio::null())
-                        .spawn()
-                        .map_err(|error| error.to_string())
-                },
+                || spawn_test_child("exit 7"),
                 |_| Ok(false),
                 reap_without_group_signal,
             )
             .expect_err("an immediately exited launcher must fail start");
 
-        assert!(error.contains("startup"));
-        assert!(error.contains('7'));
+        assert_eq!(error.kind, BackendErrorKind::Startup);
+        assert!(error.message.contains("startup"));
+        assert!(error.message.contains('7'));
         assert!(backend.lock_state().process.is_none());
     }
 
@@ -500,22 +585,14 @@ mod tests {
 
         let error = backend
             .start_with(
-                || {
-                    Command::new("sh")
-                        .args(["-c", "exit 0"])
-                        .process_group(0)
-                        .stdin(Stdio::null())
-                        .stdout(Stdio::null())
-                        .stderr(Stdio::null())
-                        .spawn()
-                        .map_err(|error| error.to_string())
-                },
+                || spawn_test_child("exit 0"),
                 |_| Err(io::Error::other("expected inspection failure")),
                 reap_without_group_signal,
             )
             .expect_err("startup inspection failure should be returned");
 
-        assert!(error.contains("expected inspection failure"));
+        assert_eq!(error.kind, BackendErrorKind::Inspect);
+        assert!(error.message.contains("expected inspection failure"));
         assert!(backend.lock_state().process.is_none());
     }
 
@@ -525,22 +602,13 @@ mod tests {
 
         let error = backend
             .start_with(
-                || {
-                    Command::new("sh")
-                        .args(["-c", "exec sleep 30"])
-                        .process_group(0)
-                        .stdin(Stdio::null())
-                        .stdout(Stdio::null())
-                        .stderr(Stdio::null())
-                        .spawn()
-                        .map_err(|error| error.to_string())
-                },
+                || spawn_test_child("exec sleep 30"),
                 |_| Ok(false),
                 |_| Err(io::Error::other("expected cleanup failure")),
             )
             .expect_err("cleanup failure should be returned");
 
-        assert!(error.contains("expected cleanup failure"));
+        assert!(error.message.contains("expected cleanup failure"));
         assert!(backend.lock_state().process.is_some());
         backend
             .stop_with(kill_and_reap_direct)
@@ -551,15 +619,40 @@ mod tests {
     fn stop_failure_retains_process_ownership_for_retry() {
         let backend = Backend::with_process_for_test(spawn_group("exec sleep 30"));
 
-        backend
+        let error = backend
             .stop_with(|_| Err(io::Error::other("expected stop failure")))
             .expect_err("stop failure should be returned");
+        assert_eq!(error.kind, BackendErrorKind::Cleanup);
         assert!(backend.lock_state().process.is_some());
 
         backend
             .stop_with(kill_and_reap_direct)
             .expect("second stop should resume cleanup");
         assert!(backend.lock_state().process.is_none());
+    }
+
+    #[test]
+    fn spawning_over_an_owned_process_group_is_refused_instead_of_orphaning_it() {
+        let backend = Backend::with_process_for_test(spawn_group("exec sleep 30"));
+
+        // `start_locked` and `restart_with` always clean up first, so reach the
+        // guard directly to prove it protects the ownership invariant.
+        let error = {
+            let mut state = backend.lock_state();
+            spawn_and_verify_locked(
+                &mut state,
+                || panic!("the guard must reject before spawning"),
+                |_| panic!("the guard must reject before observing startup"),
+                &mut |_| panic!("the guard must not clean the stored process"),
+            )
+            .expect_err("spawning over an owned group must be refused")
+        };
+
+        assert_eq!(error.kind, BackendErrorKind::Internal);
+        assert!(backend.lock_state().process.is_some());
+        backend
+            .stop_with(kill_and_reap_direct)
+            .expect("the retained group should still be stoppable");
     }
 
     #[test]
@@ -571,7 +664,7 @@ mod tests {
             .as_ref()
             .expect("test backend should own a process")
             .id();
-        let previous_was_cleaned = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let previous_was_cleaned = Arc::new(AtomicBool::new(false));
         let spawn_observer = previous_was_cleaned.clone();
         let cleanup_observer = previous_was_cleaned.clone();
 
@@ -579,23 +672,16 @@ mod tests {
             .restart_with(
                 move || {
                     assert!(
-                        spawn_observer.load(std::sync::atomic::Ordering::SeqCst),
+                        spawn_observer.load(Ordering::SeqCst),
                         "restart must clean the previous group before spawning"
                     );
-                    Command::new("sh")
-                        .args(["-c", "exec sleep 30"])
-                        .process_group(0)
-                        .stdin(Stdio::null())
-                        .stdout(Stdio::null())
-                        .stderr(Stdio::null())
-                        .spawn()
-                        .map_err(|error| error.to_string())
+                    spawn_test_child("exec sleep 30")
                 },
                 |_| Ok(true),
                 move |group| {
                     let result = kill_and_reap_direct(group);
                     if result.is_ok() {
-                        cleanup_observer.store(true, std::sync::atomic::Ordering::SeqCst);
+                        cleanup_observer.store(true, Ordering::SeqCst);
                     }
                     result
                 },
@@ -627,7 +713,8 @@ mod tests {
             )
             .expect_err("restart cleanup failure should be returned");
 
-        assert!(error.contains("expected restart cleanup failure"));
+        assert_eq!(error.kind, BackendErrorKind::Cleanup);
+        assert!(error.message.contains("expected restart cleanup failure"));
         assert_eq!(
             backend
                 .lock_state()
@@ -657,7 +744,7 @@ mod tests {
             )
             .expect_err("restart after shutdown must be rejected");
 
-        assert_eq!(error, "backend is shutting down");
+        assert_eq!(error, BackendError::shutting_down());
     }
 
     #[test]
@@ -675,14 +762,7 @@ mod tests {
                         restart_lock_probe.inner.state.try_lock(),
                         Err(TryLockError::WouldBlock),
                     ));
-                    Command::new("sh")
-                        .args(["-c", "exec sleep 30"])
-                        .process_group(0)
-                        .stdin(Stdio::null())
-                        .stdout(Stdio::null())
-                        .stderr(Stdio::null())
-                        .spawn()
-                        .map_err(|error| error.to_string())
+                    spawn_test_child("exec sleep 30")
                 },
                 |_| Ok(true),
                 |group| {
@@ -758,7 +838,7 @@ mod tests {
             )
             .expect_err("start after shutdown must be rejected");
 
-        assert_eq!(error, "backend is shutting down");
+        assert_eq!(error, BackendError::shutting_down());
     }
 
     #[test]
@@ -819,7 +899,7 @@ mod tests {
             .expect("start thread should finish")
             .expect_err("queued start should be rejected");
 
-        assert_eq!(error, "backend is shutting down");
+        assert_eq!(error, BackendError::shutting_down());
         assert!(backend.lock_state().process.is_none());
     }
 }

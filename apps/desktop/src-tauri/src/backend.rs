@@ -1,35 +1,53 @@
+mod error;
 mod manager;
 mod process_group;
 
 pub(crate) use manager::Backend;
 
+use error::{BackendError, BackendErrorKind};
 use manager::BackendStatus;
 use tauri::State;
 
-async fn run_blocking<F, T>(operation: F) -> Result<T, String>
+/// Runs a lifecycle operation off the caller's thread.
+///
+/// Every operation holds the lifecycle mutex across blocking waits — startup
+/// observation, the termination grace period — so none of them may run on a
+/// thread that the UI depends on.
+async fn run_blocking<F, T>(operation: F) -> Result<T, BackendError>
 where
     F: FnOnce() -> T + Send + 'static,
     T: Send + 'static,
 {
     tauri::async_runtime::spawn_blocking(operation)
         .await
-        .map_err(|error| format!("failed to join backend lifecycle task: {error}"))
+        .map_err(|error| {
+            BackendError::new(
+                BackendErrorKind::Internal,
+                format!("failed to join backend lifecycle task: {error}"),
+            )
+        })
 }
 
 #[tauri::command]
-pub(crate) async fn start_backend(backend: State<'_, Backend>) -> Result<BackendStatus, String> {
+pub(crate) async fn start_backend(
+    backend: State<'_, Backend>,
+) -> Result<BackendStatus, BackendError> {
     let backend = backend.inner().clone();
     run_blocking(move || backend.start()).await?
 }
 
 #[tauri::command]
-pub(crate) async fn restart_backend(backend: State<'_, Backend>) -> Result<BackendStatus, String> {
+pub(crate) async fn restart_backend(
+    backend: State<'_, Backend>,
+) -> Result<BackendStatus, BackendError> {
     let backend = backend.inner().clone();
     run_blocking(move || backend.restart()).await?
 }
 
 #[tauri::command]
-pub(crate) async fn stop_backend(backend: State<'_, Backend>) -> Result<BackendStatus, String> {
+pub(crate) async fn stop_backend(
+    backend: State<'_, Backend>,
+) -> Result<BackendStatus, BackendError> {
     let backend = backend.inner().clone();
     run_blocking(move || backend.stop()).await?
 }

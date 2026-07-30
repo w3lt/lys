@@ -1,3 +1,23 @@
+//! Ownership of the backend's POSIX process group.
+//!
+//! # Platform assumption
+//!
+//! This module is macOS-only and relies on Darwin's `kill(2)` semantics.
+//!
+//! The drain predicate asks "does this group still contain a signalable
+//! member?" via `kill(-pgid, 0)`. On Darwin, a group whose only remaining
+//! member is our own unreaped zombie leader answers `EPERM`, which
+//! [`classify_owned_group`] combines with the leader state to conclude the
+//! group is drained. Other Unixes do not agree: Linux keeps a zombie in its
+//! process group until it is reaped and answers `0`, so the same group would
+//! read as perpetually live and [`terminate_group_with`] would report that it
+//! survived `SIGKILL`. Supporting another platform means replacing this probe
+//! with real group-membership enumeration, not adding another errno arm.
+//!
+//! The leader is deliberately left unreaped until the group is drained: an
+//! unreaped child pins the PGID, so the numeric group ID can never be recycled
+//! underneath a signal we are about to send.
+
 use std::{
     io,
     mem::MaybeUninit,
@@ -24,6 +44,26 @@ enum LeaderState {
     Running,
     Exited,
     ReapedExternally,
+}
+
+/// A leader that is still ours to reason about.
+///
+/// Once a leader has been reaped externally the group identity is gone, so that
+/// case is resolved before classification rather than being carried into it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum OwnedLeader {
+    Running,
+    Exited,
+}
+
+impl LeaderState {
+    fn owned(self) -> Option<OwnedLeader> {
+        match self {
+            LeaderState::Running => Some(OwnedLeader::Running),
+            LeaderState::Exited => Some(OwnedLeader::Exited),
+            LeaderState::ReapedExternally => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -205,23 +245,24 @@ fn signal_group(group_id: i32, signal: i32) -> io::Result<GroupProbe> {
 }
 
 fn classify_owned_group(probe: GroupProbe, leader: LeaderState) -> io::Result<OwnedGroupState> {
-    if leader == LeaderState::ReapedExternally {
+    let Some(leader) = leader.owned() else {
         return Ok(OwnedGroupState::IdentityLost);
-    }
+    };
 
+    // Every combination below is reachable, so the match needs no catch-all and
+    // cannot regress into an `unreachable!()` panic on a lifecycle path.
     match (probe, leader) {
         (GroupProbe::SignalableMember, _) => Ok(OwnedGroupState::Active),
-        (GroupProbe::NoSignalableMember, LeaderState::Exited)
-        | (GroupProbe::Missing, LeaderState::Exited) => Ok(OwnedGroupState::Drained),
-        (GroupProbe::NoSignalableMember, LeaderState::Running) => Err(io::Error::new(
+        (GroupProbe::NoSignalableMember, OwnedLeader::Exited)
+        | (GroupProbe::Missing, OwnedLeader::Exited) => Ok(OwnedGroupState::Drained),
+        (GroupProbe::NoSignalableMember, OwnedLeader::Running) => Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
             "backend group has a live leader but no signalable member",
         )),
-        (GroupProbe::Missing, LeaderState::Running) => Err(io::Error::new(
+        (GroupProbe::Missing, OwnedLeader::Running) => Err(io::Error::new(
             io::ErrorKind::NotFound,
             "backend process group is missing while its leader is still running",
         )),
-        (_, LeaderState::ReapedExternally) => unreachable!(),
     }
 }
 
@@ -570,11 +611,9 @@ mod tests {
             .expect("the signalable retry should succeed");
     }
 
-    #[cfg(target_os = "macos")]
-    struct MacProcessGuard(Option<ManagedProcessGroup>);
+    struct ProcessGuard(Option<ManagedProcessGroup>);
 
-    #[cfg(target_os = "macos")]
-    impl MacProcessGuard {
+    impl ProcessGuard {
         fn new(child: Child) -> Self {
             Self(Some(
                 ManagedProcessGroup::new(child).expect("test process group should be valid"),
@@ -594,8 +633,7 @@ mod tests {
         }
     }
 
-    #[cfg(target_os = "macos")]
-    impl std::ops::Deref for MacProcessGuard {
+    impl std::ops::Deref for ProcessGuard {
         type Target = ManagedProcessGroup;
 
         fn deref(&self) -> &Self::Target {
@@ -605,8 +643,7 @@ mod tests {
         }
     }
 
-    #[cfg(target_os = "macos")]
-    impl std::ops::DerefMut for MacProcessGuard {
+    impl std::ops::DerefMut for ProcessGuard {
         fn deref_mut(&mut self) -> &mut Self::Target {
             self.0
                 .as_mut()
@@ -614,8 +651,7 @@ mod tests {
         }
     }
 
-    #[cfg(target_os = "macos")]
-    impl Drop for MacProcessGuard {
+    impl Drop for ProcessGuard {
         fn drop(&mut self) {
             let Some(group) = self.0.as_mut() else {
                 return;
@@ -633,7 +669,6 @@ mod tests {
         }
     }
 
-    #[cfg(target_os = "macos")]
     fn wait_for_leader_exit(group: &ManagedProcessGroup) {
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
@@ -650,7 +685,6 @@ mod tests {
         }
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn real_startup_observation_rejects_an_immediate_exit() {
         let child = Command::new("sh")
@@ -661,7 +695,7 @@ mod tests {
             .stderr(Stdio::null())
             .spawn()
             .expect("test process should start");
-        let mut group = MacProcessGuard::new(child);
+        let mut group = ProcessGuard::new(child);
 
         assert!(!group
             .observe_startup()
@@ -673,7 +707,6 @@ mod tests {
         assert_eq!(status.code(), Some(7));
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn real_zombie_only_group_is_drained_and_reaped() {
         let child = Command::new("sh")
@@ -684,7 +717,7 @@ mod tests {
             .stderr(Stdio::null())
             .spawn()
             .expect("test process should start");
-        let mut group = MacProcessGuard::new(child);
+        let mut group = ProcessGuard::new(child);
         wait_for_leader_exit(&group);
 
         assert_eq!(
@@ -699,7 +732,6 @@ mod tests {
         assert!(status.success());
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn real_exited_leader_with_a_live_descendant_is_stopped_as_one_group() {
         let child = Command::new("sh")
@@ -710,7 +742,7 @@ mod tests {
             .stderr(Stdio::null())
             .spawn()
             .expect("test process should start");
-        let mut group = MacProcessGuard::new(child);
+        let mut group = ProcessGuard::new(child);
         wait_for_leader_exit(&group);
 
         assert_eq!(
@@ -723,7 +755,6 @@ mod tests {
             .expect("the descendant and zombie leader should be cleaned together");
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn real_term_responsive_group_exits_during_the_grace_period() {
         let child = Command::new("sh")
@@ -734,7 +765,7 @@ mod tests {
             .stderr(Stdio::null())
             .spawn()
             .expect("test process should start");
-        let mut group = MacProcessGuard::new(child);
+        let mut group = ProcessGuard::new(child);
 
         assert!(group
             .observe_startup()
@@ -746,7 +777,6 @@ mod tests {
         assert!(status.success());
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn real_term_ignoring_group_is_force_killed_and_reaped() {
         let child = Command::new("sh")
@@ -759,7 +789,7 @@ mod tests {
             .stderr(Stdio::null())
             .spawn()
             .expect("test process should start");
-        let mut group = MacProcessGuard::new(child);
+        let mut group = ProcessGuard::new(child);
 
         assert!(group
             .observe_startup()

@@ -3,6 +3,13 @@ import { FastifyInstance, FastifyRequest } from "fastify"
 import * as z from "zod"
 import { LMStudioClient } from "@lmstudio/sdk"
 
+/**
+ * Registers the LLM load endpoint with protocol body validation and response serialization.
+ *
+ * @param app - Application instance that receives the LLM load route.
+ * @returns A promise that resolves after route registration completes.
+ * @throws If Fastify cannot register the route.
+ */
 export default async function registerLlmLoadModelRoute(app: FastifyInstance) {
   app.route<LlmLoadModelApiRoute>({
     method: llmLoadModelApi.method,
@@ -23,6 +30,13 @@ export default async function registerLlmLoadModelRoute(app: FastifyInstance) {
   })
 }
 
+/**
+ * Loads the requested LLM, then uses its canonical model key to find downloaded model metadata.
+ *
+ * @param request - Validated Fastify request containing the model identifier or alias that LM Studio resolves during loading.
+ * @returns A promise that resolves to downloaded model metadata marked as loaded after the canonical model key is found in inventory.
+ * @throws If LM Studio cannot load or enumerate models, or if the loaded model is absent from the downloaded inventory.
+ */
 async function loadLlmApiHandler(
   request: FastifyRequest<LlmLoadModelApiRoute>
 ): Promise<LlmLoadModelApiRoute["Reply"]> {

@@ -2,6 +2,15 @@ import { chatApi, ChatApiRoute, ChatApiStreamEvent } from "@lys/protocol"
 import { FastifyInstance } from "fastify"
 import { v7 as uuidv7 } from "uuid"
 
+/**
+ * Registers the chat completion endpoint on a Fastify application.
+ *
+ * @param app - Application instance that receives the chat route.
+ * @returns A promise that resolves after route registration completes.
+ * @throws If Fastify cannot register the route.
+ * @remarks The registered handler emits typed SSE start, delta, done, or error
+ * events, and aborts the upstream completion when the client disconnects.
+ */
 export default async function registerChatRoute(app: FastifyInstance) {
   app.route<ChatApiRoute>({
     method: chatApi.method,
@@ -16,6 +25,12 @@ export default async function registerChatRoute(app: FastifyInstance) {
         abortController.abort()
       })
 
+      /**
+       * Sends one typed chat event through the active SSE connection.
+       *
+       * @param event - Protocol event whose type also becomes the SSE event name.
+       * @returns A promise that resolves after Fastify writes the event.
+       */
       const sendEvent = async (event: ChatApiStreamEvent) => {
         await reply.sse.send({
           event: event.type,

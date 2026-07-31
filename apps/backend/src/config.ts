@@ -5,13 +5,19 @@ import {
   LMSTUDIO_PORT
 } from "@lys/protocol"
 
+/** Runtime network locations used by the backend and its LM Studio clients. */
 export type BackendConfig = {
+  /** Interface on which Fastify accepts connections. */
   backendHost: string
+  /** TCP port on which Fastify accepts connections. */
   backendPort: number
+  /** Host used by backend LM Studio clients. */
   lmstudioHost: string
+  /** Port used by backend LM Studio clients. */
   lmstudioPort: number
 }
 
+/** Immutable-at-reference runtime configuration built from shared protocol constants. */
 export const config: BackendConfig = {
   backendHost: BACKEND_HOST,
   backendPort: BACKEND_PORT,

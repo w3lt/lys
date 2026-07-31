@@ -1,16 +1,24 @@
 import Fastify from "fastify"
-import { BackendEnv } from "./env"
 import registerHealthRoutes from "./modules/health/routes"
 import registerLlmRoutes from "./modules/llm/routes"
 
+export type BackendConfig = {
+  backendHost: string
+  backendPort: number
+  lmstudioHost: string
+  lmstudioPort: number
+}
+
 export type BuildAppOptions = {
-  env: BackendEnv
+  config: BackendConfig
 }
 
 export async function buildApp(options: BuildAppOptions) {
   const app = Fastify({
     logger: true
   })
+
+  void options
 
   // =============== REGISTER THE ROUTES =============== //
   registerHealthRoutes(app)

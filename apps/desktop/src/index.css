@@ -252,6 +252,8 @@
   --app-status-neutral-ring: 0 0 0 4px oklch(0.59 0.035 270 / 12%);
   --app-status-success-ring: 0 0 0 4px oklch(0.47 0.13 150 / 13%);
   --app-status-pending-ring: 0 0 0 4px oklch(0.53 0.14 83 / 13%);
+  /* Worn only by a running process, so a lit card is legible at a glance. */
+  --app-status-success-glow: 0 0 10px oklch(0.47 0.13 150 / 26%);
 
   --app-scrollbar-track: oklch(0.92 0.02 275);
   --app-scrollbar-thumb: oklch(0.66 0.055 270);
@@ -402,6 +404,7 @@
   --app-status-neutral-ring: 0 0 0 4px oklch(0.68 0.03 258 / 16%);
   --app-status-success-ring: 0 0 0 4px oklch(0.75 0.16 152 / 18%);
   --app-status-pending-ring: 0 0 0 4px oklch(0.8 0.14 85 / 18%);
+  --app-status-success-glow: 0 0 12px oklch(0.75 0.16 152 / 38%);
 
   --app-scrollbar-track: oklch(0.17 0.04 292);
   --app-scrollbar-thumb: oklch(0.35 0.05 285);

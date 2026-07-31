@@ -1,10 +1,21 @@
-import { buildApp } from "./app"
-import { loadEnv } from "./env"
+import {
+  BACKEND_HOST,
+  BACKEND_PORT,
+  LMSTUDIO_HOST,
+  LMSTUDIO_PORT
+} from "@lys/protocol"
+import { BackendConfig, buildApp } from "./app"
 
-const env = loadEnv()
-const app = await buildApp({ env })
+const config: BackendConfig = {
+  backendHost: BACKEND_HOST,
+  backendPort: BACKEND_PORT,
+  lmstudioHost: LMSTUDIO_HOST,
+  lmstudioPort: LMSTUDIO_PORT
+}
+
+const app = await buildApp({ config })
 
 await app.listen({
-  host: env.BACKEND_HOST,
-  port: env.BACKEND_PORT
+  host: config.backendHost,
+  port: config.backendPort
 })

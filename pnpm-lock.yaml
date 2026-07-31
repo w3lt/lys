@@ -40,9 +40,6 @@ importers:
       "@lys/protocol":
         specifier: workspace:*
         version: link:../../packages/protocol
-      dotenv:
-        specifier: ^17.4.2
-        version: 17.4.2
       fastify:
         specifier: 5.10.0
         version: 5.10.0

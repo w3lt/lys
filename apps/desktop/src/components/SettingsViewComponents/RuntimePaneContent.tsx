@@ -1,4 +1,3 @@
-import { MODEL_OPTIONS } from "@/app/content"
 import type { AppState } from "@/app/types"
 import {
   Card,
@@ -10,11 +9,12 @@ import {
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Separator } from "@/components/ui/separator"
-import { Progress } from "@/components/ui/progress"
 import {
   backendStatusLabel,
   useRuntimeSettingsContext
 } from "@/lib/hooks/runtimeSettingsContext"
+import { lazy } from "react"
+const PaneSkeleton = lazy(() => import("./PaneSkeleton"))
 
 function modelStatusLabel(status: AppState["runtime"]["model"]) {
   switch (status) {
@@ -39,7 +39,8 @@ export default function RuntimePaneContent() {
     backendStatus
   } = useRuntimeSettingsContext()
 
-  if (loadingSettings || !settingsBuffer) return null
+  if (loadingSettings) return <PaneSkeleton pane="runtime" />
+  if (!settingsBuffer) return null
 
   return (
     <div className="settings-view__stack">
@@ -109,18 +110,17 @@ export default function RuntimePaneContent() {
 
       <Separator className="settings-view__separator" />
 
-      {/* <Card className="settings-view__card">
+      <Card className="settings-view__card">
         <CardHeader className="settings-view__card-header">
           <div>
             <CardDescription>Selected weights</CardDescription>
-            <CardTitle>{modelStatusLabel(runtime.model)}</CardTitle>
+            <CardTitle>{modelStatusLabel("none")}</CardTitle>
           </div>
           <span className="settings-view__model-size">
-            {MODEL_OPTIONS.find(({ name }) => name === state.config.model)
-              ?.size ?? "—"}
+            {settingsBuffer.selectedModel ?? "No model"}
           </span>
         </CardHeader>
-        <CardContent className="settings-view__card-content">
+        {/* <CardContent className="settings-view__card-content">
           <p className="settings-view__model-name">{state.config.model}</p>
           {runtime.model === "loading" ? (
             <div className="settings-view__progress">
@@ -160,8 +160,8 @@ export default function RuntimePaneContent() {
               </Button>
             )}
           </div>
-        </CardContent>
-      </Card> */}
+        </CardContent> */}
+      </Card>
 
       {/* <section aria-label="Runtime log" className="settings-view__log">
         <div className="settings-view__section-heading">

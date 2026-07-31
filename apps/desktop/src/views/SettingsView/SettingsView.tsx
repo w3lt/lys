@@ -1,10 +1,10 @@
-import { lazy, useState } from "react"
+import { lazy, Suspense, useState } from "react"
 
+import type { SettingsPane } from "@/app/types"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 import "./SettingsView.scss"
-import PaneFooter from "@/components/SettingsViewComponents/PaneFooter"
-import PaneHeading from "@/components/SettingsViewComponents/PaneHeading"
+import SettingsPaneFrame from "@/components/SettingsViewComponents/SettingsPaneFrame"
 
 const RuntimePaneContent = lazy(
   () => import("@/components/SettingsViewComponents/RuntimePaneContent")
@@ -19,16 +19,14 @@ const ConversationPaneContent = lazy(
   () => import("@/components/SettingsViewComponents/ConversationPaneContent")
 )
 
-type SettingsPaneValue = "runtime" | "model" | "generation" | "conversation"
-
 type SettingsPaneContentComponent =
   | typeof RuntimePaneContent
   | typeof ModelPaneContent
   | typeof GenerationPaneContent
   | typeof ConversationPaneContent
 
-type SettingsPaneProps = {
-  value: SettingsPaneValue
+export type SettingsPaneProps = {
+  value: SettingsPane
   label: string
   eyebrow: string
   note: string
@@ -71,7 +69,7 @@ type SettingsViewProps = {
 }
 
 export function SettingsView({ onDone }: SettingsViewProps) {
-  const [currentPane, setCurrentPane] = useState<SettingsPaneValue>("runtime")
+  const [currentPane, setCurrentPane] = useState<SettingsPane>("runtime")
 
   return (
     <main aria-label="Settings" className="settings-view">
@@ -103,21 +101,15 @@ export function SettingsView({ onDone }: SettingsViewProps) {
 
         <div className="settings-view__content">
           {SETTINGS_PANES.map((pane) => {
-            const ContentComponent = pane.contentComponent
-
             return (
               <TabsContent value={pane.value} key={pane.value}>
-                <div className="settings-view__pane">
-                  <PaneHeading
-                    eyebrow={pane.eyebrow}
-                    note={pane.note}
-                    title={pane.label}
-                  />
-
-                  <ContentComponent />
-
-                  <PaneFooter onDone={onDone} />
-                </div>
+                <Suspense
+                  fallback={
+                    <SettingsPaneFrame busy onDone={onDone} pane={pane} />
+                  }
+                >
+                  <SettingsPaneFrame onDone={onDone} pane={pane} />
+                </Suspense>
               </TabsContent>
             )
           })}

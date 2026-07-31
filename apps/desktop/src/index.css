@@ -7,6 +7,15 @@
 
 @custom-variant dark (&:is(.dark *));
 
+@keyframes lys-skeleton-sweep {
+  from {
+    background-position: 130% 0;
+  }
+  to {
+    background-position: -130% 0;
+  }
+}
+
 @theme inline {
   --font-heading: var(--font-sans);
   --font-sans: "Geist Variable", sans-serif;
@@ -102,6 +111,29 @@
     oklch(0.83 0.08 300) 0%,
     oklch(0.58 0.22 303) 40%,
     oklch(0.76 0.14 205) 100%
+  );
+  /*
+   * Placeholder bars, swept horizontally while a settings pane is read from
+   * disk. The middle stop carries the brand violet so a pane that is still
+   * loading reads as Lys rather than as generic grey furniture. The muted pair
+   * marks secondary text and large empty surfaces, which should not compete
+   * with the primary bars for attention.
+   */
+  --gradient-skeleton: linear-gradient(
+    90deg,
+    oklch(0.91 0.022 288) 0%,
+    oklch(0.87 0.035 292) 38%,
+    oklch(0.82 0.075 298) 50%,
+    oklch(0.87 0.035 292) 62%,
+    oklch(0.91 0.022 288) 100%
+  );
+  --gradient-skeleton-muted: linear-gradient(
+    90deg,
+    oklch(0.93 0.016 288) 0%,
+    oklch(0.9 0.026 290) 38%,
+    oklch(0.86 0.048 294) 50%,
+    oklch(0.9 0.026 290) 62%,
+    oklch(0.93 0.016 288) 100%
   );
   --shadow-primary:
     0 0 24px oklch(0.58 0.2 303 / 18%), 0 0 36px oklch(0.72 0.14 205 / 14%);
@@ -277,6 +309,22 @@
     oklch(0.86 0.08 300) 0%,
     oklch(0.65 0.22 303) 40%,
     oklch(0.78 0.14 205) 100%
+  );
+  --gradient-skeleton: linear-gradient(
+    90deg,
+    oklch(0.19 0.045 292) 0%,
+    oklch(0.26 0.062 291) 38%,
+    oklch(0.42 0.14 299) 50%,
+    oklch(0.26 0.062 291) 62%,
+    oklch(0.19 0.045 292) 100%
+  );
+  --gradient-skeleton-muted: linear-gradient(
+    90deg,
+    oklch(0.19 0.045 292) 0%,
+    oklch(0.235 0.052 291) 38%,
+    oklch(0.33 0.095 297) 50%,
+    oklch(0.235 0.052 291) 62%,
+    oklch(0.19 0.045 292) 100%
   );
   --shadow-primary:
     0 0 24px oklch(0.58 0.2 303 / 22%), 0 0 38px oklch(0.74 0.14 205 / 18%);

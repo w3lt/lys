@@ -46,6 +46,9 @@ importers:
 
   apps/backend:
     dependencies:
+      "@fastify/sse":
+        specifier: ^0.6.0
+        version: 0.6.0(fastify@5.10.0)
       "@lmstudio/sdk":
         specifier: ^1.5.0
         version: 1.5.0
@@ -942,6 +945,15 @@ packages:
       {
         integrity: sha512-INS+6gh91cLUjB+PVHfu1UqcB76Sqtpyp7bnL+FYojhjygvOPA9ctiD/JDKsyD9Xgu4hUhCSJBPig/w7duNajw==
       }
+
+  "@fastify/sse@0.6.0":
+    resolution:
+      {
+        integrity: sha512-+5g8zBbSN8ioKEfll2p6TXe75peq3uJ3/z44SakK5gNr9u6YqbOAHfTSRfXfvnUFzG97+3E055l360ruzsvgcQ==
+      }
+    engines: { node: ">=20.20.2" }
+    peerDependencies:
+      fastify: ^5.x
 
   "@floating-ui/core@1.8.0":
     resolution:
@@ -3064,6 +3076,12 @@ packages:
     resolution:
       {
         integrity: sha512-YPOs1zD5TG2+EZt+r88LwF6mclA7TPkpwMP7ZN3TO2HiHS8TXvq7QA/17iJsV9dubcLo/f8eEYqMBruyQV21hQ==
+      }
+
+  fastify-plugin@6.0.0:
+    resolution:
+      {
+        integrity: sha512-fZOty7z3O7vOliF6d8bHE3wiEh1KcNnKEQensSgTk9C1DvN6nRLS++XVd86v33Hw/8u9Un8A1zDrQ8ujcQDHEg==
       }
 
   fastify@5.10.0:
@@ -6308,6 +6326,12 @@ snapshots:
       "@fastify/forwarded": 3.0.1
       ipaddr.js: 2.4.0
 
+  "@fastify/sse@0.6.0(fastify@5.10.0)":
+    dependencies:
+      "@fastify/error": 4.2.0
+      fastify: 5.10.0
+      fastify-plugin: 6.0.0
+
   "@floating-ui/core@1.8.0":
     dependencies:
       "@floating-ui/utils": 0.2.12
@@ -7559,6 +7583,8 @@ snapshots:
   fast-uri@3.1.4: {}
 
   fast-uri@4.1.1: {}
+
+  fastify-plugin@6.0.0: {}
 
   fastify@5.10.0:
     dependencies:

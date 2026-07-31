@@ -68,7 +68,7 @@ type SettingsViewProps = {
   onDone: () => void
 }
 
-export function SettingsView({ onDone }: SettingsViewProps) {
+export default function SettingsView({ onDone }: SettingsViewProps) {
   const [currentPane, setCurrentPane] = useState<SettingsPane>("runtime")
 
   return (

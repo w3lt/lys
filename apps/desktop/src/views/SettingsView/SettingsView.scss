@@ -250,24 +250,32 @@
   padding: 0;
 }
 
+/*
+ * A runtime card states one process on one line: what it is doing on the left,
+ * the two actions that can change it on the right. The dot, the title, and the
+ * mono detail line stay together as a single identity block.
+ */
 .settings-view__card-header {
   display: flex;
   min-height: 72px;
-  grid-template-columns: 1fr auto;
   align-items: center;
   justify-content: space-between;
+  gap: 24px;
   padding: 16px;
-  border-bottom: 1px solid var(--app-border-subtle);
 }
 
-.settings-view__card-header [data-slot="card-description"] {
-  margin-bottom: 4px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--app-text-faint);
+.settings-view__identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+}
+
+.settings-view__identity-lines {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .settings-view__card-header [data-slot="card-title"] {
@@ -278,39 +286,72 @@
   color: var(--app-text-strong);
 }
 
-.settings-view__card-content {
-  padding: 16px;
-}
-
-.settings-view__card-content > p {
-  margin: 0;
-  font-size: 14px;
-  line-height: 1.5;
-  color: var(--app-text-muted);
+/* Address, uptime, weights: machine facts, so mono and quieter than the title. */
+.settings-view__card-meta {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.4;
+  letter-spacing: 0.02em;
+  color: var(--app-text-faint);
 }
 
 .settings-view__actions {
   display: flex;
+  flex: none;
   gap: 8px;
-  margin-top: 16px;
+}
+
+/*
+ * Inset to the card's padding rather than run edge to edge: it divides two rows
+ * of the same card, and does not cut the card in two.
+ */
+.settings-view__card-divider {
+  margin-inline: 16px;
+  background: var(--app-border-subtle);
+}
+
+.settings-view__card-toggle {
+  display: flex;
+  min-height: 64px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 16px;
+}
+
+.settings-view__toggle-state {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+}
+
+.settings-view__toggle-state > span {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
 }
 
 .settings-view__status-dot {
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  flex: none;
+  border-radius: var(--radius-capsule);
   background: var(--app-status-neutral);
   box-shadow: var(--app-status-neutral-ring);
 }
 
-.settings-view__status-dot--running {
+/* The glow is the only lit thing on a resting card, so it reads from across the pane. */
+.settings-view__status-dot--active {
   background: var(--app-status-success);
-  box-shadow: var(--app-status-success-ring);
+  box-shadow: var(--app-status-success-ring), var(--app-status-success-glow);
 }
 
-/* Looping only while the backend is genuinely mid-transition. */
-.settings-view__status-dot--starting,
-.settings-view__status-dot--stopping {
+/* Looping only while the process is genuinely mid-transition. */
+.settings-view__status-dot--pending {
   background: var(--app-status-pending);
   box-shadow: var(--app-status-pending-ring);
   animation: settings-view-status-pulse 1.4s ease-in-out infinite;
@@ -327,8 +368,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .settings-view__status-dot--starting,
-  .settings-view__status-dot--stopping,
+  .settings-view__status-dot--pending,
   .settings-view__reading-dot {
     animation: none;
   }
@@ -343,6 +383,7 @@
 }
 
 .settings-view__setting-row h2,
+.settings-view__card-toggle h2,
 .settings-view__section-heading h2,
 .settings-view__field > label {
   display: block;
@@ -354,6 +395,7 @@
 }
 
 .settings-view__setting-row p,
+.settings-view__card-toggle p,
 .settings-view__section-heading p {
   margin: 4px 0 0;
   font-size: 12px;
@@ -365,7 +407,6 @@
   background: var(--app-border-subtle);
 }
 
-.settings-view__model-size,
 .settings-view__section-heading > span,
 .settings-view__section-heading > output {
   font-family: var(--font-mono);
@@ -373,12 +414,6 @@
   font-weight: 500;
   letter-spacing: 0.08em;
   color: var(--app-text-muted);
-}
-
-.settings-view__model-name {
-  font-family: var(--font-mono);
-  font-size: 12px !important;
-  color: var(--app-text) !important;
 }
 
 .settings-view__progress {
@@ -618,19 +653,30 @@
 .settings-view__skeleton-cards {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 24px;
 }
 
 .settings-view__skeleton-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: var(--radius-surface);
+  background: var(--app-surface-panel);
+}
+
+.settings-view__skeleton-card-row {
   display: flex;
   min-height: 72px;
   align-items: center;
   justify-content: space-between;
   gap: 24px;
   padding: 16px;
-  border: 1px solid var(--app-border-subtle);
-  border-radius: var(--radius-surface);
-  background: var(--app-surface-panel);
+}
+
+.settings-view__skeleton-card-divider {
+  height: 1px;
+  margin-inline: 16px;
+  background: var(--app-border-subtle);
 }
 
 .settings-view__skeleton-identity {

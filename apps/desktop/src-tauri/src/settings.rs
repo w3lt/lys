@@ -1,12 +1,22 @@
-use std::{fs, io::ErrorKind, path::PathBuf};
+use std::{
+    fs,
+    io::ErrorKind,
+    path::{Path, PathBuf},
+};
 
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(default)]
-pub struct LysSettings {
+#[serde(default, rename_all = "camelCase")]
+pub struct RunTimeSettings {
     pub auto_start_backend: bool,
     pub selected_model: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct LysSettings {
+    run_time: RunTimeSettings,
 }
 
 impl LysSettings {
@@ -57,7 +67,7 @@ fn default_settings_path() -> Result<PathBuf, String> {
         .join("settings.json"))
 }
 
-fn create_parent_dir(path: &PathBuf) -> Result<(), String> {
+fn create_parent_dir(path: &Path) -> Result<(), String> {
     if let Some(directory) = path.parent() {
         fs::create_dir_all(directory)
             .map_err(|err| format!("Failed to create {}: {err}", directory.display()))?;

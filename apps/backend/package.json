@@ -11,7 +11,9 @@
     "@lmstudio/sdk": "^1.5.0",
     "@lys/protocol": "workspace:*",
     "fastify": "5.10.0",
+    "fastify-plugin": "^6.0.0",
     "openai": "6.49.0",
+    "uuid": "^14.0.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {

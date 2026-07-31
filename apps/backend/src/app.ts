@@ -1,13 +1,10 @@
 import Fastify from "fastify"
 import registerHealthRoutes from "./modules/health/routes"
 import registerLlmRoutes from "./modules/llm/routes"
-
-export type BackendConfig = {
-  backendHost: string
-  backendPort: number
-  lmstudioHost: string
-  lmstudioPort: number
-}
+import registerChatRoutes from "./modules/chat"
+import fastifySse from "@fastify/sse"
+import { BackendConfig } from "./config"
+import singletonServicesPlugin from "./di/fastify"
 
 export type BuildAppOptions = {
   config: BackendConfig
@@ -18,11 +15,15 @@ export async function buildApp(options: BuildAppOptions) {
     logger: true
   })
 
-  void options
+  await app.register(fastifySse)
+  await app.register(singletonServicesPlugin, {
+    config: options.config
+  })
 
   // =============== REGISTER THE ROUTES =============== //
-  registerHealthRoutes(app)
-  registerLlmRoutes(app)
+  await app.register(registerHealthRoutes)
+  await app.register(registerLlmRoutes)
+  await app.register(registerChatRoutes)
   // =============== REGISTER THE ROUTES =============== //
 
   return app

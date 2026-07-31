@@ -1,13 +1,9 @@
 import { llmLoadModelApi, LlmLoadModelApiRoute } from "@lys/protocol"
 import { FastifyInstance, FastifyRequest } from "fastify"
 import * as z from "zod"
-import { RegisterLlmRoutesOptions } from "./dependencies"
 import { LMStudioClient } from "@lmstudio/sdk"
 
-export default async function registerLlmLoadModelRoute(
-  app: FastifyInstance,
-  options: RegisterLlmRoutesOptions
-) {
+export default async function registerLlmLoadModelRoute(app: FastifyInstance) {
   app.route<LlmLoadModelApiRoute>({
     method: llmLoadModelApi.method,
     url: llmLoadModelApi.path,
@@ -23,15 +19,14 @@ export default async function registerLlmLoadModelRoute(
       const result = llmLoadModelApi.body.safeParse(data)
       return result.success ? { value: result.data } : { error: result.error }
     },
-    handler: (request) => loadLlmApiHandler(request, options.createClient)
+    handler: (request) => loadLlmApiHandler(request)
   })
 }
 
 async function loadLlmApiHandler(
-  request: FastifyRequest<LlmLoadModelApiRoute>,
-  createClient: () => LMStudioClient
+  request: FastifyRequest<LlmLoadModelApiRoute>
 ): Promise<LlmLoadModelApiRoute["Reply"]> {
-  const lmsClient = createClient()
+  const lmsClient = new LMStudioClient()
   const loadedModel = await lmsClient.llm.load(request.body.modelId)
   const downloadedModels = await lmsClient.system.listDownloadedModels("llm")
   const downloadedModel = downloadedModels.find(

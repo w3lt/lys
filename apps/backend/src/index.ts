@@ -1,17 +1,5 @@
-import {
-  BACKEND_HOST,
-  BACKEND_PORT,
-  LMSTUDIO_HOST,
-  LMSTUDIO_PORT
-} from "@lys/protocol"
-import { BackendConfig, buildApp } from "./app"
-
-const config: BackendConfig = {
-  backendHost: BACKEND_HOST,
-  backendPort: BACKEND_PORT,
-  lmstudioHost: LMSTUDIO_HOST,
-  lmstudioPort: LMSTUDIO_PORT
-}
+import { config } from "./config"
+import { buildApp } from "./app"
 
 const app = await buildApp({ config })
 

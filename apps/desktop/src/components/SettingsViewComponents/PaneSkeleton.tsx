@@ -12,16 +12,18 @@ import { Skeleton } from "@/components/ui/skeleton"
  * Widths are fixed lengths where the real element is label-sized and
  * percentages where it fills the pane, matching how that element sizes itself.
  */
-interface SkeletonCard {
-  title: string
-  meta: string
-}
-
 interface SkeletonRow {
   label: string
   description: string
   /** The control parked at the end of the row: a button, switch, or slider. */
   control: { width: string; height: string }
+}
+
+interface SkeletonCard {
+  title: string
+  meta: string
+  /** A setting the card carries under its own divider, below the status line. */
+  row?: SkeletonRow
 }
 
 interface PaneSkeletonShape {
@@ -38,12 +40,20 @@ interface PaneSkeletonShape {
 const PANE_SKELETONS: Record<SettingsPane, PaneSkeletonShape> = {
   runtime: {
     cards: [
-      { title: "128px", meta: "196px" },
+      {
+        title: "128px",
+        meta: "196px",
+        row: {
+          label: "164px",
+          description: "268px",
+          control: { width: "44px", height: "24px" }
+        }
+      },
       { title: "104px", meta: "168px" }
     ],
-    heading: true,
+    heading: false,
     rows: [],
-    list: ["58%", "76%", "43%"],
+    list: [],
     block: false
   },
   model: {
@@ -140,24 +150,52 @@ export default function PaneSkeleton({ pane }: { pane: SettingsPane }) {
               key={index}
               style={stagger(index, CARD_STAGGER_MS)}
             >
-              <div className="settings-view__skeleton-identity">
-                <Skeleton className="settings-view__skeleton-dot" />
-                <div className="settings-view__skeleton-lines">
-                  <Skeleton
-                    className="settings-view__skeleton-bar"
-                    style={{ width: card.title }}
-                  />
-                  <Skeleton
-                    className="settings-view__skeleton-bar settings-view__skeleton-bar--secondary"
-                    data-tone="muted"
-                    style={{ width: card.meta }}
-                  />
+              <div className="settings-view__skeleton-card-row">
+                <div className="settings-view__skeleton-identity">
+                  <Skeleton className="settings-view__skeleton-dot" />
+                  <div className="settings-view__skeleton-lines">
+                    <Skeleton
+                      className="settings-view__skeleton-bar"
+                      style={{ width: card.title }}
+                    />
+                    <Skeleton
+                      className="settings-view__skeleton-bar settings-view__skeleton-bar--secondary"
+                      data-tone="muted"
+                      style={{ width: card.meta }}
+                    />
+                  </div>
+                </div>
+                <div className="settings-view__skeleton-actions">
+                  <Skeleton className="settings-view__skeleton-action" />
+                  <Skeleton className="settings-view__skeleton-action" />
                 </div>
               </div>
-              <div className="settings-view__skeleton-actions">
-                <Skeleton className="settings-view__skeleton-action" />
-                <Skeleton className="settings-view__skeleton-action" />
-              </div>
+
+              {card.row ? (
+                <>
+                  <div className="settings-view__skeleton-card-divider" />
+                  <div className="settings-view__skeleton-card-row">
+                    <div className="settings-view__skeleton-lines">
+                      <Skeleton
+                        className="settings-view__skeleton-bar"
+                        style={{ width: card.row.label }}
+                      />
+                      <Skeleton
+                        className="settings-view__skeleton-bar settings-view__skeleton-bar--secondary"
+                        data-tone="muted"
+                        style={{ width: card.row.description }}
+                      />
+                    </div>
+                    <Skeleton
+                      className="settings-view__skeleton-control"
+                      style={{
+                        width: card.row.control.width,
+                        height: card.row.control.height
+                      }}
+                    />
+                  </div>
+                </>
+              ) : null}
             </div>
           ))}
         </div>

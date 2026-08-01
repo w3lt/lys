@@ -1,5 +1,5 @@
-import { llmListModelsApi, LlmListModelsApiRoute } from "@lys/protocol"
-import { FastifyInstance } from "fastify"
+import { llmListModelsApi, type LlmListModelsApiRoute } from "@lys/protocol"
+import type { FastifyInstance } from "fastify"
 import * as z from "zod"
 
 /**

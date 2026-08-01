@@ -1,5 +1,5 @@
-import { llmLoadModelApi, LlmLoadModelApiRoute } from "@lys/protocol"
-import { FastifyInstance, FastifyRequest } from "fastify"
+import { llmLoadModelApi, type LlmLoadModelApiRoute } from "@lys/protocol"
+import type { FastifyInstance, FastifyRequest } from "fastify"
 import * as z from "zod"
 import { LMStudioClient } from "@lmstudio/sdk"
 

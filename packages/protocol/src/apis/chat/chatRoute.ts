@@ -15,6 +15,11 @@ export const chatApiStreamEventSchema = z.discriminatedUnion("type", [
   }),
 
   z.strictObject({
+    type: z.literal("title"),
+    title: z.string().min(1)
+  }),
+
+  z.strictObject({
     type: z.literal("delta"),
     content: z.string().min(1)
   }),

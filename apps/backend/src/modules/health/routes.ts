@@ -1,5 +1,5 @@
 import { apiHeathCheckRoute } from "@lys/protocol"
-import { FastifyInstance } from "fastify"
+import type { FastifyInstance } from "fastify"
 
 /**
  * Registers the health endpoint on a Fastify application.

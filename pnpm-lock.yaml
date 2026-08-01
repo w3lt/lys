@@ -55,6 +55,9 @@ importers:
       "@lys/protocol":
         specifier: workspace:*
         version: link:../../packages/protocol
+      "@lys/share":
+        specifier: workspace:*
+        version: link:../../packages/share
       fastify:
         specifier: 5.10.0
         version: 5.10.0

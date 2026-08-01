@@ -1,6 +1,6 @@
 import fastifyPlugin from "fastify-plugin"
 import { type FastifyPluginAsync } from "fastify"
-import { BackendConfig } from "../config"
+import type { BackendConfig } from "../config"
 import { createSingletonServices, disposeSingletonServices } from "./singleton"
 
 /** Options used to install application-scoped singleton services. */

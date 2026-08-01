@@ -9,7 +9,7 @@ import reactX from "eslint-plugin-react-x"
 import reactDom from "eslint-plugin-react-dom"
 
 export default defineConfig([
-  globalIgnores(["dist", "node_modules"]),
+  globalIgnores(["dist", "node_modules", "**/src-tauri/target"]),
   {
     files: ["**/*.{js,mjs,cjs,ts,mts,cts,jsx,tsx}"],
     plugins: { js },
@@ -20,6 +20,15 @@ export default defineConfig([
       reactX.configs["recommended-typescript"],
       reactDom.configs.recommended
     ],
+    rules: {
+      "@typescript-eslint/consistent-type-imports": [
+        "error",
+        {
+          prefer: "type-imports",
+          fixStyle: "inline-type-imports"
+        }
+      ]
+    },
     languageOptions: { globals: { ...globals.browser, ...globals.node } }
   },
   tseslint.configs.recommended,

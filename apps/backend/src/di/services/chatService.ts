@@ -1,5 +1,8 @@
 import { OpenAI } from "openai"
-import { ChatCompletionMessageParam } from "openai/resources/index.mjs"
+import type { ChatCompletionMessageParam } from "openai/resources/index.mjs"
+import * as z from "zod"
+import { titleGenerationPrompt } from "../../utils/prompts"
+import { zodTextFormat } from "openai/helpers/zod"
 
 /** Settings used to create an application-scoped OpenAI-compatible chat client. */
 export type ChatServiceCreationOptions = {
@@ -28,6 +31,16 @@ export type CompleteChatOptions = {
   /** Abort signal that cancels the in-flight completion request. */
   signal?: AbortSignal
 }
+
+export type TitleGenerationOptions = {
+  message: string
+  model: string
+  signal?: AbortSignal
+}
+
+const titleGenerationOutputSchema = z.object({
+  title: z.string()
+})
 
 /** Fallback credential value for unauthenticated OpenAI-compatible local endpoints. */
 const DUMMY_API_KEY = "dummy-api-key"
@@ -69,6 +82,40 @@ export default class ChatService {
       },
       { signal }
     )
+  }
+
+  public async generateTitle({
+    message,
+    model,
+    signal
+  }: TitleGenerationOptions): Promise<string> {
+    const response = await this.#openaiClient.responses.parse(
+      {
+        model,
+        instructions: titleGenerationPrompt(),
+        input: message,
+
+        reasoning: {
+          effort: "high"
+        },
+
+        text: {
+          format: zodTextFormat(titleGenerationOutputSchema, "title_generation")
+        },
+
+        store: false,
+        stream: false
+      },
+      { signal }
+    )
+
+    const title = response.output_parsed?.title.trim()
+
+    if (!title) {
+      throw new Error("The model did not generate a title")
+    }
+
+    return title
   }
 
   /**

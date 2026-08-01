@@ -1,9 +1,6 @@
-import {
-  BaseLoadModelOpts,
-  LLMLoadModelConfig,
-  LMStudioClient
-} from "@lmstudio/sdk"
-import { LlmInfo } from "@lys/protocol"
+import type { BaseLoadModelOpts, LLMLoadModelConfig } from "@lmstudio/sdk"
+import { LMStudioClient } from "@lmstudio/sdk"
+import type { LlmInfo } from "@lys/protocol"
 
 /** Settings used to create an application-scoped LM Studio client. */
 export type LlmServiceCreationOptions = {

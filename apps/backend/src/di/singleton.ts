@@ -1,5 +1,6 @@
-import { BackendConfig } from "../config"
+import type { BackendConfig } from "../config"
 import ChatService from "./services/chatService"
+import ConversationService from "./services/conversationService"
 import LlmService from "./services/llmService"
 
 /** Application-scoped services owned for a Fastify application's lifetime. */
@@ -8,6 +9,7 @@ export type SingletonServices = Readonly<{
   chatService: ChatService
   /** LM Studio lifecycle and inventory adapter configured for the backend's local endpoint. */
   llmService: LlmService
+  conversationService: ConversationService
 }>
 
 /**
@@ -28,9 +30,14 @@ export function createSingletonServices(
     lmsBaseUrl: `ws://${config.lmstudioHost}:${config.lmstudioPort}`
   })
 
+  const conversationService = new ConversationService({
+    databaseFilePath: config.databaseFilePath
+  })
+
   return {
     chatService,
-    llmService
+    llmService,
+    conversationService
   }
 }
 
@@ -47,4 +54,5 @@ export async function disposeSingletonServices(
 ): Promise<void> {
   await services.chatService[Symbol.asyncDispose]()
   await services.llmService[Symbol.asyncDispose]()
+  services.conversationService[Symbol.dispose]()
 }

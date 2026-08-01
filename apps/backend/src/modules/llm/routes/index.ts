@@ -1,4 +1,4 @@
-import { FastifyInstance } from "fastify"
+import { type FastifyInstance } from "fastify"
 import registerLlmListModelsRoute from "./listModelsRoute"
 import registerLlmLoadModelRoute from "./loadModelRoute"
 

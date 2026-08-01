@@ -10,6 +10,7 @@
     "@fastify/sse": "^0.6.0",
     "@lmstudio/sdk": "^1.5.0",
     "@lys/protocol": "workspace:*",
+    "@lys/share": "workspace:*",
     "fastify": "5.10.0",
     "fastify-plugin": "^6.0.0",
     "openai": "6.49.0",

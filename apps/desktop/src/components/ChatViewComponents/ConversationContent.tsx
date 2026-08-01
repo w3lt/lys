@@ -1,4 +1,4 @@
-import { Message } from "@/app/types"
+import type { Message } from "@/app/types"
 import ChatMessage from "./ChatMessage"
 
 type ConversationContent = {

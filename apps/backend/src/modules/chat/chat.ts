@@ -1,5 +1,6 @@
-import { chatApi, ChatApiRoute, ChatApiStreamEvent } from "@lys/protocol"
-import { FastifyInstance } from "fastify"
+import type { ChatApiRoute, ChatApiStreamEvent } from "@lys/protocol"
+import { chatApi } from "@lys/protocol"
+import type { FastifyInstance } from "fastify"
 import { v7 as uuidv7 } from "uuid"
 
 /**
@@ -43,7 +44,21 @@ export default async function registerChatRoute(app: FastifyInstance) {
         message,
         model
       } = request.body
-      const conversationId = conversationIdParams ?? uuidv7()
+      const isNewConversation = !conversationIdParams
+
+      const conversation = isNewConversation
+        ? this.conversationService.createConversation()
+        : this.conversationService.getConversationMetadata({
+            id: conversationIdParams
+          })
+
+      if (!conversation) {
+        return reply.code(404).send({
+          message: `Conversation ${conversationIdParams} was not found`
+        })
+      }
+
+      const conversationId = conversation.id
       const assistantMessageId = uuidv7()
 
       await sendEvent({
@@ -52,8 +67,8 @@ export default async function registerChatRoute(app: FastifyInstance) {
         assistantMessageId
       })
 
-      try {
-        const stream = await this.chatService.completeChatStream({
+      const chatTask = this.chatService
+        .completeChatStream({
           messages: [
             {
               role: "user",
@@ -64,58 +79,90 @@ export default async function registerChatRoute(app: FastifyInstance) {
           stream: true,
           signal: abortController.signal
         })
+        .then(async (stream) => {
+          for await (const chunk of stream) {
+            // We request only one completion, whose index is 0.
+            // Some chunks may have an empty choices array.
+            const choice = chunk.choices.find(({ index }) => index === 0)
 
-        for await (const chunk of stream) {
-          // We request only one completion, whose index is 0.
-          // Some chunks may have an empty choices array.
-          const choice = chunk.choices.find(({ index }) => index === 0)
+            if (!choice) continue
 
-          if (!choice) continue
-
-          const content = choice.delta.content
-          if (content) {
-            sendEvent({
-              type: "delta",
-              content
-            })
-          }
-
-          switch (choice.finish_reason) {
-            case null:
-              continue
-
-            case "stop":
-            case "length":
-              await sendEvent({
-                type: "done",
-                finishReason: choice.finish_reason
+            const content = choice.delta.content
+            if (content) {
+              sendEvent({
+                type: "delta",
+                content
               })
-              return
+            }
 
-            default:
-              throw new Error(
-                `Unsupported finish reason: ${choice.finish_reason}`
-              )
+            switch (choice.finish_reason) {
+              case null:
+                continue
+
+              case "stop":
+              case "length":
+                await sendEvent({
+                  type: "done",
+                  finishReason: choice.finish_reason
+                })
+                return
+
+              default:
+                throw new Error(
+                  `Unsupported finish reason: ${choice.finish_reason}`
+                )
+            }
           }
-        }
 
-        throw new Error("Model stream ended without a finish reason")
-      } catch (error) {
-        request.log.error({ err: error }, "Chat completion stream failed")
-
-        // The client is gone, so there is nowhere to send an error event.
-        if (abortController.signal.aborted || !reply.sse.isConnected) {
-          return
-        }
-
-        await sendEvent({
-          type: "error",
-          message:
-            error instanceof Error
-              ? error.message
-              : "Unknown chat completion error"
+          throw new Error("Model stream ended without a finish reason")
         })
-      }
+        .catch(async (error) => {
+          request.log.error({ err: error }, "Chat completion stream failed")
+
+          // The client is gone, so there is nowhere to send an error event.
+          if (abortController.signal.aborted || !reply.sse.isConnected) {
+            return
+          }
+
+          await sendEvent({
+            type: "error",
+            message:
+              error instanceof Error
+                ? error.message
+                : "Unknown chat completion error"
+          })
+        })
+
+      const titleGenerationTask = isNewConversation
+        ? this.chatService
+            .generateTitle({
+              message,
+              model,
+              signal: abortController.signal
+            })
+            .then(async (title) => {
+              await sendEvent({
+                type: "title",
+                title
+              })
+            })
+            .catch(async (error) => {
+              await sendEvent({
+                type: "error",
+                message:
+                  error instanceof Error
+                    ? error.message
+                    : "Unknown title generation error"
+              })
+            })
+        : Promise.resolve()
+
+      /*
+       * Both tasks were already started and are running concurrently.
+       * This only prevents the handler—and therefore the SSE connection—from
+       * ending until both have settled.
+       */
+      await Promise.allSettled([chatTask, titleGenerationTask])
     }
   })
 }

@@ -1,5 +1,5 @@
 import { loadSettings } from "@/lib/apis/tauri/settings"
-import { LysSettings, initialSettingsState } from "./settings"
+import { initialSettingsState, type LysSettings } from "./settings"
 import { create } from "zustand"
 import { BACKEND_HOST, BACKEND_PORT } from "@lys/protocol"
 

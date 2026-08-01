@@ -3,7 +3,7 @@ import registerHealthRoutes from "./modules/health/routes"
 import registerLlmRoutes from "./modules/llm/routes"
 import registerChatRoutes from "./modules/chat"
 import fastifySse from "@fastify/sse"
-import { BackendConfig } from "./config"
+import { type BackendConfig } from "./config"
 import singletonServicesPlugin from "./di/fastify"
 
 /** Options used to construct the backend Fastify application. */

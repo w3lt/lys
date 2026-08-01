@@ -1,4 +1,4 @@
-import { LysConfig } from "@/app/types"
+import type { LysConfig } from "@/app/types"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Separator } from "@/components/ui/separator"
 import { Slider } from "@/components/ui/slider"

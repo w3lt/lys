@@ -8,8 +8,8 @@ import {
 import { appReducer, createInitialState } from "@/app/state"
 
 import { TitleBar } from "@/components/TitleBar"
-import { Composer } from "@/components/Composer"
-import { ChatView } from "@/views/ChatView/ChatView"
+
+const ChatView = lazy(() => import("@/views/ChatView/ChatView"))
 const SettingsView = lazy(() => import("@/views/SettingsView/SettingsView"))
 
 import "./App.scss"
@@ -112,48 +112,23 @@ export default function App() {
     sendPrompt(preservedDraft)
   }
 
-  function newChat() {
-    cancelTextSimulation()
-    nextMessageId.current = 1
-    dispatch({ type: "newChat" })
-  }
-
-  function openModelSettings() {
-    dispatch({ type: "viewChanged", view: "settings" })
-    dispatch({ type: "paneChanged", pane: "runtime" })
-  }
-
   if (initializing) return null
   return (
     <div className="app-shell">
       <TitleBar />
 
       {activeView === "chat" ? (
-        <main className="app-shell__chat">
-          <ChatView
-            atBottom={state.atBottom}
-            messages={state.messages}
-            onRetry={retryLastError}
-            onScrollPositionChange={(atBottom) =>
-              dispatch({ type: "scrollPositionChanged", atBottom })
-            }
-            onSend={sendPrompt}
-            onStop={stopReply}
-            streaming={state.streaming}
-          />
-          <Composer
-            config={state.config}
-            draft={state.draft}
-            messageCount={state.messages.length}
-            onDraftChange={(draft) => dispatch({ type: "draftChanged", draft })}
-            onNewChat={newChat}
-            onOpenModelSettings={openModelSettings}
-            onSend={() => sendPrompt(state.draft)}
-            onStop={stopReply}
-            runtime={state.runtime}
-            streaming={state.streaming}
-          />
-        </main>
+        <ChatView
+          atBottom={state.atBottom}
+          messages={state.messages}
+          onRetry={retryLastError}
+          onScrollPositionChange={(atBottom) =>
+            dispatch({ type: "scrollPositionChanged", atBottom })
+          }
+          onSend={sendPrompt}
+          onStop={stopReply}
+          streaming={state.streaming}
+        />
       ) : (
         <SettingsView
           onDone={() => dispatch({ type: "viewChanged", view: "chat" })}

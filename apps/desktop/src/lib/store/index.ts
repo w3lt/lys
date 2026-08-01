@@ -2,14 +2,19 @@ import { loadSettings } from "@/lib/apis/tauri/settings"
 import { initialSettingsState, type LysSettings } from "./settings"
 import { create } from "zustand"
 import { BACKEND_HOST, BACKEND_PORT } from "@lys/protocol"
+import { getBackendStatus, startBackend } from "../apis"
 
 export type AppView = "chat" | "settings"
+export type BackendServerStatus =
+  "running" | "starting" | "stopping" | "stopped"
 
 type LysState = {
   activeView: AppView
   settings: LysSettings
   backendUrl: string
   initializing: boolean
+  backendServerStatus: BackendServerStatus
+  selectedModelLoaded: boolean
 }
 
 type LysActions = {
@@ -24,7 +29,9 @@ const initialState: LysState = {
   activeView: "chat",
   settings: initialSettingsState,
   backendUrl: `http://${BACKEND_HOST}:${BACKEND_PORT}`,
-  initializing: true
+  initializing: true,
+  backendServerStatus: "stopped",
+  selectedModelLoaded: false
 }
 
 export const useLysStore = create<LysStore>()((set) => ({
@@ -40,6 +47,13 @@ export const useLysStore = create<LysStore>()((set) => ({
 
   initialize: async () => {
     const settings = await loadSettings()
-    set({ settings, initializing: false })
+    if (settings.runtime.autoStartBackend) {
+      await startBackend()
+    }
+    const backendServerStatus: BackendServerStatus = (await getBackendStatus())
+      .running
+      ? "running"
+      : "stopped"
+    set({ settings, initializing: false, backendServerStatus })
   }
 }))

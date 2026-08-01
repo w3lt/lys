@@ -1,78 +1,32 @@
-import {
-  startBackend as startBackendCommand,
-  stopBackend as stopBackendCommand
-} from "@/lib/apis"
-import { invoke } from "@tauri-apps/api/core"
 import { useEffect, useState } from "react"
-
-export type RuntimeSettings = {
-  autoStartBackend: boolean
-  selectedModel?: string
-}
-
-export type BackendStatus = "starting" | "stopping" | "running" | "stopped"
-
-const useRuntimeSettings = () => {
-  const [settingsBuffer, setSettingsBuffer] = useState<RuntimeSettings>()
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    const loadSettings = async () => {
-      try {
-        const settings = await invoke<RuntimeSettings>("load_settings")
-        setSettingsBuffer(settings)
-      } catch {
-        // Temporarily ignore, will handle later
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    void loadSettings()
-  }, [])
-
-  return { settingsBuffer, setSettingsBuffer, loading }
-}
+import { type BackendServerStatus, useLysStore } from "../store"
 
 export function useRuntimeSettingsContext() {
-  const { settingsBuffer, setSettingsBuffer, loading } = useRuntimeSettings()
-  const [backendStatus, setBackendStatus] = useState<BackendStatus>("stopped")
+  const runtimeSettings = useLysStore((state) => state.settings.runtime)
+  const { startBackend, stopBackend, backendServerInfo, getBackendUptimeMs } =
+    useLysStore((state) => state)
+  const [settingsBuffer, setSettingsBuffer] = useState(runtimeSettings)
+  const [uptimeMs, setUptimeMs] = useState(() => {
+    return getBackendUptimeMs()
+  })
 
-  const startBackend = async () => {
-    if (backendStatus === "stopped") {
-      setBackendStatus("starting")
-      try {
-        await startBackendCommand()
-        setBackendStatus("running")
-      } catch {
-        setBackendStatus("stopped")
-      }
-    }
-  }
-
-  const stopBackend = async () => {
-    if (backendStatus === "running") {
-      setBackendStatus("stopping")
-      try {
-        await stopBackendCommand()
-        setBackendStatus("stopped")
-      } catch {
-        setBackendStatus("running")
-      }
-    }
-  }
+  useEffect(() => {
+    setInterval(() => {
+      setUptimeMs(getBackendUptimeMs())
+    }, 1000)
+  }, [getBackendUptimeMs])
 
   return {
     startBackend,
     stopBackend,
     settingsBuffer,
     setSettingsBuffer,
-    loadingSettings: loading,
-    backendStatus
+    backendServerInfo,
+    uptimeMs
   }
 }
 
-export function backendStatusLabel(status: BackendStatus) {
+export function backendStatusLabel(status: BackendServerStatus) {
   switch (status) {
     case "running":
       return "Backend running"

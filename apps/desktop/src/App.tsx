@@ -22,7 +22,7 @@ export default function App() {
     void initialize()
   }, [initialize])
 
-  const activeView = useLysStore((state) => state.activeView)
+  const { activeView, setActiveView } = useLysStore((state) => state)
 
   const [state, dispatch] = useReducer(
     appReducer,
@@ -130,9 +130,7 @@ export default function App() {
           streaming={state.streaming}
         />
       ) : (
-        <SettingsView
-          onDone={() => dispatch({ type: "viewChanged", view: "chat" })}
-        />
+        <SettingsView onDone={() => setActiveView("chat")} />
       )}
     </div>
   )

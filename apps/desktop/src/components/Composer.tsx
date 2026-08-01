@@ -5,15 +5,11 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 
 import "./Composer.scss"
-import { BackendServerStatus, useLysStore } from "@/lib/store"
+import { type BackendServerStatus, useLysStore } from "@/lib/store"
+import { useChatViewStore } from "@/lib/store/chat-view"
 
 interface ComposerProps {
-  draft: string
   messageCount: number
-  streaming: boolean
-  onDraftChange: (draft: string) => void
-  onNewChat: () => void
-  onOpenModelSettings: () => void
   onSend: () => void
   onStop: () => void
 }
@@ -22,14 +18,11 @@ interface ComposerProps {
  * The meta row teaches the send shortcut while the chat is still empty, then
  * hands that space over to the session counters once there is history.
  */
-function statusParts(
-  config: LysConfig,
-  messageCount: number
-): [string, string] {
+function statusParts(messageCount: number): [string, string] {
   if (messageCount === 0) return ["Enter sends", "Shift+Enter for a newline"]
   return [
     `${messageCount} ${messageCount === 1 ? "message" : "messages"}`,
-    `${config.contextSize.toLocaleString()} context`
+    "16384 context"
   ]
 }
 
@@ -42,23 +35,21 @@ function runtimeLabel(
   return "Model ready"
 }
 
-export function Composer({
-  draft,
-  messageCount,
-  streaming,
-  onDraftChange,
-  onNewChat,
-  onOpenModelSettings,
-  onSend,
-  onStop
-}: ComposerProps) {
-  const backendServerStatus = useLysStore((state) => state.backendServerStatus)
-  const selectedModelLoaded = useLysStore((state) => state.selectedModelLoaded)
+export function Composer({ messageCount, onSend, onStop }: ComposerProps) {
+  const { backendServerInfo, selectedModelLoaded, setActiveView } = useLysStore(
+    (state) => state
+  )
+  const backendServerStatus = backendServerInfo.status
+
+  // Input draft
+  const { inputDraft, setInputDraft, setConversation, streaming } =
+    useChatViewStore((state) => state)
+
   const runtimeAvailable =
     backendServerStatus === "running" && selectedModelLoaded
 
-  const sendDisabled = streaming || !runtimeAvailable || !draft.trim()
-  const [statusLead, statusTrail] = statusParts(config, messageCount)
+  const sendDisabled = streaming || !runtimeAvailable || !inputDraft.trim()
+  const [statusLead, statusTrail] = statusParts(messageCount)
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -85,11 +76,11 @@ export function Composer({
             aria-label="Message Lys"
             className={`composer__textarea${streaming ? " composer__textarea--streaming" : ""}`}
             id="lys-composer"
-            onChange={(event) => onDraftChange(event.currentTarget.value)}
+            onChange={(event) => setInputDraft(event.currentTarget.value)}
             onKeyDown={handleKeyDown}
             placeholder="Message Lys…"
             rows={1}
-            value={draft}
+            value={inputDraft}
           />
           <Button
             aria-label="Send message"
@@ -118,7 +109,7 @@ export function Composer({
             <Button
               aria-label="New conversation"
               className="composer__new"
-              onClick={onNewChat}
+              onClick={() => setConversation(undefined)}
               size="sm"
               variant="ghost"
             >
@@ -129,7 +120,7 @@ export function Composer({
             <Button
               aria-label="Open model settings"
               className="composer__model"
-              onClick={onOpenModelSettings}
+              onClick={() => setActiveView("settings")}
               size="sm"
               variant="ghost"
             >
@@ -141,7 +132,7 @@ export function Composer({
                     : "composer__dot composer__dot--off"
                 }
               />
-              {config.model}
+              Gemma 4 12B QAT
             </Button>
           </div>
           <div className="composer__status">

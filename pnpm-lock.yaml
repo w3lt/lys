@@ -98,6 +98,9 @@ importers:
       "@lys/protocol":
         specifier: workspace:*
         version: link:../../packages/protocol
+      "@lys/share":
+        specifier: workspace:*
+        version: link:../../packages/share
       "@tailwindcss/vite":
         specifier: ^4.3.3
         version: 4.3.3(vite@7.3.6(@types/node@26.1.2)(jiti@2.7.0)(lightningcss@1.32.0)(sass@1.102.0)(tsx@4.23.1)(yaml@2.9.0))

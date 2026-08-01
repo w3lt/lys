@@ -16,7 +16,7 @@ pub struct RunTimeSettings {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default, rename_all = "camelCase")]
 pub struct LysSettings {
-    run_time: RunTimeSettings,
+    runtime: RunTimeSettings,
 }
 
 impl LysSettings {

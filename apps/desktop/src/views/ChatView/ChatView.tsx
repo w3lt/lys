@@ -91,7 +91,7 @@ export default function ChatView({
         )}
       </section>
 
-      <Composer />
+      <Composer messageCount={0} onSend={() => null} onStop={() => null} />
     </main>
   )
 }

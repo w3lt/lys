@@ -1,17 +1,15 @@
 import type { KeyboardEvent } from "react"
 import { ArrowDown, Plus, Square } from "lucide-react"
 
-import type { LysConfig, RuntimeState } from "@/app/types"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 
 import "./Composer.scss"
+import { BackendServerStatus, useLysStore } from "@/lib/store"
 
 interface ComposerProps {
-  config: LysConfig
   draft: string
   messageCount: number
-  runtime: RuntimeState
   streaming: boolean
   onDraftChange: (draft: string) => void
   onNewChat: () => void
@@ -35,20 +33,18 @@ function statusParts(
   ]
 }
 
-function runtimeLabel(runtime: RuntimeState) {
-  if (runtime.backend !== "running") return "Backend offline"
-  if (runtime.model === "loading")
-    return `Loading model · ${runtime.modelProgress}%`
-  if (runtime.model === "unloading") return "Releasing model"
-  if (runtime.model !== "loaded") return "No model loaded"
+function runtimeLabel(
+  backendServerStatus: BackendServerStatus,
+  selectedModelLoaded: boolean
+) {
+  if (backendServerStatus !== "running") return "Backend offline"
+  if (!selectedModelLoaded) return "No model loaded"
   return "Model ready"
 }
 
 export function Composer({
-  config,
   draft,
   messageCount,
-  runtime,
   streaming,
   onDraftChange,
   onNewChat,
@@ -56,8 +52,11 @@ export function Composer({
   onSend,
   onStop
 }: ComposerProps) {
+  const backendServerStatus = useLysStore((state) => state.backendServerStatus)
+  const selectedModelLoaded = useLysStore((state) => state.selectedModelLoaded)
   const runtimeAvailable =
-    runtime.backend === "running" && runtime.model === "loaded"
+    backendServerStatus === "running" && selectedModelLoaded
+
   const sendDisabled = streaming || !runtimeAvailable || !draft.trim()
   const [statusLead, statusTrail] = statusParts(config, messageCount)
 
@@ -72,7 +71,7 @@ export function Composer({
     <footer className="composer">
       {!runtimeAvailable && (
         <div className="composer__offline" role="status">
-          <span>{runtimeLabel(runtime)}</span>
+          <span>{runtimeLabel(backendServerStatus, selectedModelLoaded)}</span>
           <span>Open model settings to restore local generation.</span>
         </div>
       )}

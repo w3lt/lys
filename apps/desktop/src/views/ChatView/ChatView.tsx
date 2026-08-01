@@ -5,6 +5,7 @@ import type { Message } from "@/app/types"
 import { Button } from "@/components/ui/button"
 
 import "./ChatView.scss"
+import { Composer } from "@/components/Composer"
 
 const StarterView = lazy(
   () => import("@/components/ChatViewComponents/StarterView")
@@ -23,7 +24,7 @@ interface ChatViewProps {
   onStop: () => void
 }
 
-export function ChatView({
+export default function ChatView({
   messages,
   streaming,
   atBottom,
@@ -58,33 +59,39 @@ export function ChatView({
   }
 
   return (
-    <section className="chat-view" aria-label="Conversation">
-      <div
-        className="chat-view__scroller"
-        data-testid="transcript"
-        onScroll={handleScroll}
-        ref={transcriptRef}
-      >
-        {messages.length === 0 ? (
-          <StarterView onSend={onSend} />
-        ) : (
-          <ConversationContent messages={messages} />
-        )}
-      </div>
-
-      {!atBottom && (
-        <Button
-          className="chat-view__jump"
-          onClick={jumpToLatest}
-          size="sm"
-          variant="outline"
+    <main className="app-shell__chat">
+      <section className="chat-view" aria-label="Conversation">
+        <div
+          className="chat-view__scroller"
+          data-testid="transcript"
+          onScroll={handleScroll}
+          ref={transcriptRef}
         >
-          <ArrowDown aria-hidden="true" />
-          Jump to latest
-        </Button>
-      )}
+          {messages.length === 0 ? (
+            <StarterView onSend={onSend} />
+          ) : (
+            <ConversationContent messages={messages} />
+          )}
+        </div>
 
-      {streaming && <span className="sr-only">Lys is generating a reply</span>}
-    </section>
+        {!atBottom && (
+          <Button
+            className="chat-view__jump"
+            onClick={jumpToLatest}
+            size="sm"
+            variant="outline"
+          >
+            <ArrowDown aria-hidden="true" />
+            Jump to latest
+          </Button>
+        )}
+
+        {streaming && (
+          <span className="sr-only">Lys is generating a reply</span>
+        )}
+      </section>
+
+      <Composer />
+    </main>
   )
 }

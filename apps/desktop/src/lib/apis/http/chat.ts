@@ -1,15 +1,21 @@
-import { chatApi, type ChatApiRequestBody } from "@lys/protocol"
+import {
+  chatApi,
+  type ChatApiStreamEvent,
+  chatApiStreamEventSchema,
+  type ChatApiRequestBody
+} from "@lys/protocol"
 import { EventSourceParserStream } from "eventsource-parser/stream"
 
 export type ChatApiOptions = {
   signal?: AbortSignal
 }
 
-export const chat = async (
+export async function* chat(
   payload: ChatApiRequestBody,
-  { signal }: ChatApiOptions
-) => {
-  const response = await fetch(chatApi.path, {
+  options?: ChatApiOptions
+): AsyncGenerator<ChatApiStreamEvent, void, unknown> {
+  const { signal } = options ?? {}
+  const response = await fetch(`http://127.0.0.1:12345${chatApi.path}`, {
     method: chatApi.method,
     headers: {
       "Content-Type": "application/json",
@@ -23,9 +29,13 @@ export const chat = async (
     throw new Error(`Chat request failed: ${response.status}`)
   }
 
-  return response.body.pipeThrough(new TextDecoderStream()).pipeThrough(
+  const source = response.body.pipeThrough(new TextDecoderStream()).pipeThrough(
     new EventSourceParserStream({
       onError: "terminate"
     })
   )
+
+  for await (const message of source) {
+    yield chatApiStreamEventSchema.parse(JSON.parse(message.data))
+  }
 }

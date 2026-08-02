@@ -1,9 +1,9 @@
-import { type LysMessage } from "@/app/types"
 import { Button } from "@/components/ui/button"
 import { MarkdownMessage } from "@/components/MarkdownMessage"
+import { type ConversationAssistantMessage } from "@lys/share"
 
 type LysMessageProps = {
-  message: LysMessage
+  message: ConversationAssistantMessage
 }
 
 export default function LysMessage({ message }: LysMessageProps) {
@@ -27,9 +27,9 @@ export default function LysMessage({ message }: LysMessageProps) {
       </div>
       <MarkdownMessage
         streaming={message.status === "streaming"}
-        text={message.text}
+        text={message.content}
       />
-      {message.status === "stopped" && (
+      {message.status === "interrupted" && (
         <p aria-live="polite" className="chat-view__stopped" role="status">
           Stopped
         </p>

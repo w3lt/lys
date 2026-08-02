@@ -1,22 +1,19 @@
-import { type Message } from "@/app/types"
+import { type ConversationMessage } from "@lys/share"
 import { lazy } from "react"
 
 const UserMessage = lazy(() => import("./UserMessage"))
-const ErrorMessage = lazy(() => import("./ErrorMessage"))
 const LysMessage = lazy(() => import("./LysMessage"))
 
 type ChatMessageProps = {
-  message: Message
+  message: ConversationMessage
 }
 
 export default function ChatMessage({ message }: ChatMessageProps) {
   switch (message.role) {
     case "user":
       return <UserMessage message={message} />
-    case "lys":
+    case "assistant":
       return <LysMessage message={message} />
-    case "error":
-      return <ErrorMessage message={message} />
     default:
       return null
   }

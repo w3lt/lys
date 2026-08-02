@@ -48,7 +48,7 @@ export function Composer({ messageCount, onSend, onStop }: ComposerProps) {
   const runtimeAvailable =
     backendServerStatus === "running" && selectedModelLoaded
 
-  const sendDisabled = streaming || !runtimeAvailable || !inputDraft.trim()
+  const sendDisabled = streaming || !inputDraft.trim()
   const [statusLead, statusTrail] = statusParts(messageCount)
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {

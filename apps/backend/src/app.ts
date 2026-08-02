@@ -5,6 +5,8 @@ import registerChatRoutes from "./modules/chat"
 import fastifySse from "@fastify/sse"
 import { type BackendConfig } from "./config"
 import singletonServicesPlugin from "./di/fastify"
+import { validatorCompiler } from "fastify-type-provider-zod"
+import cors from "@fastify/cors"
 
 /** Options used to construct the backend Fastify application. */
 export type BuildAppOptions = {
@@ -24,6 +26,9 @@ export async function buildApp(options: BuildAppOptions) {
     logger: true
   })
 
+  app.setValidatorCompiler(validatorCompiler)
+
+  await app.register(cors)
   await app.register(fastifySse)
   await app.register(singletonServicesPlugin, {
     config: options.config

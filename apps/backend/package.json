@@ -7,6 +7,7 @@
     "dev": "tsx watch src/index.ts"
   },
   "dependencies": {
+    "@fastify/cors": "^11.3.0",
     "@fastify/sse": "^0.6.0",
     "@lmstudio/sdk": "^1.5.0",
     "@lys/protocol": "workspace:*",

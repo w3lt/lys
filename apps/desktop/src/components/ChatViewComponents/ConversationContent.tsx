@@ -1,8 +1,8 @@
-import type { Message } from "@/app/types"
 import ChatMessage from "./ChatMessage"
+import { type ConversationMessage } from "@lys/share"
 
 type ConversationContent = {
-  messages: Message[]
+  messages: ConversationMessage[]
 }
 
 export default function ConversationContent({ messages }: ConversationContent) {

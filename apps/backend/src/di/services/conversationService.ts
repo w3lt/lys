@@ -20,6 +20,69 @@ export type GetConversationMetadataOptions = {
   id: string
 }
 
+const databaseMigrations = [
+  `
+    CREATE TABLE conversations (
+      id TEXT PRIMARY KEY,
+      title TEXT,
+      system_prompt TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    ) STRICT
+  `
+] as const
+
+const currentDatabaseVersion = databaseMigrations.length
+
+function readDatabaseVersion(database: DatabaseSync): number {
+  const databaseVersion = database
+    .prepare("PRAGMA user_version")
+    .get()?.user_version
+
+  if (
+    typeof databaseVersion !== "number" ||
+    !Number.isSafeInteger(databaseVersion) ||
+    databaseVersion < 0
+  ) {
+    throw new Error("Invalid database user_version")
+  }
+
+  return databaseVersion
+}
+
+function migrateDatabase(database: DatabaseSync): void {
+  database.exec("BEGIN IMMEDIATE")
+
+  try {
+    const databaseVersion = readDatabaseVersion(database)
+
+    if (databaseVersion > currentDatabaseVersion) {
+      throw new Error(
+        `Database version ${databaseVersion} is newer than supported version ${currentDatabaseVersion}`
+      )
+    }
+
+    for (const [migrationIndex, migration] of databaseMigrations.entries()) {
+      const migrationVersion = migrationIndex + 1
+
+      if (migrationVersion <= databaseVersion) {
+        continue
+      }
+
+      database.exec(migration)
+      database.exec(`PRAGMA user_version = ${migrationVersion}`)
+    }
+
+    database.exec("COMMIT")
+  } catch (error) {
+    if (database.isTransaction) {
+      database.exec("ROLLBACK")
+    }
+
+    throw error
+  }
+}
+
 export default class ConversationService {
   #database: DatabaseSync
   #insertConversationStatement: StatementSync
@@ -29,6 +92,8 @@ export default class ConversationService {
     const database = new DatabaseSync(databaseFilePath)
 
     try {
+      migrateDatabase(database)
+
       this.#insertConversationStatement = database.prepare(`
         INSERT INTO conversations (
           id,

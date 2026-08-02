@@ -58,12 +58,11 @@ export default async function registerChatRoute(app: FastifyInstance) {
         })
       }
 
-      const conversationId = conversation.id
       const assistantMessageId = uuidv7()
 
       await sendEvent({
         type: "start",
-        conversationId,
+        conversation,
         assistantMessageId
       })
 

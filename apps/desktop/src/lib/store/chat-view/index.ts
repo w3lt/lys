@@ -1,6 +1,8 @@
 import { create } from "zustand"
 import { type Conversation } from "@lys/share"
 
+type StateUpdater<T> = T | ((current: T) => T)
+
 type ChatViewState = {
   inputDraft: string
   conversation?: Conversation // undefined means new conversation
@@ -9,7 +11,7 @@ type ChatViewState = {
 
 type ChatViewAction = {
   setInputDraft: (draft: string) => void
-  setConversation: (conversation?: Conversation) => void
+  setConversation: (updater: StateUpdater<Conversation | undefined>) => void
   setStreaming: (streaming: boolean) => void
 }
 
@@ -28,8 +30,11 @@ export const useChatViewStore = create<ChatViewStore>((set) => ({
     set({ inputDraft: draft })
   },
 
-  setConversation: (conversation) => {
-    set({ conversation })
+  setConversation: (update) => {
+    set((state) => ({
+      conversation:
+        typeof update === "function" ? update(state.conversation) : update
+    }))
   },
 
   setStreaming: (streaming) => {

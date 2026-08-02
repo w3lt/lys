@@ -1,5 +1,6 @@
 import { apiChatRoute } from "../llm"
 import * as z from "zod"
+import { conversationMetadataSchema } from "@lys/share"
 
 export const chatApiRequestBodySchema = z.strictObject({
   conversationId: z.uuidv7().optional(),
@@ -10,7 +11,7 @@ export const chatApiRequestBodySchema = z.strictObject({
 export const chatApiStreamEventSchema = z.discriminatedUnion("type", [
   z.strictObject({
     type: z.literal("start"),
-    conversationId: z.uuidv7(),
+    conversation: conversationMetadataSchema,
     assistantMessageId: z.uuidv7()
   }),
 

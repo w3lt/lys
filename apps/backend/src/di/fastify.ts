@@ -25,6 +25,7 @@ const singletonPlugin: FastifyPluginAsync<
 
   app.decorate("chatService", singletonServices.chatService)
   app.decorate("llmService", singletonServices.llmService)
+  app.decorate("conversationService", singletonServices.conversationService)
 
   app.addHook("onClose", async () => {
     await disposeSingletonServices(singletonServices)

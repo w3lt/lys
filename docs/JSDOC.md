@@ -1,6 +1,6 @@
 # JSDoc Standard
 
-This document defines the JSDoc standard for repository-owned JavaScript and TypeScript under `apps/*` and `packages/*`. It applies to new code and to existing code whenever that code is materially changed.
+This document defines the JSDoc standard for repository-owned JavaScript and TypeScript throughout the repository, including application, package, script, tooling, and configuration code. It applies to new code and to existing code whenever that code is modified.
 
 JSDoc explains contracts that types and names cannot express on their own: purpose, constraints, units, defaults, ownership, lifecycle, side effects, asynchronous completion, cancellation, and errors. It must not narrate implementation details or restate TypeScript syntax.
 
@@ -10,12 +10,13 @@ Code reviewers treat stale or missing required documentation as a code defect. R
 
 Document all of the following:
 
-- Exported functions, classes, types, interfaces, enums, constants, React components, and hooks.
+- Exported functions, classes, types, behavioral interfaces, enums, constants, React components, and hooks.
 - Named module-level declarations, including internal plugins, factories, services, route registrars, and helpers.
 - Classes and their constructors, fields, accessors, methods, and lifecycle or disposal methods.
-- Properties in object-shaped types, interfaces, React props, configuration types, and module augmentations.
+- Required method and accessor signatures in TypeScript behavioral interfaces and equivalent JavaScript contract declarations.
+- Properties in object-shaped types, React props, configuration types, and externally required module augmentations.
 - Named local helpers when their contract, side effects, lifecycle, error behavior, or cancellation behavior is not fully apparent from their name and type.
-- Overloads, declaration merging, and module augmentation introduced by repository code.
+- Allowed overloads and externally required declaration merging or module augmentation isolated at an adapter boundary.
 
 ## Exceptions
 
@@ -44,6 +45,12 @@ State constraints, units, defaults, ownership, lifecycle, side effects, asynchro
 - `@example`: Use only when correct usage is not apparent from the signature and surrounding API.
 - `@deprecated`: Name the supported replacement or migration path.
 
+For an accessor:
+
+- A getter has no `@param` tag and MUST use `@returns` to describe the observed value.
+- A setter has one `@param` tag for the assigned value and no `@returns` tag.
+- Accessor documentation describes property semantics and invariant effects, not the backing field.
+
 Do not use `@type`, `@private`, or `@async` when TypeScript syntax already expresses the same information.
 
 ## Examples
@@ -57,19 +64,23 @@ export type BackendConfig = {
 ```
 
 ```ts
-abstract class ModelService {
+/**
+ * Formats conversations as deterministic Markdown.
+ *
+ * @remarks Primary category: behavioral provider. Owns no mutable state or
+ * resources and preserves deterministic, input-preserving formatting.
+ * Concurrency model: reentrant.
+ */
+class MarkdownConversationFormatter implements ConversationFormatter {
   /**
-   * Loads an LLM into the LM Studio runtime.
+   * Implements {@link ConversationFormatter.formatConversation} as Markdown.
    *
-   * @param modelKey - Canonical LM Studio key of the model to load.
-   * @param options - Optional LM Studio loading and runtime settings.
-   * @returns A promise that resolves to the loaded model handle after LM Studio loads the requested model.
-   * @throws If LM Studio cannot resolve or load the requested model.
+   * @param conversation - The interface-defined immutable conversation.
+   * @returns The interface-defined result using Markdown syntax.
    */
-  public abstract loadModel(
-    modelKey: string,
-    options?: { contextLength?: number }
-  ): Promise<{ modelKey: string }>
+  public formatConversation(conversation: Conversation): FormattedConversation {
+    return formatConversationAsMarkdown(conversation)
+  }
 }
 ```
 
@@ -120,6 +131,7 @@ Examples may use abbreviated bodies and illustrative type names. Source document
 - [ ] Every declaration in the coverage matrix has JSDoc.
 - [ ] Summaries describe purpose and observable behavior.
 - [ ] Every callable parameter and non-void result has the required tag.
+- [ ] Getter and setter tags match the accessor-specific rules.
 - [ ] Units, defaults, ownership, lifecycle, cancellation, side effects, and meaningful error behavior are stated when relevant.
 - [ ] Documentation does not duplicate TypeScript types or narrate implementation steps.
 - [ ] Terms are consistent across related declarations.

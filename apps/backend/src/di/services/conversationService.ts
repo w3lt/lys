@@ -1,8 +1,14 @@
 import type { PathLike } from "node:fs"
 import { DatabaseSync, type StatementSync } from "node:sqlite"
 import {
+  conversationAssistantMessageSchema,
   conversationMetadataSchema,
-  type ConversationMetadata
+  conversationUserMessageSchema,
+  type ConversationAssistantMessage,
+  type ConversationAssistantMessageFinishReason,
+  type ConversationAssistantMessageStatus,
+  type ConversationMetadata,
+  type ConversationUserMessage
 } from "@lys/share"
 import { v7 as uuidv7 } from "uuid"
 import { lysSystemPrompt } from "../../utils/prompts"
@@ -19,6 +25,19 @@ export type GetConversationMetadataOptions = {
   id: string
 }
 
+export type AddUserMessageToConversationOptions = {
+  conversationId: string
+  userMessageContent: string
+}
+
+export type AddAssistantMessageToConversationOptions = {
+  conversationId: string
+  assistantMessageContent: string
+  model: string
+  status: ConversationAssistantMessageStatus
+  finishReason?: ConversationAssistantMessageFinishReason
+}
+
 const databaseMigrations = [
   `
     CREATE TABLE conversations (
@@ -28,6 +47,65 @@ const databaseMigrations = [
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     ) STRICT
+  `,
+  `
+    CREATE TABLE conversation_messages (
+      id TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL
+        REFERENCES conversations(id) ON DELETE CASCADE,
+      role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+      model TEXT,
+      content TEXT NOT NULL,
+      status TEXT CHECK (
+        status IN ('streaming', 'completed', 'interrupted', 'failed')
+      ),
+      finish_reason TEXT CHECK (
+        finish_reason IN ('stop', 'length')
+      ),
+      created_at TEXT NOT NULL,
+      updated_at TEXT,
+      CHECK (
+        (
+          role = 'user'
+          AND model IS NULL
+          AND length(content) > 0
+          AND status IS NULL
+          AND finish_reason IS NULL
+          AND updated_at IS NULL
+        )
+        OR
+        (
+          role = 'assistant'
+          AND status IS NOT NULL
+          AND updated_at IS NOT NULL
+          AND model IS NOT NULL
+          AND length(model) > 0
+          AND (
+            (
+              status = 'completed'
+              AND finish_reason IS NOT NULL
+            )
+            OR
+            (
+              status IN ('streaming', 'interrupted', 'failed')
+              AND finish_reason IS NULL
+            )
+          )
+        )
+      )
+    ) STRICT;
+
+    CREATE INDEX conversation_messages_conversation_idx
+      ON conversation_messages (conversation_id, created_at, id);
+
+    CREATE TRIGGER update_conversation_after_message_insert
+    AFTER INSERT ON conversation_messages
+    FOR EACH ROW
+    BEGIN
+      UPDATE conversations
+      SET updated_at = NEW.created_at
+      WHERE id = NEW.conversation_id;
+    END;
   `
 ] as const
 
@@ -86,6 +164,8 @@ export default class ConversationService {
   #database: DatabaseSync
   #insertConversationStatement: StatementSync
   #getConversationMetadataStatement: StatementSync
+  #insertUserMessageStatement: StatementSync
+  #insertAssistantMessageStatement: StatementSync
 
   constructor({ databaseFilePath }: ConversationServiceCreationOptions) {
     const database = new DatabaseSync(databaseFilePath)
@@ -112,6 +192,30 @@ export default class ConversationService {
           updated_at AS updatedAt
         FROM conversations
         WHERE id = ?
+      `)
+
+      this.#insertUserMessageStatement = database.prepare(`
+        INSERT INTO conversation_messages (
+          id,
+          conversation_id,
+          role,
+          content,
+          created_at
+        ) VALUES (?, ?, 'user', ?, ?)
+      `)
+
+      this.#insertAssistantMessageStatement = database.prepare(`
+        INSERT INTO conversation_messages (
+          id,
+          conversation_id,
+          role,
+          model,
+          content,
+          status,
+          finish_reason,
+          created_at,
+          updated_at
+        ) VALUES (?, ?, 'assistant', ?, ?, ?, ?, ?, ?)
       `)
     } catch (error) {
       database.close()
@@ -162,6 +266,68 @@ export default class ConversationService {
     }
 
     return conversationMetadataSchema.parse(row)
+  }
+
+  /**
+   * Creates and persists a user message in an existing conversation.
+   *
+   * The database trigger automatically updates the conversation's updatedAt.
+   *
+   * @throws If validation fails, the conversation does not exist, or SQLite
+   * persistence fails.
+   */
+  public addUserMessageToConversation({
+    conversationId,
+    userMessageContent
+  }: AddUserMessageToConversationOptions): ConversationUserMessage {
+    const userMessage = conversationUserMessageSchema.parse({
+      id: uuidv7(),
+      role: "user",
+      content: userMessageContent,
+      createdAt: new Date().toISOString()
+    })
+
+    this.#insertUserMessageStatement.run(
+      userMessage.id,
+      conversationId,
+      userMessage.content,
+      userMessage.createdAt
+    )
+
+    return userMessage
+  }
+
+  public addAssistantMessageToConversation({
+    conversationId,
+    assistantMessageContent,
+    model,
+    status,
+    finishReason
+  }: AddAssistantMessageToConversationOptions): ConversationAssistantMessage {
+    const now = new Date().toISOString()
+    const assistantMessage = conversationAssistantMessageSchema.parse({
+      id: uuidv7(),
+      role: "assistant",
+      model,
+      content: assistantMessageContent,
+      status,
+      finishReason: finishReason ?? null,
+      createdAt: now,
+      updatedAt: now
+    })
+
+    this.#insertAssistantMessageStatement.run(
+      assistantMessage.id,
+      conversationId,
+      assistantMessage.model,
+      assistantMessage.content,
+      assistantMessage.status,
+      assistantMessage.finishReason,
+      assistantMessage.createdAt,
+      assistantMessage.updatedAt
+    )
+
+    return assistantMessage
   }
 
   public [Symbol.dispose](): void {

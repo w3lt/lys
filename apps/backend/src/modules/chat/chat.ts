@@ -1,7 +1,6 @@
 import type { ChatApiRoute, ChatApiStreamEvent } from "@lys/protocol"
 import { chatApi } from "@lys/protocol"
 import type { FastifyInstance } from "fastify"
-import { v7 as uuidv7 } from "uuid"
 
 /**
  * Registers the chat completion endpoint on a Fastify application.
@@ -58,12 +57,37 @@ export default async function registerChatRoute(app: FastifyInstance) {
         })
       }
 
-      const assistantMessageId = uuidv7()
+      const userMessage = this.conversationService.addUserMessageToConversation(
+        {
+          conversationId: conversation.id,
+          userMessageContent: message
+        }
+      )
+
+      const assistantMessage =
+        this.conversationService.addAssistantMessageToConversation({
+          conversationId: conversation.id,
+          assistantMessageContent: "",
+          model,
+          status: "streaming"
+        })
+
+      // Send the user message
+      await sendEvent({
+        type: "user-message",
+        message: userMessage
+      })
+
+      // Send the assistant message
+      await sendEvent({
+        type: "assistant-message",
+        message: assistantMessage
+      })
 
       await sendEvent({
         type: "start",
         conversation,
-        assistantMessageId
+        assistantMessageId: assistantMessage.id
       })
 
       const chatTask = this.chatService

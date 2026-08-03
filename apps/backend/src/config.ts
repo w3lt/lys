@@ -27,5 +27,5 @@ export const config: BackendConfig = {
   backendPort: BACKEND_PORT,
   lmstudioHost: LMSTUDIO_HOST,
   lmstudioPort: LMSTUDIO_PORT,
-  databaseFilePath: join(homedir(), ".lys", "conversations.sqlite")
+  databaseFilePath: join(homedir(), ".lys", "lys_db.sqlite")
 }

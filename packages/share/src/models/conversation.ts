@@ -17,7 +17,6 @@ const conversationAssistantMessageFinishReasonSchema = z.enum([
 
 const conversationMessageBase = {
   id: z.uuidv7(),
-  model: z.string().min(1),
   createdAt: timestampSchema
 }
 
@@ -29,6 +28,7 @@ export const conversationUserMessageSchema = z.strictObject({
 
 export const conversationAssistantMessageSchema = z.strictObject({
   ...conversationMessageBase,
+  model: z.string().min(1),
   role: z.literal("assistant"),
   content: z.string(), // Maybe empty before the first delta or when generation fails.
   status: conversationAssistantMessageStatusSchema,
@@ -66,3 +66,11 @@ export type ConversationMessage = z.infer<typeof conversationMessageSchema>
 export type Conversation = z.infer<typeof conversationSchema>
 
 export type ConversationMetadata = z.infer<typeof conversationMetadataSchema>
+
+export type ConversationAssistantMessageStatus = z.infer<
+  typeof conversationAssistantMessageStatusSchema
+>
+
+export type ConversationAssistantMessageFinishReason = z.infer<
+  typeof conversationAssistantMessageFinishReasonSchema
+>

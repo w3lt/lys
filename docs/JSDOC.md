@@ -10,13 +10,15 @@ Code reviewers treat stale or missing required documentation as a code defect. R
 
 Document all of the following:
 
-- Exported functions, classes, types, behavioral interfaces, enums, constants, React components, and hooks.
+- Exported functions, classes, types, behavioral interfaces, enums, constants, renderer-recognized components, and hooks.
 - Named module-level declarations, including internal plugins, factories, services, route registrars, and helpers.
 - Classes and their constructors, fields, accessors, methods, and lifecycle or disposal methods.
 - Required method and accessor signatures in TypeScript behavioral interfaces and equivalent JavaScript contract declarations.
 - Properties in object-shaped types, React props, configuration types, and externally required module augmentations.
 - Named local helpers when their contract, side effects, lifecycle, error behavior, or cancellation behavior is not fully apparent from their name and type.
 - Allowed overloads and externally required declaration merging or module augmentation isolated at an adapter boundary.
+
+Component documentation MUST identify the primary category selected under `COMP-006` and cover every applicable component contract concern required by `COMP-018`. The [Component standard](./code_standards/COMPONENT.md) owns that semantic contract; this document owns JSDoc syntax, tags, and declaration coverage.
 
 ## Exceptions
 
@@ -96,21 +98,29 @@ export default async function registerHealthRoutes(app: FastifyInstance) {
 }
 ```
 
+In this example, `SettingsPaneTitle` is an illustrative domain type constructed only after non-empty validation.
+
 ```tsx
 /** Properties accepted by {@link SettingsPane}. */
 type SettingsPaneProps = {
   /** Heading displayed above the pane content. */
-  title: string
+  readonly title: SettingsPaneTitle
 }
 
 /**
- * Renders a titled group of application settings.
+ * Presents a titled group of application settings.
  *
- * @param props - Content and presentation settings for the pane.
+ * @remarks Primary category: presentational. The parent owns `title`; the
+ * component renders it as the visible heading at the start of the section.
+ * @param props - Parent-owned title for the settings group.
  * @returns The rendered settings pane.
  */
 function SettingsPane(props: SettingsPaneProps) {
-  return <section aria-label={props.title}>{props.title}</section>
+  return (
+    <section>
+      <h2>{props.title}</h2>
+    </section>
+  )
 }
 ```
 

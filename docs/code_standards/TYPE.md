@@ -19,6 +19,8 @@ A clean type answers:
 
 Types describe values and data relationships. Interfaces describe behavioral capabilities and substitutable implementations. Classes or semantic class equivalents own the private state, resources, or dependencies that implement behavior.
 
+Renderer-managed state or lifecycle attached to a function or template component does not by itself create a repository-owned Class construct. An actual repository-owned instance that retains state, dependencies, resources, identity, or lifecycle across calls remains a Class construct and MUST follow the [Class](./CLASS.md) chapter.
+
 ## Construction recipe
 
 Before creating a type:

@@ -46,6 +46,8 @@ Rules are owned by exactly one file. Item files may reference another rule by ID
 | Type      | [Type](./code_standards/TYPE.md)           | `TYPE`      |
 | Interface | [Interface](./code_standards/INTERFACE.md) | `IFACE`     |
 | Class     | [Class](./code_standards/CLASS.md)         | `CLASS`     |
+| Object    | [Object](./code_standards/OBJECT.md)       | `OBJECT`    |
+| Component | [Component](./code_standards/COMPONENT.md) | `COMP`      |
 
 The index grows only when an item's rules have been reviewed, approved, and written. Missing item standards do not waive applicable rules already defined by an approved standard.
 
@@ -53,22 +55,20 @@ The index grows only when an item's rules have been reviewed, approved, and writ
 
 The following item chapters are registered but intentionally deferred. A planned path is not an active standard and the file MUST NOT be created as an empty placeholder.
 
-| Item                    | Planned standard                       | Planned prefix | Status          |
-| ----------------------- | -------------------------------------- | -------------- | --------------- |
-| Object / object literal | `docs/code_standards/OBJECT.md`        | `OBJECT`       | TODO — deferred |
-| Module / file           | `docs/code_standards/MODULE.md`        | `MODULE`       | TODO — deferred |
-| Package / dependency    | `docs/code_standards/PACKAGE.md`       | `PKG`          | TODO — deferred |
-| Component               | `docs/code_standards/COMPONENT.md`     | `COMP`         | TODO — deferred |
-| Hook                    | `docs/code_standards/HOOK.md`          | `HOOK`         | TODO — deferred |
-| API                     | `docs/code_standards/API.md`           | `API`          | TODO — deferred |
-| Error                   | `docs/code_standards/ERROR.md`         | `ERROR`        | TODO — deferred |
-| Event / message         | `docs/code_standards/EVENT.md`         | `EVENT`        | TODO — deferred |
-| Async task / stream     | `docs/code_standards/ASYNC.md`         | `ASYNC`        | TODO — deferred |
-| Resource                | `docs/code_standards/RESOURCE.md`      | `RESOURCE`     | TODO — deferred |
-| Configuration           | `docs/code_standards/CONFIGURATION.md` | `CONFIG`       | TODO — deferred |
-| Schema / migration      | `docs/code_standards/SCHEMA.md`        | `SCHEMA`       | TODO — deferred |
-| Test / fixture          | `docs/code_standards/TEST.md`          | `TEST`         | TODO — deferred |
-| Comment                 | `docs/code_standards/COMMENT.md`       | `COMMENT`      | TODO — deferred |
+| Item                 | Planned standard                       | Planned prefix | Status          |
+| -------------------- | -------------------------------------- | -------------- | --------------- |
+| Module / file        | `docs/code_standards/MODULE.md`        | `MODULE`       | TODO — deferred |
+| Package / dependency | `docs/code_standards/PACKAGE.md`       | `PKG`          | TODO — deferred |
+| Hook                 | `docs/code_standards/HOOK.md`          | `HOOK`         | TODO — deferred |
+| API                  | `docs/code_standards/API.md`           | `API`          | TODO — deferred |
+| Error                | `docs/code_standards/ERROR.md`         | `ERROR`        | TODO — deferred |
+| Event / message      | `docs/code_standards/EVENT.md`         | `EVENT`        | TODO — deferred |
+| Async task / stream  | `docs/code_standards/ASYNC.md`         | `ASYNC`        | TODO — deferred |
+| Resource             | `docs/code_standards/RESOURCE.md`      | `RESOURCE`     | TODO — deferred |
+| Configuration        | `docs/code_standards/CONFIGURATION.md` | `CONFIG`       | TODO — deferred |
+| Schema / migration   | `docs/code_standards/SCHEMA.md`        | `SCHEMA`       | TODO — deferred |
+| Test / fixture       | `docs/code_standards/TEST.md`          | `TEST`         | TODO — deferred |
+| Comment              | `docs/code_standards/COMMENT.md`       | `COMMENT`      | TODO — deferred |
 
 Deferred means that the dedicated chapter has not yet been written or approved. It does not waive this foundation, an applicable active item standard, `CONTRIBUTING.md`, existing repository conventions, or ordinary maintainability requirements.
 

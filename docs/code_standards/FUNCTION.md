@@ -13,13 +13,13 @@ These rules apply to named functions, methods, closures, callbacks, event handle
 Before writing a function:
 
 1. State the single operation it performs.
-2. Classify it as a calculation, query, command, boundary adapter, or orchestrator.
+2. Classify it as a calculation, query, command, boundary adapter, orchestrator, or renderer-recognized declarative view projection.
 3. List its required inputs.
 4. Define its successful result.
 5. Define expected failure and absence outcomes.
 6. List every observable side effect.
 7. Identify external dependencies such as storage, network, time, randomness, and process state.
-8. Choose a name from the canonical verb vocabulary that exposes its operation.
+8. Choose a name under `FUNC-003`, using its canonical verb vocabulary or its exact Component naming exception.
 9. Design the signature with no more than three positional parameters.
 10. Validate untrusted input before domain logic or side effects.
 11. Write the successful path using one abstraction level and the fewest control-flow levels.
@@ -103,6 +103,12 @@ async function createConversation(
 }
 ```
 
+### Declarative view projection
+
+A declarative view projection is a renderer-recognized Component callable that produces a view description from its component contract and current renderer-managed inputs.
+
+Only a Component construct under `COMP-001` MAY select this category. A direct render helper or ordinary function remains classified by its actual operation under `COMP-003`.
+
 ## Example scope
 
 Rule-specific examples isolate the rule under discussion. A `Compliant` label means compliant with that rule; declarations and documentation unrelated to the demonstrated rule may be omitted. The complete examples at the end of this chapter demonstrate the combined construction rules.
@@ -164,6 +170,8 @@ An orchestrator passes this rule only when it delegates independent policies ins
 A function MUST preserve its primary category across every behavior path.
 
 A calculation or query MUST NOT modify externally observable state. A command or orchestrator MUST expose its side effects through its name, contract, or containing boundary.
+
+A declarative view projection MUST remain a projection during renderer invocation. Producing a declarative view description, including binding an event callback for later invocation, is not imperative user-interface mutation. An event handler, effect callback, lifecycle callback, or other callable declared or referenced by a component remains a separate Function construct and MUST use the category matching what occurs when that callable is invoked.
 
 ```ts
 // Noncompliant: a query silently updates access time.
@@ -230,7 +238,11 @@ The function name MUST include the domain object or outcome after the verb. Name
 
 For a type-associated factory or lifecycle operation, the owning type supplies the domain object. Names such as `SqliteConversationStore.open()` and `DraftSession::create()` are allowed. The module-level equivalents MUST include the object, such as `openSqliteConversationStore()` and `createDraftSession()`.
 
-A native constructor declaration is exempt from the verb-prefix and domain-object wording because the language supplies its name. A compliant property accessor uses a noun property name and the parameter shape required by `CLASS-017` through `CLASS-019`; languages without property syntax MAY use their conventional equivalent accessor form. These are the only repository-designed naming exceptions.
+A native constructor declaration is exempt from the verb-prefix and domain-object wording because the language supplies its name. A compliant property accessor uses a noun property name and the parameter shape required by `CLASS-017` through `CLASS-019`; languages without property syntax MAY use their conventional equivalent accessor form.
+
+A renderer-recognized Component declaration MUST instead use the noun or noun-phrase name required by `COMP-017`. This exception applies only to a declaration satisfying `COMP-001`; an ordinary function or direct render helper under `COMP-003` MUST use the canonical operation vocabulary.
+
+Native constructors and compliant accessors retain their syntax-specific exceptions. A renderer-recognized Component declaration is the only repository-designed noun-name exception for an ordinary named function declaration.
 
 ```ts
 // Noncompliant
@@ -1088,8 +1100,8 @@ The function rules apply SOLID as follows:
 A function is compliant only when every applicable answer is “yes”:
 
 - [ ] Does it perform or orchestrate one primary operation?
-- [ ] Is its category—calculation, query, command, adapter, or orchestrator—consistent?
-- [ ] Does its name use the canonical verb for the exact operation?
+- [ ] Is its category—calculation, query, command, adapter, orchestrator, or renderer-recognized declarative view projection—consistent?
+- [ ] Does its name use the canonical verb for the exact operation or an exact `FUNC-003` naming exception?
 - [ ] Does it have no more than three positional parameters?
 - [ ] Are mode-selection flags absent?
 - [ ] Is every input necessary, typed, and unmodified?

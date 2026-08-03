@@ -131,6 +131,8 @@ An exception requires explicit reviewer approval. Time pressure, existing noncom
 
 ## Before requesting review
 
+Reviewers follow [Merge Request Review](./docs/code_reviews/MR_REVIEW.md) for a proposed change, and [Full Code Review](./docs/code_reviews/FULL_CODE_REVIEW.md) when auditing an existing area of the codebase.
+
 Review the complete diff and confirm:
 
 - [ ] The change has one clear purpose and addresses the root requirement or defect.

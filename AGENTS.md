@@ -10,6 +10,7 @@ Agents MUST follow:
 2. [Code Construction Rules](docs/CODE_STANDARDS.md) for mandatory construct-level requirements.
 3. Every active item standard linked from `docs/CODE_STANDARDS.md` that applies to a construct being added or modified.
 4. [JSDoc Standard](docs/JSDOC.md) for repository-owned JavaScript and TypeScript in its scope.
+5. [Merge Request Review](docs/code_reviews/MR_REVIEW.md) or [Full Code Review](docs/code_reviews/FULL_CODE_REVIEW.md) when reviewing code rather than authoring it.
 
 This file MUST NOT be used to redefine or weaken a canonical construction rule. Rule ownership stays with the documents under `docs/`.
 
@@ -101,6 +102,8 @@ An agent MUST NOT claim completion without fresh validation evidence when valida
 ## Review and exceptions
 
 Reviews SHOULD cite stable rule IDs rather than paraphrasing requirements.
+
+An agent reviewing a proposed change MUST follow [Merge Request Review](docs/code_reviews/MR_REVIEW.md). An agent reviewing an existing area of the codebase MUST follow [Full Code Review](docs/code_reviews/FULL_CODE_REVIEW.md). A reviewing agent reports findings and MUST NOT apply corrections.
 
 Passing compilation or tests does not override a violated construction rule.
 

@@ -1,12 +1,26 @@
 import { Button } from "@/components/ui/button"
 import { MarkdownMessage } from "@/components/MarkdownMessage"
 import { type ConversationAssistantMessage } from "@lys/share"
+import type { ReactElement } from "react"
 
-type LysMessageProps = {
-  message: ConversationAssistantMessage
+/** Properties accepted by {@link LysMessage}. */
+export type LysMessageProps = {
+  /** Assistant message rendered with Markdown and lifecycle state. */
+  readonly message: ConversationAssistantMessage
+  /** Interrupts this message while it is streaming. */
+  readonly onStop: () => void
 }
 
-export default function LysMessage({ message }: LysMessageProps) {
+/**
+ * Renders one assistant message and its lifecycle controls or outcome.
+ *
+ * @param props - Assistant content and interruption control to present.
+ * @returns The rendered assistant transcript message.
+ */
+export default function LysMessage({
+  message,
+  onStop
+}: LysMessageProps): ReactElement {
   return (
     <article
       className="chat-view__message chat-view__message--lys"
@@ -17,7 +31,7 @@ export default function LysMessage({ message }: LysMessageProps) {
         {message.status === "streaming" && (
           <Button
             aria-label="Stop reply"
-            // onClick={onStop}
+            onClick={onStop}
             size="sm"
             variant="ghost"
           >
@@ -32,6 +46,11 @@ export default function LysMessage({ message }: LysMessageProps) {
       {message.status === "interrupted" && (
         <p aria-live="polite" className="chat-view__stopped" role="status">
           Stopped
+        </p>
+      )}
+      {message.status === "failed" && (
+        <p aria-live="polite" className="chat-view__stopped" role="status">
+          Failed
         </p>
       )}
     </article>

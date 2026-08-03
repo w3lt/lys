@@ -2,7 +2,6 @@ import type { PathLike } from "node:fs"
 import { DatabaseSync, type StatementSync } from "node:sqlite"
 import {
   conversationMetadataSchema,
-  conversationSchema,
   type ConversationMetadata
 } from "@lys/share"
 import { v7 as uuidv7 } from "uuid"
@@ -122,17 +121,23 @@ export default class ConversationService {
     this.#database = database
   }
 
+  /**
+   * Creates and persists metadata for one empty conversation.
+   *
+   * @param option - Optional system prompt override for the new conversation.
+   * @returns The newly persisted conversation metadata.
+   * @throws If metadata validation or SQLite persistence fails.
+   */
   public createConversation(
     option?: ConversationCreationOptions
   ): ConversationMetadata {
     const { systemPrompt = lysSystemPrompt() } = option ?? {}
     const now = new Date().toISOString()
 
-    const conversation = conversationSchema.parse({
+    const conversation = conversationMetadataSchema.parse({
       id: uuidv7(),
       title: null,
       systemPrompt,
-      messages: [],
       createdAt: now,
       updatedAt: now
     })

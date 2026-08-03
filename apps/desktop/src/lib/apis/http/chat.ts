@@ -6,11 +6,23 @@ import {
 } from "@lys/protocol"
 import { EventSourceParserStream } from "eventsource-parser/stream"
 
+/** Transport options for reading one backend chat event stream. */
 export type ChatApiOptions = {
-  signal?: AbortSignal
+  /** Signal that requests cancellation of the HTTP stream. */
+  readonly signal?: AbortSignal
 }
 
-export async function* chat(
+/**
+ * Opens and reads one validated backend chat event stream.
+ *
+ * @remarks Ending iteration before the backend closes the stream cancels the
+ * underlying reader before releasing it.
+ * @param payload - Valid chat prompt and optional conversation identifier.
+ * @param options - Optional transport cancellation settings.
+ * @returns An async generator yielding validated chat protocol events.
+ * @throws If the request, stream read, JSON parse, or event validation fails.
+ */
+export async function* readChatEvents(
   payload: ChatApiRequestBody,
   options?: ChatApiOptions
 ): AsyncGenerator<ChatApiStreamEvent, void, unknown> {
@@ -34,8 +46,24 @@ export async function* chat(
       onError: "terminate"
     })
   )
+  const reader = source.getReader()
+  let hasReachedStreamEnd = false
 
-  for await (const message of source) {
-    yield chatApiStreamEventSchema.parse(JSON.parse(message.data))
+  try {
+    while (true) {
+      const readResult = await reader.read()
+      if (readResult.done) {
+        hasReachedStreamEnd = true
+        return
+      }
+
+      yield chatApiStreamEventSchema.parse(JSON.parse(readResult.value.data))
+    }
+  } finally {
+    try {
+      if (!hasReachedStreamEnd) await reader.cancel()
+    } finally {
+      reader.releaseLock()
+    }
   }
 }

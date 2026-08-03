@@ -1,4 +1,5 @@
 import { lazy, useEffect, useMemo, useRef } from "react"
+import type { ReactElement } from "react"
 import { ArrowDown } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -6,7 +7,6 @@ import { Button } from "@/components/ui/button"
 import "./ChatView.scss"
 import { Composer } from "@/components/Composer"
 import { useChatViewStore } from "@/lib/store/chat-view"
-import { chat } from "@/lib/apis/http/chat"
 
 const StarterView = lazy(
   () => import("@/components/ChatViewComponents/StarterView")
@@ -15,22 +15,33 @@ const ConversationContent = lazy(
   () => import("@/components/ChatViewComponents/ConversationContent")
 )
 
-interface ChatViewProps {
-  atBottom: boolean
-  onScrollPositionChange: (atBottom: boolean) => void
+/** Properties accepted by {@link ChatView}. */
+export type ChatViewProps = {
+  /** Whether the transcript currently remains pinned to its latest content. */
+  readonly atBottom: boolean
+  /** Records whether the reader has scrolled to the latest transcript content. */
+  readonly onScrollPositionChange: (atBottom: boolean) => void
 }
 
+/**
+ * Renders the conversation transcript, lifecycle feedback, and composer.
+ *
+ * @param props - Scroll state owned by the surrounding application shell.
+ * @returns The rendered chat workspace.
+ */
 export default function ChatView({
   atBottom,
   onScrollPositionChange
-}: ChatViewProps) {
-  const { streaming, conversation, inputDraft, setConversation } =
+}: ChatViewProps): ReactElement {
+  const { conversation, error, request, sendMessage, stopStreaming } =
     useChatViewStore((state) => state)
   const messages = useMemo(
     () => conversation?.messages ?? [],
     [conversation?.messages]
   )
   const transcriptRef = useRef<HTMLDivElement>(null)
+  const isReplyPending =
+    request.status === "awaiting-start" || request.status === "reply-streaming"
 
   useEffect(() => {
     const element = transcriptRef.current
@@ -40,7 +51,8 @@ export default function ChatView({
     element.scrollTo?.({ top: element.scrollHeight })
   }, [atBottom, messages])
 
-  function handleScroll() {
+  /** Records whether the reader remains near the bottom of the transcript. */
+  function handleScroll(): void {
     const element = transcriptRef.current
     if (!element) return
 
@@ -49,80 +61,13 @@ export default function ChatView({
     onScrollPositionChange(nearBottom)
   }
 
-  function jumpToLatest() {
+  /** Scrolls the transcript to its latest content and restores pinned state. */
+  function jumpToLatest(): void {
     const element = transcriptRef.current
     if (!element) return
 
     element.scrollTo?.({ top: element.scrollHeight, behavior: "smooth" })
     onScrollPositionChange(true)
-  }
-
-  const onSend = async () => {
-    const events = chat({
-      message: inputDraft,
-      model: "google/gemma-4-12b-qat"
-    })
-
-    for await (const event of events) {
-      switch (event.type) {
-        case "start": {
-          const { conversation, assistantMessageId } = event
-          setConversation({
-            ...conversation,
-            messages: [
-              {
-                id: assistantMessageId,
-                content: "",
-                createdAt: new Date().toISOString(),
-                role: "assistant",
-                status: "streaming",
-                model: "google/gemma-4-12b-qat",
-                updatedAt: new Date().toISOString(),
-                finishReason: null
-              }
-            ]
-          })
-          break
-        }
-        case "title": {
-          if (!conversation) throw new Error("Conversation is undefined!!")
-          setConversation((conv) => {
-            if (!conv) return conv
-            return {
-              ...conv,
-              title: event.title
-            }
-          })
-          break
-        }
-        case "delta": {
-          const delta = event.content
-          setConversation((conv) => {
-            if (!conv) return conv
-            if (conv.messages.length === 0)
-              throw new Error("No message to update!!!")
-
-            const lastMessage = { ...conv.messages[conv.messages.length - 1] }
-            lastMessage.content += delta
-            const newMessages = [
-              ...conv.messages.slice(0, conv.messages.length - 1),
-              lastMessage
-            ]
-            return {
-              ...conv,
-              messages: newMessages
-            }
-          })
-          break
-        }
-        case "done":
-          // not for now
-          break
-        case "error":
-          // now for now
-          break
-      }
-    }
   }
 
   return (
@@ -134,10 +79,14 @@ export default function ChatView({
           onScroll={handleScroll}
           ref={transcriptRef}
         >
-          {messages.length === 0 ? (
-            <StarterView onSend={onSend} />
+          {messages.length === 0 && !error ? (
+            <StarterView onSend={(prompt) => void sendMessage(prompt)} />
           ) : (
-            <ConversationContent messages={messages} />
+            <ConversationContent
+              error={error}
+              messages={messages}
+              onStop={stopStreaming}
+            />
           )}
         </div>
 
@@ -153,18 +102,12 @@ export default function ChatView({
           </Button>
         )}
 
-        {streaming && (
+        {isReplyPending && (
           <span className="sr-only">Lys is generating a reply</span>
         )}
       </section>
 
-      <Composer
-        messageCount={messages.length}
-        onSend={() => {
-          void onSend()
-        }}
-        onStop={() => null}
-      />
+      <Composer messageCount={messages.length} />
     </main>
   )
 }

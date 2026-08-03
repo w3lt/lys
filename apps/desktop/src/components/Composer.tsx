@@ -1,4 +1,4 @@
-import type { KeyboardEvent } from "react"
+import type { KeyboardEvent, ReactElement } from "react"
 import { ArrowDown, Plus, Square } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -8,53 +8,96 @@ import "./Composer.scss"
 import { type BackendServerStatus, useLysStore } from "@/lib/store"
 import { useChatViewStore } from "@/lib/store/chat-view"
 
-interface ComposerProps {
-  messageCount: number
-  onSend: () => void
-  onStop: () => void
+/** Properties accepted by {@link Composer}. */
+export type ComposerProps = {
+  /** Number of transcript messages used for the composer status summary. */
+  readonly messageCount: number
+}
+
+/** Immutable display copy for the leading and trailing composer status slots. */
+type ComposerStatus = {
+  /** Primary status text shown first in the composer footer. */
+  readonly lead: string
+  /** Supporting status text shown after the composer status separator. */
+  readonly trail: string
 }
 
 /*
  * The meta row teaches the send shortcut while the chat is still empty, then
  * hands that space over to the session counters once there is history.
  */
-function statusParts(messageCount: number): [string, string] {
-  if (messageCount === 0) return ["Enter sends", "Shift+Enter for a newline"]
-  return [
-    `${messageCount} ${messageCount === 1 ? "message" : "messages"}`,
-    "16384 context"
-  ]
+/**
+ * Formats the static composer status copy for the current transcript length.
+ *
+ * @param messageCount - Number of messages currently shown in the transcript.
+ * @returns Immutable display copy for the composer footer status slots.
+ */
+function formatComposerStatus(messageCount: number): ComposerStatus {
+  if (messageCount === 0) {
+    return { lead: "Enter sends", trail: "Shift+Enter for a newline" }
+  }
+
+  return {
+    lead: `${messageCount} ${messageCount === 1 ? "message" : "messages"}`,
+    trail: "16384 context"
+  }
 }
 
-function runtimeLabel(
+/**
+ * Formats the current local runtime availability for the composer warning.
+ *
+ * @param backendServerStatus - Observed backend process lifecycle status.
+ * @param selectedModelLoaded - Whether the selected model is ready for use.
+ * @returns Human-readable runtime availability.
+ */
+function formatRuntimeLabel(
   backendServerStatus: BackendServerStatus,
   selectedModelLoaded: boolean
-) {
+): string {
   if (backendServerStatus !== "running") return "Backend offline"
   if (!selectedModelLoaded) return "No model loaded"
   return "Model ready"
 }
 
-export function Composer({ messageCount, onSend, onStop }: ComposerProps) {
+/**
+ * Renders the chat draft editor and controls for the owned chat lifecycle.
+ *
+ * @param props - Transcript count displayed in the composer status.
+ * @returns The rendered conversation composer.
+ */
+export function Composer({ messageCount }: ComposerProps): ReactElement {
   const { backendServerInfo, selectedModelLoaded, setActiveView } = useLysStore(
     (state) => state
   )
   const backendServerStatus = backendServerInfo.status
 
   // Input draft
-  const { inputDraft, setInputDraft, setConversation, streaming } =
-    useChatViewStore((state) => state)
+  const {
+    inputDraft,
+    request,
+    resetConversation,
+    sendMessage,
+    setInputDraft,
+    stopStreaming
+  } = useChatViewStore((state) => state)
 
   const runtimeAvailable =
     backendServerStatus === "running" && selectedModelLoaded
+  const isRequestActive = request.status !== "idle"
 
-  const sendDisabled = streaming || !inputDraft.trim()
-  const [statusLead, statusTrail] = statusParts(messageCount)
+  const sendDisabled = isRequestActive || !inputDraft.trim()
+  const { lead: statusLead, trail: statusTrail } =
+    formatComposerStatus(messageCount)
 
-  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+  /**
+   * Sends the current draft when Enter is pressed without a Shift modifier.
+   *
+   * @param event - Keyboard event emitted by the composer textarea.
+   */
+  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault()
-      onSend()
+      void sendMessage()
     }
   }
 
@@ -62,7 +105,9 @@ export function Composer({ messageCount, onSend, onStop }: ComposerProps) {
     <footer className="composer">
       {!runtimeAvailable && (
         <div className="composer__offline" role="status">
-          <span>{runtimeLabel(backendServerStatus, selectedModelLoaded)}</span>
+          <span>
+            {formatRuntimeLabel(backendServerStatus, selectedModelLoaded)}
+          </span>
           <span>Open model settings to restore local generation.</span>
         </div>
       )}
@@ -74,7 +119,7 @@ export function Composer({ messageCount, onSend, onStop }: ComposerProps) {
           </label>
           <Textarea
             aria-label="Message Lys"
-            className={`composer__textarea${streaming ? " composer__textarea--streaming" : ""}`}
+            className={`composer__textarea${isRequestActive ? " composer__textarea--streaming" : ""}`}
             id="lys-composer"
             onChange={(event) => setInputDraft(event.currentTarget.value)}
             onKeyDown={handleKeyDown}
@@ -84,18 +129,18 @@ export function Composer({ messageCount, onSend, onStop }: ComposerProps) {
           />
           <Button
             aria-label="Send message"
-            className={`composer__send${streaming ? " composer__send--beside-stop" : ""}`}
+            className={`composer__send${isRequestActive ? " composer__send--beside-stop" : ""}`}
             disabled={sendDisabled}
-            onClick={onSend}
+            onClick={() => void sendMessage()}
             size="icon-lg"
           >
             <ArrowDown aria-hidden="true" />
           </Button>
-          {streaming && (
+          {isRequestActive && (
             <Button
               aria-label="Stop generating"
               className="composer__stop"
-              onClick={onStop}
+              onClick={stopStreaming}
               size="icon-lg"
               variant="destructive"
             >
@@ -109,7 +154,7 @@ export function Composer({ messageCount, onSend, onStop }: ComposerProps) {
             <Button
               aria-label="New conversation"
               className="composer__new"
-              onClick={() => setConversation(undefined)}
+              onClick={resetConversation}
               size="sm"
               variant="ghost"
             >

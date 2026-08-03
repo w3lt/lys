@@ -1,18 +1,21 @@
 import type { ChatApiStreamEvent } from "@lys/protocol"
-import type { Conversation, ConversationMetadata } from "@lys/share"
+import type {
+  Conversation,
+  ConversationAssistantMessage,
+  ConversationMetadata,
+  ConversationUserMessage
+} from "@lys/share"
 
-/** Inputs required to start one assistant reply in a conversation. */
-export type StartAssistantReplyOptions = {
+/** Inputs required to append one backend-owned turn to a conversation. */
+export type StartConversationTurnOptions = {
   /** Latest metadata returned by the backend for the active conversation. */
   readonly conversationMetadata: ConversationMetadata
   /** Existing local conversation whose transcript may be preserved. */
   readonly previousConversation?: Conversation
-  /** Backend-owned identifier of the new assistant message. */
-  readonly assistantMessageId: string
-  /** Model identifier used for the submitted turn. */
-  readonly model: string
-  /** ISO timestamp applied to the new assistant message. */
-  readonly timestamp: string
+  /** Persisted user message acknowledged by the backend. */
+  readonly userMessage: ConversationUserMessage
+  /** Persisted assistant message that will receive streamed content. */
+  readonly assistantMessage: ConversationAssistantMessage
 }
 
 /** Inputs required to update one assistant reply with streamed content. */
@@ -52,35 +55,28 @@ export type UpdateAssistantReplyStatusOptions =
     }
 
 /**
- * Combines backend metadata with the local transcript and starts one reply.
+ * Combines backend metadata and messages with matching local history.
  *
- * @param options - Metadata, prior state, and new turn identifiers.
- * @returns A new conversation containing the backend-identified assistant
- * message after any history belonging to the same conversation.
+ * @param options - Metadata, prior state, and the new backend-owned turn.
+ * @returns A conversation containing matching history followed by the user and
+ * assistant messages received from the backend.
  */
-export function startAssistantReply(
-  options: StartAssistantReplyOptions
+export function startConversationTurn(
+  options: StartConversationTurnOptions
 ): Conversation {
   const previousMessages =
     options.previousConversation?.id === options.conversationMetadata.id
       ? options.previousConversation.messages
       : []
+  const messages = [
+    ...previousMessages,
+    options.userMessage,
+    options.assistantMessage
+  ]
 
   return {
     ...options.conversationMetadata,
-    messages: [
-      ...previousMessages,
-      {
-        id: options.assistantMessageId,
-        model: options.model,
-        role: "assistant",
-        content: "",
-        status: "streaming",
-        finishReason: null,
-        createdAt: options.timestamp,
-        updatedAt: options.timestamp
-      }
-    ]
+    messages
   }
 }
 

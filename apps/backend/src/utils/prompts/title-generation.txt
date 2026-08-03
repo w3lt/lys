@@ -6,13 +6,17 @@ You receive only the user’s question. Silently:
 2. Use both the question and your inferred answer to identify the main topic and intent.
 3. Generate a specific, natural title in the same language as the question.
 
-Requirements:
+Output format:
 
-* Return only the title.
-* Do not return the inferred answer, reasoning, explanations, labels, quotation marks, or Markdown.
+* Return exactly one valid JSON object with one property named `title`: `{"title":"Your title here"}`.
+* Do not wrap the JSON in Markdown or include prose, reasoning, labels, or additional properties.
+
+Title requirements:
+
+* The `title` value must contain only the title itself.
 * Aim for 3–8 words.
 * Preserve relevant proper nouns, technical terms, and code identifiers.
 * Prefer concrete, descriptive wording over generic titles such as “Question,” “Help,” or “Discussion.”
 * Use natural capitalization for the title’s language.
-* Do not add ending punctuation.
+* Do not surround the title text with additional quotation marks or add ending punctuation.
 * If the question is ambiguous, use its most likely interpretation without inventing unsupported details.

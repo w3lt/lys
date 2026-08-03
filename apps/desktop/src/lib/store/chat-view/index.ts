@@ -1,11 +1,15 @@
 import type { ChatApiRequestBody, ChatApiStreamEvent } from "@lys/protocol"
-import type { Conversation } from "@lys/share"
+import type {
+  Conversation,
+  ConversationAssistantMessage,
+  ConversationUserMessage
+} from "@lys/share"
 import { create, type StoreApi, type UseBoundStore } from "zustand"
 
 import { readChatEvents, type ChatApiOptions } from "@/lib/apis/http/chat"
 
 import {
-  startAssistantReply,
+  startConversationTurn,
   updateAssistantReplyContent,
   updateAssistantReplyStatus,
   updateConversationTitle
@@ -42,14 +46,36 @@ export type ChatRequestState =
       readonly status: "idle"
     }
   | {
-      /** The request is waiting for the backend to identify its reply. */
-      readonly status: "awaiting-start"
+      /** The request is waiting for its persisted user message. */
+      readonly status: "awaiting-user-message"
       /** Token authorizing this request to mutate chat state. */
       readonly token: number
       /** Trimmed prompt submitted to the backend. */
       readonly submittedPrompt: string
       /** Exact composer draft cleared only if unchanged at start. */
       readonly submittedComposerDraft?: string
+    }
+  | {
+      /** The request is waiting for its persisted assistant message. */
+      readonly status: "awaiting-assistant-message"
+      /** Token authorizing this request to mutate chat state. */
+      readonly token: number
+      /** Exact composer draft cleared only if unchanged at start. */
+      readonly submittedComposerDraft?: string
+      /** Backend-owned user message for the submitted turn. */
+      readonly userMessage: ConversationUserMessage
+    }
+  | {
+      /** Both messages are available while conversation metadata is pending. */
+      readonly status: "awaiting-start"
+      /** Token authorizing this request to mutate chat state. */
+      readonly token: number
+      /** Exact composer draft cleared only if unchanged at start. */
+      readonly submittedComposerDraft?: string
+      /** Backend-owned user message for the submitted turn. */
+      readonly userMessage: ConversationUserMessage
+      /** Backend-owned assistant message that will receive streamed content. */
+      readonly assistantMessage: ConversationAssistantMessage
     }
   | {
       /** The backend-identified assistant reply is accepting content. */
@@ -142,20 +168,20 @@ function formatLifecycleErrorMessage(error: unknown): string {
 }
 
 /**
- * Creates observable request state awaiting its backend start event.
+ * Creates observable request state awaiting its backend user message.
  *
  * @param token - Monotonic token assigned by the owning store.
  * @param submittedPrompt - Trimmed prompt sent to the backend.
  * @param submittedComposerDraft - Exact composer draft, when applicable.
- * @returns Observable request state awaiting its backend start event.
+ * @returns Observable request state awaiting its backend user message.
  */
-function createAwaitingChatRequest(
+function createAwaitingUserMessageRequest(
   token: number,
   submittedPrompt: string,
   submittedComposerDraft?: string
-): Extract<ChatRequestState, { status: "awaiting-start" }> {
+): Extract<ChatRequestState, { status: "awaiting-user-message" }> {
   return {
-    status: "awaiting-start",
+    status: "awaiting-user-message",
     token,
     submittedPrompt,
     ...(submittedComposerDraft === undefined ? {} : { submittedComposerDraft })
@@ -327,6 +353,66 @@ export function createChatViewStore(
     }
 
     /**
+     * Records the backend-owned user message for an awaiting request.
+     *
+     * @param event - User-message event emitted by the backend stream.
+     * @param token - Token expected to own the awaiting request.
+     * @throws If the event is out of order or its token is inactive.
+     */
+    function handleChatUserMessageEvent(
+      event: Extract<ChatApiStreamEvent, { type: "user-message" }>,
+      token: number
+    ): void {
+      const request = getOwnedRequest(token)
+      if (request.status !== "awaiting-user-message") {
+        throw new Error("Chat user message did not match an awaiting request")
+      }
+
+      const awaitingAssistantMessageRequest = {
+        status: "awaiting-assistant-message",
+        token,
+        ...(request.submittedComposerDraft === undefined
+          ? {}
+          : { submittedComposerDraft: request.submittedComposerDraft }),
+        userMessage: event.message
+      } satisfies Extract<
+        ChatRequestState,
+        { status: "awaiting-assistant-message" }
+      >
+      set({ request: awaitingAssistantMessageRequest })
+    }
+
+    /**
+     * Records the backend-owned assistant message for an awaiting request.
+     *
+     * @param event - Assistant-message event emitted by the backend stream.
+     * @param token - Token expected to own the awaiting request.
+     * @throws If the event is out of order or its token is inactive.
+     */
+    function handleChatAssistantMessageEvent(
+      event: Extract<ChatApiStreamEvent, { type: "assistant-message" }>,
+      token: number
+    ): void {
+      const request = getOwnedRequest(token)
+      if (request.status !== "awaiting-assistant-message") {
+        throw new Error(
+          "Chat assistant message did not follow its user message"
+        )
+      }
+
+      const awaitingStartRequest = {
+        status: "awaiting-start",
+        token,
+        ...(request.submittedComposerDraft === undefined
+          ? {}
+          : { submittedComposerDraft: request.submittedComposerDraft }),
+        userMessage: request.userMessage,
+        assistantMessage: event.message
+      } satisfies Extract<ChatRequestState, { status: "awaiting-start" }>
+      set({ request: awaitingStartRequest })
+    }
+
+    /**
      * Starts the backend-identified assistant reply for an awaiting request.
      *
      * @param event - Start event containing conversation metadata and message ID.
@@ -342,28 +428,31 @@ export function createChatViewStore(
       if (request.status !== "awaiting-start") {
         throw new Error("Chat start event did not match an awaiting request")
       }
+      if (event.assistantMessageId !== request.assistantMessage.id) {
+        throw new Error("Chat start event identified a different assistant")
+      }
 
-      const conversation = startAssistantReply({
+      const conversation = startConversationTurn({
         conversationMetadata: event.conversation,
         previousConversation: currentState.conversation,
-        assistantMessageId: event.assistantMessageId,
-        model: CHAT_MODEL,
-        timestamp: dependencies.createTimestamp()
+        userMessage: request.userMessage,
+        assistantMessage: request.assistantMessage
       })
       const inputDraft =
         request.submittedComposerDraft !== undefined &&
         currentState.inputDraft === request.submittedComposerDraft
           ? ""
           : currentState.inputDraft
+      const streamingRequest = {
+        status: "reply-streaming",
+        token,
+        assistantMessageId: event.assistantMessageId
+      } satisfies Extract<ChatRequestState, { status: "reply-streaming" }>
 
       set({
         conversation,
         inputDraft,
-        request: {
-          status: "reply-streaming",
-          token,
-          assistantMessageId: event.assistantMessageId
-        }
+        request: streamingRequest
       })
     }
 
@@ -459,6 +548,12 @@ export function createChatViewStore(
       if (!isRequestOwned(token)) return
 
       switch (event.type) {
+        case "user-message":
+          handleChatUserMessageEvent(event, token)
+          return
+        case "assistant-message":
+          handleChatAssistantMessageEvent(event, token)
+          return
         case "start":
           handleChatStartEvent(event, token)
           return
@@ -504,7 +599,7 @@ export function createChatViewStore(
      */
     async function readChatStream(
       payload: ChatApiRequestBody,
-      request: Extract<ChatRequestState, { status: "awaiting-start" }>
+      request: Extract<ChatRequestState, { status: "awaiting-user-message" }>
     ): Promise<void> {
       try {
         const resource = getOwnedRequestResource(request.token)
@@ -566,7 +661,7 @@ export function createChatViewStore(
 
       const token = nextRequestToken
       nextRequestToken += 1
-      const request = createAwaitingChatRequest(
+      const request = createAwaitingUserMessageRequest(
         token,
         submittedPrompt,
         submittedComposerDraft

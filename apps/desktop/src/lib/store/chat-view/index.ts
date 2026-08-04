@@ -1,8 +1,7 @@
 import type { ChatApiRequestBody, ChatApiStreamEvent } from "@lys/protocol"
 import type {
   Conversation,
-  ConversationAssistantMessage,
-  ConversationUserMessage
+  ConversationAssistantMessageStatus
 } from "@lys/share"
 import { create, type StoreApi, type UseBoundStore } from "zustand"
 
@@ -46,36 +45,12 @@ export type ChatRequestState =
       readonly status: "idle"
     }
   | {
-      /** The request is waiting for its persisted user message. */
-      readonly status: "awaiting-user-message"
-      /** Token authorizing this request to mutate chat state. */
-      readonly token: number
-      /** Trimmed prompt submitted to the backend. */
-      readonly submittedPrompt: string
-      /** Exact composer draft cleared only if unchanged at start. */
-      readonly submittedComposerDraft?: string
-    }
-  | {
-      /** The request is waiting for its persisted assistant message. */
-      readonly status: "awaiting-assistant-message"
+      /** The request is waiting for its persisted conversation turn. */
+      readonly status: "awaiting-turn"
       /** Token authorizing this request to mutate chat state. */
       readonly token: number
       /** Exact composer draft cleared only if unchanged at start. */
       readonly submittedComposerDraft?: string
-      /** Backend-owned user message for the submitted turn. */
-      readonly userMessage: ConversationUserMessage
-    }
-  | {
-      /** Both messages are available while conversation metadata is pending. */
-      readonly status: "awaiting-start"
-      /** Token authorizing this request to mutate chat state. */
-      readonly token: number
-      /** Exact composer draft cleared only if unchanged at start. */
-      readonly submittedComposerDraft?: string
-      /** Backend-owned user message for the submitted turn. */
-      readonly userMessage: ConversationUserMessage
-      /** Backend-owned assistant message that will receive streamed content. */
-      readonly assistantMessage: ConversationAssistantMessage
     }
   | {
       /** The backend-identified assistant reply is accepting content. */
@@ -136,7 +111,18 @@ const INITIAL_CHAT_VIEW_STATE: Readonly<ChatViewState> = Object.freeze({
 })
 
 /** Terminal state for an assistant reply that did not complete normally. */
-type IncompleteAssistantStatus = "interrupted" | "failed"
+type IncompleteAssistantStatus = Extract<
+  ConversationAssistantMessageStatus,
+  "interrupted" | "failed"
+>
+
+/** Complete backend-owned conversation turn emitted at the start of a stream. */
+type ChatTurnStartEvent = Extract<
+  ChatApiStreamEvent,
+  {
+    type: "start-new-conversation-turn" | "start-existing-conversation-turn"
+  }
+>
 
 /** Non-idle observable request state carrying phase-specific metadata. */
 type OwnedChatRequestState = Exclude<ChatRequestState, { status: "idle" }>
@@ -168,22 +154,19 @@ function formatLifecycleErrorMessage(error: unknown): string {
 }
 
 /**
- * Creates observable request state awaiting its backend user message.
+ * Creates observable request state awaiting its backend conversation turn.
  *
  * @param token - Monotonic token assigned by the owning store.
- * @param submittedPrompt - Trimmed prompt sent to the backend.
  * @param submittedComposerDraft - Exact composer draft, when applicable.
- * @returns Observable request state awaiting its backend user message.
+ * @returns Observable request state awaiting its backend conversation turn.
  */
-function createAwaitingUserMessageRequest(
+function createAwaitingTurnRequest(
   token: number,
-  submittedPrompt: string,
   submittedComposerDraft?: string
-): Extract<ChatRequestState, { status: "awaiting-user-message" }> {
+): Extract<ChatRequestState, { status: "awaiting-turn" }> {
   return {
-    status: "awaiting-user-message",
+    status: "awaiting-turn",
     token,
-    submittedPrompt,
     ...(submittedComposerDraft === undefined ? {} : { submittedComposerDraft })
   }
 }
@@ -353,90 +336,35 @@ export function createChatViewStore(
     }
 
     /**
-     * Records the backend-owned user message for an awaiting request.
+     * Starts a backend-owned conversation turn for an awaiting request.
      *
-     * @param event - User-message event emitted by the backend stream.
+     * @param event - Complete turn emitted by the backend stream.
      * @param token - Token expected to own the awaiting request.
      * @throws If the event is out of order or its token is inactive.
      */
-    function handleChatUserMessageEvent(
-      event: Extract<ChatApiStreamEvent, { type: "user-message" }>,
-      token: number
-    ): void {
-      const request = getOwnedRequest(token)
-      if (request.status !== "awaiting-user-message") {
-        throw new Error("Chat user message did not match an awaiting request")
-      }
-
-      const awaitingAssistantMessageRequest = {
-        status: "awaiting-assistant-message",
-        token,
-        ...(request.submittedComposerDraft === undefined
-          ? {}
-          : { submittedComposerDraft: request.submittedComposerDraft }),
-        userMessage: event.message
-      } satisfies Extract<
-        ChatRequestState,
-        { status: "awaiting-assistant-message" }
-      >
-      set({ request: awaitingAssistantMessageRequest })
-    }
-
-    /**
-     * Records the backend-owned assistant message for an awaiting request.
-     *
-     * @param event - Assistant-message event emitted by the backend stream.
-     * @param token - Token expected to own the awaiting request.
-     * @throws If the event is out of order or its token is inactive.
-     */
-    function handleChatAssistantMessageEvent(
-      event: Extract<ChatApiStreamEvent, { type: "assistant-message" }>,
-      token: number
-    ): void {
-      const request = getOwnedRequest(token)
-      if (request.status !== "awaiting-assistant-message") {
-        throw new Error(
-          "Chat assistant message did not follow its user message"
-        )
-      }
-
-      const awaitingStartRequest = {
-        status: "awaiting-start",
-        token,
-        ...(request.submittedComposerDraft === undefined
-          ? {}
-          : { submittedComposerDraft: request.submittedComposerDraft }),
-        userMessage: request.userMessage,
-        assistantMessage: event.message
-      } satisfies Extract<ChatRequestState, { status: "awaiting-start" }>
-      set({ request: awaitingStartRequest })
-    }
-
-    /**
-     * Starts the backend-identified assistant reply for an awaiting request.
-     *
-     * @param event - Start event containing conversation metadata and message ID.
-     * @param token - Token expected to own the awaiting request.
-     * @throws If the event is out of order or its token is inactive.
-     */
-    function handleChatStartEvent(
-      event: Extract<ChatApiStreamEvent, { type: "start" }>,
+    function handleChatTurnStartEvent(
+      event: ChatTurnStartEvent,
       token: number
     ): void {
       const currentState = get()
       const request = getOwnedRequest(token)
-      if (request.status !== "awaiting-start") {
-        throw new Error("Chat start event did not match an awaiting request")
-      }
-      if (event.assistantMessageId !== request.assistantMessage.id) {
-        throw new Error("Chat start event identified a different assistant")
+      if (request.status !== "awaiting-turn") {
+        throw new Error("Chat turn start did not match an awaiting request")
       }
 
+      const previousConversation =
+        event.type === "start-existing-conversation-turn"
+          ? getActiveConversation()
+          : undefined
+      const conversationMetadata =
+        event.type === "start-new-conversation-turn"
+          ? event.conversation
+          : getActiveConversation()
       const conversation = startConversationTurn({
-        conversationMetadata: event.conversation,
-        previousConversation: currentState.conversation,
-        userMessage: request.userMessage,
-        assistantMessage: request.assistantMessage
+        conversationMetadata,
+        previousConversation,
+        userMessage: event.userMessage,
+        assistantMessage: event.assistantMessage
       })
       const inputDraft =
         request.submittedComposerDraft !== undefined &&
@@ -446,7 +374,7 @@ export function createChatViewStore(
       const streamingRequest = {
         status: "reply-streaming",
         token,
-        assistantMessageId: event.assistantMessageId
+        assistantMessageId: event.assistantMessage.id
       } satisfies Extract<ChatRequestState, { status: "reply-streaming" }>
 
       set({
@@ -548,14 +476,9 @@ export function createChatViewStore(
       if (!isRequestOwned(token)) return
 
       switch (event.type) {
-        case "user-message":
-          handleChatUserMessageEvent(event, token)
-          return
-        case "assistant-message":
-          handleChatAssistantMessageEvent(event, token)
-          return
-        case "start":
-          handleChatStartEvent(event, token)
+        case "start-new-conversation-turn":
+        case "start-existing-conversation-turn":
+          handleChatTurnStartEvent(event, token)
           return
         case "title":
           handleChatTitleEvent(event, token)
@@ -599,7 +522,7 @@ export function createChatViewStore(
      */
     async function readChatStream(
       payload: ChatApiRequestBody,
-      request: Extract<ChatRequestState, { status: "awaiting-user-message" }>
+      request: Extract<ChatRequestState, { status: "awaiting-turn" }>
     ): Promise<void> {
       try {
         const resource = getOwnedRequestResource(request.token)
@@ -661,11 +584,7 @@ export function createChatViewStore(
 
       const token = nextRequestToken
       nextRequestToken += 1
-      const request = createAwaitingUserMessageRequest(
-        token,
-        submittedPrompt,
-        submittedComposerDraft
-      )
+      const request = createAwaitingTurnRequest(token, submittedComposerDraft)
       const resource = createChatRequestResource(token)
       const payload = createChatRequestPayload(
         get().conversation?.id,

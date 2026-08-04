@@ -14,19 +14,16 @@ export const chatApiRequestBodySchema = z.strictObject({
 
 export const chatApiStreamEventSchema = z.discriminatedUnion("type", [
   z.strictObject({
-    type: z.literal("user-message"),
-    message: conversationUserMessageSchema
-  }),
-
-  z.strictObject({
-    type: z.literal("assistant-message"),
-    message: conversationAssistantMessageSchema
-  }),
-
-  z.strictObject({
-    type: z.literal("start"),
+    type: z.literal("start-new-conversation-turn"),
     conversation: conversationMetadataSchema,
-    assistantMessageId: z.uuidv7()
+    userMessage: conversationUserMessageSchema,
+    assistantMessage: conversationAssistantMessageSchema
+  }),
+
+  z.strictObject({
+    type: z.literal("start-existing-conversation-turn"),
+    userMessage: conversationUserMessageSchema,
+    assistantMessage: conversationAssistantMessageSchema
   }),
 
   z.strictObject({

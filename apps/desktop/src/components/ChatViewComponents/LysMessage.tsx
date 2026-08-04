@@ -7,14 +7,16 @@ import type { ReactElement } from "react"
 export type LysMessageProps = {
   /** Assistant message rendered with Markdown and lifecycle state. */
   readonly message: ConversationAssistantMessage
-  /** Interrupts this message while it is streaming. */
-  readonly onStop: () => void
+  /** Interrupts this streaming message; omission removes the Stop control. */
+  readonly onStop?: () => void
 }
 
 /**
  * Renders one assistant message and its lifecycle controls or outcome.
  *
- * @param props - Assistant content and interruption control to present.
+ * @remarks Primary category: presentational. An interruption action is shown
+ * only for the active streaming message when the transcript provides one.
+ * @param props - Assistant content and optional interruption control to present.
  * @returns The rendered assistant transcript message.
  */
 export default function LysMessage({
@@ -28,7 +30,7 @@ export default function LysMessage({
     >
       <div className="chat-view__message-heading">
         <p className="chat-view__speaker">lys</p>
-        {message.status === "streaming" && (
+        {message.status === "streaming" && onStop !== undefined && (
           <Button
             aria-label="Stop reply"
             onClick={onStop}

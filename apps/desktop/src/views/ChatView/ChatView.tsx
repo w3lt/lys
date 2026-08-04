@@ -1,20 +1,11 @@
 import type { ConversationMessage } from "@lys/share"
-import { lazy, useEffect, useRef } from "react"
+import { useEffect, useRef } from "react"
 import type { ReactElement } from "react"
-import { ArrowDown } from "lucide-react"
-
-import { Button } from "@/components/ui/button"
 
 import "./ChatView.scss"
 import { Composer } from "@/components/Composer"
 import { type ChatRequestState, useChatViewStore } from "@/lib/store/chat-view"
-
-const StarterView = lazy(
-  () => import("@/components/ChatViewComponents/StarterView")
-)
-const ConversationContent = lazy(
-  () => import("@/components/ChatViewComponents/ConversationContent")
-)
+import ChatViewContent from "@/components/ChatViewComponents/ChatViewContent"
 
 /** Immutable empty transcript used before a conversation has started. */
 const EMPTY_CONVERSATION_MESSAGES: readonly ConversationMessage[] =
@@ -39,9 +30,7 @@ function isChatReplyPending(request: ChatRequestState): boolean {
     case "idle":
     case "reply-completed":
       return false
-    case "awaiting-user-message":
-    case "awaiting-assistant-message":
-    case "awaiting-start":
+    case "awaiting-turn":
     case "reply-streaming":
       return true
   }
@@ -100,41 +89,17 @@ export default function ChatView({
 
   return (
     <main className="app-shell__chat">
-      <section className="chat-view" aria-label="Conversation">
-        <div
-          className="chat-view__scroller"
-          data-testid="transcript"
-          onScroll={handleScroll}
-          ref={transcriptRef}
-        >
-          {messages.length === 0 && !error ? (
-            <StarterView onSend={(prompt) => void sendMessage(prompt)} />
-          ) : (
-            <ConversationContent
-              error={error}
-              messages={messages}
-              onStop={stopStreaming}
-            />
-          )}
-        </div>
-
-        {!atBottom && (
-          <Button
-            className="chat-view__jump"
-            onClick={jumpToLatest}
-            size="sm"
-            variant="outline"
-          >
-            <ArrowDown aria-hidden="true" />
-            Jump to latest
-          </Button>
-        )}
-
-        <span aria-live="polite" className="sr-only" role="status">
-          {isReplyPending ? "Lys is generating a reply" : ""}
-        </span>
-      </section>
-
+      <ChatViewContent
+        atBottom={atBottom}
+        handleScroll={handleScroll}
+        isReplyPending={isReplyPending}
+        jumpToLatest={jumpToLatest}
+        messages={messages}
+        sendMessage={sendMessage}
+        stopStreaming={stopStreaming}
+        transcriptRef={transcriptRef}
+        error={error}
+      />
       <Composer messageCount={messages.length} />
     </main>
   )

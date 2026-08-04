@@ -2,20 +2,69 @@ import type { ChatApiStreamEvent } from "@lys/protocol"
 import type {
   Conversation,
   ConversationAssistantMessage,
+  ConversationAssistantMessageFinishReason,
   ConversationMetadata,
   ConversationUserMessage
 } from "@lys/share"
+
+/** Immutable user message published by the chat-view store. */
+export type ReadonlyConversationUserMessage = Readonly<ConversationUserMessage>
+
+/** Immutable shared assistant fields independent of lifecycle state. */
+type ReadonlyConversationAssistantMessageBase = Readonly<
+  Omit<ConversationAssistantMessage, "status" | "finishReason">
+>
+
+/** Immutable assistant message that can accept stream deltas. */
+export type StreamingConversationAssistantMessage =
+  ReadonlyConversationAssistantMessageBase & {
+    /** Active lifecycle state accepting content deltas. */
+    readonly status: "streaming"
+    /** Streaming replies do not yet have a completion reason. */
+    readonly finishReason: null
+  }
+
+/** Immutable assistant message whose reply lifecycle is terminal. */
+export type TerminalConversationAssistantMessage =
+  | (ReadonlyConversationAssistantMessageBase & {
+      /** Successful terminal lifecycle state. */
+      readonly status: "completed"
+      /** Model reason that ended successful generation. */
+      readonly finishReason: ConversationAssistantMessageFinishReason
+    })
+  | (ReadonlyConversationAssistantMessageBase & {
+      /** Terminal lifecycle state without model completion. */
+      readonly status: "interrupted" | "failed"
+      /** Interrupted and failed replies have no model completion reason. */
+      readonly finishReason: null
+    })
+
+/** Immutable message valid in the completed transcript prefix. */
+export type CompletedConversationMessage =
+  ReadonlyConversationUserMessage | TerminalConversationAssistantMessage
+
+/** Immutable lifecycle-refined message published to the chat view. */
+export type ReadonlyConversationMessage =
+  CompletedConversationMessage | StreamingConversationAssistantMessage
+
+/** Transitively immutable conversation published by the chat-view store. */
+export type ChatViewConversation = Readonly<
+  Omit<Conversation, "messages"> & {
+    /** Immutable ordered transcript owned by this conversation. */
+    readonly messages: readonly ReadonlyConversationMessage[]
+  }
+>
 
 /** Inputs required to append one backend-owned turn to a conversation. */
 export type StartConversationTurnOptions = {
   /** Latest metadata returned by the backend for the active conversation. */
   readonly conversationMetadata: ConversationMetadata
   /** Existing local conversation whose transcript may be preserved. */
-  readonly previousConversation?: Conversation
+  readonly previousConversation?: ChatViewConversation
   /** Persisted user message acknowledged by the backend. */
   readonly userMessage: ConversationUserMessage
   /** Persisted assistant message that will receive streamed content. */
-  readonly assistantMessage: ConversationAssistantMessage
+  readonly assistantMessage: StreamingConversationAssistantMessage
 }
 
 /** Inputs required to update one assistant reply with streamed content. */
@@ -55,6 +104,30 @@ export type UpdateAssistantReplyStatusOptions =
     }
 
 /**
+ * Determines whether a package-valid assistant can begin reply streaming.
+ *
+ * @param message - Protocol-validated assistant received at turn start.
+ * @returns Whether the assistant is streaming without a completion reason.
+ */
+export function isStreamingConversationAssistantMessage(
+  message: Readonly<ConversationAssistantMessage>
+): message is StreamingConversationAssistantMessage {
+  return message.status === "streaming" && message.finishReason === null
+}
+
+/**
+ * Determines whether an immutable message belongs in the completed prefix.
+ *
+ * @param message - Lifecycle-refined message published by the chat-view store.
+ * @returns Whether the message is a user message or terminal assistant.
+ */
+export function isCompletedConversationMessage(
+  message: ReadonlyConversationMessage
+): message is CompletedConversationMessage {
+  return message.role === "user" || message.status !== "streaming"
+}
+
+/**
  * Combines backend metadata and messages with matching local history.
  *
  * @param options - Metadata, prior state, and the new backend-owned turn.
@@ -63,21 +136,23 @@ export type UpdateAssistantReplyStatusOptions =
  */
 export function startConversationTurn(
   options: StartConversationTurnOptions
-): Conversation {
+): ChatViewConversation {
   const previousMessages =
     options.previousConversation?.id === options.conversationMetadata.id
       ? options.previousConversation.messages
       : []
-  const messages = [
+  const userMessage = Object.freeze({ ...options.userMessage })
+  const assistantMessage = Object.freeze({ ...options.assistantMessage })
+  const messages = Object.freeze([
     ...previousMessages,
-    options.userMessage,
-    options.assistantMessage
-  ]
+    userMessage,
+    assistantMessage
+  ] satisfies readonly ReadonlyConversationMessage[])
 
-  return {
+  return Object.freeze({
     ...options.conversationMetadata,
     messages
-  }
+  })
 }
 
 /**
@@ -88,10 +163,10 @@ export function startConversationTurn(
  * @returns A new conversation with the supplied title.
  */
 export function updateConversationTitle(
-  conversation: Conversation,
+  conversation: ChatViewConversation,
   title: string
-): Conversation {
-  return { ...conversation, title }
+): ChatViewConversation {
+  return Object.freeze({ ...conversation, title })
 }
 
 /**
@@ -103,9 +178,9 @@ export function updateConversationTitle(
  * @throws If the owned assistant message is absent or already terminal.
  */
 export function updateAssistantReplyContent(
-  conversation: Conversation,
+  conversation: ChatViewConversation,
   options: UpdateAssistantReplyContentOptions
-): Conversation {
+): ChatViewConversation {
   const assistantMessage = conversation.messages.find(
     (message) => message.id === options.assistantMessageId
   )
@@ -120,18 +195,51 @@ export function updateAssistantReplyContent(
     )
   }
 
-  return {
-    ...conversation,
-    messages: conversation.messages.map((message) =>
+  const updatedAssistantMessage = Object.freeze({
+    ...assistantMessage,
+    content: assistantMessage.content + options.content,
+    updatedAt: options.timestamp
+  } satisfies StreamingConversationAssistantMessage)
+  const messages = Object.freeze(
+    conversation.messages.map((message) =>
       message.id === options.assistantMessageId
-        ? {
-            ...assistantMessage,
-            content: assistantMessage.content + options.content,
-            updatedAt: options.timestamp
-          }
+        ? updatedAssistantMessage
         : message
     )
+  )
+
+  return Object.freeze({
+    ...conversation,
+    messages
+  })
+}
+
+/**
+ * Creates one immutable terminal assistant from its streaming predecessor.
+ *
+ * @param assistantMessage - Active assistant accepting reply deltas.
+ * @param options - Exact terminal lifecycle transition to publish.
+ * @returns A frozen assistant in the requested valid terminal state.
+ */
+function createTerminalConversationAssistantMessage(
+  assistantMessage: StreamingConversationAssistantMessage,
+  options: UpdateAssistantReplyStatusOptions
+): TerminalConversationAssistantMessage {
+  if (options.status === "completed") {
+    return Object.freeze({
+      ...assistantMessage,
+      status: options.status,
+      finishReason: options.finishReason,
+      updatedAt: options.timestamp
+    })
   }
+
+  return Object.freeze({
+    ...assistantMessage,
+    status: options.status,
+    finishReason: options.finishReason,
+    updatedAt: options.timestamp
+  })
 }
 
 /**
@@ -143,9 +251,9 @@ export function updateAssistantReplyContent(
  * @throws If the owned assistant message is absent or already terminal.
  */
 export function updateAssistantReplyStatus(
-  conversation: Conversation,
+  conversation: ChatViewConversation,
   options: UpdateAssistantReplyStatusOptions
-): Conversation {
+): ChatViewConversation {
   const assistantMessage = conversation.messages.find(
     (message) => message.id === options.assistantMessageId
   )
@@ -160,17 +268,20 @@ export function updateAssistantReplyStatus(
     )
   }
 
-  return {
-    ...conversation,
-    messages: conversation.messages.map((message) =>
+  const terminalAssistantMessage = createTerminalConversationAssistantMessage(
+    assistantMessage,
+    options
+  )
+  const messages = Object.freeze(
+    conversation.messages.map((message) =>
       message.id === options.assistantMessageId
-        ? {
-            ...assistantMessage,
-            status: options.status,
-            finishReason: options.finishReason,
-            updatedAt: options.timestamp
-          }
+        ? terminalAssistantMessage
         : message
     )
-  }
+  )
+
+  return Object.freeze({
+    ...conversation,
+    messages
+  })
 }

@@ -1,14 +1,15 @@
-import { type ConversationAssistantMessage } from "@lys/share"
 import type { ReactElement } from "react"
+
+import type { StreamingConversationAssistantMessage } from "@/lib/store/chat-view/conversation-transitions"
 
 import LysMessage from "./LysMessage"
 
 /** Properties accepted by {@link StreamingChatMessage}. */
 export type StreamingChatMessageProps = {
   /** Active assistant message selected from the streaming transcript tail. */
-  readonly message: ConversationAssistantMessage
+  readonly message: StreamingConversationAssistantMessage
   /** Interrupts the message when it is the active assistant reply. */
-  readonly onStop: () => void
+  readonly onStopReply: () => void
 }
 
 /**
@@ -21,7 +22,9 @@ export type StreamingChatMessageProps = {
  */
 export default function StreamingChatMessage({
   message,
-  onStop
+  onStopReply
 }: StreamingChatMessageProps): ReactElement {
-  return <LysMessage message={message} onStop={onStop} />
+  return (
+    <LysMessage kind="streaming" message={message} onStopReply={onStopReply} />
+  )
 }

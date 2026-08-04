@@ -1,13 +1,14 @@
-import type { ConversationMessage } from "@lys/share"
-import { lazy, memo, type ReactElement } from "react"
+import { memo, type ReactElement } from "react"
 
-const UserMessage = lazy(() => import("./UserMessage"))
-const LysMessage = lazy(() => import("./LysMessage"))
+import type { CompletedConversationMessage } from "@/lib/store/chat-view/conversation-transitions"
+
+import LysMessage from "./LysMessage"
+import UserMessage from "./UserMessage"
 
 /** Properties accepted by {@link CompletedChatMessage}. */
 export type CompletedChatMessageProps = {
   /** Terminal or user message selected for role-specific presentation. */
-  readonly message: ConversationMessage
+  readonly message: CompletedConversationMessage
 }
 
 /**
@@ -21,9 +22,11 @@ export type CompletedChatMessageProps = {
 function CompletedChatMessage({
   message
 }: CompletedChatMessageProps): ReactElement {
-  if (message.role === "user") return <UserMessage message={message} />
+  if (message.role === "user") {
+    return <UserMessage message={message} />
+  }
 
-  return <LysMessage message={message} />
+  return <LysMessage kind="terminal" message={message} />
 }
 
 export default memo(CompletedChatMessage)

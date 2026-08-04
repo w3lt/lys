@@ -1,14 +1,15 @@
-import type { ConversationMessage } from "@lys/share"
 import { useEffect, useRef } from "react"
 import type { ReactElement } from "react"
 
 import "./ChatView.scss"
+import ConversationPanel from "@/components/ChatViewComponents/ConversationPanel"
+import { createConversationPresentation } from "@/components/ChatViewComponents/conversation-presentation"
 import { Composer } from "@/components/Composer"
 import { type ChatRequestState, useChatViewStore } from "@/lib/store/chat-view"
-import ChatViewContent from "@/components/ChatViewComponents/ChatViewContent"
+import type { ReadonlyConversationMessage } from "@/lib/store/chat-view/conversation-transitions"
 
 /** Immutable empty transcript used before a conversation has started. */
-const EMPTY_CONVERSATION_MESSAGES: readonly ConversationMessage[] =
+const EMPTY_CONVERSATION_MESSAGES: readonly ReadonlyConversationMessage[] =
   Object.freeze([])
 
 /** Properties accepted by {@link ChatView}. */
@@ -57,6 +58,7 @@ export default function ChatView({
   const sendMessage = useChatViewStore((state) => state.sendMessage)
   const stopStreaming = useChatViewStore((state) => state.stopStreaming)
   const messages = conversation?.messages ?? EMPTY_CONVERSATION_MESSAGES
+  const presentation = createConversationPresentation(messages)
   const transcriptRef = useRef<HTMLDivElement>(null)
   const isReplyPending = isChatReplyPending(request)
 
@@ -69,7 +71,7 @@ export default function ChatView({
   }, [atBottom, messages])
 
   /** Records whether the reader remains near the bottom of the transcript. */
-  function handleScroll(): void {
+  function handleTranscriptScroll(): void {
     const element = transcriptRef.current
     if (!element) return
 
@@ -79,7 +81,7 @@ export default function ChatView({
   }
 
   /** Scrolls the transcript to its latest content and restores pinned state. */
-  function jumpToLatest(): void {
+  function handleJumpToLatest(): void {
     const element = transcriptRef.current
     if (!element) return
 
@@ -89,17 +91,33 @@ export default function ChatView({
 
   return (
     <main className="app-shell__chat">
-      <ChatViewContent
-        atBottom={atBottom}
-        handleScroll={handleScroll}
-        isReplyPending={isReplyPending}
-        jumpToLatest={jumpToLatest}
-        messages={messages}
-        sendMessage={sendMessage}
-        stopStreaming={stopStreaming}
-        transcriptRef={transcriptRef}
-        error={error}
-      />
+      {presentation.kind === "streaming-tail" ? (
+        <ConversationPanel
+          completedMessages={presentation.completedMessages}
+          error={error}
+          isAtBottom={atBottom}
+          isReplyPending={isReplyPending}
+          kind={presentation.kind}
+          onJumpToLatest={handleJumpToLatest}
+          onSendMessage={sendMessage}
+          onStopReply={stopStreaming}
+          onTranscriptScroll={handleTranscriptScroll}
+          streamingMessage={presentation.streamingMessage}
+          transcriptRef={transcriptRef}
+        />
+      ) : (
+        <ConversationPanel
+          completedMessages={presentation.completedMessages}
+          error={error}
+          isAtBottom={atBottom}
+          isReplyPending={isReplyPending}
+          kind={presentation.kind}
+          onJumpToLatest={handleJumpToLatest}
+          onSendMessage={sendMessage}
+          onTranscriptScroll={handleTranscriptScroll}
+          transcriptRef={transcriptRef}
+        />
+      )}
       <Composer messageCount={messages.length} />
     </main>
   )

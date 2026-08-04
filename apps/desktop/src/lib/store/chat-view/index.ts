@@ -1,13 +1,12 @@
 import type { ChatApiRequestBody, ChatApiStreamEvent } from "@lys/protocol"
-import type {
-  Conversation,
-  ConversationAssistantMessageStatus
-} from "@lys/share"
+import type { ConversationAssistantMessageStatus } from "@lys/share"
 import { create, type StoreApi, type UseBoundStore } from "zustand"
 
 import { readChatEvents, type ChatApiOptions } from "@/lib/apis/http/chat"
 
 import {
+  type ChatViewConversation,
+  isStreamingConversationAssistantMessage,
   startConversationTurn,
   updateAssistantReplyContent,
   updateAssistantReplyStatus,
@@ -74,7 +73,7 @@ export type ChatViewState = {
   /** Current composer text. */
   readonly inputDraft: string
   /** Active conversation, or undefined before a conversation starts. */
-  readonly conversation?: Conversation
+  readonly conversation?: ChatViewConversation
   /** Single authoritative observable request lifecycle state. */
   readonly request: ChatRequestState
   /** Latest lifecycle error shown inline, or undefined when clear. */
@@ -290,7 +289,7 @@ export function createChatViewStore(
      * @returns The conversation currently receiving stream transitions.
      * @throws If a stream event arrives before conversation start.
      */
-    function getActiveConversation(): Conversation {
+    function getActiveConversation(): ChatViewConversation {
       const conversation = get().conversation
       if (!conversation) {
         throw new Error("Chat conversation has not started")
@@ -308,10 +307,10 @@ export function createChatViewStore(
      * @returns A new terminal conversation, or the unchanged current value.
      */
     function updateIncompleteAssistantReplyStatus(
-      conversation: Conversation | undefined,
+      conversation: ChatViewConversation | undefined,
       request: OwnedChatRequestState,
       status: IncompleteAssistantStatus
-    ): Conversation | undefined {
+    ): ChatViewConversation | undefined {
       if (request.status !== "reply-streaming" || !conversation) {
         return conversation
       }
@@ -350,6 +349,11 @@ export function createChatViewStore(
       const request = getOwnedRequest(token)
       if (request.status !== "awaiting-turn") {
         throw new Error("Chat turn start did not match an awaiting request")
+      }
+      if (!isStreamingConversationAssistantMessage(event.assistantMessage)) {
+        throw new Error(
+          "Chat turn assistant must be streaming with no finish reason"
+        )
       }
 
       const previousConversation =

@@ -38,6 +38,30 @@ export type AddAssistantMessageToConversationOptions = {
   finishReason?: ConversationAssistantMessageFinishReason
 }
 
+export type UpdateAssistantMessageStateOptions = {
+  assistantMessageId: string
+  status?: ConversationAssistantMessageStatus | undefined
+  finishReason?: ConversationAssistantMessageFinishReason | null | undefined
+}
+
+export type UpdateConversationTitleOptions = {
+  conversationId: string
+  conversationTitle: string
+}
+
+export type ListConversationMetadataOptions = {
+  query?: string
+  cursor?: string
+  limit?: number
+}
+
+export type ListConversationMetadataResult = {
+  conversations: ConversationMetadata[]
+  total: number
+  nextCursor: string | null
+  hasNextPage: boolean
+}
+
 const databaseMigrations = [
   `
     CREATE TABLE conversations (
@@ -106,6 +130,34 @@ const databaseMigrations = [
       SET updated_at = NEW.created_at
       WHERE id = NEW.conversation_id;
     END;
+  `,
+  `
+    CREATE TRIGGER update_conversation_updated_at
+    AFTER UPDATE ON conversations
+    FOR EACH ROW
+    WHEN NEW.updated_at <= OLD.updated_at
+    BEGIN
+      UPDATE conversations
+      SET updated_at = CASE
+        WHEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') > OLD.updated_at
+          THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        ELSE strftime(
+          '%Y-%m-%dT%H:%M:%fZ',
+          OLD.updated_at,
+          '+0.001 seconds'
+        )
+      END
+      WHERE id = NEW.id;
+    END;
+
+    CREATE TRIGGER update_conversation_after_message_update
+    AFTER UPDATE ON conversation_messages
+    FOR EACH ROW
+    BEGIN
+      UPDATE conversations
+      SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+      WHERE id = NEW.conversation_id;
+    END;
   `
 ] as const
 
@@ -166,6 +218,8 @@ export default class ConversationService {
   #getConversationMetadataStatement: StatementSync
   #insertUserMessageStatement: StatementSync
   #insertAssistantMessageStatement: StatementSync
+  #updateAssistantMessageStateStatement: StatementSync
+  #updateConversationTitleStatement: StatementSync
 
   constructor({ databaseFilePath }: ConversationServiceCreationOptions) {
     const database = new DatabaseSync(databaseFilePath)
@@ -216,6 +270,28 @@ export default class ConversationService {
           created_at,
           updated_at
         ) VALUES (?, ?, 'assistant', ?, ?, ?, ?, ?, ?)
+      `)
+
+      this.#updateAssistantMessageStateStatement = database.prepare(`
+        UPDATE conversation_messages
+        SET
+          status = CASE
+            WHEN ? = 1 THEN ?
+            ELSE status
+          END,
+          finish_reason = CASE
+            WHEN ? = 1 THEN ?
+            ELSE finish_reason
+          END,
+          updated_at = ?
+        WHERE id = ?
+          AND role = 'assistant' 
+      `)
+
+      this.#updateConversationTitleStatement = database.prepare(`
+        UPDATE conversations
+        SET title = ?
+        WHERE id = ?
       `)
     } catch (error) {
       database.close()
@@ -328,6 +404,65 @@ export default class ConversationService {
     )
 
     return assistantMessage
+  }
+
+  public updateAssistantMessageState({
+    assistantMessageId,
+    status,
+    finishReason
+  }: UpdateAssistantMessageStateOptions) {
+    const shouldUpdateStatus = status !== undefined
+    const shouldUpdateFinishReason = finishReason !== undefined
+
+    if (!shouldUpdateStatus && !shouldUpdateFinishReason) {
+      return
+    }
+
+    const result = this.#updateAssistantMessageStateStatement.run(
+      shouldUpdateStatus ? 1 : 0,
+      status ?? null,
+      shouldUpdateFinishReason ? 1 : 0,
+      finishReason ?? null,
+      new Date().toISOString(),
+      assistantMessageId
+    )
+
+    if (Number(result.changes) !== 1) {
+      throw new Error(`Assistant message "${assistantMessageId}" was not found`)
+    }
+  }
+
+  public updateConversationTitle({
+    conversationId,
+    conversationTitle
+  }: UpdateConversationTitleOptions) {
+    const title = conversationTitle.trim()
+
+    if (title.length === 0) {
+      throw new Error("Conversation title must not be empty")
+    }
+
+    const result = this.#updateConversationTitleStatement.run(
+      title,
+      conversationId
+    )
+
+    if (Number(result.changes) !== 1) {
+      throw new Error(`Conversation "${conversationId}" was not found`)
+    }
+  }
+  
+  /**
+   * Lists conversation metadata using fuzzy title search and keyset pagination.
+   *
+   * @param options - Optional query, opaque cursor, and result limit.
+   * @returns Matching metadata, the total match count, and pagination state.
+   * @throws If the limit or cursor is invalid, or SQLite access fails.
+   */
+  public listConversationMetadata(
+    options: ListConversationMetadataOptions = {}
+  ): ListConversationMetadataResult {
+    
   }
 
   public [Symbol.dispose](): void {

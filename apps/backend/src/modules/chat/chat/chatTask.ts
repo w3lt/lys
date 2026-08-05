@@ -1,4 +1,5 @@
 import type ChatService from "../../../di/services/chatService"
+import type { UpdateAssistantMessageStateOptions } from "../../../di/services/conversationService"
 import {
   createEventSender,
   type ChatRouteReply,
@@ -7,6 +8,9 @@ import {
 
 type CreateChatTaskOptions = {
   chatService: ChatService
+  updateAssistantMessageState: (
+    options: Omit<UpdateAssistantMessageStateOptions, "assistantMessageId">
+  ) => void
   userMessageContent: string
   model: string
   abortSignal: AbortSignal
@@ -16,6 +20,7 @@ type CreateChatTaskOptions = {
 
 export default async function createChatTask({
   chatService,
+  updateAssistantMessageState,
   model,
   userMessageContent,
   abortSignal,
@@ -45,31 +50,56 @@ export default async function createChatTask({
 
       const content = choice.delta.content
       if (content) {
-        sendEvent({
+        await sendEvent({
           type: "delta",
           content
         })
       }
 
-      switch (choice.finish_reason) {
-        case null:
-          continue
+      const finishReason = choice.finish_reason
+      if (!finishReason) continue
 
-        case "stop":
-        case "length":
+      if (finishReason !== "stop" && finishReason !== "length") {
+        throw new Error(`Unsupported finish reason: ${choice.finish_reason}`)
+      }
+
+      updateAssistantMessageState({
+        finishReason,
+        status: "completed"
+      })
+
+      if (reply.sse.isConnected) {
+        try {
           await sendEvent({
             type: "done",
-            finishReason: choice.finish_reason
+            finishReason
           })
-          return
-
-        default:
-          throw new Error(`Unsupported finish reason: ${choice.finish_reason}`)
+        } catch (error) {
+          request.log.debug(
+            { err: error },
+            "Could not send the final chat event"
+          )
+        }
       }
+
+      return
+    }
+
+    if (abortSignal.aborted) {
+      updateAssistantMessageState({
+        status: "interrupted"
+      })
+      return
     }
 
     throw new Error("Model stream ended without a finish reason")
   } catch (error) {
+    if (abortSignal.aborted) {
+      updateAssistantMessageState({
+        status: "failed"
+      })
+    }
+
     request.log.error({ err: error }, "Chat completion stream failed")
 
     // The client is gone, so there is nowhere to send an error event.

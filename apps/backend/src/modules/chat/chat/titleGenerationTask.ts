@@ -7,6 +7,7 @@ type CreateTitleGenerationTaskOptions = {
   model: string
   abortSignal: AbortSignal
   reply: ChatRouteReply
+  updateConversationTitle: (title: string) => void
 }
 
 export default async function createTitleGenerationTask({
@@ -14,7 +15,8 @@ export default async function createTitleGenerationTask({
   abortSignal,
   userMessageContent: message,
   model,
-  reply
+  reply,
+  updateConversationTitle
 }: CreateTitleGenerationTaskOptions) {
   const sendEvent = createEventSender(reply)
 
@@ -24,6 +26,8 @@ export default async function createTitleGenerationTask({
       model,
       signal: abortSignal
     })
+    
+    updateConversationTitle(title)
 
     await sendEvent({
       type: "title",

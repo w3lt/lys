@@ -61,7 +61,14 @@ export default async function registerChatRoute(app: FastifyInstance) {
           model,
           reply,
           request,
-          userMessageContent: userMessage.content
+          userMessageContent: userMessage.content,
+          updateAssistantMessageState: ({ finishReason, status }) => {
+            this.conversationService.updateAssistantMessageState({
+              assistantMessageId: assistantMessage.id,
+              finishReason,
+              status
+            })
+          }
         })
 
         const titleGenerationTask = createTitleGenerationTask({
@@ -69,7 +76,13 @@ export default async function registerChatRoute(app: FastifyInstance) {
           chatService: this.chatService,
           model,
           reply,
-          userMessageContent: userMessage.content
+          userMessageContent: userMessage.content,
+          updateConversationTitle: (title) => {
+            this.conversationService.updateConversationTitle({
+              conversationId: conversationTurn.conversation.id,
+              conversationTitle: title
+            })
+          }
         })
 
         /*

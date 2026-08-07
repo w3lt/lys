@@ -1,66 +1,30 @@
-import type { PathLike } from "node:fs"
 import { DatabaseSync, type StatementSync } from "node:sqlite"
+import * as z from "zod"
 import {
   conversationAssistantMessageSchema,
   conversationMetadataSchema,
   conversationUserMessageSchema,
   type ConversationAssistantMessage,
-  type ConversationAssistantMessageFinishReason,
-  type ConversationAssistantMessageStatus,
   type ConversationMetadata,
   type ConversationUserMessage
 } from "@lys/share"
 import { v7 as uuidv7 } from "uuid"
-import { lysSystemPrompt } from "../../utils/prompts"
-
-export type ConversationServiceCreationOptions = {
-  databaseFilePath: PathLike
-}
-
-export type ConversationCreationOptions = {
-  systemPrompt?: string
-}
-
-export type GetConversationMetadataOptions = {
-  id: string
-}
-
-export type AddUserMessageToConversationOptions = {
-  conversationId: string
-  userMessageContent: string
-}
-
-export type AddAssistantMessageToConversationOptions = {
-  conversationId: string
-  assistantMessageContent: string
-  model: string
-  status: ConversationAssistantMessageStatus
-  finishReason?: ConversationAssistantMessageFinishReason
-}
-
-export type UpdateAssistantMessageStateOptions = {
-  assistantMessageId: string
-  status?: ConversationAssistantMessageStatus | undefined
-  finishReason?: ConversationAssistantMessageFinishReason | null | undefined
-}
-
-export type UpdateConversationTitleOptions = {
-  conversationId: string
-  conversationTitle: string
-}
-
-export type ListConversationMetadataOptions = {
-  query?: string
-  cursor?: string
-  limit?: number
-}
-
-export type ListConversationMetadataResult = {
-  conversations: ConversationMetadata[]
-  total: number
-  nextCursor: string | null
-  hasNextPage: boolean
-}
+import type {
+  AddAssistantMessageToConversationOptions,
+  AddUserMessageToConversationOptions,
+  ConversationCreationOptions,
+  ConversationServiceCreationOptions,
+  GetConversationMetadataOptions,
+  ListConversationMetadataOptions,
+  ListConversationMetadataResult,
+  UpdateAssistantMessageStateOptions,
+  UpdateConversationTitleOptions
+} from "./share"
+import { lysSystemPrompt } from "../../../utils/prompts"
+import {
+  encodeConversationListCursor,
+  verifyListConversationMetadataOptions
+} from "./utils"
 
 const databaseMigrations = [
   `
@@ -163,6 +127,11 @@ const databaseMigrations = [
 
 const currentDatabaseVersion = databaseMigrations.length
 
+/** Validates the total returned by the conversation metadata count query. */
+const conversationMetadataCountSchema = z.strictObject({
+  total: z.number().int().nonnegative()
+})
+
 function readDatabaseVersion(database: DatabaseSync): number {
   const databaseVersion = database
     .prepare("PRAGMA user_version")
@@ -216,6 +185,10 @@ export default class ConversationService {
   #database: DatabaseSync
   #insertConversationStatement: StatementSync
   #getConversationMetadataStatement: StatementSync
+  /** Counts every stored conversation without search filtering. */
+  #countConversationMetadataStatement: StatementSync
+  /** Lists conversations by the unfiltered updated-time and ID keyset. */
+  #listUnfilteredConversationMetadataStatement: StatementSync
   #insertUserMessageStatement: StatementSync
   #insertAssistantMessageStatement: StatementSync
   #updateAssistantMessageStateStatement: StatementSync
@@ -246,6 +219,23 @@ export default class ConversationService {
           updated_at AS updatedAt
         FROM conversations
         WHERE id = ?
+      `)
+
+      this.#countConversationMetadataStatement = database.prepare(`
+        SELECT count(*) AS total FROM conversations
+      `)
+
+      this.#listUnfilteredConversationMetadataStatement = database.prepare(`
+        SELECT
+          id,
+          title,
+          system_prompt AS systemPrompt,
+          created_at AS createdAt,
+          updated_at AS updatedAt
+        FROM conversations
+        WHERE ? IS NULL OR updated_at < ? OR (updated_at = ? AND id < ?)
+        ORDER BY updated_at DESC, id DESC
+        LIMIT ?
       `)
 
       this.#insertUserMessageStatement = database.prepare(`
@@ -451,9 +441,9 @@ export default class ConversationService {
       throw new Error(`Conversation "${conversationId}" was not found`)
     }
   }
-  
+
   /**
-   * Lists conversation metadata using fuzzy title search and keyset pagination.
+   * Lists conversation metadata using unfiltered keyset pagination.
    *
    * @param options - Optional query, opaque cursor, and result limit.
    * @returns Matching metadata, the total match count, and pagination state.
@@ -462,7 +452,29 @@ export default class ConversationService {
   public listConversationMetadata(
     options: ListConversationMetadataOptions = {}
   ): ListConversationMetadataResult {
-    
+    const { cursor, limit, query } =
+      verifyListConversationMetadataOptions(options)
+    const total = conversationMetadataCountSchema.parse(
+      this.#countConversationMetadataStatement.get()
+    ).total
+    const rows = this.#listUnfilteredConversationMetadataStatement.all(
+      cursor?.updatedAt ?? null,
+      cursor?.updatedAt ?? null,
+      cursor?.updatedAt ?? null,
+      cursor?.id ?? null,
+      limit + 1
+    )
+    const hasNextPage = rows.length > limit
+    const conversations = conversationMetadataSchema
+      .array()
+      .parse(rows.slice(0, limit))
+    const lastConversation = conversations.at(-1)
+    const nextCursor =
+      hasNextPage && lastConversation !== undefined
+        ? encodeConversationListCursor(query, lastConversation)
+        : null
+
+    return { conversations, total, nextCursor, hasNextPage }
   }
 
   public [Symbol.dispose](): void {

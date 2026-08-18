@@ -9,16 +9,39 @@ import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Separator } from "@/components/ui/separator"
 import {
-  backendMetaLabel,
   backendStatusLabel,
-  useRuntimeSettingsContext,
-  type BackendStatus
+  useRuntimeSettingsContext
 } from "@/lib/hooks/runtimeSettingsContext"
-import { lazy } from "react"
+import { type BackendServerStatus } from "@/lib/store"
 
-const PaneSkeleton = lazy(() => import("./PaneSkeleton"))
+/**
+ * `18s` under a minute, `711m 18s` above it. Minutes never roll into hours: a
+ * long-lived local process is easier to compare in one unit.
+ */
+function formatUptime(elapsedMs: number) {
+  const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000))
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
 
-function backendTone(status: BackendStatus): string {
+  return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`
+}
+
+/** The mono detail line under the title: where the process is, and for how long. */
+function backendMetaLabel(status: BackendServerStatus, uptimeMs: number) {
+  const BACKEND_ADDRESS = "127.0.0.1:12345"
+  switch (status) {
+    case "running":
+      return `${BACKEND_ADDRESS} · up ${formatUptime(uptimeMs)}`
+    case "starting":
+      return `${BACKEND_ADDRESS} · starting`
+    case "stopping":
+      return `${BACKEND_ADDRESS} · stopping`
+    case "stopped":
+      return `${BACKEND_ADDRESS} · not running`
+  }
+}
+
+function backendTone(status: BackendServerStatus): string {
   switch (status) {
     case "running":
       return "active"
@@ -36,12 +59,12 @@ export default function RuntimePaneContent() {
     setSettingsBuffer,
     startBackend,
     stopBackend,
-    loadingSettings,
-    backendStatus,
+    backendServerInfo,
     uptimeMs
   } = useRuntimeSettingsContext()
 
-  if (loadingSettings) return <PaneSkeleton pane="runtime" />
+  const backendStatus = backendServerInfo.status
+
   if (!settingsBuffer) return null
 
   const autoStart = settingsBuffer.autoStartBackend

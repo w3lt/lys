@@ -1,14 +1,28 @@
-import { type UserMessage } from "@/app/types"
+import type { ReactElement } from "react"
 
-type UserMessageProps = {
-  message: UserMessage
+import type { ReadonlyConversationUserMessage } from "@/lib/store/chat-view/conversation-transitions"
+
+/** Properties accepted by {@link UserMessage}. */
+export type UserMessageProps = {
+  /** Immutable user message rendered in the completed transcript prefix. */
+  readonly message: ReadonlyConversationUserMessage
 }
 
-export default function UserMessage({ message }: UserMessageProps) {
+/**
+ * Presents one user-authored transcript message.
+ *
+ * @remarks Primary category: presentational. The parent owns the immutable
+ * message and list identity; this component owns no state or side effects.
+ * @param props - Completed user message selected by the transcript.
+ * @returns The rendered user message.
+ */
+export default function UserMessage({
+  message
+}: UserMessageProps): ReactElement {
   return (
-    <article className="chat-view__message" key={message.id}>
+    <article className="chat-view__message">
       <p className="chat-view__speaker">you</p>
-      <p className="chat-view__user-copy">{message.text}</p>
+      <p className="chat-view__user-copy">{message.content}</p>
     </article>
   )
 }

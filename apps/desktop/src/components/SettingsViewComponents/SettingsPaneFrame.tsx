@@ -1,4 +1,4 @@
-import { SettingsPaneProps } from "@/views/SettingsView/SettingsView"
+import type { SettingsPaneProps } from "@/views/SettingsView/SettingsView"
 import PaneHeading from "./PaneHeading"
 import PaneFooter from "./PaneFooter"
 import PaneSkeleton from "./PaneSkeleton"

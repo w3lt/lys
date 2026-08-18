@@ -1,4 +1,4 @@
-import { LysSettings } from "@/lib/store/settings"
+import type { LysSettings } from "@/lib/store/settings"
 import { invoke } from "@tauri-apps/api/core"
 
 export async function loadSettings() {

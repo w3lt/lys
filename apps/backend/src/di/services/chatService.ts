@@ -25,7 +25,7 @@ export type CompleteChatOptions = {
   /**
    * Whether the caller requested streaming in the shared option shape.
    *
-   * @remarks {@link ChatService.completeChatStream} always requests streaming.
+   * @remarks {@link ChatService["completeChatStream"]} always requests streaming.
    */
   stream?: boolean
   /** Abort signal that cancels the in-flight completion request. */

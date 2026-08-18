@@ -1,5 +1,5 @@
 import type ChatService from "../../../di/services/chatService"
-import type { UpdateAssistantMessageStateOptions } from "../../../di/services/conversationService"
+import type { UpdateAssistantMessageStateOptions } from "../../../di/services/conversationService/share"
 import {
   createEventSender,
   type ChatRouteReply,

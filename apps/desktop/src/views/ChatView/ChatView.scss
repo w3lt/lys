@@ -134,9 +134,50 @@
   justify-content: space-between;
 }
 
+.chat-view__speaker-identity {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
 .chat-view__speaker {
   color: var(--app-text-faint);
   letter-spacing: 0.2em;
+}
+
+.chat-view__avatar {
+  display: flex;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 50%;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.chat-view__avatar--you {
+  color: var(--app-text);
+  background-image: var(--gradient-identity);
+  box-shadow: 0 0 0 1px var(--app-border-default);
+}
+
+/* Static: an identity mark must not pulse or emit an animated glow. */
+.chat-view__avatar--lys {
+  background-image: var(--gradient-primary);
+  box-shadow: var(--shadow-primary);
+}
+
+.chat-view__avatar-core {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--lys-violet-black);
+  opacity: 0.55;
 }
 
 .chat-view__message--lys .chat-view__speaker {

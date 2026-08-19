@@ -1,4 +1,9 @@
 import type { ReactElement } from "react"
+import { Avatar, AvatarImage } from "../ui/avatar"
+import lysDarkAvatar from "@/assets/avatars/lys_dark.png"
+import lysLightAvatar from "@/assets/avatars/lys_light.png"
+import w3ltAvatar from "@/assets/avatars/w3lt.jpg"
+import { useTheme } from "@/app/theme"
 
 /** Transcript speaker that an identity mark stands for. */
 export type TranscriptSpeaker = "lys" | "you"
@@ -48,5 +53,23 @@ export default function SpeakerAvatar({
         <span className="chat-view__avatar-core" />
       )}
     </span>
+  )
+}
+
+function LysAvatar(): ReactElement {
+  const { theme } = useTheme()
+  const isDark = theme === "dark"
+  return (
+    <Avatar>
+      <AvatarImage src={isDark ? lysDarkAvatar : lysLightAvatar} />
+    </Avatar>
+  )
+}
+
+function W3ltAvatar(): ReactElement {
+  return (
+    <Avatar>
+      <AvatarImage src={w3ltAvatar} />
+    </Avatar>
   )
 }

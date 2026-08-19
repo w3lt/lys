@@ -1,0 +1,100 @@
+name: Feature request
+description: Request a capability that does not currently exist in Lys
+title: "[Feature] "
+labels:
+  - Feature
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A feature request proposes a capability that does not currently exist in Lys, regardless of who or what will use it.
+
+        Do not include credentials, API keys, private data, or other sensitive information.
+
+  - type: dropdown
+    id: beneficiaries
+    attributes:
+      label: Who benefits
+      description: Select everyone or everything that would benefit from this capability.
+      multiple: true
+      options:
+        - People using Lys
+        - Contributors or developers
+        - Maintainers or operators
+        - Other Lys components or integrations
+        - Unsure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: affected-area
+    attributes:
+      label: Affected area
+      description: Select every part of Lys that may provide or consume this capability.
+      multiple: true
+      options:
+        - Desktop UI
+        - Desktop native / Tauri
+        - Backend
+        - Shared protocol / packages
+        - Build / runtime integration
+        - Unsure
+    validations:
+      required: true
+
+  - type: textarea
+    id: requested-capability
+    attributes:
+      label: Requested capability
+      description: Describe what Lys should become able to do.
+      placeholder: Describe the capability without prescribing an implementation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation
+      description: Explain the goal, workflow, or need that this capability would address.
+      placeholder: Describe why this capability would be valuable.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-outcome
+    attributes:
+      label: Expected outcome
+      description: Describe the observable behavior or contract that would indicate success.
+      placeholder: Describe what should become possible if the feature is delivered.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives-or-workarounds
+    attributes:
+      label: Alternatives or workarounds
+      description: Describe any current alternatives, workarounds, or related capabilities you considered.
+
+  - type: textarea
+    id: scope-boundaries
+    attributes:
+      label: Scope boundaries
+      description: Clarify anything that this request should not include.
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add any references, examples, mockups, or other context that may help evaluate the request.
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmations
+      options:
+        - label: I searched for an existing issue that requests this capability.
+          required: true
+        - label: This capability does not already exist in Lys; a change to an existing capability belongs under Improvement.
+          required: true
+        - label: I removed credentials, private data, and other sensitive information from this request.
+          required: true

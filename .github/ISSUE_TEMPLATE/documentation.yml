@@ -1,0 +1,104 @@
+name: Documentation request
+description: Request internal or external documentation work for Lys
+title: "[Documentation] "
+labels:
+  - Documentation
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A documentation request primarily creates, corrects, clarifies, reorganizes, or removes repository-owned documentation without changing Lys's runtime behavior.
+
+        Documentation may serve people using Lys or people developing, maintaining, and operating it. Do not include credentials, API keys, private data, or other sensitive information.
+
+  - type: dropdown
+    id: target-audience
+    attributes:
+      label: Target audience
+      description: Select every audience that the documentation should serve.
+      multiple: true
+      options:
+        - External — people using Lys
+        - Internal — contributors and developers
+        - Internal — maintainers and operators
+        - Unsure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: documentation-category
+    attributes:
+      label: Documentation category
+      description: Select every category that describes the requested documentation.
+      multiple: true
+      options:
+        - User guide or help
+        - Contributor or developer guide
+        - Maintainer or operations guide
+        - Architecture or design
+        - API, protocol, or reference
+        - Standards or policy
+        - JSDoc or code comments
+        - Other or unsure
+    validations:
+      required: true
+
+  - type: input
+    id: documentation-location-or-topic
+    attributes:
+      label: Documentation location or topic
+      description: Identify the path, URL, section, or subject when the documentation does not exist yet.
+      placeholder: For example, docs/setup.md, an existing URL, or a missing topic
+    validations:
+      required: true
+
+  - type: textarea
+    id: current-state-or-gap
+    attributes:
+      label: Current state or gap
+      description: Explain what is missing, incorrect, outdated, unclear, redundant, or difficult to find.
+      placeholder: Describe the current documentation and the gap that should be addressed.
+    validations:
+      required: true
+
+  - type: textarea
+    id: requested-documentation-outcome
+    attributes:
+      label: Requested documentation outcome
+      description: Describe what the documentation should communicate or enable readers to accomplish.
+      placeholder: Describe the intended reader outcome and necessary content.
+    validations:
+      required: true
+
+  - type: textarea
+    id: accuracy-basis
+    attributes:
+      label: Accuracy basis
+      description: Link to relevant behavior, code, contracts, specifications, or other sources of truth.
+
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation
+      description: Explain how correctness, completeness, examples, links, and discoverability should be verified.
+      placeholder: Describe how a reviewer can confirm that the documentation meets its purpose.
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add any examples, references, screenshots, or other context that may help evaluate the request.
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmations
+      options:
+        - label: I searched for an existing issue that requests this documentation work.
+          required: true
+        - label: Documentation is the primary deliverable; runtime behavior changes belong under another issue type.
+          required: true
+        - label: I removed credentials, private data, and other sensitive information from this request.
+          required: true

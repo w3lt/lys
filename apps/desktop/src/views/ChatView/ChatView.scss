@@ -134,6 +134,12 @@
   justify-content: space-between;
 }
 
+.chat-view__speaker-identity {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
 .chat-view__speaker {
   color: var(--app-text-faint);
   letter-spacing: 0.2em;

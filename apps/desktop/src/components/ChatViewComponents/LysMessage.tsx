@@ -7,6 +7,8 @@ import type {
   TerminalConversationAssistantMessage
 } from "@/lib/store/chat-view/conversation-transitions"
 
+import SpeakerAvatar from "./SpeakerAvatar"
+
 /** Properties accepted by {@link LysMessage}. */
 export type LysMessageProps =
   | {
@@ -38,7 +40,10 @@ export default function LysMessage(props: LysMessageProps): ReactElement {
   return (
     <article className="chat-view__message chat-view__message--lys">
       <div className="chat-view__message-heading">
-        <p className="chat-view__speaker">lys</p>
+        <div className="chat-view__speaker-identity">
+          <SpeakerAvatar speaker="lys" />
+          <p className="chat-view__speaker">lys</p>
+        </div>
         {props.kind === "streaming" && (
           <Button
             aria-label="Stop reply"

@@ -8,7 +8,15 @@ export type LlmServiceCreationOptions = {
   lmsBaseUrl: string
 }
 
-/** Application-scoped LM Studio lifecycle and inventory adapter. */
+/**
+ * Owns an LM Studio SDK client for model lifecycle and inventory operations.
+ *
+ * @remarks Primary category: resource owner or boundary adapter. The instance
+ * owns its SDK client for the application lifetime and borrows request options
+ * from callers. Concurrency model: reentrant at this service boundary; no
+ * request-local mutable state is retained and operation concurrency is
+ * delegated to the SDK.
+ */
 export default class LlmService {
   /** Owned LM Studio SDK client used for model lifecycle and inventory operations. */
   #lmsClient: LMStudioClient

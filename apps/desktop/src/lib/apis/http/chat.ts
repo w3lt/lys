@@ -16,7 +16,9 @@ export type ChatApiOptions = {
  * Opens and reads one validated backend chat event stream.
  *
  * @remarks Ending iteration before the backend closes the stream cancels the
- * underlying reader before releasing it.
+ * underlying reader before releasing it. The adapter targets the fixed local
+ * backend loopback address and port used by the current desktop protocol; an
+ * aborted signal propagates through `fetch` and reader cleanup.
  * @param payload - Valid chat prompt and optional conversation identifier.
  * @param options - Optional transport cancellation settings.
  * @returns An async generator yielding validated chat protocol events.

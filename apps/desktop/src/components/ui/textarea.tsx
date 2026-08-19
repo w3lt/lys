@@ -2,6 +2,18 @@ import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * Renders a styled native multiline text input.
+ *
+ * @remarks Primary category: UI primitive adapter. Native `textarea` props,
+ * children, value state, and event handlers are forwarded unchanged; native
+ * focus, keyboard, disabled, read-only, and validation semantics remain with
+ * the host. A supplied `ref` targets the native `HTMLTextAreaElement`; the
+ * adapter adds `data-slot="textarea"` and owns no state, portal, or failure
+ * handling.
+ * @param props - Native textarea props, children, and optional styling.
+ * @returns The styled native textarea host.
+ */
 function Textarea({ className, ...props }: React.ComponentProps<"textarea">) {
   return (
     <textarea

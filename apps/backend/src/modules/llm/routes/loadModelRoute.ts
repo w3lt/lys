@@ -6,9 +6,16 @@ import { LMStudioClient } from "@lmstudio/sdk"
 /**
  * Registers the LLM load endpoint with protocol body validation and response serialization.
  *
+ * The registrar mutates `app` by installing the protocol POST path. The
+ * handler validates the request body before loading a model and returns the
+ * matching downloaded inventory entry marked as loaded.
+ *
  * @param app - Application instance that receives the LLM load route.
  * @returns A promise that resolves after route registration completes.
  * @throws If Fastify cannot register the route.
+ * @remarks Invalid bodies are rejected by protocol validation. Model-loading,
+ * inventory, and missing-canonical-model failures propagate from the handler to
+ * Fastify's request error boundary.
  */
 export default async function registerLlmLoadModelRoute(app: FastifyInstance) {
   app.route<LlmLoadModelApiRoute>({

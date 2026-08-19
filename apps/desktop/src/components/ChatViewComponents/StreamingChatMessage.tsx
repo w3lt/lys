@@ -17,6 +17,10 @@ export type StreamingChatMessageProps = {
  *
  * @remarks Primary category: presentational. The parent owns stream lifecycle
  * and provides the interruption action only for its active assistant message.
+ * It forwards the Stop button contract from {@link LysMessage}: one
+ * synchronous callback per button activation with the accessible `Stop reply`
+ * label; terminal Stopped/Failed announcements are rendered by that child
+ * after the parent supplies a terminal message.
  * @param props - Active assistant message and its interruption control.
  * @returns The streaming assistant message presentation.
  */

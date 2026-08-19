@@ -5,8 +5,11 @@ import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
 import { useSettingsContext } from "./SettingsContext"
 
+/** Supported context-window choices shown by the settings control. */
 const CONTEXT_OPTIONS: ReadonlyArray<{
+  /** Context-window capacity in tokens. */
   value: LysConfig["contextSize"]
+  /** Compact display label for the capacity. */
   label: string
 }> = [
   { value: 4096, label: "4k" },
@@ -15,13 +18,49 @@ const CONTEXT_OPTIONS: ReadonlyArray<{
   { value: 32768, label: "32k" }
 ]
 
+/**
+ * Normalizes a slider event to its first numeric value.
+ *
+ * @remarks Array inputs are expected to contain the slider's single value. An
+ * empty array returns `undefined`; the current temperature and reply-ceiling
+ * handlers forward that value without validation, so a later render can lose
+ * numeric state and fail at the temperature output's `toFixed` call.
+ *
+ * @param value - Scalar or single-thumb values emitted by the slider.
+ * @returns The scalar value, the first array value, or `undefined` for an empty
+ * array.
+ */
 function singleSliderValue(value: number | readonly number[]) {
   return typeof value === "number" ? value : value[0]
 }
 
+/**
+ * Presents context-window, sampling, reply-ceiling, and streaming controls.
+ *
+ * @remarks Primary category: composition/view. The required
+ * `SettingsContext.Provider` owns the generation configuration and receives
+ * synchronous patches from each control; this component owns no state,
+ * effects, persistence, or resources. The context consumer throws when the
+ * provider is absent. The context-window toggle forwards one patch for a
+ * recognized option and ignores empty or unknown arrays. Temperature and
+ * reply-ceiling sliders propose on every primitive change, including the
+ * unvalidated empty-array result above; the stream switch proposes on every
+ * checked change. No control exposes save or operation completion. Current
+ * values are rendered in token or numeric units and slider labels are
+ * associated with their outputs.
+ *
+ * @returns The generation settings controls.
+ */
 export default function GenerationPane() {
   const { state, onConfigChange } = useSettingsContext()
 
+  /**
+   * Proposes the selected context-window capacity to the settings owner.
+   *
+   * @param values - Selection values emitted by the toggle-group primitive.
+   * @returns Nothing; a recognized option is forwarded once synchronously,
+   * while empty or unknown selections are ignored.
+   */
   function changeContext(values: string[]) {
     const selected = CONTEXT_OPTIONS.find(
       ({ value }) => String(value) === values[0]

@@ -11,6 +11,7 @@ declare module "fastify" {
     chatService: ChatService
     /** Application-scoped service for LM Studio model lifecycle operations. */
     llmService: LlmService
+    /** Application-scoped service for synchronous conversation persistence. */
     conversationService: ConversationService
   }
 }

@@ -14,9 +14,15 @@ const EMPTY_CONVERSATION_MESSAGES: readonly ReadonlyConversationMessage[] =
 
 /** Properties accepted by {@link ChatView}. */
 export type ChatViewProps = {
-  /** Whether the transcript currently remains pinned to its latest content. */
+  /** Whether the parent-owned transcript currently remains pinned to latest content. */
   readonly atBottom: boolean
-  /** Records whether the reader has scrolled to the latest transcript content. */
+  /**
+   * Receives native-scroll near-bottom results and jump activation state.
+   *
+   * @remarks Native scroll events report the measured position. Activating
+   * “Jump to latest” reports `true` immediately, before the requested smooth
+   * scroll has completed.
+   */
   readonly onScrollPositionChange: (atBottom: boolean) => void
 }
 
@@ -42,9 +48,12 @@ function isChatReplyPending(request: ChatRequestState): boolean {
  *
  * @remarks Primary category: composition/view. The application chat-view store
  * owns conversation and request state; the surrounding shell owns whether the
- * transcript is pinned to its latest content. The component synchronizes its
- * private transcript host with that scroll contract and politely announces
- * pending reply generation.
+ * transcript is pinned to its latest content. The component owns the
+ * transcript host ref and synchronizes its scroll position only while the
+ * parent says it is pinned and messages exist. It forwards starter submission
+ * and stop actions to the store, and politely announces pending generation.
+ * The initial empty conversation is a valid state and renders through the
+ * starter view rather than a loading placeholder.
  * @param props - Parent-owned transcript position and its change notification.
  * @returns The conversation workspace in its empty, active, or failed state.
  */

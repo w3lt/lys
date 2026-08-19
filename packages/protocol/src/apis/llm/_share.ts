@@ -1,5 +1,6 @@
 import * as z from "zod"
 
+/** Model formats understood by the shared LM Studio inventory contract. */
 export const modelCompatibilityTypeSchema = z.enum([
   "gguf",
   "safetensors",
@@ -9,10 +10,12 @@ export const modelCompatibilityTypeSchema = z.enum([
   "torch_safetensors"
 ])
 
+/** Closed model-format domain inferred from {@link modelCompatibilityTypeSchema}. */
 export type ModelCompatibilityType = z.infer<
   typeof modelCompatibilityTypeSchema
 >
 
+/** Validates approximate quantization metadata reported for a model. */
 export const quantizationSchema = z.strictObject({
   /**
    * Name of the quantization.
@@ -26,8 +29,10 @@ export const quantizationSchema = z.strictObject({
   bits: z.number()
 })
 
+/** Quantization metadata accepted by the model inventory contract. */
 export type Quantization = z.infer<typeof quantizationSchema>
 
+/** Validates model inventory metadata shared by list and load endpoints. */
 export const llmInfoSchema = z.strictObject({
   /**
    * The key of the model. Use to load the model.
@@ -79,4 +84,5 @@ export const llmInfoSchema = z.strictObject({
   loaded: z.boolean()
 })
 
+/** Model inventory metadata inferred from the authoritative runtime schema. */
 export type LlmInfo = z.infer<typeof llmInfoSchema>

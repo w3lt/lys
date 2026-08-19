@@ -62,6 +62,14 @@ function formatRuntimeLabel(
 /**
  * Renders the chat draft editor and controls for the owned chat lifecycle.
  *
+ * @remarks Primary category: composition/view. The application stores own
+ * runtime availability and chat draft/request actions; this component derives
+ * disabled state and status copy but does not duplicate either authority.
+ * Enter without Shift submits once and prevents a newline; Shift+Enter keeps
+ * the newline. Send controls invoke the store actions, Stop invokes
+ * cancellation, New resets the session, and the model control changes the
+ * application view. The textarea remains labeled for assistive technology and
+ * the offline status is announced politely when generation is unavailable.
  * @param props - Transcript count displayed in the composer status.
  * @returns The rendered conversation composer.
  */

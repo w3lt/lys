@@ -5,6 +5,9 @@ import registerLlmLoadModelRoute from "./loadModelRoute"
 /**
  * Registers all LLM lifecycle and inventory routes on a Fastify application.
  *
+ * The registrar mutates `app` by installing the list and load endpoints in
+ * that order; it does not complete until both child registrations settle.
+ *
  * @param app - Application instance that receives the LLM route group.
  * @returns A promise that resolves after child route registrars complete.
  * @throws If a child route registrar rejects.

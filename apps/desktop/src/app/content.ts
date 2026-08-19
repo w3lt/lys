@@ -1,11 +1,13 @@
 import type { LysConfig } from "./types"
 
+/** Prompt examples shown by the chat starter view. */
 export const STARTER_PROMPTS = [
   "What are you?",
   "Sketch the streaming pipeline for a local model.",
   "What happens when the context fills?"
 ] as const
 
+/** Demonstration model choices displayed by the desktop model settings view. */
 export const MODEL_OPTIONS = [
   {
     name: "qwen3-8b-instruct",
@@ -24,6 +26,7 @@ export const MODEL_OPTIONS = [
   }
 ] as const
 
+/** Deterministic demonstration replies selected by {@link replyForPrompt}. */
 export const REPLIES = {
   identity:
     "A voice running on the model you loaded. Nothing more, and nothing behind it.\n\nI have no tools, no memory past this window, no way to reach outward. When you close me, I stop existing in any way that matters.\n\nAsk me something. I'd rather be used than described.",
@@ -36,6 +39,7 @@ export const REPLIES = {
     "Understood.\n\nI have the shape of what you want, but not enough of the particulars to be worth reading yet. Give me the constraint that matters most — the one you would not trade away — and I will work from there.\n\nBe specific. Vagueness costs you tokens and me nothing."
 } as const
 
+/** Initial demonstration generation configuration used by the reducer state. */
 export const DEFAULT_CONFIG: LysConfig = {
   endpoint: "127.0.0.1:1234",
   model: "qwen3-8b-instruct",

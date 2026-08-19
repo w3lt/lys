@@ -3,33 +3,38 @@ import type { CSSProperties } from "react"
 import type { SettingsPane } from "@/app/types"
 import { Skeleton } from "@/components/ui/skeleton"
 
-/*
- * A pane's controls are read from disk the first time it is opened. Each shape
- * below repeats the block order of the pane it stands in for — cards, then a
- * section heading, then rows and compact list lines — so the layout settles
- * into place rather than jumping when the real controls arrive.
- *
- * Widths are fixed lengths where the real element is label-sized and
- * percentages where it fills the pane, matching how that element sizes itself.
- */
+/** Geometry and labels for one repeated skeleton row. */
 interface SkeletonRow {
+  /** Width of the row's primary label placeholder. */
   label: string
+  /** Width of the row's secondary description placeholder. */
   description: string
-  /** The control parked at the end of the row: a button, switch, or slider. */
-  control: { width: string; height: string }
+  /** The control placeholder's CSS width and height, parked at row end. */
+  control: {
+    /** CSS width of the control placeholder. */
+    width: string
+    /** CSS height of the control placeholder. */
+    height: string
+  }
 }
 
+/** Geometry for one card-shaped loading placeholder. */
 interface SkeletonCard {
+  /** Width of the card title placeholder. */
   title: string
+  /** Width of the card metadata placeholder. */
   meta: string
   /** A setting the card carries under its own divider, below the status line. */
   row?: SkeletonRow
 }
 
+/** Complete placeholder geometry for one settings pane. */
 interface PaneSkeletonShape {
+  /** Card-shaped blocks rendered before row content. */
   cards: ReadonlyArray<SkeletonCard>
   /** A section heading and its rule, introducing the rows beneath it. */
   heading: boolean
+  /** Repeated label/description/control rows beneath the optional heading. */
   rows: ReadonlyArray<SkeletonRow>
   /** Compact two-column lines: runtime log entries, or model options. */
   list: ReadonlyArray<string>
@@ -37,6 +42,7 @@ interface PaneSkeletonShape {
   block: boolean
 }
 
+/** Authoritative placeholder geometry keyed by every supported settings pane. */
 const PANE_SKELETONS: Record<SettingsPane, PaneSkeletonShape> = {
   runtime: {
     cards: [
@@ -117,19 +123,44 @@ const PANE_SKELETONS: Record<SettingsPane, PaneSkeletonShape> = {
   }
 }
 
-/*
- * Cards are larger and fewer, so they carry the wider interval; rows and list
- * lines are dense enough that the same interval would leave the sweep looking
- * unsynchronised down the pane.
- */
+/** Delay between successive card placeholder animations, in milliseconds. */
 const CARD_STAGGER_MS = 130
+/** Delay between successive row/list placeholder animations, in milliseconds. */
 const LINE_STAGGER_MS = 90
 
+/**
+ * Creates the CSS custom property used to stagger one skeleton element.
+ *
+ * @param index - Zero-based position within the repeated placeholder group.
+ * @param stepMs - Delay increment per position, in milliseconds.
+ * @returns A style object containing the renderer-facing delay custom property.
+ */
 function stagger(index: number, stepMs: number) {
   return { "--skeleton-delay": `${index * stepMs}ms` } as CSSProperties
 }
 
-export default function PaneSkeleton({ pane }: { pane: SettingsPane }) {
+/**
+ * Presents an accessible loading placeholder for one settings pane.
+ *
+ * @remarks Primary category: presentational. The parent owns the pane value;
+ * this component reads only the immutable geometry registry and owns no state,
+ * effects, resources, callbacks, or persistence. The `role="status"` and
+ * visually hidden text provide one polite announcement, while decorative bars
+ * are hidden from assistive technology. Pixel widths are CSS geometry strings;
+ * stagger delays are milliseconds. The component is intended only as the
+ * `Suspense` fallback and renders cards, rows, list lines, or a block according
+ * to the selected pane's current shape; it does not claim that the controls
+ * themselves are ready or available.
+ *
+ * @param props - Pane identity whose placeholder shape should be rendered.
+ * @returns The accessible skeleton stack for the pane.
+ */
+export default function PaneSkeleton({
+  pane
+}: {
+  /** Settings pane whose loading geometry is displayed. */
+  pane: SettingsPane
+}) {
   const shape = PANE_SKELETONS[pane]
   const hasLines = shape.heading || shape.rows.length > 0
 

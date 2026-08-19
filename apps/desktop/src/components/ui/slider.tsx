@@ -2,6 +2,26 @@ import { Slider as SliderPrimitive } from "@base-ui/react/slider"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * Renders the maintained multi-thumb Base UI slider tree with Lys track
+ * styling.
+ *
+ * @remarks Primary category: UI primitive adapter. The adapter does not render
+ * caller-provided `children`; it owns the `Control`, `Track`, `Indicator`, and
+ * generated `Thumb` tree. Array `value` or array `defaultValue` supplies one
+ * thumb per entry. Scalar values are accepted by the Base UI type but this
+ * adapter falls back to `[min, max]` and renders two thumbs, so the scalar
+ * mismatch is accepted pre-existing debt rather than a supported single-thumb
+ * contract. A controlled array `value` is parent-owned; an array
+ * `defaultValue` is primitive-owned after initialization. `min` and `max`
+ * default to `0` and `100`. `thumbAlignment="edge"` is the adapter default but
+ * later forwarded props may override it; current consumers pass `center`. Base
+ * UI coordinates orientation, keyboard, focus, disabled semantics, and state
+ * attributes. A supplied `ref` targets the root's `HTMLDivElement` host.
+ * @param props - Base UI slider props and optional range defaults.
+ * @returns The styled slider root with its adapter-owned control, track,
+ * indicator, and generated thumbs.
+ */
 function Slider({
   className,
   defaultValue,

@@ -15,8 +15,12 @@ import {
 import { type BackendServerStatus } from "@/lib/store"
 
 /**
- * `18s` under a minute, `711m 18s` above it. Minutes never roll into hours: a
- * long-lived local process is easier to compare in one unit.
+ * Formats non-negative backend uptime as seconds or minutes and seconds.
+ *
+ * @param elapsedMs - Elapsed process time in milliseconds; negative values are
+ * treated as zero.
+ * @returns A compact duration label; minutes intentionally do not roll into
+ * hours.
  */
 function formatUptime(elapsedMs: number) {
   const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000))
@@ -26,8 +30,15 @@ function formatUptime(elapsedMs: number) {
   return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`
 }
 
-/** The mono detail line under the title: where the process is, and for how long. */
+/**
+ * Formats the backend address and lifecycle detail shown under its status.
+ *
+ * @param status - Store-owned backend lifecycle state.
+ * @param uptimeMs - Current process uptime in milliseconds.
+ * @returns The visible address and lifecycle detail label.
+ */
 function backendMetaLabel(status: BackendServerStatus, uptimeMs: number) {
+  /** Fixed local simulation address displayed by this prototype pane. */
   const BACKEND_ADDRESS = "127.0.0.1:12345"
   switch (status) {
     case "running":
@@ -41,6 +52,12 @@ function backendMetaLabel(status: BackendServerStatus, uptimeMs: number) {
   }
 }
 
+/**
+ * Selects the visual status tone for a backend lifecycle state.
+ *
+ * @param status - Store-owned backend lifecycle state.
+ * @returns The CSS tone name used for the status indicator.
+ */
 function backendTone(status: BackendServerStatus): string {
   switch (status) {
     case "running":
@@ -53,6 +70,27 @@ function backendTone(status: BackendServerStatus): string {
   }
 }
 
+/**
+ * Presents backend lifecycle controls and the session autostart toggle.
+ *
+ * @remarks Primary category: composition/view. The runtime settings hook
+ * selects store-owned backend status and actions, while its component-owned
+ * settings buffer supplies the displayed autostart value; no commit or
+ * persistence callback is exposed for that buffer. Start and Stop handlers
+ * intentionally discard the store-action promises with `void`: command
+ * failures are not awaited, observed, rendered, or recovered here, so a
+ * rejection may surface as an unhandled rejection; backend status is not a
+ * completion owner when the action rejects. The autostart switch updates the
+ * local buffer synchronously on each checked change. Uptime is rendered in
+ * milliseconds-derived seconds/minutes. If the settings buffer is unavailable,
+ * the defensive path renders no pane body; truthy malformed buffers are not
+ * validated by this component. The card uses native buttons and a labelled
+ * switch; status dots and the visual On/Off text are supplementary to the
+ * primitive semantics.
+ *
+ * @returns The runtime status card and backend controls, or no body while the
+ * local settings buffer is unavailable.
+ */
 export default function RuntimePaneContent() {
   const {
     settingsBuffer,

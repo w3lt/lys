@@ -9,6 +9,7 @@ export type SingletonServices = Readonly<{
   chatService: ChatService
   /** LM Studio lifecycle and inventory adapter configured for the backend's local endpoint. */
   llmService: LlmService
+  /** SQLite-backed conversation persistence owned by the application lifetime. */
   conversationService: ConversationService
 }>
 

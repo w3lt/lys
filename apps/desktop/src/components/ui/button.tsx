@@ -4,10 +4,14 @@ import { cva, type VariantProps } from "class-variance-authority"
 
 import { cn } from "@/lib/utils"
 
-/*
- * Lys styling is the default appearance of this primitive, so variants name a
- * purpose rather than a theme. Sizes follow the one compact desktop density:
- * 28 / 32 / 36px, with 14 / 16 / 18px icons.
+/**
+ * Supplies the Lys button variants used by {@link Button}.
+ *
+ * @remarks Primary category: UI primitive adapter. Variants express purpose
+ * rather than theme: `default`, `outline`, `secondary`, `ghost`, `destructive`,
+ * and `link`. Sizes follow the compact desktop density of 28/32/36px controls
+ * with 14/16/18px icons, plus icon-only
+ * sizes; `default` is used for both variant and size when omitted.
  */
 const buttonVariants = cva(
   "group/button inline-flex shrink-0 items-center justify-center rounded-[var(--radius-control)] border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap outline-none transition-[color,background-color,border-color,box-shadow,filter,translate] duration-(--duration-standard) ease-(--ease-standard) select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 active:not-aria-[haspopup]:translate-y-px disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0",
@@ -43,6 +47,21 @@ const buttonVariants = cva(
   }
 )
 
+/**
+ * Renders a Base UI button with Lys variants and native button behavior.
+ *
+ * @remarks Primary category: UI primitive adapter. Base UI button props,
+ * children, and interaction callbacks are forwarded, while `variant` and
+ * `size` select repository styling and default to `default`. The forwarded ref
+ * targets the Base UI button's `HTMLElement` host. Base UI supplies button
+ * rendering, native activation, disabled behavior, and focus behavior.
+ * Caller-provided `aria-haspopup`, `aria-pressed`, and related native
+ * attributes are forwarded and consumed by the maintained styling; this
+ * adapter owns no popup or pressed state and no failure handling.
+ * @param props - Base UI button props, children, and repository variants.
+ * @param ref - Ref forwarded to the Base UI button's `HTMLElement` host.
+ * @returns The styled Base UI button.
+ */
 const Button = React.forwardRef<
   React.ComponentRef<typeof ButtonPrimitive>,
   ButtonPrimitive.Props & VariantProps<typeof buttonVariants>

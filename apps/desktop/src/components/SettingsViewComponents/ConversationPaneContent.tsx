@@ -3,9 +3,31 @@ import { Textarea } from "@/components/ui/textarea"
 import { Separator } from "@/components/ui/separator"
 import { useSettingsContext } from "./SettingsContext"
 
+/**
+ * Presents context-overflow policy and the system prompt editor.
+ *
+ * @remarks Primary category: composition/view. The required
+ * `SettingsContext.Provider` owns the application configuration and receives
+ * synchronous patches from the toggle and textarea controls; this component
+ * owns no state, effects, persistence, or resources. The context consumer
+ * throws when the provider is absent. The trim toggle forwards one patch for a
+ * recognized `drop` or `stop` selection and ignores empty or unknown arrays;
+ * the system-prompt textarea proposes a patch synchronously on every change.
+ * Neither control exposes save or operation completion. The pane renders a
+ * vertical choice group and a labelled multiline field.
+ *
+ * @returns The context policy controls and system prompt field.
+ */
 export default function ConversationPane() {
   const { state, onConfigChange } = useSettingsContext()
 
+  /**
+   * Proposes the selected context trimming policy to the settings owner.
+   *
+   * @param values - Selection values emitted by the toggle-group primitive.
+   * @returns Nothing; recognized selections are forwarded once synchronously,
+   * while empty or unknown selections are ignored.
+   */
   function changeTrim(values: string[]) {
     const value = values[0]
     if (value === "drop" || value === "stop") {

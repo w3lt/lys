@@ -5,10 +5,32 @@ import { Separator } from "../ui/separator"
 import { MODEL_OPTIONS } from "@/app/content"
 import { useSettingsContext } from "./SettingsContext"
 
+/**
+ * Presents the endpoint field, prototype connection probe, and model choices.
+ *
+ * @remarks Primary category: composition/view. The required
+ * `SettingsContext.Provider` owns the endpoint and selected model and receives
+ * synchronous changes/selections from this component. The endpoint input
+ * proposes a patch on every primitive change, and each model button requests
+ * selection once per activation; neither exposes save or operation completion.
+ * The component owns only transient probe text, which resets when its view
+ * identity is remounted. The local probe synchronously presents either
+ * `probe ok · <endpoint>` or `probe failed · backend stopped`; it performs no
+ * network request and has no asynchronous/network failure state. The context
+ * consumer throws when the provider is absent. Controls use labels, pressed
+ * state, and a polite status region.
+ *
+ * @returns The model endpoint and model-selection controls.
+ */
 export default function ModelPane() {
   const [probeResult, setProbeResult] = useState("")
   const { state, onConfigChange, onSelectModel } = useSettingsContext()
 
+  /**
+   * Updates the local probe status without contacting the configured endpoint.
+   *
+   * @returns Nothing; the transient status is committed to component state.
+   */
   function testConnection() {
     setProbeResult(
       state.runtime.backend === "running"

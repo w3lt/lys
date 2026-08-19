@@ -3,11 +3,24 @@ import { Avatar as AvatarPrimitive } from "@base-ui/react/avatar"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * Provides the root context and styled host for an avatar family.
+ *
+ * @remarks Primary category: UI primitive adapter. Base UI avatar root props
+ * and children are forwarded; `size` is a repository styling variant with
+ * `default` as its fallback and is exposed as `data-size` for descendant
+ * styling. The Base UI root coordinates image-loading state and fallback
+ * selection; a supplied `ref` targets its `HTMLSpanElement` host. This adapter
+ * owns no portal, callbacks, or failure handling.
+ * @param props - Base UI avatar root props, children, and optional size.
+ * @returns The avatar root that provides context to image and fallback parts.
+ */
 function Avatar({
   className,
   size = "default",
   ...props
 }: AvatarPrimitive.Root.Props & {
+  /** Repository size variant applied to the avatar root and descendants. */
   size?: "default" | "sm" | "lg"
 }) {
   return (
@@ -23,6 +36,19 @@ function Avatar({
   )
 }
 
+/**
+ * Renders the image part of an {@link Avatar} using the Base UI image
+ * contract.
+ *
+ * @remarks Primary category: UI primitive adapter. Base UI image props are
+ * forwarded, and `data-slot="avatar-image"` identifies the part. Image
+ * loading and fallback behavior remain owned by the Base UI avatar root; an
+ * {@link Avatar} root is required and Base UI's missing-context error
+ * propagates otherwise. A supplied `ref` targets the Base UI
+ * `HTMLImageElement` host. No portal, state, or error contract is added here.
+ * @param props - Base UI avatar image props.
+ * @returns The styled avatar image part.
+ */
 function AvatarImage({ className, ...props }: AvatarPrimitive.Image.Props) {
   return (
     <AvatarPrimitive.Image
@@ -36,6 +62,20 @@ function AvatarImage({ className, ...props }: AvatarPrimitive.Image.Props) {
   )
 }
 
+/**
+ * Renders fallback content for an {@link Avatar} using the Base UI fallback
+ * contract.
+ *
+ * @remarks Primary category: UI primitive adapter. Base UI fallback props and
+ * children are forwarded, and `data-slot="avatar-fallback"` identifies this
+ * part. The root controls when fallback content is shown after image loading;
+ * an {@link Avatar} root is required and Base UI's missing-context error
+ * propagates otherwise. A supplied `ref` targets the Base UI
+ * `HTMLSpanElement` host. This adapter owns no state, portal, or failure
+ * handling.
+ * @param props - Base UI avatar fallback props and children.
+ * @returns The styled avatar fallback part.
+ */
 function AvatarFallback({
   className,
   ...props
@@ -52,6 +92,17 @@ function AvatarFallback({
   )
 }
 
+/**
+ * Renders an optional badge anchored to an {@link Avatar} over a native `span`.
+ *
+ * @remarks Primary category: UI primitive adapter. Native `span` props and
+ * children are forwarded, and the badge is sized from the ancestor avatar's
+ * `data-size` state. A supplied `ref` targets the native `HTMLSpanElement`;
+ * this is presentational content with no state, portal, keyboard behavior, or
+ * failure handling of its own.
+ * @param props - Native badge props and children.
+ * @returns The positioned avatar badge.
+ */
 function AvatarBadge({ className, ...props }: React.ComponentProps<"span">) {
   return (
     <span
@@ -68,6 +119,16 @@ function AvatarBadge({ className, ...props }: React.ComponentProps<"span">) {
   )
 }
 
+/**
+ * Groups multiple {@link Avatar} instances in an overlapping native `div`.
+ *
+ * @remarks Primary category: UI primitive adapter. Native `div` props and
+ * children are forwarded, and descendant avatar slots receive the group ring
+ * treatment. A supplied `ref` targets the native `HTMLDivElement`; the group
+ * owns no state, portal, callbacks, or failure handling.
+ * @param props - Native group props and avatar children.
+ * @returns The overlapping avatar group host.
+ */
 function AvatarGroup({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -81,6 +142,17 @@ function AvatarGroup({ className, ...props }: React.ComponentProps<"div">) {
   )
 }
 
+/**
+ * Renders a count or other summary content as a group-sized avatar surface.
+ *
+ * @remarks Primary category: UI primitive adapter. Native `div` props and
+ * children are forwarded, and the host adapts its size from the surrounding
+ * avatar group's descendant size data attributes. A supplied `ref` targets the
+ * native `HTMLDivElement`; it owns no state, portal, callbacks, or failure
+ * handling.
+ * @param props - Native count-surface props and summary content.
+ * @returns The styled avatar group count surface.
+ */
 function AvatarGroupCount({
   className,
   ...props

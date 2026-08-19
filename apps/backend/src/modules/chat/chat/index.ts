@@ -9,11 +9,22 @@ import { ConversationNotFoundError } from "../../../utils/errors"
 /**
  * Registers the chat completion endpoint on a Fastify application.
  *
+ * The registrar mutates `app` by installing the protocol POST/SSE route. Each
+ * request sends a conversation-turn start event before starting chat and title
+ * tasks concurrently; the handler remains pending until both tasks settle.
+ * Chat and title events may then interleave, while client closure aborts the
+ * shared upstream work. A missing conversation is translated to HTTP 404;
+ * task failures are translated by their task handlers where possible, while
+ * turn-construction or initial-event failures are caught without an extra
+ * route-level response.
+ *
  * @param app - Application instance that receives the chat route.
  * @returns A promise that resolves after route registration completes.
  * @throws If Fastify cannot register the route.
- * @remarks The registered handler emits typed SSE start, delta, done, or error
- * events, and aborts the upstream completion when the client disconnects.
+ * @remarks The registered handler emits typed SSE start, delta, done, title, or
+ * error events. The title is persisted before its event; assistant state is
+ * persisted before a supported completion event and is marked interrupted or
+ * failed when cancellation/error handling reaches those paths.
  */
 export default async function registerChatRoute(app: FastifyInstance) {
   app.route<ChatApiRoute>({

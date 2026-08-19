@@ -27,7 +27,7 @@ export default async function registerChatRoute(app: FastifyInstance) {
       const abortSignal = createAbortSignal(reply)
       const sendEvent = createEventSender(reply)
 
-      const { message, model, conversationId } = request.body
+      const { message, model, conversationId, generationOptions } = request.body
       try {
         const conversationTurn = new ConversationTurn({
           model,
@@ -62,6 +62,7 @@ export default async function registerChatRoute(app: FastifyInstance) {
           reply,
           request,
           userMessageContent: userMessage.content,
+          generationOptions,
           updateAssistantMessageState: ({ finishReason, status }) => {
             this.conversationService.updateAssistantMessageState({
               assistantMessageId: assistantMessage.id,

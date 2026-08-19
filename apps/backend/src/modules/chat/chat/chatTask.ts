@@ -1,5 +1,7 @@
+import type { MessageGenerationOptions } from "@lys/protocol"
 import type ChatService from "../../../di/services/chatService"
 import type { UpdateAssistantMessageStateOptions } from "../../../di/services/conversationService/share"
+import { lysSystemPrompt } from "../../../utils/prompts"
 import {
   createEventSender,
   type ChatRouteReply,
@@ -16,6 +18,7 @@ type CreateChatTaskOptions = {
   abortSignal: AbortSignal
   request: ChatRouteRequest
   reply: ChatRouteReply
+  generationOptions: MessageGenerationOptions
 }
 
 export default async function createChatTask({
@@ -25,19 +28,24 @@ export default async function createChatTask({
   userMessageContent,
   abortSignal,
   reply,
-  request
+  request,
+  generationOptions
 }: CreateChatTaskOptions) {
   const sendEvent = createEventSender(reply)
   try {
     const stream = await chatService.completeChatStream({
       messages: [
         {
+          role: "system",
+          content: lysSystemPrompt()
+        },
+        {
           role: "user",
           content: userMessageContent
         }
       ],
       model,
-      stream: true,
+      generationOptions,
       signal: abortSignal
     })
 

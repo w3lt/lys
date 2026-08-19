@@ -6,10 +6,16 @@ import {
   conversationUserMessageSchema
 } from "@lys/share"
 
+export const messageGenerationOptionsSchema = z.strictObject({
+  temperature: z.coerce.number().min(0).max(1),
+  replyCeiling: z.coerce.number().int().min(0).optional()
+})
+
 export const chatApiRequestBodySchema = z.strictObject({
   conversationId: z.uuidv7().optional(),
   message: z.string().min(1),
-  model: z.string().min(1)
+  model: z.string().min(1),
+  generationOptions: messageGenerationOptionsSchema
 })
 
 export const chatApiStreamEventSchema = z.discriminatedUnion("type", [
@@ -63,6 +69,10 @@ export type ChatApiRequestBody = z.infer<typeof chatApi.body>
 export type ChatApiResponse = z.infer<typeof chatApi.response>
 
 export type ChatApiStreamEvent = z.infer<typeof chatApiStreamEventSchema>
+
+export type MessageGenerationOptions = z.infer<
+  typeof messageGenerationOptionsSchema
+>
 
 export type ChatApiRoute = {
   Body: ChatApiRequestBody

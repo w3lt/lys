@@ -18,7 +18,6 @@ export default class ConversationTurn {
   #assistantMessage: ConversationAssistantMessage
   #conversation: ConversationMetadata
   #isNewConversation: boolean
-  #model: string
 
   constructor({
     model,
@@ -38,7 +37,6 @@ export default class ConversationTurn {
     }
 
     this.#conversation = conversationMetadata
-    this.#model = model
 
     this.#userMessage = conversationService.addUserMessageToConversation({
       conversationId: conversationMetadata.id,
@@ -70,9 +68,5 @@ export default class ConversationTurn {
 
   get isNewConversation() {
     return this.#isNewConversation
-  }
-
-  get model() {
-    return this.#model
   }
 }

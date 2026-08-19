@@ -3,6 +3,7 @@ import type { ChatCompletionMessageParam } from "openai/resources/index.mjs"
 import * as z from "zod"
 import { titleGenerationPrompt } from "../../utils/prompts"
 import { zodTextFormat } from "openai/helpers/zod"
+import type { MessageGenerationOptions } from "@lys/protocol"
 
 /** Settings used to create an application-scoped OpenAI-compatible chat client. */
 export type ChatServiceCreationOptions = {
@@ -30,6 +31,7 @@ export type CompleteChatOptions = {
   stream?: boolean
   /** Abort signal that cancels the in-flight completion request. */
   signal?: AbortSignal
+  generationOptions: MessageGenerationOptions
 }
 
 export type TitleGenerationOptions = {
@@ -72,13 +74,17 @@ export default class ChatService {
   public async completeChatStream({
     messages,
     model,
-    signal
+    signal,
+    generationOptions
   }: CompleteChatOptions) {
+    const { temperature, replyCeiling } = generationOptions
     return await this.#openaiClient.chat.completions.create(
       {
         messages,
         model,
-        stream: true
+        stream: true,
+        temperature,
+        max_completion_tokens: replyCeiling ?? null
       },
       { signal }
     )

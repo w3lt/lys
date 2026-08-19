@@ -1,0 +1,102 @@
+name: Bug report
+description: Report existing behavior that prevents Lys from operating according to its intended logic
+title: "[Bug] "
+labels:
+  - Bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A bug is existing behavior that prevents Lys from operating according to its intended logic, whether or not a user observes it.
+
+        Do not include credentials, API keys, private data, or other sensitive information.
+
+  - type: dropdown
+    id: affected-area
+    attributes:
+      label: Affected area
+      description: Select every part of Lys in which the incorrect behavior occurs.
+      multiple: true
+      options:
+        - Desktop UI
+        - Desktop native / Tauri
+        - Backend
+        - Shared protocol / packages
+        - Build / runtime integration
+        - Unsure
+    validations:
+      required: true
+
+  - type: textarea
+    id: observed-behavior
+    attributes:
+      label: Observed behavior
+      description: Describe what Lys currently does.
+      placeholder: Describe the incorrect behavior as precisely as possible.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected behavior
+      description: Describe the intended rule, contract, or invariant and why it applies.
+      placeholder: Describe what Lys should do instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction-or-demonstration
+    attributes:
+      label: Reproduction or demonstration
+      description: Provide steps, a failing test, a code path, logs, or other evidence that demonstrates the incorrect logic.
+      placeholder: |
+        1. Start from ...
+        2. Perform ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: input
+    id: version-or-revision
+    attributes:
+      label: Version or revision
+      description: Identify the release, branch, or commit where the bug occurs.
+      placeholder: For example, v0.1.0, main, or commit 1a2b3c4
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include any relevant operating system, architecture, execution mode, or configuration.
+      placeholder: |
+        Operating system:
+        Architecture:
+        Development or production mode:
+        Other relevant configuration:
+
+  - type: textarea
+    id: supporting-evidence
+    attributes:
+      label: Supporting evidence
+      description: Add sanitized logs, screenshots, stack traces, or test output that may help diagnose the bug.
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add any other context that may help explain or diagnose the bug.
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmations
+      options:
+        - label: I searched for an existing issue that describes this bug.
+          required: true
+        - label: This report describes incorrect existing behavior, not a request for different behavior.
+          required: true
+        - label: I removed credentials, private data, and other sensitive information from this report.
+          required: true

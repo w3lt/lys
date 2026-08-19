@@ -1,0 +1,109 @@
+name: Maintenance request
+description: Request internal work that preserves Lys's existing behavior
+title: "[Maintenance] "
+labels:
+  - Maintenance
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Maintenance is internal engineering or operational work intended to preserve Lys's existing behavior while keeping the codebase, dependencies, tooling, tests, builds, and delivery processes healthy.
+
+        Do not include credentials, API keys, private data, or other sensitive information.
+
+  - type: dropdown
+    id: maintenance-category
+    attributes:
+      label: Maintenance category
+      description: Select every category that describes the requested work.
+      multiple: true
+      options:
+        - Refactoring or code health
+        - Dependencies or toolchain
+        - Build, CI, or release process
+        - Test infrastructure
+        - Repository cleanup
+        - Preventive security hardening
+        - Other or unsure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: affected-area
+    attributes:
+      label: Affected area
+      description: Select every part of Lys involved in the maintenance work.
+      multiple: true
+      options:
+        - Desktop UI
+        - Desktop native / Tauri
+        - Backend
+        - Shared protocol / packages
+        - Build / runtime integration
+        - Repository-wide
+        - Unsure
+    validations:
+      required: true
+
+  - type: textarea
+    id: maintenance-objective
+    attributes:
+      label: Maintenance objective
+      description: Describe the internal condition that should change.
+      placeholder: Describe the intended engineering or operational outcome.
+    validations:
+      required: true
+
+  - type: textarea
+    id: current-state-and-rationale
+    attributes:
+      label: Current state and rationale
+      description: Explain the present condition, supporting evidence, and why the work is needed.
+      placeholder: Describe the technical debt, risk, outdated dependency, or process concern.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope-and-boundaries
+    attributes:
+      label: Scope and boundaries
+      description: Identify the affected packages, systems, or processes and what should remain out of scope.
+      placeholder: Describe the smallest coherent scope for the work.
+    validations:
+      required: true
+
+  - type: textarea
+    id: behavior-preservation-requirements
+    attributes:
+      label: Behavior-preservation requirements
+      description: Identify observable behavior, contracts, data, or compatibility that must remain unchanged.
+      placeholder: Describe the behavior and boundaries that the maintenance work must preserve.
+    validations:
+      required: true
+
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation
+      description: Explain how completion and behavior preservation will be verified.
+      placeholder: List the checks, tests, measurements, or manual validation that should demonstrate success.
+    validations:
+      required: true
+
+  - type: textarea
+    id: risks-dependencies-and-context
+    attributes:
+      label: Risks, dependencies, and context
+      description: Add any risks, dependencies, rollout considerations, references, or other relevant context.
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmations
+      options:
+        - label: I searched for an existing issue that requests this maintenance work.
+          required: true
+        - label: This work has no intended observable behavior change; otherwise it belongs under Bug, Feature, or Improvement.
+          required: true
+        - label: I removed credentials, private data, and other sensitive information from this request.
+          required: true

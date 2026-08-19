@@ -1,0 +1,112 @@
+name: Investigation / decision
+description: Investigate an uncertainty or make an evidence-based decision for Lys
+title: "[Investigation / Decision] "
+labels:
+  - Investigation / Decision
+body:
+  - type: markdown
+    attributes:
+      value: |
+        An investigation resolves an uncertainty through evidence. A decision selects an option using explicit criteria. One issue may investigate first and then record the resulting decision.
+
+        The primary deliverable is knowledge, a recommendation, or a recorded decision rather than implementation. Do not include credentials, API keys, private data, or other sensitive information.
+
+  - type: dropdown
+    id: work-mode
+    attributes:
+      label: Work mode
+      description: Select the outcome this issue is intended to produce.
+      options:
+        - Investigation only
+        - Decision only
+        - Investigation leading to a decision
+    validations:
+      required: true
+
+  - type: dropdown
+    id: affected-area
+    attributes:
+      label: Affected area
+      description: Select every part of Lys relevant to the investigation or decision.
+      multiple: true
+      options:
+        - Desktop UI
+        - Desktop native / Tauri
+        - Backend
+        - Shared protocol / packages
+        - Build / runtime integration
+        - Repository-wide
+        - Unsure
+    validations:
+      required: true
+
+  - type: textarea
+    id: question-or-decision
+    attributes:
+      label: Question or decision
+      description: State the exact uncertainty to resolve or choice to make.
+      placeholder: Write one focused question or decision statement.
+    validations:
+      required: true
+
+  - type: textarea
+    id: context-scope-and-importance
+    attributes:
+      label: Context, scope, and importance
+      description: Explain why this matters, why it is needed now, and the boundaries of the inquiry or decision.
+      placeholder: Describe the relevant context, impact, constraints, and out-of-scope concerns.
+    validations:
+      required: true
+
+  - type: textarea
+    id: known-facts-assumptions-and-unknowns
+    attributes:
+      label: Known facts, assumptions, and unknowns
+      description: Separate established evidence from assumptions and unresolved questions.
+      placeholder: |
+        Known facts:
+        Assumptions:
+        Unknowns:
+    validations:
+      required: true
+
+  - type: textarea
+    id: options-or-hypotheses
+    attributes:
+      label: Options or hypotheses
+      description: List the alternatives to compare or explanations to test.
+      placeholder: Describe each relevant option or hypothesis without selecting a conclusion prematurely.
+    validations:
+      required: true
+
+  - type: textarea
+    id: evaluation-criteria-and-evidence
+    attributes:
+      label: Evaluation criteria and evidence
+      description: Define how the options or hypotheses will be assessed and what evidence is needed.
+      placeholder: List the criteria, measurements, experiments, references, or constraints that should guide the outcome.
+    validations:
+      required: true
+
+  - type: textarea
+    id: completion-criteria
+    attributes:
+      label: Completion criteria
+      description: Describe the findings, recommendation, recorded decision, and follow-up issues required before closing.
+      placeholder: Explain what must be documented or created for this work to be complete.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmations
+      options:
+        - label: I searched for an existing issue that covers this investigation or decision.
+          required: true
+        - label: The primary deliverable is evidence, a recommendation, or a decision rather than implementation.
+          required: true
+        - label: Any resulting implementation will be captured under the appropriate issue type.
+          required: true
+        - label: I removed credentials, private data, and other sensitive information from this issue.
+          required: true

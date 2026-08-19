@@ -1,0 +1,99 @@
+name: Improvement request
+description: Request a better observable outcome from an existing Lys capability
+title: "[Improvement] "
+labels:
+  - Improvement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        An improvement changes an existing Lys capability that already behaves according to its intended logic so it produces a better observable outcome.
+
+        Improvements may address usability, accessibility, performance, reliability, or quality. Do not include credentials, API keys, private data, or other sensitive information.
+
+  - type: dropdown
+    id: affected-area
+    attributes:
+      label: Affected area
+      description: Select every part of Lys involved in the existing capability.
+      multiple: true
+      options:
+        - Desktop UI
+        - Desktop native / Tauri
+        - Backend
+        - Shared protocol / packages
+        - Build / runtime integration
+        - Unsure
+    validations:
+      required: true
+
+  - type: textarea
+    id: existing-capability
+    attributes:
+      label: Existing capability
+      description: Identify the capability that already exists in Lys.
+      placeholder: Describe what Lys can already do.
+    validations:
+      required: true
+
+  - type: textarea
+    id: current-behavior
+    attributes:
+      label: Current behavior
+      description: Explain how the capability works today and why that behavior is valid but insufficient.
+      placeholder: Describe the current observable behavior or contract.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-improvement
+    attributes:
+      label: Proposed improvement
+      description: Describe how the existing capability should become better.
+      placeholder: Describe the desired change without prescribing an implementation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: motivation-and-benefit
+    attributes:
+      label: Motivation and benefit
+      description: Explain who or what would benefit from this improvement and why.
+      placeholder: Describe the need or opportunity behind the improvement.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-outcome
+    attributes:
+      label: Expected outcome
+      description: Describe the observable success criteria, including measurements when relevant.
+      placeholder: Describe how we would know the improvement succeeded.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives-and-trade-offs
+    attributes:
+      label: Alternatives and trade-offs
+      description: Describe any alternatives, workarounds, constraints, or trade-offs you considered.
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add any references, examples, mockups, or other context that may help evaluate the improvement.
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmations
+      options:
+        - label: I searched for an existing issue that proposes this improvement.
+          required: true
+        - label: The existing capability behaves according to its intended logic; incorrect behavior belongs under Bug.
+          required: true
+        - label: This request changes an existing capability; a capability that does not yet exist belongs under Feature.
+          required: true
+        - label: I removed credentials, private data, and other sensitive information from this request.
+          required: true

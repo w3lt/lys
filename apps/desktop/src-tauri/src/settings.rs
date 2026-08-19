@@ -4,19 +4,60 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use serde::de::Error;
 use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct GenerationTemperature(f64);
+
+impl GenerationTemperature {
+    pub fn new(value: f64) -> Option<Self> {
+        (0.0..1.0).contains(&value).then_some(Self(value))
+    }
+
+    pub fn get(&self) -> f64 {
+        self.0
+    }
+}
+
+impl Default for GenerationTemperature {
+    fn default() -> Self {
+        Self(0.7)
+    }
+}
+
+impl<'de> Deserialize<'de> for GenerationTemperature {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value: f64 = f64::deserialize(deserializer)?;
+
+        Self::new(value)
+            .ok_or_else(|| D::Error::custom("temperature must be between 0 and 1 inclusive"))
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default, rename_all = "camelCase")]
 pub struct RunTimeSettings {
     pub auto_start_backend: bool,
-    pub selected_model: Option<String>,
+    pub default_model: Option<String>,
+    pub backend_address: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct GenerationSettings {
+    pub context_window: u32,
+    pub temperature: GenerationTemperature,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default, rename_all = "camelCase")]
 pub struct LysSettings {
     runtime: RunTimeSettings,
+    generation: GenerationSettings,
 }
 
 impl LysSettings {

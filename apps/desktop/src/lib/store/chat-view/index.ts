@@ -1,11 +1,15 @@
 import type { ChatApiRequestBody, ChatApiStreamEvent } from "@lys/protocol"
-import type { ConversationAssistantMessageStatus } from "@lys/share"
+import type {
+  Conversation,
+  ConversationAssistantMessageStatus
+} from "@lys/share"
 import { create, type StoreApi, type UseBoundStore } from "zustand"
 
 import { readChatEvents, type ChatApiOptions } from "@/lib/apis/http/chat"
 
 import {
   type ChatViewConversation,
+  createStoredChatViewConversation,
   isStreamingConversationAssistantMessage,
   startConversationTurn,
   updateAssistantReplyContent,
@@ -90,6 +94,26 @@ export type ChatViewActions = {
   stopStreaming: () => void
   /** Silently invalidates active work and restores initial chat state. */
   resetConversation: () => void
+  /**
+   * Replaces the active conversation with one stored conversation.
+   *
+   * Any active request is silently invalidated and its transport aborted, and
+   * the composer draft is cleared. Further submissions continue the opened
+   * conversation.
+   */
+  openConversation: (conversation: Conversation) => void
+  /**
+   * Restores initial chat state when the identified conversation is active.
+   *
+   * Does nothing when another conversation, or no conversation, is active.
+   */
+  closeConversation: (conversationId: string) => void
+  /**
+   * Applies a persisted title when the identified conversation is active.
+   *
+   * Does nothing when another conversation, or no conversation, is active.
+   */
+  updateActiveConversationTitle: (conversationId: string, title: string) => void
 }
 
 /** State and actions exposed by one chat-view Zustand store. */
@@ -631,12 +655,56 @@ export function createChatViewStore(
       resource?.abortController.abort()
     }
 
+    /**
+     * Replaces the active conversation with one stored conversation.
+     *
+     * @param conversation - Complete conversation read back from the backend.
+     * @throws If a stored completed reply has no model completion reason.
+     */
+    function openConversation(conversation: Conversation): void {
+      const openedConversation = createStoredChatViewConversation(conversation)
+      const resource = activeRequestResource
+      activeRequestResource = undefined
+      set({ ...INITIAL_CHAT_VIEW_STATE, conversation: openedConversation })
+      resource?.abortController.abort()
+    }
+
+    /**
+     * Restores initial chat state when the identified conversation is active.
+     *
+     * @param conversationId - Conversation that no longer exists.
+     */
+    function closeConversation(conversationId: string): void {
+      if (get().conversation?.id !== conversationId) return
+
+      resetConversation()
+    }
+
+    /**
+     * Applies a persisted title when the identified conversation is active.
+     *
+     * @param conversationId - Conversation whose title was persisted.
+     * @param title - Non-empty title persisted by the backend.
+     */
+    function updateActiveConversationTitle(
+      conversationId: string,
+      title: string
+    ): void {
+      const conversation = get().conversation
+      if (conversation?.id !== conversationId) return
+
+      set({ conversation: updateConversationTitle(conversation, title) })
+    }
+
     return {
       ...INITIAL_CHAT_VIEW_STATE,
       setInputDraft,
       sendMessage,
       stopStreaming,
-      resetConversation
+      resetConversation,
+      openConversation,
+      closeConversation,
+      updateActiveConversationTitle
     }
   }
 

@@ -1,0 +1,283 @@
+.conversation-history__header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--app-border-subtle);
+}
+
+/* Short technical labels use the mono face and tracking, like the title bar. */
+.conversation-history__eyebrow,
+.conversation-history__count,
+.conversation-history__time,
+.conversation-history__row-status,
+.conversation-history__hint {
+  color: var(--app-text-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.conversation-history__eyebrow {
+  flex: none;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.conversation-history__count {
+  flex: none;
+  white-space: nowrap;
+}
+
+.conversation-history__search {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+}
+
+.conversation-history__search-input {
+  padding-right: 32px;
+}
+
+.conversation-history__search-clear {
+  position: absolute;
+  right: 2px;
+}
+
+.conversation-history__body {
+  min-height: 0;
+  flex: 1;
+  padding: 2px 6px 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.conversation-history__loading,
+.conversation-history__empty,
+.conversation-history__page-error {
+  margin: 0;
+  padding: 20px 12px;
+  color: var(--app-text-muted);
+  font-size: 13px;
+  line-height: 1.55;
+  text-wrap: pretty;
+}
+
+.conversation-history__failure {
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 10px;
+  padding: 20px 12px;
+  color: var(--app-text-danger);
+  font-size: 13px;
+
+  p {
+    margin: 0;
+  }
+}
+
+.conversation-history__page-error {
+  color: var(--app-text-danger);
+}
+
+.conversation-history__group-heading {
+  margin: 0;
+  padding: 12px 12px 4px;
+  color: var(--app-text-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: lowercase;
+}
+
+.conversation-history__rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.conversation-history__row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  border-left: 2px solid transparent;
+  border-radius: var(--radius-control);
+  padding-right: 8px;
+  transition: background-color var(--duration-standard) var(--ease-standard);
+}
+
+.conversation-history__row:hover,
+.conversation-history__row:focus-within {
+  background: var(--app-surface-hover);
+}
+
+.conversation-history__row--active {
+  border-left-color: var(--lys-violet);
+  background: var(--app-surface-selected);
+}
+
+.conversation-history__open {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: baseline;
+  gap: 9px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  padding: 9px 10px;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.conversation-history__open:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.conversation-history__title {
+  min-width: 0;
+  max-width: 45%;
+  overflow: hidden;
+  color: var(--app-text-strong);
+  font-size: 13px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-history__badge {
+  flex: none;
+  color: var(--lys-violet);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.conversation-history__excerpt {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--app-text-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-history__excerpt-match {
+  border-radius: var(--radius-detail);
+  background: var(--app-selection);
+  color: var(--app-text-strong);
+}
+
+.conversation-history__excerpt-match:empty {
+  background: transparent;
+}
+
+/*
+ * The timestamp and the row actions share one cell so revealing the actions
+ * never changes the row's width. The actions stay focusable at all times and
+ * become visible as soon as they are hovered or focused.
+ */
+.conversation-history__meta {
+  display: grid;
+  min-width: 72px;
+  align-items: center;
+  grid-template-areas: "trailing";
+  justify-items: end;
+}
+
+.conversation-history__meta > * {
+  grid-area: trailing;
+}
+
+.conversation-history__actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--duration-standard) var(--ease-standard);
+}
+
+.conversation-history__row:hover .conversation-history__actions,
+.conversation-history__row:focus-within .conversation-history__actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.conversation-history__row:hover .conversation-history__time,
+.conversation-history__row:focus-within .conversation-history__time {
+  visibility: hidden;
+}
+
+.conversation-history__confirm {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.conversation-history__confirm-question {
+  color: var(--app-text-danger);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.conversation-history__rename {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+}
+
+.conversation-history__rename-input {
+  min-width: 0;
+  flex: 1;
+}
+
+.conversation-history__more {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0 4px;
+}
+
+.conversation-history__footer {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--app-border-subtle);
+}
+
+.conversation-history__hint,
+.conversation-history__operation-error {
+  min-width: 0;
+  flex: 1;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-history__hint {
+  letter-spacing: 0.1em;
+}
+
+.conversation-history__operation-error {
+  color: var(--app-text-danger);
+  font-size: 12px;
+}

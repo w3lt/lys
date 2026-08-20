@@ -3,8 +3,8 @@ import type {
   ConversationMetadata,
   ConversationUserMessage
 } from "@lys/share"
-import type ConversationService from "../../../di/services/conversationService"
-import { ConversationNotFoundError } from "../../../utils/errors"
+import type ConversationService from "../../../../di/services/conversationService"
+import { ConversationNotFoundError } from "../../../../utils/errors"
 
 export type ConversationTurnCreationOptions = {
   conversationId?: string | undefined

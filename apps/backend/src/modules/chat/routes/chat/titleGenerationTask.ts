@@ -1,4 +1,4 @@
-import type ChatService from "../../../di/services/chatService"
+import type ChatService from "../../../../di/services/chatService"
 import { createEventSender, type ChatRouteReply } from "./share"
 
 type CreateTitleGenerationTaskOptions = {
@@ -26,7 +26,7 @@ export default async function createTitleGenerationTask({
       model,
       signal: abortSignal
     })
-    
+
     updateConversationTitle(title)
 
     await sendEvent({

@@ -4,7 +4,7 @@ import { createAbortSignal, createEventSender } from "./share"
 import ConversationTurn from "./conversationTurn"
 import createChatTask from "./chatTask"
 import createTitleGenerationTask from "./titleGenerationTask"
-import { ConversationNotFoundError } from "../../../utils/errors"
+import { ConversationNotFoundError } from "../../../../utils/errors"
 
 /**
  * Registers the chat completion endpoint on a Fastify application.

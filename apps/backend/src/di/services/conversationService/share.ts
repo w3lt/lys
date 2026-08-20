@@ -7,9 +7,9 @@ import type { PathLike } from "node:fs"
 import type { ConversationListCursor } from "./utils"
 
 export type ListConversationMetadataOptions = {
-  query?: string
-  cursor?: string
-  limit?: number
+  query?: string | undefined
+  cursor?: string | undefined
+  limit?: number | undefined
 }
 
 export type VerifiedListConversationMetadataOptions = {

@@ -1,7 +1,7 @@
 import Fastify from "fastify"
 import registerHealthRoutes from "./modules/health/routes"
 import registerLlmRoutes from "./modules/llm/routes"
-import registerChatRoutes from "./modules/chat"
+import registerChatRoutes from "./modules/chat/routes"
 import fastifySse from "@fastify/sse"
 import { type BackendConfig } from "./config"
 import singletonServicesPlugin from "./di/fastify"

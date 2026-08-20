@@ -1,0 +1,63 @@
+---
+title: This page is not part of the published handbook.
+description: The requested address does not exist in the handbook.
+template: doc
+tableOfContents: false
+pagefind: false
+sidebar:
+  hidden: true
+---
+
+Broken internal links fail the build, so a missing page here usually means an
+external or outdated link. If a document existed before, it may now live in the
+decision, proposal, or changelog history rather than under current
+documentation.
+
+Publication is atomic: a failed build or deployment leaves the previous
+successful site in place, so you are always reading a complete version of the
+handbook. To search, use the search box in the header or press
+
+<kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>K</kbd>.
+
+<nav
+  class="not-found-actions not-content"
+  aria-label="Recover from a missing page"
+>
+  <a class="primary" href="/decisions/">
+    Decision history
+  </a>
+  <a href="/rfcs/">Proposals</a>
+  <a href="/">Home</a>
+</nav>
+
+<style>
+  {`
+  .not-found-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 1.75rem;
+  }
+
+  .not-found-actions a {
+    padding: 0.5625rem 0.9375rem;
+    border: 1px solid var(--app-border-default);
+    border-radius: 0.5rem;
+    color: var(--app-text);
+    font-size: 0.84375rem;
+    text-decoration: none;
+    transition: border-color var(--duration-standard) var(--ease-standard);
+  }
+
+  .not-found-actions a:hover {
+    border-color: var(--app-border-strong);
+  }
+
+  .not-found-actions .primary {
+    border-color: transparent;
+    background-image: var(--gradient-primary);
+    box-shadow: 0 0 24px oklch(0.58 0.2 303 / 22%);
+    color: var(--app-action-foreground);
+  }
+  `}
+</style>

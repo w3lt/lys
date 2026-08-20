@@ -1,0 +1,121 @@
+---
+import StateSummary from "./StateSummary.astro"
+import { buildRecordIndex, selectMostRecent } from "@/lib/handbook/records"
+import { toSiteHref } from "@/lib/handbook/routing"
+import type { DocumentStatus } from "@/lib/handbook/status"
+import { getCollection } from "astro:content"
+
+/** How many records each homepage panel reports. */
+const SUMMARY_LENGTH = 4
+
+const decisions = await getCollection(
+  "docs",
+  (entry) => entry.data.docType === "decision"
+)
+
+const proposals = await getCollection(
+  "docs",
+  (entry) => entry.data.docType === "proposal"
+)
+
+const recentDecisions = selectMostRecent(
+  buildRecordIndex(
+    "decision",
+    decisions.map((entry) => ({
+      href: toSiteHref(entry.id),
+      title: entry.data.title,
+      identifier: entry.data.identifier,
+      status: entry.data.status as DocumentStatus | undefined,
+      date: entry.data.decided,
+      areas: entry.data.areas
+    }))
+  ),
+  SUMMARY_LENGTH
+)
+
+const recentProposals = selectMostRecent(
+  buildRecordIndex(
+    "proposal",
+    proposals.map((entry) => ({
+      href: toSiteHref(entry.id),
+      title: entry.data.title,
+      identifier: entry.data.identifier,
+      status: entry.data.status as DocumentStatus | undefined,
+      date: entry.data.created,
+      updated: entry.data.updated,
+      areas: entry.data.areas
+    }))
+  ),
+  SUMMARY_LENGTH
+)
+---
+
+{/**
+  * The homepage's "current state" section, summarising the decision and
+  * proposal registers.
+  *
+  * Composition/view component. It resolves both registers from content metadata
+  * at build time, so the summaries cannot drift from the records they report.
+  *
+  * Takes no props: the section always reports the same two registers.
+  *
+  * Accessibility: a named region containing one section per register, each
+  * named by its own heading.
+  */}
+<section class="handbook-state not-content" aria-labelledby="current-state">
+  <header>
+    <h2 id="current-state">Current state</h2>
+    <span>derived from content metadata at build time</span>
+  </header>
+  <div class="panels">
+    <StateSummary
+      title="Recent decisions"
+      indexLabel="All decisions"
+      indexHref={toSiteHref("decisions")}
+      records={recentDecisions}
+    />
+    <StateSummary
+      title="Active proposals"
+      indexLabel="All RFCs"
+      indexHref={toSiteHref("rfcs")}
+      records={recentProposals}
+    />
+  </div>
+</section>
+
+<style>
+  .handbook-state {
+    margin-top: 3.5rem;
+  }
+
+  header {
+    display: flex;
+    gap: 0.625rem;
+    align-items: baseline;
+    margin-bottom: 1.375rem;
+    padding-bottom: 0.875rem;
+    border-bottom: 1px solid var(--app-border-subtle);
+  }
+
+  h2 {
+    margin: 0;
+    border: 0;
+    padding: 0;
+    color: var(--app-text-strong);
+    font-size: 0.9375rem;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+  }
+
+  header span {
+    color: var(--doc-text-faint);
+    font-family: var(--sl-font-mono), ui-monospace, monospace;
+    font-size: 0.6875rem;
+  }
+
+  .panels {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+    gap: 0.875rem;
+  }
+</style>

@@ -1,0 +1,116 @@
+---
+import {
+  resolveDocumentNotice,
+  resolveStatusPresentation,
+  type DocumentStatus,
+  type RecordKind
+} from "@/lib/handbook/status"
+
+type StatusNoticeProps = {
+  /** Register the record belongs to. */
+  readonly kind: RecordKind
+  /** Status the record carries. */
+  readonly status: DocumentStatus
+  /**
+   * This record's own reason for its status, in one sentence.
+   *
+   * Omit when the status alone explains the state; the notice then shows only
+   * its standing explanation.
+   */
+  readonly reason?: string
+}
+
+/** Astro types `Astro.props` from a local declaration named `Props`. */
+type Props = StatusNoticeProps
+
+const { kind, status, reason }: StatusNoticeProps = Astro.props
+const notice = resolveDocumentNotice(kind, status)
+const presentation = resolveStatusPresentation(status)
+---
+
+{/**
+  * Notice explaining what a record's status means for the reader.
+  *
+  * Presentational component. Renders nothing when the status is current for its
+  * register — a current record needs no warning — which is the documented
+  * absent state rather than an empty container.
+  *
+  * Accessibility: a complementary region named by its heading. The status glyph
+  * is decorative because the heading and body carry the same meaning.
+  */}
+{
+  notice !== undefined && (
+    <aside
+      class:list={["status-notice", "not-content", `tone-${presentation.tone}`]}
+      aria-label={notice.title}
+    >
+      <span class="glyph" aria-hidden="true">
+        {presentation.icon}
+      </span>
+      <div>
+        <p class="title">{notice.title}</p>
+        <p class="body">
+          {reason !== undefined && `${reason} `}
+          {notice.body}
+        </p>
+      </div>
+    </aside>
+  )
+}
+
+<style>
+  .status-notice {
+    display: flex;
+    gap: 0.75rem;
+    margin: 0 0 1.625rem;
+    padding: 0.875rem 1rem;
+    border: 1px solid var(--notice-border);
+    border-radius: var(--radius-surface);
+    background-color: var(--notice-background);
+  }
+
+  .glyph {
+    color: var(--notice-foreground);
+    font-size: 0.9375rem;
+    line-height: 1.4;
+  }
+
+  .title {
+    margin: 0 0 0.25rem;
+    color: var(--app-text-strong);
+    font-size: 0.84375rem;
+    font-weight: 600;
+  }
+
+  .body {
+    margin: 0;
+    color: var(--app-text);
+    font-size: 0.84375rem;
+    line-height: 1.6;
+    text-wrap: pretty;
+  }
+
+  .tone-pending {
+    --notice-foreground: var(--app-status-pending);
+    --notice-background: var(--doc-status-pending-bg);
+    --notice-border: var(--doc-status-pending-border);
+  }
+
+  .tone-danger {
+    --notice-foreground: var(--app-status-danger);
+    --notice-background: var(--doc-status-danger-bg);
+    --notice-border: var(--doc-status-danger-border);
+  }
+
+  .tone-neutral {
+    --notice-foreground: var(--app-status-neutral);
+    --notice-background: var(--doc-status-neutral-bg);
+    --notice-border: var(--doc-status-neutral-border);
+  }
+
+  .tone-success {
+    --notice-foreground: var(--app-status-success);
+    --notice-background: var(--doc-status-success-bg);
+    --notice-border: var(--doc-status-success-border);
+  }
+</style>

@@ -1,0 +1,145 @@
+---
+import StatusBadge from "../handbook/StatusBadge.astro"
+import { toBreadcrumbTrail } from "@/lib/handbook/breadcrumbs"
+import type { DocumentStatus } from "@/lib/handbook/status"
+
+/**
+ * Identifier Starlight's skip link and mobile table of contents target.
+ *
+ * Starlight owns this value; an override must reproduce it exactly or the
+ * "skip to content" link stops working.
+ */
+const PAGE_TITLE_ID = "_top"
+
+const { entry } = Astro.locals.starlightRoute
+const identifier = entry.data.identifier
+const status = entry.data.status as DocumentStatus | undefined
+const appliesTo = entry.data.appliesTo
+const trail = toBreadcrumbTrail(entry.id, identifier ?? entry.data.title)
+---
+
+{/**
+  * The heading block of a handbook article: breadcrumbs, record identity, and
+  * the page title.
+  *
+  * Framework-boundary component overriding Starlight's `PageTitle`. It reads
+  * the current route's entry and adds the design's article heading around the
+  * `h1` Starlight's skip link depends on.
+  *
+  * Takes no props: Starlight renders overrides without any.
+  *
+  * Rendered states: the applicability line is absent unless the page declares
+  * one, the breadcrumb trail is absent on the homepage, and the identity row is
+  * absent for a page that is not a numbered record. All three are intentional
+  * absences rather than empty containers.
+  *
+  * Accessibility: the trail is a named navigation landmark whose final step is
+  * marked `aria-current="page"` and is not a link, matching the breadcrumb
+  * pattern.
+  */}
+{
+  appliesTo !== undefined && (
+    <p class="applies-to">Handbook · {appliesTo}</p>
+  )
+}
+
+{
+  trail.length > 0 && (
+    <nav class="breadcrumbs" aria-label="Breadcrumb">
+      <ol>
+        {trail.map((crumb, index) => (
+          <li>
+            {crumb.href === undefined ? (
+              <span aria-current={index === trail.length - 1 ? "page" : undefined}>
+                {crumb.label}
+              </span>
+            ) : (
+              <a href={crumb.href}>{crumb.label}</a>
+            )}
+          </li>
+        ))}
+      </ol>
+    </nav>
+  )
+}
+
+{
+  identifier !== undefined && status !== undefined && (
+    <div class="identity">
+      <span class="identifier">{identifier}</span>
+      <StatusBadge status={status} />
+    </div>
+  )
+}
+
+<h1 id={PAGE_TITLE_ID}>{entry.data.title}</h1>
+
+<style>
+  .applies-to {
+    margin: 1rem 0 0;
+    color: var(--lys-cyan);
+    font-family: var(--sl-font-mono), ui-monospace, monospace;
+    font-size: 0.71875rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .breadcrumbs {
+    margin-top: 1rem;
+  }
+
+  .breadcrumbs ol {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4375rem;
+    align-items: center;
+    margin: 0;
+    padding: 0;
+    color: var(--doc-text-faint);
+    font-family: var(--sl-font-mono), ui-monospace, monospace;
+    font-size: 0.75rem;
+    list-style: none;
+  }
+
+  .breadcrumbs li + li::before {
+    content: "/";
+    margin-inline-end: 0.4375rem;
+    color: var(--doc-text-faint);
+  }
+
+  .breadcrumbs a {
+    color: var(--doc-text-faint);
+    text-decoration: none;
+  }
+
+  .breadcrumbs a:hover {
+    color: var(--lys-cyan);
+  }
+
+  .breadcrumbs [aria-current="page"] {
+    color: var(--doc-text-muted);
+  }
+
+  .identity {
+    display: flex;
+    gap: 0.625rem;
+    align-items: center;
+    margin-top: 0.75rem;
+  }
+
+  .identifier {
+    color: var(--lys-cyan);
+    font-family: var(--sl-font-mono), ui-monospace, monospace;
+    font-size: 0.8125rem;
+  }
+
+  h1 {
+    margin-top: 0.75rem;
+    color: var(--app-text-strong);
+    font-size: var(--sl-text-h1);
+    font-weight: 600;
+    letter-spacing: -0.025em;
+    line-height: 1.16;
+    text-wrap: balance;
+  }
+</style>

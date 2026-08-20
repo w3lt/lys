@@ -1,0 +1,353 @@
+---
+import { getCollection } from "astro:content"
+import StatusBadge from "./StatusBadge.astro"
+import { buildRecordIndex, countByStatus } from "@/lib/handbook/records"
+import { toSiteHref } from "@/lib/handbook/routing"
+import {
+  resolveStatusPresentation,
+  type DocumentStatus
+} from "@/lib/handbook/status"
+
+const proposals = await getCollection(
+  "docs",
+  (entry) => entry.data.docType === "proposal"
+)
+
+const records = buildRecordIndex(
+  "proposal",
+  proposals.map((entry) => ({
+    href: toSiteHref(entry.id),
+    title: entry.data.title,
+    description: entry.data.description,
+    identifier: entry.data.identifier,
+    status: entry.data.status as DocumentStatus | undefined,
+    date: entry.data.created,
+    updated: entry.data.updated,
+    areas: entry.data.areas
+  }))
+)
+
+const statusCounts = countByStatus(records)
+
+/**
+ * Composes the small provenance line beneath a proposal's summary.
+ *
+ * @param record - The proposal being listed.
+ * @returns Creation date, last substantive update when one exists, and the
+ * affected areas, joined for display.
+ */
+function toProvenanceLine(record: (typeof records)[number]): string {
+  const parts = [`created ${record.date}`]
+
+  if (record.updated !== undefined) {
+    parts.push(`updated ${record.updated}`)
+  }
+
+  if (record.areas.length > 0) {
+    parts.push(record.areas.join(", "))
+  }
+
+  return parts.join(" · ")
+}
+---
+
+{/**
+  * The generated register of Requests for Comments, with client-side status
+  * filtering.
+  *
+  * Composition/view component. It reads the proposal entries of the docs
+  * collection at build time; a duplicate identifier fails the build inside
+  * `buildRecordIndex`.
+  *
+  * State authority: the selected status set is transient view state owned by
+  * the `handbook-proposal-filter` element. No selection means "show every
+  * proposal", which is also the rendered state before the script runs and the
+  * permanent state when scripting is unavailable — the filter controls stay
+  * hidden until they can work, so no control is ever inert.
+  *
+  * Accessibility: filters are toggle buttons carrying `aria-pressed`, grouped
+  * and named. The result count is a polite live region, so filtering is
+  * announced to a reader who cannot see the list shorten.
+  */}
+<handbook-proposal-filter class="proposal-index not-content">
+  <div class="filters" role="group" aria-label="Filter proposals by status" hidden>
+    {
+      [...statusCounts].map(([status, count]) => {
+        const presentation = resolveStatusPresentation(status)
+        return (
+          <button
+            type="button"
+            class:list={["chip", `tone-${presentation.tone}`]}
+            data-status={status}
+            aria-pressed="false"
+          >
+            <span aria-hidden="true">{presentation.icon}</span>
+            <span>{presentation.label}</span>
+            <span class="count">{count}</span>
+          </button>
+        )
+      })
+    }
+    <button type="button" class="chip reset" data-reset>reset</button>
+  </div>
+
+  <p class="provenance" data-count-line aria-live="polite">
+    {records.length} proposals · filter is client-side; the page works without
+    JavaScript as a full list
+  </p>
+
+  <ul>
+    {
+      records.map((record) => (
+        <li data-status={record.status}>
+          <span class="identifier">{record.identifier}</span>
+          <span class="body">
+            <a href={record.href}>{record.title}</a>
+            {record.description !== undefined && (
+              <span class="summary">{record.description}</span>
+            )}
+            <span class="provenance-line">{toProvenanceLine(record)}</span>
+          </span>
+          <StatusBadge status={record.status} />
+        </li>
+      ))
+    }
+  </ul>
+
+  <p class="empty" data-empty hidden>No proposals match the selected statuses.</p>
+</handbook-proposal-filter>
+
+<script>
+  /**
+   * Filters the rendered proposal list by status.
+   *
+   * The element owns one piece of transient view state: the set of selected
+   * statuses. An empty set means every proposal is shown. Nothing is persisted,
+   * because a filter is a reading aid rather than a stored preference.
+   */
+  class HandbookProposalFilter extends HTMLElement {
+    /** Statuses currently selected. Empty means "show everything". */
+    readonly #selected = new Set<string>()
+
+    connectedCallback(): void {
+      const filters = this.querySelector<HTMLElement>(".filters")
+      if (filters === null) return
+
+      // The controls only work with scripting, so they appear only now.
+      filters.hidden = false
+
+      filters.addEventListener("click", (event) => {
+        const target = event.target
+        if (!(target instanceof Element)) return
+
+        const chip = target.closest<HTMLButtonElement>("button")
+        if (chip === null) return
+
+        if (chip.hasAttribute("data-reset")) {
+          this.#selected.clear()
+        } else {
+          const status = chip.dataset.status
+          if (status === undefined) return
+
+          if (this.#selected.has(status)) {
+            this.#selected.delete(status)
+          } else {
+            this.#selected.add(status)
+          }
+        }
+
+        this.#apply()
+      })
+    }
+
+    /** Applies the current selection to the chips, rows, and count line. */
+    #apply(): void {
+      for (const chip of this.querySelectorAll<HTMLButtonElement>(
+        "button[data-status]"
+      )) {
+        const status = chip.dataset.status ?? ""
+        chip.setAttribute("aria-pressed", String(this.#selected.has(status)))
+      }
+
+      let visible = 0
+
+      for (const row of this.querySelectorAll<HTMLLIElement>("li[data-status]")) {
+        const status = row.dataset.status ?? ""
+        const shown = this.#selected.size === 0 || this.#selected.has(status)
+        row.hidden = !shown
+        if (shown) visible += 1
+      }
+
+      const empty = this.querySelector<HTMLElement>("[data-empty]")
+      if (empty !== null) empty.hidden = visible > 0
+
+      const countLine = this.querySelector<HTMLElement>("[data-count-line]")
+      if (countLine !== null) {
+        const scope = this.#selected.size === 0 ? "proposals" : "matching proposals"
+        countLine.textContent = `${visible} ${scope} · filter is client-side; the page works without JavaScript as a full list`
+      }
+    }
+  }
+
+  customElements.define("handbook-proposal-filter", HandbookProposalFilter)
+</script>
+
+<style>
+  .proposal-index {
+    display: block;
+  }
+
+  .filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4375rem;
+    align-items: center;
+    margin-bottom: 0.5rem;
+  }
+
+  .chip {
+    display: inline-flex;
+    gap: 0.375rem;
+    align-items: center;
+    padding: 0.3125rem 0.625rem;
+    border: 1px solid var(--chip-border, var(--app-border-default));
+    border-radius: var(--radius-capsule);
+    background-color: transparent;
+    color: var(--chip-foreground, var(--doc-text-muted));
+    font-family: var(--sl-font-mono), ui-monospace, monospace;
+    font-size: 0.71875rem;
+    cursor: pointer;
+    transition:
+      background-color var(--duration-standard) var(--ease-standard),
+      border-color var(--duration-standard) var(--ease-standard);
+  }
+
+  .chip[aria-pressed="true"] {
+    background-color: var(--chip-background, var(--app-surface-hover));
+    border-color: var(--chip-foreground, var(--app-border-strong));
+  }
+
+  .chip:hover {
+    border-color: var(--app-border-strong);
+  }
+
+  .reset {
+    border-style: dashed;
+    color: var(--doc-text-faint);
+  }
+
+  .count {
+    opacity: 0.65;
+  }
+
+  .tone-success {
+    --chip-foreground: var(--app-status-success);
+    --chip-background: var(--doc-status-success-bg);
+    --chip-border: var(--doc-status-success-border);
+  }
+
+  .tone-pending {
+    --chip-foreground: var(--app-status-pending);
+    --chip-background: var(--doc-status-pending-bg);
+    --chip-border: var(--doc-status-pending-border);
+  }
+
+  .tone-danger {
+    --chip-foreground: var(--app-status-danger);
+    --chip-background: var(--doc-status-danger-bg);
+    --chip-border: var(--doc-status-danger-border);
+  }
+
+  .tone-neutral {
+    --chip-foreground: var(--app-status-neutral);
+    --chip-background: var(--doc-status-neutral-bg);
+    --chip-border: var(--doc-status-neutral-border);
+  }
+
+  .provenance {
+    margin: 0 0 1.375rem;
+    color: var(--doc-text-faint);
+    font-family: var(--sl-font-mono), ui-monospace, monospace;
+    font-size: 0.75rem;
+  }
+
+  ul {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  li {
+    display: flex;
+    gap: 0.875rem;
+    align-items: flex-start;
+    padding: 0.875rem 1rem;
+    border: 1px solid var(--app-border-subtle);
+    border-radius: var(--radius-surface);
+    background-color: var(--app-surface-panel);
+    box-shadow: var(--shadow-card);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    transition: border-color var(--duration-standard) var(--ease-standard);
+  }
+
+  li:hover {
+    border-color: var(--app-border-strong);
+  }
+
+  .identifier {
+    flex: 0 0 4.125rem;
+    padding-top: 0.125rem;
+    color: var(--doc-text-faint);
+    font-family: var(--sl-font-mono), ui-monospace, monospace;
+    font-size: 0.75rem;
+  }
+
+  .body {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 0.3125rem;
+    min-width: 0;
+  }
+
+  .body a {
+    color: var(--app-text-strong);
+    font-size: 0.9375rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.4;
+    text-decoration: none;
+  }
+
+  .body a:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .summary {
+    color: var(--doc-text-muted);
+    font-size: 0.84375rem;
+    line-height: 1.55;
+    text-wrap: pretty;
+  }
+
+  .provenance-line {
+    color: var(--doc-text-faint);
+    font-family: var(--sl-font-mono), ui-monospace, monospace;
+    font-size: 0.6875rem;
+  }
+
+  .empty {
+    margin: 0.5rem 0 0;
+    padding: 2.125rem 1.125rem;
+    border: 1px dashed var(--app-border-default);
+    border-radius: var(--radius-surface);
+    color: var(--doc-text-muted);
+    font-size: 0.875rem;
+    text-align: center;
+  }
+</style>

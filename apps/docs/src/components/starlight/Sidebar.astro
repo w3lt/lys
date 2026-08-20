@@ -1,0 +1,117 @@
+---
+import Default from "@astrojs/starlight/components/Sidebar.astro"
+
+/** Repository the handbook documents and links back to for editing. */
+const REPOSITORY_URL = "https://github.com/w3lt/lys"
+
+/** Repository slug shown beneath the link, matching the design's rail footer. */
+const REPOSITORY_SLUG = "w3lt/lys"
+---
+
+{/**
+  * The navigation rail, with the handbook's repository link pinned to its foot.
+  *
+  * Framework-boundary component overriding Starlight's `Sidebar`. It delegates
+  * the navigation tree to Starlight's own implementation, so sidebar
+  * configuration, current-page marking, open-state persistence, and mobile
+  * behaviour stay Starlight's responsibility, and adds only the footer the
+  * design places below it.
+  *
+  * Takes no props: Starlight renders overrides without any.
+  *
+  * Accessibility: the footer is a complementary region named for the
+  * repository. The external link is marked as opening a new context in its
+  * accessible name, and its arrow glyph is decorative.
+  */}
+<div class="rail">
+  <div class="tree">
+    <Default />
+  </div>
+
+  <div class="rail-footer">
+    <a href={REPOSITORY_URL} target="_blank" rel="noreferrer">
+      <svg viewBox="0 0 24 24" width="21" height="21" fill="currentColor" aria-hidden="true">
+        <path d="M12 1.8a10.2 10.2 0 0 0-3.2 19.9c.5.1.7-.2.7-.5v-1.9c-2.8.6-3.4-1.3-3.4-1.3-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.5 2.3 1.1 2.9.8.1-.7.4-1.1.7-1.4-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.7 0 0 .8-.3 2.8 1a9.6 9.6 0 0 1 5 0c2-1.3 2.8-1 2.8-1 .5 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.9-2.4 4.7-4.6 5 .4.3.7 1 .7 2v3c0 .3.2.6.7.5A10.2 10.2 0 0 0 12 1.8z" />
+      </svg>
+      <span class="names">
+        <span class="title">GitHub<span class="sr-only"> (opens in a new tab)</span></span>
+        <span class="slug">{REPOSITORY_SLUG}</span>
+      </span>
+      <svg class="external" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M14 5h5v5 M19 5l-8 8 M17 14v5H5V7h5" />
+      </svg>
+    </a>
+  </div>
+</div>
+
+<style>
+  .rail {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .tree {
+    flex: 1;
+    padding-bottom: 1.375rem;
+  }
+
+  .rail-footer {
+    position: sticky;
+    bottom: 0;
+    padding: 0.625rem 0;
+    border-top: 1px solid var(--app-border-subtle);
+    background-color: var(--app-surface-rail);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+  }
+
+  .rail-footer a {
+    display: flex;
+    gap: 0.6875rem;
+    align-items: center;
+    padding: 0.3125rem 0.625rem;
+    border-radius: 0.5625rem;
+    color: var(--doc-text-muted);
+    text-decoration: none;
+  }
+
+  .rail-footer a:hover {
+    background-color: var(--app-surface-hover);
+    color: var(--app-text-strong);
+  }
+
+  .names {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .title {
+    color: var(--app-text);
+    font-size: 0.8125rem;
+    font-weight: 500;
+  }
+
+  .slug {
+    color: var(--doc-text-faint);
+    font-family: var(--sl-font-mono), ui-monospace, monospace;
+    font-size: 0.6875rem;
+  }
+
+  .external {
+    flex: 0 0 auto;
+    opacity: 0.65;
+  }
+
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+</style>

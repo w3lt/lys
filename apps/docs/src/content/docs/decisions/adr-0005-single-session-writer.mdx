@@ -1,0 +1,73 @@
+---
+title: The backend is the sole writer of session state
+description: Every durable change to a session passes through the backend's session store, and no other component keeps its own copy of session truth.
+docType: decision
+identifier: ADR-0005
+status: accepted
+decided: "2026-05-12"
+areas: ["backend", "desktop", "persistence"]
+---
+
+import RecordMeta from "@/components/handbook/RecordMeta.astro"
+import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+import StatusNotice from "@/components/handbook/StatusNotice.astro"
+
+<StatusNotice
+  kind="decision"
+  status={frontmatter.status}
+  reason={frontmatter.statusNotice}
+/>
+
+<RecordMeta frontmatter={frontmatter} />
+
+## Context
+
+Early builds let the desktop application write message rows directly while the
+backend wrote everything else. Two writers meant two different opinions about
+ordering whenever a provider response and a local edit landed close together,
+and the resulting conflicts were invisible until a session was reopened.
+
+## Decision
+
+The backend owns the session store outright. The desktop application holds no
+session state of its own beyond what it is currently rendering, and reconstructs
+that view from the event stream rather than from a local database.
+
+- Every durable change is a command handled inside one write transaction.
+- The event stream is the only way a change becomes visible elsewhere.
+- A component that needs session history replays the stream; it does not query
+  the store directly.
+
+## Alternatives considered
+
+A shared database with per-table ownership was rejected: it would have kept two
+writers and moved the conflict into schema conventions that no build step could
+enforce.
+
+Optimistic local writes reconciled against the backend were rejected for the
+initial system because the reconciliation contract is substantial and the
+responsiveness problem it solves had not been observed.
+
+## Consequences
+
+The interface cannot show a message as durable before the backend has committed
+it, which makes an unavailable backend immediately visible rather than silently
+degraded. Replay and live delivery share one code path, so a bug in ordering
+appears in both rather than only after a restart.
+
+## Related documents
+
+<RelatedDocuments
+  documents={[
+    {
+      kind: "Architecture",
+      label: "Backend",
+      href: "/architecture/backend/"
+    },
+    {
+      kind: "RFC",
+      label: "RFC-0002 — Session truncation semantics",
+      href: "/rfcs/rfc-0002-session-truncation/"
+    }
+  ]}
+/>

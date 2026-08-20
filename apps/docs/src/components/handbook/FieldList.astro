@@ -1,0 +1,95 @@
+---
+type ContractField = {
+  /** Field name exactly as it appears on the wire. */
+  readonly name: string
+  /** Field type, in the documented contract's own notation. */
+  readonly type: string
+  /** Whether the field is always present, such as `required` or `optional`. */
+  readonly presence: string
+  /** Meaning, units, defaults, and constraints of the field. */
+  readonly description: string
+}
+
+type FieldListProps = {
+  /** Fields of the documented contract, in the order they should be read. */
+  readonly fields: readonly ContractField[]
+}
+
+/** Astro types `Astro.props` from a local declaration named `Props`. */
+type Props = FieldListProps
+
+const { fields }: FieldListProps = Astro.props
+---
+
+{/**
+  * Field-by-field description of a documented contract on a reference page.
+  *
+  * Presentational component. Projects the fields into a description list; it
+  * owns no state and no interaction.
+  *
+  * Accessibility: each field's name, type, and presence form one term, so the
+  * description stays programmatically associated with the complete signature
+  * rather than with the bare name.
+  */}
+<dl class="fields not-content">
+  {
+    fields.map((field) => (
+      <div class="field">
+        <dt>
+          <span class="name">{field.name}</span>
+          <span class="type">{field.type}</span>
+          <span class="presence">{field.presence}</span>
+        </dt>
+        <dd>{field.description}</dd>
+      </div>
+    ))
+  }
+</dl>
+
+<style>
+  .fields {
+    display: flex;
+    flex-direction: column;
+    gap: 0.625rem;
+    margin: 0 0 1.875rem;
+  }
+
+  .field {
+    padding: 0.8125rem 0.9375rem;
+    border: 1px solid var(--app-border-subtle);
+    border-radius: 0.5625rem;
+    background-color: var(--app-surface-panel);
+  }
+
+  dt {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5625rem;
+    align-items: baseline;
+    margin-bottom: 0.3125rem;
+    font-family: var(--sl-font-mono), ui-monospace, monospace;
+  }
+
+  .name {
+    color: var(--app-text-strong);
+    font-size: 0.8125rem;
+  }
+
+  .type {
+    color: var(--lys-violet);
+    font-size: 0.71875rem;
+  }
+
+  .presence {
+    color: var(--doc-text-faint);
+    font-size: 0.6875rem;
+  }
+
+  dd {
+    margin: 0;
+    color: var(--doc-text-muted);
+    font-size: 0.84375rem;
+    line-height: 1.6;
+    text-wrap: pretty;
+  }
+</style>

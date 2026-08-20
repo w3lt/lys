@@ -1,0 +1,111 @@
+---
+title: Backend
+description: The Rust service that owns session state, orchestrates providers, and publishes the shared event stream consumed by the desktop application.
+docType: architecture
+appliesTo: current main
+---
+
+import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
+import FlowDiagram from "@/components/handbook/FlowDiagram.astro"
+import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+
+The Rust service that owns session state, orchestrates providers, and publishes
+the shared event stream consumed by the desktop application.
+
+<DocumentMeta
+  label="Backend metadata"
+  entries={[
+    { label: "Owner", value: "Backend" },
+    { label: "Language", value: "Rust" },
+    { label: "Process", value: "Child of the Tauri host" },
+    { label: "Stability", value: "Current main" }
+  ]}
+/>
+
+## Responsibilities
+
+The backend is the single owner of durable session state. It accepts commands
+from the Tauri host, resolves them against the session store, and emits every
+resulting state change as a typed event. Nothing else in the system writes to
+the session database, and no component derives session truth from its own cache.
+
+- Session lifecycle: creation, resumption, truncation, and deletion.
+- Provider orchestration, including retry, cancellation, and budget accounting.
+- Event publication over the shared protocol described in
+  [SSE events](/reference/sse-events/).
+
+## Boundaries
+
+The backend never renders, never reads the operating-system keychain directly,
+and never talks to a provider without a credential handle issued by the host.
+That split is the subject of
+[ADR-0007](/decisions/adr-0007-credential-handles/).
+
+<FlowDiagram
+  title="Diagram · session message flow"
+  path={[
+    { label: "Desktop", detail: "user intent" },
+    { label: "Tauri host", detail: "command" },
+    { label: "Session store", detail: "write transaction" }
+  ]}
+  outputs={[
+    { label: "Event bus", detail: "typed events" },
+    { label: "Provider", detail: "orchestrated call" },
+    { label: "Diagnostics", detail: "counters" }
+  ]}
+  caption="A user message enters through the host, is persisted by the session store before any provider call, and reaches the interface only as an event on the stream. Persistence precedes emission, so a crash between the two loses an event rather than a message."
+/>
+
+## Data and control flow
+
+Each command is handled inside a single write transaction. The stream task
+subscribes to the resulting change feed rather than to the command itself, which
+is what keeps replay and live delivery on the same code path.
+
+```rust title="crates/backend/src/session/stream.rs"
+// Emission follows commit; never precedes it.
+pub async fn publish(&self, cmd: Command) -> Result<EventId> {
+    let tx = self.store.begin().await?;
+    let change = tx.apply(cmd).await?;
+    tx.commit().await?;
+
+    self.bus.emit(Event::from(change), Retention::Replayable(200))
+}
+```
+
+## Failure behaviour
+
+| Condition                    | Detected by           | Behaviour                                                                          |
+| ---------------------------- | --------------------- | ---------------------------------------------------------------------------------- |
+| Store unavailable at startup | Open probe            | Refuses to start and reports the store path and the integrity error.               |
+| Provider timeout             | Per-call deadline     | Cancels the call, emits `message.failed`, and leaves the persisted message intact. |
+| Subscriber falls behind      | Bounded replay buffer | Drops the subscriber and requires a resubscribe with a last-seen event identifier. |
+| Commit fails mid-command     | Transaction result    | Emits nothing. The command is reported as failed and the store is unchanged.       |
+
+## Related documents
+
+<RelatedDocuments
+  documents={[
+    {
+      kind: "ADR",
+      label:
+        "ADR-0007 — Credentials reach providers only as host-issued handles",
+      href: "/decisions/adr-0007-credential-handles/"
+    },
+    {
+      kind: "ADR",
+      label: "ADR-0005 — The backend is the sole writer of session state",
+      href: "/decisions/adr-0005-single-session-writer/"
+    },
+    {
+      kind: "Reference",
+      label: "SSE events",
+      href: "/reference/sse-events/"
+    },
+    {
+      kind: "RFC",
+      label: "RFC-0004 — Replayable event retention",
+      href: "/rfcs/rfc-0004-replayable-event-retention/"
+    }
+  ]}
+/>

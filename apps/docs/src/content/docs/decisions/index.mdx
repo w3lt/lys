@@ -1,0 +1,20 @@
+---
+title: Architecture Decision Records
+description: Why durable decisions were made, preserved with the context they were made in.
+sidebar:
+  order: 0
+  label: All decisions
+tableOfContents: false
+---
+
+import DecisionIndex from "@/components/handbook/DecisionIndex.astro"
+
+Why durable decisions were made. An ADR is historical evidence: it is never
+rewritten to pretend the original context was different. A materially changed
+decision gets a new ADR that supersedes the old one.
+
+<DecisionIndex />
+
+Status is carried by icon and label as well as colour, so the index stays
+readable without relying on hue. Identifiers are unique across the register;
+a duplicate fails the build.

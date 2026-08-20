@@ -1,0 +1,157 @@
+---
+/**
+ * Colour themes the handbook offers.
+ *
+ * Dark is the canonical Lys appearance and is listed first. The system-following
+ * option Starlight offers by default is deliberately not exposed: the design
+ * specifies an explicit two-state control, and Starlight's own provider script
+ * still resolves the system preference for a reader who has never chosen.
+ */
+const THEMES = [
+  { value: "dark", label: "Dark theme" },
+  { value: "light", label: "Light theme" }
+] as const
+---
+
+{/**
+  * Segmented dark/light control shown in the site header and mobile menu.
+  *
+  * Framework-boundary component overriding Starlight's `ThemeSelect`. It
+  * translates Starlight's theme contract — the `starlight-theme` storage key
+  * and the `data-theme` attribute on the document element — into the design's
+  * two-button control.
+  *
+  * Takes no props: Starlight renders overrides without any.
+  *
+  * State authority: the document element's `data-theme` attribute is the single
+  * authority, so the two instances Starlight renders (header and mobile menu)
+  * cannot disagree. Each button is an independent toggle carrying
+  * `aria-pressed`, named for the theme it selects rather than for its icon.
+  */}
+<lys-theme-select class="theme-select">
+  {
+    THEMES.map((theme) => (
+      <button
+        type="button"
+        data-theme-value={theme.value}
+        aria-label={theme.label}
+        aria-pressed="false"
+        title={theme.label}
+      >
+        {theme.value === "dark" ? (
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M20 14.4A8.4 8.4 0 0 1 9.6 4 8.6 8.6 0 1 0 20 14.4z" />
+          </svg>
+        ) : (
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 7.2a4.8 4.8 0 1 0 0 9.6 4.8 4.8 0 0 0 0-9.6z M12 2.8v1.7 M12 19.5v1.7 M4.9 4.9l1.2 1.2 M17.9 17.9l1.2 1.2 M2.8 12h1.7 M19.5 12h1.7 M4.9 19.1l1.2-1.2 M17.9 6.1l1.2-1.2" />
+          </svg>
+        )}
+      </button>
+    ))
+  }
+</lys-theme-select>
+
+<script>
+  type Theme = "dark" | "light"
+
+  /** Storage key Starlight's own theme provider reads on first paint. */
+  const STORAGE_KEY = "starlight-theme"
+
+  /**
+   * Reads the theme currently applied to the document.
+   *
+   * @returns The applied theme, defaulting to dark when nothing is set yet.
+   */
+  function readAppliedTheme(): Theme {
+    return document.documentElement.dataset.theme === "light" ? "light" : "dark"
+  }
+
+  /**
+   * Applies a theme to the document, stores it, and syncs every control.
+   *
+   * @param theme - The theme the reader selected.
+   */
+  function applyTheme(theme: Theme): void {
+    document.documentElement.dataset.theme = theme
+
+    try {
+      localStorage.setItem(STORAGE_KEY, theme)
+    } catch {
+      // A blocked storage quota must not break theme switching for this visit.
+    }
+
+    syncControls(theme)
+  }
+
+  /**
+   * Reflects the applied theme on every rendered control.
+   *
+   * @param theme - The theme now applied to the document.
+   */
+  function syncControls(theme: Theme): void {
+    for (const control of document.querySelectorAll("lys-theme-select")) {
+      for (const button of control.querySelectorAll<HTMLButtonElement>(
+        "button[data-theme-value]"
+      )) {
+        button.setAttribute(
+          "aria-pressed",
+          String(button.dataset.themeValue === theme)
+        )
+      }
+    }
+  }
+
+  class LysThemeSelect extends HTMLElement {
+    connectedCallback(): void {
+      syncControls(readAppliedTheme())
+
+      this.addEventListener("click", (event) => {
+        const target = event.target
+        if (!(target instanceof Element)) return
+
+        const button = target.closest<HTMLButtonElement>(
+          "button[data-theme-value]"
+        )
+        if (button === null) return
+
+        applyTheme(button.dataset.themeValue === "light" ? "light" : "dark")
+      })
+    }
+  }
+
+  customElements.define("lys-theme-select", LysThemeSelect)
+</script>
+
+<style>
+  .theme-select {
+    display: flex;
+    gap: 0.125rem;
+    padding: 0.125rem;
+    border: 1px solid var(--app-border-default);
+    border-radius: var(--radius-control);
+    background-color: var(--app-surface-field);
+  }
+
+  button {
+    display: flex;
+    width: 1.75rem;
+    height: 1.5rem;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 0.3125rem;
+    background-color: transparent;
+    color: var(--doc-text-faint);
+    cursor: pointer;
+  }
+
+  button:hover {
+    color: var(--app-text);
+  }
+
+  button[aria-pressed="true"] {
+    background-color: var(--app-surface-navigation-active);
+    color: var(--app-text-strong);
+  }
+</style>

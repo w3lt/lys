@@ -1,0 +1,75 @@
+---
+const { siteTitle, siteTitleHref } = Astro.locals.starlightRoute
+---
+
+{/**
+  * The Lys mark and wordmark shown at the start of the site header.
+  *
+  * Framework-boundary component overriding Starlight's `SiteTitle`. It reads
+  * the site title and its address from Starlight's route data and renders the
+  * Lys identity in their place.
+  *
+  * Takes no props: Starlight renders overrides without any, and the title comes
+  * from route data.
+  *
+  * Accessibility: the mark's letterform is decorative, so it is hidden from
+  * assistive technology and the link is named by the wordmark alone. The
+  * subtitle is part of the link's accessible name, which describes the
+  * destination accurately.
+  */}
+<a href={siteTitleHref} class="site-title">
+  <span class="mark" aria-hidden="true">L</span>
+  <span class="names">
+    <span class="wordmark">{siteTitle}</span>
+    <span class="subtitle">Engineering Handbook</span>
+  </span>
+</a>
+
+<style>
+  .site-title {
+    display: flex;
+    gap: 0.6875rem;
+    align-items: center;
+    min-width: 0;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+
+  .mark {
+    display: flex;
+    flex: 0 0 auto;
+    width: 1.625rem;
+    height: 1.625rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.5rem;
+    background-image: var(--gradient-primary);
+    box-shadow: 0 0 20px oklch(0.58 0.2 303 / 38%);
+    color: oklch(0.98 0.005 230);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+
+  .names {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .wordmark {
+    background-image: var(--gradient-wordmark);
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .subtitle {
+    color: var(--doc-text-faint);
+    font-size: 0.65625rem;
+    letter-spacing: 0.05em;
+  }
+</style>

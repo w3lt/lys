@@ -1,0 +1,122 @@
+---
+title: Replayable event retention
+description: Give the session event stream a bounded, explicitly sized replay window so a reconnecting client can resume without refetching a whole session.
+docType: proposal
+identifier: RFC-0004
+status: accepted
+author: Welt
+created: "2026-06-11"
+updated: "2026-08-02"
+areas: ["backend", "protocol", "desktop"]
+statusHistory:
+  - date: "2026-06-11"
+    status: draft
+    note: Opened after repeated full-session refetches were observed on flaky links.
+  - date: "2026-06-29"
+    status: discussion
+    note: Reviewed with the desktop and protocol owners; the retention unit changed from time to event count.
+  - date: "2026-08-02"
+    status: accepted
+    note: Approved with a fixed default window and a per-subscription override.
+---
+
+import RecordMeta from "@/components/handbook/RecordMeta.astro"
+import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+import StatusHistory from "@/components/handbook/StatusHistory.astro"
+import StatusNotice from "@/components/handbook/StatusNotice.astro"
+
+<StatusNotice kind="proposal" status={frontmatter.status} />
+
+<RecordMeta frontmatter={frontmatter} />
+
+## Summary
+
+Give the session event stream a bounded replay window, sized in events rather
+than in time, so a client that reconnects within the window resumes from its
+last seen event identifier instead of refetching the session.
+
+## Motivation
+
+A subscriber that drops today has one recovery path: refetch the session and
+rebuild its view. On a slow link that is seconds of blank interface for what was
+often a one-event gap. The stream already assigns monotonic event identifiers,
+so the information needed to resume exists; nothing retains it.
+
+## Goals and non-goals
+
+- Bound memory: retention is a fixed number of events per session, never
+  unbounded.
+- Keep replay and live delivery on one code path, as
+  [ADR-0005](/decisions/adr-0005-single-session-writer/) requires.
+- Not a durable event log. A subscriber outside the window still refetches.
+- Not an offline mode. The window is measured in events, not in days.
+
+## Proposed design
+
+Each session's bus keeps the last `N` emitted events in a ring buffer, with `N`
+fixed at subscription time. A subscriber resubscribes with its last seen event
+identifier:
+
+- Identifier inside the window: the buffered events are delivered in order, then
+  live delivery continues.
+- Identifier older than the window: the stream reports `replay.exhausted` and
+  the subscriber refetches.
+- No identifier: live delivery begins immediately, as it does today.
+
+The default window is 200 events, which the emission path already carries as its
+retention argument.
+
+## Alternatives
+
+A time-based window was rejected during review: a session's event rate varies by
+orders of magnitude between an idle window and a streaming response, so a
+duration bounds neither memory nor usefulness.
+
+Persisting the event log to the session store was rejected for this proposal.
+It solves a different problem — audit and offline resume — and would make the
+store the second writer of stream state.
+
+## Risks and trade-offs
+
+Retention is per session, so many concurrent sessions multiply the memory bound.
+The window is small and fixed, which makes the worst case calculable, but a
+future increase must be evaluated against the session count rather than against
+one session.
+
+A subscriber that resumes mid-stream sees events it may already have applied if
+it acknowledged out of order. The proposal requires the last seen identifier to
+be the last _applied_ identifier, which the desktop already tracks.
+
+## Rollout
+
+The retention argument already exists on the emission path, so the change is
+additive: a subscriber that never sends a resume identifier is unaffected.
+`replay.exhausted` is a new event type, which is additive under the
+[SSE events](/reference/sse-events/) compatibility rules and does not change the
+protocol's major version.
+
+## Status history
+
+<StatusHistory transitions={frontmatter.statusHistory} />
+
+## Related documents
+
+<RelatedDocuments
+  documents={[
+    {
+      kind: "Architecture",
+      label: "Backend",
+      href: "/architecture/backend/"
+    },
+    {
+      kind: "ADR",
+      label: "ADR-0005 — The backend is the sole writer of session state",
+      href: "/decisions/adr-0005-single-session-writer/"
+    },
+    {
+      kind: "Reference",
+      label: "SSE events",
+      href: "/reference/sse-events/"
+    }
+  ]}
+/>

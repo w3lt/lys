@@ -1,0 +1,83 @@
+---
+type DocumentMetaEntry = {
+  /** Field name, shown as a small upper-case label. */
+  readonly label: string
+  /** Field value, shown beneath its label. */
+  readonly value: string
+}
+
+type DocumentMetaProps = {
+  /** Fields to show, in the order they should be read. */
+  readonly entries: readonly DocumentMetaEntry[]
+  /**
+   * Accessible name for the metadata group.
+   *
+   * Omit to use "Document metadata".
+   */
+  readonly label?: string
+}
+
+/** Astro types `Astro.props` from a local declaration named `Props`. */
+type Props = DocumentMetaProps
+
+const { entries, label = "Document metadata" }: DocumentMetaProps = Astro.props
+---
+
+{/**
+  * Type-specific metadata block shown beneath a handbook page's description.
+  *
+  * Presentational component. Projects a list of label/value pairs; it owns no
+  * state and no interaction.
+  *
+  * Accessibility: rendered as a description list so each value keeps its
+  * programmatic association with its own label, and named as a group so the
+  * block is distinguishable from surrounding prose.
+  */}
+<dl class="document-meta not-content" aria-label={label}>
+  {
+    entries.map((entry) => (
+      <div class="entry">
+        <dt>{entry.label}</dt>
+        <dd>{entry.value}</dd>
+      </div>
+    ))
+  }
+</dl>
+
+<style>
+  .document-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 1.625rem;
+    margin: 0 0 2.125rem;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--app-border-subtle);
+    border-radius: var(--radius-surface);
+    background-color: var(--app-surface-panel);
+    box-shadow: var(--shadow-card);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+  }
+
+  .entry {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1875rem;
+    padding: 0.3125rem 0;
+  }
+
+  dt {
+    color: var(--doc-text-faint);
+    font-family: var(--sl-font-mono), ui-monospace, monospace;
+    font-size: 0.65625rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  dd {
+    margin: 0;
+    color: var(--app-text);
+    font-size: 0.8125rem;
+    line-height: 1.5;
+  }
+</style>

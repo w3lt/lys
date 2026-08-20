@@ -1,0 +1,95 @@
+---
+title: SSE events
+description: Every event published on the session stream, with normative field names, units, defaults, and compatibility rules.
+docType: reference
+appliesTo: current main
+contract: "@lys/protocol"
+contractVersion: v1
+stability: stable
+---
+
+import FieldList from "@/components/handbook/FieldList.astro"
+import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+import RecordMeta from "@/components/handbook/RecordMeta.astro"
+
+Every event published on the session stream. Field names, units, defaults, and
+compatibility rules are normative; anything not listed here is not part of the
+contract.
+
+<RecordMeta frontmatter={frontmatter} />
+
+## Event types
+
+| Event               | Meaning                                                        | Since |
+| ------------------- | -------------------------------------------------------------- | ----- |
+| `session.created`   | A session exists and is empty.                                 | v1    |
+| `session.truncated` | Every message after the carried tail identifier was removed.   | v1    |
+| `message.appended`  | A message was committed to the store.                          | v1    |
+| `message.delta`     | A partial provider response extends the named message.         | v1    |
+| `message.failed`    | A provider call ended without producing a complete message.    | v1    |
+| `replay.exhausted`  | The requested resume point is older than the retention window. | v1    |
+
+## Common fields
+
+<FieldList
+  fields={[
+    {
+      name: "eventId",
+      type: "string",
+      presence: "required",
+      description:
+        "Monotonic identifier of this event within its session. Ordering is total per session and carries no meaning across sessions. A subscriber resumes by sending the last identifier it applied."
+    },
+    {
+      name: "sessionId",
+      type: "string",
+      presence: "required",
+      description:
+        "Session the event belongs to. Present on every event, including failures, so a subscriber never has to infer the session from context."
+    },
+    {
+      name: "emittedAt",
+      type: "string (RFC 3339)",
+      presence: "required",
+      description:
+        "When the backend emitted the event, in UTC. Emission always follows the commit that caused it, so this is never earlier than the change it reports."
+    },
+    {
+      name: "reason",
+      type: "string",
+      presence: "optional",
+      description:
+        "Human-readable explanation, present only on message.failed and replay.exhausted. Absent means the event needs no explanation; it never means the explanation was empty."
+    }
+  ]}
+/>
+
+## Compatibility
+
+New event types and new optional fields are additive and do not change the major
+version. Removing an event, renaming a field, or narrowing an accepted value
+requires an ADR and a deprecation notice on this page for one release before the
+change lands.
+
+## Related documents
+
+<RelatedDocuments
+  documents={[
+    {
+      kind: "Architecture",
+      label: "Backend",
+      href: "/architecture/backend/"
+    },
+    {
+      kind: "RFC",
+      label: "RFC-0004 — Replayable event retention",
+      href: "/rfcs/rfc-0004-replayable-event-retention/"
+    },
+    {
+      kind: "ADR",
+      label:
+        "ADR-0007 — Credentials reach providers only as host-issued handles",
+      href: "/decisions/adr-0007-credential-handles/"
+    }
+  ]}
+/>

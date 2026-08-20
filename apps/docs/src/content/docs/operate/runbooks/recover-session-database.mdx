@@ -1,0 +1,85 @@
+---
+title: Recover a corrupted session database
+description: Restore a usable session store after the backend refuses to open it, without discarding recoverable conversation history.
+docType: runbook
+appliesTo: current main
+---
+
+import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
+import Procedure from "@/components/handbook/Procedure.astro"
+import StatusBadge from "@/components/handbook/StatusBadge.astro"
+
+<StatusBadge status="discussion" label="runbook · operator" />
+
+Restore a usable session store after the backend refuses to open it, without
+discarding recoverable conversation history.
+
+<DocumentMeta
+  label="Runbook metadata"
+  entries={[
+    {
+      label: "Trigger",
+      value: "Backend refuses to start with an integrity error"
+    },
+    {
+      label: "Prerequisites",
+      value: "Local machine access; Lys fully stopped"
+    },
+    { label: "Expected duration", value: "10–25 minutes" }
+  ]}
+/>
+
+:::danger[Data loss is possible]
+Step 4 rebuilds indexes in place. Copy the store before you start; a failed
+rebuild is only recoverable from that copy. Never run this procedure against a
+store that is still open by a running Lys process.
+:::
+
+## Procedure
+
+<Procedure
+  steps={[
+    {
+      title: "Stop Lys and confirm no process holds the store.",
+      command: "lys diagnostics status --json",
+      note: "The command must report no running backend. If it reports one, stop it and re-run before continuing; a rebuild against an open store corrupts it further."
+    },
+    {
+      title: "Copy the store to a working location.",
+      command: "cp -a <store-path> <store-path>.backup",
+      note: "This copy is the only rollback path for the rest of the procedure. Verify it exists and is the same size as the original before continuing."
+    },
+    {
+      title: "Read the integrity report.",
+      command: "lys diagnostics store --check <store-path>",
+      note: "Note which objects are reported damaged. A report naming only index objects is recoverable in place; a report naming message tables means escalating rather than rebuilding."
+    },
+    {
+      title: "Rebuild the indexes.",
+      command: "lys diagnostics store --rebuild-indexes <store-path>",
+      note: "The rebuild runs in place and prints the number of objects rewritten. A non-zero exit code means the store is unchanged and you should move to rollback."
+    },
+    {
+      title: "Start Lys and re-run the integrity check.",
+      command: "lys diagnostics store --check <store-path>",
+      note: "A clean report and a normal startup end the procedure. Anything else means rollback and escalation."
+    }
+  ]}
+/>
+
+## Verification
+
+The store is healthy when the backend starts without a recovery warning, the
+session list matches the pre-incident count, and a new message round-trips end
+to end. Check the diagnostics pane for a clean integrity report before handing
+the machine back.
+
+## Rollback and escalation
+
+Restore the copy taken in step 2 and start Lys with the store in read-only mode.
+If integrity still fails, attach the diagnostics bundle to a new issue and
+escalate to a maintainer rather than deleting the store — a corrupted file is
+often still readable page by page.
+
+This runbook contains no live secrets and no production-specific values. Paths
+shown are placeholders.

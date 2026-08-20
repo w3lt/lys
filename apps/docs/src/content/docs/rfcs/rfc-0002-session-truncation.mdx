@@ -1,0 +1,67 @@
+---
+title: Session truncation semantics
+description: Define what truncating a session removes, what it preserves, and which events it emits.
+docType: proposal
+identifier: RFC-0002
+status: implemented
+author: Welt
+created: "2026-04-18"
+updated: "2026-05-30"
+areas: ["backend", "persistence"]
+---
+
+import RecordMeta from "@/components/handbook/RecordMeta.astro"
+import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+import StatusNotice from "@/components/handbook/StatusNotice.astro"
+
+<StatusNotice kind="proposal" status={frontmatter.status} />
+
+<RecordMeta frontmatter={frontmatter} />
+
+## Summary
+
+Truncating a session removes every message after a chosen point and emits one
+event describing the new tail, rather than deleting rows and leaving subscribers
+to infer what happened.
+
+## Motivation
+
+Editing a message mid-conversation requires discarding everything that followed
+it. Without a defined truncation operation, each caller invented its own
+sequence of deletions, and a subscriber could observe a session in a state that
+never existed.
+
+## Proposed design
+
+Truncation takes a session and a message identifier. Inside one write
+transaction the backend removes every message after it and emits
+`session.truncated` carrying the surviving tail identifier. Nothing else in the
+session is modified; provider budget accounting is unchanged.
+
+## Alternatives
+
+Soft-deleting truncated messages was rejected: it doubles the states every
+consumer must handle in order to support an undo feature that was not requested.
+
+## Consequences
+
+Truncation became a single command with a single event, so replay and live
+delivery show the same sequence. Implemented in the same change as
+[ADR-0005](/decisions/adr-0005-single-session-writer/).
+
+## Related documents
+
+<RelatedDocuments
+  documents={[
+    {
+      kind: "ADR",
+      label: "ADR-0005 — The backend is the sole writer of session state",
+      href: "/decisions/adr-0005-single-session-writer/"
+    },
+    {
+      kind: "Reference",
+      label: "SSE events",
+      href: "/reference/sse-events/"
+    }
+  ]}
+/>

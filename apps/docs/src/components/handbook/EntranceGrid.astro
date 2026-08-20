@@ -1,0 +1,106 @@
+---
+type HandbookEntrance = {
+  /** Small monospace label naming the section the entrance leads into. */
+  readonly kicker: string
+  /** The task a reader arrives with, phrased as a destination. */
+  readonly title: string
+  /** What the reader finds there, in one sentence. */
+  readonly description: string
+  /** Site-relative address the entrance opens. */
+  readonly href: string
+}
+
+type EntranceGridProps = {
+  /** Entrances to show, in the order they should be read. */
+  readonly entrances: readonly HandbookEntrance[]
+}
+
+/** Astro types `Astro.props` from a local declaration named `Props`. */
+type Props = EntranceGridProps
+
+const { entrances }: EntranceGridProps = Astro.props
+---
+
+{/**
+  * Task-oriented entrances shown on the handbook homepage.
+  *
+  * Presentational component. Each entrance is one link with no nested controls,
+  * so the card is a single target for pointer and keyboard alike.
+  *
+  * Accessibility: rendered as a named navigation landmark containing a list.
+  * The title is the first text in each link, so the accessible name begins with
+  * the visible label.
+  */}
+<nav class="entrances not-content" aria-label="Where to start">
+  <ul>
+    {
+      entrances.map((entrance) => (
+        <li>
+          <a href={entrance.href}>
+            <span class="kicker">{entrance.kicker}</span>
+            <span class="title">{entrance.title}</span>
+            <span class="description">{entrance.description}</span>
+          </a>
+        </li>
+      ))
+    }
+  </ul>
+</nav>
+
+<style>
+  .entrances ul {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(13.5rem, 1fr));
+    gap: 0.75rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  a {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+    height: 100%;
+    padding: 1.125rem 1rem 1.25rem;
+    overflow: hidden;
+    border: 1px solid var(--app-border-default);
+    border-radius: var(--radius-surface);
+    background-color: var(--app-surface-panel);
+    box-shadow: var(--shadow-card);
+    text-decoration: none;
+    backdrop-filter: blur(18px) saturate(135%);
+    -webkit-backdrop-filter: blur(18px) saturate(135%);
+    transition:
+      border-color var(--duration-standard) var(--ease-standard),
+      transform var(--duration-standard) var(--ease-standard);
+  }
+
+  a:hover,
+  a:focus-visible {
+    border-color: var(--app-border-strong);
+    transform: translateY(-2px);
+  }
+
+  .kicker {
+    color: var(--doc-text-faint);
+    font-family: var(--sl-font-mono), ui-monospace, monospace;
+    font-size: 0.6875rem;
+    letter-spacing: 0.06em;
+  }
+
+  .title {
+    color: var(--app-text-strong);
+    font-size: 0.96875rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .description {
+    color: var(--doc-text-muted);
+    font-size: 0.84375rem;
+    line-height: 1.55;
+    text-wrap: pretty;
+  }
+</style>

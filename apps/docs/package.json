@@ -8,8 +8,6 @@
     "build": "astro build",
     "preview": "astro preview",
     "astro": "astro",
-    "test": "vitest run",
-    "test:watch": "vitest",
     "check": "astro check"
   },
   "dependencies": {

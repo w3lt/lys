@@ -1,0 +1,141 @@
+---
+import { PanelLeft } from "lucide-react"
+
+/** Edge length of the toggle's glyph, in pixels, as specified by the design. */
+const ICON_SIZE = 18
+
+/** Stroke weight of the toggle's glyph, as specified by the design. */
+const ICON_STROKE_WIDTH = 1.5
+---
+
+{/**
+  * The control that collapses the navigation rail to its icons and back.
+  *
+  * Interactive feature owning one transient interaction. Rail width is ambient
+  * chrome state rather than page state, so its one authority is the
+  * `data-rail` attribute on the document element; this component writes that
+  * attribute and mirrors it into `localStorage` so the choice survives
+  * navigation. The stored value is read back before first paint by the inline
+  * script registered in `astro.config.mjs`, so the rail never renders at the
+  * wrong width and then jumps.
+  *
+  * Takes no props. Emits no events: the attribute is the observable result.
+  *
+  * Rendered result: one button, or nothing when client JavaScript is
+  * unavailable. It is rendered hidden and revealed by its own script, so a
+  * reader is never offered a control that cannot work. The rail is fully
+  * usable in its expanded form without it.
+  *
+  * Failure behaviour: `localStorage` is unavailable in some privacy modes.
+  * Reading and writing it are guarded, and the toggle still works for the
+  * current document when storage is denied.
+  *
+  * Accessibility: a native button with `aria-pressed` reporting whether the
+  * rail is collapsed, and an accessible name that names the action it will
+  * perform. The glyph is decorative. The control is hidden below the width at
+  * which the rail is a persistent column, because there it has no meaning.
+  */}
+<button
+  type="button"
+  class="rail-collapse-toggle"
+  aria-pressed="false"
+  data-expand-label="Expand navigation"
+  data-collapse-label="Collapse navigation"
+  hidden
+>
+  <PanelLeft
+    size={ICON_SIZE}
+    strokeWidth={ICON_STROKE_WIDTH}
+    aria-hidden="true"
+    focusable="false"
+  />
+</button>
+
+<script>
+  import { RAIL_STORAGE_KEY, COLLAPSED_RAIL } from "@/lib/handbook/rail"
+
+  const toggle = document.querySelector<HTMLButtonElement>(
+    ".rail-collapse-toggle"
+  )
+
+  if (toggle !== null) {
+    const { expandLabel = "", collapseLabel = "" } = toggle.dataset
+
+    /**
+     * Brings the control's reported state and name in line with the rail.
+     *
+     * @param collapsed - Whether the rail is currently collapsed.
+     */
+    const describe = (collapsed: boolean): void => {
+      toggle.setAttribute("aria-pressed", String(collapsed))
+      toggle.setAttribute(
+        "aria-label",
+        collapsed ? expandLabel : collapseLabel
+      )
+      toggle.title = collapsed ? expandLabel : collapseLabel
+    }
+
+    describe(document.documentElement.dataset.rail === COLLAPSED_RAIL)
+    toggle.hidden = false
+
+    toggle.addEventListener("click", () => {
+      const collapsed =
+        document.documentElement.dataset.rail !== COLLAPSED_RAIL
+
+      if (collapsed) {
+        document.documentElement.dataset.rail = COLLAPSED_RAIL
+      } else {
+        delete document.documentElement.dataset.rail
+      }
+
+      describe(collapsed)
+
+      try {
+        window.localStorage.setItem(
+          RAIL_STORAGE_KEY,
+          collapsed ? COLLAPSED_RAIL : ""
+        )
+      } catch {
+        // Storage is denied in some privacy modes; the current document still
+        // honours the choice, it simply is not remembered.
+      }
+    })
+  }
+</script>
+
+<style>
+  .rail-collapse-toggle {
+    display: none;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    padding: 0;
+    border: 0;
+    border-radius: 0.5625rem;
+    background-color: transparent;
+    color: var(--doc-text-faint);
+    cursor: pointer;
+    transition:
+      color var(--duration-standard) var(--ease-standard),
+      background-color var(--duration-standard) var(--ease-standard);
+  }
+
+  .rail-collapse-toggle:hover {
+    background-color: var(--app-surface-hover);
+    color: var(--app-text-strong);
+  }
+
+  .rail-collapse-toggle:focus-visible {
+    outline: 2px solid var(--lys-cyan);
+    outline-offset: 2px;
+  }
+
+  /* The rail is a drawer below this width, where collapsing has no meaning. */
+  @media (min-width: 50rem) {
+    .rail-collapse-toggle:not([hidden]) {
+      display: flex;
+    }
+  }
+</style>

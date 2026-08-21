@@ -113,6 +113,8 @@
   --duration-immediate: 120ms;
   --duration-standard: 160ms;
   --duration-enter: 200ms;
+  /* The rail's width change is the one motion the design lets run longer. */
+  --duration-collapse: 240ms;
   --ease-standard: cubic-bezier(0.32, 0.72, 0.35, 1);
 
   --sidebar: oklch(0.145 0.05 294 / 90%);
@@ -360,8 +362,33 @@
   --sl-line-height: var(--doc-article-line-height);
 
   --sl-nav-height: 3.5rem;
-  --sl-sidebar-width: 17.5rem;
-  --sl-content-width: 46rem;
+  /* Inset of the handbook identity from the start of the chrome. */
+  --doc-identity-inset: 0.9375rem;
+  /*
+   * Width of the table-of-contents column. Starlight sizes that column from
+   * the navigation rail's width, which would shrink it whenever the rail is
+   * collapsed; the design keeps the two independent.
+   */
+  --doc-toc-width: 13.625rem;
+  /*
+   * The design's rail is 250px expanded and 74px collapsed. Starlight derives
+   * the header's first column and the article's inline offset from this one
+   * value, so changing it moves the whole shell together.
+   */
+  --sl-sidebar-width: 15.625rem;
+  --sl-content-width: 48.125rem;
+}
+
+:root[data-rail="collapsed"] {
+  --sl-sidebar-width: 4.625rem;
+}
+
+/* The design's 52px page gutter, at the width where its wide layout begins. */
+@media (min-width: 72rem) {
+  :root {
+    --sl-nav-pad-x: 3.25rem;
+    --sl-content-pad-x: 3.25rem;
+  }
 }
 
 :root[data-theme="light"],
@@ -466,20 +493,124 @@ body {
   -webkit-backdrop-filter: blur(18px) saturate(135%);
 }
 
-.sidebar-pane {
-  background-color: var(--app-surface-rail);
-  border-inline-end: 1px solid var(--app-border-subtle);
-  backdrop-filter: blur(18px) saturate(135%);
-  -webkit-backdrop-filter: blur(18px) saturate(135%);
+/*
+ * Starlight's header hides its right-hand group below the sidebar breakpoint,
+ * where the theme control would otherwise only exist inside the drawer. The
+ * design keeps it in the header at every width. The social list stays empty
+ * because the repository link belongs to the rail's foot.
+ */
+.page > .header .right-group {
+  display: flex;
 }
 
+.page > .header .social-icons {
+  display: none;
+}
+
+/*
+ * Starlight sizes the header's first column from whether a page has a table of
+ * contents, so the search field shifts between pages. The design holds it over
+ * the article's inline edge at every page, which is the rail's width less the
+ * gutter the header already applies.
+ */
+@media (min-width: 50rem) {
+  .page > .header {
+    padding-inline-start: var(--doc-identity-inset);
+  }
+
+  .page > .header .header {
+    grid-template-columns:
+      calc(var(--sl-sidebar-width) - var(--doc-identity-inset))
+      1fr
+      auto;
+  }
+}
+
+/*
+ * The design opens the article against the rail rather than centring it in
+ * whatever space is left, so its inline edge stays put as pages gain and lose
+ * a table of contents.
+ */
+.content-panel {
+  --sl-content-margin-inline: 0;
+}
+
+/*
+ * The table of contents keeps its own width instead of tracking the rail's, so
+ * collapsing the rail widens the article rather than crushing this column.
+ */
+.right-sidebar-panel > .sl-container {
+  width: var(--doc-toc-width);
+}
+
+@media (min-width: 72rem) {
+  .right-sidebar-container {
+    width: max(
+      var(--doc-toc-width),
+      calc(
+        var(--doc-toc-width) +
+          (100% - var(--sl-content-width) - var(--doc-toc-width)) / 2
+      )
+    );
+  }
+
+  .right-sidebar-panel > .sl-container {
+    max-width: var(--doc-toc-width);
+  }
+
+  [data-has-sidebar][data-has-toc] .main-pane {
+    width: min(
+      calc(100% - var(--doc-toc-width)),
+      calc(
+        var(--sl-content-width) +
+          (100% - var(--sl-content-width) - var(--doc-toc-width)) / 2
+      )
+    );
+  }
+}
+
+/*
+ * As a drawer the rail is painted over the article, so it stays opaque there
+ * and only becomes the design's translucent surface once it is a column with
+ * nothing but the page background behind it.
+ */
+.sidebar-pane {
+  background-color: var(--background);
+  box-shadow: var(--shadow-floating);
+  backdrop-filter: blur(22px) saturate(135%);
+  -webkit-backdrop-filter: blur(22px) saturate(135%);
+}
+
+@media (min-width: 50rem) {
+  .sidebar-pane {
+    border-inline-end: 1px solid var(--app-border-subtle);
+    background-color: var(--app-surface-rail);
+    box-shadow: none;
+    backdrop-filter: blur(18px) saturate(135%);
+    -webkit-backdrop-filter: blur(18px) saturate(135%);
+  }
+}
+
+/* The rail owns its own regions and their padding, edge to edge. */
 .sidebar-content {
   gap: 0;
-  padding-top: 0.75rem;
+  padding: 0;
+}
+
+/* Collapsing the rail animates the shell it displaces, not just the rail. */
+@media (min-width: 50rem) {
+  .sidebar-pane,
+  .main-frame {
+    transition:
+      width var(--duration-collapse) var(--ease-standard),
+      padding-inline-start var(--duration-collapse) var(--ease-standard);
+  }
 }
 
 /* The search trigger reads as the design's field, not as a Starlight button. */
 site-search button[data-open-modal] {
+  width: 100%;
+  max-width: 35rem;
   height: 2.25rem;
   gap: 0.625rem;
   padding: 0 0.5rem 0 0.75rem;

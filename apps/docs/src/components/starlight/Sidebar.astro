@@ -1,35 +1,42 @@
 ---
-import Default from "@astrojs/starlight/components/Sidebar.astro"
+import NavigationTree from "@/components/handbook/NavigationTree.astro"
+import RailCollapseToggle from "@/components/handbook/RailCollapseToggle.astro"
 
 /** Repository the handbook documents and links back to for editing. */
 const REPOSITORY_URL = "https://github.com/w3lt/lys"
 
 /** Repository slug shown beneath the link, matching the design's rail footer. */
 const REPOSITORY_SLUG = "w3lt/lys"
+
+const { sidebar } = Astro.locals.starlightRoute
 ---
 
 {/**
-  * The navigation rail, with the handbook's repository link pinned to its foot.
+  * The navigation rail: the section tree above a pinned repository link.
   *
-  * Framework-boundary component overriding Starlight's `Sidebar`. It delegates
-  * the navigation tree to Starlight's own implementation, so sidebar
-  * configuration, current-page marking, open-state persistence, and mobile
-  * behaviour stay Starlight's responsibility, and adds only the footer the
-  * design places below it.
+  * Framework-boundary component overriding Starlight's `Sidebar`. Starlight
+  * owns the pane this renders into, its drawer behaviour on narrow viewports,
+  * and the navigation tree's contents; this component owns the rail's two
+  * regions and delegates the tree itself to `NavigationTree`. The handbook
+  * identity sits above the rail in the header, where `SiteTitle` owns it.
   *
-  * Takes no props: Starlight renders overrides without any.
+  * Takes no props: Starlight renders overrides without any, and the tree comes
+  * from route data.
   *
-  * Accessibility: the footer is a complementary region named for the
-  * repository. The external link is marked as opening a new context in its
-  * accessible name, and its arrow glyph is decorative.
+  * Rendered result: two regions in a column. The footer stays pinned while the
+  * tree scrolls above it. Nothing is conditionally absent.
+  *
+  * Accessibility: Starlight's own `nav` element already names this region, so
+  * the rail adds no second landmark. The repository link is marked as opening a
+  * new context in its accessible name, and its arrow glyph is decorative.
   */}
 <div class="rail">
-  <div class="tree">
-    <Default />
+  <div class="rail-tree">
+    <NavigationTree entries={sidebar} />
   </div>
 
   <div class="rail-footer">
-    <a href={REPOSITORY_URL} target="_blank" rel="noreferrer">
+    <a href={REPOSITORY_URL} target="_blank" rel="noreferrer" class="repository">
       <svg viewBox="0 0 24 24" width="21" height="21" fill="currentColor" aria-hidden="true">
         <path d="M12 1.8a10.2 10.2 0 0 0-3.2 19.9c.5.1.7-.2.7-.5v-1.9c-2.8.6-3.4-1.3-3.4-1.3-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.5 2.3 1.1 2.9.8.1-.7.4-1.1.7-1.4-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.7 0 0 .8-.3 2.8 1a9.6 9.6 0 0 1 5 0c2-1.3 2.8-1 2.8-1 .5 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.9-2.4 4.7-4.6 5 .4.3.7 1 .7 2v3c0 .3.2.6.7.5A10.2 10.2 0 0 0 12 1.8z" />
       </svg>
@@ -41,6 +48,8 @@ const REPOSITORY_SLUG = "w3lt/lys"
         <path d="M14 5h5v5 M19 5l-8 8 M17 14v5H5V7h5" />
       </svg>
     </a>
+
+    <RailCollapseToggle />
   </div>
 </div>
 
@@ -52,34 +61,52 @@ const REPOSITORY_SLUG = "w3lt/lys"
     min-height: 0;
   }
 
-  .tree {
+  .rail-tree {
     flex: 1;
-    padding-bottom: 1.375rem;
+    padding: 0.75rem 0.625rem 1.375rem;
   }
 
   .rail-footer {
     position: sticky;
     bottom: 0;
-    padding: 0.625rem 0;
+    display: flex;
+    flex: 0 0 auto;
+    gap: 0.375rem;
+    align-items: center;
+    padding: 0.625rem;
     border-top: 1px solid var(--app-border-subtle);
     background-color: var(--app-surface-rail);
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
+    backdrop-filter: blur(18px) saturate(135%);
+    -webkit-backdrop-filter: blur(18px) saturate(135%);
   }
 
-  .rail-footer a {
+  .repository {
     display: flex;
+    flex: 1;
     gap: 0.6875rem;
     align-items: center;
-    padding: 0.3125rem 0.625rem;
+    align-self: stretch;
+    padding: 0.5rem 0.6875rem;
     border-radius: 0.5625rem;
     color: var(--doc-text-muted);
     text-decoration: none;
+    transition:
+      color var(--duration-standard) var(--ease-standard),
+      background-color var(--duration-standard) var(--ease-standard);
   }
 
-  .rail-footer a:hover {
+  .repository svg {
+    flex: 0 0 auto;
+  }
+
+  .repository:hover {
     background-color: var(--app-surface-hover);
     color: var(--app-text-strong);
+  }
+
+  .repository:focus-visible {
+    outline: 2px solid var(--lys-cyan);
+    outline-offset: 2px;
   }
 
   .names {
@@ -93,12 +120,14 @@ const REPOSITORY_SLUG = "w3lt/lys"
     color: var(--app-text);
     font-size: 0.8125rem;
     font-weight: 500;
+    white-space: nowrap;
   }
 
   .slug {
     color: var(--doc-text-faint);
     font-family: var(--sl-font-mono), ui-monospace, monospace;
     font-size: 0.6875rem;
+    white-space: nowrap;
   }
 
   .external {
@@ -113,5 +142,27 @@ const REPOSITORY_SLUG = "w3lt/lys"
     overflow: hidden;
     clip-path: inset(50%);
     white-space: nowrap;
+  }
+
+  /*
+   * Collapsed rail: the repository link keeps only its glyph, and the footer
+   * stacks the two remaining controls.
+   */
+  :global(html[data-rail="collapsed"]) .rail-tree {
+    padding-inline: 0.625rem;
+  }
+
+  :global(html[data-rail="collapsed"]) .rail-footer {
+    flex-direction: column;
+  }
+
+  :global(html[data-rail="collapsed"]) .repository {
+    justify-content: center;
+    padding: 0.5625rem;
+  }
+
+  :global(html[data-rail="collapsed"]) .names,
+  :global(html[data-rail="collapsed"]) .external {
+    display: none;
   }
 </style>

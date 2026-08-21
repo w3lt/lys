@@ -1,0 +1,114 @@
+---
+/** Letterform shown inside the Lys mark. */
+const MARK_GLYPH = "L"
+
+/** Subtitle shown beside the wordmark in the detailed variant. */
+const SUBTITLE = "Engineering Handbook"
+
+type SiteMarkProps = {
+  /**
+   * How much of the identity is shown.
+   *
+   * `compact` renders the mark and wordmark alone and is sized for the narrow
+   * header. `detailed` adds the handbook subtitle and is sized for the head of
+   * the navigation rail.
+   */
+  readonly variant: "compact" | "detailed"
+
+  /** Wordmark text, taken from the site title rather than hard-coded here. */
+  readonly title: string
+}
+
+/** Astro types `Astro.props` from a local declaration named `Props`. */
+type Props = SiteMarkProps
+
+const { variant, title }: SiteMarkProps = Astro.props
+---
+
+{/**
+  * The Lys mark, wordmark, and optional handbook subtitle.
+  *
+  * Presentational component. Projects the site identity at one of two fixed
+  * sizes; it owns no state, performs no navigation, and renders no link of its
+  * own so the surrounding chrome decides what the identity points at.
+  *
+  * Rendered result: one inline flex row. Nothing is ever absent.
+  *
+  * Accessibility: the mark's letterform repeats the wordmark beside it, so it
+  * is decorative and hidden from assistive technology. The subtitle stays in
+  * the accessible name of any enclosing link, where it describes the
+  * destination accurately.
+  */}
+<span class:list={["site-mark", `variant-${variant}`]}>
+  <span class="mark" aria-hidden="true">{MARK_GLYPH}</span>
+  <span class="names">
+    <span class="wordmark">{title}</span>
+    {variant === "detailed" && <span class="subtitle">{SUBTITLE}</span>}
+  </span>
+</span>
+
+<style>
+  .site-mark {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    white-space: nowrap;
+  }
+
+  .variant-compact {
+    gap: 0.5625rem;
+  }
+
+  .variant-detailed {
+    gap: 0.6875rem;
+  }
+
+  .mark {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    background-image: var(--gradient-primary);
+    color: oklch(0.98 0.005 230);
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+
+  .variant-compact .mark {
+    width: 1.375rem;
+    height: 1.375rem;
+    border-radius: var(--radius-control);
+    box-shadow: 0 0 16px oklch(0.58 0.2 303 / 35%);
+    font-size: 0.75rem;
+  }
+
+  .variant-detailed .mark {
+    width: 1.625rem;
+    height: 1.625rem;
+    border-radius: 0.5rem;
+    box-shadow: 0 0 20px oklch(0.58 0.2 303 / 38%);
+    font-size: 0.8125rem;
+  }
+
+  .names {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .wordmark {
+    background-image: var(--gradient-wordmark);
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .subtitle {
+    color: var(--doc-text-faint);
+    font-size: 0.65625rem;
+    letter-spacing: 0.05em;
+  }
+</style>

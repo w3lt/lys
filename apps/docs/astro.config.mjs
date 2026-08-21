@@ -5,6 +5,23 @@ import tailwindcss from "@tailwindcss/vite"
 
 import react from "@astrojs/react"
 
+import { COLLAPSED_RAIL, RAIL_STORAGE_KEY } from "./src/lib/handbook/rail.ts"
+
+/**
+ * Inline script restoring the reader's navigation-rail width before first paint.
+ *
+ * It runs in the document head, ahead of the rail itself, so a collapsed rail
+ * is never rendered expanded and then snapped shut. `RailCollapseToggle` owns
+ * every later change to the same attribute.
+ */
+const RESTORE_RAIL_WIDTH = `
+try {
+  if (localStorage.getItem(${JSON.stringify(RAIL_STORAGE_KEY)}) === ${JSON.stringify(COLLAPSED_RAIL)}) {
+    document.documentElement.dataset.rail = ${JSON.stringify(COLLAPSED_RAIL)};
+  }
+} catch {}
+`.trim()
+
 // https://astro.build/config
 export default defineConfig({
   vite: {
@@ -22,15 +39,18 @@ export default defineConfig({
       editLink: {
         baseUrl: "https://github.com/w3lt/lys/edit/main/apps/docs/"
       },
-      social: [
+      // The design places the repository link at the foot of the navigation
+      // rail rather than in the header, so `Sidebar` renders it and Starlight's
+      // header social list stays empty.
+      head: [
         {
-          icon: "github",
-          label: "GitHub",
-          href: "https://github.com/w3lt/lys"
+          tag: "script",
+          content: RESTORE_RAIL_WIDTH
         }
       ],
-      // Narrow overrides only. Starlight keeps ownership of navigation, search,
-      // article layout, and accessibility behaviour.
+      // Starlight keeps ownership of routing, search, article layout, and
+      // accessibility behaviour. The design replaces the shell's chrome, so the
+      // rail, header identity, page title, and theme control are overridden.
       components: {
         SiteTitle: "./src/components/starlight/SiteTitle.astro",
         ThemeSelect: "./src/components/starlight/ThemeSelect.astro",

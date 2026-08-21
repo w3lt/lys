@@ -39,6 +39,11 @@ const records = buildRecordIndex(
   * keeps its programmatic association with its column. The row link wraps only
   * the title cell, so no interactive element nests inside another.
   */}
+<p class="provenance not-content">
+  Index generated from decision frontmatter · {records.length} records ·
+  duplicate identifiers fail the build
+</p>
+
 <div class="decision-index not-content">
   <table>
     <caption class="sr-only">Architecture Decision Records</caption>
@@ -69,7 +74,19 @@ const records = buildRecordIndex(
   </table>
 </div>
 
+<p class="legend not-content">
+  Status is carried by icon and label as well as colour, so the index stays
+  readable without relying on hue.
+</p>
+
 <style>
+  .provenance {
+    margin: 0 0 1.375rem;
+    color: var(--doc-text-faint);
+    font-family: var(--sl-font-mono), ui-monospace, monospace;
+    font-size: 0.75rem;
+  }
+
   .decision-index {
     overflow-x: auto;
     border: 1px solid var(--app-border-default);
@@ -139,5 +156,12 @@ const records = buildRecordIndex(
   .title a:hover {
     text-decoration: underline;
     text-underline-offset: 3px;
+  }
+
+  .legend {
+    margin: 1rem 0 0;
+    color: var(--doc-text-faint);
+    font-size: 0.8125rem;
+    line-height: 1.6;
   }
 </style>

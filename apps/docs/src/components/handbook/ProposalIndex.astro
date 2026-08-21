@@ -4,6 +4,7 @@ import StatusBadge from "./StatusBadge.astro"
 import { buildRecordIndex, countByStatus } from "@/lib/handbook/records"
 import { toSiteHref } from "@/lib/handbook/routing"
 import {
+  PROPOSAL_STATUS_ORDER,
   resolveStatusPresentation,
   type DocumentStatus
 } from "@/lib/handbook/status"
@@ -27,7 +28,16 @@ const records = buildRecordIndex(
   }))
 )
 
+/**
+ * Statuses actually present, in lifecycle order with their counts.
+ *
+ * A status nothing carries gets no filter: a control that can only ever empty
+ * the list is not a choice worth offering.
+ */
 const statusCounts = countByStatus(records)
+const statusFilters = PROPOSAL_STATUS_ORDER.filter((status) =>
+  statusCounts.has(status)
+).map((status) => ({ status, count: statusCounts.get(status) ?? 0 }))
 
 /**
  * Composes the small provenance line beneath a proposal's summary.
@@ -72,7 +82,7 @@ function toProvenanceLine(record: (typeof records)[number]): string {
 <handbook-proposal-filter class="proposal-index not-content">
   <div class="filters" role="group" aria-label="Filter proposals by status" hidden>
     {
-      [...statusCounts].map(([status, count]) => {
+      statusFilters.map(({ status, count }) => {
         const presentation = resolveStatusPresentation(status)
         return (
           <button

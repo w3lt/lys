@@ -147,10 +147,19 @@ const { title, path, outputs, caption }: FlowDiagramProps = Astro.props
     gap: 0.1875rem;
     min-width: 8.25rem;
     padding: 0.6875rem 0.875rem;
-    border: 1px solid var(--app-border-strong);
+    border: 1px solid var(--app-border-default);
     border-radius: 0.5rem;
     background-color: var(--app-surface-field);
     text-align: center;
+  }
+
+  /*
+   * The node the path arrives at is where the flow's ownership sits, so it is
+   * the one the design tints and outlines more strongly.
+   */
+  .path li:last-child .node {
+    border-color: var(--app-border-strong);
+    background-color: oklch(0.65 0.22 303 / 12%);
   }
 
   .node.dashed {

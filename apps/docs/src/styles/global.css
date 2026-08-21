@@ -188,6 +188,15 @@
   --doc-text-muted: oklch(0.79 0.028 250);
   --doc-text-faint: oklch(0.735 0.028 256);
 
+  /*
+   * The accent the reading surface uses for markers, focus rings, and the small
+   * identifying text an article is full of. It is the brand cyan on the dark
+   * appearance and a darker cyan on the light one, for the same reason muted
+   * and faint text are raised here: the brand value is tuned for the desktop's
+   * dark chrome and does not hold AA against a light page.
+   */
+  --doc-accent: var(--lys-cyan);
+
   /* Article rhythm, matching the approved handbook design. */
   --doc-article-size: 1.0625rem;
   --doc-article-line-height: 1.74;
@@ -306,6 +315,7 @@
 
   --doc-text-muted: oklch(0.43 0.045 275);
   --doc-text-faint: oklch(0.5 0.038 270);
+  --doc-accent: oklch(0.62 0.13 205);
 
   --doc-status-success-bg: oklch(0.47 0.13 150 / 10%);
   --doc-status-success-border: oklch(0.47 0.13 150 / 36%);
@@ -377,6 +387,16 @@
    */
   --sl-sidebar-width: 15.625rem;
   --sl-content-width: 48.125rem;
+}
+
+/*
+ * A page without a table of contents keeps the design's wide measure: the same
+ * 1140px shell less its gutters, with the whole width given to the article
+ * rather than shared with a second column. It is what puts the homepage's five
+ * entrances on one row and lets the generated registers breathe.
+ */
+html:not([data-has-toc]) {
+  --sl-content-width: 64.75rem;
 }
 
 :root[data-rail="collapsed"] {
@@ -651,6 +671,46 @@ site-search dialog {
   -webkit-backdrop-filter: blur(24px) saturate(140%);
 }
 
+/*
+ * Pagefind owns the search results; the design owns how loud they are. The
+ * query row becomes a hairline-separated header rather than a boxed field, and
+ * the result text drops to the sizes the rest of the handbook lists use.
+ */
+#starlight__search .pagefind-ui__form {
+  border-bottom: 1px solid var(--app-border-subtle);
+}
+
+/*
+ * The field is the dialog's header row, so focus is shown by that row's own
+ * rule thickening rather than by a second box drawn inside it.
+ */
+#starlight__search .pagefind-ui__form:focus-within {
+  padding-bottom: 1px;
+  border-bottom: 2px solid var(--doc-accent);
+}
+
+#starlight__search .pagefind-ui__form .pagefind-ui__search-input,
+#starlight__search .pagefind-ui__form .pagefind-ui__search-input:focus {
+  border-color: transparent;
+  border-radius: 0;
+  outline: none;
+  background-color: transparent;
+  font-size: 0.9375rem;
+}
+
+#starlight__search .pagefind-ui__result-title,
+#starlight__search .pagefind-ui__result-link {
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+#starlight__search .pagefind-ui__result-excerpt {
+  color: var(--doc-text-muted);
+  font-size: 0.78125rem;
+  line-height: 1.45;
+}
+
 starlight-toc nav > h2 {
   margin-bottom: 0.625rem;
   color: var(--doc-text-faint);
@@ -665,6 +725,15 @@ starlight-toc nav ul {
   border-inline-start: 1px solid var(--app-border-subtle);
 }
 
+/*
+ * Starlight opens the contents list with a link back to the title. The design
+ * lists only the article's own sections, and the title is already reachable
+ * through the skip link and the breadcrumb trail.
+ */
+starlight-toc nav > ul > li:first-child {
+  display: none;
+}
+
 starlight-toc nav a {
   padding-block: 0.3125rem;
   color: var(--doc-text-muted);
@@ -675,14 +744,33 @@ starlight-toc nav a {
 
 starlight-toc nav a[aria-current="true"] {
   color: var(--app-text-strong);
-  box-shadow: inset 2px 0 0 var(--lys-cyan);
+  box-shadow: inset 2px 0 0 var(--doc-accent);
 }
 
 /* ---------------------------------------------------------------------------
  * Article surface
  * ------------------------------------------------------------------------- */
 
+/*
+ * Starlight pads every content panel equally and rules a line between them, so
+ * an article's heading block and its prose sit 48px apart with a divider. The
+ * design reads them as one block: the page gutter belongs to the article's ends
+ * and the title is followed by its description directly.
+ */
+.content-panel {
+  padding-block: 0;
+}
+
+.content-panel:first-of-type {
+  padding-top: 2.875rem;
+}
+
+.content-panel:last-of-type {
+  padding-bottom: 7.5rem;
+}
+
 .content-panel + .content-panel {
+  padding-top: 0.75rem;
   border-top: 0;
 }
 
@@ -702,21 +790,56 @@ starlight-toc nav a[aria-current="true"] {
   letter-spacing: -0.015em;
 }
 
-.sl-markdown-content h2 {
+/*
+ * Starlight wraps every markdown heading in `.sl-heading-wrapper` and makes the
+ * heading itself `display: inline` so its anchor link can sit on the last line.
+ * Section rules therefore belong to the wrapper: applied to the heading they
+ * would draw a rule only as wide as the heading's text.
+ */
+.sl-markdown-content .sl-heading-wrapper.level-h2 {
+  display: block;
   margin-top: var(--doc-section-gap);
-  padding-top: 1.25rem;
-  border-top: 1px solid var(--app-border-subtle);
-  font-size: var(--sl-text-h2);
 }
 
-.sl-markdown-content :is(h2, h3, h4) + * {
+/*
+ * The design opens an article's first section without a rule — the metadata
+ * block above it already closes the heading block — and separates every later
+ * section with one.
+ */
+.sl-markdown-content
+  .sl-heading-wrapper.level-h2
+  ~ .sl-heading-wrapper.level-h2 {
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--app-border-subtle);
+}
+
+.sl-markdown-content .sl-heading-wrapper + * {
   margin-top: 0.75rem;
 }
 
-.sl-markdown-content p,
-.sl-markdown-content li {
+/*
+ * The article's reading measure. Handbook components set their own measure from
+ * their own layout, so the rule stops at the boundary they mark with
+ * `not-content` — including the marked element itself, not only its descendants.
+ */
+.sl-markdown-content :is(p, li):not(:where(.not-content, .not-content *)) {
   max-width: 72ch;
   text-wrap: pretty;
+}
+
+/*
+ * The lead: the description sentence an article opens with, before any section.
+ * A paragraph that follows a heading is body copy and keeps the article size.
+ */
+.sl-markdown-content
+  > p:first-of-type:not(:where(.sl-heading-wrapper ~ *)):not(
+    :where(.not-content *)
+  ) {
+  max-width: 66ch;
+  margin-bottom: 1.625rem;
+  color: var(--doc-text-muted);
+  font-size: 1.125rem;
+  line-height: 1.6;
 }
 
 .sl-markdown-content a:not(:where(.not-content *)) {
@@ -726,7 +849,7 @@ starlight-toc nav a[aria-current="true"] {
 }
 
 .sl-markdown-content a:not(:where(.not-content *)):hover {
-  color: var(--lys-cyan);
+  color: var(--doc-accent);
   text-decoration-color: currentcolor;
 }
 
@@ -737,8 +860,30 @@ starlight-toc nav a[aria-current="true"] {
   color: var(--app-text-code);
 }
 
-.sl-markdown-content :is(table, th, td):not(:where(.not-content *)) {
-  border-color: var(--app-border-subtle);
+/*
+ * Tables read as the design's framed register: a monospace header band over
+ * hairline-separated rows, inside one rounded surface. Starlight makes the
+ * table a scrolling block; the design's tables wrap instead, so the element
+ * goes back to being a table and fills the article's measure.
+ */
+.sl-markdown-content table:not(:where(.not-content *)) {
+  display: table;
+  width: 100%;
+  max-width: 100%;
+  margin-bottom: 1.875rem;
+  border: 1px solid var(--app-border-default);
+  border-radius: var(--radius-surface);
+  border-spacing: 0;
+  background-color: var(--app-surface-panel);
+  box-shadow: var(--shadow-card);
+  font-size: 0.84375rem;
+  line-height: 1.55;
+}
+
+.sl-markdown-content :is(th, td):not(:where(.not-content *)) {
+  padding: 0.6875rem 0.875rem;
+  border: 0;
+  vertical-align: baseline;
 }
 
 .sl-markdown-content th:not(:where(.not-content *)) {
@@ -749,6 +894,35 @@ starlight-toc nav a[aria-current="true"] {
   font-weight: 400;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+}
+
+/*
+ * The header band is painted, so it has to carry the surface's own corner
+ * radius: a table cannot be clipped by `overflow` reliably.
+ */
+.sl-markdown-content thead th:first-child:not(:where(.not-content *)) {
+  border-start-start-radius: calc(var(--radius-surface) - 1px);
+}
+
+.sl-markdown-content thead th:last-child:not(:where(.not-content *)) {
+  border-start-end-radius: calc(var(--radius-surface) - 1px);
+}
+
+.sl-markdown-content tbody td:not(:where(.not-content *)) {
+  border-top: 1px solid var(--app-border-subtle);
+  color: var(--app-text);
+}
+
+/*
+ * A first-column code span names the row — an event, a key, a condition — so it
+ * reads as the row's identifier rather than as an inline code fragment.
+ */
+.sl-markdown-content tbody td:first-child code:not(:where(.not-content *)) {
+  padding: 0;
+  border: 0;
+  background-color: transparent;
+  color: var(--doc-accent);
+  font-size: 0.78125rem;
 }
 
 /* Starlight asides carry the design's notice treatment. */
@@ -802,25 +976,82 @@ starlight-toc nav a[aria-current="true"] {
  * Article footer
  * ------------------------------------------------------------------------- */
 
-.content-panel footer .meta {
-  padding-top: 1.25rem;
+/*
+ * The design closes an article with one hairline row rather than a stack: the
+ * edit link at the start, the neighbouring pages at the end. Starlight stacks
+ * its two footer regions in a column, so the footer itself becomes the row.
+ */
+.content-panel footer {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  margin-top: 2.75rem;
+  padding-top: 1.125rem;
   border-top: 1px solid var(--app-border-subtle);
+}
+
+.content-panel footer .meta {
+  flex: 0 1 auto;
+  gap: 0.75rem;
+  justify-content: flex-start;
+  margin: 0;
   color: var(--doc-text-muted);
   font-size: 0.8125rem;
 }
 
+.pagination-links {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 0.625rem;
+  margin-inline-start: auto;
+}
+
 .pagination-links a {
-  border: 1px solid var(--app-border-subtle);
-  border-radius: var(--radius-surface);
-  background-color: var(--app-surface-panel);
+  display: inline-flex;
+  gap: 0.25rem;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
   box-shadow: none;
-  color: var(--app-text-strong);
+  color: var(--app-text-link);
+  font-size: 0.8125rem;
+  text-decoration: none;
+}
+
+/*
+ * Starlight labels each link "Previous"/"Next" above the page title. The design
+ * carries direction in the arrow and the link's `rel`, so the label is withdrawn
+ * from the visual row while staying in the accessible name.
+ */
+.pagination-links a > span {
+  display: inline-flex;
+  gap: 0.25rem;
+  align-items: center;
+  font-size: 0;
+}
+
+.pagination-links a br {
+  display: none;
+}
+
+.pagination-links .link-title {
+  font-size: 0.8125rem;
+  font-weight: 400;
+}
+
+.pagination-links a[rel="prev"] {
+  color: var(--doc-text-muted);
 }
 
 .pagination-links a:hover {
-  border-color: var(--app-border-strong);
+  color: var(--doc-accent);
 }
 
 .pagination-links svg {
-  color: var(--doc-text-faint);
+  width: 0.875rem;
+  height: 0.875rem;
+  color: currentcolor;
 }

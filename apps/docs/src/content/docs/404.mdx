@@ -13,11 +13,12 @@ external or outdated link. If a document existed before, it may now live in the
 decision, proposal, or changelog history rather than under current
 documentation.
 
-Publication is atomic: a failed build or deployment leaves the previous
-successful site in place, so you are always reading a complete version of the
-handbook. To search, use the search box in the header or press
-
-<kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>K</kbd>.
+<div class="not-found-note not-content">
+  Publication is atomic: a failed build or deployment leaves the previous
+  successful site in place, so you are always reading a complete version of the
+  handbook. To search, use the search box in the header or press
+  <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>K</kbd>.
+</div>
 
 <nav
   class="not-found-actions not-content"
@@ -32,6 +33,18 @@ handbook. To search, use the search box in the header or press
 
 <style>
   {`
+  .not-found-note p {
+    max-width: 56ch;
+    margin: 0;
+    color: var(--doc-text-faint);
+    font-size: 0.84375rem;
+    line-height: 1.66;
+  }
+
+  .not-found-note kbd {
+    font-family: var(--sl-font-mono), ui-monospace, monospace;
+  }
+
   .not-found-actions {
     display: flex;
     flex-wrap: wrap;

@@ -26,6 +26,8 @@ type Props = StatusNoticeProps
 const { kind, status, reason }: StatusNoticeProps = Astro.props
 const notice = resolveDocumentNotice(kind, status)
 const presentation = resolveStatusPresentation(status)
+const tone = notice?.tone ?? presentation.tone
+const icon = notice?.icon ?? presentation.icon
 ---
 
 {/**
@@ -41,11 +43,11 @@ const presentation = resolveStatusPresentation(status)
 {
   notice !== undefined && (
     <aside
-      class:list={["status-notice", "not-content", `tone-${presentation.tone}`]}
+      class:list={["status-notice", "not-content", `tone-${tone}`]}
       aria-label={notice.title}
     >
       <span class="glyph" aria-hidden="true">
-        {presentation.icon}
+        {icon}
       </span>
       <div>
         <p class="title">{notice.title}</p>

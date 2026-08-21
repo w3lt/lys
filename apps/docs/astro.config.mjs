@@ -68,7 +68,9 @@ export default defineConfig({
             editorTabBarBackground: "var(--app-surface-code-header)",
             editorTabBarBorderBottomColor: "var(--app-border-subtle)",
             editorActiveTabBackground: "var(--app-surface-code-header)",
-            editorActiveTabIndicatorTopColor: "var(--lys-cyan)",
+            // The design's code header is one plain bar: a file name on the
+            // left, the copy control on the right, and no tab indicator.
+            editorActiveTabIndicatorTopColor: "transparent",
             editorActiveTabForeground: "var(--app-text-strong)",
             editorBackground: "var(--app-surface-code)",
             terminalBackground: "var(--app-surface-code)",

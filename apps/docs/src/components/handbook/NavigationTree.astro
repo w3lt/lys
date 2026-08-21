@@ -162,7 +162,7 @@ const { entries, nested = false }: NavigationTreeProps = Astro.props
   }
 
   .row:focus-visible {
-    outline: 2px solid var(--lys-cyan);
+    outline: 2px solid var(--doc-accent);
     outline-offset: 2px;
   }
 
@@ -183,7 +183,7 @@ const { entries, nested = false }: NavigationTreeProps = Astro.props
   [aria-current="page"]:hover,
   [aria-current="page"]:focus-visible {
     background-color: var(--app-surface-navigation-active);
-    box-shadow: inset 2px 0 0 0 var(--lys-cyan);
+    box-shadow: inset 2px 0 0 0 var(--doc-accent);
     color: var(--app-text-strong);
   }
 
@@ -198,7 +198,7 @@ const { entries, nested = false }: NavigationTreeProps = Astro.props
   }
 
   [data-current-section] :global(.navigation-icon) {
-    color: var(--lys-cyan);
+    color: var(--doc-accent);
   }
 
   /*

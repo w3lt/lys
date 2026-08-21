@@ -15,12 +15,27 @@ type DocumentMetaProps = {
    * Omit to use "Document metadata".
    */
   readonly label?: string
+  /**
+   * How the fields are arranged.
+   *
+   * `row` sets short factual values — a status, a date, an owner — on one
+   * hairline strip beneath the page description. `cards` gives each field its
+   * own surface, which is what a runbook's trigger, scope, and prerequisites
+   * need: they are sentences an operator reads before acting, not labels.
+   *
+   * Omit to use `row`.
+   */
+  readonly layout?: "row" | "cards"
 }
 
 /** Astro types `Astro.props` from a local declaration named `Props`. */
 type Props = DocumentMetaProps
 
-const { entries, label = "Document metadata" }: DocumentMetaProps = Astro.props
+const {
+  entries,
+  label = "Document metadata",
+  layout = "row"
+}: DocumentMetaProps = Astro.props
 ---
 
 {/**
@@ -33,7 +48,10 @@ const { entries, label = "Document metadata" }: DocumentMetaProps = Astro.props
   * programmatic association with its own label, and named as a group so the
   * block is distinguishable from surrounding prose.
   */}
-<dl class="document-meta not-content" aria-label={label}>
+<dl
+  class:list={["document-meta", "not-content", `layout-${layout}`]}
+  aria-label={label}
+>
   {
     entries.map((entry) => (
       <div class="entry">
@@ -46,24 +64,49 @@ const { entries, label = "Document metadata" }: DocumentMetaProps = Astro.props
 
 <style>
   .document-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0 1.625rem;
     margin: 0 0 2.125rem;
-    padding: 0.75rem 1rem;
-    border: 1px solid var(--app-border-subtle);
-    border-radius: var(--radius-surface);
-    background-color: var(--app-surface-panel);
-    box-shadow: var(--shadow-card);
     backdrop-filter: blur(18px);
     -webkit-backdrop-filter: blur(18px);
   }
 
-  .entry {
+  .layout-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 1.625rem;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--app-border-subtle);
+    border-radius: var(--radius-surface);
+    background-color: var(--app-surface-panel);
+  }
+
+  .layout-row .entry {
     display: flex;
     flex-direction: column;
     gap: 0.1875rem;
     padding: 0.3125rem 0;
+  }
+
+  .layout-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(11.875rem, 1fr));
+    gap: 0.625rem;
+    margin-bottom: 1.625rem;
+  }
+
+  .layout-cards .entry {
+    padding: 0.8125rem 0.9375rem;
+    border: 1px solid var(--app-border-subtle);
+    border-radius: var(--radius-surface);
+    background-color: var(--app-surface-panel);
+  }
+
+  .layout-cards dt {
+    margin-bottom: 0.375rem;
+  }
+
+  .layout-cards dd {
+    font-size: 0.84375rem;
+    line-height: 1.55;
   }
 
   dt {

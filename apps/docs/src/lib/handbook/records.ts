@@ -57,12 +57,13 @@ export type HandbookRecord = {
 /**
  * Builds the validated, ordered rows of a handbook index.
  *
- * Rows are ordered by identifier so the index reads as a stable register: a new
- * record appends rather than reshuffling every row above it.
+ * Rows are ordered by descending identifier, so a register opens on its newest
+ * record. Identifiers are zero-padded and monotonic, which makes them a stable
+ * ordering key that does not depend on a date a record may never restate.
  *
  * @param kind - Record type being indexed, used in failure messages.
  * @param sources - Every content entry belonging to that index, in any order.
- * @returns The index rows ordered by ascending identifier.
+ * @returns The index rows ordered by descending identifier.
  * @throws When a record is missing required metadata, or when two records claim
  * the same identifier. Both conditions block the build by design.
  */
@@ -75,7 +76,7 @@ export function buildRecordIndex(
   assertUniqueIdentifiers(kind, records)
 
   return [...records].sort((left, right) =>
-    left.identifier.localeCompare(right.identifier)
+    right.identifier.localeCompare(left.identifier)
   )
 }
 

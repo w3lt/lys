@@ -9,9 +9,23 @@
 /** Status an Architecture Decision Record may carry. */
 export type DecisionStatus = "accepted" | "superseded" | "deprecated"
 
+/**
+ * Proposal statuses in the order a proposal moves through them.
+ *
+ * Filters and legends read this rather than the order records happen to be
+ * loaded in, so the same set of statuses always reads as the same sequence.
+ */
+export const PROPOSAL_STATUS_ORDER = [
+  "draft",
+  "discussion",
+  "accepted",
+  "implemented",
+  "rejected",
+  "withdrawn"
+] as const
+
 /** Status a Request for Comments may carry. */
-export type ProposalStatus =
-  "draft" | "discussion" | "accepted" | "implemented" | "rejected" | "withdrawn"
+export type ProposalStatus = (typeof PROPOSAL_STATUS_ORDER)[number]
 
 /** Any status a handbook record may carry. */
 export type DocumentStatus = DecisionStatus | ProposalStatus
@@ -44,11 +58,19 @@ export const DOCUMENT_STATUS_PRESENTATION: Readonly<
   Record<DocumentStatus, StatusPresentation>
 > = {
   accepted: { tone: "success", icon: "✓", label: "accepted" },
-  implemented: { tone: "success", icon: "✓", label: "implemented" },
+  implemented: { tone: "success", icon: "✔", label: "implemented" },
   draft: { tone: "neutral", icon: "○", label: "draft" },
   discussion: { tone: "pending", icon: "◑", label: "discussion" },
-  superseded: { tone: "pending", icon: "⇄", label: "superseded" },
-  deprecated: { tone: "danger", icon: "⚠", label: "deprecated" },
+  /*
+   * A superseded record is not a warning: the decision it replaced is recorded
+   * and current work is unaffected, so it is retired rather than flagged.
+   */
+  superseded: { tone: "neutral", icon: "↻", label: "superseded" },
+  /*
+   * A deprecated record still guides nothing, but it has no replacement to
+   * follow, so it carries the same caution as any unresolved state.
+   */
+  deprecated: { tone: "pending", icon: "⚠", label: "deprecated" },
   rejected: { tone: "danger", icon: "✕", label: "rejected" },
   withdrawn: { tone: "neutral", icon: "⊘", label: "withdrawn" }
 }
@@ -60,6 +82,23 @@ export type RecordKind = "decision" | "proposal"
 export type DocumentNotice = {
   /** Heading of the notice. */
   readonly title: string
+  /**
+   * Colour role the notice uses, when it differs from the status's own.
+   *
+   * A status pill reports where a record stands; a notice warns a reader who
+   * may be about to act on the wrong document. The two can disagree: a
+   * superseded decision is retired rather than alarming, but opening one by
+   * mistake still needs to be caught.
+   *
+   * Omit to take the status's registered tone.
+   */
+  readonly tone?: StatusTone
+  /**
+   * Glyph shown beside the notice, when it differs from the status's own.
+   *
+   * Omit to take the status's registered icon.
+   */
+  readonly icon?: string
   /**
    * Standing explanation of what the status means for a reader.
    *
@@ -83,10 +122,14 @@ const DOCUMENT_NOTICES: Readonly<
   decision: {
     superseded: {
       title: "Historical document",
+      tone: "pending",
+      icon: "⚠",
       body: "The reasoning below is preserved as evidence and is not corrected to match current behaviour."
     },
     deprecated: {
       title: "Deprecated decision",
+      tone: "pending",
+      icon: "⚠",
       body: "This decision is no longer in force. It is preserved as evidence and is not corrected to match current behaviour."
     }
   },
@@ -102,6 +145,10 @@ const DOCUMENT_NOTICES: Readonly<
     accepted: {
       title: "Approved future change",
       body: "This proposal is approved but not yet implemented, so it does not describe current architecture."
+    },
+    implemented: {
+      title: "Implemented",
+      body: "This proposal has shipped. Current architecture and reference pages describe the behaviour; this document is kept for its reasoning."
     },
     rejected: {
       title: "Rejected proposal",

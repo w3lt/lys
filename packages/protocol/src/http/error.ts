@@ -1,11 +1,42 @@
 import * as z from "zod"
 
-export const httpErrorResponseSchema = z.strictObject({
+const httpErrorResponseBodyCreationOptionsSchema = z.strictObject({
   type: z.string().readonly(),
   title: z.string().readonly(),
   detail: z.string().readonly(),
-  status: z.number().min(400).max(599).optional(),
-  instance: z.string().optional()
+  status: z.coerce.number().min(400).max(599).readonly(),
+  instance: z.string().optional().readonly()
 })
 
-export type HttpErrorResponse = z.infer<typeof httpErrorResponseSchema>
+type HttpErrorResponseBodyCreationOptions = z.infer<
+  typeof httpErrorResponseBodyCreationOptionsSchema
+>
+
+export class HttpErrorResponseBody {
+  readonly #type: string
+  readonly #title: string
+  readonly #detail: string
+  readonly #status: number
+  readonly #instance: string | undefined
+
+  constructor(options: HttpErrorResponseBodyCreationOptions) {
+    const verifiedOptions =
+      httpErrorResponseBodyCreationOptionsSchema.parse(options)
+
+    this.#type = verifiedOptions.type
+    this.#title = verifiedOptions.title
+    this.#detail = verifiedOptions.detail
+    this.#status = verifiedOptions.status
+    this.#instance = verifiedOptions.instance
+  }
+
+  public toJson(): HttpErrorResponseBodyCreationOptions {
+    return {
+      type: this.#type,
+      title: this.#title,
+      detail: this.#detail,
+      status: this.#status,
+      instance: this.#instance
+    }
+  }
+}

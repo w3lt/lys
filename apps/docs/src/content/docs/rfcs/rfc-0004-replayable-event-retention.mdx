@@ -47,7 +47,7 @@ so the information needed to resume exists; nothing retains it.
 - Bound memory: retention is a fixed number of events per session, never
   unbounded.
 - Keep replay and live delivery on one code path, as
-  [ADR-0005](/decisions/adr-0005-single-session-writer/) requires.
+  [ADR-0003](/decisions/adr-0003-single-event-bus/) requires.
 - Not a durable event log. A subscriber outside the window still refetches.
 - Not an offline mode. The window is measured in events, not in days.
 
@@ -110,8 +110,8 @@ protocol's major version.
     },
     {
       kind: "ADR",
-      label: "ADR-0005 — The backend is the sole writer of session state",
-      href: "/decisions/adr-0005-single-session-writer/"
+      label: "ADR-0003 — A single event bus serves replay and live delivery",
+      href: "/decisions/adr-0003-single-event-bus/"
     },
     {
       kind: "Reference",

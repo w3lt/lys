@@ -32,7 +32,8 @@ reads as a broken launch rather than a slow one.
 ## Why it was rejected
 
 The cache would have made the desktop a second holder of session truth, which
-[ADR-0005](/decisions/adr-0005-single-session-writer/) closed deliberately. The
+[ADR-0004](/decisions/adr-0004-desktop-state-from-events/) closed
+deliberately. The
 proposal had no answer for a cache that disagreed with the store after an
 interrupted write, and the discussion did not find one that stopped short of a
 full reconciliation contract.
@@ -47,8 +48,8 @@ without introducing a second writer.
   documents={[
     {
       kind: "ADR",
-      label: "ADR-0005 — The backend is the sole writer of session state",
-      href: "/decisions/adr-0005-single-session-writer/"
+      label: "ADR-0004 — Desktop state is derived from the event stream only",
+      href: "/decisions/adr-0004-desktop-state-from-events/"
     },
     {
       kind: "Architecture",

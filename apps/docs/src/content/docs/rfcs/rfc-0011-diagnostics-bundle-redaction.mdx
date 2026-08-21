@@ -1,0 +1,83 @@
+---
+title: Diagnostics bundle redaction policy
+description: Define exactly which fields are stripped before a bundle can leave a machine.
+docType: proposal
+identifier: RFC-0011
+status: implemented
+author: "@dela"
+created: "2026-06-25"
+updated: "2026-07-21"
+areas: ["operate", "security"]
+statusHistory:
+  - date: "2026-06-25"
+    status: draft
+    note: Opened after a shared bundle was found to contain provider account identifiers.
+  - date: "2026-07-09"
+    status: discussion
+    note: Reviewed with the operate and security owners; the policy moved from a denylist to an allowlist.
+  - date: "2026-07-21"
+    status: implemented
+    note: Shipped with the bundle writer refusing to emit an unclassified field.
+---
+
+import RecordMeta from "@/components/handbook/RecordMeta.astro"
+import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+import StatusHistory from "@/components/handbook/StatusHistory.astro"
+import StatusNotice from "@/components/handbook/StatusNotice.astro"
+
+<StatusNotice kind="proposal" status={frontmatter.status} />
+
+<RecordMeta frontmatter={frontmatter} />
+
+## Summary
+
+Define exactly which fields are stripped before a bundle can leave a machine.
+
+## Motivation
+
+A diagnostics bundle is the one artifact a user is routinely asked to send
+elsewhere. Before this proposal its contents were decided field by field as the
+bundle writer grew, and a bundle was found to carry provider account
+identifiers that nobody had intended to include.
+
+## Proposed design
+
+Bundle contents are an allowlist. A field reaches a bundle only when it has
+been explicitly classified as safe to disclose; anything unclassified is
+omitted and the omission is recorded in the bundle's manifest.
+
+- Message content is never included.
+- Provider identifiers, account metadata, and credential handles are never
+  included.
+- Store paths are reduced to a placeholder root.
+
+## Alternatives
+
+A denylist was rejected: it is safe only while it is exhaustive, and it stops
+being exhaustive the moment a new field is added anywhere upstream.
+
+## Risks and trade-offs
+
+An allowlist omits genuinely useful fields until someone classifies them, which
+makes some first-report bundles thinner than a maintainer would like.
+
+## Status history
+
+<StatusHistory transitions={frontmatter.statusHistory} />
+
+## Related documents
+
+<RelatedDocuments
+  documents={[
+    {
+      kind: "Guide",
+      label: "Logging and diagnostics",
+      href: "/operate/logging/"
+    },
+    {
+      kind: "Architecture",
+      label: "Security and trust boundaries",
+      href: "/architecture/security/"
+    }
+  ]}
+/>

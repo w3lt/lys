@@ -1,0 +1,65 @@
+---
+title: One pinned Mermaid integration for all diagrams
+description: Every handbook diagram is authored as Mermaid text and rendered at build time through a single pinned integration.
+docType: decision
+identifier: ADR-0006
+status: accepted
+decided: "2026-07-19"
+areas: ["docs"]
+---
+
+import RecordMeta from "@/components/handbook/RecordMeta.astro"
+import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+import StatusNotice from "@/components/handbook/StatusNotice.astro"
+
+<StatusNotice kind="decision" status={frontmatter.status} />
+
+<RecordMeta frontmatter={frontmatter} />
+
+## Context
+
+Two diagram pipelines produced inconsistent output and one of them broke on
+every Astro upgrade. Readers saw two visual languages in one handbook, and
+upgrades stalled on whichever pipeline had drifted.
+
+## Decision
+
+Diagrams are authored as Mermaid text and rendered during the build through one
+pinned integration. Diagrams are used only when a technical relationship is
+materially clearer visually than in prose or a compact table.
+
+- The integration version is pinned, and upgraded deliberately.
+- A rendering failure fails the build rather than publishing a blank figure.
+- Every diagram carries a meaningful text explanation, and no critical
+  information is available only through an image.
+
+## Alternatives considered
+
+Committing rendered images was rejected because a diagram then drifts from the
+system it describes with nothing to detect it.
+
+Allowing a second pipeline for special cases was rejected: that is the state
+this decision exists to end.
+
+## Consequences
+
+Diagrams are reviewable as text in a pull request, and a stale diagram is a
+diff rather than a binary. The cost is that the handbook's visual vocabulary is
+bounded by what the pinned integration supports.
+
+## Related documents
+
+<RelatedDocuments
+  documents={[
+    {
+      kind: "Policy",
+      label: "Documentation guidelines",
+      href: "/develop/docs/"
+    },
+    {
+      kind: "Architecture",
+      label: "End-to-end flows",
+      href: "/architecture/flows/"
+    }
+  ]}
+/>

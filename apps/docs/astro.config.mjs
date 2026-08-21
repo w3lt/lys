@@ -85,8 +85,20 @@ export default defineConfig({
       // structure grows as content is authored rather than being scaffolded.
       sidebar: [
         {
+          label: "Overview",
+          items: [{ autogenerate: { directory: "overview" } }]
+        },
+        {
           label: "Architecture",
           items: [{ autogenerate: { directory: "architecture" } }]
+        },
+        {
+          label: "Develop",
+          items: [{ autogenerate: { directory: "develop" } }]
+        },
+        {
+          label: "Operate",
+          items: [{ autogenerate: { directory: "operate" } }]
         },
         {
           label: "Decisions",
@@ -94,12 +106,12 @@ export default defineConfig({
         },
         { label: "RFCs", items: [{ autogenerate: { directory: "rfcs" } }] },
         {
-          label: "Operate",
-          items: [{ autogenerate: { directory: "operate" } }]
-        },
-        {
           label: "Reference",
           items: [{ autogenerate: { directory: "reference" } }]
+        },
+        {
+          label: "Changelog",
+          items: [{ autogenerate: { directory: "changelog" } }]
         }
       ]
     }),

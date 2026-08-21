@@ -6,6 +6,8 @@ appliesTo: current main
 contract: "@lys/protocol"
 contractVersion: v1
 stability: stable
+sidebar:
+  order: 2
 ---
 
 import FieldList from "@/components/handbook/FieldList.astro"
@@ -20,46 +22,46 @@ contract.
 
 ## Event types
 
-| Event               | Meaning                                                        | Since |
-| ------------------- | -------------------------------------------------------------- | ----- |
-| `session.created`   | A session exists and is empty.                                 | v1    |
-| `session.truncated` | Every message after the carried tail identifier was removed.   | v1    |
-| `message.appended`  | A message was committed to the store.                          | v1    |
-| `message.delta`     | A partial provider response extends the named message.         | v1    |
-| `message.failed`    | A provider call ended without producing a complete message.    | v1    |
-| `replay.exhausted`  | The requested resume point is older than the retention window. | v1    |
+| Event               | Meaning                                                       | Since |
+| ------------------- | ------------------------------------------------------------- | ----- |
+| `session.created`   | A new session exists and is writable.                         | v1.0  |
+| `message.appended`  | A message was committed to the store.                         | v1.0  |
+| `message.delta`     | A fragment of an in-progress assistant message.               | v1.0  |
+| `turn.failed`       | A turn ended without a usable result; carries a typed reason. | v1.1  |
+| `session.truncated` | Messages after a point were removed by an explicit write.     | v1.2  |
+| `stream.resumed`    | Replay finished; subsequent events are live.                  | v1.2  |
 
 ## Common fields
 
 <FieldList
   fields={[
     {
-      name: "eventId",
-      type: "string",
+      name: "event_id",
+      type: "string · ULID",
       presence: "required",
       description:
-        "Monotonic identifier of this event within its session. Ordering is total per session and carries no meaning across sessions. A subscriber resumes by sending the last identifier it applied."
+        "Monotonic per session. A client may resume from the last identifier it processed; the bus retains the most recent 200 events per session."
     },
     {
-      name: "sessionId",
-      type: "string",
+      name: "session_id",
+      type: "string · UUIDv7",
       presence: "required",
       description:
-        "Session the event belongs to. Present on every event, including failures, so a subscriber never has to infer the session from context."
+        "Stable for the life of the session. Never reused after deletion."
     },
     {
-      name: "emittedAt",
-      type: "string (RFC 3339)",
+      name: "emitted_at",
+      type: "integer · ms since epoch",
       presence: "required",
       description:
-        "When the backend emitted the event, in UTC. Emission always follows the commit that caused it, so this is never earlier than the change it reports."
+        "Backend clock at commit time, not provider time. Not suitable for ordering; use event_id."
     },
     {
       name: "reason",
-      type: "string",
+      type: "enum",
       presence: "optional",
       description:
-        "Human-readable explanation, present only on message.failed and replay.exhausted. Absent means the event needs no explanation; it never means the explanation was empty."
+        "Present on turn.failed only: timeout, cancelled, provider_error, invalid_response. Unknown values must be treated as provider_error."
     }
   ]}
 />
@@ -87,8 +89,7 @@ change lands.
     },
     {
       kind: "ADR",
-      label:
-        "ADR-0007 — Credentials reach providers only as host-issued handles",
+      label: "ADR-0007 — The Tauri host owns provider credentials",
       href: "/decisions/adr-0007-credential-handles/"
     }
   ]}

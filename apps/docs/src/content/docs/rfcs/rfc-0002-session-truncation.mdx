@@ -47,7 +47,7 @@ consumer must handle in order to support an undo feature that was not requested.
 
 Truncation became a single command with a single event, so replay and live
 delivery show the same sequence. Implemented in the same change as
-[ADR-0005](/decisions/adr-0005-single-session-writer/).
+[ADR-0008](/decisions/adr-0008-truncation-is-a-write/).
 
 ## Related documents
 
@@ -55,8 +55,8 @@ delivery show the same sequence. Implemented in the same change as
   documents={[
     {
       kind: "ADR",
-      label: "ADR-0005 — The backend is the sole writer of session state",
-      href: "/decisions/adr-0005-single-session-writer/"
+      label: "ADR-0008 — Session truncation is a write, not a view filter",
+      href: "/decisions/adr-0008-truncation-is-a-write/"
     },
     {
       kind: "Reference",

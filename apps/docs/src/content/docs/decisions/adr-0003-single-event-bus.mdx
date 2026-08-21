@@ -1,0 +1,55 @@
+---
+title: A single event bus serves replay and live delivery
+description: Replay and live subscribers were unified onto one in-process bus so both paths agree about ordering after a reconnect.
+docType: decision
+identifier: ADR-0003
+status: superseded
+decided: "2026-05-30"
+areas: ["backend", "protocol"]
+supersededBy: ADR-0007
+statusNotice: This decision was superseded by ADR-0007 on 2026-07-28.
+---
+
+import RecordMeta from "@/components/handbook/RecordMeta.astro"
+import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+import StatusNotice from "@/components/handbook/StatusNotice.astro"
+
+<StatusNotice
+  kind="decision"
+  status={frontmatter.status}
+  reason={frontmatter.statusNotice}
+/>
+
+<RecordMeta frontmatter={frontmatter} />
+
+## Context
+
+Replay and live delivery were implemented twice, and the two paths disagreed
+about ordering after a reconnect.
+
+## Decision
+
+A single in-process event bus serves both replay and live subscribers,
+retaining the last two hundred events per session.
+
+## Consequences
+
+Ordering became consistent, but the design assumed the backend was the only
+credentialed component and that assumption no longer holds.
+
+## Related documents
+
+<RelatedDocuments
+  documents={[
+    {
+      kind: "Superseded by",
+      label: "ADR-0007 — The Tauri host owns provider credentials",
+      href: "/decisions/adr-0007-credential-handles/"
+    },
+    {
+      kind: "Architecture",
+      label: "Backend",
+      href: "/architecture/backend/"
+    }
+  ]}
+/>

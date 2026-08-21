@@ -1,0 +1,75 @@
+---
+title: Changelog
+description: What changed and when, rendered from the repository CHANGELOG.md.
+appliesTo: current main
+sidebar:
+  label: Changelog
+  order: 1
+---
+
+import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
+import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+
+What changed and when. The changelog is the chronological change record for
+Lys: git and pull-request history remain the implementation record, and this
+page does not duplicate them as a development journal.
+
+<DocumentMeta
+  label="Page metadata"
+  entries={[
+    { label: "Type", value: "Changelog" },
+    { label: "Source", value: "Repository CHANGELOG.md" }
+  ]}
+/>
+
+## 0.7.2
+
+**Fixed** — Diagnostics bundles redact provider metadata. Bundle contents moved
+from a denylist to an allowlist, so a field reaches a bundle only once it has
+been classified as safe to disclose. See
+[RFC-0011](/rfcs/rfc-0011-diagnostics-bundle-redaction/).
+
+## 0.7.1
+
+**Changed** — Forward-only migrations applied at startup. The backend applies
+pending migrations when it opens the store and refuses to open a store newer
+than the binary understands. Downgrading to an earlier build against a migrated
+store is now refused with a clear message rather than attempted; recover from a
+copy instead. See
+[ADR-0009](/decisions/adr-0009-forward-only-migrations/).
+
+## 0.7.0
+
+**Added** — Host-issued credential handles. The Tauri host is now the only
+component that reads the operating-system keychain, and the backend receives
+short-lived, provider-scoped handles. See
+[ADR-0007](/decisions/adr-0007-credential-handles/) and
+[RFC-0009](/rfcs/rfc-0009-scoped-credential-handles/).
+
+## Source of this page
+
+Entries above are the change record for the releases the handbook currently
+documents. The approved design has this section render the canonical root
+`CHANGELOG.md` through a build-time adapter, so that the repository keeps one
+copy of the change record; that file has not been introduced yet, and adding it
+is tracked as the remaining work for this section.
+
+<RelatedDocuments
+  documents={[
+    {
+      kind: "Overview",
+      label: "Status and roadmap",
+      href: "/overview/status/"
+    },
+    {
+      kind: "Decisions",
+      label: "Architecture Decision Records",
+      href: "/decisions/"
+    },
+    {
+      kind: "RFCs",
+      label: "Requests for Comments",
+      href: "/rfcs/"
+    }
+  ]}
+/>

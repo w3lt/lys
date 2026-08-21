@@ -1,0 +1,83 @@
+---
+title: Workspace-scoped sessions
+description: Group sessions by working directory so context follows the project a contributor is in.
+docType: proposal
+identifier: RFC-0013
+status: discussion
+author: "@dela"
+created: "2026-08-09"
+updated: "2026-08-17"
+areas: ["backend", "persistence", "desktop"]
+statusHistory:
+  - date: "2026-08-09"
+    status: draft
+    note: Opened after session lists became unusable for contributors working across several repositories.
+  - date: "2026-08-17"
+    status: discussion
+    note: Under review; the question of what happens to a session when its directory disappears is unresolved.
+---
+
+import RecordMeta from "@/components/handbook/RecordMeta.astro"
+import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+import StatusHistory from "@/components/handbook/StatusHistory.astro"
+import StatusNotice from "@/components/handbook/StatusNotice.astro"
+
+<StatusNotice kind="proposal" status={frontmatter.status} />
+
+<RecordMeta frontmatter={frontmatter} />
+
+## Summary
+
+Group sessions by working directory so context follows the project a
+contributor is in.
+
+## Motivation
+
+Sessions are currently one flat list. A contributor who works across several
+repositories accumulates sessions that are individually useful and collectively
+unnavigable, and there is no signal about which session belongs to which piece
+of work.
+
+## Proposed design
+
+A session records the working directory it was created in. The session list
+defaults to the current workspace, with the full list one control away.
+
+- The workspace is recorded at creation and does not change afterwards.
+- The desktop application filters by the host's current working directory.
+- Sessions without a workspace remain visible in the full list.
+
+## Alternatives
+
+User-assigned tags were considered: more flexible, but they require the reader
+to maintain them, and the working directory is already known for free.
+
+## Risks and trade-offs
+
+Recording a filesystem path in the session store raises a disclosure question
+for exports and diagnostics bundles, which
+[RFC-0011](/rfcs/rfc-0011-diagnostics-bundle-redaction/) would have to classify.
+
+It is unresolved what a session should do when its directory is moved or
+deleted. That question is currently blocking acceptance.
+
+## Status history
+
+<StatusHistory transitions={frontmatter.statusHistory} />
+
+## Related documents
+
+<RelatedDocuments
+  documents={[
+    {
+      kind: "Architecture",
+      label: "Persistence and ownership",
+      href: "/architecture/persistence/"
+    },
+    {
+      kind: "RFC",
+      label: "RFC-0011 — Diagnostics bundle redaction policy",
+      href: "/rfcs/rfc-0011-diagnostics-bundle-redaction/"
+    }
+  ]}
+/>

@@ -1,0 +1,75 @@
+---
+title: Desktop state is derived from the event stream only
+description: The interface holds no independent copy of session truth; every rendered fact arrives as an event.
+docType: decision
+identifier: ADR-0004
+status: accepted
+decided: "2026-06-21"
+areas: ["desktop", "protocol"]
+---
+
+import RecordMeta from "@/components/handbook/RecordMeta.astro"
+import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+import StatusNotice from "@/components/handbook/StatusNotice.astro"
+
+<StatusNotice kind="decision" status={frontmatter.status} />
+
+<RecordMeta frontmatter={frontmatter} />
+
+## Context
+
+Local optimistic caches drifted from the store whenever a provider call failed
+mid-stream. The interface would show a message that the backend had never
+committed, and the only way back to agreement was a full refetch that discarded
+whatever the reader was looking at.
+
+The divergence was not a bug in one component. It followed from two components
+each holding an opinion about what a session contained.
+
+## Decision
+
+The desktop application derives every piece of session state from the event
+stream. It renders what it has been told, and it asks for a replay when it
+suspects it has missed something.
+
+- No local write path produces session state that an event did not carry.
+- Optimistic interface affordances are visibly provisional until confirmed.
+- A reconnect replays from the last processed identifier rather than refetching.
+
+## Alternatives considered
+
+A reconciling cache — apply optimistically, correct on the next event — was
+rejected because the correction is visible to the reader as content changing
+underneath them, and because the reconciliation logic is where the original
+divergence lived.
+
+## Consequences
+
+First paint after a cold start waits for replay, which is the cost this
+decision accepts. Attempts to remove that wait with a desktop-side copy have
+been proposed and declined since.
+
+The benefit is that "what does this session contain" has exactly one answer,
+held by the backend, at every moment.
+
+## Related documents
+
+<RelatedDocuments
+  documents={[
+    {
+      kind: "Architecture",
+      label: "Desktop application",
+      href: "/architecture/desktop/"
+    },
+    {
+      kind: "Reference",
+      label: "SSE events",
+      href: "/reference/sse-events/"
+    },
+    {
+      kind: "RFC",
+      label: "RFC-0005 — A local session cache in the desktop application",
+      href: "/rfcs/rfc-0005-desktop-local-cache/"
+    }
+  ]}
+/>

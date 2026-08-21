@@ -3,6 +3,8 @@ title: Backend
 description: The Rust service that owns session state, orchestrates providers, and publishes the shared event stream consumed by the desktop application.
 docType: architecture
 appliesTo: current main
+sidebar:
+  order: 4
 ---
 
 import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
@@ -15,10 +17,9 @@ the shared event stream consumed by the desktop application.
 <DocumentMeta
   label="Backend metadata"
   entries={[
-    { label: "Owner", value: "Backend" },
-    { label: "Language", value: "Rust" },
-    { label: "Process", value: "Child of the Tauri host" },
-    { label: "Stability", value: "Current main" }
+    { label: "Type", value: "Architecture · current" },
+    { label: "Owner", value: "@lys/backend" },
+    { label: "Reviewed with", value: "crates/backend" }
   ]}
 />
 
@@ -44,14 +45,14 @@ That split is the subject of
 <FlowDiagram
   title="Diagram · session message flow"
   path={[
-    { label: "Desktop", detail: "user intent" },
-    { label: "Tauri host", detail: "command" },
-    { label: "Session store", detail: "write transaction" }
+    { label: "Desktop", detail: "React · read-only" },
+    { label: "Tauri host", detail: "commands · handles" },
+    { label: "Backend", detail: "owns session state" }
   ]}
   outputs={[
-    { label: "Event bus", detail: "typed events" },
-    { label: "Provider", detail: "orchestrated call" },
-    { label: "Diagnostics", detail: "counters" }
+    { label: "Session store", detail: "SQLite · single writer" },
+    { label: "Event bus", detail: "replay 200" },
+    { label: "Provider adapter", detail: "authorised client" }
   ]}
   caption="A user message enters through the host, is persisted by the session store before any provider call, and reaches the interface only as an event on the stream. Persistence precedes emission, so a crash between the two loses an event rather than a message."
 />
@@ -75,12 +76,12 @@ pub async fn publish(&self, cmd: Command) -> Result<EventId> {
 
 ## Failure behaviour
 
-| Condition                    | Detected by           | Behaviour                                                                          |
-| ---------------------------- | --------------------- | ---------------------------------------------------------------------------------- |
-| Store unavailable at startup | Open probe            | Refuses to start and reports the store path and the integrity error.               |
-| Provider timeout             | Per-call deadline     | Cancels the call, emits `message.failed`, and leaves the persisted message intact. |
-| Subscriber falls behind      | Bounded replay buffer | Drops the subscriber and requires a resubscribe with a last-seen event identifier. |
-| Commit fails mid-command     | Transaction result    | Emits nothing. The command is reported as failed and the store is unchanged.       |
+| Condition             | Detected by       | Behaviour                                                                              |
+| --------------------- | ----------------- | -------------------------------------------------------------------------------------- |
+| Provider timeout      | call deadline     | Emits a failed turn; the session stays writable and the message is retryable.          |
+| Malformed frame       | protocol decode   | Frame dropped, stream closed with a typed error; the client resubscribes and replays.  |
+| Store lock contention | write transaction | Bounded retry, then a surfaced error. The backend never abandons a partial write.      |
+| Host disconnect       | channel close     | In-flight provider calls are cancelled and credential handles are dropped immediately. |
 
 ## Related documents
 
@@ -88,14 +89,13 @@ pub async fn publish(&self, cmd: Command) -> Result<EventId> {
   documents={[
     {
       kind: "ADR",
-      label:
-        "ADR-0007 — Credentials reach providers only as host-issued handles",
+      label: "ADR-0007 — The Tauri host owns provider credentials",
       href: "/decisions/adr-0007-credential-handles/"
     },
     {
-      kind: "ADR",
-      label: "ADR-0005 — The backend is the sole writer of session state",
-      href: "/decisions/adr-0005-single-session-writer/"
+      kind: "RFC",
+      label: "RFC-0012 — Streaming tool-call frames",
+      href: "/rfcs/rfc-0012-streaming-tool-call-frames/"
     },
     {
       kind: "Reference",
@@ -103,9 +103,9 @@ pub async fn publish(&self, cmd: Command) -> Result<EventId> {
       href: "/reference/sse-events/"
     },
     {
-      kind: "RFC",
-      label: "RFC-0004 — Replayable event retention",
-      href: "/rfcs/rfc-0004-replayable-event-retention/"
+      kind: "Runbook",
+      label: "Recover a corrupted session store",
+      href: "/operate/runbooks/recover-session-database/"
     }
   ]}
 />

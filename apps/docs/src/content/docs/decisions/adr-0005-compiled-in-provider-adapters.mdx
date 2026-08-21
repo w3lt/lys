@@ -1,0 +1,76 @@
+---
+title: Provider adapters are compiled in, not plugins
+description: Adapters ship as part of the backend binary, because a plugin boundary would place untrusted code beside credential handles.
+docType: decision
+identifier: ADR-0005
+status: accepted
+decided: "2026-07-02"
+areas: ["providers", "security"]
+---
+
+import RecordMeta from "@/components/handbook/RecordMeta.astro"
+import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+import StatusNotice from "@/components/handbook/StatusNotice.astro"
+
+<StatusNotice kind="decision" status={frontmatter.status} />
+
+<RecordMeta frontmatter={frontmatter} />
+
+## Context
+
+A plugin boundary would put untrusted code inside the process that holds
+credential handles. Provider adapters parse untrusted responses and hold an
+authorised client for the duration of a call, so they sit at the most sensitive
+point in the backend.
+
+Making that extension point loadable at runtime would mean the set of code with
+reach to a handle is decided on the user's machine rather than at review time.
+
+## Decision
+
+Provider adapters are compiled into the backend. Adding a provider is a change
+to this repository, reviewed like any other change.
+
+- Every adapter is present in the artifact and covered by its test suite.
+- The set of code that can hold an authorised client is fixed at build time.
+- Provider selection at runtime chooses among compiled adapters, nothing more.
+
+## Alternatives considered
+
+A dynamic plugin API was proposed and later withdrawn by its author once the
+credential-custody work made in-process plugins untenable.
+
+A sandboxed out-of-process plugin host was rejected as disproportionate: it
+adds a process and an IPC contract to support providers that the project can
+simply compile in.
+
+## Consequences
+
+Adding a provider requires a release, which is slower than dropping a file into
+a directory. That cost is accepted deliberately.
+
+In exchange, the answer to "what code can reach a credential handle" is
+enumerable from the source tree, which is what makes ADR-0007's boundary
+reviewable.
+
+## Related documents
+
+<RelatedDocuments
+  documents={[
+    {
+      kind: "Architecture",
+      label: "LLM provider integration",
+      href: "/architecture/providers/"
+    },
+    {
+      kind: "ADR",
+      label: "ADR-0007 — The Tauri host owns provider credentials",
+      href: "/decisions/adr-0007-credential-handles/"
+    },
+    {
+      kind: "RFC",
+      label: "RFC-0008 — Plugin API for provider adapters",
+      href: "/rfcs/rfc-0008-provider-adapter-plugin-api/"
+    }
+  ]}
+/>

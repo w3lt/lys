@@ -1,0 +1,78 @@
+---
+title: Local model runtime behind the provider interface
+description: Treat an on-device model as one more provider adapter rather than a parallel code path.
+docType: proposal
+identifier: RFC-0014
+status: draft
+author: "@rin"
+created: "2026-08-16"
+updated: "2026-08-18"
+areas: ["providers", "operate"]
+---
+
+import RecordMeta from "@/components/handbook/RecordMeta.astro"
+import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+import StatusNotice from "@/components/handbook/StatusNotice.astro"
+
+<StatusNotice kind="proposal" status={frontmatter.status} />
+
+<RecordMeta frontmatter={frontmatter} />
+
+## Summary
+
+Treat an on-device model as one more provider adapter rather than a parallel
+code path.
+
+## Motivation
+
+An on-device model is attractive for offline work and for sessions a user would
+rather not send anywhere. The risk is that it arrives as a second orchestration
+path beside the provider layer, duplicating retry, cancellation, and streaming.
+
+## Proposed design
+
+The local runtime implements the same adapter contract as a remote provider.
+Orchestration, cancellation, and event emission are unchanged; only the
+transport differs.
+
+- The adapter is compiled in, as
+  [ADR-0005](/decisions/adr-0005-compiled-in-provider-adapters/) requires.
+- No credential handle is issued, because there is no credential to scope.
+- Model files are user-managed data, documented alongside other data locations.
+
+## Alternatives
+
+A separate local-model subsystem would be simpler to write first and harder to
+keep correct, because every streaming and cancellation fix would need doing
+twice.
+
+## Risks and trade-offs
+
+Model files are large, and their lifecycle is not like anything else Lys
+stores. Budget accounting has no meaning without a per-token price, so those
+fields would be absent rather than zero.
+
+This proposal is an early draft: nothing here is agreed, and the adapter
+contract has not yet been checked against a real local runtime.
+
+## Related documents
+
+<RelatedDocuments
+  documents={[
+    {
+      kind: "Architecture",
+      label: "LLM provider integration",
+      href: "/architecture/providers/"
+    },
+    {
+      kind: "ADR",
+      label: "ADR-0005 — Provider adapters are compiled in, not plugins",
+      href: "/decisions/adr-0005-compiled-in-provider-adapters/"
+    },
+    {
+      kind: "Reference",
+      label: "Data locations and lifecycle",
+      href: "/operate/data/"
+    }
+  ]}
+/>

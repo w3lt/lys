@@ -15,39 +15,36 @@ own history. This is not end-user product documentation.
 <EntranceGrid
   entrances={[
     {
-      kicker: "Architecture",
+      kicker: "01 · understand",
       title: "Understand Lys",
       description:
-        "How the desktop application, the Tauri host, and the backend divide responsibility.",
-      href: "/architecture/backend/"
+        "Three processes, one session store, and the contracts between them.",
+      href: "/architecture/system/"
     },
     {
-      kicker: "Decisions",
-      title: "Review decisions",
+      kicker: "02 · build",
+      title: "Start developing",
       description:
-        "Why durable architectural decisions were made, preserved with their original context.",
+        "Set up a machine, run Lys locally, and land a first reviewable change.",
+      href: "/develop/setup/"
+    },
+    {
+      kicker: "03 · operate",
+      title: "Operate Lys",
+      description: "Configuration, diagnostics, and runbooks for recovery.",
+      href: "/operate/configuration/"
+    },
+    {
+      kicker: "04 · decide",
+      title: "Review decisions",
+      description: "Why durable choices were made, and what they replaced.",
       href: "/decisions/"
     },
     {
-      kicker: "RFCs",
-      title: "Read proposals",
-      description:
-        "Changes that are proposed but not yet current, each carrying an explicit status.",
-      href: "/rfcs/"
-    },
-    {
-      kicker: "Operate",
-      title: "Operate Lys",
-      description:
-        "Runbooks for recovering the system when something has gone wrong on a real machine.",
-      href: "/operate/runbooks/recover-session-database/"
-    },
-    {
-      kicker: "Reference",
-      title: "Check a contract",
-      description:
-        "Normative field, unit, default, and compatibility rules for shared contracts.",
-      href: "/reference/sse-events/"
+      kicker: "05 · track",
+      title: "Track changes",
+      description: "The repository changelog and the proposals behind it.",
+      href: "/changelog/"
     }
   ]}
 />

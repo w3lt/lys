@@ -1,0 +1,85 @@
+---
+title: Status and roadmap
+description: What works today, what is in flight, and what is deliberately deferred.
+appliesTo: current main
+sidebar:
+  order: 3
+---
+
+import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
+import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+import StatusBadge from "@/components/handbook/StatusBadge.astro"
+
+What works today, what is in flight, and what is deliberately deferred. This
+page describes the current main branch; anything historical lives in the
+decision, proposal, or changelog record instead.
+
+<DocumentMeta
+  label="Page metadata"
+  entries={[
+    { label: "Type", value: "Overview" },
+    { label: "Applies to", value: "current main" }
+  ]}
+/>
+
+## Shipped
+
+<StatusBadge status="implemented" label="shipped" />
+
+Session streaming is stable across all three processes. A message is persisted
+before any provider call, reaches the interface only as an event, and survives a
+reconnect through a bounded replay window. The desktop application holds no
+independent copy of session truth, so there is one answer to what a session
+contains at every moment.
+
+## In flight
+
+<StatusBadge status="accepted" label="in flight" />
+
+Tool-call frames behind a capability flag. Partial `tool_call` frames let the
+interface render a call as it is produced rather than after it completes; they
+ship behind a protocol capability flag so host and interface can be released
+independently. The proposal is accepted and not yet implemented, so current
+architecture pages remain authoritative. See
+[RFC-0012](/rfcs/rfc-0012-streaming-tool-call-frames/).
+
+## Proposed
+
+<StatusBadge status="discussion" label="proposed" />
+
+Workspace-scoped sessions. Grouping sessions by the working directory they were
+created in is under discussion; what a session should do when its directory is
+moved or deleted is unresolved and currently blocks acceptance. See
+[RFC-0013](/rfcs/rfc-0013-workspace-scoped-sessions/).
+
+## Deliberately deferred
+
+The following are deferred until a demonstrated need exists, rather than
+planned: versioned documentation, end-user documentation, private
+documentation or authentication, CMS authoring, comments, accounts and
+analytics, translations, a generated API reference, and embedded AI assistance.
+
+Deferred does not mean rejected. It means the work has no current sponsor and
+no evidence of need, and a proposal is the way to change that.
+
+## Related documents
+
+<RelatedDocuments
+  documents={[
+    {
+      kind: "Section",
+      label: "Overview overview",
+      href: "/overview/introduction/"
+    },
+    {
+      kind: "Changelog",
+      label: "Changelog",
+      href: "/changelog/"
+    },
+    {
+      kind: "RFCs",
+      label: "Requests for Comments",
+      href: "/rfcs/"
+    }
+  ]}
+/>

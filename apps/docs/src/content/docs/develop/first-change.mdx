@@ -1,0 +1,51 @@
+---
+title: Making a first change
+description: A guided change through the interface, protocol, and backend layers.
+appliesTo: current main
+sidebar:
+  order: 3
+---
+
+import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
+import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+
+A guided change through the interface, protocol, and backend layers. This page
+describes the current main branch; anything historical lives in the decision,
+proposal, or changelog record instead.
+
+<DocumentMeta
+  label="Page metadata"
+  entries={[
+    { label: "Type", value: "Guide" },
+    { label: "Applies to", value: "current main" }
+  ]}
+/>
+
+It is reviewed together with the behaviour it describes, so a change that makes
+this page wrong is expected to update it in the same pull request. Where a
+statement here depends on a durable decision, the decision is linked rather
+than restated.
+
+Content is validated at build time: invalid frontmatter, a duplicate
+identifier, or a broken internal link fails the build rather than publishing a
+partial page.
+
+<RelatedDocuments
+  documents={[
+    {
+      kind: "Section",
+      label: "Develop overview",
+      href: "/develop/setup/"
+    },
+    {
+      kind: "Decisions",
+      label: "Related decision records",
+      href: "/decisions/"
+    },
+    {
+      kind: "Reference",
+      label: "SSE events",
+      href: "/reference/sse-events/"
+    }
+  ]}
+/>

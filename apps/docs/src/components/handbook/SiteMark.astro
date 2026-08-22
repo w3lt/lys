@@ -1,6 +1,7 @@
 ---
-/** Letterform shown inside the Lys mark. */
-const MARK_GLYPH = "L"
+import { Avatar } from "@/components/ui/avatar"
+import { Image } from "astro:assets"
+import lysDark from "@/assets/lys_dark.png"
 
 /** Subtitle shown beside the wordmark in the detailed variant. */
 const SUBTITLE = "Engineering Handbook"
@@ -40,7 +41,13 @@ const { variant, title }: SiteMarkProps = Astro.props
   * destination accurately.
   */}
 <span class:list={["site-mark", `variant-${variant}`]}>
-  <span class="mark" aria-hidden="true">{MARK_GLYPH}</span>
+  <Avatar className="mark" aria-hidden="true">
+    <Image
+      src={lysDark}
+      alt=""
+      class="size-full rounded-[inherit] object-cover"
+    />
+  </Avatar>
   <span class="names">
     <span class="wordmark">{title}</span>
     {variant === "detailed" && <span class="subtitle">{SUBTITLE}</span>}

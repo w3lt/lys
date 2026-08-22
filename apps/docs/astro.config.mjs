@@ -33,6 +33,7 @@ export default defineConfig({
       title: "Lys",
       description:
         "The engineering knowledge base for everyone working on Lys: current architecture, decisions, proposals, operations, and reference material.",
+      favicon: "/favicon/favicon.ico?v=20260822",
       customCss: ["./src/styles/global.css"],
       // Article pages show when their content last changed, taken from git
       // history rather than a hand-maintained frontmatter field.
@@ -47,6 +48,45 @@ export default defineConfig({
         {
           tag: "script",
           content: RESTORE_RAIL_WIDTH
+        },
+        {
+          tag: "link",
+          attrs: {
+            rel: "icon",
+            type: "image/png",
+            href: "/favicon/favicon-96x96.png?v=20260822",
+            sizes: "96x96"
+          }
+        },
+        {
+          tag: "link",
+          attrs: {
+            rel: "icon",
+            type: "image/svg+xml",
+            href: "/favicon/favicon.svg?v=20260822"
+          }
+        },
+        {
+          tag: "link",
+          attrs: {
+            rel: "apple-touch-icon",
+            sizes: "180x180",
+            href: "/favicon/apple-touch-icon.png?v=20260822"
+          }
+        },
+        {
+          tag: "meta",
+          attrs: {
+            name: "apple-mobile-web-app-title",
+            content: "Lys"
+          }
+        },
+        {
+          tag: "link",
+          attrs: {
+            rel: "manifest",
+            href: "/favicon/site.webmanifest?v=20260822"
+          }
         }
       ],
       // Starlight keeps ownership of routing, search, article layout, and

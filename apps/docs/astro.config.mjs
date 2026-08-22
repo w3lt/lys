@@ -24,6 +24,7 @@ try {
 
 // https://astro.build/config
 export default defineConfig({
+  site: "https://lys.negentropy.studio",
   vite: {
     plugins: [tailwindcss()]
   },

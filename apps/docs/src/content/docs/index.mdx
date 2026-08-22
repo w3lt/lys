@@ -1,40 +1,52 @@
 ---
-title: Welcome to Starlight
-description: Get started building your docs site with Starlight.
-template: splash # Remove or comment out this line to display the site sidebar on this page.
-hero:
-  tagline: Congrats on setting up a new Starlight project!
-  image:
-    file: ../../assets/houston.webp
-  actions:
-    - text: Example Guide
-      link: /guides/example/
-      icon: right-arrow
-    - text: Read the Starlight docs
-      link: https://starlight.astro.build
-      icon: external
-      variant: minimal
+title: Build, review, and operate Lys.
+description: The engineering knowledge base for everyone working on Lys — current architecture, durable decisions, open proposals, operations, and reference material.
+appliesTo: current main
+tableOfContents: false
 ---
 
-import { Card, CardGrid } from "@astrojs/starlight/components"
+import EntranceGrid from "@/components/handbook/EntranceGrid.astro"
+import HandbookState from "@/components/handbook/HandbookState.astro"
 
-## Next steps
+The engineering knowledge base for everyone working on Lys. Ordinary pages
+describe the current main branch; decisions, proposals, and changes keep their
+own history. This is not end-user product documentation.
 
-<CardGrid stagger>
-  <Card title="Update content" icon="pencil">
-    Edit `src/content/docs/index.mdx` to see this page change.
-  </Card>
-  <Card title="Change page layout" icon="document">
-    Delete `template: splash` in `src/content/docs/index.mdx` to display a
-    sidebar on this page.
-  </Card>
-  <Card title="Add new content" icon="add-document">
-    Add Markdown or MDX files to `src/content/docs` to create new pages.
-  </Card>
-  <Card title="Configure your site" icon="setting">
-    Edit your `sidebar` and other config in `astro.config.mjs`.
-  </Card>
-  <Card title="Read the docs" icon="open-book">
-    Learn more in [the Starlight Docs](https://starlight.astro.build/).
-  </Card>
-</CardGrid>
+<EntranceGrid
+  entrances={[
+    {
+      kicker: "01 · understand",
+      title: "Understand Lys",
+      description:
+        "Three processes, one session store, and the contracts between them.",
+      href: "/architecture/system/"
+    },
+    {
+      kicker: "02 · build",
+      title: "Start developing",
+      description:
+        "Set up a machine, run Lys locally, and land a first reviewable change.",
+      href: "/develop/setup/"
+    },
+    {
+      kicker: "03 · operate",
+      title: "Operate Lys",
+      description: "Configuration, diagnostics, and runbooks for recovery.",
+      href: "/operate/configuration/"
+    },
+    {
+      kicker: "04 · decide",
+      title: "Review decisions",
+      description: "Why durable choices were made, and what they replaced.",
+      href: "/decisions/"
+    },
+    {
+      kicker: "05 · track",
+      title: "Track changes",
+      description: "The repository changelog and the proposals behind it.",
+      href: "/changelog/"
+    }
+  ]}
+/>
+
+<HandbookState />

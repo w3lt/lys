@@ -1,0 +1,147 @@
+---
+import StatusBadge from "./StatusBadge.astro"
+import type { HandbookRecord } from "@/lib/handbook/records"
+
+type StateSummaryProps = {
+  /** Heading of the summary panel, naming what it reports. */
+  readonly title: string
+  /** Text of the link to the full register this panel summarises. */
+  readonly indexLabel: string
+  /** Site-relative address of that full register. */
+  readonly indexHref: string
+  /**
+   * Records to list, already ordered and truncated by the caller.
+   *
+   * An empty list renders the panel's empty state rather than an empty table,
+   * because "nothing recorded yet" is a real state on this page.
+   */
+  readonly records: readonly HandbookRecord[]
+}
+
+/** Astro types `Astro.props` from a local declaration named `Props`. */
+type Props = StateSummaryProps
+
+const {
+  title,
+  indexLabel,
+  indexHref,
+  records
+}: StateSummaryProps = Astro.props
+---
+
+{/**
+  * Homepage panel summarising the current state of one handbook register.
+  *
+  * Presentational component. Its rows come from content metadata resolved by
+  * the page, so the panel is never maintained separately from the records it
+  * reports.
+  *
+  * Accessibility: the panel is a section named by its own heading. The index
+  * link is a sibling of the row links rather than an enclosing control, so no
+  * link nests inside another.
+  */}
+<section class="summary not-content" aria-labelledby={`summary-${indexHref}`}>
+  <header>
+    <h3 id={`summary-${indexHref}`}>{title}</h3>
+    <a href={indexHref}>{indexLabel} →</a>
+  </header>
+  {
+    records.length === 0 ? (
+      <p class="empty">No records yet.</p>
+    ) : (
+      <ul>
+        {records.map((record) => (
+          <li>
+            <a href={record.href}>
+              <span class="identifier">{record.identifier}</span>
+              <span class="label">{record.title}</span>
+            </a>
+            <StatusBadge status={record.status} />
+          </li>
+        ))}
+      </ul>
+    )
+  }
+</section>
+
+<style>
+  .summary {
+    padding: 1rem 1rem 0.5rem;
+    border: 1px solid var(--app-border-subtle);
+    border-radius: var(--radius-surface);
+    background-color: var(--app-surface-panel);
+    box-shadow: var(--shadow-card);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+  }
+
+  header {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.625rem;
+  }
+
+  h3 {
+    margin: 0;
+    color: var(--app-text-strong);
+    font-size: 0.8125rem;
+    font-weight: 600;
+  }
+
+  header a {
+    color: var(--app-text-link);
+    font-size: 0.75rem;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+
+  ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  li {
+    display: flex;
+    gap: 0.625rem;
+    align-items: center;
+    padding: 0.5rem 0;
+    border-top: 1px solid var(--app-border-subtle);
+  }
+
+  li > a {
+    display: flex;
+    flex: 1;
+    gap: 0.625rem;
+    min-width: 0;
+    align-items: baseline;
+    text-decoration: none;
+  }
+
+  .identifier {
+    flex: 0 0 auto;
+    color: var(--doc-text-faint);
+    font-family: var(--sl-font-mono), ui-monospace, monospace;
+    font-size: 0.71875rem;
+  }
+
+  .label {
+    flex: 1;
+    color: var(--app-text);
+    font-size: 0.8125rem;
+    line-height: 1.45;
+  }
+
+  li > a:hover .label {
+    color: var(--app-text-strong);
+  }
+
+  .empty {
+    margin: 0;
+    padding: 0.75rem 0 1rem;
+    color: var(--doc-text-muted);
+    font-size: 0.8125rem;
+  }
+</style>

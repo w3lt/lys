@@ -1,0 +1,1057 @@
+/*
+ * Lys Engineering Handbook theme.
+ *
+ * The Lys visual system is owned by `apps/desktop/src/index.css`. Until the
+ * planned `@lys/theme` workspace package exists, this file carries a verbatim
+ * port of that token set so both applications render the same brand. Token
+ * names are kept identical to the desktop file so the future extraction is a
+ * move rather than a rewrite.
+ *
+ * Two structural differences from the desktop file are deliberate:
+ *
+ * 1. Dark is the canonical Lys appearance and is also Starlight's default, so
+ *    the dark values live on `:root` here and light values are the override.
+ *    The desktop file is rooted the other way around; the resolved values for
+ *    each theme are the same.
+ * 2. Starlight switches themes through `:root[data-theme='light']` rather than
+ *    a `.dark` class, so the override selector differs.
+ *
+ * Everything Starlight ships lives in the `starlight.base` and `starlight.core`
+ * cascade layers. This file is deliberately unlayered, so its rules win against
+ * Starlight defaults without needing `!important` or raised specificity.
+ */
+
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+
+:root {
+  color-scheme: dark;
+
+  /* Lys identity: darkness, intelligence, modernity, and cold elegance. */
+  --lys-violet-black: oklch(0.12 0.045 300);
+  --lys-violet: oklch(0.65 0.22 303);
+  --lys-cyan: oklch(0.78 0.14 205);
+  --lys-silver: oklch(0.91 0.025 235);
+
+  /*
+   * Violet-black establishes Lys's dark origin. The cyan aura and final
+   * gradient stop introduce her precise, modern counterpart.
+   */
+  --gradient-background:
+    radial-gradient(
+      circle at 84% 10%,
+      oklch(0.63 0.14 205 / 20%),
+      transparent 34%
+    ),
+    radial-gradient(
+      circle at 10% 92%,
+      oklch(0.46 0.18 304 / 17%),
+      transparent 38%
+    ),
+    linear-gradient(
+      135deg,
+      oklch(0.1 0.03 296) 0%,
+      oklch(0.14 0.06 294) 42%,
+      oklch(0.15 0.052 255) 70%,
+      oklch(0.18 0.06 220) 100%
+    );
+  /*
+   * Kept dark enough that --primary-foreground clears 4.5:1 across both
+   * stops; the glow, not the fill, carries the brand energy here.
+   */
+  --gradient-primary: linear-gradient(
+    105deg,
+    oklch(0.42 0.21 303) 0%,
+    oklch(0.47 0.15 216) 100%
+  );
+  --gradient-border: linear-gradient(
+    120deg,
+    oklch(0.65 0.22 303 / 58%),
+    oklch(0.78 0.14 205 / 68%)
+  );
+  --gradient-wordmark: linear-gradient(
+    135deg,
+    oklch(0.86 0.08 300) 0%,
+    oklch(0.65 0.22 303) 40%,
+    oklch(0.78 0.14 205) 100%
+  );
+  --shadow-primary:
+    0 0 24px oklch(0.58 0.2 303 / 22%), 0 0 38px oklch(0.74 0.14 205 / 18%);
+
+  --background: oklch(0.12 0.045 296);
+  --foreground: oklch(0.95 0.018 236);
+  --card: oklch(0.18 0.045 286 / 78%);
+  --card-foreground: oklch(0.95 0.018 236);
+  --popover: oklch(0.16 0.046 292 / 96%);
+  --popover-foreground: oklch(0.95 0.018 236);
+  --primary: oklch(0.5 0.14 224);
+  --primary-foreground: oklch(0.985 0.005 230);
+  --secondary: oklch(0.23 0.07 296);
+  --secondary-foreground: oklch(0.93 0.025 257);
+  --muted: oklch(0.2 0.03 281);
+  --muted-foreground: oklch(0.72 0.03 250);
+  --accent: oklch(0.24 0.065 223);
+  --accent-foreground: oklch(0.92 0.035 215);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(0.77 0.12 207 / 18%);
+  --input: oklch(0.77 0.12 207 / 24%);
+  --ring: oklch(0.75 0.14 205);
+
+  --radius: 0.625rem;
+
+  /*
+   * Lys geometry is a symmetrical soft-square scale: controls at 6px, larger
+   * surfaces at 10px. Capsules and circles are functional exceptions (status
+   * pills, dots), never the default component silhouette.
+   */
+  --radius-detail: 4px;
+  --radius-control: 6px;
+  --radius-surface: 10px;
+  --radius-capsule: 999px;
+
+  /* One restrained ease-out curve drives every interaction transition. */
+  --duration-immediate: 120ms;
+  --duration-standard: 160ms;
+  --duration-enter: 200ms;
+  /* The rail's width change is the one motion the design lets run longer. */
+  --duration-collapse: 240ms;
+  --ease-standard: cubic-bezier(0.32, 0.72, 0.35, 1);
+
+  --sidebar: oklch(0.145 0.05 294 / 90%);
+  --sidebar-foreground: oklch(0.95 0.018 236);
+  --sidebar-primary: oklch(0.5 0.14 224);
+  --sidebar-primary-foreground: oklch(0.985 0.005 230);
+  --sidebar-accent: oklch(0.23 0.064 292);
+  --sidebar-accent-foreground: oklch(0.94 0.025 235);
+  --sidebar-border: oklch(0.77 0.12 207 / 16%);
+  --sidebar-ring: oklch(0.75 0.14 205);
+
+  /*
+   * Application roles. Component styles consume these semantic tokens so the
+   * complete rendered palette stays owned by this file.
+   */
+  --app-surface: oklch(0.145 0.045 296 / 72%);
+  --app-surface-chrome: oklch(0.13 0.042 297 / 92%);
+  --app-surface-rail: oklch(0.125 0.04 298 / 88%);
+  --app-surface-content: oklch(0.155 0.04 288 / 70%);
+  --app-surface-panel: var(--card);
+  --app-surface-field: oklch(0.175 0.04 288 / 90%);
+  --app-surface-hover: var(--accent);
+  /* Reads against --app-surface-rail, not --app-surface; it must stay lighter. */
+  --app-surface-navigation-active: oklch(0.21 0.055 290 / 88%);
+  --app-surface-selected: oklch(0.3 0.075 232 / 72%);
+  --app-surface-code: oklch(0.165 0.038 288);
+  --app-surface-code-header: oklch(0.2 0.045 290);
+  --app-surface-danger: oklch(0.24 0.07 25 / 72%);
+
+  --app-text-strong: var(--foreground);
+  --app-text: oklch(0.9 0.02 240);
+  --app-text-muted: var(--muted-foreground);
+  --app-text-faint: oklch(0.66 0.03 258);
+  --app-text-link: oklch(0.81 0.11 210);
+  --app-text-code: oklch(0.88 0.04 250);
+  --app-text-danger: var(--destructive);
+  --app-text-danger-muted: oklch(0.82 0.09 25);
+
+  --app-border-subtle: oklch(0.77 0.12 207 / 12%);
+  --app-border-default: var(--border);
+  --app-border-strong: oklch(0.82 0.09 215 / 45%);
+  --app-border-interactive: oklch(0.65 0.22 303 / 62%);
+  --app-border-danger: oklch(0.7 0.17 25 / 48%);
+
+  --app-action: var(--primary);
+  --app-action-foreground: var(--primary-foreground);
+  --app-focus: var(--ring);
+  --app-selection: oklch(0.55 0.16 250 / 48%);
+
+  --app-status-neutral: oklch(0.68 0.03 258);
+  --app-status-success: oklch(0.75 0.16 152);
+  --app-status-pending: oklch(0.8 0.14 85);
+  --app-status-danger: oklch(0.7 0.18 25);
+
+  --app-scrollbar-track: oklch(0.17 0.04 292);
+  --app-scrollbar-thumb: oklch(0.35 0.05 285);
+  --shadow-card:
+    inset 0 1px 0 oklch(1 0 0 / 6%), 0 18px 52px oklch(0.05 0.03 294 / 45%);
+  --shadow-floating: 0 10px 30px oklch(0.05 0.02 294 / 55%);
+
+  /*
+   * Documentation reading surface.
+   *
+   * Long-form prose sustains far more secondary text than the desktop chat and
+   * settings surfaces do, so the handbook raises the contrast of muted and
+   * faint text above the desktop values to hold WCAG AA on body copy. Every
+   * other role is the desktop value unchanged. These are separate tokens
+   * rather than edits to --app-text-muted/--app-text-faint so the shared
+   * palette keeps one meaning across both applications.
+   */
+  --doc-text-muted: oklch(0.79 0.028 250);
+  --doc-text-faint: oklch(0.735 0.028 256);
+
+  /*
+   * The accent the reading surface uses for markers, focus rings, and the small
+   * identifying text an article is full of. It is the brand cyan on the dark
+   * appearance and a darker cyan on the light one, for the same reason muted
+   * and faint text are raised here: the brand value is tuned for the desktop's
+   * dark chrome and does not hold AA against a light page.
+   */
+  --doc-accent: var(--lys-cyan);
+
+  /* Article rhythm, matching the approved handbook design. */
+  --doc-article-size: 1.0625rem;
+  --doc-article-line-height: 1.74;
+  --doc-section-gap: 2.5rem;
+
+  /* Status pill tints, derived from the status roles above. */
+  --doc-status-success-bg: oklch(0.75 0.16 152 / 12%);
+  --doc-status-success-border: oklch(0.75 0.16 152 / 38%);
+  --doc-status-pending-bg: oklch(0.8 0.14 85 / 12%);
+  --doc-status-pending-border: oklch(0.8 0.14 85 / 38%);
+  --doc-status-danger-bg: oklch(0.7 0.18 25 / 10%);
+  --doc-status-danger-border: oklch(0.7 0.18 25 / 42%);
+  --doc-status-neutral-bg: oklch(0.68 0.03 258 / 12%);
+  --doc-status-neutral-border: oklch(0.68 0.03 258 / 34%);
+}
+
+:root[data-theme="light"],
+[data-theme="light"] ::backdrop {
+  color-scheme: light;
+
+  --lys-violet-black: oklch(0.14 0.055 300);
+  --lys-violet: oklch(0.58 0.22 303);
+  --lys-cyan: oklch(0.76 0.14 205);
+  --lys-silver: oklch(0.9 0.025 235);
+
+  /* A restrained pearl-violet → frost-cyan atmosphere. */
+  --gradient-background:
+    radial-gradient(
+      circle at 86% 8%,
+      oklch(0.84 0.1 205 / 68%),
+      transparent 34%
+    ),
+    linear-gradient(
+      135deg,
+      oklch(0.95 0.032 302) 0%,
+      oklch(0.97 0.018 274) 48%,
+      oklch(0.93 0.045 214) 100%
+    );
+  --gradient-primary: linear-gradient(
+    105deg,
+    oklch(0.46 0.2 303) 0%,
+    oklch(0.53 0.135 218) 100%
+  );
+  --gradient-border: linear-gradient(
+    120deg,
+    oklch(0.58 0.22 303 / 58%),
+    oklch(0.76 0.14 205 / 68%)
+  );
+  --gradient-wordmark: linear-gradient(
+    135deg,
+    oklch(0.83 0.08 300) 0%,
+    oklch(0.58 0.22 303) 40%,
+    oklch(0.76 0.14 205) 100%
+  );
+  --shadow-primary:
+    0 0 24px oklch(0.58 0.2 303 / 18%), 0 0 36px oklch(0.72 0.14 205 / 14%);
+
+  --background: oklch(0.97 0.018 263);
+  --foreground: oklch(0.19 0.045 293);
+  --card: oklch(1 0 0 / 74%);
+  --card-foreground: oklch(0.19 0.045 293);
+  --popover: oklch(0.99 0.008 250 / 96%);
+  --popover-foreground: oklch(0.19 0.045 293);
+  --secondary: oklch(0.93 0.035 294);
+  --secondary-foreground: oklch(0.27 0.085 298);
+  --muted: oklch(0.94 0.02 247);
+  --muted-foreground: oklch(0.48 0.045 275);
+  --accent: oklch(0.91 0.055 211);
+  --accent-foreground: oklch(0.24 0.065 232);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.7 0.055 257 / 35%);
+  --input: oklch(0.7 0.055 257 / 42%);
+  --ring: oklch(0.67 0.14 210);
+
+  --sidebar: oklch(0.98 0.012 260 / 86%);
+  --sidebar-foreground: oklch(0.19 0.045 293);
+  --sidebar-accent: oklch(0.91 0.052 211);
+  --sidebar-accent-foreground: oklch(0.24 0.065 232);
+  --sidebar-border: oklch(0.7 0.055 257 / 32%);
+  --sidebar-ring: oklch(0.67 0.14 210);
+
+  --app-surface: oklch(0.98 0.014 263 / 72%);
+  --app-surface-chrome: oklch(0.955 0.026 292 / 92%);
+  --app-surface-rail: oklch(0.945 0.03 296 / 88%);
+  --app-surface-content: oklch(0.985 0.012 250 / 70%);
+  --app-surface-field: oklch(0.99 0.008 250 / 90%);
+  --app-surface-navigation-active: oklch(0.995 0.008 286 / 92%);
+  --app-surface-selected: oklch(0.9 0.055 215 / 78%);
+  --app-surface-code: oklch(0.92 0.025 280);
+  --app-surface-code-header: oklch(0.88 0.035 278);
+  --app-surface-danger: oklch(0.95 0.045 25);
+
+  --app-text: oklch(0.27 0.04 286);
+  --app-text-faint: oklch(0.59 0.035 270);
+  --app-text-link: oklch(0.44 0.15 215);
+  --app-text-code: oklch(0.3 0.07 293);
+  --app-text-danger-muted: oklch(0.46 0.11 25);
+
+  --app-border-subtle: oklch(0.7 0.055 257 / 22%);
+  --app-border-strong: oklch(0.61 0.075 270 / 42%);
+  --app-border-interactive: oklch(0.58 0.22 303 / 55%);
+  --app-border-danger: oklch(0.58 0.14 25 / 50%);
+
+  --app-selection: oklch(0.72 0.14 205 / 38%);
+
+  --app-status-neutral: oklch(0.5 0.035 270);
+  --app-status-success: oklch(0.47 0.13 150);
+  --app-status-pending: oklch(0.53 0.14 83);
+  --app-status-danger: oklch(0.56 0.17 25);
+
+  --app-scrollbar-track: oklch(0.92 0.02 275);
+  --app-scrollbar-thumb: oklch(0.66 0.055 270);
+  --shadow-card:
+    inset 0 1px 0 oklch(1 0 0 / 50%), 0 18px 52px oklch(0.22 0.07 294 / 10%);
+  --shadow-floating: 0 10px 30px oklch(0.22 0.07 294 / 14%);
+
+  --doc-text-muted: oklch(0.43 0.045 275);
+  --doc-text-faint: oklch(0.5 0.038 270);
+  --doc-accent: oklch(0.62 0.13 205);
+
+  --doc-status-success-bg: oklch(0.47 0.13 150 / 10%);
+  --doc-status-success-border: oklch(0.47 0.13 150 / 36%);
+  --doc-status-pending-bg: oklch(0.53 0.14 83 / 10%);
+  --doc-status-pending-border: oklch(0.53 0.14 83 / 36%);
+  --doc-status-danger-bg: oklch(0.56 0.17 25 / 9%);
+  --doc-status-danger-border: oklch(0.56 0.17 25 / 38%);
+  --doc-status-neutral-bg: oklch(0.5 0.035 270 / 10%);
+  --doc-status-neutral-border: oklch(0.5 0.035 270 / 32%);
+}
+
+/*
+ * Starlight consumes its own `--sl-*` variables throughout its shell. Mapping
+ * them onto Lys roles restyles the whole shell without forking Starlight's
+ * components.
+ */
+:root,
+::backdrop {
+  --sl-font: "Geist Variable", system-ui, sans-serif;
+  --sl-font-mono: "Geist Mono Variable", ui-monospace, monospace;
+
+  --sl-color-white: var(--app-text-strong);
+  --sl-color-gray-1: var(--app-text-strong);
+  --sl-color-gray-2: var(--app-text);
+  --sl-color-gray-3: var(--doc-text-muted);
+  --sl-color-gray-4: var(--doc-text-faint);
+  --sl-color-gray-5: var(--app-border-default);
+  --sl-color-gray-6: var(--app-surface-panel);
+  --sl-color-gray-7: var(--app-surface-content);
+  --sl-color-black: var(--background);
+
+  --sl-color-accent-low: var(--app-surface-selected);
+  --sl-color-accent: var(--app-action);
+  --sl-color-accent-high: var(--app-text-link);
+
+  --sl-color-text: var(--app-text);
+  --sl-color-text-accent: var(--app-text-link);
+  --sl-color-text-invert: var(--app-action-foreground);
+  --sl-color-bg: transparent;
+  --sl-color-bg-nav: var(--app-surface-chrome);
+  --sl-color-bg-sidebar: var(--app-surface-rail);
+  --sl-color-bg-inline-code: var(--app-surface-code);
+  --sl-color-bg-accent: var(--app-action);
+  --sl-color-hairline-light: var(--app-border-subtle);
+  --sl-color-hairline: var(--app-border-subtle);
+  --sl-color-hairline-shade: var(--app-border-default);
+  --sl-color-backdrop-overlay: oklch(0.08 0.03 296 / 62%);
+
+  --sl-shadow-sm: var(--shadow-card);
+  --sl-shadow-md: var(--shadow-card);
+  --sl-shadow-lg: var(--shadow-floating);
+
+  --sl-text-body: var(--doc-article-size);
+  --sl-line-height: var(--doc-article-line-height);
+
+  --sl-nav-height: 3.5rem;
+  /* Inset of the handbook identity from the start of the chrome. */
+  --doc-identity-inset: 0.9375rem;
+  /*
+   * Width of the table-of-contents column. Starlight sizes that column from
+   * the navigation rail's width, which would shrink it whenever the rail is
+   * collapsed; the design keeps the two independent.
+   */
+  --doc-toc-width: 13.625rem;
+  /*
+   * The design's rail is 250px expanded and 74px collapsed. Starlight derives
+   * the header's first column and the article's inline offset from this one
+   * value, so changing it moves the whole shell together.
+   */
+  --sl-sidebar-width: 15.625rem;
+  --sl-content-width: 48.125rem;
+}
+
+/*
+ * A page without a table of contents keeps the design's wide measure: the same
+ * 1140px shell less its gutters, with the whole width given to the article
+ * rather than shared with a second column. It is what puts the homepage's five
+ * entrances on one row and lets the generated registers breathe.
+ */
+html:not([data-has-toc]) {
+  --sl-content-width: 64.75rem;
+}
+
+:root[data-rail="collapsed"] {
+  --sl-sidebar-width: 4.625rem;
+}
+
+/* The design's 52px page gutter, at the width where its wide layout begins. */
+@media (min-width: 72rem) {
+  :root {
+    --sl-nav-pad-x: 3.25rem;
+    --sl-content-pad-x: 3.25rem;
+  }
+}
+
+:root[data-theme="light"],
+[data-theme="light"] ::backdrop {
+  --sl-color-backdrop-overlay: oklch(0.55 0.04 290 / 46%);
+}
+
+@media (min-width: 50em) {
+  :root {
+    /* The design keeps one 56px chrome height at every width. */
+    --sl-nav-height: 3.5rem;
+  }
+}
+
+/* The wide-viewport heading ramp of the design, not Starlight's default. */
+:root {
+  --sl-text-h1: 2rem;
+  --sl-text-h2: 1.3125rem;
+  --sl-text-h3: 1.0625rem;
+  --sl-text-h4: 0.9375rem;
+  --sl-text-h5: 0.875rem;
+}
+
+@media (min-width: 50em) {
+  :root {
+    --sl-text-h1: 2.125rem;
+    --sl-text-h2: 1.3125rem;
+    --sl-text-h3: 1.0625rem;
+    --sl-text-h4: 0.9375rem;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Global surface
+ * ------------------------------------------------------------------------- */
+
+html {
+  font-family: var(--sl-font), system-ui, sans-serif;
+  scrollbar-color: var(--app-scrollbar-thumb) transparent;
+  scrollbar-width: thin;
+}
+
+body {
+  color: var(--app-text);
+  background-color: var(--background);
+  background-image: var(--gradient-background);
+  background-attachment: fixed;
+  background-position: center;
+  background-size: cover;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  color: var(--app-text-strong);
+  background: var(--app-selection);
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: var(--radius-capsule);
+  background-clip: content-box;
+  background-color: var(--app-scrollbar-thumb);
+}
+
+@keyframes lys-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Chrome: header, rail, search, table of contents
+ * ------------------------------------------------------------------------- */
+
+.page > .header {
+  background-color: var(--app-surface-chrome);
+  border-bottom: 1px solid var(--app-border-default);
+  backdrop-filter: blur(18px) saturate(135%);
+  -webkit-backdrop-filter: blur(18px) saturate(135%);
+}
+
+/*
+ * Starlight's header hides its right-hand group below the sidebar breakpoint,
+ * where the theme control would otherwise only exist inside the drawer. The
+ * design keeps it in the header at every width. The social list stays empty
+ * because the repository link belongs to the rail's foot.
+ */
+.page > .header .right-group {
+  display: flex;
+}
+
+.page > .header .social-icons {
+  display: none;
+}
+
+/*
+ * Starlight sizes the header's first column from whether a page has a table of
+ * contents, so the search field shifts between pages. The design holds it over
+ * the article's inline edge at every page, which is the rail's width less the
+ * gutter the header already applies.
+ */
+@media (min-width: 50rem) {
+  .page > .header {
+    padding-inline-start: var(--doc-identity-inset);
+  }
+
+  .page > .header .header {
+    grid-template-columns:
+      calc(var(--sl-sidebar-width) - var(--doc-identity-inset))
+      1fr
+      auto;
+  }
+}
+
+/*
+ * The design opens the article against the rail rather than centring it in
+ * whatever space is left, so its inline edge stays put as pages gain and lose
+ * a table of contents.
+ */
+.content-panel {
+  --sl-content-margin-inline: 0;
+}
+
+/*
+ * The table of contents keeps its own width instead of tracking the rail's, so
+ * collapsing the rail widens the article rather than crushing this column.
+ */
+.right-sidebar-panel > .sl-container {
+  width: var(--doc-toc-width);
+}
+
+@media (min-width: 72rem) {
+  .right-sidebar-container {
+    width: max(
+      var(--doc-toc-width),
+      calc(
+        var(--doc-toc-width) +
+          (100% - var(--sl-content-width) - var(--doc-toc-width)) / 2
+      )
+    );
+  }
+
+  .right-sidebar-panel > .sl-container {
+    max-width: var(--doc-toc-width);
+  }
+
+  [data-has-sidebar][data-has-toc] .main-pane {
+    width: min(
+      calc(100% - var(--doc-toc-width)),
+      calc(
+        var(--sl-content-width) +
+          (100% - var(--sl-content-width) - var(--doc-toc-width)) / 2
+      )
+    );
+  }
+}
+
+/*
+ * As a drawer the rail is painted over the article, so it stays opaque there
+ * and only becomes the design's translucent surface once it is a column with
+ * nothing but the page background behind it.
+ */
+.sidebar-pane {
+  background-color: var(--background);
+  box-shadow: var(--shadow-floating);
+  backdrop-filter: blur(22px) saturate(135%);
+  -webkit-backdrop-filter: blur(22px) saturate(135%);
+}
+
+@media (min-width: 50rem) {
+  .sidebar-pane {
+    border-inline-end: 1px solid var(--app-border-subtle);
+    background-color: var(--app-surface-rail);
+    box-shadow: none;
+    backdrop-filter: blur(18px) saturate(135%);
+    -webkit-backdrop-filter: blur(18px) saturate(135%);
+  }
+}
+
+/* The rail owns its own regions and their padding, edge to edge. */
+.sidebar-content {
+  gap: 0;
+  padding: 0;
+}
+
+/* Collapsing the rail animates the shell it displaces, not just the rail. */
+@media (min-width: 50rem) {
+  .sidebar-pane,
+  .main-frame {
+    transition:
+      width var(--duration-collapse) var(--ease-standard),
+      padding-inline-start var(--duration-collapse) var(--ease-standard);
+  }
+}
+
+/* The search trigger reads as the design's field, not as a Starlight button. */
+site-search button[data-open-modal] {
+  width: 100%;
+  max-width: 35rem;
+  height: 2.25rem;
+  gap: 0.625rem;
+  padding: 0 0.5rem 0 0.75rem;
+  border: 1px solid var(--app-border-default);
+  border-radius: 0.5625rem;
+  background-color: var(--app-surface-field);
+  color: var(--doc-text-muted);
+  font-family: var(--sl-font), system-ui, sans-serif;
+  font-size: 0.84375rem;
+  transition:
+    border-color var(--duration-standard) var(--ease-standard),
+    box-shadow var(--duration-enter) var(--ease-standard),
+    color var(--duration-standard) var(--ease-standard);
+}
+
+site-search button[data-open-modal]:hover:not(:disabled) {
+  border-color: var(--app-border-strong);
+  color: var(--app-text);
+  box-shadow: 0 0 0 3px oklch(0.65 0.22 303 / 10%);
+}
+
+site-search button[data-open-modal] > kbd {
+  padding: 0.125rem 0.3125rem;
+  border: 1px solid var(--app-border-default);
+  border-radius: var(--radius-detail);
+  background-color: transparent;
+  color: var(--doc-text-faint);
+  font-family: var(--sl-font-mono), ui-monospace, monospace;
+  font-size: 0.6875rem;
+}
+
+site-search dialog {
+  border: 1px solid var(--app-border-strong);
+  border-radius: 0.75rem;
+  background-color: var(--app-surface-chrome);
+  box-shadow: var(--shadow-floating);
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+}
+
+/*
+ * Pagefind owns the search results; the design owns how loud they are. The
+ * query row becomes a hairline-separated header rather than a boxed field, and
+ * the result text drops to the sizes the rest of the handbook lists use.
+ */
+#starlight__search .pagefind-ui__form {
+  border-bottom: 1px solid var(--app-border-subtle);
+}
+
+/*
+ * The field is the dialog's header row, so focus is shown by that row's own
+ * rule thickening rather than by a second box drawn inside it.
+ */
+#starlight__search .pagefind-ui__form:focus-within {
+  padding-bottom: 1px;
+  border-bottom: 2px solid var(--doc-accent);
+}
+
+#starlight__search .pagefind-ui__form .pagefind-ui__search-input,
+#starlight__search .pagefind-ui__form .pagefind-ui__search-input:focus {
+  border-color: transparent;
+  border-radius: 0;
+  outline: none;
+  background-color: transparent;
+  font-size: 0.9375rem;
+}
+
+#starlight__search .pagefind-ui__result-title,
+#starlight__search .pagefind-ui__result-link {
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+#starlight__search .pagefind-ui__result-excerpt {
+  color: var(--doc-text-muted);
+  font-size: 0.78125rem;
+  line-height: 1.45;
+}
+
+starlight-toc nav > h2 {
+  margin-bottom: 0.625rem;
+  color: var(--doc-text-faint);
+  font-family: var(--sl-font-mono), ui-monospace, monospace;
+  font-size: 0.65625rem;
+  font-weight: 400;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+starlight-toc nav ul {
+  border-inline-start: 1px solid var(--app-border-subtle);
+}
+
+/*
+ * Starlight opens the contents list with a link back to the title. The design
+ * lists only the article's own sections, and the title is already reachable
+ * through the skip link and the breadcrumb trail.
+ */
+starlight-toc nav > ul > li:first-child {
+  display: none;
+}
+
+starlight-toc nav a {
+  padding-block: 0.3125rem;
+  color: var(--doc-text-muted);
+  font-size: 0.78125rem;
+  line-height: 1.5;
+  text-decoration: none;
+}
+
+starlight-toc nav a[aria-current="true"] {
+  color: var(--app-text-strong);
+  box-shadow: inset 2px 0 0 var(--doc-accent);
+}
+
+/* ---------------------------------------------------------------------------
+ * Article surface
+ * ------------------------------------------------------------------------- */
+
+/*
+ * Starlight pads every content panel equally and rules a line between them, so
+ * an article's heading block and its prose sit 48px apart with a divider. The
+ * design reads them as one block: the page gutter belongs to the article's ends
+ * and the title is followed by its description directly.
+ */
+.content-panel {
+  padding-block: 0;
+}
+
+.content-panel:first-of-type {
+  padding-top: 2.875rem;
+}
+
+.content-panel:last-of-type {
+  padding-bottom: 7.5rem;
+}
+
+.content-panel + .content-panel {
+  padding-top: 0.75rem;
+  border-top: 0;
+}
+
+.content-panel .sl-markdown-content {
+  animation: lys-enter var(--duration-enter) var(--ease-standard) both;
+}
+
+.sl-markdown-content {
+  color: var(--app-text);
+  font-size: var(--doc-article-size);
+  line-height: var(--doc-article-line-height);
+}
+
+.sl-markdown-content :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--app-text-strong);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+/*
+ * Starlight wraps every markdown heading in `.sl-heading-wrapper` and makes the
+ * heading itself `display: inline` so its anchor link can sit on the last line.
+ * Section rules therefore belong to the wrapper: applied to the heading they
+ * would draw a rule only as wide as the heading's text.
+ */
+.sl-markdown-content .sl-heading-wrapper.level-h2 {
+  display: block;
+  margin-top: var(--doc-section-gap);
+}
+
+/*
+ * The design opens an article's first section without a rule — the metadata
+ * block above it already closes the heading block — and separates every later
+ * section with one.
+ */
+.sl-markdown-content
+  .sl-heading-wrapper.level-h2
+  ~ .sl-heading-wrapper.level-h2 {
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--app-border-subtle);
+}
+
+.sl-markdown-content .sl-heading-wrapper + * {
+  margin-top: 0.75rem;
+}
+
+/*
+ * The article's reading measure. Handbook components set their own measure from
+ * their own layout, so the rule stops at the boundary they mark with
+ * `not-content` — including the marked element itself, not only its descendants.
+ */
+.sl-markdown-content :is(p, li):not(:where(.not-content, .not-content *)) {
+  max-width: 72ch;
+  text-wrap: pretty;
+}
+
+/*
+ * The lead: the description sentence an article opens with, before any section.
+ * A paragraph that follows a heading is body copy and keeps the article size.
+ */
+.sl-markdown-content
+  > p:first-of-type:not(:where(.sl-heading-wrapper ~ *)):not(
+    :where(.not-content *)
+  ) {
+  max-width: 66ch;
+  margin-bottom: 1.625rem;
+  color: var(--doc-text-muted);
+  font-size: 1.125rem;
+  line-height: 1.6;
+}
+
+.sl-markdown-content a:not(:where(.not-content *)) {
+  color: var(--app-text-link);
+  text-decoration-color: oklch(0.7 0.1 210 / 45%);
+  text-underline-offset: 3px;
+}
+
+.sl-markdown-content a:not(:where(.not-content *)):hover {
+  color: var(--doc-accent);
+  text-decoration-color: currentcolor;
+}
+
+.sl-markdown-content code:not(:where(.not-content *)) {
+  border: 1px solid var(--app-border-subtle);
+  border-radius: var(--radius-detail);
+  background-color: var(--app-surface-code);
+  color: var(--app-text-code);
+}
+
+/*
+ * Tables read as the design's framed register: a monospace header band over
+ * hairline-separated rows, inside one rounded surface. Starlight makes the
+ * table a scrolling block; the design's tables wrap instead, so the element
+ * goes back to being a table and fills the article's measure.
+ */
+.sl-markdown-content table:not(:where(.not-content *)) {
+  display: table;
+  width: 100%;
+  max-width: 100%;
+  margin-bottom: 1.875rem;
+  border: 1px solid var(--app-border-default);
+  border-radius: var(--radius-surface);
+  border-spacing: 0;
+  background-color: var(--app-surface-panel);
+  box-shadow: var(--shadow-card);
+  font-size: 0.84375rem;
+  line-height: 1.55;
+}
+
+.sl-markdown-content :is(th, td):not(:where(.not-content *)) {
+  padding: 0.6875rem 0.875rem;
+  border: 0;
+  vertical-align: baseline;
+}
+
+.sl-markdown-content th:not(:where(.not-content *)) {
+  background-color: var(--app-surface-code-header);
+  color: var(--doc-text-faint);
+  font-family: var(--sl-font-mono), ui-monospace, monospace;
+  font-size: 0.6875rem;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/*
+ * The header band is painted, so it has to carry the surface's own corner
+ * radius: a table cannot be clipped by `overflow` reliably.
+ */
+.sl-markdown-content thead th:first-child:not(:where(.not-content *)) {
+  border-start-start-radius: calc(var(--radius-surface) - 1px);
+}
+
+.sl-markdown-content thead th:last-child:not(:where(.not-content *)) {
+  border-start-end-radius: calc(var(--radius-surface) - 1px);
+}
+
+.sl-markdown-content tbody td:not(:where(.not-content *)) {
+  border-top: 1px solid var(--app-border-subtle);
+  color: var(--app-text);
+}
+
+/*
+ * A first-column code span names the row — an event, a key, a condition — so it
+ * reads as the row's identifier rather than as an inline code fragment.
+ */
+.sl-markdown-content tbody td:first-child code:not(:where(.not-content *)) {
+  padding: 0;
+  border: 0;
+  background-color: transparent;
+  color: var(--doc-accent);
+  font-size: 0.78125rem;
+}
+
+/* Starlight asides carry the design's notice treatment. */
+.sl-markdown-content .starlight-aside:not(:where(.not-content *)) {
+  padding: 0.875rem 1rem;
+  border: 1px solid var(--app-border-default);
+  border-inline-start-width: 1px;
+  border-radius: var(--radius-surface);
+  background-color: var(--app-surface-panel);
+}
+
+.starlight-aside--caution:not(:where(.not-content *)) {
+  border-color: var(--doc-status-pending-border);
+  background-color: var(--doc-status-pending-bg);
+}
+
+.starlight-aside--danger:not(:where(.not-content *)) {
+  border-color: var(--doc-status-danger-border);
+  background-color: var(--doc-status-danger-bg);
+}
+
+.starlight-aside--tip:not(:where(.not-content *)) {
+  border-color: var(--doc-status-success-border);
+  background-color: var(--doc-status-success-bg);
+}
+
+.starlight-aside__title:not(:where(.not-content *)) {
+  color: var(--app-text-strong);
+  font-size: 0.84375rem;
+}
+
+.starlight-aside--caution .starlight-aside__icon {
+  color: var(--app-status-pending);
+}
+
+.starlight-aside--danger .starlight-aside__icon {
+  color: var(--app-status-danger);
+}
+
+.starlight-aside--tip .starlight-aside__icon {
+  color: var(--app-status-success);
+}
+
+.starlight-aside__content:not(:where(.not-content *)) {
+  color: var(--app-text);
+  font-size: 0.84375rem;
+  line-height: 1.6;
+}
+
+/* ---------------------------------------------------------------------------
+ * Article footer
+ * ------------------------------------------------------------------------- */
+
+/*
+ * The design closes an article with one hairline row rather than a stack: the
+ * edit link at the start, the neighbouring pages at the end. Starlight stacks
+ * its two footer regions in a column, so the footer itself becomes the row.
+ */
+.content-panel footer {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  margin-top: 2.75rem;
+  padding-top: 1.125rem;
+  border-top: 1px solid var(--app-border-subtle);
+}
+
+.content-panel footer .meta {
+  flex: 0 1 auto;
+  gap: 0.75rem;
+  justify-content: flex-start;
+  margin: 0;
+  color: var(--doc-text-muted);
+  font-size: 0.8125rem;
+}
+
+.pagination-links {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 0.625rem;
+  margin-inline-start: auto;
+}
+
+.pagination-links a {
+  display: inline-flex;
+  gap: 0.25rem;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--app-text-link);
+  font-size: 0.8125rem;
+  text-decoration: none;
+}
+
+/*
+ * Starlight labels each link "Previous"/"Next" above the page title. The design
+ * carries direction in the arrow and the link's `rel`, so the label is withdrawn
+ * from the visual row while staying in the accessible name.
+ */
+.pagination-links a > span {
+  display: inline-flex;
+  gap: 0.25rem;
+  align-items: center;
+  font-size: 0;
+}
+
+.pagination-links a br {
+  display: none;
+}
+
+.pagination-links .link-title {
+  font-size: 0.8125rem;
+  font-weight: 400;
+}
+
+.pagination-links a[rel="prev"] {
+  color: var(--doc-text-muted);
+}
+
+.pagination-links a:hover {
+  color: var(--doc-accent);
+}
+
+.pagination-links svg {
+  width: 0.875rem;
+  height: 0.875rem;
+  color: currentcolor;
+}

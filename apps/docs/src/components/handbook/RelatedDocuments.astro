@@ -1,0 +1,97 @@
+---
+type RelatedDocument = {
+  /** Kind of document being referenced, such as `ADR` or `Reference`. */
+  readonly kind: string
+  /** Title of the referenced document. */
+  readonly label: string
+  /** Site-relative address of the referenced document. */
+  readonly href: string
+}
+
+type RelatedDocumentsProps = {
+  /** Documents to link to, in the order they should be read. */
+  readonly documents: readonly RelatedDocument[]
+  /**
+   * Accessible name for the navigation region.
+   *
+   * Omit to use "Related documents".
+   */
+  readonly label?: string
+}
+
+/** Astro types `Astro.props` from a local declaration named `Props`. */
+type Props = RelatedDocumentsProps
+
+const {
+  documents,
+  label = "Related documents"
+}: RelatedDocumentsProps = Astro.props
+---
+
+{/**
+  * Grid of links from a handbook page to the architecture, decisions,
+  * proposals, and reference material it relates to.
+  *
+  * Presentational component. Each card is a single link and contains no nested
+  * controls, so the whole card is one keyboard-reachable target.
+  *
+  * Accessibility: rendered as a named navigation landmark containing a list, so
+  * the count of related documents is announced and the region is skippable.
+  */}
+<nav class="related not-content" aria-label={label}>
+  <ul>
+    {
+      documents.map((document) => (
+        <li>
+          <a href={document.href}>
+            <span class="kind">{document.kind}</span>
+            <span class="label">{document.label}</span>
+          </a>
+        </li>
+      ))
+    }
+  </ul>
+</nav>
+
+<style>
+  .related ul {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+    gap: 0.625rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  a {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    height: 100%;
+    padding: 0.75rem 0.875rem;
+    border: 1px solid var(--app-border-subtle);
+    border-radius: 0.5rem;
+    background-color: var(--app-surface-panel);
+    text-decoration: none;
+    transition: border-color var(--duration-standard) var(--ease-standard);
+  }
+
+  a:hover,
+  a:focus-visible {
+    border-color: var(--app-border-strong);
+  }
+
+  .kind {
+    color: var(--doc-text-faint);
+    font-family: var(--sl-font-mono), ui-monospace, monospace;
+    font-size: 0.65625rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .label {
+    color: var(--app-text-strong);
+    font-size: 0.84375rem;
+    line-height: 1.45;
+  }
+</style>

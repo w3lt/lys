@@ -1,0 +1,79 @@
+---
+title: SQLite is the session store
+description: A single-user desktop application keeps its sessions in an embedded file store rather than a server database.
+docType: decision
+identifier: ADR-0002
+status: accepted
+decided: "2026-05-12"
+areas: ["persistence"]
+---
+
+import RecordMeta from "@/components/handbook/RecordMeta.astro"
+import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+import StatusNotice from "@/components/handbook/StatusNotice.astro"
+
+<StatusNotice kind="decision" status={frontmatter.status} />
+
+<RecordMeta frontmatter={frontmatter} />
+
+## Context
+
+A single-user desktop application does not need a server database, and an
+embedded file store keeps the artifact self-contained. Sessions are read and
+written by one process on one machine, so the properties that justify a
+networked database — concurrent writers across hosts, replication, an
+independent operational lifecycle — do not apply.
+
+## Decision
+
+SQLite is the session store. It ships inside the backend, writes one file
+inside the data directory documented in
+[Data locations and lifecycle](/operate/data/), and needs no separate service
+on the user's machine.
+
+- The store is one file, and can be copied as one file.
+- No daemon, port, or credential is required to open it.
+- Schema changes are applied by the migration policy in ADR-0009.
+
+## Alternatives considered
+
+An embedded key-value store was rejected because session history is relational
+in practice — messages belong to turns, turns belong to sessions — and
+reconstructing that in a key-value layout would have moved the joins into
+application code.
+
+A bundled server database was rejected because it adds an operational surface
+to a desktop application that has no operator.
+
+## Consequences
+
+Backups, diagnostics, and the recovery procedure all reduce to file
+operations, which is what makes
+[Recover a corrupted session database](/operate/runbooks/recover-session-database/)
+a short runbook.
+
+In exchange, the project inherits SQLite's single-writer model. That
+constraint is not a limitation in practice, because the backend is the only
+writer in any case.
+
+## Related documents
+
+<RelatedDocuments
+  documents={[
+    {
+      kind: "Architecture",
+      label: "Persistence and ownership",
+      href: "/architecture/persistence/"
+    },
+    {
+      kind: "Reference",
+      label: "Database schemas",
+      href: "/reference/schema/"
+    },
+    {
+      kind: "Runbook",
+      label: "Recover a corrupted session database",
+      href: "/operate/runbooks/recover-session-database/"
+    }
+  ]}
+/>

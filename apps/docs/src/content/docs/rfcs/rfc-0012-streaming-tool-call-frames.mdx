@@ -1,0 +1,107 @@
+---
+title: Streaming tool-call frames on the session stream
+description: Add partial tool-call frames so the interface can show an argument being formed instead of waiting for a complete call.
+docType: proposal
+identifier: RFC-0012
+status: accepted
+author: "@mirek"
+created: "2026-07-14"
+updated: "2026-08-06"
+areas: ["protocol", "backend", "desktop"]
+statusHistory:
+  - date: "2026-07-14"
+    status: draft
+    note: Opened after the third slow-tool-call report.
+  - date: "2026-07-22"
+    status: discussion
+    note: Maintainer review; retention concern raised and answered.
+  - date: "2026-08-06"
+    status: accepted
+    note: Accepted with the capability-flag requirement added.
+---
+
+import RecordMeta from "@/components/handbook/RecordMeta.astro"
+import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+import StatusHistory from "@/components/handbook/StatusHistory.astro"
+import StatusNotice from "@/components/handbook/StatusNotice.astro"
+
+<StatusNotice kind="proposal" status={frontmatter.status} />
+
+<RecordMeta frontmatter={frontmatter} />
+
+## Summary
+
+Add three partial frames to the session stream — `tool_call.begin`,
+`tool_call.delta`, and `tool_call.end` — so the interface can render a tool call
+as it is produced instead of waiting for a complete, validated call.
+
+## Motivation
+
+Today a tool call appears only after the provider finishes emitting it. On a
+slow call the interface shows nothing for several seconds, which reads as a
+hang, and a cancelled call leaves no trace of what the model was attempting.
+
+The message path already streams text deltas, so the mechanism exists; the
+protocol simply has no vocabulary for a partial call.
+
+## Proposed design
+
+Each frame carries the call identifier, a monotonic sequence number, and an
+argument fragment. The backend never persists a partial call: fragments are
+forwarded and discarded, and only the validated call is written to the store. A
+client that misses fragments can still reconstruct state from the final event,
+so the frames are additive and optional.
+
+- `tool_call.begin` — call identifier, tool name, and the message it belongs to.
+- `tool_call.delta` — sequence number and an argument fragment.
+- `tool_call.end` — outcome: validated, cancelled, or invalid.
+
+## Alternatives
+
+- Poll for a partial call. Rejected: reintroduces the derived-state divergence
+  [ADR-0004](/decisions/adr-0004-desktop-state-from-events/) removed.
+- Send whole partial calls repeatedly. Simpler, but bandwidth grows with
+  argument size and the interface still has to diff.
+- Do nothing and show a spinner. Cheapest, and the option this RFC must beat on
+  perceived latency alone.
+
+## Risks and trade-offs
+
+- A malformed fragment stream could render arguments that never validate; the
+  interface must present partial arguments as provisional.
+- Frame volume rises sharply on long tool arguments, which affects the replay
+  retention window.
+- Two more event types widen the stable protocol surface, and removing them
+  later needs an ADR.
+
+## Rollout
+
+The frames ship behind a protocol capability flag. A desktop build that does
+not advertise the capability receives the current behaviour unchanged, so host
+and interface can be released independently.
+
+## Status history
+
+<StatusHistory transitions={frontmatter.statusHistory} />
+
+## Related documents
+
+<RelatedDocuments
+  documents={[
+    {
+      kind: "Reference",
+      label: "SSE events",
+      href: "/reference/sse-events/"
+    },
+    {
+      kind: "Architecture",
+      label: "Shared protocol",
+      href: "/architecture/protocol/"
+    },
+    {
+      kind: "RFC",
+      label: "RFC-0004 — Replayable event retention",
+      href: "/rfcs/rfc-0004-replayable-event-retention/"
+    }
+  ]}
+/>

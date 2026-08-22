@@ -1,0 +1,61 @@
+---
+title: Multi-window sessions
+description: "Rejected: two windows over one session store reintroduced the divergence ADR-0004 removed."
+docType: proposal
+identifier: RFC-0010
+status: rejected
+author: "@rin"
+created: "2026-06-02"
+updated: "2026-06-30"
+areas: ["host", "desktop"]
+---
+
+import RecordMeta from "@/components/handbook/RecordMeta.astro"
+import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+import StatusNotice from "@/components/handbook/StatusNotice.astro"
+
+<StatusNotice kind="proposal" status={frontmatter.status} />
+
+<RecordMeta frontmatter={frontmatter} />
+
+## Summary
+
+Rejected: two windows over one session store reintroduced the divergence
+[ADR-0004](/decisions/adr-0004-desktop-state-from-events/) removed.
+
+## Motivation
+
+Readers wanted two sessions side by side, which the single-window shell cannot
+offer.
+
+## Proposed design
+
+The host would open additional windows, each with its own renderer, sharing one
+backend and one session store.
+
+## Why it was rejected
+
+Each window holds its own derived view of session state. Two windows on the
+same session produced exactly the divergence ADR-0004 was written to remove,
+and the proposal had no answer that did not amount to reintroducing a
+reconciling cache per window.
+
+The underlying need — more than one session visible at once — is better served
+inside a single window, and was left open for a future proposal.
+
+## Related documents
+
+<RelatedDocuments
+  documents={[
+    {
+      kind: "ADR",
+      label: "ADR-0004 — Desktop state is derived from the event stream only",
+      href: "/decisions/adr-0004-desktop-state-from-events/"
+    },
+    {
+      kind: "Architecture",
+      label: "Tauri host and lifecycle",
+      href: "/architecture/host/"
+    }
+  ]}
+/>

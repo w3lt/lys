@@ -1,0 +1,78 @@
+---
+title: Tauri over Electron for the desktop shell
+description: The original desktop-shell comparison, kept as historical reasoning after the host architecture moved on.
+docType: decision
+identifier: ADR-0001
+status: deprecated
+decided: "2026-04-28"
+areas: ["host", "desktop"]
+statusNotice: The original comparison predates the current host architecture and is kept only as historical reasoning.
+---
+
+import RecordMeta from "@/components/handbook/RecordMeta.astro"
+import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+import StatusNotice from "@/components/handbook/StatusNotice.astro"
+
+<StatusNotice
+  kind="decision"
+  status={frontmatter.status}
+  reason={frontmatter.statusNotice}
+/>
+
+<RecordMeta frontmatter={frontmatter} />
+
+## Context
+
+Lys needed a desktop shell that could ship a signed artifact on three platforms
+without asking every contributor to maintain a second native codebase. The two
+credible options were Electron, which bundles its own browser engine, and
+Tauri, which uses the system webview and a Rust host process.
+
+The comparison was made when the shell was still a thin window around a single
+renderer, and before the backend became a separate child process with its own
+trust boundary.
+
+## Decision
+
+Tauri was selected. The system webview keeps the distributed artifact small,
+and a Rust host sits naturally beside the Rust backend, so the project carries
+one systems language rather than two runtimes.
+
+- The host process is Rust, and shares its toolchain with the backend.
+- The interface is a webview over the same React build used in development.
+- Platform packaging is delegated to Tauri's bundler.
+
+## Alternatives considered
+
+Electron was rejected on artifact size and on the cost of shipping a second
+JavaScript runtime alongside a Rust backend the project already needed.
+
+A fully native shell per platform was rejected because it would have tripled
+the interface surface for a project with one interface.
+
+## Consequences
+
+The system webview differs by platform, so interface work carries a real
+cross-platform test burden that Electron would have absorbed.
+
+This record is deprecated: the reasoning describes a shell that no longer
+matches the current architecture, in which the host also owns process
+lifecycle and credential custody. It is preserved as evidence of the original
+choice rather than corrected.
+
+## Related documents
+
+<RelatedDocuments
+  documents={[
+    {
+      kind: "Architecture",
+      label: "Tauri host and lifecycle",
+      href: "/architecture/host/"
+    },
+    {
+      kind: "Architecture",
+      label: "Desktop application",
+      href: "/architecture/desktop/"
+    }
+  ]}
+/>

@@ -1,0 +1,57 @@
+---
+title: Provider fallback within a single turn
+description: Explores letting a failed provider call fall back to a configured alternative without ending the turn.
+docType: proposal
+identifier: RFC-0006
+status: draft
+author: Welt
+created: "2026-08-14"
+areas: ["backend", "providers"]
+---
+
+import RecordMeta from "@/components/handbook/RecordMeta.astro"
+import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+import StatusNotice from "@/components/handbook/StatusNotice.astro"
+
+<StatusNotice kind="proposal" status={frontmatter.status} />
+
+<RecordMeta frontmatter={frontmatter} />
+
+## Summary
+
+When a provider call fails for a reason that a different provider would not
+share — a rate limit, a regional outage — attempt a configured alternative
+before failing the turn.
+
+## Open questions
+
+This draft is incomplete. The unresolved questions are:
+
+- Which failures are eligible. A timeout may mean an overloaded provider or a
+  malformed request, and the two must not be treated alike.
+- What the reader is told. A silent substitution changes which model answered
+  without saying so, which is not acceptable.
+- How budget accounting attributes a turn that touched two providers.
+
+## Motivation
+
+A single provider's rate limit currently ends the turn even when an equivalent
+provider is configured and idle. The failure is recoverable, and the recovery is
+mechanical.
+
+## Related documents
+
+<RelatedDocuments
+  documents={[
+    {
+      kind: "Architecture",
+      label: "Backend",
+      href: "/architecture/backend/"
+    },
+    {
+      kind: "ADR",
+      label: "ADR-0007 — The Tauri host owns provider credentials",
+      href: "/decisions/adr-0007-credential-handles/"
+    }
+  ]}
+/>

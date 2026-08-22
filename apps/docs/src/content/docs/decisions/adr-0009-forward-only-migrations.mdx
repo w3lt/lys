@@ -1,0 +1,74 @@
+---
+title: Migrations are forward-only and applied at startup
+description: The session store has no down-migrations; the backend applies pending migrations when it opens the store.
+docType: decision
+identifier: ADR-0009
+status: accepted
+decided: "2026-08-11"
+areas: ["persistence", "backend"]
+---
+
+import RecordMeta from "@/components/handbook/RecordMeta.astro"
+import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+import StatusNotice from "@/components/handbook/StatusNotice.astro"
+
+<StatusNotice kind="decision" status={frontmatter.status} />
+
+<RecordMeta frontmatter={frontmatter} />
+
+## Context
+
+Two-way migrations doubled the test surface while no shipped release had ever
+rolled a schema backwards. Every migration needed a reverse that was written,
+reviewed, and tested against data it would never see in production.
+
+Downgrade is also not the recovery path a desktop user takes. They reinstall a
+previous version against a store they already have, or they restore a copy.
+
+## Decision
+
+Migrations are forward-only and applied when the backend opens the store.
+
+- Each migration has a monotonic version and no reverse.
+- The backend refuses to open a store newer than the binary understands.
+- The applied version is recorded in the store and reported in diagnostics.
+
+## Alternatives considered
+
+Keeping reversible migrations was rejected on cost: the reverse half was
+untested by construction, so it offered confidence rather than safety.
+
+Applying migrations from a separate command was rejected because a desktop
+application has no operator to run it.
+
+## Consequences
+
+Downgrading to an older Lys build against a migrated store is refused with a
+clear message rather than attempted. The recovery path is the copy taken in
+[the recovery runbook](/operate/runbooks/recover-session-database/), which is
+why step 1 of that procedure exists.
+
+Migration failure at startup is fatal and reported with the store path and the
+failing version, rather than leaving a half-migrated store open.
+
+## Related documents
+
+<RelatedDocuments
+  documents={[
+    {
+      kind: "ADR",
+      label: "ADR-0002 — SQLite is the session store",
+      href: "/decisions/adr-0002-sqlite-session-store/"
+    },
+    {
+      kind: "Reference",
+      label: "Database schemas",
+      href: "/reference/schema/"
+    },
+    {
+      kind: "Runbook",
+      label: "Recover a corrupted session database",
+      href: "/operate/runbooks/recover-session-database/"
+    }
+  ]}
+/>

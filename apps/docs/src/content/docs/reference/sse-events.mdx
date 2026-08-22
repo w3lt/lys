@@ -1,0 +1,96 @@
+---
+title: SSE events
+description: Every event published on the session stream, with normative field names, units, defaults, and compatibility rules.
+docType: reference
+appliesTo: current main
+contract: "@lys/protocol"
+contractVersion: v1
+stability: stable
+sidebar:
+  order: 2
+---
+
+import FieldList from "@/components/handbook/FieldList.astro"
+import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+import RecordMeta from "@/components/handbook/RecordMeta.astro"
+
+Every event published on the session stream. Field names, units, defaults, and
+compatibility rules are normative; anything not listed here is not part of the
+contract.
+
+<RecordMeta frontmatter={frontmatter} />
+
+## Event types
+
+| Event               | Meaning                                                       | Since |
+| ------------------- | ------------------------------------------------------------- | ----- |
+| `session.created`   | A new session exists and is writable.                         | v1.0  |
+| `message.appended`  | A message was committed to the store.                         | v1.0  |
+| `message.delta`     | A fragment of an in-progress assistant message.               | v1.0  |
+| `turn.failed`       | A turn ended without a usable result; carries a typed reason. | v1.1  |
+| `session.truncated` | Messages after a point were removed by an explicit write.     | v1.2  |
+| `stream.resumed`    | Replay finished; subsequent events are live.                  | v1.2  |
+
+## Common fields
+
+<FieldList
+  fields={[
+    {
+      name: "event_id",
+      type: "string · ULID",
+      presence: "required",
+      description:
+        "Monotonic per session. A client may resume from the last identifier it processed; the bus retains the most recent 200 events per session."
+    },
+    {
+      name: "session_id",
+      type: "string · UUIDv7",
+      presence: "required",
+      description:
+        "Stable for the life of the session. Never reused after deletion."
+    },
+    {
+      name: "emitted_at",
+      type: "integer · ms since epoch",
+      presence: "required",
+      description:
+        "Backend clock at commit time, not provider time. Not suitable for ordering; use event_id."
+    },
+    {
+      name: "reason",
+      type: "enum",
+      presence: "optional",
+      description:
+        "Present on turn.failed only: timeout, cancelled, provider_error, invalid_response. Unknown values must be treated as provider_error."
+    }
+  ]}
+/>
+
+## Compatibility
+
+New event types and new optional fields are additive and do not change the major
+version. Removing an event, renaming a field, or narrowing an accepted value
+requires an ADR and a deprecation notice on this page for one release before the
+change lands.
+
+## Related documents
+
+<RelatedDocuments
+  documents={[
+    {
+      kind: "Architecture",
+      label: "Backend",
+      href: "/architecture/backend/"
+    },
+    {
+      kind: "RFC",
+      label: "RFC-0004 — Replayable event retention",
+      href: "/rfcs/rfc-0004-replayable-event-retention/"
+    },
+    {
+      kind: "ADR",
+      label: "ADR-0007 — The Tauri host owns provider credentials",
+      href: "/decisions/adr-0007-credential-handles/"
+    }
+  ]}
+/>

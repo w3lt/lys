@@ -1,0 +1,71 @@
+---
+title: Session export format
+description: A portable, reviewable export that does not leak provider metadata.
+docType: proposal
+identifier: RFC-0007
+status: discussion
+author: "@dela"
+created: "2026-04-30"
+updated: "2026-08-12"
+areas: ["persistence", "protocol"]
+---
+
+import RecordMeta from "@/components/handbook/RecordMeta.astro"
+import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+import StatusNotice from "@/components/handbook/StatusNotice.astro"
+
+<StatusNotice kind="proposal" status={frontmatter.status} />
+
+<RecordMeta frontmatter={frontmatter} />
+
+## Summary
+
+A portable, reviewable export that does not leak provider metadata.
+
+## Motivation
+
+A session is currently readable only inside Lys, on the machine that created
+it. Contributors cannot attach one to a bug report, and a reader cannot review
+what a session contains before sharing it.
+
+Copying the store file is not an answer: it carries provider identifiers,
+timing, and accounting fields that have no place in a shared artifact.
+
+## Proposed design
+
+The export is a single text document containing the session's messages, their
+order, and their roles. Everything the provider layer added is dropped rather
+than redacted, so there is no field whose safety depends on the redaction list
+being complete.
+
+- Messages, roles, and ordering are preserved.
+- Provider identifiers, token accounting, and timing are omitted entirely.
+- The document is readable without Lys, and diffable in review.
+
+## Alternatives
+
+A full-fidelity export with a redaction pass was rejected in discussion: it
+makes every new provider field a potential leak until someone remembers to add
+it to the list.
+
+## Risks and trade-offs
+
+An export that omits provider metadata cannot be re-imported to reproduce a
+session exactly, which limits its use for debugging provider behaviour.
+
+## Related documents
+
+<RelatedDocuments
+  documents={[
+    {
+      kind: "RFC",
+      label: "RFC-0011 — Diagnostics bundle redaction policy",
+      href: "/rfcs/rfc-0011-diagnostics-bundle-redaction/"
+    },
+    {
+      kind: "Architecture",
+      label: "Persistence and ownership",
+      href: "/architecture/persistence/"
+    }
+  ]}
+/>

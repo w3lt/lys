@@ -1,0 +1,95 @@
+---
+import StatusBadge from "./StatusBadge.astro"
+import type { DocumentStatus } from "@/lib/handbook/status"
+
+type StatusTransition = {
+  /** Calendar date the transition was recorded, as `YYYY-MM-DD`. */
+  readonly date: string
+  /** Status the record moved to on that date. */
+  readonly status: DocumentStatus
+  /** Why the transition happened, in one sentence. */
+  readonly note: string
+}
+
+type StatusHistoryProps = {
+  /** Transitions in the order they happened, oldest first. */
+  readonly transitions: readonly StatusTransition[]
+}
+
+/** Astro types `Astro.props` from a local declaration named `Props`. */
+type Props = StatusHistoryProps
+
+const { transitions }: StatusHistoryProps = Astro.props
+---
+
+{/**
+  * The recorded status transitions of a proposal.
+  *
+  * Presentational component. Projects the transitions a proposal declares in
+  * its frontmatter, so the history and the proposal's current status cannot
+  * disagree.
+  *
+  * Accessibility: rendered as a table with column headers, so each cell keeps
+  * its association with the column that names it.
+  */}
+<table class="status-history not-content">
+  <thead>
+    <tr>
+      <th scope="col">Date</th>
+      <th scope="col">Status</th>
+      <th scope="col">Note</th>
+    </tr>
+  </thead>
+  <tbody>
+    {
+      transitions.map((transition) => (
+        <tr>
+          <td class="date">{transition.date}</td>
+          <td>
+            <StatusBadge status={transition.status} />
+          </td>
+          <td class="note">{transition.note}</td>
+        </tr>
+      ))
+    }
+  </tbody>
+</table>
+
+<style>
+  .status-history {
+    width: 100%;
+    margin-bottom: 1.25rem;
+    border-collapse: collapse;
+  }
+
+  th {
+    padding: 0.5625rem 0.875rem 0.5625rem 0;
+    border-bottom: 1px solid var(--app-border-subtle);
+    color: var(--doc-text-faint);
+    font-family: var(--sl-font-mono), ui-monospace, monospace;
+    font-size: 0.6875rem;
+    font-weight: 400;
+    letter-spacing: 0.06em;
+    text-align: start;
+    text-transform: uppercase;
+  }
+
+  td {
+    padding: 0.5625rem 0.875rem 0.5625rem 0;
+    border-bottom: 1px solid var(--app-border-subtle);
+    vertical-align: baseline;
+  }
+
+  .date {
+    color: var(--doc-text-faint);
+    font-family: var(--sl-font-mono), ui-monospace, monospace;
+    font-size: 0.75rem;
+    white-space: nowrap;
+  }
+
+  .note {
+    color: var(--app-text);
+    font-size: 0.84375rem;
+    line-height: 1.55;
+  }
+</style>

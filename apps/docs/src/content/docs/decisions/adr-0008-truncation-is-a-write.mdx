@@ -1,0 +1,71 @@
+---
+title: Session truncation is a write, not a view filter
+description: Truncating a session removes messages from the store, so every client sees the same session contents.
+docType: decision
+identifier: ADR-0008
+status: accepted
+decided: "2026-08-04"
+areas: ["backend", "protocol"]
+---
+
+import RecordMeta from "@/components/handbook/RecordMeta.astro"
+import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+import StatusNotice from "@/components/handbook/StatusNotice.astro"
+
+<StatusNotice kind="decision" status={frontmatter.status} />
+
+<RecordMeta frontmatter={frontmatter} />
+
+## Context
+
+Filtering at read time made two clients disagree about what a session
+contained. A truncation applied as a view predicate lives in whichever client
+applied it, so a second window, a replay, or an export each saw a different
+session.
+
+Truncation also affects what is sent to a provider on the next turn, which
+means a read-time filter changes behaviour, not just presentation.
+
+## Decision
+
+Truncation is an explicit write. The backend removes the messages after the
+truncation point inside the same write transaction that records the change, and
+emits `session.truncated` so every subscriber converges.
+
+- The store is the only representation of what a session contains.
+- Truncation is durable, and survives a restart without client cooperation.
+- The emitted event carries the truncation point, so replay stays consistent.
+
+## Alternatives considered
+
+A soft-delete flag with read-time filtering was rejected: it reproduces the
+divergence in the store instead of the client, and leaves provider payload
+construction depending on which filter a caller remembered to apply.
+
+## Consequences
+
+Truncation is destructive and is not undoable from within Lys. That is stated
+plainly in the interface, because the alternative was a session whose contents
+depended on who was asking.
+
+## Related documents
+
+<RelatedDocuments
+  documents={[
+    {
+      kind: "Reference",
+      label: "SSE events",
+      href: "/reference/sse-events/"
+    },
+    {
+      kind: "RFC",
+      label: "RFC-0002 — Session truncation semantics",
+      href: "/rfcs/rfc-0002-session-truncation/"
+    },
+    {
+      kind: "Architecture",
+      label: "Persistence and ownership",
+      href: "/architecture/persistence/"
+    }
+  ]}
+/>

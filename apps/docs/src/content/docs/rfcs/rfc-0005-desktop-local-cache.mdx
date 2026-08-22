@@ -1,0 +1,60 @@
+---
+title: A local session cache in the desktop application
+description: Proposed a desktop-side copy of recent session state to remove the first-paint wait after a cold start.
+docType: proposal
+identifier: RFC-0005
+status: rejected
+author: Welt
+created: "2026-07-02"
+updated: "2026-07-19"
+areas: ["desktop", "persistence"]
+---
+
+import RecordMeta from "@/components/handbook/RecordMeta.astro"
+import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+import StatusNotice from "@/components/handbook/StatusNotice.astro"
+
+<StatusNotice kind="proposal" status={frontmatter.status} />
+
+<RecordMeta frontmatter={frontmatter} />
+
+## Summary
+
+Keep a desktop-side copy of the most recent session so the interface can paint
+before the backend has finished starting.
+
+## Motivation
+
+A cold start shows an empty session list for as long as the backend takes to
+open its store. On a slow disk that was measured at just over a second, which
+reads as a broken launch rather than a slow one.
+
+## Why it was rejected
+
+The cache would have made the desktop a second holder of session truth, which
+[ADR-0004](/decisions/adr-0004-desktop-state-from-events/) closed
+deliberately. The
+proposal had no answer for a cache that disagreed with the store after an
+interrupted write, and the discussion did not find one that stopped short of a
+full reconciliation contract.
+
+The underlying complaint was addressed instead by rendering a determinate
+loading state for the session list, which removed the appearance of failure
+without introducing a second writer.
+
+## Related documents
+
+<RelatedDocuments
+  documents={[
+    {
+      kind: "ADR",
+      label: "ADR-0004 — Desktop state is derived from the event stream only",
+      href: "/decisions/adr-0004-desktop-state-from-events/"
+    },
+    {
+      kind: "Architecture",
+      label: "Backend",
+      href: "/architecture/backend/"
+    }
+  ]}
+/>

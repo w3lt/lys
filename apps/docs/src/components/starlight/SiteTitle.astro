@@ -1,0 +1,45 @@
+---
+import SiteMark from "@/components/handbook/SiteMark.astro"
+
+const { siteTitle, siteTitleHref } = Astro.locals.starlightRoute
+---
+
+{/**
+  * The Lys mark, wordmark, and handbook subtitle at the start of the header.
+  *
+  * Framework-boundary component overriding Starlight's `SiteTitle`. Starlight
+  * sizes the header column this sits in from the navigation rail's width, so
+  * the identity lines up over the rail and the search field lines up with the
+  * article beside it.
+  *
+  * Takes no props: Starlight renders overrides without any, and the title
+  * comes from route data.
+  *
+  * Rendered result: one link. It is never absent; when the rail is collapsed
+  * the wordmark and subtitle are withdrawn so the identity narrows with the
+  * column it sits over, leaving the mark alone.
+  *
+  * Accessibility: the link is named by the wordmark and subtitle, which
+  * describe the destination accurately. The mark's letterform is decorative and
+  * hidden inside `SiteMark`. The withdrawn wordmark is removed from the
+  * accessible name along with its text, leaving the link named by its title
+  * attribute instead.
+  */}
+<a href={siteTitleHref} class="site-title" title="Lys Engineering Handbook">
+  <SiteMark variant="detailed" title={siteTitle} />
+</a>
+
+<style>
+  .site-title {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    text-decoration: none;
+  }
+
+  @media (min-width: 50rem) {
+    :global(html[data-rail="collapsed"]) .site-title :global(.names) {
+      display: none;
+    }
+  }
+</style>

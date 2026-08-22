@@ -1,0 +1,119 @@
+---
+type ProcedureStep = {
+  /** What the operator does, phrased as an instruction. */
+  readonly title: string
+  /**
+   * Exact command to run.
+   *
+   * Omit for a step that is not a single command. Commands use placeholder
+   * paths; a runbook never carries live or machine-specific values.
+   */
+  readonly command?: string
+  /** Why the step matters, or what to check before continuing. */
+  readonly note: string
+}
+
+type ProcedureProps = {
+  /** Steps in the order they must be performed. */
+  readonly steps: readonly ProcedureStep[]
+}
+
+/** Astro types `Astro.props` from a local declaration named `Props`. */
+type Props = ProcedureProps
+
+const { steps }: ProcedureProps = Astro.props
+---
+
+{/**
+  * The ordered procedure of an operational runbook.
+  *
+  * Presentational component. Projects the steps into a numbered list; it owns
+  * no state and no interaction.
+  *
+  * Accessibility: rendered as an ordered list so the step count and position
+  * are announced. The visible number is decorative and hidden from assistive
+  * technology, because the list already carries the ordinal.
+  */}
+<ol class="procedure not-content">
+  {
+    steps.map((step, index) => (
+      <li>
+        <span class="ordinal" aria-hidden="true">
+          {index + 1}
+        </span>
+        <div class="detail">
+          <p class="title">{step.title}</p>
+          {step.command !== undefined && (
+            <pre><code>{step.command}</code></pre>
+          )}
+          <p class="note">{step.note}</p>
+        </div>
+      </li>
+    ))
+  }
+</ol>
+
+<style>
+  .procedure {
+    display: flex;
+    flex-direction: column;
+    gap: 0.875rem;
+    margin: 0 0 2.125rem;
+    padding: 0;
+    list-style: none;
+    counter-reset: none;
+  }
+
+  li {
+    display: flex;
+    gap: 0.875rem;
+  }
+
+  .ordinal {
+    display: flex;
+    flex: 0 0 1.625rem;
+    height: 1.625rem;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--app-border-default);
+    border-radius: 0.4375rem;
+    background-color: var(--app-surface-field);
+    color: var(--doc-accent);
+    font-family: var(--sl-font-mono), ui-monospace, monospace;
+    font-size: 0.75rem;
+  }
+
+  .detail {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .title {
+    margin: 0 0 0.375rem;
+    color: var(--app-text-strong);
+    font-size: 0.9375rem;
+    font-weight: 500;
+    line-height: 1.5;
+  }
+
+  pre {
+    margin: 0 0 0.375rem;
+    padding: 0.625rem 0.8125rem;
+    overflow-x: auto;
+    border: 1px solid var(--app-border-subtle);
+    border-radius: 0.5rem;
+    background-color: var(--app-surface-code);
+    color: var(--app-text-code);
+    font-family: var(--sl-font-mono), ui-monospace, monospace;
+    font-size: 0.78125rem;
+    line-height: 1.65;
+  }
+
+  .note {
+    margin: 0;
+    color: var(--doc-text-muted);
+    font-size: 0.84375rem;
+    line-height: 1.6;
+    text-wrap: pretty;
+  }
+</style>

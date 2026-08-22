@@ -1,0 +1,64 @@
+---
+title: Plugin API for provider adapters
+description: Withdrawn by the author after the credential-custody work made in-process plugins untenable.
+docType: proposal
+identifier: RFC-0008
+status: withdrawn
+author: "@rin"
+created: "2026-05-04"
+updated: "2026-05-19"
+areas: ["providers"]
+---
+
+import RecordMeta from "@/components/handbook/RecordMeta.astro"
+import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+import StatusNotice from "@/components/handbook/StatusNotice.astro"
+
+<StatusNotice kind="proposal" status={frontmatter.status} />
+
+<RecordMeta frontmatter={frontmatter} />
+
+## Summary
+
+Withdrawn by the author after the credential-custody work made in-process
+plugins untenable.
+
+## Motivation
+
+Adding a provider required a release. The proposal was to let a provider
+adapter be supplied at runtime, so a contributor could try a provider without
+waiting for one.
+
+## Proposed design
+
+The proposal defined a loadable adapter interface: a manifest, a request
+builder, and a response parser, resolved from a directory at startup.
+
+## Why it was withdrawn
+
+While the proposal was open, the work that became
+[ADR-0007](/decisions/adr-0007-credential-handles/) established that adapters
+hold an authorised client during a call. A loadable adapter would therefore be
+untrusted code with reach to a credential handle, decided on the user's machine
+rather than at review time.
+
+The author withdrew the proposal before a decision was needed.
+[ADR-0005](/decisions/adr-0005-compiled-in-provider-adapters/) later recorded
+the opposite arrangement as a durable decision.
+
+## Related documents
+
+<RelatedDocuments
+  documents={[
+    {
+      kind: "ADR",
+      label: "ADR-0005 — Provider adapters are compiled in, not plugins",
+      href: "/decisions/adr-0005-compiled-in-provider-adapters/"
+    },
+    {
+      kind: "ADR",
+      label: "ADR-0007 — The Tauri host owns provider credentials",
+      href: "/decisions/adr-0007-credential-handles/"
+    }
+  ]}
+/>

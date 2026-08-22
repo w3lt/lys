@@ -528,6 +528,19 @@ body {
 }
 
 /*
+ * Starlight clips long site titles inside this wrapper. Let the avatar shadow
+ * paint into the topbar instead of cutting the glow into a straight edge, and
+ * keep the textual names clipped when the header column becomes narrow.
+ */
+.page > .header .title-wrapper {
+  overflow: visible;
+}
+
+.page > .header .site-mark .names {
+  overflow: clip;
+}
+
+/*
  * Starlight sizes the header's first column from whether a page has a table of
  * contents, so the search field shifts between pages. The design holds it over
  * the article's inline edge at every page, which is the rail's width less the

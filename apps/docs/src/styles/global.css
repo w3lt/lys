@@ -991,8 +991,9 @@ starlight-toc nav a[aria-current="true"] {
 
 /*
  * The design closes an article with one hairline row rather than a stack: the
- * edit link at the start, the neighbouring pages at the end. Starlight stacks
- * its two footer regions in a column, so the footer itself becomes the row.
+ * last-updated metadata at the start, the neighbouring pages at the end.
+ * Starlight stacks its two footer regions in a column, so the footer itself
+ * becomes the row.
  */
 .content-panel footer {
   flex-direction: row;

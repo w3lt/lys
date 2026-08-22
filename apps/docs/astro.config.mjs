@@ -38,9 +38,6 @@ export default defineConfig({
       // Article pages show when their content last changed, taken from git
       // history rather than a hand-maintained frontmatter field.
       lastUpdated: true,
-      editLink: {
-        baseUrl: "https://github.com/w3lt/lys/edit/main/apps/docs/"
-      },
       // The design places the repository link at the foot of the navigation
       // rail rather than in the header, so `Sidebar` renders it and Starlight's
       // header social list stays empty.

@@ -72,13 +72,6 @@ const statusHistoryEntry = z.object({
  */
 const handbookFrontmatter = z.object({
   docType: documentType.optional(),
-  /**
-   * Which version of Lys the page describes, such as `current main`.
-   *
-   * Shown above the page title. Omit on a page whose applicability is already
-   * obvious from its type, such as a dated record.
-   */
-  appliesTo: z.string().min(1).optional(),
   identifier: z.string().regex(RECORD_IDENTIFIER).optional(),
   status: z.union([decisionStatus, proposalStatus]).optional(),
   /** Date a decision was accepted, as `YYYY-MM-DD`. Decisions only. */

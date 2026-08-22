@@ -3,6 +3,7 @@ import type {
   Conversation,
   ConversationAssistantMessage,
   ConversationAssistantMessageFinishReason,
+  ConversationMessage,
   ConversationMetadata,
   ConversationUserMessage
 } from "@lys/share"
@@ -102,6 +103,80 @@ export type UpdateAssistantReplyStatusOptions =
       /** ISO timestamp applied to the terminal assistant message. */
       readonly timestamp: string
     }
+
+/**
+ * Creates one terminal assistant message from a stored assistant message.
+ *
+ * @param message - Assistant message read back from persistent storage.
+ * @returns A frozen assistant message in a valid terminal state.
+ * @throws If a stored completed assistant message has no completion reason.
+ * @remarks A stored conversation has no live stream, so an assistant message
+ * still recorded as `streaming` was left behind by a request that never
+ * settled and is republished as `interrupted`.
+ */
+function createStoredTerminalAssistantMessage(
+  message: Readonly<ConversationAssistantMessage>
+): TerminalConversationAssistantMessage {
+  switch (message.status) {
+    case "completed": {
+      const finishReason = message.finishReason
+      if (finishReason === null) {
+        throw new Error(
+          `Assistant message ${message.id} completed without a finish reason`
+        )
+      }
+
+      return Object.freeze({ ...message, status: "completed", finishReason })
+    }
+    case "streaming":
+      return Object.freeze({
+        ...message,
+        status: "interrupted",
+        finishReason: null
+      })
+    case "interrupted":
+    case "failed":
+      return Object.freeze({
+        ...message,
+        status: message.status,
+        finishReason: null
+      })
+  }
+}
+
+/**
+ * Creates one immutable transcript message from a stored message.
+ *
+ * @param message - User or assistant message read back from storage.
+ * @returns A frozen message valid in the completed transcript prefix.
+ * @throws If a stored completed assistant message has no completion reason.
+ */
+function createStoredCompletedMessage(
+  message: ConversationMessage
+): CompletedConversationMessage {
+  return message.role === "user"
+    ? Object.freeze({ ...message })
+    : createStoredTerminalAssistantMessage(message)
+}
+
+/**
+ * Creates the chat-view conversation for one stored conversation.
+ *
+ * @param conversation - Complete conversation read back from the backend.
+ * @returns A transitively frozen conversation whose replies are all terminal.
+ * @throws If a stored completed assistant message has no completion reason.
+ * @remarks Opening a stored conversation starts no request, so the resulting
+ * transcript never contains a streaming reply.
+ */
+export function createStoredChatViewConversation(
+  conversation: Conversation
+): ChatViewConversation {
+  const messages = Object.freeze(
+    conversation.messages.map(createStoredCompletedMessage)
+  )
+
+  return Object.freeze({ ...conversation, messages })
+}
 
 /**
  * Determines whether a package-valid assistant can begin reply streaming.

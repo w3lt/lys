@@ -1,0 +1,44 @@
+.modal-dialog__backdrop {
+  position: fixed;
+  z-index: 40;
+  backdrop-filter: blur(3px);
+  background: oklch(0.14 0.055 300 / 55%);
+  inset: 0;
+}
+
+/*
+ * The surface is bottom-anchored and horizontally centred so it rises from the
+ * composer rather than covering the transcript it is searching.
+ */
+.modal-dialog {
+  position: fixed;
+  bottom: 104px;
+  left: 50%;
+  z-index: 41;
+  display: flex;
+  width: min(720px, calc(100vw - 48px));
+  max-height: min(372px, calc(100vh - 160px));
+  flex-direction: column;
+  border: 1px solid var(--app-border-default);
+  border-radius: var(--radius-surface);
+  background: var(--app-surface-panel);
+  box-shadow: var(--shadow-floating);
+  outline: none;
+  overflow: hidden;
+  translate: -50% 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .modal-dialog[data-open] {
+    animation: modal-dialog-fade var(--duration-enter) var(--ease-standard) both;
+  }
+}
+
+@keyframes modal-dialog-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

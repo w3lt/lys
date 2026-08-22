@@ -2,6 +2,7 @@ import { lazy, useEffect, useReducer } from "react"
 
 import { appReducer, createInitialState } from "@/app/state"
 
+import { ConversationHistoryPanel } from "@/components/ConversationHistoryComponents/ConversationHistoryPanel"
 import { TitleBar } from "@/components/TitleBar"
 
 const ChatView = lazy(() => import("@/views/ChatView/ChatView"))
@@ -40,6 +41,8 @@ export default function App() {
       ) : (
         <SettingsView onDone={() => setActiveView("chat")} />
       )}
+
+      <ConversationHistoryPanel />
     </div>
   )
 }

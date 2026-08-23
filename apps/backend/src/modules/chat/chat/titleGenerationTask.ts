@@ -26,7 +26,7 @@ export default async function createTitleGenerationTask({
       model,
       signal: abortSignal
     })
-    
+
     updateConversationTitle(title)
 
     await sendEvent({

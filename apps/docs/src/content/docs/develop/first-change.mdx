@@ -1,7 +1,6 @@
 ---
 title: Making a first change
-description: A guided change through the interface, protocol, and backend layers.
-appliesTo: current main
+description: A practical trace through the current desktop, protocol, and backend layers.
 sidebar:
   order: 3
 ---
@@ -9,26 +8,81 @@ sidebar:
 import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
 import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
 
-A guided change through the interface, protocol, and backend layers. This page
-describes the current main branch; anything historical lives in the decision,
-proposal, or changelog record instead.
+A guided change through the interface, protocol, and backend layers.
 
 <DocumentMeta
   label="Page metadata"
-  entries={[
-    { label: "Type", value: "Guide" },
-    { label: "Applies to", value: "current main" }
-  ]}
+  entries={[{ label: "Type", value: "Guide" }]}
 />
 
-It is reviewed together with the behaviour it describes, so a change that makes
-this page wrong is expected to update it in the same pull request. Where a
-statement here depends on a durable decision, the decision is linked rather
-than restated.
+The safest first change in this repository is one that traces an existing path
+instead of inventing a new one. The current chat turn is a good tour because it
+touches the desktop, protocol, backend, persistence, and docs.
 
-Content is validated at build time: invalid frontmatter, a duplicate
-identifier, or a broken internal link fails the build rather than publishing a
-partial page.
+## Trace one chat turn end to end
+
+### 1. Desktop submission
+
+The desktop chat store trims the prompt, builds the request body, and opens the
+chat stream with `readChatEvents`.
+
+### 2. Shared protocol
+
+`packages/protocol` defines:
+
+- the chat route path
+- the request body schema
+- the allowed SSE event shapes
+
+This is the contract both desktop and backend have to agree on.
+
+### 3. Backend route
+
+The backend chat route:
+
+1. creates or resumes a conversation
+2. persists the user message
+3. persists an empty streaming assistant message
+4. emits the start event
+5. streams assistant deltas and a final done or error event
+
+The current backend updates the stored assistant status and finish reason, but
+does not persist streamed delta content into the assistant row.
+
+### 4. Persistence
+
+The conversation service owns the SQLite schema, migrations, inserts, updates,
+and conversation title updates. This is the right place to look before changing
+message lifecycle or stored conversation shape.
+
+### 5. Desktop stream handling
+
+The desktop store consumes the typed stream events and updates the current
+conversation state. A turn-start event comes first; after that, chat and title
+generation run concurrently:
+
+- zero or more `delta` events precede a successful `done`
+- `title` may arrive before, during, or after those chat events
+- `error` can report either task's failure and is not always the final event
+
+## Good first-change candidates
+
+- Adjust contributor-facing copy in the docs or starter UI and follow it
+  through validation.
+- Rename or clarify a misleading comment or page and update the surrounding
+  documentation in the same change.
+- Add a small protocol-backed behavior only if you are comfortable changing the
+  desktop and backend together.
+
+## Before changing the protocol
+
+If you add, remove, or reshape a stream event, you must update both:
+
+- the shared schema in `packages/protocol`
+- every producer or consumer that relies on that schema
+
+That includes the backend route, the desktop transport reader, and the desktop
+chat store.
 
 <RelatedDocuments
   documents={[
@@ -46,6 +100,11 @@ partial page.
       kind: "Reference",
       label: "SSE events",
       href: "/reference/sse-events/"
+    },
+    {
+      kind: "Guide",
+      label: "Testing and validation",
+      href: "/develop/testing/"
     }
   ]}
 />

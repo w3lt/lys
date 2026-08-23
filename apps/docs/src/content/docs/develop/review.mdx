@@ -1,7 +1,6 @@
 ---
 title: Code-review process
-description: What reviewers are accountable for, and when a maintainer must approve.
-appliesTo: current main
+description: What the repository review standards require and which review standard applies.
 sidebar:
   order: 7
 ---
@@ -9,26 +8,49 @@ sidebar:
 import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
 import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
 
-What reviewers are accountable for, and when a maintainer must approve. This
-page describes the current main branch; anything historical lives in the
-decision, proposal, or changelog record instead.
+What reviewers are accountable for and which review standard applies.
 
 <DocumentMeta
   label="Page metadata"
-  entries={[
-    { label: "Type", value: "Policy" },
-    { label: "Applies to", value: "current main" }
-  ]}
+  entries={[{ label: "Type", value: "Policy" }]}
 />
 
-It is reviewed together with the behaviour it describes, so a change that makes
-this page wrong is expected to update it in the same pull request. Where a
-statement here depends on a durable decision, the decision is linked rather
-than restated.
+The canonical review rules live in:
 
-Content is validated at build time: invalid frontmatter, a duplicate
-identifier, or a broken internal link fails the build rather than publishing a
-partial page.
+- `docs/code_reviews/MR_REVIEW.md`
+- `docs/code_reviews/FULL_CODE_REVIEW.md`
+- the final checklist in `CONTRIBUTING.md`
+
+## Merge request review
+
+Use the merge request review standard when reviewing a proposed change before it
+merges. Its core expectations are:
+
+- establish the stated purpose and review boundary first
+- review the changed lines and the directly involved parts
+- report findings only
+- record every validation command actually run
+
+## Full code review
+
+Use the full code review standard when auditing an existing area of the codebase
+independently of a pending change. It requires an explicit review target and an
+inventory of the repository-owned items in scope.
+
+## Reviewer mandate
+
+The review standards are explicit that reviewers:
+
+- report findings only
+- do not modify the implementation under review
+- may run validation commands
+- must not weaken an active standard to make a change acceptable
+
+## Coming soon
+
+This repository does not currently expose a handbook page or code-owner file
+that defines a separate maintainer-approval matrix for specific directories.
+Until that exists, do not invent one in review guidance.
 
 <RelatedDocuments
   documents={[
@@ -46,6 +68,11 @@ partial page.
       kind: "Reference",
       label: "SSE events",
       href: "/reference/sse-events/"
+    },
+    {
+      kind: "Policy",
+      label: "Contribution workflow",
+      href: "/develop/workflow/"
     }
   ]}
 />

@@ -1,47 +1,74 @@
 ---
 title: Backend API contracts
-description: Commands, payloads, and error taxonomy.
+description: The current loopback HTTP and SSE endpoints exposed by the Fastify backend.
 docType: reference
-appliesTo: current main
 sidebar:
   order: 1
 ---
 
-import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
-import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+The current backend surface is small and lives entirely under the `@lys/protocol`
+route definitions.
 
-Commands, payloads, and error taxonomy. This page describes the current main
-branch; anything historical lives in the decision, proposal, or changelog
-record instead.
+## Routes
 
-<DocumentMeta
-  label="Page metadata"
-  entries={[
-    { label: "Type", value: "Reference" },
-    { label: "Applies to", value: "current main" }
-  ]}
-/>
+| Method | Path               | Request body                                                  | Response              |
+| ------ | ------------------ | ------------------------------------------------------------- | --------------------- |
+| `GET`  | `/api/v1/heath`    | none                                                          | `{ ok: true }`        |
+| `GET`  | `/api/v1/llm/list` | none                                                          | `{ llms: LlmInfo[] }` |
+| `POST` | `/api/v1/llm/load` | `{ modelId: string }`                                         | `LlmInfo`             |
+| `POST` | `/api/v1/chat`     | `{ message: string, model: string, conversationId?: uuidv7 }` | `text/event-stream`   |
 
-It is reviewed together with the behaviour it describes, so a change that makes
-this page wrong is expected to update it in the same pull request. Where a
-statement here depends on a durable decision, the decision is linked rather
-than restated.
+`/api/v1/heath` is the current spelling in both the shared protocol package and
+the Fastify route registration.
 
-Content is validated at build time: invalid frontmatter, a duplicate
-identifier, or a broken internal link fails the build rather than publishing a
-partial page.
+## Chat request body
 
-<RelatedDocuments
-  documents={[
-    {
-      kind: "Decisions",
-      label: "Related decision records",
-      href: "/decisions/"
-    },
-    {
-      kind: "Reference",
-      label: "SSE events",
-      href: "/reference/sse-events/"
-    }
-  ]}
-/>
+```json
+{
+  "message": "Tell me what changed",
+  "model": "google/gemma-4-12b-qat",
+  "conversationId": "0198f5a5-7b9b-7e0b-9b0f-87d9d6a5f72d"
+}
+```
+
+`conversationId` is optional. Omitting it asks the backend to create a new
+conversation before sending the first stream event.
+
+## Chat response shape
+
+The chat route responds as SSE, not JSON. Each event payload must match one of
+the six variants documented in [SSE events](/reference/sse-events/).
+
+## LLM metadata shape
+
+`LlmInfo` currently includes:
+
+- `modelKey`
+- `format`
+- `displayName`
+- `path`
+- `sizeBytes`
+- optional `paramsString`, `architecture`, and `quantization`
+- `vision`
+- `trainedForToolUse`
+- `maxContextLength`
+- `loaded`
+
+## What is not part of the public API
+
+- No conversation listing or history-retrieval endpoint; the chat route can
+  continue only a conversation whose identifier the caller already knows
+- No export or import endpoint
+- No typed HTTP error taxonomy beyond route-local thrown errors
+
+## Coming soon
+
+- Public conversation query routes
+- Conversation export and import routes
+- A more explicit HTTP error contract
+
+## Related pages
+
+- [Shared protocol](/architecture/protocol/)
+- [SSE events](/reference/sse-events/)
+- [Configuration reference](/reference/configuration/)

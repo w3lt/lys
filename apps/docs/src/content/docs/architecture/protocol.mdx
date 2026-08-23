@@ -1,52 +1,58 @@
 ---
 title: Shared protocol
-description: The typed vocabulary both sides of the process boundary agree on.
+description: The Zod-backed route, event, and shared data-model packages used by the desktop and backend.
 docType: architecture
-appliesTo: current main
 sidebar:
   order: 5
 ---
 
-import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
-import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+Lys currently shares contracts through two TypeScript workspace packages.
 
-The typed vocabulary both sides of the process boundary agree on. This page
-describes the current main branch; anything historical lives in the decision,
-proposal, or changelog record instead.
+## Shared packages
 
-<DocumentMeta
-  label="Page metadata"
-  entries={[
-    { label: "Type", value: "Architecture" },
-    { label: "Applies to", value: "current main" }
-  ]}
-/>
+| Package         | Owns                                                                                                                               |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `@lys/protocol` | API prefix constants, loopback host and port constants, route paths, request bodies, response schemas, and chat SSE event variants |
+| `@lys/share`    | Conversation, conversation metadata, and conversation message schemas shared between backend and desktop                           |
 
-It is reviewed together with the behaviour it describes, so a change that makes
-this page wrong is expected to update it in the same pull request. Where a
-statement here depends on a durable decision, the decision is linked rather
-than restated.
+## Current protocol surface
 
-Content is validated at build time: invalid frontmatter, a duplicate
-identifier, or a broken internal link fails the build rather than publishing a
-partial page.
+The public backend surface is small and explicit:
 
-<RelatedDocuments
-  documents={[
-    {
-      kind: "Section",
-      label: "Architecture overview",
-      href: "/architecture/system/"
-    },
-    {
-      kind: "Decisions",
-      label: "Related decision records",
-      href: "/decisions/"
-    },
-    {
-      kind: "Reference",
-      label: "SSE events",
-      href: "/reference/sse-events/"
-    }
-  ]}
-/>
+| Concern                             | Contract source                                |
+| ----------------------------------- | ---------------------------------------------- |
+| API prefix and loopback constants   | `packages/protocol/src/constant.ts`            |
+| Chat route request and SSE payloads | `packages/protocol/src/apis/chat/chatRoute.ts` |
+| LM Studio list and load routes      | `packages/protocol/src/apis/llm/*.ts`          |
+| Health route path                   | `packages/protocol/src/apis/health/routes.ts`  |
+| Shared conversation shapes          | `packages/share/src/models/conversation.ts`    |
+
+## Why the packages are split
+
+`@lys/protocol` models transport concerns such as HTTP methods, route paths, and
+SSE events. `@lys/share` models conversation data that both sides need even when
+it is not tied to one specific route.
+
+That split lets the backend validate external requests while the desktop reuses
+the same schemas when reading backend event payloads.
+
+## Current compatibility reality
+
+- Contracts are source-level TypeScript and Zod definitions inside the monorepo.
+- The desktop and backend are built from the same workspace source; there is no
+  negotiated protocol version or feature-capability handshake.
+- The only current chat event variants are the six variants documented in
+  [SSE events](/reference/sse-events/).
+
+## Coming soon
+
+- Explicit protocol versioning beyond the current workspace package source
+- Capability flags for optional event types
+- Shared contracts for conversation listing, resume, or export flows
+
+## Related pages
+
+- [System overview](/architecture/system/)
+- [Backend API contracts](/reference/api/)
+- [SSE events](/reference/sse-events/)
+- [Database schemas](/reference/schema/)

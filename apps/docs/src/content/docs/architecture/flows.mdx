@@ -1,52 +1,60 @@
 ---
 title: End-to-end flows
-description: Send a message, resume a session, rotate a credential, recover from a crash.
+description: "The concrete runtime flows that exist today: backend startup, chat streaming, and user-initiated stop."
 docType: architecture
-appliesTo: current main
 sidebar:
   order: 9
 ---
 
-import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
-import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+This page documents only the flows implemented in the current codebase.
 
-Send a message, resume a session, rotate a credential, recover from a crash.
-This page describes the current main branch; anything historical lives in the
-decision, proposal, or changelog record instead.
+## Start the backend
 
-<DocumentMeta
-  label="Page metadata"
-  entries={[
-    { label: "Type", value: "Architecture" },
-    { label: "Applies to", value: "current main" }
-  ]}
-/>
+1. The React app calls `initialize`.
+2. The desktop loads host-managed settings through `load_settings`.
+3. If `autoStartBackend` is enabled, the desktop calls `start_backend`.
+4. The Tauri host spawns `pnpm run dev` in `apps/backend`.
+5. The shell store updates backend status to `starting`, then `running`.
 
-It is reviewed together with the behaviour it describes, so a change that makes
-this page wrong is expected to update it in the same pull request. Where a
-statement here depends on a durable decision, the decision is linked rather
-than restated.
+## Send one chat message
 
-Content is validated at build time: invalid frontmatter, a duplicate
-identifier, or a broken internal link fails the build rather than publishing a
-partial page.
+1. The composer asks the chat store to `sendMessage`.
+2. The desktop creates a request token and an `AbortController`.
+3. The desktop sends `POST /api/v1/chat` with `message`, `model`, and optional
+   `conversationId`.
+4. The backend creates or reuses the conversation, inserts the user message, and
+   inserts an empty streaming assistant message.
+5. The backend emits a `start-new-conversation-turn` or
+   `start-existing-conversation-turn` event.
+6. The backend streams zero or more `delta` events, then a `done` event when the
+   model finishes successfully.
+7. A parallel title task may emit a `title` event before, during, or after the
+   chat events.
+8. The desktop applies each event to immutable local conversation state.
 
-<RelatedDocuments
-  documents={[
-    {
-      kind: "Section",
-      label: "Architecture overview",
-      href: "/architecture/system/"
-    },
-    {
-      kind: "Decisions",
-      label: "Related decision records",
-      href: "/decisions/"
-    },
-    {
-      kind: "Reference",
-      label: "SSE events",
-      href: "/reference/sse-events/"
-    }
-  ]}
-/>
+## Stop an in-flight reply
+
+1. The user presses Stop in the composer.
+2. The desktop marks the local assistant message as `interrupted`.
+3. The desktop aborts the owned request controller.
+4. The backend SSE close handler aborts the upstream LM Studio request.
+5. The stream ends without further UI updates for that request token.
+
+## Error path
+
+If opening the stream, reading SSE frames, validating payloads, or finishing the
+model response fails, the desktop records a chat lifecycle error and may mark
+the assistant message as `failed`.
+
+## Coming soon
+
+- Resume persisted conversations after relaunch
+- Replay prior events into a new desktop window
+- Credential rotation or secret refresh flows
+- Guided crash recovery and database repair flows
+
+## Related pages
+
+- [Backend](/architecture/backend/)
+- [SSE events](/reference/sse-events/)
+- [Configuration reference](/reference/configuration/)

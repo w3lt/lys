@@ -1,7 +1,6 @@
 ---
 title: Packaging and releases
-description: How a build becomes a signed artifact and reaches users.
-appliesTo: current main
+description: Current checked-in docs deployment and desktop packaging signals.
 sidebar:
   order: 3
 ---
@@ -9,43 +8,72 @@ sidebar:
 import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
 import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
 
-How a build becomes a signed artifact and reaches users. This page describes
-the current main branch; anything historical lives in the decision, proposal,
-or changelog record instead.
+Current build and publication paths that are evidenced in this repository.
 
 <DocumentMeta
   label="Page metadata"
-  entries={[
-    { label: "Type", value: "Guide" },
-    { label: "Applies to", value: "current main" }
-  ]}
+  entries={[{ label: "Type", value: "Guide" }]}
 />
 
-It is reviewed together with the behaviour it describes, so a change that makes
-this page wrong is expected to update it in the same pull request. Where a
-statement here depends on a durable decision, the decision is linked rather
-than restated.
+## Docs deployment
 
-Content is validated at build time: invalid frontmatter, a duplicate
-identifier, or a broken internal link fails the build rather than publishing a
-partial page.
+The repository contains one checked-in publication workflow today:
+
+- workflow: `.github/workflows/deploy-docs.yml`
+- trigger: pushes to `main` and manual dispatch
+- build command: `pnpm --filter @lys/docs run build`
+- artifact directory: `apps/docs/dist`
+- deploy target: GitHub Pages
+
+That workflow is the only evidenced automated release path in this repository.
+
+## Desktop packaging
+
+The Tauri config declares desktop bundle metadata and package targets, which is
+enough to show packaging is intended:
+
+- product name: `Lys`
+- app identifier: `com.w3lt.lys-desktop`
+- bundle targets: `all`
+
+The repository does not currently prove an automated desktop signing,
+notarization, or publication workflow.
+
+:::note[Coming soon]
+Desktop artifact signing, release publication, and a canonical end-user release
+process are not documented yet.
+:::
+
+## Versioning status
+
+The checked-in workspace manifests are currently versioned `0.1.0` for:
+
+- the repository root package
+- `@lys/docs`
+- `@lys/backend`
+- `@lys/desktop`
+- `@lys/protocol`
+- `@lys/share`
+
+There is not yet a canonical release log or a tag-based release history in the
+repository.
 
 <RelatedDocuments
   documents={[
     {
       kind: "Section",
-      label: "Operate overview",
-      href: "/operate/configuration/"
-    },
-    {
-      kind: "Decisions",
-      label: "Related decision records",
-      href: "/decisions/"
+      label: "Changelog",
+      href: "/changelog/"
     },
     {
       kind: "Reference",
-      label: "SSE events",
-      href: "/reference/sse-events/"
+      label: "Runtime dependencies",
+      href: "/operate/dependencies/"
+    },
+    {
+      kind: "Reference",
+      label: "Configuration",
+      href: "/operate/configuration/"
     }
   ]}
 />

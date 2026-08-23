@@ -1,7 +1,6 @@
 ---
 title: Repository map
-description: Every workspace package, what it owns, and who reviews it.
-appliesTo: current main
+description: The applications and shared packages in the pnpm workspace and what each currently owns.
 sidebar:
   order: 4
 ---
@@ -9,32 +8,65 @@ sidebar:
 import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
 import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
 
-Every workspace package, what it owns, and who reviews it. This page describes
-the current main branch; anything historical lives in the decision, proposal,
-or changelog record instead.
+The applications and shared packages in the pnpm workspace and what each
+currently owns.
 
 <DocumentMeta
   label="Page metadata"
-  entries={[
-    { label: "Type", value: "Overview" },
-    { label: "Applies to", value: "current main" }
-  ]}
+  entries={[{ label: "Type", value: "Overview" }]}
 />
 
-It is reviewed together with the behaviour it describes, so a change that makes
-this page wrong is expected to update it in the same pull request. Where a
-statement here depends on a durable decision, the decision is linked rather
-than restated.
+The workspace structure is simple and explicit:
 
-Content is validated at build time: invalid frontmatter, a duplicate
-identifier, or a broken internal link fails the build rather than publishing a
-partial page.
+## Root workspace
+
+- `package.json` owns the root developer commands such as `pnpm dev`,
+  `pnpm docs:dev`, and `pnpm backend:dev`.
+- `pnpm-workspace.yaml` includes `apps/*` and `packages/*`.
+
+## Applications
+
+### `apps/desktop`
+
+The local desktop UI. It uses React, Vite, Zustand, and Tauri. It starts and
+stops the backend through Tauri commands, opens the chat SSE stream, and
+renders conversation state for the user.
+
+### `apps/backend`
+
+The local service process. It registers Fastify routes for health checks, model
+inventory and load operations, and the chat stream. It also owns the SQLite
+conversation store and the LM Studio / OpenAI-compatible service adapters.
+
+### `apps/docs`
+
+The internal engineering handbook. It is built with Astro and Starlight and
+validates handbook frontmatter at build time.
+
+## Shared packages
+
+### `packages/protocol`
+
+The transport contract shared between desktop and backend. It exports route
+constants, request schemas, and stream event schemas.
+
+### `packages/share`
+
+The shared domain model package. Today it mainly defines the conversation and
+message schemas reused by both transport and persistence code.
+
+## Coming soon
+
+This repository does not currently publish an explicit reviewer-ownership map
+or code-owner index inside the handbook. Until that exists, use the package
+layout, commit history, and the relevant standards documents to find the closest
+maintained context.
 
 <RelatedDocuments
   documents={[
     {
       kind: "Section",
-      label: "Overview overview",
+      label: "Introduction",
       href: "/overview/introduction/"
     },
     {
@@ -43,9 +75,9 @@ partial page.
       href: "/decisions/"
     },
     {
-      kind: "Reference",
-      label: "SSE events",
-      href: "/reference/sse-events/"
+      kind: "Guide",
+      label: "Environment setup",
+      href: "/develop/setup/"
     }
   ]}
 />

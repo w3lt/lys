@@ -1,52 +1,74 @@
 ---
 title: Desktop application
-description: "The React interface: rendering, local state, and event consumption."
+description: "The React UI: shell state, chat state, and consumption of backend SSE events."
 docType: architecture
-appliesTo: current main
 sidebar:
   order: 2
 ---
 
-import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
-import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+The desktop application is a React app rendered inside a Tauri window. It owns
+presentation state, not durable conversation storage.
 
-The React interface: rendering, local state, and event consumption. This page
-describes the current main branch; anything historical lives in the decision,
-proposal, or changelog record instead.
+## Main responsibilities
 
-<DocumentMeta
-  label="Page metadata"
-  entries={[
-    { label: "Type", value: "Architecture" },
-    { label: "Applies to", value: "current main" }
-  ]}
-/>
+| Area                | Current implementation                                                                                                      |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| App shell           | `App.tsx` swaps between chat and settings views and runs startup initialization.                                            |
+| Chat UI             | `ChatView` renders the transcript, composer, and jump-to-latest controls.                                                   |
+| Chat state          | `src/lib/store/chat-view` owns the active conversation, request lifecycle, abort controller, and error presentation.        |
+| Shell/runtime state | `src/lib/store/index.ts` tracks which view is open, whether the backend is running, and settings loaded from Tauri.         |
+| SSE consumption     | `src/lib/apis/http/chat.ts` opens `POST /api/v1/chat`, parses SSE frames, validates them with Zod, and yields typed events. |
+| Theme               | `src/app/theme.ts` applies light or dark mode and stores the choice as `lys.theme` in WebView `localStorage`.               |
 
-It is reviewed together with the behaviour it describes, so a change that makes
-this page wrong is expected to update it in the same pull request. Where a
-statement here depends on a durable decision, the decision is linked rather
-than restated.
+## Chat state split
 
-Content is validated at build time: invalid frontmatter, a duplicate
-identifier, or a broken internal link fails the build rather than publishing a
-partial page.
+The desktop currently has two separate state systems:
 
-<RelatedDocuments
-  documents={[
-    {
-      kind: "Section",
-      label: "Architecture overview",
-      href: "/architecture/system/"
-    },
-    {
-      kind: "Decisions",
-      label: "Related decision records",
-      href: "/decisions/"
-    },
-    {
-      kind: "Reference",
-      label: "SSE events",
-      href: "/reference/sse-events/"
-    }
-  ]}
-/>
+| Store               | Owns                                                                                                             |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Chat Zustand store  | Active conversation, current request token, local abort controller, streamed assistant deltas, inline error text |
+| Shell Zustand store | Active top-level view, loaded runtime settings, backend process status, startup progress                         |
+
+This means the chat transcript shown in the window is reconstructed from backend
+events during the current app session, while shell state such as backend status
+is managed independently.
+
+## Streaming path
+
+1. The composer calls `sendMessage`.
+2. The chat store opens `POST /api/v1/chat`.
+3. The desktop parses SSE frames with `EventSourceParserStream`.
+4. Each payload is validated against `chatApiStreamEventSchema`.
+5. The store applies `start-*`, `delta`, `done`, `title`, or `error` events to
+   local immutable conversation state.
+
+The desktop does not maintain a replay log or reconnect protocol. If the app is
+closed, the current UI state is lost and must be rebuilt by future backend
+features.
+
+## Current limitations
+
+- The chat path currently sends a fixed model identifier from the chat store.
+- Only the Runtime settings tab follows a usable path in the current app. The
+  Model, Generation, and Conversation tabs render components that require a
+  `SettingsContext.Provider`, but no provider is mounted; selecting one of
+  those tabs currently throws during rendering.
+- The `selectedModelLoaded` shell flag exists, but current code does not update
+  it to reflect real backend model state.
+
+## Coming soon
+
+The following areas are not yet implemented as usable desktop behavior:
+
+- Persisting edited settings through `save_settings`
+- Supplying live state and actions to the Model, Generation, and Conversation
+  settings tabs
+- Wiring model selection into live chat requests
+- Restoring prior conversations after relaunch
+- Backend-backed generation settings such as context size and temperature
+
+## Related pages
+
+- [System overview](/architecture/system/)
+- [Tauri host and lifecycle](/architecture/host/)
+- [SSE events](/reference/sse-events/)

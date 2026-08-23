@@ -1,52 +1,72 @@
 ---
 title: Persistence and ownership
-description: Which component owns which table, and how migrations are applied.
+description: What is persisted today, which runtime owns it, and how the current SQLite migrations work.
 docType: architecture
-appliesTo: current main
 sidebar:
   order: 6
 ---
 
-import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
-import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+Lys currently persists a SQLite conversation database, a small JSON settings
+file, and one desktop theme preference.
 
-Which component owns which table, and how migrations are applied. This page
-describes the current main branch; anything historical lives in the decision,
-proposal, or changelog record instead.
+## Persistent artifacts
 
-<DocumentMeta
-  label="Page metadata"
-  entries={[
-    { label: "Type", value: "Architecture" },
-    { label: "Applies to", value: "current main" }
-  ]}
-/>
+| Artifact              | Owner           | Location                                | Purpose                                                                        |
+| --------------------- | --------------- | --------------------------------------- | ------------------------------------------------------------------------------ |
+| Conversation database | Fastify backend | `~/.lys/lys_db.sqlite`                  | Stores conversation metadata and conversation messages.                        |
+| Settings JSON         | Tauri host      | `~/.lys/settings.json`                  | Stores backend auto-start and a nullable selected model.                       |
+| Theme preference      | Desktop UI      | WebView `localStorage`, key `lys.theme` | Stores `dark` or `light`; invalid or unavailable storage falls back to `dark`. |
 
-It is reviewed together with the behaviour it describes, so a change that makes
-this page wrong is expected to update it in the same pull request. Where a
-statement here depends on a durable decision, the decision is linked rather
-than restated.
+## SQLite ownership
 
-Content is validated at build time: invalid frontmatter, a duplicate
-identifier, or a broken internal link fails the build rather than publishing a
-partial page.
+Only the backend reads or writes the conversation database directly.
 
-<RelatedDocuments
-  documents={[
-    {
-      kind: "Section",
-      label: "Architecture overview",
-      href: "/architecture/system/"
-    },
-    {
-      kind: "Decisions",
-      label: "Related decision records",
-      href: "/decisions/"
-    },
-    {
-      kind: "Reference",
-      label: "SSE events",
-      href: "/reference/sse-events/"
-    }
-  ]}
-/>
+| Table                   | Owned by              | Notes                                                                                            |
+| ----------------------- | --------------------- | ------------------------------------------------------------------------------------------------ |
+| `conversations`         | `ConversationService` | One row per conversation, including `title`, `system_prompt`, `created_at`, and `updated_at`.    |
+| `conversation_messages` | `ConversationService` | Ordered user and assistant messages, including assistant `status`, `finish_reason`, and `model`. |
+
+The desktop does not query SQLite directly and the Tauri host does not proxy
+conversation SQL.
+
+## Migration model
+
+The backend applies schema changes from an in-memory `databaseMigrations` array.
+On startup it:
+
+1. Opens the SQLite file.
+2. Reads `PRAGMA user_version`.
+3. Applies each missing SQL migration in order.
+4. Writes the new `user_version`.
+
+The current migrations create the two tables, add a message index, and install
+triggers that keep `conversations.updated_at` current.
+
+## Settings ownership
+
+The settings JSON is a separate host-managed artifact. The backend does not read
+it directly. The desktop reaches it through Tauri commands.
+
+## Current limitations
+
+- There is no public backend route for listing or resuming persisted
+  conversations after relaunch. The chat route can continue a conversation only
+  when the caller already has its identifier.
+- Streamed assistant text is not appended to the stored assistant row; only its
+  lifecycle state and finish reason are updated.
+- The current React Runtime settings tab does not persist its edited auto-start
+  value back through `save_settings`.
+- Recovery, export, and import are not first-class app features yet.
+
+## Coming soon
+
+- Conversation list and resume APIs
+- Export and import flows for SQLite data
+- Recovery tooling surfaced in the app rather than only implied by files on disk
+- Persisted generation and conversation settings beyond the current runtime JSON
+
+## Related pages
+
+- [Backend](/architecture/backend/)
+- [Database schemas](/reference/schema/)
+- [Configuration reference](/reference/configuration/)

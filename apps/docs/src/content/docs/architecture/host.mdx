@@ -1,46 +1,78 @@
 ---
 title: Tauri host and lifecycle
-description: Window and process lifecycle, capability grants, and credential custody.
+description: Window bootstrap, backend process ownership, and file-backed settings commands.
 docType: architecture
 sidebar:
   order: 3
 ---
 
-import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
-import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+The Tauri layer is a small native host. It does not implement the backend API
+itself; it starts the backend process and exposes a few native commands to the
+React UI.
 
-Window and process lifecycle, capability grants, and credential custody.
+## Registered commands
 
-<DocumentMeta
-  label="Page metadata"
-  entries={[{ label: "Type", value: "Architecture" }]}
-/>
+| Command              | Purpose                                                              |
+| -------------------- | -------------------------------------------------------------------- |
+| `start_backend`      | Spawns `pnpm run dev` in `apps/backend` and stores the child handle. |
+| `stop_backend`       | Kills the backend process group and waits for shutdown.              |
+| `get_backend_status` | Reports whether the stored child process is still running.           |
+| `load_settings`      | Reads `~/.lys/settings.json`, creating a default file if needed.     |
+| `save_settings`      | Writes a new settings JSON document to `~/.lys/settings.json`.       |
 
-It is reviewed together with the behaviour it describes, so a change that makes
-this page wrong is expected to update it in the same pull request. Where a
-statement here depends on a durable decision, the decision is linked rather
-than restated.
+## Backend process ownership
 
-Content is validated at build time: invalid frontmatter, a duplicate
-identifier, or a broken internal link fails the build rather than publishing a
-partial page.
+The host owns a `Backend` state object containing `Mutex<Option<Child>>`. The
+child process is started only when the UI asks for it or when auto-start logic
+requests it during desktop initialization.
 
-<RelatedDocuments
-  documents={[
-    {
-      kind: "Section",
-      label: "Architecture overview",
-      href: "/architecture/system/"
-    },
-    {
-      kind: "Decisions",
-      label: "Related decision records",
-      href: "/decisions/"
-    },
-    {
-      kind: "Reference",
-      label: "SSE events",
-      href: "/reference/sse-events/"
-    }
-  ]}
-/>
+```rust
+Command::new("pnpm")
+    .args(["run", "dev"])
+    .current_dir(backend_dir)
+    .process_group(0)
+    .spawn()
+```
+
+Stopping the backend sends `SIGKILL` to the whole process group, not just the
+direct child, and Tauri also attempts the same cleanup on app exit.
+
+The checked-in process supervisor currently uses Unix process-group APIs and
+the `nix` crate. The repository does not yet demonstrate equivalent lifecycle
+behavior on Windows.
+
+## Settings file
+
+The current host-managed settings file is:
+
+```json
+{
+  "runtime": {
+    "autoStartBackend": false,
+    "selectedModel": null
+  }
+}
+```
+
+Only the Rust host reads and writes this file directly. The React UI reaches it
+through Tauri `invoke` calls.
+
+## What the host does not currently do
+
+- It does not manage provider credentials.
+- It does not read the operating-system keychain.
+- It does not proxy HTTP requests to LM Studio.
+- It does not replay prior conversations into the window.
+
+## Coming soon
+
+- Credential management and secure secret storage
+- Richer native tooling beyond backend lifecycle and settings I/O
+- Release-mode backend startup that does not depend on `pnpm run dev`
+- Portable backend lifecycle support beyond the current Unix implementation
+
+## Related pages
+
+- [System overview](/architecture/system/)
+- [Backend](/architecture/backend/)
+- [Configuration reference](/reference/configuration/)

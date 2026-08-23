@@ -1,6 +1,6 @@
 ---
-title: Vision and principles
-description: The engineering values that decide arguments when the code does not.
+title: Engineering principles
+description: The repository-backed engineering values that guide implementation and review.
 sidebar:
   order: 2
 ---
@@ -15,20 +15,49 @@ The engineering values that decide arguments when the code does not.
   entries={[{ label: "Type", value: "Overview" }]}
 />
 
-It is reviewed together with the behaviour it describes, so a change that makes
-this page wrong is expected to update it in the same pull request. Where a
-statement here depends on a durable decision, the decision is linked rather
-than restated.
+The clearest statement of Lys engineering policy is still the canonical source:
+`CONTRIBUTING.md`, `docs/CODE_STANDARDS.md`, `docs/JSDOC.md`, and the review
+standards under `docs/code_reviews/`. This page is a short reading guide to the
+themes those documents repeat.
 
-Content is validated at build time: invalid frontmatter, a duplicate
-identifier, or a broken internal link fails the build rather than publishing a
-partial page.
+## Correctness before convenience
+
+Changes are expected to solve the root requirement or defect, not just the most
+visible symptom. Public behavior, persisted data, schemas, and documented
+contracts stay backward-compatible unless a task explicitly requires otherwise.
+
+## Small, reviewable changes
+
+The repository prefers the smallest coherent change that fixes the problem.
+Unrelated refactors, speculative abstractions, and formatting churn are all
+explicitly discouraged.
+
+## Explicit contracts
+
+Shared behavior is meant to be readable from code, types, and documentation
+together. The standards require stable rule identifiers, construct-level
+ownership, and JSDoc that explains lifecycle, side effects, and constraints
+that types alone do not express.
+
+## Validation is part of the work
+
+Lys treats validation as part of delivery, not a follow-up task. Contributors
+are expected to run the smallest relevant checks first, then broader ones when
+shared contracts or multiple packages are involved, and to report exactly what
+was and was not verified.
+
+## Documentation changes with behavior
+
+Repository policy is explicit that documentation belongs in the same change as
+the code or contract it describes. When a page would be misleading, the right
+fix is to correct it or mark the gap clearly, not to leave stale guidance in
+place.
 
 <RelatedDocuments
   documents={[
     {
       kind: "Section",
-      label: "Overview overview",
+      label: "Introduction",
       href: "/overview/introduction/"
     },
     {
@@ -37,9 +66,9 @@ partial page.
       href: "/decisions/"
     },
     {
-      kind: "Reference",
-      label: "SSE events",
-      href: "/reference/sse-events/"
+      kind: "Policy",
+      label: "Contribution workflow",
+      href: "/develop/workflow/"
     }
   ]}
 />

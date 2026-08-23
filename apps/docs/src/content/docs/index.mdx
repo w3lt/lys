@@ -1,15 +1,18 @@
 ---
 title: Build, review, and operate Lys.
-description: The engineering knowledge base for everyone working on Lys — current architecture, durable decisions, open proposals, operations, and reference material.
+description: Repository-backed guidance for understanding, developing, and operating the current Lys implementation.
 tableOfContents: false
 ---
 
 import EntranceGrid from "@/components/handbook/EntranceGrid.astro"
-import HandbookState from "@/components/handbook/HandbookState.astro"
 
-The engineering knowledge base for everyone working on Lys. Decisions,
-proposals, and changes keep their own history. This is not end-user product
-documentation.
+The engineering knowledge base for everyone working on Lys. This is not
+end-user product documentation.
+
+Architecture, development, operations, and reference pages describe the
+checked-in implementation. The Decisions, RFCs, and Changelog sections remain
+in the navigation, but are marked **Coming soon** until the repository has real
+records to publish.
 
 <EntranceGrid
   entrances={[
@@ -17,35 +20,36 @@ documentation.
       kicker: "01 · understand",
       title: "Understand Lys",
       description:
-        "Three processes, one session store, and the contracts between them.",
+        "What the desktop app, backend, protocol package, and shared models actually do today.",
       href: "/architecture/system/"
     },
     {
       kicker: "02 · build",
       title: "Start developing",
       description:
-        "Set up a machine, run Lys locally, and land a first reviewable change.",
+        "Set up Node, pnpm, Rust, and LM Studio, then trace one chat turn through the stack.",
       href: "/develop/setup/"
     },
     {
       kicker: "03 · operate",
       title: "Operate Lys",
-      description: "Configuration, diagnostics, and runbooks for recovery.",
+      description:
+        "Current configuration, data locations, process logging, and troubleshooting limits.",
       href: "/operate/configuration/"
     },
     {
       kicker: "04 · decide",
       title: "Review decisions",
-      description: "Why durable choices were made, and what they replaced.",
+      description:
+        "A reserved register for decisions recorded through real repository history.",
       href: "/decisions/"
     },
     {
       kicker: "05 · track",
       title: "Track changes",
-      description: "The repository changelog and the proposals behind it.",
+      description:
+        "Release-log status and the current absence of a canonical changelog.",
       href: "/changelog/"
     }
   ]}
 />
-
-<HandbookState />

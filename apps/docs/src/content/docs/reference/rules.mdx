@@ -1,46 +1,57 @@
 ---
 title: Rule index
-description: Stable code-standard identifiers and their current text.
+description: The active code-standard documents, their stable prefixes, and where to find rule identifiers in this repository.
 docType: reference
 sidebar:
   order: 6
 ---
 
-import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
-import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+The canonical rule index lives in the repository `docs/` directory. This page
+summarizes the active standard documents and their stable prefixes.
 
-Stable code-standard identifiers and their current text.
+## Active standard files
 
-<DocumentMeta
-  label="Page metadata"
-  entries={[{ label: "Type", value: "Reference" }]}
-/>
+| Item      | Prefix   | Source file                        |
+| --------- | -------- | ---------------------------------- |
+| Variable  | `VAR`    | `docs/code_standards/VARIABLE.md`  |
+| Constant  | `CONST`  | `docs/code_standards/CONSTANT.md`  |
+| Function  | `FUNC`   | `docs/code_standards/FUNCTION.md`  |
+| Type      | `TYPE`   | `docs/code_standards/TYPE.md`      |
+| Interface | `IFACE`  | `docs/code_standards/INTERFACE.md` |
+| Class     | `CLASS`  | `docs/code_standards/CLASS.md`     |
+| Object    | `OBJECT` | `docs/code_standards/OBJECT.md`    |
+| Component | `COMP`   | `docs/code_standards/COMPONENT.md` |
 
-It is reviewed together with the behaviour it describes, so a change that makes
-this page wrong is expected to update it in the same pull request. Where a
-statement here depends on a durable decision, the decision is linked rather
-than restated.
+## Shared foundation
 
-Content is validated at build time: invalid frontmatter, a duplicate
-identifier, or a broken internal link fails the build rather than publishing a
-partial page.
+The top-level construction rules are defined in:
 
-<RelatedDocuments
-  documents={[
-    {
-      kind: "Section",
-      label: "Reference overview",
-      href: "/reference/api/"
-    },
-    {
-      kind: "Decisions",
-      label: "Related decision records",
-      href: "/decisions/"
-    },
-    {
-      kind: "Reference",
-      label: "SSE events",
-      href: "/reference/sse-events/"
-    }
-  ]}
-/>
+- `docs/CODE_STANDARDS.md`
+- `CONTRIBUTING.md`
+- `docs/JSDOC.md` for repository-owned JavaScript and TypeScript declarations in
+  its scope
+
+## Finding rule identifiers
+
+Use the repository search command referenced by `docs/CODE_STANDARDS.md`:
+
+```sh
+rg -n '^(### [A-Z]+-[0-9]{3}|# )' docs/code_standards
+```
+
+That command lists stable rule headings such as `FUNC-###` or `TYPE-###`.
+
+## Current limitation
+
+This repository does not currently generate a flattened rule mirror for the docs
+site. The source of truth remains the Markdown files in `docs/`.
+
+## Coming soon
+
+- A generated rule mirror if the docs site needs one
+- Reference pages for deferred standards after those standards are approved
+
+## Related pages
+
+- [Package reference](/reference/packages/)
+- [Configuration reference](/reference/configuration/)

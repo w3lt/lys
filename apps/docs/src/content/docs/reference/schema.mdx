@@ -1,46 +1,86 @@
 ---
 title: Database schemas
-description: Tables, indexes, and applied migrations.
+description: The current SQLite tables, constraints, indexes, triggers, and settings JSON shape used by Lys.
 docType: reference
 sidebar:
   order: 4
 ---
 
-import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
-import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+The backend currently manages one SQLite schema and the Tauri host manages one
+small JSON schema for runtime settings.
 
-Tables, indexes, and applied migrations.
+## SQLite tables
 
-<DocumentMeta
-  label="Page metadata"
-  entries={[{ label: "Type", value: "Reference" }]}
-/>
+### `conversations`
 
-It is reviewed together with the behaviour it describes, so a change that makes
-this page wrong is expected to update it in the same pull request. Where a
-statement here depends on a durable decision, the decision is linked rather
-than restated.
+| Column          | Type            | Notes                                                                                              |
+| --------------- | --------------- | -------------------------------------------------------------------------------------------------- |
+| `id`            | `TEXT`          | Primary key                                                                                        |
+| `title`         | `TEXT`          | Nullable until title generation succeeds                                                           |
+| `system_prompt` | `TEXT NOT NULL` | Prompt associated with the conversation; the current chat request does not forward it to the model |
+| `created_at`    | `TEXT NOT NULL` | ISO timestamp                                                                                      |
+| `updated_at`    | `TEXT NOT NULL` | ISO timestamp                                                                                      |
 
-Content is validated at build time: invalid frontmatter, a duplicate
-identifier, or a broken internal link fails the build rather than publishing a
-partial page.
+### `conversation_messages`
 
-<RelatedDocuments
-  documents={[
-    {
-      kind: "Section",
-      label: "Reference overview",
-      href: "/reference/api/"
-    },
-    {
-      kind: "Decisions",
-      label: "Related decision records",
-      href: "/decisions/"
-    },
-    {
-      kind: "Reference",
-      label: "SSE events",
-      href: "/reference/sse-events/"
-    }
-  ]}
-/>
+| Column            | Type            | Notes                                                                                                             |
+| ----------------- | --------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `id`              | `TEXT`          | Primary key                                                                                                       |
+| `conversation_id` | `TEXT NOT NULL` | Foreign key to `conversations(id)` with `ON DELETE CASCADE`                                                       |
+| `role`            | `TEXT NOT NULL` | `user` or `assistant`                                                                                             |
+| `model`           | `TEXT`          | Required for assistant rows, absent for user rows                                                                 |
+| `content`         | `TEXT NOT NULL` | User content is non-empty; assistant content may remain empty because streamed deltas are not currently persisted |
+| `status`          | `TEXT`          | Assistant-only: `streaming`, `completed`, `interrupted`, `failed`                                                 |
+| `finish_reason`   | `TEXT`          | Assistant-only: `stop` or `length`, nullable while not completed                                                  |
+| `created_at`      | `TEXT NOT NULL` | ISO timestamp                                                                                                     |
+| `updated_at`      | `TEXT`          | Required for assistant rows                                                                                       |
+
+## Important constraints
+
+- User rows must have non-empty content and no model, status, or finish reason.
+- Assistant rows must have a model and status.
+- Completed assistant rows must also have a non-null finish reason.
+- Streaming, interrupted, and failed assistant rows must keep a null finish
+  reason.
+
+The current backend inserts an empty assistant row before generation and later
+updates its status and finish reason. It does not write streamed delta content
+back to that row.
+
+## Indexes and triggers
+
+| Name                                       | Kind    | Purpose                                                  |
+| ------------------------------------------ | ------- | -------------------------------------------------------- |
+| `conversation_messages_conversation_idx`   | index   | Orders messages by conversation, creation time, and id   |
+| `update_conversation_after_message_insert` | trigger | Updates `conversations.updated_at` after inserts         |
+| `update_conversation_updated_at`           | trigger | Keeps `updated_at` monotonic on conversation updates     |
+| `update_conversation_after_message_update` | trigger | Updates `conversations.updated_at` after message updates |
+
+## Migration strategy
+
+The backend applies schema changes from an ordered array of SQL strings and
+tracks the applied version with `PRAGMA user_version`.
+
+## Runtime settings JSON
+
+The Tauri host also reads and writes:
+
+```json
+{
+  "runtime": {
+    "autoStartBackend": false,
+    "selectedModel": null
+  }
+}
+```
+
+## Coming soon
+
+- Public schema contracts for conversation listing and resume routes
+- Export and import formats for persisted conversations
+- Additional persisted settings beyond the current runtime file
+
+## Related pages
+
+- [Persistence and ownership](/architecture/persistence/)
+- [Configuration reference](/reference/configuration/)

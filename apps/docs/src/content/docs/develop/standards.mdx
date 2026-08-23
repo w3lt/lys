@@ -1,6 +1,6 @@
 ---
 title: Code standards
-description: Stable rule identifiers, their rationale, and how exceptions are recorded.
+description: Which standards are active, how to find rule IDs, and how exceptions are handled.
 sidebar:
   order: 5
 ---
@@ -15,14 +15,51 @@ Stable rule identifiers, their rationale, and how exceptions are recorded.
   entries={[{ label: "Type", value: "Policy" }]}
 />
 
-It is reviewed together with the behaviour it describes, so a change that makes
-this page wrong is expected to update it in the same pull request. Where a
-statement here depends on a durable decision, the decision is linked rather
-than restated.
+The repository’s canonical construction rules start in `docs/CODE_STANDARDS.md`.
+That file tells you which construct-specific chapters are active and which
+planned chapters are still deferred.
 
-Content is validated at build time: invalid frontmatter, a duplicate
-identifier, or a broken internal link fails the build rather than publishing a
-partial page.
+## Active standards today
+
+The active chapters are:
+
+- Variable
+- Constant
+- Function
+- Type
+- Interface
+- Class
+- Object
+- Component
+
+Every active rule has a stable identifier so reviews can cite the exact rule
+without paraphrasing it.
+
+## Deferred chapters are not permission
+
+The standards index also lists deferred chapters such as module, package, API,
+error, event, async, configuration, schema, test, and comment. Deferred means
+the dedicated chapter is not approved yet. It does not mean contributors are
+free to make those areas vague or undocumented.
+
+## JSDoc is part of the standard set
+
+For repository-owned JavaScript and TypeScript, `docs/JSDOC.md` is part of the
+required reading. It defines which declarations need JSDoc and what those docs
+must explain beyond the type signature.
+
+## Exceptions
+
+Exceptions are allowed only under documented technical constraint and require
+explicit reviewer approval. The required exception record is defined in
+`CONTRIBUTING.md`.
+
+## How to work practically
+
+1. Start with `docs/CODE_STANDARDS.md`.
+2. Open the chapter for each construct you are changing.
+3. Check `docs/JSDOC.md` if your change touches repository-owned JS or TS.
+4. Use rule IDs in review or follow-up notes.
 
 <RelatedDocuments
   documents={[
@@ -40,6 +77,11 @@ partial page.
       kind: "Reference",
       label: "SSE events",
       href: "/reference/sse-events/"
+    },
+    {
+      kind: "Policy",
+      label: "Documentation guidelines",
+      href: "/develop/docs/"
     }
   ]}
 />

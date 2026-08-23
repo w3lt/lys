@@ -1,6 +1,6 @@
 ---
 title: Running Lys locally
-description: Dev commands, watch modes, and how to point at a scratch data directory.
+description: Dev commands, watch modes, local endpoints, and current limitations.
 sidebar:
   order: 2
 ---
@@ -8,21 +8,50 @@ sidebar:
 import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
 import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
 
-Dev commands, watch modes, and how to point at a scratch data directory.
+Dev commands, watch modes, local endpoints, and current limitations.
 
 <DocumentMeta
   label="Page metadata"
   entries={[{ label: "Type", value: "Guide" }]}
 />
 
-It is reviewed together with the behaviour it describes, so a change that makes
-this page wrong is expected to update it in the same pull request. Where a
-statement here depends on a durable decision, the decision is linked rather
-than restated.
+## Root commands
 
-Content is validated at build time: invalid frontmatter, a duplicate
-identifier, or a broken internal link fails the build rather than publishing a
-partial page.
+Run all of these from the repository root:
+
+```sh
+pnpm docs:dev
+pnpm backend:dev
+pnpm dev
+```
+
+## What each command does
+
+- `pnpm docs:dev`: starts the Astro/Starlight docs app.
+- `pnpm backend:dev`: runs `tsx watch src/index.ts` in `apps/backend`.
+- `pnpm dev`: runs `pnpm --filter @lys/desktop run tauri dev`, which starts the
+  desktop Vite app and the Tauri shell.
+
+## Runtime behavior to expect
+
+- The desktop app talks to the backend over HTTP at `http://127.0.0.1:12345`.
+- The chat transport is a `POST /api/v1/chat` request that returns an SSE
+  stream.
+- The backend uses LM Studio for model inventory and load operations and an
+  OpenAI-compatible endpoint for chat completions.
+
+## Backend lifecycle in the desktop app
+
+The desktop store can start and stop the backend through Tauri commands. It
+also has a runtime setting named `autoStartBackend`; when that setting is
+already enabled in `~/.lys/settings.json`, initialization starts the backend
+automatically. The current settings UI does not persist edits back to that file.
+
+## Coming soon
+
+The current backend configuration writes its SQLite database to
+`~/.lys/lys_db.sqlite`. There is no contributor-facing command or documented
+flag yet for swapping in a scratch data directory from the docs workflow.
 
 <RelatedDocuments
   documents={[
@@ -40,6 +69,11 @@ partial page.
       kind: "Reference",
       label: "SSE events",
       href: "/reference/sse-events/"
+    },
+    {
+      kind: "Reference",
+      label: "API reference",
+      href: "/reference/api/"
     }
   ]}
 />

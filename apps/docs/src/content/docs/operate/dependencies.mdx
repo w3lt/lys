@@ -9,38 +9,70 @@ sidebar:
 import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
 import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
 
-What must exist on a machine for Lys to start.
+Current runtime and build dependencies that are evidenced in this repository.
 
 <DocumentMeta
   label="Page metadata"
   entries={[{ label: "Type", value: "Reference" }]}
 />
 
-It is reviewed together with the behaviour it describes, so a change that makes
-this page wrong is expected to update it in the same pull request. Where a
-statement here depends on a durable decision, the decision is linked rather
-than restated.
+## Desktop application
 
-Content is validated at build time: invalid frontmatter, a duplicate
-identifier, or a broken internal link fails the build rather than publishing a
-partial page.
+The desktop application is a Tauri app. Its checked-in build config expects:
+
+- a frontend build produced from `apps/desktop`
+- a Tauri host in `apps/desktop/src-tauri`
+- Rust tooling for Tauri development and packaging
+
+For local development, the repository root script runs `pnpm --filter
+@lys/desktop run tauri dev`.
+
+## Backend
+
+The desktop host manages a local backend process and expects it to serve HTTP
+on `127.0.0.1:12345`.
+
+The backend itself depends on:
+
+- local filesystem access for `~/.lys/lys_db.sqlite`
+- SQLite support through Node's `node:sqlite`
+- an LM Studio instance reachable at `127.0.0.1:1234`
+
+The backend's chat and model services are both wired to that LM Studio address
+today.
+
+## Docs site
+
+The docs app builds with Astro and Starlight from `apps/docs`. The checked-in
+GitHub Pages workflow uses:
+
+- Node 24
+- `pnpm --filter @lys/docs run build`
+- `apps/docs/dist` as the deploy artifact
+
+## What is not formalized yet
+
+The repository does not currently publish:
+
+- a supported OS-by-OS runtime dependency matrix
+- installer prerequisites for desktop end users
+- a documented production deployment target for the backend separate from the
+  desktop host
+
+This page reflects only the dependencies proven by checked-in scripts and
+configuration.
 
 <RelatedDocuments
   documents={[
     {
       kind: "Section",
-      label: "Operate overview",
+      label: "Configuration",
       href: "/operate/configuration/"
     },
     {
-      kind: "Decisions",
-      label: "Related decision records",
-      href: "/decisions/"
-    },
-    {
-      kind: "Reference",
-      label: "SSE events",
-      href: "/reference/sse-events/"
+      kind: "Guide",
+      label: "Packaging and releases",
+      href: "/operate/releases/"
     }
   ]}
 />

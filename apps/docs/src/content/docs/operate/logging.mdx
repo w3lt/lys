@@ -1,6 +1,6 @@
 ---
 title: Logging and diagnostics
-description: Log levels, the diagnostics bundle, and what is safe to share.
+description: Current checked-in logging and diagnostics surfaces.
 sidebar:
   order: 5
 ---
@@ -8,38 +8,70 @@ sidebar:
 import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
 import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
 
-Log levels, the diagnostics bundle, and what is safe to share.
+Current observability surfaces that are evidenced in this repository.
 
 <DocumentMeta
   label="Page metadata"
   entries={[{ label: "Type", value: "Guide" }]}
 />
 
-It is reviewed together with the behaviour it describes, so a change that makes
-this page wrong is expected to update it in the same pull request. Where a
-statement here depends on a durable decision, the decision is linked rather
-than restated.
+## Backend health check
 
-Content is validated at build time: invalid frontmatter, a duplicate
-identifier, or a broken internal link fails the build rather than publishing a
-partial page.
+The backend registers a single health endpoint that returns `{ ok: true }` when
+the Fastify app is running:
+
+- route: `/api/v1/heath`
+- method: `GET`
+
+This is the only checked-in machine-readable diagnostics surface in the backend
+today.
+
+## Process logging
+
+The backend enables Fastify's built-in logger, so request and application logs
+are emitted on the backend process's standard output and standard error streams.
+
+The checked-in code also includes explicit request-scoped debug and error calls
+in the chat path, and the Tauri host writes at least one shutdown failure path
+to stderr.
+
+## Desktop runtime status
+
+The desktop runtime settings pane exposes a small amount of process state:
+
+- whether the backend is `running`, `starting`, `stopping`, or `stopped`
+- the fixed backend address `127.0.0.1:12345`
+- a derived uptime label while the backend is running
+
+The same pane also exposes `Start` and `Stop` actions that call Tauri commands
+to manage the backend child process.
+
+## What is not implemented yet
+
+The repository does not currently prove support for:
+
+- log files or log rotation
+- diagnostics bundles
+- redaction policies for exported diagnostics artifacts
+- a documented incident-sharing workflow
+
+:::note[Coming soon]
+File retention, log rotation, diagnostics bundles, and export/redaction rules
+should be added to this page only after the repository ships them as supported
+behavior.
+:::
 
 <RelatedDocuments
   documents={[
     {
       kind: "Section",
-      label: "Operate overview",
-      href: "/operate/configuration/"
-    },
-    {
-      kind: "Decisions",
-      label: "Related decision records",
-      href: "/decisions/"
+      label: "Troubleshooting",
+      href: "/operate/troubleshooting/"
     },
     {
       kind: "Reference",
-      label: "SSE events",
-      href: "/reference/sse-events/"
+      label: "Configuration",
+      href: "/operate/configuration/"
     }
   ]}
 />

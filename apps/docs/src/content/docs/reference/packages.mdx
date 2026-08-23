@@ -1,46 +1,70 @@
 ---
 title: Package reference
-description: Each workspace package, its exports, and its stability level.
+description: The current workspace apps and packages involved in the desktop, backend, and shared contracts.
 docType: reference
 sidebar:
   order: 5
 ---
 
-import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
-import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+The current workspace contains three apps and two shared packages.
 
-Each workspace package, its exports, and its stability level.
+## Workspace map
 
-<DocumentMeta
-  label="Page metadata"
-  entries={[{ label: "Type", value: "Reference" }]}
-/>
+| Project         | Kind    | Current role                                                                   |
+| --------------- | ------- | ------------------------------------------------------------------------------ |
+| `@lys/desktop`  | app     | React UI plus Tauri frontend bindings                                          |
+| `@lys/backend`  | app     | Fastify backend serving health, LLM, and chat endpoints                        |
+| `@lys/docs`     | app     | Astro/Starlight engineering handbook                                           |
+| `@lys/protocol` | package | Shared route constants, request and response schemas, and chat event contracts |
+| `@lys/share`    | package | Shared conversation and message schemas                                        |
 
-It is reviewed together with the behaviour it describes, so a change that makes
-this page wrong is expected to update it in the same pull request. Where a
-statement here depends on a durable decision, the decision is linked rather
-than restated.
+## Project notes
 
-Content is validated at build time: invalid frontmatter, a duplicate
-identifier, or a broken internal link fails the build rather than publishing a
-partial page.
+### `@lys/desktop`
 
-<RelatedDocuments
-  documents={[
-    {
-      kind: "Section",
-      label: "Reference overview",
-      href: "/reference/api/"
-    },
-    {
-      kind: "Decisions",
-      label: "Related decision records",
-      href: "/decisions/"
-    },
-    {
-      kind: "Reference",
-      label: "SSE events",
-      href: "/reference/sse-events/"
-    }
-  ]}
-/>
+- Entry UI: `src/App.tsx`
+- Native host: `src-tauri`
+- Important runtime dependencies: React, Zustand, Tauri API bindings,
+  `eventsource-parser`
+
+### `@lys/backend`
+
+- Entry point: `src/index.ts`
+- Framework: Fastify
+- Important runtime dependencies: `@fastify/sse`, `@lmstudio/sdk`, `openai`,
+  `fastify-type-provider-zod`
+
+### `@lys/docs`
+
+- Content root: `src/content/docs`
+- Framework: Astro with Starlight
+- Builds the static handbook published by the checked-in GitHub Pages workflow
+
+### `@lys/protocol`
+
+- Re-exports API route modules, constants, and HTTP helpers
+- Defines the backend loopback host and port constants used by both backend and
+  desktop
+
+### `@lys/share`
+
+- Exports Zod schemas and inferred TypeScript types for conversations and
+  messages
+- Used by both backend persistence code and desktop chat state
+
+## What is not in this workspace map
+
+- No separate provider adapter package
+- No standalone persistence package
+- No generated SDK package for backend consumers
+
+## Coming soon
+
+- A public package boundary for conversation queries if those APIs are added
+- Usable non-Runtime settings tabs connected to live desktop state
+
+## Related pages
+
+- [System overview](/architecture/system/)
+- [Shared protocol](/architecture/protocol/)
+- [Backend API contracts](/reference/api/)

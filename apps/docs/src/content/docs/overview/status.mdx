@@ -1,60 +1,47 @@
 ---
-title: Status and roadmap
-description: What works today, what is in flight, and what is deliberately deferred.
+title: Implementation status
+description: What the checked-in implementation does today and which documented areas are still missing.
 sidebar:
   order: 3
 ---
 
 import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
 import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
-import StatusBadge from "@/components/handbook/StatusBadge.astro"
 
-What works today, what is in flight, and what is deliberately deferred.
+What works today and which documented areas are still missing.
 
 <DocumentMeta
   label="Page metadata"
   entries={[{ label: "Type", value: "Overview" }]}
 />
 
-## Shipped
+This page is intentionally conservative. It describes behavior visible in the
+repository today; it is not a promise of unreleased work.
 
-<StatusBadge status="implemented" label="shipped" />
+## Implemented now
 
-Session streaming is stable across all three processes. A message is persisted
-before any provider call, reaches the interface only as an event, and survives a
-reconnect through a bounded replay window. The desktop application holds no
-independent copy of session truth, so there is one answer to what a session
-contains at every moment.
+- The desktop can start and stop the backend through the Tauri host.
+- The backend exposes a health route, LLM inventory and load routes, and a chat
+  route.
+- A chat turn creates or continues a conversation, inserts user and assistant
+  rows in SQLite, and streams typed SSE events back to the desktop.
+- The backend also attempts to generate a conversation title asynchronously and
+  emits it as a stream event.
+- The Tauri host loads a small runtime settings file from
+  `~/.lys/settings.json`.
 
-## In flight
+## Coming soon
 
-<StatusBadge status="accepted" label="in flight" />
+The current repository does not yet provide:
 
-Tool-call frames behind a capability flag. Partial `tool_call` frames let the
-interface render a call as it is produced rather than after it completes; they
-ship behind a protocol capability flag so host and interface can be released
-independently. The proposal is accepted and not yet implemented, so current
-architecture pages remain authoritative. See
-[RFC-0012](/rfcs/rfc-0012-streaming-tool-call-frames/).
-
-## Proposed
-
-<StatusBadge status="discussion" label="proposed" />
-
-Workspace-scoped sessions. Grouping sessions by the working directory they were
-created in is under discussion; what a session should do when its directory is
-moved or deleted is unresolved and currently blocks acceptance. See
-[RFC-0013](/rfcs/rfc-0013-workspace-scoped-sessions/).
-
-## Deliberately deferred
-
-The following are deferred until a demonstrated need exists, rather than
-planned: versioned documentation, end-user documentation, private
-documentation or authentication, CMS authoring, comments, accounts and
-analytics, translations, a generated API reference, and embedded AI assistance.
-
-Deferred does not mean rejected. It means the work has no current sponsor and
-no evidence of need, and a proposal is the way to change that.
+- conversation history retrieval or restoration after relaunch
+- persisted assistant delta content in SQLite
+- usable Model, Generation, and Conversation settings tabs, followed by live
+  wiring between those controls and chat requests
+- replay or reconnect semantics for chat streams
+- tool-call stream events
+- a production desktop release workflow
+- evidenced ADR, RFC, and release-history records
 
 ## Related documents
 
@@ -62,7 +49,7 @@ no evidence of need, and a proposal is the way to change that.
   documents={[
     {
       kind: "Section",
-      label: "Overview overview",
+      label: "Introduction",
       href: "/overview/introduction/"
     },
     {
@@ -71,9 +58,9 @@ no evidence of need, and a proposal is the way to change that.
       href: "/changelog/"
     },
     {
-      kind: "RFCs",
-      label: "Requests for Comments",
-      href: "/rfcs/"
+      kind: "Reference",
+      label: "Backend API contracts",
+      href: "/reference/api/"
     }
   ]}
 />

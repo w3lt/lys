@@ -1,41 +1,59 @@
 ---
 title: System overview
-description: The three processes, the contracts between them, and where state lives.
+description: The React desktop UI, the Tauri host, the Fastify backend, and the shared contracts between them.
 docType: architecture
 sidebar:
   order: 1
 ---
 
-import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
-import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+Lys currently has three cooperating application components, one required
+external model runtime, and two shared TypeScript contract packages.
 
-The three processes, the contracts between them, and where state lives.
+## Runtime parts
 
-<DocumentMeta
-  label="Page metadata"
-  entries={[{ label: "Type", value: "Architecture" }]}
-/>
+| Part                      | Implementation                        | Responsibility                                                                                                              |
+| ------------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Desktop UI                | React in `apps/desktop/src`           | Renders chat and settings views, opens backend HTTP streams, and applies typed chat events to local UI state.               |
+| Host                      | Tauri in `apps/desktop/src-tauri/src` | Starts and stops the backend process, exposes native commands to the UI, and reads or writes `~/.lys/settings.json`.        |
+| Backend                   | Fastify in `apps/backend/src`         | Serves HTTP and SSE endpoints, persists conversations in SQLite, and talks to LM Studio for model inventory and generation. |
+| Model runtime             | LM Studio on `127.0.0.1:1234`         | Supplies downloaded-model inventory, model loading, chat completions, and title generation.                                 |
+| Shared API contract       | `@lys/protocol`                       | Defines route paths, request bodies, response schemas, and chat SSE event variants with Zod.                                |
+| Shared conversation model | `@lys/share`                          | Defines the conversation, message, and metadata shapes shared between backend and desktop.                                  |
 
-It is reviewed together with the behaviour it describes, so a change that makes
-this page wrong is expected to update it in the same pull request. Where a
-statement here depends on a durable decision, the decision is linked rather
-than restated.
+## Process boundary
 
-Content is validated at build time: invalid frontmatter, a duplicate
-identifier, or a broken internal link fails the build rather than publishing a
-partial page.
+The desktop UI does not call LM Studio directly. It talks to the backend over
+loopback HTTP and consumes one SSE stream per chat request.
 
-<RelatedDocuments
-  documents={[
-    {
-      kind: "Decisions",
-      label: "Related decision records",
-      href: "/decisions/"
-    },
-    {
-      kind: "Reference",
-      label: "SSE events",
-      href: "/reference/sse-events/"
-    }
-  ]}
-/>
+```text
+React UI -> Tauri commands (process and settings lifecycle)
+React UI -> HTTP/SSE -> Fastify backend -> LM Studio
+Fastify backend -> SQLite
+```
+
+## State ownership
+
+| State                                        | Owner                   | Notes                                                                                         |
+| -------------------------------------------- | ----------------------- | --------------------------------------------------------------------------------------------- |
+| Conversation rows and message rows           | Backend                 | Stored in `~/.lys/lys_db.sqlite`.                                                             |
+| Chat request lifecycle in the current window | Desktop UI              | Held in the chat Zustand store while one request is active.                                   |
+| Backend process status                       | Desktop UI + Tauri host | The host owns the process; the UI queries status during initialization and lifecycle actions. |
+| Runtime settings JSON                        | Tauri host              | Stored in `~/.lys/settings.json`.                                                             |
+| Theme preference                             | Desktop UI              | Stored as `lys.theme` in WebView `localStorage`.                                              |
+| Route and event schemas                      | `@lys/protocol`         | Used by both backend and desktop.                                                             |
+
+## What this system is not
+
+- The backend is not a Rust service. Rust currently exists only in the Tauri
+  host layer.
+- The chat stream is not a replayable shared event bus. The current
+  implementation sends SSE events directly from one HTTP request handler.
+- The current architecture does not include keychain-backed credentials,
+  provider handles, or pluggable provider adapters.
+
+## Related pages
+
+- [Desktop application](/architecture/desktop/)
+- [Tauri host and lifecycle](/architecture/host/)
+- [Backend](/architecture/backend/)
+- [Shared protocol](/architecture/protocol/)

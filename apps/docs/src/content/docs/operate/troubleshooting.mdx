@@ -8,38 +8,76 @@ sidebar:
 import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
 import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
 
-Common symptoms mapped to causes and runbooks.
+Current troubleshooting guidance grounded in the checked-in codebase.
 
 <DocumentMeta
   label="Page metadata"
   entries={[{ label: "Type", value: "Guide" }]}
 />
 
-It is reviewed together with the behaviour it describes, so a change that makes
-this page wrong is expected to update it in the same pull request. Where a
-statement here depends on a durable decision, the decision is linked rather
-than restated.
+## The desktop shows the backend as stopped
 
-Content is validated at build time: invalid frontmatter, a duplicate
-identifier, or a broken internal link fails the build rather than publishing a
-partial page.
+The desktop runtime pane is the current control surface for backend lifecycle.
+If it reports the backend as stopped, start there first:
+
+- confirm the runtime pane reports `stopped` rather than `starting`
+- start the backend from that pane
+- if startup succeeds, the pane should switch to `running` and show uptime for
+  `127.0.0.1:12345`
+
+## The backend starts but model operations fail
+
+The backend is wired to LM Studio at `127.0.0.1:1234`. If model listing,
+loading, or chat requests fail while the backend itself is up, verify that LM
+Studio is running and reachable at that address.
+
+## Lys forgets runtime settings
+
+The desktop host owns `~/.lys/settings.json`, but the checked-in desktop UI
+currently loads settings without calling the Tauri save command after runtime
+setting edits. If runtime preferences do not survive a restart:
+
+- check whether `~/.lys/settings.json` exists
+- if it exists, verify that it contains valid JSON
+- if it does not exist, the host should recreate it the next time settings are
+  loaded
+- if the file exists but does not reflect a recent UI change, that matches the
+  current implementation gap: save wiring exists in Tauri, but not in the UI
+
+## Startup fails after a schema change
+
+The conversation service reads SQLite `PRAGMA user_version` on startup and
+refuses to open a database newer than the running binary supports. If a startup
+failure mentions an unsupported database version, use a matching or newer build
+rather than editing the database by hand.
+
+## Known gaps
+
+The repository does not currently include evidenced support for:
+
+- automated store repair commands
+- diagnostics bundles
+- packaged log collection and rotation
+- a published operator escalation path
+
+Those workflows should be documented here only after the product ships them.
 
 <RelatedDocuments
   documents={[
     {
       kind: "Section",
-      label: "Operate overview",
-      href: "/operate/configuration/"
-    },
-    {
-      kind: "Decisions",
-      label: "Related decision records",
-      href: "/decisions/"
+      label: "Logging and diagnostics",
+      href: "/operate/logging/"
     },
     {
       kind: "Reference",
-      label: "SSE events",
-      href: "/reference/sse-events/"
+      label: "Data locations and lifecycle",
+      href: "/operate/data/"
+    },
+    {
+      kind: "Runbook",
+      label: "Session recovery",
+      href: "/operate/runbooks/recover-session-database/"
     }
   ]}
 />

@@ -1,6 +1,6 @@
 ---
 title: Documentation guidelines
-description: Where a fact belongs, and how to avoid a second copy of it.
+description: Where documentation belongs in this repo, how the handbook is validated, and how to avoid stale copies.
 sidebar:
   order: 8
 ---
@@ -15,14 +15,48 @@ Where a fact belongs, and how to avoid a second copy of it.
   entries={[{ label: "Type", value: "Policy" }]}
 />
 
-It is reviewed together with the behaviour it describes, so a change that makes
-this page wrong is expected to update it in the same pull request. Where a
-statement here depends on a durable decision, the decision is linked rather
-than restated.
+The repository policy is explicit: documentation changes belong in the same
+change as the behavior or contract they describe.
 
-Content is validated at build time: invalid frontmatter, a duplicate
-identifier, or a broken internal link fails the build rather than publishing a
-partial page.
+## Put facts at their canonical source
+
+- Put workflow and contributor policy in `CONTRIBUTING.md`.
+- Put construction rules in `docs/CODE_STANDARDS.md` and its active chapters.
+- Put JS and TS documentation rules in `docs/JSDOC.md`.
+- Put durable decision history in ADRs.
+- Put proposed future changes in RFCs.
+- Put shared runtime and transport contracts in reference pages or the package
+  code they describe.
+
+When a page depends on an existing decision or standard, prefer linking to that
+source over restating it in slightly different words.
+
+## Handbook validation
+
+The docs app validates handbook frontmatter at build time. The content model
+currently recognizes these `docType` values:
+
+- `architecture`
+- `decision`
+- `proposal`
+- `runbook`
+- `reference`
+
+Decision and proposal pages also have required metadata such as identifiers,
+status, dates, and affected areas.
+
+## Record integrity
+
+Generated handbook indexes fail closed when required record metadata is missing
+or two records claim the same identifier. That is deliberate: a broken index is
+better than publishing misleading decision or RFC listings.
+
+## Practical writing rules
+
+- Remove filler and stale claims instead of decorating them.
+- Say when a capability does not exist yet.
+- Avoid inventing policy not grounded in the repo.
+- Keep docs close to the code and contracts they describe.
 
 <RelatedDocuments
   documents={[
@@ -40,6 +74,11 @@ partial page.
       kind: "Reference",
       label: "SSE events",
       href: "/reference/sse-events/"
+    },
+    {
+      kind: "Policy",
+      label: "Code standards",
+      href: "/develop/standards/"
     }
   ]}
 />

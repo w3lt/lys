@@ -1,95 +1,99 @@
 ---
 title: SSE events
-description: Every event published on the session stream, with normative field names, units, defaults, and compatibility rules.
+description: The six concrete SSE payload variants currently emitted by the chat route.
 docType: reference
-contract: "@lys/protocol"
-contractVersion: v1
-stability: stable
 sidebar:
   order: 2
 ---
 
-import FieldList from "@/components/handbook/FieldList.astro"
-import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
-import RecordMeta from "@/components/handbook/RecordMeta.astro"
+The current chat route emits exactly six SSE payload variants. The payload
+shape is defined by `chatApiStreamEventSchema` in `@lys/protocol`.
 
-Every event published on the session stream. Field names, units, defaults, and
-compatibility rules are normative; anything not listed here is not part of the
-contract.
+## Event variants
 
-<RecordMeta frontmatter={frontmatter} />
+| Event name                         | Payload fields                                    | Meaning                                                              |
+| ---------------------------------- | ------------------------------------------------- | -------------------------------------------------------------------- |
+| `start-new-conversation-turn`      | `conversation`, `userMessage`, `assistantMessage` | The backend created a new conversation and persisted the first turn. |
+| `start-existing-conversation-turn` | `userMessage`, `assistantMessage`                 | The backend persisted a new turn on an existing conversation.        |
+| `title`                            | `title`                                           | A generated title for the active conversation.                       |
+| `delta`                            | `content`                                         | One non-empty assistant text fragment.                               |
+| `done`                             | `finishReason`                                    | Successful assistant completion with `stop` or `length`.             |
+| `error`                            | `message`                                         | A user-presentable error string.                                     |
 
-## Event types
+## Payload details
 
-| Event               | Meaning                                                       | Since |
-| ------------------- | ------------------------------------------------------------- | ----- |
-| `session.created`   | A new session exists and is writable.                         | v1.0  |
-| `message.appended`  | A message was committed to the store.                         | v1.0  |
-| `message.delta`     | A fragment of an in-progress assistant message.               | v1.0  |
-| `turn.failed`       | A turn ended without a usable result; carries a typed reason. | v1.1  |
-| `session.truncated` | Messages after a point were removed by an explicit write.     | v1.2  |
-| `stream.resumed`    | Replay finished; subsequent events are live.                  | v1.2  |
+### `start-new-conversation-turn`
 
-## Common fields
+Includes:
 
-<FieldList
-  fields={[
-    {
-      name: "event_id",
-      type: "string · ULID",
-      presence: "required",
-      description:
-        "Monotonic per session. A client may resume from the last identifier it processed; the bus retains the most recent 200 events per session."
-    },
-    {
-      name: "session_id",
-      type: "string · UUIDv7",
-      presence: "required",
-      description:
-        "Stable for the life of the session. Never reused after deletion."
-    },
-    {
-      name: "emitted_at",
-      type: "integer · ms since epoch",
-      presence: "required",
-      description:
-        "Backend clock at commit time, not provider time. Not suitable for ordering; use event_id."
-    },
-    {
-      name: "reason",
-      type: "enum",
-      presence: "optional",
-      description:
-        "Present on turn.failed only: timeout, cancelled, provider_error, invalid_response. Unknown values must be treated as provider_error."
-    }
-  ]}
-/>
+- full `conversation` metadata
+- one persisted user message
+- one persisted assistant message in `streaming` state
 
-## Compatibility
+### `start-existing-conversation-turn`
 
-New event types and new optional fields are additive and do not change the major
-version. Removing an event, renaming a field, or narrowing an accepted value
-requires an ADR and a deprecation notice on this page for one release before the
-change lands.
+Includes:
 
-## Related documents
+- one persisted user message
+- one persisted assistant message in `streaming` state
 
-<RelatedDocuments
-  documents={[
-    {
-      kind: "Architecture",
-      label: "Backend",
-      href: "/architecture/backend/"
-    },
-    {
-      kind: "RFC",
-      label: "RFC-0004 — Replayable event retention",
-      href: "/rfcs/rfc-0004-replayable-event-retention/"
-    },
-    {
-      kind: "ADR",
-      label: "ADR-0007 — The Tauri host owns provider credentials",
-      href: "/decisions/adr-0007-credential-handles/"
-    }
-  ]}
-/>
+The desktop uses its current active conversation metadata together with these
+messages to build the new transcript state.
+
+### `title`
+
+Carries a non-empty string title generated in parallel with the chat stream.
+
+### `delta`
+
+Carries one non-empty `content` fragment. The desktop appends it to the current
+streaming assistant message.
+
+### `done`
+
+Carries:
+
+```json
+{
+  "type": "done",
+  "finishReason": "stop"
+}
+```
+
+The only accepted `finishReason` values are `stop` and `length`.
+
+### `error`
+
+Carries a non-empty `message` string. The desktop presents it inline and may
+also mark the current assistant message as failed locally.
+
+## What is not on the current stream
+
+- No `event_id`
+- No `session_id`
+- No `emitted_at`
+- No replay marker such as `stream.resumed`
+- No tool-call frame events
+
+## Event ordering today
+
+Every valid stream begins with one turn-start event. After that, chat generation
+and title generation run concurrently:
+
+1. `start-new-conversation-turn` or `start-existing-conversation-turn`
+2. zero or more `delta` events before a successful `done`
+3. a `title` event may arrive before, during, or after the chat events
+
+An `error` event can report failure in either concurrent task. A title error does
+not prevent later chat events, so `error` is not universally terminal.
+
+## Coming soon
+
+- Replay and resume markers if conversation restoration is added
+- Tool-call or structured action stream events
+- Stronger protocol versioning around additive event growth
+
+## Related pages
+
+- [Backend](/architecture/backend/)
+- [Shared protocol](/architecture/protocol/)

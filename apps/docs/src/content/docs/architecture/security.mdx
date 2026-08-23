@@ -1,0 +1,60 @@
+---
+title: Security and trust boundaries
+description: "The current local trust boundary: loopback services, schema validation, and file-backed settings without credential management."
+docType: architecture
+sidebar:
+  order: 8
+---
+
+The current security posture is intentionally simple and local. The backend and
+LM Studio both run on loopback, request and event payloads are validated with
+Zod, and there is no credential-management subsystem yet.
+
+## Current trust boundaries
+
+| Boundary                     | Current state                                                         |
+| ---------------------------- | --------------------------------------------------------------------- |
+| React UI -> Tauri host       | Trusted application boundary using Tauri `invoke` commands.           |
+| React UI -> Fastify backend  | Loopback HTTP and SSE only. No auth layer beyond local binding.       |
+| Fastify backend -> LM Studio | Loopback connections to local LM Studio HTTP and WebSocket endpoints. |
+| Backend -> SQLite file       | Local filesystem access to `~/.lys/lys_db.sqlite`.                    |
+| Tauri host -> settings file  | Local filesystem access to `~/.lys/settings.json`.                    |
+
+## Current controls
+
+| Control                    | What it does                                                                     |
+| -------------------------- | -------------------------------------------------------------------------------- |
+| Loopback host constants    | Backend and LM Studio addresses default to `127.0.0.1`.                          |
+| Dev CORS policy            | Fastify allows only `http://localhost:1420` and `http://127.0.0.1:1420` origins. |
+| Zod request validation     | Backend validates route bodies and desktop validates incoming SSE payloads.      |
+| Route-local abort handling | Closing the SSE connection aborts the backend chat task.                         |
+
+## Candid limits
+
+- There is no keychain integration.
+- There is no scoped credential-handle layer.
+- There is no auth token or CSRF layer on the loopback backend.
+- The current Tauri configuration sets no Content Security Policy (`csp` is
+  `null`).
+- The backend currently uses a dummy API key value when talking to local
+  OpenAI-compatible LM Studio endpoints that expect an API key field.
+- Runtime settings and conversation data live on disk in user-space files.
+
+## Practical implication
+
+Loopback binding limits network exposure, but this development architecture
+must not be described as a hardened secret-management boundary. The codebase
+does not yet implement those guarantees.
+
+## Coming soon
+
+- Credential storage and retrieval
+- Provider authentication flows
+- More explicit diagnostics and log-redaction policy
+- Security review of release-mode desktop and backend packaging
+
+## Related pages
+
+- [Tauri host and lifecycle](/architecture/host/)
+- [Backend](/architecture/backend/)
+- [Configuration reference](/reference/configuration/)

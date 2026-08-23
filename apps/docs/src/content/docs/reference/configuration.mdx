@@ -1,0 +1,77 @@
+---
+title: Configuration reference
+description: The current constants, file paths, and persisted runtime settings used by the desktop and backend.
+docType: reference
+sidebar:
+  order: 3
+---
+
+Lys currently uses shared loopback constants, backend runtime composition, a
+small Tauri-managed settings file, and one WebView theme preference.
+
+## Shared constants
+
+| Constant        | Value       | Used by                                      |
+| --------------- | ----------- | -------------------------------------------- |
+| `API_PREFIX_V1` | `/api/v1`   | Route path composition                       |
+| `BACKEND_HOST`  | `127.0.0.1` | Backend bind host and desktop backend URL    |
+| `BACKEND_PORT`  | `12345`     | Backend bind port and desktop backend URL    |
+| `LMSTUDIO_HOST` | `127.0.0.1` | Backend LM Studio HTTP and WebSocket clients |
+| `LMSTUDIO_PORT` | `1234`      | Backend LM Studio HTTP and WebSocket clients |
+
+## Backend-composed values
+
+| Value                        | Current source                                |
+| ---------------------------- | --------------------------------------------- |
+| Backend listen address       | `BACKEND_HOST` and `BACKEND_PORT`             |
+| LM Studio HTTP base URL      | `http://${LMSTUDIO_HOST}:${LMSTUDIO_PORT}/v1` |
+| LM Studio WebSocket base URL | `ws://${LMSTUDIO_HOST}:${LMSTUDIO_PORT}`      |
+| SQLite path                  | `~/.lys/lys_db.sqlite`                        |
+
+## Persisted settings JSON
+
+The Tauri host reads and writes `~/.lys/settings.json` with this shape:
+
+```json
+{
+  "runtime": {
+    "autoStartBackend": false,
+    "selectedModel": null
+  }
+}
+```
+
+| Key                        | Type             | Meaning                                                                            |
+| -------------------------- | ---------------- | ---------------------------------------------------------------------------------- |
+| `runtime.autoStartBackend` | `boolean`        | Whether desktop initialization should ask Tauri to start the backend automatically |
+| `runtime.selectedModel`    | `string \| null` | Optional stored model identifier for future UI integration                         |
+
+## Desktop theme preference
+
+The active desktop theme is stored separately in WebView `localStorage` under
+`lys.theme`. Valid values are `dark` and `light`; the fallback is `dark` when
+the value is missing, invalid, or unavailable.
+
+## Current caveats
+
+- The React shell loads runtime settings from Tauri, but edits in the Runtime
+  tab are not persisted back through `save_settings`.
+- The Model, Generation, and Conversation tabs are currently unusable: their
+  components require a `SettingsContext.Provider` that the settings view does
+  not mount.
+- The chat path currently uses a fixed model identifier in the chat store rather
+  than the host-managed `selectedModel`.
+
+## Coming soon
+
+- Persisting edited settings back to `settings.json`
+- Making the Model, Generation, and Conversation settings tabs usable
+- Wiring selected model into live chat requests
+- Backend-backed generation settings such as temperature and context size
+- Release-mode configuration beyond the current loopback defaults
+
+## Related pages
+
+- [Backend API contracts](/reference/api/)
+- [Database schemas](/reference/schema/)
+- [Tauri host and lifecycle](/architecture/host/)

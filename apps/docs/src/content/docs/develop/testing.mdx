@@ -1,0 +1,89 @@
+---
+title: Testing and validation
+description: What can be validated today, which commands are canonical, and where the gaps still are.
+sidebar:
+  order: 6
+---
+
+import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
+import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+
+What each layer can validate today, including the current automated-test gaps.
+
+<DocumentMeta
+  label="Page metadata"
+  entries={[{ label: "Type", value: "Guide" }]}
+/>
+
+`CONTRIBUTING.md` is the canonical source for validation expectations. The
+short version is: run the smallest relevant checks first, widen only when your
+change affects shared contracts or multiple packages, and never claim a check
+passed without current output.
+
+## Current canonical validation commands
+
+```sh
+pnpm exec prettier . --check
+pnpm exec eslint .
+pnpm --filter @lys/desktop test
+pnpm --filter @lys/desktop build
+pnpm --filter @lys/backend exec tsc --noEmit
+cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check
+cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+```
+
+## Docs-only work
+
+For changes confined to `apps/docs`, start with:
+
+```sh
+pnpm --filter @lys/docs run check
+pnpm --filter @lys/docs run build
+```
+
+Then use broader workspace checks only if the docs change depends on shared
+contracts, schemas, or behavior that crosses package boundaries.
+
+## Current test shape
+
+- `apps/desktop` has a `vitest run` script.
+- No test files are currently tracked under `apps/desktop`, `apps/backend`, or
+  the shared packages.
+- `apps/backend` currently exposes a TypeScript validation path through
+  `pnpm --filter @lys/backend exec tsc --noEmit`, but no package-level `test`
+  script is defined in `apps/backend/package.json`.
+- `apps/docs` exposes `check` and `build` scripts that are appropriate for
+  docs-only changes.
+
+## Coming soon
+
+The backend does not currently advertise a first-class automated test script,
+and the repository has no tracked application test files. If you are changing
+behavior, be explicit in your handoff about which paths you verified and which
+ones still lack dedicated automation.
+
+<RelatedDocuments
+  documents={[
+    {
+      kind: "Section",
+      label: "Develop overview",
+      href: "/develop/setup/"
+    },
+    {
+      kind: "Decisions",
+      label: "Related decision records",
+      href: "/decisions/"
+    },
+    {
+      kind: "Reference",
+      label: "SSE events",
+      href: "/reference/sse-events/"
+    },
+    {
+      kind: "Policy",
+      label: "Code-review process",
+      href: "/develop/review/"
+    }
+  ]}
+/>

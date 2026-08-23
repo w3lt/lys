@@ -1,0 +1,167 @@
+---
+import { getCollection } from "astro:content"
+import StatusBadge from "./StatusBadge.astro"
+import { buildRecordIndex } from "@/lib/handbook/records"
+import { toSiteHref } from "@/lib/handbook/routing"
+import type { DocumentStatus } from "@/lib/handbook/status"
+
+const decisions = await getCollection(
+  "docs",
+  (entry) => entry.data.docType === "decision"
+)
+
+const records = buildRecordIndex(
+  "decision",
+  decisions.map((entry) => ({
+    href: toSiteHref(entry.id),
+    title: entry.data.title,
+    description: entry.data.description,
+    identifier: entry.data.identifier,
+    status: entry.data.status as DocumentStatus | undefined,
+    date: entry.data.decided,
+    areas: entry.data.areas
+  }))
+)
+---
+
+{/**
+  * The generated register of Architecture Decision Records.
+  *
+  * Composition/view component. It reads the decision entries of the docs
+  * collection at build time and projects them into one ordered table; the index
+  * is never maintained by hand. A duplicate identifier fails the build inside
+  * `buildRecordIndex` rather than producing an ambiguous row.
+  *
+  * Takes no props: the register is the complete set of decisions, so there is
+  * nothing for a parent to control.
+  *
+  * Accessibility: rendered as a real table with column headers, so each cell
+  * keeps its programmatic association with its column. The row link wraps only
+  * the title cell, so no interactive element nests inside another.
+  */}
+<p class="provenance not-content">
+  Index generated from decision frontmatter · {records.length} records ·
+  duplicate identifiers fail the build
+</p>
+
+<div class="decision-index not-content">
+  <table>
+    <caption class="sr-only">Architecture Decision Records</caption>
+    <thead>
+      <tr>
+        <th scope="col">ID</th>
+        <th scope="col">Decision</th>
+        <th scope="col">Status</th>
+        <th scope="col">Decided</th>
+      </tr>
+    </thead>
+    <tbody>
+      {
+        records.map((record) => (
+          <tr>
+            <td class="identifier">{record.identifier}</td>
+            <td class="title">
+              <a href={record.href}>{record.title}</a>
+            </td>
+            <td>
+              <StatusBadge status={record.status} />
+            </td>
+            <td class="date">{record.date}</td>
+          </tr>
+        ))
+      }
+    </tbody>
+  </table>
+</div>
+
+<p class="legend not-content">
+  Status is carried by icon and label as well as colour, so the index stays
+  readable without relying on hue.
+</p>
+
+<style>
+  .provenance {
+    margin: 0 0 1.375rem;
+    color: var(--doc-text-faint);
+    font-family: var(--sl-font-mono), ui-monospace, monospace;
+    font-size: 0.75rem;
+  }
+
+  .decision-index {
+    overflow-x: auto;
+    border: 1px solid var(--app-border-default);
+    border-radius: var(--radius-surface);
+    background-color: var(--app-surface-panel);
+    box-shadow: var(--shadow-card);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  th {
+    padding: 0.625rem 0.875rem;
+    background-color: var(--app-surface-code-header);
+    color: var(--doc-text-faint);
+    font-family: var(--sl-font-mono), ui-monospace, monospace;
+    font-size: 0.6875rem;
+    font-weight: 400;
+    letter-spacing: 0.06em;
+    text-align: start;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  td {
+    padding: 0.75rem 0.875rem;
+    border-top: 1px solid var(--app-border-subtle);
+    vertical-align: middle;
+  }
+
+  tr:hover td {
+    background-color: var(--app-surface-hover);
+  }
+
+  .identifier,
+  .date {
+    color: var(--doc-text-faint);
+    font-family: var(--sl-font-mono), ui-monospace, monospace;
+    font-size: 0.75rem;
+    white-space: nowrap;
+  }
+
+  .date {
+    color: var(--doc-text-muted);
+  }
+
+  .title a {
+    color: var(--app-text-strong);
+    font-size: 0.875rem;
+    line-height: 1.45;
+    text-decoration: none;
+  }
+
+  .title a:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .legend {
+    margin: 1rem 0 0;
+    color: var(--doc-text-faint);
+    font-size: 0.8125rem;
+    line-height: 1.6;
+  }
+</style>

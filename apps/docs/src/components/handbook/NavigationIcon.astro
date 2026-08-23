@@ -1,0 +1,75 @@
+---
+import {
+  BookOpen,
+  Box,
+  Code,
+  FileText,
+  History,
+  House,
+  Scale,
+  Server,
+  type LucideIcon
+} from "lucide-react"
+
+/**
+ * The icon the design assigns to each handbook section.
+ *
+ * Keys are the section labels configured in `astro.config.mjs`. The set is
+ * closed: it covers the approved information architecture, and a section
+ * outside it falls back to {@link FALLBACK_ICON} rather than rendering nothing.
+ */
+const SECTION_ICONS: Readonly<Record<string, LucideIcon>> = {
+  Overview: House,
+  Architecture: Box,
+  Develop: Code,
+  Operate: Server,
+  Decisions: Scale,
+  RFCs: FileText,
+  Reference: BookOpen,
+  Changelog: History
+}
+
+/** Icon used for a section the design does not assign a glyph to. */
+const FALLBACK_ICON: LucideIcon = FileText
+
+/** Edge length of a rail icon, in pixels, as specified by the design. */
+const ICON_SIZE = 20
+
+/** Stroke weight of a rail icon, as specified by the design. */
+const ICON_STROKE_WIDTH = 1.5
+
+type NavigationIconProps = {
+  /** Section label the icon identifies, matched against {@link SECTION_ICONS}. */
+  readonly section: string
+}
+
+/** Astro types `Astro.props` from a local declaration named `Props`. */
+type Props = NavigationIconProps
+
+const { section }: NavigationIconProps = Astro.props
+const Icon = SECTION_ICONS[section] ?? FALLBACK_ICON
+---
+
+{/**
+  * The glyph identifying one top-level handbook section in the navigation rail.
+  *
+  * UI primitive adapter over `lucide-react`. It is the only place the handbook
+  * names a Lucide icon, so the icon set stays replaceable and the design's
+  * section-to-glyph mapping has one owner. Lucide components are rendered on
+  * the server and ship no client JavaScript.
+  *
+  * Rendered result: one `svg` element sized and weighted by the design. The
+  * component never renders nothing; an unmapped section uses the fallback
+  * glyph.
+  *
+  * Accessibility: the glyph duplicates the section label rendered beside it, so
+  * it is decorative and hidden from assistive technology. Section identity is
+  * therefore never carried by the icon alone.
+  */}
+<Icon
+  size={ICON_SIZE}
+  strokeWidth={ICON_STROKE_WIDTH}
+  aria-hidden="true"
+  focusable="false"
+  className="navigation-icon"
+/>

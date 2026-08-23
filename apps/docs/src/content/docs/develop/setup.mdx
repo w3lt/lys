@@ -1,0 +1,95 @@
+---
+title: Environment setup
+description: Toolchain versions, platform prerequisites, and first build.
+sidebar:
+  order: 1
+---
+
+import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
+import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+
+Toolchain versions, platform prerequisites, and first build.
+
+<DocumentMeta
+  label="Page metadata"
+  entries={[{ label: "Type", value: "Guide" }]}
+/>
+
+## Required tools
+
+- **Node 24**: the root `.nvmrc` contains `24`, and the docs deployment workflow
+  also builds with Node 24.
+- **pnpm 11**: the root workspace pins `pnpm@11.17.0`.
+- **Rust and Cargo**: required because the desktop app uses Tauri and the
+  repository validation list includes Cargo-based checks for the host code.
+- **LM Studio**: required for the local model inventory, model loading, chat,
+  and title-generation paths used by the backend.
+
+## Install and bootstrap
+
+```sh
+pnpm install
+```
+
+That installs the workspace dependencies for:
+
+- `apps/desktop`
+- `apps/backend`
+- `apps/docs`
+- `packages/protocol`
+- `packages/share`
+
+## First successful runs
+
+From the repository root, run the path you need rather than starting all three
+long-running processes at once:
+
+```sh
+pnpm docs:dev
+pnpm backend:dev
+pnpm dev
+```
+
+- `pnpm docs:dev` starts the Astro/Starlight handbook.
+- `pnpm backend:dev` starts the Fastify backend in watch mode.
+- `pnpm dev` launches the Tauri desktop application.
+
+## Local endpoints to expect
+
+- The backend listens on `127.0.0.1:12345`.
+- The backend expects LM Studio on `127.0.0.1:1234`.
+
+If LM Studio is not running, the desktop can still start, but model inventory,
+loading, chat, and title-generation flows will fail until the LM Studio
+endpoint is available.
+
+## First validation checks
+
+For a docs-only change, start with the docs app checks:
+
+```sh
+pnpm --filter @lys/docs run check
+pnpm --filter @lys/docs run build
+```
+
+For broader work, follow the validation commands listed in `CONTRIBUTING.md`.
+
+<RelatedDocuments
+  documents={[
+    {
+      kind: "Decisions",
+      label: "Related decision records",
+      href: "/decisions/"
+    },
+    {
+      kind: "Reference",
+      label: "SSE events",
+      href: "/reference/sse-events/"
+    },
+    {
+      kind: "Policy",
+      label: "Contribution workflow",
+      href: "/develop/workflow/"
+    }
+  ]}
+/>

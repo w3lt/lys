@@ -129,6 +129,29 @@ Every exception must document:
 
 An exception requires explicit reviewer approval. Time pressure, existing noncompliant code, generated code, or a passing happy-path test is not sufficient justification.
 
+## Opening a pull request
+
+Open one pull request for one primary issue and one clear purpose. Select the specialized template that matches the primary issue type, not every kind of file touched by the change.
+
+GitHub selects a file from `.github/PULL_REQUEST_TEMPLATE` through the compare URL's `template` query parameter. For a compare URL without a query string, append `?quick_pull=1&template=bug.md`. If the URL already has query parameters, append `&template=bug.md` instead.
+
+| Primary issue type       | Template                                                                                 |
+| ------------------------ | ---------------------------------------------------------------------------------------- |
+| Bug                      | [`bug.md`](./.github/PULL_REQUEST_TEMPLATE/bug.md)                                       |
+| Feature                  | [`feature.md`](./.github/PULL_REQUEST_TEMPLATE/feature.md)                               |
+| Improvement              | [`improvement.md`](./.github/PULL_REQUEST_TEMPLATE/improvement.md)                       |
+| Maintenance              | [`maintenance.md`](./.github/PULL_REQUEST_TEMPLATE/maintenance.md)                       |
+| Documentation            | [`documentation.md`](./.github/PULL_REQUEST_TEMPLATE/documentation.md)                   |
+| Investigation / Decision | [`investigation-decision.md`](./.github/PULL_REQUEST_TEMPLATE/investigation-decision.md) |
+
+When no specialized template is selected, GitHub uses the [default pull request template](./.github/pull_request_template.md). Select exactly one change type when using the default.
+
+In the **Primary issue** section:
+
+- Use `Closes #123` only when the pull request fully completes the issue.
+- Use `Relates to #123` when the pull request contributes to the issue without completing it.
+- List secondary related issues without closing keywords.
+
 ## Before requesting review
 
 Reviewers follow [Merge Request Review](./docs/code_reviews/MR_REVIEW.md) for a proposed change, and [Full Code Review](./docs/code_reviews/FULL_CODE_REVIEW.md) when auditing an existing area of the codebase.

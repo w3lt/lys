@@ -1,0 +1,78 @@
+---
+title: Tauri host and lifecycle
+description: Window bootstrap, backend process ownership, and file-backed settings commands.
+docType: architecture
+sidebar:
+  order: 3
+---
+
+The Tauri layer is a small native host. It does not implement the backend API
+itself; it starts the backend process and exposes a few native commands to the
+React UI.
+
+## Registered commands
+
+| Command              | Purpose                                                              |
+| -------------------- | -------------------------------------------------------------------- |
+| `start_backend`      | Spawns `pnpm run dev` in `apps/backend` and stores the child handle. |
+| `stop_backend`       | Kills the backend process group and waits for shutdown.              |
+| `get_backend_status` | Reports whether the stored child process is still running.           |
+| `load_settings`      | Reads `~/.lys/settings.json`, creating a default file if needed.     |
+| `save_settings`      | Writes a new settings JSON document to `~/.lys/settings.json`.       |
+
+## Backend process ownership
+
+The host owns a `Backend` state object containing `Mutex<Option<Child>>`. The
+child process is started only when the UI asks for it or when auto-start logic
+requests it during desktop initialization.
+
+```rust
+Command::new("pnpm")
+    .args(["run", "dev"])
+    .current_dir(backend_dir)
+    .process_group(0)
+    .spawn()
+```
+
+Stopping the backend sends `SIGKILL` to the whole process group, not just the
+direct child, and Tauri also attempts the same cleanup on app exit.
+
+The checked-in process supervisor currently uses Unix process-group APIs and
+the `nix` crate. The repository does not yet demonstrate equivalent lifecycle
+behavior on Windows.
+
+## Settings file
+
+The current host-managed settings file is:
+
+```json
+{
+  "runtime": {
+    "autoStartBackend": false,
+    "selectedModel": null
+  }
+}
+```
+
+Only the Rust host reads and writes this file directly. The React UI reaches it
+through Tauri `invoke` calls.
+
+## What the host does not currently do
+
+- It does not manage provider credentials.
+- It does not read the operating-system keychain.
+- It does not proxy HTTP requests to LM Studio.
+- It does not replay prior conversations into the window.
+
+## Coming soon
+
+- Credential management and secure secret storage
+- Richer native tooling beyond backend lifecycle and settings I/O
+- Release-mode backend startup that does not depend on `pnpm run dev`
+- Portable backend lifecycle support beyond the current Unix implementation
+
+## Related pages
+
+- [System overview](/architecture/system/)
+- [Backend](/architecture/backend/)
+- [Configuration reference](/reference/configuration/)

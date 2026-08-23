@@ -1,0 +1,75 @@
+---
+import DocumentMeta from "./DocumentMeta.astro"
+
+type RecordFrontmatter = {
+  /** Current status of the record. */
+  readonly status?: string
+  /** Date a decision was accepted, as `YYYY-MM-DD`. */
+  readonly decided?: string
+  /** Author of a proposal. */
+  readonly author?: string
+  /** Date a proposal was opened, as `YYYY-MM-DD`. */
+  readonly created?: string
+  /** Date a proposal last changed substantively, as `YYYY-MM-DD`. */
+  readonly updated?: string
+  /** Subsystems the record affects. */
+  readonly areas?: readonly string[]
+  /** Identifier of the record this one replaces. */
+  readonly supersedes?: string
+  /** Identifier of the record that replaced this one. */
+  readonly supersededBy?: string
+  /** Owning application or package of a documented contract. */
+  readonly contract?: string
+  /** Contract version, such as `v1`. */
+  readonly contractVersion?: string
+  /** How much a documented contract may still change. */
+  readonly stability?: string
+}
+
+type RecordMetaProps = {
+  /**
+   * The page's own validated frontmatter.
+   *
+   * Passing frontmatter rather than a hand-written list keeps the metadata
+   * block and the values the indexes read from becoming two different answers.
+   */
+  readonly frontmatter: RecordFrontmatter
+}
+
+/** Astro types `Astro.props` from a local declaration named `Props`. */
+type Props = RecordMetaProps
+
+const { frontmatter }: RecordMetaProps = Astro.props
+
+const entries = [
+  { label: "Status", value: frontmatter.status },
+  { label: "Stability", value: frontmatter.stability },
+  { label: "Contract", value: frontmatter.contract },
+  { label: "Version", value: frontmatter.contractVersion },
+  { label: "Author", value: frontmatter.author },
+  { label: "Decided", value: frontmatter.decided },
+  { label: "Created", value: frontmatter.created },
+  { label: "Updated", value: frontmatter.updated },
+  { label: "Areas", value: frontmatter.areas?.join(", ") },
+  { label: "Supersedes", value: frontmatter.supersedes },
+  { label: "Superseded by", value: frontmatter.supersededBy }
+].filter(
+  (entry): entry is { label: string; value: string } => entry.value !== undefined
+)
+---
+
+{/**
+  * The metadata block of a handbook record, projected from its own frontmatter.
+  *
+  * Presentational component. It decides once which fields a record shows and in
+  * what order, so every record type presents its metadata the same way and no
+  * page restates a value the frontmatter already carries.
+  *
+  * A field the record does not declare is omitted rather than shown empty, so
+  * the block adapts to decisions, proposals, and reference pages without a
+  * per-type variant.
+  *
+  * Accessibility: delegates to `DocumentMeta`, which owns the term/description
+  * association and the group's accessible name.
+  */}
+<DocumentMeta entries={entries} label="Record metadata" />

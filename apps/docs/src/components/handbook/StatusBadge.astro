@@ -1,0 +1,82 @@
+---
+import {
+  resolveStatusPresentation,
+  type DocumentStatus
+} from "@/lib/handbook/status"
+
+type StatusBadgeProps = {
+  /** Status the badge reports. */
+  readonly status: DocumentStatus
+  /**
+   * Text shown instead of the status's own label.
+   *
+   * Omit to show the registered label. Supply it only when the surrounding
+   * context needs a longer phrase, such as `runbook · operator`.
+   */
+  readonly label?: string
+}
+
+/** Astro types `Astro.props` from a local declaration named `Props`. */
+type Props = StatusBadgeProps
+
+const { status, label }: StatusBadgeProps = Astro.props
+const presentation = resolveStatusPresentation(status)
+const text = label ?? presentation.label
+---
+
+{/**
+  * Status pill for a handbook decision, proposal, or contract.
+  *
+  * Presentational component. Projects one status into a labelled pill; it holds
+  * no state and performs no navigation.
+  *
+  * Accessibility: the glyph is decorative and hidden from assistive technology
+  * because the adjacent text carries the same state, so the status never
+  * depends on colour or shape alone.
+  */}
+<span class:list={["status-badge", "not-content", `tone-${presentation.tone}`]}>
+  <span aria-hidden="true">{presentation.icon}</span>
+  <span>{text}</span>
+</span>
+
+<style>
+  .status-badge {
+    display: inline-flex;
+    flex: 0 0 auto;
+    gap: 0.3125rem;
+    align-items: center;
+    padding: 0.1875rem 0.5rem;
+    border: 1px solid var(--badge-border);
+    border-radius: var(--radius-capsule);
+    background-color: var(--badge-background);
+    color: var(--badge-foreground);
+    font-family: var(--sl-font-mono), ui-monospace, monospace;
+    font-size: 0.65625rem;
+    line-height: 1.5;
+    white-space: nowrap;
+  }
+
+  .tone-success {
+    --badge-foreground: var(--app-status-success);
+    --badge-background: var(--doc-status-success-bg);
+    --badge-border: var(--doc-status-success-border);
+  }
+
+  .tone-pending {
+    --badge-foreground: var(--app-status-pending);
+    --badge-background: var(--doc-status-pending-bg);
+    --badge-border: var(--doc-status-pending-border);
+  }
+
+  .tone-danger {
+    --badge-foreground: var(--app-status-danger);
+    --badge-background: var(--doc-status-danger-bg);
+    --badge-border: var(--doc-status-danger-border);
+  }
+
+  .tone-neutral {
+    --badge-foreground: var(--app-status-neutral);
+    --badge-background: var(--doc-status-neutral-bg);
+    --badge-border: var(--doc-status-neutral-border);
+  }
+</style>

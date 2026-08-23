@@ -1,0 +1,94 @@
+---
+title: Backend
+description: The Fastify service that owns conversation persistence, LM Studio access, and chat SSE responses.
+docType: architecture
+sidebar:
+  order: 4
+---
+
+The backend is a TypeScript Fastify application in `apps/backend`. It owns the
+SQLite conversation store and the HTTP and SSE surface consumed by the desktop
+application.
+
+## Current backend shape
+
+| Layer              | Implementation                 | Responsibility                                                                                     |
+| ------------------ | ------------------------------ | -------------------------------------------------------------------------------------------------- |
+| App bootstrap      | `src/app.ts`                   | Registers CORS, SSE support, singleton services, and all routes.                                   |
+| Runtime config     | `src/config.ts`                | Supplies loopback host and port values and the SQLite file path.                                   |
+| Singleton services | `src/di/singleton.ts`          | Creates the chat, LM Studio, and conversation services used by route handlers.                     |
+| Chat routes        | `src/modules/chat`             | Accepts chat requests, persists turn data, streams SSE responses, and updates conversation titles. |
+| LLM routes         | `src/modules/llm/routes`       | Lists LM Studio models and loads a model on demand.                                                |
+| Health route       | `src/modules/health/routes.ts` | Returns a simple `{ ok: true }` response.                                                          |
+
+## Chat request flow
+
+1. `POST /api/v1/chat` validates the request body with the shared Zod schema.
+2. `ConversationTurn` creates or looks up the conversation, inserts the user
+   message, and inserts an empty streaming assistant message.
+3. The route immediately emits either `start-new-conversation-turn` or
+   `start-existing-conversation-turn`.
+4. `createChatTask` opens an OpenAI-compatible streaming completion against LM
+   Studio and converts model chunks into `delta` and `done` events.
+5. `createTitleGenerationTask` runs in parallel and may emit a `title` event.
+6. Errors become `error` events when the client is still connected.
+
+The current chat task updates the stored assistant status and finish reason, but
+does not append streamed delta text to the stored assistant content. The full
+reply shown by the desktop therefore exists only in current-window state.
+
+## Persistence
+
+The backend stores conversations in SQLite at `~/.lys/lys_db.sqlite`.
+
+| Table                   | Purpose                                                                                      |
+| ----------------------- | -------------------------------------------------------------------------------------------- |
+| `conversations`         | Stores conversation metadata, title, system prompt, and timestamps.                          |
+| `conversation_messages` | Stores ordered user and assistant messages, assistant status, finish reason, and timestamps. |
+
+The database schema is applied by inline migrations using `PRAGMA user_version`.
+Two triggers keep `conversations.updated_at` in sync with message inserts and
+message updates.
+
+## LM Studio integration
+
+Two backend services talk to LM Studio:
+
+| Service       | Backend dependency | Current use                                                                                         |
+| ------------- | ------------------ | --------------------------------------------------------------------------------------------------- |
+| `ChatService` | `openai` SDK       | Streams chat completions and generates titles through LM Studio's OpenAI-compatible HTTP interface. |
+| `LlmService`  | `@lmstudio/sdk`    | Lists downloaded models and loads one model into LM Studio.                                         |
+
+The backend currently assumes a local LM Studio runtime on loopback.
+
+## Failure behavior
+
+| Condition                                 | Current behavior                                                   |
+| ----------------------------------------- | ------------------------------------------------------------------ |
+| Client disconnects                        | The SSE close handler aborts the in-flight chat request.           |
+| Model stream ends without a finish reason | The route treats it as an error and may emit `error`.              |
+| Assistant state update fails              | The backend throws because the persisted assistant row is missing. |
+| Unknown finish reason                     | The backend throws instead of silently coercing it.                |
+
+## What is not implemented here
+
+- No Rust backend service
+- No replayable shared event bus
+- No public conversation listing or history-retrieval API; continuing a turn
+  requires a conversation identifier the caller already knows
+- No credential-management layer
+- No provider fallback or budget-accounting logic
+
+## Coming soon
+
+- Conversation replay and resume across app restarts
+- Recovery and export tooling around the SQLite store
+- Multiple provider backends or pluggable adapters
+- Backend-backed generation settings beyond the current chat request body
+
+## Related pages
+
+- [Shared protocol](/architecture/protocol/)
+- [Persistence and ownership](/architecture/persistence/)
+- [Backend API contracts](/reference/api/)
+- [SSE events](/reference/sse-events/)

@@ -1,0 +1,58 @@
+---
+title: Shared protocol
+description: The Zod-backed route, event, and shared data-model packages used by the desktop and backend.
+docType: architecture
+sidebar:
+  order: 5
+---
+
+Lys currently shares contracts through two TypeScript workspace packages.
+
+## Shared packages
+
+| Package         | Owns                                                                                                                               |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `@lys/protocol` | API prefix constants, loopback host and port constants, route paths, request bodies, response schemas, and chat SSE event variants |
+| `@lys/share`    | Conversation, conversation metadata, and conversation message schemas shared between backend and desktop                           |
+
+## Current protocol surface
+
+The public backend surface is small and explicit:
+
+| Concern                             | Contract source                                |
+| ----------------------------------- | ---------------------------------------------- |
+| API prefix and loopback constants   | `packages/protocol/src/constant.ts`            |
+| Chat route request and SSE payloads | `packages/protocol/src/apis/chat/chatRoute.ts` |
+| LM Studio list and load routes      | `packages/protocol/src/apis/llm/*.ts`          |
+| Health route path                   | `packages/protocol/src/apis/health/routes.ts`  |
+| Shared conversation shapes          | `packages/share/src/models/conversation.ts`    |
+
+## Why the packages are split
+
+`@lys/protocol` models transport concerns such as HTTP methods, route paths, and
+SSE events. `@lys/share` models conversation data that both sides need even when
+it is not tied to one specific route.
+
+That split lets the backend validate external requests while the desktop reuses
+the same schemas when reading backend event payloads.
+
+## Current compatibility reality
+
+- Contracts are source-level TypeScript and Zod definitions inside the monorepo.
+- The desktop and backend are built from the same workspace source; there is no
+  negotiated protocol version or feature-capability handshake.
+- The only current chat event variants are the six variants documented in
+  [SSE events](/reference/sse-events/).
+
+## Coming soon
+
+- Explicit protocol versioning beyond the current workspace package source
+- Capability flags for optional event types
+- Shared contracts for conversation listing, resume, or export flows
+
+## Related pages
+
+- [System overview](/architecture/system/)
+- [Backend API contracts](/reference/api/)
+- [SSE events](/reference/sse-events/)
+- [Database schemas](/reference/schema/)

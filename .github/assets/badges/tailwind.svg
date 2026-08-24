@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 117 22" width="117" height="22" role="img" aria-labelledby="t">
+  <title id="t">Tailwind CSS</title>
+  <defs>
+    <linearGradient id="edge" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#9182F5"/>
+      <stop offset="1" stop-color="#779DEF"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#D2E4F0" stop-opacity=".09"/>
+      <stop offset=".55" stop-color="#D2E4F0" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <path d="M4.5.5H112.5L116.5 4.5V17.5L112.5 21.5H4.5L.5 17.5V4.5Z" fill="#0C031F"/>
+  <path d="M4.5.5H112.5L116.5 4.5V17.5L112.5 21.5H4.5L.5 17.5V4.5Z" fill="url(#sheen)"/>
+  <path d="M4.5.5H112.5L116.5 4.5V17.5L112.5 21.5H4.5L.5 17.5V4.5Z" fill="none" stroke="url(#edge)" stroke-opacity=".8"/>
+  <g transform="translate(9 4.5) scale(0.541667)" fill="#06B6D4"><path d="M12.001,4.8c-3.2,0-5.2,1.6-6,4.8c1.2-1.6,2.6-2.2,4.2-1.8c0.913,0.228,1.565,0.89,2.288,1.624 C13.666,10.618,15.027,12,18.001,12c3.2,0,5.2-1.6,6-4.8c-1.2,1.6-2.6,2.2-4.2,1.8c-0.913-0.228-1.565-0.89-2.288-1.624 C16.337,6.182,14.976,4.8,12.001,4.8z M6.001,12c-3.2,0-5.2,1.6-6,4.8c1.2-1.6,2.6-2.2,4.2-1.8c0.913,0.228,1.565,0.89,2.288,1.624 c1.177,1.194,2.538,2.576,5.512,2.576c3.2,0,5.2-1.6,6-4.8c-1.2,1.6-2.6,2.2-4.2,1.8c-0.913-0.228-1.565-0.89-2.288-1.624 C10.337,13.382,8.976,12,6.001,12z"/></g>
+  <text x="29" y="15" textLength="79" lengthAdjust="spacing" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="11" fill="#D2E4F0">Tailwind CSS</text>
+</svg>

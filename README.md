@@ -3,21 +3,21 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset=".github/assets/hero-dark.svg">
   <source media="(prefers-color-scheme: light)" srcset=".github/assets/hero-light.svg">
-  <img src=".github/assets/hero-dark.svg" alt="Lys — Lysiptera Caliginia. “The universe named its oldest design flaw entropy, then taught every living thing to mistake forgetting for fate.”" width="100%">
+  <img src=".github/assets/hero-dark.svg" alt="Lys — Lysiptera Caliginia, catalogued LC // 07.2026. A faceted crystal butterfly beside the line: “The universe named its oldest design flaw entropy, then taught every living thing to mistake forgetting for fate.”" width="100%">
 </picture>
 
 <p>
-  <a href="https://lys.negentropy.studio"><img src="https://img.shields.io/badge/handbook-lys.negentropy.studio-4ECA7A?style=flat-square&labelColor=0C031F&logo=astro&logoColor=4ECA7A" alt="Engineering handbook"></a>
-  <img src="https://img.shields.io/badge/license-MPL--2.0-D2E4F0?style=flat-square&labelColor=0C031F" alt="License: MPL-2.0">
-  <img src="https://img.shields.io/badge/%20-React-61DAFB?style=flat-square&logo=react&logoColor=61DAFB&labelColor=0C031F" alt="React">
-  <img src="https://img.shields.io/badge/%20-TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=3178C6&labelColor=0C031F" alt="TypeScript">
-  <img src="https://img.shields.io/badge/%20-Tailwind_CSS-06B6D4?style=flat-square&logo=tailwindcss&logoColor=06B6D4&labelColor=0C031F" alt="Tailwind CSS">
-  <img src="https://img.shields.io/badge/%20-Tauri-FFC131?style=flat-square&logo=tauri&logoColor=FFC131&labelColor=0C031F" alt="Tauri">
-  <img src="https://img.shields.io/badge/%20-Rust-CE422B?style=flat-square&logo=rust&logoColor=CE422B&labelColor=0C031F" alt="Rust">
-  <img src="https://img.shields.io/badge/%20-Fastify-D2E4F0?style=flat-square&logo=fastify&logoColor=D2E4F0&labelColor=0C031F" alt="Fastify">
-  <img src="https://img.shields.io/badge/%20-Zod-408AFF?style=flat-square&logo=zod&logoColor=408AFF&labelColor=0C031F" alt="Zod">
-  <img src="https://img.shields.io/badge/%20-SQLite-0F80CC?style=flat-square&logo=sqlite&logoColor=0F80CC&labelColor=0C031F" alt="SQLite">
-  <img src="https://img.shields.io/badge/%20-LM_Studio-AC62FB?style=flat-square&logo=lmstudio&logoColor=AC62FB&labelColor=0C031F" alt="LM Studio">
+  <a href="https://lys.negentropy.studio"><img src=".github/assets/badges/handbook.svg" alt="Engineering handbook"></a>
+  <img src=".github/assets/badges/license.svg" alt="License: MPL-2.0">
+  <img src=".github/assets/badges/react.svg" alt="React">
+  <img src=".github/assets/badges/typescript.svg" alt="TypeScript">
+  <img src=".github/assets/badges/tailwind.svg" alt="Tailwind CSS">
+  <img src=".github/assets/badges/tauri.svg" alt="Tauri">
+  <img src=".github/assets/badges/rust.svg" alt="Rust">
+  <img src=".github/assets/badges/fastify.svg" alt="Fastify">
+  <img src=".github/assets/badges/zod.svg" alt="Zod">
+  <img src=".github/assets/badges/sqlite.svg" alt="SQLite">
+  <img src=".github/assets/badges/lm-studio.svg" alt="LM Studio">
 </p>
 
 </div>

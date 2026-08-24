@@ -11,7 +11,17 @@
   <img src="https://img.shields.io/badge/license-MPL--2.0-D2E4F0?style=flat-square&labelColor=0C031F" alt="License: MPL-2.0">
 </p>
 
-<sub>React · TypeScript · Tailwind CSS · Tauri · Rust · Fastify · Zod · SQLite · LM Studio</sub>
+<p>
+  <img src="https://img.shields.io/badge/%20-React-D2E4F0?style=flat-square&logo=react&logoColor=D2E4F0&labelColor=0C031F" alt="React">
+  <img src="https://img.shields.io/badge/%20-TypeScript-D2E4F0?style=flat-square&logo=typescript&logoColor=D2E4F0&labelColor=0C031F" alt="TypeScript">
+  <img src="https://img.shields.io/badge/%20-Tailwind_CSS-D2E4F0?style=flat-square&logo=tailwindcss&logoColor=D2E4F0&labelColor=0C031F" alt="Tailwind CSS">
+  <img src="https://img.shields.io/badge/%20-Tauri-D2E4F0?style=flat-square&logo=tauri&logoColor=D2E4F0&labelColor=0C031F" alt="Tauri">
+  <img src="https://img.shields.io/badge/%20-Rust-D2E4F0?style=flat-square&logo=rust&logoColor=D2E4F0&labelColor=0C031F" alt="Rust">
+  <img src="https://img.shields.io/badge/%20-Fastify-D2E4F0?style=flat-square&logo=fastify&logoColor=D2E4F0&labelColor=0C031F" alt="Fastify">
+  <img src="https://img.shields.io/badge/%20-Zod-D2E4F0?style=flat-square&logo=zod&logoColor=D2E4F0&labelColor=0C031F" alt="Zod">
+  <img src="https://img.shields.io/badge/%20-SQLite-D2E4F0?style=flat-square&logo=sqlite&logoColor=D2E4F0&labelColor=0C031F" alt="SQLite">
+  <img src="https://img.shields.io/badge/%20-LM_Studio-D2E4F0?style=flat-square&logo=lmstudio&logoColor=D2E4F0&labelColor=0C031F" alt="LM Studio">
+</p>
 
 </div>
 

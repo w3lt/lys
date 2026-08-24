@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 18" width="1200" height="18" role="presentation" aria-hidden="true">
+  <defs>
+    <linearGradient id="dRule" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#AC62FB" stop-opacity="0"/>
+      <stop offset=".18" stop-color="#AC62FB" stop-opacity=".55"/>
+      <stop offset=".5" stop-color="#7E9AF0" stop-opacity=".7"/>
+      <stop offset=".82" stop-color="#00D0E2" stop-opacity=".55"/>
+      <stop offset="1" stop-color="#00D0E2" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="dGlint" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#00D0E2" stop-opacity="0"/>
+      <stop offset=".5" stop-color="#D2E4F0" stop-opacity=".95"/>
+      <stop offset="1" stop-color="#AC62FB" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <style>
+    .glint { animation: glide 9s cubic-bezier(.32, .72, .35, 1) infinite; }
+    @keyframes glide {
+      0%        { transform: translateX(0);      opacity: 0; }
+      8%        { opacity: 1; }
+      52%       { opacity: 1; }
+      60%, 100% { transform: translateX(1240px); opacity: 0; }
+    }
+    .gem { transform-box: view-box; transform-origin: 600px 9px;
+            animation: gem 4.6s ease-in-out infinite; }
+    @keyframes gem {
+      0%, 100% { opacity: .55; transform: rotate(45deg) scale(1); }
+      50%      { opacity: 1;   transform: rotate(45deg) scale(1.25); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      * { animation: none !important; }
+      .gem { transform: rotate(45deg); opacity: .8; }
+    }
+  </style>
+  <rect x="0" y="8.5" width="1200" height="1" fill="url(#dRule)"/>
+  <rect class="glint" x="-190" y="8" width="190" height="2" rx="1" fill="url(#dGlint)"/>
+  <rect class="gem" x="596" y="5" width="8" height="8" rx="1.5" fill="#AC62FB"/>
+  <rect class="gem" x="598" y="7" width="4" height="4" rx="1" fill="#00D0E2"/>
+</svg>

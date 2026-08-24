@@ -48,8 +48,8 @@ pub fn run() {
             backend::start_backend,
             backend::stop_backend,
             backend::get_backend_status,
-            settings::load_settings,
-            settings::save_settings
+            settings::commands::load_settings,
+            settings::commands::save_settings
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

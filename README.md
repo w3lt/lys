@@ -3,7 +3,7 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset=".github/assets/hero-dark.svg">
   <source media="(prefers-color-scheme: light)" srcset=".github/assets/hero-light.svg">
-  <img src=".github/assets/hero-dark.svg" alt="Lys — Lysiptera Caliginia. “The universe named its oldest design flaw entropy, then taught every living thing to mistake forgetting for fate.”" width="100%">
+  <img src=".github/assets/hero-dark.svg" alt="Lys — Lysiptera Caliginia, catalogued LC // 07.2026. A faceted crystal butterfly beside the line: “The universe named its oldest design flaw entropy, then taught every living thing to mistake forgetting for fate.”" width="100%">
 </picture>
 
 <p>

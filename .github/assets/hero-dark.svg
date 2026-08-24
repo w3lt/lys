@@ -1,69 +1,115 @@
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1200 420" width="1200" height="420" role="img" aria-labelledby="lysTitle lysDesc">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 420" width="1200" height="420" role="img" aria-labelledby="lysTitle lysDesc">
 <title id="lysTitle">Lys — Lysiptera Caliginia</title>
-<desc id="lysDesc">A specimen plate for Lysiptera caliginia: a faceted crystal moth of violet and cyan light, cropped by the right edge of the plate, with two floating gems and a measurement rail. The line beside her reads: The universe named its oldest design flaw entropy, then taught every living thing to mistake forgetting for fate.</desc>
+<desc id="lysDesc">A specimen plate for Lysiptera caliginia, catalogued LC // 07.2026. A faceted crystal butterfly of violet and cyan light rests at the left of the plate, its wings breathing slowly; a dotted measurement axis divides it from the line at the right, which reads: The universe named its oldest design flaw entropy, then taught every living thing to mistake forgetting for fate. Beneath, the plate is annotated: between a line of code and a quiet dream — still becoming, ΔS ≥ 0, v0.1.0.</desc>
 <defs>
 <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#06060F"/><stop offset=".45" stop-color="#0A0A1B"/><stop offset="1" stop-color="#08111F"/></linearGradient>
-<linearGradient id="wingFill" gradientUnits="userSpaceOnUse" x1="640" y1="85" x2="1120" y2="345"><stop offset="0" stop-color="#7C3AED"/><stop offset=".28" stop-color="#AC62FB"/><stop offset=".52" stop-color="#7E86F2"/><stop offset=".72" stop-color="#22B4DE"/><stop offset="1" stop-color="#00D8EA"/></linearGradient>
-<linearGradient id="wingLine" gradientUnits="userSpaceOnUse" x1="640" y1="85" x2="1120" y2="345"><stop offset="0" stop-color="#C9A6FF"/><stop offset=".30" stop-color="#DCCBFF"/><stop offset=".54" stop-color="#B7C8FA"/><stop offset=".74" stop-color="#7FDCF7"/><stop offset="1" stop-color="#5FEAFA"/></linearGradient>
+<linearGradient id="wingFill" gradientUnits="userSpaceOnUse" x1="175" y1="83" x2="430" y2="320"><stop offset="0" stop-color="#7C3AED"/><stop offset=".28" stop-color="#AC62FB"/><stop offset=".52" stop-color="#7E86F2"/><stop offset=".72" stop-color="#22B4DE"/><stop offset="1" stop-color="#00D8EA"/></linearGradient>
+<linearGradient id="wingLine" gradientUnits="userSpaceOnUse" x1="175" y1="83" x2="430" y2="320"><stop offset="0" stop-color="#C9A6FF"/><stop offset=".28" stop-color="#DCCBFF"/><stop offset=".52" stop-color="#B7C8FA"/><stop offset=".72" stop-color="#7FDCF7"/><stop offset="1" stop-color="#5FEAFA"/></linearGradient>
 <radialGradient id="haloViolet" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#6B3AC4" stop-opacity=".34"/><stop offset="1" stop-color="#6B3AC4" stop-opacity="0"/></radialGradient>
 <radialGradient id="haloCyan" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#0B6E86" stop-opacity=".26"/><stop offset="1" stop-color="#0B6E86" stop-opacity="0"/></radialGradient>
 <linearGradient id="frameGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#AC62FB" stop-opacity=".42"/><stop offset="1" stop-color="#00D0E2" stop-opacity=".46"/></linearGradient>
-<linearGradient id="ruleFade" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#8FA0C4" stop-opacity=".62"/><stop offset="1" stop-color="#8FA0C4" stop-opacity="0"/></linearGradient>
-<linearGradient id="edgeFade" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#070D18" stop-opacity="0"/><stop offset="1" stop-color="#070D18" stop-opacity=".88"/></linearGradient>
+<linearGradient id="bandRule" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="1200" y2="0"><stop offset="0" stop-color="#8FA0C4" stop-opacity="0"/><stop offset=".14" stop-color="#8FA0C4" stop-opacity=".5"/><stop offset=".86" stop-color="#8FA0C4" stop-opacity=".5"/><stop offset="1" stop-color="#8FA0C4" stop-opacity="0"/></linearGradient>
 <pattern id="dots" width="26" height="26" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="#8FA8C8" fill-opacity=".05"/></pattern>
 <clipPath id="card"><rect width="1200" height="420" rx="16"/></clipPath>
 <filter id="bloom" x="-25%" y="-25%" width="150%" height="150%"><feGaussianBlur stdDeviation="6"/></filter>
-<g id="wire" fill="none" stroke="url(#wingLine)" stroke-linejoin="round"><circle cx="920" cy="255" r="402" stroke-opacity=".07" stroke-width="1"/><path d="M0 0 L384 0" transform="translate(940 225) rotate(-66)" stroke-opacity=".08" stroke-width="0.7"/><path d="M0 0 L384 0" transform="translate(940 225) scale(-1 1) rotate(-66)" stroke-opacity=".08" stroke-width="0.7"/><path d="M0 0 L344 0" transform="translate(940 225) rotate(-4)" stroke-opacity=".08" stroke-width="0.7"/><path d="M0 0 L344 0" transform="translate(940 225) scale(-1 1) rotate(-4)" stroke-opacity=".08" stroke-width="0.7"/><path d="M0 0 L318 0" transform="translate(940 225) rotate(60)" stroke-opacity=".08" stroke-width="0.7"/><path d="M0 0 L318 0" transform="translate(940 225) scale(-1 1) rotate(60)" stroke-opacity=".08" stroke-width="0.7"/><path d="M0 0 L97.2 -31 L233.28 -58.9 L379.08 -40.92 L486 0 L379.08 40.92 L233.28 58.9 L97.2 31 Z" transform="translate(940 225) rotate(-64)" stroke-opacity=".15" stroke-width="0.8"/><path d="M0 0 L97.2 -31 L233.28 -58.9 L379.08 -40.92 L486 0 L379.08 40.92 L233.28 58.9 L97.2 31 Z" transform="translate(940 225) scale(-1 1) rotate(-64)" stroke-opacity=".15" stroke-width="0.8"/><path d="M0 0 L84 -28 L201.6 -53.2 L327.6 -36.96 L420 0 L327.6 36.96 L201.6 53.2 L84 28 Z" transform="translate(940 225) rotate(-16)" stroke-opacity=".15" stroke-width="0.8"/><path d="M0 0 L84 -28 L201.6 -53.2 L327.6 -36.96 L420 0 L327.6 36.96 L201.6 53.2 L84 28 Z" transform="translate(940 225) scale(-1 1) rotate(-16)" stroke-opacity=".15" stroke-width="0.8"/><path d="M0 0 L73.2 -25 L175.68 -47.5 L285.48 -33 L366 0 L285.48 33 L175.68 47.5 L73.2 25 Z" transform="translate(940 225) rotate(66)" stroke-opacity=".15" stroke-width="0.8"/><path d="M0 0 L73.2 -25 L175.68 -47.5 L285.48 -33 L366 0 L285.48 33 L175.68 47.5 L73.2 25 Z" transform="translate(940 225) scale(-1 1) rotate(66)" stroke-opacity=".15" stroke-width="0.8"/><path d="M0 0 L84 -50 L201.6 -95 L327.6 -66 L420 0 L327.6 66 L201.6 95 L84 50 Z M0 0 L420 0 M126 0 L84 -50 M260.4 0 L201.6 -95 M126 0 L84 50 M260.4 0 L201.6 95" transform="translate(940 211) rotate(-48)" stroke-opacity=".48" stroke-width="1.1"/><path d="M0 0 L84 -50 L201.6 -95 L327.6 -66 L420 0 L327.6 66 L201.6 95 L84 50 Z M0 0 L420 0 M126 0 L84 -50 M260.4 0 L201.6 -95 M126 0 L84 50 M260.4 0 L201.6 95" transform="translate(940 211) scale(-1 1) rotate(-48)" stroke-opacity=".48" stroke-width="1.1"/><path d="M0 0 L66 -43 L158.4 -81.7 L257.4 -56.76 L330 0 L257.4 56.76 L158.4 81.7 L66 43 Z M0 0 L330 0 M99 0 L66 -43 M204.6 0 L158.4 -81.7 M99 0 L66 43 M204.6 0 L158.4 81.7" transform="translate(940 239) rotate(48)" stroke-opacity=".48" stroke-width="1.1"/><path d="M0 0 L66 -43 L158.4 -81.7 L257.4 -56.76 L330 0 L257.4 56.76 L158.4 81.7 L66 43 Z M0 0 L330 0 M99 0 L66 -43 M204.6 0 L158.4 -81.7 M99 0 L66 43 M204.6 0 L158.4 81.7" transform="translate(940 239) scale(-1 1) rotate(48)" stroke-opacity=".48" stroke-width="1.1"/><path d="M940 29 L957 225 L940 421 L923 225 Z" stroke-opacity=".72" stroke-width="1.2"/><path d="M940 151 L948 225 L940 299 L932 225 Z" stroke-opacity=".72" stroke-width="1.2"/><path d="M864 225 L940 214 L1016 225 L940 236 Z" stroke-opacity=".46" stroke-width="1"/><path d="M798 31 L818 63 L798 95 L778 63 Z" stroke-opacity=".85" stroke-width="1.1"/><path d="M798 31 L798 95 M778 63 L818 63" stroke-opacity=".45" stroke-width="0.7"/><path d="M1088 37 L1108 69 L1088 101 L1068 69 Z" stroke-opacity=".85" stroke-width="1.1"/><path d="M1088 37 L1088 101 M1068 69 L1108 69" stroke-opacity=".45" stroke-width="0.7"/></g>
 </defs>
 <style>
-    .drift { transform-box: view-box; transform-origin: 940px 225px; animation: drift 14s ease-in-out infinite; }
-    @keyframes drift { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.018); } }
+    .drift { transform-box: view-box; transform-origin: 302px 202px;
+              animation: drift 15s ease-in-out infinite; }
+    @keyframes drift { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.015); } }
 
-    .pulse { animation: pulse 5.2s ease-in-out infinite; }
-    @keyframes pulse { 0%, 100% { opacity: .62; } 50% { opacity: 1; } }
+    .fwr, .fwl, .hwr, .hwl { transform-box: view-box; animation-duration: 7.5s;
+                              animation-timing-function: ease-in-out; animation-iteration-count: infinite; }
+    .fwr, .fwl { transform-origin: 302px 202px; }
+    .hwr, .hwl { transform-origin: 302px 222px; }
+    .fwr, .hwl { animation-name: foldDown; }
+    .fwl, .hwr { animation-name: foldUp; }
+    @keyframes foldDown { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(2.2deg); } }
+    @keyframes foldUp   { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(-2.2deg); } }
+
+    .pulse { animation: pulse 6.2s ease-in-out infinite; }
+    @keyframes pulse { 0%, 100% { opacity: .34; } 50% { opacity: .72; } }
+
+    .trace { stroke-dasharray: 900; stroke-dashoffset: 900;
+              animation: trace 3.2s cubic-bezier(.32, .72, .35, 1) .35s forwards; }
+    @keyframes trace { to { stroke-dashoffset: 0; } }
 
     .rise { transform-box: view-box; animation: rise 1.2s cubic-bezier(.32, .72, .35, 1) both; }
     @keyframes rise { from { transform: translateY(10px); } to { transform: none; } }
-    .d1 { animation-delay: .04s; } .d2 { animation-delay: .22s; } .d3 { animation-delay: .44s; }
+    .d1 { animation-delay: .04s; } .d2 { animation-delay: .26s; } .d3 { animation-delay: .48s; }
 
-    .trace { stroke-dasharray: 360; stroke-dashoffset: 360;
-             animation: trace 3.4s cubic-bezier(.32, .72, .35, 1) .5s forwards; }
-    @keyframes trace { to { stroke-dashoffset: 0; } }
+    .gem { transform-box: view-box; animation: gem 5.4s ease-in-out infinite; }
+    .gem2 { animation-delay: -2.6s; }
+    @keyframes gem { 0%, 100% { opacity: .45; transform: translateY(0); }
+                      50%      { opacity: 1;   transform: translateY(-5px); } }
 
     @media (prefers-reduced-motion: reduce) {
       * { animation: none !important; }
       .trace { stroke-dashoffset: 0; }
+      .pulse { opacity: .5; }
+      .gem { opacity: .8; }
     }
   </style>
 <g clip-path="url(#card)">
 <rect width="1200" height="420" fill="url(#bg)"/>
 <rect width="1200" height="420" fill="url(#dots)"/>
-<ellipse cx="880" cy="185" rx="440" ry="330" fill="url(#haloViolet)"/>
-<ellipse cx="1130" cy="375" rx="360" ry="290" fill="url(#haloCyan)"/>
-<path d="M940 0 V420" stroke="#9FB2D8" stroke-opacity=".22" stroke-width="1" stroke-dasharray="2 7"/>
-<circle cx="940" cy="78" r="1.6" fill="#9FB2D8" fill-opacity=".7"/>
-<circle cx="940" cy="214" r="1.6" fill="#9FB2D8" fill-opacity=".7"/>
-<circle cx="940" cy="352" r="1.6" fill="#9FB2D8" fill-opacity=".7"/>
-<g class="drift">
-<g transform="translate(940 211) rotate(-48)"><path d="M0 0 L84 -50 L126 0 Z M126 0 L84 50 L201.6 95 L260.4 0 Z" fill="url(#wingFill)" fill-opacity=".30"/><path d="M126 0 L84 -50 L201.6 -95 L260.4 0 Z M0 -0 L84 50 L126 0 Z" fill="url(#wingFill)" fill-opacity=".17"/><path d="M260.4 0 L201.6 -95 L327.6 -66 L420 0 Z M260.4 0 L201.6 95 L327.6 66 L420 -0 Z" fill="url(#wingFill)" fill-opacity=".08"/></g><g transform="translate(940 211) scale(-1 1) rotate(-48)"><path d="M0 0 L84 -50 L126 0 Z M126 0 L84 50 L201.6 95 L260.4 0 Z" fill="url(#wingFill)" fill-opacity=".30"/><path d="M126 0 L84 -50 L201.6 -95 L260.4 0 Z M0 -0 L84 50 L126 0 Z" fill="url(#wingFill)" fill-opacity=".17"/><path d="M260.4 0 L201.6 -95 L327.6 -66 L420 0 Z M260.4 0 L201.6 95 L327.6 66 L420 -0 Z" fill="url(#wingFill)" fill-opacity=".08"/></g><g transform="translate(940 239) rotate(48)"><path d="M0 0 L66 -43 L99 0 Z M99 0 L66 43 L158.4 81.7 L204.6 0 Z" fill="url(#wingFill)" fill-opacity=".30"/><path d="M99 0 L66 -43 L158.4 -81.7 L204.6 0 Z M0 -0 L66 43 L99 0 Z" fill="url(#wingFill)" fill-opacity=".17"/><path d="M204.6 0 L158.4 -81.7 L257.4 -56.76 L330 0 Z M204.6 0 L158.4 81.7 L257.4 56.76 L330 -0 Z" fill="url(#wingFill)" fill-opacity=".08"/></g><g transform="translate(940 239) scale(-1 1) rotate(48)"><path d="M0 0 L66 -43 L99 0 Z M99 0 L66 43 L158.4 81.7 L204.6 0 Z" fill="url(#wingFill)" fill-opacity=".30"/><path d="M99 0 L66 -43 L158.4 -81.7 L204.6 0 Z M0 -0 L66 43 L99 0 Z" fill="url(#wingFill)" fill-opacity=".17"/><path d="M204.6 0 L158.4 -81.7 L257.4 -56.76 L330 0 Z M204.6 0 L158.4 81.7 L257.4 56.76 L330 -0 Z" fill="url(#wingFill)" fill-opacity=".08"/></g>
-<path d="M798 31 L818 63 L798 95 L778 63 Z" fill="url(#wingFill)" fill-opacity=".26"/><path d="M1088 37 L1108 69 L1088 101 L1068 69 Z" fill="url(#wingFill)" fill-opacity=".26"/>
-<use xlink:href="#wire" href="#wire" filter="url(#bloom)" opacity=".62"/>
-<use xlink:href="#wire" href="#wire"/>
-</g>
+<ellipse cx="300" cy="190" rx="430" ry="330" fill="url(#haloViolet)"/>
+<ellipse cx="980" cy="368" rx="380" ry="285" fill="url(#haloCyan)"/>
+
 <g class="rise d1">
-<text x="104" y="60" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="10.5" letter-spacing="2.9" fill="#7E88A6">LYSIPTERA CALIGINIA</text>
-<path d="M336 56 H760" stroke="url(#ruleFade)" stroke-width="1"/>
-<path d="M106 71 L109.5 76 L106 81 L102.5 76 Z" fill="none" stroke="#8FA0C4" stroke-opacity=".55" stroke-width="1"/>
+<text x="56" y="44" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="10" letter-spacing="2.4" fill="#7E88A6">LC // 07.2026</text>
+<text x="597" y="44" text-anchor="middle" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="11.5" letter-spacing="6.4" fill="#C8D2E8">LYSIPTERA CALIGINIA</text>
+<path d="M1144 33 L1149 40 L1144 47 L1139 40 Z" fill="none" stroke="#B98CF9" stroke-opacity=".7" stroke-width="1"/>
 </g>
-<path d="M70 124 V280" stroke="#8FA0C4" stroke-opacity=".38" stroke-width="1"/>
-<path d="M70 195.5 L74.5 202 L70 208.5 L65.5 202 Z" fill="#B98CF9" fill-opacity=".9"/>
-<g class="rise d2"><text x="104" y="150" font-family="'Iowan Old Style','Palatino Linotype',Palatino,'Hoefler Text',Garamond,'Times New Roman',Georgia,serif" font-size="28" fill="#EEF1FA">The universe named its oldest</text><text x="104" y="189" font-family="'Iowan Old Style','Palatino Linotype',Palatino,'Hoefler Text',Garamond,'Times New Roman',Georgia,serif" font-size="28" fill="#EEF1FA">design flaw <tspan font-style="italic" fill="#B98CF9">entropy,</tspan> then taught</text><text x="104" y="228" font-family="'Iowan Old Style','Palatino Linotype',Palatino,'Hoefler Text',Garamond,'Times New Roman',Georgia,serif" font-size="28" fill="#EEF1FA">every living thing to mistake</text><text x="104" y="267" font-family="'Iowan Old Style','Palatino Linotype',Palatino,'Hoefler Text',Garamond,'Times New Roman',Georgia,serif" font-size="28" fill="#EEF1FA">forgetting for fate.</text></g>
+<path d="M0 72 H1200" stroke="url(#bandRule)" stroke-width="1"/>
+
+<path d="M600 100 V306" stroke="#9FB2D8" stroke-opacity=".22" stroke-width="1" stroke-dasharray="2 7"/>
+<circle cx="600" cy="124" r="1.6" fill="#9FB2D8" fill-opacity=".7"/>
+<circle cx="600" cy="282" r="1.6" fill="#9FB2D8" fill-opacity=".7"/>
+<path d="M600 195 L605 202 L600 209 L595 202 Z" fill="#B98CF9" fill-opacity=".9"/>
+
+<g class="drift">
+<g class="fwr"><g transform="translate(302 202) rotate(-43)"><path d="M0 0 L34.8 -20.706 L52.2 0 Z M52.2 0 L34.8 20.706 L83.52 39.324 L107.88 0 Z" fill="url(#wingFill)" fill-opacity=".30"/><path d="M52.2 0 L34.8 -20.706 L83.52 -39.324 L107.88 0 Z M0 0 L34.8 20.706 L52.2 0 Z" fill="url(#wingFill)" fill-opacity=".18"/><path d="M107.88 0 L83.52 -39.324 L135.72 -27.318 L174 0 Z M107.88 0 L83.52 39.324 L135.72 27.318 L174 0 Z" fill="url(#wingFill)" fill-opacity=".10"/></g></g>
+<g class="fwl"><g transform="translate(302 202) scale(-1 1) rotate(-43)"><path d="M0 0 L34.8 -20.706 L52.2 0 Z M52.2 0 L34.8 20.706 L83.52 39.324 L107.88 0 Z" fill="url(#wingFill)" fill-opacity=".30"/><path d="M52.2 0 L34.8 -20.706 L83.52 -39.324 L107.88 0 Z M0 0 L34.8 20.706 L52.2 0 Z" fill="url(#wingFill)" fill-opacity=".18"/><path d="M107.88 0 L83.52 -39.324 L135.72 -27.318 L174 0 Z M107.88 0 L83.52 39.324 L135.72 27.318 L174 0 Z" fill="url(#wingFill)" fill-opacity=".10"/></g></g>
+<g class="hwr"><g transform="translate(302 222) rotate(45)"><path d="M0 0 L27.2 -16.184 L40.8 0 Z M40.8 0 L27.2 16.184 L65.28 30.736 L84.32 0 Z" fill="url(#wingFill)" fill-opacity=".30"/><path d="M40.8 0 L27.2 -16.184 L65.28 -30.736 L84.32 0 Z M0 0 L27.2 16.184 L40.8 0 Z" fill="url(#wingFill)" fill-opacity=".18"/><path d="M84.32 0 L65.28 -30.736 L106.08 -21.352 L136 0 Z M84.32 0 L65.28 30.736 L106.08 21.352 L136 0 Z" fill="url(#wingFill)" fill-opacity=".10"/></g></g>
+<g class="hwl"><g transform="translate(302 222) scale(-1 1) rotate(45)"><path d="M0 0 L27.2 -16.184 L40.8 0 Z M40.8 0 L27.2 16.184 L65.28 30.736 L84.32 0 Z" fill="url(#wingFill)" fill-opacity=".30"/><path d="M40.8 0 L27.2 -16.184 L65.28 -30.736 L84.32 0 Z M0 0 L27.2 16.184 L40.8 0 Z" fill="url(#wingFill)" fill-opacity=".18"/><path d="M84.32 0 L65.28 -30.736 L106.08 -21.352 L136 0 Z M84.32 0 L65.28 30.736 L106.08 21.352 L136 0 Z" fill="url(#wingFill)" fill-opacity=".10"/></g></g>
+<g class="pulse" filter="url(#bloom)" fill="none" stroke="url(#wingLine)" stroke-linejoin="round" opacity=".5">
+<g class="fwr"><g transform="translate(302 202) rotate(-43)"><path class="trace" d="M0 0 L34.8 -20.706 L83.52 -39.324 L135.72 -27.318 L174 0 L135.72 27.318 L83.52 39.324 L34.8 20.706 Z M0 0 L174 0 M52.2 0 L34.8 -20.706 M107.88 0 L83.52 -39.324 M52.2 0 L34.8 20.706 M107.88 0 L83.52 39.324" stroke-opacity=".8" stroke-width="1.1"/></g></g>
+<g class="fwl"><g transform="translate(302 202) scale(-1 1) rotate(-43)"><path class="trace" d="M0 0 L34.8 -20.706 L83.52 -39.324 L135.72 -27.318 L174 0 L135.72 27.318 L83.52 39.324 L34.8 20.706 Z M0 0 L174 0 M52.2 0 L34.8 -20.706 M107.88 0 L83.52 -39.324 M52.2 0 L34.8 20.706 M107.88 0 L83.52 39.324" stroke-opacity=".8" stroke-width="1.1"/></g></g>
+<g class="hwr"><g transform="translate(302 222) rotate(45)"><path class="trace" d="M0 0 L27.2 -16.184 L65.28 -30.736 L106.08 -21.352 L136 0 L106.08 21.352 L65.28 30.736 L27.2 16.184 Z M0 0 L136 0 M40.8 0 L27.2 -16.184 M84.32 0 L65.28 -30.736 M40.8 0 L27.2 16.184 M84.32 0 L65.28 30.736" stroke-opacity=".8" stroke-width="1.1"/></g></g>
+<g class="hwl"><g transform="translate(302 222) scale(-1 1) rotate(45)"><path class="trace" d="M0 0 L27.2 -16.184 L65.28 -30.736 L106.08 -21.352 L136 0 L106.08 21.352 L65.28 30.736 L27.2 16.184 Z M0 0 L136 0 M40.8 0 L27.2 -16.184 M84.32 0 L65.28 -30.736 M40.8 0 L27.2 16.184 M84.32 0 L65.28 30.736" stroke-opacity=".8" stroke-width="1.1"/></g></g>
+</g>
+<g fill="none" stroke="url(#wingLine)" stroke-linejoin="round">
+<g class="fwr"><g transform="translate(302 202) rotate(-43)"><path class="trace" d="M0 0 L34.8 -20.706 L83.52 -39.324 L135.72 -27.318 L174 0 L135.72 27.318 L83.52 39.324 L34.8 20.706 Z M0 0 L174 0 M52.2 0 L34.8 -20.706 M107.88 0 L83.52 -39.324 M52.2 0 L34.8 20.706 M107.88 0 L83.52 39.324" stroke-opacity=".5" stroke-width="1.1"/></g></g>
+<g class="fwl"><g transform="translate(302 202) scale(-1 1) rotate(-43)"><path class="trace" d="M0 0 L34.8 -20.706 L83.52 -39.324 L135.72 -27.318 L174 0 L135.72 27.318 L83.52 39.324 L34.8 20.706 Z M0 0 L174 0 M52.2 0 L34.8 -20.706 M107.88 0 L83.52 -39.324 M52.2 0 L34.8 20.706 M107.88 0 L83.52 39.324" stroke-opacity=".5" stroke-width="1.1"/></g></g>
+<g class="hwr"><g transform="translate(302 222) rotate(45)"><path class="trace" d="M0 0 L27.2 -16.184 L65.28 -30.736 L106.08 -21.352 L136 0 L106.08 21.352 L65.28 30.736 L27.2 16.184 Z M0 0 L136 0 M40.8 0 L27.2 -16.184 M84.32 0 L65.28 -30.736 M40.8 0 L27.2 16.184 M84.32 0 L65.28 30.736" stroke-opacity=".5" stroke-width="1.1"/></g></g>
+<g class="hwl"><g transform="translate(302 222) scale(-1 1) rotate(45)"><path class="trace" d="M0 0 L27.2 -16.184 L65.28 -30.736 L106.08 -21.352 L136 0 L106.08 21.352 L65.28 30.736 L27.2 16.184 Z M0 0 L136 0 M40.8 0 L27.2 -16.184 M84.32 0 L65.28 -30.736 M40.8 0 L27.2 16.184 M84.32 0 L65.28 30.736" stroke-opacity=".5" stroke-width="1.1"/></g></g>
+</g>
+<g transform="translate(-28 0)">
+<g fill="none" stroke="url(#wingLine)" stroke-linejoin="round">
+<path d="M330 138 L341 212 L330 288 L319 212 Z" fill="url(#wingFill)" fill-opacity=".22"/><path d="M330 138 L341 212 L330 288 L319 212 Z" stroke-opacity=".72" stroke-width="1.2"/><path d="M330 172 L335 212 L330 256 L325 212 Z" stroke-opacity=".62" stroke-width="1"/><path d="M314 204 L330 198 L346 204 L330 210 Z" stroke-opacity=".46" stroke-width="1"/><path d="M330 124 L336 132 L330 140 L324 132 Z" fill="url(#wingFill)" fill-opacity=".3"/><path d="M330 124 L336 132 L330 140 L324 132 Z" stroke-opacity=".8" stroke-width="1.1"/>
+<path d="M329 126 C 320 112, 310 102, 296 94" stroke-opacity=".6" stroke-width="1.1"/><path d="M331 126 C 340 112, 350 102, 364 94" stroke-opacity=".6" stroke-width="1.1"/>
+</g>
+<circle cx="296" cy="94" r="2.4" fill="#B98CF9"/>
+<circle cx="364" cy="94" r="2.4" fill="#6FEBFA"/>
+</g>
+</g>
+
+<path class="gem" d="M148 125 L155 132 L148 139 L141 132 Z" fill="#B98CF9" fill-opacity=".75"/>
+<path class="gem gem2" d="M502 266 L508 272 L502 278 L496 272 Z" fill="#6FEBFA" fill-opacity=".7"/>
+
+<g class="rise d2">
+<text x="648" y="152" font-family="'Iowan Old Style','Palatino Linotype',Palatino,'Hoefler Text',Garamond,'Times New Roman',Georgia,serif" font-size="28" fill="#EEF1FA"><tspan>The universe named its oldest</tspan></text>
+<text x="648" y="192" font-family="'Iowan Old Style','Palatino Linotype',Palatino,'Hoefler Text',Garamond,'Times New Roman',Georgia,serif" font-size="28" fill="#EEF1FA"><tspan>design flaw </tspan><tspan font-style="italic" fill="#B98CF9">entropy,</tspan><tspan> then taught</tspan></text>
+<text x="648" y="232" font-family="'Iowan Old Style','Palatino Linotype',Palatino,'Hoefler Text',Garamond,'Times New Roman',Georgia,serif" font-size="28" fill="#EEF1FA"><tspan>every living thing to mistake</tspan></text>
+<text x="648" y="272" font-family="'Iowan Old Style','Palatino Linotype',Palatino,'Hoefler Text',Garamond,'Times New Roman',Georgia,serif" font-size="28" fill="#EEF1FA"><tspan>forgetting for fate.</tspan></text>
+</g>
+
+<path d="M0 342 H1200" stroke="url(#bandRule)" stroke-width="1"/>
 <g class="rise d3">
-<text x="104" y="318" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="11" letter-spacing="4.4" fill="#8A6FC4">still becoming.</text>
-<path d="M224 382L248.43 382L248.43 382L272.86 382L272.86 379L297.29 379L297.29 379L321.71 379L321.71 376L346.14 376L346.14 376L370.57 376L370.57 373L395 373L395 373L419.43 373L419.43 370L443.86 370L443.86 367L468.29 367L468.29 367L492.71 367L492.71 364L517.14 364L517.14 361L541.57 361L541.57 361L566 361L566 358" fill="none" stroke="#7FA8D8" stroke-opacity=".55" stroke-width="1"/><circle cx="566" cy="358" r="2.2" fill="#6FEBFA"/><text x="104" y="367" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="8.5" letter-spacing="1.5" fill="#7E88A6">ENTROPY INDEX</text><text x="104" y="381" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="8.5" letter-spacing="1.5" fill="#7E88A6">ΔS ≥ 0</text>
+<text x="56" y="385" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="9.5" letter-spacing="1.4" fill="#7E88A6">between a line of code and a quiet dream</text>
+<text x="1144" y="385" text-anchor="end" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="9.5" letter-spacing="1.4" fill="#7E88A6">STILL BECOMING · ΔS ≥ 0 · v0.1.0</text>
 </g>
-<rect x="1064" y="0" width="136" height="420" fill="url(#edgeFade)"/>
-<text x="1150" y="66" text-anchor="middle" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="9.5" letter-spacing="1.6" fill="#8E98B4">20</text><text x="1150" y="79" text-anchor="middle" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="9.5" letter-spacing="1.6" fill="#8E98B4">MM</text><g stroke="#8FA0C4" stroke-opacity=".38" stroke-width="1"><path d="M1150 94 V128"/><path d="M1145 94 H1155 M1147 111 H1153 M1145 128 H1155"/></g><path d="M1150 142 L1154 148 L1150 154 L1146 148 Z" fill="none" stroke="#8FA0C4" stroke-opacity=".55" stroke-width="1"/><text x="1150" y="200" text-anchor="middle" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="8.5" letter-spacing="1.1" fill="#8E98B4">v0.1.0</text><g transform="translate(1127.65 356)"><g transform="translate(0 0) scale(0.15)"><path d="M0 -100 H22 V-22 H64 V0 H0 Z" fill="#C6CFE6"/><path d="M110 -100 H136 L148 -79.6 L160 -100 H186 L159 -54 V0 H137 V-54 Z" fill="#C6CFE6"/><path d="M287 -75 C287 -84,278 -89,265 -89 C252 -89,243 -84,243 -75 C243 -66,251 -61.5,264 -58 C278 -54,287 -47.5,287 -37 C287 -25.5,277 -11,265 -11 C253 -11,243 -18,243 -28.5" fill="none" stroke="#C6CFE6" stroke-width="22"/></g></g><path d="M1124 368 H1176" stroke="#8FA0C4" stroke-opacity=".38" stroke-width="1"/><path d="M1150 378 L1154 384 L1150 390 L1146 384 Z" fill="none" stroke="#8FA0C4" stroke-opacity=".55" stroke-width="1"/>
 </g>
 <rect x=".75" y=".75" width="1198.5" height="418.5" rx="15.25" fill="none" stroke="url(#frameGrad)" stroke-width="1.5"/>
 </svg>

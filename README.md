@@ -3,13 +3,15 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset=".github/assets/hero-dark.svg">
   <source media="(prefers-color-scheme: light)" srcset=".github/assets/hero-light.svg">
-  <img src=".github/assets/hero-dark.svg" alt="Lys — Lysiptera Caliginia. Local-first desktop chat: your models, your machine, your data." width="100%">
+  <img src=".github/assets/hero-dark.svg" alt="Lys — Lysiptera Caliginia. “The universe named its oldest design flaw entropy, then taught every living thing to mistake forgetting for fate.”" width="100%">
 </picture>
 
 <p>
   <a href="https://lys.negentropy.studio"><img src="https://img.shields.io/badge/handbook-lys.negentropy.studio-4ECA7A?style=flat-square&labelColor=0C031F&logo=astro&logoColor=4ECA7A" alt="Engineering handbook"></a>
   <img src="https://img.shields.io/badge/license-MPL--2.0-D2E4F0?style=flat-square&labelColor=0C031F" alt="License: MPL-2.0">
 </p>
+
+<sub>React · TypeScript · Tailwind CSS · Tauri · Rust · Fastify · Zod · SQLite · LM Studio</sub>
 
 </div>
 

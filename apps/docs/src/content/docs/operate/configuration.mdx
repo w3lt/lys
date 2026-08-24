@@ -1,0 +1,93 @@
+---
+title: Configuration
+description: Current checked-in configuration surfaces and their implementation boundaries.
+docType: reference
+sidebar:
+  order: 1
+---
+
+import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
+import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+
+Current configuration surfaces that are evidenced in this repository.
+
+<DocumentMeta
+  label="Page metadata"
+  entries={[{ label: "Type", value: "Reference" }]}
+/>
+
+## Host-managed settings file
+
+The Tauri desktop host reads and writes one JSON settings file at
+`~/.lys/settings.json`.
+
+The current schema contains one top-level object, `runtime`, with two fields:
+
+- `autoStartBackend`: boolean, defaults to `false`
+- `selectedModel`: nullable string in the persisted JSON; exposed as an
+  optional field at the current TypeScript boundary
+
+When the file does not exist yet, the desktop host creates `~/.lys/` and writes
+the default structure on first load.
+
+## Current UI wiring
+
+The desktop UI currently calls the Tauri `load_settings` command during
+initialization, but the checked-in UI does not call `save_settings` after a
+user changes runtime controls.
+
+That means:
+
+- the host has a save command and file format
+- the current UI can reflect loaded settings
+- changing the current runtime controls in the UI does not by itself prove that
+  the new values are persisted back to disk
+
+## Fixed runtime addresses
+
+The backend and desktop currently use compiled-in local addresses rather than a
+documented user-editable configuration source:
+
+- backend HTTP address: `127.0.0.1:12345`
+- LM Studio address used by the backend: `127.0.0.1:1234`
+
+The desktop store also derives its backend base URL from those same protocol
+constants, so the user interface and backend stay aligned.
+
+## Theme preference
+
+The desktop stores `dark` or `light` under the `lys.theme` key in WebView
+`localStorage`. Missing, invalid, or unavailable storage falls back to `dark`.
+
+## What is not configurable yet
+
+The repository does not currently document or implement:
+
+- a supported environment-variable contract for runtime settings
+- a user-facing setting for the database path
+- a supported way to change backend or LM Studio ports without editing code
+- a published configuration file for docs deployment beyond the checked-in
+  GitHub Actions workflow and Astro configuration
+
+Configuration surfaces beyond the settings file above are still code-owned.
+
+:::note[Coming soon]
+If Lys gains a supported runtime configuration contract beyond
+`~/.lys/settings.json`, this page should expand into the canonical reference
+for it.
+:::
+
+<RelatedDocuments
+  documents={[
+    {
+      kind: "Reference",
+      label: "Data locations and lifecycle",
+      href: "/operate/data/"
+    },
+    {
+      kind: "Reference",
+      label: "Runtime dependencies",
+      href: "/operate/dependencies/"
+    }
+  ]}
+/>

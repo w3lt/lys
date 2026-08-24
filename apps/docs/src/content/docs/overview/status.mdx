@@ -1,0 +1,66 @@
+---
+title: Implementation status
+description: What the checked-in implementation does today and which documented areas are still missing.
+sidebar:
+  order: 3
+---
+
+import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
+import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+
+What works today and which documented areas are still missing.
+
+<DocumentMeta
+  label="Page metadata"
+  entries={[{ label: "Type", value: "Overview" }]}
+/>
+
+This page is intentionally conservative. It describes behavior visible in the
+repository today; it is not a promise of unreleased work.
+
+## Implemented now
+
+- The desktop can start and stop the backend through the Tauri host.
+- The backend exposes a health route, LLM inventory and load routes, and a chat
+  route.
+- A chat turn creates or continues a conversation, inserts user and assistant
+  rows in SQLite, and streams typed SSE events back to the desktop.
+- The backend also attempts to generate a conversation title asynchronously and
+  emits it as a stream event.
+- The Tauri host loads a small runtime settings file from
+  `~/.lys/settings.json`.
+
+## Coming soon
+
+The current repository does not yet provide:
+
+- conversation history retrieval or restoration after relaunch
+- persisted assistant delta content in SQLite
+- usable Model, Generation, and Conversation settings tabs, followed by live
+  wiring between those controls and chat requests
+- replay or reconnect semantics for chat streams
+- tool-call stream events
+- a production desktop release workflow
+- evidenced ADR, RFC, and release-history records
+
+## Related documents
+
+<RelatedDocuments
+  documents={[
+    {
+      kind: "Section",
+      label: "Introduction",
+      href: "/overview/introduction/"
+    },
+    {
+      kind: "Changelog",
+      label: "Changelog",
+      href: "/changelog/"
+    },
+    {
+      kind: "Reference",
+      label: "Backend API contracts",
+      href: "/reference/api/"
+    }
+  ]}
+/>

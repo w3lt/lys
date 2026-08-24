@@ -1,0 +1,95 @@
+---
+title: Contribution workflow
+description: The contributor workflow defined by the repository, from reading context to requesting review.
+sidebar:
+  order: 4
+---
+
+import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
+import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+
+Repository context, validation, documentation impact, and what a reviewable
+change looks like.
+
+<DocumentMeta
+  label="Page metadata"
+  entries={[{ label: "Type", value: "Policy" }]}
+/>
+
+`CONTRIBUTING.md` is the canonical workflow document. This page pulls the main
+operational steps into one place so you know where to look before editing.
+
+## Before making a change
+
+Read the relevant implementation, tests, docs, configuration, and call sites.
+Trace the affected data flow across package or process boundaries. Then define
+the smallest coherent change that solves the real problem.
+
+## During the change
+
+Keep the scope focused:
+
+- preserve existing architecture unless a targeted improvement is necessary
+- keep callers, consumers, types, schemas, and docs consistent
+- avoid unrelated refactors and speculative abstractions
+- preserve unrelated work already present in the tree
+
+## Validation
+
+Run the smallest relevant checks first and record the actual results. If you
+cannot run a relevant check, say exactly why.
+
+## Pull request preparation
+
+This repository keeps specialized pull request templates under
+`.github/PULL_REQUEST_TEMPLATE/`. Choose the template that matches the primary
+issue type:
+
+- bug
+- feature
+- improvement
+- maintenance
+- documentation
+- investigation / decision
+
+## Before requesting review
+
+The final checklist in `CONTRIBUTING.md` requires you to confirm:
+
+- one clear purpose
+- standards compliance
+- consistent callers, consumers, and documentation
+- relevant tests and validation
+- no unrelated changes, placeholders, or debug output
+
+## Coming soon
+
+The repository workflow documents do not currently define a contributor branch
+naming policy or commit-message convention beyond the general requirement that a
+change have one clear purpose. Keep your change easy to review and avoid
+inventing stronger policy in docs until the repo adopts it explicitly.
+
+<RelatedDocuments
+  documents={[
+    {
+      kind: "Section",
+      label: "Develop overview",
+      href: "/develop/setup/"
+    },
+    {
+      kind: "Decisions",
+      label: "Related decision records",
+      href: "/decisions/"
+    },
+    {
+      kind: "Reference",
+      label: "SSE events",
+      href: "/reference/sse-events/"
+    },
+    {
+      kind: "Policy",
+      label: "Code-review process",
+      href: "/develop/review/"
+    }
+  ]}
+/>

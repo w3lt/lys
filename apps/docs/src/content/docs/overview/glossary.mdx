@@ -1,0 +1,79 @@
+---
+title: Glossary
+description: Terms that mean something specific inside Lys.
+sidebar:
+  order: 5
+---
+
+import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
+import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+
+Terms that mean something specific inside Lys.
+
+<DocumentMeta
+  label="Page metadata"
+  entries={[{ label: "Type", value: "Overview" }]}
+/>
+
+## Core runtime terms
+
+- **Desktop**: the React user interface in `apps/desktop`.
+- **Tauri host**: the native shell around the desktop app. It owns native
+  commands such as backend start and stop.
+- **Backend**: the Fastify process in `apps/backend` that serves HTTP routes,
+  streams chat events, and persists conversations.
+- **Protocol**: the shared HTTP and SSE contract exported by
+  `packages/protocol`.
+- **Share**: the shared domain-model package exported by `packages/share`.
+
+## Conversation terms
+
+- **Conversation**: the stored chat unit with metadata such as ID, title,
+  system prompt, and timestamps.
+- **User message**: a persisted message with role `user` and non-empty content.
+- **Assistant message**: a persisted message with role `assistant`, a model
+  name, lifecycle status, and an optional finish reason.
+- **Finish reason**: the terminal model reason currently supported by the
+  protocol: `stop` or `length`.
+- **System prompt**: the backend-owned prompt template attached to a new
+  conversation record.
+
+## Streaming terms
+
+- **SSE**: Server-Sent Events. The chat endpoint responds as `text/event-stream`
+  and emits typed lifecycle events.
+- **Start event**: the first event in a chat turn, either
+  `start-new-conversation-turn` or `start-existing-conversation-turn`.
+- **Delta event**: a streamed assistant text fragment.
+- **Done event**: the terminal assistant lifecycle event carrying the finish
+  reason.
+- **Title event**: the event that publishes the generated conversation title.
+
+## Handbook terms
+
+- **ADR**: Architecture Decision Record, the reserved format for preserving a
+  real decision and its historical context. No ADRs are published yet.
+- **RFC**: Request for Comments, the reserved format for tracking a proposal
+  before implementation. No RFCs are published yet.
+- **docType**: the frontmatter field that tells the docs build whether a page is
+  architecture, decision, proposal, runbook, or reference content.
+
+<RelatedDocuments
+  documents={[
+    {
+      kind: "Section",
+      label: "Introduction",
+      href: "/overview/introduction/"
+    },
+    {
+      kind: "Decisions",
+      label: "Related decision records",
+      href: "/decisions/"
+    },
+    {
+      kind: "Reference",
+      label: "API and stream reference",
+      href: "/reference/api/"
+    }
+  ]}
+/>

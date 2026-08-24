@@ -9,7 +9,16 @@ import reactX from "eslint-plugin-react-x"
 import reactDom from "eslint-plugin-react-dom"
 
 export default defineConfig([
-  globalIgnores(["dist", "node_modules", "**/src-tauri/target"]),
+  // Patterns are matched against every workspace, not only the repository
+  // root, so a built application or generated type directory inside `apps/*`
+  // is excluded as well. `.astro` holds the types Astro generates for
+  // `apps/docs`.
+  globalIgnores([
+    "**/dist",
+    "**/node_modules",
+    "**/.astro",
+    "**/src-tauri/target"
+  ]),
   {
     files: ["**/*.{js,mjs,cjs,ts,mts,cts,jsx,tsx}"],
     plugins: { js },

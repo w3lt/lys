@@ -1,0 +1,80 @@
+---
+title: Introduction
+description: What Lys is, how the repository is organised, and where to go next.
+sidebar:
+  order: 1
+---
+
+import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
+import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+
+Lys is a local-first desktop chat application under active development. Today
+the repository contains three applications and two shared packages:
+
+- `apps/desktop` is the user interface: React 19, Vite, Zustand, and a Tauri 2
+  host.
+- `apps/backend` is the local HTTP backend: Fastify, Server-Sent Events, model
+  inventory via the LM Studio SDK, and chat completions through an
+  OpenAI-compatible client.
+- `apps/docs` is this Astro/Starlight handbook.
+- `packages/protocol` defines shared route constants and validation schemas.
+- `packages/share` defines shared conversation models.
+
+The root workspace is managed with `pnpm`, and the checked-in package manager
+pin is `pnpm@11.17.0`.
+
+<DocumentMeta
+  label="Page metadata"
+  entries={[{ label: "Type", value: "Overview" }]}
+/>
+
+## Runtime shape
+
+One chat turn currently crosses these boundaries:
+
+1. The desktop store submits a prompt to `POST /api/v1/chat`.
+2. The backend creates or continues a conversation, inserts the user message
+   and an empty assistant row in SQLite, then starts streaming SSE events.
+3. The desktop reads typed stream events and updates its local presentation
+   state from them.
+
+Streamed assistant text currently lives only in desktop state; the backend
+updates the stored assistant lifecycle but does not append deltas to its stored
+content.
+
+The current public protocol surface is small: health, LLM inventory and load
+routes, plus the chat stream.
+
+## What this handbook is for
+
+Use this handbook to understand current repository structure, runtime behavior,
+contributor workflow, operations, and shared contracts. The decision, proposal,
+and release registers are visible placeholders until real records exist.
+
+## Where to go next
+
+- Read [Repository map](/overview/repository/) for the package-level layout.
+- Read [Implementation status](/overview/status/) for what is implemented and
+  what is still missing from the docs.
+- Read [Environment setup](/develop/setup/) if you want to run the project
+  locally.
+
+<RelatedDocuments
+  documents={[
+    {
+      kind: "Decisions",
+      label: "Related decision records",
+      href: "/decisions/"
+    },
+    {
+      kind: "Reference",
+      label: "SSE events",
+      href: "/reference/sse-events/"
+    },
+    {
+      kind: "Section",
+      label: "Repository map",
+      href: "/overview/repository/"
+    }
+  ]}
+/>

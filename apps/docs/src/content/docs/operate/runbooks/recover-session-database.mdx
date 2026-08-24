@@ -1,0 +1,44 @@
+---
+title: Recover a corrupted session database
+description: Placeholder for a future, evidenced recovery procedure once the repository ships supported database-repair tooling.
+docType: runbook
+sidebar:
+  label: Runbook · session recovery
+---
+
+import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
+import StatusBadge from "@/components/handbook/StatusBadge.astro"
+
+<StatusBadge status="draft" label="runbook · coming soon" />
+
+This runbook is reserved for a future recovery procedure once Lys ships a
+supported database-repair workflow.
+
+<DocumentMeta
+  label="Runbook metadata"
+  layout="cards"
+  entries={[
+    {
+      label: "Trigger",
+      value: "Database repair guidance is needed"
+    },
+    {
+      label: "Current state",
+      value: "No supported recovery commands are documented in this repository"
+    },
+    {
+      label: "Expected duration",
+      value: "To be defined with the implementation"
+    }
+  ]}
+/>
+
+## Coming soon
+
+The current codebase proves that Lys stores conversations in
+`~/.lys/lys_db.sqlite` and applies forward-only migrations at startup, but it
+does not ship documented repair commands, integrity checks, or a supported
+operator recovery path.
+
+Until that support exists, this page intentionally does not prescribe manual
+repair commands.

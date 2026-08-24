@@ -1,0 +1,59 @@
+---
+title: Changelog
+description: Placeholder for a future canonical release log once the repository starts publishing one.
+sidebar:
+  label: Changelog
+  order: 1
+---
+
+import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
+import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
+
+What changed and when. The changelog is the chronological change record for
+Lys: git and pull-request history remain the implementation record until the
+repository starts maintaining a canonical release log.
+
+<DocumentMeta
+  label="Page metadata"
+  entries={[
+    { label: "Type", value: "Changelog" },
+    { label: "Current state", value: "Coming soon" }
+  ]}
+/>
+
+## Coming soon
+
+The repository does not currently have a canonical `CHANGELOG.md` or a tag-based
+release history.
+
+All checked-in package manifests are still versioned `0.1.0` today:
+
+- repository root package
+- `@lys/docs`
+- `@lys/backend`
+- `@lys/desktop`
+- `@lys/protocol`
+- `@lys/share`
+
+Until a release log exists, use commit history and pull requests as the
+authoritative record of change.
+
+<RelatedDocuments
+  documents={[
+    {
+      kind: "Overview",
+      label: "Implementation status",
+      href: "/overview/status/"
+    },
+    {
+      kind: "Guide",
+      label: "Packaging and releases",
+      href: "/operate/releases/"
+    },
+    {
+      kind: "Reference",
+      label: "Runtime dependencies",
+      href: "/operate/dependencies/"
+    }
+  ]}
+/>

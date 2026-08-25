@@ -1,8 +1,13 @@
-import type { ChatApiRequestBody, ChatApiStreamEvent } from "@lys/protocol"
+import type {
+  ChatApiRequestBody,
+  ChatApiStreamEvent,
+  MessageGenerationOptions
+} from "@lys/protocol"
 import type { ConversationAssistantMessageStatus } from "@lys/share"
 import { create, type StoreApi, type UseBoundStore } from "zustand"
 
 import { readChatEvents, type ChatApiOptions } from "@/lib/apis/http/chat"
+import { useLysStore } from "@/lib/store"
 
 import {
   type ChatViewConversation,
@@ -33,14 +38,22 @@ export type ChatStream = (
  * Runtime dependencies used by one independently owned chat-view store.
  *
  * @remarks The store owns request tokens and the abort controller; these
- * dependencies provide only transport and timestamp capabilities. The store
- * does not share request lifecycle state with another store instance.
+ * dependencies provide only transport, timestamp, and generation-settings
+ * capabilities. The store does not share request lifecycle state with another
+ * store instance, and does not own the settings it reads.
  */
 export type ChatViewStoreDependencies = {
   /** Opens the backend chat stream; the store supplies its owned abort signal. */
   readonly streamChat: ChatStream
   /** Creates the ISO timestamp recorded on each immutable transition. */
   readonly createTimestamp: () => string
+  /**
+   * Reads the generation controls applied to the next request.
+   *
+   * @returns The settings-owned controls current at call time; the store reads
+   * them once per request, so a later change applies to the following request.
+   */
+  readonly readGenerationOptions: () => MessageGenerationOptions
 }
 
 /**
@@ -214,20 +227,24 @@ function createChatRequestResource(token: number): ChatRequestResource {
  *
  * @param conversationId - Existing conversation identifier, when continuing.
  * @param submittedPrompt - Trimmed prompt prepared for this turn.
- * @returns The current payload shape for a new or existing conversation.
- * @remarks The returned object currently omits the protocol-required
- * `generationOptions` field, so it is incomplete/invalid as a
- * `ChatApiRequestBody` baseline and is not type-safe to send successfully.
- * This documentation records the known defect; this task intentionally does
- * not add the missing options or change request behavior.
+ * @param generationOptions - Settings-owned controls for this request.
+ * @returns The complete payload for a new or existing conversation.
+ * @remarks The request contract is strict, so conversation absence is
+ * represented by omitting the identifier rather than sending an empty one.
  */
 function createChatRequestPayload(
   conversationId: string | undefined,
-  submittedPrompt: string
+  submittedPrompt: string,
+  generationOptions: MessageGenerationOptions
 ): ChatApiRequestBody {
   return conversationId
-    ? { conversationId, message: submittedPrompt, model: CHAT_MODEL }
-    : { message: submittedPrompt, model: CHAT_MODEL }
+    ? {
+        conversationId,
+        message: submittedPrompt,
+        model: CHAT_MODEL,
+        generationOptions
+      }
+    : { message: submittedPrompt, model: CHAT_MODEL, generationOptions }
 }
 
 /**
@@ -563,9 +580,7 @@ export function createChatViewStore(
     /**
      * Reads one request's stream through terminal cleanup.
      *
-     * @param payload - Current store-created payload; it is incomplete against
-     * the protocol because `createChatRequestPayload` omits required
-     * `generationOptions` (known baseline debt).
+     * @param payload - Complete store-created payload for this request.
      * @param request - Awaiting observable state correlated with the transport.
      * @returns A promise that resolves after completion, failure, or invalidation.
      * @remarks Events are consumed in arrival order. An `error` notification
@@ -645,7 +660,8 @@ export function createChatViewStore(
       const resource = createChatRequestResource(token)
       const payload = createChatRequestPayload(
         get().conversation?.id,
-        submittedPrompt
+        submittedPrompt,
+        dependencies.readGenerationOptions()
       )
 
       activeRequestResource = resource
@@ -714,10 +730,19 @@ export function createChatViewStore(
  *
  * @remarks This singleton owns the live browser request lifecycle. Tests or
  * alternate compositions should call {@link createChatViewStore} to obtain a
- * separate token and abort-resource owner.
+ * separate token and abort-resource owner. Generation controls are read from
+ * the application store at send time, so the request carries the settings
+ * shown by the Generation pane; the two controls are named explicitly because
+ * the request contract rejects unknown fields.
  */
 export const useChatViewStore: UseBoundStore<StoreApi<ChatViewStore>> =
   createChatViewStore({
     streamChat: readChatEvents,
-    createTimestamp: () => new Date().toISOString()
+    createTimestamp: () => new Date().toISOString(),
+    readGenerationOptions: () => {
+      const { temperature, replyCeiling } =
+        useLysStore.getState().settings.generation
+
+      return { temperature, replyCeiling }
+    }
   })

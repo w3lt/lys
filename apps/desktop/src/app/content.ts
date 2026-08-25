@@ -7,25 +7,6 @@ export const STARTER_PROMPTS = [
   "What happens when the context fills?"
 ] as const
 
-/** Demonstration model choices displayed by the desktop model settings view. */
-export const MODEL_OPTIONS = [
-  {
-    name: "qwen3-8b-instruct",
-    meta: "8.2B · Q4_K_M · 4.9 GB",
-    size: "4.9 GB"
-  },
-  {
-    name: "mistral-nemo-12b",
-    meta: "12.2B · Q4_K_M · 7.1 GB",
-    size: "7.1 GB"
-  },
-  {
-    name: "phi-4-mini",
-    meta: "3.8B · Q6_K · 2.4 GB",
-    size: "2.4 GB"
-  }
-] as const
-
 /** Deterministic demonstration replies selected by {@link replyForPrompt}. */
 export const REPLIES = {
   identity:

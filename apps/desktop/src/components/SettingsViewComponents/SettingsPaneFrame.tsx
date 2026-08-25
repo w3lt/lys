@@ -1,57 +1,59 @@
-import type { SettingsPaneProps } from "@/views/SettingsView/SettingsView"
-import PaneHeading from "./PaneHeading"
+import { Button } from "@/components/ui/button"
+import type { SettingsPaneDescriptor } from "@/views/SettingsView/SettingsView"
+
 import PaneFooter from "./PaneFooter"
+import PaneHeading from "./PaneHeading"
 import PaneSkeleton from "./PaneSkeleton"
 
+/** Properties accepted by {@link SettingsPaneFrame}. */
+export type SettingsPaneFrameProps = {
+  /** Whether the lazy pane body is suspended; defaults to `false`. */
+  readonly busy?: boolean
+  /** Called when the Done action is activated. */
+  readonly onDone: () => void
+  /** Metadata and lazy body selected by the settings view. */
+  readonly pane: SettingsPaneDescriptor
+}
+
 /**
- * Frames one settings pane with its heading, body or loading skeleton, and
- * completion footer.
+ * Frames one settings pane with its heading, Done action, body, and footer.
  *
  * @remarks Primary category: composition/view. The parent owns pane metadata,
- * the Done callback, and the busy state; omission of `busy` means `false`.
- * While busy, the `Suspense` fallback renders a separate busy frame whose
- * heading and footer remain visually available; it does not retain the
- * non-busy frame's child instances or local state. Otherwise it renders the
- * selected no-props lazy body supplied by the pane registry. Lazy import
- * failures propagate because this component has no error boundary. The frame
- * owns no settings state or persistence and delegates semantic heading,
- * status, and button behavior to its children.
+ * the Done callback, and the busy state; omitting `busy` means `false`. While
+ * busy the `Suspense` fallback renders a separate busy frame, so the heading
+ * and Done action stay available without retaining the ready frame's child
+ * instances or local state; the closing note is withheld until the body
+ * arrives, because it describes controls that are not on screen yet. Lazy
+ * import failures propagate, as this component declares no error boundary. The
+ * frame owns no settings state or persistence.
  *
- * @param props - Pane metadata, optional pending state, and parent completion
- * callback.
+ * @param props - Pane metadata, optional pending state, and the Done callback.
  * @returns The complete settings pane frame.
  */
 export default function SettingsPaneFrame({
   busy = false,
   onDone,
   pane
-}: {
-  /** Whether the lazy pane body is suspended; defaults to `false`. */
-  busy?: boolean
-  /** Called when the footer Done action is activated. */
-  onDone: () => void
-  /** Metadata and lazy body selected by the settings view. */
-  pane: SettingsPaneProps
-}) {
+}: SettingsPaneFrameProps) {
   const PaneContentComponent = pane.contentComponent
-  const children = busy ? (
-    <PaneSkeleton pane={pane.value} />
-  ) : (
-    <PaneContentComponent />
-  )
 
   return (
     <div className="settings-view__pane">
-      <PaneHeading
-        busy={busy}
-        eyebrow={pane.eyebrow}
-        note={pane.note}
-        title={pane.label}
-      />
+      <div className="settings-view__pane-top">
+        <PaneHeading busy={busy} note={pane.note} title={pane.label} />
+        <Button
+          className="settings-view__done"
+          onClick={onDone}
+          type="button"
+          variant="outline"
+        >
+          Done
+        </Button>
+      </div>
 
-      {children}
+      {busy ? <PaneSkeleton pane={pane.value} /> : <PaneContentComponent />}
 
-      <PaneFooter onDone={onDone} />
+      {busy ? null : <PaneFooter note={pane.footNote} />}
     </div>
   )
 }

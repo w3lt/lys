@@ -55,7 +55,15 @@ const PANE_SKELETONS: Record<SettingsPane, PaneSkeletonShape> = {
           control: { width: "44px", height: "24px" }
         }
       },
-      { title: "104px", meta: "168px" }
+      {
+        title: "104px",
+        meta: "168px",
+        row: {
+          label: "212px",
+          description: "268px",
+          control: { width: "0", height: "0" }
+        }
+      }
     ],
     heading: false,
     rows: [],
@@ -67,14 +75,9 @@ const PANE_SKELETONS: Record<SettingsPane, PaneSkeletonShape> = {
     heading: true,
     rows: [
       {
-        label: "72px",
-        description: "178px",
-        control: { width: "186px", height: "34px" }
-      },
-      {
         label: "132px",
         description: "96px",
-        control: { width: "62px", height: "30px" }
+        control: { width: "150px", height: "30px" }
       }
     ],
     list: ["64%", "78%", "52%"],
@@ -87,39 +90,21 @@ const PANE_SKELETONS: Record<SettingsPane, PaneSkeletonShape> = {
       {
         label: "116px",
         description: "218px",
-        control: { width: "154px", height: "30px" }
+        control: { width: "212px", height: "22px" }
       },
       {
         label: "94px",
         description: "158px",
-        control: { width: "212px", height: "22px" }
+        control: { width: "96px", height: "24px" }
       },
       {
         label: "98px",
         description: "132px",
         control: { width: "212px", height: "22px" }
-      },
-      {
-        label: "110px",
-        description: "190px",
-        control: { width: "80px", height: "24px" }
       }
     ],
     list: [],
     block: false
-  },
-  conversation: {
-    cards: [],
-    heading: false,
-    rows: [
-      {
-        label: "148px",
-        description: "206px",
-        control: { width: "176px", height: "30px" }
-      }
-    ],
-    list: [],
-    block: true
   }
 }
 

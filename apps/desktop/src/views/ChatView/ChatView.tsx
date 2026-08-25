@@ -127,7 +127,7 @@ export default function ChatView({
           transcriptRef={transcriptRef}
         />
       )}
-      <Composer messageCount={messages.length} />
+      <Composer />
     </main>
   )
 }

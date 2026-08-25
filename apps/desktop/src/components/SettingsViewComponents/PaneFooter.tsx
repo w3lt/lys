@@ -1,30 +1,24 @@
-import { Button } from "@/components/ui/button"
+/** Properties accepted by {@link PaneFooter}. */
+export type PaneFooterProps = {
+  /** Closing note explaining what the pane's settings actually affect. */
+  readonly note: string
+}
 
 /**
- * Completes the current settings pane with the session-only notice and Done
- * action.
+ * Closes one settings pane with the note explaining what its settings do.
  *
- * @remarks Primary category: presentational. The parent owns the `onDone`
- * callback; the component invokes it once synchronously when the button is
- * activated and owns no settings state, effects, persistence, or resources.
- * The footer is a semantic `footer`, and Done is a labelled native button that
- * remains keyboard operable. There are no pending, failed, or empty states.
+ * @remarks Primary category: presentational. The parent owns the note and
+ * decides whether to render the footer at all; an empty note renders an empty
+ * footer rather than collapsing the pane's bottom spacing. The component owns
+ * no state, callbacks, effects, or resources.
  *
- * @param props - Parent-owned completion callback for leaving settings.
- * @returns The settings footer.
+ * @param props - Closing note for the current pane.
+ * @returns The settings pane footer.
  */
-export default function PaneFooter({
-  onDone
-}: {
-  /** Parent-owned action invoked when the user completes the pane. */
-  onDone: () => void
-}) {
+export default function PaneFooter({ note }: PaneFooterProps) {
   return (
     <footer className="settings-view__footer">
-      <p>Changes live in this session only. Nothing is written to disk.</p>
-      <Button onClick={onDone} type="button">
-        Done
-      </Button>
+      <p>{note}</p>
     </footer>
   )
 }

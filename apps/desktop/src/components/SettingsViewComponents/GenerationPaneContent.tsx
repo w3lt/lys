@@ -1,164 +1,149 @@
-import type { LysConfig } from "@/app/types"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { Separator } from "@/components/ui/separator"
 import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
+
 import { useSettingsContext } from "./SettingsContext"
 
-/** Supported context-window choices shown by the settings control. */
-const CONTEXT_OPTIONS: ReadonlyArray<{
-  /** Context-window capacity in tokens. */
-  value: LysConfig["contextSize"]
-  /** Compact display label for the capacity. */
-  label: string
-}> = [
-  { value: 4096, label: "4k" },
-  { value: 8192, label: "8k" },
-  { value: 16384, label: "16k" },
-  { value: 32768, label: "32k" }
-]
+/**
+ * Highest selectable temperature.
+ *
+ * @remarks The persisted contract validates temperature over the half-open
+ * interval `[0, 1)` and rejects `1.0`, so the slider stops one step short.
+ */
+const MAXIMUM_TEMPERATURE = 0.95
+
+/** Temperature increment used by the slider. */
+const TEMPERATURE_STEP = 0.05
+
+/** Reply-ceiling increment used by the slider, in tokens. */
+const REPLY_CEILING_STEP = 64
 
 /**
- * Normalizes a slider event to its first numeric value.
+ * Ceiling restored when the reply ceiling is switched back on, in tokens.
  *
- * @remarks Array inputs are expected to contain the slider's single value. An
- * empty array returns `undefined`; the current temperature and reply-ceiling
- * handlers forward that value without validation, so a later render can lose
- * numeric state and fail at the temperature output's `toFixed` call.
+ * @remarks Matches the persisted default, so re-enabling the ceiling returns to
+ * the value a first run would have had.
+ */
+const DEFAULT_REPLY_CEILING = 2048
+
+/**
+ * Reads the first value emitted by a single-thumb slider.
  *
  * @param value - Scalar or single-thumb values emitted by the slider.
- * @returns The scalar value, the first array value, or `undefined` for an empty
- * array.
+ * @returns The scalar value, or `undefined` for an empty array.
  */
-function singleSliderValue(value: number | readonly number[]) {
+function readSliderValue(
+  value: number | readonly number[]
+): number | undefined {
   return typeof value === "number" ? value : value[0]
 }
 
 /**
- * Presents context-window, sampling, reply-ceiling, and streaming controls.
+ * Presents the sampling temperature and the reply-length ceiling.
  *
- * @remarks Primary category: composition/view. The required
- * `SettingsContext.Provider` owns the generation configuration and receives
- * synchronous patches from each control; this component owns no state,
- * effects, persistence, or resources. The context consumer throws when the
- * provider is absent. The context-window toggle forwards one patch for a
- * recognized option and ignores empty or unknown arrays. Temperature and
- * reply-ceiling sliders propose on every primitive change, including the
- * unvalidated empty-array result above; the stream switch proposes on every
- * checked change. No control exposes save or operation completion. Current
- * values are rendered in token or numeric units and slider labels are
- * associated with their outputs.
+ * @remarks Primary category: composition/view. The settings context owns the
+ * generation settings and receives one patch per control change; this component
+ * owns no state, effects, persistence, or resources, and throws when rendered
+ * outside the provider. Both sliders ignore an empty emission rather than
+ * proposing an undefined value.
+ *
+ * A reply ceiling of zero represents "no ceiling", because the persisted
+ * contract carries a single numeric field and no separate switch; turning the
+ * ceiling off writes zero, and turning it on restores
+ * {@link DEFAULT_REPLY_CEILING}. The ceiling cannot exceed the configured
+ * context window, since the reply has to fit inside it.
  *
  * @returns The generation settings controls.
  */
-export default function GenerationPane() {
-  const { state, onConfigChange } = useSettingsContext()
-
-  /**
-   * Proposes the selected context-window capacity to the settings owner.
-   *
-   * @param values - Selection values emitted by the toggle-group primitive.
-   * @returns Nothing; a recognized option is forwarded once synchronously,
-   * while empty or unknown selections are ignored.
-   */
-  function changeContext(values: string[]) {
-    const selected = CONTEXT_OPTIONS.find(
-      ({ value }) => String(value) === values[0]
-    )
-    if (selected) onConfigChange({ contextSize: selected.value })
-  }
+export default function GenerationPaneContent() {
+  const { settings, onGenerationChange } = useSettingsContext()
+  const { temperature, replyCeiling } = settings.generation
+  const isCeilingEnabled = replyCeiling > 0
+  const maximumReplyCeiling = settings.model.contextSize
 
   return (
     <div className="settings-view__stack">
-      <section className="settings-view__field">
-        <div className="settings-view__section-heading">
-          <div>
-            <h2>Context window</h2>
-            <p>How much of this conversation the model can receive.</p>
+      <section className="settings-view__section">
+        <div className="settings-view__row">
+          <div className="settings-view__identity-lines">
+            <h2 id="settings-temperature">Temperature</h2>
+            <p>Low is literal. High wanders.</p>
           </div>
-          <span>{state.config.contextSize.toLocaleString()} tokens</span>
-        </div>
-        <ToggleGroup
-          aria-label="Context window"
-          className="settings-view__toggle-group"
-          onValueChange={changeContext}
-          value={[String(state.config.contextSize)]}
-        >
-          {CONTEXT_OPTIONS.map((option) => (
-            <ToggleGroupItem
-              aria-label={option.label}
-              className="settings-view__toggle"
-              key={option.value}
-              value={String(option.value)}
-              variant="outline"
-            >
-              {option.label}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-      </section>
-
-      <Separator className="settings-view__separator" />
-
-      <section className="settings-view__range">
-        <div className="settings-view__section-heading">
-          <div>
-            <h2 id="temperature-label">Temperature</h2>
-            <p>Lower values answer more narrowly and consistently.</p>
+          <div className="settings-view__slider-group">
+            <Slider
+              aria-labelledby="settings-temperature"
+              max={MAXIMUM_TEMPERATURE}
+              min={0}
+              onValueChange={(value) => {
+                const next = readSliderValue(value)
+                if (next !== undefined)
+                  onGenerationChange({ temperature: next })
+              }}
+              step={TEMPERATURE_STEP}
+              thumbAlignment="center"
+              value={[temperature]}
+            />
+            <output className="settings-view__slider-value">
+              {temperature.toFixed(2)}
+            </output>
           </div>
-          <output>{state.config.temperature.toFixed(2)}</output>
         </div>
-        <Slider
-          aria-labelledby="temperature-label"
-          max={1.5}
-          min={0}
-          onValueChange={(temperature) =>
-            onConfigChange({
-              temperature: singleSliderValue(temperature)
-            })
-          }
-          step={0.05}
-          thumbAlignment="center"
-          value={[state.config.temperature]}
-        />
-      </section>
 
-      <Separator className="settings-view__separator" />
-
-      <section className="settings-view__range">
-        <div className="settings-view__section-heading">
-          <div>
-            <h2 id="reply-ceiling-label">Reply ceiling</h2>
-            <p>The most tokens Lys may spend on one reply.</p>
+        <div className="settings-view__row">
+          <div className="settings-view__identity-lines">
+            <h2>Reply ceiling</h2>
+            <p>
+              {isCeilingEnabled
+                ? "A hard stop, in tokens. Off lets her run until she is done."
+                : "Off. She writes until she stops on her own."}
+            </p>
           </div>
-          <output>{state.config.maxTokens}</output>
+          <div className="settings-view__toggle-state">
+            {/* The switch already announces its state; this is for the eye. */}
+            <span aria-hidden="true">{isCeilingEnabled ? "on" : "off"}</span>
+            <Switch
+              aria-label="Reply ceiling"
+              checked={isCeilingEnabled}
+              onCheckedChange={(checked) =>
+                onGenerationChange({
+                  replyCeiling: checked ? DEFAULT_REPLY_CEILING : 0
+                })
+              }
+              size="lg"
+            />
+          </div>
         </div>
-        <Slider
-          aria-labelledby="reply-ceiling-label"
-          max={4096}
-          min={256}
-          onValueChange={(maxTokens) =>
-            onConfigChange({ maxTokens: singleSliderValue(maxTokens) })
-          }
-          step={256}
-          thumbAlignment="center"
-          value={[state.config.maxTokens]}
-        />
+
+        {isCeilingEnabled ? (
+          <div className="settings-view__row">
+            <div className="settings-view__identity-lines">
+              <h2 id="settings-ceiling">Ceiling</h2>
+              <p>
+                At most {maximumReplyCeiling.toLocaleString()} tokens, the size
+                of the window it has to fit in.
+              </p>
+            </div>
+            <div className="settings-view__slider-group">
+              <Slider
+                aria-labelledby="settings-ceiling"
+                max={maximumReplyCeiling}
+                min={REPLY_CEILING_STEP}
+                onValueChange={(value) => {
+                  const next = readSliderValue(value)
+                  if (next !== undefined) {
+                    onGenerationChange({ replyCeiling: next })
+                  }
+                }}
+                step={REPLY_CEILING_STEP}
+                thumbAlignment="center"
+                value={[Math.min(replyCeiling, maximumReplyCeiling)]}
+              />
+              <output className="settings-view__slider-value">
+                {replyCeiling}
+              </output>
+            </div>
+          </div>
+        ) : null}
       </section>
-
-      <Separator className="settings-view__separator" />
-
-      <div className="settings-view__setting-row">
-        <div>
-          <h2>Streaming</h2>
-          <p>Stream tokens</p>
-        </div>
-        <Switch
-          aria-label="Stream tokens"
-          checked={state.config.stream}
-          onCheckedChange={(stream) => onConfigChange({ stream })}
-        />
-      </div>
     </div>
   )
 }

@@ -1,7 +1,7 @@
 /** Top-level application view selected by the desktop shell. */
 export type View = "chat" | "settings"
 /** Settings pane selected within the settings view. */
-export type SettingsPane = "runtime" | "model" | "generation" | "conversation"
+export type SettingsPane = "runtime" | "model" | "generation"
 /** Backend process lifecycle states represented by the demonstration reducer. */
 export type BackendStatus = "running" | "starting" | "stopping" | "stopped"
 /** Model lifecycle states represented by the demonstration reducer. */

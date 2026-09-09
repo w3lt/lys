@@ -1,7 +1,7 @@
 import fastifyPlugin from "fastify-plugin"
 import { type FastifyPluginAsync } from "fastify"
 import type { BackendConfig } from "../config"
-import { createSingletonServices, disposeSingletonServices } from "./singleton"
+import { closeSingletonServices, createSingletonServices } from "./singleton"
 
 /** Options used to install application-scoped singleton services. */
 type SingletonServicePluginOptions = {
@@ -21,14 +21,14 @@ type SingletonServicePluginOptions = {
 const singletonPlugin: FastifyPluginAsync<
   SingletonServicePluginOptions
 > = async (app, { config }) => {
-  const singletonServices = createSingletonServices(config)
+  const singletonServices = await createSingletonServices(config)
 
   app.decorate("chatService", singletonServices.chatService)
   app.decorate("llmService", singletonServices.llmService)
   app.decorate("conversationService", singletonServices.conversationService)
 
   app.addHook("onClose", async () => {
-    await disposeSingletonServices(singletonServices)
+    await closeSingletonServices(singletonServices)
   })
 }
 

@@ -1,6 +1,6 @@
 ---
 title: LLM provider integration
-description: The current LM Studio-only integration used for model inventory, loading, and streamed chat generation.
+description: The current LM Studio-only integration used for model inventory, lifecycle operations, and streamed chat generation.
 docType: architecture
 sidebar:
   order: 7
@@ -14,6 +14,7 @@ Lys currently integrates with one local model runtime: LM Studio.
 | ---------------- | ------------------------------------------------------------------------------------------------------------------- |
 | Model inventory  | `LlmService.listModel()` uses `@lmstudio/sdk` to list downloaded models and annotate which are loaded.              |
 | Model loading    | `POST /api/v1/llm/load` loads one model through LM Studio and returns its metadata.                                 |
+| Model unloading  | `PATCH /api/v1/llm/unload` unloads one model through the application-scoped `LlmService`.                           |
 | Chat generation  | `ChatService.completeChatStream()` uses the `openai` SDK against LM Studio's OpenAI-compatible `/v1` HTTP endpoint. |
 | Title generation | `ChatService.generateTitle()` uses the same endpoint with a separate prompt and structured output parsing.          |
 
@@ -27,14 +28,15 @@ Fastify /api/v1/llm/* -> LM Studio SDK/client
 The current desktop settings UI does not call the LLM routes. Its Model tab is
 not a usable alternative path: the pane requires a `SettingsContext.Provider`
 that the current settings view does not mount. The list route uses the
-application-scoped `LlmService`; the load route currently constructs an LM
-Studio client inside its handler.
+application-scoped `LlmService`; the unload route reuses that service, while the
+load route currently constructs an LM Studio client inside its handler.
 
 ## What the backend assumes today
 
 - LM Studio is running on `127.0.0.1:1234`.
 - Chat requests can be satisfied by an OpenAI-compatible HTTP endpoint.
-- Inventory and load operations are available through the LM Studio SDK.
+- Inventory, load, and unload operations are available through the LM Studio
+  SDK.
 - No external credential exchange is required to reach the local runtime.
 
 ## Limitations

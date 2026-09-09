@@ -43,16 +43,28 @@ If the declared target is too large to sweep completely, the reviewer MUST state
 
 The reviewer then enumerates every repository-owned item in the target. Item categories are the active item standards:
 
-| Item      | Standard                                    | Rule prefix |
-| --------- | ------------------------------------------- | ----------- |
-| Variable  | [Variable](../code_standards/VARIABLE.md)   | `VAR`       |
-| Constant  | [Constant](../code_standards/CONSTANT.md)   | `CONST`     |
-| Function  | [Function](../code_standards/FUNCTION.md)   | `FUNC`      |
-| Type      | [Type](../code_standards/TYPE.md)           | `TYPE`      |
-| Interface | [Interface](../code_standards/INTERFACE.md) | `IFACE`     |
-| Class     | [Class](../code_standards/CLASS.md)         | `CLASS`     |
-| Object    | [Object](../code_standards/OBJECT.md)       | `OBJECT`    |
-| Component | [Component](../code_standards/COMPONENT.md) | `COMP`      |
+| Item                 | Standard                                               | Rule prefix |
+| -------------------- | ------------------------------------------------------ | ----------- |
+| Variable             | [Variable](../code_standards/VARIABLE.md)              | `VAR`       |
+| Constant             | [Constant](../code_standards/CONSTANT.md)              | `CONST`     |
+| Function             | [Function](../code_standards/FUNCTION.md)              | `FUNC`      |
+| Type                 | [Type](../code_standards/TYPE.md)                      | `TYPE`      |
+| Interface            | [Interface](../code_standards/INTERFACE.md)            | `IFACE`     |
+| Class                | [Class](../code_standards/CLASS.md)                    | `CLASS`     |
+| Object               | [Object](../code_standards/OBJECT.md)                  | `OBJECT`    |
+| Component            | [Component](../code_standards/COMPONENT.md)            | `COMP`      |
+| Module / file        | [Module and File](../code_standards/MODULE.md)         | `MODULE`    |
+| Package / dependency | [Package and Dependency](../code_standards/PACKAGE.md) | `PKG`       |
+| Hook                 | [Hook](../code_standards/HOOK.md)                      | `HOOK`      |
+| API                  | [API](../code_standards/API.md)                        | `API`       |
+| Error                | [Error](../code_standards/ERROR.md)                    | `ERROR`     |
+| Event / message      | [Event and Message](../code_standards/EVENT.md)        | `EVENT`     |
+| Async task / stream  | [Async Task and Stream](../code_standards/ASYNC.md)    | `ASYNC`     |
+| Resource             | [Resource](../code_standards/RESOURCE.md)              | `RESOURCE`  |
+| Configuration        | [Configuration](../code_standards/CONFIGURATION.md)    | `CONFIG`    |
+| Schema / migration   | [Schema and Migration](../code_standards/SCHEMA.md)    | `SCHEMA`    |
+| Test / fixture       | [Test and Fixture](../code_standards/TEST.md)          | `TEST`      |
+| Comment              | [Comment](../code_standards/COMMENT.md)                | `COMMENT`   |
 
 Generated output, vendored code, third-party declarations, and build artifacts are exempt when they are not repository-maintained. The reviewer MUST record every exemption and its reason.
 
@@ -121,8 +133,10 @@ Before a candidate finding may enter the report, the reviewer MUST confirm all o
 
 1. The cited location exists in the current file and contains what the finding claims.
 2. Any cited rule identifier exists in an active item standard. Identifiers from the deferred registry are not citable as rules.
-3. The described failure is reachable through a real execution path.
+3. The evidence matches the claim: a construction-rule finding demonstrates that an applicable rule is violated; a behavioral finding demonstrates a failure reachable through a real execution path; an Unclear finding identifies the missing or conflicting contract information that prevents determining correctness.
 4. The stated correction is the smallest one that resolves the defect.
+
+A verified violation of an applicable mandatory standard is a code-quality defect even when runtime behavior is correct. The reviewer MUST NOT require a runtime failure scenario to report that violation.
 
 A candidate that fails any of these MUST be moved to **Unverified questions** or dropped. The reviewer MUST NOT report an unverified suspicion as a finding.
 

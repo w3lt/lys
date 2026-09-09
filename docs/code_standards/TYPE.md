@@ -662,7 +662,7 @@ Compiler and lint suppressions MUST follow the same proof requirement and remain
 
 ### TYPE-021 — Refinements must prove their claim
 
-A type guard, refinement, or narrowing function MUST verify every runtime property required by the refined type.
+A type guard, refinement, or narrowing function MUST verify that the original input has every runtime property required by the refined type.
 
 ```ts
 // Noncompliant: checks only one property.
@@ -670,13 +670,13 @@ function isConversation(value: unknown): value is Conversation {
   return typeof value === "object" && value !== null && "id" in value
 }
 
-// Compliant
-function isConversation(value: unknown): value is Conversation {
-  return conversationSchema.safeParse(value).success
+// Compliant: return the validated and normalized output.
+function parseConversation(value: unknown): Conversation {
+  return conversationSchema.parse(value)
 }
 ```
 
-A Boolean type guard is appropriate when callers need only pass/fail information. Use a parser when callers require normalized output or actionable validation errors.
+A Boolean type guard is appropriate only when its checks prove the original input already satisfies the refined type. When validation supplies defaults, coerces, transforms, or normalizes data, callers MUST use the parsed output; successful parsing alone MUST NOT narrow the original input. Use a parser when callers require that output or actionable validation errors.
 
 ### TYPE-022 — Recursive types require a termination contract
 

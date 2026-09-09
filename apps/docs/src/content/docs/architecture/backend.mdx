@@ -18,7 +18,7 @@ application.
 | Runtime config     | `src/config.ts`                | Supplies loopback host and port values and the SQLite file path.                                   |
 | Singleton services | `src/di/singleton.ts`          | Creates the chat, LM Studio, and conversation services used by route handlers.                     |
 | Chat routes        | `src/modules/chat`             | Accepts chat requests, persists turn data, streams SSE responses, and updates conversation titles. |
-| LLM routes         | `src/modules/llm/routes`       | Lists LM Studio models and loads a model on demand.                                                |
+| LLM routes         | `src/modules/llm/routes`       | Lists LM Studio models and loads or unloads a model on demand.                                     |
 | Health route       | `src/modules/health/routes.ts` | Returns a simple `{ ok: true }` response.                                                          |
 
 ## Chat request flow
@@ -57,7 +57,7 @@ Two backend services talk to LM Studio:
 | Service       | Backend dependency | Current use                                                                                         |
 | ------------- | ------------------ | --------------------------------------------------------------------------------------------------- |
 | `ChatService` | `openai` SDK       | Streams chat completions and generates titles through LM Studio's OpenAI-compatible HTTP interface. |
-| `LlmService`  | `@lmstudio/sdk`    | Lists downloaded models and loads one model into LM Studio.                                         |
+| `LlmService`  | `@lmstudio/sdk`    | Lists downloaded models and loads or unloads models in LM Studio.                                   |
 
 The backend currently assumes a local LM Studio runtime on loopback.
 

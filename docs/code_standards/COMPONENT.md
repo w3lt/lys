@@ -675,13 +675,15 @@ Rendering MUST NOT:
 
 External synchronization belongs to an owned event, effect, resource boundary, or application operation.
 
-### COMP-062 — Renderer declarations are stable and unconditional
+### COMP-062 — Renderer declarations preserve call-order contracts
 
-Renderer-managed state, context, memoization, effect, resource, and lifecycle declarations MUST occur in the same order and at the same component scope on every render.
+Renderer-managed state, context, memoization, effect, resource, and lifecycle declarations whose identity depends on invocation position MUST occur in the same order and at the same component scope on every render, including when delegated through hooks.
 
-They MUST NOT be declared conditionally, inside loops, nested functions, event handlers, callbacks, or dynamically selected branches.
+These positional declarations MUST NOT be invoked conditionally, inside loops, nested ordinary functions, event handlers, callbacks, or dynamically selected branches. Supported top-level composition through a custom hook preserves the host's declaration scope.
 
 A conditional behavior belongs inside the declaration's operation or in a conditionally rendered child component.
+
+A renderer API explicitly documented as independent of call order MAY use only its documented conditional or iterative invocation forms while retaining all supported host, scope, and phase restrictions. This permission does not extend to a custom hook wrapping that API, dynamic selection of hook implementations, or an undocumented invocation form.
 
 ### COMP-063 — Render work is bounded and deterministic
 
@@ -2493,6 +2495,8 @@ This example demonstrates:
 
 ## Complete TypeScript/React example: list projection and identity
 
+This example also assumes a validated `ConversationAccessibleLabel` domain type. Before publishing the collection, the parent validates unique conversation identities and supplies localized labels that begin with each entry's exact visible title and distinguish different targets through meaningful context, such as workspace or creation date. Titles may repeat; arbitrary identifiers are not substitutes for meaningful labels.
+
 ```tsx
 import type { ReactElement } from "react"
 
@@ -2501,17 +2505,58 @@ type ConversationListItem = {
   /** Stable domain identity used as the rendered list key. */
   readonly conversationId: ConversationId
 
-  /** Non-empty conversation title displayed as the control name. */
+  /** Non-empty conversation title displayed in the control. */
   readonly title: ConversationTitle
+
+  /** Parent-supplied name beginning with the exact title and identifying its target. */
+  readonly accessibleLabel: ConversationAccessibleLabel
 }
 
 /** Properties accepted by {@link ConversationList}. */
 type ConversationListProps = {
-  /** Immutable conversations in their intended display order. */
+  /**
+   * Immutable conversations in display order, with unique identities and labels
+   * that distinguish different conversation targets even when titles repeat.
+   */
   readonly conversations: readonly ConversationListItem[]
 
   /** Requests that the parent open the identified conversation. */
   readonly onOpenConversation: (conversationId: ConversationId) => void
+}
+
+/** Properties accepted by {@link ConversationListEntry}. */
+type ConversationListEntryProps = {
+  /** Validated summary and target-distinguishing label supplied by the list owner. */
+  readonly conversation: ConversationListItem
+
+  /** Requests that the parent open the identified conversation once per activation. */
+  readonly onOpenConversation: (conversationId: ConversationId) => void
+}
+
+/**
+ * Presents one conversation as a named selection control within a list.
+ *
+ * @remarks Primary category: presentational. The list owner supplies the key
+ * and validated label; the parent owns the requested open action. The entry
+ * owns no mutable state, effect, resource, or ambient application dependency.
+ * @param props - Display-ready conversation and the parent-owned open action.
+ * @returns One semantic list entry with a native selection button.
+ */
+function ConversationListEntry({
+  conversation,
+  onOpenConversation
+}: ConversationListEntryProps): ReactElement {
+  return (
+    <li>
+      <button
+        type="button"
+        aria-label={conversation.accessibleLabel}
+        onClick={() => onOpenConversation(conversation.conversationId)}
+      >
+        {conversation.title}
+      </button>
+    </li>
+  )
 }
 
 /**
@@ -2541,14 +2586,11 @@ function ConversationList({
       <h2>Conversations</h2>
       <ul>
         {conversations.map((conversation) => (
-          <li key={conversation.conversationId}>
-            <button
-              type="button"
-              onClick={() => onOpenConversation(conversation.conversationId)}
-            >
-              {conversation.title}
-            </button>
-          </li>
+          <ConversationListEntry
+            key={conversation.conversationId}
+            conversation={conversation}
+            onOpenConversation={onOpenConversation}
+          />
         ))}
       </ul>
     </section>
@@ -2561,7 +2603,8 @@ This example demonstrates:
 - Pure projection of resolved input.
 - One intentional empty-success state.
 - Semantic section, heading, list, and native buttons.
-- Visible text as the accessible control name.
+- Distinct accessible names beginning with the unchanged visible titles.
+- An entry component that owns its semantic control and activation mapping.
 - Stable semantic keys assigned by the iteration owner.
 - Parent-owned application action.
 - No array-index keys, derived state, effects, ambient stores, or hidden behavior.
@@ -2677,7 +2720,7 @@ Composition components may connect application capabilities, but feature and pre
 
 - [ ] Is rendering deterministic, replay-safe, and free of side effects?
 - [ ] Does render read only declared inputs?
-- [ ] Are renderer lifecycle declarations stable and unconditional?
+- [ ] Do renderer lifecycle declarations preserve positional call order and every supported invocation restriction under `COMP-062`?
 - [ ] Are template expressions simple?
 - [ ] Do peer rendered regions use one composition level?
 - [ ] Are pending, empty, failed, disabled, and successful states distinct?

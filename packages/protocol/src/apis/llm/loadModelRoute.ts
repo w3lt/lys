@@ -13,6 +13,8 @@ export const llmLoadModelApiRequestBodySchema = z.strictObject({
   modelId: z.string().min(1)
 })
 
+export const llmLoadModelApiResponseBodySchema = llmInfoSchema
+
 /**
  * Describes the POST endpoint that loads a model and returns its metadata.
  *
@@ -24,7 +26,7 @@ export const llmLoadModelApi = {
   method: "POST",
   path: apiLlmLoadModelRoute,
   body: llmLoadModelApiRequestBodySchema,
-  response: llmInfoSchema
+  response: llmLoadModelApiResponseBodySchema
 }
 
 /** Request body accepted by the model-load endpoint. */

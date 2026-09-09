@@ -4,18 +4,18 @@ This item standard is governed by the shared [Code Construction Rules](../CODE_S
 
 ## Definition
 
-A variable is a named binding whose value is intentionally reassigned during its lifetime. If the binding is never reassigned, it must be a constant.
+A variable is a named binding declared mutable because an actual reassignment, in-place mutation, or mutable borrow requires mutable binding syntax in its language. Otherwise, use immutable binding syntax under `CONST-001`.
 
 ## Construction recipe
 
 Before creating a variable:
 
 1. Identify the single domain value it represents.
-2. Confirm that the binding must be reassigned.
+2. Confirm that an actual operation requires mutable binding syntax in the language.
 3. Choose the innermost lexical scope containing every read and write.
 4. Give it its first valid domain value at declaration.
 5. Name it according to meaning, state, and units.
-6. Enumerate every write and confirm each preserves the same meaning and invariants.
+6. Enumerate every assignment, in-place mutation, and mutable borrow, and confirm each preserves the same meaning and invariants.
 7. Confirm that one owner controls all writes.
 8. Replace coupled variables with one state object when they must change atomically.
 
@@ -23,7 +23,7 @@ Before creating a variable:
 
 ### VAR-001 — Mutation must be necessary
 
-A variable MUST have at least one assignment after initialization. Otherwise, use a constant.
+A variable MUST have an actual reassignment, in-place mutation, or mutable borrow that requires mutable binding syntax in its language. Otherwise, use an immutable binding under `CONST-001`.
 
 If separate branches assign one final value and the value is read only after those branches, construct the value with a conditional, match expression, or focused function instead.
 
@@ -67,7 +67,7 @@ let access_level = if user.is_administrator {
 
 ### VAR-002 — One variable, one meaning
 
-Every assignment MUST represent the same domain concept, type, unit, and lifecycle state.
+Every assignment MUST represent the same domain concept, type, and unit, and preserve the declared invariants. Lifecycle state MAY change through transitions permitted by that contract.
 
 A variable MUST NOT be reused for another purpose merely to avoid declaring another binding.
 
@@ -256,7 +256,7 @@ messages.push(newMessage)
 // `messageCount` is now stale.
 
 // Compliant
-let messages: Message[] = []
+const messages: Message[] = []
 messages.push(newMessage)
 
 const messageCount = messages.length
@@ -320,8 +320,8 @@ Every use must still satisfy the rules above.
 
 A variable is compliant only when every answer is “yes”:
 
-- [ ] Is the binding reassigned after initialization?
-- [ ] Does every assignment preserve one domain meaning, type, and unit?
+- [ ] Does an actual operation require mutable binding syntax in this language?
+- [ ] Does every assignment preserve one domain meaning, type, unit, and invariant while following any declared lifecycle transitions?
 - [ ] Is it declared in the innermost block containing all uses?
 - [ ] Is its initial value valid rather than a placeholder?
 - [ ] Does its name identify its meaning and units?

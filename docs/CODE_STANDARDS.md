@@ -38,37 +38,36 @@ Rules are owned by exactly one file. Item files may reference another rule by ID
 
 ## Item standards
 
-| Item      | Standard                                   | Rule prefix |
-| --------- | ------------------------------------------ | ----------- |
-| Variable  | [Variable](./code_standards/VARIABLE.md)   | `VAR`       |
-| Constant  | [Constant](./code_standards/CONSTANT.md)   | `CONST`     |
-| Function  | [Function](./code_standards/FUNCTION.md)   | `FUNC`      |
-| Type      | [Type](./code_standards/TYPE.md)           | `TYPE`      |
-| Interface | [Interface](./code_standards/INTERFACE.md) | `IFACE`     |
-| Class     | [Class](./code_standards/CLASS.md)         | `CLASS`     |
-| Object    | [Object](./code_standards/OBJECT.md)       | `OBJECT`    |
-| Component | [Component](./code_standards/COMPONENT.md) | `COMP`      |
+| Item                 | Standard                                              | Rule prefix |
+| -------------------- | ----------------------------------------------------- | ----------- |
+| Variable             | [Variable](./code_standards/VARIABLE.md)              | `VAR`       |
+| Constant             | [Constant](./code_standards/CONSTANT.md)              | `CONST`     |
+| Function             | [Function](./code_standards/FUNCTION.md)              | `FUNC`      |
+| Type                 | [Type](./code_standards/TYPE.md)                      | `TYPE`      |
+| Interface            | [Interface](./code_standards/INTERFACE.md)            | `IFACE`     |
+| Class                | [Class](./code_standards/CLASS.md)                    | `CLASS`     |
+| Object               | [Object](./code_standards/OBJECT.md)                  | `OBJECT`    |
+| Component            | [Component](./code_standards/COMPONENT.md)            | `COMP`      |
+| Module / file        | [Module and File](./code_standards/MODULE.md)         | `MODULE`    |
+| Package / dependency | [Package and Dependency](./code_standards/PACKAGE.md) | `PKG`       |
+| Hook                 | [Hook](./code_standards/HOOK.md)                      | `HOOK`      |
+| API                  | [API](./code_standards/API.md)                        | `API`       |
+| Error                | [Error](./code_standards/ERROR.md)                    | `ERROR`     |
+| Event / message      | [Event and Message](./code_standards/EVENT.md)        | `EVENT`     |
+| Async task / stream  | [Async Task and Stream](./code_standards/ASYNC.md)    | `ASYNC`     |
+| Resource             | [Resource](./code_standards/RESOURCE.md)              | `RESOURCE`  |
+| Configuration        | [Configuration](./code_standards/CONFIGURATION.md)    | `CONFIG`    |
+| Schema / migration   | [Schema and Migration](./code_standards/SCHEMA.md)    | `SCHEMA`    |
+| Test / fixture       | [Test and Fixture](./code_standards/TEST.md)          | `TEST`      |
+| Comment              | [Comment](./code_standards/COMMENT.md)                | `COMMENT`   |
 
 The index grows only when an item's rules have been reviewed, approved, and written. Missing item standards do not waive applicable rules already defined by an approved standard.
 
 ## Deferred item standards
 
-The following item chapters are registered but intentionally deferred. A planned path is not an active standard and the file MUST NOT be created as an empty placeholder.
+No item chapters are currently deferred. All 20 registered chapters are active.
 
-| Item                 | Planned standard                       | Planned prefix | Status          |
-| -------------------- | -------------------------------------- | -------------- | --------------- |
-| Module / file        | `docs/code_standards/MODULE.md`        | `MODULE`       | TODO — deferred |
-| Package / dependency | `docs/code_standards/PACKAGE.md`       | `PKG`          | TODO — deferred |
-| Hook                 | `docs/code_standards/HOOK.md`          | `HOOK`         | TODO — deferred |
-| API                  | `docs/code_standards/API.md`           | `API`          | TODO — deferred |
-| Error                | `docs/code_standards/ERROR.md`         | `ERROR`        | TODO — deferred |
-| Event / message      | `docs/code_standards/EVENT.md`         | `EVENT`        | TODO — deferred |
-| Async task / stream  | `docs/code_standards/ASYNC.md`         | `ASYNC`        | TODO — deferred |
-| Resource             | `docs/code_standards/RESOURCE.md`      | `RESOURCE`     | TODO — deferred |
-| Configuration        | `docs/code_standards/CONFIGURATION.md` | `CONFIG`       | TODO — deferred |
-| Schema / migration   | `docs/code_standards/SCHEMA.md`        | `SCHEMA`       | TODO — deferred |
-| Test / fixture       | `docs/code_standards/TEST.md`          | `TEST`         | TODO — deferred |
-| Comment              | `docs/code_standards/COMMENT.md`       | `COMMENT`      | TODO — deferred |
+Future planned chapters MAY be registered here before approval. A planned path is not an active standard and the file MUST NOT be created as an empty placeholder.
 
 Deferred means that the dedicated chapter has not yet been written or approved. It does not waive this foundation, an applicable active item standard, `CONTRIBUTING.md`, existing repository conventions, or ordinary maintainability requirements.
 

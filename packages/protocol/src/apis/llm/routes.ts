@@ -18,6 +18,17 @@ export const apiLlmListModelsRoute = `${API_PREFIX_V1}/llm/list`
 export const apiLlmLoadModelRoute = `${API_PREFIX_V1}/llm/load`
 
 /**
+ * Versioned PATCH path for unloading one LM Studio model.
+ *
+ * @remarks This path is transmitted in HTTP requests and is not persisted. It
+ * is release-stable across compatible clients; changing it requires coordinated
+ * route registration because model-unload URL compatibility breaks.
+ */
+export const apiLlmUnloadModelRoute = `${API_PREFIX_V1}/llm/unload`
+
+export const apiLlmTestModelRoute = `${API_PREFIX_V1}/llm/:modelId/health`
+
+/**
  * Versioned POST path for the chat SSE endpoint.
  *
  * @remarks This path is transmitted in HTTP requests and is not persisted. It

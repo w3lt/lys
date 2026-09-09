@@ -12,14 +12,14 @@ These rules apply to named functions, methods, closures, callbacks, event handle
 
 Before writing a function:
 
-1. State the single operation it performs.
+1. State the single operation it performs and confirm any instance-method justification under `FUNC-020`.
 2. Classify it as a calculation, query, command, boundary adapter, orchestrator, or renderer-recognized declarative view projection.
 3. List its required inputs.
 4. Define its successful result.
 5. Define expected failure and absence outcomes.
 6. List every observable side effect.
 7. Identify external dependencies such as storage, network, time, randomness, and process state.
-8. Choose a name under `FUNC-003`, using its canonical verb vocabulary or its exact Component naming exception.
+8. Choose a name under `FUNC-003`, using its canonical verb vocabulary or an exact naming exception for the construct.
 9. Design the signature with no more than three positional parameters.
 10. Validate untrusted input before domain logic or side effects.
 11. Write the successful path using one abstraction level and the fewest control-flow levels.
@@ -173,6 +173,8 @@ A calculation or query MUST NOT modify externally observable state. A command or
 
 A declarative view projection MUST remain a projection during renderer invocation. Producing a declarative view description, including binding an event callback for later invocation, is not imperative user-interface mutation. An event handler, effect callback, lifecycle callback, or other callable declared or referenced by a component remains a separate Function construct and MUST use the category matching what occurs when that callable is invoked.
 
+A renderer-managed Hook under `HOOK-001` is classified by its invocation-time operation, such as querying approved renderer inputs or orchestrating supported reactive declarations. Declaring an effect or returning an action for later execution does not execute that callback during rendering. Every callback supplied or returned by a hook remains a separate Function construct classified by its own invocation-time behavior. Hooks do not qualify for the Component-only declarative view projection category.
+
 ```ts
 // Noncompliant: a query silently updates access time.
 async function findConversation(
@@ -242,7 +244,9 @@ A native constructor declaration is exempt from the verb-prefix and domain-objec
 
 A renderer-recognized Component declaration MUST instead use the noun or noun-phrase name required by `COMP-017`. This exception applies only to a declaration satisfying `COMP-001`; an ordinary function or direct render helper under `COMP-003` MUST use the canonical operation vocabulary.
 
-Native constructors and compliant accessors retain their syntax-specific exceptions. A renderer-recognized Component declaration is the only repository-designed noun-name exception for an ordinary named function declaration.
+A renderer-managed Hook satisfying `HOOK-001` MUST use the hook naming convention required by its supported renderer. For React custom hooks, the name MUST begin with `use` followed by a capitalized semantic concern or result, such as `useSettingsContext` or `useBackendUptimeMs`. This exception does not add `use` to the general operation vocabulary. Ordinary helpers, factories, callbacks, and imperative methods accompanying a hook MUST use canonical operation names unless their own exact external contract requires another name.
+
+Native constructors and compliant accessors retain their syntax-specific exceptions. A renderer-recognized Component declaration is the only repository-designed noun-name exception for an ordinary named function declaration. A qualifying Hook receives only its renderer-specific naming exception; it does not receive the Component naming exception.
 
 ```ts
 // Noncompliant
@@ -718,9 +722,9 @@ const normalizedMessages = messages.map(normalizeMessage)
 
 ### FUNC-020 — Methods must require the owning object
 
-An instance method MUST read or change an instance invariant, use an owned resource or dependency, implement an approved interface or polymorphic contract, or require access to private state that callers must not manipulate directly.
+An instance method MUST read or change an instance invariant, use an owned resource or dependency, implement an approved interface or required polymorphic contract, or require access to private state that callers must not manipulate directly.
 
-A function that depends only on its explicit parameters MUST be a module-level function rather than a method.
+A function that depends only on its explicit parameters MUST be a module-level function rather than a method unless it implements an approved interface or required polymorphic contract. An interface used for this purpose MUST already be justified under `IFACE-003`.
 
 ```ts
 // Noncompliant
@@ -1018,17 +1022,25 @@ Every implementation must satisfy the same preconditions, postconditions, failur
 ## Complete TypeScript example
 
 ```ts
+/**
+ * Retry position and delay boundaries validated by {@link calculateRetryDelayMs}.
+ *
+ * Fractional millisecond boundaries are supported.
+ */
 type CalculateRetryDelayInput = {
+  /** Zero-based retry position, validated as a nonnegative safe integer. */
   attempt: number
+  /** Base delay in milliseconds, validated as finite and positive. */
   baseDelayMs: number
+  /** Finite maximum delay in milliseconds, validated to be at least the base. */
   maxDelayMs: number
 }
 
 /**
  * Calculates an exponentially increasing retry delay capped by a maximum.
  *
- * @param input - Retry position and delay boundaries in milliseconds.
- * @returns The retry delay in milliseconds, capped by `maxDelayMs`.
+ * @param input - Retry position and millisecond delay boundaries to validate.
+ * @returns The finite retry delay in milliseconds, capped by `maxDelayMs`.
  * @throws If the attempt or delay boundaries are invalid.
  */
 function calculateRetryDelayMs({
@@ -1038,6 +1050,13 @@ function calculateRetryDelayMs({
 }: CalculateRetryDelayInput): number {
   if (!Number.isSafeInteger(attempt) || attempt < 0) {
     throw new InvalidRetryAttemptError(attempt)
+  }
+
+  if (!Number.isFinite(baseDelayMs) || !Number.isFinite(maxDelayMs)) {
+    throw new InvalidRetryDelayConfigurationError({
+      baseDelayMs,
+      maxDelayMs
+    })
   }
 
   if (baseDelayMs <= 0 || maxDelayMs < baseDelayMs) {
@@ -1118,7 +1137,7 @@ A function is compliant only when every applicable answer is “yes”:
 - [ ] Is every asynchronous completion observed and cancellable when required?
 - [ ] Does every acquired resource have guaranteed cleanup or explicit ownership transfer?
 - [ ] Are complex callbacks extracted and named?
-- [ ] Does each method require its owning object?
+- [ ] Does each method require its owning object or implement an approved interface or required polymorphic contract?
 - [ ] Does every wrapper add an observable contract?
 - [ ] Do overloads represent one operation?
 - [ ] Does every named function have accurate API documentation?

@@ -15,7 +15,7 @@ Classification is semantic rather than syntactic:
 - A Go receiver type that owns behavior follows this chapter.
 - A record, struct, data class, or class-shaped declaration used only to carry data follows the [Type](./TYPE.md) chapter instead.
 
-Renderer-managed state or lifecycle attached to a function or template component does not by itself create a repository-owned Class construct. An actual repository-owned instance that retains state, dependencies, resources, identity, or lifecycle across calls remains a Class construct and MUST follow this chapter.
+Renderer-managed state or lifecycle attached to a function or template component, or to a Hook satisfying `HOOK-001`, does not by itself create a repository-owned Class construct. An actual repository-owned instance that retains state, dependencies, resources, identity, or lifecycle across calls remains a Class construct and MUST follow this chapter. A hook-created controller, service, or closure with its own independent retained ownership remains subject to that boundary.
 
 | Concern                                                 | Required construct                                              |
 | ------------------------------------------------------- | --------------------------------------------------------------- |

@@ -11,12 +11,13 @@ route definitions.
 
 ## Routes
 
-| Method | Path               | Request body                                                  | Response              |
-| ------ | ------------------ | ------------------------------------------------------------- | --------------------- |
-| `GET`  | `/api/v1/heath`    | none                                                          | `{ ok: true }`        |
-| `GET`  | `/api/v1/llm/list` | none                                                          | `{ llms: LlmInfo[] }` |
-| `POST` | `/api/v1/llm/load` | `{ modelId: string }`                                         | `LlmInfo`             |
-| `POST` | `/api/v1/chat`     | `{ message: string, model: string, conversationId?: uuidv7 }` | `text/event-stream`   |
+| Method  | Path                 | Request body                                                  | Response                       |
+| ------- | -------------------- | ------------------------------------------------------------- | ------------------------------ |
+| `GET`   | `/api/v1/heath`      | none                                                          | `{ ok: true }`                 |
+| `GET`   | `/api/v1/llm/list`   | none                                                          | `{ llms: LlmInfo[] }`          |
+| `POST`  | `/api/v1/llm/load`   | `{ modelId: string }`                                         | `LlmInfo`                      |
+| `PATCH` | `/api/v1/llm/unload` | `{ modelId: string }`                                         | `204` or typed Problem Details |
+| `POST`  | `/api/v1/chat`       | `{ message: string, model: string, conversationId?: uuidv7 }` | `text/event-stream`            |
 
 `/api/v1/heath` is the current spelling in both the shared protocol package and
 the Fastify route registration.
@@ -54,18 +55,34 @@ the six variants documented in [SSE events](/reference/sse-events/).
 - `maxContextLength`
 - `loaded`
 
+## Model unload responses
+
+The request body must contain only `modelId`, and its value must be a non-empty
+canonical model key. Invalid bodies are rejected with `400 Bad Request` before
+the backend accesses the LLM service.
+
+`PATCH /api/v1/llm/unload` returns `204 No Content` after the requested model is
+unloaded. Expected failures use `application/problem+json` with stable `type`,
+`title`, and `status` fields plus an occurrence-specific `detail`:
+
+| Status | Problem type                              | Meaning                                         |
+| ------ | ----------------------------------------- | ----------------------------------------------- |
+| `404`  | `urn:lys:problem:llm:model-not-found`     | The model is missing or is no longer loaded.    |
+| `503`  | `urn:lys:problem:llm:runtime-unavailable` | The backend cannot query the LLM runtime.       |
+| `503`  | `urn:lys:problem:llm:unload-failed`       | The unload failed and the model remains loaded. |
+
+Problem bodies may also include an `instance` identifier for one occurrence.
+
 ## What is not part of the public API
 
 - No conversation listing or history-retrieval endpoint; the chat route can
   continue only a conversation whose identifier the caller already knows
 - No export or import endpoint
-- No typed HTTP error taxonomy beyond route-local thrown errors
 
 ## Coming soon
 
 - Public conversation query routes
 - Conversation export and import routes
-- A more explicit HTTP error contract
 
 ## Related pages
 

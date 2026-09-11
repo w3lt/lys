@@ -114,8 +114,10 @@ Before a candidate finding may enter the report, the reviewer MUST confirm all o
 
 1. The cited location exists in the current file and contains what the finding claims.
 2. Any cited rule identifier exists in an active item standard. Identifiers from the deferred registry in [Code Construction Rules](../CODE_STANDARDS.md) are not citable as rules.
-3. The described failure is reachable through a real execution path.
+3. The evidence matches the claim: a construction-rule finding demonstrates that an applicable rule is violated; a behavioral finding demonstrates a failure reachable through a real execution path; a contract-ambiguity finding identifies the missing or conflicting information that yields opposite review outcomes.
 4. The stated correction is the smallest one that resolves the defect.
+
+A verified violation of an applicable mandatory standard is a code-quality defect even when runtime behavior is correct. The reviewer MUST NOT require a runtime failure scenario to report that violation.
 
 A candidate that fails any of these MUST be moved to **Unverified questions** or dropped. The reviewer MUST NOT report an unverified suspicion as a finding.
 

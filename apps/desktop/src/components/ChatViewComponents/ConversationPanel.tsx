@@ -41,8 +41,11 @@ export type ConversationPanelProps =
  *
  * @remarks Primary category: presentational. The parent owns conversation
  * state, transcript position, scrolling, submission, and interruption. The
- * Stop action exists only in the streaming-tail contract. Submission promises
- * settle inside the application store, which owns request failure state.
+ * Stop action exists only in the streaming-tail contract. Starter clicks call
+ * `onSendMessage` once and intentionally discard its settlement because the
+ * store owns request failure state. The transcript host is the supplied ref
+ * target and exposes native scroll semantics; the jump control appears only
+ * when the parent reports that the reader is away from the latest content.
  * @param props - Parent-owned presentation state and transcript controls.
  * @returns The conversation landmark with starter or transcript content.
  */

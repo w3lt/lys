@@ -1,12 +1,24 @@
-import { Button } from "@/components/ui/button"
+/** Properties accepted by {@link PaneFooter}. */
+export type PaneFooterProps = {
+  /** Closing note explaining what the pane's settings actually affect. */
+  readonly note: string
+}
 
-export default function PaneFooter({ onDone }: { onDone: () => void }) {
+/**
+ * Closes one settings pane with the note explaining what its settings do.
+ *
+ * @remarks Primary category: presentational. The parent owns the note and
+ * decides whether to render the footer at all; an empty note renders an empty
+ * footer rather than collapsing the pane's bottom spacing. The component owns
+ * no state, callbacks, effects, or resources.
+ *
+ * @param props - Closing note for the current pane.
+ * @returns The settings pane footer.
+ */
+export default function PaneFooter({ note }: PaneFooterProps) {
   return (
     <footer className="settings-view__footer">
-      <p>Changes live in this session only. Nothing is written to disk.</p>
-      <Button onClick={onDone} type="button">
-        Done
-      </Button>
+      <p>{note}</p>
     </footer>
   )
 }

@@ -31,6 +31,11 @@ export type LysMessageProps =
  *
  * @remarks Primary category: presentational. An interruption action is shown
  * only by the streaming variant; terminal variants expose no Stop capability.
+ * The streaming Stop button has `aria-label="Stop reply"` and invokes the
+ * parent callback synchronously once for each button activation. Interrupted
+ * and failed terminal messages announce polite `Stopped` and `Failed` status
+ * text respectively; those statuses are output only after the corresponding
+ * terminal message variant is rendered.
  * @param props - Lifecycle-refined assistant presentation to render.
  * @returns The rendered assistant transcript message.
  */

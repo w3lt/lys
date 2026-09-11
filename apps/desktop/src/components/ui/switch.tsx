@@ -2,11 +2,27 @@ import { Switch as SwitchPrimitive } from "@base-ui/react/switch"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * Renders a Base UI switch with Lys size variants and a repository thumb.
+ *
+ * @remarks Primary category: UI primitive adapter. Base UI switch root props,
+ * controlled or uncontrolled checked state, event handlers, and native
+ * accessibility behavior are forwarded; a controlled `checked` value is
+ * parent-owned while `defaultChecked` is primitive-owned. `size` defaults to
+ * `default` and controls `sm`, `default`, or `lg` geometry through `data-size`.
+ * Base UI coordinates focus, keyboard toggling, disabled state, and
+ * `data-checked` / `data-unchecked` state attributes. A supplied `ref` targets
+ * the Base UI switch's `HTMLElement` host; this wrapper owns no portal or
+ * failure handling.
+ * @param props - Base UI switch props, children, and optional size.
+ * @returns The styled switch root with its thumb.
+ */
 function Switch({
   className,
   size = "default",
   ...props
 }: SwitchPrimitive.Root.Props & {
+  /** Repository geometry variant applied to the switch root and thumb. */
   size?: "sm" | "default" | "lg"
 }) {
   return (

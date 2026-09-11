@@ -1,15 +1,38 @@
 import { DEFAULT_CONFIG } from "./content"
 import type { AppAction, AppState, Message, RuntimeState } from "./types"
 
+/**
+ * Applies a partial runtime transition without mutating the current state.
+ *
+ * @param state - Current reducer-owned state.
+ * @param patch - Runtime fields to replace in the returned state.
+ * @returns A new state sharing all unchanged application fields.
+ */
 const updateRuntime = (
   state: AppState,
   patch: Partial<RuntimeState>
 ): AppState => ({ ...state, runtime: { ...state.runtime, ...patch } })
 
+/**
+ * Updates one in-progress Lys message while preserving all other messages.
+ *
+ * @param messages - Transcript entries to inspect.
+ * @param messageId - Identifier of the assistant message to update.
+ * @param update - Transformation applied to the matching assistant message.
+ * @returns A new transcript array with the matching entry transformed when present.
+ */
 const updateMessage = (
   messages: Message[],
   messageId: string,
-  update: (message: Extract<Message, { role: "lys" }>) => Message
+  update: (
+    message: Extract<
+      Message,
+      {
+        /** Restricts the callback input to assistant-owned transcript entries. */
+        role: "lys"
+      }
+    >
+  ) => Message
 ): Message[] =>
   messages.map((message) =>
     message.role === "lys" && message.id === messageId
@@ -17,6 +40,12 @@ const updateMessage = (
       : message
   )
 
+/**
+ * Creates the reducer's deterministic initial state.
+ *
+ * @param now - Epoch timestamp in milliseconds used as the initial backend start time.
+ * @returns A fresh state object with empty messages and the default demonstration runtime.
+ */
 export function createInitialState(now = Date.now()): AppState {
   return {
     view: "chat",
@@ -38,6 +67,13 @@ export function createInitialState(now = Date.now()): AppState {
   }
 }
 
+/**
+ * Applies one explicit UI or runtime action to immutable application state.
+ *
+ * @param state - Current reducer-owned application state.
+ * @param action - Closed action variant describing one requested transition.
+ * @returns The next state, or the same object when the action is invalid for the current lifecycle state.
+ */
 export function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case "draftChanged":

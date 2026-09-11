@@ -18,6 +18,7 @@ export type BackendConfig = {
   lmstudioHost: string
   /** Port used by backend LM Studio clients. */
   lmstudioPort: number
+  /** Filesystem path of the SQLite database owned by the conversation service. */
   databaseFilePath: PathLike
 }
 

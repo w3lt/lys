@@ -51,15 +51,19 @@ The compiler accepting another representation does not make it compliant.
 
 Before creating an interface:
 
-1. Name the single consumer-visible capability.
-2. Identify the current production consumer requiring it.
+1. Name the single consumer-visible capability or the narrowly approved
+   resource-owner composition under `IFACE-006` and `IFACE-026`.
+2. Establish current evidence under `IFACE-003`.
 3. Identify at least one current provider.
 4. Verify that a real boundary, substitution need, or declared extension point justifies the interface.
 5. Confirm that the implementation set is open rather than a closed finite domain.
 6. Place the contract with its high-level consumer or stable public API owner.
-7. List only operations that the identified consumer uses.
+7. List only operations required by that evidence; give each production
+   consumer only the operations it uses.
 8. Split operations with different purposes, permissions, lifecycles, owners, or implementation sets.
-9. Keep the complete effective operation count between one and five.
+9. Keep the complete effective operation count between one and five unless an
+   inseparable resource-owner composition satisfies the narrow exception in
+   `IFACE-006` and has explicit reviewer approval.
 10. Define every method under the Function standard and every accessor under the Class standard.
 11. Define every structured input, result, and failure with compliant data types.
 12. Specify preconditions, postconditions, absence, failure, side effects, completion, and ownership.
@@ -179,7 +183,7 @@ interface ConversationWriter {
 }
 ```
 
-An explicit accessor is allowed only when every provider implementation satisfies `CLASS-017`, `CLASS-018`, and `CLASS-019`. In addition, a current consumer MUST require the same synchronous local property contract from every provider. JavaScript and TypeScript interfaces MUST use `get` or `set` syntax; changing a data property into accessor syntax without this interface-specific evidence does not make it behavioral.
+An explicit accessor is allowed only when every provider implementation satisfies `CLASS-017`, `CLASS-018`, and `CLASS-019`. In addition, a current consumer or the exact approved public contract permitted by `IFACE-003` MUST require the same synchronous local property contract from every provider. JavaScript and TypeScript interfaces MUST use `get` or `set` syntax; changing a data property into accessor syntax without this interface-specific evidence does not make it behavioral.
 
 ```ts
 // Prohibited: this is a data property.
@@ -223,6 +227,14 @@ An interface MAY be introduced only when the completed change contains a real pr
 3. A plugin or extension boundary is an explicit current requirement.
 4. A language or framework contract requires an interface at an adapter boundary.
 
+For the exact composite and constituent capabilities recorded under an approved
+`IFACE-006` exception, an explicitly approved current public contract MAY supply
+the production-consumer evidence. The record MUST identify the currently
+required capability and every operation, a known provider, and at least one
+boundary condition above. This permission covers only that recorded contract;
+it does not establish evidence for hypothetical future usage or unrelated
+capabilities.
+
 A test double alone does not justify an interface. Anticipated future implementations, naming symmetry, and mocking pure code are not evidence.
 
 When valid alternatives form a closed finite domain, use a closed type and exhaustive handling instead of an interface.
@@ -257,21 +269,58 @@ Names requiring `And`, `Or`, `Manager`, `Utility`, or similarly broad wording in
 
 This is the interface-level application of SRP.
 
+The child of an approved `IFACE-006` composition follows `IFACE-026` solely to
+preserve one resource's required shared identity and lifecycle. Each constituent
+interface still represents one capability under this rule; the composition
+does not permit broad dependencies for consumers needing only a subset.
+
 ### IFACE-006 — An interface exposes one to five operations
 
-A repository-owned interface MUST expose at least one and no more than five effective operations. Five is a maximum, not a target.
+A repository-owned interface MUST expose at least one and no more than five
+effective operations unless the narrowly approved resource-owner composition
+exception below applies. Five remains the default maximum, not a target.
 
 The count includes declared methods, explicit getters, explicit setters, inherited operations, and every overload signature imposed by an external parent contract. A getter-and-setter pair counts as two operations.
 
 An interface MUST be split when:
 
-1. It exceeds five effective operations.
+1. It exceeds five effective operations without satisfying the narrowly
+   approved resource-owner composition below.
 2. Consumers require different operation subsets.
 3. Operations change for unrelated requirements.
 4. Operations require different permissions.
 5. Operations have different lifecycle, transaction, or resource owners.
 6. Any valid provider cannot support every operation.
 7. Query and command groups are consumed independently.
+
+A composite interface MAY exceed five effective operations only through an
+exception approved under [Contributing to Lys](../../CONTRIBUTING.md) and only
+when all these conditions are established:
+
+1. Every inherited interface independently satisfies this chapter, including
+   the five-operation limit and consumer segregation.
+2. The composite declares no additional operations beyond the exact operations
+   inherited from those interfaces.
+3. One current production ownership boundary or explicitly approved public
+   contract requires every effective operation to control one resource and its
+   lifecycle as a single identity.
+4. The inherited capabilities share the same resource owner, authoritative
+   lifecycle state, concurrency invariant, and cleanup obligation.
+5. Supplying, replacing, or releasing the inherited capabilities independently
+   could violate that ownership or lifecycle invariant, and the language or
+   platform cannot enforce their required shared identity through a smaller
+   contract.
+6. The exception record documents the exact effective operation count, the
+   attempted compliant splits, why each fails to preserve the invariant, and
+   why the excess contains no operation outside the approved ownership boundary
+   or public contract.
+
+The approved excess MUST be the smallest complete inherited surface that
+preserves the invariant. It MUST NOT excuse any other split trigger above,
+unrelated operations, operations outside the approved ownership boundary or
+public contract, optional behavior, omitted counting, or a composite created
+for provider or construction convenience. Consumers that need only one
+inherited capability MUST continue to receive that narrow parent interface.
 
 A zero-operation marker interface is prohibited. Use a branded type, annotation, closed type, or language-provided marker construct for non-behavioral classification.
 
@@ -517,16 +566,25 @@ An operation that may perform such waiting MUST use the language or runtime's as
 
 An asynchronous operation MUST NOT report a successful outcome until its documented success postcondition is true. Expected failure, absence, or cancellation outcomes MAY complete according to their explicit contracts. One implementation MUST NOT report success after queueing while another reports success after completion.
 
-### IFACE-018 — Potentially unbounded work is cancellable
+### IFACE-018 — Cancellation follows operation ownership
 
-An operation that may wait on a network, process, lock, stream, queue, user interaction, or input without a validated upper bound MUST accept the application stack's explicit cancellation value.
+An operation that may wait on a network, process, lock, stream, queue, user interaction, or input without a validated upper bound MUST accept the application stack's explicit cancellation value, except for the application-owned completion-only case below.
 
-Cancellation MUST be either:
+An operation MAY omit caller cancellation when a current product or lifecycle requirement assigns accepted work to an application owner until terminal success or failure, independently of the requesting caller's observation lifetime. Its contract MUST:
+
+- Identify the application owner that assumes responsibility at admission for both queued and active work.
+- Explain why accepted work continues after the requesting caller stops observing or disconnects.
+- Define terminal outcomes, possible partial effects, and responsibility for observing failures and retaining resources until completion.
+- Define shutdown behavior that closes admission and awaits accepted work before releasing its dependencies, including any limit on that wait or the absence of one.
+
+A provider's lack of cancellation support, an ignored cancellation value, or stopping only the caller's wait does not establish this permission. Completion-only operations remain subject to the capacity and ownership requirements of the [Async Task and Stream standard](./ASYNC.md).
+
+For operations accepting cancellation, the cancellation value MUST be either:
 
 - The final positional parameter.
 - A named field of the operation input type.
 
-Every implementation MUST:
+Every implementation of a cancellable operation MUST:
 
 - Observe cancellation.
 - Stop starting new owned work.
@@ -707,10 +765,15 @@ An interface MAY extend or compose only other behavioral interfaces.
 Composition is allowed only when:
 
 1. The child is substitutable for every parent.
-2. A current production consumer requires every effective operation.
-3. All operations form one capability.
+2. Every effective operation is required by a current production ownership
+   boundary or an explicitly approved public contract. Production consumers
+   that need a subset receive only the corresponding narrow parent interface.
+3. All operations form one capability, or an approved `IFACE-006` exception
+   binds independently narrow parent capabilities solely to preserve one
+   resource owner's required identity and lifecycle invariant.
 4. No contracts conflict.
-5. The complete interface remains within the five-operation limit.
+5. The complete interface remains within the five-operation limit or satisfies
+   the approved inseparable resource-owner exception in `IFACE-006`.
 6. Lifecycle and ownership rules remain identical.
 
 Composition MUST NOT introduce:
@@ -720,6 +783,8 @@ Composition MUST NOT introduce:
 - Mechanism-specific declarations.
 - Diamond inheritance requiring precedence rules.
 - Unrelated capabilities grouped for provider convenience.
+- Composition used to hide inherited operations from the effective count or to
+  bypass consumer segregation.
 
 An implementation MAY implement several independent interfaces without creating a composite interface.
 
@@ -880,6 +945,10 @@ For every repository-owned interface:
 | Production implementations excluded from contract tests |              0 |
 | Reusable fakes excluded from contract tests             |              0 |
 | Authoritative declarations per interface                |              1 |
+
+An explicitly approved `IFACE-006` resource-owner composition may exceed the
+effective-operation value. The exception record MUST report the exact count;
+every other row remains unchanged.
 
 ## Complete TypeScript example
 
@@ -1193,10 +1262,14 @@ An interface is compliant only when every applicable answer is “yes”:
 
 - [ ] Is data represented by a type and object behavior by an interface-equivalent?
 - [ ] Does the interface contain required instance methods or behaviorally evidenced explicit accessors only?
-- [ ] Do a current production consumer, known provider, and valid abstraction reason exist?
+- [ ] Does current evidence satisfy `IFACE-003`, including a known provider and
+      valid abstraction reason?
 - [ ] Does the high-level consumer or stable public API own the interface?
-- [ ] Does it represent exactly one capability?
-- [ ] Does it expose between one and five effective operations?
+- [ ] Does it represent exactly one capability or the narrowly approved
+      resource-owner composition under `IFACE-006` and `IFACE-026`?
+- [ ] Does it expose between one and five effective operations, or is every
+      excess operation inherited under an explicitly approved `IFACE-006`
+      resource-owner composition exception?
 - [ ] Does every consumer use every exposed operation?
 - [ ] Does every provider support every operation without optional or fallback behavior?
 - [ ] Does the name identify the capability without language or implementation markers?
@@ -1208,7 +1281,7 @@ An interface is compliant only when every applicable answer is “yes”:
 - [ ] Are absence and failure representations provider-independent?
 - [ ] Are side effects, atomicity, idempotency, and completion explicit?
 - [ ] Do all providers preserve the synchronous or asynchronous contract?
-- [ ] Is every potentially unbounded operation explicitly cancellable?
+- [ ] Is every potentially unbounded operation explicitly cancellable or application-owned and completion-only under `IFACE-018`?
 - [ ] Is every provider ready when exposed?
 - [ ] Is ownership and release defined for every returned resource?
 - [ ] Are mutable implementation details prevented from escaping?
@@ -1216,7 +1289,8 @@ An interface is compliant only when every applicable answer is “yes”:
 - [ ] Are implementation identity and runtime capability probing absent from consumers?
 - [ ] Are dependencies supplied explicitly by the composition root?
 - [ ] Can a new provider be added without changing consumer policy?
-- [ ] Does interface composition preserve narrow capability boundaries?
+- [ ] Does interface composition preserve narrow capability boundaries and
+      count every inherited operation honestly?
 - [ ] Are generics and associated types necessary, constrained, and operation-linked?
 - [ ] Does every production provider declare conformance explicitly?
 - [ ] Does the interface have one authoritative declaration?

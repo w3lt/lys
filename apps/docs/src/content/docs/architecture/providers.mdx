@@ -1,6 +1,6 @@
 ---
 title: LLM provider integration
-description: The current LM Studio-only integration used for model inventory, loading, and streamed chat generation.
+description: The current LM Studio-only integration used for model inventory, lifecycle operations, and streamed chat generation.
 docType: architecture
 sidebar:
   order: 7
@@ -10,31 +10,130 @@ Lys currently integrates with one local model runtime: LM Studio.
 
 ## Current stack
 
-| Concern          | Current implementation                                                                                              |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------- |
-| Model inventory  | `LlmService.listModel()` uses `@lmstudio/sdk` to list downloaded models and annotate which are loaded.              |
-| Model loading    | `POST /api/v1/llm/load` loads one model through LM Studio and returns its metadata.                                 |
-| Chat generation  | `ChatService.completeChatStream()` uses the `openai` SDK against LM Studio's OpenAI-compatible `/v1` HTTP endpoint. |
-| Title generation | `ChatService.generateTitle()` uses the same endpoint with a separate prompt and structured output parsing.          |
+| Concern          | Current implementation                                                                                                           |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Model inventory  | `LlmService.listLlmModels()` lists downloaded models and annotates which model keys have loaded instances.                       |
+| Model health     | `LlmService.getLlmModelHealth()` checks one fresh loaded-inventory snapshot for the requested key without generating text.       |
+| Model loading    | `POST /api/v1/llm/load` uses the application service to load one model and return its metadata.                                  |
+| Model unloading  | `PATCH /api/v1/llm/unload` stops every observed loaded instance matching one key, then reconciles the loaded-instance inventory. |
+| Chat generation  | `ChatService.completeChatStream()` uses the `openai` SDK against LM Studio's OpenAI-compatible `/v1` HTTP endpoint.              |
+| Title generation | `ChatService.generateTitle()` uses the same endpoint with a separate prompt and structured output parsing.                       |
 
 ## Request path
 
 ```text
 Desktop chat store -> Fastify /api/v1/chat -> ChatService -> LM Studio /v1
-Fastify /api/v1/llm/* -> LM Studio SDK/client
+Fastify /api/v1/llm/* -> LlmService -> LlmRuntime -> LmStudioRuntime -> LM Studio SDK
 ```
 
 The current desktop settings UI does not call the LLM routes. Its Model tab is
 not a usable alternative path: the pane requires a `SettingsContext.Provider`
-that the current settings view does not mount. The list route uses the
-application-scoped `LlmService`; the load route currently constructs an LM
-Studio client inside its handler.
+that the current settings view does not mount. The list, health, load, and unload routes
+reuse the application-scoped `llmService`, typed as `LlmService` on Fastify,
+through provider-neutral capabilities.
+The composition root creates `LmStudioRuntime` for one configured LM Studio
+server, then transfers exclusive ownership to `LlmService`. The service knows
+only its five-operation `LlmServiceRuntime` view and serializes complete
+application operations. The full `LlmRuntime` combines `LlmEngine` with
+`LlmRuntimeLifecycle`; the service view requires engine operations and disposal.
+Concrete runtime selection belongs in composition.
+
+`LmStudioRuntime` owns SDK calls, vendor-data validation, immutable runtime
+snapshots, and client cleanup. `LlmService` owns canonical metadata lookup after
+loading, loaded-state annotation and sorting, loaded-model health, and stop-by-key reconciliation.
+Runtime snapshots contain no SDK handles or application `loaded` flag.
+
+The runtime allows one active call and rejects overlapping operational calls
+before accessing the SDK. It adds no waiting queue. Disposal closes runtime
+admission, waits for its active call, and releases the SDK client once. Repeated
+disposal observes the same outcome, including failure. Client cleanup neither
+unloads every model nor terminates the external LM Studio engine.
+
+## Runtime readiness and inspection
+
+`LmStudioRuntime.create()` waits for a successful
+`client.system.getLMStudioVersion()` response before returning. This opens a
+real SDK connection and verifies a query response without loading a model.
+Connection, authentication, and query errors reported by the SDK reject
+acquisition with a retained diagnostic cause; acquired resources are released
+before rejection. Empty downloaded and loaded inventories are valid.
+
+The synchronous `lifecycleStatus` getter reports `ready`, `active`, `closing`,
+or `closed`, including after disposal. These values describe the adapter's
+admission and cleanup state; `ready` alone does not establish current engine
+availability.
+
+`getRuntimeAvailability()` performs a fresh SDK query and returns `available`
+or `unavailable`. It shares the runtime's single-operation guard: overlapping
+calls reject as busy, and checks after disposal begins reject as closed. A
+failed availability query releases admission so a later check can succeed.
+Its result is an observation, not a guarantee that the next model operation
+will succeed. These lifecycle and availability observations are not directly
+exposed through an HTTP route or desktop UI.
+
+The model-specific `GET /api/v1/llm/:modelId/health` endpoint uses the existing
+`listLoadedLlmModelInstances()` operation. A successful query establishes that
+the engine answered, and a matching canonical key establishes observed loaded
+presence. It needs no additional availability request or runtime capability.
+`ready` does not verify generation or guarantee that the model remains loaded
+after the snapshot. Responses are not cached. The
+[API reference](/reference/api/#model-health-responses) defines the result and
+latency fields.
+
+Acquisition and accepted availability checks are owned until settlement. SDK
+1.5.0 has no public RPC cancellation or forced client shutdown; its cleanup
+waits for pending communication. These queries therefore have no completion
+deadline, and a nonresponding engine can keep startup, a check, or shutdown
+pending. The SDK also ignores invalid version payloads without settling the
+request, so a malformed response can leave acquisition or a check pending until
+a valid response or transport failure arrives. A timeout race would not cancel
+the underlying SDK request. HTTP
+greeting checks do not establish SDK WebSocket authentication and are not used
+as a substitute.
+
+## Model operation queue
+
+Each `LlmService` accepts one active operation and up to eight waiting operations
+across inventory, health, loading, and unloading together. Accepted operations run in
+arrival order. A full queue rejects a new request immediately with HTTP `503` and
+the Problem Details type `urn:lys:problem:llm:service-busy`; rejected work never
+reaches the runtime. Finishing an operation releases its capacity on either
+success or failure.
+
+The first accepted operation reserves the active position before execution starts,
+so a burst arriving in the same event-loop turn cannot exceed nine accepted
+operations. There is no second waiting queue behind this limit. Shutdown closes
+admission and drains accepted work before releasing the runtime resources.
+
+## Cancellation policy
+
+Users cannot cancel model loading or unloading. Once `LlmService` accepts either
+operation, it owns the work until success or failure, including any time spent
+waiting in its queue. Closing the requesting client connection does not cancel
+that accepted work. During shutdown, the service stops accepting new operations
+and waits for accepted work before releasing its runtime resources.
+
+Inventory queries and model health checks use the same service-owned completion policy. This is the
+application-owned completion-only case defined by `IFACE-018` in
+`docs/code_standards/INTERFACE.md`. The service enforces no completion deadline;
+if a runtime operation never settles, shutdown also keeps waiting for it.
+
+Inference has a separate cancellation lifetime. `ChatService` passes an abort
+signal to the OpenAI SDK for chat and title generation; closing the chat SSE
+connection aborts that signal. Cancelling inference does not unload the model or
+cancel an accepted model-management operation.
+
+The LM Studio SDK supports cancellation of model loading, but Lys deliberately
+does not expose it for that operation. Its current inventory and unload methods
+do not expose per-call cancellation. These SDK details do not change the product
+policy.
 
 ## What the backend assumes today
 
 - LM Studio is running on `127.0.0.1:1234`.
 - Chat requests can be satisfied by an OpenAI-compatible HTTP endpoint.
-- Inventory and load operations are available through the LM Studio SDK.
+- Inventory, load, and unload operations are available through the LM Studio
+  SDK.
 - No external credential exchange is required to reach the local runtime.
 
 ## Limitations
@@ -47,7 +146,7 @@ Studio client inside its handler.
 
 ## Coming soon
 
-- Multiple providers or adapter abstractions
+- Additional runtime implementations
 - Fallback and retry policy across model runtimes
 - Usable Model, Generation, and Conversation settings tabs
 - Persistent model selection shared between settings and chat

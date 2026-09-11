@@ -1,139 +1,235 @@
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle
-} from "@/components/ui/card"
+import type { ReactElement } from "react"
+import ModelRequestFeedback from "./ModelRequestFeedback"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
-import { Separator } from "@/components/ui/separator"
 import {
   backendStatusLabel,
-  useRuntimeSettingsContext
-} from "@/lib/hooks/runtimeSettingsContext"
-import { type BackendServerStatus } from "@/lib/store"
+  backendStatusTone,
+  formatUptime,
+  useBackendUptimeMs
+} from "@/lib/hooks/backendRuntime"
+import {
+  formatModelResidencyHeading,
+  formatModelResidencyMeta,
+  readLoadedModelKey,
+  readModelResidencyTone
+} from "@/lib/models/model-residency"
+import { type BackendServerStatus, useLysStore } from "@/lib/store"
+import { isModelTransitionInFlight } from "@/lib/store/model-runtime"
+
+import { useSettingsContext } from "./SettingsContext"
 
 /**
- * `18s` under a minute, `711m 18s` above it. Minutes never roll into hours: a
- * long-lived local process is easier to compare in one unit.
+ * Formats the address and lifecycle detail shown under the backend status.
+ *
+ * @param status - Store-owned backend lifecycle state.
+ * @param backendAddress - Persisted backend origin.
+ * @param uptimeMs - Current process uptime in milliseconds.
+ * @returns The visible address and lifecycle detail line.
  */
-function formatUptime(elapsedMs: number) {
-  const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000))
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = totalSeconds % 60
-
-  return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`
-}
-
-/** The mono detail line under the title: where the process is, and for how long. */
-function backendMetaLabel(status: BackendServerStatus, uptimeMs: number) {
-  const BACKEND_ADDRESS = "127.0.0.1:12345"
+function formatBackendMeta(
+  status: BackendServerStatus,
+  backendAddress: string,
+  uptimeMs: number
+): string {
   switch (status) {
     case "running":
-      return `${BACKEND_ADDRESS} · up ${formatUptime(uptimeMs)}`
+      return `${backendAddress} · up ${formatUptime(uptimeMs)}`
     case "starting":
-      return `${BACKEND_ADDRESS} · starting`
+      return `${backendAddress} · starting`
     case "stopping":
-      return `${BACKEND_ADDRESS} · stopping`
+      return `${backendAddress} · stopping`
     case "stopped":
-      return `${BACKEND_ADDRESS} · not running`
+      return `${backendAddress} · not running`
   }
 }
 
-function backendTone(status: BackendServerStatus): string {
-  switch (status) {
-    case "running":
-      return "active"
-    case "starting":
-    case "stopping":
-      return "pending"
-    case "stopped":
-      return "idle"
-  }
-}
-
-export default function RuntimePaneContent() {
+/**
+ * Presents backend lifecycle controls, autostart, and model residency.
+ *
+ * @remarks Primary category: composition/view. The application store owns
+ * backend status and the start/stop commands; the settings context owns the
+ * persisted settings and the model lifecycle requests. Start and Stop
+ * intentionally discard their command promises with `void`: failures are not
+ * awaited or rendered here, so a rejection surfaces as an unhandled rejection
+ * and backend status is not a completion owner when a command rejects. The
+ * autostart switch proposes one patch per checked change.
+ *
+ * The model card projects the settings context's residency state. While a
+ * transition is in flight the card is marked busy and carries an indeterminate
+ * progress indicator: the API reports completion without progress, so no percentage is
+ * claimed. Both lifecycle actions are withheld during a transition, and Load
+ * additionally requires a running backend and a chosen default model.
+ *
+ * @returns The runtime backend and model cards.
+ */
+export default function RuntimePaneContent(): ReactElement {
+  const backendServerInfo = useLysStore((state) => state.backendServerInfo)
+  const startBackend = useLysStore((state) => state.startBackend)
+  const stopBackend = useLysStore((state) => state.stopBackend)
+  const uptimeMs = useBackendUptimeMs()
   const {
-    settingsBuffer,
-    setSettingsBuffer,
-    startBackend,
-    stopBackend,
-    backendServerInfo,
-    uptimeMs
-  } = useRuntimeSettingsContext()
+    settings,
+    modelRuntime,
+    modelRequest,
+    modelInventory,
+    onRuntimeChange,
+    onLoadModel,
+    onUnloadModel
+  } = useSettingsContext()
 
   const backendStatus = backendServerInfo.status
-
-  if (!settingsBuffer) return null
-
-  const autoStart = settingsBuffer.autoStartBackend
-  const canStart = backendStatus === "stopped"
+  const isRunning = backendStatus === "running"
+  const autoStart = settings.runtime.autoStartBackend
+  const defaultModel = settings.runtime.defaultModel
+  const loadedModelKey = readLoadedModelKey(modelRuntime)
+  const isTransitioning = isModelTransitionInFlight(modelRuntime)
+  const isModelBusy = modelRequest.status !== "idle"
+  const defaultEntry =
+    modelInventory.status === "ready"
+      ? modelInventory.models.find((model) => model.modelKey === defaultModel)
+      : undefined
+  const residencyHeading = formatModelResidencyHeading(modelRuntime)
 
   return (
     <div className="settings-view__stack">
-      <Card className="settings-view__card">
-        <CardHeader className="settings-view__card-header">
+      <section className="settings-view__card">
+        <div className="settings-view__card-row">
           <div className="settings-view__identity">
             <span
               aria-hidden="true"
-              className={`settings-view__status-dot settings-view__status-dot--${backendTone(backendStatus)}`}
+              className="settings-view__status-dot"
+              data-tone={backendStatusTone(backendStatus)}
             />
             <div className="settings-view__identity-lines">
-              <CardTitle>{backendStatusLabel(backendStatus)}</CardTitle>
-              <CardDescription className="settings-view__card-meta">
-                {backendMetaLabel(backendStatus, uptimeMs)}
-              </CardDescription>
+              <h2>{backendStatusLabel(backendStatus)}</h2>
+              <p className="settings-view__meta">
+                {formatBackendMeta(
+                  backendStatus,
+                  settings.runtime.backendAddress,
+                  uptimeMs
+                )}
+              </p>
             </div>
           </div>
           <div className="settings-view__actions">
             <Button
-              disabled={!canStart}
+              disabled={backendStatus !== "stopped"}
               onClick={() => {
                 void startBackend()
               }}
               type="button"
-              variant={canStart ? "default" : "outline"}
+              variant={backendStatus === "stopped" ? "default" : "outline"}
             >
               Start
             </Button>
             <Button
-              disabled={backendStatus !== "running"}
+              disabled={!isRunning}
               onClick={() => {
                 void stopBackend()
               }}
               type="button"
-              variant="destructive"
+              variant="outline"
             >
               Stop
             </Button>
           </div>
-        </CardHeader>
+        </div>
 
-        <Separator className="settings-view__card-divider" />
+        <div className="settings-view__card-divider" />
 
-        <CardContent className="settings-view__card-toggle">
-          <div>
+        <div className="settings-view__card-row">
+          <div className="settings-view__identity-lines">
             <h2>Start it when Lys opens</h2>
             <p>Off means the first thing you do here is press start.</p>
           </div>
           <div className="settings-view__toggle-state">
             {/* The switch already announces its state; this is for the eye. */}
-            <span aria-hidden="true">{autoStart ? "On" : "Off"}</span>
+            <span aria-hidden="true">{autoStart ? "on" : "off"}</span>
             <Switch
               aria-label="Start it when Lys opens"
               checked={autoStart}
-              onCheckedChange={() => {
-                setSettingsBuffer((prev) => ({
-                  ...prev,
-                  autoStartBackend: !prev?.autoStartBackend
-                }))
-              }}
+              onCheckedChange={(checked) =>
+                onRuntimeChange({ autoStartBackend: checked })
+              }
               size="lg"
             />
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </section>
+
+      <section
+        aria-busy={isTransitioning}
+        className="settings-view__card"
+        data-dimmed={isRunning ? undefined : ""}
+      >
+        <div className="settings-view__card-row">
+          <div className="settings-view__identity">
+            <span
+              aria-hidden="true"
+              className="settings-view__status-dot"
+              data-tone={readModelResidencyTone(modelRuntime)}
+            />
+            <div className="settings-view__identity-lines">
+              <h2>{residencyHeading}</h2>
+              <p className="settings-view__meta">
+                {formatModelResidencyMeta(
+                  modelRuntime,
+                  backendStatus,
+                  defaultModel
+                )}
+              </p>
+            </div>
+          </div>
+          <div className="settings-view__actions">
+            <Button
+              disabled={
+                !isRunning ||
+                isModelBusy ||
+                !defaultEntry ||
+                defaultEntry.loaded
+              }
+              onClick={() => {
+                if (defaultModel) void onLoadModel(defaultModel)
+              }}
+              type="button"
+              variant="default"
+            >
+              Load
+            </Button>
+            <Button
+              disabled={!isRunning || isModelBusy || loadedModelKey === null}
+              onClick={() => {
+                if (loadedModelKey) void onUnloadModel(loadedModelKey)
+              }}
+              type="button"
+              variant="outline"
+            >
+              Unload
+            </Button>
+          </div>
+        </div>
+
+        {isTransitioning ? (
+          /* The backend acknowledges completion without percentage progress. */
+          <div
+            aria-label={residencyHeading}
+            className="settings-view__progress"
+            role="progressbar"
+          >
+            <span aria-hidden="true" className="settings-view__progress-fill" />
+          </div>
+        ) : null}
+
+        <div className="settings-view__card-divider" />
+
+        <p className="settings-view__card-note">
+          Loading and unloading use LM Studio through the backend. This summary
+          prefers the loaded default; manage every loaded model in Model
+          settings.
+        </p>
+        <ModelRequestFeedback />
+      </section>
     </div>
   )
 }

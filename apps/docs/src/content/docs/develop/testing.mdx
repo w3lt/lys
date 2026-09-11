@@ -25,6 +25,7 @@ passed without current output.
 ```sh
 pnpm exec prettier . --check
 pnpm exec eslint .
+pnpm --filter @lys/backend test
 pnpm --filter @lys/desktop test
 pnpm --filter @lys/desktop build
 pnpm --filter @lys/backend exec tsc --noEmit
@@ -47,21 +48,22 @@ contracts, schemas, or behavior that crosses package boundaries.
 
 ## Current test shape
 
-- `apps/desktop` has a `vitest run` script.
-- No test files are currently tracked under `apps/desktop`, `apps/backend`, or
-  the shared packages.
-- `apps/backend` currently exposes a TypeScript validation path through
-  `pnpm --filter @lys/backend exec tsc --noEmit`, but no package-level `test`
-  script is defined in `apps/backend/package.json`.
+- `apps/backend` has a Node test script covering its unload route and the
+  corresponding shared protocol contract.
+- `apps/desktop` has a `vitest run` script, but no desktop test files are
+  currently tracked.
+- The shared packages do not expose package-level test scripts; the current LLM
+  unload protocol coverage runs from the backend suite.
+- `apps/backend` also exposes a TypeScript validation path through
+  `pnpm --filter @lys/backend exec tsc --noEmit`.
 - `apps/docs` exposes `check` and `build` scripts that are appropriate for
   docs-only changes.
 
 ## Coming soon
 
-The backend does not currently advertise a first-class automated test script,
-and the repository has no tracked application test files. If you are changing
-behavior, be explicit in your handoff about which paths you verified and which
-ones still lack dedicated automation.
+The desktop and shared packages do not yet have their own tracked test suites.
+If you are changing behavior, be explicit in your handoff about which paths you
+verified and which ones still lack dedicated automation.
 
 <RelatedDocuments
   documents={[

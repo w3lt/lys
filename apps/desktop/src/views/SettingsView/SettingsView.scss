@@ -13,131 +13,116 @@
   gap: 0;
 }
 
+/* Rail */
+
 .settings-view__rail {
   display: flex;
   width: 192px;
   min-width: 192px;
   height: 100%;
+  flex-direction: column;
   align-items: stretch;
   justify-content: flex-start;
-  gap: 4px;
-  padding: 0 0 8px;
+  gap: 0;
+  padding: 26px 0 16px;
   border-right: 1px solid var(--app-border-subtle);
   background: var(--app-surface-rail);
 }
 
 .settings-view__rail-heading {
-  display: flex;
-  min-height: 96px;
-  flex-direction: column;
-  justify-content: flex-end;
-  gap: 4px;
-  padding: 24px 16px 16px;
-  margin-bottom: 8px;
-  border-bottom: 1px solid var(--app-border-subtle);
-}
-
-.settings-view__rail-heading span {
-  font-family: var(--font-sans);
-  font-size: 18px;
-  font-weight: 600;
-  line-height: 1.3;
-  color: var(--app-text-strong);
-}
-
-.settings-view__rail-heading small {
+  padding: 0 18px 18px;
   font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.16em;
+  font-size: 9.5px;
+  letter-spacing: 0.26em;
   text-transform: uppercase;
+  white-space: nowrap;
   color: var(--app-text-faint);
 }
 
 /*
- * Navigation is sentence-case sans, not uppercase mono. The active surface
- * and weight come from the Tabs primitive; the rail owns placement and the
- * selected edge.
- *
- * Width stays auto so the rail's stretch alignment sizes the trigger within
- * these margins. The primitive sets width:100% for vertical lists, which here
- * would resolve against the full rail and push the trigger past the divider.
+ * Navigation is sentence-case sans against a mono ordinal: the label is the
+ * destination, the number is only a position. Selection is carried by the left
+ * edge and the tinted surface, so nothing reflows when it moves.
  */
 .settings-view__rail-tab {
-  position: relative;
+  display: flex;
   width: auto;
-  margin-inline: 8px;
-  padding: 0 12px;
+  min-height: 32px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 18px;
+  border: 0;
+  border-left: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--app-text-muted);
+  transition:
+    background-color var(--duration-standard) var(--ease-standard),
+    border-color var(--duration-standard) var(--ease-standard),
+    color var(--duration-standard) var(--ease-standard);
+}
+
+.settings-view__rail-tab:hover {
+  background: var(--app-surface-hover);
+  color: var(--app-text-strong);
+}
+
+.settings-view__rail-tab[data-active] {
+  border-left-color: var(--lys-violet);
+  background: var(--app-surface-navigation-active);
+  color: var(--app-text-strong);
 }
 
 /*
  * The rail is one half of a split view, so the primitive's outward focus halo
  * would spill across the divider onto the content pane. Drawing the indicator
- * inside the trigger keeps keyboard focus legible within the rail bounds.
- *
- * The app-wide button outline (App.scss) is unlayered, so it outranks the
- * primitive's own `outline-none` utility and has to be cleared here — left in
- * place it draws a second, outward ring around this inset one.
- *
- * The list does not activate on focus (Base UI's default), so arrow keys move
- * focus without switching panes: on an unselected trigger this ring is the only
- * cue for where the keyboard is.
+ * inside the trigger keeps keyboard focus legible within the rail's bounds.
  */
 .settings-view__rail-tab:focus-visible {
-  border-color: transparent;
   outline: none;
   box-shadow: inset 0 0 0 2px var(--app-focus);
 }
 
-/*
- * On the selected trigger the ring says nothing the selected edge below has not
- * already said, and it surfaces at a confusing moment: any key press — Escape
- * included — puts the browser in keyboard modality and reveals focus on the
- * trigger that already held it, which reads as a stray line appearing on click.
- */
-.settings-view__rail-tab[data-active]:focus-visible {
-  box-shadow: none;
+.settings-view__rail-marks {
+  display: flex;
+  align-items: center;
+  gap: 7px;
 }
 
-/*
- * The selected item reads as a control rather than a tinted band, and its edge
- * carries the brand gradient — violet at the top-left corner, cyan at the
- * bottom-right — instead of a flat border color.
- *
- * A border cannot take a gradient while keeping its radius, so this is the
- * masked 1px ring the composer field uses, laid over the trigger's own
- * transparent border. Nothing reflows when selection moves.
- *
- * Declared after the focus rule on purpose: the selected edge is identity, not
- * state, and should survive focus.
- */
-.settings-view__rail-tab[data-active] {
-  /*
-   * The active surface is translucent; clipped to the padding box it stops
-   * short of the edge instead of sitting under the gradient and washing it out.
-   */
-  border-color: transparent;
-  background-clip: padding-box;
+.settings-view__rail-ordinal {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--app-text-faint);
 }
 
-.settings-view__rail-tab[data-active]::after {
-  position: absolute;
-  /* Grows the padding box back out to the trigger's border box, radius included. */
-  inset: -1px;
-  padding: 1px;
-  border-radius: inherit;
-  pointer-events: none;
-  content: "";
-  background-image: var(--gradient-border);
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
+.settings-view__rail-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding-top: 15px;
+  margin: auto 18px 0;
+  border-top: 1px solid var(--app-border-subtle);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--app-text-muted);
 }
+
+.settings-view__rail-status-dot {
+  width: 5px;
+  height: 5px;
+  flex: none;
+  margin-top: 5px;
+  border-radius: var(--radius-capsule);
+  background: var(--app-status-neutral);
+}
+
+/* Content */
 
 .settings-view__content {
   min-width: 0;
@@ -157,28 +142,28 @@
   max-width: 620px;
   min-height: 100%;
   flex-direction: column;
+  gap: 32px;
+  padding: 30px 34px 54px;
   margin-inline: auto;
-  padding: 48px 32px 24px;
+}
+
+.settings-view__pane-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
 }
 
 .settings-view__pane-heading {
-  margin-bottom: 32px;
-}
-
-.settings-view__pane-heading p {
-  margin: 0 0 8px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  color: var(--lys-violet);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .settings-view__pane-heading-title {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 13px;
 }
 
 .settings-view__pane-heading h1 {
@@ -187,21 +172,25 @@
   font-size: 24px;
   font-weight: 600;
   line-height: 1.2;
+  letter-spacing: -0.01em;
   color: var(--app-text-strong);
 }
 
-/* Direct child only: the note, never the reading marker beside the title. */
-.settings-view__pane-heading > span {
-  display: block;
+.settings-view__pane-note {
   max-width: 470px;
-  margin-top: 8px;
+  margin: 0;
   font-size: 14px;
   line-height: 1.5;
+  text-wrap: pretty;
   color: var(--app-text-muted);
 }
 
+.settings-view__done {
+  flex: none;
+}
+
 /*
- * Reading marker. It sits on the title's baseline rather than above the pane
+ * Reading marker. It sits on the title's baseline rather than above the pane,
  * so the wait is attached to the thing being waited on, and it is the one
  * moving element while the placeholder below holds still.
  */
@@ -212,7 +201,7 @@
   font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 500;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--app-text-muted);
 }
@@ -220,6 +209,7 @@
 .settings-view__reading-dot {
   width: 5px;
   height: 5px;
+  flex: none;
   border-radius: var(--radius-capsule);
   background-image: var(--gradient-primary);
   box-shadow: var(--shadow-primary);
@@ -230,11 +220,11 @@
   0%,
   100% {
     opacity: 0.35;
-    transform: scale(1);
+    scale: 1;
   }
   50% {
     opacity: 1;
-    transform: scale(1.35);
+    scale: 1.35;
   }
 }
 
@@ -242,26 +232,77 @@
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 24px;
+  gap: 26px;
 }
 
+/* Cards */
+
 .settings-view__card {
-  gap: 0;
-  padding: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: var(--radius-surface);
+  background: var(--app-surface-panel);
+  transition: opacity var(--duration-enter) var(--ease-standard);
+}
+
+/* A card whose actions cannot be taken recedes without disappearing. */
+.settings-view__card[data-dimmed] {
+  opacity: 0.62;
+}
+
+.settings-view__card-row {
+  display: flex;
+  min-height: 64px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px 18px;
+}
+
+.settings-view__card-divider {
+  height: 1px;
+  margin-inline: 18px;
+  background: var(--app-border-subtle);
 }
 
 /*
- * A runtime card states one process on one line: what it is doing on the left,
- * the two actions that can change it on the right. The dot, the title, and the
- * mono detail line stay together as a single identity block.
+ * Indeterminate on purpose: nothing reports how far along a load actually is,
+ * so the track shows that work is happening without claiming how much is left.
  */
-.settings-view__card-header {
-  display: flex;
-  min-height: 72px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  padding: 16px;
+.settings-view__progress {
+  position: relative;
+  height: 3px;
+  margin: 0 18px 16px;
+  border-radius: var(--radius-capsule);
+  background: var(--app-control-track);
+  overflow: hidden;
+}
+
+.settings-view__progress-fill {
+  position: absolute;
+  inset-block: 0;
+  inline-size: 42%;
+  border-radius: var(--radius-capsule);
+  background: var(--gradient-primary);
+  animation: settings-view-progress-sweep 1.15s var(--ease-standard) infinite;
+}
+
+@keyframes settings-view-progress-sweep {
+  from {
+    inset-inline-start: -42%;
+  }
+  to {
+    inset-inline-start: 100%;
+  }
+}
+
+.settings-view__card-note {
+  padding: 14px 18px 16px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--app-text-muted);
 }
 
 .settings-view__identity {
@@ -275,23 +316,30 @@
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
 }
 
-.settings-view__card-header [data-slot="card-title"] {
+.settings-view__identity-lines h2,
+.settings-view__identity-lines h3 {
+  margin: 0;
   font-family: var(--font-sans);
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
-  line-height: 1.35;
   color: var(--app-text-strong);
 }
 
-/* Address, uptime, weights: machine facts, so mono and quieter than the title. */
-.settings-view__card-meta {
-  font-family: var(--font-mono);
+.settings-view__identity-lines p {
+  margin: 0;
   font-size: 12px;
-  line-height: 1.4;
-  letter-spacing: 0.02em;
+  line-height: 1.45;
+  color: var(--app-text-muted);
+}
+
+/* Address, uptime, weights: machine facts, so mono and quieter than the title. */
+.settings-view__meta {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
   color: var(--app-text-faint);
 }
 
@@ -299,24 +347,6 @@
   display: flex;
   flex: none;
   gap: 8px;
-}
-
-/*
- * Inset to the card's padding rather than run edge to edge: it divides two rows
- * of the same card, and does not cut the card in two.
- */
-.settings-view__card-divider {
-  margin-inline: 16px;
-  background: var(--app-border-subtle);
-}
-
-.settings-view__card-toggle {
-  display: flex;
-  min-height: 64px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  padding: 16px;
 }
 
 .settings-view__toggle-state {
@@ -330,28 +360,32 @@
   font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 500;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--app-text-muted);
 }
 
 .settings-view__status-dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   flex: none;
   border-radius: var(--radius-capsule);
   background: var(--app-status-neutral);
-  box-shadow: var(--app-status-neutral-ring);
 }
 
-/* The glow is the only lit thing on a resting card, so it reads from across the pane. */
-.settings-view__status-dot--active {
+.settings-view__status-dot--small {
+  width: 6px;
+  height: 6px;
+}
+
+/* The glow is the only lit thing on a resting card, so it reads across the pane. */
+.settings-view__status-dot[data-tone="active"] {
   background: var(--app-status-success);
-  box-shadow: var(--app-status-success-ring), var(--app-status-success-glow);
+  box-shadow: var(--app-status-success-glow);
 }
 
 /* Looping only while the process is genuinely mid-transition. */
-.settings-view__status-dot--pending {
+.settings-view__status-dot[data-tone="pending"] {
   background: var(--app-status-pending);
   box-shadow: var(--app-status-pending-ring);
   animation: settings-view-status-pulse 1.4s ease-in-out infinite;
@@ -367,277 +401,209 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .settings-view__status-dot--pending,
-  .settings-view__reading-dot {
-    animation: none;
-  }
-}
+/* Sections and rows */
 
-.settings-view__setting-row {
+.settings-view__section {
   display: flex;
-  min-height: 48px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-}
-
-.settings-view__setting-row h2,
-.settings-view__card-toggle h2,
-.settings-view__section-heading h2,
-.settings-view__field > label {
-  display: block;
-  margin: 0;
-  font-family: var(--font-sans);
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--app-text-strong);
-}
-
-.settings-view__setting-row p,
-.settings-view__card-toggle p,
-.settings-view__section-heading p {
-  margin: 4px 0 0;
-  font-size: 12px;
-  line-height: 1.45;
-  color: var(--app-text-muted);
-}
-
-.settings-view__separator {
-  background: var(--app-border-subtle);
-}
-
-.settings-view__section-heading > span,
-.settings-view__section-heading > output {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.08em;
-  color: var(--app-text-muted);
-}
-
-.settings-view__progress {
-  margin-top: 16px;
-}
-
-.settings-view__progress > div {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 8px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--app-text-muted);
-}
-
-.settings-view__progress [data-slot="progress"] {
-  display: block;
-}
-
-.settings-view__log {
-  margin-top: 0;
+  flex-direction: column;
 }
 
 .settings-view__section-heading {
   display: flex;
-  align-items: flex-start;
+  align-items: baseline;
   justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--app-border-default);
+}
+
+.settings-view__section-heading h2 {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+}
+
+.settings-view__section-heading span {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--app-text-faint);
+}
+
+.settings-view__row {
+  display: grid;
+  align-items: center;
   gap: 24px;
-}
-
-.settings-view__log ol {
-  padding: 0;
-  margin: 12px 0 0;
-  list-style: none;
-  border-top: 1px solid var(--app-border-subtle);
-}
-
-.settings-view__log li {
-  display: grid;
-  grid-template-columns: 72px 1fr;
-  gap: 12px;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--app-border-subtle);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  line-height: 1.45;
-}
-
-.settings-view__log time {
-  color: var(--app-text-faint);
-}
-
-.settings-view__log-tone--ok {
-  color: var(--app-status-success);
-}
-
-.settings-view__log-tone--wait {
-  color: var(--app-status-pending);
-}
-
-.settings-view__log-tone--warn {
-  color: var(--app-status-danger);
-}
-
-.settings-view__empty-log {
-  padding: 12px 0;
-  margin: 0;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--app-text-faint);
-}
-
-.settings-view__field {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.settings-view__input-action {
-  display: grid;
   grid-template-columns: 1fr auto;
-  gap: 8px;
+  padding: 17px 0;
+  border-bottom: 1px solid var(--app-border-subtle);
 }
 
-.settings-view__input {
-  font-family: var(--font-mono);
-  font-size: 12px;
-}
-
-.settings-view__textarea {
-  min-height: 144px;
-  resize: vertical;
-  font-size: 14px;
-  line-height: 1.6;
-}
-
-.settings-view__probe,
 .settings-view__note {
-  min-height: 16px;
+  padding-top: 12px;
   margin: 0;
-  font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.45;
   color: var(--app-text-muted);
 }
 
-.settings-view__models {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
+/* Model list */
 
 .settings-view__model-list {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.settings-view__model-row {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  align-items: center;
+  gap: 12px;
+  padding-right: 10px;
+  border-bottom: 1px solid var(--app-border-subtle);
+  transition: background-color var(--duration-standard) var(--ease-standard);
+}
+
+.settings-view__model-row[data-selected] {
+  background: var(--app-surface-selected);
 }
 
 /*
- * Model options and trim choices are selectable surfaces rather than compact
- * controls, so they take the 10px surface radius.
+ * The row itself is the control that sets the default, so the whole line is one
+ * button and the lifecycle actions sit outside it — a button inside a button is
+ * neither operable nor announceable.
  */
-.settings-view__model-option,
-.settings-view__choice {
-  width: 100%;
-  height: auto;
-  border-radius: var(--radius-surface);
-  text-align: left;
-}
-
-.settings-view__model-option {
-  min-height: 64px;
-  justify-content: space-between;
-  padding: 12px 16px;
-}
-
-.settings-view__model-option > span:first-child {
+.settings-view__model-choice {
   display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 10px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-view__model-choice:hover {
+  background: var(--app-surface-hover);
+}
+
+.settings-view__model-choice:focus-visible {
+  outline: 2px solid var(--app-focus);
+  outline-offset: -2px;
+}
+
+.settings-view__model-lines {
+  display: flex;
+  min-width: 0;
+  flex: 1;
   flex-direction: column;
   gap: 4px;
 }
 
-.settings-view__model-option strong {
-  font-size: 14px;
-  font-weight: 500;
+.settings-view__model-name {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   color: var(--app-text-strong);
 }
 
-.settings-view__model-option small,
-.settings-view__model-option > span:last-child {
+.settings-view__model-default {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--lys-violet);
+}
+
+.settings-view__model-detail {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--app-text-faint);
+}
+
+.settings-view__model-tag {
+  width: 92px;
+  flex: none;
   font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 500;
+  letter-spacing: 0.14em;
+  text-align: right;
+  text-transform: uppercase;
   color: var(--app-text-muted);
 }
 
-.settings-view__toggle-group {
-  display: grid;
-  width: 100%;
-  grid-template-columns: repeat(4, 1fr);
+.settings-view__model-actions {
+  display: flex;
+  flex: none;
   gap: 8px;
 }
 
-.settings-view__toggle {
+.settings-view__model-act {
+  width: 74px;
+}
+
+/* Segmented and slider controls */
+
+.settings-view__segments {
+  display: flex;
+  gap: 6px;
+}
+
+.settings-view__segment {
+  padding: 7px 11px;
   font-family: var(--font-mono);
-  font-size: 12px;
-  letter-spacing: 0.08em;
+  font-size: 11px;
+  letter-spacing: 0.06em;
 }
 
-.settings-view__range {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.settings-view__choice-group {
-  display: flex;
-  width: 100%;
-  align-items: stretch;
-  gap: 8px;
-}
-
-.settings-view__choice {
-  min-height: 64px;
-  justify-content: flex-start;
-  padding: 12px 16px;
-}
-
-.settings-view__choice > span {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.settings-view__choice strong {
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.settings-view__choice small {
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 1.45;
-  letter-spacing: 0;
-  color: var(--app-text-muted);
-}
-
-.settings-view__footer {
+.settings-view__slider-group {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  padding-top: 24px;
-  margin-top: 32px;
-  border-top: 1px solid var(--app-border-subtle);
+  gap: 14px;
+}
+
+.settings-view__slider-group [data-slot="slider"] {
+  width: 168px;
+}
+
+.settings-view__slider-value {
+  min-width: 40px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-align: right;
+  color: var(--app-text);
+}
+
+/* Footer */
+
+.settings-view__footer {
+  margin-top: auto;
+  padding-top: 8px;
 }
 
 .settings-view__footer p {
   margin: 0;
   font-size: 12px;
-  line-height: 1.45;
+  line-height: 1.5;
+  text-wrap: pretty;
   color: var(--app-text-faint);
 }
 
@@ -645,15 +611,15 @@
  * Placeholder pane, shown while a pane's settings are read.
  *
  * Every measurement below is borrowed from the real element the placeholder
- * stands in for — the card header's minimum height, the log row's columns, the
- * system prompt's minimum height — so the pane keeps its proportions while it
- * waits and settles without a jump when the controls arrive. The finish and the
- * stagger belong to the Skeleton primitive; only geometry lives here.
+ * stands in for — the card row's minimum height, the settings row's columns —
+ * so the pane keeps its proportions while it waits and settles without a jump
+ * when the controls arrive. The finish and the stagger belong to the Skeleton
+ * primitive; only geometry lives here.
  */
 .settings-view__skeleton-cards {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 26px;
 }
 
 .settings-view__skeleton-card {
@@ -666,16 +632,16 @@
 
 .settings-view__skeleton-card-row {
   display: flex;
-  min-height: 72px;
+  min-height: 64px;
   align-items: center;
   justify-content: space-between;
-  gap: 24px;
-  padding: 16px;
+  gap: 20px;
+  padding: 16px 18px;
 }
 
 .settings-view__skeleton-card-divider {
   height: 1px;
-  margin-inline: 16px;
+  margin-inline: 18px;
   background: var(--app-border-subtle);
 }
 
@@ -687,8 +653,8 @@
 }
 
 .settings-view__skeleton-dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   flex: none;
   border-radius: var(--radius-capsule);
 }
@@ -728,19 +694,20 @@
 
 .settings-view__skeleton-heading {
   padding-bottom: 12px;
-  border-bottom: 1px solid var(--app-border-subtle);
+  border-bottom: 1px solid var(--app-border-default);
 }
 
 .settings-view__skeleton-heading [data-slot="skeleton"] {
-  width: 88px;
+  width: 46px;
+  height: 9px;
 }
 
 .settings-view__skeleton-row {
   display: grid;
-  grid-template-columns: 1fr auto;
   align-items: center;
   gap: 24px;
-  padding: 16px 0;
+  grid-template-columns: 1fr auto;
+  padding: 17px 0;
   border-bottom: 1px solid var(--app-border-subtle);
 }
 
@@ -749,27 +716,44 @@
   border-radius: var(--radius-control);
 }
 
-/* The runtime log's two columns: a fixed timestamp, then the entry. */
+/* The model list's two columns: a fixed leading mark, then the entry. */
 .settings-view__skeleton-list-item {
   display: grid;
-  grid-template-columns: 72px 1fr;
   align-items: center;
-  gap: 12px;
-  padding: 8px 0;
+  gap: 14px;
+  grid-template-columns: 66px 1fr;
+  padding: 11px 0;
   border-bottom: 1px solid var(--app-border-subtle);
 }
 
 .settings-view__skeleton-block {
-  height: 144px;
+  height: 98px;
   border-radius: var(--radius-control);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-view__status-dot[data-tone="pending"],
+  .settings-view__reading-dot {
+    animation: none;
+  }
+
+  /*
+   * Movement is replaced rather than shortened: a still, filled track still
+   * reads as work in progress beside the heading that names it.
+   */
+  .settings-view__progress-fill {
+    position: static;
+    display: block;
+    inline-size: 100%;
+    block-size: 100%;
+    animation: none;
+    opacity: 0.5;
+  }
 }
 
 @media (max-height: 680px) {
   .settings-view__pane {
-    padding-top: 32px;
-  }
-
-  .settings-view__pane-heading {
-    margin-bottom: 24px;
+    padding-top: 22px;
+    gap: 24px;
   }
 }

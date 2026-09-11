@@ -21,8 +21,8 @@ repository today; it is not a promise of unreleased work.
 ## Implemented now
 
 - The desktop can start and stop the backend through the Tauri host.
-- The backend exposes a health route, LLM inventory and load routes, and a chat
-  route.
+- The backend exposes a health route, LLM inventory, load, and unload routes,
+  and a chat route.
 - A chat turn creates or continues a conversation, inserts user and assistant
   rows in SQLite, and streams typed SSE events back to the desktop.
 - The backend also attempts to generate a conversation title asynchronously and

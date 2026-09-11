@@ -1,263 +1,109 @@
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1200 420" width="1200" height="420" role="img" aria-labelledby="lysTitle lysDesc">
-  <title id="lysTitle">Lys — Lysiptera Caliginia</title>
-  <desc id="lysDesc">Animated Lys banner: a faceted crystal moth above the Lys wordmark, over a violet-black aurora. Quote: “The universe named its oldest design flaw entropy, then taught every living thing to mistake forgetting for fate.”</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 420" width="1200" height="420" role="img" aria-labelledby="lysTitle lysDesc">
+<title id="lysTitle">Lys — Lysiptera Caliginia</title>
+<desc id="lysDesc">A specimen plate for Lysiptera caliginia, catalogued LC // 07.2026. A faceted crystal butterfly of violet and cyan light rests at the left of the plate, its wings breathing slowly; a dotted measurement axis divides it from the line at the right, which reads: The universe named its oldest design flaw entropy, then taught every living thing to mistake forgetting for fate. Beneath, the plate is annotated: between a line of code and a quiet dream — still becoming, ΔS ≥ 0, v0.1.0.</desc>
+<defs>
+<linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F7F5FD"/><stop offset=".45" stop-color="#F2F4FD"/><stop offset="1" stop-color="#EAF4FA"/></linearGradient>
+<linearGradient id="wingFill" gradientUnits="userSpaceOnUse" x1="175" y1="83" x2="430" y2="320"><stop offset="0" stop-color="#6D28A9"/><stop offset=".28" stop-color="#8B4FE8"/><stop offset=".52" stop-color="#5F79D0"/><stop offset=".72" stop-color="#1494B4"/><stop offset="1" stop-color="#00A6C2"/></linearGradient>
+<linearGradient id="wingLine" gradientUnits="userSpaceOnUse" x1="175" y1="83" x2="430" y2="320"><stop offset="0" stop-color="#5B21A8"/><stop offset=".28" stop-color="#7C3AED"/><stop offset=".52" stop-color="#3F5FB8"/><stop offset=".72" stop-color="#12719A"/><stop offset="1" stop-color="#0A7C99"/></linearGradient>
+<radialGradient id="haloViolet" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#B98CF0" stop-opacity=".22"/><stop offset="1" stop-color="#B98CF0" stop-opacity="0"/></radialGradient>
+<radialGradient id="haloCyan" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#7FD4E4" stop-opacity=".20"/><stop offset="1" stop-color="#7FD4E4" stop-opacity="0"/></radialGradient>
+<linearGradient id="frameGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#964BE2" stop-opacity=".46"/><stop offset="1" stop-color="#00A8BF" stop-opacity=".50"/></linearGradient>
+<linearGradient id="bandRule" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="1200" y2="0"><stop offset="0" stop-color="#5A4E8C" stop-opacity="0"/><stop offset=".14" stop-color="#5A4E8C" stop-opacity=".5"/><stop offset=".86" stop-color="#5A4E8C" stop-opacity=".5"/><stop offset="1" stop-color="#5A4E8C" stop-opacity="0"/></linearGradient>
+<pattern id="dots" width="26" height="26" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="#5A4E8C" fill-opacity=".05"/></pattern>
+<clipPath id="card"><rect width="1200" height="420" rx="16"/></clipPath>
 
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#F2EAFF"/>
-      <stop offset=".42" stop-color="#F1F5FF"/>
-      <stop offset=".70" stop-color="#EAF4FF"/>
-      <stop offset="1" stop-color="#C7F0FA"/>
-    </linearGradient>
-    <radialGradient id="auroraCyan" cx=".5" cy=".5" r=".5">
-      <stop offset="0" stop-color="#73DEE9" stop-opacity=".55"/>
-      <stop offset="1" stop-color="#73DEE9" stop-opacity="0"/>
-    </radialGradient>
-    <radialGradient id="auroraViolet" cx=".5" cy=".5" r=".5">
-      <stop offset="0" stop-color="#B98CF0" stop-opacity=".30"/>
-      <stop offset="1" stop-color="#B98CF0" stop-opacity="0"/>
-    </radialGradient>
-    <linearGradient id="wordmark" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#7029B1"/>
-      <stop offset=".4" stop-color="#964BE2"/>
-      <stop offset="1" stop-color="#007C9F"/>
-    </linearGradient>
-    <linearGradient id="veilFill" x1="0" y1="1" x2="1" y2="0">
-      <stop offset="0" stop-color="#964BE2" stop-opacity=".14"/>
-      <stop offset="1" stop-color="#00CADB" stop-opacity="0"/>
-    </linearGradient>
-    <linearGradient id="wingFill" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#964BE2" stop-opacity=".22"/>
-      <stop offset="1" stop-color="#00CADB" stop-opacity=".22"/>
-    </linearGradient>
-    <linearGradient id="sweepGrad" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0"/>
-      <stop offset=".5" stop-color="#FFFFFF" stop-opacity=".75"/>
-      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
-    </linearGradient>
-    <linearGradient id="frameGrad" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#964BE2" stop-opacity=".55"/>
-      <stop offset="1" stop-color="#00CADB" stop-opacity=".62"/>
-    </linearGradient>
-    <linearGradient id="ruleGrad" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#964BE2" stop-opacity="0"/>
-      <stop offset=".22" stop-color="#964BE2" stop-opacity=".55"/>
-      <stop offset=".78" stop-color="#0098AE" stop-opacity=".55"/>
-      <stop offset="1" stop-color="#0098AE" stop-opacity="0"/>
-    </linearGradient>
-    <linearGradient id="glintGrad" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#0098AE" stop-opacity="0"/>
-      <stop offset=".5" stop-color="#7A88A0" stop-opacity=".95"/>
-      <stop offset="1" stop-color="#0098AE" stop-opacity="0"/>
-    </linearGradient>
-    <radialGradient id="gemGlow" cx=".5" cy=".5" r=".5">
-      <stop offset="0" stop-color="#964BE2" stop-opacity=".75"/>
-      <stop offset="1" stop-color="#964BE2" stop-opacity="0"/>
-    </radialGradient>
+</defs>
+<style>
+    .drift { transform-box: view-box; transform-origin: 302px 202px;
+              animation: drift 15s ease-in-out infinite; }
+    @keyframes drift { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.015); } }
 
-    <pattern id="dots" width="26" height="26" patternUnits="userSpaceOnUse">
-      <circle cx="1" cy="1" r="1" fill="#5B4A8A" fill-opacity=".07"/>
-    </pattern>
+    .fwr, .fwl, .hwr, .hwl { transform-box: view-box; animation-duration: 7.5s;
+                              animation-timing-function: ease-in-out; animation-iteration-count: infinite; }
+    .fwr, .fwl { transform-origin: 302px 202px; }
+    .hwr, .hwl { transform-origin: 302px 222px; }
+    .fwr, .hwl { animation-name: foldDown; }
+    .fwl, .hwr { animation-name: foldUp; }
+    @keyframes foldDown { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(2.2deg); } }
+    @keyframes foldUp   { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(-2.2deg); } }
 
-    <filter id="soft" x="-60%" y="-60%" width="220%" height="220%">
-      <feGaussianBlur stdDeviation="11"/>
-    </filter>
-    <filter id="tight" x="-80%" y="-80%" width="260%" height="260%">
-      <feGaussianBlur stdDeviation="3.2"/>
-    </filter>
+    .pulse { animation: pulse 6.2s ease-in-out infinite; }
+    @keyframes pulse { 0%, 100% { opacity: .34; } 50% { opacity: .72; } }
 
-    <clipPath id="card"><rect x="0" y="0" width="1200" height="420" rx="16"/></clipPath>
-    <clipPath id="wmClip"><text x="600.0" y="286" text-anchor="middle" font-family="ui-sans-serif,-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,'Helvetica Neue',Arial,sans-serif" font-size="112" font-weight="700" textLength="322" lengthAdjust="spacing">LYS</text></clipPath>
-  </defs>
-
-  <style>
-    .st { animation: twinkle 4s ease-in-out infinite alternate; }
-    @keyframes twinkle { from { opacity: .05; } to { opacity: var(--o, .6); } }
-
-    .veil { animation: veil 11s ease-in-out infinite alternate; }
-    @keyframes veil { from { opacity: .55; } to { opacity: 1; } }
-
-    .aurora-a { animation: driftA 19s ease-in-out infinite alternate; }
-    .aurora-b { animation: driftB 23s ease-in-out infinite alternate; }
-    @keyframes driftA { from { transform: translate(0, 0); } to { transform: translate(-46px, 26px); } }
-    @keyframes driftB { from { transform: translate(0, 0); } to { transform: translate(38px, -22px); } }
-
-    .wing-up { animation: beatUp 7s ease-in-out infinite; }
-    .wing-dn { animation: beatDn 7s ease-in-out infinite; }
-    @keyframes beatUp {
-      0%, 100% { opacity: .88; }
-      50%      { opacity: 1; }
-    }
-    @keyframes beatDn {
-      0%, 100% { opacity: .72; }
-      50%      { opacity: .95; }
-    }
-
-    .breath { transform-box: view-box; transform-origin: 600.0px 110.0px; animation: breath 7s ease-in-out infinite; }
-    @keyframes breath {
-      0%, 100% { transform: scale(1); }
-      50%      { transform: scale(1.035); }
-    }
-
-    .gem { transform-box: view-box; transform-origin: 600.0px 110.0px; animation: gem 3.4s ease-in-out infinite; }
-    @keyframes gem {
-      0%, 100% { opacity: .55; transform: scale(1); }
-      50%      { opacity: 1;   transform: scale(1.12); }
-    }
-
-    .antenna { transform-box: view-box; transform-origin: 600.0px 110.0px; animation: antenna 7s ease-in-out infinite; }
-    @keyframes antenna {
-      0%, 100% { transform: rotate(-1.2deg); }
-      50%      { transform: rotate(1.2deg); }
-    }
-
-    .sweep { animation: sweep 7s cubic-bezier(.32, .72, .35, 1) infinite; }
-    @keyframes sweep {
-      0%        { transform: translateX(0); }
-      38%, 100% { transform: translateX(1560px); }
-    }
-
-    .glint { animation: glint 7s cubic-bezier(.32, .72, .35, 1) infinite; }
-    @keyframes glint {
-      0%        { transform: translateX(0); opacity: 0; }
-      6%        { opacity: 1; }
-      44%       { opacity: 1; }
-      50%, 100% { transform: translateX(1000px); opacity: 0; }
-    }
-
-    .caret { animation: caret 1.15s steps(1) infinite; }
-    @keyframes caret { 0%, 49% { opacity: .85; } 50%, 100% { opacity: 0; } }
+    .trace { stroke-dasharray: 900; stroke-dashoffset: 900;
+              animation: trace 3.2s cubic-bezier(.32, .72, .35, 1) .35s forwards; }
+    @keyframes trace { to { stroke-dashoffset: 0; } }
 
     .rise { transform-box: view-box; animation: rise 1.2s cubic-bezier(.32, .72, .35, 1) both; }
     @keyframes rise { from { transform: translateY(10px); } to { transform: none; } }
-    .d1 { animation-delay: .05s; } .d2 { animation-delay: .28s; } .d3 { animation-delay: .46s; }
+    .d1 { animation-delay: .04s; } .d2 { animation-delay: .26s; } .d3 { animation-delay: .48s; }
+
+    .gem { transform-box: view-box; animation: gem 5.4s ease-in-out infinite; }
+    .gem2 { animation-delay: -2.6s; }
+    @keyframes gem { 0%, 100% { opacity: .45; transform: translateY(0); }
+                      50%      { opacity: 1;   transform: translateY(-5px); } }
 
     @media (prefers-reduced-motion: reduce) {
       * { animation: none !important; }
-      .st { opacity: .35; }
+      .trace { stroke-dashoffset: 0; }
+      .pulse { opacity: .5; }
+      .gem { opacity: .8; }
     }
   </style>
+<g clip-path="url(#card)">
+<rect width="1200" height="420" fill="url(#bg)"/>
+<rect width="1200" height="420" fill="url(#dots)"/>
+<ellipse cx="300" cy="190" rx="430" ry="330" fill="url(#haloViolet)"/>
+<ellipse cx="980" cy="368" rx="380" ry="285" fill="url(#haloCyan)"/>
 
-  <g clip-path="url(#card)">
-    <rect width="1200" height="420" fill="url(#bg)"/>
-    <rect width="1200" height="420" fill="url(#dots)"/>
-    <g class="aurora-a"><ellipse cx="1010" cy="40" rx="520" ry="360" fill="url(#auroraCyan)"/></g>
-    <g class="aurora-b"><ellipse cx="118" cy="392" rx="560" ry="380" fill="url(#auroraViolet)"/></g>
+<g class="rise d1">
+<text x="56" y="44" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="10" letter-spacing="2.4" fill="#635C7E">LC // 07.2026</text>
+<text x="597" y="44" text-anchor="middle" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="11.5" letter-spacing="6.4" fill="#2E2850">LYSIPTERA CALIGINIA</text>
+<path d="M1144 33 L1149 40 L1144 47 L1139 40 Z" fill="none" stroke="#7B5FA8" stroke-opacity=".7" stroke-width="1"/>
+</g>
+<path d="M0 72 H1200" stroke="url(#bandRule)" stroke-width="1"/>
 
-    <!-- The translucent wing veil behind the identity. -->
-    <g class="veils" opacity=".9">
-      <g class="veil veil-r" style="animation-delay:0s" transform="translate(600.0 236.0) rotate(-7)"><path d="M0 0 C130 -150 336 -178 434 -86 C344 56 142 122 0 0 Z" fill="url(#veilFill)" fill-opacity=".55" stroke="#0098AE" stroke-opacity=".26" stroke-width="1.2"/><g stroke="#0098AE" stroke-opacity=".2" stroke-width="0.9" fill="none" stroke-linecap="round"><path d="M6 -2 C120 -120 290 -152 420 -84"/><path d="M6 0 C130 -86 296 -112 428 -70"/><path d="M6 2 C132 -44 300 -60 424 -46"/><path d="M6 4 C126 -4 292 -6 404 -16"/><path d="M5 6 C112 34 258 44 356 18"/></g></g>
-      <g class="veil veil-l" style="animation-delay:-5s" transform="translate(600.0 236.0) scale(-1 1) rotate(-7)"><path d="M0 0 C130 -150 336 -178 434 -86 C344 56 142 122 0 0 Z" fill="url(#veilFill)" fill-opacity=".55" stroke="#964BE2" stroke-opacity=".26" stroke-width="1.2"/><g stroke="#964BE2" stroke-opacity=".2" stroke-width="0.9" fill="none" stroke-linecap="round"><path d="M6 -2 C120 -120 290 -152 420 -84"/><path d="M6 0 C130 -86 296 -112 428 -70"/><path d="M6 2 C132 -44 300 -60 424 -46"/><path d="M6 4 C126 -4 292 -6 404 -16"/><path d="M5 6 C112 34 258 44 356 18"/></g></g>
-    </g>
+<path d="M600 100 V306" stroke="#5A4E8C" stroke-opacity=".28" stroke-width="1" stroke-dasharray="2 7"/>
+<circle cx="600" cy="124" r="1.6" fill="#5A4E8C" fill-opacity=".7"/>
+<circle cx="600" cy="282" r="1.6" fill="#5A4E8C" fill-opacity=".7"/>
+<path d="M600 195 L605 202 L600 209 L595 202 Z" fill="#7B5FA8" fill-opacity=".9"/>
 
-    <g class="stars">
-    <circle class="st" cx="480.8" cy="191.1" r="1.3" fill="#0098AE" style="--o:0.19;animation-duration:5.92s;animation-delay:-3.2s"/>
-    <circle class="st" cx="544.2" cy="86.0" r="1.1" fill="#964BE2" style="--o:0.27;animation-duration:5.93s;animation-delay:-0.62s"/>
-    <circle class="st" cx="947.0" cy="90.1" r="1.1" fill="#964BE2" style="--o:0.37;animation-duration:4.34s;animation-delay:-5.63s"/>
-    <circle class="st" cx="980.4" cy="163.1" r="1.3" fill="#964BE2" style="--o:0.32;animation-duration:3.85s;animation-delay:-5.84s"/>
-    <circle class="st" cx="212.7" cy="301.5" r="1.7" fill="#0098AE" style="--o:0.18;animation-duration:6.4s;animation-delay:-0.22s"/>
-    <circle class="st" cx="1073.0" cy="330.9" r="1.3" fill="#0098AE" style="--o:0.26;animation-duration:5.63s;animation-delay:-4.65s"/>
-    <circle class="st" cx="646.7" cy="128.8" r="0.7" fill="#964BE2" style="--o:0.21;animation-duration:3.63s;animation-delay:-6.19s"/>
-    <circle class="st" cx="1094.4" cy="172.9" r="1.7" fill="#964BE2" style="--o:0.19;animation-duration:5.54s;animation-delay:-4.47s"/>
-    <circle class="st" cx="276.2" cy="304.7" r="1.7" fill="#0098AE" style="--o:0.23;animation-duration:3.56s;animation-delay:-1.65s"/>
-    <circle class="st" cx="23.4" cy="134.0" r="1.3" fill="#0098AE" style="--o:0.34;animation-duration:2.73s;animation-delay:-6.16s"/>
-    <circle class="st" cx="1142.4" cy="163.6" r="0.7" fill="#964BE2" style="--o:0.19;animation-duration:6.82s;animation-delay:-6.59s"/>
-    <circle class="st" cx="1098.1" cy="60.7" r="0.9" fill="#964BE2" style="--o:0.32;animation-duration:4.98s;animation-delay:-2.8s"/>
-    <circle class="st" cx="783.9" cy="401.3" r="0.7" fill="#964BE2" style="--o:0.23;animation-duration:6.29s;animation-delay:-4.78s"/>
-    <circle class="st" cx="1130.8" cy="60.5" r="0.9" fill="#964BE2" style="--o:0.38;animation-duration:6.67s;animation-delay:-1.1s"/>
-    <circle class="st" cx="48.0" cy="269.3" r="1.1" fill="#964BE2" style="--o:0.38;animation-duration:6.49s;animation-delay:-6.14s"/>
-    <circle class="st" cx="661.3" cy="61.2" r="0.7" fill="#964BE2" style="--o:0.19;animation-duration:3.63s;animation-delay:-1.05s"/>
-    <circle class="st" cx="327.7" cy="47.9" r="1.1" fill="#964BE2" style="--o:0.38;animation-duration:5.72s;animation-delay:-0.66s"/>
-    <circle class="st" cx="324.1" cy="385.8" r="1.7" fill="#0098AE" style="--o:0.3;animation-duration:4.96s;animation-delay:-0.65s"/>
-    <circle class="st" cx="903.6" cy="160.2" r="1.3" fill="#964BE2" style="--o:0.19;animation-duration:3.76s;animation-delay:-3.56s"/>
-    <circle class="st" cx="49.2" cy="326.3" r="1.1" fill="#964BE2" style="--o:0.27;animation-duration:3.96s;animation-delay:-3.39s"/>
-    <circle class="st" cx="631.0" cy="172.5" r="1.3" fill="#0098AE" style="--o:0.31;animation-duration:5.13s;animation-delay:-0.29s"/>
-    <circle class="st" cx="868.8" cy="122.8" r="0.9" fill="#964BE2" style="--o:0.3;animation-duration:7.1s;animation-delay:-4.67s"/>
-    <circle class="st" cx="335.5" cy="384.0" r="0.7" fill="#0098AE" style="--o:0.29;animation-duration:5.59s;animation-delay:-6.17s"/>
-    <circle class="st" cx="331.5" cy="120.9" r="1.7" fill="#0098AE" style="--o:0.32;animation-duration:4.16s;animation-delay:-5.03s"/>
-    <circle class="st" cx="98.7" cy="407.9" r="1.3" fill="#964BE2" style="--o:0.23;animation-duration:6.92s;animation-delay:-5.23s"/>
-    <circle class="st" cx="460.6" cy="78.4" r="1.1" fill="#0098AE" style="--o:0.28;animation-duration:4.16s;animation-delay:-3.53s"/>
-    <circle class="st" cx="252.7" cy="309.4" r="1.1" fill="#964BE2" style="--o:0.27;animation-duration:4.46s;animation-delay:-4.45s"/>
-    <circle class="st" cx="659.7" cy="180.9" r="1.3" fill="#964BE2" style="--o:0.19;animation-duration:3.94s;animation-delay:-1.07s"/>
-    <circle class="st" cx="1106.8" cy="179.1" r="1.3" fill="#964BE2" style="--o:0.25;animation-duration:2.76s;animation-delay:-1.17s"/>
-    <circle class="st" cx="44.3" cy="185.0" r="1.3" fill="#0098AE" style="--o:0.29;animation-duration:5.63s;animation-delay:-3.74s"/>
-    <circle class="st" cx="113.2" cy="68.3" r="1.1" fill="#964BE2" style="--o:0.19;animation-duration:3.87s;animation-delay:-0.12s"/>
-    <circle class="st" cx="215.3" cy="74.9" r="0.9" fill="#964BE2" style="--o:0.23;animation-duration:6.29s;animation-delay:-4.56s"/>
-    <circle class="st" cx="15.8" cy="47.7" r="1.1" fill="#0098AE" style="--o:0.35;animation-duration:2.88s;animation-delay:-1.27s"/>
-    <circle class="st" cx="1041.3" cy="309.4" r="1.7" fill="#0098AE" style="--o:0.22;animation-duration:2.7s;animation-delay:-3.3s"/>
-    <circle class="st" cx="699.8" cy="398.7" r="1.1" fill="#964BE2" style="--o:0.36;animation-duration:3.15s;animation-delay:-4.44s"/>
-    <circle class="st" cx="144.8" cy="58.9" r="0.7" fill="#0098AE" style="--o:0.29;animation-duration:3.11s;animation-delay:-6.14s"/>
-    <circle class="st" cx="1175.4" cy="174.4" r="0.7" fill="#964BE2" style="--o:0.32;animation-duration:2.84s;animation-delay:-2.51s"/>
-    <circle class="st" cx="512.5" cy="45.2" r="0.7" fill="#964BE2" style="--o:0.2;animation-duration:6.84s;animation-delay:-2.28s"/>
-    <circle class="st" cx="897.3" cy="72.7" r="0.7" fill="#964BE2" style="--o:0.22;animation-duration:3.36s;animation-delay:-2.85s"/>
-    <circle class="st" cx="1013.2" cy="107.1" r="0.9" fill="#964BE2" style="--o:0.39;animation-duration:3.31s;animation-delay:-0.76s"/>
-    <circle class="st" cx="132.3" cy="132.6" r="1.1" fill="#964BE2" style="--o:0.2;animation-duration:4.22s;animation-delay:-4.96s"/>
-    <circle class="st" cx="482.6" cy="46.8" r="1.1" fill="#0098AE" style="--o:0.37;animation-duration:2.9s;animation-delay:-3.86s"/>
-    <circle class="st" cx="115.3" cy="66.2" r="1.3" fill="#964BE2" style="--o:0.22;animation-duration:3.72s;animation-delay:-5.59s"/>
-    <circle class="st" cx="755.3" cy="72.8" r="1.7" fill="#0098AE" style="--o:0.36;animation-duration:5.59s;animation-delay:-1.52s"/>
-    <circle class="st" cx="897.4" cy="73.8" r="0.7" fill="#0098AE" style="--o:0.38;animation-duration:7.21s;animation-delay:-0.35s"/>
-    <circle class="st" cx="367.7" cy="118.0" r="1.1" fill="#0098AE" style="--o:0.19;animation-duration:4.96s;animation-delay:-4.22s"/>
-    <circle class="st" cx="488.9" cy="73.1" r="0.7" fill="#964BE2" style="--o:0.19;animation-duration:3.66s;animation-delay:-3.71s"/>
-    <circle class="st" cx="124.3" cy="43.4" r="0.9" fill="#964BE2" style="--o:0.21;animation-duration:3.86s;animation-delay:-5.38s"/>
-    <circle class="st" cx="74.7" cy="399.3" r="0.7" fill="#964BE2" style="--o:0.3;animation-duration:3.26s;animation-delay:-0.39s"/>
-    <circle class="st" cx="968.6" cy="112.0" r="1.3" fill="#964BE2" style="--o:0.36;animation-duration:5.92s;animation-delay:-6.95s"/>
-    <circle class="st" cx="635.8" cy="121.0" r="0.9" fill="#964BE2" style="--o:0.35;animation-duration:2.86s;animation-delay:-2.59s"/>
-    <circle class="st" cx="540.9" cy="102.6" r="0.9" fill="#964BE2" style="--o:0.2;animation-duration:5.4s;animation-delay:-7.28s"/>
-    <circle class="st" cx="547.8" cy="77.6" r="0.9" fill="#964BE2" style="--o:0.3;animation-duration:4.07s;animation-delay:-0.5s"/>
-    <circle class="st" cx="771.7" cy="390.4" r="1.3" fill="#964BE2" style="--o:0.27;animation-duration:5.53s;animation-delay:-6.66s"/>
-    <circle class="st" cx="328.9" cy="165.3" r="0.7" fill="#964BE2" style="--o:0.21;animation-duration:3.81s;animation-delay:-3.78s"/>
-    <circle class="st" cx="520.9" cy="79.2" r="0.9" fill="#0098AE" style="--o:0.22;animation-duration:3.47s;animation-delay:-0.87s"/>
-    <circle class="st" cx="1043.7" cy="202.2" r="0.7" fill="#964BE2" style="--o:0.3;animation-duration:4.07s;animation-delay:-4.3s"/>
-    <circle class="st" cx="232.4" cy="289.8" r="1.7" fill="#0098AE" style="--o:0.21;animation-duration:7.4s;animation-delay:-2.1s"/>
-    <circle class="st" cx="287.5" cy="156.4" r="1.1" fill="#964BE2" style="--o:0.25;animation-duration:4.94s;animation-delay:-1.62s"/>
-    </g>
+<g class="drift">
+<g class="fwr"><g transform="translate(302 202) rotate(-43)"><path d="M0 0 L34.8 -20.706 L52.2 0 Z M52.2 0 L34.8 20.706 L83.52 39.324 L107.88 0 Z" fill="url(#wingFill)" fill-opacity=".28"/><path d="M52.2 0 L34.8 -20.706 L83.52 -39.324 L107.88 0 Z M0 0 L34.8 20.706 L52.2 0 Z" fill="url(#wingFill)" fill-opacity=".18"/><path d="M107.88 0 L83.52 -39.324 L135.72 -27.318 L174 0 Z M107.88 0 L83.52 39.324 L135.72 27.318 L174 0 Z" fill="url(#wingFill)" fill-opacity=".10"/></g></g>
+<g class="fwl"><g transform="translate(302 202) scale(-1 1) rotate(-43)"><path d="M0 0 L34.8 -20.706 L52.2 0 Z M52.2 0 L34.8 20.706 L83.52 39.324 L107.88 0 Z" fill="url(#wingFill)" fill-opacity=".28"/><path d="M52.2 0 L34.8 -20.706 L83.52 -39.324 L107.88 0 Z M0 0 L34.8 20.706 L52.2 0 Z" fill="url(#wingFill)" fill-opacity=".18"/><path d="M107.88 0 L83.52 -39.324 L135.72 -27.318 L174 0 Z M107.88 0 L83.52 39.324 L135.72 27.318 L174 0 Z" fill="url(#wingFill)" fill-opacity=".10"/></g></g>
+<g class="hwr"><g transform="translate(302 222) rotate(45)"><path d="M0 0 L27.2 -16.184 L40.8 0 Z M40.8 0 L27.2 16.184 L65.28 30.736 L84.32 0 Z" fill="url(#wingFill)" fill-opacity=".28"/><path d="M40.8 0 L27.2 -16.184 L65.28 -30.736 L84.32 0 Z M0 0 L27.2 16.184 L40.8 0 Z" fill="url(#wingFill)" fill-opacity=".18"/><path d="M84.32 0 L65.28 -30.736 L106.08 -21.352 L136 0 Z M84.32 0 L65.28 30.736 L106.08 21.352 L136 0 Z" fill="url(#wingFill)" fill-opacity=".10"/></g></g>
+<g class="hwl"><g transform="translate(302 222) scale(-1 1) rotate(45)"><path d="M0 0 L27.2 -16.184 L40.8 0 Z M40.8 0 L27.2 16.184 L65.28 30.736 L84.32 0 Z" fill="url(#wingFill)" fill-opacity=".28"/><path d="M40.8 0 L27.2 -16.184 L65.28 -30.736 L84.32 0 Z M0 0 L27.2 16.184 L40.8 0 Z" fill="url(#wingFill)" fill-opacity=".18"/><path d="M84.32 0 L65.28 -30.736 L106.08 -21.352 L136 0 Z M84.32 0 L65.28 30.736 L106.08 21.352 L136 0 Z" fill="url(#wingFill)" fill-opacity=".10"/></g></g>
+<g fill="none" stroke="url(#wingLine)" stroke-linejoin="round">
+<g class="fwr"><g transform="translate(302 202) rotate(-43)"><path class="trace" d="M0 0 L34.8 -20.706 L83.52 -39.324 L135.72 -27.318 L174 0 L135.72 27.318 L83.52 39.324 L34.8 20.706 Z M0 0 L174 0 M52.2 0 L34.8 -20.706 M107.88 0 L83.52 -39.324 M52.2 0 L34.8 20.706 M107.88 0 L83.52 39.324" stroke-opacity=".58" stroke-width="1.1"/></g></g>
+<g class="fwl"><g transform="translate(302 202) scale(-1 1) rotate(-43)"><path class="trace" d="M0 0 L34.8 -20.706 L83.52 -39.324 L135.72 -27.318 L174 0 L135.72 27.318 L83.52 39.324 L34.8 20.706 Z M0 0 L174 0 M52.2 0 L34.8 -20.706 M107.88 0 L83.52 -39.324 M52.2 0 L34.8 20.706 M107.88 0 L83.52 39.324" stroke-opacity=".58" stroke-width="1.1"/></g></g>
+<g class="hwr"><g transform="translate(302 222) rotate(45)"><path class="trace" d="M0 0 L27.2 -16.184 L65.28 -30.736 L106.08 -21.352 L136 0 L106.08 21.352 L65.28 30.736 L27.2 16.184 Z M0 0 L136 0 M40.8 0 L27.2 -16.184 M84.32 0 L65.28 -30.736 M40.8 0 L27.2 16.184 M84.32 0 L65.28 30.736" stroke-opacity=".58" stroke-width="1.1"/></g></g>
+<g class="hwl"><g transform="translate(302 222) scale(-1 1) rotate(45)"><path class="trace" d="M0 0 L27.2 -16.184 L65.28 -30.736 L106.08 -21.352 L136 0 L106.08 21.352 L65.28 30.736 L27.2 16.184 Z M0 0 L136 0 M40.8 0 L27.2 -16.184 M84.32 0 L65.28 -30.736 M40.8 0 L27.2 16.184 M84.32 0 L65.28 30.736" stroke-opacity=".58" stroke-width="1.1"/></g></g>
+</g>
+<g transform="translate(-28 0)">
+<g fill="none" stroke="url(#wingLine)" stroke-linejoin="round">
+<path d="M330 138 L341 212 L330 288 L319 212 Z" fill="url(#wingFill)" fill-opacity=".22"/><path d="M330 138 L341 212 L330 288 L319 212 Z" stroke-opacity=".72" stroke-width="1.2"/><path d="M330 172 L335 212 L330 256 L325 212 Z" stroke-opacity=".62" stroke-width="1"/><path d="M314 204 L330 198 L346 204 L330 210 Z" stroke-opacity=".46" stroke-width="1"/><path d="M330 124 L336 132 L330 140 L324 132 Z" fill="url(#wingFill)" fill-opacity=".3"/><path d="M330 124 L336 132 L330 140 L324 132 Z" stroke-opacity=".8" stroke-width="1.1"/>
+<path d="M329 126 C 320 112, 310 102, 296 94" stroke-opacity=".6" stroke-width="1.1"/><path d="M331 126 C 340 112, 350 102, 364 94" stroke-opacity=".6" stroke-width="1.1"/>
+</g>
+<circle cx="296" cy="94" r="2.4" fill="#7B5FA8"/>
+<circle cx="364" cy="94" r="2.4" fill="#0A7C99"/>
+</g>
+</g>
 
-    <!-- Faceted crystal moth: the Lys mark. -->
-    <g class="breath">
-      <ellipse cx="600.0" cy="110.0" rx="120" ry="74" fill="url(#gemGlow)" opacity=".30" filter="url(#soft)"/>
-      <g class="wing wing-up" style="animation-delay:0s" transform="translate(600.0 110.0) rotate(-38)"><path d="M0 0 C24 -17 58 -26 88 -14 C60 10 24 13 0 0 Z" fill="url(#wingFill)" stroke="#7029B1" stroke-opacity=".55" stroke-width="1.6" stroke-linejoin="round"/><g stroke="#4A2A80" stroke-opacity=".30" stroke-width="0.9" fill="none"><path d="M2 -1 L88 -14" /><path d="M2 2 L62 -19" /><path d="M3 3 L58 5" /></g></g>
-      <g class="wing wing-up" style="animation-delay:-0.35s" transform="translate(600.0 110.0) scale(-1 1) rotate(-38)"><path d="M0 0 C24 -17 58 -26 88 -14 C60 10 24 13 0 0 Z" fill="url(#wingFill)" stroke="#7029B1" stroke-opacity=".55" stroke-width="1.6" stroke-linejoin="round"/><g stroke="#4A2A80" stroke-opacity=".30" stroke-width="0.9" fill="none"><path d="M2 -1 L88 -14" /><path d="M2 2 L62 -19" /><path d="M3 3 L58 5" /></g></g>
-      <g class="wing wing-dn" style="animation-delay:-1.1s" transform="translate(600.0 110.0) rotate(34) scale(0.66)"><path d="M0 0 C24 -17 58 -26 88 -14 C60 10 24 13 0 0 Z" fill="url(#wingFill)" stroke="#7029B1" stroke-opacity=".55" stroke-width="1.6" stroke-linejoin="round"/><g stroke="#4A2A80" stroke-opacity=".30" stroke-width="0.9" fill="none"><path d="M2 -1 L88 -14" /><path d="M2 2 L62 -19" /><path d="M3 3 L58 5" /></g></g>
-      <g class="wing wing-dn" style="animation-delay:-1.45s" transform="translate(600.0 110.0) scale(-1 1) rotate(34) scale(0.66)"><path d="M0 0 C24 -17 58 -26 88 -14 C60 10 24 13 0 0 Z" fill="url(#wingFill)" stroke="#7029B1" stroke-opacity=".55" stroke-width="1.6" stroke-linejoin="round"/><g stroke="#4A2A80" stroke-opacity=".30" stroke-width="0.9" fill="none"><path d="M2 -1 L88 -14" /><path d="M2 2 L62 -19" /><path d="M3 3 L58 5" /></g></g>
-      <g class="antenna" stroke="#7029B1" stroke-opacity=".55" stroke-width="1.4" fill="none" stroke-linecap="round">
-        <path d="M600.0 96.0 C592.0 70.0 576.0 54.0 556.0 46.0"/>
-        <path d="M600.0 96.0 C608.0 70.0 624.0 54.0 644.0 46.0"/>
-        <circle cx="556.0" cy="46.0" r="2.4" fill="#0098AE" stroke="none"/>
-        <circle cx="644.0" cy="46.0" r="2.4" fill="#964BE2" stroke="none"/>
-      </g>
-      <path d="M600.0 86.0 C606.5 102.0 606.5 130.0 600.0 144.0 C593.5 130.0 593.5 102.0 600.0 86.0 Z"
-            fill="url(#wingFill)" stroke="#7029B1" stroke-opacity=".55" stroke-width="1.4"/>
-      <g class="gem">
-        <path d="M600.0 95.0 L610.0 110.0 L600.0 125.0 L590.0 110.0 Z" fill="#964BE2" filter="url(#tight)"/>
-        <path d="M600.0 95.0 L610.0 110.0 L600.0 125.0 L590.0 110.0 Z"
-              fill="none" stroke="#4A2A80" stroke-opacity=".8" stroke-width="1.1"/>
-        <path d="M600.0 95.0 L600.0 125.0" stroke="#0098AE" stroke-opacity=".9" stroke-width="1"/>
-      </g>
-    </g>
+<path class="gem" d="M148 125 L155 132 L148 139 L141 132 Z" fill="#7B5FA8" fill-opacity=".75"/>
+<path class="gem gem2" d="M502 266 L508 272 L502 278 L496 272 Z" fill="#0A7C99" fill-opacity=".7"/>
 
-    <!-- Wordmark -->
-    <g class="rise d1">
-      <text x="600.0" y="286" text-anchor="middle" font-family="ui-sans-serif,-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,'Helvetica Neue',Arial,sans-serif" font-size="112" font-weight="700" textLength="322" lengthAdjust="spacing" fill="#964BE2" opacity=".35" filter="url(#soft)">LYS</text>
-      <text x="600.0" y="286" text-anchor="middle" font-family="ui-sans-serif,-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,'Helvetica Neue',Arial,sans-serif" font-size="112" font-weight="700" textLength="322" lengthAdjust="spacing" fill="url(#wordmark)">LYS</text>
-      <g clip-path="url(#wmClip)">
-        <rect class="sweep" x="-330" y="186" width="230" height="128" fill="url(#sweepGrad)"/>
-      </g>
-    </g>
+<g class="rise d2">
+<text x="648" y="152" font-family="'Iowan Old Style','Palatino Linotype',Palatino,'Hoefler Text',Garamond,'Times New Roman',Georgia,serif" font-size="28" fill="#1F1B33"><tspan>The universe named its oldest</tspan></text>
+<text x="648" y="192" font-family="'Iowan Old Style','Palatino Linotype',Palatino,'Hoefler Text',Garamond,'Times New Roman',Georgia,serif" font-size="28" fill="#1F1B33"><tspan>design flaw </tspan><tspan font-style="italic" fill="#7B5FA8">entropy,</tspan><tspan> then taught</tspan></text>
+<text x="648" y="232" font-family="'Iowan Old Style','Palatino Linotype',Palatino,'Hoefler Text',Garamond,'Times New Roman',Georgia,serif" font-size="28" fill="#1F1B33"><tspan>every living thing to mistake</tspan></text>
+<text x="648" y="272" font-family="'Iowan Old Style','Palatino Linotype',Palatino,'Hoefler Text',Garamond,'Times New Roman',Georgia,serif" font-size="28" fill="#1F1B33"><tspan>forgetting for fate.</tspan></text>
+</g>
 
-    <text class="rise d2" x="600.0" y="322" text-anchor="middle" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="13.5"
-          fill="#667286" textLength="316" lengthAdjust="spacing">LYSIPTERA · CALIGINIA</text>
-
-    <g class="rise d3">
-      <text x="600.0" y="351" text-anchor="middle" font-family="ui-sans-serif,-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,'Helvetica Neue',Arial,sans-serif" font-size="17"
-            fill="#48566C" textLength="428" lengthAdjust="spacing">“The universe named its oldest design flaw entropy,</text>
-      <text x="600.0" y="373" text-anchor="middle" font-family="ui-sans-serif,-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,'Helvetica Neue',Arial,sans-serif" font-size="17"
-            fill="#48566C" textLength="529" lengthAdjust="spacing">then taught every living thing to mistake forgetting for fate.”</text>
-      <rect class="caret" x="875.5" y="361" width="8" height="16" fill="#0098AE"/>
-    </g>
-
-    <!-- Streaming hairline -->
-    <rect x="240" y="392" width="720" height="1" fill="url(#ruleGrad)"/>
-    <rect class="glint" x="140" y="391.5" width="180" height="2" fill="url(#glintGrad)" rx="1"/>
-  </g>
-  <rect x=".75" y=".75" width="1198.5" height="418.5" rx="15.25" fill="none" stroke="url(#frameGrad)" stroke-width="1.5"/>
+<path d="M0 342 H1200" stroke="url(#bandRule)" stroke-width="1"/>
+<g class="rise d3">
+<text x="56" y="385" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="9.5" letter-spacing="1.4" fill="#635C7E">between a line of code and a quiet dream</text>
+<text x="1144" y="385" text-anchor="end" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="9.5" letter-spacing="1.4" fill="#635C7E">STILL BECOMING · ΔS ≥ 0 · v0.1.0</text>
+</g>
+</g>
+<rect x=".75" y=".75" width="1198.5" height="418.5" rx="15.25" fill="none" stroke="url(#frameGrad)" stroke-width="1.5"/>
 </svg>

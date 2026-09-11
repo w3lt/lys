@@ -1,51 +1,86 @@
-/**
- * Weight residency as the renderer models it, plus the timings that currently
- * stand in for a real load.
- *
- * @remarks The durations here simulate work the backend does not yet report.
- * `POST /api/v1/llm/load` exists but answers only once, with no progress, and
- * no unload endpoint exists at all. Until both are wired, the store drives this
- * state machine on timers so the lifecycle's rendered states are settled;
- * replacing the simulation means swapping the store's two transitions, not
- * reshaping this contract.
- */
+import type { LlmInfo, LlmTestModelApiResponse } from "@lys/protocol"
+
+/** Inventory observation; failed and unavailable states never imply an empty runtime. */
+export type ModelInventoryState =
+  | { readonly status: "unavailable" }
+  | { readonly status: "failed" }
+  | { readonly status: "ready"; readonly models: readonly LlmInfo[] }
+
+/** One application-owned model request; mutations are serialized in the renderer. */
+export type ModelRequestState =
+  | { readonly status: "idle" }
+  | { readonly status: "listing" }
+  | {
+      readonly status: "loading" | "unloading" | "testing"
+      readonly modelKey: string
+    }
 
 /**
- * Residency of the selected weights, as one closed lifecycle.
- *
- * @remarks `modelKey` names the weights the status refers to, so a transition
- * always says which model it is about. There is deliberately no progress value:
- * nothing measures a real load, and a fabricated percentage would misreport it.
+ * Compact residency summary for the runtime card and composer.
+ * @remarks Several models may be loaded. The summary prefers the loaded default,
+ * then the first loaded inventory entry. Unknown means observation failed.
  */
 export type ModelRuntimeState =
   | { readonly status: "none" }
-  | { readonly status: "loading"; readonly modelKey: string }
-  | { readonly status: "loaded"; readonly modelKey: string }
-  | { readonly status: "unloading"; readonly modelKey: string }
+  | { readonly status: "unknown" }
+  | {
+      readonly status: "loading" | "loaded" | "unloading"
+      readonly modelKey: string
+    }
+
+/** Observable model state atomically replaced by the application store. */
+export type ModelState = {
+  /** Latest complete inventory observation. */
+  readonly modelInventory: ModelInventoryState
+  /** Current renderer request, or idle after settlement. */
+  readonly modelRequest: ModelRequestState
+  /** Summary derived atomically from inventory, request, and default. */
+  readonly modelRuntime: ModelRuntimeState
+  /** Latest safe request failure; null when no failure is shown. */
+  readonly modelError: string | null
+  /** Latest health observation, cleared by the next operation. */
+  readonly modelHealth: LlmTestModelApiResponse | null
+}
+
+/** Initial model state before a backend inventory observation. */
+export const initialModelState: ModelState = Object.freeze({
+  modelInventory: Object.freeze({ status: "unavailable" }),
+  modelRequest: Object.freeze({ status: "idle" }),
+  modelRuntime: Object.freeze({ status: "none" }),
+  modelError: null,
+  modelHealth: null
+})
 
 /**
- * How long a simulated load runs before the weights report as resident.
- *
- * @remarks Milliseconds. Stands in for the unreported duration of a real load.
+ * Projects inventory into the compact residency summary.
+ * @param inventory - Latest authoritative inventory observation.
+ * @param request - Current renderer operation.
+ * @param defaultModel - Preferred model, without claiming it is loaded.
+ * @returns The transition, preferred loaded model, confirmed absence, or unknown state.
  */
-export const SIMULATED_MODEL_LOAD_MS = 1400
+export function buildModelRuntime(
+  inventory: ModelInventoryState,
+  request: ModelRequestState,
+  defaultModel: string | null
+): ModelRuntimeState {
+  if (request.status === "loading" || request.status === "unloading") {
+    return { status: request.status, modelKey: request.modelKey }
+  }
+  if (inventory.status === "failed") return { status: "unknown" }
+  if (inventory.status === "unavailable") return { status: "none" }
+  const loaded =
+    inventory.models.find(
+      (model) => model.loaded && model.modelKey === defaultModel
+    ) ?? inventory.models.find((model) => model.loaded)
+  return loaded
+    ? { status: "loaded", modelKey: loaded.modelKey }
+    : { status: "none" }
+}
 
 /**
- * How long a simulated unload runs before the weights report as released.
- *
- * @remarks Milliseconds. Releasing is quicker than loading, as it is in LM
- * Studio.
- */
-export const SIMULATED_MODEL_UNLOAD_MS = 700
-
-/** Residency state before anything has been loaded in this session. */
-export const initialModelRuntimeState: ModelRuntimeState = { status: "none" }
-
-/**
- * Reports whether the weights are mid-transition.
- *
- * @param modelRuntime - Current residency state.
- * @returns True while a load or unload has been requested and has not settled.
+ * Reports whether weights are in transition.
+ * @param modelRuntime - Current residency summary.
+ * @returns True while a load or unload awaits backend settlement.
  */
 export function isModelTransitionInFlight(
   modelRuntime: ModelRuntimeState

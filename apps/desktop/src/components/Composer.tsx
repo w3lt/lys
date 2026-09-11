@@ -233,14 +233,14 @@ export function Composer(): ReactElement {
     // Intentionally empty until a conversation-list endpoint exists.
   }
 
-  /** Starts the backend, or does nothing when only weights are missing. */
+  /** Starts the backend or opens Model settings to recover model availability. */
   function handleReconnect(): void {
     if (backendStatus === "stopped") {
       void startBackend()
       return
     }
 
-    // Loading weights has no endpoint yet; the Model pane owns that action.
+    // The Model pane owns inventory refresh, loading, and health checks.
     setSettingsPane("model")
     setActiveView("settings")
   }
@@ -255,10 +255,11 @@ export function Composer(): ReactElement {
     <footer className="composer">
       {isUnavailable ? (
         <ComposerOfflineBanner
-          action={formatReconnectAction(backendStatus, isModelLoaded)}
+          action={formatReconnectAction(backendStatus, modelRuntime)}
           message={formatUnavailableRuntimeMessage(
             backendStatus,
-            settings.runtime.backendAddress
+            settings.runtime.backendAddress,
+            modelRuntime
           )}
           onReconnect={handleReconnect}
         />

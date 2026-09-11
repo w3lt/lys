@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo } from "react"
+import { lazy, Suspense, useMemo, useEffect, type ReactElement } from "react"
 
 import type { SettingsPane } from "@/app/types"
 import SettingsViewLeftBar, {
@@ -73,7 +73,7 @@ const SETTINGS_PANES: readonly SettingsPaneDescriptor[] = [
     ordinal: "01",
     note: "Start the server, then load the weights. Nothing runs until you say so.",
     footNote:
-      "Starting spawns the LM Studio server as a child process. Stopping releases the port and the memory with it.",
+      "Starting launches the Lys backend. Model weights are managed separately by LM Studio; stopping the backend does not unload them.",
     contentComponent: RuntimePaneContent
   },
   {
@@ -82,7 +82,7 @@ const SETTINGS_PANES: readonly SettingsPaneDescriptor[] = [
     ordinal: "02",
     note: "Every model on disk, which one is default, and what it is loaded with.",
     footNote:
-      "Context size is read when the weights are loaded, not per request. Changing it applies at the next load.",
+      "Model operations use the backend. Load-time context size is managed by LM Studio; default selection lasts for this session.",
     contentComponent: ModelPaneContent
   },
   {
@@ -91,7 +91,7 @@ const SETTINGS_PANES: readonly SettingsPaneDescriptor[] = [
     ordinal: "03",
     note: "How far she wanders, and when she has to stop.",
     footNote:
-      "Applied to the next request. Nothing here is written to disk yet — settings last until Lys is closed.",
+      "Saved automatically for future messages, including after restarting Lys. Messages already sent are unchanged.",
     contentComponent: GenerationPaneContent
   }
 ]
@@ -123,6 +123,8 @@ function formatRailStatus(
       return "backend up · releasing weights"
     case "none":
       return "backend up · no model"
+    case "unknown":
+      return "backend up · model state unavailable"
   }
 }
 
@@ -138,13 +140,12 @@ export type SettingsViewProps = {
  * @remarks Primary category: composition/view. The application store owns the
  * selected pane and the settings value; this view provides `SettingsContext` so
  * every pane reads one authority and proposes patches back through it. Patches
- * are written to the store in memory only — the Tauri save boundary is not
- * wired, so nothing reaches disk and each pane's footer says so.
+ * apply in memory immediately. Generation edits are saved automatically;
+ * runtime and model edits remain session-only.
  *
- * Model residency comes from the store, whose load and unload transitions are
- * simulated on timers because no backend reports them yet. The probe callback
- * stays inert, and the model pane renders Test disabled and explains why rather
- * than implying an action it cannot perform.
+ * Inventory, load, unload, and health requests belong to the application store.
+ * Entering settings refreshes inventory; leaving the view does not cancel work.
+ * Request errors and loaded-state health observations are rendered by the panes.
  *
  * Each pane body is a stable lazy component behind a `Suspense` fallback; a
  * pending body renders a separate busy frame, so its heading and Done action
@@ -154,7 +155,9 @@ export type SettingsViewProps = {
  * @param props - Parent-owned completion callback for leaving settings.
  * @returns The settings landmark, its rail, and the selected pane.
  */
-export default function SettingsView({ onDone }: SettingsViewProps) {
+export default function SettingsView({
+  onDone
+}: SettingsViewProps): ReactElement {
   const currentPane = useLysStore((state) => state.settingsPane)
   const setSettingsPane = useLysStore((state) => state.setSettingsPane)
   const settings = useLysStore((state) => state.settings)
@@ -163,11 +166,27 @@ export default function SettingsView({ onDone }: SettingsViewProps) {
   const modelRuntime = useLysStore((state) => state.modelRuntime)
   const loadModel = useLysStore((state) => state.loadModel)
   const unloadModel = useLysStore((state) => state.unloadModel)
+  const modelInventory = useLysStore((state) => state.modelInventory)
+  const modelRequest = useLysStore((state) => state.modelRequest)
+  const modelError = useLysStore((state) => state.modelError)
+  const modelHealth = useLysStore((state) => state.modelHealth)
+  const testModel = useLysStore((state) => state.testModel)
+  const updateModelInventory = useLysStore(
+    (state) => state.updateModelInventory
+  )
+
+  useEffect(() => {
+    if (backendStatus === "running") void updateModelInventory()
+  }, [backendStatus, updateModelInventory])
 
   const contextValue = useMemo<SettingsContextValue>(
     () => ({
       settings,
       modelRuntime,
+      modelInventory,
+      modelRequest,
+      modelError,
+      modelHealth,
       onRuntimeChange: (patch) =>
         setSettings({
           ...settings,
@@ -182,11 +201,22 @@ export default function SettingsView({ onDone }: SettingsViewProps) {
         }),
       onLoadModel: loadModel,
       onUnloadModel: unloadModel,
-      // No probe endpoint exists; the model pane keeps Test disabled, so this
-      // is never reached.
-      onTestModel: () => {}
+      onTestModel: testModel,
+      onRefreshModels: updateModelInventory
     }),
-    [settings, modelRuntime, setSettings, loadModel, unloadModel]
+    [
+      settings,
+      modelRuntime,
+      modelInventory,
+      modelRequest,
+      modelError,
+      modelHealth,
+      setSettings,
+      loadModel,
+      unloadModel,
+      testModel,
+      updateModelInventory
+    ]
   )
 
   const railStatus = formatRailStatus(backendStatus, modelRuntime)
@@ -196,7 +226,10 @@ export default function SettingsView({ onDone }: SettingsViewProps) {
       <SettingsContext value={contextValue}>
         <Tabs
           className="settings-view__tabs"
-          onValueChange={(value) => setSettingsPane(value as SettingsPane)}
+          onValueChange={(value) => {
+            const pane = SETTINGS_PANES.find((entry) => entry.value === value)
+            if (pane) setSettingsPane(pane.value)
+          }}
           orientation="vertical"
           value={currentPane}
         >

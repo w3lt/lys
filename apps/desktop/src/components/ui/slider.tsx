@@ -18,6 +18,8 @@ import { cn } from "@/lib/utils"
  * later forwarded props may override it; current consumers pass `center`. Base
  * UI coordinates orientation, keyboard, focus, disabled semantics, and state
  * attributes. A supplied `ref` targets the root's `HTMLDivElement` host.
+ * For a single thumb, the caller's accessible name is also forwarded to its
+ * input; descriptions and explicit value text are forwarded to every thumb input.
  * @param props - Base UI slider props and optional range defaults.
  * @returns The styled slider root with its adapter-owned control, track,
  * indicator, and generated thumbs.
@@ -63,6 +65,12 @@ function Slider({
            * so the control still reads as part of the Lys geometry.
            */
           <SliderPrimitive.Thumb
+            aria-label={_values.length === 1 ? props["aria-label"] : undefined}
+            aria-labelledby={
+              _values.length === 1 ? props["aria-labelledby"] : undefined
+            }
+            aria-describedby={props["aria-describedby"]}
+            aria-valuetext={props["aria-valuetext"]}
             data-slot="slider-thumb"
             key={index}
             className="relative block size-3.5 shrink-0 rounded-[var(--radius-detail)] border border-[var(--app-action)] bg-[var(--app-control-selected-thumb)] ring-ring/50 transition-[border-color,box-shadow] duration-(--duration-standard) ease-(--ease-standard) select-none after:absolute after:-inset-2 hover:ring-3 focus-visible:ring-3 focus-visible:outline-hidden active:ring-3 disabled:pointer-events-none disabled:opacity-70"

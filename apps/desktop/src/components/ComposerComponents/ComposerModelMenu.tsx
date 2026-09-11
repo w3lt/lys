@@ -1,3 +1,5 @@
+import type { ReactElement } from "react"
+import { useLysStore } from "@/lib/store"
 import { ChevronDown } from "lucide-react"
 
 import {
@@ -8,7 +10,7 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu"
-import { LOCAL_MODEL_INVENTORY } from "@/lib/models/inventory"
+import { buildModelDescriptor } from "@/lib/models/inventory"
 import {
   formatComposerModelRowTag,
   readModelResidencyTone,
@@ -31,7 +33,7 @@ export type ComposerModelMenuProps = {
 /**
  * Names the weights answering this conversation and switches between them.
  *
- * @remarks Primary category: interactive feature. The parent owns the label,
+ * @remarks Primary category: composition/view. The parent owns the label,
  * the selection, the residency state, and the selection callback; the menu's
  * open state belongs to the underlying menu adapter, as do keyboard navigation,
  * dismissal, and focus return. Every row states its own condition as text — its
@@ -42,8 +44,8 @@ export type ComposerModelMenuProps = {
  * the row's tag, and the row already carries its selection both as that text
  * and as the checked state the radio role exposes.
  *
- * The inventory is the placeholder constant described by
- * {@link LOCAL_MODEL_INVENTORY}.
+ * The application store owns the backend inventory shared with settings.
+ * Each row uses its own loaded observation, so multiple resident models are visible.
  *
  * @param props - Trigger label, current selection, residency, and callback.
  * @returns The composer's weights menu.
@@ -53,7 +55,12 @@ export default function ComposerModelMenu({
   selectedModelKey,
   modelRuntime,
   onSelectModel
-}: ComposerModelMenuProps) {
+}: ComposerModelMenuProps): ReactElement {
+  const inventory = useLysStore((state) => state.modelInventory)
+  const models =
+    inventory.status === "ready"
+      ? inventory.models.map(buildModelDescriptor)
+      : []
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -83,7 +90,12 @@ export default function ComposerModelMenu({
             weights
           </DropdownMenuLabel>
 
-          {LOCAL_MODEL_INVENTORY.map((model) => (
+          {models.length === 0 ? (
+            <DropdownMenuLabel>
+              No model inventory · open Model settings
+            </DropdownMenuLabel>
+          ) : null}
+          {models.map((model) => (
             <DropdownMenuRadioItem
               className="composer__model-option"
               key={model.modelKey}
@@ -92,7 +104,7 @@ export default function ComposerModelMenu({
               <span
                 aria-hidden="true"
                 className="composer__model-dot"
-                data-tone={readModelRowTone(modelRuntime, model.modelKey)}
+                data-tone={readModelRowTone(modelRuntime, model)}
               />
               <span className="composer__model-option-lines">
                 <span className="composer__model-option-name">

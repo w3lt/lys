@@ -19,10 +19,8 @@ pub fn load_settings() -> Result<LysSettings, String> {
 /// Persists the supplied settings at the default settings path.
 ///
 /// Tauri deserializes the command argument from the camelCase wire key
-/// `newSettings` into the Rust `new_settings` parameter. The current renderer
-/// adapter passes a flat settings object instead of that named argument, so
-/// deserialization rejects the request before this function can write. When a
-/// correctly shaped value reaches the command, it serializes the complete Rust
+/// `newSettings` into the Rust `new_settings` parameter. After validation,
+/// it serializes the complete Rust
 /// settings representation and writes a trailing newline; it does not create
 /// the parent directory if it is missing.
 ///

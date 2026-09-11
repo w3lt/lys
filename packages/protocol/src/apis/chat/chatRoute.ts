@@ -6,10 +6,13 @@ import {
   conversationUserMessageSchema
 } from "@lys/share"
 
+/** Inclusive maximum sampling temperature accepted by chat requests and their UI. */
+export const MAXIMUM_GENERATION_TEMPERATURE = 1
+
 /** Validates generation controls forwarded to the backend model completion. */
 export const messageGenerationOptionsSchema = z.strictObject({
   /** Sampling temperature coerced to a number and constrained from zero through one. */
-  temperature: z.coerce.number().min(0).max(1),
+  temperature: z.coerce.number().min(0).max(MAXIMUM_GENERATION_TEMPERATURE),
   /** Optional non-negative maximum completion-token count. */
   replyCeiling: z.coerce.number().int().min(0).optional()
 })

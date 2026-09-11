@@ -1,13 +1,13 @@
 import type { SettingsPane } from "@/app/types"
 import { loadSettings } from "@/lib/apis/tauri/settings"
 import { initialSettingsState, type LysSettings } from "./settings"
+import { buildModelRuntime } from "./model-runtime"
+import { createModelSlice, type ModelSlice } from "./model-actions"
 import {
-  initialModelRuntimeState,
-  isModelTransitionInFlight,
-  type ModelRuntimeState,
-  SIMULATED_MODEL_LOAD_MS,
-  SIMULATED_MODEL_UNLOAD_MS
-} from "./model-runtime"
+  isGenerationSettingsEqual,
+  createGenerationSettingsSlice,
+  type GenerationSettingsSlice
+} from "./generation-settings"
 import { create } from "zustand"
 import { BACKEND_HOST, BACKEND_PORT } from "@lys/protocol"
 import { getBackendStatus, startBackend, stopBackend } from "../apis"
@@ -42,8 +42,6 @@ type LysState = {
   initializing: boolean
   /** Backend process lifecycle tracked by the store. */
   backendServerInfo: BackendServerInfo
-  /** Residency of the weights, and which weights the current state refers to. */
-  modelRuntime: ModelRuntimeState
 }
 
 /** Actions exposed by the application store. */
@@ -61,9 +59,10 @@ type LysActions = {
    */
   setSettingsPane: (pane: SettingsPane) => void
   /**
-   * Replaces store-owned settings without persisting them.
+   * Replaces store-owned settings and automatically persists generation edits.
    *
-   * @param settings - Complete settings value to keep in memory.
+   * @param settings - Complete settings value applied in memory immediately.
+   * Runtime and model edits remain session-only; generationSave reports persistence.
    */
   setSettings: (settings: LysSettings) => void
   /**
@@ -95,37 +94,10 @@ type LysActions = {
    * required timestamp returns zero.
    */
   getBackendUptimeMs: () => number
-  /**
-   * Begins loading the named weights and settles them as resident.
-   *
-   * @param modelKey - Weights to make resident.
-   * @remarks Rejected unless the backend is running and no transition is in
-   * flight; loading the already-resident weights is also rejected. Loading
-   * different weights while some are resident replaces them. The store owns the
-   * transition's timer and cancels it on the next transition, so an observing
-   * component must not cancel this work when it unmounts.
-   */
-  loadModel: (modelKey: string) => void
-  /**
-   * Begins releasing the named weights and settles them as absent.
-   *
-   * @param modelKey - Weights to release; must be the resident ones.
-   * @remarks Rejected unless exactly those weights are currently resident. The
-   * store owns the transition's timer under the same terms as `loadModel`.
-   */
-  unloadModel: (modelKey: string) => void
-  /**
-   * Drops residency immediately, cancelling any transition in flight.
-   *
-   * @remarks Used when the weights cannot have survived, such as after the
-   * backend process stops. A cancelled transition never settles, so a load
-   * abandoned here cannot later report the weights as resident.
-   */
-  releaseModelRuntime: () => void
 }
 
 /** Complete Zustand store contract combining state and actions. */
-type LysStore = LysState & LysActions
+type LysStore = LysState & LysActions & ModelSlice & GenerationSettingsSlice
 
 /** Initial renderer-side store state before Tauri initialization. */
 const initialState: LysState = {
@@ -138,25 +110,7 @@ const initialState: LysState = {
     status: "stopped",
     startedAt: undefined,
     stoppedAt: undefined
-  },
-  modelRuntime: initialModelRuntimeState
-}
-
-/**
- * Timer driving the weight transition currently in flight, if any.
- *
- * @remarks Module-scoped because residency is application state: the timer
- * outlives any component observing it, and only a store transition may cancel
- * it. Holding the handle is what proves a superseded transition never settles.
- */
-let modelTransitionTimer: ReturnType<typeof setTimeout> | null = null
-
-/** Cancels the weight transition in flight so it can no longer settle. */
-function cancelModelTransition(): void {
-  if (modelTransitionTimer === null) return
-
-  clearTimeout(modelTransitionTimer)
-  modelTransitionTimer = null
+  }
 }
 
 /**
@@ -164,13 +118,20 @@ function cancelModelTransition(): void {
  *
  * @remarks Initialization and process actions are application-owned asynchronous
  * transitions. Tauri errors propagate from the returned promises; settings are
- * not saved by `setSettings` unless a caller invokes the save adapter separately.
+ * edited in memory by setSettings. The generation slice owns automatic saves and
+ * retains their completion or failure state across pane changes.
  *
- * Weight residency is simulated on timers described by `./model-runtime`; no
- * load or unload request reaches the backend yet.
+ * Model requests are owned by the model slice and use the shared HTTP protocol.
+ * Their errors remain observable in model state across settings-view unmounts.
  */
 export const useLysStore = create<LysStore>()((set, get) => ({
   ...initialState,
+  ...createGenerationSettingsSlice(set, get),
+  ...createModelSlice(set, get, () => ({
+    backendUrl: get().backendUrl,
+    isRunning: get().backendServerInfo.status === "running",
+    defaultModel: get().settings.runtime.defaultModel
+  })),
 
   setActiveView: (view) => {
     set({ activeView: view })
@@ -181,11 +142,30 @@ export const useLysStore = create<LysStore>()((set, get) => ({
   },
 
   setSettings: (settings) => {
-    set({ settings })
+    const { modelInventory, modelRequest } = get()
+    const modelRuntime = buildModelRuntime(
+      modelInventory,
+      modelRequest,
+      settings.runtime.defaultModel
+    )
+    const hasGenerationChanged = !isGenerationSettingsEqual(
+      get().settings.generation,
+      settings.generation
+    )
+    const generationSave =
+      hasGenerationChanged && get().generationSave.status !== "saving"
+        ? { status: "idle" as const }
+        : get().generationSave
+    set({ settings, modelRuntime, generationSave })
+    if (hasGenerationChanged) void get().saveGenerationSettings()
   },
 
   startBackend: async () => {
-    if ((await getBackendStatus()).running) return
+    if ((await getBackendStatus()).running) {
+      set({ backendServerInfo: { status: "running", startedAt: new Date() } })
+      await get().updateModelInventory()
+      return
+    }
 
     set({
       backendServerInfo: {
@@ -205,6 +185,7 @@ export const useLysStore = create<LysStore>()((set, get) => ({
         }
       })
     }
+    await get().updateModelInventory()
   },
 
   stopBackend: async () => {
@@ -217,10 +198,11 @@ export const useLysStore = create<LysStore>()((set, get) => ({
         status: "stopping"
       }
     }))
+    get().releaseModelRuntime()
     const processStatus = await stopBackend()
     const now = new Date()
     if (!processStatus.running) {
-      // Weights cannot outlive the process that held them.
+      // LM Studio owns weights separately; discard observations until reconnect.
       get().releaseModelRuntime()
       set((prev) => ({
         ...prev,
@@ -245,45 +227,6 @@ export const useLysStore = create<LysStore>()((set, get) => ({
     return Math.max(0, endTime - startedAt.getTime())
   },
 
-  loadModel: (modelKey) => {
-    const { backendServerInfo, modelRuntime } = get()
-
-    if (backendServerInfo.status !== "running") return
-    if (isModelTransitionInFlight(modelRuntime)) return
-    if (
-      modelRuntime.status === "loaded" &&
-      modelRuntime.modelKey === modelKey
-    ) {
-      return
-    }
-
-    cancelModelTransition()
-    set({ modelRuntime: { status: "loading", modelKey } })
-    modelTransitionTimer = setTimeout(() => {
-      modelTransitionTimer = null
-      set({ modelRuntime: { status: "loaded", modelKey } })
-    }, SIMULATED_MODEL_LOAD_MS)
-  },
-
-  unloadModel: (modelKey) => {
-    const { modelRuntime } = get()
-
-    if (modelRuntime.status !== "loaded") return
-    if (modelRuntime.modelKey !== modelKey) return
-
-    cancelModelTransition()
-    set({ modelRuntime: { status: "unloading", modelKey } })
-    modelTransitionTimer = setTimeout(() => {
-      modelTransitionTimer = null
-      set({ modelRuntime: { status: "none" } })
-    }, SIMULATED_MODEL_UNLOAD_MS)
-  },
-
-  releaseModelRuntime: () => {
-    cancelModelTransition()
-    set({ modelRuntime: initialModelRuntimeState })
-  },
-
   initialize: async () => {
     const settings = await loadSettings()
     if (settings.runtime.autoStartBackend) {
@@ -303,5 +246,6 @@ export const useLysStore = create<LysStore>()((set, get) => ({
         stoppedAt: undefined
       }
     })
+    await get().updateModelInventory()
   }
 }))

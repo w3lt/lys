@@ -39,11 +39,13 @@ export function readLocalRuntimeConnection(
  *
  * @param backendStatus - Store-owned backend process lifecycle state.
  * @param backendAddress - Persisted backend origin named in the copy.
+ * @param modelRuntime - Observed residency, including unavailable observations.
  * @returns The visible explanation for the current unavailable state.
  */
 export function formatUnavailableRuntimeMessage(
   backendStatus: BackendServerStatus,
-  backendAddress: string
+  backendAddress: string,
+  modelRuntime: ModelRuntimeState
 ): string {
   switch (backendStatus) {
     case "starting":
@@ -53,6 +55,10 @@ export function formatUnavailableRuntimeMessage(
     case "stopped":
       return `The backend is not running on ${backendAddress}.`
     case "running":
+      if (modelRuntime.status === "unknown")
+        return "The backend is up, but model state is unavailable."
+      if (modelRuntime.status === "loading") return "Loading model weights…"
+      if (modelRuntime.status === "unloading") return "Unloading model weights…"
       return "The backend is up, but no model is loaded."
   }
 }
@@ -61,18 +67,21 @@ export function formatUnavailableRuntimeMessage(
  * Formats the banner's recovery action for the current runtime state.
  *
  * @param backendStatus - Store-owned backend process lifecycle state.
- * @param isModelLoaded - Whether the selected model is known to be resident.
+ * @param modelRuntime - Observed residency or current weight transition.
  * @returns The action label and whether it is currently actionable; a state
  * that is already transitioning offers no action to take.
  */
 export function formatReconnectAction(
   backendStatus: BackendServerStatus,
-  isModelLoaded: boolean
+  modelRuntime: ModelRuntimeState
 ): ReconnectAction {
   if (backendStatus === "stopped") {
     return { label: "Start backend", isEnabled: true }
   }
-  if (backendStatus === "running" && !isModelLoaded) {
+  if (backendStatus === "running" && modelRuntime.status === "unknown") {
+    return { label: "Check models", isEnabled: true }
+  }
+  if (backendStatus === "running" && modelRuntime.status === "none") {
     return { label: "Load model", isEnabled: true }
   }
 
@@ -141,6 +150,8 @@ function formatRunningModelLabel(
       return `${modelRuntime.modelKey} · releasing`
     case "loaded":
       return modelRuntime.modelKey
+    case "unknown":
+      return "model state unavailable"
     case "none":
       return modelName ?? "no model selected"
   }

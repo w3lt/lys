@@ -11,14 +11,15 @@ presentation state, not durable conversation storage.
 
 ## Main responsibilities
 
-| Area                | Current implementation                                                                                                      |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| App shell           | `App.tsx` swaps between chat and settings views and runs startup initialization.                                            |
-| Chat UI             | `ChatView` renders the transcript, composer, and jump-to-latest controls.                                                   |
-| Chat state          | `src/lib/store/chat-view` owns the active conversation, request lifecycle, abort controller, and error presentation.        |
-| Shell/runtime state | `src/lib/store/index.ts` tracks which view is open, whether the backend is running, and settings loaded from Tauri.         |
-| SSE consumption     | `src/lib/apis/http/chat.ts` opens `POST /api/v1/chat`, parses SSE frames, validates them with Zod, and yields typed events. |
-| Theme               | `src/app/theme.ts` applies light or dark mode and stores the choice as `lys.theme` in WebView `localStorage`.               |
+| Area                | Current implementation                                                                                                       |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| App shell           | `App.tsx` swaps between chat and settings views and runs startup initialization.                                             |
+| Chat UI             | `ChatView` renders the transcript, composer, and jump-to-latest controls.                                                    |
+| Chat state          | `src/lib/store/chat-view` owns the active conversation, request lifecycle, abort controller, and error presentation.         |
+| Shell/runtime state | `src/lib/store/index.ts` tracks which view is open, whether the backend is running, and settings loaded from Tauri.          |
+| Model lifecycle     | `src/lib/store/model-actions.ts` owns real inventory, load, unload, and health requests shared by settings and the composer. |
+| SSE consumption     | `src/lib/apis/http/chat.ts` opens `POST /api/v1/chat`, parses SSE frames, validates them with Zod, and yields typed events.  |
+| Theme               | `src/app/theme.ts` applies light or dark mode and stores the choice as `lys.theme` in WebView `localStorage`.                |
 
 ## Chat state split
 
@@ -46,26 +47,66 @@ The desktop does not maintain a replay log or reconnect protocol. If the app is
 closed, the current UI state is lost and must be rebuilt by future backend
 features.
 
+## Model settings
+
+The shell store refreshes `GET /api/v1/llm/list` after backend initialization,
+startup, and entry into settings. A manual Refresh action picks up changes made
+in LM Studio. Inventory metadata and each model's `loaded` flag drive the model
+rows and composer menu; several models may be loaded at once.
+
+Load sends `{ modelId }` to `POST /api/v1/llm/load`. Unload sends the same body
+to `PATCH /api/v1/llm/unload` and accepts its bodyless `204` response. Both
+operations reconcile the inventory afterward, including when the command
+fails, because a lost acknowledgement does not establish whether weights
+changed. Requests are serialized locally and mutations are never retried
+automatically.
+
+Test calls `GET /api/v1/llm/:modelId/health` with the canonical key encoded as
+one path segment. Its result reports a fresh loaded-state observation and query
+latency, not inference success. The frontend validates responses against the
+shared protocol and exposes request failures inline.
+
+The application store owns requests across pane changes. Stopping the backend
+invalidates pending observations before aborting their local HTTP transport;
+a late response cannot restore obsolete residency. LM Studio owns weights
+separately from the backend process, so a reconnect queries their actual state.
+
+## Generation settings
+
+Generation edits apply to the next chat request. Temperature uses the API's
+inclusive `0`–`1` range. The optional reply ceiling uses an on/off switch and
+a token slider. Switching it off stores zero and omits `replyCeiling`
+from the request, so the backend does not receive a zero-token limit.
+Switching it back on restores the application default. The local context estimate
+sets the usual slider range, which expands to include an existing saved ceiling
+rather than silently clamping it.
+The model's actual context capacity and stopping behavior still apply.
+
+Generation edits automatically persist only the generation group through Tauri.
+The store reads the existing settings document and preserves its runtime and
+model groups before invoking `save_settings` with `{ newSettings }`. Saves
+are serialized in the application store and continue across pane changes;
+edits made during a write are coalesced into the latest settings and saved next.
+Failures remain visible and can be retried or replaced by a newer edit; a
+completion cannot overwrite newer edits or label those edits as saved. Future
+messages use the latest settings, including after restart once the save completes;
+already submitted requests keep their original settings. The read-modify-write operation
+does not coordinate with external editors of the settings file.
+
 ## Current limitations
 
-- The chat path currently sends a fixed model identifier from the chat store.
-- Only the Runtime settings tab follows a usable path in the current app. The
-  Model, Generation, and Conversation tabs render components that require a
-  `SettingsContext.Provider`, but no provider is mounted; selecting one of
-  those tabs currently throws during rendering.
-- The `selectedModelLoaded` shell flag exists, but current code does not update
-  it to reflect real backend model state.
-
-## Coming soon
-
-The following areas are not yet implemented as usable desktop behavior:
-
-- Persisting edited settings through `save_settings`
-- Supplying live state and actions to the Model, Generation, and Conversation
-  settings tabs
-- Wiring model selection into live chat requests
-- Restoring prior conversations after relaunch
-- Backend-backed generation settings such as context size and temperature
+- Choosing a default model changes session settings. The chat request path still
+  sends its existing fixed model identifier; selection is not yet wired into
+  live chat requests.
+- Runtime and model edits remain session-only. Generation settings save
+  automatically; a failed save leaves the edits available for the current session.
+- The load API accepts only `modelId`. Model settings explain that LM Studio
+  controls the load-time context size. The retained local context budget is
+  used for composer estimates and is not a confirmed runtime configuration.
+- Model observations refresh on startup, entry into settings, manual refresh,
+  and model operations. Changes made by another LM Studio client between those
+  observations are not pushed to the desktop.
+- Restoring prior conversations after relaunch is not implemented.
 
 ## Related pages
 

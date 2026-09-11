@@ -1,6 +1,6 @@
 import { createContext, use } from "react"
 
-import type { ModelRuntimeState } from "@/lib/store/model-runtime"
+import type { ModelState } from "@/lib/store/model-runtime"
 import type {
   GenerationSettings,
   LysSettings,
@@ -12,21 +12,19 @@ import type {
  * Settings state and change requests exposed to the settings panes.
  *
  * @remarks The provider owns the settings value and applies every patch. The
- * change callbacks are synchronous proposals against in-memory state: they do
- * not promise persistence, and nothing here is written to disk until the Tauri
- * save boundary is wired. Consumers must render below the provider and must not
+ * change callbacks are synchronous proposals against in-memory state. Accepted
+ * generation edits also start application-owned autosave; generationSave reports
+ * its eventual outcome. Consumers must render below the provider and must not
  * retain or mutate the settings object.
  *
  * The model callbacks describe weight-lifecycle intent. `onLoadModel` and
- * `onUnloadModel` drive the simulated residency the provider owns; no request
- * reaches the backend, so panes must not assume a call changed server state.
- * `onTestModel` has no endpoint behind it at all and is inert.
+ * `onUnloadModel` await backend acknowledgement and inventory reconciliation.
+ * `onTestModel` observes loaded state without inference. The application store
+ * owns request completion and exposes errors and health results to the panes.
  */
-export interface SettingsContextValue {
+export type SettingsContextValue = ModelState & {
   /** Complete settings value currently shown by the panes. */
   readonly settings: LysSettings
-  /** Residency of the weights, and which weights the state refers to. */
-  readonly modelRuntime: ModelRuntimeState
   /**
    * Proposes a runtime settings patch to the provider.
    *
@@ -49,20 +47,25 @@ export interface SettingsContextValue {
    * Requests that the named weights be loaded into memory.
    *
    * @param modelKey - Model identifier to load.
+   * @returns Resolves after settlement or cancellation; failures remain in modelError.
    */
-  onLoadModel: (modelKey: string) => void
+  onLoadModel: (modelKey: string) => Promise<void>
   /**
    * Requests that the named weights be released from memory.
    *
    * @param modelKey - Model identifier to unload.
+   * @returns Resolves after settlement or cancellation; failures remain in modelError.
    */
-  onUnloadModel: (modelKey: string) => void
+  onUnloadModel: (modelKey: string) => Promise<void>
   /**
-   * Requests a probe request against the resident weights.
+   * Observes whether the named weights are currently loaded.
    *
-   * @param modelKey - Model identifier to probe.
+   * @param modelKey - Canonical model identifier to query.
+   * @returns Resolves after publishing the health observation or handled failure.
    */
-  onTestModel: (modelKey: string) => void
+  onTestModel: (modelKey: string) => Promise<void>
+  /** Refreshes inventory; failures are exposed through modelError. */
+  onRefreshModels: () => Promise<void>
 }
 
 /** Required settings context; `null` marks the absent-provider state. */

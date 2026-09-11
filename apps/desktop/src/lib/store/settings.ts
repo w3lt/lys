@@ -29,13 +29,12 @@ export type ModelSettings = {
  * Generation settings persisted under the `generation` JSON object.
  *
  * @remarks Mirrors Rust's `GenerationSettings`. Rust rejects a temperature
- * outside `[0, 1)` during deserialization, so a persisted value is always in
- * that half-open interval.
+ * outside `[0, 1]` during deserialization, matching the chat API's range.
  */
 export type GenerationSettings = {
-  /** Sampling temperature; Rust constrains persisted values to `[0, 1)`. */
+  /** Sampling temperature; Rust and the chat API accept `[0, 1]`. */
   temperature: number
-  /** Maximum completion tokens for one reply, in tokens. */
+  /** Maximum completion tokens; zero means omit the request limit. Stored as u32. */
   replyCeiling: number
 }
 

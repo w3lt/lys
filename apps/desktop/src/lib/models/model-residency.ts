@@ -1,24 +1,10 @@
 import type { BackendServerStatus } from "@/lib/store"
 import type { ModelRuntimeState } from "@/lib/store/model-runtime"
 
-import { LOCAL_MODEL_INVENTORY, type LocalModelDescriptor } from "./inventory"
+import type { LocalModelDescriptor } from "./inventory"
 
 /** Visual tone the status indicator uses for a residency state. */
 export type ModelResidencyTone = "active" | "pending" | "idle"
-
-/**
- * Reads the on-disk size of known weights.
- *
- * @param modelKey - Weights to look up in the placeholder inventory.
- * @returns The size label, or `unknown size` for weights outside the inventory.
- */
-function findModelSizeLabel(modelKey: string): string {
-  const model = LOCAL_MODEL_INVENTORY.find(
-    (candidate) => candidate.modelKey === modelKey
-  )
-
-  return model?.sizeLabel ?? "unknown size"
-}
 
 /**
  * Names the weights currently resident in memory.
@@ -48,6 +34,7 @@ export function readModelResidencyTone(
     case "unloading":
       return "pending"
     case "none":
+    case "unknown":
       return "idle"
   }
 }
@@ -56,17 +43,21 @@ export function readModelResidencyTone(
  * Selects the status tone for one model row.
  *
  * @param modelRuntime - Current residency state.
- * @param modelKey - Weights the row represents.
+ * @param model - Inventory entry the row represents.
  * @returns The row's tone; rows the current state does not name stay idle.
  */
 export function readModelRowTone(
   modelRuntime: ModelRuntimeState,
-  modelKey: string
+  model: LocalModelDescriptor
 ): ModelResidencyTone {
-  if (modelRuntime.status === "none") return "idle"
-  if (modelRuntime.modelKey !== modelKey) return "idle"
-
-  return readModelResidencyTone(modelRuntime)
+  if (modelRuntime.status === "unknown") return "idle"
+  if (
+    modelRuntime.status !== "none" &&
+    modelRuntime.modelKey === model.modelKey
+  ) {
+    return readModelResidencyTone(modelRuntime)
+  }
+  return model.loaded ? "active" : "idle"
 }
 
 /**
@@ -87,6 +78,8 @@ export function formatModelResidencyHeading(
       return "Unloading"
     case "none":
       return "No model loaded"
+    case "unknown":
+      return "Model state unavailable"
   }
 }
 
@@ -115,7 +108,7 @@ function formatAbsentResidencyMeta(
  * @param modelRuntime - Current residency state.
  * @param backendStatus - Store-owned backend process lifecycle state.
  * @param defaultModel - Persisted default model identifier, when one is chosen.
- * @returns The weights and size the state refers to, or why none are resident.
+ * @returns The observed weights or the reason residency is unavailable.
  */
 export function formatModelResidencyMeta(
   modelRuntime: ModelRuntimeState,
@@ -124,11 +117,13 @@ export function formatModelResidencyMeta(
 ): string {
   switch (modelRuntime.status) {
     case "loaded":
-      return `${modelRuntime.modelKey} · ${findModelSizeLabel(modelRuntime.modelKey)} resident`
+      return `${modelRuntime.modelKey} · loaded in LM Studio`
     case "loading":
-      return `${modelRuntime.modelKey} · ${findModelSizeLabel(modelRuntime.modelKey)}`
+      return modelRuntime.modelKey
     case "unloading":
-      return `releasing ${findModelSizeLabel(modelRuntime.modelKey)}`
+      return `releasing ${modelRuntime.modelKey}`
+    case "unknown":
+      return "refresh the model inventory to check loaded weights"
     case "none":
       return formatAbsentResidencyMeta(backendStatus, defaultModel)
   }
@@ -147,11 +142,14 @@ export function formatModelRowTag(
 ): string {
   if (
     modelRuntime.status !== "none" &&
+    modelRuntime.status !== "unknown" &&
     modelRuntime.modelKey === model.modelKey
   ) {
     return modelRuntime.status
   }
 
+  if (modelRuntime.status === "unknown") return "state unavailable"
+  if (model.loaded) return "loaded"
   return `${model.sizeLabel} on disk`
 }
 
@@ -162,9 +160,8 @@ export function formatModelRowTag(
  * @param model - Weights the row represents.
  * @param selectedModelKey - Persisted default model identifier, when chosen.
  * @returns The row's live condition when it has one, otherwise whether it is
- * merely the chosen default, otherwise its on-disk size. Resident weights read
- * as `resident` here rather than `loaded`, because the menu answers "which
- * weights are answering me" rather than "what is in memory".
+ * merely the chosen default, otherwise its on-disk size. Residency reports
+ * loaded weights; it does not determine which model a chat request uses.
  */
 export function formatComposerModelRowTag(
   modelRuntime: ModelRuntimeState,
@@ -173,11 +170,14 @@ export function formatComposerModelRowTag(
 ): string {
   if (
     modelRuntime.status !== "none" &&
+    modelRuntime.status !== "unknown" &&
     modelRuntime.modelKey === model.modelKey
   ) {
     return modelRuntime.status === "loaded" ? "resident" : modelRuntime.status
   }
 
+  if (modelRuntime.status === "unknown") return "state unavailable"
+  if (model.loaded) return "resident"
   if (model.modelKey === selectedModelKey) return "selected"
 
   return `${model.sizeLabel} on disk`

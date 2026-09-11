@@ -733,7 +733,8 @@ export function createChatViewStore(
  * separate token and abort-resource owner. Generation controls are read from
  * the application store at send time, so the request carries the settings
  * shown by the Generation pane; the two controls are named explicitly because
- * the request contract rejects unknown fields.
+ * the request contract rejects unknown fields. A saved zero ceiling is omitted
+ * so the backend receives no explicit completion-token limit.
  */
 export const useChatViewStore: UseBoundStore<StoreApi<ChatViewStore>> =
   createChatViewStore({
@@ -743,6 +744,8 @@ export const useChatViewStore: UseBoundStore<StoreApi<ChatViewStore>> =
       const { temperature, replyCeiling } =
         useLysStore.getState().settings.generation
 
-      return { temperature, replyCeiling }
+      return replyCeiling === 0
+        ? { temperature }
+        : { temperature, replyCeiling }
     }
   })

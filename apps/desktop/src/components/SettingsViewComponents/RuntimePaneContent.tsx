@@ -1,3 +1,5 @@
+import type { ReactElement } from "react"
+import ModelRequestFeedback from "./ModelRequestFeedback"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import {
@@ -55,13 +57,13 @@ function formatBackendMeta(
  *
  * The model card projects the settings context's residency state. While a
  * transition is in flight the card is marked busy and carries an indeterminate
- * progress indicator: nothing measures a real load, so no percentage is
+ * progress indicator: the API reports completion without progress, so no percentage is
  * claimed. Both lifecycle actions are withheld during a transition, and Load
  * additionally requires a running backend and a chosen default model.
  *
  * @returns The runtime backend and model cards.
  */
-export default function RuntimePaneContent() {
+export default function RuntimePaneContent(): ReactElement {
   const backendServerInfo = useLysStore((state) => state.backendServerInfo)
   const startBackend = useLysStore((state) => state.startBackend)
   const stopBackend = useLysStore((state) => state.stopBackend)
@@ -69,6 +71,8 @@ export default function RuntimePaneContent() {
   const {
     settings,
     modelRuntime,
+    modelRequest,
+    modelInventory,
     onRuntimeChange,
     onLoadModel,
     onUnloadModel
@@ -80,6 +84,11 @@ export default function RuntimePaneContent() {
   const defaultModel = settings.runtime.defaultModel
   const loadedModelKey = readLoadedModelKey(modelRuntime)
   const isTransitioning = isModelTransitionInFlight(modelRuntime)
+  const isModelBusy = modelRequest.status !== "idle"
+  const defaultEntry =
+    modelInventory.status === "ready"
+      ? modelInventory.models.find((model) => model.modelKey === defaultModel)
+      : undefined
   const residencyHeading = formatModelResidencyHeading(modelRuntime)
 
   return (
@@ -174,16 +183,25 @@ export default function RuntimePaneContent() {
           </div>
           <div className="settings-view__actions">
             <Button
-              disabled={!isRunning || isTransitioning || defaultModel === null}
-              onClick={() => defaultModel && onLoadModel(defaultModel)}
+              disabled={
+                !isRunning ||
+                isModelBusy ||
+                !defaultEntry ||
+                defaultEntry.loaded
+              }
+              onClick={() => {
+                if (defaultModel) void onLoadModel(defaultModel)
+              }}
               type="button"
               variant="default"
             >
               Load
             </Button>
             <Button
-              disabled={isTransitioning || loadedModelKey === null}
-              onClick={() => loadedModelKey && onUnloadModel(loadedModelKey)}
+              disabled={!isRunning || isModelBusy || loadedModelKey === null}
+              onClick={() => {
+                if (loadedModelKey) void onUnloadModel(loadedModelKey)
+              }}
               type="button"
               variant="outline"
             >
@@ -193,7 +211,7 @@ export default function RuntimePaneContent() {
         </div>
 
         {isTransitioning ? (
-          /* Indeterminate: nothing reports how far along a real load is. */
+          /* The backend acknowledges completion without percentage progress. */
           <div
             aria-label={residencyHeading}
             className="settings-view__progress"
@@ -206,9 +224,11 @@ export default function RuntimePaneContent() {
         <div className="settings-view__card-divider" />
 
         <p className="settings-view__card-note">
-          Loading and unloading are simulated here. The timings stand in for a
-          backend that does not report progress yet.
+          Loading and unloading use LM Studio through the backend. This summary
+          prefers the loaded default; manage every loaded model in Model
+          settings.
         </p>
+        <ModelRequestFeedback />
       </section>
     </div>
   )

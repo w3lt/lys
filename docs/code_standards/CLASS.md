@@ -49,7 +49,8 @@ Before creating a class:
 16. Declare one concurrency model.
 17. Define resource cleanup and post-cleanup behavior when applicable.
 18. Use composition and interfaces instead of repository-owned inheritance.
-19. Check every objective size limit.
+19. Check every objective size limit and document any narrowly approved
+    `CLASS-006` resource-owner surface exception.
 20. Add complete API documentation.
 21. Add the required construction, state, lifecycle, concurrency, and contract tests.
 
@@ -251,6 +252,40 @@ Counting rules:
 - Configuration values are not collaborators, but retained configuration counts toward the field limit.
 
 A class MUST NOT group unrelated fields, introduce pass-through wrappers, or fragment meaningful operations to evade a limit.
+
+A resource owner or boundary adapter MAY exceed the seven-public-operation
+limit only through an exception approved under
+[Contributing to Lys](../../CONTRIBUTING.md) and only when all these conditions
+are established:
+
+1. The excess consists solely of operations required by one explicitly approved
+   `IFACE-006` composite interface, plus the minimum construction and cleanup
+   operations required to acquire and release the same resource safely.
+2. Every operation serves the class's one ownership sentence and shares the
+   same resource, authoritative lifecycle state, concurrency invariant, and
+   cleanup obligation.
+3. Splitting the implementation would divide ownership, permit mismatched
+   capability identities, duplicate lifecycle state, or require a pass-through
+   wrapper, and the language or platform cannot enforce the invariant through a
+   compliant smaller class surface.
+4. The exception record documents the exact public-operation count, the
+   attempted compliant splits, why each fails, and the current production
+   consumer, explicitly approved public contract, or lifecycle protocol
+   requiring every operation.
+
+The approved excess MUST be the smallest surface that preserves safe ownership.
+Every constructor, factory, method, accessor, inherited operation, overload,
+and lifecycle operation still counts under this rule. The exception MUST NOT
+relax any other objective limit, admit unrelated or unused operations, permit
+multiple cleanup entry points, treat generated construction as exception
+evidence, or use composition, wrappers, aliases, or omitted counting to
+manufacture compliance.
+
+A reusable invariant-owner test provider for the exact approved composite
+contract MAY receive the same public-operation count only when the exception
+record explicitly includes it and every operation is required by shared
+contract tests. It MUST preserve the production contract's ownership, lifecycle,
+and concurrency semantics, and receives no general test-only exemption.
 
 An externally required adapter MAY exceed the public-operation, executable-member, and 200-executable-line limits only when the external contract itself imposes the excess and cannot be split across supported adapter types. Only exact required members and their minimal delegating bodies are exempt. Every repository-designed member remains inside the limits, and the adapter MUST add no unrelated operation.
 
@@ -642,7 +677,7 @@ Cleanup MUST:
 - Be idempotent.
 - Make concurrent cleanup calls join the same completion.
 - Prevent new owned work after cleanup begins.
-- Cancel and await owned background work.
+- Apply cancellation according to the owned operation contracts and await all owned work, including application-owned completion-only operations under `IFACE-018`.
 - Release resources in reverse acquisition order.
 - Attempt every required release when an earlier release fails.
 - Preserve or aggregate every cleanup failure.
@@ -883,6 +918,10 @@ A reusable fake MUST honor every interface and lifecycle contract it implements.
 | Concurrency models                 |              1 |
 | Public cleanup entry points        |            0–1 |
 | Test-only production members       |              0 |
+
+An explicitly approved `CLASS-006` resource-owner surface may exceed the
+public-operation value. The exception record MUST report the exact count; every
+other row remains unchanged.
 
 Externally required adapter exceptions are limited to the exact declarations and minimal delegating bodies imposed by the external contract and remain governed by `CLASS-006` and `CLASS-030`.
 
@@ -1198,7 +1237,8 @@ A class is compliant only when every applicable answer is “yes”:
 - [ ] Does it declare one primary category?
 - [ ] Does its name identify its owner or mechanism and capability?
 - [ ] Does every public operation have current evidence?
-- [ ] Does it satisfy every objective limit?
+- [ ] Does it satisfy every objective limit, with any public-operation excess
+      narrowly evidenced and explicitly approved under `CLASS-006`?
 - [ ] Does it have one authoritative named declaration?
 - [ ] Are all dependencies explicit and narrow?
 - [ ] Is its ownership graph acyclic?

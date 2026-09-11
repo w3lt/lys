@@ -4,12 +4,13 @@ import {
   llmRuntimeUnavailableProblemSchema,
   llmUnloadFailedProblemSchema
 } from "../../http/errors/llm"
+import { llmServiceBusyProblemSchema } from "../../http/errors/llmServiceBusy"
 import { apiLlmUnloadModelRoute } from "./routes"
 
-/** Validates a non-empty model key requested for unloading. */
+/** Validates a non-empty model key whose loaded instances should be stopped. */
 export const llmUnloadModelApiRequestBodySchema = z
   .strictObject({
-    /** Canonical model key identifying the loaded model to unload. */
+    /** Canonical model key shared by every loaded instance to stop. */
     modelId: z.string().min(1)
   })
   .readonly()
@@ -17,28 +18,33 @@ export const llmUnloadModelApiRequestBodySchema = z
 /** Validates service-unavailable responses from the model-unload endpoint. */
 export const llmUnloadModelApiServiceUnavailableResponseSchema = z.union([
   llmRuntimeUnavailableProblemSchema,
-  llmUnloadFailedProblemSchema
+  llmUnloadFailedProblemSchema,
+  llmServiceBusyProblemSchema
 ])
 
-/** Status-specific error schemas returned by the model-unload endpoint. */
+/** Selects the model-unload error validator by HTTP status. */
 export const llmUnloadModelApiResponseSchemas = Object.freeze({
   404: llmModelNotFoundProblemSchema,
   503: llmUnloadModelApiServiceUnavailableResponseSchema
 })
 
 /**
- * Describes the PATCH endpoint that unloads one currently loaded model.
+ * Describes the PATCH endpoint that stops every loaded instance matching one model key.
  *
  * @remarks This shared descriptor is imported by the backend route consumer;
  * changing its method, path, body, or response schemas changes the transmitted
- * compatibility contract and requires coordinated consumers.
+ * compatibility contract and requires coordinated consumers. Success means a
+ * reconciliation snapshot found no matching instance; another runtime client
+ * may load a new matching instance afterward. Service-busy responses mean the
+ * unload was refused before queue acceptance. Accepted unloads continue under
+ * the service owner even if the requesting client disconnects.
  */
 export const llmUnloadModelApi = Object.freeze({
   method: "PATCH",
   path: apiLlmUnloadModelRoute,
   body: llmUnloadModelApiRequestBodySchema,
   responses: llmUnloadModelApiResponseSchemas
-} as const)
+})
 
 /** Request body accepted by the model-unload endpoint. */
 export type LlmUnloadModelApiRequestBody = z.infer<
@@ -47,28 +53,28 @@ export type LlmUnloadModelApiRequestBody = z.infer<
 
 /** Problem Details body returned when the loaded model cannot be found. */
 export type LlmUnloadModelApiNotFoundResponse = z.infer<
-  (typeof llmUnloadModelApi.responses)[404]
+  typeof llmModelNotFoundProblemSchema
 >
 
-/** Problem Details body returned when the unload operation is unavailable. */
+/** Problem Details body returned for refused admission or an unavailable unload. */
 export type LlmUnloadModelApiServiceUnavailableResponse = z.infer<
-  (typeof llmUnloadModelApi.responses)[503]
+  typeof llmUnloadModelApiServiceUnavailableResponseSchema
 >
 
 /** Status-specific payloads returned by the model-unload endpoint. */
 export type LlmUnloadModelApiReply = {
-  /** Successful unload response with no payload. */
+  /** Reconciliation found no loaded instance matching the requested key. */
   readonly 204: undefined
   /** Loaded model was not found. */
   readonly 404: LlmUnloadModelApiNotFoundResponse
-  /** Runtime access or the unload operation failed. */
+  /** Admission was refused, runtime access failed, or the unload failed. */
   readonly 503: LlmUnloadModelApiServiceUnavailableResponse
 }
 
 /** Fastify route type for the model-unload request and responses. */
 export type LlmUnloadModelApiRoute = {
   /** Validated canonical model key supplied to the backend handler. */
-  Body: LlmUnloadModelApiRequestBody
+  readonly Body: LlmUnloadModelApiRequestBody
   /** Status-specific success and Problem Details payloads. */
-  Reply: LlmUnloadModelApiReply
+  readonly Reply: LlmUnloadModelApiReply
 }

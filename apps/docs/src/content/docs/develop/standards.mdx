@@ -16,8 +16,8 @@ Stable rule identifiers, their rationale, and how exceptions are recorded.
 />
 
 The repository’s canonical construction rules start in `docs/CODE_STANDARDS.md`.
-That file tells you which construct-specific chapters are active and which
-planned chapters are still deferred.
+That file lists the active construct-specific chapters and defines the approval
+process for future additions.
 
 ## Active standards today
 
@@ -31,16 +31,28 @@ The active chapters are:
 - Class
 - Object
 - Component
+- Module / file
+- Package / dependency
+- Hook
+- API
+- Error
+- Event / message
+- Async task / stream
+- Resource
+- Configuration
+- Schema / migration
+- Test / fixture
+- Comment
 
 Every active rule has a stable identifier so reviews can cite the exact rule
 without paraphrasing it.
 
-## Deferred chapters are not permission
+## Ruleset status
 
-The standards index also lists deferred chapters such as module, package, API,
-error, event, async, configuration, schema, test, and comment. Deferred means
-the dedicated chapter is not approved yet. It does not mean contributors are
-free to make those areas vague or undocumented.
+All 20 registered chapters are active. No item chapters remain deferred.
+Future additions follow the review and explicit approval process in
+`docs/CODE_STANDARDS.md`; existing standards remain applicable while a new
+chapter is being drafted.
 
 ## JSDoc is part of the standard set
 

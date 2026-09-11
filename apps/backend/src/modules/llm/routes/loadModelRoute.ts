@@ -1,30 +1,33 @@
 import { llmLoadModelApi, type LlmLoadModelApiRoute } from "@lys/protocol"
 import type { FastifyInstance, FastifyRequest } from "fastify"
 import * as z from "zod"
-import { LMStudioClient } from "@lmstudio/sdk"
+import type { LlmModelLoader } from "../llmModelCapabilities"
+import handleLlmServiceRequestFailure from "./handleLlmServiceRequestFailure"
 
 /**
- * Registers the LLM load endpoint with protocol body validation and response serialization.
- *
- * The registrar mutates `app` by installing the protocol POST path. The
- * handler validates the request body before loading a model and returns the
- * matching downloaded inventory entry marked as loaded.
+ * Adds the LLM load endpoint with protocol validation to a Fastify application.
  *
  * @param app - Application instance that receives the LLM load route.
  * @returns A promise that resolves after route registration completes.
  * @throws If Fastify cannot register the route.
- * @remarks Invalid bodies are rejected by protocol validation. Model-loading,
- * inventory, and missing-canonical-model failures propagate from the handler to
- * Fastify's request error boundary.
+ * @remarks Refused queue admission returns service-busy Problem Details.
+ * Other service failures remain owned by Fastify's parent error boundary.
  */
-export default async function registerLlmLoadModelRoute(app: FastifyInstance) {
+export default async function updateFastifyWithLlmModelLoadRoute(
+  app: FastifyInstance
+): Promise<void> {
+  const llmModelLoader: LlmModelLoader = app.llmService
+
   app.route<LlmLoadModelApiRoute>({
     method: llmLoadModelApi.method,
     url: llmLoadModelApi.path,
     schema: {
       body: llmLoadModelApi.body,
       response: {
-        200: z.toJSONSchema(llmLoadModelApi.response, {
+        200: z.toJSONSchema(llmLoadModelApi.responses[200], {
+          target: "draft-7"
+        }),
+        503: z.toJSONSchema(llmLoadModelApi.responses[503], {
           target: "draft-7"
         })
       }
@@ -33,35 +36,25 @@ export default async function registerLlmLoadModelRoute(app: FastifyInstance) {
       const result = llmLoadModelApi.body.safeParse(data)
       return result.success ? { value: result.data } : { error: result.error }
     },
-    handler: (request) => loadLlmApiHandler(request)
+    errorHandler: handleLlmServiceRequestFailure,
+    handler: async (request) =>
+      await handleLlmModelLoadRequest(request, llmModelLoader)
   })
 }
 
 /**
- * Loads the requested LLM, then uses its canonical model key to find downloaded model metadata.
+ * Delegates one validated model load to the application-owned LLM service.
  *
- * @param request - Validated Fastify request containing the model identifier or alias that LM Studio resolves during loading.
- * @returns A promise that resolves to downloaded model metadata marked as loaded after the canonical model key is found in inventory.
- * @throws If LM Studio cannot load or enumerate models, or if the loaded model is absent from the downloaded inventory.
+ * @param request - Validated Fastify request containing the model identifier or alias to load.
+ * @param llmModelLoader - Application capability that performs the model load.
+ * @returns A promise resolving to validated metadata for the canonical loaded model.
+ * @throws If the service cannot load or enumerate models, the canonical model
+ * is absent from inventory, admission is refused, or application cleanup has
+ * begun. The route boundary translates only recognized admission rejection.
  */
-async function loadLlmApiHandler(
-  request: FastifyRequest<LlmLoadModelApiRoute>
-): Promise<LlmLoadModelApiRoute["Reply"]> {
-  const lmsClient = new LMStudioClient()
-  const loadedModel = await lmsClient.llm.load(request.body.modelId)
-  const downloadedModels = await lmsClient.system.listDownloadedModels("llm")
-  const downloadedModel = downloadedModels.find(
-    (model) => model.modelKey === loadedModel.modelKey
-  )
-
-  if (downloadedModel === undefined) {
-    throw new Error(
-      `Loaded model "${loadedModel.modelKey}" was not found in the downloaded LLM inventory`
-    )
-  }
-
-  return {
-    ...downloadedModel,
-    loaded: true
-  }
+async function handleLlmModelLoadRequest(
+  request: FastifyRequest<LlmLoadModelApiRoute>,
+  llmModelLoader: LlmModelLoader
+): Promise<LlmLoadModelApiRoute["Reply"][200]> {
+  return await llmModelLoader.loadLlmModel(request.body.modelId)
 }

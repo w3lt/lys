@@ -18,7 +18,7 @@ export const apiLlmListModelsRoute = `${API_PREFIX_V1}/llm/list`
 export const apiLlmLoadModelRoute = `${API_PREFIX_V1}/llm/load`
 
 /**
- * Versioned PATCH path for unloading one LM Studio model.
+ * Versioned PATCH path for stopping every loaded instance of one model key.
  *
  * @remarks This path is transmitted in HTTP requests and is not persisted. It
  * is release-stable across compatible clients; changing it requires coordinated
@@ -26,6 +26,13 @@ export const apiLlmLoadModelRoute = `${API_PREFIX_V1}/llm/load`
  */
 export const apiLlmUnloadModelRoute = `${API_PREFIX_V1}/llm/unload`
 
+/**
+ * Versioned GET path for observing whether one canonical model key is loaded.
+ *
+ * @remarks This path is transmitted in HTTP requests and is not persisted. It
+ * is release-stable across compatible clients; changing it requires coordinated
+ * route registration because model-health URL compatibility breaks.
+ */
 export const apiLlmTestModelRoute = `${API_PREFIX_V1}/llm/:modelId/health`
 
 /**

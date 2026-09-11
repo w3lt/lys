@@ -156,6 +156,8 @@ Every escaping object MUST be checked through at least one of:
 
 Inference without a named contract is permitted only for a nonescaping local aggregate under `TYPE-026`.
 
+API payload schemas and metadata in `packages/protocol/src/apis/` follow `TYPE-009`; this rule MUST NOT require duplicate handwritten shapes or Zod wrappers for metadata that does not need runtime validation.
+
 Casts, unchecked conversions, `any`, double assertions, partial construction, and equivalent mechanisms MUST NOT manufacture conformance. TypeScript `as const` may narrow a value, but it does not validate the value against a contract.
 
 ```ts

@@ -635,7 +635,7 @@ If answering the question can fail, return an explicit result rather than disgui
 
 ### FUNC-017 — Async completion must be owned
 
-An asynchronous function MUST define how every path completes, fails, and cancels.
+An asynchronous function MUST define how every path completes, fails, and, where supported, cancels. Interface cancellation requirements remain with `IFACE-018`.
 
 Every promise, future, task, stream, process, or callback completion MUST be awaited, returned to the caller, or registered with a named lifecycle owner that observes terminal failure.
 
@@ -656,7 +656,7 @@ async function saveConversation(
 
 A function MUST NOT expose both callback-based and promise-based completion for the same operation.
 
-Work that may outlive its caller MUST support cancellation or prove through its contract that late completion cannot mutate current state. Detached work requires an explicit owner, error-reporting path, and shutdown behavior.
+Work that may outlive its requesting caller MUST support cancellation or be accepted by an explicit lifecycle owner that retains authority over its continuing effects. Late completion MUST NOT mutate state for which the work has lost authority. Detached work requires an explicit owner, error-reporting path, and shutdown behavior; application-owned completion-only interface operations remain governed by `IFACE-018`.
 
 ### FUNC-018 — Resource ownership must be complete
 

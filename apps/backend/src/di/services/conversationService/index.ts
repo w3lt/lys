@@ -26,6 +26,13 @@ import {
   verifyListConversationMetadataOptions
 } from "./utils"
 
+/**
+ * Ordered SQLite schema migrations for the conversation store.
+ *
+ * @remarks Each entry advances `PRAGMA user_version` by one and is applied
+ * inside the transaction opened by {@link migrateDatabase}. Later migrations
+ * depend on the schema established by earlier entries.
+ */
 const databaseMigrations = [
   `
     CREATE TABLE conversations (
@@ -125,13 +132,22 @@ const databaseMigrations = [
   `
 ] as const
 
+/** Latest schema version that this service can open and migrate. */
 const currentDatabaseVersion = databaseMigrations.length
 
 /** Validates the total returned by the conversation metadata count query. */
 const conversationMetadataCountSchema = z.strictObject({
+  /** Number of stored conversations represented by the count aggregate. */
   total: z.number().int().nonnegative()
 })
 
+/**
+ * Reads and validates the SQLite schema version marker.
+ *
+ * @param database - Open SQLite database whose `user_version` is inspected.
+ * @returns The non-negative safe-integer schema version.
+ * @throws If SQLite returns a missing, non-integer, unsafe, or negative version.
+ */
 function readDatabaseVersion(database: DatabaseSync): number {
   const databaseVersion = database
     .prepare("PRAGMA user_version")
@@ -148,6 +164,12 @@ function readDatabaseVersion(database: DatabaseSync): number {
   return databaseVersion
 }
 
+/**
+ * Applies all pending schema migrations atomically in version order.
+ *
+ * @param database - Open SQLite database whose schema is migrated in place.
+ * @throws If the stored version is unsupported or any migration fails; an active transaction is rolled back before the failure propagates.
+ */
 function migrateDatabase(database: DatabaseSync): void {
   database.exec("BEGIN IMMEDIATE")
 
@@ -181,19 +203,43 @@ function migrateDatabase(database: DatabaseSync): void {
   }
 }
 
+/**
+ * Owns one synchronous SQLite connection and prepared statements for persisted
+ * conversation metadata and messages.
+ *
+ * @remarks Primary category: resource owner or boundary adapter. The instance
+ * owns its database connection and statements until synchronous disposal; the
+ * database path is borrowed only during construction. Concurrency model:
+ * single-owner and synchronous—each operation completes before the next
+ * event-loop callback can use the service. Inserts and updates rely on SQLite
+ * constraints and triggers to preserve message and conversation invariants.
+ */
 export default class ConversationService {
+  /** Owned SQLite connection used by all persistence operations. */
   #database: DatabaseSync
+  /** Prepared statement that inserts conversation metadata and its timestamps. */
   #insertConversationStatement: StatementSync
+  /** Prepared statement that retrieves one conversation metadata record by ID. */
   #getConversationMetadataStatement: StatementSync
   /** Counts every stored conversation without search filtering. */
   #countConversationMetadataStatement: StatementSync
   /** Lists conversations by the unfiltered updated-time and ID keyset. */
   #listUnfilteredConversationMetadataStatement: StatementSync
+  /** Prepared statement that appends one validated user message. */
   #insertUserMessageStatement: StatementSync
+  /** Prepared statement that appends one validated assistant message. */
   #insertAssistantMessageStatement: StatementSync
+  /** Prepared statement that conditionally updates assistant status and finish reason. */
   #updateAssistantMessageStateStatement: StatementSync
+  /** Prepared statement that replaces a conversation title by ID. */
   #updateConversationTitleStatement: StatementSync
 
+  /**
+   * Opens a ready conversation store and prepares its schema statements.
+   *
+   * @param options - Filesystem path of the SQLite database to own.
+   * @throws If SQLite cannot open the database, migrations fail, or a prepared statement cannot be created; an opened connection is closed before the failure propagates.
+   */
   constructor({ databaseFilePath }: ConversationServiceCreationOptions) {
     const database = new DatabaseSync(databaseFilePath)
 
@@ -323,6 +369,13 @@ export default class ConversationService {
     return conversation
   }
 
+  /**
+   * Retrieves metadata for one conversation without loading its messages.
+   *
+   * @param options - UUIDv7 identifying the conversation to read.
+   * @returns The validated metadata, or `undefined` when no row has that ID.
+   * @throws If the returned row violates the metadata schema or SQLite access fails.
+   */
   public getConversationMetadata({
     id
   }: GetConversationMetadataOptions): ConversationMetadata | undefined {
@@ -337,8 +390,12 @@ export default class ConversationService {
   /**
    * Creates and persists a user message in an existing conversation.
    *
-   * The database trigger automatically updates the conversation's updatedAt.
+   * The synchronous SQLite INSERT trigger automatically updates the parent
+   * conversation's updatedAt to the new user message's createdAt before the
+   * method returns.
    *
+   * @param options - Conversation ID and non-empty authored message content.
+   * @returns The validated user message written to SQLite.
    * @throws If validation fails, the conversation does not exist, or SQLite
    * persistence fails.
    */
@@ -363,6 +420,16 @@ export default class ConversationService {
     return userMessage
   }
 
+  /**
+   * Creates and persists an assistant message with its initial lifecycle state.
+   *
+   * The synchronous SQLite INSERT trigger updates the parent conversation's
+   * updatedAt to the assistant message's createdAt before this method returns.
+   *
+   * @param options - Conversation, content, model, status, and optional finish reason for the message.
+   * @returns The validated assistant message written to SQLite.
+   * @throws If validation fails, the conversation does not exist, or SQLite persistence fails.
+   */
   public addAssistantMessageToConversation({
     conversationId,
     assistantMessageContent,
@@ -396,6 +463,15 @@ export default class ConversationService {
     return assistantMessage
   }
 
+  /**
+   * Updates selected lifecycle fields of one assistant message atomically.
+   *
+   * When a field is changed, the synchronous SQLite UPDATE trigger advances the
+   * parent conversation's updatedAt before this method returns.
+   *
+   * @param options - Message ID and optional status or finish-reason changes; omitted fields remain unchanged and `null` clears a finish reason.
+   * @throws If no assistant row matches the ID or SQLite persistence fails.
+   */
   public updateAssistantMessageState({
     assistantMessageId,
     status,
@@ -422,6 +498,15 @@ export default class ConversationService {
     }
   }
 
+  /**
+   * Replaces a conversation title after trimming and rejecting empty content.
+   *
+   * The synchronous SQLite UPDATE trigger may advance the conversation's
+   * updatedAt before this method returns.
+   *
+   * @param options - Conversation ID and candidate title supplied by the caller.
+   * @throws If the normalized title is empty, no conversation matches the ID, or SQLite persistence fails.
+   */
   public updateConversationTitle({
     conversationId,
     conversationTitle
@@ -443,11 +528,12 @@ export default class ConversationService {
   }
 
   /**
-   * Lists conversation metadata using unfiltered keyset pagination.
+   * Lists conversation metadata using unfiltered keyset pagination; the
+   * normalized query is retained only as a cursor binding.
    *
-   * @param options - Optional query, opaque cursor, and result limit.
-   * @returns Matching metadata, the total match count, and pagination state.
-   * @throws If the limit or cursor is invalid, or SQLite access fails.
+   * @param options - Optional cursor-bound query value, opaque cursor, and result limit.
+   * @returns Metadata rows in descending updated-time/ID order, the total stored-row count, and pagination state.
+   * @throws If the limit or cursor is invalid, count or row data fail repository-schema validation, or SQLite access fails.
    */
   public listConversationMetadata(
     options: ListConversationMetadataOptions = {}
@@ -477,6 +563,11 @@ export default class ConversationService {
     return { conversations, total, nextCursor, hasNextPage }
   }
 
+  /**
+   * Closes the owned SQLite connection and all prepared statements.
+   *
+   * @remarks Disposal is synchronous and must occur after the application stops using this service.
+   */
   public [Symbol.dispose](): void {
     this.#database.close()
   }

@@ -1,10 +1,17 @@
 import { cn } from "@/lib/utils"
 
-/*
- * A single sheen of the brand violet sweeps across each bar instead of the
- * generic opacity pulse. Set --skeleton-delay on a group's container to
- * stagger its bars; the property inherits, so it is declared once per group.
- * Silhouette stays with the caller, whose classes take precedence below.
+/**
+ * Renders a non-semantic loading placeholder over a native `div`.
+ *
+ * @remarks Primary category: UI primitive adapter. Native `div` props and
+ * children are forwarded and marked with `data-slot="skeleton"`; the caller
+ * supplies the silhouette through `className`. The sweep honors
+ * `--skeleton-delay` inherited from a group and disables animation under
+ * `prefers-reduced-motion`; a supplied `ref` targets the native
+ * `HTMLDivElement`. The adapter owns no state, portal, focus, or failure
+ * handling.
+ * @param props - Native placeholder props, children, and optional styling.
+ * @returns The styled loading placeholder.
  */
 function Skeleton({ className, ...props }: React.ComponentProps<"div">) {
   return (

@@ -37,7 +37,12 @@ export type ConversationTranscriptProps =
  *
  * @remarks Primary category: presentational. The explicit variant permits an
  * interruption action only when one streaming assistant follows the completed
- * prefix. The parent owns messages, lifecycle state, and interruption.
+ * prefix. The parent owns messages, lifecycle state, and interruption. Entries
+ * in the completed prefix are keyed by immutable message identifier; the
+ * streaming tail is rendered as the single explicit variant member. Its Stop
+ * callback and polite Stopped/Failed status semantics are forwarded through
+ * {@link StreamingChatMessage}. A lifecycle error is announced after the
+ * transcript when supplied.
  * @param props - Completed-only or streaming-tail transcript presentation.
  * @returns The rendered transcript list and optional lifecycle error.
  */

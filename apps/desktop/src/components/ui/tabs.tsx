@@ -3,6 +3,20 @@ import { cva, type VariantProps } from "class-variance-authority"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * Provides the root context for a composed tab set.
+ *
+ * @remarks Primary category: UI primitive adapter. Base UI tab-root props and
+ * children are forwarded; `orientation` defaults to `horizontal` and is
+ * mirrored in `data-orientation` for repository layout styling. A controlled
+ * `value` is parent-owned, while `defaultValue` is primitive-owned after
+ * initialization; Base UI coordinates tab/panel relationships, focus,
+ * keyboard navigation, and state attributes. A supplied `ref` targets the
+ * root's `HTMLDivElement` host; this adapter owns no portal, callbacks, or
+ * failure handling.
+ * @param props - Base UI tab-root props, children, and optional orientation.
+ * @returns The tab root context provider.
+ */
 function Tabs({
   className,
   orientation = "horizontal",
@@ -22,6 +36,15 @@ function Tabs({
   )
 }
 
+/**
+ * Supplies the maintained list variants used by {@link TabsList}.
+ *
+ * @remarks Primary category: UI primitive adapter. `default` uses a muted
+ * surface and `line` uses a transparent list with a gap; `default` is the
+ * fallback. Selected-value authority remains the tabs root's
+ * controlled/uncontrolled contract, while Base UI coordinates tab interaction
+ * and keyboard behavior.
+ */
 const tabsListVariants = cva(
   "group/tabs-list inline-flex w-fit items-center justify-center rounded-[var(--radius-surface)] p-[3px] text-[var(--app-text-muted)] group-data-horizontal/tabs:h-8 group-data-vertical/tabs:h-fit group-data-vertical/tabs:flex-col data-[variant=line]:rounded-none",
   {
@@ -37,6 +60,20 @@ const tabsListVariants = cva(
   }
 )
 
+/**
+ * Renders the list container for a {@link Tabs} family.
+ *
+ * @remarks Primary category: UI primitive adapter. Base UI list props and tab
+ * trigger children are forwarded. `variant` selects `default` or `line`
+ * styling and defaults to `default`; it is exposed as `data-variant`. A
+ * {@link Tabs} root is required and its missing-context error propagates from
+ * Base UI. The surrounding root owns tab registration, while the parent or
+ * primitive owns selected value as described by the root. A supplied `ref`
+ * targets the list's `HTMLDivElement` host; this adapter owns no portal or
+ * failure handling.
+ * @param props - Base UI list props, tab triggers, and optional variant.
+ * @returns The styled tab list.
+ */
 function TabsList({
   className,
   variant = "default",
@@ -52,6 +89,20 @@ function TabsList({
   )
 }
 
+/**
+ * Renders one selectable tab trigger in a {@link TabsList}.
+ *
+ * @remarks Primary category: UI primitive adapter. Base UI tab props, children,
+ * value, and callbacks are forwarded; the parent or primitive owns selected
+ * state through the root's controlled/uncontrolled value contract. Base UI
+ * coordinates tab/panel association, focus, keyboard navigation, disabled
+ * behavior, and active state attributes. A {@link Tabs} root and
+ * {@link TabsList} are required; missing context errors propagate from Base UI.
+ * A supplied `ref` targets the trigger's `HTMLElement` host; this adapter owns
+ * no portal or failure handling.
+ * @param props - Base UI tab props, value, children, and callbacks.
+ * @returns The styled tab trigger.
+ */
 function TabsTrigger({ className, ...props }: TabsPrimitive.Tab.Props) {
   return (
     <TabsPrimitive.Tab
@@ -75,6 +126,20 @@ function TabsTrigger({ className, ...props }: TabsPrimitive.Tab.Props) {
   )
 }
 
+/**
+ * Renders one panel associated with a {@link TabsTrigger}.
+ *
+ * @remarks Primary category: UI primitive adapter. Base UI panel props,
+ * children, and `value` are forwarded; a {@link Tabs} root is required and its
+ * missing-context error propagates from Base UI. The parent or primitive owns
+ * selected value through the root's controlled/uncontrolled contract, while
+ * Base UI coordinates the value relationship, visibility, focus behavior, and
+ * associated state attributes. A supplied `ref` targets the panel's
+ * `HTMLDivElement` host; this adapter owns no portal, callbacks, or failure
+ * handling.
+ * @param props - Base UI panel props, value, and panel children.
+ * @returns The styled tab panel.
+ */
 function TabsContent({ className, ...props }: TabsPrimitive.Panel.Props) {
   return (
     <TabsPrimitive.Panel

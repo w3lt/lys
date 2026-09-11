@@ -48,7 +48,15 @@ export type CompletedConversationMessage =
 export type ReadonlyConversationMessage =
   CompletedConversationMessage | StreamingConversationAssistantMessage
 
-/** Transitively immutable conversation published by the chat-view store. */
+/**
+ * Transitively immutable conversation published by the chat-view store.
+ *
+ * @remarks Every transition returns a new frozen outer conversation. A
+ * metadata-only transition may reuse the existing immutable message collection
+ * by identity; content or lifecycle transitions create a new frozen collection
+ * and replace only the affected message. Consumers may retain snapshots
+ * safely; no transition mutates a previous conversation or message object.
+ */
 export type ChatViewConversation = Readonly<
   Omit<Conversation, "messages"> & {
     /** Immutable ordered transcript owned by this conversation. */
@@ -206,8 +214,10 @@ export function isCompletedConversationMessage(
  * Combines backend metadata and messages with matching local history.
  *
  * @param options - Metadata, prior state, and the new backend-owned turn.
- * @returns A conversation containing matching history followed by the user and
- * assistant messages received from the backend.
+ * @returns A frozen conversation containing matching history followed by the
+ * user and assistant messages received from the backend.
+ * @remarks History is preserved only when the metadata identifier matches the
+ * prior conversation. A new identifier intentionally starts a fresh transcript.
  */
 export function startConversationTurn(
   options: StartConversationTurnOptions
@@ -234,8 +244,10 @@ export function startConversationTurn(
  * Replaces conversation metadata title without changing transcript messages.
  *
  * @param conversation - Conversation whose title is being updated.
- * @param title - Non-empty title emitted by the chat stream.
+ * @param title - Protocol-validated non-empty title emitted by the chat stream.
  * @returns A new conversation with the supplied title.
+ * @remarks The helper trusts the validated stream contract and changes only
+ * outer metadata; the ordered immutable message snapshot is reused by identity.
  */
 export function updateConversationTitle(
   conversation: ChatViewConversation,
@@ -248,9 +260,12 @@ export function updateConversationTitle(
  * Appends one delta to the assistant message owned by the active request.
  *
  * @param conversation - Conversation containing the active assistant message.
- * @param options - Assistant identifier, content, and update timestamp.
+ * @param options - Assistant identifier, protocol-validated delta content, and
+ * update timestamp.
  * @returns A new conversation containing the appended assistant content.
  * @throws If the owned assistant message is absent or already terminal.
+ * @remarks Only a streaming assistant accepts deltas. The prior conversation
+ * remains unchanged and the message's content is appended in event order.
  */
 export function updateAssistantReplyContent(
   conversation: ChatViewConversation,
@@ -295,6 +310,8 @@ export function updateAssistantReplyContent(
  * @param assistantMessage - Active assistant accepting reply deltas.
  * @param options - Exact terminal lifecycle transition to publish.
  * @returns A frozen assistant in the requested valid terminal state.
+ * @remarks The transition preserves the streaming message identity and
+ * content while replacing status, finish reason, and update timestamp.
  */
 function createTerminalConversationAssistantMessage(
   assistantMessage: StreamingConversationAssistantMessage,
@@ -324,6 +341,8 @@ function createTerminalConversationAssistantMessage(
  * @param options - Assistant identifier and terminal outcome.
  * @returns A new conversation containing the terminal assistant message.
  * @throws If the owned assistant message is absent or already terminal.
+ * @remarks Terminal state is one-way: completed, interrupted, and failed
+ * assistants cannot receive later deltas or another terminal transition.
  */
 export function updateAssistantReplyStatus(
   conversation: ChatViewConversation,

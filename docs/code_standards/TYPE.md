@@ -368,6 +368,10 @@ type Conversation = z.infer<typeof conversationSchema>
 
 If the domain type is authoritative, the boundary mapper or schema MUST have tests proving it accepts every valid domain representation and rejects incompatible representations.
 
+In `packages/protocol/src/apis/`, primary payload contracts such as request bodies, path or query parameters, individual responses, and stream events MUST use Zod schemas, with their payload types inferred from those schemas. Types imported from outside this directory may be used directly.
+
+Endpoint descriptors, status-to-schema maps, reply maps, and framework route wrappers MAY use ordinary objects and TypeScript types that compose the primary contracts. They do not require Zod schemas solely for type derivation. Avoid handwritten mirrors of an inferable schema-map or descriptor shape. Use `z.infer`, `z.input`, or `z.output` only with an actual Zod schema, never with a plain descriptor or schema map.
+
 ### TYPE-010 — Mutability must be represented by the type
 
 A type MUST expose whether callers may mutate the value.
@@ -604,6 +608,8 @@ Exported functions, methods, fields, constants, and boundaries MUST use explicit
 
 Local values MAY use inference when the inferred type is precise and immediately visible.
 
+API payload schemas, descriptors, and schema maps MAY retain precise inference under `TYPE-009` without handwritten annotations that duplicate their declarations.
+
 ```ts
 // Noncompliant public contract
 export const findConversation = async (id: ConversationId) =>
@@ -662,7 +668,7 @@ Compiler and lint suppressions MUST follow the same proof requirement and remain
 
 ### TYPE-021 — Refinements must prove their claim
 
-A type guard, refinement, or narrowing function MUST verify every runtime property required by the refined type.
+A type guard, refinement, or narrowing function MUST verify that the original input has every runtime property required by the refined type.
 
 ```ts
 // Noncompliant: checks only one property.
@@ -670,13 +676,13 @@ function isConversation(value: unknown): value is Conversation {
   return typeof value === "object" && value !== null && "id" in value
 }
 
-// Compliant
-function isConversation(value: unknown): value is Conversation {
-  return conversationSchema.safeParse(value).success
+// Compliant: return the validated and normalized output.
+function parseConversation(value: unknown): Conversation {
+  return conversationSchema.parse(value)
 }
 ```
 
-A Boolean type guard is appropriate when callers need only pass/fail information. Use a parser when callers require normalized output or actionable validation errors.
+A Boolean type guard is appropriate only when its checks prove the original input already satisfies the refined type. When validation supplies defaults, coerces, transforms, or normalizes data, callers MUST use the parsed output; successful parsing alone MUST NOT narrow the original input. Use a parser when callers require that output or actionable validation errors.
 
 ### TYPE-022 — Recursive types require a termination contract
 

@@ -3,6 +3,18 @@ import { Input as InputPrimitive } from "@base-ui/react/input"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * Renders a styled Base UI text input over the native `input` host.
+ *
+ * @remarks Primary category: UI primitive adapter. Native input props,
+ * `type`, value state, and event handlers are forwarded to Base UI, which
+ * preserves native focus, keyboard, disabled, read-only, and validation
+ * semantics. A supplied `ref` targets the Base UI input's `HTMLElement` host.
+ * The adapter adds `data-slot="input"` and owns no state, portal, or failure
+ * handling.
+ * @param props - Native input props and optional input type.
+ * @returns The styled Base UI input host.
+ */
 function Input({ className, type, ...props }: React.ComponentProps<"input">) {
   return (
     <InputPrimitive

@@ -10,7 +10,11 @@ export type ChatLifecycleErrorProps = {
 /**
  * Renders a polite inline chat lifecycle outcome.
  *
- * @param props - Lifecycle message to present without alert semantics.
+ * @remarks Primary category: presentational. The parent owns the error
+ * message and decides when it is present; this component owns no state,
+ * effects, refs, retry behavior, or application capability. The status alert
+ * is announced politely and does not interrupt the transcript's focus.
+ * @param props - Lifecycle message to present with status semantics.
  * @returns The rendered inline status.
  */
 export default function ChatLifecycleError({

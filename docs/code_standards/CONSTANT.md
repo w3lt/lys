@@ -4,7 +4,7 @@ This item standard is governed by the shared [Code Construction Rules](../CODE_S
 
 ## Definition
 
-A constant is a named binding that is not reassigned after initialization.
+A constant is a named binding declared with the language's immutable binding syntax and not reassigned after initialization.
 
 There are two forms:
 
@@ -17,7 +17,7 @@ A constant binding does not automatically make the referenced object deeply immu
 
 Before creating a constant:
 
-1. Confirm the binding never needs reassignment.
+1. Confirm that no actual operation requires mutable binding syntax in the language.
 2. Decide whether it belongs to one local operation or is a shared domain value.
 3. Place it in the narrowest scope containing every consumer.
 4. Initialize it with one valid, final value.
@@ -32,7 +32,9 @@ Before creating a constant:
 
 ### CONST-001 — Immutable binding by default
 
-A binding that is not reassigned MUST be declared immutable using the language's applicable construct.
+A binding MUST use immutable declaration syntax unless an actual reassignment, in-place mutation, or mutable borrow requires mutable binding syntax in that language.
+
+Binding immutability does not imply value immutability. TypeScript permits array mutation through a `const` binding. Rust requires `let mut` to call `Vec::push` on an owned vector even when that binding is never reassigned.
 
 TypeScript:
 
@@ -401,7 +403,7 @@ const firstMessage = messages[0]
 
 A constant is compliant only when every applicable answer is “yes”:
 
-- [ ] Is the binding never reassigned?
+- [ ] Is the binding never reassigned, and do its actual operations permit immutable binding syntax in this language?
 - [ ] Is it declared in the innermost scope shared by all consumers?
 - [ ] Does it name a real domain concept rather than merely alias a literal?
 - [ ] Does its name communicate meaning, boundary, and units?

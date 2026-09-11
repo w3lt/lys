@@ -9,8 +9,9 @@ declare module "fastify" {
   interface FastifyInstance {
     /** Application-scoped service for OpenAI-compatible chat completion streams. */
     chatService: ChatService
-    /** Application-scoped service for LM Studio model lifecycle operations. */
+    /** Application-scoped model inventory, lifecycle, and health capabilities. */
     llmService: LlmService
+    /** Application-scoped service for synchronous conversation persistence. */
     conversationService: ConversationService
   }
 }

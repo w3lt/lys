@@ -8,9 +8,20 @@ import { type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 import { toggleVariants } from "@/components/ui/toggle"
 
+/**
+ * Carries toggle-group styling and layout values to descendant items.
+ *
+ * @remarks Primary category: UI primitive adapter. The context is local to
+ * this adapter family. Its defaults are `variant="default"`, `size="default"`,
+ * `spacing=2`, and `orientation="horizontal"`; {@link ToggleGroup} replaces
+ * them for its descendants. It does not own selected-value state or
+ * application state.
+ */
 const ToggleGroupContext = React.createContext<
   VariantProps<typeof toggleVariants> & {
+    /** Gap between adjacent toggle items in CSS spacing units. */
     spacing?: number
+    /** Layout direction applied to the group and its item selectors. */
     orientation?: "horizontal" | "vertical"
   }
 >({
@@ -20,6 +31,22 @@ const ToggleGroupContext = React.createContext<
   orientation: "horizontal"
 })
 
+/**
+ * Renders a Base UI toggle group and provides its shared styling context.
+ *
+ * @remarks Primary category: UI primitive adapter. Base UI group props,
+ * children, selected-value state, and callbacks are forwarded. `orientation`
+ * defaults to `horizontal`, `spacing` defaults to `2`, and `variant`/`size`
+ * are passed to descendant items through a local context; the values are also
+ * exposed as data attributes. A controlled group `value` is parent-owned,
+ * while `defaultValue` is primitive-owned after initialization. Base UI
+ * coordinates group keyboard/focus behavior and value semantics. A supplied
+ * `ref` targets the root's `HTMLDivElement` host; this adapter owns only layout
+ * context and no portal or failure handling.
+ * @param props - Base UI group props, children, orientation, spacing, and
+ * optional shared toggle variants.
+ * @returns The styled toggle-group root and its context provider.
+ */
 function ToggleGroup({
   className,
   variant,
@@ -30,7 +57,9 @@ function ToggleGroup({
   ...props
 }: ToggleGroupPrimitive.Props &
   VariantProps<typeof toggleVariants> & {
+    /** Gap between adjacent toggle items in CSS spacing units. */
     spacing?: number
+    /** Layout direction forwarded to the Base UI group. */
     orientation?: "horizontal" | "vertical"
   }) {
   return (
@@ -57,6 +86,26 @@ function ToggleGroup({
   )
 }
 
+/**
+ * Renders one selectable item in a {@link ToggleGroup}.
+ *
+ * @remarks Primary category: UI primitive adapter. Base UI toggle props,
+ * children, controlled or uncontrolled pressed state, and callbacks are
+ * forwarded. Item `variant` and `size` default to `default` but are overridden
+ * by the nearest group's context when supplied; spacing and orientation are
+ * likewise inherited through the ancestor group's selectors; the item exposes
+ * `data-spacing` but does not render its own `data-orientation`. Inside a
+ * {@link ToggleGroup}, pressed state is derived from the parent's controlled
+ * group `value` or the primitive-owned group `defaultValue`; item
+ * `pressed`/`defaultPressed` do not independently own selection there. Outside
+ * a group, the item uses its own local controlled or uncontrolled pressed
+ * contract. Base UI coordinates focus, keyboard activation, disabled behavior,
+ * and `aria-pressed` state, while the surrounding group owns item registration
+ * and value semantics. A supplied `ref` targets the item's `HTMLElement` host.
+ * @param props - Base UI toggle-item props, children, callbacks, and fallback
+ * style variants.
+ * @returns The styled toggle-group item.
+ */
 function ToggleGroupItem({
   className,
   children,

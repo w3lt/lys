@@ -8,6 +8,15 @@ import reactRefresh from "eslint-plugin-react-refresh"
 import reactX from "eslint-plugin-react-x"
 import reactDom from "eslint-plugin-react-dom"
 
+/**
+ * Repository-wide ESLint flat configuration.
+ *
+ * @remarks Applies the JavaScript, TypeScript, React, and Prettier-compatible
+ * rules used by the workspace lint command. Configured global ignores cover
+ * root-level `dist`, `node_modules`, and nested `src-tauri/target` paths; this
+ * configuration affects static analysis only and has no application runtime
+ * effect.
+ */
 export default defineConfig([
   // Patterns are matched against every workspace, not only the repository
   // root, so a built application or generated type directory inside `apps/*`

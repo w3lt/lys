@@ -6,6 +6,16 @@ import { useConversationHistoryStore } from "@/lib/store/conversation-history"
 
 import "./TitleBar.scss"
 
+/**
+ * Presents the draggable application title bar and theme toggle.
+ *
+ * @remarks Primary category: composition/view. The theme hook owns persisted
+ * theme state and the toggle capability; this component owns no duplicate
+ * theme state or resource. The native drag region remains non-interactive,
+ * while the button exposes the next theme in its accessible label and invokes
+ * the theme hook transition once per click.
+ * @returns The title bar with application identity and theme control.
+ */
 export function TitleBar() {
   const { theme, toggleTheme } = useTheme()
   const nextTheme = theme === "dark" ? "light" : "dark"

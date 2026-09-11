@@ -11,12 +11,14 @@ route definitions.
 
 ## Routes
 
-| Method | Path               | Request body                                                  | Response              |
-| ------ | ------------------ | ------------------------------------------------------------- | --------------------- |
-| `GET`  | `/api/v1/heath`    | none                                                          | `{ ok: true }`        |
-| `GET`  | `/api/v1/llm/list` | none                                                          | `{ llms: LlmInfo[] }` |
-| `POST` | `/api/v1/llm/load` | `{ modelId: string }`                                         | `LlmInfo`             |
-| `POST` | `/api/v1/chat`     | `{ message: string, model: string, conversationId?: uuidv7 }` | `text/event-stream`   |
+| Method  | Path                          | Request body                                                  | Response                        |
+| ------- | ----------------------------- | ------------------------------------------------------------- | ------------------------------- |
+| `GET`   | `/api/v1/heath`               | none                                                          | `{ ok: true }`                  |
+| `GET`   | `/api/v1/llm/list`            | none                                                          | `{ llms: LlmInfo[] }`           |
+| `GET`   | `/api/v1/llm/:modelId/health` | none                                                          | Loaded-state health observation |
+| `POST`  | `/api/v1/llm/load`            | `{ modelId: string }`                                         | `LlmInfo`                       |
+| `PATCH` | `/api/v1/llm/unload`          | `{ modelId: string }`                                         | `204` or typed Problem Details  |
+| `POST`  | `/api/v1/chat`                | `{ message: string, model: string, conversationId?: uuidv7 }` | `text/event-stream`             |
 
 `/api/v1/heath` is the current spelling in both the shared protocol package and
 the Fastify route registration.
@@ -54,18 +56,121 @@ the six variants documented in [SSE events](/reference/sse-events/).
 - `maxContextLength`
 - `loaded`
 
+## Model operation admission
+
+Inventory, health, load, and unload share one service queue with one active operation and
+at most eight waiting. Accepted operations execute in arrival order. When all
+nine positions are occupied, each of these endpoints returns `503 Service
+Unavailable` with `Content-Type: application/problem+json`:
+
+```json
+{
+  "type": "urn:lys:problem:llm:service-busy",
+  "title": "LLM service busy",
+  "status": 503,
+  "detail": "The LLM service queue is full. This operation was not accepted. Try again after pending model operations finish."
+}
+```
+
+This response means the operation was never accepted and performed no runtime
+work. The caller may submit it again after capacity becomes available. The backend
+does not retry automatically or promise a retry time. A disconnected request that
+was already accepted continues to occupy capacity until its operation settles.
+
+## Model operation cancellation
+
+`POST /api/v1/llm/load` and `PATCH /api/v1/llm/unload` do not support user
+cancellation. After the backend accepts an operation, disconnecting the client
+does not cancel it. Accepted operations remain owned by the backend until success
+or failure, and shutdown waits for them before releasing runtime resources.
+
+Model health checks follow the same completion-only lifetime as inventory:
+disconnecting the client does not cancel an accepted query. The runtime's
+inventory RPC has no enforced completion deadline, so an unresponsive engine
+can keep the query and shutdown pending.
+
+Chat inference remains separately cancellable through its SSE connection. See the
+[provider cancellation policy](/architecture/providers/#cancellation-policy).
+
+## Model health responses
+
+`GET /api/v1/llm/:modelId/health` checks whether a fresh, validated loaded-model
+inventory contains the requested canonical model key. Encode the key as one
+URL segment; for example, `provider/model` becomes
+`/api/v1/llm/provider%2Fmodel/health`. The key must contain 1–100 decoded
+characters, matching the router's existing path-parameter limit.
+
+The check generates no text and never loads or unloads a model. `ready` means
+the runtime answered and reported a matching loaded instance. It does not prove
+that a subsequent inference will succeed. Results are observations of changing
+runtime state and use `Cache-Control: no-store`.
+
+Completed checks return `200 OK` with one of these JSON shapes:
+
+```json
+{
+  "modelId": "provider/model",
+  "status": "ready",
+  "latencyMs": 4
+}
+```
+
+```json
+{
+  "modelId": "provider/model",
+  "status": "not-ready",
+  "reason": "model-not-loaded",
+  "latencyMs": 4
+}
+```
+
+`model-not-loaded` covers both unknown keys and models without a loaded
+instance. `runtime-unavailable` means the inventory could not be obtained or
+validated, so loaded state could not be established. Internal failure details
+are logged and excluded from the response.
+
+`latencyMs` is a non-negative safe integer measuring the loaded-inventory query.
+It excludes time waiting in the service queue and HTTP
+transmission, and does not measure generation speed. A full queue returns the
+`503` service-busy Problem Details response documented above; it is distinct
+from an accepted check returning a negative observation.
+
+## Model unload responses
+
+The request body must contain only `modelId`, and its value must be a non-empty
+canonical model key. Invalid bodies are rejected with `400 Bad Request` before
+the backend accesses the LLM runtime.
+
+`PATCH /api/v1/llm/unload` attempts every loaded runtime instance currently
+observed with that model key. It returns `204 No Content` when a fresh
+reconciliation snapshot contains no matching instance. This is an observation
+of that snapshot, not a guarantee that another runtime client will not load a
+new matching instance afterward. Expected failures use
+`application/problem+json` with stable `type`, `title`, and `status` fields.
+Operation failures include an occurrence-specific `detail`; admission refusal
+uses the fixed four-field service-busy body shown above:
+
+| Status | Problem type                              | Meaning                                           |
+| ------ | ----------------------------------------- | ------------------------------------------------- |
+| `404`  | `urn:lys:problem:llm:model-not-found`     | No matching instance was initially loaded.        |
+| `503`  | `urn:lys:problem:llm:runtime-unavailable` | The backend cannot query the LLM runtime.         |
+| `503`  | `urn:lys:problem:llm:unload-failed`       | Reconciliation still found matching instances.    |
+| `503`  | `urn:lys:problem:llm:service-busy`        | The shared queue is full; no unload was accepted. |
+
+Operation-failure bodies may also include an `instance` identifier for one
+occurrence. The service-busy body has fixed `type`, `title`, `status`, and `detail`
+fields and does not accept an `instance` field.
+
 ## What is not part of the public API
 
 - No conversation listing or history-retrieval endpoint; the chat route can
   continue only a conversation whose identifier the caller already knows
 - No export or import endpoint
-- No typed HTTP error taxonomy beyond route-local thrown errors
 
 ## Coming soon
 
 - Public conversation query routes
 - Conversation export and import routes
-- A more explicit HTTP error contract
 
 ## Related pages
 

@@ -3,6 +3,7 @@ import type { ChatCompletionMessageParam } from "openai/resources/index.mjs"
 import * as z from "zod"
 import { titleGenerationPrompt } from "../../utils/prompts"
 import { zodTextFormat } from "openai/helpers/zod"
+import type { MessageGenerationOptions } from "@lys/protocol"
 
 /** Settings used to create an application-scoped OpenAI-compatible chat client. */
 export type ChatServiceCreationOptions = {
@@ -30,22 +31,39 @@ export type CompleteChatOptions = {
   stream?: boolean
   /** Abort signal that cancels the in-flight completion request. */
   signal?: AbortSignal
+  /** Sampling and completion-length controls forwarded to the model request. */
+  generationOptions: MessageGenerationOptions
 }
 
+/** Inputs used to generate a structured conversation title from one user message. */
 export type TitleGenerationOptions = {
+  /** User-authored message supplied as the title-generation input. */
   message: string
+  /** Identifier of the model that generates the title. */
   model: string
+  /** Optional signal that cancels the title-generation request. */
   signal?: AbortSignal
 }
 
+/** Validates the structured title returned by the model response parser. */
 const titleGenerationOutputSchema = z.object({
+  /** Generated title before the service trims and validates non-emptiness. */
   title: z.string()
 })
 
 /** Fallback credential value for unauthenticated OpenAI-compatible local endpoints. */
 const DUMMY_API_KEY = "dummy-api-key"
 
-/** Application-scoped adapter around an OpenAI-compatible chat completion endpoint. */
+/**
+ * Owns an OpenAI client that adapts chat and title generation to the backend's
+ * OpenAI-compatible local endpoint.
+ *
+ * @remarks Primary category: resource owner or boundary adapter. The instance
+ * owns its SDK client for its application lifetime; request inputs are borrowed
+ * and cancellation is owned by each caller. Concurrency model: reentrant at
+ * this service boundary; no request-local mutable state is retained and
+ * request concurrency is delegated to the SDK.
+ */
 export default class ChatService {
   /** Owned OpenAI SDK client used to create chat completions. */
   #openaiClient: OpenAI
@@ -72,18 +90,29 @@ export default class ChatService {
   public async completeChatStream({
     messages,
     model,
-    signal
+    signal,
+    generationOptions
   }: CompleteChatOptions) {
+    const { temperature, replyCeiling } = generationOptions
     return await this.#openaiClient.chat.completions.create(
       {
         messages,
         model,
-        stream: true
+        stream: true,
+        temperature,
+        max_completion_tokens: replyCeiling ?? null
       },
       { signal }
     )
   }
 
+  /**
+   * Generates and validates one non-empty title from a user message.
+   *
+   * @param options - Message, model, and optional cancellation signal for the request.
+   * @returns A promise that resolves to the trimmed generated title after structured response parsing.
+   * @throws If the request is rejected, cancelled, malformed, or produces no non-empty title.
+   */
   public async generateTitle({
     message,
     model,

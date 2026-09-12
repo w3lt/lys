@@ -160,8 +160,8 @@ export function formatModelRowTag(
  * @param model - Weights the row represents.
  * @param selectedModelKey - Persisted default model identifier, when chosen.
  * @returns The row's live condition when it has one, otherwise whether it is
- * merely the chosen default, otherwise its on-disk size. Residency reports
- * loaded weights; it does not determine which model a chat request uses.
+ * merely the chosen default, otherwise its on-disk size. The loaded runtime
+ * projection also identifies the model eligible to answer a chat request.
  */
 export function formatComposerModelRowTag(
   modelRuntime: ModelRuntimeState,

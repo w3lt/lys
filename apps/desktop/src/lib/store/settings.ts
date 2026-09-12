@@ -8,7 +8,13 @@
 export type RuntimeSettings = {
   /** Whether desktop initialization requests backend startup. */
   autoStartBackend: boolean
-  /** Default-model selection; `null` when absent. Selection does not load weights or choose the chat model. */
+  /**
+   * Preferred chat model, or `null` when absent.
+   *
+   * @remarks Selection does not load weights. The runtime projection uses this
+   * model when resident and otherwise falls back to the first loaded inventory
+   * entry.
+   */
   defaultModel: string | null
   /** Backend origin shown in runtime settings; HTTP consumers use shared protocol constants. */
   backendAddress: string

@@ -50,14 +50,14 @@ defaults:
 }
 ```
 
-| Key                        | Type                    | Meaning                                                                                     |
-| -------------------------- | ----------------------- | ------------------------------------------------------------------------------------------- |
-| `runtime.autoStartBackend` | `boolean`               | Whether desktop initialization should ask Tauri to start the backend automatically          |
-| `runtime.defaultModel`     | `string \| null`        | Model selected for the settings load controls; chat currently uses its own fixed identifier |
-| `runtime.backendAddress`   | `string`                | Backend address displayed in settings; HTTP clients still target the fixed loopback address |
-| `model.contextSize`        | unsigned 32-bit integer | Context-size estimate displayed in the Model pane; not forwarded by the load API            |
-| `generation.temperature`   | number in `[0, 1]`      | Sampling temperature sent with each new chat request                                        |
-| `generation.replyCeiling`  | unsigned 32-bit integer | Maximum reply tokens; the desktop omits the request limit when this is `0`                  |
+| Key                        | Type                    | Meaning                                                                                            |
+| -------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------- |
+| `runtime.autoStartBackend` | `boolean`               | Whether desktop initialization should ask Tauri to start the backend automatically                 |
+| `runtime.defaultModel`     | `string \| null`        | Preferred model used when it is loaded; otherwise the first loaded inventory entry is the fallback |
+| `runtime.backendAddress`   | `string`                | Backend address displayed in settings; HTTP clients still target the fixed loopback address        |
+| `model.contextSize`        | unsigned 32-bit integer | Context-size estimate displayed in the Model pane; not forwarded by the load API                   |
+| `generation.temperature`   | number in `[0, 1]`      | Sampling temperature sent with each new chat request                                               |
+| `generation.replyCeiling`  | unsigned 32-bit integer | Maximum reply tokens; the desktop omits the request limit when this is `0`                         |
 
 Missing groups or fields use the host defaults. Invalid JSON or invalid field
 values, including a temperature outside `[0, 1]`, cause loading to fail. Loading
@@ -87,17 +87,14 @@ the value is missing, invalid, or unavailable.
 
 ## Current caveats
 
-- The React shell loads runtime settings from Tauri, but edits in the Runtime
-  tab are not persisted back through `save_settings`.
-- The chat path currently uses a fixed model identifier in the chat store rather
-  than `runtime.defaultModel`.
+- The React shell loads runtime settings from Tauri, but runtime and model edits,
+  including `runtime.defaultModel`, are not persisted back through `save_settings`.
 - Model context size is controlled by LM Studio at load time; the current Lys
   load request carries only the model identifier.
 
 ## Coming soon
 
 - Persisting runtime and model edits back to `settings.json`
-- Wiring selected model into live chat requests
 - Configuring model load-time context size through the backend
 - Release-mode configuration beyond the current loopback defaults
 

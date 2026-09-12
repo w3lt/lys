@@ -145,10 +145,12 @@ policy.
 ## Limitations
 
 - There is no provider registry or adapter plugin system.
-- There is no automatic fallback between providers or models.
+- There is no retry or request-time fallback after a provider and model are
+  sampled for an admitted request.
 - There is no request budgeting, quota tracking, or provider-specific telemetry.
-- Default-model selection in settings lasts for the current session and is not
-  used by chat, which still sends a fixed model identifier.
+- Default-model selection lasts for the current session. The runtime projection
+  prefers that model when loaded and otherwise selects the first loaded inventory
+  entry; chat samples the projected model once for each admitted request.
 - Model context size is displayed as an estimate; the load endpoint does not
   accept a context-size option.
 
@@ -156,7 +158,7 @@ policy.
 
 - Additional runtime implementations
 - Fallback and retry policy across model runtimes
-- Persistent model selection shared between settings and chat
+- Persistent default-model selection across application relaunches
 - Provider-specific configuration and health reporting
 
 ## Related pages

@@ -17,19 +17,31 @@ Current troubleshooting guidance grounded in the checked-in codebase.
 
 ## The desktop shows the backend as stopped
 
-The desktop runtime pane is the current control surface for backend lifecycle.
-If it reports the backend as stopped, start there first:
+The desktop runtime pane controls the backend child owned by Tauri. It does not
+discover a backend launched separately in a terminal. Choose one launch path
+before starting another process on the same port.
+
+For the desktop-managed path:
 
 - confirm the runtime pane reports `stopped` rather than `starting`
 - start the backend from that pane
-- if startup succeeds, the pane should switch to `running` and show uptime for
-  `127.0.0.1:12345`
+- the pane switches to `running` when the owned child is reported running;
+  uptime and the displayed address do not prove HTTP readiness
+- verify `GET /api/v1/heath` responds at `http://127.0.0.1:12345`
+
+If the listener is unavailable, inspect the backend output. Startup requires
+LM Studio at `127.0.0.1:1234`; its readiness query completes before the backend
+listens. Start LM Studio and restart the backend after a readiness failure.
+For standalone startup, also ensure `~/.lys/` exists as described in
+[Running Lys locally](/develop/running/).
 
 ## The backend starts but model operations fail
 
 The backend is wired to LM Studio at `127.0.0.1:1234`. If model listing,
-loading, or chat requests fail while the backend itself is up, verify that LM
-Studio is running and reachable at that address.
+loading, or chat requests fail after HTTP readiness was established, verify
+that LM Studio is still reachable. The
+[model health endpoint](/operate/logging/#model-health-observation) can report
+loaded state; it does not test inference success.
 
 ## Lys forgets runtime settings
 
@@ -43,6 +55,10 @@ setting edits. If runtime preferences do not survive a restart:
   loaded
 - if the file exists but does not reflect a recent UI change, that matches the
   current implementation gap: save wiring exists in Tauri, but not in the UI
+
+This limitation applies to runtime and model controls. Generation controls
+autosave separately and expose a save failure with a retry action; a generation
+save preserves the runtime and model values already on disk.
 
 ## Startup fails after a schema change
 

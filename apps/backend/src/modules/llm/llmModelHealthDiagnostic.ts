@@ -31,7 +31,7 @@ export interface LlmModelHealthDiagnostic {
 /**
  * Owns one opaque failure reference for controlled diagnostic reporting.
  *
- * @remarks Primary category: invariant owner. The retained evidence is never
+ * @remarks The retained evidence is never
  * exposed as passive data and can only be observed through the synchronous
  * reporting capability. Instances are immutable after construction.
  * Concurrency model: reentrant; reporting performs no state transition, and

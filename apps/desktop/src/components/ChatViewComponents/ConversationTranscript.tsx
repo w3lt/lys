@@ -35,7 +35,7 @@ export type ConversationTranscriptProps =
 /**
  * Renders the chat transcript and its latest lifecycle error.
  *
- * @remarks Primary category: presentational. The explicit variant permits an
+ * @remarks The explicit variant permits an
  * interruption action only when one streaming assistant follows the completed
  * prefix. The parent owns messages, lifecycle state, and interruption. Entries
  * in the completed prefix are keyed by immutable message identifier; the

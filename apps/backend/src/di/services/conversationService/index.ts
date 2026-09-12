@@ -207,7 +207,7 @@ function migrateDatabase(database: DatabaseSync): void {
  * Owns one synchronous SQLite connection and prepared statements for persisted
  * conversation metadata and messages.
  *
- * @remarks Primary category: resource owner or boundary adapter. The instance
+ * @remarks The instance
  * owns its database connection and statements until synchronous disposal; the
  * database path is borrowed only during construction. Concurrency model:
  * single-owner and synchronous—each operation completes before the next

@@ -11,7 +11,7 @@ type ErrorMessageProps = {
 /**
  * Presents a legacy error record with an intentionally inactive retry affordance.
  *
- * @remarks Primary category: presentational. The parent owns the error record;
+ * @remarks The parent owns the error record;
  * this component owns no state or side effects. The alert is
  * announced politely. The visible Retry button currently has no callback, so
  * it does not retry or alter state; that limitation is retained because this

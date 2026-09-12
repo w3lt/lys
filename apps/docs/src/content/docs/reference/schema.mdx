@@ -7,7 +7,7 @@ sidebar:
 ---
 
 The backend currently manages one SQLite schema and the Tauri host manages one
-small JSON schema for runtime settings.
+JSON schema for runtime, model, and generation settings.
 
 ## SQLite tables
 
@@ -61,24 +61,18 @@ back to that row.
 The backend applies schema changes from an ordered array of SQL strings and
 tracks the applied version with `PRAGMA user_version`.
 
-## Runtime settings JSON
+## Settings JSON
 
-The Tauri host also reads and writes:
-
-```json
-{
-  "runtime": {
-    "autoStartBackend": false,
-    "selectedModel": null
-  }
-}
-```
+The Tauri host stores `runtime`, `model`, and `generation` groups in
+`~/.lys/settings.json`. See the [configuration reference](/reference/configuration/#persisted-settings-json)
+for the current fields, defaults, and validation. Generation edits are saved
+automatically; runtime and model edits in the desktop remain session-only.
 
 ## Coming soon
 
 - Public schema contracts for conversation listing and resume routes
 - Export and import formats for persisted conversations
-- Additional persisted settings beyond the current runtime file
+- Persisted conversation settings beyond the current runtime, model, and generation groups
 
 ## Related pages
 

@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils"
 /**
  * Renders a progress root with the maintained track and indicator parts.
  *
- * @remarks Primary category: UI primitive adapter. Base UI progress-root props,
+ * @remarks Base UI progress-root props,
  * children, and required `value` are forwarded; the parent owns that value
  * (including `null` for indeterminate progress), while Base UI coordinates
  * progress accessibility semantics and state attributes. This wrapper always
@@ -39,7 +39,7 @@ function Progress({
 /**
  * Renders the visual track for a {@link Progress} root.
  *
- * @remarks Primary category: UI primitive adapter. Base UI track props and
+ * @remarks Base UI track props and
  * children are forwarded and marked with `data-slot="progress-track"`; a
  * {@link Progress} root is required and its missing-context error propagates
  * from Base UI. A supplied `ref` targets the track's `HTMLDivElement` host.
@@ -64,7 +64,7 @@ function ProgressTrack({ className, ...props }: ProgressPrimitive.Track.Props) {
 /**
  * Renders the value indicator inside a {@link ProgressTrack}.
  *
- * @remarks Primary category: UI primitive adapter. Base UI indicator props and
+ * @remarks Base UI indicator props and
  * children are forwarded and marked with `data-slot="progress-indicator"`;
  * the parent-owned root value determines its extent. A {@link Progress} root
  * is required and its missing-context error propagates from Base UI. A supplied
@@ -92,7 +92,7 @@ function ProgressIndicator({
 /**
  * Renders an accessible label associated with a {@link Progress} root.
  *
- * @remarks Primary category: UI primitive adapter. Base UI label props and
+ * @remarks Base UI label props and
  * children are forwarded and marked with `data-slot="progress-label"`; a
  * {@link Progress} root is required and its missing-context error propagates
  * from Base UI, which owns the relationship to its root. A supplied `ref`
@@ -114,7 +114,7 @@ function ProgressLabel({ className, ...props }: ProgressPrimitive.Label.Props) {
 /**
  * Renders the formatted value text for a {@link Progress} root.
  *
- * @remarks Primary category: UI primitive adapter. Base UI value props and
+ * @remarks Base UI value props and
  * value props are forwarded and the host is marked with
  * `data-slot="progress-value"`; a {@link Progress} root is required and its
  * missing-context error propagates from Base UI, which derives or formats the

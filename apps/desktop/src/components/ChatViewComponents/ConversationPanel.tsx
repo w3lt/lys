@@ -39,7 +39,7 @@ export type ConversationPanelProps =
 /**
  * Presents the conversation transcript and its navigation affordances.
  *
- * @remarks Primary category: presentational. The parent owns conversation
+ * @remarks The parent owns conversation
  * state, transcript position, scrolling, submission, and interruption. The
  * Stop action exists only in the streaming-tail contract. Starter clicks call
  * `onSendMessage` once and intentionally discard its settlement because the

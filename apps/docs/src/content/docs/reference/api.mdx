@@ -11,14 +11,14 @@ route definitions.
 
 ## Routes
 
-| Method  | Path                          | Request body                                                  | Response                        |
-| ------- | ----------------------------- | ------------------------------------------------------------- | ------------------------------- |
-| `GET`   | `/api/v1/heath`               | none                                                          | `{ ok: true }`                  |
-| `GET`   | `/api/v1/llm/list`            | none                                                          | `{ llms: LlmInfo[] }`           |
-| `GET`   | `/api/v1/llm/:modelId/health` | none                                                          | Loaded-state health observation |
-| `POST`  | `/api/v1/llm/load`            | `{ modelId: string }`                                         | `LlmInfo`                       |
-| `PATCH` | `/api/v1/llm/unload`          | `{ modelId: string }`                                         | `204` or typed Problem Details  |
-| `POST`  | `/api/v1/chat`                | `{ message: string, model: string, conversationId?: uuidv7 }` | `text/event-stream`             |
+| Method  | Path                          | Request body                                                                | Response                        |
+| ------- | ----------------------------- | --------------------------------------------------------------------------- | ------------------------------- |
+| `GET`   | `/api/v1/heath`               | none                                                                        | `{ ok: true }`                  |
+| `GET`   | `/api/v1/llm/list`            | none                                                                        | `{ llms: LlmInfo[] }`           |
+| `GET`   | `/api/v1/llm/:modelId/health` | none                                                                        | Loaded-state health observation |
+| `POST`  | `/api/v1/llm/load`            | `{ modelId: string }`                                                       | `LlmInfo`                       |
+| `PATCH` | `/api/v1/llm/unload`          | `{ modelId: string }`                                                       | `204` or typed Problem Details  |
+| `POST`  | `/api/v1/chat`                | `message`, `model`, required `generationOptions`, optional `conversationId` | `text/event-stream`             |
 
 `/api/v1/heath` is the current spelling in both the shared protocol package and
 the Fastify route registration.
@@ -29,12 +29,36 @@ the Fastify route registration.
 {
   "message": "Tell me what changed",
   "model": "google/gemma-4-12b-qat",
+  "generationOptions": {
+    "temperature": 0.7,
+    "replyCeiling": 2048
+  },
   "conversationId": "0198f5a5-7b9b-7e0b-9b0f-87d9d6a5f72d"
 }
 ```
 
 `conversationId` is optional. Omitting it asks the backend to create a new
 conversation before sending the first stream event.
+
+`message` and `model` must be non-empty strings. A supplied `conversationId`
+must be a UUIDv7 identifying an existing conversation; an unknown identifier
+returns `404`. Continuing a conversation appends stored messages, but inference
+receives only the default system prompt and the current user message, without
+the earlier transcript or the stored conversation-specific system prompt.
+
+`generationOptions` is required and has no protocol-level default:
+
+| Field          | Accepted value                                  | Effect                                                                  |
+| -------------- | ----------------------------------------------- | ----------------------------------------------------------------------- |
+| `temperature`  | Required number from `0` through `1`, inclusive | Forwarded as the completion sampling temperature.                       |
+| `replyCeiling` | Optional non-negative integer, in tokens        | Forwarded as `max_completion_tokens`; omission becomes `null` upstream. |
+
+Both numeric fields use number coercion before validation. The request and
+generation-options objects reject unknown fields. Missing required options or
+invalid values are rejected with `400` before generation. The desktop translates
+a saved zero reply ceiling into omission; API callers should omit the field for
+that behavior, since an explicit API value of `0` is forwarded unchanged. These
+controls affect chat completion; title generation uses a separate request.
 
 ## Chat response shape
 

@@ -10,8 +10,6 @@ import type { LlmRuntimeLifecycle } from "./llmRuntimeLifecycle"
  * begins rejects with `The LLM runtime is closed.` The owning service retains
  * accepted completion-only operations and disposes the runtime after they settle.
  *
- * This seven-member composition is an approved narrow exception to IFACE-006
- * and IFACE-026 because separating engine operations from lifecycle observation
- * preserves consumer segregation while one runtime owner requires both capabilities.
+ * The service consumes only engine operations and disposal.
  */
 export interface LlmRuntime extends LlmEngine, LlmRuntimeLifecycle {}

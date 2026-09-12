@@ -24,7 +24,7 @@ export type SettingsViewLeftBarProps = {
 /**
  * Presents the settings navigation rail and the runtime status line.
  *
- * @remarks Primary category: presentational. The parent owns the entries, which
+ * @remarks The parent owns the entries, which
  * pane is being read, and the status summary; selection state and keyboard
  * navigation belong to the surrounding tabs adapter, so this component owns no
  * state, effects, or callbacks. A pane being read shows a breathing marker

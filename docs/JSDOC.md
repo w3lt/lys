@@ -18,7 +18,7 @@ Document all of the following:
 - Named local helpers when their contract, side effects, lifecycle, error behavior, or cancellation behavior is not fully apparent from their name and type.
 - Allowed overloads and externally required declaration merging or module augmentation isolated at an adapter boundary.
 
-Component documentation MUST identify the primary category selected under `COMP-006` and cover every applicable component contract concern required by `COMP-018`. The [Component standard](./code_standards/COMPONENT.md) owns that semantic contract; this document owns JSDoc syntax, tags, and declaration coverage.
+Component declaration documentation MUST cover every applicable component contract concern required by `COMP-018`. The primary category selected under `COMP-006` belongs in supporting engineering documentation rather than the declaration comment. The [Component standard](./code_standards/COMPONENT.md) owns that semantic contract; this document owns JSDoc syntax, tags, and declaration coverage.
 
 ## Exceptions
 
@@ -58,18 +58,20 @@ Do not use `@type`, `@private`, or `@async` when TypeScript syntax already expre
 ## Examples
 
 ```ts
-/** Runtime network locations used by the backend and its LM Studio client. */
-export type BackendConfig = {
-  /** Interface on which the Fastify server accepts connections. */
-  backendHost: string
+/** Network interface accepted by an HTTP listener. */
+export type HttpListenerConfig = {
+  /** Host address on which the server accepts connections. */
+  listenHost: string
 }
 ```
+
+The formatter example uses the behavioral-provider category.
 
 ```ts
 /**
  * Formats conversations as deterministic Markdown.
  *
- * @remarks Primary category: behavioral provider. Owns no mutable state or
+ * @remarks Owns no mutable state or
  * resources and preserves deterministic, input-preserving formatting.
  * Concurrency model: reentrant.
  */
@@ -88,17 +90,18 @@ class MarkdownConversationFormatter implements ConversationFormatter {
 
 ```ts
 /**
- * Registers the health endpoint on a Fastify application.
+ * Registers the readiness endpoint on a Fastify application.
  *
  * @param app - Application instance that receives the route.
  * @returns A promise that resolves after route registration completes.
  */
-export default async function registerHealthRoutes(app: FastifyInstance) {
-  app.get("/health", async () => ({ ok: true }))
+export default async function registerReadinessRoute(app: FastifyInstance) {
+  app.get("/ready", async () => ({ ready: true }))
 }
 ```
 
 In this example, `SettingsPaneTitle` is an illustrative domain type constructed only after non-empty validation.
+The settings pane uses the presentational category.
 
 ```tsx
 /** Properties accepted by {@link SettingsPane}. */
@@ -110,7 +113,7 @@ type SettingsPaneProps = {
 /**
  * Presents a titled group of application settings.
  *
- * @remarks Primary category: presentational. The parent owns `title`; the
+ * @remarks The parent owns `title`; the
  * component renders it as the visible heading at the start of the section.
  * @param props - Parent-owned title for the settings group.
  * @returns The rendered settings pane.

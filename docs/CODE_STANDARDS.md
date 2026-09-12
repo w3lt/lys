@@ -36,6 +36,8 @@ For every code change:
 
 Rules are owned by exactly one file. Item files may reference another rule by ID but MUST NOT redefine it. Language-specific examples illustrate the language-independent requirement in their containing rule.
 
+Standards MUST remain independent of concrete repository implementations. Examples may illustrate a general requirement, but mappings to actual declarations, source paths, or implementation compliance status MUST live in separate engineering documentation.
+
 ## Item standards
 
 | Item                 | Standard                                              | Rule prefix |

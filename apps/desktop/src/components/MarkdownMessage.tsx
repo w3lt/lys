@@ -49,7 +49,7 @@ function getCodeText(children: ReactNode) {
 /**
  * Presents one fenced code block with language metadata and copy interaction.
  *
- * @remarks Primary category: interactive feature. The parent/renderer owns
+ * @remarks The parent/renderer owns
  * code content; this component owns only transient copied feedback and its
  * reset timer. Clipboard failure is intentionally silent because denial by
  * the host runtime is not converted into a message. The copy button exposes
@@ -119,7 +119,7 @@ function CodeBlock({ children, className }: CodeElementProps) {
 /**
  * Adapts react-markdown `pre` nodes to the repository code-block projection.
  *
- * @remarks Primary category: framework boundary. The renderer supplies this
+ * @remarks The renderer supplies this
  * callback as a stable `pre` component; non-code children retain native
  * `<pre>` output, while a code child delegates to {@link CodeBlock}.
  * @param props - Renderer-provided pre children.
@@ -163,7 +163,7 @@ const markdownComponents: Components = {
 /**
  * Projects assistant Markdown into safe, accessible message presentation.
  *
- * @remarks Primary category: presentational. The parent owns source text and
+ * @remarks The parent owns source text and
  * streaming state; this component owns no application state or external
  * resource. Markdown links receive the configured external-navigation
  * attributes, code blocks receive the copy interaction, and the streaming

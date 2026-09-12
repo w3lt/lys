@@ -33,6 +33,15 @@ application.
 5. `createTitleGenerationTask` runs in parallel and may emit a `title` event.
 6. Errors become `error` events when the client is still connected.
 
+Each completion receives the default system prompt and the current user message.
+Continuing an existing conversation appends a turn in SQLite but does not send
+earlier messages or the stored conversation-specific system prompt to the model.
+The required `generationOptions` controls supply sampling temperature and an
+optional completion-token ceiling; the [API reference](/reference/api/#chat-request-body)
+defines their limits. Title generation uses a separate request and replaces the
+conversation title after every successful turn-title task, including existing
+conversations.
+
 The current chat task updates the stored assistant status and finish reason, but
 does not append streamed delta text to the stored assistant content. The full
 reply shown by the desktop therefore exists only in current-window state.

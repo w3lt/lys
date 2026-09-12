@@ -11,7 +11,7 @@ interface StarterViewProps {
 /**
  * Presents the empty-session starter prompts.
  *
- * @remarks Primary category: presentational. The parent owns prompt
+ * @remarks The parent owns prompt
  * submission and request lifecycle; this component owns no state, effects, or
  * resources. Each prompt is rendered as an accessible button in source order,
  * and its callback fires once from that button's click handler. Decorative

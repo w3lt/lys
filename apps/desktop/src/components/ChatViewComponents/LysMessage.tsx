@@ -29,7 +29,7 @@ export type LysMessageProps =
 /**
  * Renders one assistant message and its lifecycle controls or outcome.
  *
- * @remarks Primary category: presentational. An interruption action is shown
+ * @remarks An interruption action is shown
  * only by the streaming variant; terminal variants expose no Stop capability.
  * The streaming Stop button has `aria-label="Stop reply"` and invokes the
  * parent callback synchronously once for each button activation. Interrupted

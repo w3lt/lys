@@ -15,7 +15,7 @@ export type StreamingChatMessageProps = {
 /**
  * Presents the active assistant transcript tail with its interruption control.
  *
- * @remarks Primary category: presentational. The parent owns stream lifecycle
+ * @remarks The parent owns stream lifecycle
  * and provides the interruption action only for its active assistant message.
  * It forwards the Stop button contract from {@link LysMessage}: one
  * synchronous callback per button activation with the accessible `Stop reply`

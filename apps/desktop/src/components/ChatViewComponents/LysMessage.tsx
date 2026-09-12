@@ -1,4 +1,3 @@
-import { Button } from "@/components/ui/button"
 import { MarkdownMessage } from "@/components/MarkdownMessage"
 import type { ReactElement } from "react"
 
@@ -12,29 +11,28 @@ import SpeakerAvatar from "./SpeakerAvatar"
 /** Properties accepted by {@link LysMessage}. */
 export type LysMessageProps =
   | {
-      /** Selects one terminal assistant with no interruption capability. */
+      /** Selects one terminal assistant whose lifecycle has ended. */
       readonly kind: "terminal"
       /** Assistant message whose lifecycle has ended. */
       readonly message: TerminalConversationAssistantMessage
     }
   | {
-      /** Selects one active assistant with an interruption capability. */
+      /** Selects one assistant still accepting streamed content. */
       readonly kind: "streaming"
       /** Assistant message currently accepting streamed content. */
       readonly message: StreamingConversationAssistantMessage
-      /** Interrupts the active assistant reply. */
-      readonly onStopReply: () => void
     }
 
 /**
- * Renders one assistant message and its lifecycle controls or outcome.
+ * Renders one assistant message and its lifecycle outcome.
  *
- * @remarks An interruption action is shown
- * only by the streaming variant; terminal variants expose no Stop capability.
- * The streaming Stop button has `aria-label="Stop reply"` and invokes the
- * parent callback synchronously once for each button activation. Interrupted
- * and failed terminal messages announce polite `Stopped` and `Failed` status
- * text respectively; those statuses are output only after the corresponding
+ * @remarks The parent owns the message and
+ * its lifecycle; the variant selects only whether content is still arriving.
+ * This component exposes no interruption capability: cancellation is reachable
+ * in every active request phase, including phases with no assistant message,
+ * so the composer owns the single Stop control. Interrupted and failed
+ * terminal messages announce polite `Stopped` and `Failed` status text
+ * respectively; those statuses are output only after the corresponding
  * terminal message variant is rendered.
  * @param props - Lifecycle-refined assistant presentation to render.
  * @returns The rendered assistant transcript message.
@@ -44,21 +42,9 @@ export default function LysMessage(props: LysMessageProps): ReactElement {
 
   return (
     <article className="chat-view__message chat-view__message--lys">
-      <div className="chat-view__message-heading">
-        <div className="chat-view__speaker-identity">
-          <SpeakerAvatar speaker="lys" />
-          <p className="chat-view__speaker">lys</p>
-        </div>
-        {props.kind === "streaming" && (
-          <Button
-            aria-label="Stop reply"
-            onClick={props.onStopReply}
-            size="sm"
-            variant="ghost"
-          >
-            Stop
-          </Button>
-        )}
+      <div className="chat-view__speaker-identity">
+        <SpeakerAvatar speaker="lys" />
+        <p className="chat-view__speaker">lys</p>
       </div>
       <MarkdownMessage
         streaming={props.kind === "streaming"}

@@ -5,6 +5,50 @@
   background: var(--app-surface);
 }
 
+/* The workspace grid: transcript above, composer below. */
+.app-shell__chat > .chat-view {
+  grid-area: 1 / 1;
+}
+
+.app-shell__chat > .composer {
+  grid-area: 2 / 1;
+}
+
+/*
+ * While past conversations are open, the veil dims both the transcript and the
+ * composer beneath it. It is decorative; the panel owns dismissal.
+ */
+.chat-view__veil {
+  z-index: 4;
+  grid-area: 1 / 1 / 3 / 2;
+  background: var(--app-surface-veil);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+  animation: chat-view-veil-in var(--duration-enter) var(--ease-standard) both;
+}
+
+/* Sits in the transcript's cell, so its bottom edge meets the composer. */
+.chat-view__history-dock {
+  z-index: 5;
+  display: flex;
+  width: min(720px, calc(100% - 64px));
+  max-height: 100%;
+  min-height: 0;
+  align-self: end;
+  justify-self: center;
+  grid-area: 1 / 1;
+  padding-bottom: 12px;
+}
+
+@keyframes chat-view-veil-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 .chat-view__scroller {
   width: 100%;
   height: 100%;
@@ -51,8 +95,7 @@
 
 .chat-view__eyebrow,
 .chat-view__speaker,
-.chat-view__stopped,
-.chat-view__session-note {
+.chat-view__stopped {
   margin: 0;
   font-family: var(--font-mono);
   font-size: 11px;
@@ -86,12 +129,6 @@
   font-family: var(--font-sans);
   font-size: 14px;
   line-height: 1.5;
-}
-
-.chat-view__session-note {
-  margin-top: 16px;
-  color: var(--app-text-faint);
-  letter-spacing: 0.12em;
 }
 
 .chat-view__starters {
@@ -208,9 +245,19 @@
   box-shadow: var(--shadow-floating);
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .chat-view__veil {
+    animation: none;
+  }
+}
+
 @media (max-width: 640px) {
   .chat-view__scroller {
     padding-inline: 16px;
+  }
+
+  .chat-view__history-dock {
+    width: calc(100% - 32px);
   }
 
   .chat-view__empty {

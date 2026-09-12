@@ -1,4 +1,8 @@
 import type { BackendServerStatus } from "@/lib/store"
+import type {
+  ChatRequestState,
+  ConversationOpenState
+} from "@/lib/store/chat-view"
 import type { ModelRuntimeState } from "@/lib/store/model-runtime"
 
 /**
@@ -8,6 +12,16 @@ import type { ModelRuntimeState } from "@/lib/store/model-runtime"
  * three states are ordered: the process must be up before weights can be.
  */
 export type LocalRuntimeConnection = "ready" | "no-model" | "offline"
+
+/**
+ * Chat work that keeps the composer from sending.
+ *
+ * @remarks `awaiting-reply` lasts until the whole request settles, including a
+ * title that may arrive after the reply; `opening-conversation` lasts while a
+ * stored conversation is read to replace the shown one.
+ */
+export type ComposerActivity =
+  "idle" | "awaiting-reply" | "opening-conversation"
 
 /** Visible copy and enablement for the offline banner's recovery action. */
 export type ReconnectAction = {
@@ -89,20 +103,60 @@ export function formatReconnectAction(
 }
 
 /**
+ * Determines which chat work, if any, keeps the composer from sending.
+ *
+ * @param request - Authoritative chat request lifecycle.
+ * @param conversationOpen - Authoritative stored-conversation open lifecycle.
+ * @returns Opening while a stored conversation is read, awaiting while any
+ * request is active, and idle otherwise.
+ */
+export function calculateComposerActivity(
+  request: ChatRequestState,
+  conversationOpen: ConversationOpenState
+): ComposerActivity {
+  if (conversationOpen.status === "opening") return "opening-conversation"
+
+  return request.status === "idle" ? "idle" : "awaiting-reply"
+}
+
+/**
  * Formats the composer textarea placeholder.
  *
  * @param connection - Current local generation availability.
- * @param isReplyPending - Whether a reply is being generated.
+ * @param activity - Chat work that keeps the composer from sending.
  * @returns The placeholder shown while the field is empty.
  */
 export function formatComposerPlaceholder(
   connection: LocalRuntimeConnection,
-  isReplyPending: boolean
+  activity: ComposerActivity
 ): string {
   if (connection !== "ready") return "Waiting on LM Studio…"
-  if (isReplyPending) return "Keep typing — Send unlocks when she stops."
 
-  return "Say something to Lys"
+  switch (activity) {
+    case "idle":
+      return "Say something to Lys"
+    case "awaiting-reply":
+      return "Keep typing — Send unlocks when she stops."
+    case "opening-conversation":
+      return "Opening a past conversation…"
+  }
+}
+
+/**
+ * Formats the status shown in the composer's meta row.
+ *
+ * @param activity - Chat work that keeps the composer from sending.
+ * @returns Progress text for active work, or empty text when idle.
+ */
+export function formatComposerActivity(activity: ComposerActivity): string {
+  switch (activity) {
+    case "idle":
+      return ""
+    case "awaiting-reply":
+      return "Generating…"
+    case "opening-conversation":
+      return "Opening…"
+  }
 }
 
 /**

@@ -28,6 +28,17 @@ export type ConversationPresentation =
   CompletedConversationPresentation | StreamingConversationPresentation
 
 /**
+ * Work the conversation region is waiting on, from the reader's perspective.
+ *
+ * @remarks `generating-reply` covers waiting for and streaming a reply;
+ * `opening-conversation` covers reading a stored conversation that will
+ * replace the shown one. The two never overlap because opening invalidates
+ * any active request.
+ */
+export type ConversationActivity =
+  "idle" | "generating-reply" | "opening-conversation"
+
+/**
  * Selects and validates the completed prefix of a transcript.
  *
  * @param messages - Messages expected to contain no streaming assistant.

@@ -4,6 +4,7 @@ import type { ReactElement, RefObject } from "react"
 import { Button } from "../ui/button"
 import type {
   CompletedConversationPresentation,
+  ConversationActivity,
   StreamingConversationPresentation
 } from "./conversation-presentation"
 import ConversationTranscript from "./ConversationTranscript"
@@ -21,10 +22,27 @@ type ConversationPanelCommonProps = {
   readonly error?: string
   /** Sends an optional starter prompt and resolves after request settlement. */
   readonly onSendMessage: (message?: string) => Promise<void>
-  /** Whether reply generation remains active for live-status announcement. */
-  readonly isReplyPending: boolean
+  /** Work the region is waiting on, announced as a polite status. */
+  readonly activity: ConversationActivity
   /** Whether the transcript already displays its latest content. */
   readonly isAtBottom: boolean
+}
+
+/**
+ * Formats the polite status announced for the region's pending work.
+ *
+ * @param activity - Work the region is waiting on.
+ * @returns The announcement, or empty text when nothing is pending.
+ */
+function formatConversationActivity(activity: ConversationActivity): string {
+  switch (activity) {
+    case "idle":
+      return ""
+    case "generating-reply":
+      return "Lys is generating a reply"
+    case "opening-conversation":
+      return "Opening conversation"
+  }
 }
 
 /** Properties accepted by {@link ConversationPanel}. */
@@ -46,6 +64,8 @@ export type ConversationPanelProps =
  * store owns request failure state. The transcript host is the supplied ref
  * target and exposes native scroll semantics; the jump control appears only
  * when the parent reports that the reader is away from the latest content.
+ * A polite status announces a pending reply or conversation open, and the
+ * landmark is marked busy while its content is being replaced by an open.
  * @param props - Parent-owned presentation state and transcript controls.
  * @returns The conversation landmark with starter or transcript content.
  */
@@ -59,7 +79,7 @@ export default function ConversationPanel(
     error,
     onSendMessage,
     isAtBottom,
-    isReplyPending
+    activity
   } = props
   const isEmptyConversation =
     props.kind === "completed-only" &&
@@ -88,7 +108,11 @@ export default function ConversationPanel(
   )
 
   return (
-    <section className="chat-view" aria-label="Conversation">
+    <section
+      aria-busy={activity === "opening-conversation"}
+      aria-label="Conversation"
+      className="chat-view"
+    >
       <div
         className="chat-view__scroller"
         data-testid="transcript"
@@ -111,7 +135,7 @@ export default function ConversationPanel(
       )}
 
       <span aria-live="polite" className="sr-only" role="status">
-        {isReplyPending ? "Lys is generating a reply" : ""}
+        {formatConversationActivity(activity)}
       </span>
     </section>
   )

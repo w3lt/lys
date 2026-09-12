@@ -51,7 +51,9 @@ function isChatReplyPending(request: ChatRequestState): boolean {
  * transcript is pinned to its latest content. The component owns the
  * transcript host ref and synchronizes its scroll position only while the
  * parent says it is pinned and messages exist. It forwards starter submission
- * and stop actions to the store, and politely announces pending generation.
+ * to the store and politely announces pending generation; request
+ * cancellation is owned by the composer, which stays mounted in every request
+ * phase.
  * The initial empty conversation is a valid state and renders through the
  * starter view rather than a loading placeholder.
  * @param props - Parent-owned transcript position and its change notification.
@@ -65,7 +67,6 @@ export default function ChatView({
   const error = useChatViewStore((state) => state.error)
   const request = useChatViewStore((state) => state.request)
   const sendMessage = useChatViewStore((state) => state.sendMessage)
-  const stopStreaming = useChatViewStore((state) => state.stopStreaming)
   const messages = conversation?.messages ?? EMPTY_CONVERSATION_MESSAGES
   const presentation = createConversationPresentation(messages)
   const transcriptRef = useRef<HTMLDivElement>(null)
@@ -100,33 +101,16 @@ export default function ChatView({
 
   return (
     <main className="app-shell__chat">
-      {presentation.kind === "streaming-tail" ? (
-        <ConversationPanel
-          completedMessages={presentation.completedMessages}
-          error={error}
-          isAtBottom={atBottom}
-          isReplyPending={isReplyPending}
-          kind={presentation.kind}
-          onJumpToLatest={handleJumpToLatest}
-          onSendMessage={sendMessage}
-          onStopReply={stopStreaming}
-          onTranscriptScroll={handleTranscriptScroll}
-          streamingMessage={presentation.streamingMessage}
-          transcriptRef={transcriptRef}
-        />
-      ) : (
-        <ConversationPanel
-          completedMessages={presentation.completedMessages}
-          error={error}
-          isAtBottom={atBottom}
-          isReplyPending={isReplyPending}
-          kind={presentation.kind}
-          onJumpToLatest={handleJumpToLatest}
-          onSendMessage={sendMessage}
-          onTranscriptScroll={handleTranscriptScroll}
-          transcriptRef={transcriptRef}
-        />
-      )}
+      <ConversationPanel
+        {...presentation}
+        error={error}
+        isAtBottom={atBottom}
+        isReplyPending={isReplyPending}
+        onJumpToLatest={handleJumpToLatest}
+        onSendMessage={sendMessage}
+        onTranscriptScroll={handleTranscriptScroll}
+        transcriptRef={transcriptRef}
+      />
       <Composer />
     </main>
   )

@@ -368,10 +368,6 @@ type Conversation = z.infer<typeof conversationSchema>
 
 If the domain type is authoritative, the boundary mapper or schema MUST have tests proving it accepts every valid domain representation and rejects incompatible representations.
 
-In `packages/protocol/src/apis/`, primary payload contracts such as request bodies, path or query parameters, individual responses, and stream events MUST use Zod schemas, with their payload types inferred from those schemas. Types imported from outside this directory may be used directly.
-
-Endpoint descriptors, status-to-schema maps, reply maps, and framework route wrappers MAY use ordinary objects and TypeScript types that compose the primary contracts. They do not require Zod schemas solely for type derivation. Avoid handwritten mirrors of an inferable schema-map or descriptor shape. Use `z.infer`, `z.input`, or `z.output` only with an actual Zod schema, never with a plain descriptor or schema map.
-
 ### TYPE-010 — Mutability must be represented by the type
 
 A type MUST expose whether callers may mutate the value.

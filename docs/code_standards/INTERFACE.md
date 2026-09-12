@@ -952,6 +952,8 @@ every other row remains unchanged.
 
 ## Complete TypeScript example
 
+The formatter implementations use the behavioral-provider category.
+
 ```ts
 /** Nominal marker for validated conversation identifiers. */
 declare const CONVERSATION_ID_BRAND: unique symbol
@@ -1005,7 +1007,7 @@ interface ConversationFormatter {
  * Owns no state to format conversations as deterministic plain text without
  * changing the input.
  *
- * @remarks Primary category: behavioral provider. Concurrency model: reentrant.
+ * @remarks Concurrency model: reentrant.
  */
 class PlainTextConversationFormatter implements ConversationFormatter {
   /**
@@ -1023,7 +1025,7 @@ class PlainTextConversationFormatter implements ConversationFormatter {
  * Owns no state to format conversations as deterministic Markdown headings
  * without changing the input.
  *
- * @remarks Primary category: behavioral provider. Concurrency model: reentrant.
+ * @remarks Concurrency model: reentrant.
  */
 class MarkdownConversationFormatter implements ConversationFormatter {
   /**
@@ -1125,6 +1127,8 @@ The production consumer invokes every exposed operation. A test supplies one val
 
 ## Complete Rust example
 
+The formatter implementations use the behavioral-provider category.
+
 ```rust
 /// Identifier of one conversation in validated fixed-length canonical form.
 struct ConversationId(String);
@@ -1160,7 +1164,7 @@ trait ConversationFormatter {
 /// Owns no state to format conversations as deterministic plain text without
 /// changing the input.
 ///
-/// Primary category: behavioral provider. Concurrency model: reentrant.
+/// Concurrency model: reentrant.
 struct PlainTextConversationFormatter;
 
 impl ConversationFormatter for PlainTextConversationFormatter {
@@ -1173,7 +1177,7 @@ impl ConversationFormatter for PlainTextConversationFormatter {
 /// Owns no state to format conversations as deterministic Markdown headings
 /// without changing the input.
 ///
-/// Primary category: behavioral provider. Concurrency model: reentrant.
+/// Concurrency model: reentrant.
 struct MarkdownConversationFormatter;
 
 impl ConversationFormatter for MarkdownConversationFormatter {

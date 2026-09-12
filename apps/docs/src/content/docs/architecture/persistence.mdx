@@ -14,7 +14,7 @@ file, and one desktop theme preference.
 | Artifact              | Owner           | Location                                | Purpose                                                                        |
 | --------------------- | --------------- | --------------------------------------- | ------------------------------------------------------------------------------ |
 | Conversation database | Fastify backend | `~/.lys/lys_db.sqlite`                  | Stores conversation metadata and conversation messages.                        |
-| Settings JSON         | Tauri host      | `~/.lys/settings.json`                  | Stores backend auto-start and a nullable selected model.                       |
+| Settings JSON         | Tauri host      | `~/.lys/settings.json`                  | Stores runtime, model, and generation settings.                                |
 | Theme preference      | Desktop UI      | WebView `localStorage`, key `lys.theme` | Stores `dark` or `light`; invalid or unavailable storage falls back to `dark`. |
 
 ## SQLite ownership
@@ -47,6 +47,13 @@ triggers that keep `conversations.updated_at` current.
 The settings JSON is a separate host-managed artifact. The backend does not read
 it directly. The desktop reaches it through Tauri commands.
 
+Generation edits are saved automatically. Each save reads the document already
+on disk and replaces only its `generation` group, preserving the persisted
+runtime and model groups. Runtime edits, including auto-start and default-model
+selection, and model settings edits remain session-only in the desktop.
+See the [configuration reference](/reference/configuration/#persisted-settings-json)
+for the current shape and defaults.
+
 ## Current limitations
 
 - There is no public backend route for listing or resuming persisted
@@ -63,7 +70,7 @@ it directly. The desktop reaches it through Tauri commands.
 - Conversation list and resume APIs
 - Export and import flows for SQLite data
 - Recovery tooling surfaced in the app rather than only implied by files on disk
-- Persisted generation and conversation settings beyond the current runtime JSON
+- Persisting desktop runtime and model edits, and adding conversation settings
 
 ## Related pages
 

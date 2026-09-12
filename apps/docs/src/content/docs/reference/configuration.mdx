@@ -1,13 +1,13 @@
 ---
 title: Configuration reference
-description: The current constants, file paths, and persisted runtime settings used by the desktop and backend.
+description: The current constants, file paths, and settings used by the desktop and backend.
 docType: reference
 sidebar:
   order: 3
 ---
 
 Lys currently uses shared loopback constants, backend runtime composition, a
-small Tauri-managed settings file, and one WebView theme preference.
+Tauri-managed settings file, and one WebView theme preference.
 
 ## Shared constants
 
@@ -30,21 +30,54 @@ small Tauri-managed settings file, and one WebView theme preference.
 
 ## Persisted settings JSON
 
-The Tauri host reads and writes `~/.lys/settings.json` with this shape:
+The Tauri host reads and writes `~/.lys/settings.json`. A new file uses these
+defaults:
 
 ```json
 {
   "runtime": {
-    "autoStartBackend": false,
-    "selectedModel": null
+    "autoStartBackend": true,
+    "defaultModel": null,
+    "backendAddress": "http://127.0.0.1:12345"
+  },
+  "model": {
+    "contextSize": 32768
+  },
+  "generation": {
+    "temperature": 0.7,
+    "replyCeiling": 2048
   }
 }
 ```
 
-| Key                        | Type             | Meaning                                                                            |
-| -------------------------- | ---------------- | ---------------------------------------------------------------------------------- |
-| `runtime.autoStartBackend` | `boolean`        | Whether desktop initialization should ask Tauri to start the backend automatically |
-| `runtime.selectedModel`    | `string \| null` | Optional stored model identifier for future UI integration                         |
+| Key                        | Type                    | Meaning                                                                                     |
+| -------------------------- | ----------------------- | ------------------------------------------------------------------------------------------- |
+| `runtime.autoStartBackend` | `boolean`               | Whether desktop initialization should ask Tauri to start the backend automatically          |
+| `runtime.defaultModel`     | `string \| null`        | Model selected for the settings load controls; chat currently uses its own fixed identifier |
+| `runtime.backendAddress`   | `string`                | Backend address displayed in settings; HTTP clients still target the fixed loopback address |
+| `model.contextSize`        | unsigned 32-bit integer | Context-size estimate displayed in the Model pane; not forwarded by the load API            |
+| `generation.temperature`   | number in `[0, 1]`      | Sampling temperature sent with each new chat request                                        |
+| `generation.replyCeiling`  | unsigned 32-bit integer | Maximum reply tokens; the desktop omits the request limit when this is `0`                  |
+
+Missing groups or fields use the host defaults. Invalid JSON or invalid field
+values, including a temperature outside `[0, 1]`, cause loading to fail. Loading
+a missing file creates the parent directory and writes the default document.
+
+## Settings updates
+
+The settings view provides Runtime, Model, and Generation panes. Model inventory,
+load, unload, and loaded-state health controls call the backend through the
+application store. There is no Conversation pane.
+
+Generation edits apply to future messages immediately and are saved
+automatically through Tauri. The save reloads the persisted document and replaces
+only its `generation` group, preserving runtime and model values already on disk.
+Saves are serialized and newer edits are saved after the active write settles.
+Save failure leaves the current values usable and exposes a retry action.
+
+Runtime edits, including auto-start and default-model selection, remain in memory
+for the current session. Model settings edits also remain session-only. A
+generation save does not persist those unsaved groups.
 
 ## Desktop theme preference
 
@@ -56,18 +89,16 @@ the value is missing, invalid, or unavailable.
 
 - The React shell loads runtime settings from Tauri, but edits in the Runtime
   tab are not persisted back through `save_settings`.
-- The Model, Generation, and Conversation tabs are currently unusable: their
-  components require a `SettingsContext.Provider` that the settings view does
-  not mount.
 - The chat path currently uses a fixed model identifier in the chat store rather
-  than the host-managed `selectedModel`.
+  than `runtime.defaultModel`.
+- Model context size is controlled by LM Studio at load time; the current Lys
+  load request carries only the model identifier.
 
 ## Coming soon
 
-- Persisting edited settings back to `settings.json`
-- Making the Model, Generation, and Conversation settings tabs usable
+- Persisting runtime and model edits back to `settings.json`
 - Wiring selected model into live chat requests
-- Backend-backed generation settings such as temperature and context size
+- Configuring model load-time context size through the backend
 - Release-mode configuration beyond the current loopback defaults
 
 ## Related pages

@@ -13,7 +13,7 @@ export type StreamingChatMessageProps = {
 /**
  * Presents the active assistant transcript tail.
  *
- * @remarks Primary category: presentational. The parent owns stream lifecycle
+ * @remarks The parent owns stream lifecycle
  * and supplies only its active assistant message. The transcript tail carries
  * no interruption control; the composer owns the single Stop control because
  * cancellation must stay reachable in active phases that have no assistant

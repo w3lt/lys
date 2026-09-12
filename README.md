@@ -65,10 +65,12 @@ She can listen and answer today. A turn reaches the local model, streams back a
 word at a time, and is recorded in SQLite while it runs.
 
 Returning to it is another matter. The assistant's streamed text is never
-written back into its stored row, nothing in the application can list or reopen
-a conversation once the window closes, and the settings panes that would let
-you choose a model are not mounted yet. Memory, tools, and continuity are
-directions Lys is growing toward, not capabilities she already has.
+written back into its stored row; nothing in the application can list or reopen
+a conversation once the window closes. Model settings can list, load, unload,
+and check local models; generation controls shape future replies and save
+automatically. Default-model selection lasts for the session, and chat still
+uses a fixed model identifier. Memory, tools, and continuity are directions Lys
+is growing toward, not capabilities she already has.
 
 [See what exists today and what remains unfinished →](https://lys.negentropy.studio/overview/status/)
 

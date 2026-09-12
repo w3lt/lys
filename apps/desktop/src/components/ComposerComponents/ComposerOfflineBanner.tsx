@@ -15,7 +15,7 @@ export type ComposerOfflineBannerProps = {
 /**
  * States why local generation is unavailable and offers the recovery action.
  *
- * @remarks Primary category: presentational. The parent owns the message, the
+ * @remarks The parent owns the message, the
  * action's label and enablement, and the callback; this component owns no
  * state, effects, or resources. The banner is a polite status region so a
  * reader is told about the change without losing their place in the composer,

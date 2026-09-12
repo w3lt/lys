@@ -33,7 +33,7 @@ export type ConversationTranscriptProps =
 /**
  * Renders the chat transcript and its latest lifecycle error.
  *
- * @remarks Primary category: presentational. The explicit variant selects
+ * @remarks The explicit variant selects
  * whether one streaming assistant follows the completed prefix. The parent
  * owns messages and lifecycle state; the transcript exposes no interruption
  * control, because cancellation must stay reachable in active phases that have

@@ -46,7 +46,7 @@ function isChatReplyPending(request: ChatRequestState): boolean {
 /**
  * Presents the conversation transcript, lifecycle feedback, and composer.
  *
- * @remarks Primary category: composition/view. The application chat-view store
+ * @remarks The application chat-view store
  * owns conversation and request state; the surrounding shell owns whether the
  * transcript is pinned to its latest content. The component owns the
  * transcript host ref and synchronizes its scroll position only while the

@@ -29,17 +29,22 @@ For local development, the repository root script runs `pnpm --filter
 
 ## Backend
 
-The desktop host manages a local backend process and expects it to serve HTTP
-on `127.0.0.1:12345`.
+The desktop host launches `pnpm run dev` from the backend directory in the
+checkout recorded at host compile time. This requires that checkout, installed
+workspace dependencies, Node 24, and `pnpm` on the process search path. There
+is no bundled backend executable in the current launch path.
 
 The backend itself depends on:
 
-- local filesystem access for `~/.lys/lys_db.sqlite`
+- local filesystem access for `~/.lys/lys_db.sqlite` and an existing parent
+  directory; see [standalone startup](/develop/running/)
 - SQLite support through Node's `node:sqlite`
 - an LM Studio instance reachable at `127.0.0.1:1234`
 
-The backend's chat and model services are both wired to that LM Studio address
-today.
+The backend's chat and model services are both wired to that LM Studio address.
+Startup waits for an LM Studio readiness query before opening its HTTP listener
+at `127.0.0.1:12345`. A running host-owned child is process status only; check
+`GET /api/v1/heath` for HTTP readiness.
 
 ## Docs site
 

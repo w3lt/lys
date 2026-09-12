@@ -31,7 +31,7 @@ export type ConversationPanelProps = ConversationPanelCommonProps &
 /**
  * Presents the conversation transcript and its navigation affordances.
  *
- * @remarks Primary category: presentational. The parent owns conversation
+ * @remarks The parent owns conversation
  * state, transcript position, scrolling, and submission. The panel exposes no
  * interruption control, because cancellation must stay reachable in active
  * phases that have no assistant message and is therefore owned by the

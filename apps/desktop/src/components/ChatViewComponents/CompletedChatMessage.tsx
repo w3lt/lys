@@ -14,7 +14,7 @@ export type CompletedChatMessageProps = {
 /**
  * Selects role-specific presentation for one completed transcript message.
  *
- * @remarks Primary category: presentational. The shared message object is
+ * @remarks The shared message object is
  * immutable; memoization skips body work while its identity is unchanged.
  * @param props - Stable completed message selected by the transcript.
  * @returns The rendered role-specific transcript message.

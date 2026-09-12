@@ -18,7 +18,7 @@ import "./SettingsView.scss"
 /**
  * Lazily loads the runtime settings body; the parent supplies its fallback.
  *
- * @remarks Primary category: framework boundary. React owns module loading and
+ * @remarks React owns module loading and
  * suspension while the settings view owns pane selection and the fallback.
  */
 const RuntimePaneContent = lazy(
@@ -27,7 +27,7 @@ const RuntimePaneContent = lazy(
 /**
  * Lazily loads the model settings body; the parent supplies its fallback.
  *
- * @remarks Primary category: framework boundary. React owns module loading and
+ * @remarks React owns module loading and
  * suspension while the settings view owns pane selection and the fallback.
  */
 const ModelPaneContent = lazy(
@@ -36,7 +36,7 @@ const ModelPaneContent = lazy(
 /**
  * Lazily loads the generation settings body; the parent supplies the fallback.
  *
- * @remarks Primary category: framework boundary. React owns module loading and
+ * @remarks React owns module loading and
  * suspension while the settings view owns pane selection and the fallback.
  */
 const GenerationPaneContent = lazy(
@@ -137,7 +137,7 @@ export type SettingsViewProps = {
 /**
  * Composes the settings rail, the selected pane, and its settings authority.
  *
- * @remarks Primary category: composition/view. The application store owns the
+ * @remarks The application store owns the
  * selected pane and the settings value; this view provides `SettingsContext` so
  * every pane reads one authority and proposes patches back through it. Patches
  * apply in memory immediately. Generation edits are saved automatically;

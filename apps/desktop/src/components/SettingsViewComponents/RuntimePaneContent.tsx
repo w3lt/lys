@@ -47,7 +47,7 @@ function formatBackendMeta(
 /**
  * Presents backend lifecycle controls, autostart, and model residency.
  *
- * @remarks Primary category: composition/view. The application store owns
+ * @remarks The application store owns
  * backend status and the start/stop commands; the settings context owns the
  * persisted settings and the model lifecycle requests. Start and Stop
  * intentionally discard their command promises with `void`: failures are not

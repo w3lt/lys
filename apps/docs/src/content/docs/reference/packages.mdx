@@ -26,6 +26,8 @@ The current workspace contains three apps and two shared packages.
 - Native host: `src-tauri`
 - Important runtime dependencies: React, Zustand, Tauri API bindings,
   `eventsource-parser`
+- Runtime, Model, and Generation settings share application state. Model controls
+  call the backend; generation edits are saved through Tauri and sent with chat requests.
 
 ### `@lys/backend`
 
@@ -61,7 +63,7 @@ The current workspace contains three apps and two shared packages.
 ## Coming soon
 
 - A public package boundary for conversation queries if those APIs are added
-- Usable non-Runtime settings tabs connected to live desktop state
+- Persisting runtime and model settings edits alongside generation settings
 
 ## Related pages
 

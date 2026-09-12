@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils"
 /**
  * Renders a styled Base UI text input over the native `input` host.
  *
- * @remarks Primary category: UI primitive adapter. Native input props,
+ * @remarks Native input props,
  * `type`, value state, and event handlers are forwarded to Base UI, which
  * preserves native focus, keyboard, disabled, read-only, and validation
  * semantics. A supplied `ref` targets the Base UI input's `HTMLElement` host.

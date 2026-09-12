@@ -18,7 +18,7 @@ export type SettingsPaneFrameProps = {
 /**
  * Frames one settings pane with its heading, Done action, body, and footer.
  *
- * @remarks Primary category: composition/view. The parent owns pane metadata,
+ * @remarks The parent owns pane metadata,
  * the Done callback, and the busy state; omitting `busy` means `false`. While
  * busy the `Suspense` fallback renders a separate busy frame, so the heading
  * and Done action stay available without retaining the ready frame's child

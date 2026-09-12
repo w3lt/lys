@@ -63,7 +63,7 @@ function findLargestAttachment(
 /**
  * Presents the chat draft editor, its context tray, and the session controls.
  *
- * @remarks Primary category: composition/view. The application store owns
+ * @remarks The application store owns
  * runtime availability and persisted settings; the chat-view store owns the
  * draft, the conversation, and the request lifecycle. This component owns only
  * transient composer state: the staged attachment tray, whether a drag is over

@@ -97,7 +97,7 @@ const CLOSED_LLM_SERVICE_MESSAGE = "The LLM runtime is closed."
 /**
  * Owns one LLM runtime for serialized model loading, inventory, and stopping.
  *
- * @remarks Primary category: resource owner. The instance
+ * @remarks The instance
  * exclusively owns the supplied runtime and coordinates complete application
  * operations through its provider-independent contract. Its invariant is
  * `ready -> closing -> closed`; cleanup is terminal and idempotent.

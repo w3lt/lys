@@ -163,7 +163,7 @@ function readMeterTone(usage: ContextUsage): "over" | "tight" | "normal" {
 /**
  * Reports how full the window is and what is occupying it.
  *
- * @remarks Primary category: interactive feature. The parent owns the estimated
+ * @remarks The parent owns the estimated
  * usage, the staged files, and the request to change the window; this component
  * owns only whether its panel is disclosed. The control is a disclosure: the
  * button carries `aria-expanded` and points at the panel it reveals, the panel

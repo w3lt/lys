@@ -244,7 +244,7 @@ A native constructor declaration is exempt from the verb-prefix and domain-objec
 
 A renderer-recognized Component declaration MUST instead use the noun or noun-phrase name required by `COMP-017`. This exception applies only to a declaration satisfying `COMP-001`; an ordinary function or direct render helper under `COMP-003` MUST use the canonical operation vocabulary.
 
-A renderer-managed Hook satisfying `HOOK-001` MUST use the hook naming convention required by its supported renderer. For React custom hooks, the name MUST begin with `use` followed by a capitalized semantic concern or result, such as `useSettingsContext` or `useBackendUptimeMs`. This exception does not add `use` to the general operation vocabulary. Ordinary helpers, factories, callbacks, and imperative methods accompanying a hook MUST use canonical operation names unless their own exact external contract requires another name.
+A renderer-managed Hook satisfying `HOOK-001` MUST use the hook naming convention required by its supported renderer. For React custom hooks, the name MUST begin with `use` followed by a capitalized semantic concern or result, such as `useSessionContext` or `useElapsedTime`. This exception does not add `use` to the general operation vocabulary. Ordinary helpers, factories, callbacks, and imperative methods accompanying a hook MUST use canonical operation names unless their own exact external contract requires another name.
 
 Native constructors and compliant accessors retain their syntax-specific exceptions. A renderer-recognized Component declaration is the only repository-designed noun-name exception for an ordinary named function declaration. A qualifying Hook receives only its renderer-specific naming exception; it does not receive the Component naming exception.
 
@@ -885,7 +885,7 @@ async function saveConversation(
 }
 ```
 
-The adapter implementing the writer contract owns its mechanism:
+The adapter implementing the writer contract owns its mechanism. This illustrative class retains the category label “resource owner or boundary adapter”:
 
 ```ts
 /**
@@ -910,9 +910,8 @@ interface ConversationFileStore {
  * Owns mapping persisted conversations to files within one database directory.
  *
  * @remarks
- * Primary category: resource owner or boundary adapter. The class borrows a
- * reentrant file-store capability and is itself reentrant because it retains no
- * mutable state.
+ * The class borrows a reentrant file-store capability and is itself reentrant
+ * because it retains no mutable state.
  */
 class FileConversationWriter implements ConversationWriter {
   /** Stable directory containing conversation files. */

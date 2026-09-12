@@ -11,7 +11,7 @@ export type PaneHeadingProps = {
 /**
  * Renders the title, reading marker, and note for one settings pane.
  *
- * @remarks Primary category: presentational. The parent owns every displayed
+ * @remarks The parent owns every displayed
  * string and the `busy` state; omitting `busy` means `false`. The reading
  * marker is decorative and hidden from assistive technology, because the
  * skeleton below the heading owns the single polite announcement for the wait.

@@ -8,7 +8,7 @@ import "./TitleBar.scss"
 /**
  * Presents the draggable application title bar and theme toggle.
  *
- * @remarks Primary category: composition/view. The theme hook owns persisted
+ * @remarks The theme hook owns persisted
  * theme state and the toggle capability; this component owns no duplicate
  * theme state or resource. The native drag region remains non-interactive,
  * while the button exposes the next theme in its accessible label and invokes

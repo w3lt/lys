@@ -34,8 +34,10 @@ Command::new("pnpm")
     .spawn()
 ```
 
-Stopping the backend sends `SIGKILL` to the whole process group, not just the
-direct child, and Tauri also attempts the same cleanup on app exit.
+When the direct child is still running, stopping the backend sends `SIGKILL`
+to its whole process group and waits for that child. If the direct child has
+already exited, the host clears its handle without killing any surviving
+descendants. Tauri attempts this same cleanup on app exit.
 
 The checked-in process supervisor currently uses Unix process-group APIs and
 the `nix` crate. The repository does not yet demonstrate equivalent lifecycle
@@ -43,19 +45,33 @@ behavior on Windows.
 
 ## Settings file
 
-The current host-managed settings file is:
+The host creates the following defaults when the settings file is missing:
 
 ```json
 {
   "runtime": {
-    "autoStartBackend": false,
-    "selectedModel": null
+    "autoStartBackend": true,
+    "defaultModel": null,
+    "backendAddress": "http://127.0.0.1:12345"
+  },
+  "model": {
+    "contextSize": 32768
+  },
+  "generation": {
+    "temperature": 0.7,
+    "replyCeiling": 2048
   }
 }
 ```
 
 Only the Rust host reads and writes this file directly. The React UI reaches it
 through Tauri `invoke` calls.
+
+The desktop automatically saves generation edits by reading this document,
+replacing its generation group, and saving the complete document. Runtime and
+model edits in the UI remain session-only; generation saves preserve those
+groups as already stored on disk. The local context size supports composer
+estimates and does not configure LM Studio's load-time context.
 
 ## What the host does not currently do
 

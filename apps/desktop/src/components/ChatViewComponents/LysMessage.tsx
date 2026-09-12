@@ -26,7 +26,7 @@ export type LysMessageProps =
 /**
  * Renders one assistant message and its lifecycle outcome.
  *
- * @remarks Primary category: presentational. The parent owns the message and
+ * @remarks The parent owns the message and
  * its lifecycle; the variant selects only whether content is still arriving.
  * This component exposes no interruption capability: cancellation is reachable
  * in every active request phase, including phases with no assistant message,

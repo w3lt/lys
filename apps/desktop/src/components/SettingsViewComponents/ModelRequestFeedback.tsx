@@ -19,7 +19,7 @@ function formatModelHealth(health: LlmTestModelApiResponse): string {
 /**
  * Announces model operation progress, errors, and loaded-state health.
  * @returns Persistent live regions whose messages track the store-owned request.
- * @remarks Primary category: composition/view. Requires SettingsContext and owns
+ * @remarks Requires SettingsContext and owns
  * no work; the application store retains requests across pane changes.
  */
 export default function ModelRequestFeedback(): ReactElement {

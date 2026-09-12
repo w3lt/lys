@@ -33,7 +33,7 @@ export type ComposerModelMenuProps = {
 /**
  * Names the weights answering this conversation and switches between them.
  *
- * @remarks Primary category: composition/view. The parent owns the label,
+ * @remarks The parent owns the label,
  * the selection, the residency state, and the selection callback; the menu's
  * open state belongs to the underlying menu adapter, as do keyboard navigation,
  * dismissal, and focus return. Every row states its own condition as text — its

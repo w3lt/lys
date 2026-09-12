@@ -13,7 +13,7 @@ export type UserMessageProps = {
 /**
  * Presents one user-authored transcript message.
  *
- * @remarks Primary category: presentational. The parent owns the immutable
+ * @remarks The parent owns the immutable
  * message and list identity; this component owns no state or side effects.
  * @param props - Completed user message selected by the transcript.
  * @returns The rendered user message.

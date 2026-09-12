@@ -23,8 +23,22 @@ the Fastify app is running:
 - route: `/api/v1/heath`
 - method: `GET`
 
-This is the only checked-in machine-readable diagnostics surface in the backend
-today.
+This confirms that the HTTP listener responds. The desktop's runtime status
+instead observes its owned backend child process and does not perform this
+health request.
+
+## Model health observation
+
+`GET /api/v1/llm/:modelId/health` observes whether a canonical model key is
+currently loaded. Encode the key as one path parameter. An accepted query
+returns `200` with `modelId`, `latencyMs`, and either:
+
+- `status: "ready"`
+- `status: "not-ready"` with reason `model-not-loaded` or `runtime-unavailable`
+
+Queue admission rejection returns `503` Problem Details. Responses use
+`Cache-Control: no-store`. Loaded state is a fresh inventory observation and
+does not prove that a later inference request will succeed.
 
 ## Process logging
 
@@ -40,7 +54,8 @@ to stderr.
 The desktop runtime settings pane exposes a small amount of process state:
 
 - whether the backend is `running`, `starting`, `stopping`, or `stopped`
-- the fixed backend address `127.0.0.1:12345`
+- the persisted `runtime.backendAddress`, defaulting to
+  `http://127.0.0.1:12345`, as status copy
 - a derived uptime label while the backend is running
 
 The same pane also exposes `Start` and `Stop` actions that call Tauri commands

@@ -17,7 +17,7 @@ export type SpeakerAvatarProps = {
 /**
  * Presents the circular identity mark of one transcript speaker.
  *
- * @remarks Primary category: presentational. The parent owns the speaker and
+ * @remarks The parent owns the speaker and
  * places the mark immediately before the visible speaker label. The mark only
  * repeats that label, so it is excluded from the accessibility tree and never
  * carries a speaker's only cue.
@@ -38,7 +38,7 @@ export default function SpeakerAvatar({
 /**
  * Presents Lys's theme-matched transcript portrait.
  *
- * @remarks Primary category: presentational. The application's root theme
+ * @remarks The application's root theme
  * class selects one of the decorative portraits without component-owned state.
  * @returns The light and dark portrait alternatives for Lys.
  */
@@ -58,7 +58,7 @@ function LysAvatar(): ReactElement {
 /**
  * Presents the person's transcript portrait.
  *
- * @remarks Primary category: presentational. The portrait is decorative
+ * @remarks The portrait is decorative
  * because the adjacent transcript label already identifies the speaker.
  * @returns The person's portrait.
  */

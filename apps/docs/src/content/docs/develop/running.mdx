@@ -17,7 +17,7 @@ Dev commands, watch modes, local endpoints, and current limitations.
 
 ## Root commands
 
-Run all of these from the repository root:
+Choose the command you need and run it from the repository root:
 
 ```sh
 pnpm docs:dev
@@ -32,6 +32,18 @@ pnpm dev
 - `pnpm dev`: runs `pnpm --filter @lys/desktop run tauri dev`, which starts the
   desktop Vite app and the Tauri shell.
 
+For standalone backend development, create the database parent directory before
+starting the watcher:
+
+```sh
+mkdir -p "$HOME/.lys"
+pnpm backend:dev
+```
+
+The backend opens `~/.lys/lys_db.sqlite` but does not create its parent. The
+desktop-managed path creates the directory while initializing missing settings.
+Both paths use the same database and port; choose one backend launch path.
+
 ## Runtime behavior to expect
 
 - The desktop app talks to the backend over HTTP at `http://127.0.0.1:12345`.
@@ -39,13 +51,24 @@ pnpm dev
   stream.
 - The backend uses LM Studio for model inventory and load operations and an
   OpenAI-compatible endpoint for chat completions.
+- Backend initialization checks LM Studio readiness before listening for HTTP
+  requests. Start LM Studio at `127.0.0.1:1234` before starting the backend.
 
 ## Backend lifecycle in the desktop app
 
-The desktop store can start and stop the backend through Tauri commands. It
-also has a runtime setting named `autoStartBackend`; when that setting is
-already enabled in `~/.lys/settings.json`, initialization starts the backend
-automatically. The current settings UI does not persist edits back to that file.
+The desktop starts and stops an owned `pnpm run dev` child through Tauri
+commands. The command runs from the backend directory in the checkout recorded
+when the host was compiled, so that checkout, installed dependencies, Node, and
+`pnpm` must remain available.
+
+`runtime.autoStartBackend` defaults to `true`; initialization starts the child
+when the loaded value is enabled. Runtime control edits remain session-only;
+generation controls have separate autosave wiring.
+
+Runtime status describes the owned child process. It does not discover a
+backend started separately in a terminal or prove HTTP readiness. Use
+`GET /api/v1/heath` to check the listener. Avoid launching a standalone watcher
+alongside desktop auto-start because both attempt to use port `12345`.
 
 ## Coming soon
 

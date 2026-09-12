@@ -127,7 +127,7 @@ function stagger(index: number, stepMs: number) {
 /**
  * Presents an accessible loading placeholder for one settings pane.
  *
- * @remarks Primary category: presentational. The parent owns the pane value;
+ * @remarks The parent owns the pane value;
  * this component reads only the immutable geometry registry and owns no state,
  * effects, resources, callbacks, or persistence. The `role="status"` and
  * visually hidden text provide one polite announcement, while decorative bars

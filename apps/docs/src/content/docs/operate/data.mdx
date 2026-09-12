@@ -21,12 +21,14 @@ Current persisted data locations that are evidenced in this repository.
 The desktop host owns a JSON settings file at `~/.lys/settings.json`.
 
 - created automatically when the file is missing
-- currently stores `runtime.autoStartBackend` and `runtime.selectedModel`
+- stores the `runtime`, `model`, and `generation` groups described in
+  [Configuration](/operate/configuration/)
 - parsed as JSON on load and rewritten as pretty-printed JSON when the Tauri
   `save_settings` command is called
 
-The current desktop UI loads this file, but the checked-in UI does not yet call
-the Tauri save command after runtime-setting edits.
+The desktop loads this file at initialization and autosaves generation edits.
+That save path preserves the runtime and model groups already on disk; runtime
+and model edits in the UI remain session-only.
 
 ## `~/.lys/lys_db.sqlite`
 
@@ -48,6 +50,9 @@ whose version is newer than the binary understands.
 
 - The settings file is created by the Tauri host on first settings load.
 - The SQLite file is opened by the backend when the conversation service starts.
+- The backend does not create the parent directory. Standalone startup requires
+  `~/.lys/` to exist; the desktop creates it when initializing a missing settings
+  file. See [Running Lys locally](/develop/running/).
 - Both files live under the same `~/.lys/` directory, so user data and app
   settings currently share one root.
 

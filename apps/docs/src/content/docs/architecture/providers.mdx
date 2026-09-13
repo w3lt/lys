@@ -10,14 +10,14 @@ Lys currently integrates with one local model runtime: LM Studio.
 
 ## Current stack
 
-| Concern          | Current implementation                                                                                                           |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| Model inventory  | `LlmService.listLlmModels()` lists downloaded models and annotates which model keys have loaded instances.                       |
-| Model health     | `LlmService.getLlmModelHealth()` checks one fresh loaded-inventory snapshot for the requested key without generating text.       |
-| Model loading    | `POST /api/v1/llm/load` uses the application service to load one model and return its metadata.                                  |
-| Model unloading  | `PATCH /api/v1/llm/unload` stops every observed loaded instance matching one key, then reconciles the loaded-instance inventory. |
-| Chat generation  | `ChatService.completeChatStream()` uses the `openai` SDK against LM Studio's OpenAI-compatible `/v1` HTTP endpoint.              |
-| Title generation | `ChatService.generateTitle()` uses the same endpoint with a separate prompt and structured output parsing.                       |
+| Concern          | Current implementation                                                                                                                                   |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Model inventory  | `LlmService.listLlmModels()` lists downloaded models and annotates which model keys have loaded instances.                                               |
+| Model health     | `LlmService.getLlmModelHealth()` checks one fresh loaded-inventory snapshot for the requested key without generating text.                               |
+| Model loading    | `POST /api/v1/llm/load` uses the application service to load one model and return its metadata.                                                          |
+| Model unloading  | `PATCH /api/v1/llm/unload` stops every observed loaded instance matching one key, then reconciles the loaded-instance inventory.                         |
+| Chat generation  | `ChatService.completeChatStream()` uses the `openai` SDK against LM Studio's OpenAI-compatible `/v1` HTTP endpoint.                                      |
+| Title generation | `ChatService.generateTitle()` sends one request to the same endpoint with a separate prompt and a JSON-schema response format, then validates the reply. |
 
 Generation temperature and reply-ceiling edits are saved automatically and
 applied to future chat requests. The [API reference](/reference/api/#chat-request-body)

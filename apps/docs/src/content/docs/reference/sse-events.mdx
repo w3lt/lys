@@ -15,10 +15,10 @@ shape is defined by `chatApiStreamEventSchema` in `@lys/protocol`.
 | ---------------------------------- | ------------------------------------------------- | -------------------------------------------------------------------- |
 | `start-new-conversation-turn`      | `conversation`, `userMessage`, `assistantMessage` | The backend created a new conversation and persisted the first turn. |
 | `start-existing-conversation-turn` | `userMessage`, `assistantMessage`                 | The backend persisted a new turn on an existing conversation.        |
-| `title`                            | `title`                                           | A generated title for the active conversation.                       |
+| `title`                            | `title`                                           | A generated title for a newly created conversation.                  |
 | `delta`                            | `content`                                         | One non-empty assistant text fragment.                               |
 | `done`                             | `finishReason`                                    | Successful assistant completion with `stop` or `length`.             |
-| `error`                            | `message`                                         | A user-presentable error string.                                     |
+| `error`                            | `message`                                         | A user-presentable chat generation error string.                     |
 
 ## Payload details
 
@@ -26,7 +26,7 @@ shape is defined by `chatApiStreamEventSchema` in `@lys/protocol`.
 
 Includes:
 
-- full `conversation` metadata
+- full `conversation` metadata, whose `title` is the default `New Conversation`
 - one persisted user message
 - one persisted assistant message in `streaming` state
 
@@ -42,7 +42,17 @@ messages to build the new transcript state.
 
 ### `title`
 
-Carries a non-empty string title generated in parallel with the chat stream.
+Carries the non-empty title generated for a newly created conversation. The
+backend persists the title before it sends the event. Continuing an existing
+conversation never produces a `title` event.
+
+The backend requests a title up to three times, set by the
+`titleGenerationMaxAttempts` backend setting. Only a reply that cannot be used as
+a title, such as JSON wrapped in a Markdown code fence, leads to another request;
+an HTTP or connection failure ends title generation at once. When no usable
+title is produced, or the client disconnects first, no `title` event is sent and
+the conversation keeps `New Conversation`. The backend logs these outcomes
+instead of sending an `error` event.
 
 ### `delta`
 
@@ -64,8 +74,9 @@ The only accepted `finishReason` values are `stop` and `length`.
 
 ### `error`
 
-Carries a non-empty `message` string. The desktop presents it inline and may
-also mark the current assistant message as failed locally.
+Carries a non-empty `message` string that reports a chat generation failure.
+The desktop presents it inline and may also mark the current assistant message
+as failed locally. Title-generation failures never produce `error` events.
 
 ## What is not on the current stream
 
@@ -77,15 +88,17 @@ also mark the current assistant message as failed locally.
 
 ## Event ordering today
 
-Every valid stream begins with one turn-start event. After that, chat generation
-and title generation run concurrently:
+Every valid stream begins with one turn-start event. After that, chat
+generation and, for a new conversation, title generation run concurrently:
 
 1. `start-new-conversation-turn` or `start-existing-conversation-turn`
 2. zero or more `delta` events before a successful `done`
-3. a `title` event may arrive before, during, or after the chat events
+3. for a new conversation, a `title` event may arrive before, during, or after
+   the chat events
 
-An `error` event can report failure in either concurrent task. A title error does
-not prevent later chat events, so `error` is not universally terminal.
+An `error` event reports a chat generation failure and is not followed by
+`done`. A `title` event can still arrive after it, because title generation
+runs independently.
 
 ## Coming soon
 

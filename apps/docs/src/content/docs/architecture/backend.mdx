@@ -12,14 +12,14 @@ application.
 
 ## Current backend shape
 
-| Layer              | Implementation                 | Responsibility                                                                                     |
-| ------------------ | ------------------------------ | -------------------------------------------------------------------------------------------------- |
-| App bootstrap      | `src/app.ts`                   | Registers CORS, SSE support, singleton services, and all routes.                                   |
-| Runtime config     | `src/config.ts`                | Supplies loopback host and port values and the SQLite file path.                                   |
-| Singleton services | `src/di/singleton.ts`          | Creates the chat and conversation services, and selects the runtime owned by the LLM service.      |
-| Chat routes        | `src/modules/chat`             | Accepts chat requests, persists turn data, streams SSE responses, and updates conversation titles. |
-| LLM routes         | `src/modules/llm/routes`       | Lists LM Studio models, checks loaded-model health, and loads or unloads a model on demand.        |
-| Health route       | `src/modules/health/routes.ts` | Returns a simple `{ ok: true }` response.                                                          |
+| Layer              | Implementation                 | Responsibility                                                                                        |
+| ------------------ | ------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| App bootstrap      | `src/app.ts`                   | Registers CORS, SSE support, singleton services, and all routes.                                      |
+| Runtime config     | `src/config.ts`                | Supplies loopback host and port values, the SQLite file path, and the title-generation attempt limit. |
+| Singleton services | `src/di/singleton.ts`          | Creates the chat and conversation services, and selects the runtime owned by the LLM service.         |
+| Chat routes        | `src/modules/chat`             | Accepts chat requests, persists turn data, streams SSE responses, and updates conversation titles.    |
+| LLM routes         | `src/modules/llm/routes`       | Lists LM Studio models, checks loaded-model health, and loads or unloads a model on demand.           |
+| Health route       | `src/modules/health/routes.ts` | Returns a simple `{ ok: true }` response.                                                             |
 
 ## Chat request flow
 
@@ -30,17 +30,25 @@ application.
    `start-existing-conversation-turn`.
 4. `createChatTask` opens an OpenAI-compatible streaming completion against LM
    Studio and converts model chunks into `delta` and `done` events.
-5. `createTitleGenerationTask` runs in parallel and may emit a `title` event.
-6. Errors become `error` events when the client is still connected.
+5. For a new conversation only, `createTitleGenerationTask` runs in parallel
+   and emits a `title` event after it persists a usable title.
+6. Chat generation errors become `error` events when the client is still
+   connected; title-generation failures are logged instead.
 
 Each completion receives the default system prompt and the current user message.
 Continuing an existing conversation appends a turn in SQLite but does not send
 earlier messages or the stored conversation-specific system prompt to the model.
 The required `generationOptions` controls supply sampling temperature and an
 optional completion-token ceiling; the [API reference](/reference/api/#chat-request-body)
-defines their limits. Title generation uses a separate request and replaces the
-conversation title after every successful turn-title task, including existing
-conversations.
+defines their limits.
+
+A new conversation is stored with the title `New Conversation`. Title generation
+runs only for that conversation and uses a separate chat completion request with
+a JSON-schema response format, then validates the reply. Only a reply that
+cannot be used as a title leads to another request, up to
+`titleGenerationMaxAttempts` requests (three by default); an HTTP, connection,
+or cancellation failure ends title generation at once. When no usable title is
+produced, the conversation keeps its default title.
 
 The current chat task updates the stored assistant status and finish reason, but
 does not append streamed delta text to the stored assistant content. The full
@@ -106,12 +114,14 @@ See the [health response contract](/reference/api/#model-health-responses).
 
 | Condition                                          | Current behavior                                                                                                   |
 | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| Chat SSE connection closes                         | The close handler aborts the signal used by chat and title generation.                                             |
+| Chat SSE connection closes                         | The close handler aborts the signal used by chat and title generation; no further title request is made.           |
 | Model operation or health-check client disconnects | Accepted work continues until success or failure; user cancellation is unavailable.                                |
 | LLM service already has nine accepted operations   | New inventory/health/load/unload requests receive `503` with `urn:lys:problem:llm:service-busy` before acceptance. |
 | Model stream ends without a finish reason          | The route treats it as an error and may emit `error`.                                                              |
 | Assistant state update fails                       | The backend throws because the persisted assistant row is missing.                                                 |
 | Unknown finish reason                              | The backend throws instead of silently coercing it.                                                                |
+| Title generation produces no usable title          | The conversation keeps `New Conversation`; the backend logs a warning and sends no `error` event.                  |
+| A generated title cannot be saved                  | The backend logs an error and sends no `title` event.                                                              |
 
 See the [provider cancellation policy](/architecture/providers/#cancellation-policy)
 for the separate inference and model-management lifetimes.

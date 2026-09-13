@@ -13,13 +13,13 @@ JSON schema for runtime, model, and generation settings.
 
 ### `conversations`
 
-| Column          | Type            | Notes                                                                                              |
-| --------------- | --------------- | -------------------------------------------------------------------------------------------------- |
-| `id`            | `TEXT`          | Primary key                                                                                        |
-| `title`         | `TEXT`          | Nullable until title generation succeeds                                                           |
-| `system_prompt` | `TEXT NOT NULL` | Prompt associated with the conversation; the current chat request does not forward it to the model |
-| `created_at`    | `TEXT NOT NULL` | ISO timestamp                                                                                      |
-| `updated_at`    | `TEXT NOT NULL` | ISO timestamp                                                                                      |
+| Column          | Type            | Notes                                                                                                                       |
+| --------------- | --------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `id`            | `TEXT`          | Primary key                                                                                                                 |
+| `title`         | `TEXT`          | `New Conversation` for a new conversation until title generation replaces it; null only in rows created before that default |
+| `system_prompt` | `TEXT NOT NULL` | Prompt associated with the conversation; the current chat request does not forward it to the model                          |
+| `created_at`    | `TEXT NOT NULL` | ISO timestamp                                                                                                               |
+| `updated_at`    | `TEXT NOT NULL` | ISO timestamp                                                                                                               |
 
 ### `conversation_messages`
 

@@ -1,9 +1,13 @@
 import { OpenAI } from "openai"
-import type { ChatCompletionMessageParam } from "openai/resources/index.mjs"
+import type {
+  ChatCompletion,
+  ChatCompletionMessageParam
+} from "openai/resources/index.mjs"
 import * as z from "zod"
 import { titleGenerationPrompt } from "../../utils/prompts"
-import { zodTextFormat } from "openai/helpers/zod"
+import { zodResponseFormat } from "openai/helpers/zod"
 import type { MessageGenerationOptions } from "@lys/protocol"
+import { TitleGenerationOutputError } from "../../utils/errors"
 
 /** Settings used to create an application-scoped OpenAI-compatible chat client. */
 export type ChatServiceCreationOptions = {
@@ -45,11 +49,17 @@ export type TitleGenerationOptions = {
   signal?: AbortSignal
 }
 
-/** Validates the structured title returned by the model response parser. */
+/**
+ * Validates the structured title in a title-generation reply and defines the
+ * JSON schema the endpoint is asked to enforce.
+ */
 const titleGenerationOutputSchema = z.object({
   /** Generated title before the service trims and validates non-emptiness. */
   title: z.string()
 })
+
+/** Structured title output parsed from a reply, before trimming. */
+type TitleGenerationOutput = z.infer<typeof titleGenerationOutputSchema>
 
 /** Fallback credential value for unauthenticated OpenAI-compatible local endpoints. */
 const DUMMY_API_KEY = "dummy-api-key"
@@ -109,42 +119,49 @@ export default class ChatService {
   /**
    * Generates and validates one non-empty title from a user message.
    *
+   * @remarks Makes one chat completion request whose response format asks the
+   * endpoint to constrain the reply to the title JSON schema. The reply is
+   * still parsed and validated because that enforcement depends on the
+   * endpoint. The service adds no retries beyond the OpenAI SDK's transport
+   * retries.
    * @param options - Message, model, and optional cancellation signal for the request.
-   * @returns A promise that resolves to the trimmed generated title after structured response parsing.
-   * @throws If the request is rejected, cancelled, malformed, or produces no non-empty title.
+   * @returns A promise that resolves to the trimmed generated title.
+   * @throws {@link TitleGenerationOutputError} If the endpoint answers with a
+   * reply that is truncated, has no content, is not JSON, does not match the
+   * title shape, or contains a blank title.
+   * @throws If the title prompt cannot be read, or the request is rejected,
+   * cannot reach the endpoint, or is cancelled.
    */
   public async generateTitle({
     message,
     model,
     signal
   }: TitleGenerationOptions): Promise<string> {
-    const response = await this.#openaiClient.responses.parse(
+    const titleInstructions = titleGenerationPrompt()
+    const systemMessage: ChatCompletionMessageParam = {
+      role: "system",
+      content: titleInstructions
+    }
+    const userMessage: ChatCompletionMessageParam = {
+      role: "user",
+      content: message
+    }
+    const responseFormat = zodResponseFormat(
+      titleGenerationOutputSchema,
+      "title_generation"
+    )
+
+    const completion = await this.#openaiClient.chat.completions.create(
       {
+        messages: [systemMessage, userMessage],
         model,
-        instructions: titleGenerationPrompt(),
-        input: message,
-
-        reasoning: {
-          effort: "high"
-        },
-
-        text: {
-          format: zodTextFormat(titleGenerationOutputSchema, "title_generation")
-        },
-
-        store: false,
+        response_format: responseFormat,
         stream: false
       },
       { signal }
     )
 
-    const title = response.output_parsed?.title.trim()
-
-    if (!title) {
-      throw new Error("The model did not generate a title")
-    }
-
-    return title
+    return parseGeneratedTitle(completion)
   }
 
   /**
@@ -154,4 +171,74 @@ export default class ChatService {
    * @remarks The current OpenAI client exposes no asynchronous cleanup requirement.
    */
   public async [Symbol.asyncDispose]() {}
+}
+
+/**
+ * Extracts the non-empty title from one title-generation chat completion.
+ *
+ * @param completion - Endpoint reply to a title request; its content is untrusted.
+ * @returns The trimmed title.
+ * @throws {@link TitleGenerationOutputError} If the reply stopped for a reason
+ * other than `stop`, has no message content, is not JSON, does not match the
+ * title shape, or contains a blank title.
+ */
+function parseGeneratedTitle(completion: ChatCompletion): string {
+  const choice = completion.choices.find(({ index }) => index === 0)
+  if (choice?.finish_reason !== "stop") {
+    throw new TitleGenerationOutputError(
+      `The title reply finished with reason "${choice?.finish_reason ?? "none"}"`
+    )
+  }
+
+  const content = choice.message.content
+  if (content === null) {
+    throw new TitleGenerationOutputError("The title reply has no content")
+  }
+
+  const title = parseTitleOutput(content).title.trim()
+  if (!title) {
+    throw new TitleGenerationOutputError("The model generated a blank title")
+  }
+
+  return title
+}
+
+/**
+ * Parses reply content into the structured title output.
+ *
+ * @param content - Untrusted message content returned by the endpoint.
+ * @returns The validated title output before trimming.
+ * @throws {@link TitleGenerationOutputError} If the content is not JSON or does
+ * not match the title shape; the parse failure is kept as the cause.
+ */
+function parseTitleOutput(content: string): TitleGenerationOutput {
+  const titleOutput = titleGenerationOutputSchema.safeParse(
+    parseReplyJson(content)
+  )
+  if (!titleOutput.success) {
+    throw new TitleGenerationOutputError(
+      "The title reply does not match the title shape",
+      { cause: titleOutput.error }
+    )
+  }
+
+  return titleOutput.data
+}
+
+/**
+ * Parses reply content as JSON.
+ *
+ * @param content - Untrusted message content returned by the endpoint.
+ * @returns The parsed, still untrusted JSON value.
+ * @throws {@link TitleGenerationOutputError} If the content is not valid JSON;
+ * the syntax error is kept as the cause.
+ */
+function parseReplyJson(content: string): unknown {
+  try {
+    return JSON.parse(content)
+  } catch (error) {
+    throw new TitleGenerationOutputError("The title reply is not valid JSON", {
+      cause: error
+    })
+  }
 }

@@ -57,7 +57,10 @@ export const conversationMessageSchema = z.discriminatedUnion("role", [
 /** Validates the persisted conversation record and its ordered message history. */
 export const conversationSchema = z.strictObject({
   id: z.uuidv7(),
-  /** Optional until title generation completes; otherwise non-empty. */
+  /**
+   * Non-empty title; null only for conversations stored before new
+   * conversations started with a default title.
+   */
   title: z.string().min(1).nullable(),
   /** Non-empty system instruction persisted with the conversation. */
   systemPrompt: z.string().min(1),

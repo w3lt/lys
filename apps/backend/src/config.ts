@@ -8,7 +8,7 @@ import type { PathLike } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
-/** Runtime network locations used by the backend and its LM Studio clients. */
+/** Runtime locations and limits used by the backend and its LM Studio clients. */
 export type BackendConfig = {
   /** Interface on which Fastify accepts connections. */
   backendHost: string
@@ -20,13 +20,22 @@ export type BackendConfig = {
   lmstudioPort: number
   /** Filesystem path of the SQLite database owned by the conversation service. */
   databaseFilePath: PathLike
+  /**
+   * Inclusive maximum number of title-generation requests for one new
+   * conversation, passed to the chat routes when they are registered.
+   *
+   * @remarks The chat routes reject a value that is not a positive safe
+   * integer. The value is read once at startup.
+   */
+  titleGenerationMaxAttempts: number
 }
 
-/** Immutable-at-reference runtime configuration built from shared protocol constants. */
+/** Immutable-at-reference runtime configuration built from shared protocol constants and backend defaults. */
 export const config: BackendConfig = {
   backendHost: BACKEND_HOST,
   backendPort: BACKEND_PORT,
   lmstudioHost: LMSTUDIO_HOST,
   lmstudioPort: LMSTUDIO_PORT,
-  databaseFilePath: join(homedir(), ".lys", "lys_db.sqlite")
+  databaseFilePath: join(homedir(), ".lys", "lys_db.sqlite"),
+  titleGenerationMaxAttempts: 3
 }

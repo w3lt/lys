@@ -340,6 +340,10 @@ export default class ConversationService {
   /**
    * Creates and persists metadata for one empty conversation.
    *
+   * @remarks Every new conversation is stored with the default title
+   * `New Conversation`. Title generation may later replace it; when generation
+   * fails, the conversation keeps the default. Changing the default affects
+   * only conversations created afterwards.
    * @param option - Optional system prompt override for the new conversation.
    * @returns The newly persisted conversation metadata.
    * @throws If metadata validation or SQLite persistence fails.
@@ -347,12 +351,14 @@ export default class ConversationService {
   public createConversation(
     option?: ConversationCreationOptions
   ): ConversationMetadata {
+    /** Title stored with every new conversation until title generation replaces it. */
+    const defaultConversationTitle = "New Conversation"
     const { systemPrompt = lysSystemPrompt() } = option ?? {}
     const now = new Date().toISOString()
 
     const conversation = conversationMetadataSchema.parse({
       id: uuidv7(),
-      title: null,
+      title: defaultConversationTitle,
       systemPrompt,
       createdAt: now,
       updatedAt: now

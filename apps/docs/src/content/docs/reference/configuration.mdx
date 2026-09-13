@@ -21,12 +21,13 @@ Tauri-managed settings file, and one WebView theme preference.
 
 ## Backend-composed values
 
-| Value                        | Current source                                |
-| ---------------------------- | --------------------------------------------- |
-| Backend listen address       | `BACKEND_HOST` and `BACKEND_PORT`             |
-| LM Studio HTTP base URL      | `http://${LMSTUDIO_HOST}:${LMSTUDIO_PORT}/v1` |
-| LM Studio WebSocket base URL | `ws://${LMSTUDIO_HOST}:${LMSTUDIO_PORT}`      |
-| SQLite path                  | `~/.lys/lys_db.sqlite`                        |
+| Value                          | Current source                                                                        |
+| ------------------------------ | ------------------------------------------------------------------------------------- |
+| Backend listen address         | `BACKEND_HOST` and `BACKEND_PORT`                                                     |
+| LM Studio HTTP base URL        | `http://${LMSTUDIO_HOST}:${LMSTUDIO_PORT}/v1`                                         |
+| LM Studio WebSocket base URL   | `ws://${LMSTUDIO_HOST}:${LMSTUDIO_PORT}`                                              |
+| SQLite path                    | `~/.lys/lys_db.sqlite`                                                                |
+| Title-generation attempt limit | `3`, from `titleGenerationMaxAttempts` in `src/config.ts`; must be a positive integer |
 
 ## Persisted settings JSON
 

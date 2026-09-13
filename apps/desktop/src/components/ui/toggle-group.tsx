@@ -11,7 +11,7 @@ import { toggleVariants } from "@/components/ui/toggle"
 /**
  * Carries toggle-group styling and layout values to descendant items.
  *
- * @remarks Primary category: UI primitive adapter. The context is local to
+ * @remarks The context is local to
  * this adapter family. Its defaults are `variant="default"`, `size="default"`,
  * `spacing=2`, and `orientation="horizontal"`; {@link ToggleGroup} replaces
  * them for its descendants. It does not own selected-value state or
@@ -34,7 +34,7 @@ const ToggleGroupContext = React.createContext<
 /**
  * Renders a Base UI toggle group and provides its shared styling context.
  *
- * @remarks Primary category: UI primitive adapter. Base UI group props,
+ * @remarks Base UI group props,
  * children, selected-value state, and callbacks are forwarded. `orientation`
  * defaults to `horizontal`, `spacing` defaults to `2`, and `variant`/`size`
  * are passed to descendant items through a local context; the values are also
@@ -89,7 +89,7 @@ function ToggleGroup({
 /**
  * Renders one selectable item in a {@link ToggleGroup}.
  *
- * @remarks Primary category: UI primitive adapter. Base UI toggle props,
+ * @remarks Base UI toggle props,
  * children, controlled or uncontrolled pressed state, and callbacks are
  * forwarded. Item `variant` and `size` default to `default` but are overridden
  * by the nearest group's context when supplied; spacing and orientation are

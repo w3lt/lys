@@ -11,7 +11,7 @@ import { useSettingsContext } from "./SettingsContext"
 /**
  * Presents the downloaded inventory and the default-model selection.
  * @returns Backend model rows or an explicit unavailable/empty state.
- * @remarks Primary category: composition/view. Requires SettingsContext and the
+ * @remarks Requires SettingsContext and the
  * application store. The store owns requests, errors, and inventory; refreshing
  * prevents overlapping actions. Multiple models may be loaded independently.
  */
@@ -91,7 +91,7 @@ function ModelInventoryPanel(): ReactElement {
 /**
  * Explains the current backend limit on context configuration.
  * @returns The retained local context budget and its application boundary.
- * @remarks Primary category: composition/view. Requires SettingsContext. The
+ * @remarks Requires SettingsContext. The
  * current load API accepts only modelId, so no load-time control is offered.
  */
 function ModelLoadConfiguration(): ReactElement {
@@ -121,7 +121,7 @@ function ModelLoadConfiguration(): ReactElement {
 /**
  * Composes the backend-backed model inventory and load-configuration boundary.
  * @returns Model settings with real operations and truthful capability limits.
- * @remarks Primary category: composition/view. Children share SettingsContext;
+ * @remarks Children share SettingsContext;
  * the application store owns request lifetime and handles asynchronous failures.
  */
 export default function ModelPaneContent(): ReactElement {

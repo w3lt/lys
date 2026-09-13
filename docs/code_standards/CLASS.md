@@ -169,7 +169,9 @@ Owning a lifecycle or implementing an interface MAY accompany the primary catego
 
 A category MUST NOT be selected merely to excuse an otherwise data-only, static-only, or mixed-responsibility class.
 
-The class API documentation MUST state the selected category.
+Supporting engineering documentation MUST state the selected category and
+identify the authoritative class declaration. The taxonomy selection belongs
+there rather than in the source declaration's API comment.
 
 ### CLASS-004 — Names identify the owner or mechanism
 
@@ -827,11 +829,14 @@ An external serialization framework MUST be isolated behind an adapter that tran
 
 Every class MUST have API documentation stating:
 
-- Its primary category.
 - Its ownership sentence.
 - Its invariant.
 - Its concurrency model.
 - Resource ownership and lifecycle when applicable.
+
+The selected primary category remains recorded in supporting engineering
+documentation under `CLASS-003`; declaration comments retain the behavioral
+contract above.
 
 Every constructor, factory, field, accessor, method, and lifecycle operation MUST have JSDoc, rustdoc, or the language-equivalent API documentation.
 
@@ -927,6 +932,8 @@ Externally required adapter exceptions are limited to the exact declarations and
 
 ## Complete TypeScript example
 
+The complete examples use the invariant-owner category.
+
 ```ts
 /** Immutable text owned by a draft editor. */
 type DraftContent = {
@@ -959,7 +966,7 @@ type DraftState =
  * preserving committed-or-cancellable content.
  *
  * @remarks
- * Primary category: invariant owner. An idle state contains committed content;
+ * An idle state contains committed content;
  * an editing state additionally retains the content from editing start.
  * Concurrency model: single-owner. JavaScript object identity stays within one
  * runtime agent, and the constructing editor event-loop owner retains this
@@ -1114,7 +1121,7 @@ enum DraftState {
 /// Owns one draft editing transaction for the current editor controller while
 /// preserving committed-or-cancellable content.
 ///
-/// Primary category: invariant owner. An idle state contains committed content;
+/// An idle state contains committed content;
 /// an editing state additionally retains the content from editing start.
 /// Concurrency model: single-owner; the `Rc` marker makes this type neither
 /// `Send` nor `Sync`, and mutable operations require exclusive `&mut self` access.

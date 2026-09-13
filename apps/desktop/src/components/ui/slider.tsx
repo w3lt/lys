@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils"
  * Renders the maintained multi-thumb Base UI slider tree with Lys track
  * styling.
  *
- * @remarks Primary category: UI primitive adapter. The adapter does not render
+ * @remarks The adapter does not render
  * caller-provided `children`; it owns the `Control`, `Track`, `Indicator`, and
  * generated `Thumb` tree. Array `value` or array `defaultValue` supplies one
  * thumb per entry. Scalar values are accepted by the Base UI type but this

@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 /**
  * Supplies the Lys button variants used by {@link Button}.
  *
- * @remarks Primary category: UI primitive adapter. Variants express purpose
+ * @remarks Variants express purpose
  * rather than theme: `default`, `outline`, `secondary`, `ghost`, `destructive`,
  * and `link`. Sizes follow the compact desktop density of 28/32/36px controls
  * with 14/16/18px icons, plus icon-only
@@ -50,7 +50,7 @@ const buttonVariants = cva(
 /**
  * Renders a Base UI button with Lys variants and native button behavior.
  *
- * @remarks Primary category: UI primitive adapter. Base UI button props,
+ * @remarks Base UI button props,
  * children, and interaction callbacks are forwarded, while `variant` and
  * `size` select repository styling and default to `default`. The forwarded ref
  * targets the Base UI button's `HTMLElement` host. Base UI supplies button
@@ -79,4 +79,4 @@ const Button = React.forwardRef<
   )
 })
 
-export { Button, buttonVariants }
+export { Button }

@@ -63,14 +63,25 @@ function findLargestAttachment(
 /**
  * Presents the chat draft editor, its context tray, and the session controls.
  *
- * @remarks Primary category: composition/view. The application store owns
+ * @remarks The application store owns
  * runtime availability and persisted settings; the chat-view store owns the
  * draft, the conversation, and the request lifecycle. This component owns only
  * transient composer state: the staged attachment tray, whether a drag is over
  * the field, and whether the field has focus. Enter without Shift submits once
  * and suppresses the newline; Shift+Enter keeps it. Sending requires a
- * non-empty draft, and is refused while a reply is pending, while generation is
- * unavailable, or while the estimated request exceeds the window.
+ * non-empty draft, and is refused while a request is active, while generation
+ * is unavailable, or while the estimated request exceeds the window.
+ *
+ * The primary control is Send only while the request lifecycle is idle. It
+ * becomes Stop for every active phase — awaiting the conversation turn, the
+ * streaming reply, and the completed reply whose transport is still open for
+ * the title. Cancellation is bound here rather than to the transcript because
+ * the transcript has no assistant message to carry a control while the turn is
+ * awaited, and none still accepting content once the reply is complete. Stop
+ * delegates to the store's cancellation action, which preserves the
+ * conversation, the draft, and the staged tray, invalidates the request before
+ * aborting so late transport events cannot alter the conversation, and ignores
+ * activation once the lifecycle is idle, so repeated activation is harmless.
  *
  * Three affordances are staged ahead of the capability behind them and are
  * deliberately inert: attachments are held in the renderer and never sent
@@ -96,6 +107,7 @@ export function Composer(): ReactElement {
   const resetConversation = useChatViewStore((state) => state.resetConversation)
   const sendMessage = useChatViewStore((state) => state.sendMessage)
   const setInputDraft = useChatViewStore((state) => state.setInputDraft)
+  const stopStreaming = useChatViewStore((state) => state.stopStreaming)
 
   const [attachments, setAttachments] =
     useState<readonly ComposerAttachment[]>(NO_ATTACHMENTS)
@@ -107,7 +119,7 @@ export function Composer(): ReactElement {
   const isModelLoaded = modelRuntime.status === "loaded"
   const connection = readLocalRuntimeConnection(backendStatus, isModelLoaded)
   const isUnavailable = connection !== "ready"
-  const isReplyPending = request.status !== "idle"
+  const isRequestActive = request.status !== "idle"
 
   const turns: readonly ContextTurn[] = (conversation?.messages ?? []).map(
     (message) => ({ id: message.id, text: message.content })
@@ -122,7 +134,7 @@ export function Composer(): ReactElement {
   const isOverWindow = contextUsage.overflowTokens > 0
 
   const isSendDisabled =
-    isReplyPending ||
+    isRequestActive ||
     isUnavailable ||
     inputDraft.trim().length === 0 ||
     isOverWindow
@@ -314,20 +326,32 @@ export function Composer(): ReactElement {
               onPaste={handlePaste}
               placeholder={formatComposerPlaceholder(
                 connection,
-                isReplyPending
+                isRequestActive
               )}
               rows={1}
               value={inputDraft}
             />
 
-            <Button
-              className="composer__send"
-              disabled={isSendDisabled}
-              onClick={() => void sendMessage()}
-              type="button"
-            >
-              Send
-            </Button>
+            {isRequestActive ? (
+              <Button
+                aria-label="Stop reply"
+                className="composer__send"
+                onClick={stopStreaming}
+                type="button"
+                variant="secondary"
+              >
+                Stop
+              </Button>
+            ) : (
+              <Button
+                className="composer__send"
+                disabled={isSendDisabled}
+                onClick={() => void sendMessage()}
+                type="button"
+              >
+                Send
+              </Button>
+            )}
           </div>
 
           {isDropping && !isUnavailable ? (
@@ -384,7 +408,7 @@ export function Composer(): ReactElement {
           </div>
 
           <div className="composer__meta-right">
-            {isReplyPending ? (
+            {isRequestActive ? (
               <span className="composer__generating">Generating…</span>
             ) : null}
 

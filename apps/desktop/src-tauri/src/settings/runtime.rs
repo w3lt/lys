@@ -8,14 +8,16 @@ const BACKEND_ADDRESS_DEFAULT_VALUE: &str = "http://127.0.0.1:12345";
 #[serde(default, rename_all = "camelCase")]
 /// Runtime settings persisted under the `runtime` JSON object.
 ///
-/// Missing fields use Rust defaults (`false`, `None`, and an empty string),
-/// and field names serialize in camelCase.
+/// Missing fields use this type's `Default` implementation: backend startup
+/// enabled, no selected model, and the loopback backend address. Field names
+/// serialize in camelCase; runtime edits in the desktop UI remain session-only.
 pub struct RunTimeSettings {
     /// Whether application initialization requests backend startup.
     pub auto_start_backend: bool,
-    /// Optional model identifier selected as the runtime default.
+    /// Optional default-model selection; selecting it does not load weights.
     pub default_model: Option<String>,
-    /// Backend address persisted for runtime consumers; empty by default.
+    /// Backend address shown in runtime settings; HTTP consumers use shared
+    /// protocol constants.
     pub backend_address: String,
 }
 

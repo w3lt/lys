@@ -58,7 +58,7 @@ const DUMMY_API_KEY = "dummy-api-key"
  * Owns an OpenAI client that adapts chat and title generation to the backend's
  * OpenAI-compatible local endpoint.
  *
- * @remarks Primary category: resource owner or boundary adapter. The instance
+ * @remarks The instance
  * owns its SDK client for its application lifetime; request inputs are borrowed
  * and cancellation is owned by each caller. Concurrency model: reentrant at
  * this service boundary; no request-local mutable state is retained and

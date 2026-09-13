@@ -51,7 +51,7 @@ fn running_backend_status(pid: u32) -> BackendProcessStatus {
 #[derive(Default)]
 /// Owns the optional backend child for the Tauri application lifetime.
 ///
-/// Primary category: resource owner. The mutex serializes each individual
+/// The mutex serializes each individual
 /// process-state access; callers never receive the `Child` itself. An exited
 /// direct child remains stored until `stop` removes it or a later spawn
 /// replaces it. `start_backend` performs its status check and spawn in separate

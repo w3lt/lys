@@ -27,8 +27,11 @@ repository today; it is not a promise of unreleased work.
   rows in SQLite, and streams typed SSE events back to the desktop.
 - The backend also attempts to generate a conversation title asynchronously and
   emits it as a stream event.
-- The Tauri host loads a small runtime settings file from
-  `~/.lys/settings.json`.
+- Runtime, Model, and Generation settings panes are available. Model controls
+  refresh inventory, load and unload weights, and check loaded-state health.
+- Generation controls apply to future chat requests and save automatically
+  through Tauri to `~/.lys/settings.json`, which contains runtime, model, and
+  generation groups. Runtime and model edits remain session-only.
 
 ## Coming soon
 
@@ -36,12 +39,13 @@ The current repository does not yet provide:
 
 - conversation history retrieval or restoration after relaunch
 - persisted assistant delta content in SQLite
-- usable Model, Generation, and Conversation settings tabs, followed by live
-  wiring between those controls and chat requests
+- a Conversation settings pane
+- using the selected default model for chat requests, which still send a fixed
+  model identifier
 - replay or reconnect semantics for chat streams
 - tool-call stream events
 - a production desktop release workflow
-- evidenced ADR, RFC, and release-history records
+- evidenced ADR and RFC records, and a canonical release log
 
 ## Related documents
 

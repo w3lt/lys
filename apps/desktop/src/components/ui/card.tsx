@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils"
 /**
  * Renders the root surface for a composed card over a native `div`.
  *
- * @remarks Primary category: UI primitive adapter. Native `div` props and
+ * @remarks Native `div` props and
  * children are forwarded; `size` is a repository spacing variant with
  * `default` or `sm` and defaults to `default`. The root exposes
  * `data-slot="card"` and `data-size` for its compound parts. A supplied `ref`
@@ -38,7 +38,7 @@ function Card({
 /**
  * Renders the header region of a {@link Card} over a native `div`.
  *
- * @remarks Primary category: UI primitive adapter. Native `div` props and
+ * @remarks Native `div` props and
  * children are forwarded and marked with `data-slot="card-header"`; nested
  * title, description, and action parts use that region's layout contract. A
  * supplied `ref` targets the native `HTMLDivElement`; no state, portal,
@@ -62,7 +62,7 @@ function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
 /**
  * Renders title content in a {@link CardHeader} over a native `div`.
  *
- * @remarks Primary category: UI primitive adapter. Native `div` props and
+ * @remarks Native `div` props and
  * children are forwarded and marked with `data-slot="card-title"`; the
  * component does not create a heading element or own state, portals, callbacks,
  * or failures. A supplied `ref` targets the native `HTMLDivElement`.
@@ -85,7 +85,7 @@ function CardTitle({ className, ...props }: React.ComponentProps<"div">) {
 /**
  * Renders supporting description content in a {@link CardHeader}.
  *
- * @remarks Primary category: UI primitive adapter. Native `div` props and
+ * @remarks Native `div` props and
  * children are forwarded and marked with `data-slot="card-description"`.
  * Semantics remain those supplied by the caller because the host is a `div`.
  * A supplied `ref` targets the native `HTMLDivElement`; no state, portal,
@@ -106,7 +106,7 @@ function CardDescription({ className, ...props }: React.ComponentProps<"div">) {
 /**
  * Places action content in the trailing area of a {@link CardHeader}.
  *
- * @remarks Primary category: UI primitive adapter. Native `div` props and
+ * @remarks Native `div` props and
  * children are forwarded and marked with `data-slot="card-action"`; layout
  * ownership remains with the surrounding header. A supplied `ref` targets the
  * native `HTMLDivElement`; it owns no state, portal, callbacks, or failure
@@ -130,7 +130,7 @@ function CardAction({ className, ...props }: React.ComponentProps<"div">) {
 /**
  * Renders the main content region of a {@link Card} over a native `div`.
  *
- * @remarks Primary category: UI primitive adapter. Native `div` props and
+ * @remarks Native `div` props and
  * children are forwarded and marked with `data-slot="card-content"`; the
  * card root supplies the spacing context. A supplied `ref` targets the native
  * `HTMLDivElement`; it owns no state, portal, callbacks, or failure handling.
@@ -150,7 +150,7 @@ function CardContent({ className, ...props }: React.ComponentProps<"div">) {
 /**
  * Renders the footer region of a {@link Card} over a native `div`.
  *
- * @remarks Primary category: UI primitive adapter. Native `div` props and
+ * @remarks Native `div` props and
  * children are forwarded and marked with `data-slot="card-footer"`; the card
  * root adjusts its bottom spacing when this part is present. A supplied `ref`
  * targets the native `HTMLDivElement`; it owns no state, portal, callbacks, or

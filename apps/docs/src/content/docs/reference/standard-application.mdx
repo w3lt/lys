@@ -1,0 +1,283 @@
+---
+title: Applying standards to Lys
+description: Project-specific policy and current implementation boundaries mapped to canonical construction rules.
+docType: reference
+sidebar:
+  order: 7
+---
+
+This page connects the current Lys implementation to the canonical construction
+standards. Its observations identify boundaries to review and test; they do not
+certify compliance. Generic rules remain in the
+[canonical standards](https://github.com/w3lt/lys/blob/main/docs/CODE_STANDARDS.md).
+Implementation mappings, compliance findings, and exception evidence belong in
+this handbook rather than source comments or the canonical rule chapters.
+
+## Project-specific protocol policy
+
+This policy applies the schema/type authority rule in
+[TYPE-009](https://github.com/w3lt/lys/blob/main/docs/code_standards/TYPE.md)
+and the construction exception in
+[OBJECT-006](https://github.com/w3lt/lys/blob/main/docs/code_standards/OBJECT.md)
+to the [protocol API directory](https://github.com/w3lt/lys/tree/main/packages/protocol/src/apis).
+It retains the existing project requirements and allowances.
+
+In `packages/protocol/src/apis/`, primary payload contracts such as request bodies, path or query parameters, individual responses, and stream events MUST use Zod schemas, with their payload types inferred from those schemas. Types imported from outside this directory may be used directly.
+
+Endpoint descriptors, status-to-schema maps, reply maps, and framework route wrappers MAY use ordinary objects and TypeScript types that compose the primary contracts. They do not require Zod schemas solely for type derivation. Avoid handwritten mirrors of an inferable schema-map or descriptor shape. Use `z.infer`, `z.input`, or `z.output` only with an actual Zod schema, never with a plain descriptor or schema map.
+
+## LLM runtime surface and unresolved review
+
+The current runtime surface maps to
+[IFACE-006 and IFACE-026](https://github.com/w3lt/lys/blob/main/docs/code_standards/INTERFACE.md)
+and [CLASS-006](https://github.com/w3lt/lys/blob/main/docs/code_standards/CLASS.md).
+The interface default is at most five effective operations; the class default is
+at most seven public operations. Inherited operations count, as do public getters,
+disposal, and the class's public static factory.
+
+| Declaration           | Effective surface                                                                                  | Count |
+| --------------------- | -------------------------------------------------------------------------------------------------- | ----: |
+| `LlmEngine`           | Downloaded inventory, loaded-instance inventory, load, and stop                                    |     4 |
+| `LlmRuntimeLifecycle` | `lifecycleStatus`, `getRuntimeAvailability()`, and `[Symbol.asyncDispose]()`                       |     3 |
+| `LlmRuntime`          | All inherited `LlmEngine` and `LlmRuntimeLifecycle` operations; no additional declarations         |     7 |
+| `LmStudioRuntime`     | The seven runtime operations plus public static `create()`; its private constructor does not count |     8 |
+| `LlmServiceRuntime`   | `LlmEngine` plus `AsyncDisposable`                                                                 |     5 |
+
+The declarations are in [engine capability](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/llm/llmEngine.ts),
+[lifecycle capability](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/llm/llmRuntimeLifecycle.ts),
+[composite runtime](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/llm/llmRuntime.ts),
+[LM Studio adapter](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/llm/runtimes/lmStudioRuntime.ts),
+and [service consumer contract](https://github.com/w3lt/lys/blob/main/apps/backend/src/di/services/llmService.ts).
+
+Production service calls use the four engine operations and disposal.
+[Singleton composition](https://github.com/w3lt/lys/blob/main/apps/backend/src/di/singleton.ts)
+uses `create()` for acquisition and retains cleanup responsibility until the
+instance transfers to the service. The service consumes the same runtime instance
+through its five-operation contract. Source inspection found no production calls
+to `lifecycleStatus` or `getRuntimeAvailability()`. The factory's readiness check
+calls the SDK directly, so it does not establish a consumer of the public
+availability method.
+
+The seven-operation composite and eight-operation class exceed their default
+limits. Shared resource identity alone does not satisfy the exception criteria:
+the inspected production owner already uses a smaller contract, and no actual
+consumer or approved public contract was established for the two observations.
+No valid exception approval was established in the inspected repository and PR
+review evidence. [Issue #37](https://github.com/w3lt/lys/issues/37) remains unresolved;
+recording these facts does not approve an exception or change the implementation.
+
+Historically, [review finding I-8 on PR #23](https://github.com/w3lt/lys/pull/23#issuecomment-5633082465)
+identified a missing design record and approval behind source-level exception
+claims. Those claims were subsequently removed from source documentation. The
+missing record was not present in the inspected repository or its path history,
+and the inspected PR review list was empty; this describes the inspected evidence,
+not proof that no discussion could have occurred elsewhere. Moving the review
+mapping here does not close the finding's underlying surface-compliance issue.
+
+A separate implementation decision can reduce the surface or provide the evidence
+and explicit reviewer approval required by the
+[exception process](https://github.com/w3lt/lys/blob/main/CONTRIBUTING.md).
+Removing both currently unused observations would leave five interface operations
+and six public class operations including `create()`. That is a proposed change,
+not an implemented compatibility decision. Behavioral coverage remains separate
+work tracked in [issue #25](https://github.com/w3lt/lys/issues/25).
+
+## API boundaries
+
+Canonical rules: [API-004, API-020, API-034](https://github.com/w3lt/lys/blob/main/docs/code_standards/API.md).
+
+These examples identify review boundaries in the current repository. They do not certify implementation compliance with the linked standard.
+
+| Repository pattern                         | Contract to review                                             | Important distinction                                                                      |
+| ------------------------------------------ | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Shared route descriptor in `@lys/protocol` | Method, path, request, response variants, and actual registrar | A descriptor is not proof of publication                                                   |
+| Model unload response                      | Bodyless success and status-specific Problem Details           | Reconciled absence is an observation, not permanent exclusion                              |
+| Chat request and response                  | Complete request shape, SSE framing, and task-scoped outcomes  | Generating a reply, producing a title, and closing the connection have different lifetimes |
+| Native settings command                    | Registered command and exact serialized argument envelope      | A TypeScript return type does not prove the Rust boundary accepts the request              |
+| `/api/v1/heath`                            | Existing method/path identity                                  | A spelling correction still requires a consumer-compatible transition                      |
+
+The relevant sources are the [unload contract](https://github.com/w3lt/lys/blob/main/packages/protocol/src/apis/llm/unloadModelRoute.ts), [LLM registrar](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/llm/routes/index.ts), [chat contract](https://github.com/w3lt/lys/blob/main/packages/protocol/src/apis/chat/chatRoute.ts), [chat handler](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/chat/chat/index.ts), [native settings commands](https://github.com/w3lt/lys/blob/main/apps/desktop/src-tauri/src/settings/commands.rs), [settings client](https://github.com/w3lt/lys/blob/main/apps/desktop/src/lib/apis/tauri/settings.ts), and [health route](https://github.com/w3lt/lys/blob/main/packages/protocol/src/apis/health/routes.ts).
+
+### Example of scoped stream completion
+
+| Observation in the current chat exchange | What it establishes                                                   | What it does not establish                                               |
+| ---------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Successful response establishment        | The consumer can begin reading the declared representation            | Generation and persistence have completed successfully                   |
+| Conversation start event                 | Identifiers for this exchange are available according to the protocol | All later tasks have succeeded                                           |
+| Assistant `done` event                   | The assistant generation has reached its documented outcome           | No title or other task event can follow                                  |
+| Stream closure                           | No more bytes arrive on that connection                               | Every required application outcome occurred or every effect was reversed |
+
+The [SSE reference](/reference/sse-events/) explains the current task ordering. A complete API contract identifies which remaining outcomes each consumer requires before it reports success.
+
+## Asynchronous work
+
+Canonical rules: [ASYNC-001, ASYNC-002, ASYNC-003](https://github.com/w3lt/lys/blob/main/docs/code_standards/ASYNC.md).
+
+These examples identify useful review boundaries in the current repository. They do not certify that existing implementations satisfy every rule in the linked standard.
+
+| Situation                                                                        | Contract distinction                                                                                                                                                                                               |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| The LLM service serializes accepted operations through a private completion tail | Accepted model operations use an application-owned completion-only contract. Keeping the queue usable after failure is separate from preserving each caller's original failure and establishing bounded admission. |
+| Service disposal closes admission before awaiting accepted work                  | Joining accepted operations before dependency release demonstrates one shutdown boundary; it does not by itself establish every cancellation or deadline requirement.                                              |
+| Service construction registers each acquired service for asynchronous cleanup    | A later acquisition failure still requires release of earlier services and preservation of both creation and cleanup failures.                                                                                     |
+| The chat route starts assistant and title tasks and awaits all settlements       | Joining both lifetimes does not handle rejected results if the result collection is discarded.                                                                                                                     |
+| The desktop chat adapter returns an async generator                              | Calling the generator supplies an iterator; consuming it begins the fetch. Never iterating and exiting early are different lifetime paths.                                                                         |
+| The desktop stops a request and revokes its publication token                    | Old output can lose authority immediately while the underlying transport remains pending. Publication safety and termination are separate obligations.                                                             |
+| Assistant completion arrives before the generated title                          | One domain task can finish while the enclosing stream still has valid work and messages to deliver.                                                                                                                |
+| An early stream exit cancels a reader and releases its lock                      | Cancelling the source, releasing the reader, and preserving a failure during cleanup require distinct protocol handling.                                                                                           |
+| A hook owns an uptime interval while the application store owns model requests   | The hook releases its interval on unmount. Model requests survive view unmounts; invalidating local publication and aborting transport do not cancel accepted backend work.                                        |
+
+The relevant sources are the [LLM service](https://github.com/w3lt/lys/blob/main/apps/backend/src/di/services/llmService.ts), [service lifetime](https://github.com/w3lt/lys/blob/main/apps/backend/src/di/singleton.ts), [chat task group](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/chat/chat/index.ts), [desktop chat adapter](https://github.com/w3lt/lys/blob/main/apps/desktop/src/lib/apis/http/chat.ts), [chat-view owner](https://github.com/w3lt/lys/blob/main/apps/desktop/src/lib/store/chat-view/index.ts), [uptime hook](https://github.com/w3lt/lys/blob/main/apps/desktop/src/lib/hooks/backendRuntime.ts), and [model request owner](https://github.com/w3lt/lys/blob/main/apps/desktop/src/lib/store/model-actions.ts).
+
+No backend service-lifetime tests are currently tracked. These source examples identify boundaries that need controlled-schedule tests; they are not evidence of executed coverage. See the [testing guide](/develop/testing/) for the current gap.
+
+## Source comments
+
+Canonical rules: [COMMENT-027 through COMMENT-032](https://github.com/w3lt/lys/blob/main/docs/code_standards/COMMENT.md).
+
+These examples describe comments and nearby source in the current working tree. They illustrate review boundaries; they do not certify full compliance, executed tests, third-party behavior, or platform guarantees. Existing limitations are not exceptions for new or modified code.
+
+| Observed source                                                                                                                   | Comment distinction                                                                                                                                                                                |
+| --------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The chat registrar explains why it awaits settlement after creating two tasks                                                     | The comment explains a sequencing consequence beyond the final call's syntax. Source ordering can be inspected; full connection lifetime still requires the appropriate boundary evidence.         |
+| The shared chat-event declaration describes start, generation, and concurrent title events                                        | The contract belongs with the protocol, while the producer establishes ordering. A schema validating each event's shape does not independently enforce the sequence.                               |
+| The desktop stream adapter documents cancellation and reader release on early iteration exit                                      | The nested cleanup structure is observable in source. It does not by itself establish that all remote work terminates when the local reader is cancelled.                                          |
+| The Rust spawn helper explains locking before spawning, while the public start contract discloses separate check and spawn phases | A valid local ownership rationale must not be generalized into a guarantee against concurrent starts across the whole operation.                                                                   |
+| The uptime formatter names milliseconds, negative-input clamping, and minutes that do not roll into hours                         | Units and intentionally surprising output add information beyond a numeric parameter type. This is not a claim that every possible numeric input has been validated.                               |
+| Rail-state comments connect a shared key and value to initialization, the control, and the stylesheet                             | The explanation identifies a cross-file contract. Head placement is visible in configuration; a claim about every rendered first paint needs suitable rendered evidence.                           |
+| Record-index comments explain rechecking metadata before publishing complete index rows                                           | A local reason can preserve a seemingly redundant check. The statement about inferred types still needs the applicable compiler evidence when that claim is changed.                               |
+| Source includes a checking directive and declaration-file references                                                              | Tool-consumed comment syntax has a different role from ordinary explanation. Its presence alone is not proof that the relevant checker ran.                                                        |
+| ESLint documentation and its nearby ignore comment summarize the selected paths differently                                       | Duplicating changing inventories creates a concrete drift risk. Review must reconcile the actual declaration and the affected explanation, rather than count comments as evidence of completeness. |
+
+The relevant sources are the [chat registrar](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/chat/chat/index.ts), [chat protocol](https://github.com/w3lt/lys/blob/main/packages/protocol/src/apis/chat/chatRoute.ts), [desktop stream adapter](https://github.com/w3lt/lys/blob/main/apps/desktop/src/lib/apis/http/chat.ts), [Rust process owner and spawn path](https://github.com/w3lt/lys/blob/main/apps/desktop/src-tauri/src/backend.rs), [uptime formatter](https://github.com/w3lt/lys/blob/main/apps/desktop/src/lib/hooks/backendRuntime.ts), [shared rail contract](https://github.com/w3lt/lys/blob/main/apps/docs/src/lib/handbook/rail.ts), [rail bootstrap configuration](https://github.com/w3lt/lys/blob/main/apps/docs/astro.config.mjs), [rail control](https://github.com/w3lt/lys/blob/main/apps/docs/src/components/handbook/RailCollapseToggle.astro), [rail stylesheet](https://github.com/w3lt/lys/blob/main/apps/docs/src/styles/global.css), [record-index projection](https://github.com/w3lt/lys/blob/main/apps/docs/src/lib/handbook/records.ts), [frontmatter declarations](https://github.com/w3lt/lys/blob/main/apps/docs/src/content.config.ts), [backend declaration reference](https://github.com/w3lt/lys/blob/main/apps/backend/src/fastify.d.ts), [desktop declaration reference](https://github.com/w3lt/lys/blob/main/apps/desktop/src/vite-env.d.ts), and [lint configuration](https://github.com/w3lt/lys/blob/main/eslint.config.ts).
+
+The source illustrations are observations, not a cleanup request or a passing validation record. Suppression and generation rules apply when those constructs occur; this mapping does not claim that every comment category already appears in repository-maintained source.
+
+## Configuration boundaries
+
+Canonical rules: [CONFIG-021 through CONFIG-030](https://github.com/w3lt/lys/blob/main/docs/code_standards/CONFIGURATION.md).
+
+These examples identify boundaries in the current source; they do not certify those implementations as compliant with the linked standard or every active standard. Existing limitations are not exceptions for new or modified code.
+
+| Observed boundary                                                                                                   | Configuration distinction                                                                                                                                                                    |
+| ------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Backend composition uses a configuration object assembled from protocol constants and a home-relative database path | An assembled object and its use by factories do not establish an external environment override or validation contract.                                                                       |
+| Native settings loading parses an existing document and creates defaults only when the file is missing              | Absence, decoding failure, and initial persistence are separate outcomes.                                                                                                                    |
+| Renderer and native settings both represent runtime, model, and generation groups                                   | Matching field names alone do not prove matching domains, defaults, or validation.                                                                                                           |
+| The renderer applies settings in memory and automatically saves generation edits through the native command         | Runtime and model edits remain session-only. The adapter sends `{ newSettings: settings }`, matching Rust's `new_settings` parameter; write failure remains distinct from local application. |
+| A chat request reads temperature and reply ceiling once from a narrow settings projection                           | The request has a concrete sampling point; a later edit can affect a subsequent request without changing the admitted request.                                                               |
+| A backend-address setting exists while the chat transport uses a fixed address                                      | Storing or displaying a setting does not prove that its intended consumer applies it.                                                                                                        |
+| Theme application and its browser-storage write have separate failure behavior                                      | A locally applied appearance is distinct from an acknowledged saved preference. This does not authorize silent recovery from invalid required configuration.                                 |
+| Backend composition derives endpoints and a database path before passing them to service factories                  | The source exposes a configuration boundary to verify; it does not establish that a test has executed the factory inputs, external parsing, or persistence.                                  |
+
+The relevant sources are the [backend configuration declaration](https://github.com/w3lt/lys/blob/main/apps/backend/src/config.ts), [backend startup](https://github.com/w3lt/lys/blob/main/apps/backend/src/index.ts), [service composition](https://github.com/w3lt/lys/blob/main/apps/backend/src/di/singleton.ts), [native settings loading and persistence](https://github.com/w3lt/lys/blob/main/apps/desktop/src-tauri/src/settings.rs), [native settings commands](https://github.com/w3lt/lys/blob/main/apps/desktop/src-tauri/src/settings/commands.rs), [renderer settings types and initial values](https://github.com/w3lt/lys/blob/main/apps/desktop/src/lib/store/settings.ts), [renderer settings adapter](https://github.com/w3lt/lys/blob/main/apps/desktop/src/lib/apis/tauri/settings.ts), [application settings state](https://github.com/w3lt/lys/blob/main/apps/desktop/src/lib/store/index.ts), [chat request sampling](https://github.com/w3lt/lys/blob/main/apps/desktop/src/lib/store/chat-view/index.ts), [chat transport](https://github.com/w3lt/lys/blob/main/apps/desktop/src/lib/apis/http/chat.ts), and [theme behavior](https://github.com/w3lt/lys/blob/main/apps/desktop/src/app/theme.ts).
+
+Backend service-composition tests are not currently tracked. The [testing guide](/develop/testing/) describes this coverage gap; the examples above are source observations.
+
+## Events and delivery
+
+Canonical rules: [EVENT-001, EVENT-002, EVENT-003](https://github.com/w3lt/lys/blob/main/docs/code_standards/EVENT.md).
+
+These examples identify useful review boundaries in the current repository. They do not certify that existing implementations satisfy every rule in the linked standard.
+
+| Situation                                                               | Contract distinction                                                                                                                    |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| A chat turn-start event contains persisted message records              | The delivery event reports a turn-start occurrence; the nested transcript messages are domain data with their own identities.           |
+| The assistant stream emits two identical text fragments                 | Equal content does not prove duplicate delivery. Both fragments may be required for the final text.                                     |
+| A generated title arrives after assistant `done`                        | Assistant completion and title completion are separate scopes even though they share one SSE connection.                                |
+| The chat sender resolves after its event write is accepted              | Acceptance by the sender path does not prove that the desktop decoded, applied, or persisted the event.                                 |
+| A new request replaces an older request in the same conversation        | Conversation identity alone cannot authorize the older request's queued notifications to update current state.                          |
+| A view reports its measured scroll position through a semantic callback | An in-process notification can use its direct callback relationship without a wire envelope, durable acknowledgement, or occurrence ID. |
+| A disclosure registers pointer and keyboard listeners while open        | Each registration belongs to that disclosure instance and its exact cleanup; native propagation rules still apply.                      |
+| A native command returns the current backend status                     | A request/response status snapshot is not proof that a backend event stream or replay history exists.                                   |
+
+The relevant sources are the [chat event contract](https://github.com/w3lt/lys/blob/main/packages/protocol/src/apis/chat/chatRoute.ts), [sender boundary](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/chat/chat/share.ts), [chat consumer adapter](https://github.com/w3lt/lys/blob/main/apps/desktop/src/lib/apis/http/chat.ts), and [SSE reference](/reference/sse-events/). The repository's current SSE reference explicitly records the absence of event IDs and replay markers; this mapping does not add those capabilities.
+
+## Hooks and their owners
+
+The current desktop renderer uses React. The Hook chapter’s React-specific notes apply to that integration.
+
+Canonical rules: [HOOK-001, HOOK-007](https://github.com/w3lt/lys/blob/main/docs/code_standards/HOOK.md).
+
+These examples illustrate classification and contract review; they do not assert that the existing implementations satisfy every rule in the linked standard.
+
+| Repository pattern                               | Hook boundary                                              | Ownership consequence                                                              |
+| ------------------------------------------------ | ---------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `useSettingsContext` reads the settings provider | Query with a required-provider precondition                | Provider owns settings; returned actions retain their proposal/completion contract |
+| `useBackendUptimeMs` observes sampled uptime     | Reactive orchestration with a documented sampling interval | Its observation timer is local; the backend runtime is not                         |
+| `useTheme` returns a value and an action         | Current snapshot and later action are separate contracts   | Stable action identity, if promised, does not imply stable result-object identity  |
+| `useLysStore` is a library-created bound hook    | Hook invocation plus separate imperative store operations  | Observer removal does not own the store's model-transition work                    |
+| `createChatViewStore` creates a bound store      | Ordinary factory providing a renderer integration surface  | Factory-selected instance owns its operation tokens and abort resources            |
+| `backendStatusLabel` formats display text        | Ordinary Function                                          | Rendering use alone does not create a Hook construct                               |
+| A server `onClose` callback                      | Ordinary lifecycle callback                                | Server lifecycle rules apply; renderer hook call order does not                    |
+
+The source patterns are in [settings context](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/SettingsViewComponents/SettingsContext.ts), [uptime helpers](https://github.com/w3lt/lys/blob/main/apps/desktop/src/lib/hooks/backendRuntime.ts), [theme](https://github.com/w3lt/lys/blob/main/apps/desktop/src/app/theme.ts), [application store](https://github.com/w3lt/lys/blob/main/apps/desktop/src/lib/store/index.ts), [chat store](https://github.com/w3lt/lys/blob/main/apps/desktop/src/lib/store/chat-view/index.ts), and [server lifecycle composition](https://github.com/w3lt/lys/blob/main/apps/backend/src/di/fastify.ts).
+
+## Resource ownership
+
+Canonical rules: [RESOURCE-025 through RESOURCE-031](https://github.com/w3lt/lys/blob/main/docs/code_standards/RESOURCE.md).
+
+These examples identify useful review boundaries in the current repository. They do not certify that existing implementations satisfy every rule in the linked standard.
+
+| Situation                                                                             | Contract distinction                                                                                                                                                                          |
+| ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A service bundle exposes operation capabilities and a module-private close capability | Using a service and owning the bundle's complete cleanup are different responsibilities. A frozen outer record does not by itself establish compliant lifecycle ownership.                    |
+| Each service acquisition is registered before acquiring the next service              | The next acquisition can fail without removing responsibility for the services already acquired. Installation into the final application host is another ownership boundary.                  |
+| The LLM service owns a runtime adapter that retains one SDK client                    | The runtime protects the client with its disposal stack; the service waits for accepted work before disposing the runtime. Closing the client does not unload remote model weights.           |
+| A database owner retains prepared statements                                          | The statements' use depends on the connection remaining valid; a different statement object does not prove independent resource ownership.                                                    |
+| A model inventory operation returns immutable instance identities                     | The snapshot is data. It does not establish exclusive ownership of models that other clients can change.                                                                                      |
+| A chat sender captures a borrowed reply connection                                    | The sender can use the connection within its permitted lifetime without owning the connection's release.                                                                                      |
+| An effect registers pointer and keyboard listeners on the document                    | The effect owns its two registrations and borrows the document and DOM references.                                                                                                            |
+| A view observes application-owned model requests                                      | Removing the view does not end request ownership. The application store invalidates observations and aborts local transport when the runtime is released; accepted backend work may continue. |
+| A stream adapter cancels early consumption and then releases its reader lock          | Upstream cancellation and lock release are separate obligations; cleanup failures still need their proper outcome.                                                                            |
+| Native shutdown observes the direct child process                                     | Direct-child exit, descendant lifetime, process-group termination, and handle release are separate facts.                                                                                     |
+
+The relevant sources are the [service bundle and runtime acquisition](https://github.com/w3lt/lys/blob/main/apps/backend/src/di/singleton.ts), [application lifetime registration](https://github.com/w3lt/lys/blob/main/apps/backend/src/di/fastify.ts), [database and statement owner](https://github.com/w3lt/lys/blob/main/apps/backend/src/di/services/conversationService/index.ts), [LLM service](https://github.com/w3lt/lys/blob/main/apps/backend/src/di/services/llmService.ts), [LM Studio runtime owner](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/llm/runtimes/lmStudioRuntime.ts), [remote model reconciliation](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/llm/stopLlmModelsByKey.ts), [borrowed reply sender](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/chat/chat/share.ts), [listener registrations](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ComposerComponents/ComposerContextMeter.tsx), [model request owner](https://github.com/w3lt/lys/blob/main/apps/desktop/src/lib/store/model-actions.ts), [stream reader](https://github.com/w3lt/lys/blob/main/apps/desktop/src/lib/apis/http/chat.ts), and [native process owner](https://github.com/w3lt/lys/blob/main/apps/desktop/src-tauri/src/backend.rs).
+
+Service-lifetime tests are not currently tracked. These examples identify ownership boundaries to test, not verified cleanup coverage; see the [testing guide](/develop/testing/).
+
+## Persisted schemas
+
+Canonical rules: [SCHEMA-001, SCHEMA-002, SCHEMA-003](https://github.com/w3lt/lys/blob/main/docs/code_standards/SCHEMA.md).
+
+These examples identify boundaries in the current source; they do not certify those implementations as compliant with the linked standard or every active standard. Existing limitations are not exceptions for new or modified code.
+
+| Observed boundary                                                                                                                                     | Schema and migration distinction                                                                                                                                                                 |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Conversation storage keeps an ordered array of SQL migrations and uses its position as the version                                                    | Array order is persistent history; changing an applied entry can make fresh and upgraded stores disagree.                                                                                        |
+| The migration runner acquires a write transaction before reading the version, applies pending changes, updates the marker, and commits                | Coordination, schema changes, and version recording have a concrete boundary; this does not prove general application writes or external effects are atomic.                                     |
+| The store rejects a newer version and prepares statements after migration                                                                             | Supported opening versions and dependent preparation are explicit concerns. The existing constructor does not waive the active Class construction rules.                                         |
+| Conversation tables define role checks, correlated assistant status and finish reason, indexes, and timestamp triggers                                | A storage schema contains behavioral invariants beyond its column names. Copying rows alone would not preserve the complete contract.                                                            |
+| Shared conversation schemas constrain UUIDs and timestamps, while SQL enforces an assistant-state relationship not fully encoded in the runtime shape | Similar representations do not prove identical enforcement; each invariant needs a deliberate owner and consistent affected mappings.                                                            |
+| Conversation metadata reads alias stored column names and validate the returned value                                                                 | A query result and its static type are separate from the trusted internal representation. Missing rows and invalid rows have different outcomes.                                                 |
+| Conversation-list cursors carry a version and query binding                                                                                           | Versioned representation contracts extend beyond databases. The current decoder validates its shape before rejecting unsupported versions; its existence does not waive version-selection rules. |
+| The chat route installs a shared request schema and the desktop validates decoded stream events                                                       | Schema changes affect real producers and consumers, including coercion, required fields, discriminants, and strict unknown-field handling.                                                       |
+| Native settings initialize defaults when absent and deserialize existing JSON, but have no explicit format migration path                             | Defaults and current field names do not establish historical version identity or a failure-safe document migration. Configuration rules remain applicable.                                       |
+| The conversation store opens SQLite and runs migrations, while the recovery runbook declares no supported repair procedure                            | The implementation exposes a migration boundary, but there is no tracked backend test suite establishing fresh creation, historical upgrades, restart recovery, or operator repair.              |
+
+The relevant sources are the [conversation store and migration runner](https://github.com/w3lt/lys/blob/main/apps/backend/src/di/services/conversationService/index.ts), [shared conversation schemas](https://github.com/w3lt/lys/blob/main/packages/share/src/models/conversation.ts), [cursor encoding and decoding](https://github.com/w3lt/lys/blob/main/apps/backend/src/di/services/conversationService/utils.ts), [chat protocol schemas](https://github.com/w3lt/lys/blob/main/packages/protocol/src/apis/chat/chatRoute.ts), [backend chat registration](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/chat/chat/index.ts), [desktop stream validation](https://github.com/w3lt/lys/blob/main/apps/desktop/src/lib/apis/http/chat.ts), [native settings persistence](https://github.com/w3lt/lys/blob/main/apps/desktop/src-tauri/src/settings.rs), and [current recovery-support statement](/operate/runbooks/recover-session-database/).
+
+## Test boundaries and current gaps
+
+Canonical rules: [TEST-001, TEST-002, TEST-003](https://github.com/w3lt/lys/blob/main/docs/code_standards/TEST.md).
+
+These examples identify production boundaries and validation tooling present in the repository. They do not claim that automated tests cover those boundaries or that the implementation complies with every active requirement. Existing limitations are not exceptions for new or modified code.
+
+| Observed boundary                                                                                                        | Test and fixture distinction                                                                                                                                            |
+| ------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Backend routes use shared protocol descriptors and delegate to application capabilities                                  | A future route test must exercise real request validation and response mapping; sharing a descriptor alone does not independently protect its historical external path. |
+| The stop operation distinguishes canonical model keys from loaded instance identifiers and reconciles state after unload | Meaningful fixtures must distinguish multiple instances and unrelated models; command outcomes and final inventory require separate assertions.                         |
+| The LLM service owns queued operations and asynchronous shutdown                                                         | Concurrency coverage requires controlled admission and settlement boundaries; reading the lifecycle implementation is not execution evidence.                           |
+| Singleton composition acquires services and owns their reverse-order release                                             | Ownership tests need to observe partial acquisition and compound failures. Such tests would not by themselves prove file durability or historical migrations.           |
+| The backend manifest declares only a development script, and its TypeScript project includes only source                 | There is no supported backend test script or tracked backend test suite. Type checking does not establish behavioral coverage.                                          |
+| The desktop manifest includes a test runner, but no desktop cases are tracked                                            | A dependency or command is not evidence of exercised behavior.                                                                                                          |
+
+The relevant sources are the [load route](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/llm/routes/loadModelRoute.ts), [unload route](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/llm/routes/unloadModelRoute.ts), [stop operation](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/llm/stopLlmModelsByKey.ts), [LLM service](https://github.com/w3lt/lys/blob/main/apps/backend/src/di/services/llmService.ts), [singleton composition](https://github.com/w3lt/lys/blob/main/apps/backend/src/di/singleton.ts), [backend package manifest](https://github.com/w3lt/lys/blob/main/apps/backend/package.json), [backend TypeScript project](https://github.com/w3lt/lys/blob/main/apps/backend/tsconfig.json), [desktop package manifest](https://github.com/w3lt/lys/blob/main/apps/desktop/package.json), and [current testing guide](/develop/testing/).
+
+Backend, desktop, and shared-package test suites are currently absent from the tracked repository. The boundaries above identify where evidence is needed; they are not a passing run, measured coverage, or a supported production-service integration suite.
+
+## Related pages
+
+- [Implementation classifications](/reference/implementation-classifications/)
+- [Development standards](/develop/standards/)
+- [Testing](/develop/testing/)

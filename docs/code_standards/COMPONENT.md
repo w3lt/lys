@@ -116,6 +116,10 @@ Every repository-authored wrapper, adapter, configuration component, provider, b
 
 Every component MUST select exactly one primary category using this chapter's precedence and permissions table.
 
+Supporting engineering documentation MUST record that selection and identify
+the authoritative declaration. The taxonomy selection belongs there rather
+than in the source declaration's API comment.
+
 The category MUST describe the component's current responsibility and dependencies. A secondary renderer role such as provider, lazy boundary, error boundary, or compound subcomponent MUST NOT be selected as another category.
 
 A component whose required behavior exceeds its category's permissions MUST move the behavior to the appropriate parent, child, application capability, primitive adapter, or framework boundary.
@@ -205,7 +209,7 @@ Every named repository-owned component MUST have an API documentation comment im
 
 JavaScript and TypeScript MUST use JSDoc and follow [`docs/JSDOC.md`](../JSDOC.md). Other languages MUST use their standard API documentation format.
 
-The documentation MUST state the component's responsibility and primary category and describe every applicable:
+The declaration documentation MUST state the component's responsibility and describe every applicable:
 
 - Props, children, and slots.
 - Events and completion behavior.
@@ -215,6 +219,9 @@ The documentation MUST state the component's responsibility and primary category
 - Semantic and accessibility contract.
 - Ref or imperative surface.
 - Lifecycle, failure, and lazy-boundary behavior.
+
+Supporting engineering documentation records the selected category under
+`COMP-006`; it does not replace the declaration's behavioral contract.
 
 Wrapping or adapting another component does not create an exception. Documentation MUST NOT repeat type syntax, narrate implementation, or claim behavior the component does not provide.
 
@@ -1639,8 +1646,6 @@ type DeleteConversationButtonProps = {
 
 /**
  * Deletes one named conversation through an accessible native button.
- *
- * @category presentational
  */
 function DeleteConversationButton({
   conversationTitle,
@@ -1656,7 +1661,7 @@ function DeleteConversationButton({
 }
 ```
 
-The native button supplies the base semantics and keyboard behavior. The accessible name states both the action and target, the decorative icon contributes no duplicate name, and disabled behavior is functional rather than only visual.
+The example uses the presentational category. The native button supplies the base semantics and keyboard behavior. The accessible name states both the action and target, the decorative icon contributes no duplicate name, and disabled behavior is functional rather than only visual.
 
 ## Framework and external-component boundaries
 
@@ -2022,7 +2027,6 @@ type NotificationsSwitchProps = {
 /**
  * Adapts the external switch contract to notification settings.
  *
- * @remarks Primary category: framework boundary.
  * @param props - Controlled notification state and its parent-owned proposal.
  * @returns A labeled notification switch.
  */
@@ -2045,7 +2049,7 @@ function NotificationsSwitch({
 }
 ```
 
-The external `checked` contract is translated into repository terminology, the vendor props type does not escape, ownership remains controlled, and the adapter owns the accessible relationship.
+The example uses the framework-boundary category. The external `checked` contract is translated into repository terminology, the vendor props type does not escape, ownership remains controlled, and the adapter owns the accessible relationship.
 
 ## Compatibility and documentation
 
@@ -2457,7 +2461,7 @@ type ConversationSearchFieldProps = {
 /**
  * Presents a controlled field for filtering conversations.
  *
- * @remarks Primary category: presentational. The parent owns the query and
+ * @remarks The parent owns the query and
  * decides whether to accept each proposed change. The component owns no
  * mutable state, effect, resource, or ambient application dependency.
  * @param props - Parent-owned query, availability, and change proposal.
@@ -2495,7 +2499,7 @@ This example demonstrates:
 
 ## Complete TypeScript/React example: list projection and identity
 
-This example also assumes a validated `ConversationAccessibleLabel` domain type. Before publishing the collection, the parent validates unique conversation identities and supplies localized labels that begin with each entry's exact visible title and distinguish different targets through meaningful context, such as workspace or creation date. Titles may repeat; arbitrary identifiers are not substitutes for meaningful labels.
+Both components use the presentational category. This example also assumes a validated `ConversationAccessibleLabel` domain type. Before publishing the collection, the parent validates unique conversation identities and supplies localized labels that begin with each entry's exact visible title and distinguish different targets through meaningful context, such as workspace or creation date. Titles may repeat; arbitrary identifiers are not substitutes for meaningful labels.
 
 ```tsx
 import type { ReactElement } from "react"
@@ -2536,7 +2540,7 @@ type ConversationListEntryProps = {
 /**
  * Presents one conversation as a named selection control within a list.
  *
- * @remarks Primary category: presentational. The list owner supplies the key
+ * @remarks The list owner supplies the key
  * and validated label; the parent owns the requested open action. The entry
  * owns no mutable state, effect, resource, or ambient application dependency.
  * @param props - Display-ready conversation and the parent-owned open action.
@@ -2562,7 +2566,7 @@ function ConversationListEntry({
 /**
  * Presents available conversations and emits selection intent.
  *
- * @remarks Primary category: presentational. An empty collection is an
+ * @remarks An empty collection is an
  * intentional successful state. Loading and failure remain responsibilities
  * of the parent because this contract accepts only resolved conversations.
  * @param props - Ordered conversations and the parent-owned open action.

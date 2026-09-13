@@ -387,22 +387,7 @@ When configuration crosses languages, processes, packages, build phases, or publ
 
 Relevant validation MUST cover argument names, serialization, defaults, provider construction, request sampling, embedded build inputs, and exclusion of sensitive values where the change affects them. A UI update or successful document write alone MUST NOT be used as proof of changed runtime behavior. Any boundary that could not be verified MUST be reported with the exact limitation.
 
-## Repository boundary examples
-
-These examples identify boundaries in the current source; they do not certify those implementations as compliant with this chapter or every active standard. Existing limitations are not exceptions for new or modified code.
-
-| Observed boundary                                                                                                   | Configuration distinction                                                                                                                                    |
-| ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Backend composition uses a configuration object assembled from protocol constants and a home-relative database path | An assembled object and its use by factories do not establish an external environment override or validation contract.                                       |
-| Native settings loading parses an existing document and creates defaults only when the file is missing              | Absence, decoding failure, and initial persistence are separate outcomes.                                                                                    |
-| Renderer and native settings both represent runtime, model, and generation groups                                   | Matching field names alone do not prove matching domains, defaults, or validation.                                                                           |
-| The renderer's settings setter replaces in-memory state, while a separate native command writes settings            | Editing, command acceptance, persistence, and runtime application are different stages. The current save adapter also documents an argument-shape mismatch.  |
-| A chat request reads temperature and reply ceiling once from a narrow settings projection                           | The request has a concrete sampling point; a later edit can affect a subsequent request without changing the admitted request.                               |
-| A backend-address setting exists while the chat transport uses a fixed address                                      | Storing or displaying a setting does not prove that its intended consumer applies it.                                                                        |
-| Theme application and its browser-storage write have separate failure behavior                                      | A locally applied appearance is distinct from an acknowledged saved preference. This does not authorize silent recovery from invalid required configuration. |
-| Backend service tests inject configuration and inspect factory inputs                                               | Observing actual derived endpoints and paths gives evidence that configuration reaches composition; it does not test external parsing or persistence.        |
-
-The relevant sources are the [backend configuration declaration](../../apps/backend/src/config.ts), [backend startup](../../apps/backend/src/index.ts), [service composition](../../apps/backend/src/di/singleton.ts), [native settings loading and persistence](../../apps/desktop/src-tauri/src/settings.rs), [native settings commands](../../apps/desktop/src-tauri/src/settings/commands.rs), [renderer settings types and initial values](../../apps/desktop/src/lib/store/settings.ts), [renderer settings adapter](../../apps/desktop/src/lib/apis/tauri/settings.ts), [application settings state](../../apps/desktop/src/lib/store/index.ts), [chat request sampling](../../apps/desktop/src/lib/store/chat-view/index.ts), [chat transport](../../apps/desktop/src/lib/apis/http/chat.ts), [theme behavior](../../apps/desktop/src/app/theme.ts), and [service composition tests](../../apps/backend/test/di/singleton.test.ts).
+## Platform examples
 
 Two platform examples illustrate why decoding remains explicit:
 

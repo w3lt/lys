@@ -31,6 +31,24 @@ change as the behavior or contract they describe.
 When a page depends on an existing decision or standard, prefer linking to that
 source over restating it in slightly different words.
 
+## Keep code and construction rules independent
+
+Source comments and JSDoc describe the code's contract, constraints, and
+reasoning. They do not cite construction-rule IDs or carry compliance findings
+or exception-approval records. Record standards-category labels in the
+[implementation classifications](/reference/implementation-classifications/),
+while keeping the actual ownership and behavior contracts beside declarations.
+
+Canonical standards define general requirements and may use illustrative
+examples. They do not depend on concrete Lys declarations, source paths, or
+the current implementation's compliance status.
+
+Document relationships between an implementation and a rule in this handbook
+under `apps/docs`. Link to both sources there, distinguish observations from
+verified guarantees, and keep findings and exception status with their
+supporting evidence. The [implementation mappings](/reference/standard-application/)
+collect the current examples; they do not redefine rules or grant exceptions.
+
 ## Handbook validation
 
 The docs app validates handbook frontmatter at build time. The content model

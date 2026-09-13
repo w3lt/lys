@@ -21,7 +21,7 @@ export type ConversationTurnCreationOptions = {
 /**
  * Owns the invariant-bearing metadata and persisted messages for one turn.
  *
- * @remarks Primary category: invariant owner. The instance owns the selected
+ * @remarks The instance owns the selected
  * conversation metadata, user message, assistant message, and whether the
  * turn created a conversation. Construction performs synchronous persistence:
  * it creates or retrieves metadata, then inserts the user and streaming

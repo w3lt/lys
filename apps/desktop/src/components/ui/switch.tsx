@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils"
 /**
  * Renders a Base UI switch with Lys size variants and a repository thumb.
  *
- * @remarks Primary category: UI primitive adapter. Base UI switch root props,
+ * @remarks Base UI switch root props,
  * controlled or uncontrolled checked state, event handlers, and native
  * accessibility behavior are forwarded; a controlled `checked` value is
  * parent-owned while `defaultChecked` is primitive-owned. `size` defaults to

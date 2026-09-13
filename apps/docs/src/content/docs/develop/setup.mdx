@@ -54,14 +54,27 @@ pnpm dev
 - `pnpm backend:dev` starts the Fastify backend in watch mode.
 - `pnpm dev` launches the Tauri desktop application.
 
+Before standalone `pnpm backend:dev`, create its database parent directory if
+needed:
+
+```sh
+mkdir -p "$HOME/.lys"
+```
+
+Desktop settings initialization creates that directory for the desktop-managed
+path. Choose one backend launch path: desktop auto-start is enabled by default,
+and starting another backend on the same port can conflict. See
+[Running Lys locally](/develop/running/) for process ownership and readiness.
+
 ## Local endpoints to expect
 
 - The backend listens on `127.0.0.1:12345`.
 - The backend expects LM Studio on `127.0.0.1:1234`.
 
-If LM Studio is not running, the desktop can still start, but model inventory,
-loading, chat, and title-generation flows will fail until the LM Studio
-endpoint is available.
+Backend startup queries LM Studio readiness before opening the HTTP listener.
+If LM Studio is unavailable, backend initialization fails. Start LM Studio
+first, then restart the backend. A running desktop child process alone does
+not establish that the HTTP endpoint is ready.
 
 ## First validation checks
 

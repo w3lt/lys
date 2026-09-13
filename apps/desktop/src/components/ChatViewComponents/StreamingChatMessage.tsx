@@ -8,27 +8,22 @@ import LysMessage from "./LysMessage"
 export type StreamingChatMessageProps = {
   /** Active assistant message selected from the streaming transcript tail. */
   readonly message: StreamingConversationAssistantMessage
-  /** Interrupts the message when it is the active assistant reply. */
-  readonly onStopReply: () => void
 }
 
 /**
- * Presents the active assistant transcript tail with its interruption control.
+ * Presents the active assistant transcript tail.
  *
- * @remarks Primary category: presentational. The parent owns stream lifecycle
- * and provides the interruption action only for its active assistant message.
- * It forwards the Stop button contract from {@link LysMessage}: one
- * synchronous callback per button activation with the accessible `Stop reply`
- * label; terminal Stopped/Failed announcements are rendered by that child
- * after the parent supplies a terminal message.
- * @param props - Active assistant message and its interruption control.
+ * @remarks The parent owns stream lifecycle
+ * and supplies only its active assistant message. The transcript tail carries
+ * no interruption control; the composer owns the single Stop control because
+ * cancellation must stay reachable in active phases that have no assistant
+ * message. Terminal Stopped/Failed announcements are rendered by
+ * {@link LysMessage} after the parent supplies a terminal message.
+ * @param props - Active assistant message to present.
  * @returns The streaming assistant message presentation.
  */
 export default function StreamingChatMessage({
-  message,
-  onStopReply
+  message
 }: StreamingChatMessageProps): ReactElement {
-  return (
-    <LysMessage kind="streaming" message={message} onStopReply={onStopReply} />
-  )
+  return <LysMessage kind="streaming" message={message} />
 }

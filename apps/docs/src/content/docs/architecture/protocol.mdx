@@ -19,13 +19,13 @@ Lys currently shares contracts through two TypeScript workspace packages.
 
 The public backend surface is small and explicit:
 
-| Concern                                 | Contract source                                |
-| --------------------------------------- | ---------------------------------------------- |
-| API prefix and loopback constants       | `packages/protocol/src/constant.ts`            |
-| Chat route request and SSE payloads     | `packages/protocol/src/apis/chat/chatRoute.ts` |
-| LM Studio list, load, and unload routes | `packages/protocol/src/apis/llm/*.ts`          |
-| Health route path                       | `packages/protocol/src/apis/health/routes.ts`  |
-| Shared conversation shapes              | `packages/share/src/models/conversation.ts`    |
+| Concern                                     | Contract source                                |
+| ------------------------------------------- | ---------------------------------------------- |
+| API prefix and loopback constants           | `packages/protocol/src/constant.ts`            |
+| Chat route request and SSE payloads         | `packages/protocol/src/apis/chat/chatRoute.ts` |
+| Model list, health, load, and unload routes | `packages/protocol/src/apis/llm/*.ts`          |
+| Health route path                           | `packages/protocol/src/apis/health/routes.ts`  |
+| Shared conversation shapes                  | `packages/share/src/models/conversation.ts`    |
 
 ## Why the packages are split
 

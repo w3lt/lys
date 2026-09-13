@@ -92,15 +92,15 @@ export function formatReconnectAction(
  * Formats the composer textarea placeholder.
  *
  * @param connection - Current local generation availability.
- * @param isReplyPending - Whether a reply is being generated.
+ * @param isRequestActive - Whether a chat request still owns the lifecycle.
  * @returns The placeholder shown while the field is empty.
  */
 export function formatComposerPlaceholder(
   connection: LocalRuntimeConnection,
-  isReplyPending: boolean
+  isRequestActive: boolean
 ): string {
   if (connection !== "ready") return "Waiting on LM Studio…"
-  if (isReplyPending) return "Keep typing — Send unlocks when she stops."
+  if (isRequestActive) return "Keep typing — Send unlocks when she stops."
 
   return "Say something to Lys"
 }

@@ -16,7 +16,7 @@ A **local hook instance** denotes the renderer-managed state associated with one
 
 The chapter includes repository-written hooks and repository-maintained integration with library-created hooks. It does not classify ordinary formatters, services, Git hooks, server request callbacks, plugin callbacks, or functions merely named `useSomething` as renderer hooks. Those constructs retain their actual item standards.
 
-The normative rules are language-independent. React-specific notes describe the repository's current renderer and identify its documented invocation restrictions. Other supported renderers use their actual execution and lifetime contracts; React spelling or positional semantics are not imposed on them automatically.
+The normative rules are language-independent. React-specific notes illustrate documented invocation restrictions. Other supported renderers use their actual execution and lifetime contracts; React spelling or positional semantics are not imposed on them automatically.
 
 ## Existing rule ownership
 
@@ -104,7 +104,7 @@ Every composed hook MUST preserve `COMP-062` across all of its caller's valid pa
 
 The supported choices are a stable declaration with conditional behavior inside its operation, or a separate renderer-owned child whose lifetime represents that condition. A documented exception for a particular renderer API does not confer the same exception on a custom hook wrapping it.
 
-React's `use` API permits conditional and iterative calls while retaining component/hook context restrictions and prohibiting `try`/`catch` wrapping. This API-specific permission does not apply to `useSettingsContext()` or another custom hook merely because it delegates to `use`. See the [`use` reference](https://react.dev/reference/react/use).
+React's `use` API permits conditional and iterative calls while retaining component/hook context restrictions and prohibiting `try`/`catch` wrapping. This API-specific permission does not apply to a custom hook merely because it delegates to `use`. See the [`use` reference](https://react.dev/reference/react/use).
 
 ### HOOK-008 — Hook implementations are statically composed
 
@@ -337,22 +337,6 @@ Lint success does not establish lifetime, race, host, or browser behavior. Type,
 Moving behavior into a hook MUST preserve the verification of its complete consumer-visible outcome, including component interactions and any applicable accessibility behavior.
 
 Focused hook tests MAY replace duplicated internal checks when they prove the same contract, but they do not replace required component or real-host evidence. A successful hook harness does not prove focus movement, clipboard permission behavior, native integration, or the final rendered semantics.
-
-## Boundary examples
-
-These examples illustrate classification and contract review; they do not assert that the existing implementations satisfy every rule in this chapter.
-
-| Repository pattern                               | Hook boundary                                              | Ownership consequence                                                              |
-| ------------------------------------------------ | ---------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `useSettingsContext` reads the settings provider | Query with a required-provider precondition                | Provider owns settings; returned actions retain their proposal/completion contract |
-| `useBackendUptimeMs` observes sampled uptime     | Reactive orchestration with a documented sampling interval | Its observation timer is local; the backend runtime is not                         |
-| `useTheme` returns a value and an action         | Current snapshot and later action are separate contracts   | Stable action identity, if promised, does not imply stable result-object identity  |
-| `useLysStore` is a library-created bound hook    | Hook invocation plus separate imperative store operations  | Observer removal does not own the store's model-transition work                    |
-| `createChatViewStore` creates a bound store      | Ordinary factory providing a renderer integration surface  | Factory-selected instance owns its operation tokens and abort resources            |
-| `backendStatusLabel` formats display text        | Ordinary Function                                          | Rendering use alone does not create a Hook construct                               |
-| A server `onClose` callback                      | Ordinary lifecycle callback                                | Server lifecycle rules apply; renderer hook call order does not                    |
-
-The source patterns are in [settings context](../../apps/desktop/src/components/SettingsViewComponents/SettingsContext.ts), [uptime helpers](../../apps/desktop/src/lib/hooks/backendRuntime.ts), [theme](../../apps/desktop/src/app/theme.ts), [application store](../../apps/desktop/src/lib/store/index.ts), [chat store](../../apps/desktop/src/lib/store/chat-view/index.ts), and [server lifecycle composition](../../apps/backend/src/di/fastify.ts).
 
 ## Review criteria and SOLID application
 

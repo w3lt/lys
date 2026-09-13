@@ -1,155 +1,113 @@
 import * as z from "zod"
-import type { ConversationMetadata } from "@lys/share"
 import {
-  DEFAULT_CONVERSAION_LIST_LIMIT,
-  MAXIMUM_CONVERSATION_LIST_LIMIT,
-  type ListConversationMetadataOptions,
-  type VerifiedListConversationMetadataOptions
-} from "./share"
+  listConversationsApi,
+  type ListConversationsApiQuery,
+  type ConversationSummary
+} from "@lys/protocol"
 
-/** Validates the versioned, opaque keyset cursor used by conversation lists. */
+/** Version-one cursor binding a normalized query to an exact activity boundary. */
 const conversationListCursorSchema = z.strictObject({
-  /** Cursor format version used to reject incompatible encodings. */
-  version: z.int(),
-  /** Normalized query text to which the cursor is bound. */
+  version: z.literal(1),
   query: z.string(),
-  /** Reserved score field retained in the cursor representation. */
-  score: z.number().nullable(),
-  /** Updated-time boundary of the final row in the previous page. */
-  updatedAt: z.string(),
-  /** UUIDv7 boundary ID used to disambiguate equal timestamps. */
+  score: z.null(),
+  updatedAt: z.iso.datetime({ precision: 3 }),
   id: z.uuidv7()
 })
 
-/** Version supported by the current conversation-list cursor contract. */
-const currentConversationListCursorVersion = 1
+/** Service-owned page size used only when a caller omits the bounded API limit. */
+const DEFAULT_CONVERSATION_LIST_LIMIT = 30
 
-/** Validated cursor boundary used to resume one normalized conversation query. */
-export type ConversationListCursor = z.infer<
-  typeof conversationListCursorSchema
->
-
-/**
- * Parses an encoded conversation-list cursor into its validated representation.
- *
- * @param encodedCursor - Base64-encoded JSON cursor supplied by a list client.
- * @returns The structurally valid cursor represented by `encodedCursor`.
- * @throws If the encoded value cannot be decoded, parsed, or validated.
- */
-function parseConversationListCursor(
-  encodedCursor: string
-): ConversationListCursor {
-  try {
-    return conversationListCursorSchema.parse(
-      JSON.parse(Buffer.from(encodedCursor, "base64").toString("utf-8"))
-    )
-  } catch (error) {
-    throw new Error("Invalid conversation list cursor", { cause: error })
-  }
-}
+/** Trusted cursor-bound query and page size supplied to SQLite. */
+export type ConversationListOptions = Readonly<{
+  /** Normalized query; empty only when the query parameter was omitted. */
+  query: string
+  /** Validated boundary, absent for the first page. */
+  cursor: z.infer<typeof conversationListCursorSchema> | undefined
+  /** Inclusive page size bounded by the shared API schema. */
+  limit: number
+}>
 
 /**
- * Decodes an optional conversation-list cursor accepted by this service.
- *
- * @param encodedCursor - Optional Base64-encoded cursor from a list client.
- * @returns The decoded current-version cursor, or `undefined` when omitted or supplied as an empty string.
- * @throws If a non-empty cursor is whitespace-only, malformed, or uses an unsupported version.
+ * Validates pagination input and binds decoded cursors to the normalized query.
+ * @param options - Raw optional API query values.
+ * @returns Trusted query and pagination options.
+ * @throws If the input or cursor is malformed, unsupported, or belongs to another query.
  */
-export function decodeConversationListCursor(
-  encodedCursor?: string
-): ConversationListCursor | undefined {
-  if (!encodedCursor) return undefined
-
-  if (encodedCursor.trim().length === 0)
-    throw new Error("Invalid cursor length")
-
-  const cursor = parseConversationListCursor(encodedCursor)
-
-  if (cursor.version !== currentConversationListCursorVersion) {
-    throw new Error("Unsupported conversation list cursor version")
-  }
-
-  return cursor
-}
-
-/**
- * Encodes an opaque cursor that resumes a conversation metadata list query.
- *
- * @param query - Normalized cursor-bound query value.
- * @param conversation - Final conversation included in the current page.
- * @returns An opaque Base64-encoded cursor for the following page.
- * @throws If the conversation identity or timestamp cannot satisfy the cursor schema.
- */
-export function encodeConversationListCursor(
-  query: string,
-  conversation: Pick<ConversationMetadata, "id" | "updatedAt">
-): string {
-  const cursor = conversationListCursorSchema.parse({
-    version: currentConversationListCursorVersion,
-    query,
-    score: null,
-    updatedAt: conversation.updatedAt,
-    id: conversation.id
-  })
-
-  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64")
-}
-
-/**
- * Trims the optional query value carried by a conversation metadata cursor.
- *
- * @param query - Optional raw query text supplied by a list caller.
- * @returns The trimmed query, or an empty string when no query is supplied; the current metadata SQL remains unfiltered.
- */
-export function normalizeListConversationMetadataQuery(query?: string): string {
-  if (!query) return ""
-  return query.trim()
-}
-
-/**
- * Applies the inclusive bounds for a conversation metadata page size.
- *
- * @param limit - Optional requested page size; omission selects the default.
- * @returns An integer page size between the inclusive minimum of one and the configured maximum.
- * @throws If `limit` is not a safe integer in the supported inclusive range.
- */
-export function validateConversationListLimit(limit?: number): number {
-  const normalizedLimit = limit ?? DEFAULT_CONVERSAION_LIST_LIMIT
-
-  if (
-    !Number.isSafeInteger(normalizedLimit) ||
-    normalizedLimit < 1 ||
-    normalizedLimit > MAXIMUM_CONVERSATION_LIST_LIMIT
-  ) {
-    throw new RangeError(
-      `Conversation list limit must be an integer between 1 and ${MAXIMUM_CONVERSATION_LIST_LIMIT}`
-    )
-  }
-
-  return normalizedLimit
-}
-
-/**
- * Normalizes and validates conversation metadata list options for one request.
- *
- * @param options - Untrusted optional query, cursor, and limit list inputs.
- * @returns Validated options with a normalized cursor-bound query and decoded cursor.
- * @throws If the limit or cursor is invalid or unsupported, or the cursor's bound query value differs from the normalized request value.
- */
-export function verifyListConversationMetadataOptions(
-  options: ListConversationMetadataOptions
-): VerifiedListConversationMetadataOptions {
-  const query = normalizeListConversationMetadataQuery(options.query)
-  const cursor = decodeConversationListCursor(options.cursor)
-  const limit = validateConversationListLimit(options.limit)
-
-  if (cursor !== undefined && cursor.query !== query) {
-    throw new Error("Conversation list cursor query does not match list query")
-  }
-
+function parseConversationListInput(
+  options: ListConversationsApiQuery
+): ConversationListOptions {
+  const parsed = listConversationsApi.querystring.parse(options)
+  const query = parsed.query ?? ""
+  if (parsed.cursor === undefined)
+    return {
+      query,
+      cursor: undefined,
+      limit: parsed.limit ?? DEFAULT_CONVERSATION_LIST_LIMIT
+    }
+  const decoded = Buffer.from(parsed.cursor, "base64")
+  if (decoded.toString("base64") !== parsed.cursor)
+    throw new Error("Invalid conversation list cursor")
+  const cursor = conversationListCursorSchema.parse(
+    JSON.parse(decoded.toString("utf8"))
+  )
+  if (cursor.query !== query)
+    throw new Error("Conversation list cursor belongs to another query")
   return {
-    cursor,
     query,
-    limit
+    cursor,
+    limit: parsed.limit ?? DEFAULT_CONVERSATION_LIST_LIMIT
+  }
+}
+
+/**
+ * Creates a versioned opaque continuation from the last returned row.
+ * @param query - Normalized query bound to the page.
+ * @param conversation - Last row of a nonterminal page.
+ * @returns Base64 JSON accepted only with the same query.
+ */
+export function createConversationListCursor(
+  query: string,
+  conversation: ConversationSummary
+): string {
+  return Buffer.from(
+    JSON.stringify({
+      version: 1,
+      query,
+      score: null,
+      updatedAt: conversation.updatedAt,
+      id: conversation.id
+    }),
+    "utf8"
+  ).toString("base64")
+}
+
+/** Invalid pagination input mapped by Fastify to a caller-safe HTTP 400. */
+class ConversationListInputError extends Error {
+  /**
+   * Preserves the parser failure for server diagnostics.
+   * @param cause - Original invalid query or cursor failure.
+   */
+  constructor(cause: unknown) {
+    super("Invalid conversation list query or cursor", { cause })
+  }
+  /** HTTP status consumed by Fastify's error boundary. @returns The invalid-input status. */
+  get statusCode(): number {
+    return 400
+  }
+}
+
+/**
+ * Translates only pagination parsing failures into the public invalid-input category.
+ * @param options - Raw optional query values.
+ * @returns Validated options for one SQLite query.
+ * @throws ConversationListInputError when any input or cursor binding is invalid.
+ */
+export function parseConversationListOptions(
+  options: ListConversationsApiQuery = {}
+): ConversationListOptions {
+  try {
+    return parseConversationListInput(options)
+  } catch (cause) {
+    throw new ConversationListInputError(cause)
   }
 }

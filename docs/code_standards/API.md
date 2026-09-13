@@ -391,31 +391,6 @@ An API change MUST validate the affected producer/consumer combinations under th
 
 This MAY use contract fixtures, real encoders and decoders, cross-language boundary checks, or maintained older consumers appropriate to the supported release policy. Tests MUST NOT derive both the sent and expected representation from the same mistaken assumption while bypassing the boundary being changed. Validation reports MUST identify what was exercised and any host, network, security, or released-client behavior the chosen environment could not verify.
 
-## Boundary examples
-
-These examples identify review boundaries in the current repository. They do not certify implementation compliance with this chapter.
-
-| Repository pattern                         | Contract to review                                             | Important distinction                                                                      |
-| ------------------------------------------ | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| Shared route descriptor in `@lys/protocol` | Method, path, request, response variants, and actual registrar | A descriptor is not proof of publication                                                   |
-| Model unload response                      | Bodyless success and status-specific Problem Details           | Reconciled absence is an observation, not permanent exclusion                              |
-| Chat request and response                  | Complete request shape, SSE framing, and task-scoped outcomes  | Generating a reply, producing a title, and closing the connection have different lifetimes |
-| Native settings command                    | Registered command and exact serialized argument envelope      | A TypeScript return type does not prove the Rust boundary accepts the request              |
-| `/api/v1/heath`                            | Existing method/path identity                                  | A spelling correction still requires a consumer-compatible transition                      |
-
-The relevant sources are the [unload contract](../../packages/protocol/src/apis/llm/unloadModelRoute.ts), [LLM registrar](../../apps/backend/src/modules/llm/routes/index.ts), [chat contract](../../packages/protocol/src/apis/chat/chatRoute.ts), [chat handler](../../apps/backend/src/modules/chat/chat/index.ts), [native settings commands](../../apps/desktop/src-tauri/src/settings/commands.rs), [settings client](../../apps/desktop/src/lib/apis/tauri/settings.ts), and [health route](../../packages/protocol/src/apis/health/routes.ts).
-
-### Example of scoped stream completion
-
-| Observation in the current chat exchange | What it establishes                                                   | What it does not establish                                               |
-| ---------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| Successful response establishment        | The consumer can begin reading the declared representation            | Generation and persistence have completed successfully                   |
-| Conversation start event                 | Identifiers for this exchange are available according to the protocol | All later tasks have succeeded                                           |
-| Assistant `done` event                   | The assistant generation has reached its documented outcome           | No title or other task event can follow                                  |
-| Stream closure                           | No more bytes arrive on that connection                               | Every required application outcome occurred or every effect was reversed |
-
-The [SSE reference](../../apps/docs/src/content/docs/reference/sse-events.mdx) explains the current task ordering. A complete API contract identifies which remaining outcomes each consumer requires before it reports success.
-
 ## Review criteria and SOLID application
 
 | Principle | Observable review question                                                                                     | Governing rules                                |

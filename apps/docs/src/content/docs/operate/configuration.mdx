@@ -21,27 +21,32 @@ Current configuration surfaces that are evidenced in this repository.
 The Tauri desktop host reads and writes one JSON settings file at
 `~/.lys/settings.json`.
 
-The current schema contains one top-level object, `runtime`, with two fields:
+The current schema contains `runtime`, `model`, and `generation` groups. Rust
+and the TypeScript settings projection use the same camelCase field names. See
+the [configuration reference](/reference/configuration/) for the complete field
+list, defaults, and accepted values.
 
-- `autoStartBackend`: boolean, defaults to `false`
-- `selectedModel`: nullable string in the persisted JSON; exposed as an
-  optional field at the current TypeScript boundary
+The stored `model.contextSize` is a local token budget used by the composer and
+generation controls. It does not override LM Studio's model-load context size.
+
+Missing groups and fields receive their Rust defaults. Invalid JSON or invalid
+typed values fail loading; for example, Rust rejects temperatures outside
+`[0, 1]` and token counts outside the unsigned 32-bit integer range.
 
 When the file does not exist yet, the desktop host creates `~/.lys/` and writes
 the default structure on first load.
 
 ## Current UI wiring
 
-The desktop UI currently calls the Tauri `load_settings` command during
-initialization, but the checked-in UI does not call `save_settings` after a
-user changes runtime controls.
+The desktop loads settings through Tauri during initialization. Generation
+edits autosave through `save_settings`: the save path reloads the persisted
+document, replaces only its `generation` group, and preserves the stored
+runtime and model groups. Save status is retained across pane changes, and the
+generation pane offers a retry action. A failed save keeps the current
+in-memory edits usable.
 
-That means:
-
-- the host has a save command and file format
-- the current UI can reflect loaded settings
-- changing the current runtime controls in the UI does not by itself prove that
-  the new values are persisted back to disk
+Runtime and model edits remain session-only. Changing those controls does not
+persist them, and a later generation save does not save their in-memory values.
 
 ## Fixed runtime addresses
 
@@ -52,7 +57,8 @@ documented user-editable configuration source:
 - LM Studio address used by the backend: `127.0.0.1:1234`
 
 The desktop store also derives its backend base URL from those same protocol
-constants, so the user interface and backend stay aligned.
+constants. The persisted `runtime.backendAddress` is used in status copy;
+editing it does not redirect HTTP requests or change the backend listener.
 
 ## Theme preference
 

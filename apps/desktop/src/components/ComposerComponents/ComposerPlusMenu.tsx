@@ -45,7 +45,7 @@ export type ComposerPlusMenuProps = {
 /**
  * Offers the actions that add context to the next message.
  *
- * @remarks Primary category: interactive feature. The parent owns availability,
+ * @remarks The parent owns availability,
  * whether the tray is occupied, and the attach action; this component owns only
  * the menu's open state, which the underlying menu adapter holds. Keyboard
  * navigation, dismissal, and focus return belong to that adapter. Only "Attach

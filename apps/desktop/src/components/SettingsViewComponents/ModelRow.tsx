@@ -25,7 +25,7 @@ type ModelChoiceProps = {
  * Presents the default-selection button and backend model metadata.
  * @param props - Parent-owned model, selection, and selection proposal.
  * @returns The native pressed-state selection control.
- * @remarks Primary category: presentational. Owns no state or effects.
+ * @remarks Owns no state or effects.
  */
 function ModelChoice({
   model,
@@ -80,7 +80,7 @@ type ModelRowActionsProps = {
  * Presents model operations supported by the backend.
  * @param props - Model, availability, and store-owned asynchronous callbacks.
  * @returns Named native controls for health and residency.
- * @remarks Primary category: presentational. The store observes all failures;
+ * @remarks The store observes all failures;
  * this row does not cancel application work on unmount. Health path eligibility
  * comes from the shared parameter validator rather than a copied length limit.
  */
@@ -137,7 +137,7 @@ type ModelRowProps = ModelChoiceProps & ModelRowActionsProps
  * Composes one model's selection control and independent backend actions.
  * @param props - Parent-owned inventory entry, state, and callbacks.
  * @returns A semantic model-list entry.
- * @remarks Primary category: presentational. Selection never implies loading.
+ * @remarks Selection never implies loading.
  */
 export default function ModelRow({
   model,

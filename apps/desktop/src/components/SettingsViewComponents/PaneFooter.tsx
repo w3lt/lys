@@ -7,7 +7,7 @@ export type PaneFooterProps = {
 /**
  * Closes one settings pane with the note explaining what its settings do.
  *
- * @remarks Primary category: presentational. The parent owns the note and
+ * @remarks The parent owns the note and
  * decides whether to render the footer at all; an empty note renders an empty
  * footer rather than collapsing the pane's bottom spacing. The component owns
  * no state, callbacks, effects, or resources.

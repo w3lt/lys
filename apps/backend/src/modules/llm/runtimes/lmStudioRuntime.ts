@@ -39,7 +39,7 @@ type LmStudioRuntimeState =
 /**
  * Owns one LM Studio client to implement {@link LlmRuntime} with terminal cleanup.
  *
- * @remarks Primary category: resource owner. Concurrency
+ * @remarks Concurrency
  * model: single-owner; the owning service confines calls, and synchronous
  * admission rejects operational overlap before SDK access. State transitions are
  * `ready -> active -> ready` and `ready | active -> closing -> closed`.
@@ -47,9 +47,6 @@ type LmStudioRuntimeState =
  * sole release registration; the client field borrows that protected resource.
  * Model operations retain the interface's application-owned completion-only
  * lifetime. Cleanup closes SDK connections without unloading engine models.
- * The eight-member public surface is the approved resource-owner exception
- * recorded in the runtime readiness design.
- * @see ../../../../../../docs/superpowers/specs/2026-09-10-llm-runtime-readiness-design.md
  */
 export default class LmStudioRuntime implements LlmRuntime {
   /** SDK client borrowed from this runtime's exclusively owned disposal stack. */

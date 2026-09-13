@@ -7,7 +7,7 @@ import { ChevronRightIcon, CheckIcon } from "lucide-react"
 /**
  * Provides the root context for a composed dropdown menu.
  *
- * @remarks Primary category: UI primitive adapter. Base UI menu root props and
+ * @remarks Base UI menu root props and
  * children are forwarded. A controlled `open` value is parent-owned, while
  * `defaultOpen` gives Base UI ownership of the uncontrolled initial state; Base
  * UI coordinates item registration, focus, keyboard navigation, and state
@@ -23,7 +23,7 @@ function DropdownMenu({ ...props }: MenuPrimitive.Root.Props) {
 /**
  * Portals dropdown content using the Base UI menu portal contract.
  *
- * @remarks Primary category: UI primitive adapter. Base UI portal props and
+ * @remarks Base UI portal props and
  * children are forwarded; a {@link DropdownMenu} root is required and its
  * missing-context error propagates from Base UI. Placement and lifecycle of
  * the portal remain owned by Base UI. A supplied `ref` targets the portal's
@@ -39,7 +39,7 @@ function DropdownMenuPortal({ ...props }: MenuPrimitive.Portal.Props) {
 /**
  * Renders the control that opens a {@link DropdownMenu}.
  *
- * @remarks Primary category: UI primitive adapter. Base UI trigger props,
+ * @remarks Base UI trigger props,
  * children, and callbacks are forwarded; a controlled `open` value is
  * parent-owned and `defaultOpen` is primitive-owned. Base UI coordinates focus
  * return and keyboard activation. A supplied `ref` targets the trigger's
@@ -54,7 +54,7 @@ function DropdownMenuTrigger({ ...props }: MenuPrimitive.Trigger.Props) {
 /**
  * Renders positioned dropdown content with a Base UI portal and positioner.
  *
- * @remarks Primary category: UI primitive adapter. Base UI popup props and
+ * @remarks Base UI popup props and
  * children are forwarded; `align`, `alignOffset`, `side`, and `sideOffset`
  * control placement and default to `start`, `0`, `bottom`, and `4`. The wrapper
  * owns the portal/positioner composition while Base UI owns collision
@@ -102,7 +102,7 @@ function DropdownMenuContent({
 /**
  * Groups related items in a {@link DropdownMenu} over the Base UI group part.
  *
- * @remarks Primary category: UI primitive adapter. Base UI group props and
+ * @remarks Base UI group props and
  * children are forwarded through the group's own context; labels require this
  * group or a radio-group context. Item focus and keyboard behavior remain
  * owned by Base UI. A supplied `ref` targets the group's `HTMLDivElement`
@@ -117,7 +117,7 @@ function DropdownMenuGroup({ ...props }: MenuPrimitive.Group.Props) {
 /**
  * Renders a non-interactive label for a {@link DropdownMenuGroup}.
  *
- * @remarks Primary category: UI primitive adapter. Base UI group-label props
+ * @remarks Base UI group-label props
  * and children are forwarded; `inset` adds the repository's item alignment and
  * is exposed as `data-inset`. A `Menu.Group` or `Menu.RadioGroup` context is
  * required; Base UI's missing-context error propagates otherwise. The
@@ -151,7 +151,7 @@ function DropdownMenuLabel({
 /**
  * Renders an actionable item in a {@link DropdownMenu}.
  *
- * @remarks Primary category: UI primitive adapter. Base UI item props,
+ * @remarks Base UI item props,
  * children, and callbacks are forwarded. `variant` is a repository styling
  * choice (`default` or `destructive`, defaulting to `default`) and `inset`
  * controls alignment; both are exposed as data attributes. Base UI owns item
@@ -189,7 +189,7 @@ function DropdownMenuItem({
 /**
  * Provides the root context for a nested submenu in a {@link DropdownMenu}.
  *
- * @remarks Primary category: UI primitive adapter. Base UI submenu-root props
+ * @remarks Base UI submenu-root props
  * and children are forwarded; submenu open state, focus transfer, and keyboard
  * navigation remain owned by Base UI. Controlled `open` is parent-owned while
  * `defaultOpen` is primitive-owned. The root renders no DOM host; its
@@ -205,7 +205,7 @@ function DropdownMenuSub({ ...props }: MenuPrimitive.SubmenuRoot.Props) {
 /**
  * Renders the trigger for a nested submenu.
  *
- * @remarks Primary category: UI primitive adapter. Base UI submenu-trigger
+ * @remarks Base UI submenu-trigger
  * props, callbacks, and caller children are forwarded; the wrapper appends a
  * chevron indicator and exposes `inset` as `data-inset`. Base UI owns focus,
  * keyboard navigation, open state, and submenu context; a submenu root is
@@ -242,7 +242,7 @@ function DropdownMenuSubTrigger({
 /**
  * Renders positioned content for a nested dropdown submenu.
  *
- * @remarks Primary category: UI primitive adapter. This delegates to
+ * @remarks This delegates to
  * {@link DropdownMenuContent} with submenu defaults of `align="start"`,
  * `alignOffset=-3`, `side="right"`, and `sideOffset=0`; popup props and
  * children are forwarded. Its composed Portal, Positioner, and Popup require
@@ -280,7 +280,7 @@ function DropdownMenuSubContent({
 /**
  * Renders a checkable item in a {@link DropdownMenu}.
  *
- * @remarks Primary category: UI primitive adapter. Base UI checkbox-item props,
+ * @remarks Base UI checkbox-item props,
  * `checked` state, children, and callbacks are forwarded; `inset` controls
  * alignment and is exposed as `data-inset`. The wrapper supplies a check
  * indicator. A controlled `checked` value is parent-owned, while
@@ -329,7 +329,7 @@ function DropdownMenuCheckboxItem({
 /**
  * Provides radio-group context for mutually exclusive menu items.
  *
- * @remarks Primary category: UI primitive adapter. Base UI radio-group props
+ * @remarks Base UI radio-group props
  * and children are forwarded; a controlled `value` is parent-owned, while
  * `defaultValue` is primitive-owned. Base UI coordinates keyboard behavior and
  * item registration. This group creates the context required by its radio
@@ -349,7 +349,7 @@ function DropdownMenuRadioGroup({ ...props }: MenuPrimitive.RadioGroup.Props) {
 /**
  * Renders a mutually exclusive radio item in a menu radio group.
  *
- * @remarks Primary category: UI primitive adapter. Base UI radio-item props,
+ * @remarks Base UI radio-item props,
  * children, and callbacks are forwarded; `inset` controls alignment and is
  * exposed as `data-inset`. The wrapper supplies a check indicator, while a
  * parent-controlled radio-group value or the primitive's `defaultValue` owns
@@ -394,7 +394,7 @@ function DropdownMenuRadioItem({
 /**
  * Renders a visual separator between dropdown menu regions.
  *
- * @remarks Primary category: UI primitive adapter. Base UI separator props
+ * @remarks Base UI separator props
  * are forwarded and the host is marked with `data-slot="dropdown-menu-separator"`.
  * A supplied `ref` targets the Base UI `HTMLDivElement` host. It owns no state,
  * portal, placement, keyboard behavior, or failure handling; semantic grouping
@@ -418,7 +418,7 @@ function DropdownMenuSeparator({
 /**
  * Renders shortcut text aligned to the trailing edge of a menu item.
  *
- * @remarks Primary category: UI primitive adapter. Native `span` props and
+ * @remarks Native `span` props and
  * children are forwarded and marked with `data-slot="dropdown-menu-shortcut"`.
  * A supplied `ref` targets the native `HTMLSpanElement`; the content is
  * descriptive only and does not register a keyboard shortcut, own focus, or

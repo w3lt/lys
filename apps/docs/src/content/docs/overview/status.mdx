@@ -22,26 +22,32 @@ repository today; it is not a promise of unreleased work.
 
 - The desktop can start and stop the backend through the Tauri host.
 - The backend exposes a health route, LLM inventory, load, and unload routes,
-  and a chat route.
+  chat, and conversation history routes.
 - A chat turn creates or continues a conversation, inserts user and assistant
   rows in SQLite, and streams typed SSE events back to the desktop.
-- The backend also attempts to generate a conversation title asynchronously and
-  emits it as a stream event.
-- The Tauri host loads a small runtime settings file from
-  `~/.lys/settings.json`.
+- Conversation history supports search, cursor pagination, transcript retrieval,
+  rename, and deletion. Assistant deltas are persisted before publication;
+  continuation uses the saved prompt and eligible stored history.
+- Untitled conversations receive a generated title only if no rename has won
+  the race. Interrupted streaming rows are recovered on backend startup.
+- Runtime, Model, and Generation settings panes are available. Model controls
+  refresh inventory, load and unload weights, and check loaded-state health.
+- Generation controls apply to future chat requests and save automatically
+  through Tauri to `~/.lys/settings.json`, which contains runtime, model, and
+  generation groups. Runtime and model edits remain session-only.
 
 ## Coming soon
 
 The current repository does not yet provide:
 
-- conversation history retrieval or restoration after relaunch
-- persisted assistant delta content in SQLite
-- usable Model, Generation, and Conversation settings tabs, followed by live
-  wiring between those controls and chat requests
+- desktop history-list and restore integration (the backend APIs are available)
+- a Conversation settings pane
+- using the selected default model for chat requests, which still send a fixed
+  model identifier
 - replay or reconnect semantics for chat streams
 - tool-call stream events
 - a production desktop release workflow
-- evidenced ADR, RFC, and release-history records
+- evidenced ADR and RFC records, and a canonical release log
 
 ## Related documents
 

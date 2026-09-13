@@ -78,7 +78,7 @@ function findLargestAttachment(
 /**
  * Presents the chat draft editor, its context tray, and the session controls.
  *
- * @remarks Primary category: composition/view. The application store owns
+ * @remarks The application store owns
  * runtime availability and persisted settings; the chat-view store owns the
  * draft, the conversation, the request lifecycle, and conversation opening;
  * the history store owns whether past conversations are shown. This component
@@ -86,10 +86,21 @@ function findLargestAttachment(
  * drag is over the field, and whether the field has focus. The parent owns the
  * message-field ref. Enter without Shift submits once and suppresses the
  * newline; Shift+Enter keeps it. Sending requires a non-empty draft, and is
- * refused while a reply is pending, while a past conversation is opening,
+ * refused while a request is active, while a past conversation is opening,
  * while generation is unavailable, or while the estimated request exceeds the
  * window. The Past conversations button opens history, or closes it when
  * open, and exposes that state through `aria-expanded`.
+ *
+ * The primary control is Send only while the request lifecycle is idle. It
+ * becomes Stop for every active phase — awaiting the conversation turn, the
+ * streaming reply, and the completed reply whose transport is still open for
+ * the title. Cancellation is bound here rather than to the transcript because
+ * the transcript has no assistant message to carry a control while the turn is
+ * awaited, and none still accepting content once the reply is complete. Stop
+ * delegates to the store's cancellation action, which preserves the
+ * conversation, the draft, and the staged tray, invalidates the request before
+ * aborting so late transport events cannot alter the conversation, and ignores
+ * activation once the lifecycle is idle, so repeated activation is harmless.
  *
  * Two affordances are staged ahead of the capability behind them and are
  * deliberately inert: attachments are held in the renderer and never sent
@@ -117,6 +128,7 @@ export function Composer({ messageFieldRef }: ComposerProps): ReactElement {
   const resetConversation = useChatViewStore((state) => state.resetConversation)
   const sendMessage = useChatViewStore((state) => state.sendMessage)
   const setInputDraft = useChatViewStore((state) => state.setInputDraft)
+  const stopStreaming = useChatViewStore((state) => state.stopStreaming)
 
   const isHistoryOpen = useConversationHistoryStore(
     (state) => state.visibility.status === "open"
@@ -138,6 +150,7 @@ export function Composer({ messageFieldRef }: ComposerProps): ReactElement {
   const isModelLoaded = modelRuntime.status === "loaded"
   const connection = readLocalRuntimeConnection(backendStatus, isModelLoaded)
   const isUnavailable = connection !== "ready"
+  const isRequestActive = request.status !== "idle"
   const activity = calculateComposerActivity(request, conversationOpen)
   const activityLabel = formatComposerActivity(activity)
 
@@ -347,14 +360,26 @@ export function Composer({ messageFieldRef }: ComposerProps): ReactElement {
               value={inputDraft}
             />
 
-            <Button
-              className="composer__send"
-              disabled={isSendDisabled}
-              onClick={() => void sendMessage()}
-              type="button"
-            >
-              Send
-            </Button>
+            {isRequestActive ? (
+              <Button
+                aria-label="Stop reply"
+                className="composer__send"
+                onClick={stopStreaming}
+                type="button"
+                variant="secondary"
+              >
+                Stop
+              </Button>
+            ) : (
+              <Button
+                className="composer__send"
+                disabled={isSendDisabled}
+                onClick={() => void sendMessage()}
+                type="button"
+              >
+                Send
+              </Button>
+            )}
           </div>
 
           {isDropping && !isUnavailable ? (

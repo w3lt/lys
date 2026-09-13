@@ -11,14 +11,18 @@ route definitions.
 
 ## Routes
 
-| Method  | Path                          | Request body                                                  | Response                        |
-| ------- | ----------------------------- | ------------------------------------------------------------- | ------------------------------- |
-| `GET`   | `/api/v1/heath`               | none                                                          | `{ ok: true }`                  |
-| `GET`   | `/api/v1/llm/list`            | none                                                          | `{ llms: LlmInfo[] }`           |
-| `GET`   | `/api/v1/llm/:modelId/health` | none                                                          | Loaded-state health observation |
-| `POST`  | `/api/v1/llm/load`            | `{ modelId: string }`                                         | `LlmInfo`                       |
-| `PATCH` | `/api/v1/llm/unload`          | `{ modelId: string }`                                         | `204` or typed Problem Details  |
-| `POST`  | `/api/v1/chat`                | `{ message: string, model: string, conversationId?: uuidv7 }` | `text/event-stream`             |
+| Method   | Path                                    | Request body                                                                | Response                           |
+| -------- | --------------------------------------- | --------------------------------------------------------------------------- | ---------------------------------- |
+| `GET`    | `/api/v1/heath`                         | none                                                                        | `{ ok: true }`                     |
+| `GET`    | `/api/v1/llm/list`                      | none                                                                        | `{ llms: LlmInfo[] }`              |
+| `GET`    | `/api/v1/llm/:modelId/health`           | none                                                                        | Loaded-state health observation    |
+| `POST`   | `/api/v1/llm/load`                      | `{ modelId: string }`                                                       | `LlmInfo`                          |
+| `PATCH`  | `/api/v1/llm/unload`                    | `{ modelId: string }`                                                       | `204` or typed Problem Details     |
+| `GET`    | `/api/v1/conversations`                 | none; optional `query`, `cursor`, `limit` query parameters                  | Conversation list page             |
+| `GET`    | `/api/v1/conversations/:conversationId` | none                                                                        | Conversation with ordered messages |
+| `PATCH`  | `/api/v1/conversations/:conversationId` | `{ title: string }`                                                         | Conversation metadata              |
+| `DELETE` | `/api/v1/conversations/:conversationId` | none                                                                        | Bodyless `204`                     |
+| `POST`   | `/api/v1/chat`                          | `message`, `model`, required `generationOptions`, optional `conversationId` | `text/event-stream`                |
 
 `/api/v1/heath` is the current spelling in both the shared protocol package and
 the Fastify route registration.
@@ -29,6 +33,10 @@ the Fastify route registration.
 {
   "message": "Tell me what changed",
   "model": "google/gemma-4-12b-qat",
+  "generationOptions": {
+    "temperature": 0.7,
+    "replyCeiling": 2048
+  },
   "conversationId": "0198f5a5-7b9b-7e0b-9b0f-87d9d6a5f72d"
 }
 ```
@@ -36,10 +44,81 @@ the Fastify route registration.
 `conversationId` is optional. Omitting it asks the backend to create a new
 conversation before sending the first stream event.
 
+`message` and `model` must be non-empty strings. A supplied `conversationId`
+must be a UUIDv7 identifying an existing conversation; an unknown identifier
+returns the conversation-not-found Problem Details response below. Continuation
+uses the saved system prompt, prior user messages, non-empty completed or
+interrupted assistant messages, then the current user message exactly once.
+Failed, empty, and still-streaming assistant messages are excluded from context.
+
+`generationOptions` is required and has no protocol-level default:
+
+| Field          | Accepted value                                  | Effect                                                                  |
+| -------------- | ----------------------------------------------- | ----------------------------------------------------------------------- |
+| `temperature`  | Required number from `0` through `1`, inclusive | Forwarded as the completion sampling temperature.                       |
+| `replyCeiling` | Optional non-negative integer, in tokens        | Forwarded as `max_completion_tokens`; omission becomes `null` upstream. |
+
+Both numeric fields use number coercion before validation. The request and
+generation-options objects reject unknown fields. Missing required options or
+invalid values are rejected with `400` before generation. The desktop translates
+a saved zero reply ceiling into omission; API callers should omit the field for
+that behavior, since an explicit API value of `0` is forwarded unchanged. These
+controls affect chat completion; title generation uses a separate request.
+
 ## Chat response shape
 
-The chat route responds as SSE, not JSON. Each event payload must match one of
+Accepted chat turns respond as SSE. Missing conversations return JSON Problem
+Details before the stream starts. Each event payload must match one of
 the six variants documented in [SSE events](/reference/sse-events/).
+
+## Conversation history
+
+All conversation identifiers must be UUIDv7; malformed identifiers return `400`.
+List responses have exactly `conversations`, `storedCount`, `matchCount`, and
+`nextCursor`. Counts include all stored conversations and all matches before
+pagination, respectively. Each summary contains `id`, nullable `title`,
+`createdAt`, `updatedAt`, and nullable `preview`; it does not expose `systemPrompt`.
+A preview contains only `role` and full `content`.
+
+| Parameter | Contract                                                                                                                                                                         |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `query`   | Optional; trimmed to 1–200 UTF-16 code units when supplied. Blank queries are rejected. Unicode case-insensitive literal substring search covers titles and all message content. |
+| `limit`   | Integer from 1–50; defaults to 30.                                                                                                                                               |
+| `cursor`  | Opaque, at most 2048 characters; reuse with the same trimmed query. Malformed, unsupported, or differently bound cursors return `400`.                                           |
+
+Results are ordered by `updatedAt DESC, id DESC`, with keyset pagination. The
+next cursor is `null` at the end. Each response reads counts, page, and previews
+from one snapshot; subsequent pages reflect later database changes.
+Search previews select the latest non-empty matching message, falling back to
+the latest non-empty message for a title-only match. Unfiltered lists select the
+latest non-empty message; conversations without one have `preview: null`.
+
+`GET` by identifier returns conversation metadata, including the saved system
+prompt, and messages ordered by creation time then identifier. `PATCH` accepts
+only `title`, trims it to 1–120 UTF-16 code units, and returns updated metadata. Repeating
+a rename is idempotent; renaming never changes activity time or list position.
+`DELETE` cascades to messages and returns `204` without a body. Late generation
+writes after deletion do not recreate the conversation. Allowed development and
+Tauri origins support DELETE preflights.
+
+Missing conversations on GET, PATCH, DELETE, or chat continuation return `404`
+with `Content-Type: application/problem+json`:
+
+```json
+{
+  "type": "urn:lys:problem:conversation:not-found",
+  "title": "Conversation not found",
+  "status": 404,
+  "detail": "Conversation 0198f5a5-7b9b-7e0b-9b0f-87d9d6a5f72d was not found.",
+  "instance": "/api/v1/conversations/0198f5a5-7b9b-7e0b-9b0f-87d9d6a5f72d"
+}
+```
+
+Chat creates its user/assistant pair atomically, persists each delta before
+sending it, and stores a terminal status before `done`. Partial content survives
+failure or cancellation. Title generation runs only for an untitled conversation
+and publishes a title only if the conditional database write succeeds. On startup,
+remaining streaming assistants become interrupted with refreshed timestamps.
 
 ## LLM metadata shape
 
@@ -163,13 +242,10 @@ fields and does not accept an `instance` field.
 
 ## What is not part of the public API
 
-- No conversation listing or history-retrieval endpoint; the chat route can
-  continue only a conversation whose identifier the caller already knows
 - No export or import endpoint
 
 ## Coming soon
 
-- Public conversation query routes
 - Conversation export and import routes
 
 ## Related pages

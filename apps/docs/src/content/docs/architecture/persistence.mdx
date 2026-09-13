@@ -14,20 +14,21 @@ file, and one desktop theme preference.
 | Artifact              | Owner           | Location                                | Purpose                                                                        |
 | --------------------- | --------------- | --------------------------------------- | ------------------------------------------------------------------------------ |
 | Conversation database | Fastify backend | `~/.lys/lys_db.sqlite`                  | Stores conversation metadata and conversation messages.                        |
-| Settings JSON         | Tauri host      | `~/.lys/settings.json`                  | Stores backend auto-start and a nullable selected model.                       |
+| Settings JSON         | Tauri host      | `~/.lys/settings.json`                  | Stores runtime, model, and generation settings.                                |
 | Theme preference      | Desktop UI      | WebView `localStorage`, key `lys.theme` | Stores `dark` or `light`; invalid or unavailable storage falls back to `dark`. |
 
 ## SQLite ownership
 
 Only the backend reads or writes the conversation database directly.
 
-| Table                   | Owned by              | Notes                                                                                            |
-| ----------------------- | --------------------- | ------------------------------------------------------------------------------------------------ |
-| `conversations`         | `ConversationService` | One row per conversation, including `title`, `system_prompt`, `created_at`, and `updated_at`.    |
-| `conversation_messages` | `ConversationService` | Ordered user and assistant messages, including assistant `status`, `finish_reason`, and `model`. |
+| Table                   | Owned by                  | Notes                                                                                            |
+| ----------------------- | ------------------------- | ------------------------------------------------------------------------------------------------ |
+| `conversations`         | `SqliteConversationStore` | One row per conversation, including `title`, `system_prompt`, `created_at`, and `updated_at`.    |
+| `conversation_messages` | `SqliteConversationStore` | Ordered user and assistant messages, including assistant `status`, `finish_reason`, and `model`. |
 
 The desktop does not query SQLite directly and the Tauri host does not proxy
-conversation SQL.
+conversation SQL. The store lends separate history and turn capabilities, guards
+borrowed access after disposal, and remains open until chat handlers settle.
 
 ## Migration model
 
@@ -35,35 +36,41 @@ The backend applies schema changes from an in-memory `databaseMigrations` array.
 On startup it:
 
 1. Opens the SQLite file.
-2. Reads `PRAGMA user_version`.
-3. Applies each missing SQL migration in order.
-4. Writes the new `user_version`.
+2. Acquires a write transaction and reads `PRAGMA user_version`.
+3. Rejects unsupported future versions or applies each missing migration in order.
+4. Records version 4 and commits; a migration failure rolls back all pending work.
+5. Changes remaining streaming assistants to interrupted with a fresh message timestamp.
 
 The current migrations create the two tables, add a message index, and install
-triggers that keep `conversations.updated_at` current.
+triggers that keep `conversations.updated_at` current. Historical migrations remain
+unchanged; version 4 restricts the conversation timestamp trigger to explicit
+activity updates, so title edits preserve ordering. Turn creation is atomic, and
+streamed content is committed before it is published.
 
 ## Settings ownership
 
 The settings JSON is a separate host-managed artifact. The backend does not read
 it directly. The desktop reaches it through Tauri commands.
 
+Generation edits are saved automatically. Each save reads the document already
+on disk and replaces only its `generation` group, preserving the persisted
+runtime and model groups. Runtime edits, including auto-start and default-model
+selection, and model settings edits remain session-only in the desktop.
+See the [configuration reference](/reference/configuration/#persisted-settings-json)
+for the current shape and defaults.
+
 ## Current limitations
 
-- There is no public backend route for listing or resuming persisted
-  conversations after relaunch. The chat route can continue a conversation only
-  when the caller already has its identifier.
-- Streamed assistant text is not appended to the stored assistant row; only its
-  lifecycle state and finish reason are updated.
 - The current React Runtime settings tab does not persist its edited auto-start
   value back through `save_settings`.
 - Recovery, export, and import are not first-class app features yet.
 
 ## Coming soon
 
-- Conversation list and resume APIs
+- Desktop integration of the conversation list and resume APIs
 - Export and import flows for SQLite data
 - Recovery tooling surfaced in the app rather than only implied by files on disk
-- Persisted generation and conversation settings beyond the current runtime JSON
+- Persisting desktop runtime and model edits, and adding conversation settings
 
 ## Related pages
 

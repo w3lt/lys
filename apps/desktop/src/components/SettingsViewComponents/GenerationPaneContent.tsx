@@ -18,7 +18,7 @@ const REPLY_CEILING_STEP = 64
 /**
  * Presents the API's inclusive sampling-temperature range.
  * @returns A keyboard-operable slider and its current numeric value.
- * @remarks Primary category: composition/view. SettingsContext owns the accepted
+ * @remarks SettingsContext owns the accepted
  * value; empty slider emissions are ignored. Changes apply to the next request.
  */
 function GenerationTemperatureField(): ReactElement {
@@ -56,7 +56,7 @@ function GenerationTemperatureField(): ReactElement {
 /**
  * Presents the reply ceiling's on/off control and optional token slider.
  * @returns A named switch and a ceiling slider only while the limit is enabled.
- * @remarks Primary category: composition/view. SettingsContext owns accepted
+ * @remarks SettingsContext owns accepted
  * values. Switching off proposes zero, which omits the request limit; switching
  * on restores the application's default ceiling. Changes apply to future requests
  * and are saved by the application owner. Missing context fails explicitly.
@@ -102,7 +102,7 @@ function GenerationReplyCeilingField(): ReactElement {
 /**
  * Edits an enabled reply ceiling in tokens through a keyboard-operable slider.
  * @returns The labeled ceiling slider and its accepted numeric value.
- * @remarks Primary category: composition/view. Requires SettingsContext and a
+ * @remarks Requires SettingsContext and a
  * positive ceiling. The local context estimate sets the usual slider range;
  * existing ceilings outside that range remain visible without clamping. Actual
  * model capacity remains runtime-owned. Empty slider emissions are ignored.
@@ -152,7 +152,7 @@ function GenerationReplyLimitField(): ReactElement {
 /**
  * Announces automatic persistence and offers recovery when a write fails.
  * @returns A persistent status region and a retry button only after failure.
- * @remarks Primary category: composition/view. The application store owns saves
+ * @remarks The application store owns saves
  * across pane unmounts; failure leaves edits available and allows an explicit retry.
  */
 function GenerationSaveFeedback(): ReactElement {
@@ -191,7 +191,7 @@ function GenerationSaveFeedback(): ReactElement {
 /**
  * Composes generation controls with automatic persistence feedback.
  * @returns Temperature and optional reply-ceiling controls for future messages.
- * @remarks Primary category: composition/view. Requires SettingsContext and the
+ * @remarks Requires SettingsContext and the
  * application store. Edits apply immediately and save only the generation group;
  * the store owns completion, errors, and coalescing of overlapping edits. Already
  * submitted messages retain their settings. No backend process is required.

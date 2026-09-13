@@ -12,30 +12,43 @@ application.
 
 ## Current backend shape
 
-| Layer              | Implementation                 | Responsibility                                                                                     |
-| ------------------ | ------------------------------ | -------------------------------------------------------------------------------------------------- |
-| App bootstrap      | `src/app.ts`                   | Registers CORS, SSE support, singleton services, and all routes.                                   |
-| Runtime config     | `src/config.ts`                | Supplies loopback host and port values and the SQLite file path.                                   |
-| Singleton services | `src/di/singleton.ts`          | Creates the chat and conversation services, and selects the runtime owned by the LLM service.      |
-| Chat routes        | `src/modules/chat`             | Accepts chat requests, persists turn data, streams SSE responses, and updates conversation titles. |
-| LLM routes         | `src/modules/llm/routes`       | Lists LM Studio models, checks loaded-model health, and loads or unloads a model on demand.        |
-| Health route       | `src/modules/health/routes.ts` | Returns a simple `{ ok: true }` response.                                                          |
+| Layer               | Implementation                 | Responsibility                                                                                     |
+| ------------------- | ------------------------------ | -------------------------------------------------------------------------------------------------- |
+| App bootstrap       | `src/app.ts`                   | Registers CORS, SSE support, singleton services, and all routes.                                   |
+| Runtime config      | `src/config.ts`                | Supplies loopback host and port values and the SQLite file path.                                   |
+| Singleton services  | `src/di/singleton.ts`          | Creates the chat and conversation services, and selects the runtime owned by the LLM service.      |
+| Chat routes         | `src/modules/chat`             | Accepts chat requests, persists turn data, streams SSE responses, and updates conversation titles. |
+| Conversation routes | `src/modules/conversation`     | Lists, searches, retrieves, renames, and deletes stored conversations.                             |
+| LLM routes          | `src/modules/llm/routes`       | Lists LM Studio models, checks loaded-model health, and loads or unloads a model on demand.        |
+| Health route        | `src/modules/health/routes.ts` | Returns a simple `{ ok: true }` response.                                                          |
 
 ## Chat request flow
 
 1. `POST /api/v1/chat` validates the request body with the shared Zod schema.
-2. `ConversationTurn` creates or looks up the conversation, inserts the user
-   message, and inserts an empty streaming assistant message.
+2. `SqliteConversationTurns` creates or loads the conversation and atomically
+   inserts the user message and empty streaming assistant message.
 3. The route immediately emits either `start-new-conversation-turn` or
    `start-existing-conversation-turn`.
 4. `createChatTask` opens an OpenAI-compatible streaming completion against LM
-   Studio and converts model chunks into `delta` and `done` events.
-5. `createTitleGenerationTask` runs in parallel and may emit a `title` event.
+   Studio, persists each delta before publication, and stores completion before
+   emitting `done`.
+5. For an untitled conversation, `createTitleGenerationTask` runs in parallel
+   and emits `title` only if a conditional write succeeds.
 6. Errors become `error` events when the client is still connected.
 
-The current chat task updates the stored assistant status and finish reason, but
-does not append streamed delta text to the stored assistant content. The full
-reply shown by the desktop therefore exists only in current-window state.
+Each completion receives the saved system prompt, prior user messages, non-empty
+completed or interrupted assistant replies, and the current user message once.
+Failed, empty, and streaming assistant replies are excluded from model context.
+The required `generationOptions` controls supply sampling temperature and an
+optional completion-token ceiling; the [API reference](/reference/api/#chat-request-body)
+defines their limits. Title generation uses a separate request and cannot
+overwrite a manual rename. Partial assistant content remains available in history
+after cancellation or failure.
+
+`ChatRequestLifetime` owns complete handler promises, including cleanup after a
+client disconnect. Its close hook drains handlers before singleton disposal can
+close SQLite. Post-stream failures are logged and terminate the SSE response
+without attempting a second HTTP response.
 
 ## Persistence
 
@@ -46,7 +59,10 @@ The backend stores conversations in SQLite at `~/.lys/lys_db.sqlite`.
 | `conversations`         | Stores conversation metadata, title, system prompt, and timestamps.                          |
 | `conversation_messages` | Stores ordered user and assistant messages, assistant status, finish reason, and timestamps. |
 
-The database schema is applied by inline migrations using `PRAGMA user_version`.
+The database schema is applied by `conversationService/migrations.ts` using
+`PRAGMA user_version`. The store owns the connection and lends history and turn
+capabilities without exposing connection or disposal authority. Version 4 preserves
+activity timestamps on rename, and startup recovers streaming assistants.
 Two triggers keep `conversations.updated_at` in sync with message inserts and
 message updates.
 
@@ -101,7 +117,7 @@ See the [health response contract](/reference/api/#model-health-responses).
 | Model operation or health-check client disconnects | Accepted work continues until success or failure; user cancellation is unavailable.                                |
 | LLM service already has nine accepted operations   | New inventory/health/load/unload requests receive `503` with `urn:lys:problem:llm:service-busy` before acceptance. |
 | Model stream ends without a finish reason          | The route treats it as an error and may emit `error`.                                                              |
-| Assistant state update fails                       | The backend throws because the persisted assistant row is missing.                                                 |
+| Assistant row was deleted or already finalized     | Late writes return false without recreating data.                                                                  |
 | Unknown finish reason                              | The backend throws instead of silently coercing it.                                                                |
 
 See the [provider cancellation policy](/architecture/providers/#cancellation-policy)
@@ -111,14 +127,12 @@ for the separate inference and model-management lifetimes.
 
 - No Rust backend service
 - No replayable shared event bus
-- No public conversation listing or history-retrieval API; continuing a turn
-  requires a conversation identifier the caller already knows
 - No credential-management layer
 - No provider fallback or budget-accounting logic
 
 ## Coming soon
 
-- Conversation replay and resume across app restarts
+- Desktop history restoration using the available backend APIs
 - Recovery and export tooling around the SQLite store
 - Multiple provider backends or pluggable adapters
 - Backend-backed generation settings beyond the current chat request body

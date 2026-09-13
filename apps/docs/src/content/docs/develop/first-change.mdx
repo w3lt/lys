@@ -46,8 +46,9 @@ The backend chat route:
 4. emits the start event
 5. streams assistant deltas and a final done or error event
 
-The current backend updates the stored assistant status and finish reason, but
-does not persist streamed delta content into the assistant row.
+The backend persists each assistant delta before emitting it, then stores terminal
+status and finish reason before completion. Continuation reads the saved prompt
+and eligible transcript; title generation runs only while the title is absent.
 
 ### 4. Persistence
 

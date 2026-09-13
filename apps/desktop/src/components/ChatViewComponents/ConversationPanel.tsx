@@ -3,9 +3,8 @@ import type { ReactElement, RefObject } from "react"
 
 import { Button } from "../ui/button"
 import type {
-  CompletedConversationPresentation,
   ConversationActivity,
-  StreamingConversationPresentation
+  ConversationPresentation
 } from "./conversation-presentation"
 import ConversationTranscript from "./ConversationTranscript"
 import StarterView from "./StarterView"
@@ -46,26 +45,23 @@ function formatConversationActivity(activity: ConversationActivity): string {
 }
 
 /** Properties accepted by {@link ConversationPanel}. */
-export type ConversationPanelProps =
-  | (ConversationPanelCommonProps & CompletedConversationPresentation)
-  | (ConversationPanelCommonProps &
-      StreamingConversationPresentation & {
-        /** Interrupts the active assistant reply. */
-        readonly onStopReply: () => void
-      })
+export type ConversationPanelProps = ConversationPanelCommonProps &
+  ConversationPresentation
 
 /**
  * Presents the conversation transcript and its navigation affordances.
  *
- * @remarks Primary category: presentational. The parent owns conversation
- * state, transcript position, scrolling, submission, and interruption. The
- * Stop action exists only in the streaming-tail contract. Starter clicks call
- * `onSendMessage` once and intentionally discard its settlement because the
- * store owns request failure state. The transcript host is the supplied ref
- * target and exposes native scroll semantics; the jump control appears only
- * when the parent reports that the reader is away from the latest content.
- * A polite status announces a pending reply or conversation open, and the
- * landmark is marked busy while its content is being replaced by an open.
+ * @remarks The parent owns conversation
+ * state, transcript position, scrolling, and submission. The panel exposes no
+ * interruption control, because cancellation must stay reachable in active
+ * phases that have no assistant message and is therefore owned by the
+ * composer. Starter clicks call `onSendMessage` once and intentionally discard
+ * its settlement because the store owns request failure state. The transcript
+ * host is the supplied ref target and exposes native scroll semantics; the
+ * jump control appears only when the parent reports that the reader is away
+ * from the latest content. A polite status announces a pending reply or
+ * conversation open, and the landmark is marked busy while its content is
+ * being replaced by an open.
  * @param props - Parent-owned presentation state and transcript controls.
  * @returns The conversation landmark with starter or transcript content.
  */
@@ -91,7 +87,6 @@ export default function ConversationPanel(
         kind="streaming-tail"
         completedMessages={props.completedMessages}
         error={error}
-        onStopReply={props.onStopReply}
         streamingMessage={props.streamingMessage}
       />
     ) : (

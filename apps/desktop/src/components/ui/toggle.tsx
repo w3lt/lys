@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
  * Supplies the maintained variants used by {@link Toggle} and toggle-group
  * items.
  *
- * @remarks Primary category: UI primitive adapter. `variant` supports
+ * @remarks `variant` supports
  * `default` and `outline`; `size` supports `default`, `sm`, and `lg`. Both
  * default to `default`. Selected state is represented through the primitive's
  * `aria-pressed` attribute and styling, while this utility only supplies class
@@ -39,7 +39,7 @@ const toggleVariants = cva(
 /**
  * Renders a Base UI toggle with Lys variants.
  *
- * @remarks Primary category: UI primitive adapter. Base UI toggle props,
+ * @remarks Base UI toggle props,
  * children, controlled or uncontrolled pressed state, and callbacks are
  * forwarded. A controlled `pressed` value is parent-owned, while
  * `defaultPressed` is primitive-owned after initialization. `variant` and
@@ -65,4 +65,4 @@ function Toggle({
   )
 }
 
-export { Toggle, toggleVariants }
+export { Toggle }

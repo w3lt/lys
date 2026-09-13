@@ -19,6 +19,11 @@ Lys currently integrates with one local model runtime: LM Studio.
 | Chat generation  | `ChatService.completeChatStream()` uses the `openai` SDK against LM Studio's OpenAI-compatible `/v1` HTTP endpoint.              |
 | Title generation | `ChatService.generateTitle()` uses the same endpoint with a separate prompt and structured output parsing.                       |
 
+Generation temperature and reply-ceiling edits are saved automatically and
+applied to future chat requests. The [API reference](/reference/api/#chat-request-body)
+defines how those controls reach chat completion; title generation uses its own
+request.
+
 ## Request path
 
 ```text
@@ -26,9 +31,10 @@ Desktop chat store -> Fastify /api/v1/chat -> ChatService -> LM Studio /v1
 Fastify /api/v1/llm/* -> LlmService -> LlmRuntime -> LmStudioRuntime -> LM Studio SDK
 ```
 
-The current desktop settings UI does not call the LLM routes. Its Model tab is
-not a usable alternative path: the pane requires a `SettingsContext.Provider`
-that the current settings view does not mount. The list, health, load, and unload routes
+The desktop settings view supplies the shared context for its Runtime, Model,
+and Generation panes. Model controls call the inventory, health, load, and unload
+routes through the application store; entering settings refreshes inventory when
+the backend is running. The list, health, load, and unload routes
 reuse the application-scoped `llmService`, typed as `LlmService` on Fastify,
 through provider-neutral capabilities.
 The composition root creates `LmStudioRuntime` for one configured LM Studio
@@ -141,14 +147,15 @@ policy.
 - There is no provider registry or adapter plugin system.
 - There is no automatic fallback between providers or models.
 - There is no request budgeting, quota tracking, or provider-specific telemetry.
-- The desktop Model, Generation, and Conversation settings tabs are currently
-  unusable because their required context provider is not mounted.
+- Default-model selection in settings lasts for the current session and is not
+  used by chat, which still sends a fixed model identifier.
+- Model context size is displayed as an estimate; the load endpoint does not
+  accept a context-size option.
 
 ## Coming soon
 
 - Additional runtime implementations
 - Fallback and retry policy across model runtimes
-- Usable Model, Generation, and Conversation settings tabs
 - Persistent model selection shared between settings and chat
 - Provider-specific configuration and health reporting
 

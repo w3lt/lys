@@ -223,9 +223,11 @@ Generation markers and required notices MUST accurately identify their source or
 
 ### COMMENT-027 — References resolve to the intended authority
 
-Local paths, symbols, rule identifiers, documentation links, and referenced work records MUST identify the fact they support. A moved or renamed owner MUST update directly affected references.
+Local paths, symbols, documentation links, and referenced work records MUST identify the fact they support. A moved or renamed owner MUST update directly affected references.
 
 Use stable symbols, section anchors, or record identifiers where available. A fragile line number SHOULD NOT be the only way to locate a continuing contract. A link that resolves but points to an obsolete or unrelated declaration is not a valid reference.
+
+Source comments MUST NOT cite construction-rule identifiers or carry implementation compliance findings or exception-approval records. Those mappings belong in supporting engineering documentation.
 
 ### COMMENT-028 — External references support the claimed constraint
 
@@ -306,23 +308,3 @@ If a relevant check cannot run, report the exact reason and the affected unverif
 Review of a comment change MUST assess its accuracy, scope, authoritative owner, attachment, references, and any tool interpretation. Spelling and formatting checks MUST NOT replace that assessment.
 
 A correct explanation does not certify the surrounding implementation as compliant or waive a known defect. Findings and exceptions retain their canonical review processes, and only active rule identifiers may be cited as construction requirements.
-
-## Repository boundary examples
-
-These examples describe comments and nearby source in the current working tree. They illustrate review boundaries; they do not certify full compliance, executed tests, third-party behavior, or platform guarantees. Existing limitations are not exceptions for new or modified code.
-
-| Observed source                                                                                                                   | Comment distinction                                                                                                                                                                                |
-| --------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The chat registrar explains why it awaits settlement after creating two tasks                                                     | The comment explains a sequencing consequence beyond the final call's syntax. Source ordering can be inspected; full connection lifetime still requires the appropriate boundary evidence.         |
-| The shared chat-event declaration describes start, generation, and concurrent title events                                        | The contract belongs with the protocol, while the producer establishes ordering. A schema validating each event's shape does not independently enforce the sequence.                               |
-| The desktop stream adapter documents cancellation and reader release on early iteration exit                                      | The nested cleanup structure is observable in source. It does not by itself establish that all remote work terminates when the local reader is cancelled.                                          |
-| The Rust spawn helper explains locking before spawning, while the public start contract discloses separate check and spawn phases | A valid local ownership rationale must not be generalized into a guarantee against concurrent starts across the whole operation.                                                                   |
-| The uptime formatter names milliseconds, negative-input clamping, and minutes that do not roll into hours                         | Units and intentionally surprising output add information beyond a numeric parameter type. This is not a claim that every possible numeric input has been validated.                               |
-| Rail-state comments connect a shared key and value to initialization, the control, and the stylesheet                             | The explanation identifies a cross-file contract. Head placement is visible in configuration; a claim about every rendered first paint needs suitable rendered evidence.                           |
-| Record-index comments explain rechecking metadata before publishing complete index rows                                           | A local reason can preserve a seemingly redundant check. The statement about inferred types still needs the applicable compiler evidence when that claim is changed.                               |
-| Source includes a checking directive and declaration-file references                                                              | Tool-consumed comment syntax has a different role from ordinary explanation. Its presence alone is not proof that the relevant checker ran.                                                        |
-| ESLint documentation and its nearby ignore comment summarize the selected paths differently                                       | Duplicating changing inventories creates a concrete drift risk. Review must reconcile the actual declaration and the affected explanation, rather than count comments as evidence of completeness. |
-
-The relevant sources are the [chat registrar](../../apps/backend/src/modules/chat/chat/index.ts), [chat protocol](../../packages/protocol/src/apis/chat/chatRoute.ts), [desktop stream adapter](../../apps/desktop/src/lib/apis/http/chat.ts), [Rust process owner and spawn path](../../apps/desktop/src-tauri/src/backend.rs), [uptime formatter](../../apps/desktop/src/lib/hooks/backendRuntime.ts), [shared rail contract](../../apps/docs/src/lib/handbook/rail.ts), [rail bootstrap configuration](../../apps/docs/astro.config.mjs), [rail control](../../apps/docs/src/components/handbook/RailCollapseToggle.astro), [rail stylesheet](../../apps/docs/src/styles/global.css), [record-index projection](../../apps/docs/src/lib/handbook/records.ts), [frontmatter declarations](../../apps/docs/src/content.config.ts), [backend declaration reference](../../apps/backend/src/fastify.d.ts), [desktop declaration reference](../../apps/desktop/src/vite-env.d.ts), and [lint configuration](../../eslint.config.ts).
-
-The source illustrations are observations, not a cleanup request or a passing validation record. Suppression and generation rules apply when those constructs occur; this chapter does not claim that every comment category already appears in repository-maintained source.

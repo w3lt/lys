@@ -26,12 +26,13 @@ use serde::{Deserialize, Serialize};
 #[serde(default, rename_all = "camelCase")]
 /// Complete persisted Lys settings value.
 ///
-/// The private fields group runtime and generation settings in the serialized
-/// JSON representation while keeping those groups behind the settings module's
-/// API boundary.
+/// The private fields group runtime, model, and generation settings in the
+/// serialized JSON representation while keeping those groups behind the
+/// settings module's API boundary.
 pub struct LysSettings {
-    /// Runtime process and model settings in the serialized `runtime` object.
+    /// Process settings and default-model selection in the `runtime` object.
     runtime: RunTimeSettings,
+    /// Local context estimate in the serialized `model` object.
     model: ModelSettings,
     /// Generation parameters in the serialized `generation` object.
     generation: GenerationSettings,

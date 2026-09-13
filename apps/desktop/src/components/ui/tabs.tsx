@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils"
 /**
  * Provides the root context for a composed tab set.
  *
- * @remarks Primary category: UI primitive adapter. Base UI tab-root props and
+ * @remarks Base UI tab-root props and
  * children are forwarded; `orientation` defaults to `horizontal` and is
  * mirrored in `data-orientation` for repository layout styling. A controlled
  * `value` is parent-owned, while `defaultValue` is primitive-owned after
@@ -39,7 +39,7 @@ function Tabs({
 /**
  * Supplies the maintained list variants used by {@link TabsList}.
  *
- * @remarks Primary category: UI primitive adapter. `default` uses a muted
+ * @remarks `default` uses a muted
  * surface and `line` uses a transparent list with a gap; `default` is the
  * fallback. Selected-value authority remains the tabs root's
  * controlled/uncontrolled contract, while Base UI coordinates tab interaction
@@ -63,7 +63,7 @@ const tabsListVariants = cva(
 /**
  * Renders the list container for a {@link Tabs} family.
  *
- * @remarks Primary category: UI primitive adapter. Base UI list props and tab
+ * @remarks Base UI list props and tab
  * trigger children are forwarded. `variant` selects `default` or `line`
  * styling and defaults to `default`; it is exposed as `data-variant`. A
  * {@link Tabs} root is required and its missing-context error propagates from
@@ -92,7 +92,7 @@ function TabsList({
 /**
  * Renders one selectable tab trigger in a {@link TabsList}.
  *
- * @remarks Primary category: UI primitive adapter. Base UI tab props, children,
+ * @remarks Base UI tab props, children,
  * value, and callbacks are forwarded; the parent or primitive owns selected
  * state through the root's controlled/uncontrolled value contract. Base UI
  * coordinates tab/panel association, focus, keyboard navigation, disabled
@@ -129,7 +129,7 @@ function TabsTrigger({ className, ...props }: TabsPrimitive.Tab.Props) {
 /**
  * Renders one panel associated with a {@link TabsTrigger}.
  *
- * @remarks Primary category: UI primitive adapter. Base UI panel props,
+ * @remarks Base UI panel props,
  * children, and `value` are forwarded; a {@link Tabs} root is required and its
  * missing-context error propagates from Base UI. The parent or primitive owns
  * selected value through the root's controlled/uncontrolled contract, while
@@ -150,4 +150,4 @@ function TabsContent({ className, ...props }: TabsPrimitive.Panel.Props) {
   )
 }
 
-export { Tabs, TabsList, TabsTrigger, TabsContent, tabsListVariants }
+export { Tabs, TabsList, TabsTrigger, TabsContent }

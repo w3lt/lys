@@ -7,33 +7,33 @@ sidebar:
 ---
 
 The backend currently manages one SQLite schema and the Tauri host manages one
-small JSON schema for runtime settings.
+JSON schema for runtime, model, and generation settings.
 
 ## SQLite tables
 
 ### `conversations`
 
-| Column          | Type            | Notes                                                                                              |
-| --------------- | --------------- | -------------------------------------------------------------------------------------------------- |
-| `id`            | `TEXT`          | Primary key                                                                                        |
-| `title`         | `TEXT`          | Nullable until title generation succeeds                                                           |
-| `system_prompt` | `TEXT NOT NULL` | Prompt associated with the conversation; the current chat request does not forward it to the model |
-| `created_at`    | `TEXT NOT NULL` | ISO timestamp                                                                                      |
-| `updated_at`    | `TEXT NOT NULL` | ISO timestamp                                                                                      |
+| Column          | Type            | Notes                                              |
+| --------------- | --------------- | -------------------------------------------------- |
+| `id`            | `TEXT`          | Primary key                                        |
+| `title`         | `TEXT`          | Nullable until title generation succeeds           |
+| `system_prompt` | `TEXT NOT NULL` | Saved instruction forwarded for every continuation |
+| `created_at`    | `TEXT NOT NULL` | ISO timestamp                                      |
+| `updated_at`    | `TEXT NOT NULL` | ISO timestamp                                      |
 
 ### `conversation_messages`
 
-| Column            | Type            | Notes                                                                                                             |
-| ----------------- | --------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `id`              | `TEXT`          | Primary key                                                                                                       |
-| `conversation_id` | `TEXT NOT NULL` | Foreign key to `conversations(id)` with `ON DELETE CASCADE`                                                       |
-| `role`            | `TEXT NOT NULL` | `user` or `assistant`                                                                                             |
-| `model`           | `TEXT`          | Required for assistant rows, absent for user rows                                                                 |
-| `content`         | `TEXT NOT NULL` | User content is non-empty; assistant content may remain empty because streamed deltas are not currently persisted |
-| `status`          | `TEXT`          | Assistant-only: `streaming`, `completed`, `interrupted`, `failed`                                                 |
-| `finish_reason`   | `TEXT`          | Assistant-only: `stop` or `length`, nullable while not completed                                                  |
-| `created_at`      | `TEXT NOT NULL` | ISO timestamp                                                                                                     |
-| `updated_at`      | `TEXT`          | Required for assistant rows                                                                                       |
+| Column            | Type            | Notes                                                                                                       |
+| ----------------- | --------------- | ----------------------------------------------------------------------------------------------------------- |
+| `id`              | `TEXT`          | Primary key                                                                                                 |
+| `conversation_id` | `TEXT NOT NULL` | Foreign key to `conversations(id)` with `ON DELETE CASCADE`                                                 |
+| `role`            | `TEXT NOT NULL` | `user` or `assistant`                                                                                       |
+| `model`           | `TEXT`          | Required for assistant rows, absent for user rows                                                           |
+| `content`         | `TEXT NOT NULL` | User content is non-empty; assistant content accumulates persisted deltas and may be empty before any delta |
+| `status`          | `TEXT`          | Assistant-only: `streaming`, `completed`, `interrupted`, `failed`                                           |
+| `finish_reason`   | `TEXT`          | Assistant-only: `stop` or `length`, nullable while not completed                                            |
+| `created_at`      | `TEXT NOT NULL` | ISO timestamp                                                                                               |
+| `updated_at`      | `TEXT`          | Required for assistant rows                                                                                 |
 
 ## Important constraints
 
@@ -44,41 +44,37 @@ small JSON schema for runtime settings.
   reason.
 
 The current backend inserts an empty assistant row before generation and later
-updates its status and finish reason. It does not write streamed delta content
-back to that row.
+appends each streamed delta before publication, then updates its status and finish
+reason. Partial text is retained on failure or interruption.
 
 ## Indexes and triggers
 
-| Name                                       | Kind    | Purpose                                                  |
-| ------------------------------------------ | ------- | -------------------------------------------------------- |
-| `conversation_messages_conversation_idx`   | index   | Orders messages by conversation, creation time, and id   |
-| `update_conversation_after_message_insert` | trigger | Updates `conversations.updated_at` after inserts         |
-| `update_conversation_updated_at`           | trigger | Keeps `updated_at` monotonic on conversation updates     |
-| `update_conversation_after_message_update` | trigger | Updates `conversations.updated_at` after message updates |
+| Name                                       | Kind    | Purpose                                                                      |
+| ------------------------------------------ | ------- | ---------------------------------------------------------------------------- |
+| `conversation_messages_conversation_idx`   | index   | Orders messages by conversation, creation time, and id                       |
+| `update_conversation_after_message_insert` | trigger | Updates `conversations.updated_at` after inserts                             |
+| `update_conversation_updated_at`           | trigger | Keeps explicit activity updates monotonic; title-only updates do not fire it |
+| `update_conversation_after_message_update` | trigger | Updates `conversations.updated_at` after message updates                     |
 
 ## Migration strategy
 
 The backend applies schema changes from an ordered array of SQL strings and
-tracks the applied version with `PRAGMA user_version`.
+tracks the applied version with `PRAGMA user_version`. Version 4 replaces only the
+conversation timestamp trigger; versions 1–3 are unchanged. Missing migrations
+and the version marker commit together. At startup, streaming assistant rows
+become interrupted with a refreshed `updated_at`; content is preserved.
 
-## Runtime settings JSON
+## Settings JSON
 
-The Tauri host also reads and writes:
-
-```json
-{
-  "runtime": {
-    "autoStartBackend": false,
-    "selectedModel": null
-  }
-}
-```
+The Tauri host stores `runtime`, `model`, and `generation` groups in
+`~/.lys/settings.json`. See the [configuration reference](/reference/configuration/#persisted-settings-json)
+for the current fields, defaults, and validation. Generation edits are saved
+automatically; runtime and model edits in the desktop remain session-only.
 
 ## Coming soon
 
-- Public schema contracts for conversation listing and resume routes
 - Export and import formats for persisted conversations
-- Additional persisted settings beyond the current runtime file
+- Persisted conversation settings beyond the current runtime, model, and generation groups
 
 ## Related pages
 

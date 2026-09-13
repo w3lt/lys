@@ -10,7 +10,7 @@ export type ChatLifecycleErrorProps = {
 /**
  * Renders a polite inline chat lifecycle outcome.
  *
- * @remarks Primary category: presentational. The parent owns the error
+ * @remarks The parent owns the error
  * message and decides when it is present; this component owns no state,
  * effects, refs, retry behavior, or application capability. The status alert
  * is announced politely and does not interrupt the transcript's focus.

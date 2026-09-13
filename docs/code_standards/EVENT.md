@@ -385,20 +385,3 @@ Applicable cases include notification during setup, partial setup failure, read/
 A changed published or retained message contract MUST validate the affected producer/consumer and history combinations under the existing compatibility standards.
 
 Fixtures, actual codecs, representative consumers, or retained-message samples MAY supply evidence appropriate to the supported contract. Tests and examples MUST NOT generate both the received and expected meaning from the same unchecked assumption. Documentation, rule references, and examples MUST agree with the verified contract; no test result waives an active construction rule.
-
-## Boundary examples
-
-These examples identify useful review boundaries in the current repository. They do not certify that existing implementations satisfy every rule in this chapter.
-
-| Situation                                                               | Contract distinction                                                                                                                    |
-| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| A chat turn-start event contains persisted message records              | The delivery event reports a turn-start occurrence; the nested transcript messages are domain data with their own identities.           |
-| The assistant stream emits two identical text fragments                 | Equal content does not prove duplicate delivery. Both fragments may be required for the final text.                                     |
-| A generated title arrives after assistant `done`                        | Assistant completion and title completion are separate scopes even though they share one SSE connection.                                |
-| The chat sender resolves after its event write is accepted              | Acceptance by the sender path does not prove that the desktop decoded, applied, or persisted the event.                                 |
-| A new request replaces an older request in the same conversation        | Conversation identity alone cannot authorize the older request's queued notifications to update current state.                          |
-| A view reports its measured scroll position through a semantic callback | An in-process notification can use its direct callback relationship without a wire envelope, durable acknowledgement, or occurrence ID. |
-| A disclosure registers pointer and keyboard listeners while open        | Each registration belongs to that disclosure instance and its exact cleanup; native propagation rules still apply.                      |
-| A native command returns the current backend status                     | A request/response status snapshot is not proof that a backend event stream or replay history exists.                                   |
-
-The relevant sources are the [chat event contract](../../packages/protocol/src/apis/chat/chatRoute.ts), [sender boundary](../../apps/backend/src/modules/chat/chat/share.ts), [chat consumer adapter](../../apps/desktop/src/lib/apis/http/chat.ts), and [SSE reference](../../apps/docs/src/content/docs/reference/sse-events.mdx). The repository's current SSE reference explicitly records the absence of event IDs and replay markers; this chapter does not add those capabilities.

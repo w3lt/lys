@@ -2,26 +2,27 @@
  * Runtime process settings persisted under the `runtime` JSON object.
  *
  * @remarks Mirrors Rust's `RunTimeSettings`. Field names match the camelCase
- * wire representation, so a loaded value round-trips without mapping.
+ * wire representation, so a loaded value round-trips without mapping. Runtime
+ * edits in the desktop UI remain session-only.
  */
 export type RuntimeSettings = {
   /** Whether desktop initialization requests backend startup. */
   autoStartBackend: boolean
-  /** Model identifier loaded by default; `null` when no default is chosen. */
+  /** Default-model selection; `null` when absent. Selection does not load weights or choose the chat model. */
   defaultModel: string | null
-  /** Backend origin persisted for runtime consumers, including its scheme. */
+  /** Backend origin shown in runtime settings; HTTP consumers use shared protocol constants. */
   backendAddress: string
 }
 
 /**
- * Model load settings persisted under the `model` JSON object.
+ * Local model context estimate persisted under the `model` JSON object.
  *
- * @remarks Mirrors Rust's `ModelSettings`. The context window is read when
- * weights are loaded rather than per request, so a change applies at the next
- * load.
+ * @remarks Mirrors Rust's `ModelSettings`. The context budget supports composer
+ * estimates and generation controls; LM Studio owns load-time context size.
+ * Model edits in the desktop UI remain session-only.
  */
 export type ModelSettings = {
-  /** Context-window size in tokens requested when weights are loaded. */
+  /** Context budget in tokens used for local estimates, not sent when loading weights. */
   contextSize: number
 }
 
@@ -30,6 +31,8 @@ export type ModelSettings = {
  *
  * @remarks Mirrors Rust's `GenerationSettings`. Rust rejects a temperature
  * outside `[0, 1]` during deserialization, matching the chat API's range.
+ * Desktop edits apply to future requests immediately and survive restart after
+ * the application-owned automatic save completes.
  */
 export type GenerationSettings = {
   /** Sampling temperature; Rust and the chat API accept `[0, 1]`. */
@@ -48,7 +51,7 @@ export type GenerationSettings = {
 export type LysSettings = {
   /** Backend process and default-model settings. */
   runtime: RuntimeSettings
-  /** Weight-loading settings applied at model load time. */
+  /** Local model context estimate. */
   model: ModelSettings
   /** Sampling settings applied to the next request. */
   generation: GenerationSettings

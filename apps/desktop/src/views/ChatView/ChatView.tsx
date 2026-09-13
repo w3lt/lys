@@ -114,14 +114,15 @@ function useConversationHistoryShortcut(
  * Presents the conversation transcript, lifecycle feedback, past
  * conversations, and composer.
  *
- * @remarks Primary category: composition/view. The chat-view store owns
+ * @remarks The chat-view store owns
  * conversation, request, and open state; the history store owns whether past
  * conversations are shown; the surrounding shell owns whether the transcript
  * is pinned to its latest content. The component owns the transcript host ref
  * and the message-field ref. It synchronizes the transcript's scroll position
  * only while the parent says it is pinned and messages exist, forwards starter
- * submission and stop actions to the store, and politely announces a pending
- * reply or conversation open. Command+K or Control+K toggles past
+ * submission to the store, and politely announces a pending reply or
+ * conversation open; request cancellation is owned by the composer, which
+ * stays mounted in every request phase. Command+K or Control+K toggles past
  * conversations, which then dim the workspace behind a dialog docked above
  * the composer. Opening a conversation or starting one from that dialog closes
  * it, pins the transcript to its latest content, and moves focus to the
@@ -141,7 +142,6 @@ export default function ChatView({
   const error = useChatViewStore((state) => state.error)
   const request = useChatViewStore((state) => state.request)
   const sendMessage = useChatViewStore((state) => state.sendMessage)
-  const stopStreaming = useChatViewStore((state) => state.stopStreaming)
   const openConversation = useChatViewStore((state) => state.openConversation)
   const resetConversation = useChatViewStore((state) => state.resetConversation)
   const historyVisibility = useConversationHistoryStore(
@@ -213,33 +213,16 @@ export default function ChatView({
 
   return (
     <main className="app-shell__chat">
-      {presentation.kind === "streaming-tail" ? (
-        <ConversationPanel
-          activity={activity}
-          completedMessages={presentation.completedMessages}
-          error={error}
-          isAtBottom={atBottom}
-          kind={presentation.kind}
-          onJumpToLatest={handleJumpToLatest}
-          onSendMessage={sendMessage}
-          onStopReply={stopStreaming}
-          onTranscriptScroll={handleTranscriptScroll}
-          streamingMessage={presentation.streamingMessage}
-          transcriptRef={transcriptRef}
-        />
-      ) : (
-        <ConversationPanel
-          activity={activity}
-          completedMessages={presentation.completedMessages}
-          error={error}
-          isAtBottom={atBottom}
-          kind={presentation.kind}
-          onJumpToLatest={handleJumpToLatest}
-          onSendMessage={sendMessage}
-          onTranscriptScroll={handleTranscriptScroll}
-          transcriptRef={transcriptRef}
-        />
-      )}
+      <ConversationPanel
+        {...presentation}
+        activity={activity}
+        error={error}
+        isAtBottom={atBottom}
+        onJumpToLatest={handleJumpToLatest}
+        onSendMessage={sendMessage}
+        onTranscriptScroll={handleTranscriptScroll}
+        transcriptRef={transcriptRef}
+      />
       {historyVisibility.status === "open" ? (
         <>
           <div aria-hidden="true" className="chat-view__veil" />

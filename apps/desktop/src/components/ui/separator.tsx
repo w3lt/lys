@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils"
 /**
  * Renders a horizontal or vertical separator over the Base UI separator host.
  *
- * @remarks Primary category: UI primitive adapter. Base UI separator props are
+ * @remarks Base UI separator props are
  * forwarded; `orientation` defaults to `horizontal` and controls the host's
  * orientation and corresponding dimensions. Base UI supplies separator
  * semantics. A supplied `ref` targets the Base UI `HTMLDivElement` host; the

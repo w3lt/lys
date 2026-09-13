@@ -1,0 +1,170 @@
+---
+title: Implementation classifications
+description: Declaration classifications and their canonical rules, recorded separately from source contracts.
+docType: reference
+stability: experimental
+sidebar:
+  order: 8
+---
+
+This register preserves earlier source classification labels and records affected
+implementation updates. It keeps the connection between implementation and
+construction rules in the handbook. It is not a compliance audit, an approval record, or a
+claim that each earlier classification is correct. Source declarations remain
+authoritative for behavior, ownership, lifecycle, and other callable or rendered
+contracts.
+
+The class classifications use [CLASS-003](https://github.com/w3lt/lys/blob/main/docs/code_standards/CLASS.md#class-003--every-class-has-one-primary-category).
+The UI classifications use [COMP-006](https://github.com/w3lt/lys/blob/main/docs/code_standards/COMPONENT.md#comp-006--every-component-has-one-primary-category).
+Category precedence and permissions remain defined by those canonical rules.
+This page records their application without redefining them.
+
+The UI register includes existing labels on variant builders and a context
+value; retaining those labels does not establish that those declarations are
+Component constructs. Reviewing or correcting classification requires examining
+the actual declaration and consumers.
+
+## Backend and native owners
+
+| Declaration                        | Source                                                                                                                                                      | Recorded classification            |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| `ChatService`                      | [backend/src/di/services/chatService.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/di/services/chatService.ts)                                 | resource owner or boundary adapter |
+| `SqliteConversationStore`          | [backend/src/di/services/conversationService/index.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/di/services/conversationService/index.ts)     | resource owner or boundary adapter |
+| `LlmService`                       | [backend/src/di/services/llmService.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/di/services/llmService.ts)                                   | resource owner                     |
+| `SqliteConversationHistory`        | [backend/src/di/services/conversationService/history.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/di/services/conversationService/history.ts) | resource owner or boundary adapter |
+| `SqliteConversationTurns`          | [backend/src/di/services/conversationService/turns.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/di/services/conversationService/turns.ts)     | resource owner or boundary adapter |
+| `ChatRequestLifetime`              | [backend/src/modules/chat/chat/requestLifetime.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/chat/chat/requestLifetime.ts)             | resource owner                     |
+| `ConversationListInputError`       | [backend/src/di/services/conversationService/utils.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/di/services/conversationService/utils.ts)     | framework adapter                  |
+| `RetainedLlmModelHealthDiagnostic` | [backend/src/modules/llm/llmModelHealthDiagnostic.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/llm/llmModelHealthDiagnostic.ts)       | invariant owner                    |
+| `LmStudioRuntime`                  | [backend/src/modules/llm/runtimes/lmStudioRuntime.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/llm/runtimes/lmStudioRuntime.ts)       | resource owner                     |
+| `ConversationNotFoundError`        | [backend/src/utils/errors/index.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/utils/errors/index.ts)                                           | framework adapter                  |
+| `Backend`                          | [desktop/src-tauri/src/backend.rs](https://github.com/w3lt/lys/blob/main/apps/desktop/src-tauri/src/backend.rs)                                             | resource owner                     |
+
+The runtime surface exception discussed in [issue #37](https://github.com/w3lt/lys/issues/37)
+remains unresolved. Recording a resource-owner label does not approve its public
+surface or establish an exception.
+
+## Desktop views and feature declarations
+
+| Declaration                   | Source                                                                                                                                                                                        | Recorded classification |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| `ChatView`                    | [desktop/src/App.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/App.tsx)                                                                                                         | framework boundary      |
+| `SettingsView`                | [desktop/src/App.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/App.tsx)                                                                                                         | framework boundary      |
+| `App`                         | [desktop/src/App.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/App.tsx)                                                                                                         | composition/view        |
+| `ChatLifecycleError`          | [desktop/src/components/ChatViewComponents/ChatLifecycleError.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ChatViewComponents/ChatLifecycleError.tsx)               | presentational          |
+| `CompletedChatMessage`        | [desktop/src/components/ChatViewComponents/CompletedChatMessage.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ChatViewComponents/CompletedChatMessage.tsx)           | presentational          |
+| `ConversationPanel`           | [desktop/src/components/ChatViewComponents/ConversationPanel.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ChatViewComponents/ConversationPanel.tsx)                 | presentational          |
+| `ConversationTranscript`      | [desktop/src/components/ChatViewComponents/ConversationTranscript.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ChatViewComponents/ConversationTranscript.tsx)       | presentational          |
+| `ErrorMessage`                | [desktop/src/components/ChatViewComponents/ErrorMessage.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ChatViewComponents/ErrorMessage.tsx)                           | presentational          |
+| `LysMessage`                  | [desktop/src/components/ChatViewComponents/LysMessage.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ChatViewComponents/LysMessage.tsx)                               | presentational          |
+| `SpeakerAvatar`               | [desktop/src/components/ChatViewComponents/SpeakerAvatar.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ChatViewComponents/SpeakerAvatar.tsx)                         | presentational          |
+| `LysAvatar`                   | [desktop/src/components/ChatViewComponents/SpeakerAvatar.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ChatViewComponents/SpeakerAvatar.tsx)                         | presentational          |
+| `W3ltAvatar`                  | [desktop/src/components/ChatViewComponents/SpeakerAvatar.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ChatViewComponents/SpeakerAvatar.tsx)                         | presentational          |
+| `StarterView`                 | [desktop/src/components/ChatViewComponents/StarterView.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ChatViewComponents/StarterView.tsx)                             | presentational          |
+| `StreamingChatMessage`        | [desktop/src/components/ChatViewComponents/StreamingChatMessage.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ChatViewComponents/StreamingChatMessage.tsx)           | presentational          |
+| `UserMessage`                 | [desktop/src/components/ChatViewComponents/UserMessage.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ChatViewComponents/UserMessage.tsx)                             | presentational          |
+| `Composer`                    | [desktop/src/components/Composer.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/Composer.tsx)                                                                         | composition/view        |
+| `ComposerAttachmentTray`      | [desktop/src/components/ComposerComponents/ComposerAttachmentTray.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ComposerComponents/ComposerAttachmentTray.tsx)       | presentational          |
+| `ComposerContextMeter`        | [desktop/src/components/ComposerComponents/ComposerContextMeter.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ComposerComponents/ComposerContextMeter.tsx)           | interactive feature     |
+| `ComposerModelMenu`           | [desktop/src/components/ComposerComponents/ComposerModelMenu.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ComposerComponents/ComposerModelMenu.tsx)                 | composition/view        |
+| `ComposerOfflineBanner`       | [desktop/src/components/ComposerComponents/ComposerOfflineBanner.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ComposerComponents/ComposerOfflineBanner.tsx)         | presentational          |
+| `ComposerPlusMenu`            | [desktop/src/components/ComposerComponents/ComposerPlusMenu.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ComposerComponents/ComposerPlusMenu.tsx)                   | interactive feature     |
+| `CodeBlock`                   | [desktop/src/components/MarkdownMessage.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/MarkdownMessage.tsx)                                                           | interactive feature     |
+| `MarkdownPre`                 | [desktop/src/components/MarkdownMessage.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/MarkdownMessage.tsx)                                                           | framework boundary      |
+| `MarkdownMessage`             | [desktop/src/components/MarkdownMessage.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/MarkdownMessage.tsx)                                                           | presentational          |
+| `GenerationTemperatureField`  | [desktop/src/components/SettingsViewComponents/GenerationPaneContent.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/SettingsViewComponents/GenerationPaneContent.tsx) | composition/view        |
+| `GenerationReplyCeilingField` | [desktop/src/components/SettingsViewComponents/GenerationPaneContent.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/SettingsViewComponents/GenerationPaneContent.tsx) | composition/view        |
+| `GenerationReplyLimitField`   | [desktop/src/components/SettingsViewComponents/GenerationPaneContent.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/SettingsViewComponents/GenerationPaneContent.tsx) | composition/view        |
+| `GenerationSaveFeedback`      | [desktop/src/components/SettingsViewComponents/GenerationPaneContent.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/SettingsViewComponents/GenerationPaneContent.tsx) | composition/view        |
+| `GenerationPane`              | [desktop/src/components/SettingsViewComponents/GenerationPaneContent.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/SettingsViewComponents/GenerationPaneContent.tsx) | composition/view        |
+| `SettingsViewLeftBar`         | [desktop/src/components/SettingsViewComponents/LeftBar.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/SettingsViewComponents/LeftBar.tsx)                             | presentational          |
+| `ModelInventoryPanel`         | [desktop/src/components/SettingsViewComponents/ModelPaneContent.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/SettingsViewComponents/ModelPaneContent.tsx)           | composition/view        |
+| `ModelLoadConfiguration`      | [desktop/src/components/SettingsViewComponents/ModelPaneContent.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/SettingsViewComponents/ModelPaneContent.tsx)           | composition/view        |
+| `ModelPaneContent`            | [desktop/src/components/SettingsViewComponents/ModelPaneContent.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/SettingsViewComponents/ModelPaneContent.tsx)           | composition/view        |
+| `ModelRequestFeedback`        | [desktop/src/components/SettingsViewComponents/ModelRequestFeedback.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/SettingsViewComponents/ModelRequestFeedback.tsx)   | composition/view        |
+| `ModelChoice`                 | [desktop/src/components/SettingsViewComponents/ModelRow.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/SettingsViewComponents/ModelRow.tsx)                           | presentational          |
+| `ModelRowActions`             | [desktop/src/components/SettingsViewComponents/ModelRow.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/SettingsViewComponents/ModelRow.tsx)                           | presentational          |
+| `ModelRow`                    | [desktop/src/components/SettingsViewComponents/ModelRow.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/SettingsViewComponents/ModelRow.tsx)                           | presentational          |
+| `PaneFooter`                  | [desktop/src/components/SettingsViewComponents/PaneFooter.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/SettingsViewComponents/PaneFooter.tsx)                       | presentational          |
+| `PaneHeading`                 | [desktop/src/components/SettingsViewComponents/PaneHeading.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/SettingsViewComponents/PaneHeading.tsx)                     | presentational          |
+| `PaneSkeleton`                | [desktop/src/components/SettingsViewComponents/PaneSkeleton.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/SettingsViewComponents/PaneSkeleton.tsx)                   | presentational          |
+| `RuntimePaneContent`          | [desktop/src/components/SettingsViewComponents/RuntimePaneContent.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/SettingsViewComponents/RuntimePaneContent.tsx)       | composition/view        |
+| `SettingsPaneFrame`           | [desktop/src/components/SettingsViewComponents/SettingsPaneFrame.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/SettingsViewComponents/SettingsPaneFrame.tsx)         | composition/view        |
+| `TitleBar`                    | [desktop/src/components/TitleBar.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/TitleBar.tsx)                                                                         | composition/view        |
+| `ChatView`                    | [desktop/src/views/ChatView/ChatView.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/views/ChatView/ChatView.tsx)                                                                 | composition/view        |
+| `RuntimePaneContent`          | [desktop/src/views/SettingsView/SettingsView.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/views/SettingsView/SettingsView.tsx)                                                 | framework boundary      |
+| `ModelPaneContent`            | [desktop/src/views/SettingsView/SettingsView.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/views/SettingsView/SettingsView.tsx)                                                 | framework boundary      |
+| `GenerationPaneContent`       | [desktop/src/views/SettingsView/SettingsView.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/views/SettingsView/SettingsView.tsx)                                                 | framework boundary      |
+| `SettingsView`                | [desktop/src/views/SettingsView/SettingsView.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/views/SettingsView/SettingsView.tsx)                                                 | composition/view        |
+
+## Desktop primitive declarations
+
+| Declaration                | Source                                                                                                                                | Recorded classification                                                            |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `alertVariants`            | [desktop/src/components/ui/alert.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/alert.tsx)                 | UI primitive adapter — supporting declaration; construct classification unreviewed |
+| `Alert`                    | [desktop/src/components/ui/alert.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/alert.tsx)                 | UI primitive adapter                                                               |
+| `AlertTitle`               | [desktop/src/components/ui/alert.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/alert.tsx)                 | UI primitive adapter                                                               |
+| `AlertDescription`         | [desktop/src/components/ui/alert.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/alert.tsx)                 | UI primitive adapter                                                               |
+| `AlertAction`              | [desktop/src/components/ui/alert.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/alert.tsx)                 | UI primitive adapter                                                               |
+| `Avatar`                   | [desktop/src/components/ui/avatar.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/avatar.tsx)               | UI primitive adapter                                                               |
+| `AvatarImage`              | [desktop/src/components/ui/avatar.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/avatar.tsx)               | UI primitive adapter                                                               |
+| `AvatarFallback`           | [desktop/src/components/ui/avatar.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/avatar.tsx)               | UI primitive adapter                                                               |
+| `AvatarBadge`              | [desktop/src/components/ui/avatar.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/avatar.tsx)               | UI primitive adapter                                                               |
+| `AvatarGroup`              | [desktop/src/components/ui/avatar.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/avatar.tsx)               | UI primitive adapter                                                               |
+| `AvatarGroupCount`         | [desktop/src/components/ui/avatar.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/avatar.tsx)               | UI primitive adapter                                                               |
+| `buttonVariants`           | [desktop/src/components/ui/button.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/button.tsx)               | UI primitive adapter — supporting declaration; construct classification unreviewed |
+| `Button`                   | [desktop/src/components/ui/button.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/button.tsx)               | UI primitive adapter                                                               |
+| `Card`                     | [desktop/src/components/ui/card.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/card.tsx)                   | UI primitive adapter                                                               |
+| `CardHeader`               | [desktop/src/components/ui/card.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/card.tsx)                   | UI primitive adapter                                                               |
+| `CardTitle`                | [desktop/src/components/ui/card.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/card.tsx)                   | UI primitive adapter                                                               |
+| `CardDescription`          | [desktop/src/components/ui/card.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/card.tsx)                   | UI primitive adapter                                                               |
+| `CardAction`               | [desktop/src/components/ui/card.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/card.tsx)                   | UI primitive adapter                                                               |
+| `CardContent`              | [desktop/src/components/ui/card.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/card.tsx)                   | UI primitive adapter                                                               |
+| `CardFooter`               | [desktop/src/components/ui/card.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/card.tsx)                   | UI primitive adapter                                                               |
+| `DropdownMenu`             | [desktop/src/components/ui/dropdown-menu.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/dropdown-menu.tsx) | UI primitive adapter                                                               |
+| `DropdownMenuPortal`       | [desktop/src/components/ui/dropdown-menu.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/dropdown-menu.tsx) | UI primitive adapter                                                               |
+| `DropdownMenuTrigger`      | [desktop/src/components/ui/dropdown-menu.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/dropdown-menu.tsx) | UI primitive adapter                                                               |
+| `DropdownMenuContent`      | [desktop/src/components/ui/dropdown-menu.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/dropdown-menu.tsx) | UI primitive adapter                                                               |
+| `DropdownMenuGroup`        | [desktop/src/components/ui/dropdown-menu.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/dropdown-menu.tsx) | UI primitive adapter                                                               |
+| `DropdownMenuLabel`        | [desktop/src/components/ui/dropdown-menu.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/dropdown-menu.tsx) | UI primitive adapter                                                               |
+| `DropdownMenuItem`         | [desktop/src/components/ui/dropdown-menu.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/dropdown-menu.tsx) | UI primitive adapter                                                               |
+| `DropdownMenuSub`          | [desktop/src/components/ui/dropdown-menu.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/dropdown-menu.tsx) | UI primitive adapter                                                               |
+| `DropdownMenuSubTrigger`   | [desktop/src/components/ui/dropdown-menu.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/dropdown-menu.tsx) | UI primitive adapter                                                               |
+| `DropdownMenuSubContent`   | [desktop/src/components/ui/dropdown-menu.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/dropdown-menu.tsx) | UI primitive adapter                                                               |
+| `DropdownMenuCheckboxItem` | [desktop/src/components/ui/dropdown-menu.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/dropdown-menu.tsx) | UI primitive adapter                                                               |
+| `DropdownMenuRadioGroup`   | [desktop/src/components/ui/dropdown-menu.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/dropdown-menu.tsx) | UI primitive adapter                                                               |
+| `DropdownMenuRadioItem`    | [desktop/src/components/ui/dropdown-menu.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/dropdown-menu.tsx) | UI primitive adapter                                                               |
+| `DropdownMenuSeparator`    | [desktop/src/components/ui/dropdown-menu.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/dropdown-menu.tsx) | UI primitive adapter                                                               |
+| `DropdownMenuShortcut`     | [desktop/src/components/ui/dropdown-menu.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/dropdown-menu.tsx) | UI primitive adapter                                                               |
+| `Input`                    | [desktop/src/components/ui/input.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/input.tsx)                 | UI primitive adapter                                                               |
+| `Progress`                 | [desktop/src/components/ui/progress.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/progress.tsx)           | UI primitive adapter                                                               |
+| `ProgressTrack`            | [desktop/src/components/ui/progress.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/progress.tsx)           | UI primitive adapter                                                               |
+| `ProgressIndicator`        | [desktop/src/components/ui/progress.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/progress.tsx)           | UI primitive adapter                                                               |
+| `ProgressLabel`            | [desktop/src/components/ui/progress.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/progress.tsx)           | UI primitive adapter                                                               |
+| `ProgressValue`            | [desktop/src/components/ui/progress.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/progress.tsx)           | UI primitive adapter                                                               |
+| `Separator`                | [desktop/src/components/ui/separator.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/separator.tsx)         | UI primitive adapter                                                               |
+| `Skeleton`                 | [desktop/src/components/ui/skeleton.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/skeleton.tsx)           | UI primitive adapter                                                               |
+| `Slider`                   | [desktop/src/components/ui/slider.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/slider.tsx)               | UI primitive adapter                                                               |
+| `Switch`                   | [desktop/src/components/ui/switch.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/switch.tsx)               | UI primitive adapter                                                               |
+| `Tabs`                     | [desktop/src/components/ui/tabs.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/tabs.tsx)                   | UI primitive adapter                                                               |
+| `tabsListVariants`         | [desktop/src/components/ui/tabs.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/tabs.tsx)                   | UI primitive adapter — supporting declaration; construct classification unreviewed |
+| `TabsList`                 | [desktop/src/components/ui/tabs.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/tabs.tsx)                   | UI primitive adapter                                                               |
+| `TabsTrigger`              | [desktop/src/components/ui/tabs.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/tabs.tsx)                   | UI primitive adapter                                                               |
+| `TabsContent`              | [desktop/src/components/ui/tabs.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/tabs.tsx)                   | UI primitive adapter                                                               |
+| `Textarea`                 | [desktop/src/components/ui/textarea.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/textarea.tsx)           | UI primitive adapter                                                               |
+| `ToggleGroupContext`       | [desktop/src/components/ui/toggle-group.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/toggle-group.tsx)   | UI primitive adapter — supporting declaration; construct classification unreviewed |
+| `ToggleGroup`              | [desktop/src/components/ui/toggle-group.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/toggle-group.tsx)   | UI primitive adapter                                                               |
+| `ToggleGroupItem`          | [desktop/src/components/ui/toggle-group.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/toggle-group.tsx)   | UI primitive adapter                                                               |
+| `toggleVariants`           | [desktop/src/components/ui/toggle.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/toggle.tsx)               | UI primitive adapter — supporting declaration; construct classification unreviewed |
+| `Toggle`                   | [desktop/src/components/ui/toggle.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/toggle.tsx)               | UI primitive adapter                                                               |
+
+## Maintaining the register
+
+When a declaration changes responsibility, inspect its implementation and
+consumers before updating its classification. Keep behavior and lifecycle
+documentation beside the declaration; record the selected taxonomy and the
+applicable canonical rule here. Use stable source paths and declaration names
+rather than source line numbers.
+
+This register covers the migrated labels only. Absence from the table does not
+establish that a declaration is outside a standard or has been reviewed.

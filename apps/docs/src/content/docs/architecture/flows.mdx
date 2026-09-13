@@ -14,22 +14,30 @@ This page documents only the flows implemented in the current codebase.
 2. The desktop loads host-managed settings through `load_settings`.
 3. If `autoStartBackend` is enabled, the desktop calls `start_backend`.
 4. The Tauri host spawns `pnpm run dev` in `apps/backend`.
-5. The shell store updates backend status to `starting`, then `running`.
+5. The desktop queries `get_backend_status`, records `running` or `stopped`,
+   and completes initialization.
+6. The shell store requests model inventory if the process is running.
+
+For a stopped backend, a manual start sets the shell status to `starting` before invoking
+`start_backend`, then records `running` when the host reports a live child.
+This process observation does not establish that the backend HTTP API is ready.
 
 ## Send one chat message
 
 1. The composer asks the chat store to `sendMessage`.
 2. The desktop creates a request token and an `AbortController`.
-3. The desktop sends `POST /api/v1/chat` with `message`, `model`, and optional
-   `conversationId`.
+3. The desktop sends `POST /api/v1/chat` with `message`, `model`, required
+   `generationOptions`, and optional `conversationId`. Generation options contain
+   the current temperature and an optional reply ceiling; a local zero ceiling
+   is omitted from the request.
 4. The backend creates or reuses the conversation, inserts the user message, and
    inserts an empty streaming assistant message.
 5. The backend emits a `start-new-conversation-turn` or
    `start-existing-conversation-turn` event.
 6. The backend streams zero or more `delta` events, then a `done` event when the
    model finishes successfully.
-7. A parallel title task may emit a `title` event before, during, or after the
-   chat events.
+7. After the turn-start event, a parallel title task may emit a `title` event
+   before, during, or after the assistant deltas and completion.
 8. The desktop applies each event to immutable local conversation state.
 
 ## Stop an in-flight reply

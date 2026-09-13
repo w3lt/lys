@@ -18,7 +18,7 @@ export type ComposerAttachmentTrayProps = {
 /**
  * Lists the files staged for the next message with their estimated cost.
  *
- * @remarks Primary category: presentational. The parent owns the staged files,
+ * @remarks The parent owns the staged files,
  * which attachment is blamed for an overflowing window, and removal; this
  * component owns no state, effects, or resources. Token counts are estimates
  * and are labelled with `~` for that reason. The blamed chip is marked by both

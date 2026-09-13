@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils"
 /**
  * Renders a non-semantic loading placeholder over a native `div`.
  *
- * @remarks Primary category: UI primitive adapter. Native `div` props and
+ * @remarks Native `div` props and
  * children are forwarded and marked with `data-slot="skeleton"`; the caller
  * supplies the silhouette through `className`. The sweep honors
  * `--skeleton-delay` inherited from a group and disables animation under

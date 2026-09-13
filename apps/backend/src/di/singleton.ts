@@ -133,7 +133,7 @@ function createChatService(
 function createConversationService(
   databaseFilePath: BackendConfig["databaseFilePath"]
 ): SingletonServiceAcquisition<ConversationService> {
-  const conversationService = new ConversationService({ databaseFilePath })
+  const conversationService = ConversationService.open(databaseFilePath)
   return Object.freeze({
     service: conversationService,
     closeService: async () => {

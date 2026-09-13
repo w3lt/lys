@@ -72,9 +72,11 @@ a late response cannot restore obsolete residency. LM Studio owns weights
 separately from the backend process, so a reconnect queries their actual state.
 
 The Composer label, send eligibility, and chat request use that same compact
-runtime projection. When several models are loaded, it prefers the loaded
-default and otherwise falls back to the first loaded inventory entry. A send is
-admitted only while the backend is running and the projection is loaded. The
+runtime projection. The [default-model setting](/reference/configuration/#persisted-settings-json)
+defines the preference and fallback selection. A send is admitted only while
+the backend is running and the projection is loaded. A submission rejected
+because no model is eligible produces an inline chat error without discarding the draft or conversation;
+Model settings provide inventory refresh and load controls for recovery. The
 chat store samples that model key once at submission, so a later selection
 change applies only to a later request.
 

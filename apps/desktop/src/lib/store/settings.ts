@@ -11,9 +11,8 @@ export type RuntimeSettings = {
   /**
    * Preferred chat model, or `null` when absent.
    *
-   * @remarks Selection does not load weights. The runtime projection uses this
-   * model when resident and otherwise falls back to the first loaded inventory
-   * entry.
+   * @remarks Selection does not load weights. The loaded-model preference and
+   * fallback are documented in [ModelRuntimeState](./model-runtime.ts).
    */
   defaultModel: string | null
   /** Backend origin shown in runtime settings; HTTP consumers use shared protocol constants. */

@@ -7,6 +7,7 @@ import type { ConversationAssistantMessageStatus } from "@lys/share"
 import { create, type StoreApi, type UseBoundStore } from "zustand"
 
 import { readChatEvents, type ChatApiOptions } from "@/lib/apis/http/chat"
+import { findEligibleChatModel } from "@/lib/models/model-residency"
 import { useLysStore } from "@/lib/store"
 
 import {
@@ -51,15 +52,14 @@ export type ChatViewStoreDependencies = {
    * Finds the loaded model eligible to answer the next request.
    *
    * @returns The model key current at call time, or `null` when chat cannot be
-   * sent. The store reads it once per request, so a later selection applies to
-   * the following request.
+   * sent. Sampling is owned by {@link ChatViewActions.sendMessage}.
    */
   readonly findEligibleChatModel: () => string | null
   /**
    * Reads the generation controls applied to the next request.
    *
-   * @returns The settings-owned controls current at call time; the store reads
-   * them once per request, so a later change applies to the following request.
+   * @returns The settings-owned controls current at call time. Sampling is
+   * owned by {@link ChatViewActions.sendMessage}.
    */
   readonly readGenerationOptions: () => MessageGenerationOptions
 }
@@ -115,15 +115,14 @@ export type ChatViewState = {
   readonly conversation?: ChatViewConversation
   /** Single authoritative observable request lifecycle state. */
   readonly request: ChatRequestState
-  /** Latest lifecycle error shown inline, or undefined when clear. */
+  /** Latest admission or lifecycle error shown inline, or undefined when clear. */
   readonly error?: string
 }
 
 /**
  * Actions that mutate or advance the chat lifecycle.
  *
- * @remarks `sendMessage` resolves after stream completion, failure, or request
- * invalidation. `stopStreaming` and `resetConversation` abort the store-owned
+ * @remarks `stopStreaming` and `resetConversation` abort the store-owned
  * transport; reset additionally discards the conversation and error.
  */
 export type ChatViewActions = {
@@ -135,11 +134,13 @@ export type ChatViewActions = {
    *
    * @param explicitPrompt - Optional starter prompt; omission submits the
    * current composer draft.
-   * @returns A promise that resolves without starting work when a request is
+   * @returns A promise that resolves without opening a stream when a request is
    * active, the prompt is empty, or no loaded model is eligible; otherwise it
    * resolves after stream completion, failure, or invalidation.
-   * @remarks The eligible model is sampled once per admitted request; later
-   * selection changes affect only later requests.
+   * @remarks An unavailable model records an inline error and preserves the
+   * draft and conversation. An active request or empty prompt is ignored.
+   * The eligible model and generation controls are sampled once before request
+   * ownership begins; later edits affect only later requests.
    */
   sendMessage: (explicitPrompt?: string) => Promise<void>
   /** Interrupts the active assistant reply without affecting prior history. */
@@ -265,7 +266,7 @@ function createChatRequestPayload({
   model,
   generationOptions
 }: CreateChatRequestPayloadInput): ChatApiRequestBody {
-  return conversationId
+  return conversationId !== undefined
     ? {
         conversationId,
         message: submittedPrompt,
@@ -668,13 +669,11 @@ export function createChatViewStore(
     }
 
     /**
-     * Submits an explicit starter prompt or the current composer draft.
+     * Implements {@link ChatViewActions.sendMessage} for this store.
      *
      * @param explicitPrompt - Optional starter prompt supplied outside composer.
-     * @returns A promise that resolves after this request loses or ends ownership.
-     * @remarks Submission is ignored when no loaded model is eligible. The
-     * eligible model is sampled once before request ownership begins, so later
-     * selection changes affect only later requests.
+     * @returns A promise with the admission and settlement semantics defined
+     * by {@link ChatViewActions.sendMessage}.
      */
     async function sendMessage(explicitPrompt?: string): Promise<void> {
       if (get().request.status !== "idle") return
@@ -686,7 +685,13 @@ export function createChatViewStore(
       const submittedPrompt = promptSource.trim()
       if (!submittedPrompt) return
       const model = dependencies.findEligibleChatModel()
-      if (model === null) return
+      if (model === null) {
+        set({
+          error:
+            "Chat is unavailable. Check the backend and loaded model in Settings → Model, then try again."
+        })
+        return
+      }
 
       const token = nextRequestToken
       nextRequestToken += 1
@@ -765,10 +770,9 @@ export function createChatViewStore(
  *
  * @remarks This singleton owns the live browser request lifecycle. Tests or
  * alternate compositions should call {@link createChatViewStore} to obtain a
- * separate token and abort-resource owner. The loaded Composer model and
- * Generation controls are read from the application store at send time. They
- * are sampled once before streaming starts, so later edits apply to the next
- * request. The two generation controls are named explicitly because the
+ * separate token and abort-resource owner. Application-store dependencies
+ * supply the model and Generation controls to {@link ChatViewActions.sendMessage}.
+ * The two generation controls are named explicitly because the
  * request contract rejects unknown fields. A saved zero ceiling is omitted so
  * the backend receives no explicit completion-token limit.
  */
@@ -779,10 +783,7 @@ export const useChatViewStore: UseBoundStore<StoreApi<ChatViewStore>> =
     findEligibleChatModel: () => {
       const { backendServerInfo, modelRuntime } = useLysStore.getState()
 
-      return backendServerInfo.status === "running" &&
-        modelRuntime.status === "loaded"
-        ? modelRuntime.modelKey
-        : null
+      return findEligibleChatModel(backendServerInfo.status, modelRuntime)
     },
     readGenerationOptions: () => {
       const { temperature, replyCeiling } =

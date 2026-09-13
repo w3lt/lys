@@ -148,9 +148,9 @@ policy.
 - There is no retry or request-time fallback after a provider and model are
   sampled for an admitted request.
 - There is no request budgeting, quota tracking, or provider-specific telemetry.
-- Default-model selection lasts for the current session. The runtime projection
-  prefers that model when loaded and otherwise selects the first loaded inventory
-  entry; chat samples the projected model once for each admitted request.
+- Default-model selection lasts for the current session and does not load weights.
+  The [desktop model settings](/architecture/desktop/#model-settings) describe how
+  the observed loaded model reaches chat requests.
 - Model context size is displayed as an estimate; the load endpoint does not
   accept a context-size option.
 

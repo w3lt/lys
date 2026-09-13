@@ -44,10 +44,10 @@ export type ConversationServiceCreationOptions = {
   databaseFilePath: PathLike
 }
 
-/** Optional values used when creating a new conversation record. */
+/** Values used when creating a new conversation record. */
 export type ConversationCreationOptions = {
-  /** Persisted system prompt; omission uses the backend's default prompt. */
-  systemPrompt?: string
+  /** Non-empty system prompt persisted with the conversation. */
+  systemPrompt: string
 }
 
 /** Identifier used to retrieve one conversation metadata record. */

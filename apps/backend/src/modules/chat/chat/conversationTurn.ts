@@ -16,6 +16,8 @@ export type ConversationTurnCreationOptions = {
   model: string
   /** Conversation persistence owner used for metadata and message writes. */
   conversationService: ConversationService
+  /** System prompt stored with a conversation this turn creates; unused when it continues one. */
+  systemPrompt: string
 }
 
 /**
@@ -42,8 +44,8 @@ export default class ConversationTurn {
   /**
    * Creates and persists the user/assistant pair for one conversation turn.
    *
-   * @param options - Conversation selection, message content, model, and
-   * persistence owner.
+   * @param options - Conversation selection, message content, model, system
+   * prompt for a created conversation, and persistence owner.
    * @throws {@link ConversationNotFoundError} when a supplied conversation
    * identifier does not resolve to metadata. Persistence failures from the
    * conversation service propagate; no rollback is performed here.
@@ -52,11 +54,12 @@ export default class ConversationTurn {
     model,
     userMessageContent,
     conversationId,
-    conversationService
+    conversationService,
+    systemPrompt
   }: ConversationTurnCreationOptions) {
     const isNewConversation = !conversationId
     const conversationMetadata = isNewConversation
-      ? conversationService.createConversation()
+      ? conversationService.createConversation({ systemPrompt })
       : conversationService.getConversationMetadata({
           id: conversationId
         })

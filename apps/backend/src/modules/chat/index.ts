@@ -8,10 +8,10 @@ import registerChatRoute, { type ChatRouteOptions } from "./chat"
  * only after its child registrar has completed.
  *
  * @param app - Application instance that receives the chat route group.
- * @param options - Title-generation settings forwarded to the chat route.
+ * @param options - System prompt and title-generation attempt limit forwarded
+ * to the chat route.
  * @returns A promise that resolves after child route registrars complete.
- * @throws If a child route registrar rejects, including for an invalid
- * title-generation attempt limit.
+ * @throws If a child route registrar rejects.
  */
 export default async function registerChatRoutes(
   app: FastifyInstance,

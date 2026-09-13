@@ -1,6 +1,8 @@
 import type { BackendConfig } from "../config"
 import LmStudioRuntime from "../modules/llm/runtimes/lmStudioRuntime"
-import ChatService from "./services/chatService"
+import ChatService, {
+  type ChatServiceCreationOptions
+} from "./services/chatService"
 import ConversationService from "./services/conversationService"
 import LlmService from "./services/llmService"
 
@@ -20,9 +22,9 @@ export type SingletonServiceAcquisition<Service> = Readonly<{
 
 /** Factories for the three independently acquired application services. */
 export type SingletonServiceFactories = Readonly<{
-  /** Creates the chat service for one OpenAI-compatible HTTP endpoint. */
+  /** Creates the chat service for one OpenAI-compatible HTTP endpoint and its title settings. */
   createChatService: (
-    openAiBaseUrl: string
+    options: ChatServiceCreationOptions
   ) => SingletonServiceAcquisition<ChatService>
   /** Creates the conversation store for one database location. */
   createConversationService: (
@@ -56,7 +58,9 @@ export type SingletonServices = Readonly<{
 /**
  * Creates the application-scoped service bundle from backend network configuration.
  *
- * @param config - LM Studio host and port used to derive local service endpoints.
+ * @param config - LM Studio host and port used to derive local service endpoints,
+ * and the title-generation prompt and title length limit given to the chat
+ * service.
  * @param factories - Service factories owned by the composition root.
  * @returns A promise resolving to the owned service bundle configured with the
  * HTTP `/v1` chat endpoint and WebSocket LM Studio endpoint.
@@ -70,9 +74,13 @@ export async function createSingletonServices(
   const serviceLifetime = new AsyncDisposableStack()
 
   try {
-    const chatServiceAcquisition = factories.createChatService(
-      `http://${config.lmstudioHost}:${config.lmstudioPort}/v1`
-    )
+    const chatServiceOptions: ChatServiceCreationOptions = {
+      openAiBaseUrl: `http://${config.lmstudioHost}:${config.lmstudioPort}/v1`,
+      titleGenerationPrompt: config.titleGenerationPrompt,
+      generatedTitleMaxLength: config.generatedTitleMaxLength
+    }
+    const chatServiceAcquisition =
+      factories.createChatService(chatServiceOptions)
     serviceLifetime.defer(chatServiceAcquisition.closeService)
 
     const conversationServiceAcquisition = factories.createConversationService(
@@ -110,13 +118,14 @@ export async function createSingletonServices(
 /**
  * Creates the production chat adapter for one HTTP endpoint.
  *
- * @param openAiBaseUrl - OpenAI-compatible base URL used by the chat SDK.
+ * @param options - OpenAI-compatible base URL used by the chat SDK and the
+ * title-generation settings.
  * @returns The newly owned chat service and its cleanup capability.
  */
 function createChatService(
-  openAiBaseUrl: string
+  options: ChatServiceCreationOptions
 ): SingletonServiceAcquisition<ChatService> {
-  const chatService = new ChatService({ openAiBaseUrl })
+  const chatService = new ChatService(options)
   return Object.freeze({
     service: chatService,
     closeService: async () => await chatService[Symbol.asyncDispose]()

@@ -4,7 +4,7 @@ import { TitleGenerationOutputError } from "../../../utils/errors"
 import { createEventSender, type ChatRouteReply } from "./share"
 
 /** Inputs, attempt limit, and callbacks for one title-generation task. */
-type CreateTitleGenerationTaskOptions = {
+export type CreateTitleGenerationTaskOptions = {
   /** Application-scoped service used to generate the title. */
   chatService: ChatService
   /** User content used as the title-generation prompt. */
@@ -17,7 +17,7 @@ type CreateTitleGenerationTaskOptions = {
   reply: ChatRouteReply
   /** Request-scoped logger that receives title-generation outcomes. */
   logger: FastifyBaseLogger
-  /** Validated positive, inclusive maximum number of title requests. */
+  /** Positive, inclusive maximum number of title requests validated by the backend configuration. */
   titleGenerationMaxAttempts: number
   /** Synchronous persistence callback run before the title event is sent. */
   updateConversationTitle: (title: string) => void
@@ -71,13 +71,14 @@ type TitleGenerationResult =
 type GeneratedTitle = Extract<TitleGenerationResult, { status: "generated" }>
 
 /**
- * Generates a title for a newly created conversation and reports the outcome.
+ * Generates a title for a conversation without a stored title and reports the
+ * outcome.
  *
  * Titles are requested up to `titleGenerationMaxAttempts` times; only a reply
  * unusable as a title consumes another request. A generated title is persisted
  * before one `title` event is sent to a still-connected client. Every other
- * outcome leaves the stored title unchanged, so the conversation keeps its
- * default title, and is logged with `titleGenerationOutcome` and
+ * outcome leaves the stored title unchanged, so the conversation's next chat
+ * turn requests a title again, and is logged with `titleGenerationOutcome` and
  * `titleGenerationAttempts` fields: exhausted attempts or a failure that is not
  * retried at warn level, a client disconnect at debug level, and a persistence
  * failure at error level. The task never sends an `error` event.
@@ -112,10 +113,10 @@ export default async function createTitleGenerationTask(
       logger.warn(
         {
           err: titleGeneration.error,
-          titleGenerationOutcome: "default-title-kept",
+          titleGenerationOutcome: "title-not-generated",
           titleGenerationAttempts: titleGeneration.attempts
         },
-        "Title generation failed; the conversation keeps its default title"
+        "Title generation failed; the conversation stays untitled"
       )
       return
   }
@@ -126,10 +127,10 @@ export default async function createTitleGenerationTask(
  * client disconnects.
  *
  * @remarks Only {@link TitleGenerationOutputError} consumes another attempt.
- * Transport, HTTP, and cancellation failures end generation at once because
- * repeating the request would not change their outcome; the SDK has already
- * retried transient transport failures. Each retried reply is logged at debug
- * level.
+ * HTTP, connection, and cancellation failures end generation at once; within
+ * the failed attempt, the OpenAI SDK has already retried connection failures,
+ * timeouts, and 408, 409, 429, and 5xx responses. Each retried reply is logged
+ * at debug level.
  * @param options - Chat service, prompt input, signal, logger, and attempt limit.
  * @returns A promise that resolves to the generation result; it does not reject.
  */
@@ -161,10 +162,12 @@ async function generateTitleWithinAttempts({
         return { status: "abandoned", attempts, error }
       }
 
-      if (
-        !(error instanceof TitleGenerationOutputError) ||
-        attempts >= titleGenerationMaxAttempts
-      ) {
+      // `attempts < limit` is false for a limit that is not a number, so an
+      // invalid limit ends generation instead of requesting titles forever.
+      const canRequestAnotherTitle =
+        error instanceof TitleGenerationOutputError &&
+        attempts < titleGenerationMaxAttempts
+      if (!canRequestAnotherTitle) {
         return { status: "failed", attempts, error }
       }
 

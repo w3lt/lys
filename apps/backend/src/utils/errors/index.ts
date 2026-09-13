@@ -26,7 +26,8 @@ export class ConversationNotFoundError extends Error {
  * cannot be used as a conversation title.
  *
  * @remarks Covers a truncated reply, a reply without content, content that is
- * not JSON or does not match the title shape, and a blank title. Transport,
+ * not JSON after one surrounding Markdown code fence is unwrapped, content that
+ * does not match the title shape or length limit, and a blank title. Transport,
  * HTTP, and cancellation failures are never represented by this class, so
  * title generation can treat it as the only failure worth another request.
  * The subclass preserves the native `Error` contract, owns no mutable state,

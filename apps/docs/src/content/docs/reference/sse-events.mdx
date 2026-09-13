@@ -15,7 +15,7 @@ shape is defined by `chatApiStreamEventSchema` in `@lys/protocol`.
 | ---------------------------------- | ------------------------------------------------- | -------------------------------------------------------------------- |
 | `start-new-conversation-turn`      | `conversation`, `userMessage`, `assistantMessage` | The backend created a new conversation and persisted the first turn. |
 | `start-existing-conversation-turn` | `userMessage`, `assistantMessage`                 | The backend persisted a new turn on an existing conversation.        |
-| `title`                            | `title`                                           | A generated title for a newly created conversation.                  |
+| `title`                            | `title`                                           | A generated title for a conversation that had no stored title.       |
 | `delta`                            | `content`                                         | One non-empty assistant text fragment.                               |
 | `done`                             | `finishReason`                                    | Successful assistant completion with `stop` or `length`.             |
 | `error`                            | `message`                                         | A user-presentable chat generation error string.                     |
@@ -26,7 +26,8 @@ shape is defined by `chatApiStreamEventSchema` in `@lys/protocol`.
 
 Includes:
 
-- full `conversation` metadata, whose `title` is the default `New Conversation`
+- full `conversation` metadata, whose `title` is `null` until a title is
+  generated
 - one persisted user message
 - one persisted assistant message in `streaming` state
 
@@ -42,17 +43,25 @@ messages to build the new transcript state.
 
 ### `title`
 
-Carries the non-empty title generated for a newly created conversation. The
-backend persists the title before it sends the event. Continuing an existing
-conversation never produces a `title` event.
+Carries the non-empty title generated for a conversation that had no stored
+title when the turn started: a newly created conversation, or a continued one
+whose earlier title generation saved no title. The backend persists the title
+before it sends the event. A turn on a conversation that already has a title
+never produces a `title` event.
 
-The backend requests a title up to three times, set by the
-`titleGenerationMaxAttempts` backend setting. Only a reply that cannot be used as
-a title, such as JSON wrapped in a Markdown code fence, leads to another request;
-an HTTP or connection failure ends title generation at once. When no usable
-title is produced, or the client disconnects first, no `title` event is sent and
-the conversation keeps `New Conversation`. The backend logs these outcomes
-instead of sending an `error` event.
+The backend makes up to three title-generation attempts per turn, set by
+`titleGenerationMaxAttempts` in `src/config.ts`. Only a reply that cannot be
+used as a title, such as JSON with the wrong shape or a title longer than
+`generatedTitleMaxLength`, leads to another attempt. JSON wrapped in one
+Markdown code fence is accepted. An HTTP, connection, or cancellation failure
+ends title generation for the turn. Before that, the OpenAI SDK retries a
+connection failure, timeout, or 408, 409, 429, or 5xx response up to two more
+times, so one attempt can send up to three HTTP requests.
+
+When no usable title is produced, or the client disconnects first, no `title`
+event is sent and the conversation stays untitled; its next turn requests a
+title again. The backend logs these outcomes instead of sending an `error`
+event.
 
 ### `delta`
 
@@ -89,12 +98,13 @@ as failed locally. Title-generation failures never produce `error` events.
 ## Event ordering today
 
 Every valid stream begins with one turn-start event. After that, chat
-generation and, for a new conversation, title generation run concurrently:
+generation and, for a conversation without a stored title, title generation run
+concurrently:
 
 1. `start-new-conversation-turn` or `start-existing-conversation-turn`
 2. zero or more `delta` events before a successful `done`
-3. for a new conversation, a `title` event may arrive before, during, or after
-   the chat events
+3. for a conversation without a stored title, a `title` event may arrive
+   before, during, or after the chat events
 
 An `error` event reports a chat generation failure and is not followed by
 `done`. A `title` event can still arrive after it, because title generation

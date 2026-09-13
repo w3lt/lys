@@ -20,7 +20,6 @@ import type {
   UpdateAssistantMessageStateOptions,
   UpdateConversationTitleOptions
 } from "./share"
-import { lysSystemPrompt } from "../../../utils/prompts"
 import {
   encodeConversationListCursor,
   verifyListConversationMetadataOptions
@@ -340,25 +339,20 @@ export default class ConversationService {
   /**
    * Creates and persists metadata for one empty conversation.
    *
-   * @remarks Every new conversation is stored with the default title
-   * `New Conversation`. Title generation may later replace it; when generation
-   * fails, the conversation keeps the default. Changing the default affects
-   * only conversations created afterwards.
-   * @param option - Optional system prompt override for the new conversation.
+   * @remarks Every new conversation is stored without a title (`null`) until
+   * {@link ConversationService.updateConversationTitle} saves a generated one.
+   * @param options - System prompt persisted with the new conversation.
    * @returns The newly persisted conversation metadata.
    * @throws If metadata validation or SQLite persistence fails.
    */
-  public createConversation(
-    option?: ConversationCreationOptions
-  ): ConversationMetadata {
-    /** Title stored with every new conversation until title generation replaces it. */
-    const defaultConversationTitle = "New Conversation"
-    const { systemPrompt = lysSystemPrompt() } = option ?? {}
+  public createConversation({
+    systemPrompt
+  }: ConversationCreationOptions): ConversationMetadata {
     const now = new Date().toISOString()
 
     const conversation = conversationMetadataSchema.parse({
       id: uuidv7(),
-      title: defaultConversationTitle,
+      title: null,
       systemPrompt,
       createdAt: now,
       updatedAt: now

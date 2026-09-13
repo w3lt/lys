@@ -1,7 +1,6 @@
 import type { MessageGenerationOptions } from "@lys/protocol"
 import type ChatService from "../../../di/services/chatService"
 import type { UpdateAssistantMessageStateOptions } from "../../../di/services/conversationService/share"
-import { lysSystemPrompt } from "../../../utils/prompts"
 import {
   createEventSender,
   type ChatRouteReply,
@@ -16,6 +15,8 @@ type CreateChatTaskOptions = {
   updateAssistantMessageState: (
     options: Omit<UpdateAssistantMessageStateOptions, "assistantMessageId">
   ) => void
+  /** System prompt sent before the user content. */
+  systemPrompt: string
   /** User content sent after the system prompt. */
   userMessageContent: string
   /** Model identifier passed to the chat service. */
@@ -51,6 +52,7 @@ export default async function createChatTask({
   chatService,
   updateAssistantMessageState,
   model,
+  systemPrompt,
   userMessageContent,
   abortSignal,
   reply,
@@ -63,7 +65,7 @@ export default async function createChatTask({
       messages: [
         {
           role: "system",
-          content: lysSystemPrompt()
+          content: systemPrompt
         },
         {
           role: "user",

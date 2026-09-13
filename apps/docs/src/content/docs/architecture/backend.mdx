@@ -15,7 +15,7 @@ application.
 | Layer              | Implementation                 | Responsibility                                                                                        |
 | ------------------ | ------------------------------ | ----------------------------------------------------------------------------------------------------- |
 | App bootstrap      | `src/app.ts`                   | Registers CORS, SSE support, singleton services, and all routes.                                      |
-| Runtime config     | `src/config.ts`                | Supplies loopback host and port values, the SQLite file path, and the title-generation attempt limit. |
+| Runtime config     | `src/config.ts`                | Loads loopback host and port values, the SQLite path, the system and title prompts, and title limits. |
 | Singleton services | `src/di/singleton.ts`          | Creates the chat and conversation services, and selects the runtime owned by the LLM service.         |
 | Chat routes        | `src/modules/chat`             | Accepts chat requests, persists turn data, streams SSE responses, and updates conversation titles.    |
 | LLM routes         | `src/modules/llm/routes`       | Lists LM Studio models, checks loaded-model health, and loads or unloads a model on demand.           |
@@ -30,8 +30,8 @@ application.
    `start-existing-conversation-turn`.
 4. `createChatTask` opens an OpenAI-compatible streaming completion against LM
    Studio and converts model chunks into `delta` and `done` events.
-5. For a new conversation only, `createTitleGenerationTask` runs in parallel
-   and emits a `title` event after it persists a usable title.
+5. When the conversation has no stored title, `createTitleGenerationTask` runs
+   in parallel and emits a `title` event after it persists a usable title.
 6. Chat generation errors become `error` events when the client is still
    connected; title-generation failures are logged instead.
 
@@ -42,13 +42,22 @@ The required `generationOptions` controls supply sampling temperature and an
 optional completion-token ceiling; the [API reference](/reference/api/#chat-request-body)
 defines their limits.
 
-A new conversation is stored with the title `New Conversation`. Title generation
-runs only for that conversation and uses a separate chat completion request with
-a JSON-schema response format, then validates the reply. Only a reply that
-cannot be used as a title leads to another request, up to
-`titleGenerationMaxAttempts` requests (three by default); an HTTP, connection,
-or cancellation failure ends title generation at once. When no usable title is
-produced, the conversation keeps its default title.
+The Lys system prompt and the title-generation prompt are read once, when
+`loadBackendConfig()` builds the backend configuration at startup.
+
+A new conversation is stored without a title (`null`). Title generation runs
+for every turn whose conversation has no stored title and uses that turn's user
+message, so a conversation whose earlier title generation failed or was
+interrupted gets another try on its next turn. It uses a separate chat
+completion request with a JSON-schema response format that limits the title to
+`generatedTitleMaxLength` UTF-16 code units (100 by default), then validates the
+reply; JSON wrapped in one Markdown code fence is accepted. Only a reply that
+cannot be used as a title leads to another attempt, up to
+`titleGenerationMaxAttempts` attempts per turn (three by default). An HTTP,
+connection, or cancellation failure ends title generation for the turn, after
+the OpenAI SDK has retried a connection failure, timeout, or 408, 409, 429, or
+5xx response up to two more times within the attempt. When no usable title is
+produced, the conversation stays untitled.
 
 The current chat task updates the stored assistant status and finish reason, but
 does not append streamed delta text to the stored assistant content. The full
@@ -120,8 +129,9 @@ See the [health response contract](/reference/api/#model-health-responses).
 | Model stream ends without a finish reason          | The route treats it as an error and may emit `error`.                                                              |
 | Assistant state update fails                       | The backend throws because the persisted assistant row is missing.                                                 |
 | Unknown finish reason                              | The backend throws instead of silently coercing it.                                                                |
-| Title generation produces no usable title          | The conversation keeps `New Conversation`; the backend logs a warning and sends no `error` event.                  |
-| A generated title cannot be saved                  | The backend logs an error and sends no `title` event.                                                              |
+| Title generation produces no usable title          | The conversation stays untitled; the backend logs a warning, sends no `error` event, and retries next turn.        |
+| A generated title cannot be saved                  | The backend logs an error and sends no `title` event; the next turn requests a title again.                        |
+| Starting a turn fails for another reason           | The route rethrows; Fastify logs it and responds `500` if no event was sent. Written rows stay.                    |
 
 See the [provider cancellation policy](/architecture/providers/#cancellation-policy)
 for the separate inference and model-management lifetimes.

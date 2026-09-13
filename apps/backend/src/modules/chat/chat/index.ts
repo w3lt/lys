@@ -1,5 +1,5 @@
 import { chatApi, type ChatApiRoute } from "@lys/protocol"
-import type { FastifyBaseLogger, FastifyInstance } from "fastify"
+import type { FastifyInstance } from "fastify"
 import {
   createAbortSignal,
   createEventSender,
@@ -7,77 +7,55 @@ import {
 } from "./share"
 import ConversationTurn from "./conversationTurn"
 import createChatTask from "./chatTask"
-import createTitleGenerationTask from "./titleGenerationTask"
+import createTitleGenerationTask, {
+  type CreateTitleGenerationTaskOptions
+} from "./titleGenerationTask"
 import { ConversationNotFoundError } from "../../../utils/errors"
-import type ChatService from "../../../di/services/chatService"
 import type ConversationService from "../../../di/services/conversationService"
+import type { BackendConfig } from "../../../config"
 
-/** Settings applied by the chat route to every request. */
-export type ChatRouteOptions = {
-  /**
-   * Inclusive maximum number of title-generation requests for one new
-   * conversation.
-   *
-   * @remarks Must be a positive safe integer; registration rejects any other
-   * value. Only a reply unusable as a title consumes another request.
-   */
-  titleGenerationMaxAttempts: number
-}
+/** Backend settings the chat route applies to every request. */
+export type ChatRouteOptions = Pick<
+  BackendConfig,
+  "lysSystemPrompt" | "titleGenerationMaxAttempts"
+>
 
-/** Route-owned services and turn values used to title a new conversation. */
-type StartNewConversationTitleGenerationOptions = {
-  /** Signal aborted when the SSE client disconnects. */
-  readonly abortSignal: AbortSignal
-  /** Application-scoped service that generates the title. */
-  readonly chatService: ChatService
-  /** Application-scoped store that persists the generated title. */
-  readonly conversationService: ConversationService
-  /** Persisted turn whose conversation may receive a title. */
-  readonly conversationTurn: ConversationTurn
-  /** Request-scoped logger for title-generation outcomes. */
-  readonly logger: FastifyBaseLogger
-  /** Model identifier used for title generation. */
-  readonly model: string
-  /** Reply whose SSE connection receives the title event. */
-  readonly reply: ChatRouteReply
-  /** Validated inclusive maximum number of title requests. */
-  readonly titleGenerationMaxAttempts: number
-}
+/** Title-task inputs supplied by the route; the turn supplies its message and title persistence. */
+type UntitledConversationTitleTaskOptions = Omit<
+  CreateTitleGenerationTaskOptions,
+  "userMessageContent" | "updateConversationTitle"
+>
 
 /**
  * Registers the chat completion endpoint on a Fastify application.
  *
- * The registrar validates the title-generation attempt limit and then mutates
- * `app` by installing the protocol POST/SSE route. Each request sends a
- * conversation-turn start event before starting its chat task and, only when
- * the turn created the conversation, its title task; the handler remains
- * pending until both settle. Chat and title events may then interleave, while
- * client closure aborts the shared upstream work. A missing conversation is
- * translated to HTTP 404; task failures are handled by their task handlers,
- * while turn-construction or initial-event failures are caught without an
- * extra route-level response.
+ * The registrar mutates `app` by installing the protocol POST/SSE route. Each
+ * request sends a conversation-turn start event before starting its chat task
+ * and, only when the conversation has no stored title, its title task; the
+ * handler remains pending until both settle. Chat and title events may then
+ * interleave, while client closure aborts the shared upstream work. A missing
+ * conversation is translated to HTTP 404; task failures are handled by their
+ * task handlers. Any other turn-construction or initial-event failure is
+ * rethrown to Fastify, which logs it and responds with HTTP 500 when no event
+ * has been sent.
  *
  * @param app - Application instance that receives the chat route.
- * @param options - Title-generation settings applied to every request.
+ * @param options - System prompt and title-generation attempt limit applied to
+ * every request.
  * @returns A promise that resolves after route registration completes.
- * @throws {RangeError} If the title-generation attempt limit is not a positive
- * safe integer.
  * @throws If Fastify cannot register the route.
  * @remarks The registered handler emits typed SSE start, delta, done, title, or
  * error events. An `error` event reports only a chat generation failure; a
- * title-generation failure is logged and the conversation keeps its default
- * title. The title is persisted before its event; assistant state is persisted
- * before a supported completion event and is marked interrupted or failed when
- * cancellation/error handling reaches those paths.
+ * title-generation failure is logged and the conversation stays untitled until
+ * a later turn generates its title. The title is persisted before its event;
+ * assistant state is persisted before a supported completion event and is
+ * marked interrupted or failed when cancellation/error handling reaches those
+ * paths.
  */
 export default async function registerChatRoute(
   app: FastifyInstance,
-  options: ChatRouteOptions
+  { lysSystemPrompt, titleGenerationMaxAttempts }: ChatRouteOptions
 ) {
-  const titleGenerationMaxAttempts = parseTitleGenerationMaxAttempts(
-    options.titleGenerationMaxAttempts
-  )
-
   app.route<ChatApiRoute>({
     method: chatApi.method,
     url: chatApi.path,
@@ -94,6 +72,7 @@ export default async function registerChatRoute(
           model,
           conversationService: this.conversationService,
           conversationId,
+          systemPrompt: lysSystemPrompt,
           userMessageContent: message
         })
 
@@ -105,6 +84,7 @@ export default async function registerChatRoute(
           model,
           reply,
           request,
+          systemPrompt: lysSystemPrompt,
           userMessageContent: conversationTurn.userMessage.content,
           generationOptions,
           updateAssistantMessageState: ({ finishReason, status }) => {
@@ -116,16 +96,18 @@ export default async function registerChatRoute(
           }
         })
 
-        const titleGenerationTask = startNewConversationTitleGeneration({
-          abortSignal,
-          chatService: this.chatService,
-          conversationService: this.conversationService,
+        const titleGenerationTask = startUntitledConversationTitleGeneration(
           conversationTurn,
-          logger: request.log,
-          model,
-          reply,
-          titleGenerationMaxAttempts
-        })
+          this.conversationService,
+          {
+            abortSignal,
+            chatService: this.chatService,
+            logger: request.log,
+            model,
+            reply,
+            titleGenerationMaxAttempts
+          }
+        )
 
         /*
          * Both tasks were already started and are running concurrently.
@@ -139,31 +121,11 @@ export default async function registerChatRoute(
             message: `Conversation ${conversationId} was not found`
           })
         }
+
+        throw error
       }
     }
   })
-}
-
-/**
- * Validates the configured title-generation attempt limit.
- *
- * @param titleGenerationMaxAttempts - Configured inclusive attempt limit.
- * @returns The same limit once it is known to be a positive safe integer.
- * @throws {RangeError} If the limit is not a positive safe integer.
- */
-function parseTitleGenerationMaxAttempts(
-  titleGenerationMaxAttempts: number
-): number {
-  if (
-    !Number.isSafeInteger(titleGenerationMaxAttempts) ||
-    titleGenerationMaxAttempts < 1
-  ) {
-    throw new RangeError(
-      `The title-generation attempt limit must be a positive safe integer, received ${titleGenerationMaxAttempts}`
-    )
-  }
-
-  return titleGenerationMaxAttempts
 }
 
 /**
@@ -199,40 +161,35 @@ async function sendConversationTurnStartEvent(
 }
 
 /**
- * Starts title generation when the turn created its conversation.
+ * Starts title generation when the turn's conversation has no stored title.
  *
- * @remarks A continued conversation keeps its stored title, so no title is
- * requested for it.
- * @param options - Services, turn, connection, and attempt limit for the task.
- * @returns A promise that resolves when the title task settles, or at once for
- * a continued conversation; it does not reject.
+ * @remarks The turn's user message is the title source. A conversation that
+ * already has a title keeps it and no title is requested. A conversation whose
+ * earlier title generation failed or was abandoned is still untitled, so its
+ * next turn requests a title again.
+ * @param conversationTurn - Persisted turn whose conversation may receive a title.
+ * @param conversationService - Store that persists the generated title.
+ * @param taskOptions - Service, connection, logger, model, and attempt limit
+ * for the title task.
+ * @returns A promise that resolves when the title task settles, or at once
+ * when the conversation already has a title; it does not reject.
  */
-async function startNewConversationTitleGeneration({
-  abortSignal,
-  chatService,
-  conversationService,
-  conversationTurn,
-  logger,
-  model,
-  reply,
-  titleGenerationMaxAttempts
-}: StartNewConversationTitleGenerationOptions): Promise<void> {
-  if (!conversationTurn.isNewConversation) {
+async function startUntitledConversationTitleGeneration(
+  conversationTurn: ConversationTurn,
+  conversationService: ConversationService,
+  taskOptions: UntitledConversationTitleTaskOptions
+): Promise<void> {
+  const { conversation, userMessage } = conversationTurn
+  if (conversation.title !== null) {
     return
   }
 
-  const conversationId = conversationTurn.conversation.id
   await createTitleGenerationTask({
-    abortSignal,
-    chatService,
-    logger,
-    model,
-    reply,
-    titleGenerationMaxAttempts,
-    userMessageContent: conversationTurn.userMessage.content,
+    ...taskOptions,
+    userMessageContent: userMessage.content,
     updateConversationTitle: (title) => {
       conversationService.updateConversationTitle({
-        conversationId,
+        conversationId: conversation.id,
         conversationTitle: title
       })
     }

@@ -25,9 +25,10 @@ repository today; it is not a promise of unreleased work.
   and a chat route.
 - A chat turn creates or continues a conversation, inserts user and assistant
   rows in SQLite, and streams typed SSE events back to the desktop.
-- For a new conversation, the backend also attempts to generate a title
-  asynchronously and emits it as a stream event. The conversation keeps its
-  default `New Conversation` title when no usable title is produced.
+- For a conversation without a stored title, the backend also attempts to
+  generate a title asynchronously and emits it as a stream event. When no usable
+  title is produced, the conversation stays untitled and its next turn tries
+  again.
 - Runtime, Model, and Generation settings panes are available. Model controls
   refresh inventory, load and unload weights, and check loaded-state health.
 - Generation controls apply to future chat requests and save automatically

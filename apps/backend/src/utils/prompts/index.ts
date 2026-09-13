@@ -36,19 +36,3 @@ export const readPrompt = (type: PromptType) => {
 
   return readFileSync(prompt.filePath, "utf-8").trim()
 }
-
-/**
- * Loads the system prompt used for streamed chat completion.
- *
- * @returns The trimmed Lys system prompt.
- * @throws If the maintained prompt file cannot be read.
- */
-export const lysSystemPrompt = () => readPrompt("lys-system")
-
-/**
- * Loads the prompt used to generate conversation titles.
- *
- * @returns The trimmed title-generation prompt.
- * @throws If the maintained prompt file cannot be read.
- */
-export const titleGenerationPrompt = () => readPrompt("title-generation")

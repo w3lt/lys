@@ -27,6 +27,7 @@ pnpm exec prettier . --check
 pnpm exec eslint .
 pnpm --filter @lys/desktop test
 pnpm --filter @lys/desktop build
+pnpm --filter @lys/backend test
 pnpm --filter @lys/backend exec tsc --noEmit
 cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check
 cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
@@ -47,20 +48,23 @@ contracts, schemas, or behavior that crosses package boundaries.
 
 ## Current test shape
 
-- `apps/backend` has no test script or tracked automated test suite. Its
-  package manifest currently exposes only the `dev` script.
+- `apps/backend` runs Node tests through the existing `tsx` import hook. History
+  tests exercise real isolated SQLite, historical migrations, and Fastify routes.
+  Chat tests replace external inference and cover SSE persistence, continuation,
+  title/delete races, cancellation, and shutdown. The disconnect test binds an
+  ephemeral loopback port and needs local networking permission.
 - `apps/desktop` has a `vitest run` script, but no desktop test files are
   currently tracked.
 - The shared packages have no package-level test scripts or tracked test suites.
-- `apps/backend` also exposes a TypeScript validation path through
+- Backend test and production source are both checked by
   `pnpm --filter @lys/backend exec tsc --noEmit`.
 - `apps/docs` exposes `check` and `build` scripts that are appropriate for
   docs-only changes.
 
 ## Coming soon
 
-Backend, desktop, and shared-package automated test coverage is currently
-absent. A command that exits successfully without executing tests does not
+Live LM Studio integration, desktop, and shared-package test suites remain
+coverage gaps. A command that exits successfully without executing tests does not
 establish coverage. If you are changing behavior, be explicit in your handoff
 about which paths you verified and which still lack dedicated automation.
 

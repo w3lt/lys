@@ -65,4 +65,4 @@ function Toggle({
   )
 }
 
-export { Toggle }
+export { Toggle, toggleVariants }

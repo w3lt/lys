@@ -23,13 +23,13 @@ const singletonPlugin: FastifyPluginAsync<
 > = async (app, { config }) => {
   const singletonServices = await createSingletonServices(config)
 
-  app.decorate("chatService", singletonServices.chatService)
-  app.decorate("llmService", singletonServices.llmService)
-  app.decorate("conversationService", singletonServices.conversationService)
-
   app.addHook("onClose", async () => {
     await closeSingletonServices(singletonServices)
   })
+
+  app.decorate("chatService", singletonServices.chatService)
+  app.decorate("llmService", singletonServices.llmService)
+  app.decorate("conversationService", singletonServices.conversationService)
 }
 
 /** Fastify plugin that installs application-scoped singleton services. */

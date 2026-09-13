@@ -4,7 +4,8 @@ import type {
   ClipboardEvent,
   DragEvent,
   KeyboardEvent,
-  ReactElement
+  ReactElement,
+  RefObject
 } from "react"
 import { Menu, Plus, Settings } from "lucide-react"
 
@@ -12,6 +13,7 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { useLysStore } from "@/lib/store"
 import { useChatViewStore } from "@/lib/store/chat-view"
+import { useConversationHistoryStore } from "@/lib/store/conversation-history"
 
 import ComposerAttachmentTray from "./ComposerComponents/ComposerAttachmentTray"
 import ComposerContextMeter from "./ComposerComponents/ComposerContextMeter"
@@ -30,6 +32,8 @@ import {
   type ContextTurn
 } from "./ComposerComponents/composer-context"
 import {
+  calculateComposerActivity,
+  formatComposerActivity,
   formatComposerModelLabel,
   formatComposerPlaceholder,
   formatReconnectAction,
@@ -38,6 +42,17 @@ import {
 } from "./ComposerComponents/composer-presentation"
 
 import "./Composer.scss"
+
+/** Properties accepted by {@link Composer}. */
+export type ComposerProps = {
+  /**
+   * Parent-owned ref attached to the message field.
+   *
+   * @remarks The parent uses it only to move focus into the field after the
+   * user opens or starts a conversation from past conversations.
+   */
+  readonly messageFieldRef: RefObject<HTMLTextAreaElement | null>
+}
 
 /** Empty tray used as the initial value and while nothing is staged. */
 const NO_ATTACHMENTS: readonly ComposerAttachment[] = Object.freeze([])
@@ -65,12 +80,16 @@ function findLargestAttachment(
  *
  * @remarks The application store owns
  * runtime availability and persisted settings; the chat-view store owns the
- * draft, the conversation, and the request lifecycle. This component owns only
- * transient composer state: the staged attachment tray, whether a drag is over
- * the field, and whether the field has focus. Enter without Shift submits once
- * and suppresses the newline; Shift+Enter keeps it. Sending requires a
- * non-empty draft, and is refused while a request is active, while generation
- * is unavailable, or while the estimated request exceeds the window.
+ * draft, the conversation, the request lifecycle, and conversation opening;
+ * the history store owns whether past conversations are shown. This component
+ * owns only transient composer state: the staged attachment tray, whether a
+ * drag is over the field, and whether the field has focus. The parent owns the
+ * message-field ref. Enter without Shift submits once and suppresses the
+ * newline; Shift+Enter keeps it. Sending requires a non-empty draft, and is
+ * refused while a request is active, while a past conversation is opening,
+ * while generation is unavailable, or while the estimated request exceeds the
+ * window. The Past conversations button opens history, or closes it when
+ * open, and exposes that state through `aria-expanded`.
  *
  * The primary control is Send only while the request lifecycle is idle. It
  * becomes Stop for every active phase — awaiting the conversation turn, the
@@ -83,16 +102,17 @@ function findLargestAttachment(
  * aborting so late transport events cannot alter the conversation, and ignores
  * activation once the lifecycle is idle, so repeated activation is harmless.
  *
- * Three affordances are staged ahead of the capability behind them and are
+ * Two affordances are staged ahead of the capability behind them and are
  * deliberately inert: attachments are held in the renderer and never sent
- * because the chat protocol carries no attachment field; past conversations
- * have no backing list; and selecting weights updates settings in memory only,
- * since this view does not persist them. Context figures are client-side
- * estimates throughout, marked `~` wherever they appear.
+ * because the chat protocol carries no attachment field; and selecting weights
+ * updates settings in memory only, since this view does not persist them.
+ * Context figures are client-side estimates throughout, marked `~` wherever
+ * they appear.
  *
+ * @param props - Parent-owned ref for the message field.
  * @returns The rendered conversation composer.
  */
-export function Composer(): ReactElement {
+export function Composer({ messageFieldRef }: ComposerProps): ReactElement {
   const backendServerInfo = useLysStore((state) => state.backendServerInfo)
   const modelRuntime = useLysStore((state) => state.modelRuntime)
   const settings = useLysStore((state) => state.settings)
@@ -102,12 +122,23 @@ export function Composer(): ReactElement {
   const startBackend = useLysStore((state) => state.startBackend)
 
   const conversation = useChatViewStore((state) => state.conversation)
+  const conversationOpen = useChatViewStore((state) => state.conversationOpen)
   const inputDraft = useChatViewStore((state) => state.inputDraft)
   const request = useChatViewStore((state) => state.request)
   const resetConversation = useChatViewStore((state) => state.resetConversation)
   const sendMessage = useChatViewStore((state) => state.sendMessage)
   const setInputDraft = useChatViewStore((state) => state.setInputDraft)
   const stopStreaming = useChatViewStore((state) => state.stopStreaming)
+
+  const isHistoryOpen = useConversationHistoryStore(
+    (state) => state.visibility.status === "open"
+  )
+  const openConversationHistory = useConversationHistoryStore(
+    (state) => state.openConversationHistory
+  )
+  const closeConversationHistory = useConversationHistoryStore(
+    (state) => state.closeConversationHistory
+  )
 
   const [attachments, setAttachments] =
     useState<readonly ComposerAttachment[]>(NO_ATTACHMENTS)
@@ -120,6 +151,8 @@ export function Composer(): ReactElement {
   const connection = readLocalRuntimeConnection(backendStatus, isModelLoaded)
   const isUnavailable = connection !== "ready"
   const isRequestActive = request.status !== "idle"
+  const activity = calculateComposerActivity(request, conversationOpen)
+  const activityLabel = formatComposerActivity(activity)
 
   const turns: readonly ContextTurn[] = (conversation?.messages ?? []).map(
     (message) => ({ id: message.id, text: message.content })
@@ -133,11 +166,8 @@ export function Composer(): ReactElement {
   const largestAttachment = findLargestAttachment(attachments)
   const isOverWindow = contextUsage.overflowTokens > 0
 
-  const isSendDisabled =
-    isRequestActive ||
-    isUnavailable ||
-    inputDraft.trim().length === 0 ||
-    isOverWindow
+  const canSubmitDraft = inputDraft.trim().length > 0 && !isOverWindow
+  const isSendDisabled = activity !== "idle" || isUnavailable || !canSubmitDraft
 
   /**
    * Sends the current draft when Enter is pressed without a Shift modifier.
@@ -235,14 +265,14 @@ export function Composer(): ReactElement {
     })
   }
 
-  /**
-   * Opens past conversations.
-   *
-   * @remarks Not implemented. No conversation list exists on the backend, so
-   * this control is present for layout only and performs no action.
-   */
-  function handleToggleHistory(): void {
-    // Intentionally empty until a conversation-list endpoint exists.
+  /** Opens past conversations, or closes them when they are already open. */
+  function handleHistoryClick(): void {
+    if (isHistoryOpen) {
+      closeConversationHistory()
+      return
+    }
+
+    openConversationHistory()
   }
 
   /** Starts the backend or opens Model settings to recover model availability. */
@@ -324,10 +354,8 @@ export function Composer(): ReactElement {
               onFocus={() => setIsFocused(true)}
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
-              placeholder={formatComposerPlaceholder(
-                connection,
-                isRequestActive
-              )}
+              placeholder={formatComposerPlaceholder(connection, activity)}
+              ref={messageFieldRef}
               rows={1}
               value={inputDraft}
             />
@@ -374,9 +402,12 @@ export function Composer(): ReactElement {
             </button>
 
             <button
+              aria-expanded={isHistoryOpen}
+              aria-haspopup="dialog"
+              aria-keyshortcuts="Meta+K Control+K"
               className="composer__icon-button"
-              onClick={handleToggleHistory}
-              title="Past conversations"
+              onClick={handleHistoryClick}
+              title="Past conversations (⌘K)"
               type="button"
             >
               <Menu aria-hidden="true" />
@@ -408,9 +439,9 @@ export function Composer(): ReactElement {
           </div>
 
           <div className="composer__meta-right">
-            {isRequestActive ? (
-              <span className="composer__generating">Generating…</span>
-            ) : null}
+            {activityLabel === "" ? null : (
+              <span className="composer__activity">{activityLabel}</span>
+            )}
 
             {!isUnavailable ? (
               <ComposerContextMeter

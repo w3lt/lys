@@ -7,9 +7,9 @@ sidebar:
   order: 8
 ---
 
-This register preserves 112 classification labels previously recorded beside
-54 source files. It moves the connection between implementation and construction
-rules into the handbook. It is not a compliance audit, an approval record, or a
+This register preserves earlier source classification labels and records affected
+implementation updates. It keeps the connection between implementation and
+construction rules in the handbook. It is not a compliance audit, an approval record, or a
 claim that each earlier classification is correct. Source declarations remain
 authoritative for behavior, ownership, lifecycle, and other callable or rendered
 contracts.
@@ -26,16 +26,19 @@ the actual declaration and consumers.
 
 ## Backend and native owners
 
-| Declaration                        | Source                                                                                                                                                  | Recorded classification            |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
-| `ChatService`                      | [backend/src/di/services/chatService.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/di/services/chatService.ts)                             | resource owner or boundary adapter |
-| `ConversationService`              | [backend/src/di/services/conversationService/index.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/di/services/conversationService/index.ts) | resource owner or boundary adapter |
-| `LlmService`                       | [backend/src/di/services/llmService.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/di/services/llmService.ts)                               | resource owner                     |
-| `ConversationTurn`                 | [backend/src/modules/chat/chat/conversationTurn.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/chat/chat/conversationTurn.ts)       | invariant owner                    |
-| `RetainedLlmModelHealthDiagnostic` | [backend/src/modules/llm/llmModelHealthDiagnostic.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/llm/llmModelHealthDiagnostic.ts)   | invariant owner                    |
-| `LmStudioRuntime`                  | [backend/src/modules/llm/runtimes/lmStudioRuntime.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/llm/runtimes/lmStudioRuntime.ts)   | resource owner                     |
-| `ConversationNotFoundError`        | [backend/src/utils/errors/index.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/utils/errors/index.ts)                                       | framework adapter                  |
-| `Backend`                          | [desktop/src-tauri/src/backend.rs](https://github.com/w3lt/lys/blob/main/apps/desktop/src-tauri/src/backend.rs)                                         | resource owner                     |
+| Declaration                        | Source                                                                                                                                                      | Recorded classification            |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| `ChatService`                      | [backend/src/di/services/chatService.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/di/services/chatService.ts)                                 | resource owner or boundary adapter |
+| `SqliteConversationStore`          | [backend/src/di/services/conversationService/index.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/di/services/conversationService/index.ts)     | resource owner or boundary adapter |
+| `LlmService`                       | [backend/src/di/services/llmService.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/di/services/llmService.ts)                                   | resource owner                     |
+| `SqliteConversationHistory`        | [backend/src/di/services/conversationService/history.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/di/services/conversationService/history.ts) | resource owner or boundary adapter |
+| `SqliteConversationTurns`          | [backend/src/di/services/conversationService/turns.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/di/services/conversationService/turns.ts)     | resource owner or boundary adapter |
+| `ChatRequestLifetime`              | [backend/src/modules/chat/chat/requestLifetime.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/chat/chat/requestLifetime.ts)             | resource owner                     |
+| `ConversationListInputError`       | [backend/src/di/services/conversationService/utils.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/di/services/conversationService/utils.ts)     | framework adapter                  |
+| `RetainedLlmModelHealthDiagnostic` | [backend/src/modules/llm/llmModelHealthDiagnostic.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/llm/llmModelHealthDiagnostic.ts)       | invariant owner                    |
+| `LmStudioRuntime`                  | [backend/src/modules/llm/runtimes/lmStudioRuntime.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/llm/runtimes/lmStudioRuntime.ts)       | resource owner                     |
+| `ConversationNotFoundError`        | [backend/src/utils/errors/index.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/utils/errors/index.ts)                                           | framework adapter                  |
+| `Backend`                          | [desktop/src-tauri/src/backend.rs](https://github.com/w3lt/lys/blob/main/apps/desktop/src-tauri/src/backend.rs)                                             | resource owner                     |
 
 The runtime surface exception discussed in [issue #37](https://github.com/w3lt/lys/issues/37)
 remains unresolved. Recording a resource-owner label does not approve its public

@@ -1,12 +1,11 @@
 import Fastify from "fastify"
+import updateFastifyWithConversationRoutes from "./modules/conversation"
 import registerHealthRoutes from "./modules/health/routes"
 import updateFastifyWithLlmRoutes from "./modules/llm/routes"
 import registerChatRoutes from "./modules/chat"
-import fastifySse from "@fastify/sse"
 import { type BackendConfig } from "./config"
 import singletonServicesPlugin from "./di/fastify"
-import { validatorCompiler } from "fastify-type-provider-zod"
-import cors from "@fastify/cors"
+import { updateFastifyWithHttpTransport } from "./http"
 
 /** Options used to construct the backend Fastify application. */
 export type BuildAppOptions = {
@@ -26,17 +25,7 @@ export async function buildApp(options: BuildAppOptions) {
     logger: true
   })
 
-  app.setValidatorCompiler(validatorCompiler)
-
-  await app.register(cors, {
-    origin: [
-      "http://localhost:1420",
-      "http://127.0.0.1:1420",
-      "tauri://localhost"
-    ],
-    methods: ["GET", "POST", "PUT", "PATCH"]
-  })
-  await app.register(fastifySse)
+  await updateFastifyWithHttpTransport(app)
   await app.register(singletonServicesPlugin, {
     config: options.config
   })
@@ -45,6 +34,7 @@ export async function buildApp(options: BuildAppOptions) {
   await app.register(registerHealthRoutes)
   await app.register(updateFastifyWithLlmRoutes)
   await app.register(registerChatRoutes)
+  await app.register(updateFastifyWithConversationRoutes)
   // =============== REGISTER THE ROUTES =============== //
 
   return app

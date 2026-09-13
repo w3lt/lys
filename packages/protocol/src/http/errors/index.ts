@@ -4,3 +4,7 @@ export {
   llmServiceBusyProblemSchema,
   type LlmServiceBusyProblem
 } from "./llmServiceBusy"
+export {
+  conversationNotFoundProblemSchema,
+  type ConversationNotFoundProblem
+} from "./conversation"

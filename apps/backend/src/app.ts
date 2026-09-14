@@ -29,7 +29,11 @@ export async function buildApp(options: BuildAppOptions) {
   app.setValidatorCompiler(validatorCompiler)
 
   await app.register(cors, {
-    origin: ["http://localhost:1420", "http://127.0.0.1:1420"],
+    origin: [
+      "http://localhost:1420",
+      "http://127.0.0.1:1420",
+      "tauri://localhost"
+    ],
     methods: ["GET", "POST", "PUT", "PATCH"]
   })
   await app.register(fastifySse)

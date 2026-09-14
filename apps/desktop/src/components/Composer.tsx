@@ -116,8 +116,7 @@ export function Composer(): ReactElement {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const backendStatus = backendServerInfo.status
-  const isModelLoaded = modelRuntime.status === "loaded"
-  const connection = readLocalRuntimeConnection(backendStatus, isModelLoaded)
+  const connection = readLocalRuntimeConnection(backendStatus, modelRuntime)
   const isUnavailable = connection !== "ready"
   const isRequestActive = request.status !== "idle"
 

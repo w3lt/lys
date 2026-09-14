@@ -71,6 +71,15 @@ invalidates pending observations before aborting their local HTTP transport;
 a late response cannot restore obsolete residency. LM Studio owns weights
 separately from the backend process, so a reconnect queries their actual state.
 
+The Composer label, send eligibility, and chat request use that same compact
+runtime projection. The [default-model setting](/reference/configuration/#persisted-settings-json)
+defines the preference and fallback selection. A send is admitted only while
+the backend is running and the projection is loaded. A submission rejected
+because no model is eligible produces an inline chat error without discarding the draft or conversation;
+Model settings provide inventory refresh and load controls for recovery. The
+chat store samples that model key once at submission, so a later selection
+change applies only to a later request.
+
 ## Generation settings
 
 Generation edits apply to the next chat request. Temperature uses the API's
@@ -95,9 +104,6 @@ does not coordinate with external editors of the settings file.
 
 ## Current limitations
 
-- Choosing a default model changes session settings. The chat request path still
-  sends its existing fixed model identifier; selection is not yet wired into
-  live chat requests.
 - Runtime and model edits remain session-only. Generation settings save
   automatically; a failed save leaves the edits available for the current session.
 - The load API accepts only `modelId`. Model settings explain that LM Studio

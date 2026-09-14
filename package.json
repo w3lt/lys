@@ -14,6 +14,7 @@
     "dev": "pnpm --filter @lys/desktop run tauri dev",
     "docs:dev": "pnpm --filter @lys/docs run dev",
     "backend:dev": "pnpm --filter @lys/backend run dev",
+    "backend:build": "pnpm --filter @lys/backend run build",
     "prepare": "husky"
   },
   "devDependencies": {

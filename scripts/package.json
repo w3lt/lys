@@ -2,8 +2,14 @@
   "name": "@lys/scripts",
   "private": true,
   "type": "module",
-  "scripts": {},
+  "scripts": {
+    "version:sync": "node sync-version.mts update",
+    "version:check": "node sync-version.mts check"
+  },
   "devDependencies": {
     "@types/node": "^26.2.0"
+  },
+  "dependencies": {
+    "smol-toml": "^1.8.0"
   }
 }

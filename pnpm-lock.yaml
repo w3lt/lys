@@ -282,6 +282,10 @@ importers:
         version: 4.6.2
 
   scripts:
+    dependencies:
+      smol-toml:
+        specifier: ^1.8.0
+        version: 1.8.0
     devDependencies:
       "@types/node":
         specifier: ^26.2.0

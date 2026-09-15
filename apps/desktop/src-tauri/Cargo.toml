@@ -1,6 +1,6 @@
 [package]
 name = "lys-desktop"
-version = "0.1.0"
+version = "0.2.0"
 description = "Lysiptera Caliginia"
 authors = ["Welt w3lt@negentropy.studio"]
 edition = "2021"

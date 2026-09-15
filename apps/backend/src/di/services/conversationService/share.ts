@@ -44,10 +44,10 @@ export type ConversationServiceCreationOptions = {
   databaseFilePath: PathLike
 }
 
-/** Optional values used when creating a new conversation record. */
+/** Values used when creating a new conversation record. */
 export type ConversationCreationOptions = {
-  /** Persisted system prompt; omission uses the backend's default prompt. */
-  systemPrompt?: string
+  /** Non-empty system prompt persisted with the conversation. */
+  systemPrompt: string
 }
 
 /** Identifier used to retrieve one conversation metadata record. */
@@ -88,13 +88,20 @@ export type UpdateAssistantMessageStateOptions = {
   finishReason?: ConversationAssistantMessageFinishReason | null | undefined
 }
 
-/** Values used to replace a persisted conversation title after normalization. */
+/** Values used to assign an untitled conversation's first persisted title. */
 export type UpdateConversationTitleOptions = {
   /** UUIDv7 of the conversation to update. */
   conversationId: string
   /** Candidate title trimmed and rejected when empty by the service. */
   conversationTitle: string
 }
+
+/**
+ * Outcome of an initial title assignment: `updated` means the candidate was
+ * saved; `already-titled` means a previously assigned title remains unchanged.
+ * Missing conversations and persistence failures are reported by throwing.
+ */
+export type UpdateConversationTitleResult = "updated" | "already-titled"
 
 /**
  * Default JavaScript-number row count for one conversation metadata page.

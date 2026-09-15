@@ -21,12 +21,21 @@ Tauri-managed settings file, and one WebView theme preference.
 
 ## Backend-composed values
 
-| Value                        | Current source                                |
-| ---------------------------- | --------------------------------------------- |
-| Backend listen address       | `BACKEND_HOST` and `BACKEND_PORT`             |
-| LM Studio HTTP base URL      | `http://${LMSTUDIO_HOST}:${LMSTUDIO_PORT}/v1` |
-| LM Studio WebSocket base URL | `ws://${LMSTUDIO_HOST}:${LMSTUDIO_PORT}`      |
-| SQLite path                  | `~/.lys/lys_db.sqlite`                        |
+| Value                          | Current source                                                                        |
+| ------------------------------ | ------------------------------------------------------------------------------------- |
+| Backend listen address         | `BACKEND_HOST` and `BACKEND_PORT`                                                     |
+| LM Studio HTTP base URL        | `http://${LMSTUDIO_HOST}:${LMSTUDIO_PORT}/v1`                                         |
+| LM Studio WebSocket base URL   | `ws://${LMSTUDIO_HOST}:${LMSTUDIO_PORT}`                                              |
+| SQLite path                    | `~/.lys/lys_db.sqlite`                                                                |
+| Lys system prompt              | `src/utils/prompts/lys.txt`, as `lysSystemPrompt`                                     |
+| Title-generation prompt        | `src/utils/prompts/title-generation.txt`, as `titleGenerationPrompt`                  |
+| Title-generation attempt limit | `3`, from `titleGenerationMaxAttempts` in `src/config.ts`; must be a positive integer |
+| Generated title length limit   | `100`, from `generatedTitleMaxLength` in `src/config.ts`; must be a positive integer  |
+
+`loadBackendConfig()` builds these values once when the backend starts, so a
+changed prompt file or limit takes effect after a restart. The attempt limit
+applies to each chat turn. The title length limit counts UTF-16 code units
+before surrounding whitespace is trimmed.
 
 ## Persisted settings JSON
 

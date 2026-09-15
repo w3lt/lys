@@ -26,7 +26,7 @@ export type ChatServiceCreationOptions = {
   /** Non-empty system prompt sent with every title-generation request. */
   titleGenerationPrompt: string
   /**
-   * Inclusive maximum length of a generated title, in UTF-16 code units,
+   * Inclusive maximum length of a generated title, in Unicode code points,
    * before surrounding whitespace is trimmed.
    *
    * @remarks A positive safe integer, validated when the backend configuration
@@ -227,8 +227,8 @@ export default class ChatService {
  * Builds the schema that validates a title-generation reply and defines the
  * JSON schema the endpoint is asked to enforce.
  *
- * @param generatedTitleMaxLength - Inclusive maximum title length, in UTF-16
- * code units, before trimming.
+ * @param generatedTitleMaxLength - Inclusive maximum title length, in Unicode
+ * code points, before trimming.
  * @returns A schema accepting an object whose `title` is a string no longer
  * than the limit.
  */

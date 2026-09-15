@@ -46,7 +46,7 @@ export type BackendConfig = {
    */
   readonly titleGenerationMaxAttempts: number
   /**
-   * Inclusive maximum length of a generated title, in UTF-16 code units,
+   * Inclusive maximum length of a generated title, in Unicode code points,
    * before surrounding whitespace is trimmed.
    *
    * @remarks A positive safe integer. Title requests pass it to the endpoint as
@@ -64,7 +64,7 @@ export type BackendConfig = {
 const TITLE_GENERATION_MAX_ATTEMPTS = 3
 
 /**
- * Generated-title length limit in UTF-16 code units, applied as
+ * Generated-title length limit in Unicode code points, applied as
  * `generatedTitleMaxLength` by {@link loadBackendConfig}. No other source
  * overrides it.
  */

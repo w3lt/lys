@@ -52,7 +52,7 @@ for every turn whose conversation has no stored title and uses that turn's user
 message, so a conversation that remains untitled after an earlier failed or
 interrupted task gets another try on its next turn. It uses a separate chat
 completion request with a JSON-schema response format that limits the title to
-`generatedTitleMaxLength` UTF-16 code units (100 by default), then validates the
+`generatedTitleMaxLength` Unicode code points (100 by default), then validates the
 reply; JSON wrapped in one Markdown code fence is accepted. Only a reply that
 cannot be used as a title leads to another attempt, up to
 `titleGenerationMaxAttempts` attempts per turn (three by default). An HTTP,

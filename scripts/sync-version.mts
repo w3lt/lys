@@ -1,6 +1,7 @@
 import { globSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { parse as parseToml, stringify as stringifyToml } from "smol-toml"
 
 /** major.minor.patch version validated before it is written to release manifests. */
 type ReleaseVersion = string & {
@@ -87,38 +88,28 @@ function buildJsonVersion(contents: string, version: ReleaseVersion): string {
 }
 
 /**
- * Replaces the desktop package version in Cargo's existing table layout.
- * @param contents - Cargo.toml text with standalone table headers.
+ * Replaces the desktop package version using TOML parsing and serialization.
+ * @param contents - Cargo.toml text containing the desktop package table.
  * @param version - Validated release version for the desktop crate.
- * @returns Original text when current; preserves other tables and inline comments.
- * @throws If the desktop package table is absent or ambiguous.
+ * @returns Original text when current; otherwise normalized TOML without comments.
+ * @throws If TOML is malformed, package is not a table, or serialization fails.
  */
 function buildCargoVersion(contents: string, version: ReleaseVersion): string {
-  const tables = contents
-    .split(/(?=^\[)/m)
-    .filter((table) => /^\[package\]/.test(table))
-  const table = tables[0]
-  if (tables.length !== 1 || table === undefined) {
-    throw new Error(
-      "Expected exactly one desktop package table in the Cargo file."
-    )
+  const manifest = parseToml(contents, { integersAsBigInt: true })
+  const packageTable = manifest.package
+  if (
+    typeof packageTable !== "object" ||
+    Array.isArray(packageTable) ||
+    packageTable instanceof Date
+  ) {
+    throw new Error("Cargo.toml must contain a package table.")
   }
-  const versionLine = /^[ \t]*version[ \t]*=[^\r\n]*/m
-  const currentLine = table.match(versionLine)?.[0]
-  const currentVersion = currentLine?.match(
-    /=[ \t]*(["'])(.*?)\1[ \t]*(?:#.*)?$/
-  )?.[2]
-  if (currentVersion === version) {
+  if (packageTable.version === version) {
     return contents
   }
-  const newline = contents.includes("\r\n") ? "\r\n" : "\n"
-  const comment = currentLine?.match(/[ \t]*#.*$/)?.[0] ?? ""
-  const replacement = `version = "${version}"${comment}`
-  const updated =
-    currentLine === undefined
-      ? table.replace(/^(.*?)(\r?\n|$)/, `$1${newline}${replacement}${newline}`)
-      : table.replace(versionLine, () => replacement)
-  return contents.replace(table, () => updated)
+  packageTable.version = version
+  // Preserve integer precision and distinguish integers from floats on rewrite.
+  return stringifyToml(manifest, { numbersAsFloat: true })
 }
 
 /**

@@ -1,6 +1,5 @@
 {
   "name": "@lys/protocol",
-  "version": "0.1.0",
   "type": "module",
   "private": true,
   "main": "./src/index.ts",
@@ -8,5 +7,6 @@
   "dependencies": {
     "zod": "^4.4.3",
     "@lys/share": "workspace:*"
-  }
+  },
+  "version": "0.2.0"
 }

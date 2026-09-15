@@ -1,7 +1,6 @@
 {
   "name": "@lys/desktop",
   "private": true,
-  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -47,5 +46,6 @@
     "sass": "^1.103.1",
     "typescript": "^6.0.3",
     "vite": "^7.3.6"
-  }
+  },
+  "version": "0.2.0"
 }

@@ -34,10 +34,11 @@ export const chatApiRequestBodySchema = z.strictObject({
  *
  * @remarks The backend emits a start event before generation events. A `done`
  * event terminates successful model generation, and an `error` event reports a
- * chat generation failure. A `title` event is emitted only when the conversation
- * had no stored title at the start of the turn, after its generated title is
- * persisted, and may arrive before, between, or after the chat events. The
- * `type` discriminant is the compatibility boundary used by desktop consumers.
+ * chat generation failure. A `title` event follows the start event either to
+ * reconcile an existing persisted title or to publish a newly persisted title.
+ * A generated title may arrive before, between, or after chat events because
+ * its task runs concurrently. The `type` discriminant is the compatibility
+ * boundary used by desktop consumers.
  */
 export const chatApiStreamEventSchema = z.discriminatedUnion("type", [
   z.strictObject({
@@ -60,7 +61,7 @@ export const chatApiStreamEventSchema = z.discriminatedUnion("type", [
 
   z.strictObject({
     type: z.literal("title"),
-    /** Non-empty title generated for the conversation. */
+    /** Non-empty persisted title for the conversation. */
     title: z.string().min(1)
   }),
 

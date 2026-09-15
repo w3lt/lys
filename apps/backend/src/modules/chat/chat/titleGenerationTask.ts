@@ -1,5 +1,6 @@
 import type { FastifyBaseLogger } from "fastify"
 import type ChatService from "../../../di/services/chatService"
+import type { UpdateConversationTitleResult } from "../../../di/services/conversationService/share"
 import { TitleGenerationOutputError } from "../../../utils/errors"
 import { createEventSender, type ChatRouteReply } from "./share"
 
@@ -19,8 +20,8 @@ export type CreateTitleGenerationTaskOptions = {
   logger: FastifyBaseLogger
   /** Positive, inclusive maximum number of title requests validated by the backend configuration. */
   titleGenerationMaxAttempts: number
-  /** Synchronous persistence callback run before the title event is sent. */
-  updateConversationTitle: (title: string) => void
+  /** Synchronous first-title assignment; only `updated` permits publishing the candidate. */
+  updateConversationTitle: (title: string) => UpdateConversationTitleResult
 }
 
 /** Inputs used to request a title within the attempt limit. */
@@ -76,12 +77,15 @@ type GeneratedTitle = Extract<TitleGenerationResult, { status: "generated" }>
  *
  * Titles are requested up to `titleGenerationMaxAttempts` times; only a reply
  * unusable as a title consumes another request. A generated title is persisted
- * before one `title` event is sent to a still-connected client. Every other
- * outcome leaves the stored title unchanged, so the conversation's next chat
- * turn requests a title again, and is logged with `titleGenerationOutcome` and
+ * only while the conversation remains untitled, before one `title` event is
+ * sent to a still-connected client. If another turn assigned a title first,
+ * this task preserves it and sends no event. Other unsuccessful outcomes leave
+ * this task's candidate unsaved; a later turn retries if still untitled.
+ * Outcomes are logged with `titleGenerationOutcome` and
  * `titleGenerationAttempts` fields: exhausted attempts or a failure that is not
  * retried at warn level, a client disconnect at debug level, and a persistence
- * failure at error level. The task never sends an `error` event.
+ * failure at error level. An assignment that loses to another title is logged
+ * at debug level. The task never sends an `error` event.
  *
  * @param options - Chat service, prompt input, attempt limit, cancellation
  * signal, SSE reply, logger, and title persistence callback owned by the route.
@@ -116,7 +120,7 @@ export default async function createTitleGenerationTask(
           titleGenerationOutcome: "title-not-generated",
           titleGenerationAttempts: titleGeneration.attempts
         },
-        "Title generation failed; the conversation stays untitled"
+        "Title generation failed; this task saved no title"
       )
       return
   }
@@ -184,20 +188,30 @@ async function generateTitleWithinAttempts({
 }
 
 /**
- * Persists a generated title and sends it to a still-connected client.
+ * Assigns a generated title and sends it only when this task wins persistence.
  *
  * @param options - Reply, logger, and persistence callback.
  * @param generatedTitle - Usable title and the requests made to generate it.
  * @returns A promise that resolves after the title is sent or its failure is
- * logged: a persistence failure at error level, in which case no event is
- * sent, and a send failure at debug level. It does not reject.
+ * logged: a persistence failure at error level, an already assigned title at
+ * debug level, and a send failure at debug level. Only a successful assignment
+ * sends an event to a still-connected client. It does not reject.
  */
 async function handleGeneratedTitle(
   { reply, logger, updateConversationTitle }: GeneratedTitleHandlingOptions,
   { title, attempts }: GeneratedTitle
 ): Promise<void> {
   try {
-    updateConversationTitle(title)
+    if (updateConversationTitle(title) === "already-titled") {
+      logger.debug(
+        {
+          titleGenerationOutcome: "already-titled",
+          titleGenerationAttempts: attempts
+        },
+        "Another turn already saved the conversation title"
+      )
+      return
+    }
   } catch (error) {
     logger.error(
       {

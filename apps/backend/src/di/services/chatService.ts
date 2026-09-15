@@ -1,13 +1,17 @@
-import { OpenAI } from "openai"
+import { APIUserAbortError, OpenAI } from "openai"
 import type {
   ChatCompletion,
+  ChatCompletionChunk,
   ChatCompletionMessageParam,
   ResponseFormatJSONSchema
 } from "openai/resources/index.mjs"
 import * as z from "zod"
 import { zodResponseFormat } from "openai/helpers/zod"
 import type { MessageGenerationOptions } from "@lys/protocol"
-import { TitleGenerationOutputError } from "../../utils/errors"
+import {
+  ChatCompletionCancelledError,
+  TitleGenerationOutputError
+} from "../../utils/errors"
 
 /** Settings used to create an application-scoped OpenAI-compatible chat client. */
 export type ChatServiceCreationOptions = {
@@ -137,25 +141,36 @@ export default class ChatService {
    *
    * @param options - Messages, model selection, and optional cancellation signal for the request.
    * @returns A promise that resolves to the asynchronous stream of chat completion chunks after the request is established.
-   * @throws If the request is rejected, aborted, or cannot be streamed by the configured endpoint.
+   * @throws {@link ChatCompletionCancelledError} If the SDK reports that
+   * request creation was cancelled; the SDK failure is kept as the cause.
+   * @throws If the request is otherwise rejected or cannot be streamed by the
+   * configured endpoint.
    */
   public async completeChatStream({
     messages,
     model,
     signal,
     generationOptions
-  }: CompleteChatOptions) {
+  }: CompleteChatOptions): Promise<AsyncIterable<ChatCompletionChunk>> {
     const { temperature, replyCeiling } = generationOptions
-    return await this.#openaiClient.chat.completions.create(
-      {
-        messages,
-        model,
-        stream: true,
-        temperature,
-        max_completion_tokens: replyCeiling ?? null
-      },
-      { signal }
-    )
+    try {
+      return await this.#openaiClient.chat.completions.create(
+        {
+          messages,
+          model,
+          stream: true,
+          temperature,
+          max_completion_tokens: replyCeiling ?? null
+        },
+        { signal }
+      )
+    } catch (error) {
+      if (error instanceof APIUserAbortError) {
+        throw new ChatCompletionCancelledError(error)
+      }
+
+      throw error
+    }
   }
 
   /**
@@ -246,8 +261,10 @@ function parseGeneratedTitle(
   }
 
   const content = choice.message.content
-  if (content === null) {
-    throw new TitleGenerationOutputError("The title reply has no content")
+  if (typeof content !== "string") {
+    throw new TitleGenerationOutputError(
+      "The title reply content is not a string"
+    )
   }
 
   const title = parseTitleOutput(content, titleOutputSchema).title.trim()

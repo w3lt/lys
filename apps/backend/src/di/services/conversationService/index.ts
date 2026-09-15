@@ -18,7 +18,8 @@ import type {
   ListConversationMetadataOptions,
   ListConversationMetadataResult,
   UpdateAssistantMessageStateOptions,
-  UpdateConversationTitleOptions
+  UpdateConversationTitleOptions,
+  UpdateConversationTitleResult
 } from "./share"
 import {
   encodeConversationListCursor,
@@ -230,7 +231,7 @@ export default class ConversationService {
   #insertAssistantMessageStatement: StatementSync
   /** Prepared statement that conditionally updates assistant status and finish reason. */
   #updateAssistantMessageStateStatement: StatementSync
-  /** Prepared statement that replaces a conversation title by ID. */
+  /** Prepared statement that assigns a title only while the stored title is null. */
   #updateConversationTitleStatement: StatementSync
 
   /**
@@ -326,7 +327,7 @@ export default class ConversationService {
       this.#updateConversationTitleStatement = database.prepare(`
         UPDATE conversations
         SET title = ?
-        WHERE id = ?
+        WHERE id = ? AND title IS NULL
       `)
     } catch (error) {
       database.close()
@@ -499,32 +500,44 @@ export default class ConversationService {
   }
 
   /**
-   * Replaces a conversation title after trimming and rejecting empty content.
+   * Assigns the first conversation title after trimming and rejecting empty content.
    *
-   * The synchronous SQLite UPDATE trigger may advance the conversation's
-   * updatedAt before this method returns.
+   * The SQLite conditional update makes the first successful assignment win
+   * across overlapping turns. An existing title and its updatedAt are left
+   * unchanged; a successful assignment may advance updatedAt through the
+   * synchronous SQLite UPDATE trigger before this method returns.
    *
    * @param options - Conversation ID and candidate title supplied by the caller.
+   * @returns `updated` after the title is saved, or `already-titled` when the
+   * conversation exists and another assignment already supplied its title.
    * @throws If the normalized title is empty, no conversation matches the ID, or SQLite persistence fails.
    */
   public updateConversationTitle({
     conversationId,
     conversationTitle
-  }: UpdateConversationTitleOptions) {
+  }: UpdateConversationTitleOptions): UpdateConversationTitleResult {
     const title = conversationTitle.trim()
 
     if (title.length === 0) {
       throw new Error("Conversation title must not be empty")
     }
 
-    const result = this.#updateConversationTitleStatement.run(
+    const titleUpdate = this.#updateConversationTitleStatement.run(
       title,
       conversationId
     )
 
-    if (Number(result.changes) !== 1) {
+    if (Number(titleUpdate.changes) === 1) {
+      return "updated"
+    }
+
+    if (
+      this.#getConversationMetadataStatement.get(conversationId) === undefined
+    ) {
       throw new Error(`Conversation "${conversationId}" was not found`)
     }
+
+    return "already-titled"
   }
 
   /**

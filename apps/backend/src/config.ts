@@ -74,9 +74,9 @@ const GENERATED_TITLE_MAX_LENGTH = 100
  * Loads the backend configuration from shared protocol constants, backend
  * limits, and the maintained prompt files.
  *
- * @returns A frozen configuration snapshot whose prompts were read once during
- * this call and whose limits are positive safe integers.
- * @throws If a prompt file cannot be read.
+ * @returns A frozen configuration snapshot whose non-empty prompts were read
+ * once during this call and whose limits are positive safe integers.
+ * @throws If a prompt file cannot be read or its trimmed contents are empty.
  * @throws {RangeError} If a title-generation limit is not a positive safe
  * integer.
  */

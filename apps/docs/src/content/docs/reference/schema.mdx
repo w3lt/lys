@@ -13,13 +13,13 @@ JSON schema for runtime, model, and generation settings.
 
 ### `conversations`
 
-| Column          | Type            | Notes                                                                                              |
-| --------------- | --------------- | -------------------------------------------------------------------------------------------------- |
-| `id`            | `TEXT`          | Primary key                                                                                        |
-| `title`         | `TEXT`          | Null until title generation saves a title; a chat turn on an untitled conversation requests one    |
-| `system_prompt` | `TEXT NOT NULL` | Prompt associated with the conversation; the current chat request does not forward it to the model |
-| `created_at`    | `TEXT NOT NULL` | ISO timestamp                                                                                      |
-| `updated_at`    | `TEXT NOT NULL` | ISO timestamp                                                                                      |
+| Column          | Type            | Notes                                                                                                          |
+| --------------- | --------------- | -------------------------------------------------------------------------------------------------------------- |
+| `id`            | `TEXT`          | Primary key                                                                                                    |
+| `title`         | `TEXT`          | Null until the first title assignment; untitled turns request one, and titled turns reconcile it to the client |
+| `system_prompt` | `TEXT NOT NULL` | Prompt associated with the conversation; the current chat request does not forward it to the model             |
+| `created_at`    | `TEXT NOT NULL` | ISO timestamp                                                                                                  |
+| `updated_at`    | `TEXT NOT NULL` | ISO timestamp                                                                                                  |
 
 ### `conversation_messages`
 

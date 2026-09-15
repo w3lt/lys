@@ -22,6 +22,25 @@ export class ConversationNotFoundError extends Error {
 }
 
 /**
+ * Cancellation raised when the chat completion SDK aborts request creation.
+ *
+ * @remarks Gives chat workflows a repository-owned cancellation discriminator
+ * while preserving the SDK failure as the cause. Other transport and provider
+ * failures are never represented by this class. It owns no mutable state, and
+ * each occurrence is constructed and consumed independently.
+ */
+export class ChatCompletionCancelledError extends Error {
+  /**
+   * Creates a chat-completion cancellation with its SDK failure as the cause.
+   *
+   * @param cause - SDK cancellation failure translated by the chat service.
+   */
+  constructor(cause: unknown) {
+    super("Chat completion was cancelled", { cause })
+  }
+}
+
+/**
  * Failure raised when a title-generation endpoint answers with a reply that
  * cannot be used as a conversation title.
  *

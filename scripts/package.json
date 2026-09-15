@@ -1,0 +1,9 @@
+{
+  "name": "@lys/scripts",
+  "private": true,
+  "type": "module",
+  "scripts": {},
+  "devDependencies": {
+    "@types/node": "^26.2.0"
+  }
+}

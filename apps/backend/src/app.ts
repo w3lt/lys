@@ -29,7 +29,11 @@ export async function buildApp(options: BuildAppOptions) {
   app.setValidatorCompiler(validatorCompiler)
 
   await app.register(cors, {
-    origin: ["http://localhost:1420", "http://127.0.0.1:1420"],
+    origin: [
+      "http://localhost:1420",
+      "http://127.0.0.1:1420",
+      "tauri://localhost"
+    ],
     methods: ["GET", "POST", "PUT", "PATCH"]
   })
   await app.register(fastifySse)
@@ -40,7 +44,10 @@ export async function buildApp(options: BuildAppOptions) {
   // =============== REGISTER THE ROUTES =============== //
   await app.register(registerHealthRoutes)
   await app.register(updateFastifyWithLlmRoutes)
-  await app.register(registerChatRoutes)
+  await app.register(registerChatRoutes, {
+    lysSystemPrompt: options.config.lysSystemPrompt,
+    titleGenerationMaxAttempts: options.config.titleGenerationMaxAttempts
+  })
   // =============== REGISTER THE ROUTES =============== //
 
   return app

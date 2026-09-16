@@ -559,9 +559,10 @@ export function createChatViewStore(
      * @param token - Token whose ownership authorizes event side effects.
      * @throws If an in-order handler detects a request or conversation
      * invariant violation.
-     * @remarks A stale token is ignored without error. An `error` event only
-     * records the latest inline error; it is non-terminal, so later `title` or
-     * `done` events may still be applied while this token remains active.
+     * @remarks A stale token is ignored without error. An `error` event records
+     * the latest inline error. The backend contract sends no later `done`, but
+     * an independently running title task may still send `title` while this
+     * token remains active.
      */
     function handleChatStreamEvent(
       event: ChatApiStreamEvent,
@@ -614,13 +615,15 @@ export function createChatViewStore(
      * @param request - Awaiting observable state correlated with the transport.
      * @returns A promise that resolves after completion, failure, or invalidation.
      * @remarks Events are consumed in arrival order. An `error` notification
-     * records the latest inline error but does not end iteration; a later
-     * `title` or `done` event may still complete the request. A normal `done`
-     * event makes the assistant terminal; a close before `done` records
-     * failure with the latest stream error or the premature-close message.
-     * Stale queued events and failures are ignored silently after token
-     * invalidation. The finally block releases the active resource and returns
-     * the request to idle only while this token still owns both representations.
+     * records the latest inline error. The backend contract sends no later
+     * `done`, but the stream may stay open while an independently running title
+     * task settles, so `title` may still arrive. Stream closure without `done`
+     * records request failure and marks the assistant failed with the latest
+     * stream error or the premature-close message. A normal `done` event makes
+     * the assistant terminal. Stale queued events and failures are ignored
+     * silently after token invalidation. The finally block releases the active
+     * resource and returns the request to idle only while this token still owns
+     * both representations.
      */
     async function readChatStream(
       payload: ChatApiRequestBody,

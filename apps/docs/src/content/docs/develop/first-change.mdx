@@ -58,12 +58,13 @@ message lifecycle or stored conversation shape.
 ### 5. Desktop stream handling
 
 The desktop store consumes the typed stream events and updates the current
-conversation state. A turn-start event comes first; after that, chat and title
-generation run concurrently:
+conversation state. A turn-start event comes first; after that:
 
+- for an existing titled conversation, the stored `title` event arrives next
 - zero or more `delta` events precede a successful `done`
-- `title` may arrive before, during, or after those chat events
-- `error` can report either task's failure and is not always the final event
+- for a conversation without a stored title, `title` may arrive before, during,
+  or after those chat events because title generation runs concurrently
+- `error` reports a chat generation failure; a `title` event can still follow it
 
 ## Good first-change candidates
 

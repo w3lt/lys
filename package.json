@@ -14,21 +14,22 @@
     "dev": "pnpm --filter @lys/desktop run tauri dev",
     "docs:dev": "pnpm --filter @lys/docs run dev",
     "backend:dev": "pnpm --filter @lys/backend run dev",
+    "backend:build": "pnpm --filter @lys/backend run build",
     "prepare": "husky"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "eslint": "^10.8.0",
+    "eslint": "^10.8.1",
     "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-react-dom": "^5.18.1",
+    "eslint-plugin-react-dom": "^5.18.6",
     "eslint-plugin-react-hooks": "^7.1.1",
-    "eslint-plugin-react-refresh": "^0.5.3",
-    "eslint-plugin-react-x": "^5.18.1",
-    "globals": "^17.8.0",
+    "eslint-plugin-react-refresh": "^0.5.4",
+    "eslint-plugin-react-x": "^5.18.6",
+    "globals": "^17.11.0",
     "husky": "^9.1.7",
-    "lint-staged": "^17.2.0",
+    "lint-staged": "^17.3.0",
     "prettier": "3.9.6",
-    "typescript-eslint": "^8.65.0"
+    "typescript-eslint": "^8.67.0"
   },
   "lint-staged": {
     "*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}": [

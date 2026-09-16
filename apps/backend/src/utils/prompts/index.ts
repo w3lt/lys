@@ -27,28 +27,19 @@ const prompts: PromptProps[] = [
  * Loads and trims one maintained prompt file.
  *
  * @param type - Prompt identifier whose module-relative file should be read.
- * @returns The prompt text with leading and trailing whitespace removed.
- * @throws If the identifier is not registered or the filesystem read fails.
+ * @returns The non-empty prompt text with leading and trailing whitespace
+ * removed.
+ * @throws If the identifier is not registered, the filesystem read fails, or
+ * the trimmed prompt is empty.
  */
-export const readPrompt = (type: PromptType) => {
+export const readPrompt = (type: PromptType): string => {
   const prompt = prompts.find((p) => p.type === type)
   if (!prompt) throw new Error(`Prompt type ${type} does not exist!`)
 
-  return readFileSync(prompt.filePath, "utf-8").trim()
+  const promptText = readFileSync(prompt.filePath, "utf-8").trim()
+  if (promptText.length === 0) {
+    throw new Error(`Prompt ${type} must not be empty after trimming.`)
+  }
+
+  return promptText
 }
-
-/**
- * Loads the system prompt used for streamed chat completion.
- *
- * @returns The trimmed Lys system prompt.
- * @throws If the maintained prompt file cannot be read.
- */
-export const lysSystemPrompt = () => readPrompt("lys-system")
-
-/**
- * Loads the prompt used to generate conversation titles.
- *
- * @returns The trimmed title-generation prompt.
- * @throws If the maintained prompt file cannot be read.
- */
-export const titleGenerationPrompt = () => readPrompt("title-generation")

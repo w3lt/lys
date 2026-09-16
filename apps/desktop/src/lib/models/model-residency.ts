@@ -19,6 +19,21 @@ export function readLoadedModelKey(
 }
 
 /**
+ * Finds the observed loaded model eligible for chat submission.
+ *
+ * @param backendStatus - Store-owned backend process lifecycle state.
+ * @param modelRuntime - Validated runtime projection shared with the Composer.
+ * @returns The resident model key while the backend is running, or `null`
+ * when either prerequisite is unavailable.
+ */
+export function findEligibleChatModel(
+  backendStatus: BackendServerStatus,
+  modelRuntime: ModelRuntimeState
+): string | null {
+  return backendStatus === "running" ? readLoadedModelKey(modelRuntime) : null
+}
+
+/**
  * Selects the status tone for a residency state.
  *
  * @param modelRuntime - Current residency state.
@@ -87,7 +102,7 @@ export function formatModelResidencyHeading(
  * Formats the supporting line shown while no weights are resident.
  *
  * @param backendStatus - Store-owned backend process lifecycle state.
- * @param defaultModel - Persisted default model identifier, when one is chosen.
+ * @param defaultModel - Current default model identifier, when one is chosen.
  * @returns The reason nothing is in memory, naming what to do about it.
  */
 function formatAbsentResidencyMeta(
@@ -107,7 +122,7 @@ function formatAbsentResidencyMeta(
  *
  * @param modelRuntime - Current residency state.
  * @param backendStatus - Store-owned backend process lifecycle state.
- * @param defaultModel - Persisted default model identifier, when one is chosen.
+ * @param defaultModel - Current default model identifier, when one is chosen.
  * @returns The observed weights or the reason residency is unavailable.
  */
 export function formatModelResidencyMeta(
@@ -158,10 +173,10 @@ export function formatModelRowTag(
  *
  * @param modelRuntime - Current residency state.
  * @param model - Weights the row represents.
- * @param selectedModelKey - Persisted default model identifier, when chosen.
+ * @param selectedModelKey - Current default model identifier, when chosen.
  * @returns The row's live condition when it has one, otherwise whether it is
- * merely the chosen default, otherwise its on-disk size. Residency reports
- * loaded weights; it does not determine which model a chat request uses.
+ * merely the chosen default, otherwise its on-disk size. A resident tag reports
+ * loaded weights for this row, including models outside the runtime projection.
  */
 export function formatComposerModelRowTag(
   modelRuntime: ModelRuntimeState,

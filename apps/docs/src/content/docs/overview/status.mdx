@@ -34,6 +34,8 @@ repository today; it is not a promise of unreleased work.
 - Generation controls apply to future chat requests and save automatically
   through Tauri to `~/.lys/settings.json`, which contains runtime, model, and
   generation groups. Runtime and model edits remain session-only.
+- The Composer label, send eligibility, and each chat request use the loaded
+  runtime projection described in [desktop model settings](/architecture/desktop/#model-settings).
 
 ## Coming soon
 
@@ -42,8 +44,6 @@ The current repository does not yet provide:
 - conversation history retrieval or restoration after relaunch
 - persisted assistant delta content in SQLite
 - a Conversation settings pane
-- using the selected default model for chat requests, which still send a fixed
-  model identifier
 - replay or reconnect semantics for chat streams
 - tool-call stream events
 - a production desktop release workflow

@@ -1,3 +1,4 @@
+import { findEligibleChatModel } from "@/lib/models/model-residency"
 import type { BackendServerStatus } from "@/lib/store"
 import type { ModelRuntimeState } from "@/lib/store/model-runtime"
 
@@ -21,17 +22,18 @@ export type ReconnectAction = {
  * Derives the composer's view of local generation availability.
  *
  * @param backendStatus - Store-owned backend process lifecycle state.
- * @param isModelLoaded - Whether the selected model is known to be resident.
- * @returns The availability state the composer renders against.
+ * @param modelRuntime - Current validated residency projection.
+ * @returns The availability state using {@link findEligibleChatModel} for
+ * chat readiness, with offline and no-model presentation states when refused.
  */
 export function readLocalRuntimeConnection(
   backendStatus: BackendServerStatus,
-  isModelLoaded: boolean
+  modelRuntime: ModelRuntimeState
 ): LocalRuntimeConnection {
   if (backendStatus !== "running") return "offline"
-  if (!isModelLoaded) return "no-model"
-
-  return "ready"
+  return findEligibleChatModel(backendStatus, modelRuntime) === null
+    ? "no-model"
+    : "ready"
 }
 
 /**

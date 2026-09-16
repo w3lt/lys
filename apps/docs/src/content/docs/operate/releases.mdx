@@ -17,7 +17,7 @@ Current build and publication paths that are evidenced in this repository.
 
 ## Docs deployment
 
-The repository contains one checked-in publication workflow today:
+The docs publication workflow runs independently of desktop releases:
 
 - workflow: `.github/workflows/deploy-docs.yml`
 - trigger: pushes to `main` and manual dispatch
@@ -25,23 +25,95 @@ The repository contains one checked-in publication workflow today:
 - artifact directory: `apps/docs/dist`
 - deploy target: GitHub Pages
 
-That workflow is the only evidenced automated release path in this repository.
+## Automatic desktop builds
 
-## Desktop packaging
+`.github/workflows/build_desktop_macos_app.yml` builds a desktop release candidate
+when a version tag is pushed. Supported tags use `vMAJOR.MINOR.PATCH`, such as
+`v0.1.0`, without leading zeroes or prerelease suffixes. It checks out the exact
+commit from that event. Pushing a newer tag does not change the source of an
+already queued build.
 
-The Tauri config declares desktop bundle metadata and package targets, which is
-enough to show packaging is intended:
+Before pushing a version tag, make its version match all three desktop manifests:
 
-- product name: `Lys`
-- app identifier: `com.w3lt.lys-desktop`
-- bundle targets: `all`
+- `apps/desktop/package.json`
+- `apps/desktop/src-tauri/Cargo.toml`
+- `apps/desktop/src-tauri/tauri.conf.json`
 
-The repository does not currently prove an automated desktop signing,
-notarization, or publication workflow.
+The build runs on `macos-latest`, sets up Node from `.nvmrc`, pnpm from the root
+`packageManager` field, and a pinned Rust toolchain. It uses the committed pnpm
+and Cargo lockfiles. Formatting, lint, and type checks must pass before the
+candidate is uploaded. Application test execution is deferred until test cases
+are added; a successful build does not claim test coverage.
 
-:::note[Coming soon]
-Desktop artifact signing, release publication, and a canonical end-user release
-process are not documented yet.
+The workflow builds and ad-hoc signs `Lys.app`, then prepares two archives:
+
+| Asset                    | Macs supported |
+| ------------------------ | -------------- |
+| `Lys-macos-arm64.tar.gz` | Apple Silicon  |
+| `Lys-macos-x64.tar.gz`   | Intel          |
+
+Each archive contains `Lys.app` and preserves its executable permissions and
+symbolic links. Each architecture's workflow artifact also contains
+`Lys-macos-<arch>.tar.gz.sha256` and `Lys-macos-<arch>.metadata.json`, identifying
+its repository, tag, commit, build run, run attempt, architecture, archive name,
+and digest. Artifact names follow
+`lys-macos-<arch>-run-<run_id>-attempt-<run_attempt>` so a release cannot silently
+combine files from different attempts.
+
+Candidates are stored as GitHub Actions artifacts for **14 days**. Publish within
+that period or rerun the complete build for the same tag. Workflow artifacts are
+temporary candidate storage; users download published assets from GitHub Releases.
+
+## Manual macOS publication
+
+`.github/workflows/release_macos.yml` publishes an existing candidate on
+`ubuntu-latest`. It does not compile, sign, or repackage the desktop app.
+
+To publish:
+
+1. Ensure the build workflow is present in the tagged revision and the release
+   workflow exists on the repository's default branch.
+2. Wait for the desktop build to succeed and copy its run ID from the build URL,
+   where it follows `/actions/runs/`.
+3. Open **Actions → Release macOS desktop app → Run workflow**.
+4. Select the default branch, enter the version tag and build run ID, and start
+   the workflow.
+
+The release validates that the selected run came from this repository's expected
+build workflow, succeeded, and built the selected tag's exact commit. It downloads
+the required artifacts for the selected attempt, validates their metadata, and
+requires all expected assets and checksums to match. Missing, expired, mismatched,
+or incomplete candidates stop publication.
+
+After verification, the workflow stages every asset in a draft GitHub Release and
+publishes only after all uploads succeed. Published assets include both app
+archives and a combined `SHA256SUMS` file. The publication job alone has permission
+to write releases. Concurrent publication for the same tag is serialized, and an
+existing published release is never replaced.
+
+If publication fails after creating a draft, start the release workflow again
+with the same tag and build run ID. It resumes only a draft identified as belonging
+to that exact build candidate. Existing draft assets must match the verified
+candidate; unrelated drafts or mismatched assets stop the run. A failure never
+silently replaces published assets.
+
+:::note[Trust and signing]
+SHA-256 checks detect changes to the recorded archive bytes. They do not prove
+that the build machine or its dependencies were uncompromised; this process
+trusts GitHub's build infrastructure and the reviewed build inputs.
+
+Ad-hoc signing does not verify the developer's identity and does not notarize the
+app. This workflow requires no paid Apple Developer membership. macOS may require
+the user to approve opening an app from an unidentified developer.
+:::
+
+:::caution[Desktop runtime is still under development]
+The desktop launcher currently starts the backend with `pnpm run dev` from a
+source-checkout path embedded during compilation. These workflows package and
+publish the desktop bundle, but do not make that backend available on an end-user
+machine. Backend packaging, Node installation, and the installed runtime launch
+path remain separate work. A successful packaging run does not establish that
+the app runs independently of its development checkout.
 :::
 
 ## Versioning status
@@ -55,10 +127,10 @@ The checked-in workspace manifests are currently versioned `0.1.0` for:
 - `@lys/protocol`
 - `@lys/share`
 
-The repository has a `v0.2.0` Git tag even though these manifest versions remain
-`0.1.0`. The tag records repository history; it does not establish an automated
-desktop publication or signing workflow. See the [changelog](/changelog/) for
-the recorded release context.
+The repository has a historical `v0.2.0` Git tag even though these manifest
+versions remain `0.1.0`. That tag does not satisfy the new desktop build's version
+check. Future release tags must match the desktop manifests. See the
+[changelog](/changelog/) for the recorded release context.
 
 <RelatedDocuments
   documents={[

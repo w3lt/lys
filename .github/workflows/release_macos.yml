@@ -1,0 +1,431 @@
+name: Release macOS desktop app
+run-name: Release ${{ inputs.tag }} from build run ${{ inputs.build_run_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to release, such as v0.1.0
+        required: true
+        type: string
+      build_run_id:
+        description: Successful Build macOS desktop app run ID
+        required: true
+        type: string
+
+concurrency:
+  group: release-macos-${{ inputs.tag }}
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  verify:
+    name: Verify selected build candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      build_run_attempt: ${{ steps.resolve.outputs.build_run_attempt }}
+      release_commit: ${{ steps.resolve.outputs.release_commit }}
+      staged_artifact_id: ${{ steps.staging.outputs.artifact-id }}
+
+    steps:
+      - name: Resolve selected build candidate
+        id: resolve
+        env:
+          BUILD_RUN_ID: ${{ inputs.build_run_id }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Release tag must use vMAJOR.MINOR.PATCH without leading zeroes." >&2
+            exit 1
+          fi
+          if [[ ! "$BUILD_RUN_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Build run ID must be a positive decimal integer." >&2
+            exit 1
+          fi
+
+          repository_json="$(gh api "repos/$GITHUB_REPOSITORY")"
+          default_branch="$(jq -er '.default_branch | select(type == "string" and length > 0)' <<< "$repository_json")"
+          if [[ "$GITHUB_REF_TYPE" != "branch" || "$GITHUB_REF_NAME" != "$default_branch" ]]; then
+            echo "This workflow must be dispatched from the repository's default branch." >&2
+            exit 1
+          fi
+
+          encoded_tag="$(jq -rn --arg tag "$RELEASE_TAG" '$tag | @uri')"
+          tag_object="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$encoded_tag")"
+          tag_object_type="$(jq -er '.object.type' <<< "$tag_object")"
+          tag_object_sha="$(jq -er '.object.sha' <<< "$tag_object")"
+          tag_depth=0
+          while [[ "$tag_object_type" == "tag" ]]; do
+            ((tag_depth += 1))
+            if [[ "$tag_depth" -gt 16 ]]; then
+              echo "Annotated tag nesting exceeds the supported validation limit." >&2
+              exit 1
+            fi
+            tag_object="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object_sha")"
+            tag_object_type="$(jq -er '.object.type' <<< "$tag_object")"
+            tag_object_sha="$(jq -er '.object.sha' <<< "$tag_object")"
+          done
+          release_commit="$tag_object_sha"
+          if [[ "$tag_object_type" != "commit" || ! "$release_commit" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "The selected tag does not resolve to a commit." >&2
+            exit 1
+          fi
+
+          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN_ID")"
+          build_run_attempt="$(jq -er '.run_attempt | tostring' <<< "$run_json")"
+          jq -e \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg tag "$RELEASE_TAG" \
+            --arg commit "$release_commit" \
+            --arg run_id "$BUILD_RUN_ID" \
+            '
+              (.id | tostring) == $run_id and
+              .path == ".github/workflows/build_desktop_macos_app.yml" and
+              .event == "push" and
+              .status == "completed" and
+              .conclusion == "success" and
+              .repository.full_name == $repository and
+              .head_repository.full_name == $repository and
+              .head_branch == $tag and
+              .head_sha == $commit
+            ' <<< "$run_json" > /dev/null
+
+          artifacts_path="$(mktemp "${RUNNER_TEMP}/lys-artifacts.XXXXXX.json")"
+          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN_ID/artifacts?per_page=100" \
+            | jq -s '[.[].artifacts[]]' > "$artifacts_path"
+
+          arm64_artifact_name="lys-macos-arm64-run-${BUILD_RUN_ID}-attempt-${build_run_attempt}"
+          x64_artifact_name="lys-macos-x64-run-${BUILD_RUN_ID}-attempt-${build_run_attempt}"
+          for artifact_name in "$arm64_artifact_name" "$x64_artifact_name"; do
+            jq -e --arg name "$artifact_name" '
+              [.[] | select(.name == $name)] as $matches |
+              ($matches | length) == 1 and
+              $matches[0].expired == false and
+              $matches[0].size_in_bytes > 0
+            ' "$artifacts_path" > /dev/null
+          done
+
+          arm64_artifact_id="$(jq -er --arg name "$arm64_artifact_name" '.[] | select(.name == $name) | .id' "$artifacts_path")"
+          x64_artifact_id="$(jq -er --arg name "$x64_artifact_name" '.[] | select(.name == $name) | .id' "$artifacts_path")"
+
+          {
+            printf 'artifact_ids=%s,%s\n' "$arm64_artifact_id" "$x64_artifact_id"
+            printf 'build_run_attempt=%s\n' "$build_run_attempt"
+            printf 'release_commit=%s\n' "$release_commit"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Download selected candidate artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ steps.resolve.outputs.artifact_ids }}
+          path: ${{ runner.temp }}/lys-candidate-download
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.build_run_id }}
+          digest-mismatch: error
+
+      - name: Validate candidate files and checksums
+        env:
+          BUILD_RUN_ATTEMPT: ${{ steps.resolve.outputs.build_run_attempt }}
+          BUILD_RUN_ID: ${{ inputs.build_run_id }}
+          CANDIDATE_DIRECTORY: ${{ runner.temp }}/lys-candidate-download
+          RELEASE_COMMIT: ${{ steps.resolve.outputs.release_commit }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          STAGING_DIRECTORY: ${{ runner.temp }}/lys-release-assets
+        run: |
+          set -euo pipefail
+
+          expected_files="$(printf '%s\n' \
+            Lys-macos-arm64.metadata.json \
+            Lys-macos-arm64.tar.gz \
+            Lys-macos-arm64.tar.gz.sha256 \
+            Lys-macos-x64.metadata.json \
+            Lys-macos-x64.tar.gz \
+            Lys-macos-x64.tar.gz.sha256)"
+          actual_files="$(find "$CANDIDATE_DIRECTORY" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)"
+          if [[ "$actual_files" != "$expected_files" ]]; then
+            echo "Downloaded candidate contains an unexpected file inventory." >&2
+            diff -u <(printf '%s\n' "$expected_files") <(printf '%s\n' "$actual_files") || true
+            exit 1
+          fi
+
+          for architecture in arm64 x64; do
+            archive_name="Lys-macos-${architecture}.tar.gz"
+            metadata_name="Lys-macos-${architecture}.metadata.json"
+            checksum_name="${archive_name}.sha256"
+
+            jq -e \
+              --arg repository "$GITHUB_REPOSITORY" \
+              --arg tag "$RELEASE_TAG" \
+              --arg commit "$RELEASE_COMMIT" \
+              --arg run_id "$BUILD_RUN_ID" \
+              --arg run_attempt "$BUILD_RUN_ATTEMPT" \
+              --arg architecture "$architecture" \
+              --arg archive "$archive_name" \
+              '
+                type == "object" and
+                (keys | sort) == (["repository", "tag", "commit", "run_id", "run_attempt", "architecture", "archive", "sha256"] | sort) and
+                .repository == $repository and
+                .tag == $tag and
+                .commit == $commit and
+                .run_id == $run_id and
+                .run_attempt == $run_attempt and
+                .architecture == $architecture and
+                .archive == $archive and
+                (.sha256 | type == "string" and test("^[0-9a-f]{64}$"))
+              ' "$CANDIDATE_DIRECTORY/$metadata_name" > /dev/null
+
+            expected_sha256="$(jq -er '.sha256' "$CANDIDATE_DIRECTORY/$metadata_name")"
+            if [[ "$(wc -l < "$CANDIDATE_DIRECTORY/$checksum_name")" -ne 1 ]] ||
+              ! grep -Fxq "$expected_sha256  $archive_name" "$CANDIDATE_DIRECTORY/$checksum_name"; then
+              echo "Checksum manifest for $architecture does not match its metadata." >&2
+              exit 1
+            fi
+
+            actual_sha256="$(sha256sum "$CANDIDATE_DIRECTORY/$archive_name" | awk '{ print $1 }')"
+            if [[ "$actual_sha256" != "$expected_sha256" ]]; then
+              echo "Archive checksum for $architecture does not match its metadata." >&2
+              exit 1
+            fi
+
+            archive_listing="$(mktemp "${RUNNER_TEMP}/lys-${architecture}-archive.XXXXXX.txt")"
+            tar -tzf "$CANDIDATE_DIRECTORY/$archive_name" > "$archive_listing"
+            grep -Fxq 'Lys.app/' "$archive_listing"
+            if ! awk '
+              $0 !~ /^Lys\.app\// || $0 ~ /(^|\/)\.\.(\/|$)/ { invalid = 1 }
+              END { exit invalid }
+            ' "$archive_listing"; then
+              echo "Archive for $architecture must contain only one top-level Lys.app bundle." >&2
+              exit 1
+            fi
+          done
+
+          mkdir "$STAGING_DIRECTORY"
+          cp "$CANDIDATE_DIRECTORY/Lys-macos-arm64.tar.gz" "$STAGING_DIRECTORY/"
+          cp "$CANDIDATE_DIRECTORY/Lys-macos-x64.tar.gz" "$STAGING_DIRECTORY/"
+          cat \
+            "$CANDIDATE_DIRECTORY/Lys-macos-arm64.tar.gz.sha256" \
+            "$CANDIDATE_DIRECTORY/Lys-macos-x64.tar.gz.sha256" \
+            > "$STAGING_DIRECTORY/SHA256SUMS"
+
+      - name: Stage verified release assets
+        id: staging
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: verified-macos-release-run-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/lys-release-assets
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  publish:
+    name: Publish verified release
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: write
+
+    steps:
+      - name: Download verified release assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.verify.outputs.staged_artifact_id }}
+          path: ${{ runner.temp }}/lys-release-assets
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ github.run_id }}
+          digest-mismatch: error
+
+      - name: Revalidate staged release assets
+        env:
+          STAGING_DIRECTORY: ${{ runner.temp }}/lys-release-assets
+        run: |
+          set -euo pipefail
+
+          expected_files="$(printf '%s\n' Lys-macos-arm64.tar.gz Lys-macos-x64.tar.gz SHA256SUMS)"
+          actual_files="$(find "$STAGING_DIRECTORY" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)"
+          if [[ "$actual_files" != "$expected_files" ]]; then
+            echo "Staged release contains an unexpected file inventory." >&2
+            exit 1
+          fi
+
+          if [[ "$(wc -l < "$STAGING_DIRECTORY/SHA256SUMS")" -ne 2 ]]; then
+            echo "SHA256SUMS must contain exactly two entries." >&2
+            exit 1
+          fi
+          grep -Eq '^[0-9a-f]{64}  Lys-macos-arm64\.tar\.gz$' "$STAGING_DIRECTORY/SHA256SUMS"
+          grep -Eq '^[0-9a-f]{64}  Lys-macos-x64\.tar\.gz$' "$STAGING_DIRECTORY/SHA256SUMS"
+          (cd "$STAGING_DIRECTORY" && sha256sum --check SHA256SUMS)
+
+      - name: Create or resume owned draft release
+        id: draft
+        env:
+          BUILD_RUN_ATTEMPT: ${{ needs.verify.outputs.build_run_attempt }}
+          BUILD_RUN_ID: ${{ inputs.build_run_id }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMMIT: ${{ needs.verify.outputs.release_commit }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          release_name="Lys $RELEASE_TAG"
+          release_body="$(printf '%s\n\n<!-- lys-macos-release repository=%s tag=%s commit=%s build_run_id=%s build_run_attempt=%s -->' \
+            'macOS desktop archives built and verified by GitHub Actions.' \
+            "$GITHUB_REPOSITORY" \
+            "$RELEASE_TAG" \
+            "$RELEASE_COMMIT" \
+            "$BUILD_RUN_ID" \
+            "$BUILD_RUN_ATTEMPT")"
+
+          encoded_tag="$(jq -rn --arg tag "$RELEASE_TAG" '$tag | @uri')"
+          tag_object="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$encoded_tag")"
+          tag_object_type="$(jq -er '.object.type' <<< "$tag_object")"
+          tag_object_sha="$(jq -er '.object.sha' <<< "$tag_object")"
+          tag_depth=0
+          while [[ "$tag_object_type" == "tag" ]]; do
+            ((tag_depth += 1))
+            if [[ "$tag_depth" -gt 16 ]]; then
+              echo "Annotated tag nesting exceeds the supported validation limit." >&2
+              exit 1
+            fi
+            tag_object="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object_sha")"
+            tag_object_type="$(jq -er '.object.type' <<< "$tag_object")"
+            tag_object_sha="$(jq -er '.object.sha' <<< "$tag_object")"
+          done
+          if [[ "$tag_object_type" != "commit" || "$tag_object_sha" != "$RELEASE_COMMIT" ]]; then
+            echo "The release tag no longer identifies the verified build commit." >&2
+            exit 1
+          fi
+
+          matching_releases="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            | jq -s --arg tag "$RELEASE_TAG" '[.[][] | select(.tag_name == $tag)]')"
+          release_count="$(jq 'length' <<< "$matching_releases")"
+
+          if [[ "$release_count" -gt 1 ]]; then
+            echo "More than one release exists for $RELEASE_TAG; refusing to choose one." >&2
+            exit 1
+          fi
+
+          if [[ "$release_count" -eq 1 ]]; then
+            if ! jq -e '.[] | .draft == true' <<< "$matching_releases" > /dev/null; then
+              echo "A published release already exists for $RELEASE_TAG; refusing to replace it." >&2
+              exit 1
+            fi
+            jq -e \
+              --arg name "$release_name" \
+              --arg body "$release_body" \
+              '.[] | .prerelease == false and .name == $name and .body == $body' \
+              <<< "$matching_releases" > /dev/null || {
+                echo "The existing draft is not owned by this exact build candidate." >&2
+                exit 1
+              }
+            release_id="$(jq -er '.[0].id' <<< "$matching_releases")"
+          else
+            created_release="$(gh api --method POST "repos/$GITHUB_REPOSITORY/releases" \
+              --raw-field tag_name="$RELEASE_TAG" \
+              --raw-field name="$release_name" \
+              --raw-field body="$release_body" \
+              --field draft=true \
+              --field prerelease=false)"
+            release_id="$(jq -er '.id' <<< "$created_release")"
+          fi
+
+          printf 'release_id=%s\n' "$release_id" >> "$GITHUB_OUTPUT"
+
+      - name: Upload and verify draft assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.draft.outputs.release_id }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          STAGING_DIRECTORY: ${{ runner.temp }}/lys-release-assets
+        run: |
+          set -euo pipefail
+
+          release_assets="$(mktemp "${RUNNER_TEMP}/lys-release-assets.XXXXXX.json")"
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?per_page=100" \
+            | jq -s '[.[][]]' > "$release_assets"
+          jq -e '
+            all(.[]; .name == "Lys-macos-arm64.tar.gz" or .name == "Lys-macos-x64.tar.gz" or .name == "SHA256SUMS") and
+            ([.[].name] | length) == ([.[].name] | unique | length)
+          ' "$release_assets" > /dev/null
+
+          for asset_name in Lys-macos-arm64.tar.gz Lys-macos-x64.tar.gz SHA256SUMS; do
+            asset_count="$(jq --arg name "$asset_name" '[.[] | select(.name == $name)] | length' "$release_assets")"
+            if [[ "$asset_count" -eq 0 ]]; then
+              gh release upload "$RELEASE_TAG" "$STAGING_DIRECTORY/$asset_name" --repo "$GITHUB_REPOSITORY"
+            elif [[ "$asset_count" -eq 1 ]]; then
+              asset_id="$(jq -er --arg name "$asset_name" '.[] | select(.name == $name) | .id' "$release_assets")"
+              downloaded_asset="$(mktemp "${RUNNER_TEMP}/lys-existing-asset.XXXXXX")"
+              gh api \
+                --header 'Accept: application/octet-stream' \
+                "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id" > "$downloaded_asset"
+              if ! cmp -s "$STAGING_DIRECTORY/$asset_name" "$downloaded_asset"; then
+                echo "Existing draft asset $asset_name does not match the verified candidate." >&2
+                exit 1
+              fi
+            else
+              echo "Existing draft contains duplicate $asset_name assets." >&2
+              exit 1
+            fi
+          done
+
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?per_page=100" \
+            | jq -s '[.[][]]' > "$release_assets"
+          jq -e '
+            ([.[].name] | sort) == (["Lys-macos-arm64.tar.gz", "Lys-macos-x64.tar.gz", "SHA256SUMS"] | sort)
+          ' "$release_assets" > /dev/null
+
+          for asset_name in Lys-macos-arm64.tar.gz Lys-macos-x64.tar.gz SHA256SUMS; do
+            asset_id="$(jq -er --arg name "$asset_name" '.[] | select(.name == $name) | .id' "$release_assets")"
+            downloaded_asset="$(mktemp "${RUNNER_TEMP}/lys-published-asset.XXXXXX")"
+            gh api \
+              --header 'Accept: application/octet-stream' \
+              "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id" > "$downloaded_asset"
+            if ! cmp -s "$STAGING_DIRECTORY/$asset_name" "$downloaded_asset"; then
+              echo "Uploaded draft asset $asset_name does not match the verified candidate." >&2
+              exit 1
+            fi
+          done
+
+      - name: Publish draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.draft.outputs.release_id }}
+          RELEASE_COMMIT: ${{ needs.verify.outputs.release_commit }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          encoded_tag="$(jq -rn --arg tag "$RELEASE_TAG" '$tag | @uri')"
+          tag_object="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$encoded_tag")"
+          tag_object_type="$(jq -er '.object.type' <<< "$tag_object")"
+          tag_object_sha="$(jq -er '.object.sha' <<< "$tag_object")"
+          tag_depth=0
+          while [[ "$tag_object_type" == "tag" ]]; do
+            ((tag_depth += 1))
+            if [[ "$tag_depth" -gt 16 ]]; then
+              echo "Annotated tag nesting exceeds the supported validation limit." >&2
+              exit 1
+            fi
+            tag_object="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object_sha")"
+            tag_object_type="$(jq -er '.object.type' <<< "$tag_object")"
+            tag_object_sha="$(jq -er '.object.sha' <<< "$tag_object")"
+          done
+          if [[ "$tag_object_type" != "commit" || "$tag_object_sha" != "$RELEASE_COMMIT" ]]; then
+            echo "The release tag no longer identifies the verified build commit." >&2
+            exit 1
+          fi
+
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
+            --field draft=false \
+            | jq -e --arg tag "$RELEASE_TAG" '.draft == false and .tag_name == $tag' > /dev/null

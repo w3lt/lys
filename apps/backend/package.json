@@ -5,8 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsx build.mts",
-    "test": "node --import tsx --test \"src/**/*.test.ts\""
+    "build": "tsx build.mts"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",

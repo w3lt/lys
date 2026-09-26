@@ -39,18 +39,44 @@ function createConversation(
 }
 
 /**
+ * Interrupts replies still streaming in a conversation that a new turn supersedes.
+ * @param database - Borrowed connection inside the turn transaction.
+ * @param conversationId - Conversation receiving the turn; a missing one changes nothing.
+ * @remarks A stopped request can finalize its reply after the client has already
+ * sent the next turn. Interrupting it here keeps its partial text in the new
+ * turn's context, and the streaming-only write guards then reject every later
+ * write from the superseded generation.
+ */
+function updateSupersededAssistantMessages(
+  database: DatabaseSync,
+  conversationId: string
+): void {
+  const updatedAt = new Date().toISOString()
+  database
+    .prepare(
+      `UPDATE conversation_messages SET status = 'interrupted', updated_at = ?
+    WHERE conversation_id = ? AND role = 'assistant' AND status = 'streaming'`
+    )
+    .run(updatedAt, conversationId)
+}
+
+/**
  * Inserts a validated user/assistant pair inside the caller-owned transaction.
  * @param database - Borrowed connection with an active write transaction.
  * @param options - Conversation selection and authored content.
  * @param systemPrompt - Default instruction used only for a new conversation.
  * @returns The conversation snapshot and both committed-to-transaction messages.
  * @throws If the conversation is missing, validation fails, or SQLite rejects a write.
+ * @remarks A reply still streaming in an existing conversation becomes
+ * interrupted before the snapshot is read, so the new turn supersedes it.
  */
 export function createConversationTurn(
   database: DatabaseSync,
   options: CreateConversationTurnOptions,
   systemPrompt: string
 ): ConversationTurn {
+  if (options.conversationId !== undefined)
+    updateSupersededAssistantMessages(database, options.conversationId)
   const conversation =
     options.conversationId === undefined
       ? createConversation(database, systemPrompt)

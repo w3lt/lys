@@ -126,6 +126,17 @@ const databaseMigrations = [
     END;
 
 
+  `,
+  `
+    DROP TRIGGER update_conversation_after_message_update;
+    CREATE TRIGGER update_conversation_after_message_update
+    AFTER UPDATE OF content ON conversation_messages
+    FOR EACH ROW
+    BEGIN
+      UPDATE conversations
+      SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+      WHERE id = NEW.conversation_id;
+    END;
   `
 ] as const
 

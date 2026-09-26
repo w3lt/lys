@@ -53,6 +53,10 @@ This process observation does not establish that the backend HTTP API is ready.
 4. The backend SSE close handler aborts the upstream LM Studio request.
 5. The stream ends without further UI updates for that request token.
 
+If the next message reaches the backend before the stopped reply is finalized,
+creating the new turn interrupts that reply first, so its partial text is part
+of the new turn's context.
+
 ## Error path
 
 If opening the stream, reading SSE frames, validating payloads, or finishing the

@@ -25,8 +25,9 @@ application.
 ## Chat request flow
 
 1. `POST /api/v1/chat` validates the request body with the shared Zod schema.
-2. `SqliteConversationTurns` creates or loads the conversation and atomically
-   inserts the user message and empty streaming assistant message.
+2. `SqliteConversationTurns` creates or loads the conversation, interrupts a
+   reply still streaming in it, and atomically inserts the user message and
+   empty streaming assistant message.
 3. The route immediately emits either `start-new-conversation-turn` or
    `start-existing-conversation-turn`.
 4. For an existing conversation with a stored title, the route emits that title
@@ -42,7 +43,9 @@ application.
 
 Each completion receives the saved system prompt, prior user messages, non-empty
 completed or interrupted assistant replies, and the current user message once.
-Failed, empty, and streaming assistant replies are excluded from model context.
+Failed and empty assistant replies are excluded from model context. A reply
+still streaming when the next turn is created becomes interrupted first, so its
+partial text is included.
 The required `generationOptions` controls supply sampling temperature and an
 optional completion-token ceiling; the [API reference](/reference/api/#chat-request-body)
 defines their limits. Partial assistant content remains available in history
@@ -85,9 +88,10 @@ The backend stores conversations in SQLite at `~/.lys/lys_db.sqlite`.
 The database schema is applied by `conversationService/migrations.ts` using
 `PRAGMA user_version`. The store owns the connection and lends history and turn
 capabilities without exposing connection or disposal authority. Version 4 preserves
-activity timestamps on rename, and startup recovers streaming assistants.
+activity timestamps on rename, version 5 preserves them on status-only message
+updates, and startup recovers streaming assistants without reordering history.
 Two triggers keep `conversations.updated_at` in sync with message inserts and
-message updates.
+message text updates.
 
 ## LM Studio integration
 

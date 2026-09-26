@@ -58,7 +58,7 @@ export default async function createChatTask(
       finishReason
     })
     if (persisted && options.reply.sse.isConnected) {
-      await createEventSender(options.reply)({ type: "done", finishReason })
+      await createChatDoneEvent(options, finishReason)
     }
   } catch (error) {
     options.request.log.error({ err: error }, "Chat completion stream failed")
@@ -85,6 +85,29 @@ export default async function createChatTask(
         message: "Chat completion failed. Please try again."
       })
     }
+  }
+}
+
+/**
+ * Publishes the terminal event of a completion that is already persisted.
+ * @param options - Request logger and SSE connection of the completed task.
+ * @param finishReason - Persisted reason the model stopped.
+ * @returns Settlement after the event is accepted or its delivery failure is logged.
+ * @remarks The stored completion is the authoritative outcome. A failed write
+ * means only that the client missed the event, so it is logged at debug level
+ * rather than reported as a stream failure; it does not reject.
+ */
+async function createChatDoneEvent(
+  options: CreateChatTaskOptions,
+  finishReason: ConversationAssistantMessageFinishReason
+): Promise<void> {
+  try {
+    await createEventSender(options.reply)({ type: "done", finishReason })
+  } catch (error) {
+    options.request.log.debug(
+      { err: error },
+      "Could not send the final chat event"
+    )
   }
 }
 

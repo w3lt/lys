@@ -49,7 +49,9 @@ must be a UUIDv7 identifying an existing conversation; an unknown identifier
 returns the conversation-not-found Problem Details response below. Continuation
 uses the saved system prompt, prior user messages, non-empty completed or
 interrupted assistant messages, then the current user message exactly once.
-Failed, empty, and still-streaming assistant messages are excluded from context.
+Failed and empty assistant messages are excluded from context. A reply still
+streaming in the conversation becomes interrupted when the new turn is created,
+so its partial text is included.
 
 `generationOptions` is required and has no protocol-level default:
 
@@ -118,7 +120,8 @@ Chat creates its user/assistant pair atomically, persists each delta before
 sending it, and stores a terminal status before `done`. Partial content survives
 failure or cancellation. Title generation runs only for an untitled conversation
 and publishes a title only if the conditional database write succeeds. On startup,
-remaining streaming assistants become interrupted with refreshed timestamps.
+remaining streaming assistants become interrupted with refreshed message
+timestamps; conversation activity time and history order do not change.
 
 ## LLM metadata shape
 

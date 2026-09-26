@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { test } from "node:test"
+import { test, type TestContext } from "node:test"
 import SqliteConversationStore from ".."
 import type SqliteConversationTurns from "../turns"
 import { parseConversationListOptions } from "../utils"
@@ -156,7 +156,7 @@ function handleClosedStore(): void {
   )
 }
 
-/** Verifies continuation excludes failed, empty, and still-streaming assistant context. */
+/** Verifies continuation keeps superseded partial replies and skips failed or empty ones. */
 function handleContinuationContext(): void {
   using store = SqliteConversationStore.open(":memory:")
   const turns = store.createTurnAccess()
@@ -173,8 +173,86 @@ function handleContinuationContext(): void {
     { role: "user", content: "Second" },
     { role: "user", content: "Third" },
     { role: "user", content: "Fourth" },
+    { role: "assistant", content: "Still generating" },
     { role: "user", content: "Continue" }
   ])
+}
+
+/** Verifies a new turn interrupts only its own conversation's streaming reply. */
+function handleSupersededReply(): void {
+  using store = SqliteConversationStore.open(":memory:")
+  const turns = store.createTurnAccess()
+  const superseded = turns.createConversationTurn({
+    systemPrompt: "Test system prompt",
+    model: "test",
+    userMessageContent: "First"
+  })
+  turns.updateAssistantMessageContent(
+    superseded.assistantMessage.id,
+    "Partial reply"
+  )
+  const unrelated = turns.createConversationTurn({
+    systemPrompt: "Test system prompt",
+    model: "test",
+    userMessageContent: "Elsewhere"
+  })
+  turns.createConversationTurn({
+    systemPrompt: "Test system prompt",
+    conversationId: superseded.conversation.id,
+    model: "test",
+    userMessageContent: "Second"
+  })
+  assert.equal(
+    turns.updateAssistantMessageContent(
+      superseded.assistantMessage.id,
+      " late"
+    ),
+    false
+  )
+  assert.equal(
+    turns.updateAssistantMessageState(superseded.assistantMessage.id, {
+      status: "completed",
+      finishReason: "stop"
+    }),
+    false
+  )
+  const stored = store
+    .createHistoryAccess()
+    .getConversation(superseded.conversation.id)?.messages[1]
+  assert.ok(stored?.role === "assistant")
+  assert.equal(stored.status, "interrupted")
+  assert.equal(stored.content, "Partial reply")
+  assert.equal(
+    turns.updateAssistantMessageContent(unrelated.assistantMessage.id, "Still"),
+    true
+  )
+}
+
+/** Verifies reply text counts as conversation activity while a state change alone does not. */
+function handleReplyActivity(context: TestContext): void {
+  context.mock.timers.enable({
+    apis: ["Date"],
+    now: Date.parse("2099-01-01T00:00:00.000Z")
+  })
+  using store = SqliteConversationStore.open(":memory:")
+  const turns = store.createTurnAccess()
+  const history = store.createHistoryAccess()
+  const turn = turns.createConversationTurn({
+    systemPrompt: "Test system prompt",
+    model: "test",
+    userMessageContent: "Prompt"
+  })
+  const createdAt = history.getConversation(turn.conversation.id)?.updatedAt
+  turns.updateAssistantMessageContent(turn.assistantMessage.id, "Reply")
+  const repliedAt = history.getConversation(turn.conversation.id)?.updatedAt
+  turns.updateAssistantMessageState(turn.assistantMessage.id, {
+    status: "completed",
+    finishReason: "stop"
+  })
+  const completedAt = history.getConversation(turn.conversation.id)?.updatedAt
+  assert.ok(createdAt !== undefined && repliedAt !== undefined)
+  assert.ok(repliedAt > createdAt)
+  assert.equal(completedAt, repliedAt)
 }
 
 test(
@@ -191,8 +269,16 @@ test(
   handleClosedStore
 )
 test(
-  "continuation retains partial interruptions and skips failed or unfinished assistants",
+  "continuation retains partial and superseded replies and skips failed or empty assistants",
   handleContinuationContext
+)
+test(
+  "a new turn interrupts its conversation's streaming reply and rejects its late writes",
+  handleSupersededReply
+)
+test(
+  "reply text updates conversation activity and terminal state alone does not",
+  handleReplyActivity
 )
 
 /**

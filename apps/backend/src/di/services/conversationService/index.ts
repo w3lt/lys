@@ -36,6 +36,8 @@ export default class SqliteConversationStore {
    * @param databaseFilePath - SQLite location; :memory: creates an isolated store.
    * @returns The ready store whose disposal belongs to the caller.
    * @throws If acquisition, migration, or recovery fails; acquired resources are released.
+   * @remarks Recovery marks replies left streaming as interrupted without
+   * changing their conversations' activity time or history order.
    */
   public static open(databaseFilePath: PathLike): SqliteConversationStore {
     using lifetime = new DisposableStack()

@@ -38,14 +38,17 @@ On startup it:
 1. Opens the SQLite file.
 2. Acquires a write transaction and reads `PRAGMA user_version`.
 3. Rejects unsupported future versions or applies each missing migration in order.
-4. Records version 4 and commits; a migration failure rolls back all pending work.
-5. Changes remaining streaming assistants to interrupted with a fresh message timestamp.
+4. Records version 5 and commits; a migration failure rolls back all pending work.
+5. Changes remaining streaming assistants to interrupted with a fresh message
+   timestamp, without changing conversation activity time.
 
 The current migrations create the two tables, add a message index, and install
 triggers that keep `conversations.updated_at` current. Historical migrations remain
 unchanged; version 4 restricts the conversation timestamp trigger to explicit
-activity updates, so title edits preserve ordering. Turn creation is atomic, and
-streamed content is committed before it is published.
+activity updates, so title edits preserve ordering, and version 5 restricts the
+message-update trigger to text changes, so status-only updates preserve it too.
+Turn creation is atomic and first interrupts a reply still streaming in the same
+conversation, and streamed content is committed before it is published.
 
 ## Settings ownership
 

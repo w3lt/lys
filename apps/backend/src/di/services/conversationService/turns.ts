@@ -35,6 +35,8 @@ export default class SqliteConversationTurns
    * @param options - Target conversation and initial message values.
    * @returns An independent snapshot and pair after the whole transaction commits.
    * @throws If lookup, validation, or persistence fails; no partial turn remains.
+   * @remarks Implements {@link ConversationTurnWriter.createConversationTurn},
+   * including interruption of a superseded streaming reply.
    */
   public createConversationTurn(
     options: CreateConversationTurnOptions

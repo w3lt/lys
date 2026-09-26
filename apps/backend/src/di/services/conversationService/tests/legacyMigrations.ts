@@ -1,4 +1,4 @@
-/** Immutable historical SQL from 19edf31, schema versions 1–3; never derive upgrade fixtures from current migrations. */
+/** Immutable historical SQL for schema versions 1–3 (19edf31) and 4 (99a42b0); never derive upgrade fixtures from current migrations. */
 export const legacyMigrations = Object.freeze([
   `
     CREATE TABLE conversations (
@@ -94,6 +94,26 @@ export const legacyMigrations = Object.freeze([
       UPDATE conversations
       SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
       WHERE id = NEW.conversation_id;
+    END;
+  `,
+  `
+    DROP TRIGGER update_conversation_updated_at;
+    CREATE TRIGGER update_conversation_updated_at
+    AFTER UPDATE OF updated_at ON conversations
+    FOR EACH ROW
+    WHEN NEW.updated_at <= OLD.updated_at
+    BEGIN
+      UPDATE conversations
+      SET updated_at = CASE
+        WHEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') > OLD.updated_at
+          THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        ELSE strftime(
+          '%Y-%m-%dT%H:%M:%fZ',
+          OLD.updated_at,
+          '+0.001 seconds'
+        )
+      END
+      WHERE id = NEW.id;
     END;
   `
 ])

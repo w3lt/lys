@@ -1,7 +1,9 @@
 import {
   type ConversationHistoryEntry,
   type ConversationHistoryListState,
-  findTextMatch
+  type ConversationRowInteraction,
+  findTextMatch,
+  parseConversationSearchQuery
 } from "@/lib/store/conversation-history"
 
 /** Calendar group an entry falls into, relative to when history opened. */
@@ -15,30 +17,6 @@ export type ConversationHistoryGroup = {
   readonly entries: readonly ConversationHistoryEntry[]
 }
 
-/**
- * Transient interaction affecting at most one history row.
- *
- * @remarks Only one row can be edited or confirming deletion at a time;
- * starting either on another row replaces the current interaction.
- */
-export type ConversationRowInteraction =
-  | {
-      /** No row is being edited or confirmed. */
-      readonly kind: "none"
-    }
-  | {
-      /** One row's title is being edited in place. */
-      readonly kind: "editing-title"
-      /** Conversation whose title is being edited. */
-      readonly conversationId: string
-    }
-  | {
-      /** One row is asking whether to delete its conversation. */
-      readonly kind: "confirming-delete"
-      /** Conversation whose deletion awaits confirmation. */
-      readonly conversationId: string
-    }
-
 /** Excerpt text split around its highlighted search match. */
 export type ExcerptSegments = {
   /** Text before the match, or the whole text when nothing matched. */
@@ -48,11 +26,6 @@ export type ExcerptSegments = {
   /** Text after the match. */
   readonly after: string
 }
-
-/** Shared interaction for rows that are neither edited nor confirming. */
-export const NO_ROW_INTERACTION: ConversationRowInteraction = Object.freeze({
-  kind: "none"
-})
 
 /** Title shown for a conversation whose title has not been generated or set. */
 const UNTITLED_CONVERSATION_TITLE = "Untitled"
@@ -246,6 +219,45 @@ export function buildExcerptSegments(
     match: text.slice(match.start, match.end),
     after: text.slice(match.end)
   }
+}
+
+/**
+ * Reports whether the displayed entries answer the typed search.
+ *
+ * @param list - Current list state.
+ * @param query - Search text exactly as typed.
+ * @returns Whether a page is displayed and was read for the typed text once
+ * trimmed; a page kept on screen while another search is read does not.
+ */
+export function isListAnsweringQuery(
+  list: ConversationHistoryListState,
+  query: string
+): boolean {
+  if (list.status !== "loaded") return false
+
+  return list.page.query === parseConversationSearchQuery(query)
+}
+
+/**
+ * Decides whether one scroll of the result region requests older entries.
+ *
+ * @param isNearListEnd - Whether the region is now scrolled near its end.
+ * @param wasNearListEnd - Whether the previous scroll left it near its end.
+ * @param list - Current list state.
+ * @returns Whether to request older entries. Near the end this is true,
+ * except after an older page failed: then only arriving near the end again
+ * retries, so continued scrolling there does not repeat a failing read.
+ */
+export function shouldRequestOlderConversations(
+  isNearListEnd: boolean,
+  wasNearListEnd: boolean,
+  list: ConversationHistoryListState
+): boolean {
+  if (!isNearListEnd) return false
+  const isOlderPageFailed =
+    list.status === "loaded" && list.activity.status === "older-failed"
+
+  return !isOlderPageFailed || !wasNearListEnd
 }
 
 /**

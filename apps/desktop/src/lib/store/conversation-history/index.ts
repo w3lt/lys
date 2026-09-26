@@ -32,6 +32,7 @@ import {
 
 export {
   findTextMatch,
+  parseConversationSearchQuery,
   type ConversationExcerpt,
   type ConversationHistoryEntry,
   type TextMatch
@@ -101,6 +102,34 @@ export type ConversationHistoryVisibility =
       readonly openedAtMs: number
     }
 
+/**
+ * Transient interaction affecting at most one history row.
+ *
+ * @remarks Only one row can be edited or confirming deletion at a time;
+ * starting either on another row replaces the current interaction. The
+ * interaction ends when history closes, and a title still being edited is
+ * saved first when it changed to a non-blank title.
+ */
+export type ConversationRowInteraction =
+  | {
+      /** No row is being edited or confirmed. */
+      readonly kind: "none"
+    }
+  | {
+      /** One row's title is being edited in place. */
+      readonly kind: "editing-title"
+      /** Conversation whose title is being edited. */
+      readonly conversationId: string
+      /** Title exactly as typed so far; seeded with the displayed title. */
+      readonly draftTitle: string
+    }
+  | {
+      /** One row is asking whether to delete its conversation. */
+      readonly kind: "confirming-delete"
+      /** Conversation whose deletion awaits confirmation. */
+      readonly conversationId: string
+    }
+
 /** Title or deletion change requested for one listed conversation. */
 export type ConversationHistoryMutation = {
   /** Conversation the change applies to. */
@@ -112,9 +141,10 @@ export type ConversationHistoryMutation = {
 /**
  * Observable state of conversation history.
  *
- * @remarks The store owns panel visibility, the typed query, the list, and
- * pending mutations. The query survives closing so reopening shows the same
- * search. Mutations continue after the panel closes; the list read does not.
+ * @remarks The store owns panel visibility, the typed query, the list, the
+ * row interaction, and pending mutations. The query survives closing so
+ * reopening shows the same search. Mutations continue after the panel closes;
+ * the list read and the row interaction do not.
  */
 export type ConversationHistoryState = {
   /** Whether the panel is shown. */
@@ -123,6 +153,8 @@ export type ConversationHistoryState = {
   readonly query: string
   /** Lifecycle of the displayed conversation list. */
   readonly list: ConversationHistoryListState
+  /** Row interaction in progress, including a title still being typed. */
+  readonly rowInteraction: ConversationRowInteraction
   /** Mutations awaiting a backend outcome, in the order they started. */
   readonly pendingMutations: readonly ConversationHistoryMutation[]
   /** Latest mutation failure to present, or undefined when there is none. */
@@ -139,10 +171,17 @@ export type ConversationHistoryState = {
 export type ConversationHistoryActions = {
   /** Shows the panel and reads the first page for the current query. */
   readonly openConversationHistory: () => void
-  /** Hides the panel and cancels any list read; mutations continue. */
+  /**
+   * Hides the panel, saves a changed title still being edited, ends the row
+   * interaction, and cancels any list read; mutations continue.
+   */
   readonly closeConversationHistory: () => void
   /** Replaces the typed query and, while shown, reads its first page. */
   readonly updateConversationHistoryQuery: (query: string) => void
+  /** Replaces the row interaction, ending any interaction on another row. */
+  readonly updateConversationRowInteraction: (
+    rowInteraction: ConversationRowInteraction
+  ) => void
   /** Reads the first page for the current query, replacing any list read. */
   readonly loadConversationHistory: () => Promise<void>
   /** Reads the next older page for the displayed query. */
@@ -190,6 +229,11 @@ const CLOSED_VISIBILITY: ConversationHistoryVisibility = Object.freeze({
   status: "closed"
 })
 
+/** Shared interaction for rows that are neither edited nor confirming. */
+export const NO_ROW_INTERACTION: ConversationRowInteraction = Object.freeze({
+  kind: "none"
+})
+
 /** Shared empty mutation list. */
 const NO_PENDING_MUTATIONS: readonly ConversationHistoryMutation[] =
   Object.freeze([])
@@ -200,6 +244,7 @@ const INITIAL_CONVERSATION_HISTORY_STATE: ConversationHistoryState =
     visibility: CLOSED_VISIBILITY,
     query: "",
     list: IDLE_LIST,
+    rowInteraction: NO_ROW_INTERACTION,
     pendingMutations: NO_PENDING_MUTATIONS,
     mutationError: undefined
   })
@@ -522,6 +567,32 @@ export function createConversationHistoryStore(
     }
 
     /**
+     * Reports whether a first page is being read to replace the list.
+     *
+     * @returns Whether an owned first-page read may still commit its page.
+     */
+    function isFirstPageReadPending(): boolean {
+      const { list } = get()
+      if (list.status === "loading") return true
+
+      return list.status === "loaded" && list.activity.status === "refreshing"
+    }
+
+    /**
+     * Replaces a pending first-page read after a change to a listed
+     * conversation settles.
+     *
+     * @remarks A read already sent may answer from before the change was
+     * stored, and committing it would undo the change on screen. The
+     * replacement read starts after the change settled. Without a pending
+     * first-page read, the settled change has already been applied to the
+     * displayed page and nothing is read.
+     */
+    function loadConversationHistoryAfterMutation(): void {
+      if (isFirstPageReadPending()) void loadConversationHistory()
+    }
+
+    /**
      * Updates the displayed page with an older page.
      *
      * @param response - Validated older page for the displayed query.
@@ -600,20 +671,64 @@ export function createConversationHistoryStore(
     }
 
     /**
-     * Hides the panel, cancels any list read, and clears the mutation error.
+     * Finds the title still being edited that closing history must save.
+     *
+     * @returns The trimmed title for a listed conversation when it is
+     * non-blank and differs from the displayed title, otherwise undefined.
+     */
+    function findUnsavedTitleUpdate(): ConversationTitleUpdate | undefined {
+      const { rowInteraction, list } = get()
+      if (rowInteraction.kind !== "editing-title") return undefined
+      if (list.status !== "loaded") return undefined
+      const entry = list.page.entries.find(
+        (listed) => listed.id === rowInteraction.conversationId
+      )
+      const title = rowInteraction.draftTitle.trim()
+      if (entry === undefined || title === "" || title === entry.title)
+        return undefined
+
+      return { conversationId: entry.id, title }
+    }
+
+    /**
+     * Hides the panel, ends the row interaction, cancels any list read, and
+     * clears the mutation error.
      *
      * @remarks A displayed page is kept for the next opening, which reads the
-     * list again. Pending mutations continue and commit their outcomes.
+     * list again. A changed, non-blank title still being edited is saved as
+     * a rename that continues after closing, so its failure is shown when
+     * history opens again. Pending mutations continue and commit their
+     * outcomes.
      */
     function closeConversationHistory(): void {
       if (get().visibility.status === "closed") return
 
+      const unsavedTitle = findUnsavedTitleUpdate()
       cancelListRead()
       set({
         visibility: CLOSED_VISIBILITY,
         list: calculateSettledList(get().list),
+        rowInteraction: NO_ROW_INTERACTION,
         mutationError: undefined
       })
+      if (unsavedTitle === undefined) return
+
+      void updateConversationTitle(
+        unsavedTitle.conversationId,
+        unsavedTitle.title
+      )
+    }
+
+    /**
+     * Replaces the row interaction proposed by the panel.
+     *
+     * @param rowInteraction - Complete next interaction; starting one on a
+     * row ends any interaction on another row.
+     */
+    function updateConversationRowInteraction(
+      rowInteraction: ConversationRowInteraction
+    ): void {
+      set({ rowInteraction })
     }
 
     /**
@@ -749,7 +864,8 @@ export function createConversationHistoryStore(
      * @param title - Candidate title; surrounding whitespace is removed.
      * @returns A promise that resolves after the outcome commits.
      * @remarks Ignored for an empty title or while the conversation has a
-     * pending mutation. The renamed entry keeps its position.
+     * pending mutation. The renamed entry keeps its position. A first-page
+     * read pending when the rename settles is replaced by a new read.
      */
     async function updateConversationTitle(
       conversationId: string,
@@ -769,6 +885,7 @@ export function createConversationHistoryStore(
         backendUrl
       )
       updateHistoryWithTitleOutcome(conversationId, outcome)
+      if (outcome.status !== "failed") loadConversationHistoryAfterMutation()
     }
 
     /**
@@ -800,8 +917,9 @@ export function createConversationHistoryStore(
      * @param conversationId - Conversation to delete.
      * @returns A promise that resolves after the outcome commits.
      * @remarks Ignored while the conversation has a pending mutation. Once the
-     * conversation is no longer stored, its entry is removed and the chat view
-     * closes it if presented; a failure keeps the entry.
+     * conversation is no longer stored, its entry is removed, the chat view
+     * closes it if presented, and a first-page read still pending is replaced
+     * by a new read; a failure keeps the entry.
      */
     async function deleteConversation(conversationId: string): Promise<void> {
       const backendUrl = startMutation({ conversationId, operation: "delete" })
@@ -826,6 +944,7 @@ export function createConversationHistoryStore(
         pendingMutations: remainingMutations
       })
       dependencies.closeConversation(conversationId)
+      loadConversationHistoryAfterMutation()
     }
 
     return {
@@ -833,6 +952,7 @@ export function createConversationHistoryStore(
       openConversationHistory,
       closeConversationHistory,
       updateConversationHistoryQuery,
+      updateConversationRowInteraction,
       loadConversationHistory,
       loadOlderConversations,
       updateConversationTitle,

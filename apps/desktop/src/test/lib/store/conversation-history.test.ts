@@ -291,6 +291,67 @@ describe("closing", () => {
   })
 })
 
+describe("closing with a title being edited", () => {
+  it("saves a changed title as a rename that continues after closing", async () => {
+    const harness = createHarness()
+    await openWithTwoConversations(harness)
+    const result = createDeferred<UpdateConversationTitleResult>()
+    harness.updateConversationTitle.mockReturnValue(result.promise)
+    harness.store.getState().updateConversationRowInteraction({
+      kind: "editing-title",
+      conversationId: FIXTURE_IDS.firstConversation,
+      draftTitle: "  Renamed  "
+    })
+
+    harness.store.getState().closeConversationHistory()
+
+    expect(harness.store.getState().rowInteraction).toEqual({ kind: "none" })
+    expect(harness.updateConversationTitle).toHaveBeenCalledWith(
+      { conversationId: FIXTURE_IDS.firstConversation, title: "Renamed" },
+      { backendUrl: BACKEND_URL }
+    )
+    result.resolve({
+      status: "updated",
+      conversation: {
+        id: FIXTURE_IDS.firstConversation,
+        title: "Renamed",
+        systemPrompt: "You are Lys.",
+        createdAt: FIXTURE_TIMESTAMP,
+        updatedAt: "2026-09-11T11:50:00.000Z"
+      }
+    })
+    await vi.waitFor(() =>
+      expect(harness.store.getState().pendingMutations).toEqual([])
+    )
+    const list = harness.store.getState().list
+    expect(list.status === "loaded" && list.page.entries[0].title).toBe(
+      "Renamed"
+    )
+  })
+
+  it.each<[string, string, string]>([
+    ["blank", FIXTURE_IDS.firstConversation, "   "],
+    ["unchanged", FIXTURE_IDS.firstConversation, " First "],
+    ["no longer listed", FIXTURE_IDS.thirdConversation, "Renamed"]
+  ])(
+    "drops a %s draft without renaming",
+    async (_label, conversationId, draftTitle) => {
+      const harness = createHarness()
+      await openWithTwoConversations(harness)
+      harness.store.getState().updateConversationRowInteraction({
+        kind: "editing-title",
+        conversationId,
+        draftTitle
+      })
+
+      harness.store.getState().closeConversationHistory()
+
+      expect(harness.updateConversationTitle).not.toHaveBeenCalled()
+      expect(harness.store.getState().rowInteraction).toEqual({ kind: "none" })
+    }
+  )
+})
+
 describe("reading older conversations", () => {
   it("appends the next page for the displayed query and skips repeated identities", async () => {
     const harness = createHarness()
@@ -470,6 +531,82 @@ describe("renaming", () => {
     expect(harness.store.getState().mutationError).toBe(
       "The backend is not running, so the change was not made."
     )
+  })
+})
+
+describe("changes settling while a first page is read", () => {
+  it("replaces the pending read so a deleted conversation does not return", async () => {
+    const harness = createHarness()
+    await openWithTwoConversations(harness)
+    harness.store.getState().closeConversationHistory()
+    harness.store.getState().openConversationHistory()
+    harness.deleteConversation.mockResolvedValue({ status: "deleted" })
+
+    await harness.store
+      .getState()
+      .deleteConversation(FIXTURE_IDS.firstConversation)
+
+    expect(harness.listReads).toHaveLength(3)
+    expect(harness.listReads[1].connection.signal?.aborted).toBe(true)
+    harness.listReads[1].response.resolve(TWO_CONVERSATIONS_PAGE)
+    await flushPendingWork()
+    expect(readDisplayedIds(harness.store.getState().list)).toEqual([
+      FIXTURE_IDS.secondConversation
+    ])
+
+    harness.listReads[2].response.resolve(
+      buildListPage({
+        conversations: [TWO_CONVERSATIONS_PAGE.conversations[1]],
+        storedCount: 1,
+        matchCount: 1,
+        nextCursor: null
+      })
+    )
+    await flushPendingWork()
+    const list = harness.store.getState().list
+    expect(readDisplayedIds(list)).toEqual([FIXTURE_IDS.secondConversation])
+    expect(list.status === "loaded" && list.activity.status).toBe("idle")
+  })
+
+  it("replaces the pending read so a rename is not reverted", async () => {
+    const harness = createHarness()
+    await openWithTwoConversations(harness)
+    harness.store.getState().closeConversationHistory()
+    harness.store.getState().openConversationHistory()
+    harness.updateConversationTitle.mockResolvedValue({
+      status: "updated",
+      conversation: {
+        id: FIXTURE_IDS.firstConversation,
+        title: "Renamed",
+        systemPrompt: "You are Lys.",
+        createdAt: FIXTURE_TIMESTAMP,
+        updatedAt: "2026-09-11T11:50:00.000Z"
+      }
+    })
+
+    await harness.store
+      .getState()
+      .updateConversationTitle(FIXTURE_IDS.firstConversation, "Renamed")
+
+    expect(harness.listReads).toHaveLength(3)
+    harness.listReads[1].response.resolve(TWO_CONVERSATIONS_PAGE)
+    await flushPendingWork()
+    const list = harness.store.getState().list
+    expect(list.status === "loaded" && list.page.entries[0].title).toBe(
+      "Renamed"
+    )
+  })
+
+  it("does not read again when no first page is pending", async () => {
+    const harness = createHarness()
+    await openWithTwoConversations(harness)
+    harness.deleteConversation.mockResolvedValue({ status: "deleted" })
+
+    await harness.store
+      .getState()
+      .deleteConversation(FIXTURE_IDS.firstConversation)
+
+    expect(harness.listReads).toHaveLength(1)
   })
 })
 

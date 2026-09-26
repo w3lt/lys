@@ -5,7 +5,9 @@ import {
   buildExcerptSegments,
   formatConversationHistoryCount,
   formatConversationTime,
-  formatConversationTitle
+  formatConversationTitle,
+  isListAnsweringQuery,
+  shouldRequestOlderConversations
 } from "@/components/ConversationHistoryComponents/conversation-history-presentation"
 import {
   type ConversationHistoryEntry,
@@ -161,6 +163,77 @@ describe("formatConversationHistoryCount", () => {
     ["while searching", buildLoadedList("stop", 6, 3), "3 of 6"]
   ])("formats the count %s", (_label, list, expected) => {
     expect(formatConversationHistoryCount(list)).toBe(expected)
+  })
+})
+
+describe("isListAnsweringQuery", () => {
+  it.each<[string, ConversationHistoryListState, string, boolean]>([
+    ["before a page loads", { status: "loading" }, "", false],
+    [
+      "for the same search once trimmed",
+      buildLoadedList("stop", 6, 3),
+      " stop ",
+      true
+    ],
+    ["without a search", buildLoadedList("", 6, 6), "   ", true],
+    [
+      "while an earlier search is shown",
+      buildLoadedList("", 6, 6),
+      "stop",
+      false
+    ],
+    [
+      "while a refresh of the same search is read",
+      {
+        status: "loaded",
+        page: {
+          query: "stop",
+          entries: [],
+          storedCount: 6,
+          matchCount: 3,
+          nextCursor: null
+        },
+        activity: { status: "refreshing" }
+      },
+      "stop",
+      true
+    ]
+  ])("answers %s", (_label, list, query, expected) => {
+    expect(isListAnsweringQuery(list, query)).toBe(expected)
+  })
+})
+
+describe("shouldRequestOlderConversations", () => {
+  const idleList = buildLoadedList("", 60, 60)
+  const failedList: ConversationHistoryListState = {
+    status: "loaded",
+    page: {
+      query: "",
+      entries: [],
+      storedCount: 60,
+      matchCount: 60,
+      nextCursor: "next"
+    },
+    activity: { status: "older-failed", error: "HTTP 500" }
+  }
+
+  it.each<[string, boolean, boolean, ConversationHistoryListState, boolean]>([
+    ["away from the end", false, false, idleList, false],
+    ["on arriving near the end", true, false, idleList, true],
+    ["while staying near the end", true, true, idleList, true],
+    ["on returning to the end after a failure", true, false, failedList, true],
+    [
+      "while staying near the end after a failure",
+      true,
+      true,
+      failedList,
+      false
+    ],
+    ["away from the end after a failure", false, true, failedList, false]
+  ])("decides %s", (_label, isNearListEnd, wasNearListEnd, list, expected) => {
+    expect(
+      shouldRequestOlderConversations(isNearListEnd, wasNearListEnd, list)
+    ).toBe(expected)
   })
 })
 

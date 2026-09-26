@@ -140,6 +140,11 @@ export type ConversationOpenState =
       readonly status: "opening"
       /** UUIDv7 of the conversation being opened. */
       readonly conversationId: string
+      /**
+       * Exact composer draft when the open started; a successful open clears
+       * the draft only if it is still this text.
+       */
+      readonly replacedComposerDraft: string
     }
 
 /**
@@ -917,6 +922,21 @@ export function createChatViewStore(
     }
 
     /**
+     * Calculates the composer draft kept when an opened conversation is shown.
+     *
+     * @returns An empty draft when the composer still holds the text it had
+     * when the open started, or the text typed while the conversation opened.
+     */
+    function calculateOpenedConversationDraft(): string {
+      const { inputDraft, conversationOpen } = get()
+      const isDraftUnchanged =
+        conversationOpen.status === "opening" &&
+        inputDraft === conversationOpen.replacedComposerDraft
+
+      return isDraftUnchanged ? "" : inputDraft
+    }
+
+    /**
      * Updates the view with the outcome of an owned conversation read.
      *
      * @param result - Stored conversation or absence outcome from the backend.
@@ -931,10 +951,11 @@ export function createChatViewStore(
           const conversation = createStoredChatViewConversation(
             result.conversation
           )
+          const inputDraft = calculateOpenedConversationDraft()
           activeOpenResource = undefined
           set({
             conversation,
-            inputDraft: "",
+            inputDraft,
             error: undefined,
             conversationOpen: IDLE_CONVERSATION_OPEN
           })
@@ -990,9 +1011,11 @@ export function createChatViewStore(
      * @remarks Opening the conversation already shown is ignored. Otherwise
      * the active request, if any, is invalidated first: its streaming reply is
      * marked interrupted and its transport and any earlier open are aborted.
-     * The previous conversation stays visible until the read succeeds; a
-     * successful open also clears the draft. A missing conversation or a
-     * failed read leaves the previous conversation with an inline error.
+     * The previous conversation stays visible until the read succeeds. A
+     * successful open clears the draft only if it still holds the text present
+     * when the open started, so text typed while opening is kept. A missing
+     * conversation or a failed read leaves the previous conversation with an
+     * inline error.
      */
     async function openConversation(conversationId: string): Promise<void> {
       if (isConversationShown(conversationId)) return
@@ -1005,7 +1028,8 @@ export function createChatViewStore(
       const conversation = calculateInterruptedConversation()
       const conversationOpen: ConversationOpenState = {
         status: "opening",
-        conversationId
+        conversationId,
+        replacedComposerDraft: get().inputDraft
       }
       const supersededRequest = activeRequestResource
       const supersededOpen = activeOpenResource

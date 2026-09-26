@@ -108,7 +108,8 @@ describe("openConversation", () => {
 
     expect(harness.store.getState().conversationOpen).toEqual({
       status: "opening",
-      conversationId: FIXTURE_IDS.firstConversation
+      conversationId: FIXTURE_IDS.firstConversation,
+      replacedComposerDraft: "unsent"
     })
     harness.conversationReads[0].result.resolve({
       status: "found",
@@ -130,6 +131,25 @@ describe("openConversation", () => {
       finishReason: null
     })
     expect(Object.isFrozen(state.conversation?.messages)).toBe(true)
+  })
+
+  it("keeps text typed while the conversation opens", async () => {
+    const harness = createHarness()
+    harness.store.getState().setInputDraft("unsent")
+
+    const opening = harness.store
+      .getState()
+      .openConversation(FIXTURE_IDS.firstConversation)
+    harness.store.getState().setInputDraft("follow-up typed while opening")
+    harness.conversationReads[0].result.resolve({
+      status: "found",
+      conversation: STORED_CONVERSATION
+    })
+    await opening
+
+    const state = harness.store.getState()
+    expect(state.conversation?.id).toBe(FIXTURE_IDS.firstConversation)
+    expect(state.inputDraft).toBe("follow-up typed while opening")
   })
 
   it("lets only the newest open commit and aborts the superseded read", async () => {
@@ -329,7 +349,8 @@ describe("resetting and closing during an open", () => {
 
     expect(harness.store.getState().conversationOpen).toEqual({
       status: "opening",
-      conversationId: FIXTURE_IDS.secondConversation
+      conversationId: FIXTURE_IDS.secondConversation,
+      replacedComposerDraft: ""
     })
     expect(harness.conversationReads[1].signal.aborted).toBe(false)
   })

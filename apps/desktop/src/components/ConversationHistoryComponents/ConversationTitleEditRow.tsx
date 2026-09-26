@@ -1,5 +1,5 @@
 import { MAXIMUM_CONVERSATION_TITLE_LENGTH } from "@lys/protocol"
-import { useId, useState } from "react"
+import { useId } from "react"
 import type { FocusEvent, KeyboardEvent, ReactElement } from "react"
 
 import type { ConversationExcerpt } from "@/lib/store/conversation-history"
@@ -8,14 +8,16 @@ import ConversationExcerptText from "./ConversationExcerptText"
 
 /** Properties accepted by {@link ConversationTitleEditRow}. */
 export type ConversationTitleEditRowProps = {
-  /** Title placed in the field when editing starts; read only once. */
-  readonly initialTitle: string
+  /** Title typed so far, owned by the parent. */
+  readonly draftTitle: string
   /** Excerpt still shown beside the field. */
   readonly excerpt: ConversationExcerpt | null
   /** Parsed query of the displayed page; empty when not searching. */
   readonly highlightQuery: string
   /** Identifier of the visible hint describing the editing keys and limit. */
   readonly hintId: string
+  /** Receives a proposed replacement for the parent-owned draft on each edit. */
+  readonly onDraftTitleChange: (draftTitle: string) => void
   /** Receives the draft when Enter submits it; focus should return to the row. */
   readonly onSubmitTitle: (draftTitle: string) => void
   /** Receives the draft when focus moves from the field to another element. */
@@ -27,28 +29,30 @@ export type ConversationTitleEditRowProps = {
 /**
  * Edits one conversation's title in place within the history list.
  *
- * @remarks Primary category: interactive feature. The component owns only the
- * draft, seeded once from `initialTitle`; the parent decides whether a draft
- * becomes a rename. The field is labeled `rename conversation`, limited to the
- * protocol's title length, described by the panel hint, and focused when it
- * mounts because the user asked to rename. Enter submits the draft unless an
- * input method is composing text, Escape cancels, and moving focus to another
- * element reports the draft; Escape is consumed so the panel stays open. A
- * blur with no destination, such as the window losing focus or the field
- * being removed after a submit or cancel, reports nothing and keeps the edit.
- * @param props - Initial title, excerpt, hint, and the three edit endings.
+ * @remarks Primary category: presentational. The parent owns the draft,
+ * which outlives this row so that closing history can still save it, and
+ * decides whether a draft becomes a rename; the component owns no state. The
+ * field is labeled `rename conversation`, limited to the protocol's title
+ * length, described by the panel hint, and focused when it mounts because the
+ * user asked to rename. Each edit proposes the new draft. Enter submits the
+ * draft unless an input method is composing text, Escape cancels, and moving
+ * focus to another element reports the draft; Escape is consumed so the panel
+ * stays open. A blur with no destination, such as the window losing focus or
+ * the field being removed after a submit or cancel, reports nothing and keeps
+ * the edit.
+ * @param props - Parent-owned draft, excerpt, hint, and the edit actions.
  * @returns One history list item in title-editing mode.
  */
 export default function ConversationTitleEditRow({
-  initialTitle,
+  draftTitle,
   excerpt,
   highlightQuery,
   hintId,
+  onDraftTitleChange,
   onSubmitTitle,
   onLeaveTitleField,
   onCancelTitleEdit
 }: ConversationTitleEditRowProps): ReactElement {
-  const [draftTitle, setDraftTitle] = useState(initialTitle)
   const inputId = useId()
 
   /**
@@ -95,7 +99,7 @@ export default function ConversationTitleEditRow({
           id={inputId}
           maxLength={MAXIMUM_CONVERSATION_TITLE_LENGTH}
           onBlur={handleTitleBlur}
-          onChange={(event) => setDraftTitle(event.currentTarget.value)}
+          onChange={(event) => onDraftTitleChange(event.currentTarget.value)}
           onKeyDown={handleTitleKeyDown}
           spellCheck={false}
           type="text"

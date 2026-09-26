@@ -1,10 +1,12 @@
 import { useId, useRef } from "react"
 import type { ReactElement, RefCallback, RefObject, UIEvent } from "react"
 
-import type {
-  ConversationHistoryEntry,
-  ConversationHistoryListState,
-  ConversationHistoryMutation
+import {
+  type ConversationHistoryEntry,
+  type ConversationHistoryListState,
+  type ConversationHistoryMutation,
+  type ConversationRowInteraction,
+  NO_ROW_INTERACTION
 } from "@/lib/store/conversation-history"
 
 import ConversationDeleteConfirmRow from "./ConversationDeleteConfirmRow"
@@ -15,10 +17,10 @@ import ConversationTitleEditRow from "./ConversationTitleEditRow"
 import {
   buildConversationHistoryGroups,
   type ConversationHistoryGroup,
-  type ConversationRowInteraction,
   formatConversationHistoryCount,
   formatConversationTitle,
-  NO_ROW_INTERACTION
+  isListAnsweringQuery,
+  shouldRequestOlderConversations
 } from "./conversation-history-presentation"
 
 /** Properties accepted by {@link ConversationHistoryBrowser}. */
@@ -135,20 +137,23 @@ function formatOlderPageStatus(list: ConversationHistoryListState): string {
  *
  * @remarks Primary category: interactive feature. The parent owns the search
  * text, the list, pending changes, the row interaction, and every requested
- * domain action; this component owns only the open-button registry and the
- * pending focus request used to move focus. Rows are grouped by local calendar
- * day relative to
- * `referenceTimeMs` and keep list order. Arrow Down from the search moves to
+ * domain action; this component owns only the open-button registry, the
+ * pending focus request used to move focus, and whether the last scroll ended
+ * near the list end. Rows are grouped by local calendar day relative to
+ * `referenceTimeMs` and keep list order. Enter in the search opens the first
+ * row only once the rows answer the typed search, and is ignored while an
+ * earlier search's rows are still shown. Arrow Down from the search moves to
  * the first openable row and Enter there opens it; Arrow Up and Arrow Down
  * move between rows, Arrow Up from the first row returns to the search, and
  * Arrow Down on the last row or scrolling near the end requests older
- * entries, which join any read already in progress. Renaming and confirming
- * deletion replace one row at a time. Submitting or cancelling a rename and
- * keeping a conversation return focus to that row; confirming deletion first
- * moves focus to the next row, the previous row, or the search. A title is
- * requested only when it changed and is not blank. Loading, empty, no-match,
- * and failure messages replace the rows, and the region is marked busy while
- * its rows are being replaced.
+ * entries, which join any read already in progress; after an older read
+ * fails, scrolling retries it only on returning to the end. Renaming and
+ * confirming deletion replace one row at a time. Submitting or cancelling a
+ * rename and keeping a conversation return focus to that row; confirming
+ * deletion first moves focus to the next row, the previous row, or the
+ * search. A title is requested only when it changed and is not blank.
+ * Loading, empty, no-match, and failure messages replace the rows, and the
+ * region is marked busy while its rows are being replaced.
  * @param props - List state, interaction state, focus target, and actions.
  * @returns The search field followed by the scrollable result region.
  */
@@ -172,6 +177,7 @@ export default function ConversationHistoryBrowser({
 }: ConversationHistoryBrowserProps): ReactElement {
   const openButtonsRef = useRef(new Map<string, HTMLButtonElement>())
   const pendingFocusIdRef = useRef<string | undefined>(undefined)
+  const isNearListEndRef = useRef(false)
   const groupIdPrefix = useId()
   const entries = list.status === "loaded" ? list.page.entries : NO_ENTRIES
   const highlightQuery = list.status === "loaded" ? list.page.query : ""
@@ -239,8 +245,12 @@ export default function ConversationHistoryBrowser({
     findOpenButton(0, 1)?.focus()
   }
 
-  /** Opens the first listed conversation that is not being deleted. */
+  /**
+   * Opens the first listed conversation that is not being deleted, once the
+   * displayed entries answer the typed search.
+   */
   function handleSearchFieldEnter(): void {
+    if (!isListAnsweringQuery(list, query)) return
     const firstEntry = entries.find(
       (entry) => findPendingOperation(pendingMutations, entry.id) !== "delete"
     )
@@ -284,12 +294,19 @@ export default function ConversationHistoryBrowser({
    * Requests older entries once the list is scrolled near its end.
    *
    * @param event - Scroll of the result region.
+   * @remarks After a failed older read, only scrolling back to the end
+   * requests it again.
    */
   function handleResultsScroll(event: UIEvent<HTMLDivElement>): void {
     const region = event.currentTarget
     const remainingPx =
       region.scrollHeight - region.scrollTop - region.clientHeight
-    if (remainingPx < OLDER_PAGE_SCROLL_THRESHOLD_PX) onLoadOlderConversations()
+    const isNearListEnd = remainingPx < OLDER_PAGE_SCROLL_THRESHOLD_PX
+    const wasNearListEnd = isNearListEndRef.current
+    isNearListEndRef.current = isNearListEnd
+    if (shouldRequestOlderConversations(isNearListEnd, wasNearListEnd, list)) {
+      onLoadOlderConversations()
+    }
   }
 
   /**
@@ -346,28 +363,54 @@ export default function ConversationHistoryBrowser({
   }
 
   /**
+   * Proposes the title typed so far for the row being edited.
+   *
+   * @param conversationId - Conversation whose title is being edited.
+   * @param draftTitle - Title exactly as typed.
+   */
+  function handleDraftTitleChange(
+    conversationId: string,
+    draftTitle: string
+  ): void {
+    onRowInteractionChange({
+      kind: "editing-title",
+      conversationId,
+      draftTitle
+    })
+  }
+
+  /**
    * Builds the in-place title editor for one entry.
    *
    * @param entry - Entry whose title is being edited.
+   * @param draftTitle - Title typed so far for that entry.
    * @returns The title-editing list item.
    */
-  function buildTitleEditRow(entry: ConversationHistoryEntry): ReactElement {
+  function buildTitleEditRow(
+    entry: ConversationHistoryEntry,
+    draftTitle: string
+  ): ReactElement {
     return (
       <ConversationTitleEditRow
+        draftTitle={draftTitle}
         excerpt={entry.excerpt}
         highlightQuery={highlightQuery}
         hintId={hintId}
-        initialTitle={entry.title ?? ""}
         key={entry.id}
         onCancelTitleEdit={() =>
           handleRowInteractionEnd(entry.id, () =>
             onRowInteractionChange(NO_ROW_INTERACTION)
           )
         }
-        onLeaveTitleField={(draftTitle) => saveTitleDraft(entry, draftTitle)}
-        onSubmitTitle={(draftTitle) =>
+        onDraftTitleChange={(nextDraftTitle) =>
+          handleDraftTitleChange(entry.id, nextDraftTitle)
+        }
+        onLeaveTitleField={(leftDraftTitle) =>
+          saveTitleDraft(entry, leftDraftTitle)
+        }
+        onSubmitTitle={(submittedDraftTitle) =>
           handleRowInteractionEnd(entry.id, () =>
-            saveTitleDraft(entry, draftTitle)
+            saveTitleDraft(entry, submittedDraftTitle)
           )
         }
       />
@@ -406,7 +449,8 @@ export default function ConversationHistoryBrowser({
   function buildEntryRow(entry: ConversationHistoryEntry): ReactElement {
     const editingInteraction: ConversationRowInteraction = {
       kind: "editing-title",
-      conversationId: entry.id
+      conversationId: entry.id,
+      draftTitle: entry.title ?? ""
     }
     const confirmingInteraction: ConversationRowInteraction = {
       kind: "confirming-delete",
@@ -442,7 +486,7 @@ export default function ConversationHistoryBrowser({
     if (rowInteraction.conversationId !== entry.id) return buildEntryRow(entry)
 
     return rowInteraction.kind === "editing-title"
-      ? buildTitleEditRow(entry)
+      ? buildTitleEditRow(entry, rowInteraction.draftTitle)
       : buildDeleteConfirmRow(entry)
   }
 

@@ -21,7 +21,9 @@ import {
   buildStoredConversation,
   buildUserMessage,
   createConversationNotFoundResponse,
+  createDeferred,
   createJsonResponse,
+  type Deferred,
   FIXTURE_IDS
 } from "../fixtures/conversations"
 
@@ -41,13 +43,16 @@ type BackendRequest = {
  * @remarks Lists stored summaries newest first, filters them by a
  * case-insensitive title or preview match, serves stored transcripts, applies
  * renames, and deletes. `failNextList` makes the next list request fail with
- * HTTP 500 to exercise the failure path.
+ * HTTP 500 to exercise the failure path, and `heldLists`, while set, delays
+ * every list response until the test resolves it.
  */
 class FakeConversationBackend {
   /** Requests received, in order. */
   readonly requests: BackendRequest[] = []
   /** Whether the next list request fails. */
   failNextList = false
+  /** Release that list responses wait for, or undefined to answer at once. */
+  heldLists: Deferred<void> | undefined = undefined
   /** Stored summaries, newest activity first. */
   #summaries: ConversationSummary[]
 
@@ -78,7 +83,10 @@ class FakeConversationBackend {
     }
     this.requests.push(request)
     const conversationId = request.url.pathname.split("/")[4]
-    if (conversationId === undefined) return this.#list(request.url)
+    if (conversationId === undefined) {
+      await this.heldLists?.promise
+      return this.#list(request.url)
+    }
     if (request.method === "GET") return this.#get(conversationId)
     if (request.method === "PATCH") return this.#rename(conversationId, request)
 
@@ -315,6 +323,32 @@ describe("conversation history in the chat view", () => {
     expect(historyButton).toHaveAttribute("aria-expanded", "false")
   })
 
+  it("opens the top result with Enter only once the typed search has answered", async () => {
+    const user = renderChatView()
+    const dialog = await openHistory(user)
+    const heldLists = createDeferred<void>()
+    backend.heldLists = heldLists
+
+    await user.type(within(dialog).getByRole("searchbox"), "what")
+    await user.keyboard("{Enter}")
+
+    expect(dialog).toBeInTheDocument()
+    expect(useChatViewStore.getState().conversationOpen).toEqual({
+      status: "idle"
+    })
+
+    heldLists.resolve()
+    await within(dialog).findByText("1 of 2")
+    await user.keyboard("{Enter}")
+
+    await waitFor(() => expect(dialog).not.toBeInTheDocument())
+    await waitFor(() =>
+      expect(useChatViewStore.getState().conversation?.id).toBe(
+        FIXTURE_IDS.secondConversation
+      )
+    )
+  })
+
   it("moves between rows with the arrows and continues the chosen conversation", async () => {
     const user = renderChatView()
     const dialog = await openHistory(user)
@@ -359,11 +393,50 @@ describe("conversation history in the chat view", () => {
       name: /^Renamed/
     })
     expect(renamedRow).toHaveFocus()
-    const rename = backend.requests.find(
+    const renames = backend.requests.filter(
       (request) => request.method === "PATCH"
     )
-    expect(rename?.body).toBe(JSON.stringify({ title: "Renamed" }))
+    expect(renames.map((request) => request.body)).toEqual([
+      JSON.stringify({ title: "Renamed" })
+    ])
   })
+
+  it.each<
+    [string, (user: ReturnType<typeof userEvent.setup>) => Promise<void>]
+  >([
+    [
+      "a pointer press outside",
+      (user) =>
+        user.pointer({
+          keys: "[MouseLeft]",
+          target: screen.getByRole("region", { name: "Conversation" })
+        })
+    ],
+    ["the shortcut", (user) => user.keyboard("{Meta>}k{/Meta}")]
+  ])(
+    "saves a rename still being typed when %s closes history",
+    async (_label, closeHistory) => {
+      const user = renderChatView()
+      const dialog = await openHistory(user)
+      await user.keyboard("{ArrowDown}{F2}")
+      const titleField = within(dialog).getByRole("textbox", {
+        name: "rename conversation"
+      })
+      await user.clear(titleField)
+      await user.type(titleField, "Kept on close")
+
+      await closeHistory(user)
+
+      await waitFor(() => expect(dialog).not.toBeInTheDocument())
+      await waitFor(() =>
+        expect(
+          backend.requests
+            .filter((request) => request.method === "PATCH")
+            .map((request) => request.body)
+        ).toEqual([JSON.stringify({ title: "Kept on close" })])
+      )
+    }
+  )
 
   it("cancels a rename with Escape without sending it or closing history", async () => {
     const user = renderChatView()

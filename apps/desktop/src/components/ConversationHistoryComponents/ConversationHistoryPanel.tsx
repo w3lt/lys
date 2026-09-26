@@ -1,20 +1,18 @@
 import { MAXIMUM_CONVERSATION_TITLE_LENGTH } from "@lys/protocol"
-import { useEffect, useId, useRef, useState } from "react"
+import { useEffect, useId, useRef } from "react"
 import type { FocusEvent, KeyboardEvent, ReactElement, RefObject } from "react"
 
 import { type ChatViewStore, useChatViewStore } from "@/lib/store/chat-view"
 import {
   type ConversationHistoryListState,
+  type ConversationRowInteraction,
+  NO_ROW_INTERACTION,
   useConversationHistoryStore
 } from "@/lib/store/conversation-history"
 
 import ConversationHistoryBrowser from "./ConversationHistoryBrowser"
 import ConversationHistoryFooter from "./ConversationHistoryFooter"
-import {
-  type ConversationRowInteraction,
-  formatConversationHistoryHint,
-  NO_ROW_INTERACTION
-} from "./conversation-history-presentation"
+import { formatConversationHistoryHint } from "./conversation-history-presentation"
 
 import "./ConversationHistoryPanel.scss"
 
@@ -44,7 +42,7 @@ function getPresentedConversationId(state: ChatViewStore): string | undefined {
  * Reports whether a row interaction still targets a displayed entry.
  *
  * @param list - Current list state.
- * @param rowInteraction - Interaction recorded by the panel.
+ * @param rowInteraction - Interaction recorded by the history store.
  * @returns Whether no interaction is active or its row is still displayed.
  */
 function isRowInteractionDisplayed(
@@ -134,12 +132,14 @@ function useOutsidePointerDismissal(
  * Presents past conversations for searching, opening, renaming, and deleting.
  *
  * @remarks Primary category: composition/view. The history store owns the
- * query, list, pending changes, and their requests; the chat-view store owns
- * which conversation is presented; the parent owns opening a conversation,
- * starting one, and closing history around those actions. The panel owns only
- * the row interaction and its focus lifecycle. It is a non-modal dialog named
- * Past conversations: on mount focus moves to the search field, and Escape,
- * a pointer press outside, or focus moving to an element outside closes it.
+ * query, list, row interaction, pending changes, and their requests, and
+ * saves a changed title still being edited whenever history closes; the
+ * chat-view store owns which conversation is presented; the parent owns
+ * opening a conversation, starting one, and closing history around those
+ * actions. The panel owns only its focus lifecycle. It is a non-modal dialog
+ * named Past conversations: on mount focus moves to the search field, and
+ * Escape, a pointer press outside, or focus moving to an element outside
+ * closes it.
  * Focus returns to the invoker when closing would otherwise lose it. The
  * footer hint follows the active row interaction, which is dropped when its
  * row is no longer displayed. Rendering it presumes history is open.
@@ -153,6 +153,9 @@ export default function ConversationHistoryPanel({
 }: ConversationHistoryPanelProps): ReactElement {
   const query = useConversationHistoryStore((state) => state.query)
   const list = useConversationHistoryStore((state) => state.list)
+  const rowInteraction = useConversationHistoryStore(
+    (state) => state.rowInteraction
+  )
   const pendingMutations = useConversationHistoryStore(
     (state) => state.pendingMutations
   )
@@ -161,6 +164,9 @@ export default function ConversationHistoryPanel({
   )
   const updateConversationHistoryQuery = useConversationHistoryStore(
     (state) => state.updateConversationHistoryQuery
+  )
+  const updateConversationRowInteraction = useConversationHistoryStore(
+    (state) => state.updateConversationRowInteraction
   )
   const closeConversationHistory = useConversationHistoryStore(
     (state) => state.closeConversationHistory
@@ -179,8 +185,6 @@ export default function ConversationHistoryPanel({
   )
   const openConversationId = useChatViewStore(getPresentedConversationId)
 
-  const [rowInteraction, setRowInteraction] =
-    useState<ConversationRowInteraction>(NO_ROW_INTERACTION)
   const panelRef = useRef<HTMLElement>(null)
   const searchFieldRef = useRef<HTMLInputElement>(null)
   const hintId = useId()
@@ -190,17 +194,6 @@ export default function ConversationHistoryPanel({
   const activeRowInteraction = isRowInteractionDisplayed(list, rowInteraction)
     ? rowInteraction
     : NO_ROW_INTERACTION
-
-  /**
-   * Replaces the row interaction; starting one on a row ends any other.
-   *
-   * @param nextInteraction - Complete interaction proposed by the browser.
-   */
-  function handleRowInteractionChange(
-    nextInteraction: ConversationRowInteraction
-  ): void {
-    setRowInteraction(nextInteraction)
-  }
 
   /**
    * Closes history when Escape reaches the panel unconsumed.
@@ -248,7 +241,7 @@ export default function ConversationHistoryPanel({
         onOpenConversation={onOpenConversation}
         onQueryChange={updateConversationHistoryQuery}
         onRetryConversationHistory={() => void loadConversationHistory()}
-        onRowInteractionChange={handleRowInteractionChange}
+        onRowInteractionChange={updateConversationRowInteraction}
         onUpdateConversationTitle={(conversationId, title) =>
           void updateConversationTitle(conversationId, title)
         }

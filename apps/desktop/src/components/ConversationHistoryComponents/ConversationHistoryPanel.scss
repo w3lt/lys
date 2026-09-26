@@ -1,0 +1,448 @@
+/*
+ * Past conversations float above the composer as a non-modal dialog. The chat
+ * view places the panel; these rules style only what is inside it.
+ */
+.conversation-history {
+  display: flex;
+  width: 100%;
+  max-height: 372px;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--app-border-default);
+  border-radius: var(--radius-surface);
+  background: var(--popover);
+  box-shadow: var(--shadow-floating);
+  animation: conversation-history-rise var(--duration-enter)
+    var(--ease-standard) both;
+}
+
+@keyframes conversation-history-rise {
+  from {
+    opacity: 0;
+    translate: 0 6px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+/* Search */
+
+.conversation-history__search {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--app-border-subtle);
+  transition: box-shadow var(--duration-standard) var(--ease-standard);
+}
+
+/* The field has no box of its own, so the search row reports its focus. */
+.conversation-history__search:focus-within {
+  box-shadow: inset 0 -1px 0 var(--app-border-interactive);
+}
+
+.conversation-history__search-label,
+.conversation-history__group-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  color: var(--app-text-faint);
+}
+
+.conversation-history__search-label {
+  flex: none;
+  text-transform: uppercase;
+}
+
+.conversation-history__search-input {
+  min-width: 0;
+  flex: 1;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--app-text);
+  font-size: 13px;
+  appearance: none;
+}
+
+.conversation-history__search-input::placeholder {
+  color: var(--app-text-faint);
+}
+
+/* The clear button beside the field replaces the platform's own. */
+.conversation-history__search-input::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+/* Focus is shown by the search row's edge instead of a ring on the field. */
+.conversation-history__search-input:focus-visible {
+  outline: none;
+}
+
+.conversation-history__count {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--app-text-faint);
+}
+
+/* Results */
+
+.conversation-history__results {
+  min-height: 0;
+  flex: 1;
+  padding: 2px 6px 10px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Rows answering an older search fade while their replacement is read. */
+.conversation-history__results[aria-busy="true"] .conversation-history__list {
+  opacity: 0.6;
+}
+
+.conversation-history__group-label {
+  margin: 0;
+  padding: 14px 12px 6px;
+  text-transform: lowercase;
+}
+
+.conversation-history__list {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.conversation-history__row {
+  position: relative;
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  gap: 14px;
+  border-left: 2px solid transparent;
+  transition:
+    background-color var(--duration-standard) var(--ease-standard),
+    opacity var(--duration-standard) var(--ease-standard);
+}
+
+.conversation-history__row:hover,
+.conversation-history__row:focus-within {
+  background: color-mix(in oklch, var(--lys-violet) 10%, transparent);
+}
+
+/* The open conversation is also named by its `open` tag, not by tone alone. */
+.conversation-history__row[data-current] {
+  border-left-color: var(--lys-violet);
+  background: color-mix(in oklch, var(--lys-violet) 18%, transparent);
+}
+
+.conversation-history__row[data-editing],
+.conversation-history__row[data-confirming] {
+  padding: 8px 12px;
+}
+
+.conversation-history__row[data-confirming] {
+  border-left-color: var(--app-border-danger);
+  background: var(--app-surface-danger);
+}
+
+.conversation-history__row[data-pending] {
+  opacity: 0.6;
+}
+
+.conversation-history__open {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 14px;
+  grid-template-columns: minmax(0, 40fr) minmax(0, 52fr) 50px;
+  padding: 10px 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* An inset ring stays visible where the scroll region clips the row edge. */
+.conversation-history__open:focus-visible {
+  outline-offset: -2px;
+}
+
+.conversation-history__open:disabled {
+  cursor: default;
+}
+
+.conversation-history__title-line {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+}
+
+.conversation-history__title {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--app-text-muted);
+  transition: color var(--duration-enter) var(--ease-standard);
+}
+
+.conversation-history__row:hover .conversation-history__title,
+.conversation-history__row:focus-within .conversation-history__title,
+.conversation-history__row[data-current] .conversation-history__title {
+  color: var(--app-text-strong);
+}
+
+.conversation-history__row[data-confirming] .conversation-history__title {
+  flex: 1 1 40%;
+  color: var(--app-text);
+}
+
+.conversation-history__tag {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--lys-violet);
+}
+
+.conversation-history__excerpt {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--app-text-faint);
+}
+
+.conversation-history__row[data-editing] .conversation-history__excerpt {
+  flex: 1 1 52%;
+}
+
+.conversation-history__excerpt mark {
+  border-radius: 2px;
+  background: color-mix(in oklch, var(--lys-violet) 42%, transparent);
+  color: var(--app-text-strong);
+}
+
+.conversation-history__time,
+.conversation-history__pending {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: nowrap;
+  color: var(--app-text-faint);
+}
+
+.conversation-history__time {
+  justify-self: end;
+}
+
+/*
+ * Hover or keyboard focus within a row trades its time for its actions. The
+ * actions stay focusable while faded, so reaching one with Tab reveals it.
+ */
+.conversation-history__actions,
+.conversation-history__pending {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  translate: 0 -50%;
+}
+
+.conversation-history__actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity var(--duration-standard) var(--ease-standard);
+}
+
+.conversation-history__row:hover .conversation-history__actions,
+.conversation-history__row:focus-within .conversation-history__actions {
+  opacity: 1;
+}
+
+.conversation-history__row:hover .conversation-history__time,
+.conversation-history__row:focus-within .conversation-history__time,
+.conversation-history__row[data-pending] .conversation-history__time {
+  visibility: hidden;
+}
+
+.conversation-history__icon-button {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-detail);
+  background: transparent;
+  color: var(--app-text-faint);
+  cursor: pointer;
+  transition:
+    color var(--duration-standard) var(--ease-standard),
+    background-color var(--duration-standard) var(--ease-standard);
+}
+
+.conversation-history__icon-button svg {
+  width: 12px;
+  height: 12px;
+}
+
+.conversation-history__icon-button:hover {
+  background: var(--app-surface-hover);
+  color: var(--app-text-strong);
+}
+
+.conversation-history__icon-button[data-tone="danger"]:hover {
+  background: var(--app-surface-danger);
+  color: var(--app-text-danger);
+}
+
+/* Renaming */
+
+.conversation-history__rename {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 40%;
+  align-items: center;
+  gap: 9px;
+}
+
+.conversation-history__rename-label {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--app-text-faint);
+}
+
+.conversation-history__rename-input {
+  min-width: 0;
+  flex: 1;
+  padding: 3px 6px;
+  border: 1px solid var(--app-border-interactive);
+  border-radius: var(--radius-control);
+  background: var(--app-surface-field);
+  color: var(--app-text-strong);
+  font-size: 13px;
+}
+
+/* Deleting */
+
+.conversation-history__confirm {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+}
+
+.conversation-history__confirm-text {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  color: var(--app-text-danger);
+}
+
+/* Notices */
+
+.conversation-history__notice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 22px 12px;
+}
+
+.conversation-history__notice p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  text-wrap: pretty;
+  color: var(--app-text-muted);
+}
+
+/* Status regions stay mounted while empty so later changes are announced. */
+.conversation-history__older {
+  padding: 8px 12px 0;
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--app-text-faint);
+}
+
+.conversation-history__older:empty,
+.conversation-history__error:empty {
+  padding: 0;
+}
+
+/* Footer */
+
+.conversation-history__footer {
+  flex: none;
+  border-top: 1px solid var(--app-border-subtle);
+  background: var(--app-surface-chrome);
+}
+
+.conversation-history__error {
+  padding: 9px 14px 0;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--app-text-danger);
+}
+
+.conversation-history__footer-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 9px 14px 10px;
+}
+
+.conversation-history__hint {
+  min-width: 0;
+  flex: 1;
+  margin: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--app-text-faint);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .conversation-history {
+    animation: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .conversation-history__open {
+    grid-template-columns: minmax(0, 1fr) 50px;
+  }
+
+  .conversation-history__open .conversation-history__excerpt {
+    display: none;
+  }
+}

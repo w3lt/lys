@@ -7,10 +7,16 @@ import type { ConversationAssistantMessageStatus } from "@lys/share"
 import { create, type StoreApi, type UseBoundStore } from "zustand"
 
 import { readChatEvents, type ChatApiOptions } from "@/lib/apis/http/chat"
+import {
+  getConversation,
+  type GetConversationResult
+} from "@/lib/apis/http/conversations"
+import { findEligibleChatModel } from "@/lib/models/model-residency"
 import { useLysStore } from "@/lib/store"
 
 import {
   type ChatViewConversation,
+  createStoredChatViewConversation,
   isStreamingConversationAssistantMessage,
   startConversationTurn,
   updateAssistantReplyContent,
@@ -35,23 +41,47 @@ export type ChatStream = (
 ) => AsyncGenerator<ChatApiStreamEvent, void, unknown>
 
 /**
+ * Reads one stored conversation to open in the chat view.
+ *
+ * @param conversationId - UUIDv7 of the conversation to open.
+ * @param signal - Store-owned signal aborted when the open is superseded.
+ * @returns The stored conversation, or the absence outcome when the backend
+ * reports that the conversation is not stored.
+ * @throws If opening, transporting, or validating the response fails.
+ */
+export type StoredConversationReader = (
+  conversationId: string,
+  signal: AbortSignal
+) => Promise<GetConversationResult>
+
+/**
  * Runtime dependencies used by one independently owned chat-view store.
  *
- * @remarks The store owns request tokens and the abort controller; these
- * dependencies provide only transport, timestamp, and generation-settings
- * capabilities. The store does not share request lifecycle state with another
- * store instance, and does not own the settings it reads.
+ * @remarks The store owns request and open tokens and their abort controllers;
+ * these dependencies provide only transport, stored-conversation reads,
+ * timestamps, model-selection, and generation-settings capabilities. The store
+ * does not share lifecycle
+ * state with another store instance, and does not own the settings it reads.
  */
 export type ChatViewStoreDependencies = {
   /** Opens the backend chat stream; the store supplies its owned abort signal. */
   readonly streamChat: ChatStream
+  /** Reads a stored conversation; the store supplies its owned abort signal. */
+  readonly getConversation: StoredConversationReader
   /** Creates the ISO timestamp recorded on each immutable transition. */
   readonly createTimestamp: () => string
   /**
+   * Finds the loaded model eligible to answer the next request.
+   *
+   * @returns The model key current at call time, or `null` when chat cannot be
+   * sent. Sampling is owned by {@link ChatViewActions.sendMessage}.
+   */
+  readonly findEligibleChatModel: () => string | null
+  /**
    * Reads the generation controls applied to the next request.
    *
-   * @returns The settings-owned controls current at call time; the store reads
-   * them once per request, so a later change applies to the following request.
+   * @returns The settings-owned controls current at call time. Sampling is
+   * owned by {@link ChatViewActions.sendMessage}.
    */
   readonly readGenerationOptions: () => MessageGenerationOptions
 }
@@ -94,11 +124,36 @@ export type ChatRequestState =
     }
 
 /**
+ * Lifecycle of replacing the chat view's conversation with a stored one.
+ *
+ * @remarks While a conversation is opening, the previously shown conversation
+ * stays visible and no chat request may start. The store alone owns the read
+ * and its cancellation; a superseded read can no longer change state.
+ */
+export type ConversationOpenState =
+  | {
+      /** No stored conversation is being opened. */
+      readonly status: "idle"
+    }
+  | {
+      /** A stored conversation is being read to replace the shown one. */
+      readonly status: "opening"
+      /** UUIDv7 of the conversation being opened. */
+      readonly conversationId: string
+      /**
+       * Exact composer draft when the open started; a successful open clears
+       * the draft only if it is still this text.
+       */
+      readonly replacedComposerDraft: string
+    }
+
+/**
  * Observable state rendered by the chat view.
  *
- * @remarks The store owns the draft, conversation snapshot, request phase, and
- * latest error. Conversation and message values are replaced immutably; the
- * UI may read them but cannot mutate the store's authoritative values.
+ * @remarks The store owns the draft, conversation snapshot, request phase,
+ * conversation-open phase, and latest error. Conversation and message values
+ * are replaced immutably; the UI may read them but cannot mutate the store's
+ * authoritative values.
  */
 export type ChatViewState = {
   /** Current composer text. */
@@ -107,47 +162,78 @@ export type ChatViewState = {
   readonly conversation?: ChatViewConversation
   /** Single authoritative observable request lifecycle state. */
   readonly request: ChatRequestState
-  /** Latest lifecycle error shown inline, or undefined when clear. */
+  /** Whether a stored conversation is being opened to replace the shown one. */
+  readonly conversationOpen: ConversationOpenState
+  /** Latest admission or lifecycle error shown inline, or undefined when clear. */
   readonly error?: string
 }
 
 /**
  * Actions that mutate or advance the chat lifecycle.
  *
- * @remarks `sendMessage` resolves after stream completion, failure, or request
- * invalidation. `stopStreaming` and `resetConversation` abort the store-owned
+ * @remarks `openConversation` resolves after the read commits, fails, or is
+ * superseded. `stopStreaming` and `resetConversation` abort the store-owned
  * transport; reset additionally discards the conversation and error.
  */
 export type ChatViewActions = {
   /** Replaces the composer draft with user-entered text. */
   setInputDraft: (draft: string) => void
-  /** Submits an explicit starter prompt or the current composer draft. */
+  /**
+   * Submits an explicit starter prompt or current composer draft when a loaded
+   * model is eligible.
+   *
+   * @param explicitPrompt - Optional starter prompt; omission submits the
+   * current composer draft.
+   * @returns A promise that resolves without opening a stream when a request is
+   * active, a stored conversation is opening, the prompt is empty, or no loaded
+   * model is eligible; otherwise it resolves after stream completion, failure,
+   * or invalidation.
+   * @remarks An unavailable model records an inline error and preserves the
+   * draft and conversation. An active request, an opening conversation, or an
+   * empty prompt is ignored.
+   * The eligible model and generation controls are sampled once before request
+   * ownership begins; later edits affect only later requests.
+   */
   sendMessage: (explicitPrompt?: string) => Promise<void>
   /** Interrupts the active assistant reply without affecting prior history. */
   stopStreaming: () => void
   /** Silently invalidates active work and restores initial chat state. */
   resetConversation: () => void
+  /** Opens a stored conversation, replacing the shown one once it is read. */
+  openConversation: (conversationId: string) => Promise<void>
+  /** Restores initial state when the view presents the identified conversation. */
+  closeConversation: (conversationId: string) => void
 }
 
 /** State and actions exposed by one independently owned chat-view store. */
 export type ChatViewStore = ChatViewState & ChatViewActions
 
-/** Model identifier sent by the current chat lifecycle integration. */
-const CHAT_MODEL = "google/gemma-4-12b-qat"
-
 /** Error shown when an owned stream closes before its done event. */
 const PREMATURE_STREAM_CLOSE_MESSAGE = "Chat stream ended before completion."
+
+/** Error shown when a conversation chosen for opening is no longer stored. */
+const MISSING_CONVERSATION_MESSAGE = "That conversation no longer exists."
+
+/** Shared idle request state; it carries no per-request data. */
+const IDLE_CHAT_REQUEST: ChatRequestState = Object.freeze({ status: "idle" })
+
+/** Shared idle open state; it carries no per-open data. */
+const IDLE_CONVERSATION_OPEN: ConversationOpenState = Object.freeze({
+  status: "idle"
+})
 
 /**
  * Initial observable state used as a fresh value by independent stores.
  *
- * @remarks The outer and request objects are frozen to prevent accidental
- * mutation; reset reuses this immutable snapshot and aborts the prior owner.
+ * @remarks The outer, request, and open objects are frozen to prevent
+ * accidental mutation; reset reuses this immutable snapshot and aborts the
+ * prior owners.
  */
 const INITIAL_CHAT_VIEW_STATE: Readonly<ChatViewState> = Object.freeze({
   inputDraft: "",
   conversation: undefined,
-  request: Object.freeze({ status: "idle" }),
+  request: IDLE_CHAT_REQUEST,
+  conversationOpen: IDLE_CONVERSATION_OPEN,
   error: undefined
 })
 
@@ -176,11 +262,31 @@ type ChatRequestResource = {
   readonly abortController: AbortController
 }
 
+/** Store-private read resource correlated with one conversation open. */
+type ConversationOpenResource = {
+  /** Token authorizing this open to commit its outcome. */
+  readonly token: number
+  /** Controller owned exclusively by the store. */
+  readonly abortController: AbortController
+}
+
 /** Request state whose backend-identified reply is accepting deltas. */
 type StreamingChatReplyState = Extract<
   ChatRequestState,
   { status: "reply-streaming" }
 >
+
+/** Inputs sampled to create one immutable chat request payload. */
+type CreateChatRequestPayloadInput = {
+  /** Existing conversation identifier, when continuing a conversation. */
+  readonly conversationId: string | undefined
+  /** Trimmed prompt prepared for this turn. */
+  readonly submittedPrompt: string
+  /** Loaded model selected for this request. */
+  readonly model: string
+  /** Settings-owned generation controls for this request. */
+  readonly generationOptions: MessageGenerationOptions
+}
 
 /**
  * Converts an unknown thrown value into a user-presentable lifecycle error.
@@ -192,6 +298,18 @@ function formatLifecycleErrorMessage(error: unknown): string {
   return error instanceof Error && error.message
     ? error.message
     : "Chat request failed."
+}
+
+/**
+ * Converts an unknown value thrown while opening a conversation into an error.
+ *
+ * @param error - Value thrown while reading or converting the conversation.
+ * @returns A non-empty message naming the failed open and its reason.
+ */
+function formatConversationOpenErrorMessage(error: unknown): string {
+  return error instanceof Error && error.message
+    ? `The conversation could not be opened: ${error.message}`
+    : "The conversation could not be opened."
 }
 
 /**
@@ -225,32 +343,33 @@ function createChatRequestResource(token: number): ChatRequestResource {
 /**
  * Creates the current chat payload with conversation absence represented by omission.
  *
- * @param conversationId - Existing conversation identifier, when continuing.
- * @param submittedPrompt - Trimmed prompt prepared for this turn.
- * @param generationOptions - Settings-owned controls for this request.
+ * @param input - Model, prompt, conversation, and generation values sampled for
+ * this request.
  * @returns The complete payload for a new or existing conversation.
  * @remarks The request contract is strict, so conversation absence is
  * represented by omitting the identifier rather than sending an empty one.
  */
-function createChatRequestPayload(
-  conversationId: string | undefined,
-  submittedPrompt: string,
-  generationOptions: MessageGenerationOptions
-): ChatApiRequestBody {
-  return conversationId
+function createChatRequestPayload({
+  conversationId,
+  submittedPrompt,
+  model,
+  generationOptions
+}: CreateChatRequestPayloadInput): ChatApiRequestBody {
+  return conversationId !== undefined
     ? {
         conversationId,
         message: submittedPrompt,
-        model: CHAT_MODEL,
+        model,
         generationOptions
       }
-    : { message: submittedPrompt, model: CHAT_MODEL, generationOptions }
+    : { message: submittedPrompt, model, generationOptions }
 }
 
 /**
  * Creates one independently owned chat-view store.
  *
- * @param dependencies - Transport and timestamp providers for one store.
+ * @param dependencies - Transport, timestamp, model-selection, and generation
+ * providers for one store.
  * @returns A Zustand hook and store API owning one chat lifecycle.
  */
 export function createChatViewStore(
@@ -260,6 +379,10 @@ export function createChatViewStore(
   let nextRequestToken = 1
   /** Current store-owned abort resource, or absent after invalidation. */
   let activeRequestResource: ChatRequestResource | undefined
+  /** Next open token issued by this store; tokens never authorize another store. */
+  let nextOpenToken = 1
+  /** Current store-owned conversation read, or absent when none is owned. */
+  let activeOpenResource: ConversationOpenResource | undefined
 
   /**
    * Creates the state and actions that own this store's request lifecycle.
@@ -529,9 +652,10 @@ export function createChatViewStore(
      * @param token - Token whose ownership authorizes event side effects.
      * @throws If an in-order handler detects a request or conversation
      * invariant violation.
-     * @remarks A stale token is ignored without error. An `error` event only
-     * records the latest inline error; it is non-terminal, so later `title` or
-     * `done` events may still be applied while this token remains active.
+     * @remarks A stale token is ignored without error. An `error` event records
+     * the latest inline error. The backend contract sends no later `done`, but
+     * an independently running title task may still send `title` while this
+     * token remains active.
      */
     function handleChatStreamEvent(
       event: ChatApiStreamEvent,
@@ -584,13 +708,15 @@ export function createChatViewStore(
      * @param request - Awaiting observable state correlated with the transport.
      * @returns A promise that resolves after completion, failure, or invalidation.
      * @remarks Events are consumed in arrival order. An `error` notification
-     * records the latest inline error but does not end iteration; a later
-     * `title` or `done` event may still complete the request. A normal `done`
-     * event makes the assistant terminal; a close before `done` records
-     * failure with the latest stream error or the premature-close message.
-     * Stale queued events and failures are ignored silently after token
-     * invalidation. The finally block releases the active resource and returns
-     * the request to idle only while this token still owns both representations.
+     * records the latest inline error. The backend contract sends no later
+     * `done`, but the stream may stay open while an independently running title
+     * task settles, so `title` may still arrive. Stream closure without `done`
+     * records request failure and marks the assistant failed with the latest
+     * stream error or the premature-close message. A normal `done` event makes
+     * the assistant terminal. Stale queued events and failures are ignored
+     * silently after token invalidation. The finally block releases the active
+     * resource and returns the request to idle only while this token still owns
+     * both representations.
      */
     async function readChatStream(
       payload: ChatApiRequestBody,
@@ -639,13 +765,25 @@ export function createChatViewStore(
     }
 
     /**
-     * Submits an explicit starter prompt or the current composer draft.
+     * Reports whether a new chat request may take ownership of the lifecycle.
+     *
+     * @returns Whether no request is active and no conversation is opening.
+     */
+    function canStartChatRequest(): boolean {
+      const { request, conversationOpen } = get()
+
+      return request.status === "idle" && conversationOpen.status === "idle"
+    }
+
+    /**
+     * Implements {@link ChatViewActions.sendMessage} for this store.
      *
      * @param explicitPrompt - Optional starter prompt supplied outside composer.
-     * @returns A promise that resolves after this request loses or ends ownership.
+     * @returns A promise with the admission and settlement semantics defined
+     * by {@link ChatViewActions.sendMessage}.
      */
     async function sendMessage(explicitPrompt?: string): Promise<void> {
-      if (get().request.status !== "idle") return
+      if (!canStartChatRequest()) return
 
       const promptSource =
         explicitPrompt === undefined ? get().inputDraft : explicitPrompt
@@ -653,16 +791,25 @@ export function createChatViewStore(
         explicitPrompt === undefined ? promptSource : undefined
       const submittedPrompt = promptSource.trim()
       if (!submittedPrompt) return
+      const model = dependencies.findEligibleChatModel()
+      if (model === null) {
+        set({
+          error:
+            "Chat is unavailable. Check the backend and loaded model in Settings → Model, then try again."
+        })
+        return
+      }
 
       const token = nextRequestToken
       nextRequestToken += 1
       const request = createAwaitingTurnRequest(token, submittedComposerDraft)
       const resource = createChatRequestResource(token)
-      const payload = createChatRequestPayload(
-        get().conversation?.id,
+      const payload = createChatRequestPayload({
+        conversationId: get().conversation?.id,
         submittedPrompt,
-        dependencies.readGenerationOptions()
-      )
+        model,
+        generationOptions: dependencies.readGenerationOptions()
+      })
 
       activeRequestResource = resource
       set({
@@ -702,15 +849,216 @@ export function createChatViewStore(
     /**
      * Restores initial chat state and silently aborts any active transport.
      *
-     * @remarks Reset invalidates the token before aborting, clears draft,
-     * conversation, request, and error together, and intentionally reports no
-     * cancellation error from the superseded stream.
+     * @remarks Reset invalidates the request and open tokens before aborting,
+     * clears draft, conversation, request, open, and error together, and
+     * intentionally reports no cancellation error from superseded work.
      */
     function resetConversation(): void {
-      const resource = activeRequestResource
+      const requestResource = activeRequestResource
+      const openResource = activeOpenResource
       activeRequestResource = undefined
+      activeOpenResource = undefined
       set(INITIAL_CHAT_VIEW_STATE)
-      resource?.abortController.abort()
+      requestResource?.abortController.abort()
+      openResource?.abortController.abort()
+    }
+
+    /**
+     * Reports whether the view already shows a conversation with no open pending.
+     *
+     * @param conversationId - Conversation requested for opening.
+     * @returns Whether opening it again would change nothing.
+     */
+    function isConversationShown(conversationId: string): boolean {
+      const { conversation, conversationOpen } = get()
+
+      return (
+        conversationOpen.status === "idle" &&
+        conversation?.id === conversationId
+      )
+    }
+
+    /**
+     * Reports whether the view presents, or is about to present, a conversation.
+     *
+     * @param conversationId - Conversation whose presentation is checked.
+     * @returns Whether it is the conversation being opened, or the shown
+     * conversation when no other conversation is opening.
+     */
+    function isConversationPresented(conversationId: string): boolean {
+      const { conversation, conversationOpen } = get()
+
+      return conversationOpen.status === "opening"
+        ? conversationOpen.conversationId === conversationId
+        : conversation?.id === conversationId
+    }
+
+    /**
+     * Reports whether a token still owns the conversation read.
+     *
+     * @param token - Open token attempting to commit its outcome.
+     * @returns Whether that open has not been superseded or reset.
+     */
+    function isOpenOwned(token: number): boolean {
+      return activeOpenResource?.token === token
+    }
+
+    /**
+     * Calculates the shown conversation after its active reply is abandoned.
+     *
+     * @returns The current conversation with any streaming reply owned by the
+     * active request marked interrupted, or the unchanged conversation.
+     */
+    function calculateInterruptedConversation():
+      ChatViewConversation | undefined {
+      const { conversation, request } = get()
+      if (request.status === "idle") return conversation
+
+      return updateIncompleteAssistantReplyStatus(
+        conversation,
+        request,
+        "interrupted"
+      )
+    }
+
+    /**
+     * Calculates the composer draft kept when an opened conversation is shown.
+     *
+     * @returns An empty draft when the composer still holds the text it had
+     * when the open started, or the text typed while the conversation opened.
+     */
+    function calculateOpenedConversationDraft(): string {
+      const { inputDraft, conversationOpen } = get()
+      const isDraftUnchanged =
+        conversationOpen.status === "opening" &&
+        inputDraft === conversationOpen.replacedComposerDraft
+
+      return isDraftUnchanged ? "" : inputDraft
+    }
+
+    /**
+     * Updates the view with the outcome of an owned conversation read.
+     *
+     * @param result - Stored conversation or absence outcome from the backend.
+     * @throws If the stored conversation violates a transcript invariant; the
+     * caller still owns the open and records that failure.
+     */
+    function updateViewWithStoredConversation(
+      result: GetConversationResult
+    ): void {
+      switch (result.status) {
+        case "found": {
+          const conversation = createStoredChatViewConversation(
+            result.conversation
+          )
+          const inputDraft = calculateOpenedConversationDraft()
+          activeOpenResource = undefined
+          set({
+            conversation,
+            inputDraft,
+            error: undefined,
+            conversationOpen: IDLE_CONVERSATION_OPEN
+          })
+          return
+        }
+        case "not-found":
+          activeOpenResource = undefined
+          set({
+            error: MISSING_CONVERSATION_MESSAGE,
+            conversationOpen: IDLE_CONVERSATION_OPEN
+          })
+          return
+      }
+    }
+
+    /**
+     * Loads one stored conversation into the view through commit or failure.
+     *
+     * @param conversationId - Conversation being opened.
+     * @param resource - Private read resource owned by this open.
+     * @returns A promise that resolves after the outcome commits, the failure
+     * is recorded, or the open is superseded.
+     * @remarks Superseded reads are ignored silently, including their
+     * failures, because a newer open, reset, or close already owns the view.
+     */
+    async function loadStoredConversation(
+      conversationId: string,
+      resource: ConversationOpenResource
+    ): Promise<void> {
+      try {
+        const result = await dependencies.getConversation(
+          conversationId,
+          resource.abortController.signal
+        )
+        if (!isOpenOwned(resource.token)) return
+        updateViewWithStoredConversation(result)
+      } catch (error) {
+        if (!isOpenOwned(resource.token)) return
+        activeOpenResource = undefined
+        set({
+          error: formatConversationOpenErrorMessage(error),
+          conversationOpen: IDLE_CONVERSATION_OPEN
+        })
+      }
+    }
+
+    /**
+     * Opens a stored conversation, replacing the shown one once it is read.
+     *
+     * @param conversationId - UUIDv7 of the stored conversation to open.
+     * @returns A promise that resolves after the read commits, fails, or is
+     * superseded by a newer open, reset, or close.
+     * @remarks Opening the conversation already shown is ignored. Otherwise
+     * the active request, if any, is invalidated first: its streaming reply is
+     * marked interrupted and its transport and any earlier open are aborted.
+     * The previous conversation stays visible until the read succeeds. A
+     * successful open clears the draft only if it still holds the text present
+     * when the open started, so text typed while opening is kept. A missing
+     * conversation or a failed read leaves the previous conversation with an
+     * inline error.
+     */
+    async function openConversation(conversationId: string): Promise<void> {
+      if (isConversationShown(conversationId)) return
+
+      const resource: ConversationOpenResource = {
+        token: nextOpenToken,
+        abortController: new AbortController()
+      }
+      nextOpenToken += 1
+      const conversation = calculateInterruptedConversation()
+      const conversationOpen: ConversationOpenState = {
+        status: "opening",
+        conversationId,
+        replacedComposerDraft: get().inputDraft
+      }
+      const supersededRequest = activeRequestResource
+      const supersededOpen = activeOpenResource
+      activeRequestResource = undefined
+      activeOpenResource = resource
+      set({
+        conversation,
+        request: IDLE_CHAT_REQUEST,
+        conversationOpen,
+        error: undefined
+      })
+      supersededRequest?.abortController.abort()
+      supersededOpen?.abortController.abort()
+      await loadStoredConversation(conversationId, resource)
+    }
+
+    /**
+     * Restores initial state when the view presents a removed conversation.
+     *
+     * @param conversationId - Conversation that is no longer stored.
+     * @remarks When the identified conversation is shown or being opened, this
+     * behaves as {@link resetConversation}, including discarding the draft.
+     * Otherwise, including while a different conversation is opening to
+     * replace it, nothing changes.
+     */
+    function closeConversation(conversationId: string): void {
+      if (!isConversationPresented(conversationId)) return
+
+      resetConversation()
     }
 
     return {
@@ -718,7 +1066,9 @@ export function createChatViewStore(
       setInputDraft,
       sendMessage,
       stopStreaming,
-      resetConversation
+      resetConversation,
+      openConversation,
+      closeConversation
     }
   }
 
@@ -726,20 +1076,44 @@ export function createChatViewStore(
 }
 
 /**
+ * Reads a stored conversation from the backend the application store names.
+ *
+ * @param conversationId - UUIDv7 of the conversation to open.
+ * @param signal - Store-owned signal aborted when the open is superseded.
+ * @returns The stored conversation or the absence outcome.
+ * @throws If the request, transport, or response validation fails.
+ * @remarks The backend origin is sampled when the read starts.
+ */
+function getStoredConversation(
+  conversationId: string,
+  signal: AbortSignal
+): Promise<GetConversationResult> {
+  const backendUrl = useLysStore.getState().backendUrl
+
+  return getConversation(conversationId, { backendUrl, signal })
+}
+
+/**
  * Chat-view store used by the desktop React tree.
  *
- * @remarks This singleton owns the live browser request lifecycle. Tests or
- * alternate compositions should call {@link createChatViewStore} to obtain a
- * separate token and abort-resource owner. Generation controls are read from
- * the application store at send time, so the request carries the settings
- * shown by the Generation pane; the two controls are named explicitly because
- * the request contract rejects unknown fields. A saved zero ceiling is omitted
- * so the backend receives no explicit completion-token limit.
+ * @remarks This singleton owns the live browser request and open lifecycles.
+ * Tests or alternate compositions should call {@link createChatViewStore} to
+ * obtain separate token and abort-resource owners. Application-store
+ * dependencies supply the model and Generation controls to
+ * {@link ChatViewActions.sendMessage}. The two generation controls are named
+ * explicitly because the request contract rejects unknown fields. A saved zero
+ * ceiling is omitted so the backend receives no explicit completion-token limit.
  */
 export const useChatViewStore: UseBoundStore<StoreApi<ChatViewStore>> =
   createChatViewStore({
     streamChat: readChatEvents,
+    getConversation: getStoredConversation,
     createTimestamp: () => new Date().toISOString(),
+    findEligibleChatModel: () => {
+      const { backendServerInfo, modelRuntime } = useLysStore.getState()
+
+      return findEligibleChatModel(backendServerInfo.status, modelRuntime)
+    },
     readGenerationOptions: () => {
       const { temperature, replyCeiling } =
         useLysStore.getState().settings.generation

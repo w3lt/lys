@@ -5,8 +5,7 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "dependencies": {
-    "zod": "^4.4.3",
-    "@lys/share": "workspace:*"
-  },
-  "version": "0.2.0"
+    "@lys/share": "workspace:*",
+    "zod": "^4.6.5"
+  }
 }

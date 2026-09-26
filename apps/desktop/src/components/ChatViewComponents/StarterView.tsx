@@ -28,10 +28,8 @@ export default function StarterView({ onSend }: StarterViewProps) {
       <h1>Lys</h1>
       <p className="chat-view__eyebrow">Lysiptera Caliginia</p>
       <p className="chat-view__subtitle">
-        One model. One conversation. Nothing leaves this machine.
-      </p>
-      <p className="chat-view__session-note">
-        This conversation exists for this session only.
+        One model, one conversation at a time. The transcripts stay on this
+        machine.
       </p>
       <div className="chat-view__starters" aria-label="Starter prompts">
         {STARTER_PROMPTS.map((prompt) => (

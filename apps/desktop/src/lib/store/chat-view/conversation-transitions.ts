@@ -3,6 +3,7 @@ import type {
   Conversation,
   ConversationAssistantMessage,
   ConversationAssistantMessageFinishReason,
+  ConversationMessage,
   ConversationMetadata,
   ConversationUserMessage
 } from "@lys/share"
@@ -303,4 +304,113 @@ export function updateAssistantReplyStatus(
     ...conversation,
     messages
   })
+}
+
+/**
+ * Creates one immutable terminal assistant from a stored assistant record.
+ *
+ * @param message - Schema-validated assistant read from conversation storage.
+ * @returns A frozen terminal assistant valid in the completed prefix.
+ * @throws If a completed message lacks a finish reason, or an interrupted or
+ * failed message carries one; storage constraints forbid both.
+ * @remarks A stored `streaming` status means the backend has not finalized the
+ * reply. No request in this chat view owns that generation, so it can receive
+ * no further content here; it is presented as interrupted with the content
+ * stored so far. The stored record itself is not changed.
+ */
+function createStoredAssistantMessage(
+  message: ConversationAssistantMessage
+): TerminalConversationAssistantMessage {
+  switch (message.status) {
+    case "streaming":
+      return Object.freeze({
+        id: message.id,
+        createdAt: message.createdAt,
+        model: message.model,
+        role: message.role,
+        content: message.content,
+        status: "interrupted",
+        finishReason: null,
+        updatedAt: message.updatedAt
+      })
+    case "completed":
+      if (message.finishReason === null) {
+        throw new Error(`Stored reply ${message.id} has no finish reason`)
+      }
+      return Object.freeze({
+        id: message.id,
+        createdAt: message.createdAt,
+        model: message.model,
+        role: message.role,
+        content: message.content,
+        status: message.status,
+        finishReason: message.finishReason,
+        updatedAt: message.updatedAt
+      })
+    case "interrupted":
+    case "failed":
+      if (message.finishReason !== null) {
+        throw new Error(`Stored reply ${message.id} has a finish reason`)
+      }
+      return Object.freeze({
+        id: message.id,
+        createdAt: message.createdAt,
+        model: message.model,
+        role: message.role,
+        content: message.content,
+        status: message.status,
+        finishReason: message.finishReason,
+        updatedAt: message.updatedAt
+      })
+  }
+}
+
+/**
+ * Creates one immutable completed-prefix message from a stored record.
+ *
+ * @param message - Schema-validated message read from conversation storage.
+ * @returns A frozen user message or terminal assistant.
+ * @throws If a stored assistant violates its status and finish-reason pairing.
+ */
+function createStoredConversationMessage(
+  message: ConversationMessage
+): CompletedConversationMessage {
+  if (message.role === "assistant") {
+    return createStoredAssistantMessage(message)
+  }
+
+  return Object.freeze({
+    id: message.id,
+    createdAt: message.createdAt,
+    role: message.role,
+    content: message.content
+  })
+}
+
+/**
+ * Creates the chat-view conversation for a stored conversation being opened.
+ *
+ * @param conversation - Schema-validated conversation read from storage.
+ * @returns A transitively frozen conversation whose transcript contains only
+ * completed-prefix messages in stored order.
+ * @throws If a stored assistant violates its status and finish-reason pairing.
+ * @remarks Every stored `streaming` assistant becomes interrupted, so the
+ * resulting transcript has no streaming tail and a later turn may be appended
+ * after it.
+ */
+export function createStoredChatViewConversation(
+  conversation: Conversation
+): ChatViewConversation {
+  const messages = Object.freeze(
+    conversation.messages.map(createStoredConversationMessage)
+  )
+
+  return Object.freeze({
+    id: conversation.id,
+    title: conversation.title,
+    systemPrompt: conversation.systemPrompt,
+    messages,
+    createdAt: conversation.createdAt,
+    updatedAt: conversation.updatedAt
+  } satisfies ChatViewConversation)
 }

@@ -219,6 +219,8 @@
   --app-surface-code: oklch(0.92 0.025 280);
   --app-surface-code-header: oklch(0.88 0.035 278);
   --app-surface-danger: oklch(0.95 0.045 25);
+  /* Dims the workspace behind a floating panel without hiding its content. */
+  --app-surface-veil: oklch(0.3 0.06 294 / 18%);
 
   --app-text-strong: var(--foreground);
   --app-text: oklch(0.27 0.04 286);
@@ -380,6 +382,7 @@
   --app-surface-code: oklch(0.165 0.038 288);
   --app-surface-code-header: oklch(0.2 0.045 290);
   --app-surface-danger: oklch(0.24 0.07 25 / 72%);
+  --app-surface-veil: oklch(0.06 0.03 294 / 58%);
 
   --app-text: oklch(0.9 0.02 240);
   --app-text-faint: oklch(0.66 0.03 258);

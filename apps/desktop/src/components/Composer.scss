@@ -319,6 +319,11 @@
   color: var(--app-text-strong);
 }
 
+/* An open disclosure keeps its trigger lit; `aria-expanded` also states it. */
+.composer__icon-button[aria-expanded="true"] {
+  color: var(--lys-violet);
+}
+
 .composer__divider {
   width: 1px;
   height: 12px;
@@ -396,7 +401,7 @@
   rotate: 180deg;
 }
 
-.composer__generating {
+.composer__activity {
   font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.12em;
@@ -685,7 +690,7 @@
     padding-inline: 16px;
   }
 
-  .composer__generating,
+  .composer__activity,
   .composer__model-label {
     display: none;
   }

@@ -53,11 +53,16 @@ input:focus-visible,
   background: var(--app-surface);
 }
 
+/*
+ * A grid rather than a column, so layers such as past conversations can share
+ * the transcript's cell and sit flush against the composer's top edge.
+ */
 .app-shell__chat {
-  display: flex;
+  display: grid;
   min-height: 0;
   flex: 1;
-  flex-direction: column;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
 }
 
 .app-shell__settings-route {

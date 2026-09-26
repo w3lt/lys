@@ -33,9 +33,12 @@ export const chatApiRequestBodySchema = z.strictObject({
  * Validates the discriminated SSE event variants emitted by the chat route.
  *
  * @remarks The backend emits a start event before generation events. A `done`
- * event terminates successful model generation; title and error events may be
- * emitted by concurrent route tasks as they settle. The `type` discriminant is
- * the compatibility boundary used by desktop consumers.
+ * event terminates successful model generation, and an `error` event reports a
+ * chat generation failure. A `title` event follows the start event either to
+ * reconcile an existing persisted title or to publish a newly persisted title.
+ * A generated title may arrive before, between, or after chat events because
+ * its task runs concurrently. The `type` discriminant is the compatibility
+ * boundary used by desktop consumers.
  */
 export const chatApiStreamEventSchema = z.discriminatedUnion("type", [
   z.strictObject({
@@ -58,7 +61,7 @@ export const chatApiStreamEventSchema = z.discriminatedUnion("type", [
 
   z.strictObject({
     type: z.literal("title"),
-    /** Non-empty title generated for the conversation. */
+    /** Non-empty persisted title for the conversation. */
     title: z.string().min(1)
   }),
 

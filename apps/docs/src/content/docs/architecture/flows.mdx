@@ -36,8 +36,13 @@ This process observation does not establish that the backend HTTP API is ready.
    `start-existing-conversation-turn` event.
 6. The backend streams zero or more `delta` events, then a `done` event when the
    model finishes successfully.
-7. After the turn-start event, a parallel title task may emit a `title` event
-   before, during, or after the assistant deltas and completion.
+7. For an existing conversation with a stored title, the backend emits that
+   title immediately after the turn-start event to reconcile desktop metadata.
+   When the conversation has no stored title, a parallel title task requests a
+   title after the turn-start event. The first usable title assigned is emitted
+   before, during, or after the assistant deltas and completion. An untitled
+   turn whose title task neither generates nor assigns a title sends no title
+   event; another turn may generate one while the conversation remains untitled.
 8. The desktop applies each event to immutable local conversation state.
 
 ## Stop an in-flight reply

@@ -33,7 +33,10 @@ export async function buildApp(options: BuildAppOptions) {
   // =============== REGISTER THE ROUTES =============== //
   await app.register(registerHealthRoutes)
   await app.register(updateFastifyWithLlmRoutes)
-  await app.register(registerChatRoutes)
+  await app.register(registerChatRoutes, {
+    lysSystemPrompt: options.config.lysSystemPrompt,
+    titleGenerationMaxAttempts: options.config.titleGenerationMaxAttempts
+  })
   await app.register(updateFastifyWithConversationRoutes)
   // =============== REGISTER THE ROUTES =============== //
 

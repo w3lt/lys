@@ -52,6 +52,7 @@ function handleStreamingRecovery(context: TestContext): void {
   )
   assert.equal(renamed?.updatedAt, conversation.updatedAt)
   const turn = store.createTurnAccess().createConversationTurn({
+    systemPrompt: "Test system prompt",
     conversationId: conversation.id,
     model: "test",
     userMessageContent: "Continue"
@@ -70,9 +71,11 @@ function handleHistoricalVersion(context: TestContext, version: number): void {
   historical.exec(legacyMigrations.slice(0, version).join(";\n"))
   historical.exec(`PRAGMA user_version = ${version}`)
   using store = SqliteConversationStore.open(databasePath)
-  const turn = store
-    .createTurnAccess()
-    .createConversationTurn({ model: "test", userMessageContent: "Migrated" })
+  const turn = store.createTurnAccess().createConversationTurn({
+    systemPrompt: "Test system prompt",
+    model: "test",
+    userMessageContent: "Migrated"
+  })
   assert.equal(
     store.createHistoryAccess().getConversation(turn.conversation.id)?.messages
       .length,

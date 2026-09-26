@@ -3,6 +3,7 @@ import type { ChatCompletionChunk } from "openai/resources/index.mjs"
 import type { CompleteChatOptions } from "../../../di/services/chatService"
 import type { AssistantMessageCompletion } from "../../../di/services/conversationService/share"
 import type { ConversationAssistantMessageFinishReason } from "@lys/share"
+import { ChatCompletionCancelledError } from "../../../utils/errors"
 import {
   createEventSender,
   type ChatRouteReply,
@@ -61,9 +62,14 @@ export default async function createChatTask(
     }
   } catch (error) {
     options.request.log.error({ err: error }, "Chat completion stream failed")
+    // The upstream reports a cancelled stream even when this route has not yet
+    // observed its own abort, so both indicate an interrupted reply.
+    const isCancelled =
+      options.abortSignal.aborted ||
+      error instanceof ChatCompletionCancelledError
     try {
       options.updateAssistantMessageState({
-        status: options.abortSignal.aborted ? "interrupted" : "failed"
+        status: isCancelled ? "interrupted" : "failed"
       })
     } catch (persistenceFailure) {
       throw new AggregateError(
@@ -72,7 +78,7 @@ export default async function createChatTask(
         { cause: persistenceFailure }
       )
     }
-    if (options.abortSignal.aborted) return
+    if (isCancelled) return
     if (options.reply.sse.isConnected) {
       await createEventSender(options.reply)({
         type: "error",

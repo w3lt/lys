@@ -208,6 +208,7 @@ test("Tauri DELETE preflight succeeds", handleDeletePreflight)
 function createTitledConversation(store: SqliteConversationStore) {
   const turns = store.createTurnAccess()
   const first = turns.createConversationTurn({
+    systemPrompt: "Test system prompt",
     model: "test",
     userMessageContent: "Earlier question"
   })

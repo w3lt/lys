@@ -10,6 +10,7 @@ function handlePersistedTurn(): void {
   using store = SqliteConversationStore.open(":memory:")
   const turns = store.createTurnAccess()
   const turn = turns.createConversationTurn({
+    systemPrompt: "Test system prompt",
     model: "test",
     userMessageContent: "Prompt"
   })
@@ -58,7 +59,11 @@ function handleAtomicTurn(): void {
   const history = store.createHistoryAccess()
   assert.throws(
     () =>
-      turns.createConversationTurn({ model: "", userMessageContent: "Prompt" }),
+      turns.createConversationTurn({
+        systemPrompt: "Test system prompt",
+        model: "",
+        userMessageContent: "Prompt"
+      }),
     { name: "ZodError" }
   )
   assert.equal(
@@ -66,12 +71,14 @@ function handleAtomicTurn(): void {
     0
   )
   const first = turns.createConversationTurn({
+    systemPrompt: "Test system prompt",
     model: "test",
     userMessageContent: "First"
   })
   assert.throws(
     () =>
       turns.createConversationTurn({
+        systemPrompt: "Test system prompt",
         conversationId: first.conversation.id,
         model: "",
         userMessageContent: "Invalid"
@@ -90,6 +97,7 @@ function handleLateWrites(): void {
   const turns = store.createTurnAccess()
   const history = store.createHistoryAccess()
   const turn = turns.createConversationTurn({
+    systemPrompt: "Test system prompt",
     model: "test",
     userMessageContent: "Prompt"
   })
@@ -136,6 +144,7 @@ function handleClosedStore(): void {
   assert.throws(
     () =>
       turns.createConversationTurn({
+        systemPrompt: "Test system prompt",
         model: "test",
         userMessageContent: "Late"
       }),
@@ -153,6 +162,7 @@ function handleContinuationContext(): void {
   const turns = store.createTurnAccess()
   const conversationId = createContextFixture(turns)
   const current = turns.createConversationTurn({
+    systemPrompt: "Test system prompt",
     conversationId,
     model: "test",
     userMessageContent: "Continue"
@@ -192,6 +202,7 @@ test(
  */
 function createContextFixture(turns: SqliteConversationTurns): string {
   const first = turns.createConversationTurn({
+    systemPrompt: "Test system prompt",
     model: "test",
     userMessageContent: "First"
   })
@@ -203,6 +214,7 @@ function createContextFixture(turns: SqliteConversationTurns): string {
     status: "interrupted"
   })
   const failed = turns.createConversationTurn({
+    systemPrompt: "Test system prompt",
     conversationId: first.conversation.id,
     model: "test",
     userMessageContent: "Second"
@@ -215,6 +227,7 @@ function createContextFixture(turns: SqliteConversationTurns): string {
     status: "failed"
   })
   const empty = turns.createConversationTurn({
+    systemPrompt: "Test system prompt",
     conversationId: first.conversation.id,
     model: "test",
     userMessageContent: "Third"
@@ -223,6 +236,7 @@ function createContextFixture(turns: SqliteConversationTurns): string {
     status: "interrupted"
   })
   const pending = turns.createConversationTurn({
+    systemPrompt: "Test system prompt",
     conversationId: first.conversation.id,
     model: "test",
     userMessageContent: "Fourth"

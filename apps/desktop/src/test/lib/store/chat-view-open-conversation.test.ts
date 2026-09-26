@@ -76,6 +76,7 @@ function createHarness() {
       return result.promise
     },
     createTimestamp: () => FIXTURE_TIMESTAMP,
+    findEligibleChatModel: () => "fixture/model",
     readGenerationOptions: () => ({ temperature: 0.7 })
   })
 

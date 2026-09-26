@@ -11,6 +11,7 @@ import {
   getConversation,
   type GetConversationResult
 } from "@/lib/apis/http/conversations"
+import { findEligibleChatModel } from "@/lib/models/model-residency"
 import { useLysStore } from "@/lib/store"
 
 import {
@@ -58,7 +59,8 @@ export type StoredConversationReader = (
  *
  * @remarks The store owns request and open tokens and their abort controllers;
  * these dependencies provide only transport, stored-conversation reads,
- * timestamps, and generation settings. The store does not share lifecycle
+ * timestamps, model-selection, and generation-settings capabilities. The store
+ * does not share lifecycle
  * state with another store instance, and does not own the settings it reads.
  */
 export type ChatViewStoreDependencies = {
@@ -69,10 +71,17 @@ export type ChatViewStoreDependencies = {
   /** Creates the ISO timestamp recorded on each immutable transition. */
   readonly createTimestamp: () => string
   /**
+   * Finds the loaded model eligible to answer the next request.
+   *
+   * @returns The model key current at call time, or `null` when chat cannot be
+   * sent. Sampling is owned by {@link ChatViewActions.sendMessage}.
+   */
+  readonly findEligibleChatModel: () => string | null
+  /**
    * Reads the generation controls applied to the next request.
    *
-   * @returns The settings-owned controls current at call time; the store reads
-   * them once per request, so a later change applies to the following request.
+   * @returns The settings-owned controls current at call time. Sampling is
+   * owned by {@link ChatViewActions.sendMessage}.
    */
   readonly readGenerationOptions: () => MessageGenerationOptions
 }
@@ -150,22 +159,36 @@ export type ChatViewState = {
   readonly request: ChatRequestState
   /** Whether a stored conversation is being opened to replace the shown one. */
   readonly conversationOpen: ConversationOpenState
-  /** Latest lifecycle error shown inline, or undefined when clear. */
+  /** Latest admission or lifecycle error shown inline, or undefined when clear. */
   readonly error?: string
 }
 
 /**
  * Actions that mutate or advance the chat lifecycle.
  *
- * @remarks `sendMessage` resolves after stream completion, failure, or request
- * invalidation, and `openConversation` after the read commits, fails, or is
+ * @remarks `openConversation` resolves after the read commits, fails, or is
  * superseded. `stopStreaming` and `resetConversation` abort the store-owned
  * transport; reset additionally discards the conversation and error.
  */
 export type ChatViewActions = {
   /** Replaces the composer draft with user-entered text. */
   setInputDraft: (draft: string) => void
-  /** Submits an explicit starter prompt or the current composer draft. */
+  /**
+   * Submits an explicit starter prompt or current composer draft when a loaded
+   * model is eligible.
+   *
+   * @param explicitPrompt - Optional starter prompt; omission submits the
+   * current composer draft.
+   * @returns A promise that resolves without opening a stream when a request is
+   * active, a stored conversation is opening, the prompt is empty, or no loaded
+   * model is eligible; otherwise it resolves after stream completion, failure,
+   * or invalidation.
+   * @remarks An unavailable model records an inline error and preserves the
+   * draft and conversation. An active request, an opening conversation, or an
+   * empty prompt is ignored.
+   * The eligible model and generation controls are sampled once before request
+   * ownership begins; later edits affect only later requests.
+   */
   sendMessage: (explicitPrompt?: string) => Promise<void>
   /** Interrupts the active assistant reply without affecting prior history. */
   stopStreaming: () => void
@@ -179,9 +202,6 @@ export type ChatViewActions = {
 
 /** State and actions exposed by one independently owned chat-view store. */
 export type ChatViewStore = ChatViewState & ChatViewActions
-
-/** Model identifier sent by the current chat lifecycle integration. */
-const CHAT_MODEL = "google/gemma-4-12b-qat"
 
 /** Error shown when an owned stream closes before its done event. */
 const PREMATURE_STREAM_CLOSE_MESSAGE = "Chat stream ended before completion."
@@ -251,6 +271,18 @@ type StreamingChatReplyState = Extract<
   { status: "reply-streaming" }
 >
 
+/** Inputs sampled to create one immutable chat request payload. */
+type CreateChatRequestPayloadInput = {
+  /** Existing conversation identifier, when continuing a conversation. */
+  readonly conversationId: string | undefined
+  /** Trimmed prompt prepared for this turn. */
+  readonly submittedPrompt: string
+  /** Loaded model selected for this request. */
+  readonly model: string
+  /** Settings-owned generation controls for this request. */
+  readonly generationOptions: MessageGenerationOptions
+}
+
 /**
  * Converts an unknown thrown value into a user-presentable lifecycle error.
  *
@@ -306,32 +338,33 @@ function createChatRequestResource(token: number): ChatRequestResource {
 /**
  * Creates the current chat payload with conversation absence represented by omission.
  *
- * @param conversationId - Existing conversation identifier, when continuing.
- * @param submittedPrompt - Trimmed prompt prepared for this turn.
- * @param generationOptions - Settings-owned controls for this request.
+ * @param input - Model, prompt, conversation, and generation values sampled for
+ * this request.
  * @returns The complete payload for a new or existing conversation.
  * @remarks The request contract is strict, so conversation absence is
  * represented by omitting the identifier rather than sending an empty one.
  */
-function createChatRequestPayload(
-  conversationId: string | undefined,
-  submittedPrompt: string,
-  generationOptions: MessageGenerationOptions
-): ChatApiRequestBody {
-  return conversationId
+function createChatRequestPayload({
+  conversationId,
+  submittedPrompt,
+  model,
+  generationOptions
+}: CreateChatRequestPayloadInput): ChatApiRequestBody {
+  return conversationId !== undefined
     ? {
         conversationId,
         message: submittedPrompt,
-        model: CHAT_MODEL,
+        model,
         generationOptions
       }
-    : { message: submittedPrompt, model: CHAT_MODEL, generationOptions }
+    : { message: submittedPrompt, model, generationOptions }
 }
 
 /**
  * Creates one independently owned chat-view store.
  *
- * @param dependencies - Transport and timestamp providers for one store.
+ * @param dependencies - Transport, timestamp, model-selection, and generation
+ * providers for one store.
  * @returns A Zustand hook and store API owning one chat lifecycle.
  */
 export function createChatViewStore(
@@ -614,9 +647,10 @@ export function createChatViewStore(
      * @param token - Token whose ownership authorizes event side effects.
      * @throws If an in-order handler detects a request or conversation
      * invariant violation.
-     * @remarks A stale token is ignored without error. An `error` event only
-     * records the latest inline error; it is non-terminal, so later `title` or
-     * `done` events may still be applied while this token remains active.
+     * @remarks A stale token is ignored without error. An `error` event records
+     * the latest inline error. The backend contract sends no later `done`, but
+     * an independently running title task may still send `title` while this
+     * token remains active.
      */
     function handleChatStreamEvent(
       event: ChatApiStreamEvent,
@@ -669,13 +703,15 @@ export function createChatViewStore(
      * @param request - Awaiting observable state correlated with the transport.
      * @returns A promise that resolves after completion, failure, or invalidation.
      * @remarks Events are consumed in arrival order. An `error` notification
-     * records the latest inline error but does not end iteration; a later
-     * `title` or `done` event may still complete the request. A normal `done`
-     * event makes the assistant terminal; a close before `done` records
-     * failure with the latest stream error or the premature-close message.
-     * Stale queued events and failures are ignored silently after token
-     * invalidation. The finally block releases the active resource and returns
-     * the request to idle only while this token still owns both representations.
+     * records the latest inline error. The backend contract sends no later
+     * `done`, but the stream may stay open while an independently running title
+     * task settles, so `title` may still arrive. Stream closure without `done`
+     * records request failure and marks the assistant failed with the latest
+     * stream error or the premature-close message. A normal `done` event makes
+     * the assistant terminal. Stale queued events and failures are ignored
+     * silently after token invalidation. The finally block releases the active
+     * resource and returns the request to idle only while this token still owns
+     * both representations.
      */
     async function readChatStream(
       payload: ChatApiRequestBody,
@@ -735,12 +771,11 @@ export function createChatViewStore(
     }
 
     /**
-     * Submits an explicit starter prompt or the current composer draft.
+     * Implements {@link ChatViewActions.sendMessage} for this store.
      *
      * @param explicitPrompt - Optional starter prompt supplied outside composer.
-     * @returns A promise that resolves after this request loses or ends ownership.
-     * @remarks A submission is ignored while a request is active or a stored
-     * conversation is opening.
+     * @returns A promise with the admission and settlement semantics defined
+     * by {@link ChatViewActions.sendMessage}.
      */
     async function sendMessage(explicitPrompt?: string): Promise<void> {
       if (!canStartChatRequest()) return
@@ -751,16 +786,25 @@ export function createChatViewStore(
         explicitPrompt === undefined ? promptSource : undefined
       const submittedPrompt = promptSource.trim()
       if (!submittedPrompt) return
+      const model = dependencies.findEligibleChatModel()
+      if (model === null) {
+        set({
+          error:
+            "Chat is unavailable. Check the backend and loaded model in Settings → Model, then try again."
+        })
+        return
+      }
 
       const token = nextRequestToken
       nextRequestToken += 1
       const request = createAwaitingTurnRequest(token, submittedComposerDraft)
       const resource = createChatRequestResource(token)
-      const payload = createChatRequestPayload(
-        get().conversation?.id,
+      const payload = createChatRequestPayload({
+        conversationId: get().conversation?.id,
         submittedPrompt,
-        dependencies.readGenerationOptions()
-      )
+        model,
+        generationOptions: dependencies.readGenerationOptions()
+      })
 
       activeRequestResource = resource
       set({
@@ -1030,17 +1074,22 @@ function getStoredConversation(
  *
  * @remarks This singleton owns the live browser request and open lifecycles.
  * Tests or alternate compositions should call {@link createChatViewStore} to
- * obtain separate token and abort-resource owners. Generation controls are
- * read from the application store at send time, so the request carries the
- * settings shown by the Generation pane; the two controls are named explicitly
- * because the request contract rejects unknown fields. A saved zero ceiling is
- * omitted so the backend receives no explicit completion-token limit.
+ * obtain separate token and abort-resource owners. Application-store
+ * dependencies supply the model and Generation controls to
+ * {@link ChatViewActions.sendMessage}. The two generation controls are named
+ * explicitly because the request contract rejects unknown fields. A saved zero
+ * ceiling is omitted so the backend receives no explicit completion-token limit.
  */
 export const useChatViewStore: UseBoundStore<StoreApi<ChatViewStore>> =
   createChatViewStore({
     streamChat: readChatEvents,
     getConversation: getStoredConversation,
     createTimestamp: () => new Date().toISOString(),
+    findEligibleChatModel: () => {
+      const { backendServerInfo, modelRuntime } = useLysStore.getState()
+
+      return findEligibleChatModel(backendServerInfo.status, modelRuntime)
+    },
     readGenerationOptions: () => {
       const { temperature, replyCeiling } =
         useLysStore.getState().settings.generation

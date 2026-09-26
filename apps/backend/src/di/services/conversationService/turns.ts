@@ -10,7 +10,6 @@ import type {
   CreateConversationTurnOptions
 } from "./share"
 import { createConversationTurn } from "./createTurn"
-import { lysSystemPrompt } from "../../../utils/prompts"
 
 /**
  * Borrows guarded SQLite access to persist atomic turns and their generation lifecycle.
@@ -41,11 +40,13 @@ export default class SqliteConversationTurns
     options: CreateConversationTurnOptions
   ): ConversationTurn {
     const database = this.#getDatabase()
-    const systemPrompt =
-      options.conversationId === undefined ? lysSystemPrompt() : ""
     database.exec("BEGIN IMMEDIATE")
     try {
-      const turn = createConversationTurn(database, options, systemPrompt)
+      const turn = createConversationTurn(
+        database,
+        options,
+        options.systemPrompt
+      )
       database.exec("COMMIT")
       return turn
     } catch (error) {

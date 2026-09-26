@@ -20,3 +20,46 @@ export class ConversationNotFoundError extends Error {
     super(message, options)
   }
 }
+
+/**
+ * Cancellation raised when the chat completion SDK aborts request creation.
+ *
+ * @remarks Gives chat workflows a repository-owned cancellation discriminator
+ * while preserving the SDK failure as the cause. Other transport and provider
+ * failures are never represented by this class. It owns no mutable state, and
+ * each occurrence is constructed and consumed independently.
+ */
+export class ChatCompletionCancelledError extends Error {
+  /**
+   * Creates a chat-completion cancellation with its SDK failure as the cause.
+   *
+   * @param cause - SDK cancellation failure translated by the chat service.
+   */
+  constructor(cause: unknown) {
+    super("Chat completion was cancelled", { cause })
+  }
+}
+
+/**
+ * Failure raised when a title-generation endpoint answers with a reply that
+ * cannot be used as a conversation title.
+ *
+ * @remarks Covers a truncated reply, a reply without content, content that is
+ * not JSON after one surrounding Markdown code fence is unwrapped, content that
+ * does not match the title shape or length limit, and a blank title. Transport,
+ * HTTP, and cancellation failures are never represented by this class, so
+ * title generation can treat it as the only failure worth another request.
+ * The subclass preserves the native `Error` contract, owns no mutable state,
+ * and keeps the underlying parse failure as its cause when one exists.
+ */
+export class TitleGenerationOutputError extends Error {
+  /**
+   * Creates an unusable-title-output failure with an optional cause.
+   *
+   * @param message - Human-readable reason the reply is unusable.
+   * @param options - Native error options, including an optional cause.
+   */
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options)
+  }
+}

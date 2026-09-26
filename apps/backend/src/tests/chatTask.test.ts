@@ -33,6 +33,7 @@ function createInterruptedTaskSetup(store: SqliteConversationStore) {
   const controller = new AbortController()
   const turns = store.createTurnAccess()
   const turn = turns.createConversationTurn({
+    systemPrompt: "Test system prompt",
     model: "test",
     userMessageContent: "Prompt"
   })

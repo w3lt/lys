@@ -1,5 +1,5 @@
 import { chatApi, type ChatApiRoute } from "@lys/protocol"
-import type { FastifyInstance } from "fastify"
+import type { FastifyBaseLogger, FastifyInstance } from "fastify"
 import {
   createAbortSignal,
   createEventSender,
@@ -22,8 +22,15 @@ import type {
 } from "../../../di/services/chatService"
 import type { CreateChatTaskOptions } from "./chatTask"
 import { ChatRequestLifetime } from "./requestLifetime"
+import type { BackendConfig } from "../../../config"
 
-/** Dependencies borrowed for the lifetime of a registered chat route. */
+/** Backend settings the chat route applies to every request. */
+export type ChatRouteOptions = Pick<
+  BackendConfig,
+  "lysSystemPrompt" | "titleGenerationMaxAttempts"
+>
+
+/** Capabilities and settings borrowed for the lifetime of a registered chat route. */
 type ChatRouteDependencies = Readonly<{
   /** Turn persistence whose lifetime outlives all active route handlers. */
   turns: ConversationTurnWriter
@@ -33,16 +40,23 @@ type ChatRouteDependencies = Readonly<{
   completeChatStream: CreateChatTaskOptions["completeChatStream"]
   /** Bound title operation retained separately from chat completion. */
   generateTitle: (options: TitleGenerationOptions) => Promise<string>
+  /** Startup-loaded prompt persisted with a conversation this route creates. */
+  lysSystemPrompt: string
+  /** Inclusive maximum number of title requests permitted for one turn. */
+  titleGenerationMaxAttempts: number
 }>
 
 /**
  * Installs the chat endpoint, persisting turns before opening their event streams.
  * @param app - Backend with SSE, validation, and singleton services installed.
+ * @param options - System prompt and title-generation attempt limit applied to
+ * every request.
  * @returns Settlement after route registration.
  * @throws If borrowed access or route registration fails.
  */
 export default async function updateFastifyWithChatRoute(
-  app: FastifyInstance
+  app: FastifyInstance,
+  { lysSystemPrompt, titleGenerationMaxAttempts }: ChatRouteOptions
 ): Promise<void> {
   const lifetime = new ChatRequestLifetime()
   app.addHook("onClose", () => lifetime[Symbol.asyncDispose]())
@@ -53,7 +67,9 @@ export default async function updateFastifyWithChatRoute(
     completeChatStream: (options: CompleteChatOptions) =>
       app.chatService.completeChatStream(options),
     generateTitle: (options: TitleGenerationOptions) =>
-      app.chatService.generateTitle(options)
+      app.chatService.generateTitle(options),
+    lysSystemPrompt,
+    titleGenerationMaxAttempts
   }
   app.route<ChatApiRoute>({
     method: chatApi.method,
@@ -84,7 +100,8 @@ async function handleChatRequest(
     const turn = dependencies.turns.createConversationTurn({
       model: request.body.model,
       conversationId: request.body.conversationId,
-      userMessageContent: request.body.message
+      userMessageContent: request.body.message,
+      systemPrompt: dependencies.lysSystemPrompt
     })
     await createConversationStream({ request, reply, dependencies, turn })
   } catch (error) {
@@ -140,6 +157,7 @@ async function createConversationStream(
   const abortSignal = createAbortSignal(reply)
   try {
     await createConversationStartEvent(reply, turn)
+    await updateClientConversationTitle(reply, turn, request.log)
     const tasks = createConversationTasks(options, abortSignal)
     const outcomes = await Promise.allSettled(tasks)
     for (const outcome of outcomes) {
@@ -193,7 +211,8 @@ function createConversationTasks(
         userMessageContent: turn.userMessage.content,
         abortSignal,
         reply,
-        request,
+        logger: request.log,
+        titleGenerationMaxAttempts: dependencies.titleGenerationMaxAttempts,
         updateConversationTitle: (title) =>
           dependencies.titleWriter.updateGeneratedConversationTitle(
             turn.conversation.id,
@@ -203,6 +222,32 @@ function createConversationTasks(
     )
   }
   return tasks
+}
+
+/**
+ * Replays an existing conversation's stored title after its turn starts.
+ * @param reply - Active SSE output.
+ * @param turn - Persisted turn whose stored title may be replayed.
+ * @param logger - Request logger recording an optional replay failure.
+ * @returns Settlement after the title event, or at once when no stored title is
+ * eligible; it does not reject.
+ * @remarks New conversations and untitled conversations produce no event. A
+ * failed write is logged at debug level so optional metadata delivery cannot
+ * prevent the started conversation from generating its reply.
+ */
+async function updateClientConversationTitle(
+  reply: ChatRouteReply,
+  turn: ConversationTurn,
+  logger: FastifyBaseLogger
+): Promise<void> {
+  const { title } = turn.conversation
+  if (turn.isNewConversation || title === null) return
+
+  try {
+    await createEventSender(reply)({ type: "title", title })
+  } catch (error) {
+    logger.debug({ err: error }, "Could not send the stored title event")
+  }
 }
 
 /**

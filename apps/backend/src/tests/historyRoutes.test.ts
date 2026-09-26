@@ -19,6 +19,7 @@ async function handleHistoryRoutes(): Promise<void> {
   app.decorate("conversationService", store)
   await app.register(updateFastifyWithConversationRoutes)
   const turn = store.createTurnAccess().createConversationTurn({
+    systemPrompt: "Test system prompt",
     model: "test-model",
     userMessageContent: "Earlier prompt"
   })

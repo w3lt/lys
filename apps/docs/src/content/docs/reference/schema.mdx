@@ -13,13 +13,13 @@ JSON schema for runtime, model, and generation settings.
 
 ### `conversations`
 
-| Column          | Type            | Notes                                              |
-| --------------- | --------------- | -------------------------------------------------- |
-| `id`            | `TEXT`          | Primary key                                        |
-| `title`         | `TEXT`          | Nullable until title generation succeeds           |
-| `system_prompt` | `TEXT NOT NULL` | Saved instruction forwarded for every continuation |
-| `created_at`    | `TEXT NOT NULL` | ISO timestamp                                      |
-| `updated_at`    | `TEXT NOT NULL` | ISO timestamp                                      |
+| Column          | Type            | Notes                                                                                                                                |
+| --------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `id`            | `TEXT`          | Primary key                                                                                                                          |
+| `title`         | `TEXT`          | Null until the first title assignment; untitled turns request one, titled turns reconcile it to the client, and a rename replaces it |
+| `system_prompt` | `TEXT NOT NULL` | Saved instruction forwarded as the system message for every turn                                                                     |
+| `created_at`    | `TEXT NOT NULL` | ISO timestamp                                                                                                                        |
+| `updated_at`    | `TEXT NOT NULL` | ISO timestamp                                                                                                                        |
 
 ### `conversation_messages`
 

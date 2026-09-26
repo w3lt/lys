@@ -28,13 +28,19 @@ repository today; it is not a promise of unreleased work.
 - Conversation history supports search, cursor pagination, transcript retrieval,
   rename, and deletion. Assistant deltas are persisted before publication;
   continuation uses the saved prompt and eligible stored history.
-- Untitled conversations receive a generated title only if no rename has won
-  the race. Interrupted streaming rows are recovered on backend startup.
+- For a conversation without a stored title, the backend also attempts to
+  generate a title asynchronously and emits the first assigned title as a stream
+  event. When the conversation remains untitled, its next turn tries again; an
+  existing titled turn resends the stored title to reconcile desktop metadata.
+  A generated title is saved only if no rename has won the race.
+- Interrupted streaming rows are recovered on backend startup.
 - Runtime, Model, and Generation settings panes are available. Model controls
   refresh inventory, load and unload weights, and check loaded-state health.
 - Generation controls apply to future chat requests and save automatically
   through Tauri to `~/.lys/settings.json`, which contains runtime, model, and
   generation groups. Runtime and model edits remain session-only.
+- The Composer label, send eligibility, and each chat request use the loaded
+  runtime projection described in [desktop model settings](/architecture/desktop/#model-settings).
 
 ## Coming soon
 
@@ -42,8 +48,6 @@ The current repository does not yet provide:
 
 - desktop history-list and restore integration (the backend APIs are available)
 - a Conversation settings pane
-- using the selected default model for chat requests, which still send a fixed
-  model identifier
 - replay or reconnect semantics for chat streams
 - tool-call stream events
 - a production desktop release workflow

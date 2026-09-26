@@ -7,9 +7,11 @@ import { parseConversationListOptions } from "../utils"
 function handleRenamePreservesActivity(): void {
   using store = SqliteConversationStore.open(":memory:")
   const history = store.createHistoryAccess()
-  const turn = store
-    .createTurnAccess()
-    .createConversationTurn({ model: "test", userMessageContent: "Prompt" })
+  const turn = store.createTurnAccess().createConversationTurn({
+    systemPrompt: "Test system prompt",
+    model: "test",
+    userMessageContent: "Prompt"
+  })
   const before = history.getConversation(turn.conversation.id)
   assert.ok(before)
   const renamed = history.updateConversationTitle(before.id, "  Renamed  ")
@@ -27,6 +29,7 @@ function handleSearchAndPreview(): void {
   const turns = store.createTurnAccess()
   const history = store.createHistoryAccess()
   const turn = turns.createConversationTurn({
+    systemPrompt: "Test system prompt",
     model: "test",
     userMessageContent: "CAFÉ 100%_done [a.b]"
   })
@@ -35,6 +38,7 @@ function handleSearchAndPreview(): void {
     "Later unrelated reply"
   )
   turns.createConversationTurn({
+    systemPrompt: "Test system prompt",
     model: "test",
     userMessageContent: "Unrelated"
   })
@@ -68,6 +72,7 @@ function handleTitlePreview(): void {
   const turns = store.createTurnAccess()
   const history = store.createHistoryAccess()
   const turn = turns.createConversationTurn({
+    systemPrompt: "Test system prompt",
     model: "test",
     userMessageContent: "First"
   })
@@ -97,6 +102,7 @@ function handlePagination(): void {
   const history = store.createHistoryAccess()
   for (let index = 0; index < 32; index += 1)
     turns.createConversationTurn({
+      systemPrompt: "Test system prompt",
       model: "test",
       userMessageContent: `Prompt ${index}`
     })
@@ -130,7 +136,11 @@ function handleInvalidPagination(): void {
   using store = SqliteConversationStore.open(":memory:")
   const turns = store.createTurnAccess()
   for (let index = 0; index < 2; index += 1)
-    turns.createConversationTurn({ model: "test", userMessageContent: "Same" })
+    turns.createConversationTurn({
+      systemPrompt: "Test system prompt",
+      model: "test",
+      userMessageContent: "Same"
+    })
   const page = store
     .createHistoryAccess()
     .listConversations(

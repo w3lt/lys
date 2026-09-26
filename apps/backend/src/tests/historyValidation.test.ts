@@ -18,9 +18,11 @@ async function handleInvalidRequest(
   }
 ): Promise<void> {
   const { app, store } = await createChatTestApp(context)
-  store
-    .createTurnAccess()
-    .createConversationTurn({ model: "test", userMessageContent: "Keep me" })
+  store.createTurnAccess().createConversationTurn({
+    systemPrompt: "Test system prompt",
+    model: "test",
+    userMessageContent: "Keep me"
+  })
   const history = store.createHistoryAccess()
   const before = history.listConversations(parseConversationListOptions())
   const response = await app.inject(request)

@@ -13,6 +13,8 @@ export type CreateConversationTurnOptions = Readonly<{
   userMessageContent: string
   /** Nonempty model identity stored on the assistant reply. */
   model: string
+  /** Startup-loaded prompt persisted only with a conversation this turn creates. */
+  systemPrompt: string
 }>
 
 /** Immutable turn identities plus an independent snapshot of the earlier transcript. */

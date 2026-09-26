@@ -121,6 +121,7 @@ echo "NodeJS ready: $("$NODE_INSTALL_DIR/bin/node" --version) at $NODE_INSTALL_D
 BACKEND_DIR="$LYS_HOME/runtime/backend"
 mkdir -p "$BACKEND_DIR"
 
+rm -r "$BACKEND_DIR"
 mv apps/backend/dist "$BACKEND_DIR"
 
 # Step 8. Build the desktop app

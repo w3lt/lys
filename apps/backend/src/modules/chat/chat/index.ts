@@ -1,23 +1,27 @@
-import {
-  chatApi,
-  type ChatApiRequestBody,
-  type ChatApiRoute
-} from "@lys/protocol"
+import { chatApi, type ChatApiRoute } from "@lys/protocol"
 import type { FastifyBaseLogger, FastifyInstance } from "fastify"
 import {
   createAbortSignal,
   createEventSender,
-  type ChatRouteReply,
-  type ChatRouteRequest
+  type ChatRouteRequest,
+  type ChatRouteReply
 } from "./share"
-import ConversationTurn from "./conversationTurn"
 import createChatTask from "./chatTask"
-import createTitleGenerationTask, {
-  type CreateTitleGenerationTaskOptions
-} from "./titleGenerationTask"
+import createTitleGenerationTask from "./titleGenerationTask"
+import { buildChatMessages } from "./messages"
 import { ConversationNotFoundError } from "../../../utils/errors"
-import type ConversationService from "../../../di/services/conversationService"
-import type ChatService from "../../../di/services/chatService"
+import { createConversationNotFoundProblem } from "../../conversation/notFound"
+import type {
+  ConversationTurnWriter,
+  GeneratedConversationTitleWriter
+} from "./persistence"
+import type { ConversationTurn } from "../../../di/services/conversationService/share"
+import type {
+  CompleteChatOptions,
+  TitleGenerationOptions
+} from "../../../di/services/chatService"
+import type { CreateChatTaskOptions } from "./chatTask"
+import { ChatRequestLifetime } from "./requestLifetime"
 import type { BackendConfig } from "../../../config"
 
 /** Backend settings the chat route applies to every request. */
@@ -26,282 +30,250 @@ export type ChatRouteOptions = Pick<
   "lysSystemPrompt" | "titleGenerationMaxAttempts"
 >
 
-/** Title-task inputs supplied by the route; the turn supplies its message and title persistence. */
-type UntitledConversationTitleTaskOptions = Omit<
-  CreateTitleGenerationTaskOptions,
-  "userMessageContent" | "updateConversationTitle"
->
-
-/** Route-owned inputs used to start and settle one turn's generation tasks. */
-type ConversationTaskStartOptions = {
-  /** Shared signal aborted when the request's SSE connection closes. */
-  abortSignal: AbortSignal
-  /** Application-scoped service used for chat and title generation. */
-  chatService: ChatService
-  /** Store used for assistant-state and title persistence. */
-  conversationService: ConversationService
-  /** Persisted turn whose assistant reply and optional title are generated. */
-  conversationTurn: ConversationTurn
-  /** Validated controls forwarded to assistant generation. */
-  generationOptions: ChatApiRequestBody["generationOptions"]
-  /** Model identifier used by both generation tasks. */
-  model: string
-  /** Reply whose SSE connection receives generation events. */
-  reply: ChatRouteReply
-  /** Request logger and lifecycle supplied to the chat task. */
-  request: ChatRouteRequest
-  /** System prompt applied to assistant generation. */
-  systemPrompt: string
-  /** Inclusive attempt limit applied to title generation. */
+/** Capabilities and settings borrowed for the lifetime of a registered chat route. */
+type ChatRouteDependencies = Readonly<{
+  /** Turn persistence whose lifetime outlives all active route handlers. */
+  turns: ConversationTurnWriter
+  /** Conditional generated-title persistence borrowed for the route lifetime. */
+  titleWriter: GeneratedConversationTitleWriter
+  /** Bound application inference operation; no adapter cleanup authority. */
+  completeChatStream: CreateChatTaskOptions["completeChatStream"]
+  /** Bound title operation retained separately from chat completion. */
+  generateTitle: (options: TitleGenerationOptions) => Promise<string>
+  /** Startup-loaded prompt persisted with a conversation this route creates. */
+  lysSystemPrompt: string
+  /** Inclusive maximum number of title requests permitted for one turn. */
   titleGenerationMaxAttempts: number
-}
+}>
 
 /**
- * Registers the chat completion endpoint on a Fastify application.
- *
- * The registrar mutates `app` by installing the protocol POST/SSE route. Each
- * request sends a conversation-turn start event, then reconciles a stored title
- * for an existing conversation before starting its chat task and, only when
- * the conversation has no stored title, its title task; the handler remains
- * pending until both tasks settle. Chat and generated-title events may then
- * interleave, while client closure aborts the shared upstream work. A missing
- * conversation is translated to HTTP 404; task failures are handled by their
- * task handlers. Any other turn-construction or initial-event failure is
- * rethrown to Fastify, which logs it and responds with HTTP 500 when no event
- * has been sent.
- *
- * @param app - Application instance that receives the chat route.
+ * Installs the chat endpoint, persisting turns before opening their event streams.
+ * @param app - Backend with SSE, validation, and singleton services installed.
  * @param options - System prompt and title-generation attempt limit applied to
  * every request.
- * @returns A promise that resolves after route registration completes.
- * @throws If Fastify cannot register the route.
- * @remarks The registered handler emits typed SSE start, delta, done, title, or
- * error events. An existing stored title is sent after its turn-start event;
- * failure to send that optional reconciliation is logged and does not prevent
- * chat generation. An `error` event reports only a chat generation failure; a
- * title-generation failure is logged, and a later turn may generate a title if
- * the conversation remains untitled. A generated title is persisted before its
- * event; assistant state is persisted before a supported completion event and
- * is marked interrupted or failed when cancellation/error handling reaches
- * those paths.
+ * @returns Settlement after route registration.
+ * @throws If borrowed access or route registration fails.
  */
-export default async function registerChatRoute(
+export default async function updateFastifyWithChatRoute(
   app: FastifyInstance,
   { lysSystemPrompt, titleGenerationMaxAttempts }: ChatRouteOptions
 ): Promise<void> {
-  /**
-   * Handles one validated chat request through turn persistence and generation.
-   *
-   * @param request - Validated request that owns logging and chat inputs.
-   * @param reply - Reply that owns the request's SSE connection.
-   * @returns A promise that resolves after both generation tasks settle or the
-   * missing-conversation response is sent.
-   * @throws Turn construction and initial start-event failures other than a
-   * missing conversation; task-specific failures follow their own contracts.
-   */
-  async function handleChatRequest(
-    this: FastifyInstance,
-    request: ChatRouteRequest,
-    reply: ChatRouteReply
-  ) {
-    const abortSignal = createAbortSignal(reply)
-    const { message, model, conversationId, generationOptions } = request.body
-
-    try {
-      const conversationTurn = new ConversationTurn({
-        conversationId,
-        userMessageContent: message,
-        model,
-        conversationService: this.conversationService,
-        systemPrompt: lysSystemPrompt
-      })
-
-      await sendConversationTurnStartEvent(reply, conversationTurn)
-      await updateClientConversationTitle(reply, conversationTurn, request.log)
-      await startConversationTasks({
-        abortSignal,
-        chatService: this.chatService,
-        conversationService: this.conversationService,
-        conversationTurn,
-        generationOptions,
-        model,
-        reply,
-        request,
-        systemPrompt: lysSystemPrompt,
-        titleGenerationMaxAttempts
-      })
-    } catch (error) {
-      if (error instanceof ConversationNotFoundError) {
-        return reply.code(404).send({
-          message: `Conversation ${conversationId} was not found`
-        })
-      }
-
-      throw error
-    }
+  const lifetime = new ChatRequestLifetime()
+  app.addHook("onClose", () => lifetime[Symbol.asyncDispose]())
+  const turns = app.conversationService.createTurnAccess()
+  const dependencies = {
+    turns,
+    titleWriter: turns,
+    completeChatStream: (options: CompleteChatOptions) =>
+      app.chatService.completeChatStream(options),
+    generateTitle: (options: TitleGenerationOptions) =>
+      app.chatService.generateTitle(options),
+    lysSystemPrompt,
+    titleGenerationMaxAttempts
   }
-
   app.route<ChatApiRoute>({
     method: chatApi.method,
     url: chatApi.path,
     sse: "only",
-    schema: {
-      body: chatApi.body
-    },
-    handler: handleChatRequest
+    schema: { body: chatApi.body },
+    handler: async (request, reply) =>
+      lifetime.createRequestTask(() =>
+        handleChatRequest(request, reply, dependencies)
+      )
   })
 }
 
 /**
- * Starts the assistant and optional title tasks and owns their settlement.
- *
- * @param options - Persisted turn, generation inputs, services, request
- * lifecycle, and title-attempt limit owned by the route.
- * @returns A promise that resolves after both independently handled tasks
- * settle.
+ * Selects a conversation and owns both generation tasks through settlement.
+ * @param request - Validated chat input and request logger.
+ * @param reply - SSE or pre-stream error response owner.
+ * @param dependencies - Borrowed persistence and inference capabilities.
+ * @returns Settlement after both tasks, or the missing-conversation response.
+ * @throws Unexpected pre-stream construction errors for Fastify's HTTP error boundary.
  */
-async function startConversationTasks({
-  abortSignal,
-  chatService,
-  conversationService,
-  conversationTurn,
-  generationOptions,
-  model,
-  reply,
-  request,
-  systemPrompt,
-  titleGenerationMaxAttempts
-}: ConversationTaskStartOptions): Promise<void> {
-  const chatTask = createChatTask({
-    chatService,
-    updateAssistantMessageState: ({ finishReason, status }) => {
-      conversationService.updateAssistantMessageState({
-        assistantMessageId: conversationTurn.assistantMessage.id,
-        status,
-        finishReason
-      })
-    },
-    systemPrompt,
-    userMessageContent: conversationTurn.userMessage.content,
-    model,
-    abortSignal,
-    request,
-    reply,
-    generationOptions
-  })
+async function handleChatRequest(
+  request: ChatRouteRequest,
+  reply: ChatRouteReply,
+  dependencies: ChatRouteDependencies
+): Promise<void> {
+  try {
+    const turn = dependencies.turns.createConversationTurn({
+      model: request.body.model,
+      conversationId: request.body.conversationId,
+      userMessageContent: request.body.message,
+      systemPrompt: dependencies.lysSystemPrompt
+    })
+    await createConversationStream({ request, reply, dependencies, turn })
+  } catch (error) {
+    if (reply.raw.headersSent || reply.raw.destroyed) {
+      request.log.error(
+        { err: error },
+        "Conversation stream finalization failed"
+      )
+      if (reply.sse.isConnected) reply.sse.close()
+      return
+    }
+    if (
+      error instanceof ConversationNotFoundError &&
+      request.body.conversationId !== undefined
+    ) {
+      reply
+        .type("application/problem+json")
+        .code(404)
+        .send(
+          createConversationNotFoundProblem(
+            request.body.conversationId,
+            request.url
+          )
+        )
+      return
+    }
+    throw error
+  }
+}
 
-  const titleGenerationTask = startUntitledConversationTitleGeneration(
-    conversationTurn,
-    conversationService,
-    {
-      chatService,
-      model,
+/** Turn and request ownership needed until both stream tasks have settled. */
+type ConversationStreamOptions = Readonly<{
+  /** Current validated request. */
+  request: ChatRouteRequest
+  /** Connection whose closure cancels generation. */
+  reply: ChatRouteReply
+  /** Borrowed persistence and model adapters. */
+  dependencies: ChatRouteDependencies
+  /** Atomically persisted turn and prior transcript snapshot. */
+  turn: ConversationTurn
+}>
+
+/**
+ * Publishes the committed turn and joins chat and optional title generation.
+ * @param options - Request lifecycle and turn-specific write authority.
+ * @returns Settlement after every task and fallback assistant finalization.
+ * @throws If initial publication or terminal persistence fails.
+ */
+async function createConversationStream(
+  options: ConversationStreamOptions
+): Promise<void> {
+  const { request, reply, dependencies, turn } = options
+  const abortSignal = createAbortSignal(reply)
+  try {
+    await createConversationStartEvent(reply, turn)
+    await updateClientConversationTitle(reply, turn, request.log)
+    const tasks = createConversationTasks(options, abortSignal)
+    const outcomes = await Promise.allSettled(tasks)
+    for (const outcome of outcomes) {
+      if (outcome.status === "rejected")
+        request.log.error({ err: outcome.reason }, "Conversation task failed")
+    }
+  } finally {
+    dependencies.turns.updateAssistantMessageState(turn.assistantMessage.id, {
+      status: abortSignal.aborted ? "interrupted" : "failed"
+    })
+  }
+}
+
+/**
+ * Starts model work only after the turn-start event has been accepted.
+ * @param options - Turn and borrowed model/persistence dependencies.
+ * @param abortSignal - Cancellation owned by the request connection.
+ * @returns Both owned tasks; title generation is absent for already titled conversations.
+ */
+function createConversationTasks(
+  options: ConversationStreamOptions,
+  abortSignal: AbortSignal
+): Promise<void>[] {
+  const { dependencies, turn, request, reply } = options
+  const tasks = [
+    createChatTask({
+      completeChatStream: dependencies.completeChatStream,
+      model: request.body.model,
+      messages: buildChatMessages(turn),
+      generationOptions: request.body.generationOptions,
       abortSignal,
       reply,
-      logger: request.log,
-      titleGenerationMaxAttempts
-    }
-  )
-
-  await Promise.allSettled([chatTask, titleGenerationTask])
-}
-
-/**
- * Sends the start event matching whether the turn created its conversation.
- *
- * @param reply - Reply whose SSE connection receives the event.
- * @param conversationTurn - Persisted turn announced to the client.
- * @returns A promise that resolves after Fastify accepts the event write.
- * @throws If the event cannot be written.
- */
-async function sendConversationTurnStartEvent(
-  reply: ChatRouteReply,
-  conversationTurn: ConversationTurn
-): Promise<void> {
-  const sendEvent = createEventSender(reply)
-  const { userMessage, assistantMessage } = conversationTurn
-
-  if (conversationTurn.isNewConversation) {
-    await sendEvent({
-      type: "start-new-conversation-turn",
-      conversation: conversationTurn.conversation,
-      userMessage,
-      assistantMessage
+      request,
+      updateAssistantMessageContent: (content) =>
+        dependencies.turns.updateAssistantMessageContent(
+          turn.assistantMessage.id,
+          content
+        ),
+      updateAssistantMessageState: (completion) =>
+        dependencies.turns.updateAssistantMessageState(
+          turn.assistantMessage.id,
+          completion
+        )
     })
-    return
+  ]
+  if (turn.conversation.title === null) {
+    tasks.push(
+      createTitleGenerationTask({
+        generateTitle: dependencies.generateTitle,
+        model: request.body.model,
+        userMessageContent: turn.userMessage.content,
+        abortSignal,
+        reply,
+        logger: request.log,
+        titleGenerationMaxAttempts: dependencies.titleGenerationMaxAttempts,
+        updateConversationTitle: (title) =>
+          dependencies.titleWriter.updateGeneratedConversationTitle(
+            turn.conversation.id,
+            title
+          )
+      })
+    )
   }
-
-  await sendEvent({
-    type: "start-existing-conversation-turn",
-    userMessage,
-    assistantMessage
-  })
+  return tasks
 }
 
 /**
- * Updates client title metadata after an existing conversation turn starts.
- *
- * @param reply - Reply whose SSE connection receives the title event.
- * @param conversationTurn - Persisted turn whose existing title may be replayed.
- * @param logger - Request logger that records an optional replay failure.
- * @returns A promise that resolves after the title write or immediately when no
- * stored title is eligible; it does not reject for a title write failure.
- * @remarks New conversations and untitled existing conversations produce no
- * event. A failed write is logged at debug level so optional metadata delivery
- * cannot prevent the already-started conversation from generating its reply.
+ * Replays an existing conversation's stored title after its turn starts.
+ * @param reply - Active SSE output.
+ * @param turn - Persisted turn whose stored title may be replayed.
+ * @param logger - Request logger recording an optional replay failure.
+ * @returns Settlement after the title event, or at once when no stored title is
+ * eligible; it does not reject.
+ * @remarks New conversations and untitled conversations produce no event. A
+ * failed write is logged at debug level so optional metadata delivery cannot
+ * prevent the started conversation from generating its reply.
  */
 async function updateClientConversationTitle(
   reply: ChatRouteReply,
-  conversationTurn: ConversationTurn,
+  turn: ConversationTurn,
   logger: FastifyBaseLogger
 ): Promise<void> {
-  const { conversation } = conversationTurn
-  if (conversationTurn.isNewConversation || conversation.title === null) {
-    return
-  }
+  const { title } = turn.conversation
+  if (turn.isNewConversation || title === null) return
 
   try {
-    await createEventSender(reply)({
-      type: "title",
-      title: conversation.title
-    })
+    await createEventSender(reply)({ type: "title", title })
   } catch (error) {
     logger.debug({ err: error }, "Could not send the stored title event")
   }
 }
 
 /**
- * Starts title generation when the turn's conversation has no stored title.
- *
- * @remarks The turn's user message is the title source. A conversation that
- * already has a title keeps it and no title is requested. After an earlier
- * title task fails or is abandoned, the next turn requests a title only if the
- * conversation remains untitled.
- * @param conversationTurn - Persisted turn whose conversation may receive a title.
- * @param conversationService - Store that persists the generated title.
- * @param taskOptions - Service, connection, logger, model, and attempt limit
- * for the title task.
- * @returns A promise that resolves when the title task settles, or at once
- * when the conversation already has a title; it does not reject.
+ * Announces a committed turn before any chat or title generation event.
+ * @param reply - Active SSE output.
+ * @param turn - Persisted pair and conversation snapshot.
+ * @returns Settlement after the initial event is accepted by the transport.
+ * @throws If the connection cannot accept the start event.
  */
-async function startUntitledConversationTitleGeneration(
-  conversationTurn: ConversationTurn,
-  conversationService: ConversationService,
-  taskOptions: UntitledConversationTitleTaskOptions
+async function createConversationStartEvent(
+  reply: ChatRouteReply,
+  turn: ConversationTurn
 ): Promise<void> {
-  const { conversation, userMessage } = conversationTurn
-  if (conversation.title !== null) {
+  const sendEvent = createEventSender(reply)
+  const pair = {
+    userMessage: turn.userMessage,
+    assistantMessage: turn.assistantMessage
+  }
+  if (turn.isNewConversation) {
+    const { id, title, systemPrompt, createdAt, updatedAt } = turn.conversation
+    await sendEvent({
+      type: "start-new-conversation-turn",
+      conversation: { id, title, systemPrompt, createdAt, updatedAt },
+      ...pair
+    })
     return
   }
-
-  await createTitleGenerationTask({
-    ...taskOptions,
-    userMessageContent: userMessage.content,
-    updateConversationTitle: (title) => {
-      return conversationService.updateConversationTitle({
-        conversationId: conversation.id,
-        conversationTitle: title
-      })
-    }
-  })
+  await sendEvent({ type: "start-existing-conversation-turn", ...pair })
 }

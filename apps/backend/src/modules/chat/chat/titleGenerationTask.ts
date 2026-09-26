@@ -1,13 +1,12 @@
 import type { FastifyBaseLogger } from "fastify"
-import type ChatService from "../../../di/services/chatService"
-import type { UpdateConversationTitleResult } from "../../../di/services/conversationService/share"
+import type { TitleGenerationOptions } from "../../../di/services/chatService"
 import { TitleGenerationOutputError } from "../../../utils/errors"
 import { createEventSender, type ChatRouteReply } from "./share"
 
 /** Inputs, attempt limit, and callbacks for one title-generation task. */
 export type CreateTitleGenerationTaskOptions = {
-  /** Application-scoped service used to generate the title. */
-  chatService: ChatService
+  /** Starts one external title request, borrowing the application adapter. */
+  generateTitle: (options: TitleGenerationOptions) => Promise<string>
   /** User content used as the title-generation prompt. */
   userMessageContent: string
   /** Model identifier passed to the chat service. */
@@ -20,14 +19,14 @@ export type CreateTitleGenerationTaskOptions = {
   logger: FastifyBaseLogger
   /** Positive, inclusive maximum number of title requests validated by the backend configuration. */
   titleGenerationMaxAttempts: number
-  /** Synchronous first-title assignment; only `updated` permits publishing the candidate. */
-  updateConversationTitle: (title: string) => UpdateConversationTitleResult
+  /** Conditional first-title assignment returning the saved title, or `undefined` after a rename, competing assignment, or deletion. */
+  updateConversationTitle: (title: string) => string | undefined
 }
 
 /** Inputs used to request a title within the attempt limit. */
 type TitleGenerationAttemptOptions = Pick<
   CreateTitleGenerationTaskOptions,
-  | "chatService"
+  | "generateTitle"
   | "userMessageContent"
   | "model"
   | "abortSignal"
@@ -78,8 +77,9 @@ type GeneratedTitle = Extract<TitleGenerationResult, { status: "generated" }>
  * Titles are requested up to `titleGenerationMaxAttempts` times; only a reply
  * unusable as a title consumes another request. A generated title is persisted
  * only while the conversation remains untitled, before one `title` event is
- * sent to a still-connected client. If another turn assigned a title first,
- * this task preserves it and sends no event. Other unsuccessful outcomes leave
+ * sent to a still-connected client. If another turn assigned a title first or
+ * the conversation was renamed or deleted, this task preserves the stored state
+ * and sends no event. Other unsuccessful outcomes leave
  * this task's candidate unsaved; a later turn retries if still untitled.
  * Outcomes are logged with `titleGenerationOutcome` and
  * `titleGenerationAttempts` fields: exhausted attempts or a failure that is not
@@ -87,7 +87,7 @@ type GeneratedTitle = Extract<TitleGenerationResult, { status: "generated" }>
  * failure at error level. An assignment that loses to another title is logged
  * at debug level. The task never sends an `error` event.
  *
- * @param options - Chat service, prompt input, attempt limit, cancellation
+ * @param options - Title generator, prompt input, attempt limit, cancellation
  * signal, SSE reply, logger, and title persistence callback owned by the route.
  * @returns A promise that resolves after the title is published or the outcome
  * is logged; it does not reject, so the route can await it alongside the chat
@@ -135,11 +135,11 @@ export default async function createTitleGenerationTask(
  * the failed attempt, the OpenAI SDK has already retried connection failures,
  * timeouts, and 408, 409, 429, and 5xx responses. Each retried reply is logged
  * at debug level.
- * @param options - Chat service, prompt input, signal, logger, and attempt limit.
+ * @param options - Title generator, prompt input, signal, logger, and attempt limit.
  * @returns A promise that resolves to the generation result; it does not reject.
  */
 async function generateTitleWithinAttempts({
-  chatService,
+  generateTitle,
   userMessageContent,
   model,
   abortSignal,
@@ -155,7 +155,7 @@ async function generateTitleWithinAttempts({
 
     attempts += 1
     try {
-      const title = await chatService.generateTitle({
+      const title = await generateTitle({
         message: userMessageContent,
         model,
         signal: abortSignal
@@ -201,17 +201,10 @@ async function handleGeneratedTitle(
   { reply, logger, updateConversationTitle }: GeneratedTitleHandlingOptions,
   { title, attempts }: GeneratedTitle
 ): Promise<void> {
+  let persistedTitle: string | undefined
+
   try {
-    if (updateConversationTitle(title) === "already-titled") {
-      logger.debug(
-        {
-          titleGenerationOutcome: "already-titled",
-          titleGenerationAttempts: attempts
-        },
-        "Another turn already saved the conversation title"
-      )
-      return
-    }
+    persistedTitle = updateConversationTitle(title)
   } catch (error) {
     logger.error(
       {
@@ -224,12 +217,23 @@ async function handleGeneratedTitle(
     return
   }
 
+  if (persistedTitle === undefined) {
+    logger.debug(
+      {
+        titleGenerationOutcome: "already-titled",
+        titleGenerationAttempts: attempts
+      },
+      "Another turn already saved the conversation title"
+    )
+    return
+  }
+
   if (!reply.sse.isConnected) {
     return
   }
 
   try {
-    await createEventSender(reply)({ type: "title", title })
+    await createEventSender(reply)({ type: "title", title: persistedTitle })
   } catch (error) {
     logger.debug({ err: error }, "Could not send the title event")
   }

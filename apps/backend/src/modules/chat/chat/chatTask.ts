@@ -1,8 +1,8 @@
 import type { MessageGenerationOptions } from "@lys/protocol"
-import type { ConversationAssistantMessageFinishReason } from "@lys/share"
-import type ChatService from "../../../di/services/chatService"
+import type { ChatCompletionChunk } from "openai/resources/index.mjs"
 import type { CompleteChatOptions } from "../../../di/services/chatService"
-import type { UpdateAssistantMessageStateOptions } from "../../../di/services/conversationService/share"
+import type { AssistantMessageCompletion } from "../../../di/services/conversationService/share"
+import type { ConversationAssistantMessageFinishReason } from "@lys/share"
 import { ChatCompletionCancelledError } from "../../../utils/errors"
 import {
   createEventSender,
@@ -10,258 +10,172 @@ import {
   type ChatRouteRequest
 } from "./share"
 
-/** Inputs and owned callbacks for one streamed chat completion task. */
-type CreateChatTaskOptions = {
-  /** Application-scoped service used to start the model stream. */
-  chatService: ChatService
-  /** Synchronous persistence callback for the assistant terminal state. */
+/** Dependencies and persistence callbacks for one owned streamed completion. */
+export type CreateChatTaskOptions = Readonly<{
+  /** Starts the external model stream; the returned iterator owns upstream cleanup. */
+  completeChatStream: (
+    input: CompleteChatOptions
+  ) => Promise<AsyncIterable<ChatCompletionChunk>>
+  /** Persists a terminal transition, returning false after deletion or prior completion. */
   updateAssistantMessageState: (
-    options: Omit<UpdateAssistantMessageStateOptions, "assistantMessageId">
-  ) => void
-  /** System prompt sent before the user content. */
-  systemPrompt: string
-  /** User content sent after the system prompt. */
-  userMessageContent: string
-  /** Model identifier passed to the chat service. */
+    completion: AssistantMessageCompletion
+  ) => boolean
+  /** Persists each delta before publication, returning false after deletion. */
+  updateAssistantMessageContent: (content: string) => boolean
+  /** Saved prompt, eligible earlier transcript, and current user text in inference order. */
+  messages: CompleteChatOptions["messages"]
+  /** Model selected by the caller. */
   model: string
-  /** Signal owned by the route and aborted when the SSE client disconnects. */
+  /** Route-owned cancellation from the SSE connection. */
   abortSignal: AbortSignal
-  /** Request used for structured logging of task failures. */
+  /** Request logger used for failures. */
   request: ChatRouteRequest
-  /** Reply whose SSE connection receives delta, done, and error events. */
+  /** SSE connection receiving ordered deltas and one terminal chat event. */
   reply: ChatRouteReply
-  /** Sampling and reply-length controls forwarded to the chat service. */
+  /** Caller-provided sampling and reply length controls. */
   generationOptions: MessageGenerationOptions
-}
-
-/** Failure caught while persisting an assistant terminal state. */
-type AssistantStateUpdateFailure = {
-  /** Original value thrown by the synchronous persistence callback. */
-  error: unknown
-}
+}>
 
 /**
- * Starts one streamed assistant completion immediately.
- *
- * The task sends the system prompt and user content to the chat service,
- * forwards content deltas, persists a completed/interrupted/failed assistant
- * state, and emits at most one terminal `done` or `error` event. Only `stop`
- * and `length` finish reasons are supported. A client disconnect aborts the
- * upstream stream and suppresses reporting that requires the closed SSE
- * connection; the route still awaits this task's settlement.
- *
- * @param options - Chat service, request lifecycle, persistence callback, and
- * stream output owned by the route.
- * @returns A promise that resolves after the stream reaches a supported finish
- * reason, observes abort, or reports a failure event.
- * @throws If an error event cannot be sent while the SSE connection remains
- * connected.
+ * Streams a reply, persisting content before publication and status before completion.
+ * @param options - Borrowed dependencies and turn-scoped persistence authority.
+ * @returns Settlement after completion, cancellation, deletion, or reported failure.
+ * @throws If persistence or failure reporting fails; the route observes that rejection.
+ * @remarks Partial text remains stored on cancellation and failure. Cancelled replies
+ * become interrupted; upstream failures become failed and are excluded from future context.
  */
 export default async function createChatTask(
   options: CreateChatTaskOptions
 ): Promise<void> {
-  const sendEvent = createEventSender(options.reply)
   try {
-    await createChatCompletion(options, sendEvent)
+    const finishReason = await createChatCompletion(options)
+    if (finishReason === undefined) {
+      options.updateAssistantMessageState({ status: "interrupted" })
+      return
+    }
+    const persisted = options.updateAssistantMessageState({
+      status: "completed",
+      finishReason
+    })
+    if (persisted && options.reply.sse.isConnected) {
+      await createChatDoneEvent(options, finishReason)
+    }
   } catch (error) {
-    await handleChatCompletionFailure(error, options, sendEvent)
+    options.request.log.error({ err: error }, "Chat completion stream failed")
+    // The upstream reports a cancelled stream even when this route has not yet
+    // observed its own abort, so both indicate an interrupted reply.
+    const isCancelled =
+      options.abortSignal.aborted ||
+      error instanceof ChatCompletionCancelledError
+    try {
+      options.updateAssistantMessageState({
+        status: isCancelled ? "interrupted" : "failed"
+      })
+    } catch (persistenceFailure) {
+      throw new AggregateError(
+        [error, persistenceFailure],
+        "Chat failure could not be finalized",
+        { cause: persistenceFailure }
+      )
+    }
+    if (isCancelled) return
+    if (options.reply.sse.isConnected) {
+      await createEventSender(options.reply)({
+        type: "error",
+        message: "Chat completion failed. Please try again."
+      })
+    }
   }
 }
 
 /**
- * Streams one assistant completion through its persisted and SSE outcomes.
- *
- * @param options - Chat service, request lifecycle, persistence callback, and
- * stream output owned by the route.
- * @param sendEvent - Sender bound to the task's SSE reply.
- * @returns A promise that resolves after a supported completion or observed
- * graceful abort.
- * @throws If stream establishment, iteration, validation, or delta delivery
- * fails, if a terminal assistant state cannot be persisted, or if the stream
- * ends without a finish reason while not aborted.
+ * Publishes the terminal event of a completion that is already persisted.
+ * @param options - Request logger and SSE connection of the completed task.
+ * @param finishReason - Persisted reason the model stopped.
+ * @returns Settlement after the event is accepted or its delivery failure is logged.
+ * @remarks The stored completion is the authoritative outcome. A failed write
+ * means only that the client missed the event, so it is logged at debug level
+ * rather than reported as a stream failure; it does not reject.
+ */
+async function createChatDoneEvent(
+  options: CreateChatTaskOptions,
+  finishReason: ConversationAssistantMessageFinishReason
+): Promise<void> {
+  try {
+    await createEventSender(options.reply)({ type: "done", finishReason })
+  } catch (error) {
+    options.request.log.debug(
+      { err: error },
+      "Could not send the final chat event"
+    )
+  }
+}
+
+/**
+ * Consumes one upstream stream with persistence preceding every emitted delta.
+ * @param options - Turn context, upstream adapter, and route-owned cancellation.
+ * @returns The supported finish reason, or undefined after cancellation/deletion.
+ * @throws If the upstream fails, ends prematurely, or supplies an unsupported finish reason.
  */
 async function createChatCompletion(
-  options: CreateChatTaskOptions,
-  sendEvent: ReturnType<typeof createEventSender>
-): Promise<void> {
-  const {
-    chatService,
-    updateAssistantMessageState,
-    model,
-    systemPrompt,
-    userMessageContent,
-    abortSignal,
-    generationOptions
-  } = options
-  const systemMessage: CompleteChatOptions["messages"][number] = {
-    role: "system",
-    content: systemPrompt
-  }
-  const userMessage: CompleteChatOptions["messages"][number] = {
-    role: "user",
-    content: userMessageContent
-  }
-  const messages: CompleteChatOptions["messages"] = [systemMessage, userMessage]
-  const stream = await chatService.completeChatStream({
-    messages,
-    model,
-    signal: abortSignal,
-    generationOptions
+  options: CreateChatTaskOptions
+): Promise<ConversationAssistantMessageFinishReason | undefined> {
+  if (options.abortSignal.aborted) return undefined
+  const stream = await options.completeChatStream({
+    messages: options.messages,
+    model: options.model,
+    generationOptions: options.generationOptions,
+    signal: options.abortSignal
   })
-
+  const sendEvent = createEventSender(options.reply)
   for await (const chunk of stream) {
-    // We request only one completion, whose index is 0.
-    // Some chunks may have an empty choices array.
-    const choice = chunk.choices.find(({ index }) => index === 0)
-
-    if (!choice) continue
-
-    const content = choice.delta.content
-    if (content) {
-      await sendEvent({
-        type: "delta",
-        content
-      })
-    }
-
-    const finishReason = choice.finish_reason
-    if (!finishReason) continue
-
-    if (finishReason !== "stop" && finishReason !== "length") {
-      throw new Error(`Unsupported finish reason: ${choice.finish_reason}`)
-    }
-
-    await handleChatCompletionFinish(finishReason, options, sendEvent)
-    return
+    if (options.abortSignal.aborted) return undefined
+    const outcome = await createChatChunkEvent(
+      chunk,
+      options.updateAssistantMessageContent,
+      sendEvent
+    )
+    if (outcome.status === "discarded") return undefined
+    if (outcome.status === "completed") return outcome.finishReason
   }
-
-  if (abortSignal.aborted) {
-    updateAssistantMessageState({
-      status: "interrupted"
-    })
-    return
-  }
-
+  if (options.abortSignal.aborted) return undefined
   throw new Error("Model stream ended without a finish reason")
 }
 
+/** Result of persisting and publishing one upstream chunk. */
+type ChatChunkOutcome =
+  | Readonly<{ /** No terminal marker in this chunk. */ status: "pending" }>
+  | Readonly<{
+      /** Persistence authority ended through deletion or finalization. */ status: "discarded"
+    }>
+  | Readonly<{
+      /** The model supplied a supported terminal marker. */ status: "completed"
+      /** Terminal reason persisted by the enclosing task. */ finishReason: ConversationAssistantMessageFinishReason
+    }>
+
 /**
- * Handles a supported completion finish for persistence and SSE delivery.
- *
- * @param finishReason - Supported reason reported by the model stream.
- * @param options - Task persistence callback and request lifecycle boundaries.
- * @param sendEvent - Sender bound to the task's SSE reply.
- * @returns A promise that resolves after completed state is persisted and the
- * event is sent or its failure is logged; it does not reject for a transport
- * failure after persistence succeeds.
- * @throws If the completed assistant state cannot be persisted.
+ * Persists and publishes the selected completion delta, then interprets its marker.
+ * @param chunk - Upstream chunk containing zero or more indexed choices.
+ * @param updateAssistantMessageContent - Turn-specific delta persistence callback.
+ * @param sendEvent - Borrowed ordered SSE publication callback.
+ * @returns Continuation, discarded-write, or supported-completion outcome.
+ * @throws If persistence/publication fails or the finish reason is unsupported.
  */
-async function handleChatCompletionFinish(
-  finishReason: ConversationAssistantMessageFinishReason,
-  { updateAssistantMessageState, reply, request }: CreateChatTaskOptions,
+async function createChatChunkEvent(
+  chunk: ChatCompletionChunk,
+  updateAssistantMessageContent: CreateChatTaskOptions["updateAssistantMessageContent"],
   sendEvent: ReturnType<typeof createEventSender>
-): Promise<void> {
-  updateAssistantMessageState({
-    status: "completed",
-    finishReason
-  })
-
-  if (!reply.sse.isConnected) {
-    return
+): Promise<ChatChunkOutcome> {
+  const choice = chunk.choices.find(({ index }) => index === 0)
+  if (!choice) return { status: "pending" }
+  const content = choice.delta.content
+  if (content) {
+    if (!updateAssistantMessageContent(content)) return { status: "discarded" }
+    await sendEvent({ type: "delta", content })
   }
-
-  try {
-    await sendEvent({
-      type: "done",
-      finishReason
-    })
-  } catch (error) {
-    request.log.debug({ err: error }, "Could not send the final chat event")
-  }
-}
-
-/**
- * Handles a chat completion failure across persistence, diagnostics, and SSE.
- *
- * @param error - Original stream establishment, iteration, validation, or
- * delta-delivery failure.
- * @param options - Task persistence callback and request lifecycle boundaries.
- * @param sendEvent - Sender bound to the task's SSE reply.
- * @returns A promise that resolves after reporting the failure when possible.
- * @throws If the error event cannot be sent while SSE remains connected. If
- * persistence also fails, an aggregate preserves the original, persistence,
- * and event-delivery failures.
- */
-async function handleChatCompletionFailure(
-  error: unknown,
-  {
-    updateAssistantMessageState,
-    abortSignal,
-    reply,
-    request
-  }: CreateChatTaskOptions,
-  sendEvent: ReturnType<typeof createEventSender>
-): Promise<void> {
-  request.log.error({ err: error }, "Chat completion stream failed")
-
-  const assistantStateFailure = updateAssistantFailureState(
-    error,
-    updateAssistantMessageState,
-    request
-  )
-
-  // The client is gone, so there is nowhere to send an error event.
-  if (abortSignal.aborted || !reply.sse.isConnected) {
-    return
-  }
-
-  try {
-    await sendEvent({
-      type: "error",
-      message:
-        error instanceof Error ? error.message : "Unknown chat completion error"
-    })
-  } catch (eventError) {
-    if (!assistantStateFailure) {
-      throw eventError
-    }
-
-    throw new AggregateError(
-      [error, assistantStateFailure.error, eventError],
-      "Chat completion failure reporting failed",
-      { cause: eventError }
-    )
-  }
-}
-
-/**
- * Updates the assistant state for a chat completion failure when possible.
- *
- * @param chatCompletionError - Original chat completion failure.
- * @param updateAssistantMessageState - Synchronous persistence callback for
- * the assistant terminal state.
- * @param request - Request whose logger records a persistence failure.
- * @returns The persistence failure when the state could not be updated;
- * otherwise `undefined`.
- */
-function updateAssistantFailureState(
-  chatCompletionError: unknown,
-  updateAssistantMessageState: CreateChatTaskOptions["updateAssistantMessageState"],
-  request: ChatRouteRequest
-): AssistantStateUpdateFailure | undefined {
-  try {
-    updateAssistantMessageState({
-      status:
-        chatCompletionError instanceof ChatCompletionCancelledError
-          ? "interrupted"
-          : "failed"
-    })
-    return undefined
-  } catch (error) {
-    request.log.error(
-      { err: error, chatCompletionError },
-      "Could not persist the assistant failure state"
-    )
-    return { error }
-  }
+  const finishReason = choice.finish_reason
+  if (!finishReason) return { status: "pending" }
+  if (finishReason !== "stop" && finishReason !== "length")
+    throw new Error("Unsupported chat finish reason")
+  return { status: "completed", finishReason }
 }

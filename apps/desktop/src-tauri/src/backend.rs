@@ -227,19 +227,46 @@ fn run_backend_dev_script(backend_dir: &Path) -> Result<Child, String> {
 /// state cannot be locked, the script cannot be spawned, or the child cannot
 /// be inspected.
 fn spawn_backend_process(backend: &Backend) -> Result<BackendProcessStatus, String> {
-    let backend_dir = get_backend_dir()?;
+    if tauri::is_dev() {
+        let backend_dir = get_backend_dir()?;
 
-    // Lock before spawning so we never create a process that we cannot store.
-    let mut process = backend
-        .process
-        .lock()
-        .map_err(|err| format!("Failed to lock backend state: {err}"))?;
+        // Lock before spawning so we never create a process that we cannot store.
+        let mut process = backend
+            .process
+            .lock()
+            .map_err(|err| format!("Failed to lock backend state: {err}"))?;
 
-    let backend_process = run_backend_dev_script(&backend_dir)?;
+        let backend_process = run_backend_dev_script(&backend_dir)?;
 
-    *process = Some(backend_process);
+        *process = Some(backend_process);
 
-    inspect_process(process.as_mut())
+        inspect_process(process.as_mut())
+    } else {
+        // TODO: Clean up this function
+        let prod_runtime_dir = std::env::home_dir()
+            .ok_or("Could not determine the home directory")?
+            .join(".lys")
+            .join("runtime");
+
+        let node = prod_runtime_dir.join("node/bin/node");
+        let entry = prod_runtime_dir.join("backend/dist/backend.mjs");
+
+        // Lock before spawning so we never create a process that we cannot store.
+        let mut process = backend
+            .process
+            .lock()
+            .map_err(|err| format!("Failed to lock backend state: {err}"))?;
+
+        let backend_process = Command::new(node)
+            .arg(entry)
+            .process_group(0)
+            .spawn()
+            .map_err(|err| format!("Failed to start backend: {err}"))?;
+
+        *process = Some(backend_process);
+
+        inspect_process(process.as_mut())
+    }
 }
 
 #[tauri::command]

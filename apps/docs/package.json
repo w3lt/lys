@@ -1,7 +1,6 @@
 {
   "name": "@lys/docs",
   "type": "module",
-  "version": "0.1.0",
   "scripts": {
     "dev": "astro dev",
     "start": "astro dev",
@@ -34,5 +33,6 @@
   "devDependencies": {
     "@astrojs/check": "^0.9.10",
     "typescript": "^6.0.3"
-  }
+  },
+  "version": "0.2.0"
 }

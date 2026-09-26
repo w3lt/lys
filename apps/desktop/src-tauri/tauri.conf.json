@@ -1,7 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Lys",
-  "version": "0.1.0",
   "identifier": "com.w3lt.lys-desktop",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -38,5 +37,6 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
-  }
+  },
+  "version": "0.2.0"
 }

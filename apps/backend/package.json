@@ -23,7 +23,8 @@
     "@types/node": "^26.6.2",
     "esbuild": "^0.28.2",
     "tsx": "^4.23.15",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.11"
   },
   "version": "0.2.0"
 }

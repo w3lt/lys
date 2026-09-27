@@ -96,7 +96,7 @@ const MARKDOWN_JSON_CODE_FENCE_PATTERN = /^```(?:json)?([\s\S]*)```$/i
  */
 export default class ChatService {
   /** Owned OpenAI SDK client used to create chat completions. */
-  #openaiClient: OpenAI
+  readonly #openaiClient: OpenAI
   /** Frozen system message sent before the user message in every title request. */
   readonly #titleSystemMessage: ChatCompletionMessageParam
   /** Validates title replies, including the configured title length limit. */
@@ -220,7 +220,9 @@ export default class ChatService {
    * @returns A promise that resolves immediately.
    * @remarks The current OpenAI client exposes no asynchronous cleanup requirement.
    */
-  public async [Symbol.asyncDispose]() {}
+  public async [Symbol.asyncDispose]() {
+    // This method does nothing as described above
+  }
 }
 
 /**

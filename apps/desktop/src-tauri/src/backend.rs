@@ -19,6 +19,8 @@ use nix::{
 };
 use tauri::State;
 
+use crate::utils::{get_backend_script_path, get_node_executable_path};
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 /// Serializable status of the child process currently owned by the desktop.
@@ -215,6 +217,44 @@ fn run_backend_dev_script(backend_dir: &Path) -> Result<Child, String> {
         .map_err(|err| format!("Failed to spawn backend process: {err}"))
 }
 
+fn spawn_dev_backend_process(backend: &Backend) -> Result<BackendProcessStatus, String> {
+    let backend_dir = get_backend_dir()?;
+
+    // Lock before spawning so we never create a process that we cannot store.
+    let mut process = backend
+        .process
+        .lock()
+        .map_err(|err| format!("Failed to lock backend state: {err}"))?;
+
+    let backend_process = run_backend_dev_script(&backend_dir)?;
+
+    *process = Some(backend_process);
+
+    // We return the status, that's why we need this
+    inspect_process(process.as_mut())
+}
+
+fn spawn_prod_backend_process(backend: &Backend) -> Result<BackendProcessStatus, String> {
+    let node_executable_path = get_node_executable_path()?;
+    let backend_script_path = get_backend_script_path()?;
+
+    // Lock before spawning so we never create a process that we cannot store.
+    let mut process = backend
+        .process
+        .lock()
+        .map_err(|err| format!("Failed to lock backend state: {err}"))?;
+
+    let backend_process = Command::new(node_executable_path)
+        .arg(backend_script_path)
+        .process_group(0)
+        .spawn()
+        .map_err(|err| format!("Failed to start backend: {err}"))?;
+
+    *process = Some(backend_process);
+
+    inspect_process(process.as_mut())
+}
+
 /// Spawns a backend child and records it under the backend mutex before inspecting it.
 ///
 /// Locking occurs before spawning so a successfully created child can always
@@ -228,44 +268,9 @@ fn run_backend_dev_script(backend_dir: &Path) -> Result<Child, String> {
 /// be inspected.
 fn spawn_backend_process(backend: &Backend) -> Result<BackendProcessStatus, String> {
     if tauri::is_dev() {
-        let backend_dir = get_backend_dir()?;
-
-        // Lock before spawning so we never create a process that we cannot store.
-        let mut process = backend
-            .process
-            .lock()
-            .map_err(|err| format!("Failed to lock backend state: {err}"))?;
-
-        let backend_process = run_backend_dev_script(&backend_dir)?;
-
-        *process = Some(backend_process);
-
-        inspect_process(process.as_mut())
+        spawn_dev_backend_process(backend)
     } else {
-        // TODO: Clean up this function
-        let prod_runtime_dir = std::env::home_dir()
-            .ok_or("Could not determine the home directory")?
-            .join(".lys")
-            .join("runtime");
-
-        let node = prod_runtime_dir.join("node/bin/node");
-        let entry = prod_runtime_dir.join("backend/dist/backend.mjs");
-
-        // Lock before spawning so we never create a process that we cannot store.
-        let mut process = backend
-            .process
-            .lock()
-            .map_err(|err| format!("Failed to lock backend state: {err}"))?;
-
-        let backend_process = Command::new(node)
-            .arg(entry)
-            .process_group(0)
-            .spawn()
-            .map_err(|err| format!("Failed to start backend: {err}"))?;
-
-        *process = Some(backend_process);
-
-        inspect_process(process.as_mut())
+        spawn_prod_backend_process(backend)
     }
 }
 

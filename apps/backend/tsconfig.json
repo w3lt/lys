@@ -21,5 +21,5 @@
     "skipLibCheck": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["src", "test", "build.mts"]
+  "include": ["src", "test", "build.mts", "vitest.config.ts"]
 }

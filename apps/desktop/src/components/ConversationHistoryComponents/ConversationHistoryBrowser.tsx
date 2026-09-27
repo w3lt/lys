@@ -501,11 +501,10 @@ export default function ConversationHistoryBrowser({
     const labelId = `${groupIdPrefix}-${group.label}`
 
     return (
-      <div
+      <fieldset
         aria-labelledby={labelId}
         className="conversation-history__group"
         key={group.label}
-        role="group"
       >
         <p className="conversation-history__group-label" id={labelId}>
           {group.label}
@@ -513,7 +512,7 @@ export default function ConversationHistoryBrowser({
         <ul className="conversation-history__list">
           {group.entries.map(buildRow)}
         </ul>
-      </div>
+      </fieldset>
     )
   }
 
@@ -558,7 +557,11 @@ export default function ConversationHistoryBrowser({
       >
         {buildNotice()}
         {groups.map(buildGroup)}
-        <p className="conversation-history__older" role="status">
+        <p
+          aria-live="polite"
+          className="conversation-history__older"
+          role="status"
+        >
           {formatOlderPageStatus(list)}
         </p>
       </div>

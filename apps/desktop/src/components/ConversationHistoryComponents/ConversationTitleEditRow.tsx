@@ -27,6 +27,16 @@ export type ConversationTitleEditRowProps = {
 }
 
 /**
+ * Focuses the title field as React attaches it, because the row mounts only
+ * when the user asks to rename.
+ *
+ * @param titleField - Attached field, or null when React detaches it.
+ */
+function handleTitleFieldAttach(titleField: HTMLInputElement | null): void {
+  titleField?.focus()
+}
+
+/**
  * Edits one conversation's title in place within the history list.
  *
  * @remarks Primary category: presentational. The parent owns the draft,
@@ -94,13 +104,13 @@ export default function ConversationTitleEditRow({
         </label>
         <input
           aria-describedby={hintId}
-          autoFocus
           className="conversation-history__rename-input"
           id={inputId}
           maxLength={MAXIMUM_CONVERSATION_TITLE_LENGTH}
           onBlur={handleTitleBlur}
           onChange={(event) => onDraftTitleChange(event.currentTarget.value)}
           onKeyDown={handleTitleKeyDown}
+          ref={handleTitleFieldAttach}
           spellCheck={false}
           type="text"
           value={draftTitle}

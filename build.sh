@@ -25,12 +25,12 @@ mkdir -p "$LYS_HOME/runtime"
 
 # Step 6: Detect the target NodeJS version
 get_latest_lts_node_version() {
-  curl -fsSL https://nodejs.org/dist/index.json | jq -er '[.[] | select(.lts)][0].version'
+  curl --proto "=https" -fsSL https://nodejs.org/dist/index.json | jq -er '[.[] | select(.lts)][0].version'
 }
 
 get_latest_node_major_version() {
   local major="$1"
-  curl -fsSL --retry 3 https://nodejs.org/dist/index.json |
+  curl --proto "=https" -fsSL --retry 3 https://nodejs.org/dist/index.json |
     jq -er --arg prefix "v${major}." \
       '[.[] | select(.version | startswith($prefix))][0].version'
 }
@@ -76,10 +76,11 @@ detect_node_arch() {
 }
 
 sha256_of() {
+  local file_path="$1"
   if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$1" | awk '{print $1}'
+    sha256sum "$file_path" | awk '{print $1}'
   else
-    shasum -a 256 "$1" | awk '{print $1}'
+    shasum -a 256 "$file_path" | awk '{print $1}'
   fi
 }
 
@@ -97,8 +98,8 @@ else
   trap 'rm -rf "$TMP_DIR"' EXIT
 
   echo "Downloading $NODE_TARBALL..."
-  curl -fsSL --retry 3 -o "$TMP_DIR/$NODE_TARBALL" "$NODE_BASE_URL/$NODE_TARBALL"
-  curl -fsSL --retry 3 -o "$TMP_DIR/SHASUMS256.txt" "$NODE_BASE_URL/SHASUMS256.txt"
+  curl --proto "=https" -fsSL --retry 3 -o "$TMP_DIR/$NODE_TARBALL" "$NODE_BASE_URL/$NODE_TARBALL"
+  curl --proto "=https" -fsSL --retry 3 -o "$TMP_DIR/SHASUMS256.txt" "$NODE_BASE_URL/SHASUMS256.txt"
 
   EXPECTED_SHA=$(awk -v f="$NODE_TARBALL" '$2 == f {print $1}' "$TMP_DIR/SHASUMS256.txt")
   ACTUAL_SHA=$(sha256_of "$TMP_DIR/$NODE_TARBALL")

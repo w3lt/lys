@@ -1,5 +1,11 @@
 import { DEFAULT_CONFIG } from "./content"
-import type { AppAction, AppState, Message, RuntimeState } from "./types"
+import type {
+  AppAction,
+  AppState,
+  LysMessage,
+  Message,
+  RuntimeState
+} from "./types"
 
 /**
  * Applies a partial runtime transition without mutating the current state.
@@ -12,6 +18,27 @@ const updateRuntime = (
   state: AppState,
   patch: Partial<RuntimeState>
 ): AppState => ({ ...state, runtime: { ...state.runtime, ...patch } })
+
+/**
+ * Applies a runtime transition only from the lifecycle statuses it requires.
+ *
+ * @param state - Current reducer-owned state.
+ * @param required - Backend and model statuses that permit the transition; an omitted status matches any current value.
+ * @param patch - Runtime fields to replace when the transition is permitted.
+ * @returns The transitioned state, or the same object when the runtime is in any other status.
+ */
+const updateRuntimeFrom = (
+  state: AppState,
+  required: Partial<Pick<RuntimeState, "backend" | "model">>,
+  patch: Partial<RuntimeState>
+): AppState => {
+  const { backend, model } = state.runtime
+  const isPermitted =
+    (required.backend ?? backend) === backend &&
+    (required.model ?? model) === model
+
+  return isPermitted ? updateRuntime(state, patch) : state
+}
 
 /**
  * Updates one in-progress Lys message while preserving all other messages.
@@ -39,6 +66,122 @@ const updateMessage = (
       ? update(message)
       : message
   )
+
+/**
+ * Checks whether a reply stream is active and the identified Lys reply is still streaming.
+ *
+ * @param state - Current reducer-owned state.
+ * @param messageId - Identifier of the Lys reply to inspect.
+ * @returns Whether the state is streaming and contains that streaming reply.
+ */
+const isReplyStreaming = (state: AppState, messageId: string): boolean =>
+  state.streaming &&
+  state.messages.some(
+    (message) =>
+      message.role === "lys" &&
+      message.id === messageId &&
+      message.status === "streaming"
+  )
+
+/**
+ * Starts a streaming Lys reply unless a reply is already streaming.
+ *
+ * @param state - Current reducer-owned state.
+ * @param messageId - Identifier assigned to the new reply.
+ * @returns A state with an empty streaming reply appended, or the same object while a reply is streaming.
+ */
+const startReply = (state: AppState, messageId: string): AppState => {
+  if (state.streaming) return state
+
+  return {
+    ...state,
+    streaming: true,
+    messages: [
+      ...state.messages,
+      { id: messageId, role: "lys", text: "", status: "streaming" }
+    ]
+  }
+}
+
+/**
+ * Appends a text chunk to the identified reply while it is streaming.
+ *
+ * @param state - Current reducer-owned state.
+ * @param messageId - Identifier of the streaming reply.
+ * @param text - Text fragment to append.
+ * @returns A state with the reply text extended, or the same object when that reply is not actively streaming.
+ */
+const updateReplyText = (
+  state: AppState,
+  messageId: string,
+  text: string
+): AppState => {
+  if (!isReplyStreaming(state, messageId)) return state
+
+  return {
+    ...state,
+    messages: updateMessage(state.messages, messageId, (item) => ({
+      ...item,
+      text: item.text + text
+    }))
+  }
+}
+
+/**
+ * Ends the active reply stream by moving the identified reply to a terminal status.
+ *
+ * @param state - Current reducer-owned state.
+ * @param messageId - Identifier of the streaming reply.
+ * @param status - Terminal status recorded on the reply.
+ * @returns A state with streaming ended and the reply status replaced, or the same object when that reply is not actively streaming.
+ */
+const updateReplyStatus = (
+  state: AppState,
+  messageId: string,
+  status: Exclude<LysMessage["status"], "streaming">
+): AppState => {
+  if (!isReplyStreaming(state, messageId)) return state
+
+  return {
+    ...state,
+    streaming: false,
+    messages: updateMessage(state.messages, messageId, (item) => ({
+      ...item,
+      status
+    }))
+  }
+}
+
+/**
+ * Stops the most recent streaming Lys reply.
+ *
+ * @param state - Current reducer-owned state.
+ * @returns A state with streaming ended and that reply marked stopped, or the same object when no reply is actively streaming.
+ */
+const stopReply = (state: AppState): AppState => {
+  const reply = [...state.messages]
+    .reverse()
+    .find((item) => item.role === "lys" && item.status === "streaming")
+
+  return reply ? updateReplyStatus(state, reply.id, "stopped") : state
+}
+
+/**
+ * Selects a different model and resets any model runtime that is not already empty.
+ *
+ * @param state - Current reducer-owned state.
+ * @param model - Model identifier to select.
+ * @returns A state with the model selected and, unless the runtime model is `none`, the runtime model reset to `none` with zero progress; the same object when the model is already selected.
+ */
+const updateSelectedModel = (state: AppState, model: string): AppState => {
+  if (state.config.model === model) return state
+
+  const selected = { ...state, config: { ...state.config, model } }
+
+  return state.runtime.model === "none"
+    ? selected
+    : updateRuntime(selected, { model: "none", modelProgress: 0 })
+}
 
 /**
  * Creates the reducer's deterministic initial state.
@@ -81,66 +224,13 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case "messageAdded":
       return { ...state, messages: [...state.messages, action.message] }
     case "replyStarted":
-      if (state.streaming) return state
-
-      return {
-        ...state,
-        streaming: true,
-        messages: [
-          ...state.messages,
-          { id: action.messageId, role: "lys", text: "", status: "streaming" }
-        ]
-      }
-    case "replyChunkReceived": {
-      const message = state.messages.find(
-        (item) =>
-          item.role === "lys" &&
-          item.id === action.messageId &&
-          item.status === "streaming"
-      )
-      if (!state.streaming || !message) return state
-
-      return {
-        ...state,
-        messages: updateMessage(state.messages, action.messageId, (item) => ({
-          ...item,
-          text: item.text + action.text
-        }))
-      }
-    }
-    case "replyCompleted": {
-      const message = state.messages.find(
-        (item) =>
-          item.role === "lys" &&
-          item.id === action.messageId &&
-          item.status === "streaming"
-      )
-      if (!state.streaming || !message) return state
-
-      return {
-        ...state,
-        streaming: false,
-        messages: updateMessage(state.messages, action.messageId, (item) => ({
-          ...item,
-          status: "complete"
-        }))
-      }
-    }
-    case "replyStopped": {
-      const message = [...state.messages]
-        .reverse()
-        .find((item) => item.role === "lys" && item.status === "streaming")
-      if (!state.streaming || !message || message.role !== "lys") return state
-
-      return {
-        ...state,
-        streaming: false,
-        messages: updateMessage(state.messages, message.id, (item) => ({
-          ...item,
-          status: "stopped"
-        }))
-      }
-    }
+      return startReply(state, action.messageId)
+    case "replyChunkReceived":
+      return updateReplyText(state, action.messageId, action.text)
+    case "replyCompleted":
+      return updateReplyStatus(state, action.messageId, "complete")
+    case "replyStopped":
+      return stopReply(state)
     case "errorsCleared":
       return {
         ...state,
@@ -167,64 +257,61 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case "configChanged":
       return { ...state, config: { ...state.config, ...action.patch } }
     case "backendStartRequested":
-      return state.runtime.backend === "stopped"
-        ? updateRuntime(state, { backend: "starting" })
-        : state
+      return updateRuntimeFrom(
+        state,
+        { backend: "stopped" },
+        { backend: "starting" }
+      )
     case "backendStarted":
-      return state.runtime.backend === "starting"
-        ? updateRuntime(state, {
-            backend: "running",
-            startedAt: action.startedAt
-          })
-        : state
+      return updateRuntimeFrom(
+        state,
+        { backend: "starting" },
+        { backend: "running", startedAt: action.startedAt }
+      )
     case "backendStopRequested":
-      return state.runtime.backend === "running"
-        ? updateRuntime(state, { backend: "stopping" })
-        : state
+      return updateRuntimeFrom(
+        state,
+        { backend: "running" },
+        { backend: "stopping" }
+      )
     case "backendStopped":
-      return state.runtime.backend === "stopping"
-        ? updateRuntime(state, {
-            backend: "stopped",
-            model: "none",
-            modelProgress: 0
-          })
-        : state
+      return updateRuntimeFrom(
+        state,
+        { backend: "stopping" },
+        { backend: "stopped", model: "none", modelProgress: 0 }
+      )
     case "modelLoadStarted":
-      return state.runtime.backend === "running" &&
-        state.runtime.model === "none"
-        ? updateRuntime(state, { model: "loading", modelProgress: 0 })
-        : state
+      return updateRuntimeFrom(
+        state,
+        { backend: "running", model: "none" },
+        { model: "loading", modelProgress: 0 }
+      )
     case "modelLoadProgressed":
-      return state.runtime.model === "loading"
-        ? updateRuntime(state, {
-            modelProgress: Math.min(100, Math.max(0, action.progress))
-          })
-        : state
+      return updateRuntimeFrom(
+        state,
+        { model: "loading" },
+        { modelProgress: Math.min(100, Math.max(0, action.progress)) }
+      )
     case "modelLoaded":
-      return state.runtime.model === "loading"
-        ? updateRuntime(state, { model: "loaded", modelProgress: 100 })
-        : state
+      return updateRuntimeFrom(
+        state,
+        { model: "loading" },
+        { model: "loaded", modelProgress: 100 }
+      )
     case "modelUnloadStarted":
-      return state.runtime.backend === "running" &&
-        state.runtime.model === "loaded"
-        ? updateRuntime(state, { model: "unloading" })
-        : state
+      return updateRuntimeFrom(
+        state,
+        { backend: "running", model: "loaded" },
+        { model: "unloading" }
+      )
     case "modelUnloaded":
-      return state.runtime.model === "unloading"
-        ? updateRuntime(state, { model: "none", modelProgress: 0 })
-        : state
-    case "modelSelected": {
-      if (state.config.model === action.model) return state
-
-      const selected = {
-        ...state,
-        config: { ...state.config, model: action.model }
-      }
-
-      return state.runtime.model === "none"
-        ? selected
-        : updateRuntime(selected, { model: "none", modelProgress: 0 })
-    }
+      return updateRuntimeFrom(
+        state,
+        { model: "unloading" },
+        { model: "none", modelProgress: 0 }
+      )
+    case "modelSelected":
+      return updateSelectedModel(state, action.model)
     case "autostartToggled":
       return updateRuntime(state, { autostart: !state.runtime.autostart })
     case "logAdded":

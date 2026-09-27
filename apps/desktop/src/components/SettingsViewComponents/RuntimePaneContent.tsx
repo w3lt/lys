@@ -211,12 +211,13 @@ export default function RuntimePaneContent(): ReactElement {
         </div>
 
         {isTransitioning ? (
-          /* The backend acknowledges completion without percentage progress. */
-          <div
-            aria-label={residencyHeading}
-            className="settings-view__progress"
-            role="progressbar"
-          >
+          /*
+           * The backend acknowledges completion without percentage progress, so
+           * the native bar stays indeterminate. It carries the semantics while
+           * the track draws the sweep, which a native bar cannot render.
+           */
+          <div className="settings-view__progress">
+            <progress aria-label={residencyHeading} className="sr-only" />
             <span aria-hidden="true" className="settings-view__progress-fill" />
           </div>
         ) : null}

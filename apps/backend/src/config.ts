@@ -115,49 +115,15 @@ export type BackendConfig = z.infer<typeof backendConfigSchema>
  * failing key.
  */
 export function loadBackendConfig(): BackendConfig {
-  const lysSystemPrompt = readPrompt("lys-system")
-  const titleGenerationPrompt = readPrompt("title-generation")
-  const titleGenerationMaxAttempts = parsePositiveSafeInteger(
-    TITLE_GENERATION_MAX_ATTEMPTS,
-    "titleGenerationMaxAttempts"
-  )
-  const generatedTitleMaxLength = parsePositiveSafeInteger(
-    GENERATED_TITLE_MAX_LENGTH,
-    "generatedTitleMaxLength"
-  )
-
-  const databaseFilePath = join(homedir(), ".lys", "lys_db.sqlite")
-
   return backendConfigSchema.parse({
     backendHost: BACKEND_HOST,
     backendPort: BACKEND_PORT,
     lmstudioHost: LMSTUDIO_HOST,
     lmstudioPort: LMSTUDIO_PORT,
-    databaseFilePath: databaseFilePath,
-    lysSystemPrompt,
-    titleGenerationPrompt,
-    titleGenerationMaxAttempts,
-    generatedTitleMaxLength
+    databaseFilePath: join(homedir(), ".lys", "lys_db.sqlite"),
+    lysSystemPrompt: readPrompt("lys-system"),
+    titleGenerationPrompt: readPrompt("title-generation"),
+    titleGenerationMaxAttempts: TITLE_GENERATION_MAX_ATTEMPTS,
+    generatedTitleMaxLength: GENERATED_TITLE_MAX_LENGTH
   } satisfies z.input<typeof backendConfigSchema>)
-}
-
-/**
- * Validates one numeric backend setting as a positive safe integer.
- *
- * @param value - Candidate setting value.
- * @param settingName - Configuration key named in the failure message.
- * @returns The same value once it is known to be a positive safe integer.
- * @throws {RangeError} If the value is not a positive safe integer.
- */
-function parsePositiveSafeInteger(
-  value: number,
-  settingName: keyof BackendConfig
-): number {
-  if (!Number.isSafeInteger(value) || value < 1) {
-    throw new RangeError(
-      `${settingName} must be a positive safe integer, received ${value}`
-    )
-  }
-
-  return value
 }

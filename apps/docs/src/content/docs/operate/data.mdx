@@ -16,9 +16,13 @@ Current persisted data locations that are evidenced in this repository.
   entries={[{ label: "Type", value: "Reference" }]}
 />
 
-## `~/.lys/settings.json`
+Paths on this page use `$LYS_HOME` for the
+[Lys home directory](/reference/configuration/#lys-home-directory): `~/.lys`
+unless the `LYS_HOME` environment variable selects another directory.
 
-The desktop host owns a JSON settings file at `~/.lys/settings.json`.
+## `$LYS_HOME/settings.json`
+
+The desktop host owns a JSON settings file at `$LYS_HOME/settings.json`.
 
 - created automatically when the file is missing
 - stores the `runtime`, `model`, and `generation` groups described in
@@ -30,10 +34,10 @@ The desktop loads this file at initialization and autosaves generation edits.
 That save path preserves the runtime and model groups already on disk; runtime
 and model edits in the UI remain session-only.
 
-## `~/.lys/lys_db.sqlite`
+## `$LYS_HOME/lys_db.sqlite`
 
 The backend stores conversations in one SQLite database file at
-`~/.lys/lys_db.sqlite`.
+`$LYS_HOME/lys_db.sqlite`.
 
 The checked-in schema currently creates:
 
@@ -50,16 +54,18 @@ whose version is newer than the binary understands.
 
 - The settings file is created by the Tauri host on first settings load.
 - The SQLite file is opened by the backend when the conversation service starts.
-- The backend does not create the parent directory. Standalone startup requires
-  `~/.lys/` to exist; the desktop creates it when initializing a missing settings
-  file. See [Running Lys locally](/develop/running/).
-- Both files live under the same `~/.lys/` directory, so user data and app
-  settings currently share one root.
+- The backend does not create the Lys home directory. A standalone backend
+  started with `pnpm backend:dev` uses `~/.lys`, which must already exist; the
+  desktop creates the Lys home when initializing a missing settings file. See
+  [Running Lys locally](/develop/running/).
+- Both files live in the same Lys home directory, so user data and app settings
+  currently share one root. Release builds also start their backend from the
+  `runtime/` directory there.
 
 ## WebView theme storage
 
-The desktop theme is stored separately from `~/.lys/` under the `lys.theme`
-WebView `localStorage` key. Its valid values are `dark` and `light`.
+The desktop theme is stored separately from the Lys home directory under the
+`lys.theme` WebView `localStorage` key. Its valid values are `dark` and `light`.
 
 ## What is not documented yet
 
@@ -67,7 +73,9 @@ The repository does not currently provide an evidenced contract for:
 
 - exporting conversations to another format
 - pruning or rotating stored conversation data
-- relocating either file through supported configuration
+- relocating either file on its own; `LYS_HOME` moves both together
+- moving existing files when `LYS_HOME` changes; Lys does not copy them, so an
+  empty new directory starts with default settings and an empty database
 - diagnostics bundles that package these files or projections of them
 
 :::note[Coming soon]

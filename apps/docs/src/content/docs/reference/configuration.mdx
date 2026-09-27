@@ -6,8 +6,9 @@ sidebar:
   order: 3
 ---
 
-Lys currently uses shared loopback constants, backend runtime composition, a
-Tauri-managed settings file, and one WebView theme preference.
+Lys currently uses shared loopback constants, one Lys home directory, backend
+runtime composition, a Tauri-managed settings file, and one WebView theme
+preference.
 
 ## Shared constants
 
@@ -19,6 +20,49 @@ Tauri-managed settings file, and one WebView theme preference.
 | `LMSTUDIO_HOST` | `127.0.0.1` | Backend LM Studio HTTP and WebSocket clients |
 | `LMSTUDIO_PORT` | `1234`      | Backend LM Studio HTTP and WebSocket clients |
 
+## Lys home directory
+
+The Lys home directory holds the desktop settings file, the conversation
+database, and the runtime that release builds start. The handbook writes it as
+`$LYS_HOME`. The desktop host resolves it once at startup from the `LYS_HOME`
+environment variable:
+
+| `LYS_HOME` value                             | Lys home                |
+| -------------------------------------------- | ----------------------- |
+| Unset or empty                               | `~/.lys`                |
+| Absolute path                                | That path, used as-is   |
+| Relative path, including an unexpanded `~/…` | Rejected at app startup |
+| Not valid UTF-8                              | Rejected at app startup |
+
+A rejected value stops the desktop app before any window opens and prints
+`Lys cannot start: …` to standard error. The host does not create the directory
+at startup; loading settings creates it when `settings.json` is missing.
+
+| Path under `$LYS_HOME`        | Used by        | Contents                                                |
+| ----------------------------- | -------------- | ------------------------------------------------------- |
+| `settings.json`               | Tauri host     | [Persisted settings JSON](#persisted-settings-json)     |
+| `lys_db.sqlite`               | Backend        | Conversation database                                   |
+| `runtime/node/bin/node`       | Release builds | Node.js executable that runs the backend                |
+| `runtime/backend/backend.mjs` | Release builds | Backend bundle that the release Node.js executable runs |
+
+On macOS, `build.sh` installs the two `runtime/` entries under
+`${LYS_HOME:-$HOME/.lys}`. It treats an empty value as unset but does not reject
+a relative path.
+
+The backend has no default of its own. It reads `LYS_HOME` once at startup,
+stops with `LYS_HOME is not set` when the variable is unset or empty, and uses
+any other value as given, so set an absolute path when you start the backend
+yourself. The desktop host sets `LYS_HOME` to its resolved Lys home for the
+backend it starts, in development and release builds. The root `backend:dev`
+script sets `LYS_HOME` to `$HOME/.lys`.
+
+:::caution[Apps opened from Finder or the Dock]
+The desktop app reads `LYS_HOME` from its own process environment. An app
+opened from Finder or the Dock does not inherit variables exported in a shell
+profile, so it uses `~/.lys` even when your shell sets `LYS_HOME`. It also does
+not find a runtime that `build.sh` installed under another directory.
+:::
+
 ## Backend-composed values
 
 | Value                          | Current source                                                                        |
@@ -26,20 +70,20 @@ Tauri-managed settings file, and one WebView theme preference.
 | Backend listen address         | `BACKEND_HOST` and `BACKEND_PORT`                                                     |
 | LM Studio HTTP base URL        | `http://${LMSTUDIO_HOST}:${LMSTUDIO_PORT}/v1`                                         |
 | LM Studio WebSocket base URL   | `ws://${LMSTUDIO_HOST}:${LMSTUDIO_PORT}`                                              |
-| SQLite path                    | `~/.lys/lys_db.sqlite`                                                                |
+| SQLite path                    | `$LYS_HOME/lys_db.sqlite`; see [Lys home directory](#lys-home-directory)              |
 | Lys system prompt              | `src/utils/prompts/lys.txt`, as `lysSystemPrompt`                                     |
 | Title-generation prompt        | `src/utils/prompts/title-generation.txt`, as `titleGenerationPrompt`                  |
 | Title-generation attempt limit | `3`, from `titleGenerationMaxAttempts` in `src/config.ts`; must be a positive integer |
 | Generated title length limit   | `100`, from `generatedTitleMaxLength` in `src/config.ts`; must be a positive integer  |
 
 `loadBackendConfig()` builds these values once when the backend starts, so a
-changed prompt file or limit takes effect after a restart. The attempt limit
-applies to each chat turn. The title length limit counts Unicode code points
-before surrounding whitespace is trimmed.
+changed `LYS_HOME`, prompt file, or limit takes effect after a restart. The
+attempt limit applies to each chat turn. The title length limit counts Unicode
+code points before surrounding whitespace is trimmed.
 
 ## Persisted settings JSON
 
-The Tauri host reads and writes `~/.lys/settings.json`. A new file uses these
+The Tauri host reads and writes `$LYS_HOME/settings.json`. A new file uses these
 defaults:
 
 ```json

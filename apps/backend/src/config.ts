@@ -18,7 +18,12 @@ export type BackendConfig = {
   readonly lmstudioHost: string
   /** Port used by backend LM Studio clients. */
   readonly lmstudioPort: number
-  /** Filesystem path of the SQLite database owned by the conversation service. */
+  /**
+   * Filesystem path of the SQLite database owned by the conversation service.
+   *
+   * @remarks `lys_db.sqlite` in the `LYS_HOME` directory. The backend does not
+   * create that directory.
+   */
   readonly databaseFilePath: PathLike
   /**
    * System prompt sent before the user message in every chat completion and
@@ -70,14 +75,18 @@ const TITLE_GENERATION_MAX_ATTEMPTS = 3
 const GENERATED_TITLE_MAX_LENGTH = 100
 
 /**
- * Loads the backend configuration from shared protocol constants, backend
- * limits, and the maintained prompt files.
+ * Loads the backend configuration from the `LYS_HOME` environment variable,
+ * shared protocol constants, backend limits, and the maintained prompt files.
  *
- * @returns A frozen configuration snapshot whose non-empty prompts were read
- * once during this call and whose limits are positive safe integers.
+ * @returns A frozen configuration snapshot whose database path is under
+ * `LYS_HOME`, whose non-empty prompts were read once during this call, and
+ * whose limits are positive safe integers.
+ * @throws If `LYS_HOME` is unset or empty.
  * @throws If a prompt file cannot be read or its trimmed contents are empty.
  * @throws {RangeError} If a title-generation limit is not a positive safe
  * integer.
+ * @remarks `LYS_HOME` has no backend default and is used as given. The desktop
+ * host sets it to its resolved absolute Lys home for the backend it starts.
  */
 export function loadBackendConfig(): BackendConfig {
   const lys_home = process.env.LYS_HOME

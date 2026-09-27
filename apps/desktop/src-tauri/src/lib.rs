@@ -1,8 +1,9 @@
 //! Tauri application wiring for the Lys desktop shell.
 //!
-//! This crate registers commands, owns the managed backend process state, and
-//! stops that process during application exit. Feature-specific command
-//! implementations live in the `backend` and `settings` modules; `tools`
+//! This crate resolves the Lys home once at startup, registers commands, owns
+//! the managed backend process state, and stops that process during
+//! application exit. Feature-specific command implementations live in the
+//! `backend` and `settings` modules; `utils` resolves the Lys home; `tools`
 //! contains unregistered helper and input modules.
 
 use tauri::Manager;
@@ -31,10 +32,14 @@ fn greet(name: &str) -> String {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// Builds and runs the Tauri application.
 ///
-/// The builder registers the opener plugin, manages one mutex-protected
-/// `backend::Backend` resource, and exposes the backend and settings
-/// commands to the renderer. On `Exit`, the managed backend is stopped and a
-/// failure is reported to stderr without preventing the process from
+/// The Lys home is resolved once from `LYS_HOME` before the builder runs, as
+/// described by `LysHome::resolve`. If resolution fails, the error is written
+/// to stderr and the process exits with status 1 before any window opens.
+///
+/// The builder registers the opener plugin, manages the resolved `LysHome` and
+/// one mutex-protected `backend::Backend` resource, and exposes the backend and
+/// settings commands to the renderer. On `Exit`, the managed backend is stopped
+/// and a failure is reported to stderr without preventing the process from
 /// finishing its exit handling.
 ///
 /// # Panics

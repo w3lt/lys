@@ -17,8 +17,8 @@ Zod, and there is no credential-management subsystem yet.
 | React UI -> Tauri host       | Trusted application boundary using Tauri `invoke` commands.           |
 | React UI -> Fastify backend  | Loopback HTTP and SSE only. No auth layer beyond local binding.       |
 | Fastify backend -> LM Studio | Loopback connections to local LM Studio HTTP and WebSocket endpoints. |
-| Backend -> SQLite file       | Local filesystem access to `~/.lys/lys_db.sqlite`.                    |
-| Tauri host -> settings file  | Local filesystem access to `~/.lys/settings.json`.                    |
+| Backend -> SQLite file       | Local filesystem access to `$LYS_HOME/lys_db.sqlite`.                 |
+| Tauri host -> settings file  | Local filesystem access to `$LYS_HOME/settings.json`.                 |
 
 ## Current controls
 

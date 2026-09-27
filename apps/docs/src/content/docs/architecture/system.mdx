@@ -14,7 +14,7 @@ external model runtime, and two shared TypeScript contract packages.
 | Part                      | Implementation                        | Responsibility                                                                                                              |
 | ------------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | Desktop UI                | React in `apps/desktop/src`           | Renders chat and settings views, opens backend HTTP streams, and applies typed chat events to local UI state.               |
-| Host                      | Tauri in `apps/desktop/src-tauri/src` | Starts and stops the backend process, exposes native commands to the UI, and reads or writes `~/.lys/settings.json`.        |
+| Host                      | Tauri in `apps/desktop/src-tauri/src` | Starts and stops the backend process, exposes native commands to the UI, and reads or writes `$LYS_HOME/settings.json`.     |
 | Backend                   | Fastify in `apps/backend/src`         | Serves HTTP and SSE endpoints, persists conversations in SQLite, and talks to LM Studio for model inventory and generation. |
 | Model runtime             | LM Studio on `127.0.0.1:1234`         | Supplies downloaded-model inventory, model loading, chat completions, and title generation.                                 |
 | Shared API contract       | `@lys/protocol`                       | Defines route paths, request bodies, response schemas, and chat SSE event variants with Zod.                                |
@@ -35,10 +35,10 @@ Fastify backend -> SQLite
 
 | State                                        | Owner                   | Notes                                                                                         |
 | -------------------------------------------- | ----------------------- | --------------------------------------------------------------------------------------------- |
-| Conversation rows and message rows           | Backend                 | Stored in `~/.lys/lys_db.sqlite`.                                                             |
+| Conversation rows and message rows           | Backend                 | Stored in `$LYS_HOME/lys_db.sqlite`.                                                          |
 | Chat request lifecycle in the current window | Desktop UI              | Held in the chat Zustand store while one request is active.                                   |
 | Backend process status                       | Desktop UI + Tauri host | The host owns the process; the UI queries status during initialization and lifecycle actions. |
-| Runtime settings JSON                        | Tauri host              | Stored in `~/.lys/settings.json`.                                                             |
+| Runtime settings JSON                        | Tauri host              | Stored in `$LYS_HOME/settings.json`.                                                          |
 | Theme preference                             | Desktop UI              | Stored as `lys.theme` in WebView `localStorage`.                                              |
 | Route and event schemas                      | `@lys/protocol`         | Used by both backend and desktop.                                                             |
 

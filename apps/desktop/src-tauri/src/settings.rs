@@ -1,9 +1,9 @@
 //! Serde-backed desktop settings and their Tauri persistence commands.
 //!
-//! Settings are stored as pretty-printed JSON at `~/.lys/settings.json` by
-//! default. Loading a missing file attempts to create its parent directory;
-//! the supplied path must therefore have a creatable parent. Custom-path saves
-//! write only to the path supplied by the caller.
+//! Settings are stored as pretty-printed JSON in the settings file of the Lys
+//! home that the host resolved at startup (`LysHome::settings_path`). Loading
+//! a missing file creates the Lys home directory when needed and writes the
+//! defaults; saving never creates it.
 
 pub mod commands;
 pub mod generation;
@@ -37,20 +37,20 @@ pub struct LysSettings {
 }
 
 impl LysSettings {
-    /// Loads settings from `path`, creating and saving defaults when the file is absent.
+    /// Loads settings from the settings file under `lys_home`, creating and
+    /// saving defaults when the file is absent.
     ///
     /// Existing files are read as UTF-8 JSON and deserialized with the serde
     /// defaults and temperature validation described by the settings types.
-    /// A missing file causes `create_parent_dir` to attempt parent-directory
-    /// creation, then writes a default settings document before returning those
-    /// defaults. The path must have a parent that the filesystem can create;
-    /// an empty parent from a bare relative filename can itself fail.
+    /// A missing file causes `create_parent_dir` to create the Lys home
+    /// directory if needed, then writes a default settings document before
+    /// returning those defaults.
     ///
     /// # Errors
     ///
     /// Returns an error when the file cannot be read, JSON cannot be parsed,
-    /// the path's parent cannot be created (including an empty relative
-    /// parent), or default settings cannot be written.
+    /// the Lys home directory cannot be created, or default settings cannot be
+    /// written.
     pub fn load_settings(lys_home: &LysHome) -> Result<Self, String> {
         let path = &lys_home.settings_path();
         match fs::read_to_string(path) {
@@ -58,7 +58,7 @@ impl LysSettings {
                 .map_err(|err| format!("Failed to parse {}: {err}", path.display())),
 
             Err(err) if err.kind() == ErrorKind::NotFound => {
-                // ~/.lys might not exist yet
+                // The Lys home directory might not exist yet
                 create_parent_dir(path)?;
 
                 // Save the settings to file
@@ -71,10 +71,11 @@ impl LysSettings {
         }
     }
 
-    /// Serializes settings as pretty-printed JSON and writes them to `path`.
+    /// Serializes settings as pretty-printed JSON and writes them to the settings
+    /// file under `lys_home`.
     ///
     /// A trailing newline is written. This method does not create a missing
-    /// parent directory; callers that need that behavior must create it first
+    /// Lys home directory; callers that need that behavior must create it first
     /// or use the missing-file path through loading.
     ///
     /// # Errors

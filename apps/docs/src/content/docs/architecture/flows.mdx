@@ -13,7 +13,9 @@ This page documents only the flows implemented in the current codebase.
 1. The React app calls `initialize`.
 2. The desktop loads host-managed settings through `load_settings`.
 3. If `autoStartBackend` is enabled, the desktop calls `start_backend`.
-4. The Tauri host spawns `pnpm run dev` in `apps/backend`.
+4. The Tauri host starts the backend with `LYS_HOME` set to the Lys home it
+   resolved at startup: `pnpm run dev` in `apps/backend` for development builds,
+   or the installed runtime under `$LYS_HOME/runtime` for release builds.
 5. The desktop queries `get_backend_status`, records `running` or `stopped`,
    and completes initialization.
 6. The shell store requests model inventory if the process is running.

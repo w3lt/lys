@@ -108,12 +108,15 @@ the user to approve opening an app from an unidentified developer.
 :::
 
 :::caution[Desktop runtime is still under development]
-The desktop launcher currently starts the backend with `pnpm run dev` from a
-source-checkout path embedded during compilation. These workflows package and
-publish the desktop bundle, but do not make that backend available on an end-user
-machine. Backend packaging, Node installation, and the installed runtime launch
-path remain separate work. A successful packaging run does not establish that
-the app runs independently of its development checkout.
+Release builds of the desktop app start the backend from a runtime installed in
+the [Lys home directory](/reference/configuration/#lys-home-directory):
+`$LYS_HOME/runtime/node/bin/node` running
+`$LYS_HOME/runtime/backend/backend.mjs`. On macOS, `build.sh` installs that
+runtime when building from a source checkout. These workflows package and
+publish the desktop bundle, but do not install that runtime on an end-user
+machine; installing it for published builds remains separate work. A successful
+packaging run does not establish that the app can start its backend on a
+machine without that runtime.
 :::
 
 ## Versioning status

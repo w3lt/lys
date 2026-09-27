@@ -12,13 +12,21 @@ React UI.
 
 ## Registered commands
 
-| Command              | Purpose                                                              |
-| -------------------- | -------------------------------------------------------------------- |
-| `start_backend`      | Spawns `pnpm run dev` in `apps/backend` and stores the child handle. |
-| `stop_backend`       | Kills the backend process group and waits for shutdown.              |
-| `get_backend_status` | Reports whether the stored child process is still running.           |
-| `load_settings`      | Reads `~/.lys/settings.json`, creating a default file if needed.     |
-| `save_settings`      | Writes a new settings JSON document to `~/.lys/settings.json`.       |
+| Command              | Purpose                                                                                      |
+| -------------------- | -------------------------------------------------------------------------------------------- |
+| `start_backend`      | Starts the backend for the current build mode with the Lys home and stores the child handle. |
+| `stop_backend`       | Kills the backend process group and waits for shutdown.                                      |
+| `get_backend_status` | Reports whether the stored child process is still running.                                   |
+| `load_settings`      | Reads `$LYS_HOME/settings.json`, creating a default file if needed.                          |
+| `save_settings`      | Writes a new settings JSON document to `$LYS_HOME/settings.json`.                            |
+
+## Lys home
+
+Before building the application, the host resolves the
+[Lys home directory](/reference/configuration/#lys-home-directory) once from the
+`LYS_HOME` environment variable and manages it as application state. The
+settings and backend commands receive that value instead of reading the
+environment again. An invalid `LYS_HOME` stops the app before any window opens.
 
 ## Backend process ownership
 
@@ -26,13 +34,24 @@ The host owns a `Backend` state object containing `Mutex<Option<Child>>`. The
 child process is started only when the UI asks for it or when auto-start logic
 requests it during desktop initialization.
 
+The child depends on the build mode:
+
+- Development builds run `pnpm run dev` from `apps/backend` in the checkout
+  recorded at compile time.
+- Release builds run `$LYS_HOME/runtime/node/bin/node` with
+  `$LYS_HOME/runtime/backend/backend.mjs`.
+
 ```rust
 Command::new("pnpm")
     .args(["run", "dev"])
     .current_dir(backend_dir)
+    .env("LYS_HOME", lys_home.as_path())
     .process_group(0)
     .spawn()
 ```
+
+Both children run in their own process group, with `LYS_HOME` set to the Lys
+home the host resolved, so the backend uses the same directory as the host.
 
 When the direct child is still running, stopping the backend sends `SIGKILL`
 to its whole process group and waits for that child. If the direct child has
@@ -84,7 +103,6 @@ estimates and does not configure LM Studio's load-time context.
 
 - Credential management and secure secret storage
 - Richer native tooling beyond backend lifecycle and settings I/O
-- Release-mode backend startup that does not depend on `pnpm run dev`
 - Portable backend lifecycle support beyond the current Unix implementation
 
 ## Related pages

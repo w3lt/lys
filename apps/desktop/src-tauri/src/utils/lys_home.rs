@@ -39,4 +39,20 @@ impl LysHome {
     pub fn as_path(&self) -> &Path {
         &self.0
     }
+
+    pub fn prod_runtime_dir(&self) -> PathBuf {
+        self.0.join("runtime")
+    }
+
+    pub fn node_executable_path(&self) -> PathBuf {
+        self.prod_runtime_dir().join("node/bin/node")
+    }
+
+    pub fn backend_script_path(&self) -> PathBuf {
+        self.prod_runtime_dir().join("backend/backend.mjs")
+    }
+
+    pub fn settings_path(&self) -> PathBuf {
+        self.0.join("settings.json")
+    }
 }

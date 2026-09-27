@@ -14,15 +14,11 @@ use generation::GenerationSettings;
 use model::ModelSettings;
 use runtime::RunTimeSettings;
 
-use std::{
-    fs,
-    io::ErrorKind,
-    path::{Path, PathBuf},
-};
+use std::{fs, io::ErrorKind, path::Path};
 
 use serde::{Deserialize, Serialize};
 
-use crate::utils::get_settings_path;
+use crate::utils::lys_home::LysHome;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default, rename_all = "camelCase")]
@@ -55,7 +51,8 @@ impl LysSettings {
     /// Returns an error when the file cannot be read, JSON cannot be parsed,
     /// the path's parent cannot be created (including an empty relative
     /// parent), or default settings cannot be written.
-    pub fn load_settings_from_custom_path(path: &PathBuf) -> Result<Self, String> {
+    pub fn load_settings(lys_home: &LysHome) -> Result<Self, String> {
+        let path = &lys_home.settings_path();
         match fs::read_to_string(path) {
             Ok(contents) => serde_json::from_str(&contents)
                 .map_err(|err| format!("Failed to parse {}: {err}", path.display())),
@@ -66,27 +63,12 @@ impl LysSettings {
 
                 // Save the settings to file
                 let settings = Self::default();
-                settings.save_to_custom_path(path)?;
+                settings.save_settings(lys_home)?;
                 Ok(settings)
             }
 
             Err(err) => Err(format!("Failed to read {}: {err}", path.display())),
         }
-    }
-
-    /// Loads settings from the default path under the current user's home directory.
-    ///
-    /// This delegates to [`Self::load_settings_from_custom_path`] for
-    /// `~/.lys/settings.json`, including missing-file directory creation and
-    /// default-file persistence.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the home directory cannot be determined or the
-    /// selected settings file cannot be loaded or initialized.
-    pub fn load_settings_from_default_path() -> Result<Self, String> {
-        let settings_path = get_settings_path()?;
-        Self::load_settings_from_custom_path(&settings_path)
     }
 
     /// Serializes settings as pretty-printed JSON and writes them to `path`.
@@ -98,7 +80,9 @@ impl LysSettings {
     /// # Errors
     ///
     /// Returns an error when serde serialization or filesystem writing fails.
-    pub fn save_to_custom_path(&self, path: &PathBuf) -> Result<(), String> {
+    pub fn save_settings(&self, lys_home: &LysHome) -> Result<(), String> {
+        let path = &lys_home.settings_path();
+
         let settings_json = serde_json::to_string_pretty(self)
             .map_err(|err| format!("Failed to serialize settings: {err}"))?;
 
@@ -106,17 +90,6 @@ impl LysSettings {
             .map_err(|err| format!("Failed to write {}: {err}", path.display()))?;
 
         Ok(())
-    }
-
-    /// Saves settings to `~/.lys/settings.json`.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the home directory cannot be determined,
-    /// serialization fails, or the default file cannot be written.
-    pub fn save_to_default_path(&self) -> Result<(), String> {
-        let default_settings_path = get_settings_path()?;
-        self.save_to_custom_path(&default_settings_path)
     }
 }
 

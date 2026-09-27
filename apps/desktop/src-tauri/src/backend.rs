@@ -19,7 +19,7 @@ use nix::{
 };
 use tauri::State;
 
-use crate::utils::{get_backend_script_path, get_node_executable_path, lys_home::LysHome};
+use crate::utils::lys_home::LysHome;
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -242,8 +242,8 @@ fn spawn_prod_backend_process(
     backend: &Backend,
     lys_home: &LysHome,
 ) -> Result<BackendProcessStatus, String> {
-    let node_executable_path = get_node_executable_path()?;
-    let backend_script_path = get_backend_script_path()?;
+    let node_executable_path = lys_home.node_executable_path();
+    let backend_script_path = lys_home.backend_script_path();
 
     // Lock before spawning so we never create a process that we cannot store.
     let mut process = backend

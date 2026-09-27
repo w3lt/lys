@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import registerHealthRoutes from "../../../src/modules/health/routes"
+import registerHealthRoutes from "../../../../src/modules/health/routes"
 import { createTestFastify } from "../../support/fastifyTestApp"
 
 describe("registerHealthRoutes", () => {

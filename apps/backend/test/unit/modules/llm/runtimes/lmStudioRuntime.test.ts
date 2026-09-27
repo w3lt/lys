@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
-import LmStudioRuntime from "../../../../src/modules/llm/runtimes/lmStudioRuntime"
+import LmStudioRuntime from "../../../../../src/modules/llm/runtimes/lmStudioRuntime"
 import { createLmStudioLlmRecord } from "../../../support/llmFixtures"
 import { fakeLmStudio } from "../../../support/lmStudioSdkFake"
 import { flushMicrotasks } from "../../../support/microtasks"

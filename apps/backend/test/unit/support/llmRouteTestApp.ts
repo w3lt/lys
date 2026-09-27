@@ -1,4 +1,4 @@
-import LlmService from "../../src/di/services/llmService"
+import LlmService from "../../../src/di/services/llmService"
 import { createFakeLlmRuntime, type FakeLlmRuntime } from "./fakeLlmRuntime"
 import { createTestFastify, type TestFastify } from "./fastifyTestApp"
 

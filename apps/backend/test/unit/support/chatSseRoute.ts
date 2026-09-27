@@ -5,7 +5,7 @@ import * as z from "zod"
 import type {
   ChatRouteReply,
   ChatRouteRequest
-} from "../../src/modules/chat/chat/share"
+} from "../../../src/modules/chat/chat/share"
 import { createTestFastify, type TestFastify } from "./fastifyTestApp"
 
 /** Path of the chat-shaped SSE route installed by {@link addChatSseRoute}. */

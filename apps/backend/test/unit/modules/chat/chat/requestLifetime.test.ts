@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { ChatRequestLifetime } from "../../../../src/modules/chat/chat/requestLifetime"
+import { ChatRequestLifetime } from "../../../../../src/modules/chat/chat/requestLifetime"
 import { flushMicrotasks } from "../../../support/microtasks"
 
 /**

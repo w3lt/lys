@@ -1,6 +1,6 @@
 import { conversationNotFoundProblemSchema } from "@lys/protocol"
 import { describe, expect, it } from "vitest"
-import { createConversationNotFoundProblem } from "../../../src/modules/conversation/notFound"
+import { createConversationNotFoundProblem } from "../../../../src/modules/conversation/notFound"
 
 describe("createConversationNotFoundProblem", () => {
   it("creates the published missing-conversation problem for one occurrence", () => {

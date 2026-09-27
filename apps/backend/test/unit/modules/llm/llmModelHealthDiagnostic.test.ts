@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { createLlmModelHealthDiagnostic } from "../../../src/modules/llm/llmModelHealthDiagnostic"
+import { createLlmModelHealthDiagnostic } from "../../../../src/modules/llm/llmModelHealthDiagnostic"
 
 describe("createLlmModelHealthDiagnostic", () => {
   it("reports the original failure value to the reporter", () => {

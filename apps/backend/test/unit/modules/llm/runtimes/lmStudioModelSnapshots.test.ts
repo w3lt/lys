@@ -3,7 +3,7 @@ import * as z from "zod"
 import {
   createDownloadedLlmModelSnapshot,
   createLoadedLlmModelInstanceSnapshot
-} from "../../../../src/modules/llm/runtimes/lmStudioModelSnapshots"
+} from "../../../../../src/modules/llm/runtimes/lmStudioModelSnapshots"
 import {
   createDownloadedLlmModel,
   createLmStudioLlmRecord

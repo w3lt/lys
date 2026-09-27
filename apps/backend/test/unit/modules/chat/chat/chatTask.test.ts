@@ -1,12 +1,12 @@
 import type { ChatCompletionChunk } from "openai/resources/index.mjs"
 import { describe, expect, it, vi } from "vitest"
-import type { CompleteChatOptions } from "../../../../src/di/services/chatService"
-import type { AssistantMessageCompletion } from "../../../../src/di/services/conversationService/share"
+import type { CompleteChatOptions } from "../../../../../src/di/services/chatService"
+import type { AssistantMessageCompletion } from "../../../../../src/di/services/conversationService/share"
 import createChatTask, {
   type CreateChatTaskOptions
-} from "../../../../src/modules/chat/chat/chatTask"
-import type { ChatRouteReply } from "../../../../src/modules/chat/chat/share"
-import { ChatCompletionCancelledError } from "../../../../src/utils/errors"
+} from "../../../../../src/modules/chat/chat/chatTask"
+import type { ChatRouteReply } from "../../../../../src/modules/chat/chat/share"
+import { ChatCompletionCancelledError } from "../../../../../src/utils/errors"
 import {
   addChatSseRoute,
   createChatSseTestApp,

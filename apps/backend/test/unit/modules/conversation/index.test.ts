@@ -1,9 +1,9 @@
 import { conversationNotFoundProblemSchema } from "@lys/protocol"
 import { describe, expect, it, onTestFinished } from "vitest"
-import SqliteConversationStore from "../../../src/di/services/conversationService"
-import { updateFastifyWithHttpTransport } from "../../../src/http"
-import updateFastifyWithConversationRoutes from "../../../src/modules/conversation"
-import { createConversationListCursor } from "../../../src/di/services/conversationService/utils"
+import SqliteConversationStore from "../../../../src/di/services/conversationService"
+import { updateFastifyWithHttpTransport } from "../../../../src/http"
+import updateFastifyWithConversationRoutes from "../../../../src/modules/conversation"
+import { createConversationListCursor } from "../../../../src/di/services/conversationService/utils"
 import { createFixtureUuidV7 } from "../../support/conversationFixtures"
 import { createTestFastify } from "../../support/fastifyTestApp"
 

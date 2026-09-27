@@ -1,5 +1,5 @@
 import type { LLMInfo } from "@lmstudio/sdk"
-import type { DownloadedLlmModel } from "../../src/modules/llm/llmRuntimeTypes"
+import type { DownloadedLlmModel } from "../../../src/modules/llm/llmRuntimeTypes"
 
 /** Identity fields that distinguish one fixture model from another. */
 export type LlmModelFixtureIdentity = Readonly<{

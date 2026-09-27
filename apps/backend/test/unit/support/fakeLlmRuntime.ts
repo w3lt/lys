@@ -1,5 +1,5 @@
 import { vi, type Mock } from "vitest"
-import type { LlmEngine } from "../../src/modules/llm/llmEngine"
+import type { LlmEngine } from "../../../src/modules/llm/llmEngine"
 
 /** Runtime double accepted by `LlmService`, with every operation observable. */
 export type FakeLlmRuntime = Readonly<{

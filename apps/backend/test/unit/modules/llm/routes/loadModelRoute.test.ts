@@ -1,6 +1,6 @@
 import { createLlmServiceBusyProblem } from "@lys/protocol"
 import { describe, expect, it } from "vitest"
-import updateFastifyWithLlmModelLoadRoute from "../../../../src/modules/llm/routes/loadModelRoute"
+import updateFastifyWithLlmModelLoadRoute from "../../../../../src/modules/llm/routes/loadModelRoute"
 import { createDownloadedLlmModel } from "../../../support/llmFixtures"
 import {
   createLlmRouteTestApp,

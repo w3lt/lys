@@ -4,8 +4,8 @@ import * as z from "zod"
 import {
   calculateConversationSearchMatch,
   listConversations
-} from "../../../../src/di/services/conversationService/listConversations"
-import { parseConversationListOptions } from "../../../../src/di/services/conversationService/utils"
+} from "../../../../../src/di/services/conversationService/listConversations"
+import { parseConversationListOptions } from "../../../../../src/di/services/conversationService/utils"
 import {
   insertAssistantMessageRow,
   insertConversationRow,

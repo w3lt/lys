@@ -3,11 +3,11 @@ import { describe, expect, it } from "vitest"
 import * as z from "zod"
 import ChatService, {
   type ChatServiceCreationOptions
-} from "../../../src/di/services/chatService"
+} from "../../../../src/di/services/chatService"
 import {
   ChatCompletionCancelledError,
   TitleGenerationOutputError
-} from "../../../src/utils/errors"
+} from "../../../../src/utils/errors"
 import {
   createChatCompletion,
   createChatCompletionChunk,

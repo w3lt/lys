@@ -8,9 +8,9 @@ import {
   vi
 } from "vitest"
 import * as z from "zod"
-import SqliteConversationStore from "../../../../src/di/services/conversationService"
-import { parseConversationListOptions } from "../../../../src/di/services/conversationService/utils"
-import { ConversationNotFoundError } from "../../../../src/utils/errors"
+import SqliteConversationStore from "../../../../../src/di/services/conversationService"
+import { parseConversationListOptions } from "../../../../../src/di/services/conversationService/utils"
+import { ConversationNotFoundError } from "../../../../../src/utils/errors"
 import { createFixtureUuidV7 } from "../../../support/conversationFixtures"
 
 /** Wall-clock time observed by every case. */

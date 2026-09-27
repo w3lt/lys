@@ -1,9 +1,9 @@
 import { MAXIMUM_CONVERSATION_TITLE_LENGTH } from "@lys/protocol"
 import { describe, expect, it, onTestFinished } from "vitest"
 import * as z from "zod"
-import SqliteConversationStore from "../../../../src/di/services/conversationService"
-import SqliteConversationHistory from "../../../../src/di/services/conversationService/history"
-import { parseConversationListOptions } from "../../../../src/di/services/conversationService/utils"
+import SqliteConversationStore from "../../../../../src/di/services/conversationService"
+import SqliteConversationHistory from "../../../../../src/di/services/conversationService/history"
+import { parseConversationListOptions } from "../../../../../src/di/services/conversationService/utils"
 import {
   insertConversationRow,
   openConversationTestDatabase

@@ -1,6 +1,6 @@
 import { createLlmServiceBusyProblem } from "@lys/protocol"
 import { describe, expect, it } from "vitest"
-import updateFastifyWithLlmTestModelRoute from "../../../../src/modules/llm/routes/testModelRoute"
+import updateFastifyWithLlmTestModelRoute from "../../../../../src/modules/llm/routes/testModelRoute"
 import { findLogRecords } from "../../../support/fastifyTestApp"
 import {
   createLlmRouteTestApp,

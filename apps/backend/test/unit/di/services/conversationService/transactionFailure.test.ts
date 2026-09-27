@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite"
 import { describe, expect, it, onTestFinished } from "vitest"
-import { handleConversationTransactionFailure } from "../../../../src/di/services/conversationService/transactionFailure"
+import { handleConversationTransactionFailure } from "../../../../../src/di/services/conversationService/transactionFailure"
 
 /**
  * Opens an in-memory database with one table, owned by the current test.

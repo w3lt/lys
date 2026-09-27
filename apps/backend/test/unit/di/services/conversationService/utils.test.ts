@@ -3,7 +3,7 @@ import * as z from "zod"
 import {
   createConversationListCursor,
   parseConversationListOptions
-} from "../../../../src/di/services/conversationService/utils"
+} from "../../../../../src/di/services/conversationService/utils"
 import { createFixtureUuidV7 } from "../../../support/conversationFixtures"
 
 /** Last row of a nonterminal page, used to create continuation cursors. */

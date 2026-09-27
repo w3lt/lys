@@ -1,7 +1,7 @@
 import { createLlmServiceBusyProblem } from "@lys/protocol"
 import { describe, expect, it } from "vitest"
-import { createLlmServiceBusyError } from "../../../../src/modules/llm/llmServiceBusyError"
-import handleLlmServiceRequestFailure from "../../../../src/modules/llm/routes/handleLlmServiceRequestFailure"
+import { createLlmServiceBusyError } from "../../../../../src/modules/llm/llmServiceBusyError"
+import handleLlmServiceRequestFailure from "../../../../../src/modules/llm/routes/handleLlmServiceRequestFailure"
 import { createTestFastify } from "../../../support/fastifyTestApp"
 
 /**

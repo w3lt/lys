@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { buildChatMessages } from "../../../../src/modules/chat/chat/messages"
+import { buildChatMessages } from "../../../../../src/modules/chat/chat/messages"
 import {
   createAssistantMessage,
   createConversationTurn,

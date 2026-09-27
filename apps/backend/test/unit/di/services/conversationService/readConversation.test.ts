@@ -3,7 +3,7 @@ import * as z from "zod"
 import {
   getConversation,
   getConversationMetadata
-} from "../../../../src/di/services/conversationService/readConversation"
+} from "../../../../../src/di/services/conversationService/readConversation"
 import {
   insertAssistantMessageRow,
   insertConversationRow,

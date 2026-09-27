@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   createAbortSignal,
   createEventSender
-} from "../../../../src/modules/chat/chat/share"
+} from "../../../../../src/modules/chat/chat/share"
 import {
   addChatSseRoute,
   createChatSseTestApp,

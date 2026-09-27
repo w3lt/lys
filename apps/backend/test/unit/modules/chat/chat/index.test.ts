@@ -3,10 +3,10 @@ import {
   conversationNotFoundProblemSchema
 } from "@lys/protocol"
 import { describe, expect, it, vi } from "vitest"
-import type SqliteConversationStore from "../../../../src/di/services/conversationService"
+import type SqliteConversationStore from "../../../../../src/di/services/conversationService"
 import updateFastifyWithChatRoute, {
   type ChatRouteOptions
-} from "../../../../src/modules/chat/chat"
+} from "../../../../../src/modules/chat/chat"
 import {
   createChatRouteTestApp,
   isStreamedRequest,

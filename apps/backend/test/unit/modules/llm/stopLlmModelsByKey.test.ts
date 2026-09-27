@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest"
-import type { LoadedLlmModelInstance } from "../../../src/modules/llm/llmRuntimeTypes"
+import type { LoadedLlmModelInstance } from "../../../../src/modules/llm/llmRuntimeTypes"
 import {
   stopLlmModelsByKey,
   type ListLoadedLlmModelInstances,
   type StopLoadedLlmModelInstance
-} from "../../../src/modules/llm/stopLlmModelsByKey"
+} from "../../../../src/modules/llm/stopLlmModelsByKey"
 
 /** Requested model key in every case. */
 const MODEL_KEY = "qwen/qwen3-8b"

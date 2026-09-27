@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import updateFastifyWithLlmRoutes from "../../../../src/modules/llm/routes"
+import updateFastifyWithLlmRoutes from "../../../../../src/modules/llm/routes"
 import { createLlmRouteTestApp } from "../../../support/llmRouteTestApp"
 
 describe("updateFastifyWithLlmRoutes", () => {

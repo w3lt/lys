@@ -3,8 +3,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import { describe, expect, it, onTestFinished } from "vitest"
-import SqliteConversationStore from "../../../../src/di/services/conversationService"
-import { parseConversationListOptions } from "../../../../src/di/services/conversationService/utils"
+import SqliteConversationStore from "../../../../../src/di/services/conversationService"
+import { parseConversationListOptions } from "../../../../../src/di/services/conversationService/utils"
 
 /**
  * Allocates a database path in a temporary directory owned by the current test.

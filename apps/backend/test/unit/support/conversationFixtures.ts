@@ -3,7 +3,7 @@ import type {
   ConversationMessage,
   ConversationUserMessage
 } from "@lys/share"
-import type { ConversationTurn } from "../../src/di/services/conversationService/share"
+import type { ConversationTurn } from "../../../src/di/services/conversationService/share"
 
 /**
  * Creates a syntactically valid UUIDv7 whose last group encodes `sequence`.

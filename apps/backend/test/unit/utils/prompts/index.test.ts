@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
-import { readPrompt } from "../../../src/utils/prompts"
+import { readPrompt } from "../../../../src/utils/prompts"
 
 describe("readPrompt", () => {
   it.each([

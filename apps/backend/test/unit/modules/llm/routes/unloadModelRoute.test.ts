@@ -3,7 +3,7 @@ import {
   createLlmUnloadProblem
 } from "@lys/protocol"
 import { describe, expect, it } from "vitest"
-import updateFastifyWithLlmModelUnloadRoute from "../../../../src/modules/llm/routes/unloadModelRoute"
+import updateFastifyWithLlmModelUnloadRoute from "../../../../../src/modules/llm/routes/unloadModelRoute"
 import { findLogRecords } from "../../../support/fastifyTestApp"
 import {
   createLlmRouteTestApp,

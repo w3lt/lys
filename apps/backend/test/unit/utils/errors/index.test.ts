@@ -3,7 +3,7 @@ import {
   ChatCompletionCancelledError,
   ConversationNotFoundError,
   TitleGenerationOutputError
-} from "../../../src/utils/errors"
+} from "../../../../src/utils/errors"
 
 describe("ConversationNotFoundError", () => {
   it("is a native error with the default not-found message", () => {

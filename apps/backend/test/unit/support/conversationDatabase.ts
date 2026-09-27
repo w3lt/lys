@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite"
 import { onTestFinished } from "vitest"
-import { calculateConversationSearchMatch } from "../../src/di/services/conversationService/listConversations"
-import { migrateDatabase } from "../../src/di/services/conversationService/migrations"
+import { calculateConversationSearchMatch } from "../../../src/di/services/conversationService/listConversations"
+import { migrateDatabase } from "../../../src/di/services/conversationService/migrations"
 
 /** Stored conversation columns written by {@link insertConversationRow}. */
 export type ConversationRowFixture = Readonly<{

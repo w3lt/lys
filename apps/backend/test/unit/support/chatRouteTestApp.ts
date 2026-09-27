@@ -2,8 +2,8 @@ import type { FastifyInstance } from "fastify"
 import { validatorCompiler } from "fastify-type-provider-zod"
 import type { ChatCompletionChunk } from "openai/resources/index.mjs"
 import { onTestFinished } from "vitest"
-import ChatService from "../../src/di/services/chatService"
-import SqliteConversationStore from "../../src/di/services/conversationService"
+import ChatService from "../../../src/di/services/chatService"
+import SqliteConversationStore from "../../../src/di/services/conversationService"
 import {
   createChatSseTestApp,
   parseSseEvents,

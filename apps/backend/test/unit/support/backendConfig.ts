@@ -1,4 +1,4 @@
-import type { BackendConfig } from "../../src/config"
+import type { BackendConfig } from "../../../src/config"
 
 /**
  * Backend configuration that keeps every test-owned resource isolated.

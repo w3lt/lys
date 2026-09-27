@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest"
-import type { TitleGenerationOptions } from "../../../../src/di/services/chatService"
+import type { TitleGenerationOptions } from "../../../../../src/di/services/chatService"
 import createTitleGenerationTask, {
   type CreateTitleGenerationTaskOptions
-} from "../../../../src/modules/chat/chat/titleGenerationTask"
-import type { ChatRouteReply } from "../../../../src/modules/chat/chat/share"
-import { TitleGenerationOutputError } from "../../../../src/utils/errors"
+} from "../../../../../src/modules/chat/chat/titleGenerationTask"
+import type { ChatRouteReply } from "../../../../../src/modules/chat/chat/share"
+import { TitleGenerationOutputError } from "../../../../../src/utils/errors"
 import {
   addChatSseRoute,
   createChatSseTestApp,

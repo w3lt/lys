@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import * as z from "zod"
-import { getLlmModelHealth } from "../../../src/modules/llm/getLlmModelHealth"
-import type { ListLoadedLlmModelInstances } from "../../../src/modules/llm/stopLlmModelsByKey"
+import { getLlmModelHealth } from "../../../../src/modules/llm/getLlmModelHealth"
+import type { ListLoadedLlmModelInstances } from "../../../../src/modules/llm/stopLlmModelsByKey"
 
 /** Requested model key in every case. */
 const MODEL_KEY = "qwen/qwen3-8b"

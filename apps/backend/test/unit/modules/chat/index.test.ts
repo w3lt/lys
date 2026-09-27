@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import registerChatRoutes from "../../../src/modules/chat"
+import registerChatRoutes from "../../../../src/modules/chat"
 import {
   createChatRouteTestApp,
   requestChat,

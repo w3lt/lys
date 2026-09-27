@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
-import ChatService from "../../src/di/services/chatService"
-import SqliteConversationStore from "../../src/di/services/conversationService"
-import LlmService from "../../src/di/services/llmService"
+import ChatService from "../../../src/di/services/chatService"
+import SqliteConversationStore from "../../../src/di/services/conversationService"
+import LlmService from "../../../src/di/services/llmService"
 import {
   closeSingletonServices,
   createSingletonServices,
   type SingletonServiceAcquisition,
   type SingletonServiceFactories,
   type SingletonServices
-} from "../../src/di/singleton"
+} from "../../../src/di/singleton"
 import { TEST_BACKEND_CONFIG } from "../support/backendConfig"
 import { createFakeLlmRuntime } from "../support/fakeLlmRuntime"
 import { fakeLmStudio } from "../support/lmStudioSdkFake"

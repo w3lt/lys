@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 import {
   createLlmServiceBusyError,
   isLlmServiceBusyError
-} from "../../../src/modules/llm/llmServiceBusyError"
+} from "../../../../src/modules/llm/llmServiceBusyError"
 
 describe("createLlmServiceBusyError", () => {
   it("creates a native error with the queue-full message", () => {

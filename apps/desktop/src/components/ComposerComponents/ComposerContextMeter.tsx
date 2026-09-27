@@ -35,6 +35,65 @@ export type ComposerContextMeterProps = {
 }
 
 /**
+ * Builds the breakdown row for files staged with the next message.
+ *
+ * @param usage - Estimated breakdown of the window.
+ * @param attachmentCount - Number of files staged for the next message.
+ * @returns A quiet `none` row without files; otherwise their estimated
+ * tokens, warned while the window overflows.
+ */
+function buildAttachmentRow(
+  usage: ContextUsage,
+  attachmentCount: number
+): ContextRow {
+  if (attachmentCount === 0) {
+    return { label: "Attached files", value: "none", tone: "quiet" }
+  }
+
+  return {
+    label: "Attached files",
+    value: `~${formatTokenCount(usage.attachmentTokens)}`,
+    tone: usage.overflowTokens > 0 ? "warning" : "accent"
+  }
+}
+
+/**
+ * Builds the breakdown row describing the window beyond its kept turns.
+ *
+ * @param usage - Estimated breakdown of the window.
+ * @returns The overflow while the window overflows, otherwise the recap of
+ * compacted turns when any exist, otherwise the room left.
+ */
+function buildRemainderRow(usage: ContextUsage): ContextRow {
+  if (usage.overflowTokens > 0) {
+    return {
+      label: "Over the window",
+      value: `~${formatTokenCount(usage.overflowTokens)}`,
+      tone: "warning"
+    }
+  }
+
+  if (usage.compactedTurnCount > 0) {
+    const compactedLabel =
+      usage.compactedTurnCount === 1
+        ? "1 turn compacted into a recap"
+        : `${usage.compactedTurnCount} turns compacted into a recap`
+
+    return {
+      label: compactedLabel,
+      value: `~${formatTokenCount(usage.recapTokens)}`,
+      tone: "recap"
+    }
+  }
+
+  return {
+    label: "Room left",
+    value: `~${formatTokenCount(usage.freeTokens)}`,
+    tone: "neutral"
+  }
+}
+
+/**
  * Builds the breakdown rows for one estimated context window.
  *
  * @param usage - Estimated breakdown of the window.
@@ -45,33 +104,10 @@ function buildContextRows(
   usage: ContextUsage,
   attachmentCount: number
 ): readonly ContextRow[] {
-  const isOverflowing = usage.overflowTokens > 0
   const turnLabel =
     usage.keptTurnCount === 1
       ? "1 turn in the window"
       : `${usage.keptTurnCount} turns in the window`
-  const compactedLabel =
-    usage.compactedTurnCount === 1
-      ? "1 turn compacted into a recap"
-      : `${usage.compactedTurnCount} turns compacted into a recap`
-
-  const remainderRow: ContextRow = isOverflowing
-    ? {
-        label: "Over the window",
-        value: `~${formatTokenCount(usage.overflowTokens)}`,
-        tone: "warning"
-      }
-    : usage.compactedTurnCount > 0
-      ? {
-          label: compactedLabel,
-          value: `~${formatTokenCount(usage.recapTokens)}`,
-          tone: "recap"
-        }
-      : {
-          label: "Room left",
-          value: `~${formatTokenCount(usage.freeTokens)}`,
-          tone: "neutral"
-        }
 
   return [
     {
@@ -79,21 +115,13 @@ function buildContextRows(
       value: `~${formatTokenCount(usage.systemTokens)}`,
       tone: "quiet"
     },
-    {
-      label: "Attached files",
-      value:
-        attachmentCount > 0
-          ? `~${formatTokenCount(usage.attachmentTokens)}`
-          : "none",
-      tone:
-        attachmentCount === 0 ? "quiet" : isOverflowing ? "warning" : "accent"
-    },
+    buildAttachmentRow(usage, attachmentCount),
     {
       label: turnLabel,
       value: `~${formatTokenCount(usage.keptTokens)}`,
       tone: "neutral"
     },
-    remainderRow,
+    buildRemainderRow(usage),
     {
       label: "Reserved for the reply",
       value: `~${formatTokenCount(usage.reserve)}`,

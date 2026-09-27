@@ -32,11 +32,10 @@ export default function ConversationDeleteConfirmRow({
   /**
    * Keeps the conversation when Escape is pressed inside the prompt.
    *
-   * @param event - Key press observed within the confirmation group.
+   * @param event - Key press observed on either confirmation button, the
+   * prompt's only focusable elements.
    */
-  function handleConfirmationKeyDown(
-    event: KeyboardEvent<HTMLDivElement>
-  ): void {
+  function handleConfirmationKeyDown(event: KeyboardEvent<HTMLElement>): void {
     if (event.key !== "Escape") return
 
     event.preventDefault()
@@ -47,33 +46,38 @@ export default function ConversationDeleteConfirmRow({
   return (
     <li className="conversation-history__row" data-confirming="">
       <span className="conversation-history__title">{title}</span>
-      <div
+      <fieldset
         aria-label={`Delete ${title} for good?`}
         className="conversation-history__confirm"
-        onKeyDown={handleConfirmationKeyDown}
-        role="group"
       >
-        <span aria-hidden="true" className="conversation-history__confirm-text">
-          delete for good?
-        </span>
-        <Button
-          autoFocus
-          onClick={onCancelDelete}
-          size="sm"
-          type="button"
-          variant="outline"
-        >
-          Keep
-        </Button>
-        <Button
-          onClick={onConfirmDelete}
-          size="sm"
-          type="button"
-          variant="destructive"
-        >
-          Delete
-        </Button>
-      </div>
+        <div className="conversation-history__confirm-choices">
+          <span
+            aria-hidden="true"
+            className="conversation-history__confirm-text"
+          >
+            delete for good?
+          </span>
+          <Button
+            autoFocus
+            onClick={onCancelDelete}
+            onKeyDown={handleConfirmationKeyDown}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            Keep
+          </Button>
+          <Button
+            onClick={onConfirmDelete}
+            onKeyDown={handleConfirmationKeyDown}
+            size="sm"
+            type="button"
+            variant="destructive"
+          >
+            Delete
+          </Button>
+        </div>
+      </fieldset>
     </li>
   )
 }

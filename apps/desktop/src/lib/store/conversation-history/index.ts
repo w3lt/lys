@@ -455,6 +455,123 @@ export function createConversationHistoryStore(
   let activeListResource: ConversationListResource | undefined
 
   /**
+   * Reports whether a token still owns the list read.
+   *
+   * @param token - List token attempting to commit its outcome.
+   * @returns Whether no newer read, close, or settlement superseded it.
+   */
+  function isListOwned(token: number): boolean {
+    return activeListResource?.token === token
+  }
+
+  /**
+   * Starts a list read that supersedes any owned one.
+   *
+   * @returns The new read's resource; the superseded read is invalidated
+   * before its transport is aborted.
+   */
+  function startListRead(): ConversationListResource {
+    const supersededResource = activeListResource
+    const resource: ConversationListResource = {
+      token: nextListToken,
+      abortController: new AbortController()
+    }
+    nextListToken += 1
+    activeListResource = resource
+    supersededResource?.abortController.abort()
+
+    return resource
+  }
+
+  /** Invalidates the owned list read, if any, and aborts its transport. */
+  function cancelListRead(): void {
+    const resource = activeListResource
+    activeListResource = undefined
+    resource?.abortController.abort()
+  }
+
+  /**
+   * Lists one page while its read remains owned.
+   *
+   * @param query - List parameters for the page.
+   * @param backendUrl - Backend origin sampled when the read started.
+   * @param resource - Resource owned by this read.
+   * @returns The validated page, or undefined when the read was superseded;
+   * ownership is released before an owned outcome is returned.
+   * @throws The failure of a read that was still owned; its ownership has
+   * been released.
+   */
+  async function listOwnedPage(
+    query: ListConversationsApiQuery,
+    backendUrl: string,
+    resource: ConversationListResource
+  ): Promise<ListConversationsApiResponse | undefined> {
+    try {
+      const response = await dependencies.listConversations(query, {
+        backendUrl,
+        signal: resource.abortController.signal
+      })
+      if (!isListOwned(resource.token)) return undefined
+      activeListResource = undefined
+
+      return response
+    } catch (error) {
+      if (!isListOwned(resource.token)) return undefined
+      activeListResource = undefined
+      throw error
+    }
+  }
+
+  /**
+   * Saves one replacement title and reports the settled outcome.
+   *
+   * @param update - Conversation and trimmed replacement title.
+   * @param backendUrl - Backend origin sampled when the mutation started.
+   * @returns The outcome; failures are returned rather than thrown.
+   */
+  async function saveConversationTitle(
+    update: ConversationTitleUpdate,
+    backendUrl: string
+  ): Promise<TitleUpdateOutcome> {
+    try {
+      const result = await dependencies.updateConversationTitle(update, {
+        backendUrl
+      })
+      return result.status === "updated"
+        ? { status: "updated", title: result.conversation.title }
+        : { status: "missing" }
+    } catch (error) {
+      return {
+        status: "failed",
+        error: formatMutationError("Renaming", error)
+      }
+    }
+  }
+
+  /**
+   * Deletes one stored conversation and reports the settled outcome.
+   *
+   * @param conversationId - Conversation to delete.
+   * @param backendUrl - Backend origin sampled when the mutation started.
+   * @returns The outcome; failures are returned rather than thrown.
+   * @remarks The missing-conversation problem also establishes removal.
+   */
+  async function deleteStoredConversation(
+    conversationId: string,
+    backendUrl: string
+  ): Promise<DeletionOutcome> {
+    try {
+      await dependencies.deleteConversation(conversationId, { backendUrl })
+      return { status: "removed" }
+    } catch (error) {
+      return {
+        status: "failed",
+        error: formatMutationError("Deleting", error)
+      }
+    }
+  }
+
+  /**
    * Creates the state and actions that own this store's history lifecycle.
    *
    * @param set - Zustand capability that applies observable state changes.
@@ -465,74 +582,6 @@ export function createConversationHistoryStore(
     set: StoreApi<ConversationHistoryStore>["setState"],
     get: StoreApi<ConversationHistoryStore>["getState"]
   ): ConversationHistoryStore {
-    /**
-     * Reports whether a token still owns the list read.
-     *
-     * @param token - List token attempting to commit its outcome.
-     * @returns Whether no newer read, close, or settlement superseded it.
-     */
-    function isListOwned(token: number): boolean {
-      return activeListResource?.token === token
-    }
-
-    /**
-     * Starts a list read that supersedes any owned one.
-     *
-     * @returns The new read's resource; the superseded read is invalidated
-     * before its transport is aborted.
-     */
-    function startListRead(): ConversationListResource {
-      const supersededResource = activeListResource
-      const resource: ConversationListResource = {
-        token: nextListToken,
-        abortController: new AbortController()
-      }
-      nextListToken += 1
-      activeListResource = resource
-      supersededResource?.abortController.abort()
-
-      return resource
-    }
-
-    /** Invalidates the owned list read, if any, and aborts its transport. */
-    function cancelListRead(): void {
-      const resource = activeListResource
-      activeListResource = undefined
-      resource?.abortController.abort()
-    }
-
-    /**
-     * Lists one page while its read remains owned.
-     *
-     * @param query - List parameters for the page.
-     * @param backendUrl - Backend origin sampled when the read started.
-     * @param resource - Resource owned by this read.
-     * @returns The validated page, or undefined when the read was superseded;
-     * ownership is released before an owned outcome is returned.
-     * @throws The failure of a read that was still owned; its ownership has
-     * been released.
-     */
-    async function listOwnedPage(
-      query: ListConversationsApiQuery,
-      backendUrl: string,
-      resource: ConversationListResource
-    ): Promise<ListConversationsApiResponse | undefined> {
-      try {
-        const response = await dependencies.listConversations(query, {
-          backendUrl,
-          signal: resource.abortController.signal
-        })
-        if (!isListOwned(resource.token)) return undefined
-        activeListResource = undefined
-
-        return response
-      } catch (error) {
-        if (!isListOwned(resource.token)) return undefined
-        activeListResource = undefined
-        throw error
-      }
-    }
-
     /**
      * Reads the first page for the current query, replacing any list read.
      *
@@ -787,32 +836,6 @@ export function createConversationHistoryStore(
     }
 
     /**
-     * Saves one replacement title and reports the settled outcome.
-     *
-     * @param update - Conversation and trimmed replacement title.
-     * @param backendUrl - Backend origin sampled when the mutation started.
-     * @returns The outcome; failures are returned rather than thrown.
-     */
-    async function saveConversationTitle(
-      update: ConversationTitleUpdate,
-      backendUrl: string
-    ): Promise<TitleUpdateOutcome> {
-      try {
-        const result = await dependencies.updateConversationTitle(update, {
-          backendUrl
-        })
-        return result.status === "updated"
-          ? { status: "updated", title: result.conversation.title }
-          : { status: "missing" }
-      } catch (error) {
-        return {
-          status: "failed",
-          error: formatMutationError("Renaming", error)
-        }
-      }
-    }
-
-    /**
      * Updates history with the settled outcome of one title replacement.
      *
      * @param conversationId - Renamed conversation.
@@ -886,29 +909,6 @@ export function createConversationHistoryStore(
       )
       updateHistoryWithTitleOutcome(conversationId, outcome)
       if (outcome.status !== "failed") loadConversationHistoryAfterMutation()
-    }
-
-    /**
-     * Deletes one stored conversation and reports the settled outcome.
-     *
-     * @param conversationId - Conversation to delete.
-     * @param backendUrl - Backend origin sampled when the mutation started.
-     * @returns The outcome; failures are returned rather than thrown.
-     * @remarks The missing-conversation problem also establishes removal.
-     */
-    async function deleteStoredConversation(
-      conversationId: string,
-      backendUrl: string
-    ): Promise<DeletionOutcome> {
-      try {
-        await dependencies.deleteConversation(conversationId, { backendUrl })
-        return { status: "removed" }
-      } catch (error) {
-        return {
-          status: "failed",
-          error: formatMutationError("Deleting", error)
-        }
-      }
     }
 
     /**

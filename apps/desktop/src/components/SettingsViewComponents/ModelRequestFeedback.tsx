@@ -1,7 +1,22 @@
 import type { ReactElement } from "react"
 import type { LlmTestModelApiResponse } from "@lys/protocol"
 
+import type { ModelRequestState } from "@/lib/store/model-runtime"
+
 import { useSettingsContext } from "./SettingsContext"
+
+/**
+ * Describes an in-flight model request.
+ * @param request - Non-idle request owned by the application store.
+ * @returns The inventory refresh, or the operation and its model key, followed
+ * by an ellipsis.
+ */
+function formatModelRequestProgress(
+  request: Exclude<ModelRequestState, { readonly status: "idle" }>
+): string {
+  if (request.status === "listing") return "Refreshing model inventory…"
+  return `${request.status} ${request.modelKey}…`
+}
 
 /**
  * Describes the health endpoint's observation without claiming inference succeeded.
@@ -27,10 +42,10 @@ export default function ModelRequestFeedback(): ReactElement {
   const pending =
     modelRequest.status === "idle"
       ? ""
-      : `${modelRequest.status === "listing" ? "Refreshing model inventory" : `${modelRequest.status} ${modelRequest.modelKey}`}…`
+      : formatModelRequestProgress(modelRequest)
   return (
     <div>
-      <p className="settings-view__note" role="status">
+      <p aria-live="polite" className="settings-view__note" role="status">
         {pending || (modelHealth ? formatModelHealth(modelHealth) : "")}
       </p>
       <p className="settings-view__note" role="alert">

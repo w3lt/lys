@@ -3,6 +3,22 @@ import { Slider as SliderPrimitive } from "@base-ui/react/slider"
 import { cn } from "@/lib/utils"
 
 /**
+ * Finds the thumb values supplied as an array, preferring the controlled value.
+ *
+ * @param value - Controlled slider value, when the parent owns it.
+ * @param defaultValue - Initial slider value, when the primitive owns it.
+ * @returns One value per thumb, or undefined when neither input is an array.
+ */
+function findThumbValues(
+  value: SliderPrimitive.Root.Props["value"],
+  defaultValue: SliderPrimitive.Root.Props["defaultValue"]
+): readonly number[] | undefined {
+  if (Array.isArray(value)) return value
+  if (Array.isArray(defaultValue)) return defaultValue
+  return undefined
+}
+
+/**
  * Renders the maintained multi-thumb Base UI slider tree with Lys track
  * styling.
  *
@@ -32,11 +48,7 @@ function Slider({
   max = 100,
   ...props
 }: SliderPrimitive.Root.Props) {
-  const _values = Array.isArray(value)
-    ? value
-    : Array.isArray(defaultValue)
-      ? defaultValue
-      : [min, max]
+  const _values = findThumbValues(value, defaultValue) ?? [min, max]
 
   return (
     <SliderPrimitive.Root

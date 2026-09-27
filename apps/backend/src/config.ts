@@ -5,7 +5,6 @@ import {
   LMSTUDIO_PORT
 } from "@lys/protocol"
 import type { PathLike } from "node:fs"
-import { homedir } from "node:os"
 import { join } from "node:path"
 import { readPrompt } from "./utils/prompts"
 
@@ -81,6 +80,11 @@ const GENERATED_TITLE_MAX_LENGTH = 100
  * integer.
  */
 export function loadBackendConfig(): BackendConfig {
+  const lys_home = process.env.LYS_HOME
+  if (!lys_home) {
+    throw new Error("LYS_HOME is not set")
+  }
+
   const lysSystemPrompt = readPrompt("lys-system")
   const titleGenerationPrompt = readPrompt("title-generation")
   const titleGenerationMaxAttempts = parsePositiveSafeInteger(
@@ -97,7 +101,7 @@ export function loadBackendConfig(): BackendConfig {
     backendPort: BACKEND_PORT,
     lmstudioHost: LMSTUDIO_HOST,
     lmstudioPort: LMSTUDIO_PORT,
-    databaseFilePath: join(homedir(), ".lys", "lys_db.sqlite"),
+    databaseFilePath: join(lys_home, "lys_db.sqlite"),
     lysSystemPrompt,
     titleGenerationPrompt,
     titleGenerationMaxAttempts,

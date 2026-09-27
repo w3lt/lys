@@ -7,6 +7,8 @@
 
 use tauri::Manager;
 
+use crate::utils::lys_home::LysHome;
+
 mod backend;
 mod settings;
 mod tools;
@@ -41,8 +43,17 @@ fn greet(name: &str) -> String {
 /// startup failure because the desktop shell cannot run without a valid Tauri
 /// application.
 pub fn run() {
+    let lys_home = match LysHome::resolve() {
+        Ok(lys_home) => lys_home,
+        Err(error) => {
+            eprintln!("Lys cannot start: {error}");
+            std::process::exit(1);
+        }
+    };
+
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .manage(lys_home)
         .manage(backend::Backend::default())
         .invoke_handler(tauri::generate_handler![
             greet,

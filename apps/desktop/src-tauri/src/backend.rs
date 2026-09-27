@@ -19,7 +19,7 @@ use nix::{
 };
 use tauri::State;
 
-use crate::utils::{get_backend_script_path, get_node_executable_path};
+use crate::utils::{get_backend_script_path, get_node_executable_path, lys_home::LysHome};
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -208,16 +208,20 @@ fn get_backend_dir() -> Result<PathBuf, String> {
 /// # Errors
 ///
 /// Returns an error when the script cannot be spawned.
-fn run_backend_dev_script(backend_dir: &Path) -> Result<Child, String> {
+fn run_backend_dev_script(backend_dir: &Path, lys_home: &LysHome) -> Result<Child, String> {
     Command::new("pnpm")
         .args(["run", "dev"])
         .current_dir(backend_dir)
+        .env("LYS_HOME", lys_home.as_path())
         .process_group(0)
         .spawn()
         .map_err(|err| format!("Failed to spawn backend process: {err}"))
 }
 
-fn spawn_dev_backend_process(backend: &Backend) -> Result<BackendProcessStatus, String> {
+fn spawn_dev_backend_process(
+    backend: &Backend,
+    lys_home: &LysHome,
+) -> Result<BackendProcessStatus, String> {
     let backend_dir = get_backend_dir()?;
 
     // Lock before spawning so we never create a process that we cannot store.
@@ -226,7 +230,7 @@ fn spawn_dev_backend_process(backend: &Backend) -> Result<BackendProcessStatus, 
         .lock()
         .map_err(|err| format!("Failed to lock backend state: {err}"))?;
 
-    let backend_process = run_backend_dev_script(&backend_dir)?;
+    let backend_process = run_backend_dev_script(&backend_dir, lys_home)?;
 
     *process = Some(backend_process);
 
@@ -234,7 +238,10 @@ fn spawn_dev_backend_process(backend: &Backend) -> Result<BackendProcessStatus, 
     inspect_process(process.as_mut())
 }
 
-fn spawn_prod_backend_process(backend: &Backend) -> Result<BackendProcessStatus, String> {
+fn spawn_prod_backend_process(
+    backend: &Backend,
+    lys_home: &LysHome,
+) -> Result<BackendProcessStatus, String> {
     let node_executable_path = get_node_executable_path()?;
     let backend_script_path = get_backend_script_path()?;
 
@@ -246,6 +253,7 @@ fn spawn_prod_backend_process(backend: &Backend) -> Result<BackendProcessStatus,
 
     let backend_process = Command::new(node_executable_path)
         .arg(backend_script_path)
+        .env("LYS_HOME", lys_home.as_path())
         .process_group(0)
         .spawn()
         .map_err(|err| format!("Failed to start backend: {err}"))?;
@@ -266,11 +274,14 @@ fn spawn_prod_backend_process(backend: &Backend) -> Result<BackendProcessStatus,
 /// Returns an error when the backend directory cannot be resolved, process
 /// state cannot be locked, the script cannot be spawned, or the child cannot
 /// be inspected.
-fn spawn_backend_process(backend: &Backend) -> Result<BackendProcessStatus, String> {
+fn spawn_backend_process(
+    backend: &Backend,
+    lys_home: &LysHome,
+) -> Result<BackendProcessStatus, String> {
     if tauri::is_dev() {
-        spawn_dev_backend_process(backend)
+        spawn_dev_backend_process(backend, lys_home)
     } else {
-        spawn_prod_backend_process(backend)
+        spawn_prod_backend_process(backend, lys_home)
     }
 }
 
@@ -288,7 +299,10 @@ fn spawn_backend_process(backend: &Backend) -> Result<BackendProcessStatus, Stri
 ///
 /// Returns an error when status inspection, process-state locking, backend
 /// directory resolution, spawning, or post-spawn inspection fails.
-pub fn start_backend(backend: State<'_, Backend>) -> Result<BackendProcessStatus, String> {
+pub fn start_backend(
+    backend: State<'_, Backend>,
+    lys_home: State<'_, LysHome>,
+) -> Result<BackendProcessStatus, String> {
     // Step 1. Get backend process status
     let backend_status = backend.status()?;
 
@@ -298,7 +312,7 @@ pub fn start_backend(backend: State<'_, Backend>) -> Result<BackendProcessStatus
     }
 
     // Step 3. If the backend process is not runnning, we spawn a new one
-    spawn_backend_process(&backend)
+    spawn_backend_process(&backend, &lys_home)
 }
 
 #[tauri::command]

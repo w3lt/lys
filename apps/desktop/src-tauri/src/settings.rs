@@ -22,6 +22,8 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+use crate::utils::get_settings_path;
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default, rename_all = "camelCase")]
 /// Complete persisted Lys settings value.
@@ -83,8 +85,8 @@ impl LysSettings {
     /// Returns an error when the home directory cannot be determined or the
     /// selected settings file cannot be loaded or initialized.
     pub fn load_settings_from_default_path() -> Result<Self, String> {
-        let default_settings_path = &default_settings_path()?;
-        Self::load_settings_from_custom_path(default_settings_path)
+        let settings_path = get_settings_path()?;
+        Self::load_settings_from_custom_path(&settings_path)
     }
 
     /// Serializes settings as pretty-printed JSON and writes them to `path`.
@@ -113,25 +115,9 @@ impl LysSettings {
     /// Returns an error when the home directory cannot be determined,
     /// serialization fails, or the default file cannot be written.
     pub fn save_to_default_path(&self) -> Result<(), String> {
-        let default_settings_path = &default_settings_path()?;
-        self.save_to_custom_path(default_settings_path)
+        let default_settings_path = get_settings_path()?;
+        self.save_to_custom_path(&default_settings_path)
     }
-}
-
-/// Resolves the default settings file below the current user's home directory.
-///
-/// The returned path is `~/.lys/settings.json`; this helper does not create the
-/// directory.
-///
-/// # Errors
-///
-/// Returns an error when the operating system cannot determine the home
-/// directory.
-fn default_settings_path() -> Result<PathBuf, String> {
-    Ok(std::env::home_dir()
-        .ok_or("Could not determine the home directory")?
-        .join(".lys")
-        .join("settings.json"))
 }
 
 /// Attempts to create the parent directory returned for a settings path.

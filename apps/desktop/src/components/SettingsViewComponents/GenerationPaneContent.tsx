@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
 import { useLysStore } from "@/lib/store"
+import type { GenerationSaveState } from "@/lib/store/generation-settings"
 import { initialSettingsState } from "@/lib/store/settings"
 
 import { useSettingsContext } from "./SettingsContext"
@@ -150,6 +151,25 @@ function GenerationReplyLimitField(): ReactElement {
 }
 
 /**
+ * Formats the generation-save outcome announced beneath the controls.
+ *
+ * @param save - Latest application-owned save lifecycle state.
+ * @returns The saving or failure message, or an empty string while idle or
+ * after a successful save, which leave nothing to announce.
+ */
+function formatGenerationSaveStatus(save: GenerationSaveState): string {
+  switch (save.status) {
+    case "saving":
+      return "Saving generation settings…"
+    case "failed":
+      return "Could not save generation settings. Your edits still apply to upcoming messages in this session."
+    case "idle":
+    case "saved":
+      return ""
+  }
+}
+
+/**
  * Announces automatic persistence and offers recovery when a write fails.
  * @returns A persistent status region and a retry button only after failure.
  * @remarks The application store owns saves
@@ -160,20 +180,15 @@ function GenerationSaveFeedback(): ReactElement {
   const saveGenerationSettings = useLysStore(
     (state) => state.saveGenerationSettings
   )
-  const status =
-    save.status === "saving"
-      ? "Saving generation settings…"
-      : save.status === "failed"
-        ? "Could not save generation settings. Your edits still apply to upcoming messages in this session."
-        : ""
   return (
     <div>
       <p
         aria-label="Generation settings save"
+        aria-live="polite"
         className="settings-view__note"
         role="status"
       >
-        {status}
+        {formatGenerationSaveStatus(save)}
       </p>
       {save.status === "failed" ? (
         <Button

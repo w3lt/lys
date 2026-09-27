@@ -34,7 +34,11 @@ export default function ConversationHistoryFooter({
 }: ConversationHistoryFooterProps): ReactElement {
   return (
     <div className="conversation-history__footer">
-      <p className="conversation-history__error" role="status">
+      <p
+        aria-live="polite"
+        className="conversation-history__error"
+        role="status"
+      >
         {mutationError}
       </p>
       <div className="conversation-history__footer-row">

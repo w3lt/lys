@@ -126,7 +126,11 @@ export default function ConversationSearchField({
           <X aria-hidden="true" />
         </button>
       )}
-      <span className="conversation-history__count" role="status">
+      <span
+        aria-live="polite"
+        className="conversation-history__count"
+        role="status"
+      >
         {resultCountLabel}
       </span>
     </div>

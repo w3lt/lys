@@ -1,10 +1,13 @@
 /*
  * Past conversations float above the composer as a non-modal dialog. The chat
- * view places the panel; these rules style only what is inside it.
+ * view places the panel; these rules style only what is inside it, so the
+ * dialog element's own positioning, sizing, and text color are neutralized.
  */
 .conversation-history {
+  position: static;
   display: flex;
   width: 100%;
+  height: auto;
   max-height: 372px;
   min-height: 0;
   flex-direction: column;
@@ -13,6 +16,7 @@
   border-radius: var(--radius-surface);
   background: var(--popover);
   box-shadow: var(--shadow-floating);
+  color: inherit;
   animation: conversation-history-rise var(--duration-enter)
     var(--ease-standard) both;
 }
@@ -106,6 +110,11 @@
 /* Rows answering an older search fade while their replacement is read. */
 .conversation-history__results[aria-busy="true"] .conversation-history__list {
   opacity: 0.6;
+}
+
+/* A group is a fieldset, which would otherwise widen to fit an unclipped title. */
+.conversation-history__group {
+  min-inline-size: 0;
 }
 
 .conversation-history__group-label {
@@ -345,10 +354,18 @@
 
 /* Deleting */
 
+/*
+ * The prompt is a fieldset that names the choices, and a fieldset is not a
+ * dependable flex container in every WebKit version, so the choices row
+ * inside it owns the layout.
+ */
 .conversation-history__confirm {
-  display: flex;
   min-width: 0;
   flex: 1 1 auto;
+}
+
+.conversation-history__confirm-choices {
+  display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 9px;

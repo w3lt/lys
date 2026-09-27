@@ -2,11 +2,41 @@ import type { ReactElement } from "react"
 
 import { Button } from "@/components/ui/button"
 import { buildModelDescriptor } from "@/lib/models/inventory"
-import { useLysStore } from "@/lib/store"
+import { type BackendServerStatus, useLysStore } from "@/lib/store"
+import type {
+  ModelInventoryState,
+  ModelRequestState
+} from "@/lib/store/model-runtime"
 
 import ModelRow from "./ModelRow"
 import ModelRequestFeedback from "./ModelRequestFeedback"
 import { useSettingsContext } from "./SettingsContext"
+
+/**
+ * Formats why the model list is empty.
+ *
+ * @param backendStatus - Current backend process status.
+ * @param inventoryStatus - Latest inventory observation status.
+ * @param requestStatus - Current model request status.
+ * @returns The first applicable reason, checked in order: the backend is not
+ * running, the inventory read failed, models are being listed, LM Studio has
+ * no downloaded language models, or the inventory has not been read yet.
+ */
+function formatModelInventoryEmptyMessage(
+  backendStatus: BackendServerStatus,
+  inventoryStatus: ModelInventoryState["status"],
+  requestStatus: ModelRequestState["status"]
+): string {
+  if (backendStatus !== "running") return "Start the backend to list models."
+  if (inventoryStatus === "failed") {
+    return "Model inventory is unavailable. Refresh to try again."
+  }
+  if (requestStatus === "listing") return "Reading models from LM Studio…"
+  if (inventoryStatus === "ready") {
+    return "No downloaded language models found in LM Studio."
+  }
+  return "Refresh to list downloaded models."
+}
 
 /**
  * Presents the downloaded inventory and the default-model selection.
@@ -33,16 +63,11 @@ function ModelInventoryPanel(): ReactElement {
     modelInventory.status === "ready"
       ? modelInventory.models.map(buildModelDescriptor)
       : []
-  const emptyMessage =
-    backendStatus !== "running"
-      ? "Start the backend to list models."
-      : modelInventory.status === "failed"
-        ? "Model inventory is unavailable. Refresh to try again."
-        : modelRequest.status === "listing"
-          ? "Reading models from LM Studio…"
-          : modelInventory.status === "ready"
-            ? "No downloaded language models found in LM Studio."
-            : "Refresh to list downloaded models."
+  const emptyMessage = formatModelInventoryEmptyMessage(
+    backendStatus,
+    modelInventory.status,
+    modelRequest.status
+  )
   return (
     <section className="settings-view__section">
       <div className="settings-view__section-heading">

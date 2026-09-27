@@ -185,7 +185,7 @@ export default function ConversationHistoryPanel({
   )
   const openConversationId = useChatViewStore(getPresentedConversationId)
 
-  const panelRef = useRef<HTMLElement>(null)
+  const panelRef = useRef<HTMLDialogElement>(null)
   const searchFieldRef = useRef<HTMLInputElement>(null)
   const hintId = useId()
   useConversationHistoryFocus(searchFieldRef)
@@ -221,13 +221,13 @@ export default function ConversationHistoryPanel({
   }
 
   return (
-    <section
+    <dialog
       aria-label="Past conversations"
       className="conversation-history"
       onBlur={handlePanelBlur}
       onKeyDown={handlePanelKeyDown}
+      open
       ref={panelRef}
-      role="dialog"
       tabIndex={-1}
     >
       <ConversationHistoryBrowser
@@ -262,6 +262,6 @@ export default function ConversationHistoryPanel({
         mutationError={mutationError}
         onStartConversation={onStartConversation}
       />
-    </section>
+    </dialog>
   )
 }

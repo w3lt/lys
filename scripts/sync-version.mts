@@ -51,13 +51,14 @@ function listVersionManifests(root: string): readonly string[] {
       "**/.*/**"
     ]
   })
+  // Compare UTF-16 code units, as the default sort does, so order ignores the host locale.
   return [
     ...new Set([
       ...packages,
       "apps/desktop/src-tauri/tauri.conf.json",
       "apps/desktop/src-tauri/Cargo.toml"
     ])
-  ].sort()
+  ].sort((left, right) => Number(left > right) - Number(left < right))
 }
 
 /**

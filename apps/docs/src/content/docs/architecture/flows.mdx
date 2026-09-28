@@ -1,6 +1,6 @@
 ---
 title: End-to-end flows
-description: "The concrete runtime flows that exist today: backend startup, chat streaming, and user-initiated stop."
+description: "The concrete runtime flows that exist today: backend startup, chat streaming, user-initiated stop, and opening a past conversation."
 docType: architecture
 sidebar:
   order: 9
@@ -59,6 +59,20 @@ If the next message reaches the backend before the stopped reply is finalized,
 creating the new turn interrupts that reply first, so its partial text is part
 of the new turn's context.
 
+## Open a past conversation
+
+1. The user opens history from the composer or with Command+K or Control+K.
+2. The history store reads `GET /api/v1/conversations` for the current search
+   query.
+3. Choosing a row closes history and asks the chat store to `openConversation`.
+4. The chat store interrupts any active reply, then reads
+   `GET /api/v1/conversations/:conversationId`.
+5. When the read succeeds, the stored transcript replaces the shown
+   conversation. A missing conversation or failed read keeps the previous
+   conversation and records an inline error.
+6. The next message sends that conversation's `conversationId`, so the backend
+   continues it.
+
 ## Error path
 
 If opening the stream, reading SSE frames, validating payloads, or finishing the
@@ -67,7 +81,6 @@ the assistant message as `failed`.
 
 ## Coming soon
 
-- Resume persisted conversations after relaunch
 - Replay prior events into a new desktop window
 - Credential rotation or secret refresh flows
 - Guided crash recovery and database repair flows

@@ -10,22 +10,24 @@ Lys currently shares contracts through two TypeScript workspace packages.
 
 ## Shared packages
 
-| Package         | Owns                                                                                                                               |
-| --------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `@lys/protocol` | API prefix constants, loopback host and port constants, route paths, request bodies, response schemas, and chat SSE event variants |
-| `@lys/share`    | Conversation, conversation metadata, and conversation message schemas shared between backend and desktop                           |
+| Package         | Owns                                                                                                                                                       |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@lys/protocol` | API prefix constants, loopback host and port constants, route paths, request bodies, response schemas, Problem Details bodies, and chat SSE event variants |
+| `@lys/share`    | Conversation, conversation metadata, and conversation message schemas shared between backend and desktop                                                   |
 
 ## Current protocol surface
 
 The public backend surface is small and explicit:
 
-| Concern                                     | Contract source                                |
-| ------------------------------------------- | ---------------------------------------------- |
-| API prefix and loopback constants           | `packages/protocol/src/constant.ts`            |
-| Chat route request and SSE payloads         | `packages/protocol/src/apis/chat/chatRoute.ts` |
-| Model list, health, load, and unload routes | `packages/protocol/src/apis/llm/*.ts`          |
-| Health route path                           | `packages/protocol/src/apis/health/routes.ts`  |
-| Shared conversation shapes                  | `packages/share/src/models/conversation.ts`    |
+| Concern                                           | Contract source                                |
+| ------------------------------------------------- | ---------------------------------------------- |
+| API prefix and loopback constants                 | `packages/protocol/src/constant.ts`            |
+| Chat route request and SSE payloads               | `packages/protocol/src/apis/chat/chatRoute.ts` |
+| Model list, health, load, and unload routes       | `packages/protocol/src/apis/llm/*.ts`          |
+| Conversation list, get, rename, and delete routes | `packages/protocol/src/apis/conversation/*.ts` |
+| Problem Details error bodies                      | `packages/protocol/src/http/errors/*.ts`       |
+| Health route path                                 | `packages/protocol/src/apis/health/routes.ts`  |
+| Shared conversation shapes                        | `packages/share/src/models/conversation.ts`    |
 
 ## Why the packages are split
 
@@ -48,7 +50,7 @@ the same schemas when reading backend event payloads.
 
 - Explicit protocol versioning beyond the current workspace package source
 - Capability flags for optional event types
-- Shared contracts for conversation listing, resume, or export flows
+- Shared contracts for conversation export and import flows
 
 ## Related pages
 

@@ -6,7 +6,8 @@ sidebar:
   order: 5
 ---
 
-The current workspace contains three apps and two shared packages.
+The current workspace contains three apps, two shared packages, and one tooling
+package.
 
 ## Workspace map
 
@@ -17,6 +18,7 @@ The current workspace contains three apps and two shared packages.
 | `@lys/docs`     | app     | Astro/Starlight engineering handbook                                           |
 | `@lys/protocol` | package | Shared route constants, request and response schemas, and chat event contracts |
 | `@lys/share`    | package | Shared conversation and message schemas                                        |
+| `@lys/scripts`  | tooling | Release-version synchronization from the root `VERSION` file                   |
 
 ## Project notes
 
@@ -28,6 +30,8 @@ The current workspace contains three apps and two shared packages.
   `eventsource-parser`
 - Runtime, Model, and Generation settings share application state. Model controls
   call the backend; generation edits are saved through Tauri and sent with chat requests.
+- The past-conversations dialog lists, searches, renames, deletes, and reopens
+  stored conversations through the backend history routes.
 
 ### `@lys/backend`
 
@@ -35,6 +39,9 @@ The current workspace contains three apps and two shared packages.
 - Framework: Fastify
 - Important runtime dependencies: `@fastify/sse`, `@lmstudio/sdk`, `openai`,
   `fastify-type-provider-zod`
+- `build` (root `pnpm backend:build`) bundles `src/index.ts` with esbuild into
+  `dist/backend.mjs` and copies the two prompt files beside it; `build.sh`
+  installs that output as the release backend.
 
 ### `@lys/docs`
 
@@ -54,6 +61,19 @@ The current workspace contains three apps and two shared packages.
 - Exports Zod schemas and inferred TypeScript types for conversations and
   messages
 - Used by both backend persistence code and desktop chat state
+
+### `@lys/scripts`
+
+- Location: `scripts/`
+- `version:sync` writes the `major.minor.patch` version in the root `VERSION`
+  file into every `package.json` outside dependency, build, and hidden
+  directories, plus `apps/desktop/src-tauri/tauri.conf.json` and
+  `apps/desktop/src-tauri/Cargo.toml`. It rewrites only manifests whose version
+  differs; a rewritten `Cargo.toml` is normalized and loses its comments.
+- `version:check` lists each manifest whose version is missing or differs from
+  `VERSION` and exits with status 1 when any does.
+- Run either with `pnpm --filter @lys/scripts run version:sync` or
+  `pnpm --filter @lys/scripts run version:check`.
 
 ## What is not in this workspace map
 

@@ -49,10 +49,11 @@ On macOS, `build.sh` installs the two `runtime/` entries under
 `${LYS_HOME:-$HOME/.lys}`. It treats an empty value as unset but does not reject
 a relative path.
 
-The backend has no default of its own. It reads `LYS_HOME` once at startup,
-stops with `LYS_HOME is not set` when the variable is unset or empty, and uses
-any other value as given, so set an absolute path when you start the backend
-yourself. The desktop host sets `LYS_HOME` to its resolved Lys home for the
+The backend has no default of its own. It reads `LYS_HOME` once at startup and
+uses an absolute path as given. It stops with `LYS_HOME is not set` when the
+variable is unset or empty. A relative path, including an unexpanded `~/…`,
+stops it with `LYS_HOME must be an absolute path, got "…"`, quoting the value.
+The desktop host sets `LYS_HOME` to its resolved Lys home for the
 backend it starts, in development and release builds. The root `backend:dev`
 script sets `LYS_HOME` to `$HOME/.lys`.
 

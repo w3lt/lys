@@ -32,8 +32,8 @@ For the desktop-managed path:
 If the listener is unavailable, inspect the backend output. Startup requires
 LM Studio at `127.0.0.1:1234`; its readiness query completes before the backend
 listens. Start LM Studio and restart the backend after a readiness failure.
-For standalone startup, also ensure `LYS_HOME` is set and its directory exists
-as described in [Running Lys locally](/develop/running/).
+For standalone startup, also ensure `LYS_HOME` is set to an absolute path and
+its directory exists as described in [Running Lys locally](/develop/running/).
 
 ## The backend starts but model operations fail
 

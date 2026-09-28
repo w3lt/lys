@@ -28,6 +28,9 @@ repository today; it is not a promise of unreleased work.
 - Conversation history supports search, cursor pagination, transcript retrieval,
   rename, and deletion. Assistant deltas are persisted before publication;
   continuation uses the saved prompt and eligible stored history.
+- The desktop's past-conversations dialog, opened from the composer or with
+  Command+K or Control+K, searches, renames, and deletes stored conversations,
+  and reopens one so its next message continues it.
 - For a conversation without a stored title, the backend also attempts to
   generate a title asynchronously and emits the first assigned title as a stream
   event. When the conversation remains untitled, its next turn tries again; an
@@ -41,12 +44,16 @@ repository today; it is not a promise of unreleased work.
   generation groups. Runtime and model edits remain session-only.
 - The Composer label, send eligibility, and each chat request use the loaded
   runtime projection described in [desktop model settings](/architecture/desktop/#model-settings).
+- On macOS, `build.sh` builds the desktop app from a source checkout, installs
+  its backend runtime under `$LYS_HOME/runtime`, and copies `Lys.app` to
+  `/Applications`. See [Packaging and releases](/operate/releases/).
 
 ## Coming soon
 
 The current repository does not yet provide:
 
-- desktop history-list and restore integration (the backend APIs are available)
+- sending composer attachments; the composer stages files and long pastes only
+  for its local context estimate
 - a Conversation settings pane
 - replay or reconnect semantics for chat streams
 - tool-call stream events

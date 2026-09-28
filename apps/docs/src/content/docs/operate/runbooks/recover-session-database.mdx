@@ -36,7 +36,9 @@ supported database-repair workflow.
 ## Coming soon
 
 The current codebase proves that Lys stores conversations in
-`~/.lys/lys_db.sqlite` and applies forward-only migrations at startup, but it
+`$LYS_HOME/lys_db.sqlite`, in the
+[Lys home directory](/reference/configuration/#lys-home-directory), and applies
+forward-only migrations at startup, but it
 does not ship documented repair commands, integrity checks, or a supported
 operator recovery path.
 

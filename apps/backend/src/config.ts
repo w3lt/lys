@@ -5,8 +5,7 @@ import {
   LMSTUDIO_PORT
 } from "@lys/protocol"
 import type { PathLike } from "node:fs"
-import { homedir } from "node:os"
-import { join } from "node:path"
+import { isAbsolute, join } from "node:path"
 import { readPrompt } from "./utils/prompts"
 
 /** Runtime locations, prompts, and limits used by the backend and its LM Studio clients. */
@@ -19,7 +18,12 @@ export type BackendConfig = {
   readonly lmstudioHost: string
   /** Port used by backend LM Studio clients. */
   readonly lmstudioPort: number
-  /** Filesystem path of the SQLite database owned by the conversation service. */
+  /**
+   * Filesystem path of the SQLite database owned by the conversation service.
+   *
+   * @remarks `lys_db.sqlite` in the `LYS_HOME` directory. The backend does not
+   * create that directory.
+   */
   readonly databaseFilePath: PathLike
   /**
    * System prompt sent before the user message in every chat completion and
@@ -71,16 +75,22 @@ const TITLE_GENERATION_MAX_ATTEMPTS = 3
 const GENERATED_TITLE_MAX_LENGTH = 100
 
 /**
- * Loads the backend configuration from shared protocol constants, backend
- * limits, and the maintained prompt files.
+ * Loads the backend configuration from the `LYS_HOME` environment variable,
+ * shared protocol constants, backend limits, and the maintained prompt files.
  *
- * @returns A frozen configuration snapshot whose non-empty prompts were read
- * once during this call and whose limits are positive safe integers.
+ * @returns A frozen configuration snapshot whose database path is under
+ * `LYS_HOME`, whose non-empty prompts were read once during this call, and
+ * whose limits are positive safe integers.
+ * @throws If `LYS_HOME` is unset, empty, or not an absolute path, as
+ * described by {@link parseLysHome}.
  * @throws If a prompt file cannot be read or its trimmed contents are empty.
  * @throws {RangeError} If a title-generation limit is not a positive safe
  * integer.
+ * @remarks `LYS_HOME` has no backend default. The desktop host sets it to its
+ * resolved absolute Lys home for the backend it starts.
  */
 export function loadBackendConfig(): BackendConfig {
+  const lysHome = parseLysHome(process.env.LYS_HOME)
   const lysSystemPrompt = readPrompt("lys-system")
   const titleGenerationPrompt = readPrompt("title-generation")
   const titleGenerationMaxAttempts = parsePositiveSafeInteger(
@@ -97,12 +107,38 @@ export function loadBackendConfig(): BackendConfig {
     backendPort: BACKEND_PORT,
     lmstudioHost: LMSTUDIO_HOST,
     lmstudioPort: LMSTUDIO_PORT,
-    databaseFilePath: join(homedir(), ".lys", "lys_db.sqlite"),
+    databaseFilePath: join(lysHome, "lys_db.sqlite"),
     lysSystemPrompt,
     titleGenerationPrompt,
     titleGenerationMaxAttempts,
     generatedTitleMaxLength
   } satisfies BackendConfig)
+}
+
+/**
+ * Validates the raw `LYS_HOME` environment value as the Lys home directory.
+ *
+ * @param value - Raw `LYS_HOME` value, or `undefined` when the variable is
+ * unset.
+ * @returns The value unchanged once it is known to be an absolute path. The
+ * directory is not required to exist.
+ * @throws If the value is unset or empty, with the message
+ * `LYS_HOME is not set`.
+ * @throws If the value is a relative path, including an unexpanded `~/…`, with
+ * a message that quotes the rejected value.
+ */
+function parseLysHome(value: string | undefined): string {
+  if (!value) {
+    throw new Error("LYS_HOME is not set")
+  }
+
+  if (!isAbsolute(value)) {
+    throw new Error(
+      `LYS_HOME must be an absolute path, got ${JSON.stringify(value)}`
+    )
+  }
+
+  return value
 }
 
 /**

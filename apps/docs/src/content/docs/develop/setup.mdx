@@ -39,6 +39,7 @@ That installs the workspace dependencies for:
 - `apps/docs`
 - `packages/protocol`
 - `packages/share`
+- `scripts`
 
 ## First successful runs
 
@@ -55,17 +56,18 @@ pnpm dev
 - `pnpm backend:dev` starts the Fastify backend in watch mode.
 - `pnpm dev` launches the Tauri desktop application.
 
-Before standalone `pnpm backend:dev`, create its database parent directory if
-needed:
+Before standalone `pnpm backend:dev`, create its Lys home directory if needed.
+The script sets `LYS_HOME` to `$HOME/.lys`:
 
 ```sh
 mkdir -p "$HOME/.lys"
 ```
 
-Desktop settings initialization creates that directory for the desktop-managed
-path. Choose one backend launch path: desktop auto-start is enabled by default,
-and starting another backend on the same port can conflict. See
-[Running Lys locally](/develop/running/) for process ownership and readiness.
+Desktop settings initialization creates the Lys home directory for the
+desktop-managed path. Choose one backend launch path: desktop auto-start is
+enabled by default, and starting another backend on the same port can conflict.
+See [Running Lys locally](/develop/running/) for process ownership and
+readiness.
 
 ## Local endpoints to expect
 

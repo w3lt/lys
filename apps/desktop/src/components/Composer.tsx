@@ -267,8 +267,9 @@ export function Composer({ messageFieldRef }: ComposerProps): ReactElement {
    * Records the chosen weights in memory without persisting them.
    *
    * @param modelKey - Model identifier chosen from the weights menu.
-   * @remarks The application store explicitly does not write settings, so this
-   * selection is lost on restart until the settings save boundary is wired.
+   * @remarks The application store persists only generation edits, so this
+   * runtime selection stays in memory and is lost on restart until runtime
+   * settings are saved.
    */
   function handleSelectModel(modelKey: string): void {
     setSettings({

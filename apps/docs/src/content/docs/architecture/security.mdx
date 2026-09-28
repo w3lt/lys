@@ -17,17 +17,17 @@ Zod, and there is no credential-management subsystem yet.
 | React UI -> Tauri host       | Trusted application boundary using Tauri `invoke` commands.           |
 | React UI -> Fastify backend  | Loopback HTTP and SSE only. No auth layer beyond local binding.       |
 | Fastify backend -> LM Studio | Loopback connections to local LM Studio HTTP and WebSocket endpoints. |
-| Backend -> SQLite file       | Local filesystem access to `~/.lys/lys_db.sqlite`.                    |
-| Tauri host -> settings file  | Local filesystem access to `~/.lys/settings.json`.                    |
+| Backend -> SQLite file       | Local filesystem access to `$LYS_HOME/lys_db.sqlite`.                 |
+| Tauri host -> settings file  | Local filesystem access to `$LYS_HOME/settings.json`.                 |
 
 ## Current controls
 
-| Control                    | What it does                                                                     |
-| -------------------------- | -------------------------------------------------------------------------------- |
-| Loopback host constants    | Backend and LM Studio addresses default to `127.0.0.1`.                          |
-| Dev CORS policy            | Fastify allows only `http://localhost:1420` and `http://127.0.0.1:1420` origins. |
-| Zod request validation     | Backend validates route bodies and desktop validates incoming SSE payloads.      |
-| Route-local abort handling | Closing the SSE connection aborts the backend chat task.                         |
+| Control                    | What it does                                                                                                                            |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Loopback host constants    | Backend and LM Studio addresses default to `127.0.0.1`.                                                                                 |
+| CORS policy                | Fastify admits only the `http://localhost:1420` and `http://127.0.0.1:1420` development origins and the `tauri://localhost` app origin. |
+| Zod validation             | Backend validates route bodies, parameters, and query strings; desktop validates SSE payloads and HTTP responses.                       |
+| Route-local abort handling | Closing the SSE connection aborts the backend chat task.                                                                                |
 
 ## Candid limits
 

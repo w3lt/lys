@@ -1,6 +1,6 @@
 ---
 title: End-to-end flows
-description: "The concrete runtime flows that exist today: backend startup, chat streaming, and user-initiated stop."
+description: "The concrete runtime flows that exist today: backend startup, chat streaming, user-initiated stop, and opening a past conversation."
 docType: architecture
 sidebar:
   order: 9
@@ -15,8 +15,10 @@ This page documents only the flows implemented in the current codebase.
    the shell.
 3. If `autoStartBackend` is enabled, or a backend process already runs, the
    store starts or checks the backend in the background.
-4. For a stopped backend, the store sets `starting` and calls `start_backend`;
-   the Tauri host spawns `pnpm run dev` in `apps/backend`.
+4. For a stopped backend, the store sets `starting` and calls `start_backend`.
+   The Tauri host starts the backend with `LYS_HOME` set to the Lys home it
+   resolved at startup: `pnpm run dev` in `apps/backend` for development builds,
+   or the installed runtime under `$LYS_HOME/runtime` for release builds.
 5. The backend opens its HTTP listener without contacting LM Studio, then makes
    one LM Studio connection attempt.
 6. The store checks `GET /api/v1/heath` until it answers (`running`), the
@@ -75,6 +77,20 @@ If the next message reaches the backend before the stopped reply is finalized,
 creating the new turn interrupts that reply first, so its partial text is part
 of the new turn's context.
 
+## Open a past conversation
+
+1. The user opens history from the composer or with Command+K or Control+K.
+2. The history store reads `GET /api/v1/conversations` for the current search
+   query.
+3. Choosing a row closes history and asks the chat store to `openConversation`.
+4. The chat store interrupts any active reply, then reads
+   `GET /api/v1/conversations/:conversationId`.
+5. When the read succeeds, the stored transcript replaces the shown
+   conversation. A missing conversation or failed read keeps the previous
+   conversation and records an inline error.
+6. The next message sends that conversation's `conversationId`, so the backend
+   continues it.
+
 ## Error path
 
 If opening the stream, reading SSE frames, validating payloads, or finishing the
@@ -83,7 +99,6 @@ the assistant message as `failed`.
 
 ## Coming soon
 
-- Resume persisted conversations after relaunch
 - Replay prior events into a new desktop window
 - Credential rotation or secret refresh flows
 - Guided crash recovery and database repair flows

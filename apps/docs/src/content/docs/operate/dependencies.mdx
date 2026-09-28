@@ -45,12 +45,15 @@ The backend itself depends on:
   `$LYS_HOME/lys_db.sqlite` in an existing directory; see
   [standalone startup](/develop/running/)
 - SQLite support through Node's `node:sqlite`
-- an LM Studio instance reachable at `127.0.0.1:1234`
+- an LM Studio instance reachable at `127.0.0.1:1234` for model features;
+  startup does not require it
 
 The backend's chat and model services are both wired to that LM Studio address.
-Startup waits for an LM Studio readiness query before opening its HTTP listener
-at `127.0.0.1:12345`. A running host-owned child is process status only; check
-`GET /api/v1/heath` for HTTP readiness.
+The backend opens its HTTP listener at `127.0.0.1:12345` without waiting for LM
+Studio, then makes one connection attempt. `GET /api/v1/heath` reports HTTP
+readiness only. `GET /api/v1/llm/runtime` reports the LM Studio connection
+status, and `POST /api/v1/llm/runtime/connect` retries it. A running
+host-owned child is process status only.
 
 ## Docs site
 

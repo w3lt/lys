@@ -58,8 +58,11 @@ launch path.
   stream.
 - The backend uses LM Studio for model inventory and load operations and an
   OpenAI-compatible endpoint for chat completions.
-- Backend initialization checks LM Studio readiness before listening for HTTP
-  requests. Start LM Studio at `127.0.0.1:1234` before starting the backend.
+- The backend starts listening without LM Studio and then tries once to
+  connect to `127.0.0.1:1234`. If LM Studio starts later, press **Refresh** on
+  the LM Studio card in Settings → Runtime, or send
+  `POST /api/v1/llm/runtime/connect`. `GET /api/v1/llm/runtime` reports
+  `connecting`, `connected`, or `unreachable`.
 
 ## Backend lifecycle in the desktop app
 

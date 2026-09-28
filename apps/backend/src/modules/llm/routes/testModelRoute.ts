@@ -12,8 +12,10 @@ import handleLlmServiceRequestFailure from "./handleLlmServiceRequestFailure"
  * @returns A promise that resolves after route registration completes.
  * @throws If Fastify cannot register the route.
  * @remarks Every response prevents caching because health is a fresh observation.
- * Refused queue admission returns service-busy Problem Details. Accepted health
- * work remains owned by the application service after client disconnect.
+ * Refused queue admission returns service-busy Problem Details, and a missing
+ * or lost LLM runtime connection returns runtime-unavailable Problem Details.
+ * Accepted health work remains owned by the application service after client
+ * disconnect.
  */
 export default async function updateFastifyWithLlmTestModelRoute(
   app: FastifyInstance
@@ -66,8 +68,9 @@ function validateLlmTestModelParams(data: unknown) {
  * @param reply - Fastify reply used for the validated health response.
  * @param llmModelHealthReader - Application capability that queries loaded state.
  * @returns A promise that resolves after the health response is sent.
- * @throws If admission is refused or an unexpected application failure occurs.
- * The route boundary translates only recognized admission rejection.
+ * @throws If admission is refused, no LLM runtime is connected, or an
+ * unexpected application failure occurs. The route boundary translates only
+ * the recognized service-busy and runtime-unavailable failures.
  * @remarks Internal runtime diagnostics are logged and excluded from the body.
  */
 async function handleLlmTestModelRequest(

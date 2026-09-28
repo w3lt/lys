@@ -37,7 +37,7 @@ export function useBackendUptimeMs(): number {
  * @param status - Store-owned backend lifecycle state.
  * @returns The user-facing label for the status.
  */
-export function backendStatusLabel(status: BackendServerStatus): string {
+export function formatBackendStatusLabel(status: BackendServerStatus): string {
   switch (status) {
     case "running":
       return "Backend running"
@@ -47,6 +47,8 @@ export function backendStatusLabel(status: BackendServerStatus): string {
       return "Backend stopping"
     case "stopped":
       return "Backend stopped"
+    case "unresponsive":
+      return "Backend not responding"
   }
 }
 
@@ -56,9 +58,9 @@ export function backendStatusLabel(status: BackendServerStatus): string {
  * @param status - Store-owned backend lifecycle state.
  * @returns The tone name consumed by the status indicator's styles.
  */
-export function backendStatusTone(
+export function calculateBackendStatusTone(
   status: BackendServerStatus
-): "active" | "pending" | "idle" {
+): "active" | "pending" | "idle" | "danger" {
   switch (status) {
     case "running":
       return "active"
@@ -67,6 +69,8 @@ export function backendStatusTone(
       return "pending"
     case "stopped":
       return "idle"
+    case "unresponsive":
+      return "danger"
   }
 }
 

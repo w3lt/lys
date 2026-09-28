@@ -25,21 +25,30 @@ For the desktop-managed path:
 
 - confirm the runtime pane reports `stopped` rather than `starting`
 - start the backend from that pane
-- the pane switches to `running` when the owned child is reported running;
-  uptime and the displayed address do not prove HTTP readiness
+- the pane switches to `running` only after `GET /api/v1/heath` answers; if
+  the process stays up without answering for 30 seconds, it shows **Backend
+  not responding**. Press **Stop**, then **Start**
 - verify `GET /api/v1/heath` responds at `http://127.0.0.1:12345`
 
-If the listener is unavailable, inspect the backend output. Startup requires
-LM Studio at `127.0.0.1:1234`; its readiness query completes before the backend
-listens. Start LM Studio and restart the backend after a readiness failure.
-For standalone startup, also ensure `LYS_HOME` is set to an absolute path and
-its directory exists as described in [Running Lys locally](/develop/running/).
+If the listener is unavailable, inspect the backend output. LM Studio is not
+required for the backend to listen. For standalone startup, also ensure
+`LYS_HOME` is set to an absolute path and its directory exists as described in
+[Running Lys locally](/develop/running/).
+
+## LM Studio is not reachable
+
+The Runtime pane's LM Studio card shows **LM Studio not reachable** when the
+backend cannot connect to `127.0.0.1:1234`, and the model list stays empty.
+Start LM Studio and its local server, then press **Refresh** on that card. The
+backend does not retry on its own.
 
 ## The backend starts but model operations fail
 
 The backend is wired to LM Studio at `127.0.0.1:1234`. If model listing,
 loading, or chat requests fail after HTTP readiness was established, verify
-that LM Studio is still reachable. The
+that LM Studio is still reachable. When LM Studio stops while connected, the
+next failing model request marks it not reachable; press **Refresh** after
+restarting it. The
 [model health endpoint](/operate/logging/#model-health-observation) can report
 loaded state; it does not test inference success.
 

@@ -28,21 +28,19 @@ request.
 
 ```text
 Desktop chat store -> Fastify /api/v1/chat -> ChatService -> LM Studio /v1
-Fastify /api/v1/llm/* -> LlmService -> LlmRuntime -> LmStudioRuntime -> LM Studio SDK
+Fastify /api/v1/llm/* -> LlmService -> LlmRuntimeService -> LlmRuntime -> LmStudioRuntime -> LM Studio SDK
 ```
 
 The desktop settings view supplies the shared context for its Runtime, Model,
-and Generation panes. Model controls call the inventory, health, load, and unload
-routes through the application store; entering settings refreshes inventory when
-the backend is running. The list, health, load, and unload routes
-reuse the application-scoped `llmService`, typed as `LlmService` on Fastify,
-through provider-neutral capabilities.
-The composition root creates `LmStudioRuntime` for one configured LM Studio
-server, then transfers exclusive ownership to `LlmService`. The service knows
-only its five-operation `LlmServiceRuntime` view and serializes complete
-application operations. The full `LlmRuntime` combines `LlmEngine` with
-`LlmRuntimeLifecycle`; the service view requires engine operations and disposal.
-Concrete runtime selection belongs in composition.
+and Generation panes. Model controls call the inventory, health, load, and
+unload routes through the application store only while LM Studio is connected;
+the Runtime pane's LM Studio card reads and refreshes the connection. The model
+routes use the application-scoped `llmService` through provider-neutral
+capabilities, and `LlmService` sends each operation through the queue owned by
+`llmRuntimeService`. `LlmRuntimeService` acquires `LmStudioRuntime` for one
+configured LM Studio server when it connects and owns it until it releases it.
+It consumes the full `LlmRuntime`: the four engine operations, the availability
+probe, and disposal. Concrete runtime selection belongs in composition.
 
 `LmStudioRuntime` owns SDK calls, vendor-data validation, immutable runtime
 snapshots, and client cleanup. `LlmService` owns canonical metadata lookup after
@@ -62,20 +60,23 @@ unloads every model nor terminates the external LM Studio engine.
 real SDK connection and verifies a query response without loading a model.
 Connection, authentication, and query errors reported by the SDK reject
 acquisition with a retained diagnostic cause; acquired resources are released
-before rejection. Empty downloaded and loaded inventories are valid.
+before rejection. Empty downloaded and loaded inventories are valid. The
+runtime service calls it for the startup attempt and for each refresh that needs
+a new runtime, never before the backend listens.
 
 The synchronous `lifecycleStatus` getter reports `ready`, `active`, `closing`,
 or `closed`, including after disposal. These values describe the adapter's
 admission and cleanup state; `ready` alone does not establish current engine
 availability.
 
-`getRuntimeAvailability()` performs a fresh SDK query and returns `available`
-or `unavailable`. It shares the runtime's single-operation guard: overlapping
-calls reject as busy, and checks after disposal begins reject as closed. A
-failed availability query releases admission so a later check can succeed.
-Its result is an observation, not a guarantee that the next model operation
-will succeed. These lifecycle and availability observations are not directly
-exposed through an HTTP route or desktop UI.
+`getRuntimeAvailability()` performs a fresh SDK query and returns `available` or
+`unavailable`. It shares the runtime's single-operation guard: overlapping calls
+reject as busy, and checks after disposal begins reject as closed. A failed
+availability query releases admission so a later check can succeed. Its result
+is an observation, not a guarantee that the next model operation will succeed.
+The runtime service uses it to verify a held runtime on refresh and after a
+failed runtime call. The resulting connection status, not the raw observation,
+is exposed through `GET /api/v1/llm/runtime` and the desktop's LM Studio card.
 
 The model-specific `GET /api/v1/llm/:modelId/health` endpoint uses the existing
 `listLoadedLlmModelInstances()` operation. A successful query establishes that
@@ -89,22 +90,21 @@ latency fields.
 Acquisition and accepted availability checks are owned until settlement. SDK
 1.5.0 has no public RPC cancellation or forced client shutdown; its cleanup
 waits for pending communication. These queries therefore have no completion
-deadline, and a nonresponding engine can keep startup, a check, or shutdown
-pending. The SDK also ignores invalid version payloads without settling the
-request, so a malformed response can leave acquisition or a check pending until
-a valid response or transport failure arrives. A timeout race would not cancel
-the underlying SDK request. HTTP
-greeting checks do not establish SDK WebSocket authentication and are not used
-as a substitute.
+deadline, and a nonresponding engine can keep a connection attempt, a check, or
+shutdown pending. The SDK also ignores invalid version payloads without settling
+the request, so a malformed response can leave acquisition or a check pending
+until a valid response or transport failure arrives. A timeout race would not
+cancel the underlying SDK request. HTTP greeting checks do not establish SDK
+WebSocket authentication and are not used as a substitute.
 
 ## Model operation queue
 
-Each `LlmService` accepts one active operation and up to eight waiting operations
-across inventory, health, loading, and unloading together. Accepted operations run in
-arrival order. A full queue rejects a new request immediately with HTTP `503` and
-the Problem Details type `urn:lys:problem:llm:service-busy`; rejected work never
-reaches the runtime. Finishing an operation releases its capacity on either
-success or failure.
+The `LlmRuntimeService` queue accepts one active operation and up to eight
+waiting operations across inventory, health, loading, unloading, and connection
+attempts together. Accepted operations run in arrival order. A full queue
+rejects a new request immediately with HTTP `503` and the Problem Details type
+`urn:lys:problem:llm:service-busy`; rejected work never reaches the runtime.
+Finishing an operation releases its capacity on either success or failure.
 
 The first accepted operation reserves the active position before execution starts,
 so a burst arriving in the same event-loop turn cannot exceed nine accepted
@@ -113,11 +113,12 @@ admission and drains accepted work before releasing the runtime resources.
 
 ## Cancellation policy
 
-Users cannot cancel model loading or unloading. Once `LlmService` accepts either
-operation, it owns the work until success or failure, including any time spent
-waiting in its queue. Closing the requesting client connection does not cancel
-that accepted work. During shutdown, the service stops accepting new operations
-and waits for accepted work before releasing its runtime resources.
+Users cannot cancel model loading or unloading. Once the runtime queue accepts
+either operation, it owns the work until success or failure, including any time
+spent waiting in its queue. Closing the requesting client connection does not
+cancel that accepted work. During shutdown, the runtime service stops accepting
+new operations and waits for accepted work before releasing its runtime
+resources.
 
 Inventory queries and model health checks use the same service-owned completion policy. This is the
 application-owned completion-only case defined by `IFACE-018` in
@@ -136,7 +137,8 @@ policy.
 
 ## What the backend assumes today
 
-- LM Studio is running on `127.0.0.1:1234`.
+- LM Studio, when running, listens on `127.0.0.1:1234`; the backend starts
+  without it.
 - Chat requests can be satisfied by an OpenAI-compatible HTTP endpoint.
 - Inventory, load, and unload operations are available through the LM Studio
   SDK.

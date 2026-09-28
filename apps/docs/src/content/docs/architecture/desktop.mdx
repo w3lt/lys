@@ -73,11 +73,33 @@ and shows an inline error. The next message sends the opened conversation's
 chat view presents, or learning that it no longer exists, resets the view to a
 new conversation.
 
+## Backend and LM Studio status
+
+The shell store tracks three facts separately. The Tauri host reports whether
+the backend process exists. The store reports the backend as `running` only
+after `GET /api/v1/heath` answers: it checks every 250 ms, each check bounded
+to one second, for up to 30 seconds, and shows **Backend not responding**
+(`unresponsive`) when the process stays alive without answering. Once the
+backend runs, the store reads `GET /api/v1/llm/runtime`, joining the backend's
+startup attempt through `POST /api/v1/llm/runtime/connect` while it is still
+`connecting`.
+
+The Runtime pane's LM Studio card shows `unknown`, `connecting`, `connected`,
+or `unreachable` with the address `127.0.0.1:1234`. Its **Refresh** button is
+the only control that asks the backend to reconnect. A failed model request
+re-reads the status, so a lost LM Studio appears as not reachable without
+polling. The composer banner names the first missing prerequisite—the
+backend, LM Studio, or model weights—and opens the settings pane that fixes
+it. `initialize` shows the shell as soon as settings load; the backend starts
+in the background.
+
 ## Model settings
 
-The shell store refreshes `GET /api/v1/llm/list` after backend initialization,
-startup, and entry into settings. A manual Refresh action picks up changes made
-in LM Studio. Inventory metadata and each model's `loaded` flag drive the model
+The shell store refreshes `GET /api/v1/llm/list` when LM Studio becomes
+connected and on entry into settings while it stays connected. While LM Studio
+is not connected, the model list is empty, model actions are disabled, and the
+pane explains how to recover. A manual Refresh action picks up changes made in
+LM Studio. Inventory metadata and each model's `loaded` flag drive the model
 rows and composer menu; several models may be loaded at once.
 
 Load sends `{ modelId }` to `POST /api/v1/llm/load`. Unload sends the same body
@@ -135,9 +157,11 @@ does not coordinate with external editors of the settings file.
 - The load API accepts only `modelId`. Model settings explain that LM Studio
   controls the load-time context size. The retained local context budget is
   used for composer estimates and is not a confirmed runtime configuration.
-- Model observations refresh on startup, entry into settings, manual refresh,
-  and model operations. Changes made by another LM Studio client between those
-  observations are not pushed to the desktop.
+- Model observations refresh on LM Studio connection, entry into settings,
+  manual refresh, and model operations. The LM Studio status changes only on
+  backend start, Refresh, and failed model requests; it is not polled. Changes
+  made by another LM Studio client between observations are not pushed to the
+  desktop.
 - The composer's attachment tray stages files and long pastes for its local
   context estimate only. The chat protocol has no attachment field, so staged
   attachments are never sent.

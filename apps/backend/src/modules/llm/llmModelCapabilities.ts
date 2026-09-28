@@ -11,7 +11,8 @@ import type { StopLlmModelsByKeyOutcome } from "./stopLlmModelsByKey"
  * The application-scoped provider owns accepted queries independently of the
  * requesting client connection. Health shares the model-operation FIFO: one
  * active operation and at most eight waiting. No completion deadline is
- * guaranteed. Cleanup rejects new work and awaits accepted health queries.
+ * guaranteed. Cleanup of the runtime queue rejects new work and awaits accepted
+ * work before releasing the runtime.
  */
 export interface LlmModelHealthReader {
   /**
@@ -25,6 +26,12 @@ export interface LlmModelHealthReader {
    * @throws A service-busy error recognized by
    * [isLlmServiceBusyError](./llmServiceBusyError.ts) if the shared queue is full;
    * the query is not accepted and has no runtime effects.
+   * @throws A runtime-unavailable error recognized by
+   * [isLlmRuntimeUnavailableError](./llmRuntimeUnavailableError.ts) when no
+   * LLM runtime is connected, or when a failed runtime call revealed that it
+   * stopped answering; the operation had no further runtime effects.
+   * A resolved runtime-unavailable outcome is returned instead when the
+   * operation already represented the failure.
    * @remarks Every returned diagnostic must be reported synchronously before
    * the consuming boundary completes its response.
    */
@@ -42,8 +49,9 @@ export interface LlmModelHealthReader {
  * budget: one active operation and at most eight waiting. Excess calls reject
  * before acceptance with a failure recognized by
  * [isLlmServiceBusyError](./llmServiceBusyError.ts). This completion-only capability
- * has no caller cancellation or completion-deadline guarantee. Cleanup rejects
- * new work and awaits accepted queries before releasing provider resources.
+ * has no caller cancellation or completion-deadline guarantee. Cleanup of the
+ * runtime queue rejects new work and awaits accepted work before releasing the
+ * runtime.
  */
 export interface LlmModelInventory {
   /**
@@ -55,6 +63,10 @@ export interface LlmModelInventory {
    * its application lifetime has begun cleanup.
    * @throws A service-busy error if the shared model-operation queue is full;
    * the query is not accepted and no runtime work starts.
+   * @throws A runtime-unavailable error recognized by
+   * [isLlmRuntimeUnavailableError](./llmRuntimeUnavailableError.ts) when no
+   * LLM runtime is connected, or when a failed runtime call revealed that it
+   * stopped answering; the operation had no further runtime effects.
    */
   listLlmModels(): Promise<readonly LlmInfo[]>
 }
@@ -68,8 +80,9 @@ export interface LlmModelInventory {
  * queued and active work until the model is loaded and described or the operation
  * fails. A client disconnect does not revoke that ownership. Loads share the
  * FIFO admission budget defined by {@link LlmModelInventory}: one active model
- * operation and eight waiting. No completion deadline is guaranteed. Cleanup
- * rejects new work and awaits accepted loads before releasing provider resources.
+ * operation and eight waiting. No completion deadline is guaranteed. Cleanup of
+ * the runtime queue rejects new work and awaits accepted work before releasing
+ * the runtime.
  */
 export interface LlmModelLoader {
   /**
@@ -83,6 +96,10 @@ export interface LlmModelLoader {
    * @throws A service-busy error recognized by
    * [isLlmServiceBusyError](./llmServiceBusyError.ts) if the shared queue is full;
    * the load is not accepted and has no runtime effects.
+   * @throws A runtime-unavailable error recognized by
+   * [isLlmRuntimeUnavailableError](./llmRuntimeUnavailableError.ts) when no
+   * LLM runtime is connected, or when a failed runtime call revealed that it
+   * stopped answering; the operation had no further runtime effects.
    * @remarks Loading changes provider runtime state. No atomicity or
    * idempotency guarantee is provided: a repeated call may create another
    * loaded instance, and an inventory or validation failure after loading may
@@ -101,8 +118,8 @@ export interface LlmModelLoader {
  * their failure outcomes. A client disconnect does not revoke that ownership.
  * Unloads share the FIFO admission budget defined by {@link LlmModelInventory}:
  * one active model operation and eight waiting. No completion deadline is
- * guaranteed. Cleanup rejects new work and awaits accepted unloads before
- * releasing provider resources.
+ * guaranteed. Cleanup of the runtime queue rejects new work and awaits accepted
+ * work before releasing the runtime.
  */
 export interface LlmModelStopper {
   /**
@@ -116,6 +133,12 @@ export interface LlmModelStopper {
    * @throws A service-busy error recognized by
    * [isLlmServiceBusyError](./llmServiceBusyError.ts) if the shared queue is full;
    * the unload is not accepted and has no runtime effects.
+   * @throws A runtime-unavailable error recognized by
+   * [isLlmRuntimeUnavailableError](./llmRuntimeUnavailableError.ts) when no
+   * LLM runtime is connected, or when a failed runtime call revealed that it
+   * stopped answering; the operation had no further runtime effects.
+   * A resolved runtime-unavailable outcome is returned instead when the
+   * operation already represented the failure.
    * @remarks Stopping changes provider runtime state and is not atomic. A
    * `stopped` outcome means the reconciliation snapshot contains no matching
    * instances; `stop-failed` or `runtime-unavailable` may follow partial stop

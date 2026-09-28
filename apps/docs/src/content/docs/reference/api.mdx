@@ -11,21 +11,28 @@ route definitions.
 
 ## Routes
 
-| Method   | Path                                    | Request body                                                                | Response                           |
-| -------- | --------------------------------------- | --------------------------------------------------------------------------- | ---------------------------------- |
-| `GET`    | `/api/v1/heath`                         | none                                                                        | `{ ok: true }`                     |
-| `GET`    | `/api/v1/llm/list`                      | none                                                                        | `{ llms: LlmInfo[] }`              |
-| `GET`    | `/api/v1/llm/:modelId/health`           | none                                                                        | Loaded-state health observation    |
-| `POST`   | `/api/v1/llm/load`                      | `{ modelId: string }`                                                       | `LlmInfo`                          |
-| `PATCH`  | `/api/v1/llm/unload`                    | `{ modelId: string }`                                                       | `204` or typed Problem Details     |
-| `GET`    | `/api/v1/conversations`                 | none; optional `query`, `cursor`, `limit` query parameters                  | Conversation list page             |
-| `GET`    | `/api/v1/conversations/:conversationId` | none                                                                        | Conversation with ordered messages |
-| `PATCH`  | `/api/v1/conversations/:conversationId` | `{ title: string }`                                                         | Conversation metadata              |
-| `DELETE` | `/api/v1/conversations/:conversationId` | none                                                                        | Bodyless `204`                     |
-| `POST`   | `/api/v1/chat`                          | `message`, `model`, required `generationOptions`, optional `conversationId` | `text/event-stream`                |
+| Method   | Path                                    | Request body                                                                | Response                                                   |
+| -------- | --------------------------------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `GET`    | `/api/v1/heath`                         | none                                                                        | `{ ok: true }`                                             |
+| `GET`    | `/api/v1/llm/list`                      | none                                                                        | `{ llms: LlmInfo[] }`                                      |
+| `GET`    | `/api/v1/llm/:modelId/health`           | none                                                                        | Loaded-state health observation                            |
+| `POST`   | `/api/v1/llm/load`                      | `{ modelId: string }`                                                       | `LlmInfo`                                                  |
+| `PATCH`  | `/api/v1/llm/unload`                    | `{ modelId: string }`                                                       | `204` or typed Problem Details                             |
+| `GET`    | `/api/v1/llm/runtime`                   | none                                                                        | `{ status: "connecting" \| "connected" \| "unreachable" }` |
+| `POST`   | `/api/v1/llm/runtime/connect`           | none                                                                        | Settled `{ status }`, or service-busy Problem Details      |
+| `GET`    | `/api/v1/conversations`                 | none; optional `query`, `cursor`, `limit` query parameters                  | Conversation list page                                     |
+| `GET`    | `/api/v1/conversations/:conversationId` | none                                                                        | Conversation with ordered messages                         |
+| `PATCH`  | `/api/v1/conversations/:conversationId` | `{ title: string }`                                                         | Conversation metadata                                      |
+| `DELETE` | `/api/v1/conversations/:conversationId` | none                                                                        | Bodyless `204`                                             |
+| `POST`   | `/api/v1/chat`                          | `message`, `model`, required `generationOptions`, optional `conversationId` | `text/event-stream`                                        |
 
 `/api/v1/heath` is the current spelling in both the shared protocol package and
 the Fastify route registration.
+
+List, load, health, and unload requests answer `503` with
+`urn:lys:problem:llm:runtime-unavailable` while the backend has no connected
+LM Studio runtime. The runtime-status route never contacts LM Studio; the
+runtime-connect route waits for one shared connection attempt.
 
 ## Chat request body
 
@@ -140,10 +147,11 @@ timestamps; conversation activity time and history order do not change.
 
 ## Model operation admission
 
-Inventory, health, load, and unload share one service queue with one active operation and
-at most eight waiting. Accepted operations execute in arrival order. When all
-nine positions are occupied, each of these endpoints returns `503 Service
-Unavailable` with `Content-Type: application/problem+json`:
+Inventory, health, load, unload, and LM Studio connection attempts share one
+queue with one active operation and at most eight waiting. Accepted operations
+execute in arrival order. When all nine positions are occupied, each of these
+endpoints returns `503 Service Unavailable` with `Content-Type:
+application/problem+json`:
 
 ```json
 {
@@ -232,12 +240,12 @@ new matching instance afterward. Expected failures use
 Operation failures include an occurrence-specific `detail`; admission refusal
 uses the fixed four-field service-busy body shown above:
 
-| Status | Problem type                              | Meaning                                           |
-| ------ | ----------------------------------------- | ------------------------------------------------- |
-| `404`  | `urn:lys:problem:llm:model-not-found`     | No matching instance was initially loaded.        |
-| `503`  | `urn:lys:problem:llm:runtime-unavailable` | The backend cannot query the LLM runtime.         |
-| `503`  | `urn:lys:problem:llm:unload-failed`       | Reconciliation still found matching instances.    |
-| `503`  | `urn:lys:problem:llm:service-busy`        | The shared queue is full; no unload was accepted. |
+| Status | Problem type                              | Meaning                                                      |
+| ------ | ----------------------------------------- | ------------------------------------------------------------ |
+| `404`  | `urn:lys:problem:llm:model-not-found`     | No matching instance was initially loaded.                   |
+| `503`  | `urn:lys:problem:llm:runtime-unavailable` | No LLM runtime is connected, or the backend cannot query it. |
+| `503`  | `urn:lys:problem:llm:unload-failed`       | Reconciliation still found matching instances.               |
+| `503`  | `urn:lys:problem:llm:service-busy`        | The shared queue is full; no unload was accepted.            |
 
 Operation-failure bodies may also include an `instance` identifier for one
 occurrence. The service-busy body has fixed `type`, `title`, `status`, and `detail`

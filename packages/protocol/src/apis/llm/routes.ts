@@ -36,6 +36,26 @@ export const apiLlmUnloadModelRoute = `${API_PREFIX_V1}/llm/unload`
 export const apiLlmTestModelRoute = `${API_PREFIX_V1}/llm/:modelId/health`
 
 /**
+ * Versioned GET path for observing the backend's LLM runtime connection status.
+ *
+ * @remarks This path is transmitted in HTTP requests and is not persisted. It
+ * is release-stable across compatible clients; changing it requires coordinated
+ * route registration because runtime-status URL compatibility breaks. The
+ * static `runtime` segment does not shadow `/llm/:modelId/health` for a model
+ * whose key is `runtime`.
+ */
+export const apiLlmRuntimeStatusRoute = `${API_PREFIX_V1}/llm/runtime`
+
+/**
+ * Versioned POST path for connecting the backend to its LLM runtime.
+ *
+ * @remarks This path is transmitted in HTTP requests and is not persisted. It
+ * is release-stable across compatible clients; changing it requires coordinated
+ * route registration because runtime-connect URL compatibility breaks.
+ */
+export const apiLlmRuntimeConnectRoute = `${API_PREFIX_V1}/llm/runtime/connect`
+
+/**
  * Versioned POST path for the chat SSE endpoint.
  *
  * @remarks This path is transmitted in HTTP requests and is not persisted. It

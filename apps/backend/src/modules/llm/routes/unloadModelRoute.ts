@@ -14,8 +14,10 @@ import handleLlmServiceRequestFailure from "./handleLlmServiceRequestFailure"
  * @param app - Application instance that receives the LLM unload route.
  * @returns A promise that resolves after the route is added.
  * @throws If Fastify cannot register the route.
- * @remarks Refused queue admission returns service-busy Problem Details.
- * Other service rejections remain owned by Fastify's parent error boundary.
+ * @remarks Refused queue admission returns service-busy Problem Details, and a
+ * missing or lost LLM runtime connection returns runtime-unavailable Problem
+ * Details. Other service rejections remain owned by Fastify's parent error
+ * boundary.
  */
 export default async function updateFastifyWithLlmModelUnloadRoute(
   app: FastifyInstance
@@ -55,8 +57,9 @@ export default async function updateFastifyWithLlmModelUnloadRoute(
  * @param reply - Fastify reply used for status-specific responses.
  * @param llmModelStopper - Application capability that performs the reconciled stop.
  * @returns A promise that resolves after a response is sent.
- * @throws If admission is refused or application cleanup has begun. The route
- * boundary translates only recognized admission rejection.
+ * @throws If admission is refused, no LLM runtime is connected, or
+ * application cleanup has begun. The route boundary translates only the
+ * recognized service-busy and runtime-unavailable failures.
  * @remarks Runtime diagnostics and reconciled failures are written to the
  * request logger before their HTTP outcome is sent.
  */

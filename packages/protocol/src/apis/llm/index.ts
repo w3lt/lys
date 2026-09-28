@@ -3,6 +3,14 @@ export * from "./_share"
 export * from "./listModelsRoute"
 export * from "./loadModelRoute"
 export {
+  llmRuntimeConnectApi,
+  llmRuntimeConnectionApiResponseSchema,
+  llmRuntimeStatusApi,
+  type LlmRuntimeConnectApiRoute,
+  type LlmRuntimeConnectionStatus,
+  type LlmRuntimeStatusApiRoute
+} from "./runtimeConnectionRoute"
+export {
   llmTestModelApi,
   llmTestModelApiParamsSchema,
   llmTestModelApiResponseSchema,

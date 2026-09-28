@@ -1,4 +1,5 @@
 import type { BackendServerStatus } from "@/lib/store"
+import type { ModelRuntimeAvailability } from "./lm-studio-connection"
 import type { ModelRuntimeState } from "@/lib/store/model-runtime"
 
 import type { LocalModelDescriptor } from "./inventory"
@@ -101,33 +102,39 @@ export function formatModelResidencyHeading(
 /**
  * Formats the supporting line shown while no weights are resident.
  *
- * @param backendStatus - Store-owned backend process lifecycle state.
+ * @param availability - Whether model requests can reach LM Studio, and why not.
  * @param defaultModel - Current default model identifier, when one is chosen.
  * @returns The reason nothing is in memory, naming what to do about it.
  */
 function formatAbsentResidencyMeta(
-  backendStatus: BackendServerStatus,
+  availability: ModelRuntimeAvailability,
   defaultModel: string | null
 ): string {
-  if (backendStatus !== "running") return "start the backend first"
-  if (defaultModel === null) {
-    return "no default model chosen · pick one in Model"
+  switch (availability) {
+    case "backend-offline":
+      return "start the backend first"
+    case "lm-studio-connecting":
+      return "connecting to LM Studio"
+    case "lm-studio-unreachable":
+      return "LM Studio is not reachable"
+    case "available":
+      return defaultModel === null
+        ? "no default model chosen · pick one in Model"
+        : `${defaultModel} is default · not in memory`
   }
-
-  return `${defaultModel} is default · not in memory`
 }
 
 /**
  * Formats the supporting line under the residency heading.
  *
  * @param modelRuntime - Current residency state.
- * @param backendStatus - Store-owned backend process lifecycle state.
+ * @param availability - Whether model requests can reach LM Studio, and why not.
  * @param defaultModel - Current default model identifier, when one is chosen.
  * @returns The observed weights or the reason residency is unavailable.
  */
 export function formatModelResidencyMeta(
   modelRuntime: ModelRuntimeState,
-  backendStatus: BackendServerStatus,
+  availability: ModelRuntimeAvailability,
   defaultModel: string | null
 ): string {
   switch (modelRuntime.status) {
@@ -140,7 +147,7 @@ export function formatModelResidencyMeta(
     case "unknown":
       return "refresh the model inventory to check loaded weights"
     case "none":
-      return formatAbsentResidencyMeta(backendStatus, defaultModel)
+      return formatAbsentResidencyMeta(availability, defaultModel)
   }
 }
 

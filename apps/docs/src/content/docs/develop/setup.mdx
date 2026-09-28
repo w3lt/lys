@@ -23,7 +23,8 @@ Toolchain versions, platform prerequisites, and first build.
 - **Rust and Cargo**: required because the desktop app uses Tauri and the
   repository validation list includes Cargo-based checks for the host code.
 - **LM Studio**: required for the local model inventory, model loading, chat,
-  and title-generation paths used by the backend.
+  and title-generation paths. Lys starts without it and shows LM Studio as not
+  reachable until it runs.
 
 ## Install and bootstrap
 
@@ -73,10 +74,11 @@ readiness.
 - The backend listens on `127.0.0.1:12345`.
 - The backend expects LM Studio on `127.0.0.1:1234`.
 
-Backend startup queries LM Studio readiness before opening the HTTP listener.
-If LM Studio is unavailable, backend initialization fails. Start LM Studio
-first, then restart the backend. A running desktop child process alone does
-not establish that the HTTP endpoint is ready.
+Backend startup does not wait for LM Studio: the backend opens its HTTP
+listener, then tries once to connect. If LM Studio starts later, press
+**Refresh** on the LM Studio card in Settings → Runtime. A running desktop child
+process alone does not establish that the HTTP endpoint is ready; the desktop
+reports the backend as running only after `GET /api/v1/heath` answers.
 
 ## First validation checks
 

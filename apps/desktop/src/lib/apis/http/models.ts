@@ -9,6 +9,28 @@ import {
   type LlmTestModelApiResponse
 } from "@lys/protocol"
 
+/** Private error cause marking a model request refused because no LLM runtime is connected. */
+const MODEL_RUNTIME_UNAVAILABLE_CAUSE = Symbol("model-runtime-unavailable")
+
+/**
+ * Determines whether a model request failed because the backend has no connected LLM runtime.
+ *
+ * @param failure - Untrusted rejection from a model request.
+ * @returns Whether the error carries the private runtime-unavailable cause.
+ * @remarks Accessors are not invoked; uninspectable values are unrecognized.
+ */
+export function isModelRuntimeUnavailableError(failure: unknown): boolean {
+  try {
+    return (
+      failure instanceof Error &&
+      Object.getOwnPropertyDescriptor(failure, "cause")?.value ===
+        MODEL_RUNTIME_UNAVAILABLE_CAUSE
+    )
+  } catch {
+    return false
+  }
+}
+
 /** Transport scope sampled once for one model operation. */
 export type ModelApiConnection = {
   /** Application-owned backend origin. */
@@ -60,7 +82,11 @@ async function createModelResponseError(response: Response): Promise<Error> {
     }
     const problem = llmUnloadProblemSchema.safeParse(body)
     if (problem.success && response.status === problem.data.status) {
-      return new Error(problem.data.detail)
+      return problem.data.type === "urn:lys:problem:llm:runtime-unavailable"
+        ? new Error(problem.data.detail, {
+            cause: MODEL_RUNTIME_UNAVAILABLE_CAUSE
+          })
+        : new Error(problem.data.detail)
     }
     return fallback
   } catch {

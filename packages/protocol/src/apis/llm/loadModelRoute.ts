@@ -3,6 +3,10 @@ import {
   llmServiceBusyProblemSchema,
   type LlmServiceBusyProblem
 } from "../../http/errors/llmServiceBusy"
+import {
+  llmRuntimeUnavailableProblemSchema,
+  type LlmRuntimeUnavailableProblem
+} from "../../http/errors/llm"
 import { llmInfoSchema } from "./_share"
 import { apiLlmLoadModelRoute } from "./routes"
 
@@ -28,10 +32,16 @@ export const llmLoadModelApiResponseBodySchema = llmInfoSchema
   })
   .readonly()
 
+/** Validates service-unavailable responses from the model-load endpoint. */
+const llmLoadModelApiServiceUnavailableResponseSchema = z.union([
+  llmServiceBusyProblemSchema,
+  llmRuntimeUnavailableProblemSchema
+])
+
 /** Selects the model-load response validator by HTTP status. */
 const llmLoadModelApiResponseSchemas = Object.freeze({
   200: llmLoadModelApiResponseBodySchema,
-  503: llmServiceBusyProblemSchema
+  503: llmLoadModelApiServiceUnavailableResponseSchema
 })
 
 /**
@@ -42,6 +52,8 @@ const llmLoadModelApiResponseSchemas = Object.freeze({
  * compatibility contract and requires coordinated consumers. Service-busy
  * responses mean the load was refused before queue acceptance. Accepted loads
  * continue under the service owner even if the requesting client disconnects.
+ * Runtime-unavailable responses mean the backend has no connected LLM runtime;
+ * no load ran, or the runtime stopped answering during it.
  */
 export const llmLoadModelApi = Object.freeze({
   method: "POST",
@@ -61,14 +73,14 @@ export type LlmLoadModelApiResponse = z.infer<typeof llmLoadModelApi.response>
 export type LlmLoadModelApiReply = {
   /** Metadata of the canonical model after loading completed. */
   readonly 200: LlmLoadModelApiResponse
-  /** The load was refused before acceptance. */
-  readonly 503: LlmServiceBusyProblem
+  /** The load was refused before acceptance, or no LLM runtime is connected. */
+  readonly 503: LlmServiceBusyProblem | LlmRuntimeUnavailableProblem
 }
 
 /** Fastify route type for the model-load request and response. */
 export type LlmLoadModelApiRoute = {
   /** Validated model identifier supplied to the backend handler. */
   readonly Body: LlmLoadModelApiRequestBody
-  /** Status-specific model metadata and admission-rejection payloads. */
+  /** Status-specific model metadata and service-unavailable payloads. */
   readonly Reply: LlmLoadModelApiReply
 }

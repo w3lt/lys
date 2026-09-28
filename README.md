@@ -51,7 +51,8 @@ local one. Everything between them stays on loopback: no account to create, no
 server holding your half of the conversation, no third party in the middle of
 it. What she keeps is a SQLite file in your home directory,
 `~/.lys/lys_db.sqlite`, alongside a small settings file — both of them yours to
-read, move, or delete.
+read, move, or delete. Set `LYS_HOME` to an absolute path and she keeps them
+there instead.
 
 That closeness is the design goal rather than a finished guarantee. Local
 ownership is how the system is built, but the handbook is candid about

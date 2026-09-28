@@ -32,8 +32,8 @@ For the desktop-managed path:
 If the listener is unavailable, inspect the backend output. Startup requires
 LM Studio at `127.0.0.1:1234`; its readiness query completes before the backend
 listens. Start LM Studio and restart the backend after a readiness failure.
-For standalone startup, also ensure `~/.lys/` exists as described in
-[Running Lys locally](/develop/running/).
+For standalone startup, also ensure `LYS_HOME` is set and its directory exists
+as described in [Running Lys locally](/develop/running/).
 
 ## The backend starts but model operations fail
 
@@ -45,11 +45,11 @@ loaded state; it does not test inference success.
 
 ## Lys forgets runtime settings
 
-The desktop host owns `~/.lys/settings.json`, but the checked-in desktop UI
+The desktop host owns `$LYS_HOME/settings.json`, but the checked-in desktop UI
 currently loads settings without calling the Tauri save command after runtime
 setting edits. If runtime preferences do not survive a restart:
 
-- check whether `~/.lys/settings.json` exists
+- check whether `$LYS_HOME/settings.json` exists
 - if it exists, verify that it contains valid JSON
 - if it does not exist, the host should recreate it the next time settings are
   loaded
@@ -66,6 +66,18 @@ The conversation service reads SQLite `PRAGMA user_version` on startup and
 refuses to open a database newer than the running binary supports. If a startup
 failure mentions an unsupported database version, use a matching or newer build
 rather than editing the database by hand.
+
+## The desktop app exits at startup or uses another data directory
+
+The desktop host resolves `LYS_HOME` once at startup. A relative path,
+including an unexpanded `~/…`, or a value that is not valid UTF-8 stops the app
+before any window opens and prints `Lys cannot start: …` to standard error. That
+message is visible only when the app is started from a terminal. Set `LYS_HOME`
+to an absolute path, or unset it to use `~/.lys`.
+
+An app opened from Finder or the Dock does not see a `LYS_HOME` exported in a
+shell profile, so it uses `~/.lys`. See the
+[Lys home directory](/reference/configuration/#lys-home-directory) reference.
 
 ## Known gaps
 

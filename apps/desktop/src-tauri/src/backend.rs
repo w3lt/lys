@@ -1,9 +1,11 @@
 //! Ownership and Tauri commands for the local Lys backend process.
 //!
 //! The desktop application stores at most one child process behind a mutex.
-//! The backend is launched through the repository's `pnpm run dev` script in
-//! its own Unix process group so shutdown can terminate the script and its
-//! descendants together while the direct child is still running.
+//! Development builds launch the backend through the repository's `pnpm run
+//! dev` script; release builds start the installed Node.js runtime from the
+//! Lys home. Either child runs in its own Unix process group so shutdown can
+//! terminate it and its descendants together while the direct child is still
+//! running, and receives the host's resolved Lys home as `LYS_HOME`.
 
 use std::{
     os::unix::process::CommandExt,
@@ -18,6 +20,8 @@ use nix::{
     unistd::Pid,
 };
 use tauri::State;
+
+use crate::utils::lys_home::LysHome;
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -136,8 +140,9 @@ impl Backend {
 /// Sends `SIGKILL` to the Unix process group whose identifier matches `pid`.
 ///
 /// The backend command creates its child as a process-group leader, allowing
-/// this operation to terminate the `pnpm` script and descendants as one unit
-/// when the direct child is still running.
+/// this operation to terminate that child, such as the development `pnpm`
+/// script, and its descendants as one unit when the direct child is still
+/// running.
 /// An already-missing group is treated as successfully terminated.
 ///
 /// # Errors
@@ -199,73 +204,117 @@ fn get_backend_dir() -> Result<PathBuf, String> {
 
 /// Starts the backend development script in its own Unix process group.
 ///
-/// The direct child is the `pnpm run dev` process launched from `backend_dir`;
-/// the caller stores that child in [`Backend`] and, while it is still running,
+/// The direct child is the `pnpm run dev` process launched from `backend_dir`,
+/// with `LYS_HOME` set to `lys_home` so the backend uses the host's Lys home.
+/// The caller stores that child in [`Backend`] and, while it is still running,
 /// later waits for it after killing the process group.
 ///
 /// # Errors
 ///
 /// Returns an error when the script cannot be spawned.
-fn run_backend_dev_script(backend_dir: &Path) -> Result<Child, String> {
+fn run_backend_dev_script(backend_dir: &Path, lys_home: &LysHome) -> Result<Child, String> {
     Command::new("pnpm")
         .args(["run", "dev"])
         .current_dir(backend_dir)
+        .env("LYS_HOME", lys_home.as_path())
         .process_group(0)
         .spawn()
         .map_err(|err| format!("Failed to spawn backend process: {err}"))
 }
 
-/// Spawns a backend child and records it under the backend mutex before inspecting it.
+/// Starts the development backend script and stores it as the owned child.
 ///
-/// Locking occurs before spawning so a successfully created child can always
-/// be stored by this owner. The returned status is obtained with a
-/// non-blocking inspection of the stored child.
+/// The script runs from the repository's backend directory with `LYS_HOME`
+/// set to `lys_home`. Locking occurs before spawning so a successfully created
+/// child can always be stored; the returned status comes from a non-blocking
+/// inspection of the stored child.
 ///
 /// # Errors
 ///
 /// Returns an error when the backend directory cannot be resolved, process
 /// state cannot be locked, the script cannot be spawned, or the child cannot
 /// be inspected.
-fn spawn_backend_process(backend: &Backend) -> Result<BackendProcessStatus, String> {
+fn spawn_dev_backend_process(
+    backend: &Backend,
+    lys_home: &LysHome,
+) -> Result<BackendProcessStatus, String> {
+    let backend_dir = get_backend_dir()?;
+
+    // Lock before spawning so we never create a process that we cannot store.
+    let mut process = backend
+        .process
+        .lock()
+        .map_err(|err| format!("Failed to lock backend state: {err}"))?;
+
+    let backend_process = run_backend_dev_script(&backend_dir, lys_home)?;
+
+    *process = Some(backend_process);
+
+    // We return the status, that's why we need this
+    inspect_process(process.as_mut())
+}
+
+/// Starts the installed release backend and stores it as the owned child.
+///
+/// Runs the Node.js executable from the Lys home's runtime directory with the
+/// installed backend bundle, in its own Unix process group and with `LYS_HOME`
+/// set to `lys_home`. Locking occurs before spawning so a successfully created
+/// child can always be stored; the returned status comes from a non-blocking
+/// inspection of the stored child. A missing backend bundle is not detected
+/// here: Node.js starts, reports the missing file, and exits.
+///
+/// # Errors
+///
+/// Returns an error when process state cannot be locked, the Node.js
+/// executable cannot be spawned, for example because it is not installed under
+/// the Lys home, or the child cannot be inspected.
+fn spawn_prod_backend_process(
+    backend: &Backend,
+    lys_home: &LysHome,
+) -> Result<BackendProcessStatus, String> {
+    let node_executable_path = lys_home.node_executable_path();
+    let backend_script_path = lys_home.backend_script_path();
+
+    // Lock before spawning so we never create a process that we cannot store.
+    let mut process = backend
+        .process
+        .lock()
+        .map_err(|err| format!("Failed to lock backend state: {err}"))?;
+
+    let backend_process = Command::new(node_executable_path)
+        .arg(backend_script_path)
+        .env("LYS_HOME", lys_home.as_path())
+        .process_group(0)
+        .spawn()
+        .map_err(|err| format!("Failed to start backend: {err}"))?;
+
+    *process = Some(backend_process);
+
+    inspect_process(process.as_mut())
+}
+
+/// Spawns the backend child for the current build mode and records it under the
+/// backend mutex before inspecting it.
+///
+/// Development builds run the repository's `pnpm run dev` script; release
+/// builds run the installed runtime from the Lys home. Either child receives
+/// `lys_home` as `LYS_HOME`. Locking occurs before spawning so a successfully
+/// created child can always be stored by this owner. The returned status is
+/// obtained with a non-blocking inspection of the stored child.
+///
+/// # Errors
+///
+/// Returns an error when the development backend directory cannot be resolved,
+/// process state cannot be locked, the child cannot be spawned, or the child
+/// cannot be inspected.
+fn spawn_backend_process(
+    backend: &Backend,
+    lys_home: &LysHome,
+) -> Result<BackendProcessStatus, String> {
     if tauri::is_dev() {
-        let backend_dir = get_backend_dir()?;
-
-        // Lock before spawning so we never create a process that we cannot store.
-        let mut process = backend
-            .process
-            .lock()
-            .map_err(|err| format!("Failed to lock backend state: {err}"))?;
-
-        let backend_process = run_backend_dev_script(&backend_dir)?;
-
-        *process = Some(backend_process);
-
-        inspect_process(process.as_mut())
+        spawn_dev_backend_process(backend, lys_home)
     } else {
-        // TODO: Clean up this function
-        let prod_runtime_dir = std::env::home_dir()
-            .ok_or("Could not determine the home directory")?
-            .join(".lys")
-            .join("runtime");
-
-        let node = prod_runtime_dir.join("node/bin/node");
-        let entry = prod_runtime_dir.join("backend/dist/backend.mjs");
-
-        // Lock before spawning so we never create a process that we cannot store.
-        let mut process = backend
-            .process
-            .lock()
-            .map_err(|err| format!("Failed to lock backend state: {err}"))?;
-
-        let backend_process = Command::new(node)
-            .arg(entry)
-            .process_group(0)
-            .spawn()
-            .map_err(|err| format!("Failed to start backend: {err}"))?;
-
-        *process = Some(backend_process);
-
-        inspect_process(process.as_mut())
+        spawn_prod_backend_process(backend, lys_home)
     }
 }
 
@@ -274,16 +323,19 @@ fn spawn_backend_process(backend: &Backend) -> Result<BackendProcessStatus, Stri
 ///
 /// The command first reads the current status and releases that lock before a
 /// non-running result is passed to the spawn path. A running child is left
-/// untouched and its status is returned; otherwise a new development-script
-/// child is stored and reported to the renderer. Because the check and spawn
-/// use separate lock acquisitions, concurrent starts can both observe stopped
-/// and spawn.
+/// untouched and its status is returned; otherwise a new backend child for the
+/// current build mode is started with the Lys home resolved at startup, stored,
+/// and reported to the renderer. Because the check and spawn use separate lock
+/// acquisitions, concurrent starts can both observe stopped and spawn.
 ///
 /// # Errors
 ///
-/// Returns an error when status inspection, process-state locking, backend
-/// directory resolution, spawning, or post-spawn inspection fails.
-pub fn start_backend(backend: State<'_, Backend>) -> Result<BackendProcessStatus, String> {
+/// Returns an error when status inspection, process-state locking, development
+/// backend directory resolution, spawning, or post-spawn inspection fails.
+pub fn start_backend(
+    backend: State<'_, Backend>,
+    lys_home: State<'_, LysHome>,
+) -> Result<BackendProcessStatus, String> {
     // Step 1. Get backend process status
     let backend_status = backend.status()?;
 
@@ -293,7 +345,7 @@ pub fn start_backend(backend: State<'_, Backend>) -> Result<BackendProcessStatus
     }
 
     // Step 3. If the backend process is not runnning, we spawn a new one
-    spawn_backend_process(&backend)
+    spawn_backend_process(&backend, &lys_home)
 }
 
 #[tauri::command]

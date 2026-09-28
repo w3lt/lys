@@ -16,10 +16,19 @@ Current configuration surfaces that are evidenced in this repository.
   entries={[{ label: "Type", value: "Reference" }]}
 />
 
+## Lys home directory
+
+The `LYS_HOME` environment variable selects the directory that holds the
+settings file, the conversation database, and the runtime that release builds
+start. When it is unset or empty, Lys uses `~/.lys`. The
+[configuration reference](/reference/configuration/#lys-home-directory) lists
+the accepted values, the directory layout, and why an app opened from Finder or
+the Dock does not see a `LYS_HOME` exported in a shell profile.
+
 ## Host-managed settings file
 
 The Tauri desktop host reads and writes one JSON settings file at
-`~/.lys/settings.json`.
+`$LYS_HOME/settings.json`.
 
 The current schema contains `runtime`, `model`, and `generation` groups. Rust
 and the TypeScript settings projection use the same camelCase field names. See
@@ -33,8 +42,8 @@ Missing groups and fields receive their Rust defaults. Invalid JSON or invalid
 typed values fail loading; for example, Rust rejects temperatures outside
 `[0, 1]` and token counts outside the unsigned 32-bit integer range.
 
-When the file does not exist yet, the desktop host creates `~/.lys/` and writes
-the default structure on first load.
+When the file does not exist yet, the desktop host creates the Lys home
+directory if needed and writes the default structure on first load.
 
 ## Current UI wiring
 
@@ -69,18 +78,19 @@ The desktop stores `dark` or `light` under the `lys.theme` key in WebView
 
 The repository does not currently document or implement:
 
-- a supported environment-variable contract for runtime settings
-- a user-facing setting for the database path
+- an environment-variable contract for runtime settings; `LYS_HOME` selects
+  only the Lys home directory
+- a separate setting for the database path; it follows `LYS_HOME`
 - a supported way to change backend or LM Studio ports without editing code
 - a published configuration file for docs deployment beyond the checked-in
   GitHub Actions workflow and Astro configuration
 
-Configuration surfaces beyond the settings file above are still code-owned.
+Configuration surfaces beyond `LYS_HOME` and the settings file above are still
+code-owned.
 
 :::note[Coming soon]
-If Lys gains a supported runtime configuration contract beyond
-`~/.lys/settings.json`, this page should expand into the canonical reference
-for it.
+If Lys gains a supported runtime configuration contract beyond `LYS_HOME` and
+`settings.json`, this page should expand into the canonical reference for it.
 :::
 
 <RelatedDocuments

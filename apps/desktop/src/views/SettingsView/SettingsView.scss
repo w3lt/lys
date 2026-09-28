@@ -391,6 +391,10 @@
   animation: settings-view-status-pulse 1.4s ease-in-out infinite;
 }
 
+.settings-view__status-dot[data-tone="danger"] {
+  background: var(--app-status-danger);
+}
+
 @keyframes settings-view-status-pulse {
   0%,
   100% {

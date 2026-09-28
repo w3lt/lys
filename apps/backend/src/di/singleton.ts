@@ -4,6 +4,7 @@ import ChatService, {
   type ChatServiceCreationOptions
 } from "./services/chatService"
 import ConversationService from "./services/conversationService"
+import LlmRuntimeService from "./services/llmRuntimeService"
 import LlmService from "./services/llmService"
 
 /** Private close operation owned by one returned singleton-service bundle. */
@@ -20,6 +21,9 @@ export type SingletonServiceAcquisition<Service> = Readonly<{
   closeService: () => Promise<void>
 }>
 
+/** Receives one LLM runtime acquisition failure for application logging. */
+export type ReportLlmRuntimeAcquisitionFailure = (failure: unknown) => void
+
 /** Factories for the three independently acquired application services. */
 export type SingletonServiceFactories = Readonly<{
   /** Creates the chat service for one OpenAI-compatible HTTP endpoint and its title settings. */
@@ -30,25 +34,31 @@ export type SingletonServiceFactories = Readonly<{
   createConversationService: (
     databaseFilePath: BackendConfig["databaseFilePath"]
   ) => SingletonServiceAcquisition<ConversationService>
-  /** Creates the owned LLM service for one LM Studio WebSocket endpoint. */
-  createLlmService: (
-    lmsBaseUrl: string
-  ) => Promise<SingletonServiceAcquisition<LlmService>>
+  /**
+   * Creates the owned LLM runtime service for one LM Studio WebSocket endpoint
+   * without contacting it.
+   */
+  createLlmRuntimeService: (
+    lmsBaseUrl: string,
+    reportLlmRuntimeAcquisitionFailure: ReportLlmRuntimeAcquisitionFailure
+  ) => SingletonServiceAcquisition<LlmRuntimeService>
 }>
 
 /** Production factories used when the composition root supplies no substitutes. */
 const DEFAULT_SINGLETON_SERVICE_FACTORIES = Object.freeze({
   createChatService,
   createConversationService,
-  createLlmService
+  createLlmRuntimeService
 } satisfies SingletonServiceFactories)
 
 /** Application-scoped services owned for a Fastify application's lifetime. */
 export type SingletonServices = Readonly<{
   /** Chat completion adapter configured for the backend's local endpoint. */
   chatService: ChatService
-  /** LLM inventory and lifecycle service owned by the application. */
+  /** LLM model policy served through the runtime service's queue. */
   llmService: LlmService
+  /** LLM runtime connection and model-operation queue owned by the application. */
+  llmRuntimeService: LlmRuntimeService
   /** SQLite-backed conversation persistence owned by the application lifetime. */
   conversationService: ConversationService
   /** Module-private cleanup capability for the complete owned service lifetime. */
@@ -61,14 +71,18 @@ export type SingletonServices = Readonly<{
  * @param config - LM Studio host and port used to derive local service endpoints,
  * and the title-generation prompt and title length limit given to the chat
  * service.
+ * @param reportLlmRuntimeAcquisitionFailure - Receives each LLM runtime
+ * acquisition failure for logging.
  * @param factories - Service factories owned by the composition root.
  * @returns A promise resolving to the owned service bundle configured with the
- * HTTP `/v1` chat endpoint and WebSocket LM Studio endpoint.
+ * HTTP `/v1` chat endpoint and WebSocket LM Studio endpoint. No service
+ * contacts LM Studio during creation; the runtime service connects later.
  * @throws If service construction fails; every resource acquired before the
  * failure is closed before the rejection settles.
  */
 export async function createSingletonServices(
   config: BackendConfig,
+  reportLlmRuntimeAcquisitionFailure: ReportLlmRuntimeAcquisitionFailure,
   factories: SingletonServiceFactories = DEFAULT_SINGLETON_SERVICE_FACTORIES
 ): Promise<SingletonServices> {
   const serviceLifetime = new AsyncDisposableStack()
@@ -88,10 +102,14 @@ export async function createSingletonServices(
     )
     serviceLifetime.defer(conversationServiceAcquisition.closeService)
 
-    const llmServiceAcquisition = await factories.createLlmService(
-      `ws://${config.lmstudioHost}:${config.lmstudioPort}`
+    const llmRuntimeServiceAcquisition = factories.createLlmRuntimeService(
+      `ws://${config.lmstudioHost}:${config.lmstudioPort}`,
+      reportLlmRuntimeAcquisitionFailure
     )
-    serviceLifetime.defer(llmServiceAcquisition.closeService)
+    serviceLifetime.defer(llmRuntimeServiceAcquisition.closeService)
+    const llmService = new LlmService({
+      llmEngineOperationQueue: llmRuntimeServiceAcquisition.service
+    })
     let closeCompletion: Promise<void> | undefined = undefined
 
     /** Joins every close request to one complete service-lifetime disposal. */
@@ -102,7 +120,8 @@ export async function createSingletonServices(
 
     return Object.freeze({
       chatService: chatServiceAcquisition.service,
-      llmService: llmServiceAcquisition.service,
+      llmService,
+      llmRuntimeService: llmRuntimeServiceAcquisition.service,
       conversationService: conversationServiceAcquisition.service,
       [CLOSE_SINGLETON_SERVICES]: closeOwnedSingletonServices
     })
@@ -152,33 +171,25 @@ function createConversationService(
 }
 
 /**
- * Creates the production LLM service for one WebSocket endpoint.
+ * Creates the production LLM runtime service for one WebSocket endpoint.
  *
- * @param lmsBaseUrl - WebSocket endpoint used by the SDK client.
- * @returns A promise resolving to the newly owned service and its cleanup capability.
- * @throws If runtime or service creation fails. Cleanup follows the current
- * owner, preserving both creation and release failures when both occur.
+ * @param lmsBaseUrl - WebSocket endpoint used by each acquired SDK client.
+ * @param reportLlmRuntimeAcquisitionFailure - Receives each acquisition failure.
+ * @returns The newly owned runtime service and its cleanup capability. No
+ * connection is attempted until the service is asked to connect.
  */
-async function createLlmService(
-  lmsBaseUrl: string
-): Promise<SingletonServiceAcquisition<LlmService>> {
-  const runtime = await LmStudioRuntime.create(lmsBaseUrl)
-  let cleanupOwner: AsyncDisposable = runtime
-
-  try {
-    const service = new LlmService({ runtime })
-    cleanupOwner = service
-    return Object.freeze({
-      service,
-      closeService: async () => await service[Symbol.asyncDispose]()
-    })
-  } catch (creationFailure) {
-    return await throwCreationFailureAfterClosingResources(
-      creationFailure,
-      cleanupOwner,
-      "LLM service creation and cleanup both failed."
-    )
-  }
+function createLlmRuntimeService(
+  lmsBaseUrl: string,
+  reportLlmRuntimeAcquisitionFailure: ReportLlmRuntimeAcquisitionFailure
+): SingletonServiceAcquisition<LlmRuntimeService> {
+  const llmRuntimeService = new LlmRuntimeService({
+    acquireLlmRuntime: async () => await LmStudioRuntime.create(lmsBaseUrl),
+    reportLlmRuntimeAcquisitionFailure
+  })
+  return Object.freeze({
+    service: llmRuntimeService,
+    closeService: async () => await llmRuntimeService[Symbol.asyncDispose]()
+  })
 }
 
 /**

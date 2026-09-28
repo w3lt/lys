@@ -12,15 +12,15 @@ application.
 
 ## Current backend shape
 
-| Layer               | Implementation                 | Responsibility                                                                                        |
-| ------------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------- |
-| App bootstrap       | `src/app.ts`                   | Registers CORS, SSE support, singleton services, and all routes.                                      |
-| Runtime config      | `src/config.ts`                | Loads loopback host and port values, the SQLite path, the system and title prompts, and title limits. |
-| Singleton services  | `src/di/singleton.ts`          | Creates the chat and conversation services, and selects the runtime owned by the LLM service.         |
-| Chat routes         | `src/modules/chat`             | Accepts chat requests, persists turn data, streams SSE responses, and updates conversation titles.    |
-| Conversation routes | `src/modules/conversation`     | Lists, searches, retrieves, renames, and deletes stored conversations.                                |
-| LLM routes          | `src/modules/llm/routes`       | Lists LM Studio models, checks loaded-model health, and loads or unloads a model on demand.           |
-| Health route        | `src/modules/health/routes.ts` | Returns a simple `{ ok: true }` response.                                                             |
+| Layer               | Implementation                 | Responsibility                                                                                                                   |
+| ------------------- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| App bootstrap       | `src/app.ts`                   | Registers CORS, SSE support, singleton services, and all routes.                                                                 |
+| Runtime config      | `src/config.ts`                | Loads loopback host and port values, the SQLite path, the system and title prompts, and title limits.                            |
+| Singleton services  | `src/di/singleton.ts`          | Creates the chat, conversation, LLM runtime, and LLM services without contacting LM Studio.                                      |
+| Chat routes         | `src/modules/chat`             | Accepts chat requests, persists turn data, streams SSE responses, and updates conversation titles.                               |
+| Conversation routes | `src/modules/conversation`     | Lists, searches, retrieves, renames, and deletes stored conversations.                                                           |
+| LLM routes          | `src/modules/llm/routes`       | Lists LM Studio models, checks loaded-model health, loads or unloads a model, and reports or refreshes the LM Studio connection. |
+| Health route        | `src/modules/health/routes.ts` | Returns a simple `{ ok: true }` response.                                                                                        |
 
 ## Chat request flow
 
@@ -97,34 +97,41 @@ message text updates.
 
 Chat generation and model management use separate integration boundaries:
 
-| Service           | Backend dependency  | Current use                                                                                                       |
-| ----------------- | ------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `ChatService`     | `openai` SDK        | Streams chat completions and generates titles through LM Studio's OpenAI-compatible HTTP interface.               |
-| `LlmService`      | `LlmServiceRuntime` | Coordinates inventory, loaded-model health, model loading, and stopping instances matching a canonical model key. |
-| `LmStudioRuntime` | `@lmstudio/sdk`     | Verifies engine availability, implements model operations and lifecycle inspection, and owns SDK client cleanup.  |
+| Service             | Backend dependency        | Current use                                                                                                              |
+| ------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `ChatService`       | `openai` SDK              | Streams chat completions and generates titles through LM Studio's OpenAI-compatible HTTP interface.                      |
+| `LlmService`        | `LlmEngineOperationQueue` | Applies inventory, loaded-model health, loading, and stop-by-key policy to operations serialized by the runtime service. |
+| `LlmRuntimeService` | `LlmRuntime`              | Owns the LM Studio runtime, its connection status, and the serialized model-operation queue; connects on demand.         |
+| `LmStudioRuntime`   | `@lmstudio/sdk`           | Verifies engine availability, implements model operations and lifecycle inspection, and owns SDK client cleanup.         |
 
-Fastify exposes the application-scoped `llmService` as `LlmService`. Each LLM
-route uses its required provider-neutral capability for inventory, health,
-loading, or stopping. The ownership path is
-`routes -> LlmService -> LlmRuntime -> LmStudioRuntime -> SDK`. The composition
-root constructs the runtime, protects it during acquisition, and transfers it to
-the service. If service publication fails, cleanup runs through the current
-owner. The service drains accepted operations before disposing its runtime;
-runtime disposal releases the client without unloading models or stopping the
-external engine. Consumers do not select or depend on the concrete runtime.
+Fastify exposes the application-scoped `llmService` and `llmRuntimeService`.
+Model routes use provider-neutral capabilities of `LlmService`; the runtime
+status and connect routes use `LlmRuntimeConnectionObserver` and
+`LlmRuntimeConnector`, implemented by `LlmRuntimeService`. The ownership path
+is `routes -> LlmService -> LlmRuntimeService queue -> LlmRuntime ->
+LmStudioRuntime -> SDK`. The composition root creates `LlmRuntimeService`
+without contacting LM Studio. After the HTTP listener opens, an `onListen` hook
+makes one connection attempt; later attempts happen only through
+`POST /api/v1/llm/runtime/connect`. The runtime service drains accepted
+operations before releasing its runtime; releasing it closes the SDK client
+without unloading models or stopping LM Studio.
 
-`LlmRuntime` combines `LlmEngine` and `LlmRuntimeLifecycle`. The service receives
-a narrower view containing the four engine operations and disposal. The full
-runtime additionally exposes a synchronous lifecycle snapshot and a fresh SDK
-availability query. Runtime creation waits for LM Studio to answer its version
-query; connection, authentication, and query errors reported by the SDK reject
-startup and release acquired resources. An empty model inventory does not
-prevent startup.
+The connection status is `connecting` until the first attempt settles,
+`connected` while a runtime is held, and `unreachable` after a failed attempt
+or after a held runtime stops answering. Model operations are refused with
+`503` `urn:lys:problem:llm:runtime-unavailable` unless the status is
+`connected`. When a runtime call fails during a model operation, the service
+probes the runtime before the queue moves on and releases it if LM Studio no
+longer answers. Refresh keeps a runtime that still answers and otherwise
+acquires a new one; concurrent refreshes share one attempt.
 
-The installed SDK cannot cancel a pending version query. Acquisition and
-availability checks therefore have no completion deadline; a nonresponding
-dependency or a malformed response ignored by the SDK can keep startup or
-shutdown pending.
+`LmStudioRuntime.create()` still waits for LM Studio to answer its version
+query, so a held runtime was always available when acquired. The installed SDK
+cannot cancel a pending version query, so an attempt and the queue behind it
+have no completion deadline; a nonresponding LM Studio can keep an attempt or
+shutdown pending. A refused loopback port fails immediately. SDK messages
+queued during an outage can be sent after a reconnect; see
+[issue #81](https://github.com/w3lt/lys/issues/81).
 
 The backend currently assumes a local LM Studio runtime on loopback.
 
@@ -138,19 +145,21 @@ See the [health response contract](/reference/api/#model-health-responses).
 
 ## Failure behavior
 
-| Condition                                          | Current behavior                                                                                                           |
-| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Chat SSE connection closes                         | The close handler aborts the signal used by chat and title generation; no further title request is made.                   |
-| Model operation or health-check client disconnects | Accepted work continues until success or failure; user cancellation is unavailable.                                        |
-| LLM service already has nine accepted operations   | New inventory/health/load/unload requests receive `503` with `urn:lys:problem:llm:service-busy` before acceptance.         |
-| Model stream ends without a finish reason          | The route treats it as an error and may emit `error`.                                                                      |
-| Assistant row was deleted or already finalized     | Late writes return false without recreating data.                                                                          |
-| Assistant terminal state cannot be persisted       | The task aggregates the original and persistence failures and rejects; the route logs the rejection.                       |
-| Unknown finish reason                              | The backend throws instead of silently coercing it.                                                                        |
-| Title generation produces no usable title          | The task logs a warning and sends no `error` or `title` event; a later turn retries if the conversation is still untitled. |
-| A generated title cannot be saved                  | The task logs an error and sends no `title` event; a later turn retries if the conversation is still untitled.             |
-| A stored title cannot be sent after turn start     | The backend logs at debug level and continues chat generation; a later turn attempts reconciliation again.                 |
-| Starting a turn fails for another reason           | The route rethrows; Fastify logs it and responds `500` if no event was sent. Written rows stay.                            |
+| Condition                                                                              | Current behavior                                                                                                           |
+| -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Chat SSE connection closes                                                             | The close handler aborts the signal used by chat and title generation; no further title request is made.                   |
+| Model operation or health-check client disconnects                                     | Accepted work continues until success or failure; user cancellation is unavailable.                                        |
+| LLM runtime queue already has nine accepted operations (including connection attempts) | New inventory/health/load/unload requests receive `503` with `urn:lys:problem:llm:service-busy` before acceptance.         |
+| LM Studio is not connected                                                             | List, load, unload, and health requests receive `503` with `urn:lys:problem:llm:runtime-unavailable` before acceptance.    |
+| A runtime call fails and LM Studio stopped answering                                   | The runtime is released, the status becomes `unreachable`, and a rejected request receives the runtime-unavailable `503`.  |
+| Model stream ends without a finish reason                                              | The route treats it as an error and may emit `error`.                                                                      |
+| Assistant row was deleted or already finalized                                         | Late writes return false without recreating data.                                                                          |
+| Assistant terminal state cannot be persisted                                           | The task aggregates the original and persistence failures and rejects; the route logs the rejection.                       |
+| Unknown finish reason                                                                  | The backend throws instead of silently coercing it.                                                                        |
+| Title generation produces no usable title                                              | The task logs a warning and sends no `error` or `title` event; a later turn retries if the conversation is still untitled. |
+| A generated title cannot be saved                                                      | The task logs an error and sends no `title` event; a later turn retries if the conversation is still untitled.             |
+| A stored title cannot be sent after turn start                                         | The backend logs at debug level and continues chat generation; a later turn attempts reconciliation again.                 |
+| Starting a turn fails for another reason                                               | The route rethrows; Fastify logs it and responds `500` if no event was sent. Written rows stay.                            |
 
 See the [provider cancellation policy](/architecture/providers/#cancellation-policy)
 for the separate inference and model-management lifetimes.

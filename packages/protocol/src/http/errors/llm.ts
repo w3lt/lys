@@ -312,3 +312,28 @@ export function createLlmUnloadProblem(
       : { instance: verifiedInput.instance })
   })
 }
+
+/** Immutable Problem Details body returned when no LLM runtime is connected. */
+export type LlmRuntimeUnavailableProblem = z.infer<
+  typeof llmRuntimeUnavailableProblemSchema
+>
+
+/**
+ * Creates Problem Details for a model operation refused or ended because the
+ * backend has no connected LLM runtime.
+ *
+ * @param detail - Client-safe recovery guidance naming the runtime to start.
+ * @returns A validated immutable body with the runtime-unavailable type,
+ * title, and status.
+ * @throws If `detail` is empty.
+ */
+export function createLlmRuntimeUnavailableProblem(
+  detail: string
+): LlmRuntimeUnavailableProblem {
+  return llmRuntimeUnavailableProblemSchema.parse({
+    type: RUNTIME_UNAVAILABLE_PROBLEM_DEFINITION.type,
+    title: RUNTIME_UNAVAILABLE_PROBLEM_DEFINITION.title,
+    status: RUNTIME_UNAVAILABLE_PROBLEM_DEFINITION.status,
+    detail
+  })
+}

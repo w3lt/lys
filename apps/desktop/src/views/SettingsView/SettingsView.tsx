@@ -73,7 +73,7 @@ const SETTINGS_PANES: readonly SettingsPaneDescriptor[] = [
     ordinal: "01",
     note: "Start the server, then load the weights. Nothing runs until you say so.",
     footNote:
-      "Starting launches the Lys backend. Model weights are managed separately by LM Studio; stopping the backend does not unload them.",
+      "Starting launches the Lys backend, which then connects to LM Studio. Lys doesn't start LM Studio for you; model weights are managed by LM Studio, and stopping the backend does not unload them.",
     contentComponent: RuntimePaneContent
   },
   {

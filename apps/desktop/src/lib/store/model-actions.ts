@@ -3,6 +3,7 @@ import type { StoreApi } from "zustand"
 
 import {
   getModelHealth,
+  isModelRuntimeUnavailableError,
   listModels,
   loadModel,
   unloadModel,
@@ -20,13 +21,29 @@ import {
 export type ModelConnectionState = {
   /** Backend origin used by model HTTP consumers. */
   readonly backendUrl: string
-  /** Whether the process owner currently admits model requests. */
-  readonly isRunning: boolean
+  /** Whether the backend runs and LM Studio is connected, so model requests are admitted. */
+  readonly isModelRuntimeAvailable: boolean
   /** Current default used only for the compact residency summary. */
   readonly defaultModel: string | null
 }
 
-/** Application model callbacks; request failures are handled in modelError. */
+/** Store capabilities the model slice reads and notifies. */
+export type ModelSliceDependencies = {
+  /** Reads current model-runtime availability, origin, and selection. */
+  readonly getConnection: () => ModelConnectionState
+  /**
+   * Re-reads the LM Studio status after a request failed or reported an
+   * unavailable runtime.
+   *
+   * @remarks Resolves after the status settles and never rejects.
+   */
+  readonly handleModelRequestFailure: () => Promise<void>
+}
+
+/**
+ * Application model callbacks; request failures are handled in modelError,
+ * except a missing LLM runtime, which the LM Studio status explains instead.
+ */
 export type ModelActions = {
   /** Queries inventory; resolves after settlement or invalidation, retaining failure in state. */
   updateModelInventory: () => Promise<void>
@@ -82,19 +99,35 @@ function formatModelFailure(failure: unknown): string {
     : "The model request could not be completed."
 }
 
+/**
+ * Formats a failed action for presentation.
+ * @param failure - Failure retained by the HTTP boundary or runtime.
+ * @returns The safe message, or null for a missing LLM runtime, which the LM
+ * Studio status explains instead.
+ */
+function formatModelOperationError(failure: unknown): string | null {
+  return isModelRuntimeUnavailableError(failure)
+    ? null
+    : formatModelFailure(failure)
+}
+
 /** Inventory and safe failure published together when an operation settles. */
 type ModelInventoryOutcome = {
   /** Fresh snapshot or explicit observation failure. */
   readonly modelInventory: ModelInventoryState
-  /** Action failure, reconciliation failure, or both. */
+  /** Action failure, reconciliation failure, or both; excludes a missing LLM runtime. */
   readonly modelError: string | null
+  /** Whether the inventory read found no connected LLM runtime. */
+  readonly isModelRuntimeUnavailable: boolean
 }
 
 /**
  * Observes inventory without publishing partially settled state.
  * @param connection - Cancellation and origin owned by the admitted operation.
  * @param priorError - Failure of the preceding action, if any.
- * @returns A complete observation result; failures remain visible as unknown state.
+ * @returns A complete observation result; failures remain visible as unknown
+ * state, except a missing LLM runtime, which leaves inventory unavailable
+ * without a model error because the LM Studio status explains it.
  */
 async function readInventoryOutcome(
   connection: ModelApiConnection,
@@ -104,34 +137,66 @@ async function readInventoryOutcome(
     const models = await listModels(connection)
     return {
       modelInventory: { status: "ready", models },
-      modelError: priorError
+      modelError: priorError,
+      isModelRuntimeUnavailable: false
     }
   } catch (failure) {
+    if (isModelRuntimeUnavailableError(failure)) {
+      return {
+        modelInventory: { status: "unavailable" },
+        modelError: priorError,
+        isModelRuntimeUnavailable: true
+      }
+    }
     const message = formatModelFailure(failure)
     return {
       modelInventory: { status: "failed" },
       modelError: priorError
         ? `${priorError} Inventory refresh also failed: ${message}`
-        : message
+        : message,
+      isModelRuntimeUnavailable: false
     }
   }
+}
+
+/**
+ * Determines whether a settled request warrants a fresh LM Studio status.
+ *
+ * @param result - Published inventory observation and failure.
+ * @param modelHealth - Health observation from a test request, if any.
+ * @returns Whether the action or reconciliation failed, or health reported an
+ * unavailable runtime.
+ */
+function hasModelRequestFailed(
+  result: ModelInventoryOutcome,
+  modelHealth: LlmTestModelApiResponse | null
+): boolean {
+  if (result.modelError !== null || result.isModelRuntimeUnavailable) {
+    return true
+  }
+  return (
+    modelHealth?.status === "not-ready" &&
+    modelHealth.reason === "runtime-unavailable"
+  )
 }
 
 /**
  * Registers model callbacks with one Zustand state owner.
  * @param set - Framework setter for atomic model-state updates.
  * @param get - Framework reader for current model state.
- * @param getConnection - Reads current process availability, origin, and selection.
+ * @param dependencies - Availability reader and the failure reaction owned by the store.
  * @returns Initial model state and callbacks for the application store.
  * @remarks One request is admitted at a time and survives view unmounts.
  * Release invalidates publication before aborting local transport. Accepted
  * backend work can continue after disconnect. Mutations are never retried;
  * their outcomes, including failures, are followed by a fresh inventory query.
+ * A settled request that failed, or whose health reported an unavailable
+ * runtime, awaits the store's LM Studio status refresh before resolving.
  */
 export function createModelSlice(
   set: StoreApi<ModelSlice>["setState"],
   get: StoreApi<ModelSlice>["getState"],
-  getConnection: () => ModelConnectionState
+  dependencies: ModelSliceDependencies
 ): ModelSlice {
   let activeRequest: AbortController | null = null
 
@@ -139,16 +204,17 @@ export function createModelSlice(
    * Checks publication authority after an asynchronous boundary.
    * @param controller - Request identity being checked.
    * @param backendUrl - Origin sampled at admission.
-   * @returns Whether this request still belongs to the current running backend.
+   * @returns Whether this request is still current for the same backend while
+   * the model runtime remains available.
    */
   function isCurrentRequest(
     controller: AbortController,
     backendUrl: string
   ): boolean {
-    const connection = getConnection()
+    const connection = dependencies.getConnection()
     return (
       activeRequest === controller &&
-      connection.isRunning &&
+      connection.isModelRuntimeAvailable &&
       connection.backendUrl === backendUrl
     )
   }
@@ -161,8 +227,8 @@ export function createModelSlice(
   async function startModelOperation(
     request: ActiveModelRequest
   ): Promise<void> {
-    const current = getConnection()
-    if (!current.isRunning || activeRequest !== null) return
+    const current = dependencies.getConnection()
+    if (!current.isModelRuntimeAvailable || activeRequest !== null) return
     const controller = new AbortController()
     const connection: ModelApiConnection = {
       backendUrl: current.backendUrl,
@@ -186,22 +252,26 @@ export function createModelSlice(
     try {
       modelHealth = await updateModelOperation(request, connection)
     } catch (failure) {
-      modelError = formatModelFailure(failure)
+      modelError = formatModelOperationError(failure)
     }
     if (!isCurrentRequest(controller, current.backendUrl)) return
     const result = await readInventoryOutcome(connection, modelError)
     if (!isCurrentRequest(controller, current.backendUrl)) return
     activeRequest = null
     set({
-      ...result,
+      modelInventory: result.modelInventory,
+      modelError: result.modelError,
       modelHealth,
       modelRequest: { status: "idle" },
       modelRuntime: buildModelRuntime(
         result.modelInventory,
         { status: "idle" },
-        getConnection().defaultModel
+        dependencies.getConnection().defaultModel
       )
     })
+    if (hasModelRequestFailed(result, modelHealth)) {
+      await dependencies.handleModelRequestFailure()
+    }
   }
 
   /** Invalidates publication before aborting the corresponding local transport. */

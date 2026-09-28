@@ -38,8 +38,9 @@ import {
   formatComposerPlaceholder,
   formatReconnectAction,
   formatUnavailableRuntimeMessage,
-  readLocalRuntimeConnection
+  calculateLocalRuntimeConnection
 } from "./ComposerComponents/composer-presentation"
+import { calculateModelRuntimeAvailability } from "@/lib/models/lm-studio-connection"
 
 import "./Composer.scss"
 
@@ -89,7 +90,11 @@ function findLargestAttachment(
  * refused while a request is active, while a past conversation is opening,
  * while generation is unavailable, or while the estimated request exceeds the
  * window. The Past conversations button opens history, or closes it when
- * open, and exposes that state through `aria-expanded`.
+ * open, and exposes that state through `aria-expanded`. While generation is
+ * unavailable, a banner names the first missing prerequisite — the backend,
+ * LM Studio, or loaded weights — and its action starts a stopped backend or
+ * opens the settings pane that fixes the problem: Runtime for the backend and
+ * LM Studio, Model for inventory and loading.
  *
  * The primary control is Send only while the request lifecycle is idle. It
  * becomes Stop for every active phase — awaiting the conversation turn, the
@@ -115,6 +120,7 @@ function findLargestAttachment(
 export function Composer({ messageFieldRef }: ComposerProps): ReactElement {
   const backendServerInfo = useLysStore((state) => state.backendServerInfo)
   const modelRuntime = useLysStore((state) => state.modelRuntime)
+  const lmStudioStatus = useLysStore((state) => state.lmStudioStatus)
   const settings = useLysStore((state) => state.settings)
   const setActiveView = useLysStore((state) => state.setActiveView)
   const setSettingsPane = useLysStore((state) => state.setSettingsPane)
@@ -147,7 +153,14 @@ export function Composer({ messageFieldRef }: ComposerProps): ReactElement {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const backendStatus = backendServerInfo.status
-  const connection = readLocalRuntimeConnection(backendStatus, modelRuntime)
+  const connection = calculateLocalRuntimeConnection(
+    backendStatus,
+    lmStudioStatus,
+    modelRuntime
+  )
+  const isModelRuntimeAvailable =
+    calculateModelRuntimeAvailability(backendStatus, lmStudioStatus) ===
+    "available"
   const isUnavailable = connection !== "ready"
   const isRequestActive = request.status !== "idle"
   const activity = calculateComposerActivity(request, conversationOpen)
@@ -274,15 +287,18 @@ export function Composer({ messageFieldRef }: ComposerProps): ReactElement {
     openConversationHistory()
   }
 
-  /** Starts the backend or opens Model settings to recover model availability. */
+  /**
+   * Starts a stopped backend, or opens the settings pane that fixes the first
+   * missing prerequisite.
+   */
   function handleReconnect(): void {
     if (backendStatus === "stopped") {
       void startBackend()
       return
     }
 
-    // The Model pane owns inventory refresh, loading, and health checks.
-    setSettingsPane("model")
+    // Runtime owns backend and LM Studio recovery; Model owns inventory and loading.
+    setSettingsPane(isModelRuntimeAvailable ? "model" : "runtime")
     setActiveView("settings")
   }
 
@@ -296,12 +312,17 @@ export function Composer({ messageFieldRef }: ComposerProps): ReactElement {
     <footer className="composer">
       {isUnavailable ? (
         <ComposerOfflineBanner
-          action={formatReconnectAction(backendStatus, modelRuntime)}
-          message={formatUnavailableRuntimeMessage(
+          action={formatReconnectAction(
             backendStatus,
-            settings.runtime.backendAddress,
+            lmStudioStatus,
             modelRuntime
           )}
+          message={formatUnavailableRuntimeMessage({
+            backendStatus,
+            backendAddress: settings.runtime.backendAddress,
+            lmStudioStatus,
+            modelRuntime
+          })}
           onReconnect={handleReconnect}
         />
       ) : null}

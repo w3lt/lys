@@ -25,8 +25,16 @@ type SingletonServicePluginOptions = {
 const singletonPlugin: FastifyPluginAsync<
   SingletonServicePluginOptions
 > = async (app, { config }) => {
-  const singletonServices = await createSingletonServices(config, (failure) => {
-    app.log.warn({ err: failure }, "LM Studio runtime acquisition failed")
+  const singletonServices = await createSingletonServices(config, {
+    reportLlmRuntimeAcquisitionFailure: (failure) => {
+      app.log.warn({ err: failure }, "LM Studio runtime acquisition failed")
+    },
+    reportLlmRuntimeAvailabilityCheckFailure: (failure) => {
+      app.log.error(
+        { err: failure },
+        "LM Studio runtime check or release failed after a model operation"
+      )
+    }
   })
 
   app.addHook("onClose", async () => {

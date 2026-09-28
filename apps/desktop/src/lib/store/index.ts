@@ -98,6 +98,8 @@ type LysActions = {
   startBackend: () => Promise<void>
   /**
    * Stops the backend when its process runs; a still-running result leaves the stop transition pending.
+   * A process that already exited, for example after it was reported
+   * unresponsive, is published as stopped.
    *
    * @returns A promise resolving after the status command and any stop command settle.
    * @throws The Tauri status or stop rejection.
@@ -195,6 +197,25 @@ export const useLysStore = create<LysStore>()((set, get) => {
   }
 
   /**
+   * Publishes a stopped backend once no backend process remains.
+   *
+   * @param stoppedAt - Renderer time at which the process was found gone.
+   */
+  function handleBackendProcessExit(stoppedAt: Date): void {
+    get().resetLmStudioStatus()
+    // LM Studio owns weights separately; discard observations until reconnect.
+    get().releaseModelRuntime()
+    set((prev) => ({
+      ...prev,
+      backendServerInfo: {
+        ...prev.backendServerInfo,
+        status: "stopped",
+        stoppedAt
+      }
+    }))
+  }
+
+  /**
    * Refreshes model observations when LM Studio connects and releases them otherwise.
    *
    * @param lmStudioStatus - Newly published LM Studio status.
@@ -274,7 +295,12 @@ export const useLysStore = create<LysStore>()((set, get) => {
     },
 
     stopBackend: async () => {
-      if (!(await getBackendStatus()).running) return
+      if (!(await getBackendStatus()).running) {
+        if (get().backendServerInfo.status !== "stopped") {
+          handleBackendProcessExit(new Date())
+        }
+        return
+      }
 
       set((prev) => ({
         ...prev,
@@ -287,18 +313,7 @@ export const useLysStore = create<LysStore>()((set, get) => {
       get().releaseModelRuntime()
       const processStatus = await stopBackend()
       const now = new Date()
-      if (!processStatus.running) {
-        // LM Studio owns weights separately; discard observations until reconnect.
-        get().releaseModelRuntime()
-        set((prev) => ({
-          ...prev,
-          backendServerInfo: {
-            ...prev.backendServerInfo,
-            status: "stopped",
-            stoppedAt: now
-          }
-        }))
-      }
+      if (!processStatus.running) handleBackendProcessExit(now)
     },
 
     getBackendUptimeMs: () => {

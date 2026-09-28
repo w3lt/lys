@@ -42,7 +42,8 @@ export type ModelSliceDependencies = {
 
 /**
  * Application model callbacks; request failures are handled in modelError,
- * except a missing LLM runtime, which the LM Studio status explains instead.
+ * except an inventory query that finds no connected LLM runtime, which the LM
+ * Studio status explains instead.
  */
 export type ModelActions = {
   /** Queries inventory; resolves after settlement or invalidation, retaining failure in state. */
@@ -99,23 +100,11 @@ function formatModelFailure(failure: unknown): string {
     : "The model request could not be completed."
 }
 
-/**
- * Formats a failed action for presentation.
- * @param failure - Failure retained by the HTTP boundary or runtime.
- * @returns The safe message, or null for a missing LLM runtime, which the LM
- * Studio status explains instead.
- */
-function formatModelOperationError(failure: unknown): string | null {
-  return isModelRuntimeUnavailableError(failure)
-    ? null
-    : formatModelFailure(failure)
-}
-
 /** Inventory and safe failure published together when an operation settles. */
 type ModelInventoryOutcome = {
   /** Fresh snapshot or explicit observation failure. */
   readonly modelInventory: ModelInventoryState
-  /** Action failure, reconciliation failure, or both; excludes a missing LLM runtime. */
+  /** Action failure, reconciliation failure, or both; excludes an inventory query that found no connected LLM runtime. */
   readonly modelError: string | null
   /** Whether the inventory read found no connected LLM runtime. */
   readonly isModelRuntimeUnavailable: boolean
@@ -252,7 +241,7 @@ export function createModelSlice(
     try {
       modelHealth = await updateModelOperation(request, connection)
     } catch (failure) {
-      modelError = formatModelOperationError(failure)
+      modelError = formatModelFailure(failure)
     }
     if (!isCurrentRequest(controller, current.backendUrl)) return
     const result = await readInventoryOutcome(connection, modelError)

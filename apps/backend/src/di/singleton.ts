@@ -4,7 +4,9 @@ import ChatService, {
   type ChatServiceCreationOptions
 } from "./services/chatService"
 import ConversationService from "./services/conversationService"
-import LlmRuntimeService from "./services/llmRuntimeService"
+import LlmRuntimeService, {
+  type LlmRuntimeFailureReporters
+} from "./services/llmRuntimeService"
 import LlmService from "./services/llmService"
 
 /** Private close operation owned by one returned singleton-service bundle. */
@@ -20,9 +22,6 @@ export type SingletonServiceAcquisition<Service> = Readonly<{
   /** Releases every resource exclusively owned by the service. */
   closeService: () => Promise<void>
 }>
-
-/** Receives one LLM runtime acquisition failure for application logging. */
-export type ReportLlmRuntimeAcquisitionFailure = (failure: unknown) => void
 
 /** Factories for the three independently acquired application services. */
 export type SingletonServiceFactories = Readonly<{
@@ -40,7 +39,7 @@ export type SingletonServiceFactories = Readonly<{
    */
   createLlmRuntimeService: (
     lmsBaseUrl: string,
-    reportLlmRuntimeAcquisitionFailure: ReportLlmRuntimeAcquisitionFailure
+    llmRuntimeFailureReporters: LlmRuntimeFailureReporters
   ) => SingletonServiceAcquisition<LlmRuntimeService>
 }>
 
@@ -71,8 +70,8 @@ export type SingletonServices = Readonly<{
  * @param config - LM Studio host and port used to derive local service endpoints,
  * and the title-generation prompt and title length limit given to the chat
  * service.
- * @param reportLlmRuntimeAcquisitionFailure - Receives each LLM runtime
- * acquisition failure for logging.
+ * @param llmRuntimeFailureReporters - Receive the LLM runtime failures that no
+ * caller observes, for logging.
  * @param factories - Service factories owned by the composition root.
  * @returns A promise resolving to the owned service bundle configured with the
  * HTTP `/v1` chat endpoint and WebSocket LM Studio endpoint. No service
@@ -82,7 +81,7 @@ export type SingletonServices = Readonly<{
  */
 export async function createSingletonServices(
   config: BackendConfig,
-  reportLlmRuntimeAcquisitionFailure: ReportLlmRuntimeAcquisitionFailure,
+  llmRuntimeFailureReporters: LlmRuntimeFailureReporters,
   factories: SingletonServiceFactories = DEFAULT_SINGLETON_SERVICE_FACTORIES
 ): Promise<SingletonServices> {
   const serviceLifetime = new AsyncDisposableStack()
@@ -104,7 +103,7 @@ export async function createSingletonServices(
 
     const llmRuntimeServiceAcquisition = factories.createLlmRuntimeService(
       `ws://${config.lmstudioHost}:${config.lmstudioPort}`,
-      reportLlmRuntimeAcquisitionFailure
+      llmRuntimeFailureReporters
     )
     serviceLifetime.defer(llmRuntimeServiceAcquisition.closeService)
     const llmService = new LlmService({
@@ -174,17 +173,17 @@ function createConversationService(
  * Creates the production LLM runtime service for one WebSocket endpoint.
  *
  * @param lmsBaseUrl - WebSocket endpoint used by each acquired SDK client.
- * @param reportLlmRuntimeAcquisitionFailure - Receives each acquisition failure.
+ * @param llmRuntimeFailureReporters - Receive failures that no caller observes.
  * @returns The newly owned runtime service and its cleanup capability. No
  * connection is attempted until the service is asked to connect.
  */
 function createLlmRuntimeService(
   lmsBaseUrl: string,
-  reportLlmRuntimeAcquisitionFailure: ReportLlmRuntimeAcquisitionFailure
+  llmRuntimeFailureReporters: LlmRuntimeFailureReporters
 ): SingletonServiceAcquisition<LlmRuntimeService> {
   const llmRuntimeService = new LlmRuntimeService({
-    acquireLlmRuntime: async () => await LmStudioRuntime.create(lmsBaseUrl),
-    reportLlmRuntimeAcquisitionFailure
+    ...llmRuntimeFailureReporters,
+    acquireLlmRuntime: async () => await LmStudioRuntime.create(lmsBaseUrl)
   })
   return Object.freeze({
     service: llmRuntimeService,

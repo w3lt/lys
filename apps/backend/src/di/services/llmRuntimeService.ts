@@ -9,15 +9,25 @@ import { createLlmRuntimeUnavailableError } from "../../modules/llm/llmRuntimeUn
 import { createLlmServiceBusyError } from "../../modules/llm/llmServiceBusyError"
 import type { LlmEngineOperation, LlmEngineOperationQueue } from "./llmService"
 
+/** Receives LLM runtime failures that no caller observes, for application logging. */
+export type LlmRuntimeFailureReporters = {
+  /** Receives each acquisition failure after the status becomes `unreachable`. */
+  readonly reportLlmRuntimeAcquisitionFailure: (failure: unknown) => void
+  /**
+   * Receives a failed availability probe or release that followed a resolved
+   * model operation; the operation's result is still returned. After a failed
+   * release the status is `unreachable`; after a failed probe it is unchanged.
+   */
+  readonly reportLlmRuntimeAvailabilityCheckFailure: (failure: unknown) => void
+}
+
 /** Dependencies supplied when creating the application-scoped LLM runtime service. */
-export type LlmRuntimeServiceCreationOptions = {
+export type LlmRuntimeServiceCreationOptions = LlmRuntimeFailureReporters & {
   /**
    * Acquires a ready, provider-available runtime. A resolved runtime transfers
    * to the service; a rejection means no runtime was acquired.
    */
   readonly acquireLlmRuntime: () => Promise<LlmRuntime>
-  /** Receives each acquisition failure after the status becomes `unreachable`. */
-  readonly reportLlmRuntimeAcquisitionFailure: (failure: unknown) => void
 }
 
 /** Connection to the LLM runtime; a runtime is held exactly while connected. */
@@ -116,7 +126,9 @@ const UNREACHABLE_LLM_RUNTIME_CONNECTION_STATE = Object.freeze({
  * probes, or releases it, so no attempt overlaps a model operation.
  * A model operation whose runtime call rejects is followed, before the next
  * queued work, by an availability probe; a runtime that no longer answers is
- * released and the status becomes `unreachable`.
+ * released and the status becomes `unreachable`. When such an operation
+ * resolved, a failed probe or release is reported instead of replacing its
+ * result.
  * Lifecycle: `ready -> closing -> closed`. Cleanup is terminal and idempotent:
  * it closes admission, waits for accepted work, then releases the held runtime
  * without unloading models or stopping the external engine. The connection
@@ -135,6 +147,9 @@ export default class LlmRuntimeService
 
   /** Borrowed reporter for acquisition failures that became `unreachable`. */
   readonly #reportLlmRuntimeAcquisitionFailure: (failure: unknown) => void
+
+  /** Borrowed reporter for failed probes or releases after a resolved operation. */
+  readonly #reportLlmRuntimeAvailabilityCheckFailure: (failure: unknown) => void
 
   /** Exclusively owned admission accounting and completion tail. */
   readonly #operationQueue: LlmRuntimeServiceQueueState = {
@@ -160,11 +175,14 @@ export default class LlmRuntimeService
    */
   public constructor({
     acquireLlmRuntime,
-    reportLlmRuntimeAcquisitionFailure
+    reportLlmRuntimeAcquisitionFailure,
+    reportLlmRuntimeAvailabilityCheckFailure
   }: LlmRuntimeServiceCreationOptions) {
     this.#acquireLlmRuntime = acquireLlmRuntime
     this.#reportLlmRuntimeAcquisitionFailure =
       reportLlmRuntimeAcquisitionFailure
+    this.#reportLlmRuntimeAvailabilityCheckFailure =
+      reportLlmRuntimeAvailabilityCheckFailure
   }
 
   /**
@@ -208,6 +226,8 @@ export default class LlmRuntimeService
    * @throws The interface-defined closed, runtime-unavailable, service-busy,
    * and operation failures, or an aggregate of an operation failure and a
    * failed availability probe or release.
+   * @remarks After a resolved operation, a failed probe or release is reported
+   * through the injected reporter instead of being thrown.
    */
   public async handleLlmEngineOperationRequest<Result>(
     operation: LlmEngineOperation<Result>
@@ -346,9 +366,11 @@ export default class LlmRuntimeService
    * @typeParam Result - Result produced by the operation.
    * @param operation - Accepted model operation whose predecessors have settled.
    * @returns The operation result; a resolved result is kept even when the
-   * probe releases the runtime.
+   * probe releases the runtime, or when the probe or release fails and is
+   * reported.
    * @throws The runtime-unavailable error when the connection was lost before
-   * or during the operation; otherwise the operation or probe failure.
+   * or during the operation; otherwise the operation failure, an aggregate of
+   * it and a failed probe or release, or the reporter's own failure.
    */
   async #handleAcceptedLlmEngineOperation<Result>(
     operation: LlmEngineOperation<Result>
@@ -371,7 +393,11 @@ export default class LlmRuntimeService
     }
 
     if (llmEngine.hasRecordedFailure) {
-      await this.#updateLlmRuntimeAvailability(connection.llmRuntime)
+      try {
+        await this.#updateLlmRuntimeAvailability(connection.llmRuntime)
+      } catch (availabilityFailure) {
+        this.#reportLlmRuntimeAvailabilityCheckFailure(availabilityFailure)
+      }
     }
     return result
   }

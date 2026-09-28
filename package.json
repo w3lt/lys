@@ -13,7 +13,7 @@
     "eslint:write": "eslint . --fix",
     "dev": "pnpm --filter @lys/desktop run tauri dev",
     "docs:dev": "pnpm --filter @lys/docs run dev",
-    "backend:dev": "LYS_HOME=\"$HOME/.lys\" pnpm --filter @lys/backend run dev",
+    "backend:dev": "LYS_HOME=\"${LYS_HOME:-$HOME/.lys}\" pnpm --filter @lys/backend run dev",
     "backend:build": "pnpm --filter @lys/backend run build",
     "desktop:build": "pnpm --filter @lys/desktop run tauri build",
     "desktop:build:ci": "pnpm --filter @lys/desktop run tauri build --no-bundle",

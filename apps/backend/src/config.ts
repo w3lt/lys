@@ -5,7 +5,7 @@ import {
   LMSTUDIO_PORT
 } from "@lys/protocol"
 import type { PathLike } from "node:fs"
-import { join } from "node:path"
+import { isAbsolute, join } from "node:path"
 import { readPrompt } from "./utils/prompts"
 
 /** Runtime locations, prompts, and limits used by the backend and its LM Studio clients. */
@@ -90,7 +90,7 @@ const GENERATED_TITLE_MAX_LENGTH = 100
  */
 export function loadBackendConfig(): BackendConfig {
   const lys_home = process.env.LYS_HOME
-  if (!lys_home) {
+  if (!lys_home || !isAbsolute(lys_home)) {
     throw new Error("LYS_HOME is not set")
   }
 

@@ -81,19 +81,16 @@ const GENERATED_TITLE_MAX_LENGTH = 100
  * @returns A frozen configuration snapshot whose database path is under
  * `LYS_HOME`, whose non-empty prompts were read once during this call, and
  * whose limits are positive safe integers.
- * @throws If `LYS_HOME` is unset or empty.
+ * @throws If `LYS_HOME` is unset, empty, or not an absolute path, as
+ * described by {@link parseLysHome}.
  * @throws If a prompt file cannot be read or its trimmed contents are empty.
  * @throws {RangeError} If a title-generation limit is not a positive safe
  * integer.
- * @remarks `LYS_HOME` has no backend default and is used as given. The desktop
- * host sets it to its resolved absolute Lys home for the backend it starts.
+ * @remarks `LYS_HOME` has no backend default. The desktop host sets it to its
+ * resolved absolute Lys home for the backend it starts.
  */
 export function loadBackendConfig(): BackendConfig {
-  const lys_home = process.env.LYS_HOME
-  if (!lys_home || !isAbsolute(lys_home)) {
-    throw new Error("LYS_HOME is not set")
-  }
-
+  const lysHome = parseLysHome(process.env.LYS_HOME)
   const lysSystemPrompt = readPrompt("lys-system")
   const titleGenerationPrompt = readPrompt("title-generation")
   const titleGenerationMaxAttempts = parsePositiveSafeInteger(
@@ -110,12 +107,38 @@ export function loadBackendConfig(): BackendConfig {
     backendPort: BACKEND_PORT,
     lmstudioHost: LMSTUDIO_HOST,
     lmstudioPort: LMSTUDIO_PORT,
-    databaseFilePath: join(lys_home, "lys_db.sqlite"),
+    databaseFilePath: join(lysHome, "lys_db.sqlite"),
     lysSystemPrompt,
     titleGenerationPrompt,
     titleGenerationMaxAttempts,
     generatedTitleMaxLength
   } satisfies BackendConfig)
+}
+
+/**
+ * Validates the raw `LYS_HOME` environment value as the Lys home directory.
+ *
+ * @param value - Raw `LYS_HOME` value, or `undefined` when the variable is
+ * unset.
+ * @returns The value unchanged once it is known to be an absolute path. The
+ * directory is not required to exist.
+ * @throws If the value is unset or empty, with the message
+ * `LYS_HOME is not set`.
+ * @throws If the value is a relative path, including an unexpanded `~/…`, with
+ * a message that quotes the rejected value.
+ */
+function parseLysHome(value: string | undefined): string {
+  if (!value) {
+    throw new Error("LYS_HOME is not set")
+  }
+
+  if (!isAbsolute(value)) {
+    throw new Error(
+      `LYS_HOME must be an absolute path, got ${JSON.stringify(value)}`
+    )
+  }
+
+  return value
 }
 
 /**

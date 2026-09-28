@@ -43,8 +43,9 @@ pnpm backend:dev
 
 The root `backend:dev` script sets `LYS_HOME` to `$HOME/.lys`, so the
 standalone backend opens `~/.lys/lys_db.sqlite`; it does not create that
-directory. Running the backend package's `dev` script without `LYS_HOME` stops
-at startup with `LYS_HOME is not set`. The desktop-managed path creates its
+directory. Running the backend package's `dev` script with `LYS_HOME` unset or
+empty stops at startup with `LYS_HOME is not set`; a relative value stops it
+with `LYS_HOME must be an absolute path`. The desktop-managed path creates its
 [Lys home directory](/reference/configuration/#lys-home-directory) while
 initializing missing settings. With `LYS_HOME` unset for the desktop, both paths
 use the same database; they always use the same port, so choose one backend

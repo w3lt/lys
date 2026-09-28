@@ -35,11 +35,13 @@ checkout, installed workspace dependencies, Node 24, and `pnpm` on the process
 search path. Release builds instead run `$LYS_HOME/runtime/node/bin/node` with
 `$LYS_HOME/runtime/backend/backend.mjs`, both installed by `build.sh` on macOS;
 see the [Lys home directory](/reference/configuration/#lys-home-directory).
-Neither launch path uses a backend bundled inside the desktop app.
+Neither launch path uses a backend bundled inside the desktop app. `build.sh`
+itself also needs `curl`, `jq`, and network access to `nodejs.org` to download
+that runtime; see [Packaging and releases](/operate/releases/).
 
 The backend itself depends on:
 
-- a `LYS_HOME` environment variable and local filesystem access for
+- an absolute `LYS_HOME` path and local filesystem access for
   `$LYS_HOME/lys_db.sqlite` in an existing directory; see
   [standalone startup](/develop/running/)
 - SQLite support through Node's `node:sqlite`

@@ -22,12 +22,12 @@ Zod, and there is no credential-management subsystem yet.
 
 ## Current controls
 
-| Control                    | What it does                                                                     |
-| -------------------------- | -------------------------------------------------------------------------------- |
-| Loopback host constants    | Backend and LM Studio addresses default to `127.0.0.1`.                          |
-| Dev CORS policy            | Fastify allows only `http://localhost:1420` and `http://127.0.0.1:1420` origins. |
-| Zod request validation     | Backend validates route bodies and desktop validates incoming SSE payloads.      |
-| Route-local abort handling | Closing the SSE connection aborts the backend chat task.                         |
+| Control                    | What it does                                                                                                                            |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Loopback host constants    | Backend and LM Studio addresses default to `127.0.0.1`.                                                                                 |
+| CORS policy                | Fastify admits only the `http://localhost:1420` and `http://127.0.0.1:1420` development origins and the `tauri://localhost` app origin. |
+| Zod validation             | Backend validates route bodies, parameters, and query strings; desktop validates SSE payloads and HTTP responses.                       |
+| Route-local abort handling | Closing the SSE connection aborts the backend chat task.                                                                                |
 
 ## Candid limits
 

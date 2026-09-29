@@ -15,6 +15,7 @@ presentation state, not durable conversation storage.
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
 | App shell           | `App.tsx` swaps between chat and settings views and runs startup initialization.                                             |
 | Chat UI             | `ChatView` renders the transcript, composer, jump-to-latest controls, and the past-conversations dialog.                     |
+| Message rendering   | `MarkdownMessage` renders assistant replies as Markdown with KaTeX math and highlighted, copyable code blocks.               |
 | Chat state          | `src/lib/store/chat-view` owns the active conversation, request lifecycle, conversation opening, and error presentation.     |
 | History state       | `src/lib/store/conversation-history` owns the past-conversations dialog, its search and pages, and rename and delete calls.  |
 | Shell/runtime state | `src/lib/store/index.ts` tracks which view is open, whether the backend is running, and settings loaded from Tauri.          |
@@ -48,6 +49,25 @@ Shell state such as backend status is managed independently.
 The desktop does not maintain a replay log or reconnect protocol. If the app
 closes during a reply, that stream is lost; the backend keeps the reply's
 persisted text, and the conversation can be reopened from history.
+
+## Assistant message rendering
+
+`MarkdownMessage` renders each assistant reply with `react-markdown`. Links
+open in a new tab without a referrer. `remark-math` and `rehype-katex` render
+`$…$` inline math and `$$…$$` display math with KaTeX, whose stylesheet
+`src/index.css` imports.
+
+Each fenced code block shows its language and a Copy button. Shiki
+(`@shikijs/rehype`) highlights a block whose language it bundles, using GitHub
+Light token colors; a block without a language, or in one Shiki does not
+bundle, stays unhighlighted and is labelled with its marker or `Text`. Copy
+writes the block's plain text without its final newline, never the
+highlighting markup.
+
+Rendering is asynchronous. The first reply rendered in a session loads Shiki
+with every bundled language. Until a message's first pass finishes, it shows
+plain Markdown without the link, math, and code-block handling. While a reply
+streams, the previous rendering stays visible until the new text is processed.
 
 ## Conversation history
 

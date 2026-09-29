@@ -24,10 +24,14 @@ type MarkdownMessageProps = {
 
 /** Properties accepted by the renderer-invoked code block projection. */
 type CodeElementProps = {
-  /** Inline or block code children supplied by react-markdown. */
+  /**
+   * Inline or block code children supplied by react-markdown, as Shiki token
+   * markup when the block's language is highlighted.
+   */
   children?: ReactNode
   /** Renderer class containing an optional `language-*` marker. */
   className?: string
+  /** Plain block text, without highlighting markup, that the copy button writes. */
   code: string
 }
 
@@ -35,7 +39,8 @@ type CodeElementProps = {
  * Extracts a Markdown language marker for the code-block header.
  *
  * @param className - Renderer class list, when a language marker is present.
- * @returns The marker without `language-`, or `text` when absent.
+ * @returns The marker without `language-` and with its first letter
+ * capitalized, or `Text` when absent.
  */
 function getCodeLanguage(className?: string) {
   const languageClass = className
@@ -46,9 +51,9 @@ function getCodeLanguage(className?: string) {
 }
 
 /**
- * Converts renderer code children to copyable text without its final newline.
+ * Converts a code block's plain text to copyable text without its final newline.
  *
- * @param children - Code children supplied by react-markdown.
+ * @param text - Text content of the rendered `pre` node.
  * @returns Text suitable for clipboard copying.
  */
 function getCodeText(text: string) {
@@ -60,12 +65,15 @@ function getCodeText(text: string) {
  *
  * @remarks The parent/renderer owns
  * code content; this component owns only transient copied feedback and its
- * reset timer. Clipboard failure is intentionally silent because denial by
- * the host runtime is not converted into a message. The copy button exposes
+ * reset timer. The copy button writes `code` rather than the rendered
+ * children, which may be highlighting markup. Clipboard failure is
+ * intentionally silent because denial by the host runtime is not converted
+ * into a message. The copy button exposes
  * its current result through a polite live label; successful copied feedback
  * resets after 1,400 ms. A repeated copy clears and replaces the prior reset
  * timer, and the active timer is cleared on unmount.
- * @param props - Code children and optional language marker from Markdown.
+ * @param props - Rendered code children, optional language marker, and the
+ * plain text to copy.
  * @returns The code block header, copy control, and code content.
  */
 function CodeBlock({ children, className, code }: CodeElementProps) {
@@ -128,9 +136,13 @@ function CodeBlock({ children, className, code }: CodeElementProps) {
  * Adapts react-markdown `pre` nodes to the repository code-block projection.
  *
  * @remarks The renderer supplies this
- * callback as a stable `pre` component; non-code children retain native
- * `<pre>` output, while a code child delegates to {@link CodeBlock}.
- * @param props - Renderer-provided pre children.
+ * callback as a stable `pre` component; non-code children, or a call without
+ * the source node, retain native `<pre>` output, while a code child delegates
+ * to {@link CodeBlock} with the node's text content as the copy source. Only
+ * the code child's props are forwarded, so the theme background and other
+ * attributes Shiki sets on `pre` are dropped.
+ * @param props - Renderer-provided pre children and the hast `pre` node they
+ * were rendered from.
  * @returns A native pre element or the copyable code-block projection.
  */
 function MarkdownPre({
@@ -180,8 +192,17 @@ const markdownComponents: Components = {
  * @remarks The parent owns source text and
  * streaming state; this component owns no application state or external
  * resource. Markdown links receive the configured external-navigation
- * attributes, code blocks receive the copy interaction, and the streaming
- * caret is a polite status announcement only while `streaming` is true.
+ * attributes, `$…$` and `$$…$$` math renders through KaTeX, code blocks
+ * receive the copy interaction, and the streaming caret is a polite status
+ * announcement only while `streaming` is true.
+ * Fenced code in a language Shiki bundles is highlighted with GitHub Light
+ * token colors; the GitHub Dark colors are exposed only as `--shiki-dark`
+ * custom properties for a stylesheet to apply. Other code stays unhighlighted.
+ * Processing is asynchronous. The first pass in a session loads the shared
+ * Shiki highlighter with every bundled language, and until a message's first
+ * pass resolves it renders as plain Markdown without the link, math, and
+ * code-block handling. Later passes keep the previous output visible until
+ * the new text is processed.
  * @param props - Markdown source and current streaming presentation state.
  * @returns The rendered Markdown body and optional generation caret.
  */

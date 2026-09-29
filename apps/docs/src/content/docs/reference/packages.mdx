@@ -27,7 +27,8 @@ package.
 - Entry UI: `src/App.tsx`
 - Native host: `src-tauri`
 - Important runtime dependencies: React, Zustand, Tauri API bindings,
-  `eventsource-parser`
+  `eventsource-parser`, and `react-markdown` with `@shikijs/rehype`,
+  `remark-math`, and `rehype-katex` for assistant replies
 - Runtime, Model, and Generation settings share application state. Model controls
   call the backend; generation edits are saved through Tauri and sent with chat requests.
 - The past-conversations dialog lists, searches, renames, deletes, and reopens

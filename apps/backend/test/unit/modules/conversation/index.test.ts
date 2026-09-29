@@ -151,6 +151,20 @@ describe("updateFastifyWithConversationRoutes", () => {
       })
     })
 
+    it("responds with a server error when the page cannot be read", async () => {
+      const { app, historyCalls } = await createConversationRouteApp()
+      historyCalls.listConversations.mockImplementation(() => {
+        throw new Error("database is locked")
+      })
+
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/v1/conversations"
+      })
+
+      expect(response.statusCode).toBe(500)
+    })
+
     it.each([
       ["an empty search query", { query: "  " }],
       ["a page size above the maximum", { limit: "51" }],
@@ -229,6 +243,20 @@ describe("updateFastifyWithConversationRoutes", () => {
       )
     })
 
+    it("responds with a server error when the conversation cannot be read", async () => {
+      const { app, historyCalls } = await createConversationRouteApp()
+      historyCalls.getConversation.mockImplementation(() => {
+        throw new Error("database is locked")
+      })
+
+      const response = await app.inject({
+        method: "GET",
+        url: `/api/v1/conversations/${CONVERSATION_ID}`
+      })
+
+      expect(response.statusCode).toBe(500)
+    })
+
     it("rejects an identifier that is not a UUIDv7", async () => {
       const { app, historyCalls } = await createConversationRouteApp()
 
@@ -286,6 +314,21 @@ describe("updateFastifyWithConversationRoutes", () => {
       })
     })
 
+    it("responds with a server error when the title cannot be replaced", async () => {
+      const { app, historyCalls } = await createConversationRouteApp()
+      historyCalls.updateConversationTitle.mockImplementation(() => {
+        throw new Error("database is locked")
+      })
+
+      const response = await app.inject({
+        method: "PATCH",
+        url: `/api/v1/conversations/${CONVERSATION_ID}`,
+        payload: { title: "Trip plan" }
+      })
+
+      expect(response.statusCode).toBe(500)
+    })
+
     it("rejects a blank title without replacing it", async () => {
       const { app, historyCalls } = await createConversationRouteApp()
 
@@ -334,6 +377,20 @@ describe("updateFastifyWithConversationRoutes", () => {
         detail: `Conversation ${MISSING_CONVERSATION_ID} was not found.`,
         instance: url
       })
+    })
+
+    it("responds with a server error when the conversation cannot be deleted", async () => {
+      const { app, historyCalls } = await createConversationRouteApp()
+      historyCalls.deleteConversation.mockImplementation(() => {
+        throw new Error("database is locked")
+      })
+
+      const response = await app.inject({
+        method: "DELETE",
+        url: `/api/v1/conversations/${CONVERSATION_ID}`
+      })
+
+      expect(response.statusCode).toBe(500)
     })
   })
 

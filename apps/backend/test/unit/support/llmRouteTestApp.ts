@@ -13,13 +13,18 @@ export type LlmRouteTestApp = TestFastify &
      * method its route calls; an unstubbed method rejects.
      */
     service: LlmService
+    /**
+     * Service decorated as `app.llmRuntimeService`. It is never connected;
+     * cases stub the status or connection attempt its routes read.
+     */
+    runtimeService: LlmRuntimeService
   }>
 
 /**
  * Creates a test application decorated with LLM services that never reach a
  * runtime.
  *
- * @returns The application, captured logs, and the decorated LLM service.
+ * @returns The application, captured logs, and both decorated LLM services.
  * @remarks `app.llmService` borrows an operation queue that rejects every
  * operation with `Unexpected LLM engine operation`, so a route outcome comes
  * only from the capability method a case stubs with `vi.spyOn`.
@@ -35,17 +40,15 @@ export function createLlmRouteTestApp(): LlmRouteTestApp {
     }
   })
   const service = new LlmService({ llmEngineOperationQueue })
+  const runtimeService = new LlmRuntimeService({
+    acquireLlmRuntime: async () => {
+      throw new Error("Unexpected LLM runtime acquisition")
+    },
+    reportLlmRuntimeAcquisitionFailure: vi.fn<(failure: unknown) => void>(),
+    reportLlmRuntimeAvailabilityCheckFailure:
+      vi.fn<(failure: unknown) => void>()
+  })
   testFastify.app.decorate("llmService", service)
-  testFastify.app.decorate(
-    "llmRuntimeService",
-    new LlmRuntimeService({
-      acquireLlmRuntime: async () => {
-        throw new Error("Unexpected LLM runtime acquisition")
-      },
-      reportLlmRuntimeAcquisitionFailure: vi.fn<(failure: unknown) => void>(),
-      reportLlmRuntimeAvailabilityCheckFailure:
-        vi.fn<(failure: unknown) => void>()
-    })
-  )
-  return Object.freeze({ ...testFastify, service })
+  testFastify.app.decorate("llmRuntimeService", runtimeService)
+  return Object.freeze({ ...testFastify, service, runtimeService })
 }

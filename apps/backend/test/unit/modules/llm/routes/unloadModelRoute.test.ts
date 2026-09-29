@@ -1,8 +1,10 @@
 import {
   createLlmServiceBusyProblem,
-  createLlmUnloadProblem
+  createLlmUnloadProblem,
+  llmRuntimeUnavailableProblemSchema
 } from "@lys/protocol"
 import { describe, expect, it, vi } from "vitest"
+import { createLlmRuntimeUnavailableError } from "../../../../../src/modules/llm/llmRuntimeUnavailableError"
 import { createLlmServiceBusyError } from "../../../../../src/modules/llm/llmServiceBusyError"
 import updateFastifyWithLlmModelUnloadRoute from "../../../../../src/modules/llm/routes/unloadModelRoute"
 import { findLogRecords } from "../../../support/fastifyTestApp"
@@ -220,5 +222,23 @@ describe("updateFastifyWithLlmModelUnloadRoute", () => {
       /^application\/problem\+json/
     )
     expect(response.json()).toEqual(createLlmServiceBusyProblem())
+  })
+
+  it("responds with the runtime-unavailable problem when no runtime is connected", async () => {
+    const testApp = createLlmRouteTestApp()
+    vi.spyOn(testApp.service, "stopLlmModelsByKey").mockRejectedValue(
+      createLlmRuntimeUnavailableError([])
+    )
+    await updateFastifyWithLlmModelUnloadRoute(testApp.app)
+
+    const response = await requestUnload(testApp)
+
+    expect(response.statusCode).toBe(503)
+    expect(response.headers["content-type"]).toMatch(
+      /^application\/problem\+json/
+    )
+    expect(
+      llmRuntimeUnavailableProblemSchema.safeParse(response.json()).success
+    ).toBe(true)
   })
 })

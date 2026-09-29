@@ -1,7 +1,11 @@
-import { createLlmServiceBusyProblem } from "@lys/protocol"
+import {
+  createLlmServiceBusyProblem,
+  llmRuntimeUnavailableProblemSchema
+} from "@lys/protocol"
 import { describe, expect, it, vi } from "vitest"
 import type { LlmModelHealthOutcome } from "../../../../../src/modules/llm/getLlmModelHealth"
 import { createLlmModelHealthDiagnostic } from "../../../../../src/modules/llm/llmModelHealthDiagnostic"
+import { createLlmRuntimeUnavailableError } from "../../../../../src/modules/llm/llmRuntimeUnavailableError"
 import { createLlmServiceBusyError } from "../../../../../src/modules/llm/llmServiceBusyError"
 import updateFastifyWithLlmTestModelRoute from "../../../../../src/modules/llm/routes/testModelRoute"
 import { findLogRecords } from "../../../support/fastifyTestApp"
@@ -161,5 +165,27 @@ describe("updateFastifyWithLlmTestModelRoute", () => {
       /^application\/problem\+json/
     )
     expect(response.json()).toEqual(createLlmServiceBusyProblem())
+  })
+
+  it("responds with the runtime-unavailable problem when no runtime is connected", async () => {
+    const testApp = createLlmRouteTestApp()
+    vi.spyOn(testApp.service, "getLlmModelHealth").mockRejectedValue(
+      createLlmRuntimeUnavailableError([])
+    )
+    await updateFastifyWithLlmTestModelRoute(testApp.app)
+
+    const response = await testApp.app.inject({
+      method: "GET",
+      url: healthPath(MODEL_KEY)
+    })
+
+    expect(response.statusCode).toBe(503)
+    expect(response.headers["cache-control"]).toBe("no-store")
+    expect(response.headers["content-type"]).toMatch(
+      /^application\/problem\+json/
+    )
+    expect(
+      llmRuntimeUnavailableProblemSchema.safeParse(response.json()).success
+    ).toBe(true)
   })
 })

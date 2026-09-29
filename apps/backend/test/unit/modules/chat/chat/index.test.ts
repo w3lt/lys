@@ -56,6 +56,27 @@ describe("updateFastifyWithChatRoute", () => {
     expect(testApp.generateTitle).not.toHaveBeenCalled()
   })
 
+  it("responds with a server error before contacting the model when the turn cannot be stored", async () => {
+    const testApp = await createChatRouteTestApp()
+    const storageFailure = new Error("database is locked")
+    testApp.createConversationTurn.mockImplementation(() => {
+      throw storageFailure
+    })
+    await updateFastifyWithChatRoute(testApp.app, CHAT_ROUTE_OPTIONS)
+
+    const response = await requestChat(testApp.app, NEW_CONVERSATION_REQUEST)
+
+    expect(response.statusCode).toBe(500)
+    expect(testApp.logs).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        err: expect.objectContaining({ message: storageFailure.message })
+      })
+    )
+    expect(testApp.completeChatStream).not.toHaveBeenCalled()
+    expect(testApp.generateTitle).not.toHaveBeenCalled()
+  })
+
   it.each([
     ["an empty message", { ...NEW_CONVERSATION_REQUEST, message: "" }],
     [

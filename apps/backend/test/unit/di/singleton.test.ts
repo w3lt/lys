@@ -143,6 +143,24 @@ describe("createSingletonServices", () => {
     expect(services.llmService).toBeInstanceOf(LlmService)
   })
 
+  it("serves the LLM service through the runtime service's operation queue", async () => {
+    const { factories, acquisitions } = createRecordedFactories()
+    const refusal = new Error("The LLM runtime is closed.")
+    const handleLlmEngineOperationRequest = vi
+      .spyOn(acquisitions.llmRuntime.service, "handleLlmEngineOperationRequest")
+      .mockRejectedValue(refusal)
+    const services = await createSingletonServices(
+      TEST_BACKEND_CONFIG,
+      createFailureReporters(),
+      factories
+    )
+    onTestFinished(async () => await closeSingletonServices(services))
+
+    await expect(services.llmService.listLlmModels()).rejects.toBe(refusal)
+
+    expect(handleLlmEngineOperationRequest).toHaveBeenCalledOnce()
+  })
+
   it("releases the chat service when the conversation store cannot be created", async () => {
     const { factories, closeLog } = createRecordedFactories()
     const creationFailure = new Error("unable to open database file")

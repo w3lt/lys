@@ -54,6 +54,15 @@ describe("loadBackendConfig", () => {
     expect(() => loadBackendConfig()).toThrow(readFailure)
   })
 
+  it.each([
+    ["unset", undefined],
+    ["empty", ""]
+  ])("rejects an %s Lys home directory", (_label, lysHome) => {
+    vi.stubEnv("LYS_HOME", lysHome)
+
+    expect(() => loadBackendConfig()).toThrow("LYS_HOME is not set")
+  })
+
   it("rejects a relative Lys home directory", () => {
     vi.stubEnv("LYS_HOME", "relative-home")
 

@@ -1,5 +1,9 @@
-import { createLlmServiceBusyProblem } from "@lys/protocol"
+import {
+  createLlmServiceBusyProblem,
+  llmRuntimeUnavailableProblemSchema
+} from "@lys/protocol"
 import { describe, expect, it } from "vitest"
+import { createLlmRuntimeUnavailableError } from "../../../../../src/modules/llm/llmRuntimeUnavailableError"
 import { createLlmServiceBusyError } from "../../../../../src/modules/llm/llmServiceBusyError"
 import handleLlmServiceRequestFailure from "../../../../../src/modules/llm/routes/handleLlmServiceRequestFailure"
 import { createTestFastify } from "../../../support/fastifyTestApp"
@@ -61,5 +65,53 @@ describe("handleLlmServiceRequestFailure", () => {
     expect(response.headers["content-type"]).not.toMatch(
       /application\/problem\+json/
     )
+  })
+
+  it("answers a runtime refusal without runtime work with the runtime-unavailable problem and no log", async () => {
+    const { app, logs } = createFailingRouteApp(
+      createLlmRuntimeUnavailableError([])
+    )
+
+    const response = await app.inject({ method: "GET", url: "/failing" })
+
+    expect(response.statusCode).toBe(503)
+    expect(response.headers["content-type"]).toMatch(
+      /^application\/problem\+json/
+    )
+    expect(
+      llmRuntimeUnavailableProblemSchema.safeParse(response.json()).success
+    ).toBe(true)
+    expect(logs.filter((record) => "err" in record)).toEqual([])
+  })
+
+  it("logs retained runtime failures at warn before answering with the runtime-unavailable problem", async () => {
+    const runtimeFailure = new Error("connect ECONNREFUSED /private/lms.sock")
+    const { app, logs } = createFailingRouteApp(
+      createLlmRuntimeUnavailableError([runtimeFailure])
+    )
+    let logCountAtSend: number | undefined = undefined
+    app.addHook("onSend", async () => {
+      logCountAtSend = logs.length
+    })
+
+    const response = await app.inject({ method: "GET", url: "/failing" })
+
+    expect(response.statusCode).toBe(503)
+    expect(
+      llmRuntimeUnavailableProblemSchema.safeParse(response.json()).success
+    ).toBe(true)
+    expect(response.body).not.toContain("ECONNREFUSED")
+    const warnings = logs.filter(({ level }) => level === "warn")
+    expect(warnings).toEqual([
+      expect.objectContaining({
+        err: expect.objectContaining({
+          aggregateErrors: [
+            expect.objectContaining({ message: runtimeFailure.message })
+          ]
+        })
+      })
+    ])
+    const warningIndex = logs.findIndex(({ level }) => level === "warn")
+    expect(logCountAtSend).toBeGreaterThan(warningIndex)
   })
 })

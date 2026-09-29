@@ -77,11 +77,12 @@ type GeneratedTitle = Extract<TitleGenerationResult, { status: "generated" }>
  * Titles are requested up to `titleGenerationMaxAttempts` times; only a reply
  * unusable as a title consumes another request. A generated title is persisted
  * only while the conversation remains untitled, before one `title` event is
- * sent to the turn's followers. If another turn assigned a title first or the
- * conversation was renamed or deleted, this task preserves the stored state
- * and sends no event. Other unsuccessful outcomes leave this task's candidate
- * unsaved; a later turn retries if still untitled. Stopping the reply does not
- * cancel this task; only backend shutdown does. Outcomes are logged with
+ * sent to the turn's followers. If the conversation was renamed or deleted
+ * first, this task preserves the stored state and sends no event. Other
+ * unsuccessful outcomes leave this task's candidate unsaved; a turn that
+ * starts after this task settles retries if the conversation is still
+ * untitled. Stopping the reply does not cancel this task; only backend
+ * shutdown does. Outcomes are logged with
  * `titleGenerationOutcome` and `titleGenerationAttempts` fields: exhausted
  * attempts or a failure that is not retried at warn level, a shutdown
  * cancellation at debug level, and a persistence failure at error level. An

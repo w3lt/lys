@@ -194,7 +194,8 @@ function createRequestedTurn(
 
 /**
  * Starts the generation that writes one stored turn's reply and, for an
- * untitled conversation, its title.
+ * untitled conversation, its title unless another turn of that conversation
+ * is already generating one.
  *
  * @param input - Stored turn and the request values its tasks keep.
  * @returns The registered generation.

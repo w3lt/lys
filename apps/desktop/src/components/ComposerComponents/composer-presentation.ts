@@ -14,9 +14,10 @@ import type { ModelRuntimeState } from "@/lib/store/model-runtime"
 /**
  * Chat work that keeps the composer from sending.
  *
- * @remarks `awaiting-reply` lasts until the whole request settles, including a
- * title that may arrive after the reply; `opening-conversation` lasts while a
- * stored conversation is read to replace the shown one.
+ * @remarks `awaiting-reply` lasts from sending until the reply is final; a
+ * title that may still arrive after the reply does not keep the composer from
+ * sending. `opening-conversation` lasts while a stored conversation is read to
+ * replace the shown one.
  */
 export type ComposerActivity =
   "idle" | "awaiting-reply" | "opening-conversation"
@@ -172,8 +173,9 @@ export function formatReconnectAction(
  *
  * @param request - Authoritative chat request lifecycle.
  * @param conversationOpen - Authoritative stored-conversation open lifecycle.
- * @returns Opening while a stored conversation is read, awaiting while any
- * request is active, and idle otherwise.
+ * @returns Opening while a stored conversation is read, awaiting while a reply
+ * is awaited or streamed, and idle otherwise, including after the reply
+ * completed while its stream stays open for a title.
  */
 export function calculateComposerActivity(
   request: ChatRequestState,
@@ -181,7 +183,14 @@ export function calculateComposerActivity(
 ): ComposerActivity {
   if (conversationOpen.status === "opening") return "opening-conversation"
 
-  return request.status === "idle" ? "idle" : "awaiting-reply"
+  switch (request.status) {
+    case "idle":
+    case "reply-completed":
+      return "idle"
+    case "awaiting-turn":
+    case "reply-streaming":
+      return "awaiting-reply"
+  }
 }
 
 /**

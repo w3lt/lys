@@ -137,7 +137,8 @@ export type ChatViewStoreDependencies = {
  * stream event and private transport resource. `reply-completed` is entered
  * once the reply is final — after `done`, `interrupted`, or `error`, or a
  * snapshot of a final reply — and still permits title events; no later
- * request state accepts deltas again.
+ * request state accepts deltas again. A new request may replace a
+ * `reply-completed` one, which ends following its stream.
  */
 export type ChatRequestState =
   | {
@@ -233,13 +234,15 @@ export type ChatViewActions = {
    *
    * @param explicitPrompt - Optional starter prompt; omission submits the
    * current composer draft.
-   * @returns A promise that resolves without opening a stream when a request is
-   * active, a stored conversation is opening, the prompt is empty, or no loaded
-   * model is eligible; otherwise it resolves after stream completion, failure,
-   * or invalidation.
+   * @returns A promise that resolves without opening a stream when a reply is
+   * awaited or streaming, a stored conversation is opening, the prompt is
+   * empty, or no loaded model is eligible; otherwise it resolves after stream
+   * completion, failure, or invalidation.
    * @remarks An unavailable model records an inline error and preserves the
-   * draft and conversation. An active request, an opening conversation, or an
-   * empty prompt is ignored.
+   * draft and conversation. A reply that is awaited or streaming, an opening
+   * conversation, or an empty prompt is ignored. After the reply completed,
+   * sending stops following its stream, which may still carry a title; the
+   * backend keeps generating and saving that title.
    * The eligible model and generation controls are sampled once before request
    * ownership begins; later edits affect only later requests.
    */
@@ -1058,12 +1061,16 @@ export function createChatViewStore(
     /**
      * Reports whether a new chat request may take ownership of the lifecycle.
      *
-     * @returns Whether no request is active and no conversation is opening.
+     * @returns Whether no conversation is opening and no reply is awaited:
+     * either no request is active, or the active one has a final reply and
+     * only waits for a possible title.
      */
     function canStartChatRequest(): boolean {
       const { request, conversationOpen } = get()
+      const isRequestReplaceable =
+        request.status === "idle" || request.status === "reply-completed"
 
-      return request.status === "idle" && conversationOpen.status === "idle"
+      return isRequestReplaceable && conversationOpen.status === "idle"
     }
 
     /**
@@ -1102,11 +1109,13 @@ export function createChatViewStore(
         generationOptions: dependencies.readGenerationOptions()
       })
 
+      const supersededRequest = activeRequestResource
       activeRequestResource = resource
       set({
         error: undefined,
         request
       })
+      supersededRequest?.abortController.abort()
       await readChatStream(token, {
         openEvents: (signal) => dependencies.streamChat(payload, { signal }),
         handleEvent: async (event) => {

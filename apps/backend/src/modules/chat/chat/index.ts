@@ -232,8 +232,10 @@ function startTurnGeneration(input: TurnGenerationInput): ReplyGeneration {
  * @param input - Stored turn and the request values the task keeps.
  * @param context - Generation-owned cancellation and event sender.
  * @returns Settlement after the reply is final.
- * @throws If the task or the fallback finalization fails; the generation
- * reports it.
+ * @throws The task's failure after the fallback finalization; an
+ * `AggregateError` of the task's failure and the fallback's failure when the
+ * fallback also fails; or the fallback's failure after a task that succeeded.
+ * The generation reports it.
  * @remarks The fallback stores `interrupted` after cancellation and `failed`
  * otherwise; it changes nothing when the task already finalized the reply.
  */
@@ -263,11 +265,48 @@ async function createTurnReplyTask(
       sendEvent,
       logger: input.logger
     })
-  } finally {
-    dependencies.turns.updateAssistantMessageState(assistantMessageId, {
-      status: abortSignal.aborted ? "interrupted" : "failed"
-    })
+  } catch (taskFailure) {
+    try {
+      updateUnfinishedReplyState(
+        dependencies.turns,
+        assistantMessageId,
+        abortSignal
+      )
+    } catch (finalizationFailure) {
+      throw new AggregateError(
+        [taskFailure, finalizationFailure],
+        "Reply failure could not be finalized",
+        { cause: finalizationFailure }
+      )
+    }
+    throw taskFailure
   }
+  updateUnfinishedReplyState(
+    dependencies.turns,
+    assistantMessageId,
+    abortSignal
+  )
+}
+
+/**
+ * Stores a final state for a reply its task left streaming.
+ *
+ * @param turns - Turn persistence borrowed for the route lifetime.
+ * @param assistantMessageId - UUIDv7 of the reply.
+ * @param abortSignal - The reply task's cancellation; aborted means the reply
+ * was stopped or shut down.
+ * @throws If the state cannot be stored.
+ * @remarks Stores `interrupted` after cancellation and `failed` otherwise. A
+ * reply that is already final, superseded, or deleted is left unchanged.
+ */
+function updateUnfinishedReplyState(
+  turns: ConversationTurnWriter,
+  assistantMessageId: string,
+  abortSignal: AbortSignal
+): void {
+  turns.updateAssistantMessageState(assistantMessageId, {
+    status: abortSignal.aborted ? "interrupted" : "failed"
+  })
 }
 
 /**

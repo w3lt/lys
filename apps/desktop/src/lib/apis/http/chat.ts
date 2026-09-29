@@ -129,7 +129,10 @@ export async function* readChatReplyEvents(
     }
   )
 
-  if (response.status === 404 && (await isChatReplyAbsence(response))) {
+  if (
+    response.status === 404 &&
+    isChatReplyAbsenceProblem(await readFailureBody(response))
+  ) {
     throw new Error(MISSING_REPLY_MESSAGE)
   }
   if (!response.ok || !response.body) {
@@ -160,7 +163,10 @@ export async function stopChatReply(
     `${connection.backendUrl}${buildChatReplyPath(stopChatReplyApi.path, target)}`
   )
   if (response.status === 204) return STOPPED_RESULT
-  if (response.status === 409 && (await isReplyNotGenerating(response))) {
+  if (
+    response.status === 409 &&
+    isReplyNotGeneratingProblem(await readFailureBody(response))
+  ) {
     return NOT_GENERATING_RESULT
   }
   throw new Error(
@@ -231,25 +237,25 @@ async function* readServerSentEvents<TStreamEvent>(
 }
 
 /**
- * Determines whether a failed reply-events response declares the reply or
- * its conversation absent.
+ * Determines whether a decoded body declares the followed reply or its
+ * conversation absent.
  *
- * @param response - Failed response whose body is consumed here.
- * @returns Whether the body validates as a declared absence problem.
+ * @param body - Untrusted body of a failed reply-events response.
+ * @returns Whether it validates as a declared absence problem; a different
+ * body, such as the one an unregistered route returns, does not.
  */
-async function isChatReplyAbsence(response: Response): Promise<boolean> {
-  const body = await readFailureBody(response)
+function isChatReplyAbsenceProblem(body: unknown): boolean {
   return chatReplyEventsApi.responses[404].safeParse(body).success
 }
 
 /**
- * Determines whether a failed stop response declares that no generation runs.
+ * Determines whether a decoded body declares that no generation runs for the
+ * reply.
  *
- * @param response - Failed response whose body is consumed here.
- * @returns Whether the body validates as the declared not-generating problem.
+ * @param body - Untrusted body of a failed stop response.
+ * @returns Whether it validates as the declared not-generating problem.
  */
-async function isReplyNotGenerating(response: Response): Promise<boolean> {
-  const body = await readFailureBody(response)
+function isReplyNotGeneratingProblem(body: unknown): boolean {
   return stopChatReplyApi.responses[409].safeParse(body).success
 }
 

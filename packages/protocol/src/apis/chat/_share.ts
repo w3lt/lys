@@ -67,7 +67,11 @@ export const chatErrorEventSchema = z.strictObject({
  *
  * @remarks Exactly one of `done`, `interrupted`, or `error` ends the reply. A
  * `title` event can arrive before, between, or after reply events because
- * title generation runs concurrently.
+ * title generation runs concurrently. A stream can also close without any of
+ * the three: the backend ends a follower that falls too far behind, and a
+ * reply whose final state cannot be stored sends none. Such a close says
+ * nothing about the reply's outcome; following the reply again or reading
+ * its conversation returns the stored state.
  */
 export type ChatGenerationEvent =
   | z.infer<typeof chatTitleEventSchema>

@@ -68,7 +68,8 @@ export default async function updateFastifyWithChatReplyRoutes(
  * @param dependencies - Borrowed history reader and registry.
  * @returns Settlement after the stream ends, or after a missing-conversation
  * or missing-reply response.
- * @throws If reading the conversation fails before the stream starts.
+ * @throws Before the stream starts, if reading the conversation fails or the
+ * registry is closed because shutdown began.
  * @remarks Reading the snapshot and registering the follower happen in one
  * synchronous step, and every delta is stored before it is sent, so the
  * snapshot plus later deltas equal the stored reply. Closing this stream does
@@ -100,6 +101,7 @@ async function handleChatReplyEventsRequest(
     return
   }
 
+  const generation = generations.findReplyGeneration(request.params)
   const subscription = new ReplyEventSubscription<ChatReplyEvent>(
     createEventSender<ChatReplyEvent>(reply.sse)
   )
@@ -108,7 +110,6 @@ async function handleChatReplyEventsRequest(
     conversationTitle: conversation.title,
     assistantMessage
   })
-  const generation = generations.findReplyGeneration(request.params)
   if (generation === undefined) subscription.close()
   else generation.openSubscription(subscription)
   await openReplyEventStream(reply.sse, subscription)
@@ -122,6 +123,8 @@ async function handleChatReplyEventsRequest(
  * @param reply - HTTP response owner.
  * @param generations - Borrowed registry.
  * @returns Settlement after the 204 or the not-generating problem is sent.
+ * @throws If the registry is closed because shutdown began; nothing is
+ * stopped.
  */
 async function handleStopChatReplyRequest(
   request: FastifyRequest<StopChatReplyApiRoute>,

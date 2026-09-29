@@ -47,8 +47,10 @@ export const chatApiRequestBodySchema = z.strictObject({
  * either to reconcile an existing persisted title or to publish a newly
  * persisted title. A generated title may arrive before, between, or after the
  * reply events because its task runs concurrently. The stream closes after
- * both tasks settle. The `type` discriminant is the compatibility boundary
- * used by desktop consumers.
+ * both tasks settle; like every generation stream (see
+ * `ChatGenerationEvent`), it can close without a final reply event. The
+ * `type` discriminant is the compatibility boundary used by desktop
+ * consumers.
  */
 export const chatApiStreamEventSchema = z.discriminatedUnion("type", [
   z.strictObject({

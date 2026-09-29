@@ -106,8 +106,9 @@ function findLargestAttachment(
  * staged tray and owns the request's completion and failure. While the reply
  * streams, it asks the backend to stop the reply and keeps applying the stream
  * until `interrupted` or `done` arrives; while the turn is awaited, the stop is
- * remembered and sent once the reply is known; after the reply completed, it
- * only stops following the stream. It ignores activation once the lifecycle is
+ * remembered and sent once the reply is known, unless the user moves to
+ * another conversation first; after the reply completed, it only stops
+ * following the stream. It ignores activation once the lifecycle is
  * idle, and repeated presses send repeated stop requests, which the backend
  * treats idempotently. Moving to another conversation stops following a reply
  * without stopping it.

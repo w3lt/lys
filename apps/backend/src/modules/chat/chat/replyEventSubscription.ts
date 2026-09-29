@@ -23,7 +23,7 @@ const MAXIMUM_QUEUED_SUBSCRIPTION_EVENTS = 4096
  * after it has ended and every accepted write has settled.
  */
 export default class ReplyEventSubscription<TStreamEvent> {
-  /** Writes one event to the borrowed connection; rejects once it is gone. */
+  /** Writes one event to the borrowed connection. */
   readonly #sendEvent: (event: TStreamEvent) => Promise<void>
   /** Settles once the subscription has ended and accepted writes settled. */
   readonly #closure = Promise.withResolvers<void>()
@@ -38,8 +38,9 @@ export default class ReplyEventSubscription<TStreamEvent> {
    * Creates an open subscription with an empty queue.
    *
    * @param sendEvent - Borrowed writer for one SSE connection. It resolves
-   * after the transport accepts the event and rejects once the connection has
-   * closed.
+   * after the transport accepts the event and rejects when the connection has
+   * already closed; a write pending when the connection closes may never
+   * settle.
    */
   public constructor(sendEvent: (event: TStreamEvent) => Promise<void>) {
     this.#sendEvent = sendEvent
@@ -49,7 +50,8 @@ export default class ReplyEventSubscription<TStreamEvent> {
    * Settlement of the subscription's end.
    *
    * @returns A promise that settles after the subscription stopped accepting
-   * events and every accepted write settled; it never rejects.
+   * events and every accepted write settled; it never rejects, and it stays
+   * pending while an accepted write never settles.
    */
   public get closed(): Promise<void> {
     return this.#closure.promise
@@ -95,9 +97,9 @@ export default class ReplyEventSubscription<TStreamEvent> {
    *
    * @param event - Event accepted by {@link ReplyEventSubscription.handleStreamEvent}.
    * @returns Settlement after the write; it never rejects.
-   * @remarks A write fails only after the connection closed, so no later event
-   * can reach this follower; the subscription ends while the producer and
-   * other followers continue.
+   * @remarks A write fails only once the connection is closed, so no later
+   * event can reach this follower; the subscription ends while the producer
+   * and other followers continue.
    */
   async #handleQueuedEvent(event: TStreamEvent): Promise<void> {
     try {

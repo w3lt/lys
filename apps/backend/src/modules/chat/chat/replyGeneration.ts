@@ -19,7 +19,11 @@ export type StartReplyGenerationOptions = Readonly<{
    */
   startTitleTask:
     ((context: ReplyGenerationTaskContext) => Promise<void>) | undefined
-  /** Records one task rejection; must not throw. The generation still settles. */
+  /**
+   * Records one task rejection; must not throw. A reporter that throws still
+   * lets the generation settle and close its followers; its own failure is
+   * left unhandled, the process's last diagnostic signal.
+   */
   reportTaskFailure: (error: unknown) => void
 }>
 
@@ -105,8 +109,11 @@ export default class ReplyGeneration implements AsyncDisposable {
       () => replySettlement.resolve()
     )
     void Promise.allSettled(tasks).then((outcomes) => {
-      generation.#handleTasksSettled(outcomes, options.reportTaskFailure)
-      settlement.resolve()
+      try {
+        generation.#handleTasksSettled(outcomes, options.reportTaskFailure)
+      } finally {
+        settlement.resolve()
+      }
     })
     return generation
   }
@@ -144,8 +151,8 @@ export default class ReplyGeneration implements AsyncDisposable {
    * Stops the reply by cancelling its model request.
    *
    * @returns A promise that settles after the reply task settled, so the
-   * reply's final state (`interrupted`, or `completed` when the model
-   * finished first) is stored; it never rejects.
+   * reply's final state is stored: `interrupted`, or `completed` or `failed`
+   * when the reply ended before the stop; it never rejects.
    * @remarks Idempotent. Title generation continues.
    */
   public stopReply(): Promise<void> {
@@ -197,6 +204,7 @@ export default class ReplyGeneration implements AsyncDisposable {
    *
    * @param outcomes - Settled outcomes of every task this generation started.
    * @param reportTaskFailure - Reporter that receives each rejection.
+   * @throws The reporter's failure, after every follower was closed.
    * @remarks Followers are closed even when the reporter throws, so their
    * streams always end.
    */

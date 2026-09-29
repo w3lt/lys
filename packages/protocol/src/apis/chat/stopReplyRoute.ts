@@ -14,9 +14,10 @@ const stopChatReplyApiResponseSchemas = Object.freeze({
  * Describes the POST endpoint that stops one reply's running generation.
  *
  * @remarks The request has no body. Success is a bodyless 204 sent after the
- * reply's model request was cancelled and the reply reached its stored final
- * state: `interrupted`, or `completed` when the model finished first.
- * Followers of the reply receive the matching `interrupted` or `done` event.
+ * reply reached its stored final state: `interrupted` when the stop cancelled
+ * its model request, or `completed` or `failed` when the reply ended before
+ * the stop. Followers of the reply receive the `interrupted` event, or have
+ * already received the `done` or `error` event that ended it.
  * Title generation for the turn is not cancelled, and a repeated request
  * while that title task runs also returns 204. When no generation is running
  * for the addressed reply, the endpoint returns the reply-not-generating

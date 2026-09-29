@@ -30,10 +30,11 @@ const chatReplySnapshotEventSchema = z.strictObject({
 /**
  * Validates the SSE events sent to a client that follows one stored reply.
  *
- * @remarks The first event is always `reply-snapshot`. When the reply's
- * generation still runs, the generation events follow and the stream closes
- * after the generation settles; otherwise the stream closes right after the
- * snapshot.
+ * @remarks The first event is always `reply-snapshot`. When no generation
+ * runs for the reply, the stream closes right after the snapshot. Otherwise
+ * the generation events follow and the stream closes after the generation
+ * settles; like every generation stream (see `ChatGenerationEvent`), it can
+ * close without a final reply event.
  */
 export const chatReplyEventSchema = z.discriminatedUnion("type", [
   chatReplySnapshotEventSchema,

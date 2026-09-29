@@ -134,8 +134,10 @@ export type ChatViewStoreDependencies = {
  * Authoritative observable lifecycle state of one chat request.
  *
  * @remarks One monotonically increasing token is the authority for every
- * stream event and private transport resource. `reply-completed` permits
- * title events after `done`; no later request state accepts deltas again.
+ * stream event and private transport resource. `reply-completed` is entered
+ * once the reply is final — after `done`, `interrupted`, or `error`, or a
+ * snapshot of a final reply — and still permits title events; no later
+ * request state accepts deltas again.
  */
 export type ChatRequestState =
   | {
@@ -216,8 +218,9 @@ export type ChatViewState = {
  * Actions that mutate or advance the chat lifecycle.
  *
  * @remarks `openConversation` resolves after the read commits, fails, or is
- * superseded, and when the opened conversation ends with a reply that is
- * still generating, after the store stops following it. `resetConversation`
+ * superseded, and when the conversation shown afterwards ends with a reply
+ * that is still generating — the opened one, or the previous one after a
+ * failed open — after the store stops following it. `resetConversation`
  * and opening another conversation stop following the active reply without
  * stopping it; only `stopStreaming` stops a reply on the backend.
  */
@@ -245,15 +248,16 @@ export type ChatViewActions = {
    * Stops the active reply.
    *
    * @returns A promise that settles after the backend answered the stop
-   * request, or at once when no request is involved. It rejects only if the
-   * store's own request bookkeeping is inconsistent.
+   * request, or at once when no request is involved; it never rejects.
    * @remarks While the reply streams, asks the backend to stop it and keeps
    * reading until `interrupted` or `done` arrives. Before the turn has
-   * started, the stop is sent as soon as the start event names the reply.
-   * After the reply finished while a title may still arrive, only stops
-   * following. A failed stop request records an inline error. Repeated
-   * presses while the reply streams send repeated requests, which the backend
-   * treats idempotently.
+   * started, the stop is sent as soon as the start event names the reply; a
+   * stop still pending when another conversation opens or the conversation
+   * resets is dropped, and the backend generates the whole reply. After the
+   * reply finished while a title may still arrive, only stops following. A
+   * failed stop request records an inline error. Repeated presses while the
+   * reply streams send repeated requests, which the backend treats
+   * idempotently.
    */
   stopStreaming: () => Promise<void>
   /** Stops following active work and restores initial chat state. */
@@ -1209,7 +1213,8 @@ export function createChatViewStore(
           requestedStopToken = request.token
           return
         case "reply-completed":
-          stopFollowingChatReply(request.token)
+          if (isRequestOwned(request.token))
+            stopFollowingChatReply(request.token)
           return
         case "reply-streaming": {
           const target = findOwnedReplyTarget(request.token)
@@ -1269,25 +1274,6 @@ export function createChatViewStore(
     }
 
     /**
-     * Calculates the shown conversation after the view stops following its
-     * active reply.
-     *
-     * @returns The current conversation with any streaming reply owned by the
-     * active request marked interrupted, or the unchanged conversation.
-     */
-    function calculateInterruptedConversation():
-      ChatViewConversation | undefined {
-      const { conversation, request } = get()
-      if (request.status === "idle") return conversation
-
-      return updateIncompleteAssistantReplyStatus(
-        conversation,
-        request,
-        "interrupted"
-      )
-    }
-
-    /**
      * Calculates the composer draft kept when an opened conversation is shown.
      *
      * @returns An empty draft when the composer still holds the text it had
@@ -1343,9 +1329,10 @@ export function createChatViewStore(
      *
      * @returns The started follow, or undefined when the shown conversation
      * does not end with a streaming reply.
-     * @remarks Runs in the same synchronous step that showed the conversation,
-     * so no request can start in between. The request enters
-     * `reply-streaming` at once, which keeps the composer from sending.
+     * @remarks Runs in the same synchronous step that ended the open, whether
+     * it showed the opened conversation or kept the previous one, so no
+     * request can start in between. The request enters `reply-streaming` at
+     * once, which keeps the composer from sending.
      */
     function startStoredReplyFollowing(): StoredReplyFollow | undefined {
       const conversation = get().conversation
@@ -1404,7 +1391,8 @@ export function createChatViewStore(
      * @param resource - Private read resource owned by this open.
      * @returns A promise that resolves after the outcome commits, the failure
      * is recorded, or the open is superseded. It carries the started follow
-     * when the shown conversation ends with a reply that is still generating.
+     * when the conversation shown afterwards ends with a reply that is still
+     * generating: the opened one, or the previous one when the open failed.
      * @remarks Superseded reads are ignored silently, including their
      * failures, because a newer open, reset, or close already owns the view.
      */
@@ -1419,9 +1407,6 @@ export function createChatViewStore(
         )
         if (!isOpenOwned(resource.token)) return undefined
         updateViewWithStoredConversation(result)
-        return result.status === "found"
-          ? startStoredReplyFollowing()
-          : undefined
       } catch (error) {
         if (!isOpenOwned(resource.token)) return undefined
         activeOpenResource = undefined
@@ -1429,8 +1414,8 @@ export function createChatViewStore(
           error: formatConversationOpenErrorMessage(error),
           conversationOpen: IDLE_CONVERSATION_OPEN
         })
-        return undefined
       }
+      return startStoredReplyFollowing()
     }
 
     /**
@@ -1442,15 +1427,15 @@ export function createChatViewStore(
      * reply's stream ends.
      * @remarks Opening the conversation already shown is ignored. Otherwise
      * the active request, if any, is invalidated first: the view stops
-     * following its reply, which is shown interrupted until the new
-     * conversation replaces it, while the backend keeps generating it. Its
-     * transport and any earlier open are aborted. The previous conversation
-     * stays visible until the read succeeds. A successful open clears the draft
-     * only if it still holds the text present when the open started, so text
-     * typed while opening is kept. When the opened conversation ends with a
-     * reply that is still generating, the store follows it. A missing
-     * conversation or a failed read leaves the previous conversation with an
-     * inline error.
+     * following its reply, whose text stays as last shown while the backend
+     * keeps generating it. Its transport and any earlier open are aborted. The
+     * previous conversation stays visible until the read succeeds. A
+     * successful open clears the draft only if it still holds the text present
+     * when the open started, so text typed while opening is kept. When the
+     * opened conversation ends with a reply that is still generating, the
+     * store follows it. A missing conversation or a failed read leaves the
+     * previous conversation with an inline error, and the store follows its
+     * reply again from a fresh snapshot when that reply is still generating.
      */
     async function openConversation(conversationId: string): Promise<void> {
       if (isConversationShown(conversationId)) return
@@ -1460,7 +1445,6 @@ export function createChatViewStore(
         abortController: new AbortController()
       }
       nextOpenToken += 1
-      const conversation = calculateInterruptedConversation()
       const conversationOpen: ConversationOpenState = {
         status: "opening",
         conversationId,
@@ -1471,7 +1455,6 @@ export function createChatViewStore(
       activeRequestResource = undefined
       activeOpenResource = resource
       set({
-        conversation,
         request: IDLE_CHAT_REQUEST,
         conversationOpen,
         error: undefined

@@ -82,6 +82,28 @@ changed `LYS_HOME`, prompt file, or limit takes effect after a restart. The
 attempt limit applies to each chat turn. The title length limit counts Unicode
 code points before surrounding whitespace is trimmed.
 
+### Backend configuration validation
+
+The backend validates the complete configuration with `backendConfigSchema` in
+`src/config.ts`. `loadBackendConfig()` validates the values it builds, and
+`buildApp()` validates the configuration it receives before it creates the
+application or any service. Every key is required, unknown keys are rejected,
+and no defaults are applied.
+
+| Key                                                     | Accepted values                                                                               |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `backendHost`                                           | An IPv4 loopback address (`127.x.x.x`); the backend does not authenticate non-browser callers |
+| `backendPort`, `lmstudioPort`                           | An integer from 1 to 65535                                                                    |
+| `lmstudioHost`                                          | A host name or IPv4 address, used unbracketed in the `http://` and `ws://` URLs               |
+| `databaseFilePath`                                      | An absolute path                                                                              |
+| `lysSystemPrompt`, `titleGenerationPrompt`              | Non-empty text without leading or trailing whitespace                                         |
+| `titleGenerationMaxAttempts`, `generatedTitleMaxLength` | A positive integer                                                                            |
+
+A value outside these rules stops the backend at startup with a `ZodError`
+whose issues name each failing key. The shared constants, the `LYS_HOME`
+database path, the trimmed prompt files, and the fixed limits above all satisfy
+them.
+
 ## Persisted settings JSON
 
 The Tauri host reads and writes `$LYS_HOME/settings.json`. A new file uses these

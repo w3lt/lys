@@ -104,14 +104,20 @@ export const backendConfigSchema = z
 export type BackendConfig = z.infer<typeof backendConfigSchema>
 
 /**
- * Loads the backend configuration from shared protocol constants, backend
- * limits, and the maintained prompt files.
+ * Loads the backend configuration from the `LYS_HOME` environment variable,
+ * shared protocol constants, backend limits, and the maintained prompt files.
  *
  * @returns A frozen configuration snapshot that satisfies the complete backend
- * configuration schema and whose prompts were read once during this call.
+ * configuration schema, whose database path is `lys_db.sqlite` in the
+ * `LYS_HOME` directory, and whose prompts were read once during this call.
+ * @throws If `LYS_HOME` is unset, empty, or not an absolute path, as
+ * described by {@link parseLysHome}.
  * @throws If a prompt file cannot be read or its trimmed contents are empty.
  * @throws {z.ZodError} If a setting is outside its domain; each issue names the
  * failing key.
+ * @remarks `LYS_HOME` has no backend default, and the backend does not create
+ * that directory. The desktop host sets it to its resolved absolute Lys home
+ * for the backend it starts.
  */
 export function loadBackendConfig(): BackendConfig {
   const lysHome = parseLysHome(process.env.LYS_HOME)

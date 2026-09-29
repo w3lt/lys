@@ -3,7 +3,7 @@ import type { DatabaseSync } from "node:sqlite"
 /**
  * Sets the conversation database's journal and sync policy on one connection.
  *
- * @param database - Newly opened connection, outside any transaction.
+ * @param database - Open connection, outside any transaction.
  * @throws If SQLite rejects either pragma.
  * @remarks Write-ahead logging lets each delta commit append to the `-wal`
  * file instead of rewriting and syncing a rollback journal, and readers do not

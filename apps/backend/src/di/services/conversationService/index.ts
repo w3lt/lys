@@ -38,21 +38,23 @@ export default class SqliteConversationStore {
    * @returns The ready store whose disposal belongs to the caller.
    * @throws If acquisition, migration, or recovery fails; acquired resources are released.
    * @remarks Recovery marks replies left streaming as interrupted without
-   * changing their conversations' activity time or history order. The
-   * connection uses write-ahead logging with `synchronous = NORMAL`; see
+   * changing their conversations' activity time or history order. After the
+   * migration accepts the stored version, the connection switches to
+   * write-ahead logging with `synchronous = NORMAL`, so a database from a
+   * newer version is refused unchanged; see
    * {@link updateConversationDatabaseDurability} for the durability trade-off.
    */
   public static open(databaseFilePath: PathLike): SqliteConversationStore {
     using lifetime = new DisposableStack()
     const database = lifetime.use(new DatabaseSync(databaseFilePath))
     database.exec("PRAGMA foreign_keys = ON")
-    updateConversationDatabaseDurability(database)
     database.function(
       "contains_search",
       { deterministic: true },
       calculateConversationSearchMatch
     )
     migrateDatabase(database)
+    updateConversationDatabaseDurability(database)
     database
       .prepare(
         `UPDATE conversation_messages SET status = 'interrupted', updated_at = ?

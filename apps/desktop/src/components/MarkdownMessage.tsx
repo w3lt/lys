@@ -22,17 +22,18 @@ type MarkdownMessageProps = {
   streaming: boolean
 }
 
-/** Properties accepted by the renderer-invoked code block projection. */
+/** Properties react-markdown supplies to the `code` element inside a `pre`. */
 type CodeElementProps = {
   /**
-   * Inline or block code children supplied by react-markdown, as Shiki token
-   * markup when the block's language is highlighted.
+   * Block code children supplied by react-markdown, as Shiki token markup
+   * when the block is highlighted.
    */
   children?: ReactNode
   /** Renderer class containing an optional `language-*` marker. */
   className?: string
 }
 
+/** Properties accepted by {@link CodeBlock}. */
 type CodeBlockProps = CodeElementProps & {
   /** Plain block text, without highlighting markup, that the copy button writes. */
   code: string
@@ -198,14 +199,16 @@ const markdownComponents: Components = {
  * attributes, `$…$` and `$$…$$` math renders through KaTeX, code blocks
  * receive the copy interaction, and the streaming caret is a polite status
  * announcement only while `streaming` is true.
- * Fenced code in a language Shiki bundles is highlighted with GitHub Light
- * token colors; the GitHub Dark colors are exposed only as `--shiki-dark`
- * custom properties for a stylesheet to apply. Other code stays unhighlighted.
- * Processing is asynchronous. The first pass in a session loads the shared
- * Shiki highlighter with every bundled language, and until a message's first
- * pass resolves it renders as plain Markdown without the link, math, and
- * code-block handling. Later passes keep the previous output visible until
- * the new text is processed.
+ * Shiki highlights fenced code with CSS `light-dark()` token colors from the
+ * GitHub Light and GitHub Dark themes, so highlighted code follows the
+ * inherited `color-scheme` without being highlighted again. Each language's
+ * grammar loads the first time a message uses it and stays loaded for the
+ * session. A fence naming a language Shiki does not bundle, compared
+ * case-sensitively, renders as plain `text`; a fence without a language stays
+ * unhighlighted. Processing is asynchronous: until a message's first pass
+ * resolves, it renders as plain Markdown without the link, math, and
+ * code-block handling. Later passes keep the previous output visible until the
+ * new text is processed.
  * @param props - Markdown source and current streaming presentation state.
  * @returns The rendered Markdown body and optional generation caret.
  */
@@ -216,6 +219,8 @@ export function MarkdownMessage({ text, streaming }: MarkdownMessageProps) {
         components={markdownComponents}
         remarkPlugins={[remarkMath]}
         rehypePlugins={[
+          // Display math arrives as `pre > code`, so KaTeX must claim it
+          // before Shiki treats it as a code block.
           rehypeKatex,
           [
             rehypeShiki,
@@ -226,6 +231,8 @@ export function MarkdownMessage({ text, streaming }: MarkdownMessageProps) {
               colorsRendering: "none",
               langs: [],
               lazy: true,
+              // Without a fallback, a lazily loaded unbundled language
+              // rejects the pass, and MarkdownHooks rethrows it on render.
               fallbackLanguage: "text"
             }
           ]

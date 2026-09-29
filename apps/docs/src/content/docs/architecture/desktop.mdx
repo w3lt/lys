@@ -58,16 +58,19 @@ open in a new tab without a referrer. `remark-math` and `rehype-katex` render
 `src/index.css` imports.
 
 Each fenced code block shows its language and a Copy button. Shiki
-(`@shikijs/rehype`) highlights a block whose language it bundles, using GitHub
-Light token colors; a block without a language, or in one Shiki does not
-bundle, stays unhighlighted and is labelled with its marker or `Text`. Copy
-writes the block's plain text without its final newline, never the
-highlighting markup.
+(`@shikijs/rehype`) highlights a block whose language it bundles, loading that
+language's grammar the first time a reply uses it. Token colors are CSS
+`light-dark()` pairs from the GitHub Light and GitHub Dark themes, so they
+follow the app's `color-scheme` and change with the theme without highlighting
+again. A block without a language, or in one Shiki does not bundle (names are
+case-sensitive, so `TS` is not `ts`), is labelled `Text` and shown without
+highlighting. Copy writes the block's plain text without its final newline,
+never the highlighting markup.
 
-Rendering is asynchronous. The first reply rendered in a session loads Shiki
-with every bundled language. Until a message's first pass finishes, it shows
-plain Markdown without the link, math, and code-block handling. While a reply
-streams, the previous rendering stays visible until the new text is processed.
+Rendering is asynchronous. Until a message's first pass finishes, it shows
+plain Markdown without the link, math, and code-block handling; the first
+reply in a session also waits for Shiki to start. While a reply streams, the
+previous rendering stays visible until the new text is processed.
 
 ## Conversation history
 

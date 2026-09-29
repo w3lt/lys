@@ -1,4 +1,5 @@
-import type { DatabaseSync, SQLOutputValue } from "node:sqlite"
+import type { SQLOutputValue } from "node:sqlite"
+import type { SqliteQueries } from "../../../infrastructure/database/sqliteDatabase"
 import * as z from "zod"
 import {
   listConversationsApi,
@@ -37,13 +38,13 @@ export function calculateConversationSearchMatch(
 
 /**
  * Reads a bounded summary page and both counts from one SQLite snapshot.
- * @param database - Borrowed connection in a caller-owned read transaction.
+ * @param database - Statement access inside the caller's read transaction.
  * @param options - Validated query, cursor binding, and page size.
  * @returns The strict history page with full preview text and an opaque continuation.
  * @throws If SQLite or stored-record validation fails.
  */
 export function listConversations(
-  database: DatabaseSync,
+  database: SqliteQueries,
   options: ConversationListOptions
 ): ListConversationsApiResponse {
   const { query, cursor, limit } = options

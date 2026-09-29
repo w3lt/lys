@@ -1,4 +1,4 @@
-import type { DatabaseSync } from "node:sqlite"
+import type { SqliteQueries } from "../../../infrastructure/database/sqliteDatabase"
 import {
   conversationMetadataSchema,
   conversationMessageSchema,
@@ -9,13 +9,13 @@ import {
 
 /**
  * Reads metadata without changing activity time.
- * @param database - Borrowed open connection.
+ * @param database - Statement access inside the caller's transaction.
  * @param conversationId - Stored UUIDv7 to look up.
  * @returns Independent metadata, or undefined for an absent conversation.
  * @throws If SQLite access or persisted validation fails.
  */
 export function getConversationMetadata(
-  database: DatabaseSync,
+  database: SqliteQueries,
   conversationId: string
 ): ConversationMetadata | undefined {
   const row = database
@@ -54,13 +54,13 @@ function parseConversationMessage(
 
 /**
  * Reads a full transcript in creation-time and UUID order.
- * @param database - Borrowed open connection in the caller's read transaction.
+ * @param database - Statement access inside the caller's transaction.
  * @param conversationId - Stored UUIDv7 to look up.
  * @returns Independent conversation data, or undefined when absent.
  * @throws If SQLite access or persisted validation fails.
  */
 export function getConversation(
-  database: DatabaseSync,
+  database: SqliteQueries,
   conversationId: string
 ): Conversation | undefined {
   const metadata = getConversationMetadata(database, conversationId)

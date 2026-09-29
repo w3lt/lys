@@ -1,4 +1,7 @@
 import type { BackendConfig } from "../config"
+import SqliteDatabase, {
+  type SqliteTransactions
+} from "../infrastructure/database/sqliteDatabase"
 import LmStudioRuntime from "../modules/llm/runtimes/lmStudioRuntime"
 import ChatService, {
   type ChatServiceCreationOptions
@@ -15,24 +18,37 @@ const CLOSE_SINGLETON_SERVICES = Symbol("close-singleton-services")
 /** Closes all resources owned by one singleton-service bundle. */
 type CloseSingletonServices = () => Promise<void>
 
-/** One newly acquired service paired with its exclusive cleanup capability. */
+/**
+ * One newly acquired service or shared resource paired with its exclusive
+ * cleanup capability.
+ */
 export type SingletonServiceAcquisition<Service> = Readonly<{
-  /** Service value transferred to the singleton bundle. */
+  /** Acquired value lent to the singleton bundle or to the services built on it. */
   service: Service
-  /** Releases every resource exclusively owned by the service. */
+  /** Releases every resource exclusively owned by the acquired value. */
   closeService: () => Promise<void>
 }>
 
-/** Factories for the three independently acquired application services. */
+/** Factories for the application services and the shared database they use. */
 export type SingletonServiceFactories = Readonly<{
   /** Creates the chat service for one OpenAI-compatible HTTP endpoint and its title settings. */
   createChatService: (
     options: ChatServiceCreationOptions
   ) => SingletonServiceAcquisition<ChatService>
-  /** Creates the conversation store for one database location. */
-  createConversationService: (
+  /**
+   * Opens and migrates the shared SQLite database at one location, lending only
+   * its transactions.
+   */
+  openDatabase: (
     databaseFilePath: BackendConfig["databaseFilePath"]
-  ) => SingletonServiceAcquisition<ConversationService>
+  ) => SingletonServiceAcquisition<SqliteTransactions>
+  /**
+   * Creates the conversation store on the shared database; the store owns
+   * nothing to release.
+   */
+  createConversationService: (
+    database: SqliteTransactions
+  ) => ConversationService
   /**
    * Creates the owned LLM runtime service for one LM Studio WebSocket endpoint
    * without contacting it.
@@ -46,6 +62,7 @@ export type SingletonServiceFactories = Readonly<{
 /** Production factories used when the composition root supplies no substitutes. */
 const DEFAULT_SINGLETON_SERVICE_FACTORIES = Object.freeze({
   createChatService,
+  openDatabase,
   createConversationService,
   createLlmRuntimeService
 } satisfies SingletonServiceFactories)
@@ -58,7 +75,7 @@ export type SingletonServices = Readonly<{
   llmService: LlmService
   /** LLM runtime connection and model-operation queue owned by the application. */
   llmRuntimeService: LlmRuntimeService
-  /** SQLite-backed conversation persistence owned by the application lifetime. */
+  /** Conversation persistence on the shared SQLite database. */
   conversationService: ConversationService
   /** Module-private cleanup capability for the complete owned service lifetime. */
   [CLOSE_SINGLETON_SERVICES]: CloseSingletonServices
@@ -68,16 +85,18 @@ export type SingletonServices = Readonly<{
  * Creates the application-scoped service bundle from backend network configuration.
  *
  * @param config - LM Studio host and port used to derive local service endpoints,
- * and the title-generation prompt and title length limit given to the chat
- * service.
+ * the SQLite database location, and the title-generation prompt and title
+ * length limit given to the chat service.
  * @param llmRuntimeFailureReporters - Receive the LLM runtime failures that no
  * caller observes, for logging.
  * @param factories - Service factories owned by the composition root.
  * @returns A promise resolving to the owned service bundle configured with the
- * HTTP `/v1` chat endpoint and WebSocket LM Studio endpoint. No service
- * contacts LM Studio during creation; the runtime service connects later.
- * @throws If service construction fails; every resource acquired before the
- * failure is closed before the rejection settles.
+ * HTTP `/v1` chat endpoint and WebSocket LM Studio endpoint. The bundle also
+ * owns the shared database, which only the services built on it can use. No
+ * service contacts LM Studio during creation; the runtime service connects
+ * later.
+ * @throws If service or database creation fails; every resource acquired before
+ * the failure is closed before the rejection settles.
  */
 export async function createSingletonServices(
   config: BackendConfig,
@@ -96,10 +115,11 @@ export async function createSingletonServices(
       factories.createChatService(chatServiceOptions)
     serviceLifetime.defer(chatServiceAcquisition.closeService)
 
-    const conversationServiceAcquisition = factories.createConversationService(
-      config.databaseFilePath
+    const databaseAcquisition = factories.openDatabase(config.databaseFilePath)
+    serviceLifetime.defer(databaseAcquisition.closeService)
+    const conversationService = factories.createConversationService(
+      databaseAcquisition.service
     )
-    serviceLifetime.defer(conversationServiceAcquisition.closeService)
 
     const llmRuntimeServiceAcquisition = factories.createLlmRuntimeService(
       `ws://${config.lmstudioHost}:${config.lmstudioPort}`,
@@ -121,7 +141,7 @@ export async function createSingletonServices(
       chatService: chatServiceAcquisition.service,
       llmService,
       llmRuntimeService: llmRuntimeServiceAcquisition.service,
-      conversationService: conversationServiceAcquisition.service,
+      conversationService,
       [CLOSE_SINGLETON_SERVICES]: closeOwnedSingletonServices
     })
   } catch (creationFailure) {
@@ -151,22 +171,36 @@ function createChatService(
 }
 
 /**
- * Creates the production conversation store for one database location.
+ * Opens the production shared SQLite database for one location.
  *
- * @param databaseFilePath - SQLite database location owned by the service.
- * @returns The newly owned conversation service and its cleanup capability.
- * @throws If the database cannot be opened, migrated, or prepared.
+ * @param databaseFilePath - SQLite location owned by the returned acquisition.
+ * @returns Transactional access for stores and the capability that closes the
+ * database.
+ * @throws If the database cannot be opened or migrated; nothing remains open.
  */
-function createConversationService(
+function openDatabase(
   databaseFilePath: BackendConfig["databaseFilePath"]
-): SingletonServiceAcquisition<ConversationService> {
-  const conversationService = ConversationService.open(databaseFilePath)
+): SingletonServiceAcquisition<SqliteTransactions> {
+  const database = SqliteDatabase.open(databaseFilePath)
   return Object.freeze({
-    service: conversationService,
+    service: database,
     closeService: async () => {
-      conversationService[Symbol.dispose]()
+      database[Symbol.dispose]()
     }
   })
+}
+
+/**
+ * Creates the production conversation store on the shared database.
+ *
+ * @param database - Migrated shared database borrowed for the store's lifetime.
+ * @returns The ready conversation service; it owns nothing to release.
+ * @throws If the database is closed or conversation setup fails.
+ */
+function createConversationService(
+  database: SqliteTransactions
+): ConversationService {
+  return ConversationService.create(database)
 }
 
 /**

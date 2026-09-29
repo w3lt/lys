@@ -27,8 +27,11 @@ Only the backend reads or writes the conversation database directly.
 | `conversation_messages` | `SqliteConversationStore` | Ordered user and assistant messages, including assistant `status`, `finish_reason`, and `model`. |
 
 The desktop does not query SQLite directly and the Tauri host does not proxy
-conversation SQL. The store lends separate history and turn capabilities, guards
-borrowed access after disposal, and remains open until chat handlers settle.
+conversation SQL. `SqliteDatabase` owns the single connection, its schema
+version, and its closure. It lends read and write transactions that cannot
+close the connection or end a transaction early, and rejects every call after
+closure. The conversation store builds separate history and turn capabilities
+on those transactions, and the database stays open until chat handlers settle.
 
 ## Migration model
 
@@ -39,8 +42,9 @@ On startup it:
 2. Acquires a write transaction and reads `PRAGMA user_version`.
 3. Rejects unsupported future versions or applies each missing migration in order.
 4. Records version 5 and commits; a migration failure rolls back all pending work.
-5. Changes remaining streaming assistants to interrupted with a fresh message
-   timestamp, without changing conversation activity time.
+5. Once the database is open, the conversation store changes remaining
+   streaming assistants to interrupted with a fresh message timestamp, without
+   changing conversation activity time.
 
 The current migrations create the two tables, add a message index, and install
 triggers that keep `conversations.updated_at` current. Historical migrations remain

@@ -1,14 +1,19 @@
 import type { DatabaseSync } from "node:sqlite"
 
+/** Connection capabilities needed to end a failed transaction. */
+type TransactionControl = Pick<DatabaseSync, "isTransaction" | "exec">
+
 /**
  * Rolls back an active transaction without discarding its original failure.
+ *
  * @param database - Borrowed connection whose operation failed.
  * @param failure - Original query, validation, or persistence failure.
- * @returns Never returns; preserves the original failure or both failures in an aggregate.
+ * @returns Never returns; preserves the original failure or both failures in
+ * an aggregate.
  * @throws The original failure, or an AggregateError if rollback also fails.
  */
-export function handleConversationTransactionFailure(
-  database: DatabaseSync,
+export function handleTransactionFailure(
+  database: TransactionControl,
   failure: unknown
 ): never {
   try {
@@ -16,7 +21,7 @@ export function handleConversationTransactionFailure(
   } catch (rollbackFailure) {
     throw new AggregateError(
       [failure, rollbackFailure],
-      "Conversation operation and rollback both failed",
+      "Database operation and rollback both failed",
       { cause: rollbackFailure }
     )
   }

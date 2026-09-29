@@ -19,7 +19,7 @@ export type BackendConfig = {
   /** Port used by backend LM Studio clients. */
   readonly lmstudioPort: number
   /**
-   * Filesystem path of the SQLite database owned by the conversation service.
+   * Filesystem path of the backend's shared SQLite database.
    *
    * @remarks `lys_db.sqlite` in the `LYS_HOME` directory. The backend does not
    * create that directory.

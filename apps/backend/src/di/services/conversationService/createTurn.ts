@@ -1,4 +1,4 @@
-import type { DatabaseSync } from "node:sqlite"
+import type { SqliteQueries } from "../../../infrastructure/database/sqliteDatabase"
 import { v7 as uuidv7 } from "uuid"
 import {
   conversationMetadataSchema,
@@ -12,13 +12,13 @@ import { ConversationNotFoundError } from "../../../utils/errors"
 
 /**
  * Creates metadata for a new empty conversation using the supplied system instruction.
- * @param database - Borrowed connection inside the turn transaction.
+ * @param database - Statement access inside the turn's write transaction.
  * @param systemPrompt - Default prompt loaded by the turn creator.
  * @returns The newly inserted independent conversation snapshot.
  * @throws If validation or insertion fails.
  */
 function createConversation(
-  database: DatabaseSync,
+  database: SqliteQueries,
   systemPrompt: string
 ): Conversation {
   const now = new Date().toISOString()
@@ -40,7 +40,7 @@ function createConversation(
 
 /**
  * Interrupts replies still streaming in a conversation that a new turn supersedes.
- * @param database - Borrowed connection inside the turn transaction.
+ * @param database - Statement access inside the turn's write transaction.
  * @param conversationId - Conversation receiving the turn; a missing one changes nothing.
  * @remarks A stopped request can finalize its reply after the client has already
  * sent the next turn. Interrupting it here keeps its partial text in the new
@@ -48,7 +48,7 @@ function createConversation(
  * write from the superseded generation.
  */
 function updateSupersededAssistantMessages(
-  database: DatabaseSync,
+  database: SqliteQueries,
   conversationId: string
 ): void {
   const updatedAt = new Date().toISOString()
@@ -62,7 +62,7 @@ function updateSupersededAssistantMessages(
 
 /**
  * Inserts a validated user/assistant pair inside the caller-owned transaction.
- * @param database - Borrowed connection with an active write transaction.
+ * @param database - Statement access inside the caller's write transaction.
  * @param options - Conversation selection and authored content.
  * @param systemPrompt - Default instruction used only for a new conversation.
  * @returns The conversation snapshot and both committed-to-transaction messages.
@@ -71,7 +71,7 @@ function updateSupersededAssistantMessages(
  * interrupted before the snapshot is read, so the new turn supersedes it.
  */
 export function createConversationTurn(
-  database: DatabaseSync,
+  database: SqliteQueries,
   options: CreateConversationTurnOptions,
   systemPrompt: string
 ): ConversationTurn {

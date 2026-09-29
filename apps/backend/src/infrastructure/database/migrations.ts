@@ -1,8 +1,8 @@
 import type { DatabaseSync } from "node:sqlite"
-import { handleConversationTransactionFailure } from "./transactionFailure"
+import { handleTransactionFailure } from "./transactionFailure"
 
 /**
- * Ordered SQLite schema migrations for the conversation store.
+ * Ordered schema migrations for the backend's `lys_db.sqlite` database.
  *
  * @remarks Each entry advances `PRAGMA user_version` by one and is applied
  * inside the transaction opened by {@link migrateDatabase}. Later migrations
@@ -140,7 +140,7 @@ const databaseMigrations = [
   `
 ] as const
 
-/** Latest schema version that this service can open and migrate. */
+/** Latest schema version that the backend can open and migrate. */
 const currentDatabaseVersion = databaseMigrations.length
 
 /**
@@ -197,6 +197,6 @@ export function migrateDatabase(database: DatabaseSync): void {
 
     database.exec("COMMIT")
   } catch (error) {
-    handleConversationTransactionFailure(database, error)
+    handleTransactionFailure(database, error)
   }
 }

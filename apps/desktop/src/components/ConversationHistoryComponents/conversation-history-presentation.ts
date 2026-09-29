@@ -2,8 +2,7 @@ import {
   type ConversationHistoryEntry,
   type ConversationHistoryListState,
   type ConversationRowInteraction,
-  findTextMatch,
-  parseConversationSearchQuery
+  findTextMatch
 } from "@/lib/store/conversation-history"
 
 /** Calendar group an entry falls into, relative to when history opened. */
@@ -222,23 +221,6 @@ export function buildExcerptSegments(
 }
 
 /**
- * Reports whether the displayed entries answer the typed search.
- *
- * @param list - Current list state.
- * @param query - Search text exactly as typed.
- * @returns Whether a page is displayed and was read for the typed text once
- * trimmed; a page kept on screen while another search is read does not.
- */
-export function isListAnsweringQuery(
-  list: ConversationHistoryListState,
-  query: string
-): boolean {
-  if (list.status !== "loaded") return false
-
-  return list.page.query === parseConversationSearchQuery(query)
-}
-
-/**
  * Decides whether one scroll of the result region requests older entries.
  *
  * @param isNearListEnd - Whether the region is now scrolled near its end.
@@ -295,12 +277,12 @@ export function formatConversationHistoryHint(
 ): string {
   switch (rowInteraction.kind) {
     case "editing-title":
-      return `enter saves · esc cancels · up to ${maximumTitleLength} characters`
+      return `Enter saves · ESC cancels · Up to ${maximumTitleLength} characters`
     case "confirming-delete":
-      return "deleting cannot be undone · esc keeps it"
+      return "Deleting cannot be undone · ESC keeps it"
     case "none":
       return list.status === "loaded" && list.page.storedCount === 0
-        ? "anything you send is kept here"
-        : "arrows move · enter continues · f2 renames"
+        ? "Anything you send is kept here"
+        : "Arrows move · Enter continues · F2 renames"
   }
 }

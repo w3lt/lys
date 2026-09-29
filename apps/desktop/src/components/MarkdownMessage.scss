@@ -61,11 +61,9 @@
   text-underline-offset: 3px;
 }
 
-.markdown-message :not(.markdown-message__block-code) > code,
+.markdown-message code:not(.markdown-message__block-code),
 .markdown-message > code {
   background: var(--app-surface-code);
-  border: 1px solid var(--app-border-default);
-  border-radius: var(--radius-detail);
   color: var(--app-text-code);
   font-family: var(--font-mono);
   font-size: 0.86em;
@@ -98,7 +96,6 @@
   justify-content: space-between;
   letter-spacing: 0.16em;
   padding: 4px 8px;
-  text-transform: uppercase;
 }
 
 .markdown-message__block-code {

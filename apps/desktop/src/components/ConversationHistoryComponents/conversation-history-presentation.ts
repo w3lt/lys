@@ -295,12 +295,12 @@ export function formatConversationHistoryHint(
 ): string {
   switch (rowInteraction.kind) {
     case "editing-title":
-      return `enter saves · esc cancels · up to ${maximumTitleLength} characters`
+      return `Enter saves · ESC cancels · Up to ${maximumTitleLength} characters`
     case "confirming-delete":
-      return "deleting cannot be undone · esc keeps it"
+      return "Deleting cannot be undone · ESC keeps it"
     case "none":
       return list.status === "loaded" && list.page.storedCount === 0
-        ? "anything you send is kept here"
-        : "arrows move · enter continues · f2 renames"
+        ? "Anything you send is kept here"
+        : "Arrows move · Enter continues · F2 renames"
   }
 }

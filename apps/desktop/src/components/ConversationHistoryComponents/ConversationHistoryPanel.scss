@@ -120,7 +120,6 @@
 .conversation-history__group-label {
   margin: 0;
   padding: 14px 12px 6px;
-  text-transform: lowercase;
 }
 
 .conversation-history__list {
@@ -442,7 +441,6 @@
   font-family: var(--font-mono);
   font-size: 9.5px;
   letter-spacing: 0.18em;
-  text-transform: uppercase;
   white-space: nowrap;
   text-overflow: ellipsis;
   color: var(--app-text-faint);

@@ -4,6 +4,7 @@
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/geist-mono";
 @import "./components/ui/wingline.scss";
+@import "katex/dist/katex.min.css";
 
 @custom-variant dark (&:is(.dark *));
 

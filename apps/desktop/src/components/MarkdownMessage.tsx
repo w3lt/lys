@@ -4,6 +4,8 @@ import { Copy } from "lucide-react"
 import { upperFirst } from "lodash"
 import { Button } from "@/components/ui/button"
 import rehypeShiki from "@shikijs/rehype"
+import remarkMath from "remark-math"
+import rehypeKatex from "rehype-katex"
 
 import "./MarkdownMessage.scss"
 
@@ -177,10 +179,15 @@ export function MarkdownMessage({ text, streaming }: MarkdownMessageProps) {
     <div className="markdown-message">
       <MarkdownHooks
         components={markdownComponents}
+        remarkPlugins={[remarkMath]}
         rehypePlugins={[
+          rehypeKatex,
           [
             rehypeShiki,
-            { themes: { dark: "github-dark", light: "github-light" } }
+            {
+              themes: { dark: "github-dark", light: "github-light" },
+              addLanguageClass: true
+            }
           ]
         ]}
         fallback={<ReactMarkdown>{text}</ReactMarkdown>}

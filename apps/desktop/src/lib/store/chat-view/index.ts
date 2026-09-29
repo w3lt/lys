@@ -780,6 +780,40 @@ export function createChatViewStore(
     }
 
     /**
+     * Handles a reply generation failure reported by the backend.
+     *
+     * @param event - Error event carrying the user-presentable message.
+     * @param token - Token expected to own the reply.
+     * @remarks The backend stores the reply as failed before sending this
+     * event, which ends the reply, so a streaming reply becomes failed and the
+     * request moves to `reply-completed` while a title may still arrive. The
+     * message is recorded inline in every request state.
+     */
+    function handleChatErrorEvent(
+      event: Extract<ChatGenerationEvent, { type: "error" }>,
+      token: number
+    ): void {
+      const request = getOwnedRequest(token)
+      if (request.status !== "reply-streaming") {
+        set({ error: event.message })
+        return
+      }
+
+      const conversation = updateIncompleteAssistantReplyStatus(
+        get().conversation,
+        request,
+        "failed"
+      )
+      const completedRequest = {
+        status: "reply-completed",
+        token,
+        assistantMessageId: request.assistantMessageId
+      } satisfies ChatRequestState
+
+      set({ conversation, request: completedRequest, error: event.message })
+    }
+
+    /**
      * Applies the stored snapshot that starts a followed reply's stream.
      *
      * @param event - Snapshot of the followed reply and its conversation title.
@@ -852,8 +886,8 @@ export function createChatViewStore(
      * @param event - Title, delta, final, or error event of the reply.
      * @param token - Token whose ownership authorizes event side effects.
      * @throws If an in-order handler detects an invariant violation.
-     * @remarks An `error` event records the latest inline error. The backend
-     * sends nothing but a possible `title` after the reply's final event.
+     * @remarks Exactly one of `done`, `interrupted`, or `error` ends the
+     * reply; the backend sends nothing but a possible `title` after it.
      */
     function handleChatGenerationEvent(
       event: ChatGenerationEvent,
@@ -873,7 +907,7 @@ export function createChatViewStore(
           handleChatInterruptedEvent(token)
           return
         case "error":
-          set({ error: event.message })
+          handleChatErrorEvent(event, token)
           return
       }
     }

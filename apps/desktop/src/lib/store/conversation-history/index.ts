@@ -921,13 +921,15 @@ export function createConversationHistoryStore(
      *
      * @returns A promise resolving with the first displayed conversation that
      * is not being deleted, once any delayed read commits or is superseded;
-     * undefined when history closed, the page does not answer the query typed
-     * by then, or nothing listed can be opened.
+     * undefined when history closed, the typed query changed meanwhile, the
+     * page does not answer the typed query, or nothing listed can be opened.
      * @remarks A read already sent is not awaited; the displayed page is used
      * as it is, so nothing is found while it answers an earlier query.
      */
     async function loadFirstConversationId(): Promise<string | undefined> {
+      const typedQuery = get().query
       if (isListReadDelayed()) await loadConversationHistory()
+      if (get().query !== typedQuery) return undefined
 
       return findFirstConversationId()
     }

@@ -2,8 +2,7 @@ import {
   type ConversationHistoryEntry,
   type ConversationHistoryListState,
   type ConversationRowInteraction,
-  findTextMatch,
-  parseConversationSearchQuery
+  findTextMatch
 } from "@/lib/store/conversation-history"
 
 /** Calendar group an entry falls into, relative to when history opened. */
@@ -219,23 +218,6 @@ export function buildExcerptSegments(
     match: text.slice(match.start, match.end),
     after: text.slice(match.end)
   }
-}
-
-/**
- * Reports whether the displayed entries answer the typed search.
- *
- * @param list - Current list state.
- * @param query - Search text exactly as typed.
- * @returns Whether a page is displayed and was read for the typed text once
- * trimmed; a page kept on screen while another search is read does not.
- */
-export function isListAnsweringQuery(
-  list: ConversationHistoryListState,
-  query: string
-): boolean {
-  if (list.status !== "loaded") return false
-
-  return list.page.query === parseConversationSearchQuery(query)
 }
 
 /**

@@ -19,7 +19,6 @@ import {
   type ConversationHistoryGroup,
   formatConversationHistoryCount,
   formatConversationTitle,
-  isListAnsweringQuery,
   shouldRequestOlderConversations
 } from "./conversation-history-presentation"
 
@@ -49,6 +48,11 @@ export type ConversationHistoryBrowserProps = {
   ) => void
   /** Requests that the parent open a conversation in the chat view. */
   readonly onOpenConversation: (conversationId: string) => void
+  /**
+   * Requests that the parent open the first conversation listed for the
+   * typed search.
+   */
+  readonly onOpenFirstConversation: () => void
   /** Requests that the parent persist a changed, trimmed, non-empty title. */
   readonly onUpdateConversationTitle: (
     conversationId: string,
@@ -140,18 +144,17 @@ function formatOlderPageStatus(list: ConversationHistoryListState): string {
  * domain action; this component owns only the open-button registry, the
  * pending focus request used to move focus, and whether the last scroll ended
  * near the list end. Rows are grouped by local calendar day relative to
- * `referenceTimeMs` and keep list order. Enter in the search opens the first
- * row only once the rows answer the typed search, and is ignored while an
- * earlier search's rows are still shown. Arrow Down from the search moves to
- * the first openable row and Enter there opens it; Arrow Up and Arrow Down
- * move between rows, Arrow Up from the first row returns to the search, and
- * Arrow Down on the last row or scrolling near the end requests older
- * entries, which join any read already in progress; after an older read
- * fails, scrolling retries it only on returning to the end. Renaming and
- * confirming deletion replace one row at a time. Submitting or cancelling a
- * rename and keeping a conversation return focus to that row; confirming
- * deletion first moves focus to the next row, the previous row, or the
- * search. A title is requested only when it changed and is not blank.
+ * `referenceTimeMs` and keep list order. Enter in the search asks the parent
+ * to open the first conversation for the typed search. Arrow Down from the
+ * search moves to the first openable row and Enter there opens it; Arrow Up
+ * and Arrow Down move between rows, Arrow Up from the first row returns to
+ * the search, and Arrow Down on the last row or scrolling near the end
+ * requests older entries, which join any read already in progress; after an
+ * older read fails, scrolling retries it only on returning to the end.
+ * Renaming and confirming deletion replace one row at a time. Submitting or
+ * cancelling a rename and keeping a conversation return focus to that row;
+ * confirming deletion first moves focus to the next row, the previous row, or
+ * the search. A title is requested only when it changed and is not blank.
  * Loading, empty, no-match, and failure messages replace the rows, and the
  * region is marked busy while its rows are being replaced.
  * @param props - List state, interaction state, focus target, and actions.
@@ -169,6 +172,7 @@ export default function ConversationHistoryBrowser({
   onQueryChange,
   onRowInteractionChange,
   onOpenConversation,
+  onOpenFirstConversation,
   onUpdateConversationTitle,
   onDeleteConversation,
   onRetryConversationHistory,
@@ -243,18 +247,6 @@ export default function ConversationHistoryBrowser({
   /** Moves focus from the search field to the first openable row. */
   function handleSearchFieldArrowDown(): void {
     findOpenButton(0, 1)?.focus()
-  }
-
-  /**
-   * Opens the first listed conversation that is not being deleted, once the
-   * displayed entries answer the typed search.
-   */
-  function handleSearchFieldEnter(): void {
-    if (!isListAnsweringQuery(list, query)) return
-    const firstEntry = entries.find(
-      (entry) => findPendingOperation(pendingMutations, entry.id) !== "delete"
-    )
-    if (firstEntry !== undefined) onOpenConversation(firstEntry.id)
   }
 
   /**
@@ -544,7 +536,7 @@ export default function ConversationHistoryBrowser({
         hintId={hintId}
         onCloseConversationHistory={onCloseConversationHistory}
         onFocusFirstConversation={handleSearchFieldArrowDown}
-        onOpenFirstConversation={handleSearchFieldEnter}
+        onOpenFirstConversation={onOpenFirstConversation}
         onQueryChange={onQueryChange}
         query={query}
         resultCountLabel={formatConversationHistoryCount(list)}

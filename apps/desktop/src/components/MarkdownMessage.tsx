@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import ReactMarkdown, { type Components } from "react-markdown"
 import { Copy } from "lucide-react"
-
+import { upperFirst } from "lodash"
 import { Button } from "@/components/ui/button"
 
 import "./MarkdownMessage.scss"
@@ -33,7 +33,7 @@ function getCodeLanguage(className?: string) {
     ?.split(" ")
     .find((value) => value.startsWith("language-"))
 
-  return languageClass?.slice("language-".length) || "text"
+  return upperFirst(languageClass?.slice("language-".length) || "Text")
 }
 
 /**

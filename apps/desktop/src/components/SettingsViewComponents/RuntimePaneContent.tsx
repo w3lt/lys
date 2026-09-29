@@ -1,13 +1,15 @@
 import type { ReactElement } from "react"
+import LmStudioStatusCard from "./LmStudioStatusCard"
 import ModelRequestFeedback from "./ModelRequestFeedback"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import {
-  backendStatusLabel,
-  backendStatusTone,
+  calculateBackendStatusTone,
+  formatBackendStatusLabel,
   formatUptime,
   useBackendUptimeMs
 } from "@/lib/hooks/backendRuntime"
+import { calculateModelRuntimeAvailability } from "@/lib/models/lm-studio-connection"
 import {
   formatModelResidencyHeading,
   formatModelResidencyMeta,
@@ -41,25 +43,32 @@ function formatBackendMeta(
       return `${backendAddress} · stopping`
     case "stopped":
       return `${backendAddress} · not running`
+    case "unresponsive":
+      return `${backendAddress} · process is up but not answering`
   }
 }
 
 /**
- * Presents backend lifecycle controls, autostart, and model residency.
+ * Presents backend lifecycle controls, autostart, LM Studio status, and model
+ * residency.
  *
  * @remarks The application store owns
- * backend status and the start/stop commands; the settings context owns the
- * persisted settings and the model lifecycle requests. Start and Stop
+ * backend status, the LM Studio status, and the start, stop, and LM Studio
+ * connect commands; the settings context owns the persisted settings and the
+ * model lifecycle requests. Start, Stop, and the LM Studio refresh
  * intentionally discard their command promises with `void`: failures are not
  * awaited or rendered here, so a rejection surfaces as an unhandled rejection
- * and backend status is not a completion owner when a command rejects. The
- * autostart switch proposes one patch per checked change.
+ * and backend status is not a completion owner when a command rejects. Stop is
+ * available while the backend runs or is not responding. The autostart switch
+ * proposes one patch per checked change.
  *
- * The model card projects the settings context's residency state. While a
- * transition is in flight the card is marked busy and carries an indeterminate
- * progress indicator: the API reports completion without progress, so no percentage is
- * claimed. Both lifecycle actions are withheld during a transition, and Load
- * additionally requires a running backend and a chosen default model.
+ * The LM Studio card sits under the backend card and owns the only reconnect
+ * action. The model card projects the settings context's residency state and
+ * is dimmed unless LM Studio is connected. While a transition is in flight the
+ * card is marked busy and carries an indeterminate progress indicator: the API
+ * reports completion without progress, so no percentage is claimed. Both
+ * lifecycle actions are withheld during a transition and require a connected
+ * LM Studio; Load additionally requires a chosen default model.
  *
  * @returns The runtime backend and model cards.
  */
@@ -67,6 +76,8 @@ export default function RuntimePaneContent(): ReactElement {
   const backendServerInfo = useLysStore((state) => state.backendServerInfo)
   const startBackend = useLysStore((state) => state.startBackend)
   const stopBackend = useLysStore((state) => state.stopBackend)
+  const lmStudioStatus = useLysStore((state) => state.lmStudioStatus)
+  const connectLmStudio = useLysStore((state) => state.connectLmStudio)
   const uptimeMs = useBackendUptimeMs()
   const {
     settings,
@@ -80,6 +91,12 @@ export default function RuntimePaneContent(): ReactElement {
 
   const backendStatus = backendServerInfo.status
   const isRunning = backendStatus === "running"
+  const isStoppable = isRunning || backendStatus === "unresponsive"
+  const availability = calculateModelRuntimeAvailability(
+    backendStatus,
+    lmStudioStatus
+  )
+  const isModelRuntimeAvailable = availability === "available"
   const autoStart = settings.runtime.autoStartBackend
   const defaultModel = settings.runtime.defaultModel
   const loadedModelKey = readLoadedModelKey(modelRuntime)
@@ -99,10 +116,10 @@ export default function RuntimePaneContent(): ReactElement {
             <span
               aria-hidden="true"
               className="settings-view__status-dot"
-              data-tone={backendStatusTone(backendStatus)}
+              data-tone={calculateBackendStatusTone(backendStatus)}
             />
             <div className="settings-view__identity-lines">
-              <h2>{backendStatusLabel(backendStatus)}</h2>
+              <h2>{formatBackendStatusLabel(backendStatus)}</h2>
               <p className="settings-view__meta">
                 {formatBackendMeta(
                   backendStatus,
@@ -124,7 +141,7 @@ export default function RuntimePaneContent(): ReactElement {
               Start
             </Button>
             <Button
-              disabled={!isRunning}
+              disabled={!isStoppable}
               onClick={() => {
                 void stopBackend()
               }}
@@ -158,10 +175,18 @@ export default function RuntimePaneContent(): ReactElement {
         </div>
       </section>
 
+      <LmStudioStatusCard
+        backendStatus={backendStatus}
+        lmStudioStatus={lmStudioStatus}
+        onRefreshLmStudioStatus={() => {
+          void connectLmStudio()
+        }}
+      />
+
       <section
         aria-busy={isTransitioning}
         className="settings-view__card"
-        data-dimmed={isRunning ? undefined : ""}
+        data-dimmed={isModelRuntimeAvailable ? undefined : ""}
       >
         <div className="settings-view__card-row">
           <div className="settings-view__identity">
@@ -175,7 +200,7 @@ export default function RuntimePaneContent(): ReactElement {
               <p className="settings-view__meta">
                 {formatModelResidencyMeta(
                   modelRuntime,
-                  backendStatus,
+                  availability,
                   defaultModel
                 )}
               </p>
@@ -184,7 +209,7 @@ export default function RuntimePaneContent(): ReactElement {
           <div className="settings-view__actions">
             <Button
               disabled={
-                !isRunning ||
+                !isModelRuntimeAvailable ||
                 isModelBusy ||
                 !defaultEntry ||
                 defaultEntry.loaded
@@ -198,7 +223,11 @@ export default function RuntimePaneContent(): ReactElement {
               Load
             </Button>
             <Button
-              disabled={!isRunning || isModelBusy || loadedModelKey === null}
+              disabled={
+                !isModelRuntimeAvailable ||
+                isModelBusy ||
+                loadedModelKey === null
+              }
               onClick={() => {
                 if (loadedModelKey) void onUnloadModel(loadedModelKey)
               }}
@@ -211,12 +240,13 @@ export default function RuntimePaneContent(): ReactElement {
         </div>
 
         {isTransitioning ? (
-          /* The backend acknowledges completion without percentage progress. */
-          <div
-            aria-label={residencyHeading}
-            className="settings-view__progress"
-            role="progressbar"
-          >
+          /*
+           * The backend acknowledges completion without percentage progress, so
+           * the native bar stays indeterminate. It carries the semantics while
+           * the track draws the sweep, which a native bar cannot render.
+           */
+          <div className="settings-view__progress">
+            <progress aria-label={residencyHeading} className="sr-only" />
             <span aria-hidden="true" className="settings-view__progress-fill" />
           </div>
         ) : null}

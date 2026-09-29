@@ -3,6 +3,10 @@ import {
   llmServiceBusyProblemSchema,
   type LlmServiceBusyProblem
 } from "../../http/errors/llmServiceBusy"
+import {
+  llmRuntimeUnavailableProblemSchema,
+  type LlmRuntimeUnavailableProblem
+} from "../../http/errors/llm"
 import { llmInfoSchema } from "./_share"
 import { apiLlmListModelsRoute } from "./routes"
 
@@ -14,10 +18,16 @@ export const llmListModelsApiResponseSchema = z
   })
   .readonly()
 
+/** Validates service-unavailable responses from the inventory endpoint. */
+const llmListModelsApiServiceUnavailableResponseSchema = z.union([
+  llmServiceBusyProblemSchema,
+  llmRuntimeUnavailableProblemSchema
+])
+
 /** Selects the inventory response validator by HTTP status. */
 const llmListModelsApiResponseSchemas = Object.freeze({
   200: llmListModelsApiResponseSchema,
-  503: llmServiceBusyProblemSchema
+  503: llmListModelsApiServiceUnavailableResponseSchema
 })
 
 /**
@@ -27,6 +37,8 @@ const llmListModelsApiResponseSchemas = Object.freeze({
  * changing its method, path, or response schema changes the transmitted
  * compatibility contract and requires coordinated consumers. Service-busy
  * responses mean the inventory operation was refused before queue acceptance.
+ * Runtime-unavailable responses mean the backend has no connected LLM runtime;
+ * no inventory query ran, or the runtime stopped answering during it.
  */
 export const llmListModelsApi = Object.freeze({
   method: "GET",
@@ -43,12 +55,12 @@ export type LlmListModelsApiResponse = z.infer<
 export type LlmListModelsApiReply = {
   /** Downloaded-model inventory with its observed loaded state. */
   readonly 200: LlmListModelsApiResponse
-  /** The inventory operation was refused before acceptance. */
-  readonly 503: LlmServiceBusyProblem
+  /** The inventory was refused before acceptance, or no LLM runtime is connected. */
+  readonly 503: LlmServiceBusyProblem | LlmRuntimeUnavailableProblem
 }
 
 /** Fastify route type for the model-list response. */
 export type LlmListModelsApiRoute = {
-  /** Status-specific inventory and admission-rejection payloads. */
+  /** Status-specific inventory and service-unavailable payloads. */
   readonly Reply: LlmListModelsApiReply
 }

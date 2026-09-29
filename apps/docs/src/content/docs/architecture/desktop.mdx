@@ -14,8 +14,10 @@ presentation state, not durable conversation storage.
 | Area                | Current implementation                                                                                                       |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
 | App shell           | `App.tsx` swaps between chat and settings views and runs startup initialization.                                             |
-| Chat UI             | `ChatView` renders the transcript, composer, and jump-to-latest controls.                                                    |
-| Chat state          | `src/lib/store/chat-view` owns the active conversation, request lifecycle, abort controller, and error presentation.         |
+| Chat UI             | `ChatView` renders the transcript, composer, jump-to-latest controls, and the past-conversations dialog.                     |
+| Message rendering   | `MarkdownMessage` renders assistant replies as Markdown with KaTeX math and highlighted, copyable code blocks.               |
+| Chat state          | `src/lib/store/chat-view` owns the active conversation, request lifecycle, conversation opening, and error presentation.     |
+| History state       | `src/lib/store/conversation-history` owns the past-conversations dialog, its search and pages, and rename and delete calls.  |
 | Shell/runtime state | `src/lib/store/index.ts` tracks which view is open, whether the backend is running, and settings loaded from Tauri.          |
 | Model lifecycle     | `src/lib/store/model-actions.ts` owns real inventory, load, unload, and health requests shared by settings and the composer. |
 | SSE consumption     | `src/lib/apis/http/chat.ts` opens `POST /api/v1/chat`, parses SSE frames, validates them with Zod, and yields typed events.  |
@@ -23,16 +25,17 @@ presentation state, not durable conversation storage.
 
 ## Chat state split
 
-The desktop currently has two separate state systems:
+The desktop currently has three separate state systems:
 
-| Store               | Owns                                                                                                             |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Chat Zustand store  | Active conversation, current request token, local abort controller, streamed assistant deltas, inline error text |
-| Shell Zustand store | Active top-level view, loaded runtime settings, backend process status, startup progress                         |
+| Store                 | Owns                                                                                                                           |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Chat Zustand store    | Active conversation, request and open tokens, local abort controllers, streamed assistant deltas, inline error text            |
+| History Zustand store | Dialog visibility, search query, displayed conversation pages, the row being renamed or confirmed, pending renames and deletes |
+| Shell Zustand store   | Active top-level view, loaded runtime settings, backend process status, startup progress                                       |
 
-This means the chat transcript shown in the window is reconstructed from backend
-events during the current app session, while shell state such as backend status
-is managed independently.
+The transcript shown in the window is built from backend events for the current
+request, or from the stored transcript read when a past conversation is opened.
+Shell state such as backend status is managed independently.
 
 ## Streaming path
 
@@ -43,15 +46,86 @@ is managed independently.
 5. The store applies `start-*`, `delta`, `done`, `title`, or `error` events to
    local immutable conversation state.
 
-The desktop does not maintain a replay log or reconnect protocol. If the app is
-closed, the current UI state is lost and must be rebuilt by future backend
-features.
+The desktop does not maintain a replay log or reconnect protocol. If the app
+closes during a reply, that stream is lost; the backend keeps the reply's
+persisted text, and the conversation can be reopened from history.
+
+## Assistant message rendering
+
+`MarkdownMessage` renders each assistant reply with `react-markdown`. Links
+open in a new tab without a referrer. `remark-math` and `rehype-katex` render
+`$…$` inline math and `$$…$$` display math with KaTeX, whose stylesheet
+`src/index.css` imports.
+
+Each fenced code block shows its language and a Copy button. Shiki
+(`@shikijs/rehype`) highlights a block whose language it bundles, loading that
+language's grammar the first time a reply uses it. Token colors are CSS
+`light-dark()` pairs from the GitHub Light and GitHub Dark themes, so they
+follow the app's `color-scheme` and change with the theme without highlighting
+again. A block without a language, or in one Shiki does not bundle (names are
+case-sensitive, so `TS` is not `ts`), is labelled `Text` and shown without
+highlighting. Copy writes the block's plain text without its final newline,
+never the highlighting markup.
+
+Rendering is asynchronous. Until a message's first pass finishes, it shows
+plain Markdown without the link, math, and code-block handling; the first
+reply in a session also waits for Shiki to start. While a reply streams, the
+previous rendering stays visible until the new text is processed.
+
+## Conversation history
+
+The Past conversations button in the composer, or Command+K or Control+K,
+toggles a history dialog above the composer. Opening it reads the first page
+of `GET /api/v1/conversations`, 30 entries at a time. Typing in the search
+field reads again with the trimmed query after a 200 ms pause in typing, so
+the backend receives one list request per pause rather than per keystroke.
+Enter in the search field reads a search still waiting for that pause at once
+and then opens its first row. Older pages load on request.
+Rows can be renamed in place or deleted after confirmation through the
+conversation `PATCH` and `DELETE` routes. While the backend is not running,
+these actions fail inline without sending a request.
+
+Closing the dialog cancels a pending list read and saves a changed title that
+is still being edited. Renames and deletions already sent continue after the
+dialog closes and record their outcome.
+
+Choosing a row closes the dialog and opens that conversation. The chat store
+first interrupts any active reply, then reads
+`GET /api/v1/conversations/:conversationId`. The previous conversation stays
+visible until the read succeeds, and no message can be sent while it is
+pending. A missing conversation or failed read keeps the previous conversation
+and shows an inline error. The next message sends the opened conversation's
+`conversationId`, so the backend continues it. Deleting the conversation the
+chat view presents, or learning that it no longer exists, resets the view to a
+new conversation.
+
+## Backend and LM Studio status
+
+The shell store tracks three facts separately. The Tauri host reports whether
+the backend process exists. The store reports the backend as `running` only
+after `GET /api/v1/heath` answers: it checks every 250 ms, each check bounded
+to one second, for up to 30 seconds, and shows **Backend not responding**
+(`unresponsive`) when the process stays alive without answering. Once the
+backend runs, the store reads `GET /api/v1/llm/runtime`, joining the backend's
+startup attempt through `POST /api/v1/llm/runtime/connect` while it is still
+`connecting`.
+
+The Runtime pane's LM Studio card shows `unknown`, `connecting`, `connected`,
+or `unreachable` with the address `127.0.0.1:1234`. Its **Refresh** button is
+the only control that asks the backend to reconnect. A failed model request
+re-reads the status, so a lost LM Studio appears as not reachable without
+polling. The composer banner names the first missing prerequisite—the
+backend, LM Studio, or model weights—and opens the settings pane that fixes
+it. `initialize` shows the shell as soon as settings load; the backend starts
+in the background.
 
 ## Model settings
 
-The shell store refreshes `GET /api/v1/llm/list` after backend initialization,
-startup, and entry into settings. A manual Refresh action picks up changes made
-in LM Studio. Inventory metadata and each model's `loaded` flag drive the model
+The shell store refreshes `GET /api/v1/llm/list` when LM Studio becomes
+connected and on entry into settings while it stays connected. While LM Studio
+is not connected, the model list is empty, model actions are disabled, and the
+pane explains how to recover. A manual Refresh action picks up changes made in
+LM Studio. Inventory metadata and each model's `loaded` flag drive the model
 rows and composer menu; several models may be loaded at once.
 
 Load sends `{ modelId }` to `POST /api/v1/llm/load`. Unload sends the same body
@@ -109,10 +183,14 @@ does not coordinate with external editors of the settings file.
 - The load API accepts only `modelId`. Model settings explain that LM Studio
   controls the load-time context size. The retained local context budget is
   used for composer estimates and is not a confirmed runtime configuration.
-- Model observations refresh on startup, entry into settings, manual refresh,
-  and model operations. Changes made by another LM Studio client between those
-  observations are not pushed to the desktop.
-- Restoring prior conversations after relaunch is not implemented.
+- Model observations refresh on LM Studio connection, entry into settings,
+  manual refresh, and model operations. The LM Studio status changes only on
+  backend start, Refresh, and failed model requests; it is not polled. Changes
+  made by another LM Studio client between observations are not pushed to the
+  desktop.
+- The composer's attachment tray stages files and long pastes for its local
+  context estimate only. The chat protocol has no attachment field, so staged
+  attachments are never sent.
 
 ## Related pages
 

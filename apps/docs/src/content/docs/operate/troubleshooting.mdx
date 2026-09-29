@@ -25,31 +25,40 @@ For the desktop-managed path:
 
 - confirm the runtime pane reports `stopped` rather than `starting`
 - start the backend from that pane
-- the pane switches to `running` when the owned child is reported running;
-  uptime and the displayed address do not prove HTTP readiness
+- the pane switches to `running` only after `GET /api/v1/heath` answers; if
+  the process stays up without answering for 30 seconds, it shows **Backend
+  not responding**. Press **Stop**, then **Start**
 - verify `GET /api/v1/heath` responds at `http://127.0.0.1:12345`
 
-If the listener is unavailable, inspect the backend output. Startup requires
-LM Studio at `127.0.0.1:1234`; its readiness query completes before the backend
-listens. Start LM Studio and restart the backend after a readiness failure.
-For standalone startup, also ensure `~/.lys/` exists as described in
+If the listener is unavailable, inspect the backend output. LM Studio is not
+required for the backend to listen. For standalone startup, also ensure
+`LYS_HOME` is set to an absolute path and its directory exists as described in
 [Running Lys locally](/develop/running/).
+
+## LM Studio is not reachable
+
+The Runtime pane's LM Studio card shows **LM Studio not reachable** when the
+backend cannot connect to `127.0.0.1:1234`, and the model list stays empty.
+Start LM Studio and its local server, then press **Refresh** on that card. The
+backend does not retry on its own.
 
 ## The backend starts but model operations fail
 
 The backend is wired to LM Studio at `127.0.0.1:1234`. If model listing,
 loading, or chat requests fail after HTTP readiness was established, verify
-that LM Studio is still reachable. The
+that LM Studio is still reachable. When LM Studio stops while connected, the
+next failing model request marks it not reachable; press **Refresh** after
+restarting it. The
 [model health endpoint](/operate/logging/#model-health-observation) can report
 loaded state; it does not test inference success.
 
 ## Lys forgets runtime settings
 
-The desktop host owns `~/.lys/settings.json`, but the checked-in desktop UI
+The desktop host owns `$LYS_HOME/settings.json`, but the checked-in desktop UI
 currently loads settings without calling the Tauri save command after runtime
 setting edits. If runtime preferences do not survive a restart:
 
-- check whether `~/.lys/settings.json` exists
+- check whether `$LYS_HOME/settings.json` exists
 - if it exists, verify that it contains valid JSON
 - if it does not exist, the host should recreate it the next time settings are
   loaded
@@ -66,6 +75,18 @@ The conversation service reads SQLite `PRAGMA user_version` on startup and
 refuses to open a database newer than the running binary supports. If a startup
 failure mentions an unsupported database version, use a matching or newer build
 rather than editing the database by hand.
+
+## The desktop app exits at startup or uses another data directory
+
+The desktop host resolves `LYS_HOME` once at startup. A relative path,
+including an unexpanded `~/…`, or a value that is not valid UTF-8 stops the app
+before any window opens and prints `Lys cannot start: …` to standard error. That
+message is visible only when the app is started from a terminal. Set `LYS_HOME`
+to an absolute path, or unset it to use `~/.lys`.
+
+An app opened from Finder or the Dock does not see a `LYS_HOME` exported in a
+shell profile, so it uses `~/.lys`. See the
+[Lys home directory](/reference/configuration/#lys-home-directory) reference.
 
 ## Known gaps
 

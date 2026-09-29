@@ -11,6 +11,7 @@ import {
 import SettingsPaneFrame from "@/components/SettingsViewComponents/SettingsPaneFrame"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { type BackendServerStatus, useLysStore } from "@/lib/store"
+import type { LmStudioStatus } from "@/lib/store/lm-studio-status"
 import type { ModelRuntimeState } from "@/lib/store/model-runtime"
 
 import "./SettingsView.scss"
@@ -73,7 +74,7 @@ const SETTINGS_PANES: readonly SettingsPaneDescriptor[] = [
     ordinal: "01",
     note: "Start the server, then load the weights. Nothing runs until you say so.",
     footNote:
-      "Starting launches the Lys backend. Model weights are managed separately by LM Studio; stopping the backend does not unload them.",
+      "Starting launches the Lys backend, which then connects to LM Studio. Lys doesn't start LM Studio for you; model weights are managed by LM Studio, and stopping the backend does not unload them.",
     contentComponent: RuntimePaneContent
   },
   {
@@ -102,17 +103,63 @@ const SETTINGS_RAIL_ITEMS: readonly SettingsRailItem[] = SETTINGS_PANES.map(
 )
 
 /**
+ * Formats the rail summary for a backend that is not running.
+ *
+ * @param backendStatus - Store-owned backend lifecycle state other than `running`.
+ * @returns The backend state, matching the Runtime pane's backend card.
+ */
+function formatRailBackendStatus(
+  backendStatus: Exclude<BackendServerStatus, "running">
+): string {
+  switch (backendStatus) {
+    case "stopped":
+      return "backend stopped"
+    case "starting":
+      return "backend starting"
+    case "stopping":
+      return "backend stopping"
+    case "unresponsive":
+      return "backend not responding"
+  }
+}
+
+/**
+ * Formats the rail summary for a running backend without a connected LM Studio.
+ *
+ * @param lmStudioStatus - Latest published LM Studio status other than `connected`.
+ * @returns The LM Studio state, matching the Runtime pane's LM Studio card.
+ */
+function formatRailLmStudioStatus(
+  lmStudioStatus: Exclude<LmStudioStatus, "connected">
+): string {
+  switch (lmStudioStatus) {
+    case "unknown":
+      return "backend up · LM Studio status unknown"
+    case "connecting":
+      return "backend up · connecting to LM Studio"
+    case "unreachable":
+      return "backend up · LM Studio not reachable"
+  }
+}
+
+/**
  * Formats the one-line runtime summary shown under the settings rail.
  *
- * @param backendStatus - Store-owned backend process lifecycle state.
+ * @param backendStatus - Store-owned backend lifecycle state.
+ * @param lmStudioStatus - Latest published LM Studio status.
  * @param modelRuntime - Current weight residency state.
- * @returns The rail's summary of the backend and its weights.
+ * @returns The rail's summary of the first missing prerequisite—the backend,
+ * then LM Studio—or of the weights once both are available.
  */
 function formatRailStatus(
   backendStatus: BackendServerStatus,
+  lmStudioStatus: LmStudioStatus,
   modelRuntime: ModelRuntimeState
 ): string {
-  if (backendStatus !== "running") return "backend stopped"
+  if (backendStatus !== "running") return formatRailBackendStatus(backendStatus)
+  if (lmStudioStatus !== "connected") {
+    return formatRailLmStudioStatus(lmStudioStatus)
+  }
 
   switch (modelRuntime.status) {
     case "loaded":
@@ -163,6 +210,7 @@ export default function SettingsView({
   const settings = useLysStore((state) => state.settings)
   const setSettings = useLysStore((state) => state.setSettings)
   const backendStatus = useLysStore((state) => state.backendServerInfo.status)
+  const lmStudioStatus = useLysStore((state) => state.lmStudioStatus)
   const modelRuntime = useLysStore((state) => state.modelRuntime)
   const loadModel = useLysStore((state) => state.loadModel)
   const unloadModel = useLysStore((state) => state.unloadModel)
@@ -219,7 +267,11 @@ export default function SettingsView({
     ]
   )
 
-  const railStatus = formatRailStatus(backendStatus, modelRuntime)
+  const railStatus = formatRailStatus(
+    backendStatus,
+    lmStudioStatus,
+    modelRuntime
+  )
 
   return (
     <main aria-label="Settings" className="settings-view">

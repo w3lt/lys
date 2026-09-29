@@ -5,7 +5,6 @@ import {
   type LlmInfo,
   type LlmLoadModelApiResponse
 } from "@lys/protocol"
-import { createLlmServiceBusyError } from "../../modules/llm/llmServiceBusyError"
 import {
   getLlmModelHealth,
   type LlmModelHealthOutcome
@@ -25,94 +24,65 @@ import type { LlmEngine } from "../../modules/llm/llmEngine"
 import type { DownloadedLlmModel } from "../../modules/llm/llmRuntimeTypes"
 
 /**
- * Runtime capabilities exclusively owned by {@link LlmService}.
+ * One model operation performed against the connected engine.
  *
- * @remarks Model operations follow {@link LlmEngine}; disposal follows the
- * runtime lifecycle contract supplied at construction. Lifecycle observation
- * remains outside the service because it does not participate in service policy.
+ * @typeParam Result - Result produced by the operation.
  */
-interface LlmServiceRuntime extends LlmEngine, AsyncDisposable {}
+export type LlmEngineOperation<Result> = (
+  llmEngine: LlmEngine
+) => Promise<Result>
+
+/**
+ * Serializes model operations against the connected LLM engine for {@link LlmService}.
+ *
+ * @remarks Implementations are ready when injected and own the runtime,
+ * capacity, ordering, and cleanup. Accepted operations run one at a time in
+ * admission order with at most eight waiting; the provider owns accepted work
+ * until it settles, independently of the requesting client. No completion
+ * deadline is guaranteed.
+ */
+export interface LlmEngineOperationQueue {
+  /**
+   * Performs one model operation after earlier accepted work settles.
+   *
+   * @typeParam Result - Result produced by the operation.
+   * @param operation - Operation receiving an engine valid until it settles.
+   * @returns The operation's result.
+   * @throws `The LLM runtime is closed.` after cleanup begins.
+   * @throws A runtime-unavailable error recognized by
+   * [isLlmRuntimeUnavailableError](../../modules/llm/llmRuntimeUnavailableError.ts)
+   * when no runtime is connected, or when a failed runtime call revealed that
+   * the runtime stopped answering (the error retains the original failure).
+   * @throws A service-busy error when the queue is full; the operation is not accepted.
+   * @throws The operation's own failure otherwise.
+   * @remarks A resolved result is returned even when the runtime is released
+   * after the operation because one of its runtime calls failed.
+   */
+  handleLlmEngineOperationRequest<Result>(
+    operation: LlmEngineOperation<Result>
+  ): Promise<Result>
+}
 
 /** Dependencies supplied when creating an application-scoped LLM service. */
 export type LlmServiceCreationOptions = {
-  /** Ready runtime that the caller must no longer operate or dispose after construction. */
-  readonly runtime: LlmServiceRuntime
+  /** Borrowed queue that serializes every model operation against the connected runtime. */
+  readonly llmEngineOperationQueue: LlmEngineOperationQueue
   /** Monotonic millisecond clock; defaults to the process performance clock. */
   readonly readMonotonicTimeMs?: () => number
 }
 
-/** Lifecycle state that prevents work after runtime cleanup begins. */
-type LlmServiceState =
-  | Readonly<{
-      /** The service accepts model operations. */
-      status: "ready"
-    }>
-  | Readonly<{
-      /** Cleanup is waiting for queued work or releasing the client. */
-      status: "closing"
-      /** Shared completion joined by concurrent cleanup calls. */
-      completion: Promise<void>
-    }>
-  | Readonly<{
-      /** Cleanup settled and model operations are permanently rejected. */
-      status: "closed"
-      /** Settled cleanup result reused by repeated cleanup calls. */
-      completion: Promise<void>
-    }>
-
-/** Ready service state established before input validation or queue admission. */
-type ReadyLlmServiceState = Extract<LlmServiceState, { status: "ready" }>
-
 /**
- * Work accepted by the serialized application operation queue.
+ * Applies model policy to operations serialized by the LLM runtime queue.
  *
- * @typeParam Result - Immutable result or owned value produced by the work.
- */
-type LlmServiceOperation<Result> = () => Promise<Result>
-
-/** Private admission count and completion tail for the service's FIFO queue. */
-type LlmServiceQueueState = {
-  /** Completion of every accepted operation, preserving progress after failure. */
-  completion: Promise<void>
-  /** Accepted operations that have not settled, including the active operation. */
-  acceptedOperationCount: number
-}
-
-/**
- * Inclusive service capacity: one active operation and eight waiting operations.
- *
- * @remarks The first operation reserves the active position at admission, before
- * its execution microtask starts. Excess requests are rejected without waiting.
- */
-const MAX_ACCEPTED_LLM_SERVICE_OPERATIONS = 9
-
-/** Initial state for an LLM service that can accept model operations. */
-const READY_LLM_SERVICE_STATE = Object.freeze({
-  status: "ready"
-} as const satisfies LlmServiceState)
-
-/** Stable failure text for model operations requested after cleanup begins. */
-const CLOSED_LLM_SERVICE_MESSAGE = "The LLM runtime is closed."
-
-/**
- * Owns one LLM runtime for serialized model loading, inventory, and stopping.
- *
- * @remarks The instance
- * exclusively owns the supplied runtime and coordinates complete application
- * operations through its provider-independent contract. Its invariant is
- * `ready -> closing -> closed`; cleanup is terminal and idempotent.
- * Concurrency model: serialized;
- * accepted model operations run one at a time in admission order, with at most
- * eight additional operations waiting. Excess requests fail before admission
- * with a recognized service-busy error. Cleanup waits for all accepted work.
- * By product design, users cannot cancel accepted loads or unloads. This service
- * owns queued and active model operations independently of client connections,
- * including inventory queries needed to finish each operation. No completion
- * deadline is enforced; a dependency that never settles also prevents cleanup
- * from completing.
+ * @remarks Owns no mutable state or resource. It borrows the operation queue,
+ * whose owner holds the runtime, admits work only while connected, and
+ * enforces capacity, ordering, completion ownership, and cleanup. Each
+ * operation composes its policy with the engine supplied for that operation.
+ * By product design, users cannot cancel accepted loads or unloads.
+ * Concurrency model: reentrant; overlapping calls are serialized by the
+ * borrowed queue, not by this class.
  * Implements {@link LlmModelHealthReader}, {@link LlmModelInventory},
- * {@link LlmModelLoader}, and {@link LlmModelStopper} through the same owned
- * runtime and lifecycle.
+ * {@link LlmModelLoader}, and {@link LlmModelStopper}.
  */
 export default class LlmService
   implements
@@ -121,220 +91,108 @@ export default class LlmService
     LlmModelLoader,
     LlmModelStopper
 {
-  /** Exclusively owned model runtime; only this service may dispose it. */
-  readonly #runtime: LlmServiceRuntime
+  /** Borrowed queue that owns the runtime and every accepted operation. */
+  readonly #llmEngineOperationQueue: LlmEngineOperationQueue
 
   /** Borrowed monotonic clock used only around admitted health queries. */
   readonly #readMonotonicTimeMs: () => number
 
-  /** Exclusively owned admission accounting and terminal observation for queued work. */
-  readonly #operationQueue: LlmServiceQueueState = {
-    completion: Promise.resolve(),
-    acceptedOperationCount: 0
-  }
-
-  /** Authoritative lifecycle state controlling work admission and cleanup. */
-  #state: LlmServiceState = READY_LLM_SERVICE_STATE
-
   /**
-   * Creates a ready service and takes exclusive ownership of its runtime.
+   * Creates a ready service over a borrowed operation queue.
    *
-   * @param options - Ready runtime whose ownership transfers and optional borrowed clock.
+   * @param options - Borrowed queue and optional monotonic clock.
    */
-  constructor({
-    runtime,
+  public constructor({
+    llmEngineOperationQueue,
     readMonotonicTimeMs = readPerformanceNowMs
   }: LlmServiceCreationOptions) {
-    this.#runtime = runtime
+    this.#llmEngineOperationQueue = llmEngineOperationQueue
     this.#readMonotonicTimeMs = readMonotonicTimeMs
   }
 
   /**
-   * Implements {@link LlmModelHealthReader.getLlmModelHealth} through its owned runtime.
+   * Implements {@link LlmModelHealthReader.getLlmModelHealth} through the queue.
    *
-   * @param modelKey - Raw canonical-key candidate validated after lifecycle observation and before admission.
+   * @param modelKey - Raw canonical-key candidate validated before queue admission.
    * @returns A promise resolving to validated immutable health and internal diagnostics.
-   * @throws If the candidate is empty or exceeds the protocol limit, response
-   * validation fails, queue capacity is exhausted, or cleanup has begun;
-   * inventory failure is represented by a `runtime-unavailable` outcome.
-   * @remarks Queue waiting is excluded from measured latency. The service owns
-   * accepted health work through settlement after client disconnect.
+   * @throws If the candidate is empty or exceeds the protocol limit, before any
+   * lifecycle or connection check; otherwise the queue's closed,
+   * runtime-unavailable, and service-busy failures. Inventory failure is
+   * represented by a `runtime-unavailable` outcome.
+   * @remarks Queue waiting is excluded from measured latency.
    */
   public async getLlmModelHealth(
     modelKey: string
   ): Promise<LlmModelHealthOutcome> {
-    this.#getReadyLlmServiceState()
     const { modelId } = llmTestModelApiParamsSchema.parse({ modelId: modelKey })
-    return await this.#handleLlmServiceOperationRequest(
-      async () =>
+    return await this.#llmEngineOperationQueue.handleLlmEngineOperationRequest(
+      async (llmEngine) =>
         await getLlmModelHealth(
           modelId,
-          async () => await this.#runtime.listLoadedLlmModelInstances(),
+          async () => await llmEngine.listLoadedLlmModelInstances(),
           this.#readMonotonicTimeMs
         )
     )
   }
 
   /**
-   * Implements {@link LlmModelLoader.loadLlmModel} through its owned runtime.
+   * Implements {@link LlmModelLoader.loadLlmModel} through the queue.
    *
-   * @param modelKeyOrAlias - Model key or alias for the attached runtime to resolve.
+   * @param modelKeyOrAlias - Model key or alias for the connected runtime to resolve.
    * @returns A promise resolving to a validated immutable model snapshot after
    * the runtime loads the model and its canonical key is found in inventory.
-   * @throws If loading or inventory fails, the canonical model is absent from
-   * inventory, application response validation fails, queue capacity is exhausted,
-   * or cleanup has begun.
-   * @remarks The service owns the full load and inventory-query lifetime;
-   * client disconnect does not cancel accepted work.
+   * @throws If loading or inventory fails, the canonical model is absent,
+   * response validation fails, or the queue rejects the operation.
    */
   public async loadLlmModel(
     modelKeyOrAlias: string
   ): Promise<LlmLoadModelApiResponse> {
-    return await this.#handleLlmServiceOperationRequest(
-      async () =>
+    return await this.#llmEngineOperationQueue.handleLlmEngineOperationRequest(
+      async (llmEngine) =>
         await loadRuntimeLlmModel(
           modelKeyOrAlias,
-          async (selection) => await this.#runtime.loadLlmModel(selection),
-          async () => await this.#runtime.listDownloadedLlmModels()
+          async (selection) => await llmEngine.loadLlmModel(selection),
+          async () => await llmEngine.listDownloadedLlmModels()
         )
     )
   }
 
   /**
-   * Implements {@link LlmModelInventory.listLlmModels} through its owned runtime.
+   * Implements {@link LlmModelInventory.listLlmModels} through the queue.
    *
    * @returns A promise resolving to snapshots ordered by ascending canonical model key.
-   * @throws If an inventory query fails, queue capacity is exhausted, or cleanup has begun.
-   * @remarks The service owns both completion-only inventory queries until
-   * they settle, including after the requesting client disconnects.
+   * @throws If an inventory query fails or the queue rejects the operation.
    */
   public async listLlmModels(): Promise<readonly LlmInfo[]> {
-    return await this.#handleLlmServiceOperationRequest(
-      async () =>
+    return await this.#llmEngineOperationQueue.handleLlmEngineOperationRequest(
+      async (llmEngine) =>
         await listLlmModels(
-          async () => await this.#runtime.listDownloadedLlmModels(),
-          async () => await this.#runtime.listLoadedLlmModelInstances()
+          async () => await llmEngine.listDownloadedLlmModels(),
+          async () => await llmEngine.listLoadedLlmModelInstances()
         )
     )
   }
 
   /**
-   * Implements {@link LlmModelStopper.stopLlmModelsByKey} through its owned runtime.
+   * Implements {@link LlmModelStopper.stopLlmModelsByKey} through the queue.
    *
    * @param modelKey - Canonical model key shared by the instances to stop.
    * @returns A promise resolving to the immutable outcome from a fresh reconciliation snapshot.
-   * @throws If queue capacity is exhausted or cleanup has begun; runtime-operation
-   * failures are represented in the returned outcome.
-   * @remarks Accepted work remains owned by the service through stop attempts
-   * and reconciliation; client disconnect does not cancel it.
+   * @throws If the queue rejects the operation; runtime-operation failures are
+   * represented in the returned outcome.
    */
   public async stopLlmModelsByKey(
     modelKey: string
   ): Promise<StopLlmModelsByKeyOutcome> {
-    return await this.#handleLlmServiceOperationRequest(
-      async () =>
+    return await this.#llmEngineOperationQueue.handleLlmEngineOperationRequest(
+      async (llmEngine) =>
         await stopLlmModelsByKey(
           modelKey,
-          async () => await this.#runtime.listLoadedLlmModelInstances(),
+          async () => await llmEngine.listLoadedLlmModelInstances(),
           async (identifier) =>
-            await this.#runtime.stopLoadedLlmModelInstance(identifier)
+            await llmEngine.stopLoadedLlmModelInstance(identifier)
         )
     )
-  }
-
-  /**
-   * Disposes the owned runtime after every accepted operation settles.
-   *
-   * @returns A promise shared by concurrent and repeated cleanup calls.
-   * @throws If the owned runtime cannot release its resources; the service remains terminally closed.
-   * @remarks Cleanup is idempotent and rejects every model operation requested after it begins.
-   */
-  public async [Symbol.asyncDispose](): Promise<void> {
-    if (this.#state.status !== "ready") {
-      await this.#state.completion
-      return
-    }
-
-    const cleanupCompletion = this.#operationQueue.completion.then(
-      async () => await this.#runtime[Symbol.asyncDispose]()
-    )
-    this.#state = Object.freeze({
-      status: "closing",
-      completion: cleanupCompletion
-    })
-
-    try {
-      await cleanupCompletion
-    } finally {
-      this.#state = Object.freeze({
-        status: "closed",
-        completion: cleanupCompletion
-      })
-    }
-  }
-
-  /**
-   * Adds one model operation to the service's serialized work queue.
-   *
-   * @param operation - Deferred operation that accesses the owned runtime.
-   * @returns A promise resolving to the operation result after earlier accepted work settles.
-   * @throws If cleanup has begun, queue capacity is exhausted, or the operation rejects.
-   * @remarks Admission reserves capacity synchronously. Completion releases it
-   * on success or failure before the caller observes the operation's outcome.
-   */
-  #handleLlmServiceOperationRequest<Result>(
-    operation: LlmServiceOperation<Result>
-  ): Promise<Result> {
-    this.#getReadyLlmServiceState()
-
-    if (
-      this.#operationQueue.acceptedOperationCount >=
-      MAX_ACCEPTED_LLM_SERVICE_OPERATIONS
-    ) {
-      return Promise.reject(createLlmServiceBusyError())
-    }
-
-    this.#operationQueue.acceptedOperationCount += 1
-    const operationResult = this.#operationQueue.completion.then(
-      async () => await this.#handleAcceptedLlmServiceOperation(operation)
-    )
-    this.#operationQueue.completion = operationResult.then(
-      () => undefined,
-      () => undefined
-    )
-    return operationResult
-  }
-
-  /**
-   * Gets the ready lifecycle state or rejects every operation after cleanup begins.
-   *
-   * @returns The current ready state authorizing validation and queue admission.
-   * @throws The canonical closed-runtime failure after cleanup begins.
-   */
-  #getReadyLlmServiceState(): ReadyLlmServiceState {
-    if (this.#state.status !== "ready") {
-      throw new Error(CLOSED_LLM_SERVICE_MESSAGE)
-    }
-
-    return this.#state
-  }
-
-  /**
-   * Completes one accepted operation and releases its reserved queue capacity.
-   *
-   * @typeParam Result - Result returned by the accepted operation.
-   * @param operation - Accepted work whose predecessors have settled.
-   * @returns The original operation result after its capacity is released.
-   * @throws The original operation failure after its capacity is released.
-   */
-  async #handleAcceptedLlmServiceOperation<Result>(
-    operation: LlmServiceOperation<Result>
-  ): Promise<Result> {
-    try {
-      return await operation()
-    } finally {
-      this.#operationQueue.acceptedOperationCount -= 1
-    }
   }
 }
 

@@ -10,8 +10,10 @@ import handleLlmServiceRequestFailure from "./handleLlmServiceRequestFailure"
  * @param app - Application instance that receives the LLM load route.
  * @returns A promise that resolves after route registration completes.
  * @throws If Fastify cannot register the route.
- * @remarks Refused queue admission returns service-busy Problem Details.
- * Other service failures remain owned by Fastify's parent error boundary.
+ * @remarks Refused queue admission returns service-busy Problem Details, and a
+ * missing or lost LLM runtime connection returns runtime-unavailable Problem
+ * Details. Other service failures remain owned by Fastify's parent error
+ * boundary.
  */
 export default async function updateFastifyWithLlmModelLoadRoute(
   app: FastifyInstance
@@ -49,8 +51,10 @@ export default async function updateFastifyWithLlmModelLoadRoute(
  * @param llmModelLoader - Application capability that performs the model load.
  * @returns A promise resolving to validated metadata for the canonical loaded model.
  * @throws If the service cannot load or enumerate models, the canonical model
- * is absent from inventory, admission is refused, or application cleanup has
- * begun. The route boundary translates only recognized admission rejection.
+ * is absent from inventory, admission is refused, no LLM runtime is connected
+ * or it stopped answering, or application cleanup has begun. The route
+ * boundary translates only the recognized service-busy and runtime-unavailable
+ * failures.
  */
 async function handleLlmModelLoadRequest(
   request: FastifyRequest<LlmLoadModelApiRoute>,

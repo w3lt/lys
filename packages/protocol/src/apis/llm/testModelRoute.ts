@@ -3,6 +3,10 @@ import {
   llmServiceBusyProblemSchema,
   type LlmServiceBusyProblem
 } from "../../http/errors/llmServiceBusy"
+import {
+  llmRuntimeUnavailableProblemSchema,
+  type LlmRuntimeUnavailableProblem
+} from "../../http/errors/llm"
 import { apiLlmTestModelRoute } from "./routes"
 
 /** Maximum decoded key length accepted by the Fastify path router. */
@@ -47,10 +51,16 @@ export const llmTestModelApiResponseSchema = z.discriminatedUnion("status", [
     .readonly()
 ])
 
+/** Validates service-unavailable responses from the model-health endpoint. */
+const llmTestModelApiServiceUnavailableResponseSchema = z.union([
+  llmServiceBusyProblemSchema,
+  llmRuntimeUnavailableProblemSchema
+])
+
 /** Selects the model-health response validator by HTTP status. */
 const llmTestModelApiResponseSchemas = Object.freeze({
   200: llmTestModelApiResponseSchema,
-  503: llmServiceBusyProblemSchema
+  503: llmTestModelApiServiceUnavailableResponseSchema
 })
 
 /**
@@ -59,6 +69,8 @@ const llmTestModelApiResponseSchemas = Object.freeze({
  * @remarks A 200 response is a fresh inventory observation and is not proof of
  * future inference success. Service-busy responses mean the query was refused
  * before queue acceptance. The backend owns accepted work after disconnect.
+ * Runtime-unavailable responses mean the backend has no connected LLM runtime;
+ * no health query ran, or the runtime stopped answering during it.
  */
 export const llmTestModelApi = Object.freeze({
   method: "GET",
@@ -78,14 +90,14 @@ export type LlmTestModelApiResponse = z.infer<typeof llmTestModelApi.response>
 export type LlmTestModelApiReply = {
   /** Fresh loaded-state observation produced by an accepted health query. */
   readonly 200: LlmTestModelApiResponse
-  /** The health query was refused before acceptance. */
-  readonly 503: LlmServiceBusyProblem
+  /** The health query was refused before acceptance, or no LLM runtime is connected. */
+  readonly 503: LlmServiceBusyProblem | LlmRuntimeUnavailableProblem
 }
 
 /** Fastify route type for model-health parameters and responses. */
 export type LlmTestModelApiRoute = {
   /** Validated canonical model key supplied to the backend handler. */
   readonly Params: LlmTestModelApiParams
-  /** Status-specific health observation and admission-rejection payloads. */
+  /** Status-specific health observation and service-unavailable payloads. */
   readonly Reply: LlmTestModelApiReply
 }

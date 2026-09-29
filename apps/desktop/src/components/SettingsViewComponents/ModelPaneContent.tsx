@@ -1,12 +1,57 @@
-import type { ReactElement } from "react"
+import { useId, type ReactElement } from "react"
 
 import { Button } from "@/components/ui/button"
+import { Tooltip } from "@/components/ui/tooltip"
 import { buildModelDescriptor } from "@/lib/models/inventory"
+import {
+  calculateModelRuntimeAvailability,
+  LM_STUDIO_UNREACHABLE_MESSAGE,
+  type ModelRuntimeAvailability
+} from "@/lib/models/lm-studio-connection"
 import { useLysStore } from "@/lib/store"
+import type {
+  ModelInventoryState,
+  ModelRequestState
+} from "@/lib/store/model-runtime"
 
 import ModelRow from "./ModelRow"
 import ModelRequestFeedback from "./ModelRequestFeedback"
 import { useSettingsContext } from "./SettingsContext"
+
+/**
+ * Formats the empty-state explanation for the model inventory.
+ *
+ * @param availability - Whether model requests can reach LM Studio, and why not.
+ * @param inventoryStatus - Latest inventory observation status.
+ * @param requestStatus - Current model request status.
+ * @returns The first applicable reason, checked in order: the backend is not
+ * running, LM Studio is connecting, LM Studio is not reachable, the inventory
+ * read failed, models are being listed, LM Studio has no downloaded language
+ * models, or the inventory has not been read yet.
+ */
+function formatModelInventoryEmptyMessage(
+  availability: ModelRuntimeAvailability,
+  inventoryStatus: ModelInventoryState["status"],
+  requestStatus: ModelRequestState["status"]
+): string {
+  if (availability === "backend-offline") {
+    return "Start the backend to list models."
+  }
+  if (availability === "lm-studio-connecting") {
+    return "Connecting to LM Studio…"
+  }
+  if (availability === "lm-studio-unreachable") {
+    return LM_STUDIO_UNREACHABLE_MESSAGE
+  }
+  if (inventoryStatus === "failed") {
+    return "Model inventory is unavailable. Refresh to try again."
+  }
+  if (requestStatus === "listing") return "Reading models from LM Studio…"
+  if (inventoryStatus === "ready") {
+    return "No downloaded language models found in LM Studio."
+  }
+  return "Refresh to list downloaded models."
+}
 
 /**
  * Presents the downloaded inventory and the default-model selection.
@@ -14,9 +59,14 @@ import { useSettingsContext } from "./SettingsContext"
  * @remarks Requires SettingsContext and the
  * application store. The store owns requests, errors, and inventory; refreshing
  * prevents overlapping actions. Multiple models may be loaded independently.
+ * Model actions require a running backend and a connected LM Studio. While LM
+ * Studio is not reachable the list is empty, Refresh is disabled, and a
+ * pointer tooltip plus `aria-describedby` repeat the empty-state explanation.
  */
 function ModelInventoryPanel(): ReactElement {
   const backendStatus = useLysStore((state) => state.backendServerInfo.status)
+  const lmStudioStatus = useLysStore((state) => state.lmStudioStatus)
+  const emptyMessageId = useId()
   const {
     settings,
     modelInventory,
@@ -28,34 +78,45 @@ function ModelInventoryPanel(): ReactElement {
     onTestModel,
     onRefreshModels
   } = useSettingsContext()
-  const disabled = backendStatus !== "running" || modelRequest.status !== "idle"
+  const availability = calculateModelRuntimeAvailability(
+    backendStatus,
+    lmStudioStatus
+  )
+  const isLmStudioUnreachable = availability === "lm-studio-unreachable"
+  const disabled =
+    availability !== "available" || modelRequest.status !== "idle"
   const models =
     modelInventory.status === "ready"
       ? modelInventory.models.map(buildModelDescriptor)
       : []
-  const emptyMessage =
-    backendStatus !== "running"
-      ? "Start the backend to list models."
-      : modelInventory.status === "failed"
-        ? "Model inventory is unavailable. Refresh to try again."
-        : modelRequest.status === "listing"
-          ? "Reading models from LM Studio…"
-          : modelInventory.status === "ready"
-            ? "No downloaded language models found in LM Studio."
-            : "Refresh to list downloaded models."
+  const emptyMessage = formatModelInventoryEmptyMessage(
+    availability,
+    modelInventory.status,
+    modelRequest.status
+  )
+  const refreshButton = (
+    <Button
+      aria-describedby={isLmStudioUnreachable ? emptyMessageId : undefined}
+      disabled={disabled}
+      onClick={() => void onRefreshModels()}
+      size="sm"
+      type="button"
+      variant="outline"
+    >
+      Refresh
+    </Button>
+  )
   return (
     <section className="settings-view__section">
       <div className="settings-view__section-heading">
         <h2>models</h2>
-        <Button
-          disabled={disabled}
-          onClick={() => void onRefreshModels()}
-          size="sm"
-          type="button"
-          variant="outline"
-        >
-          Refresh
-        </Button>
+        {isLmStudioUnreachable ? (
+          <Tooltip description={LM_STUDIO_UNREACHABLE_MESSAGE}>
+            {refreshButton}
+          </Tooltip>
+        ) : (
+          refreshButton
+        )}
       </div>
       <ul
         className="settings-view__model-list"
@@ -77,7 +138,9 @@ function ModelInventoryPanel(): ReactElement {
         ))}
       </ul>
       {models.length === 0 ? (
-        <p className="settings-view__note">{emptyMessage}</p>
+        <p className="settings-view__note" id={emptyMessageId}>
+          {emptyMessage}
+        </p>
       ) : null}
       <ModelRequestFeedback />
       <p className="settings-view__note">

@@ -28,11 +28,12 @@ pnpm dev
 ## What each command does
 
 - `pnpm docs:dev`: starts the Astro/Starlight docs app.
-- `pnpm backend:dev`: runs `tsx watch src/index.ts` in `apps/backend`.
+- `pnpm backend:dev`: runs `tsx watch src/index.ts` in `apps/backend` with
+  `LYS_HOME` set to `$HOME/.lys`.
 - `pnpm dev`: runs `pnpm --filter @lys/desktop run tauri dev`, which starts the
   desktop Vite app and the Tauri shell.
 
-For standalone backend development, create the database parent directory before
+For standalone backend development, create the Lys home directory before
 starting the watcher:
 
 ```sh
@@ -40,9 +41,15 @@ mkdir -p "$HOME/.lys"
 pnpm backend:dev
 ```
 
-The backend opens `~/.lys/lys_db.sqlite` but does not create its parent. The
-desktop-managed path creates the directory while initializing missing settings.
-Both paths use the same database and port; choose one backend launch path.
+The root `backend:dev` script sets `LYS_HOME` to `$HOME/.lys`, so the
+standalone backend opens `~/.lys/lys_db.sqlite`; it does not create that
+directory. Running the backend package's `dev` script with `LYS_HOME` unset or
+empty stops at startup with `LYS_HOME is not set`; a relative value stops it
+with `LYS_HOME must be an absolute path`. The desktop-managed path creates its
+[Lys home directory](/reference/configuration/#lys-home-directory) while
+initializing missing settings. With `LYS_HOME` unset for the desktop, both paths
+use the same database; they always use the same port, so choose one backend
+launch path.
 
 ## Runtime behavior to expect
 
@@ -51,15 +58,19 @@ Both paths use the same database and port; choose one backend launch path.
   stream.
 - The backend uses LM Studio for model inventory and load operations and an
   OpenAI-compatible endpoint for chat completions.
-- Backend initialization checks LM Studio readiness before listening for HTTP
-  requests. Start LM Studio at `127.0.0.1:1234` before starting the backend.
+- The backend starts listening without LM Studio and then tries once to
+  connect to `127.0.0.1:1234`. If LM Studio starts later, press **Refresh** on
+  the LM Studio card in Settings → Runtime, or send
+  `POST /api/v1/llm/runtime/connect`. `GET /api/v1/llm/runtime` reports
+  `connecting`, `connected`, or `unreachable`.
 
 ## Backend lifecycle in the desktop app
 
 The desktop starts and stops an owned `pnpm run dev` child through Tauri
 commands. The command runs from the backend directory in the checkout recorded
 when the host was compiled, so that checkout, installed dependencies, Node, and
-`pnpm` must remain available.
+`pnpm` must remain available. The host sets `LYS_HOME` on that child to the Lys
+home it resolved at startup.
 
 `runtime.autoStartBackend` defaults to `true`; initialization starts the child
 when the loaded value is enabled. Runtime control edits remain session-only;
@@ -70,11 +81,24 @@ backend started separately in a terminal or prove HTTP readiness. Use
 `GET /api/v1/heath` to check the listener. Avoid launching a standalone watcher
 alongside desktop auto-start because both attempt to use port `12345`.
 
-## Coming soon
+## Using a scratch data directory
 
-The current backend configuration writes its SQLite database to
-`~/.lys/lys_db.sqlite`. There is no contributor-facing command or documented
-flag yet for swapping in a scratch data directory from the docs workflow.
+Set `LYS_HOME` to an absolute path to keep development settings and
+conversations out of `~/.lys`. For the desktop app, the host creates that
+directory while initializing settings and passes it to the backend it starts:
+
+```sh
+LYS_HOME="$HOME/lys-scratch" pnpm dev
+```
+
+For a standalone backend, create the directory and run the backend package
+directly, because the root `backend:dev` script always sets `LYS_HOME` to
+`$HOME/.lys`:
+
+```sh
+mkdir -p "$HOME/lys-scratch"
+LYS_HOME="$HOME/lys-scratch" pnpm --filter @lys/backend run dev
+```
 
 <RelatedDocuments
   documents={[

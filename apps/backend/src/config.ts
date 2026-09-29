@@ -4,7 +4,6 @@ import {
   LMSTUDIO_HOST,
   LMSTUDIO_PORT
 } from "@lys/protocol"
-import { homedir } from "node:os"
 import { isAbsolute, join } from "node:path"
 import { readPrompt } from "./utils/prompts"
 import * as z from "zod"
@@ -115,15 +114,42 @@ export type BackendConfig = z.infer<typeof backendConfigSchema>
  * failing key.
  */
 export function loadBackendConfig(): BackendConfig {
+  const lysHome = parseLysHome(process.env.LYS_HOME)
   return backendConfigSchema.parse({
     backendHost: BACKEND_HOST,
     backendPort: BACKEND_PORT,
     lmstudioHost: LMSTUDIO_HOST,
     lmstudioPort: LMSTUDIO_PORT,
-    databaseFilePath: join(homedir(), ".lys", "lys_db.sqlite"),
+    databaseFilePath: join(lysHome, "lys_db.sqlite"),
     lysSystemPrompt: readPrompt("lys-system"),
     titleGenerationPrompt: readPrompt("title-generation"),
     titleGenerationMaxAttempts: TITLE_GENERATION_MAX_ATTEMPTS,
     generatedTitleMaxLength: GENERATED_TITLE_MAX_LENGTH
   } satisfies z.input<typeof backendConfigSchema>)
+}
+
+/**
+ * Validates the raw `LYS_HOME` environment value as the Lys home directory.
+ *
+ * @param value - Raw `LYS_HOME` value, or `undefined` when the variable is
+ * unset.
+ * @returns The value unchanged once it is known to be an absolute path. The
+ * directory is not required to exist.
+ * @throws If the value is unset or empty, with the message
+ * `LYS_HOME is not set`.
+ * @throws If the value is a relative path, including an unexpanded `~/…`, with
+ * a message that quotes the rejected value.
+ */
+function parseLysHome(value: string | undefined): string {
+  if (!value) {
+    throw new Error("LYS_HOME is not set")
+  }
+
+  if (!isAbsolute(value)) {
+    throw new Error(
+      `LYS_HOME must be an absolute path, got ${JSON.stringify(value)}`
+    )
+  }
+
+  return value
 }

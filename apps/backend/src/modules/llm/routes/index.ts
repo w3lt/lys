@@ -3,12 +3,15 @@ import updateFastifyWithLlmListModelsRoute from "./listModelsRoute"
 import updateFastifyWithLlmModelLoadRoute from "./loadModelRoute"
 import updateFastifyWithLlmTestModelRoute from "./testModelRoute"
 import updateFastifyWithLlmModelUnloadRoute from "./unloadModelRoute"
+import updateFastifyWithLlmRuntimeConnectRoute from "./runtimeConnectRoute"
+import updateFastifyWithLlmRuntimeStatusRoute from "./runtimeStatusRoute"
 
 /**
  * Adds all LLM lifecycle, inventory, and health routes to a Fastify application.
  *
- * The registrar mutates `app` by installing the list, load, unload, and health
- * endpoints in that order; it does not complete until all child registrations settle.
+ * The registrar mutates `app` by installing the list, load, unload, health,
+ * runtime-status, and runtime-connect endpoints in that order; it does not
+ * complete until all child registrations settle.
  *
  * @param app - Application instance that receives the LLM route group.
  * @returns A promise that resolves after child route registrars complete.
@@ -21,4 +24,6 @@ export default async function updateFastifyWithLlmRoutes(
   await updateFastifyWithLlmModelLoadRoute(app)
   await updateFastifyWithLlmModelUnloadRoute(app)
   await updateFastifyWithLlmTestModelRoute(app)
+  await updateFastifyWithLlmRuntimeStatusRoute(app)
+  await updateFastifyWithLlmRuntimeConnectRoute(app)
 }

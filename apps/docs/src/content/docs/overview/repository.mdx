@@ -22,21 +22,27 @@ The workspace structure is simple and explicit:
 
 - `package.json` owns the root developer commands such as `pnpm dev`,
   `pnpm docs:dev`, and `pnpm backend:dev`.
-- `pnpm-workspace.yaml` includes `apps/*` and `packages/*`.
+- `pnpm-workspace.yaml` includes `apps/*`, `packages/*`, and `scripts`.
+- `VERSION` holds the release version that `scripts` writes into the package
+  and desktop manifests.
+- `build.sh` builds and installs the desktop app on macOS; see
+  [Packaging and releases](/operate/releases/).
 
 ## Applications
 
 ### `apps/desktop`
 
 The local desktop UI. It uses React, Vite, Zustand, and Tauri. It starts and
-stops the backend through Tauri commands, opens the chat SSE stream, and
-renders conversation state for the user.
+stops the backend through Tauri commands, opens the chat SSE stream, renders
+conversation state for the user, and browses stored conversations.
 
 ### `apps/backend`
 
-The local service process. It registers Fastify routes for health checks, model
-inventory and load operations, and the chat stream. It also owns the SQLite
-conversation store and the LM Studio / OpenAI-compatible service adapters.
+The local service process. It registers Fastify routes for health checks; model
+inventory, health, load, and unload operations; the LM Studio connection status
+and reconnect; conversation history; and the chat stream. It also owns the
+SQLite conversation store and the LM Studio / OpenAI-compatible service
+adapters.
 
 ### `apps/docs`
 
@@ -54,6 +60,14 @@ constants, request schemas, and stream event schemas.
 
 The shared domain model package. Today it mainly defines the conversation and
 message schemas reused by both transport and persistence code.
+
+## Tooling
+
+### `scripts`
+
+The `@lys/scripts` workspace package. Its `version:sync` and `version:check`
+scripts write or verify the root `VERSION` in every package manifest and the
+two Tauri manifests; see [Package reference](/reference/packages/#lysscripts).
 
 ## Coming soon
 

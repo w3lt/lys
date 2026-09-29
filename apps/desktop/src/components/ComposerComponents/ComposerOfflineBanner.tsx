@@ -31,7 +31,7 @@ export default function ComposerOfflineBanner({
   onReconnect
 }: ComposerOfflineBannerProps) {
   return (
-    <div className="composer__offline" role="status">
+    <div aria-live="polite" className="composer__offline" role="status">
       <span aria-hidden="true" className="composer__offline-dot" />
       <span className="composer__offline-message">{message}</span>
       <Button

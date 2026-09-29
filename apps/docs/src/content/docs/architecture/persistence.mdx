@@ -13,8 +13,8 @@ file, and one desktop theme preference.
 
 | Artifact              | Owner           | Location                                | Purpose                                                                        |
 | --------------------- | --------------- | --------------------------------------- | ------------------------------------------------------------------------------ |
-| Conversation database | Fastify backend | `~/.lys/lys_db.sqlite`                  | Stores conversation metadata and conversation messages.                        |
-| Settings JSON         | Tauri host      | `~/.lys/settings.json`                  | Stores runtime, model, and generation settings.                                |
+| Conversation database | Fastify backend | `$LYS_HOME/lys_db.sqlite`               | Stores conversation metadata and conversation messages.                        |
+| Settings JSON         | Tauri host      | `$LYS_HOME/settings.json`               | Stores runtime, model, and generation settings.                                |
 | Theme preference      | Desktop UI      | WebView `localStorage`, key `lys.theme` | Stores `dark` or `light`; invalid or unavailable storage falls back to `dark`. |
 
 ## SQLite ownership
@@ -70,7 +70,6 @@ for the current shape and defaults.
 
 ## Coming soon
 
-- Desktop integration of the conversation list and resume APIs
 - Export and import flows for SQLite data
 - Recovery tooling surfaced in the app rather than only implied by files on disk
 - Persisting desktop runtime and model edits, and adding conversation settings

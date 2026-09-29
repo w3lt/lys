@@ -32,7 +32,7 @@ export default function PaneHeading({
         {busy ? (
           <span aria-hidden="true" className="settings-view__reading">
             <span className="settings-view__reading-dot" />
-            reading
+            {"reading"}
           </span>
         ) : null}
       </div>

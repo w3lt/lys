@@ -23,7 +23,8 @@ Toolchain versions, platform prerequisites, and first build.
 - **Rust and Cargo**: required because the desktop app uses Tauri and the
   repository validation list includes Cargo-based checks for the host code.
 - **LM Studio**: required for the local model inventory, model loading, chat,
-  and title-generation paths used by the backend.
+  and title-generation paths. Lys starts without it and shows LM Studio as not
+  reachable until it runs.
 
 ## Install and bootstrap
 
@@ -38,6 +39,7 @@ That installs the workspace dependencies for:
 - `apps/docs`
 - `packages/protocol`
 - `packages/share`
+- `scripts`
 
 ## First successful runs
 
@@ -54,27 +56,29 @@ pnpm dev
 - `pnpm backend:dev` starts the Fastify backend in watch mode.
 - `pnpm dev` launches the Tauri desktop application.
 
-Before standalone `pnpm backend:dev`, create its database parent directory if
-needed:
+Before standalone `pnpm backend:dev`, create its Lys home directory if needed.
+The script sets `LYS_HOME` to `$HOME/.lys`:
 
 ```sh
 mkdir -p "$HOME/.lys"
 ```
 
-Desktop settings initialization creates that directory for the desktop-managed
-path. Choose one backend launch path: desktop auto-start is enabled by default,
-and starting another backend on the same port can conflict. See
-[Running Lys locally](/develop/running/) for process ownership and readiness.
+Desktop settings initialization creates the Lys home directory for the
+desktop-managed path. Choose one backend launch path: desktop auto-start is
+enabled by default, and starting another backend on the same port can conflict.
+See [Running Lys locally](/develop/running/) for process ownership and
+readiness.
 
 ## Local endpoints to expect
 
 - The backend listens on `127.0.0.1:12345`.
 - The backend expects LM Studio on `127.0.0.1:1234`.
 
-Backend startup queries LM Studio readiness before opening the HTTP listener.
-If LM Studio is unavailable, backend initialization fails. Start LM Studio
-first, then restart the backend. A running desktop child process alone does
-not establish that the HTTP endpoint is ready.
+Backend startup does not wait for LM Studio: the backend opens its HTTP
+listener, then tries once to connect. If LM Studio starts later, press
+**Refresh** on the LM Studio card in Settings → Runtime. A running desktop child
+process alone does not establish that the HTTP endpoint is ready; the desktop
+reports the backend as running only after `GET /api/v1/heath` answers.
 
 ## First validation checks
 

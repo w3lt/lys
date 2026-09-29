@@ -30,9 +30,10 @@ import { useLysStore } from "./lib/store"
  * component renders intentionally blank while initialization is pending, then
  * renders the title bar and one lazily loaded child view. The initialization
  * promise is detached from the effect, so a rejected initialization is
- * unhandled by this component and leaves the store in its blank initializing
- * state. The lazy children have no local `Suspense` loading fallback or import
- * failure boundary here.
+ * unhandled by this component. Only a failed settings load leaves the store in
+ * its blank initializing state; a rejected backend start or status check
+ * happens after the shell is shown. The lazy children have no local `Suspense`
+ * loading fallback or import failure boundary here.
  * @returns The initialized application shell, or `null` while initialization is pending.
  */
 export default function App() {

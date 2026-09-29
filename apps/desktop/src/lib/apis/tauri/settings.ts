@@ -17,7 +17,7 @@ export async function loadSettings() {
  * @param settings - Complete settings value owned by the desktop store.
  * @returns Resolves after the native settings file write completes.
  * @throws The Tauri invoke rejection for command deserialization, serialization,
- * home-path resolution, or file-writing failures.
+ * or file-writing failures.
  * @remarks The named newSettings argument matches Rust's new_settings parameter.
  */
 export async function saveSettings(settings: LysSettings): Promise<void> {

@@ -211,6 +211,13 @@
   --doc-status-danger-border: oklch(0.7 0.18 25 / 42%);
   --doc-status-neutral-bg: oklch(0.68 0.03 258 / 12%);
   --doc-status-neutral-border: oklch(0.68 0.03 258 / 34%);
+
+  /* The wide-viewport heading ramp of the design, not Starlight's default. */
+  --sl-text-h1: 2rem;
+  --sl-text-h2: 1.3125rem;
+  --sl-text-h3: 1.0625rem;
+  --sl-text-h4: 0.9375rem;
+  --sl-text-h5: 0.875rem;
 }
 
 :root[data-theme="light"],
@@ -325,6 +332,8 @@
   --doc-status-danger-border: oklch(0.56 0.17 25 / 38%);
   --doc-status-neutral-bg: oklch(0.5 0.035 270 / 10%);
   --doc-status-neutral-border: oklch(0.5 0.035 270 / 32%);
+
+  --sl-color-backdrop-overlay: oklch(0.55 0.04 290 / 46%);
 }
 
 /*
@@ -411,25 +420,11 @@ html:not([data-has-toc]) {
   }
 }
 
-:root[data-theme="light"],
-[data-theme="light"] ::backdrop {
-  --sl-color-backdrop-overlay: oklch(0.55 0.04 290 / 46%);
-}
-
 @media (min-width: 50em) {
   :root {
     /* The design keeps one 56px chrome height at every width. */
     --sl-nav-height: 3.5rem;
   }
-}
-
-/* The wide-viewport heading ramp of the design, not Starlight's default. */
-:root {
-  --sl-text-h1: 2rem;
-  --sl-text-h2: 1.3125rem;
-  --sl-text-h3: 1.0625rem;
-  --sl-text-h4: 0.9375rem;
-  --sl-text-h5: 0.875rem;
 }
 
 @media (min-width: 50em) {
@@ -557,15 +552,6 @@ body {
       1fr
       auto;
   }
-}
-
-/*
- * The design opens the article against the rail rather than centring it in
- * whatever space is left, so its inline edge stays put as pages gain and lose
- * a table of contents.
- */
-.content-panel {
-  --sl-content-margin-inline: 0;
 }
 
 /*
@@ -771,6 +757,13 @@ starlight-toc nav a[aria-current="true"] {
  * and the title is followed by its description directly.
  */
 .content-panel {
+  /*
+   * The design opens the article against the rail rather than centring it in
+   * whatever space is left, so its inline edge stays put as pages gain and
+   * lose a table of contents.
+   */
+  --sl-content-margin-inline: 0;
+
   padding-block: 0;
 }
 

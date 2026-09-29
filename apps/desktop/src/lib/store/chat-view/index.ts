@@ -385,6 +385,52 @@ export function createChatViewStore(
   let activeOpenResource: ConversationOpenResource | undefined
 
   /**
+   * Updates an incomplete assistant when its exact message still exists.
+   *
+   * @param conversation - Current conversation, if the backend started one.
+   * @param request - Request snapshot whose assistant may be terminal.
+   * @param status - Interrupted or failed outcome to record.
+   * @returns A new terminal conversation, or the unchanged current value.
+   */
+  function updateIncompleteAssistantReplyStatus(
+    conversation: ChatViewConversation | undefined,
+    request: OwnedChatRequestState,
+    status: IncompleteAssistantStatus
+  ): ChatViewConversation | undefined {
+    if (request.status !== "reply-streaming" || !conversation) {
+      return conversation
+    }
+
+    const ownedMessage = conversation.messages.find(
+      (message) => message.id === request.assistantMessageId
+    )
+    if (
+      !ownedMessage ||
+      ownedMessage.role !== "assistant" ||
+      ownedMessage.status !== "streaming"
+    ) {
+      return conversation
+    }
+
+    return updateAssistantReplyStatus(conversation, {
+      assistantMessageId: request.assistantMessageId,
+      status,
+      finishReason: null,
+      timestamp: dependencies.createTimestamp()
+    })
+  }
+
+  /**
+   * Reports whether a token still owns the conversation read.
+   *
+   * @param token - Open token attempting to commit its outcome.
+   * @returns Whether that open has not been superseded or reset.
+   */
+  function isOpenOwned(token: number): boolean {
+    return activeOpenResource?.token === token
+  }
+
+  /**
    * Creates the state and actions that own this store's request lifecycle.
    *
    * @param set - Zustand capability that applies observable state changes.
@@ -472,42 +518,6 @@ export function createChatViewStore(
       }
 
       return conversation
-    }
-
-    /**
-     * Updates an incomplete assistant when its exact message still exists.
-     *
-     * @param conversation - Current conversation, if the backend started one.
-     * @param request - Request snapshot whose assistant may be terminal.
-     * @param status - Interrupted or failed outcome to record.
-     * @returns A new terminal conversation, or the unchanged current value.
-     */
-    function updateIncompleteAssistantReplyStatus(
-      conversation: ChatViewConversation | undefined,
-      request: OwnedChatRequestState,
-      status: IncompleteAssistantStatus
-    ): ChatViewConversation | undefined {
-      if (request.status !== "reply-streaming" || !conversation) {
-        return conversation
-      }
-
-      const ownedMessage = conversation.messages.find(
-        (message) => message.id === request.assistantMessageId
-      )
-      if (
-        !ownedMessage ||
-        ownedMessage.role !== "assistant" ||
-        ownedMessage.status !== "streaming"
-      ) {
-        return conversation
-      }
-
-      return updateAssistantReplyStatus(conversation, {
-        assistantMessageId: request.assistantMessageId,
-        status,
-        finishReason: null,
-        timestamp: dependencies.createTimestamp()
-      })
     }
 
     /**
@@ -891,16 +901,6 @@ export function createChatViewStore(
       return conversationOpen.status === "opening"
         ? conversationOpen.conversationId === conversationId
         : conversation?.id === conversationId
-    }
-
-    /**
-     * Reports whether a token still owns the conversation read.
-     *
-     * @param token - Open token attempting to commit its outcome.
-     * @returns Whether that open has not been superseded or reset.
-     */
-    function isOpenOwned(token: number): boolean {
-      return activeOpenResource?.token === token
     }
 
     /**

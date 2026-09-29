@@ -51,7 +51,8 @@ local one. Everything between them stays on loopback: no account to create, no
 server holding your half of the conversation, no third party in the middle of
 it. What she keeps is a SQLite file in your home directory,
 `~/.lys/lys_db.sqlite`, alongside a small settings file — both of them yours to
-read, move, or delete.
+read, move, or delete. Set `LYS_HOME` to an absolute path and she keeps them
+there instead.
 
 That closeness is the design goal rather than a finished guarantee. Local
 ownership is how the system is built, but the handbook is candid about
@@ -62,15 +63,15 @@ ownership is how the system is built, but the handbook is candid about
 ## Still becoming
 
 She can listen and answer today. A turn reaches the local model, streams back a
-word at a time, and is recorded in SQLite while it runs.
+word at a time, and is recorded in SQLite as it arrives.
 
-Returning to it is another matter. The assistant's streamed text is never
-written back into its stored row; nothing in the application can list or reopen
-a conversation once the window closes. Model settings can list, load, unload,
-and check local models; generation controls shape future replies and save
-automatically. Default-model selection lasts for the session, and chat still
-uses a fixed model identifier. Memory, tools, and continuity are directions Lys
-is growing toward, not capabilities she already has.
+She can return to it, too. Past conversations can be searched, renamed,
+deleted, or reopened and continued where they stopped. Model settings can list,
+load, unload, and check local models; chat answers with a loaded model,
+preferring the default you choose, though that choice lasts only for the
+session. Generation controls shape future replies and save automatically.
+Memory, tools, and continuity are directions Lys is growing toward, not
+capabilities she already has.
 
 [See what exists today and what remains unfinished →](https://lys.negentropy.studio/overview/status/)
 

@@ -136,7 +136,9 @@ function useOutsidePointerDismissal(
  * saves a changed title still being edited whenever history closes; the
  * chat-view store owns which conversation is presented; the parent owns
  * opening a conversation, starting one, and closing history around those
- * actions. The panel owns only its focus lifecycle. It is a non-modal dialog
+ * actions. The panel owns only its focus lifecycle. Enter in the search opens
+ * the first conversation the store finds for the typed search, after reading
+ * a search still waiting for a pause in typing. It is a non-modal dialog
  * named Past conversations: on mount focus moves to the search field, and
  * Escape, a pointer press outside, or focus moving to an element outside
  * closes it.
@@ -177,6 +179,9 @@ export default function ConversationHistoryPanel({
   const loadOlderConversations = useConversationHistoryStore(
     (state) => state.loadOlderConversations
   )
+  const loadFirstConversationId = useConversationHistoryStore(
+    (state) => state.loadFirstConversationId
+  )
   const updateConversationTitle = useConversationHistoryStore(
     (state) => state.updateConversationTitle
   )
@@ -185,7 +190,7 @@ export default function ConversationHistoryPanel({
   )
   const openConversationId = useChatViewStore(getPresentedConversationId)
 
-  const panelRef = useRef<HTMLElement>(null)
+  const panelRef = useRef<HTMLDialogElement>(null)
   const searchFieldRef = useRef<HTMLInputElement>(null)
   const hintId = useId()
   useConversationHistoryFocus(searchFieldRef)
@@ -220,14 +225,29 @@ export default function ConversationHistoryPanel({
     closeConversationHistory()
   }
 
+  /**
+   * Opens the first conversation the history store finds for the typed
+   * search.
+   *
+   * @returns A promise that resolves after the conversation is requested, or
+   * after the store finds none to open.
+   * @remarks A search still waiting for a pause in typing is read first.
+   * Nothing opens when history closes or the search changes before its page
+   * arrives, or while the displayed page still answers an earlier search.
+   */
+  async function openFirstConversation(): Promise<void> {
+    const conversationId = await loadFirstConversationId()
+    if (conversationId !== undefined) onOpenConversation(conversationId)
+  }
+
   return (
-    <section
+    <dialog
       aria-label="Past conversations"
       className="conversation-history"
       onBlur={handlePanelBlur}
       onKeyDown={handlePanelKeyDown}
+      open
       ref={panelRef}
-      role="dialog"
       tabIndex={-1}
     >
       <ConversationHistoryBrowser
@@ -239,6 +259,7 @@ export default function ConversationHistoryPanel({
         }
         onLoadOlderConversations={() => void loadOlderConversations()}
         onOpenConversation={onOpenConversation}
+        onOpenFirstConversation={() => void openFirstConversation()}
         onQueryChange={updateConversationHistoryQuery}
         onRetryConversationHistory={() => void loadConversationHistory()}
         onRowInteractionChange={updateConversationRowInteraction}
@@ -262,6 +283,6 @@ export default function ConversationHistoryPanel({
         mutationError={mutationError}
         onStartConversation={onStartConversation}
       />
-    </section>
+    </dialog>
   )
 }

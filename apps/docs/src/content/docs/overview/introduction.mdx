@@ -9,7 +9,8 @@ import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
 import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
 
 Lys is a local-first desktop chat application under active development. Today
-the repository contains three applications and two shared packages:
+the repository contains three applications, two shared packages, and one
+tooling package:
 
 - `apps/desktop` is the user interface: React 19, Vite, Zustand, and a Tauri 2
   host.
@@ -19,6 +20,8 @@ the repository contains three applications and two shared packages:
 - `apps/docs` is this Astro/Starlight handbook.
 - `packages/protocol` defines shared route constants and validation schemas.
 - `packages/share` defines shared conversation models.
+- `scripts` keeps the release version in the root `VERSION` file in step with
+  every package and desktop manifest.
 
 The root workspace is managed with `pnpm`, and the checked-in package manager
 pin is `pnpm@11.17.0`.
@@ -38,12 +41,14 @@ One chat turn currently crosses these boundaries:
 3. The desktop reads typed stream events and updates its local presentation
    state from them.
 
-Streamed assistant text currently lives only in desktop state; the backend
-updates the stored assistant lifecycle but does not append deltas to its stored
-content.
+The backend persists each assistant delta before sending it and records the
+reply's final status, so a stored conversation can be reopened from the
+desktop's conversation history and continued.
 
-The current public protocol surface is small: health, LLM inventory, load, and
-unload routes, plus the chat stream.
+The current public protocol surface is small: a health route; LLM inventory,
+health, load, and unload routes; LM Studio connection status and reconnect
+routes; conversation history routes to list, read, rename, and delete; and the
+chat stream.
 
 ## What this handbook is for
 

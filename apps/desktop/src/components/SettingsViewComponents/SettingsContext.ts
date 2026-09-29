@@ -47,14 +47,16 @@ export type SettingsContextValue = ModelState & {
    * Requests that the named weights be loaded into memory.
    *
    * @param modelKey - Model identifier to load.
-   * @returns Resolves after settlement or cancellation; failures remain in modelError.
+   * @returns Resolves after settlement or cancellation; failures other than a
+   * missing LLM runtime remain in modelError.
    */
   onLoadModel: (modelKey: string) => Promise<void>
   /**
    * Requests that the named weights be released from memory.
    *
    * @param modelKey - Model identifier to unload.
-   * @returns Resolves after settlement or cancellation; failures remain in modelError.
+   * @returns Resolves after settlement or cancellation; failures other than a
+   * missing LLM runtime remain in modelError.
    */
   onUnloadModel: (modelKey: string) => Promise<void>
   /**
@@ -64,7 +66,10 @@ export type SettingsContextValue = ModelState & {
    * @returns Resolves after publishing the health observation or handled failure.
    */
   onTestModel: (modelKey: string) => Promise<void>
-  /** Refreshes inventory; failures are exposed through modelError. */
+  /**
+   * Refreshes inventory; failures other than a missing LLM runtime are exposed
+   * through modelError.
+   */
   onRefreshModels: () => Promise<void>
 }
 

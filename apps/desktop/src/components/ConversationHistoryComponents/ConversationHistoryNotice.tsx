@@ -35,7 +35,9 @@ export default function ConversationHistoryNotice(
 ): ReactElement {
   return (
     <div className="conversation-history__notice">
-      <p role="status">{props.message}</p>
+      <p aria-live="polite" role="status">
+        {props.message}
+      </p>
       {props.kind === "failure" ? (
         <Button
           onClick={props.onRetryConversationHistory}

@@ -4,42 +4,54 @@ import type { SettingsPane } from "@/app/types"
 import { Skeleton } from "@/components/ui/skeleton"
 
 /** Geometry and labels for one repeated skeleton row. */
-interface SkeletonRow {
+type SkeletonRow = {
+  /** Name of the setting the row stands in for, unique among its siblings. */
+  readonly id: string
   /** Width of the row's primary label placeholder. */
-  label: string
+  readonly label: string
   /** Width of the row's secondary description placeholder. */
-  description: string
+  readonly description: string
   /** The control placeholder's CSS width and height, parked at row end. */
-  control: {
+  readonly control: {
     /** CSS width of the control placeholder. */
-    width: string
+    readonly width: string
     /** CSS height of the control placeholder. */
-    height: string
+    readonly height: string
   }
 }
 
 /** Geometry for one card-shaped loading placeholder. */
-interface SkeletonCard {
+type SkeletonCard = {
+  /** Name of the card the placeholder stands in for, unique within its pane. */
+  readonly id: string
   /** Width of the card title placeholder. */
-  title: string
+  readonly title: string
   /** Width of the card metadata placeholder. */
-  meta: string
+  readonly meta: string
   /** A setting the card carries under its own divider, below the status line. */
-  row?: SkeletonRow
+  readonly row?: SkeletonRow
+}
+
+/** Geometry for one compact two-column skeleton line. */
+type SkeletonListLine = {
+  /** Name of the entry the line stands in for, unique within its list. */
+  readonly id: string
+  /** CSS width of the line's secondary placeholder. */
+  readonly width: string
 }
 
 /** Complete placeholder geometry for one settings pane. */
-interface PaneSkeletonShape {
+type PaneSkeletonShape = {
   /** Card-shaped blocks rendered before row content. */
-  cards: ReadonlyArray<SkeletonCard>
+  readonly cards: ReadonlyArray<SkeletonCard>
   /** A section heading and its rule, introducing the rows beneath it. */
-  heading: boolean
+  readonly heading: boolean
   /** Repeated label/description/control rows beneath the optional heading. */
-  rows: ReadonlyArray<SkeletonRow>
+  readonly rows: ReadonlyArray<SkeletonRow>
   /** Compact two-column lines: runtime log entries, or model options. */
-  list: ReadonlyArray<string>
+  readonly list: ReadonlyArray<SkeletonListLine>
   /** One tall surface, standing in for the system prompt field. */
-  block: boolean
+  readonly block: boolean
 }
 
 /** Authoritative placeholder geometry keyed by every supported settings pane. */
@@ -47,18 +59,22 @@ const PANE_SKELETONS: Record<SettingsPane, PaneSkeletonShape> = {
   runtime: {
     cards: [
       {
+        id: "backend",
         title: "128px",
         meta: "196px",
         row: {
+          id: "autostart",
           label: "164px",
           description: "268px",
           control: { width: "44px", height: "24px" }
         }
       },
       {
+        id: "model-residency",
         title: "104px",
         meta: "168px",
         row: {
+          id: "residency-note",
           label: "212px",
           description: "268px",
           control: { width: "0", height: "0" }
@@ -75,12 +91,17 @@ const PANE_SKELETONS: Record<SettingsPane, PaneSkeletonShape> = {
     heading: true,
     rows: [
       {
+        id: "context-size",
         label: "132px",
         description: "96px",
         control: { width: "150px", height: "30px" }
       }
     ],
-    list: ["64%", "78%", "52%"],
+    list: [
+      { id: "first-model", width: "64%" },
+      { id: "second-model", width: "78%" },
+      { id: "third-model", width: "52%" }
+    ],
     block: false
   },
   generation: {
@@ -88,16 +109,19 @@ const PANE_SKELETONS: Record<SettingsPane, PaneSkeletonShape> = {
     heading: false,
     rows: [
       {
+        id: "temperature",
         label: "116px",
         description: "218px",
         control: { width: "212px", height: "22px" }
       },
       {
+        id: "reply-ceiling",
         label: "94px",
         description: "158px",
         control: { width: "96px", height: "24px" }
       },
       {
+        id: "ceiling",
         label: "98px",
         description: "132px",
         control: { width: "212px", height: "22px" }
@@ -155,7 +179,7 @@ export default function PaneSkeleton({
      * Announcing it politely lets a reader finish the pane title first, which
      * is the part that says which settings are being read.
      */
-    <div className="settings-view__stack" role="status">
+    <div aria-live="polite" className="settings-view__stack" role="status">
       <span className="sr-only">Reading {pane} settings</span>
 
       {shape.cards.length > 0 ? (
@@ -163,7 +187,7 @@ export default function PaneSkeleton({
           {shape.cards.map((card, index) => (
             <div
               className="settings-view__skeleton-card"
-              key={index}
+              key={card.id}
               style={stagger(index, CARD_STAGGER_MS)}
             >
               <div className="settings-view__skeleton-card-row">
@@ -228,7 +252,7 @@ export default function PaneSkeleton({
           {shape.rows.map((row, index) => (
             <div
               className="settings-view__skeleton-row"
-              key={index}
+              key={row.id}
               style={stagger(index, LINE_STAGGER_MS)}
             >
               <div className="settings-view__skeleton-lines">
@@ -249,10 +273,10 @@ export default function PaneSkeleton({
             </div>
           ))}
 
-          {shape.list.map((width, index) => (
+          {shape.list.map((line, index) => (
             <div
               className="settings-view__skeleton-list-item"
-              key={index}
+              key={line.id}
               style={stagger(index, LINE_STAGGER_MS)}
             >
               <Skeleton
@@ -261,7 +285,7 @@ export default function PaneSkeleton({
               />
               <Skeleton
                 className="settings-view__skeleton-bar settings-view__skeleton-bar--secondary"
-                style={{ width }}
+                style={{ width: line.width }}
               />
             </div>
           ))}

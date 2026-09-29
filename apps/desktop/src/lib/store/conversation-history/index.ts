@@ -54,10 +54,10 @@ export type ConversationHistoryBackend = {
 /**
  * Runtime dependencies used by one independently owned history store.
  *
- * @remarks The store owns its list-read token, its abort controller, and every
- * mutation it starts; these dependencies provide only transport, backend
- * availability, the clock, and the chat view's reaction to a conversation that
- * is no longer stored.
+ * @remarks The store owns its list-read token, its abort controller, the timer
+ * that delays search reads, and every mutation it starts; these dependencies
+ * provide only transport, backend availability, the clock, and the chat view's
+ * reaction to a conversation that is no longer stored.
  */
 export type ConversationHistoryStoreDependencies = {
   /** Lists one page of conversations; the store supplies its abort signal. */
@@ -176,7 +176,10 @@ export type ConversationHistoryActions = {
    * interaction, and cancels any list read; mutations continue.
    */
   readonly closeConversationHistory: () => void
-  /** Replaces the typed query and, while shown, reads its first page. */
+  /**
+   * Replaces the typed query and, while shown, reads its first page once
+   * typing pauses.
+   */
   readonly updateConversationHistoryQuery: (query: string) => void
   /** Replaces the row interaction, ending any interaction on another row. */
   readonly updateConversationRowInteraction: (
@@ -186,6 +189,11 @@ export type ConversationHistoryActions = {
   readonly loadConversationHistory: () => Promise<void>
   /** Reads the next older page for the displayed query. */
   readonly loadOlderConversations: () => Promise<void>
+  /**
+   * Reads the typed query's first page at once when its read waits for a
+   * pause in typing, then finds the conversation Enter in the search opens.
+   */
+  readonly loadFirstConversationId: () => Promise<string | undefined>
   /** Persists a replacement title for one listed conversation. */
   readonly updateConversationTitle: (
     conversationId: string,
@@ -212,6 +220,17 @@ type LoadedConversationHistoryList = Extract<
  * protocol's inclusive maximum page size.
  */
 const CONVERSATION_HISTORY_PAGE_SIZE = 30
+
+/**
+ * Milliseconds without another query change before a changed search is read.
+ *
+ * @remarks Each change while history is shown restarts the pause, so typing
+ * without pausing sends one list request, after the last change. Opening
+ * history, retrying, a re-read after a rename or delete, and Enter in the
+ * search read at once instead and replace the delayed read; closing history
+ * cancels it.
+ */
+const CONVERSATION_SEARCH_READ_DELAY_MS = 200
 
 /** Failure shown when history is read while the backend is not running. */
 const BACKEND_STOPPED_MESSAGE =
@@ -425,6 +444,24 @@ function removePendingMutation(
 }
 
 /**
+ * Reports whether a conversation's deletion awaits its outcome.
+ *
+ * @param mutations - Mutations currently pending.
+ * @param conversationId - Conversation to check.
+ * @returns Whether that conversation is being deleted.
+ */
+function isDeletionPending(
+  mutations: readonly ConversationHistoryMutation[],
+  conversationId: string
+): boolean {
+  return mutations.some(
+    (mutation) =>
+      mutation.conversationId === conversationId &&
+      mutation.operation === "delete"
+  )
+}
+
+/**
  * Reports whether a conversation already has a pending mutation.
  *
  * @param mutations - Mutations currently pending.
@@ -453,6 +490,150 @@ export function createConversationHistoryStore(
   let nextListToken = 1
   /** Current store-owned list read, or absent when none is owned. */
   let activeListResource: ConversationListResource | undefined
+  /** Timer that starts a delayed first-page read, or absent when none waits. */
+  let delayedListReadTimer: ReturnType<typeof setTimeout> | undefined
+
+  /**
+   * Reports whether a token still owns the list read.
+   *
+   * @param token - List token attempting to commit its outcome.
+   * @returns Whether no newer read, close, or settlement superseded it.
+   */
+  function isListOwned(token: number): boolean {
+    return activeListResource?.token === token
+  }
+
+  /**
+   * Reports whether a first-page read waits for a pause in typing.
+   *
+   * @returns Whether a delayed read has neither started nor been cancelled.
+   */
+  function isListReadDelayed(): boolean {
+    return delayedListReadTimer !== undefined
+  }
+
+  /**
+   * Cancels the delayed first-page read, if one waits.
+   *
+   * @remarks Clearing the timer before it fires means its read never starts;
+   * a read the timer already started is owned like any other list read.
+   */
+  function cancelDelayedListRead(): void {
+    clearTimeout(delayedListReadTimer)
+    delayedListReadTimer = undefined
+  }
+
+  /**
+   * Starts a list read that supersedes any delayed or owned one.
+   *
+   * @returns The new read's resource; the superseded read is invalidated
+   * before its transport is aborted.
+   */
+  function startListRead(): ConversationListResource {
+    cancelDelayedListRead()
+    const supersededResource = activeListResource
+    const resource: ConversationListResource = {
+      token: nextListToken,
+      abortController: new AbortController()
+    }
+    nextListToken += 1
+    activeListResource = resource
+    supersededResource?.abortController.abort()
+
+    return resource
+  }
+
+  /**
+   * Cancels the delayed list read, if any, and invalidates the owned list
+   * read, if any, aborting its transport.
+   */
+  function cancelListRead(): void {
+    cancelDelayedListRead()
+    const resource = activeListResource
+    activeListResource = undefined
+    resource?.abortController.abort()
+  }
+
+  /**
+   * Lists one page while its read remains owned.
+   *
+   * @param query - List parameters for the page.
+   * @param backendUrl - Backend origin sampled when the read started.
+   * @param resource - Resource owned by this read.
+   * @returns The validated page, or undefined when the read was superseded;
+   * ownership is released before an owned outcome is returned.
+   * @throws The failure of a read that was still owned; its ownership has
+   * been released.
+   */
+  async function listOwnedPage(
+    query: ListConversationsApiQuery,
+    backendUrl: string,
+    resource: ConversationListResource
+  ): Promise<ListConversationsApiResponse | undefined> {
+    try {
+      const response = await dependencies.listConversations(query, {
+        backendUrl,
+        signal: resource.abortController.signal
+      })
+      if (!isListOwned(resource.token)) return undefined
+      activeListResource = undefined
+
+      return response
+    } catch (error) {
+      if (!isListOwned(resource.token)) return undefined
+      activeListResource = undefined
+      throw error
+    }
+  }
+
+  /**
+   * Saves one replacement title and reports the settled outcome.
+   *
+   * @param update - Conversation and trimmed replacement title.
+   * @param backendUrl - Backend origin sampled when the mutation started.
+   * @returns The outcome; failures are returned rather than thrown.
+   */
+  async function saveConversationTitle(
+    update: ConversationTitleUpdate,
+    backendUrl: string
+  ): Promise<TitleUpdateOutcome> {
+    try {
+      const result = await dependencies.updateConversationTitle(update, {
+        backendUrl
+      })
+      return result.status === "updated"
+        ? { status: "updated", title: result.conversation.title }
+        : { status: "missing" }
+    } catch (error) {
+      return {
+        status: "failed",
+        error: formatMutationError("Renaming", error)
+      }
+    }
+  }
+
+  /**
+   * Deletes one stored conversation and reports the settled outcome.
+   *
+   * @param conversationId - Conversation to delete.
+   * @param backendUrl - Backend origin sampled when the mutation started.
+   * @returns The outcome; failures are returned rather than thrown.
+   * @remarks The missing-conversation problem also establishes removal.
+   */
+  async function deleteStoredConversation(
+    conversationId: string,
+    backendUrl: string
+  ): Promise<DeletionOutcome> {
+    try {
+      await dependencies.deleteConversation(conversationId, { backendUrl })
+      return { status: "removed" }
+    } catch (error) {
+      return {
+        status: "failed",
+        error: formatMutationError("Deleting", error)
+      }
+    }
+  }
 
   /**
    * Creates the state and actions that own this store's history lifecycle.
@@ -466,75 +647,8 @@ export function createConversationHistoryStore(
     get: StoreApi<ConversationHistoryStore>["getState"]
   ): ConversationHistoryStore {
     /**
-     * Reports whether a token still owns the list read.
-     *
-     * @param token - List token attempting to commit its outcome.
-     * @returns Whether no newer read, close, or settlement superseded it.
-     */
-    function isListOwned(token: number): boolean {
-      return activeListResource?.token === token
-    }
-
-    /**
-     * Starts a list read that supersedes any owned one.
-     *
-     * @returns The new read's resource; the superseded read is invalidated
-     * before its transport is aborted.
-     */
-    function startListRead(): ConversationListResource {
-      const supersededResource = activeListResource
-      const resource: ConversationListResource = {
-        token: nextListToken,
-        abortController: new AbortController()
-      }
-      nextListToken += 1
-      activeListResource = resource
-      supersededResource?.abortController.abort()
-
-      return resource
-    }
-
-    /** Invalidates the owned list read, if any, and aborts its transport. */
-    function cancelListRead(): void {
-      const resource = activeListResource
-      activeListResource = undefined
-      resource?.abortController.abort()
-    }
-
-    /**
-     * Lists one page while its read remains owned.
-     *
-     * @param query - List parameters for the page.
-     * @param backendUrl - Backend origin sampled when the read started.
-     * @param resource - Resource owned by this read.
-     * @returns The validated page, or undefined when the read was superseded;
-     * ownership is released before an owned outcome is returned.
-     * @throws The failure of a read that was still owned; its ownership has
-     * been released.
-     */
-    async function listOwnedPage(
-      query: ListConversationsApiQuery,
-      backendUrl: string,
-      resource: ConversationListResource
-    ): Promise<ListConversationsApiResponse | undefined> {
-      try {
-        const response = await dependencies.listConversations(query, {
-          backendUrl,
-          signal: resource.abortController.signal
-        })
-        if (!isListOwned(resource.token)) return undefined
-        activeListResource = undefined
-
-        return response
-      } catch (error) {
-        if (!isListOwned(resource.token)) return undefined
-        activeListResource = undefined
-        throw error
-      }
-    }
-
-    /**
-     * Reads the first page for the current query, replacing any list read.
+     * Reads the first page for the current query at once, replacing any
+     * delayed or sent list read.
      *
      * @returns A promise that resolves after the page or failure commits, or
      * after a newer read, close, or settlement supersedes this one.
@@ -567,9 +681,28 @@ export function createConversationHistoryStore(
     }
 
     /**
+     * Starts a first-page read that waits for a pause in typing.
+     *
+     * @remarks Any delayed or sent list read is cancelled, and the list is
+     * marked pending at once, as it is for an immediate read. The read starts
+     * {@link CONVERSATION_SEARCH_READ_DELAY_MS} later for the query typed
+     * then, unless another change, an immediate read, or closing history
+     * cancels it first.
+     */
+    function startDelayedListRead(): void {
+      cancelListRead()
+      set({ list: calculatePendingList(get().list) })
+      delayedListReadTimer = setTimeout(
+        () => void loadConversationHistory(),
+        CONVERSATION_SEARCH_READ_DELAY_MS
+      )
+    }
+
+    /**
      * Reports whether a first page is being read to replace the list.
      *
-     * @returns Whether an owned first-page read may still commit its page.
+     * @returns Whether a delayed or owned first-page read may still commit its
+     * page.
      */
     function isFirstPageReadPending(): boolean {
       const { list } = get()
@@ -584,7 +717,8 @@ export function createConversationHistoryStore(
      *
      * @remarks A read already sent may answer from before the change was
      * stored, and committing it would undo the change on screen. The
-     * replacement read starts after the change settled. Without a pending
+     * replacement read starts after the change settled, and a delayed read is
+     * started at once rather than after its pause. Without a pending
      * first-page read, the settled change has already been applied to the
      * displayed page and nothing is read.
      */
@@ -745,18 +879,59 @@ export function createConversationHistoryStore(
     }
 
     /**
-     * Replaces the typed query and, while shown, reads its first page.
+     * Replaces the typed query and, while shown, reads its first page once
+     * typing pauses.
      *
      * @param query - Search text exactly as typed.
      * @remarks No read starts when the trimmed query is the one already
-     * displayed; a newer read supersedes an older pending one.
+     * displayed. Otherwise the change cancels any pending list read, marks the
+     * list pending, and restarts the pause after which the first page is read.
      */
     function updateConversationHistoryQuery(query: string): void {
       set({ query })
       if (get().visibility.status === "closed") return
       if (isPageCurrent(parseConversationSearchQuery(query))) return
 
-      void loadConversationHistory()
+      startDelayedListRead()
+    }
+
+    /**
+     * Finds the conversation Enter in the search opens.
+     *
+     * @returns The first displayed conversation that is not being deleted,
+     * or undefined when history is closed, no displayed page answers the
+     * query typed now, or every displayed conversation is being deleted.
+     */
+    function findFirstConversationId(): string | undefined {
+      const { visibility, query, list, pendingMutations } = get()
+      if (visibility.status === "closed") return undefined
+      if (list.status !== "loaded") return undefined
+      if (list.page.query !== parseConversationSearchQuery(query))
+        return undefined
+
+      const entry = list.page.entries.find(
+        (listed) => !isDeletionPending(pendingMutations, listed.id)
+      )
+      return entry?.id
+    }
+
+    /**
+     * Reads the typed query's first page at once when its read waits for a
+     * pause in typing, then finds the conversation Enter in the search opens.
+     *
+     * @returns A promise resolving with the first displayed conversation that
+     * is not being deleted, once any delayed read commits or is superseded;
+     * undefined when history closed, the typed query changed meanwhile, the
+     * page does not answer the typed query, or nothing listed can be opened.
+     * @remarks A read already sent is not awaited; the displayed page is used
+     * as it is, so nothing is found while it answers an earlier query.
+     */
+    async function loadFirstConversationId(): Promise<string | undefined> {
+      const typedQuery = get().query
+      if (isListReadDelayed()) await loadConversationHistory()
+      if (get().query !== typedQuery) return undefined
+
+      return findFirstConversationId()
     }
 
     /**
@@ -784,32 +959,6 @@ export function createConversationHistoryStore(
         mutationError: undefined
       })
       return backend.backendUrl
-    }
-
-    /**
-     * Saves one replacement title and reports the settled outcome.
-     *
-     * @param update - Conversation and trimmed replacement title.
-     * @param backendUrl - Backend origin sampled when the mutation started.
-     * @returns The outcome; failures are returned rather than thrown.
-     */
-    async function saveConversationTitle(
-      update: ConversationTitleUpdate,
-      backendUrl: string
-    ): Promise<TitleUpdateOutcome> {
-      try {
-        const result = await dependencies.updateConversationTitle(update, {
-          backendUrl
-        })
-        return result.status === "updated"
-          ? { status: "updated", title: result.conversation.title }
-          : { status: "missing" }
-      } catch (error) {
-        return {
-          status: "failed",
-          error: formatMutationError("Renaming", error)
-        }
-      }
     }
 
     /**
@@ -889,29 +1038,6 @@ export function createConversationHistoryStore(
     }
 
     /**
-     * Deletes one stored conversation and reports the settled outcome.
-     *
-     * @param conversationId - Conversation to delete.
-     * @param backendUrl - Backend origin sampled when the mutation started.
-     * @returns The outcome; failures are returned rather than thrown.
-     * @remarks The missing-conversation problem also establishes removal.
-     */
-    async function deleteStoredConversation(
-      conversationId: string,
-      backendUrl: string
-    ): Promise<DeletionOutcome> {
-      try {
-        await dependencies.deleteConversation(conversationId, { backendUrl })
-        return { status: "removed" }
-      } catch (error) {
-        return {
-          status: "failed",
-          error: formatMutationError("Deleting", error)
-        }
-      }
-    }
-
-    /**
      * Permanently deletes one listed conversation.
      *
      * @param conversationId - Conversation to delete.
@@ -955,6 +1081,7 @@ export function createConversationHistoryStore(
       updateConversationRowInteraction,
       loadConversationHistory,
       loadOlderConversations,
+      loadFirstConversationId,
       updateConversationTitle,
       deleteConversation
     }

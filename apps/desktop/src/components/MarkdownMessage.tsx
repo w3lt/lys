@@ -1,11 +1,16 @@
 import { useEffect, useRef, useState, type ReactNode } from "react"
-import ReactMarkdown, { MarkdownHooks, type Components } from "react-markdown"
+import ReactMarkdown, {
+  type ExtraProps,
+  MarkdownHooks,
+  type Components
+} from "react-markdown"
 import { Copy } from "lucide-react"
 import { upperFirst } from "lodash"
 import { Button } from "@/components/ui/button"
 import rehypeShiki from "@shikijs/rehype"
 import remarkMath from "remark-math"
 import rehypeKatex from "rehype-katex"
+import { toString } from "hast-util-to-string"
 
 import "./MarkdownMessage.scss"
 
@@ -23,6 +28,7 @@ type CodeElementProps = {
   children?: ReactNode
   /** Renderer class containing an optional `language-*` marker. */
   className?: string
+  code: string
 }
 
 /**
@@ -45,8 +51,8 @@ function getCodeLanguage(className?: string) {
  * @param children - Code children supplied by react-markdown.
  * @returns Text suitable for clipboard copying.
  */
-function getCodeText(children: ReactNode) {
-  return String(children).replace(/\n$/, "")
+function getCodeText(text: string) {
+  return text.replace(/\n$/, "")
 }
 
 /**
@@ -62,10 +68,9 @@ function getCodeText(children: ReactNode) {
  * @param props - Code children and optional language marker from Markdown.
  * @returns The code block header, copy control, and code content.
  */
-function CodeBlock({ children, className }: CodeElementProps) {
+function CodeBlock({ children, className, code }: CodeElementProps) {
   const [copied, setCopied] = useState(false)
   const resetTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
-  const code = getCodeText(children)
   const language = getCodeLanguage(className)
 
   useEffect(() => {
@@ -129,12 +134,18 @@ function CodeBlock({ children, className }: CodeElementProps) {
  * @returns A native pre element or the copyable code-block projection.
  */
 function MarkdownPre({
-  children
+  children,
+  node
 }: {
   /** Renderer-provided children projected into native pre or code output. */
   children?: ReactNode
-}) {
-  if (Array.isArray(children) || !children || typeof children !== "object") {
+} & ExtraProps) {
+  if (
+    Array.isArray(children) ||
+    !children ||
+    typeof children !== "object" ||
+    !node
+  ) {
     return <pre>{children}</pre>
   }
 
@@ -144,7 +155,7 @@ function MarkdownPre({
     return <pre>{children}</pre>
   }
 
-  return <CodeBlock {...codeElement.props} />
+  return <CodeBlock {...codeElement.props} code={getCodeText(toString(node))} />
 }
 
 /**

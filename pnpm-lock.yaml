@@ -143,6 +143,9 @@ importers:
       eventsource-parser:
         specifier: ^4.1.1
         version: 4.1.1
+      hast-util-to-string:
+        specifier: ^3.0.1
+        version: 3.0.1
       jsdom:
         specifier: ^30.1.1
         version: 30.1.1

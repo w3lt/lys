@@ -1,14 +1,13 @@
-import type { MessageGenerationOptions } from "@lys/protocol"
+import type {
+  ChatGenerationEvent,
+  MessageGenerationOptions
+} from "@lys/protocol"
+import type { ConversationAssistantMessageFinishReason } from "@lys/share"
+import type { FastifyBaseLogger } from "fastify"
 import type { ChatCompletionChunk } from "openai/resources/index.mjs"
 import type { CompleteChatOptions } from "../../../di/services/chatService"
 import type { AssistantMessageCompletion } from "../../../di/services/conversationService/share"
-import type { ConversationAssistantMessageFinishReason } from "@lys/share"
 import { ChatCompletionCancelledError } from "../../../utils/errors"
-import {
-  createEventSender,
-  type ChatRouteReply,
-  type ChatRouteRequest
-} from "./share"
 
 /** Dependencies and persistence callbacks for one owned streamed completion. */
 export type CreateChatTaskOptions = Readonly<{
@@ -20,29 +19,35 @@ export type CreateChatTaskOptions = Readonly<{
   updateAssistantMessageState: (
     completion: AssistantMessageCompletion
   ) => boolean
-  /** Persists each delta before publication, returning false after deletion. */
+  /** Persists each delta before it is sent, returning false after deletion or finalization. */
   updateAssistantMessageContent: (content: string) => boolean
   /** Saved prompt, eligible earlier transcript, and current user text in inference order. */
   messages: CompleteChatOptions["messages"]
   /** Model selected by the caller. */
   model: string
-  /** Route-owned cancellation from the SSE connection. */
-  abortSignal: AbortSignal
-  /** Request logger used for failures. */
-  request: ChatRouteRequest
-  /** SSE connection receiving ordered deltas and one terminal chat event. */
-  reply: ChatRouteReply
   /** Caller-provided sampling and reply length controls. */
   generationOptions: MessageGenerationOptions
+  /** Generation-owned cancellation, aborted by stop or shutdown. */
+  abortSignal: AbortSignal
+  /** Queues one event for every stream following the reply; never waits. */
+  sendEvent: (event: ChatGenerationEvent) => void
+  /** Logger that records reply failures. */
+  logger: FastifyBaseLogger
 }>
 
 /**
- * Streams a reply, persisting content before publication and status before completion.
+ * Streams a reply, storing each delta before sending it and the final status
+ * before the final event.
+ *
  * @param options - Borrowed dependencies and turn-scoped persistence authority.
- * @returns Settlement after completion, cancellation, deletion, or reported failure.
- * @throws If persistence or failure reporting fails; the route observes that rejection.
- * @remarks Partial text remains stored on cancellation and failure. Cancelled replies
- * become interrupted; upstream failures become failed and are excluded from future context.
+ * @returns Settlement after completion, cancellation, supersession, deletion,
+ * or a reported failure.
+ * @throws If persistence fails; the generation reports that rejection.
+ * @remarks When the task settles without throwing it has sent exactly one
+ * final event: `done` after a stored completion; `interrupted` after
+ * cancellation, or when a newer turn or a deletion ended the reply; `error`
+ * after an upstream failure. Partial text stays stored. Interrupted replies
+ * stay in later context; failed replies do not.
  */
 export default async function createChatTask(
   options: CreateChatTaskOptions
@@ -51,71 +56,73 @@ export default async function createChatTask(
     const finishReason = await createChatCompletion(options)
     if (finishReason === undefined) {
       options.updateAssistantMessageState({ status: "interrupted" })
+      options.sendEvent({ type: "interrupted" })
       return
     }
     const persisted = options.updateAssistantMessageState({
       status: "completed",
       finishReason
     })
-    if (persisted && options.reply.sse.isConnected) {
-      await createChatDoneEvent(options, finishReason)
-    }
+    // A reply already finalized elsewhere was superseded by a newer turn or
+    // deleted, so it did not complete here.
+    options.sendEvent(
+      persisted ? { type: "done", finishReason } : { type: "interrupted" }
+    )
   } catch (error) {
-    options.request.log.error({ err: error }, "Chat completion stream failed")
-    // The upstream reports a cancelled stream even when this route has not yet
-    // observed its own abort, so both indicate an interrupted reply.
-    const isCancelled =
-      options.abortSignal.aborted ||
-      error instanceof ChatCompletionCancelledError
-    try {
-      options.updateAssistantMessageState({
-        status: isCancelled ? "interrupted" : "failed"
-      })
-    } catch (persistenceFailure) {
-      throw new AggregateError(
-        [error, persistenceFailure],
-        "Chat failure could not be finalized",
-        { cause: persistenceFailure }
-      )
-    }
-    if (isCancelled) return
-    if (options.reply.sse.isConnected) {
-      await createEventSender(options.reply)({
-        type: "error",
-        message: "Chat completion failed. Please try again."
-      })
-    }
+    handleChatCompletionFailure(options, error)
   }
 }
 
 /**
- * Publishes the terminal event of a completion that is already persisted.
- * @param options - Request logger and SSE connection of the completed task.
- * @param finishReason - Persisted reason the model stopped.
- * @returns Settlement after the event is accepted or its delivery failure is logged.
- * @remarks The stored completion is the authoritative outcome. A failed write
- * means only that the client missed the event, so it is logged at debug level
- * rather than reported as a stream failure; it does not reject.
+ * Stores and reports a reply whose completion failed or was cancelled.
+ *
+ * @param options - Turn-scoped persistence, logger, cancellation, and sender.
+ * @param error - Failure raised while streaming the reply.
+ * @throws An `AggregateError` holding both failures when the terminal state
+ * cannot be stored.
+ * @remarks The upstream reports a cancelled stream even when the task has not
+ * yet observed its own abort, so both mean an interrupted reply, logged at
+ * debug level. Any other failure is logged at error level, stores `failed`,
+ * and sends an `error` event.
  */
-async function createChatDoneEvent(
+function handleChatCompletionFailure(
   options: CreateChatTaskOptions,
-  finishReason: ConversationAssistantMessageFinishReason
-): Promise<void> {
+  error: unknown
+): void {
+  const isCancelled =
+    options.abortSignal.aborted || error instanceof ChatCompletionCancelledError
+  if (isCancelled) {
+    options.logger.debug({ err: error }, "Chat completion was cancelled")
+  } else {
+    options.logger.error({ err: error }, "Chat completion stream failed")
+  }
   try {
-    await createEventSender(options.reply)({ type: "done", finishReason })
-  } catch (error) {
-    options.request.log.debug(
-      { err: error },
-      "Could not send the final chat event"
+    options.updateAssistantMessageState({
+      status: isCancelled ? "interrupted" : "failed"
+    })
+  } catch (persistenceFailure) {
+    throw new AggregateError(
+      [error, persistenceFailure],
+      "Chat failure could not be finalized",
+      { cause: persistenceFailure }
     )
   }
+  options.sendEvent(
+    isCancelled
+      ? { type: "interrupted" }
+      : { type: "error", message: "Chat completion failed. Please try again." }
+  )
 }
 
 /**
- * Consumes one upstream stream with persistence preceding every emitted delta.
- * @param options - Turn context, upstream adapter, and route-owned cancellation.
- * @returns The supported finish reason, or undefined after cancellation/deletion.
- * @throws If the upstream fails, ends prematurely, or supplies an unsupported finish reason.
+ * Consumes one upstream stream, storing every delta before sending it.
+ *
+ * @param options - Turn context, upstream adapter, and generation-owned
+ * cancellation.
+ * @returns The supported finish reason, or undefined after cancellation,
+ * supersession, or deletion.
+ * @throws If the upstream fails, ends prematurely, or supplies an unsupported
+ * finish reason.
  */
 async function createChatCompletion(
   options: CreateChatTaskOptions
@@ -127,14 +134,9 @@ async function createChatCompletion(
     generationOptions: options.generationOptions,
     signal: options.abortSignal
   })
-  const sendEvent = createEventSender(options.reply)
   for await (const chunk of stream) {
     if (options.abortSignal.aborted) return undefined
-    const outcome = await createChatChunkEvent(
-      chunk,
-      options.updateAssistantMessageContent,
-      sendEvent
-    )
+    const outcome = createChatChunkEvent(chunk, options)
     if (outcome.status === "discarded") return undefined
     if (outcome.status === "completed") return outcome.finishReason
   }
@@ -142,7 +144,7 @@ async function createChatCompletion(
   throw new Error("Model stream ended without a finish reason")
 }
 
-/** Result of persisting and publishing one upstream chunk. */
+/** Result of storing and sending one upstream chunk. */
 type ChatChunkOutcome =
   | Readonly<{ /** No terminal marker in this chunk. */ status: "pending" }>
   | Readonly<{
@@ -154,24 +156,28 @@ type ChatChunkOutcome =
     }>
 
 /**
- * Persists and publishes the selected completion delta, then interprets its marker.
+ * Stores and sends the selected completion delta, then interprets its marker.
+ *
  * @param chunk - Upstream chunk containing zero or more indexed choices.
- * @param updateAssistantMessageContent - Turn-specific delta persistence callback.
- * @param sendEvent - Borrowed ordered SSE publication callback.
+ * @param options - Turn-specific delta persistence and the event sender.
  * @returns Continuation, discarded-write, or supported-completion outcome.
- * @throws If persistence/publication fails or the finish reason is unsupported.
+ * @throws If persistence fails or the finish reason is unsupported.
+ * @remarks Storing and sending happen in one synchronous step, so a follower
+ * that reads a snapshot in its own step sees either both or neither.
  */
-async function createChatChunkEvent(
+function createChatChunkEvent(
   chunk: ChatCompletionChunk,
-  updateAssistantMessageContent: CreateChatTaskOptions["updateAssistantMessageContent"],
-  sendEvent: ReturnType<typeof createEventSender>
-): Promise<ChatChunkOutcome> {
+  {
+    updateAssistantMessageContent,
+    sendEvent
+  }: Pick<CreateChatTaskOptions, "updateAssistantMessageContent" | "sendEvent">
+): ChatChunkOutcome {
   const choice = chunk.choices.find(({ index }) => index === 0)
   if (!choice) return { status: "pending" }
   const content = choice.delta.content
   if (content) {
     if (!updateAssistantMessageContent(content)) return { status: "discarded" }
-    await sendEvent({ type: "delta", content })
+    sendEvent({ type: "delta", content })
   }
   const finishReason = choice.finish_reason
   if (!finishReason) return { status: "pending" }

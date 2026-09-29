@@ -1,5 +1,6 @@
-import type { ChatApiRoute, ChatApiStreamEvent } from "@lys/protocol"
+import type { ChatApiRoute } from "@lys/protocol"
 import type { FastifyReply, FastifyRequest } from "fastify"
+import type ReplyEventSubscription from "./replyEventSubscription"
 
 /** Fastify reply that owns the protocol-defined chat SSE connection. */
 export type ChatRouteReply = FastifyReply<ChatApiRoute>
@@ -7,36 +8,47 @@ export type ChatRouteReply = FastifyReply<ChatApiRoute>
 /** Fastify request whose body has been validated by the chat route contract. */
 export type ChatRouteRequest = FastifyRequest<ChatApiRoute>
 
-/**
- * Binds client disconnects to cancellation of work owned by one chat request.
- *
- * @param reply - Active chat reply whose SSE lifecycle owns the cancellation.
- * @returns A signal aborted when the SSE connection closes; the returned
- * signal does not own or release the reply itself.
- */
-export function createAbortSignal(reply: ChatRouteReply) {
-  const abortController = new AbortController()
-  reply.sse.onClose(() => {
-    abortController.abort()
-  })
+/** SSE capability of one route reply, borrowed for one stream. */
+export type ReplySse = FastifyReply["sse"]
 
-  return abortController.signal
+/**
+ * Creates the writer that sends typed events on one SSE connection.
+ *
+ * @typeParam TStreamEvent - Event union of the route's stream contract.
+ * @param sse - Borrowed SSE connection; the route keeps ownership.
+ * @returns An async writer that uses each event's `type` as the SSE event
+ * name and resolves after Fastify accepts the write; it rejects once the
+ * connection has closed.
+ */
+export function createEventSender<
+  TStreamEvent extends Readonly<{ type: string }>
+>(sse: Pick<ReplySse, "send">): (event: TStreamEvent) => Promise<void> {
+  return async (event) => {
+    await sse.send({ event: event.type, data: event })
+  }
 }
 
 /**
- * Sends one typed chat event through the active SSE connection.
+ * Ties one follower to its SSE connection and settles when the stream ends.
  *
- * @param reply - Active chat reply whose SSE connection receives events.
- * @returns An async sender that accepts a protocol event, uses its type as the
- * SSE event name, and resolves after Fastify accepts the event write.
- * Concurrent callers may interleave because chat and title tasks share the
- * connection.
+ * @typeParam TStreamEvent - Event union written by the follower.
+ * @param sse - Borrowed SSE connection of the current route reply.
+ * @param subscription - Follower that writes to that connection.
+ * @returns A promise that settles after the follower ended — because its
+ * generation settled, the client disconnected, or a write failed — and its
+ * accepted writes settled. It never rejects. The route then returns and the
+ * SSE plugin ends the response.
+ * @remarks A client disconnect ends only this follower; the generation
+ * continues. A connection that closed before this call ends the follower at
+ * once.
  */
-export function createEventSender(reply: ChatRouteReply) {
-  return async (event: ChatApiStreamEvent) => {
-    await reply.sse.send({
-      event: event.type,
-      data: event
-    })
-  }
+export async function openReplyEventStream<TStreamEvent>(
+  sse: Pick<ReplySse, "onClose" | "isConnected">,
+  subscription: ReplyEventSubscription<TStreamEvent>
+): Promise<void> {
+  sse.onClose(() => {
+    subscription.close()
+  })
+  if (!sse.isConnected) subscription.close()
+  await subscription.closed
 }

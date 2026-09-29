@@ -313,10 +313,10 @@ export function updateAssistantReplyStatus(
  * @returns A frozen terminal assistant valid in the completed prefix.
  * @throws If a completed message lacks a finish reason, or an interrupted or
  * failed message carries one; storage constraints forbid both.
- * @remarks A stored `streaming` status means the backend has not finalized the
- * reply. No request in this chat view owns that generation, so it can receive
- * no further content here; it is presented as interrupted with the content
- * stored so far. The stored record itself is not changed.
+ * @remarks A stored `streaming` status here belongs to a reply that does not
+ * end the transcript, so no generation can still be writing it for this view;
+ * it is presented as interrupted with the content stored so far. The stored
+ * record itself is not changed.
  */
 function createStoredAssistantMessage(
   message: ConversationAssistantMessage
@@ -388,21 +388,70 @@ function createStoredConversationMessage(
 }
 
 /**
+ * Creates one immutable streaming assistant from a validated record.
+ *
+ * @param message - Stored or snapshot reply that is streaming without a
+ * finish reason.
+ * @returns A frozen streaming assistant carrying the record's content and
+ * update time.
+ */
+function createStreamingAssistantMessage(
+  message: StreamingConversationAssistantMessage
+): StreamingConversationAssistantMessage {
+  return Object.freeze({
+    id: message.id,
+    createdAt: message.createdAt,
+    model: message.model,
+    role: message.role,
+    content: message.content,
+    status: message.status,
+    finishReason: message.finishReason,
+    updatedAt: message.updatedAt
+  })
+}
+
+/**
+ * Creates the immutable last message of a stored transcript.
+ *
+ * @param message - Schema-validated message that ends the transcript.
+ * @returns A streaming assistant when the stored reply is still streaming,
+ * because its generation may still be running and the chat view follows it;
+ * otherwise the same message as {@link createStoredConversationMessage}.
+ * @throws If a stored assistant violates its status and finish-reason pairing.
+ */
+function createStoredLastMessage(
+  message: ConversationMessage
+): ReadonlyConversationMessage {
+  if (
+    message.role === "assistant" &&
+    isStreamingConversationAssistantMessage(message)
+  ) {
+    return createStreamingAssistantMessage(message)
+  }
+
+  return createStoredConversationMessage(message)
+}
+
+/**
  * Creates the chat-view conversation for a stored conversation being opened.
  *
  * @param conversation - Schema-validated conversation read from storage.
- * @returns A transitively frozen conversation whose transcript contains only
- * completed-prefix messages in stored order.
+ * @returns A transitively frozen conversation in stored order.
  * @throws If a stored assistant violates its status and finish-reason pairing.
- * @remarks Every stored `streaming` assistant becomes interrupted, so the
- * resulting transcript has no streaming tail and a later turn may be appended
- * after it.
+ * @remarks A `streaming` reply that ends the transcript stays streaming so the
+ * chat view can follow its generation; {@link findStreamingReply} finds it.
+ * Any earlier `streaming` reply is presented as interrupted.
  */
 export function createStoredChatViewConversation(
   conversation: Conversation
 ): ChatViewConversation {
+  const lastIndex = conversation.messages.length - 1
   const messages = Object.freeze(
-    conversation.messages.map(createStoredConversationMessage)
+    conversation.messages.map((message, index): ReadonlyConversationMessage =>
+      index === lastIndex
+        ? createStoredLastMessage(message)
+        : createStoredConversationMessage(message)
+    )
   )
 
   return Object.freeze({
@@ -413,4 +462,63 @@ export function createStoredChatViewConversation(
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt
   } satisfies ChatViewConversation)
+}
+
+/**
+ * Finds the streaming reply that ends a conversation.
+ *
+ * @param conversation - Conversation published by the chat-view store.
+ * @returns The last message when it is a streaming assistant, otherwise
+ * undefined.
+ */
+export function findStreamingReply(
+  conversation: ChatViewConversation
+): StreamingConversationAssistantMessage | undefined {
+  const lastMessage = conversation.messages.at(-1)
+  return lastMessage?.role === "assistant" && lastMessage.status === "streaming"
+    ? lastMessage
+    : undefined
+}
+
+/**
+ * Replaces a followed streaming reply with the backend's stored snapshot.
+ *
+ * @param conversation - Conversation whose streaming reply is followed.
+ * @param snapshot - Schema-validated stored reply sent when following began.
+ * @returns A new conversation whose reply carries the snapshot's content,
+ * status, finish reason, and update time.
+ * @throws If the reply is absent or already terminal locally, or a final
+ * snapshot violates its status and finish-reason pairing.
+ * @remarks The snapshot contains every delta sent before it, so it replaces
+ * the local content instead of appending to it.
+ */
+export function updateAssistantReplyWithSnapshot(
+  conversation: ChatViewConversation,
+  snapshot: ConversationAssistantMessage
+): ChatViewConversation {
+  const assistantMessage = conversation.messages.find(
+    (message) => message.id === snapshot.id
+  )
+  if (!assistantMessage || assistantMessage.role !== "assistant") {
+    throw new Error(`Assistant message ${snapshot.id} was not found`)
+  }
+  if (assistantMessage.status !== "streaming") {
+    throw new Error(`Assistant message ${snapshot.id} is already terminal`)
+  }
+
+  const updatedAssistantMessage = isStreamingConversationAssistantMessage(
+    snapshot
+  )
+    ? createStreamingAssistantMessage(snapshot)
+    : createStoredAssistantMessage(snapshot)
+  const messages = Object.freeze(
+    conversation.messages.map((message) =>
+      message.id === snapshot.id ? updatedAssistantMessage : message
+    )
+  )
+
+  return Object.freeze({
+    ...conversation,
+    messages
+  })
 }

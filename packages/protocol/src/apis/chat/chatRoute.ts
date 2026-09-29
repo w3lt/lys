@@ -5,6 +5,13 @@ import {
   conversationMetadataSchema,
   conversationUserMessageSchema
 } from "@lys/share"
+import {
+  chatDeltaEventSchema,
+  chatDoneEventSchema,
+  chatErrorEventSchema,
+  chatInterruptedEventSchema,
+  chatTitleEventSchema
+} from "./_share"
 
 /** Inclusive maximum sampling temperature accepted by chat requests and their UI. */
 export const MAXIMUM_GENERATION_TEMPERATURE = 1
@@ -32,13 +39,16 @@ export const chatApiRequestBodySchema = z.strictObject({
 /**
  * Validates the discriminated SSE event variants emitted by the chat route.
  *
- * @remarks The backend emits a start event before generation events. A `done`
- * event terminates successful model generation, and an `error` event reports a
- * chat generation failure. A `title` event follows the start event either to
- * reconcile an existing persisted title or to publish a newly persisted title.
- * A generated title may arrive before, between, or after chat events because
- * its task runs concurrently. The `type` discriminant is the compatibility
- * boundary used by desktop consumers.
+ * @remarks The backend emits a start event before generation events. Exactly
+ * one of `done`, `interrupted`, or `error` ends the reply: `done` after the
+ * completed reply is stored, `interrupted` when it ended early because it was
+ * stopped, superseded by a newer turn, deleted, or cancelled by shutdown, and
+ * `error` after a generation failure. A `title` event follows the start event
+ * either to reconcile an existing persisted title or to publish a newly
+ * persisted title. A generated title may arrive before, between, or after the
+ * reply events because its task runs concurrently. The stream closes after
+ * both tasks settle. The `type` discriminant is the compatibility boundary
+ * used by desktop consumers.
  */
 export const chatApiStreamEventSchema = z.discriminatedUnion("type", [
   z.strictObject({
@@ -59,29 +69,11 @@ export const chatApiStreamEventSchema = z.discriminatedUnion("type", [
     assistantMessage: conversationAssistantMessageSchema
   }),
 
-  z.strictObject({
-    type: z.literal("title"),
-    /** Non-empty persisted title for the conversation. */
-    title: z.string().min(1)
-  }),
-
-  z.strictObject({
-    type: z.literal("delta"),
-    /** Non-empty assistant content fragment in stream order. */
-    content: z.string().min(1)
-  }),
-
-  z.strictObject({
-    type: z.literal("done"),
-    /** Terminal model reason for a successfully completed assistant reply. */
-    finishReason: z.enum(["stop", "length"])
-  }),
-
-  z.strictObject({
-    type: z.literal("error"),
-    /** Non-empty user-presentable stream failure message. */
-    message: z.string().min(1)
-  })
+  chatTitleEventSchema,
+  chatDeltaEventSchema,
+  chatDoneEventSchema,
+  chatInterruptedEventSchema,
+  chatErrorEventSchema
 ])
 
 /**
@@ -90,9 +82,12 @@ export const chatApiStreamEventSchema = z.discriminatedUnion("type", [
  * @remarks Strict request and event schemas reject unknown fields. The required
  * generation options have no protocol-level default; an omitted
  * `replyCeiling` remains absent and is translated by the backend runtime.
- * The descriptor is imported by backend and desktop transport code; changing
- * its method, path, status, content type, or schemas is a compatibility change
- * requiring coordinated consumers.
+ * Closing the response stream ends only this client's observation: the
+ * backend keeps generating and storing the reply and its title. The
+ * reply-stop endpoint stops a reply, and the reply-events endpoint follows it
+ * again. The descriptor is imported by backend and desktop transport code;
+ * changing its method, path, status, content type, or schemas is a
+ * compatibility change requiring coordinated consumers.
  */
 export const chatApi = {
   method: "POST",

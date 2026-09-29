@@ -19,7 +19,7 @@ export interface ConversationTurnWriter {
     options: CreateConversationTurnOptions
   ): ConversationTurn
   /**
-   * Appends a nonempty delta before publication to the client.
+   * Appends a nonempty delta before it is sent to the reply's followers.
    * @param assistantMessageId - Streaming reply UUIDv7.
    * @param content - Nonempty model fragment in stream order.
    * @returns False if deleted or finalized; otherwise true after persistence.

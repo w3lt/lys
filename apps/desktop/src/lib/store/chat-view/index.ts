@@ -1,12 +1,21 @@
 import type {
   ChatApiRequestBody,
   ChatApiStreamEvent,
+  ChatGenerationEvent,
+  ChatReplyEvent,
+  ChatReplyPathParams,
   MessageGenerationOptions
 } from "@lys/protocol"
 import type { ConversationAssistantMessageStatus } from "@lys/share"
 import { create, type StoreApi, type UseBoundStore } from "zustand"
 
-import { readChatEvents, type ChatApiOptions } from "@/lib/apis/http/chat"
+import {
+  readChatEvents,
+  readChatReplyEvents,
+  stopChatReply,
+  type ChatApiOptions,
+  type StopChatReplyResult
+} from "@/lib/apis/http/chat"
 import {
   getConversation,
   type GetConversationResult
@@ -17,10 +26,12 @@ import { useLysStore } from "@/lib/store"
 import {
   type ChatViewConversation,
   createStoredChatViewConversation,
+  findStreamingReply,
   isStreamingConversationAssistantMessage,
   startConversationTurn,
   updateAssistantReplyContent,
   updateAssistantReplyStatus,
+  updateAssistantReplyWithSnapshot,
   updateConversationTitle
 } from "./conversation-transitions"
 
@@ -32,13 +43,41 @@ import {
  * @returns An async generator that yields validated events and completes when
  * the response stream closes.
  * @throws If opening, reading, or validating the response stream fails.
- * @remarks Aborting `options.signal` requests transport cancellation; consumers
- * must still ignore any events already queued by the transport.
+ * @remarks Aborting `options.signal` ends only this observation; the backend
+ * keeps generating. Consumers must still ignore any events already queued by
+ * the transport.
  */
 export type ChatStream = (
   payload: ChatApiRequestBody,
   options?: ChatApiOptions
 ) => AsyncGenerator<ChatApiStreamEvent, void, unknown>
+
+/**
+ * Follows one stored reply from its snapshot to the end of its generation.
+ *
+ * @param target - Reply and the conversation that holds it.
+ * @param signal - Store-owned signal; aborting it ends only this observation.
+ * @returns An async generator that yields validated reply events and
+ * completes when the backend ends the stream.
+ * @throws If opening, reading, or validating the stream fails, or the reply
+ * is no longer stored.
+ */
+export type ChatReplyStream = (
+  target: ChatReplyPathParams,
+  signal: AbortSignal
+) => AsyncGenerator<ChatReplyEvent, void, unknown>
+
+/**
+ * Asks the backend to stop one reply's generation.
+ *
+ * @param target - Reply and the conversation that holds it.
+ * @returns The stop outcome after the backend stored the reply's final state
+ * or reported that it was not generating.
+ * @throws If the backend cannot be reached or answers unexpectedly.
+ */
+export type ChatReplyStopper = (
+  target: ChatReplyPathParams
+) => Promise<StopChatReplyResult>
 
 /**
  * Reads one stored conversation to open in the chat view.
@@ -58,14 +97,19 @@ export type StoredConversationReader = (
  * Runtime dependencies used by one independently owned chat-view store.
  *
  * @remarks The store owns request and open tokens and their abort controllers;
- * these dependencies provide only transport, stored-conversation reads,
- * timestamps, model-selection, and generation-settings capabilities. The store
- * does not share lifecycle
- * state with another store instance, and does not own the settings it reads.
+ * these dependencies provide only transport, stored-conversation reads, reply
+ * stops, timestamps, model-selection, and generation-settings capabilities.
+ * Aborting a store-owned signal ends only the store's observation; the
+ * backend keeps generating. The store does not share lifecycle state with
+ * another store instance, and does not own the settings it reads.
  */
 export type ChatViewStoreDependencies = {
   /** Opens the backend chat stream; the store supplies its owned abort signal. */
   readonly streamChat: ChatStream
+  /** Follows a stored reply; the store supplies its owned abort signal. */
+  readonly streamChatReply: ChatReplyStream
+  /** Stops a reply's generation on the backend; not cancellable by the store. */
+  readonly stopChatReply: ChatReplyStopper
   /** Reads a stored conversation; the store supplies its owned abort signal. */
   readonly getConversation: StoredConversationReader
   /** Creates the ISO timestamp recorded on each immutable transition. */
@@ -172,8 +216,10 @@ export type ChatViewState = {
  * Actions that mutate or advance the chat lifecycle.
  *
  * @remarks `openConversation` resolves after the read commits, fails, or is
- * superseded. `stopStreaming` and `resetConversation` abort the store-owned
- * transport; reset additionally discards the conversation and error.
+ * superseded, and when the opened conversation ends with a reply that is
+ * still generating, after the store stops following it. `resetConversation`
+ * and opening another conversation stop following the active reply without
+ * stopping it; only `stopStreaming` stops a reply on the backend.
  */
 export type ChatViewActions = {
   /** Replaces the composer draft with user-entered text. */
@@ -195,11 +241,27 @@ export type ChatViewActions = {
    * ownership begins; later edits affect only later requests.
    */
   sendMessage: (explicitPrompt?: string) => Promise<void>
-  /** Interrupts the active assistant reply without affecting prior history. */
-  stopStreaming: () => void
-  /** Silently invalidates active work and restores initial chat state. */
+  /**
+   * Stops the active reply.
+   *
+   * @returns A promise that settles after the backend answered the stop
+   * request, or at once when no request is involved. It rejects only if the
+   * store's own request bookkeeping is inconsistent.
+   * @remarks While the reply streams, asks the backend to stop it and keeps
+   * reading until `interrupted` or `done` arrives. Before the turn has
+   * started, the stop is sent as soon as the start event names the reply.
+   * After the reply finished while a title may still arrive, only stops
+   * following. A failed stop request records an inline error. Repeated
+   * presses while the reply streams send repeated requests, which the backend
+   * treats idempotently.
+   */
+  stopStreaming: () => Promise<void>
+  /** Stops following active work and restores initial chat state. */
   resetConversation: () => void
-  /** Opens a stored conversation, replacing the shown one once it is read. */
+  /**
+   * Opens a stored conversation, replacing the shown one once it is read, and
+   * follows its last reply while that reply is still generating.
+   */
   openConversation: (conversationId: string) => Promise<void>
   /** Restores initial state when the view presents the identified conversation. */
   closeConversation: (conversationId: string) => void
@@ -213,6 +275,13 @@ const PREMATURE_STREAM_CLOSE_MESSAGE = "Chat stream ended before completion."
 
 /** Error shown when a conversation chosen for opening is no longer stored. */
 const MISSING_CONVERSATION_MESSAGE = "That conversation no longer exists."
+
+/** Error shown when a followed reply's stream closes before the reply is final. */
+const PREMATURE_REPLY_STREAM_CLOSE_MESSAGE =
+  "Stopped following the reply before it finished."
+
+/** Error raised when a followed reply's stream does not start with a snapshot. */
+const REPLY_STREAM_ORDER_MESSAGE = "Reply stream did not start with a snapshot."
 
 /** Shared idle request state; it carries no per-request data. */
 const IDLE_CHAT_REQUEST: ChatRequestState = Object.freeze({ status: "idle" })
@@ -270,6 +339,14 @@ type ConversationOpenResource = {
   readonly abortController: AbortController
 }
 
+/** Stored reply the store started following, with the request that owns it. */
+type StoredReplyFollow = {
+  /** Request token that owns the follow and its transport resource. */
+  readonly token: number
+  /** Followed reply and the conversation that holds it. */
+  readonly target: ChatReplyPathParams
+}
+
 /** Request state whose backend-identified reply is accepting deltas. */
 type StreamingChatReplyState = Extract<
   ChatRequestState,
@@ -286,6 +363,22 @@ type CreateChatRequestPayloadInput = {
   readonly model: string
   /** Settings-owned generation controls for this request. */
   readonly generationOptions: MessageGenerationOptions
+}
+
+/**
+ * How one owned chat stream is opened, applied, and closed.
+ *
+ * @typeParam TStreamEvent - Validated event union of the stream.
+ */
+type OwnedChatStreamOptions<TStreamEvent> = {
+  /** Opens the stream with the store-owned signal. */
+  readonly openEvents: (signal: AbortSignal) => AsyncIterable<TStreamEvent>
+  /** Applies one event; may await follow-up work such as a requested stop. */
+  readonly handleEvent: (event: TStreamEvent) => Promise<void> | void
+  /** State recorded for the reply when the stream ends before it is final. */
+  readonly incompleteStatus: IncompleteAssistantStatus
+  /** Error recorded when the stream closes early without a stream error. */
+  readonly prematureCloseMessage: string
 }
 
 /**
@@ -310,6 +403,39 @@ function formatConversationOpenErrorMessage(error: unknown): string {
   return error instanceof Error && error.message
     ? `The conversation could not be opened: ${error.message}`
     : "The conversation could not be opened."
+}
+
+/**
+ * Converts an unknown value thrown by a stop request into an error message.
+ *
+ * @param error - Value thrown while asking the backend to stop the reply.
+ * @returns A non-empty message naming the failed stop and its reason.
+ */
+function formatReplyStopErrorMessage(error: unknown): string {
+  return error instanceof Error && error.message
+    ? `The reply could not be stopped: ${error.message}`
+    : "The reply could not be stopped."
+}
+
+/**
+ * Reads a followed reply's events, requiring the snapshot to come first.
+ *
+ * @param events - Events of one reply-events stream.
+ * @returns The same events in order, completing when the source completes.
+ * @throws If the first event is not a `reply-snapshot`, because later deltas
+ * continue only from the snapshot's content.
+ */
+async function* readSnapshotFirstReplyEvents(
+  events: AsyncIterable<ChatReplyEvent>
+): AsyncGenerator<ChatReplyEvent, void, unknown> {
+  let isFirstEvent = true
+  for await (const event of events) {
+    if (isFirstEvent && event.type !== "reply-snapshot") {
+      throw new Error(REPLY_STREAM_ORDER_MESSAGE)
+    }
+    isFirstEvent = false
+    yield event
+  }
 }
 
 /**
@@ -383,6 +509,8 @@ export function createChatViewStore(
   let nextOpenToken = 1
   /** Current store-owned conversation read, or absent when none is owned. */
   let activeOpenResource: ConversationOpenResource | undefined
+  /** Request token whose stop was requested before its reply was known. */
+  let requestedStopToken: number | undefined
 
   /**
    * Updates an incomplete assistant when its exact message still exists.
@@ -627,6 +755,69 @@ export function createChatViewStore(
     }
 
     /**
+     * Handles an authorized reply that ended before the model finished.
+     *
+     * @param token - Token expected to own the started reply.
+     * @throws If the event is out of order or its assistant is absent.
+     * @remarks A title may still arrive afterwards, so the request moves to
+     * `reply-completed` rather than idle.
+     */
+    function handleChatInterruptedEvent(token: number): void {
+      const request = getStreamingReply(token)
+      const conversation = updateAssistantReplyStatus(getActiveConversation(), {
+        assistantMessageId: request.assistantMessageId,
+        status: "interrupted",
+        finishReason: null,
+        timestamp: dependencies.createTimestamp()
+      })
+      const completedRequest = {
+        status: "reply-completed",
+        token,
+        assistantMessageId: request.assistantMessageId
+      } satisfies ChatRequestState
+
+      set({ conversation, request: completedRequest })
+    }
+
+    /**
+     * Applies the stored snapshot that starts a followed reply's stream.
+     *
+     * @param event - Snapshot of the followed reply and its conversation title.
+     * @param token - Token expected to own the followed reply.
+     * @throws If the snapshot names another reply or the reply is terminal.
+     */
+    function handleChatReplySnapshotEvent(
+      event: Extract<ChatReplyEvent, { type: "reply-snapshot" }>,
+      token: number
+    ): void {
+      const request = getStreamingReply(token)
+      if (event.assistantMessage.id !== request.assistantMessageId) {
+        throw new Error("Reply snapshot did not match the followed reply")
+      }
+
+      const withReply = updateAssistantReplyWithSnapshot(
+        getActiveConversation(),
+        event.assistantMessage
+      )
+      const conversation =
+        event.conversationTitle === null
+          ? withReply
+          : updateConversationTitle(withReply, event.conversationTitle)
+      const isStillStreaming =
+        findStreamingReply(conversation)?.id === request.assistantMessageId
+      const completedRequest = {
+        status: "reply-completed",
+        token,
+        assistantMessageId: request.assistantMessageId
+      } satisfies ChatRequestState
+
+      set({
+        conversation,
+        request: isStillStreaming ? request : completedRequest
+      })
+    }
+
+    /**
      * Handles one title for a started or completed assistant reply.
      *
      * @param event - Title event emitted by the backend stream.
@@ -656,16 +847,45 @@ export function createChatViewStore(
     }
 
     /**
-     * Applies one stream event only while its request token remains active.
+     * Applies one generation event shared by chat and followed-reply streams.
+     *
+     * @param event - Title, delta, final, or error event of the reply.
+     * @param token - Token whose ownership authorizes event side effects.
+     * @throws If an in-order handler detects an invariant violation.
+     * @remarks An `error` event records the latest inline error. The backend
+     * sends nothing but a possible `title` after the reply's final event.
+     */
+    function handleChatGenerationEvent(
+      event: ChatGenerationEvent,
+      token: number
+    ): void {
+      switch (event.type) {
+        case "title":
+          handleChatTitleEvent(event, token)
+          return
+        case "delta":
+          handleChatDeltaEvent(event, token)
+          return
+        case "done":
+          handleChatDoneEvent(event, token)
+          return
+        case "interrupted":
+          handleChatInterruptedEvent(token)
+          return
+        case "error":
+          set({ error: event.message })
+          return
+      }
+    }
+
+    /**
+     * Applies one chat-stream event only while its request token is active.
      *
      * @param event - Typed event emitted by the active chat stream.
      * @param token - Token whose ownership authorizes event side effects.
      * @throws If an in-order handler detects a request or conversation
      * invariant violation.
-     * @remarks A stale token is ignored without error. An `error` event records
-     * the latest inline error. The backend contract sends no later `done`, but
-     * an independently running title task may still send `title` while this
-     * token remains active.
+     * @remarks A stale token is ignored without error.
      */
     function handleChatStreamEvent(
       event: ChatApiStreamEvent,
@@ -679,88 +899,111 @@ export function createChatViewStore(
           handleChatTurnStartEvent(event, token)
           return
         case "title":
-          handleChatTitleEvent(event, token)
-          return
         case "delta":
-          handleChatDeltaEvent(event, token)
-          return
         case "done":
-          handleChatDoneEvent(event, token)
-          return
+        case "interrupted":
         case "error":
-          set({ error: event.message })
+          handleChatGenerationEvent(event, token)
           return
       }
     }
 
     /**
-     * Records failure for an owned request and its assistant when present.
+     * Applies one followed-reply event only while its request token is active.
      *
-     * @param token - Token expected to own the failed request.
-     * @param error - User-presentable failure message.
+     * @param event - Typed event of the followed reply's stream.
+     * @param token - Token whose ownership authorizes event side effects.
+     * @throws If an in-order handler detects an invariant violation.
+     * @remarks A stale token is ignored without error.
      */
-    function updateChatRequestFailure(token: number, error: string): void {
+    function handleChatReplyEvent(event: ChatReplyEvent, token: number): void {
+      if (!isRequestOwned(token)) return
+
+      switch (event.type) {
+        case "reply-snapshot":
+          handleChatReplySnapshotEvent(event, token)
+          return
+        case "title":
+        case "delta":
+        case "done":
+        case "interrupted":
+        case "error":
+          handleChatGenerationEvent(event, token)
+          return
+      }
+    }
+
+    /**
+     * Records an early end for an owned request and its reply when present.
+     *
+     * @param token - Token expected to own the request.
+     * @param error - User-presentable message.
+     * @param status - `failed` when the reply failed, `interrupted` when the
+     * store only stopped following a reply that may still be generating.
+     */
+    function updateChatRequestFailure(
+      token: number,
+      error: string,
+      status: IncompleteAssistantStatus
+    ): void {
       if (!isRequestOwned(token)) return
 
       const request = getOwnedRequest(token)
       const conversation = updateIncompleteAssistantReplyStatus(
         get().conversation,
         request,
-        "failed"
+        status
       )
       set({ conversation, error })
     }
 
     /**
-     * Reads one request's stream through terminal cleanup.
+     * Reads one owned stream through terminal cleanup.
      *
-     * @param payload - Complete store-created payload for this request.
-     * @param request - Awaiting observable state correlated with the transport.
-     * @returns A promise that resolves after completion, failure, or invalidation.
-     * @remarks Events are consumed in arrival order. An `error` notification
-     * records the latest inline error. The backend contract sends no later
-     * `done`, but the stream may stay open while an independently running title
-     * task settles, so `title` may still arrive. Stream closure without `done`
-     * records request failure and marks the assistant failed with the latest
-     * stream error or the premature-close message. A normal `done` event makes
-     * the assistant terminal. Stale queued events and failures are ignored
-     * silently after token invalidation. The finally block releases the active
-     * resource and returns the request to idle only while this token still owns
-     * both representations.
+     * @typeParam TStreamEvent - Validated event union of the stream.
+     * @param token - Request token that owns the stream and its resource.
+     * @param options - How the stream is opened, applied, and reported.
+     * @returns A promise that resolves after completion, failure, or
+     * invalidation.
+     * @remarks Events are applied in arrival order. Stream closure before the
+     * reply is final records the latest stream error, or the premature-close
+     * message, with the incomplete status. Stale queued events and failures are
+     * ignored silently after token invalidation. The finally block releases
+     * the resource and returns the request to idle only while this token still
+     * owns both representations.
      */
-    async function readChatStream(
-      payload: ChatApiRequestBody,
-      request: Extract<ChatRequestState, { status: "awaiting-turn" }>
+    async function readChatStream<TStreamEvent>(
+      token: number,
+      options: OwnedChatStreamOptions<TStreamEvent>
     ): Promise<void> {
       try {
-        const resource = getOwnedRequestResource(request.token)
-        const events = dependencies.streamChat(payload, {
-          signal: resource.abortController.signal
-        })
+        const resource = getOwnedRequestResource(token)
+        const events = options.openEvents(resource.abortController.signal)
         for await (const event of events) {
-          handleChatStreamEvent(event, request.token)
+          await options.handleEvent(event)
         }
 
-        const currentRequest = get().request
         if (
-          isRequestOwned(request.token) &&
-          currentRequest.status !== "reply-completed"
+          isRequestOwned(token) &&
+          get().request.status !== "reply-completed"
         ) {
           updateChatRequestFailure(
-            request.token,
-            get().error ?? PREMATURE_STREAM_CLOSE_MESSAGE
+            token,
+            get().error ?? options.prematureCloseMessage,
+            options.incompleteStatus
           )
         }
       } catch (error) {
-        if (!isRequestOwned(request.token)) return
+        if (!isRequestOwned(token)) return
         updateChatRequestFailure(
-          request.token,
-          formatLifecycleErrorMessage(error)
+          token,
+          formatLifecycleErrorMessage(error),
+          options.incompleteStatus
         )
       } finally {
-        if (isRequestOwned(request.token)) {
+        if (isRequestOwned(token)) {
           activeRequestResource = undefined
-          set({ request: { status: "idle" } })
+          set({ request: IDLE_CHAT_REQUEST })
         }
       }
     }
@@ -826,42 +1069,130 @@ export function createChatViewStore(
         error: undefined,
         request
       })
-      await readChatStream(payload, request)
+      await readChatStream(token, {
+        openEvents: (signal) => dependencies.streamChat(payload, { signal }),
+        handleEvent: async (event) => {
+          handleChatStreamEvent(event, token)
+          await stopRequestedChatReply(token)
+        },
+        incompleteStatus: "failed",
+        prematureCloseMessage: PREMATURE_STREAM_CLOSE_MESSAGE
+      })
     }
 
     /**
-     * Interrupts the active assistant reply and requests transport abort.
+     * Finds the reply an owned request is streaming.
      *
-     * @remarks Awaiting-turn requests are also invalidated, although no
-     * assistant exists yet to mark interrupted. The token and resource are
-     * cleared before abort so queued transport events cannot commit state.
-     * @throws If the observable request has no matching private resource.
+     * @param token - Request token expected to own a streaming reply.
+     * @returns The reply and its conversation, or undefined when the token no
+     * longer owns a streaming reply.
      */
-    function stopStreaming(): void {
-      const currentState = get()
-      const request = currentState.request
-      if (request.status === "idle") return
-      const resource = getOwnedRequestResource(request.token)
+    function findOwnedReplyTarget(
+      token: number
+    ): ChatReplyPathParams | undefined {
+      const { request, conversation } = get()
+      if (
+        !isRequestOwned(token) ||
+        request.status !== "reply-streaming" ||
+        conversation === undefined
+      ) {
+        return undefined
+      }
 
-      const conversation = updateIncompleteAssistantReplyStatus(
-        currentState.conversation,
-        request,
-        "interrupted"
-      )
+      return {
+        conversationId: conversation.id,
+        assistantMessageId: request.assistantMessageId
+      }
+    }
+
+    /**
+     * Asks the backend to stop an owned reply and records a failed request.
+     *
+     * @param token - Request token that owns the reply.
+     * @param target - Reply and the conversation that holds it.
+     * @returns Settlement after the stop request settles; it never rejects.
+     * @remarks The reply's `interrupted` or `done` event, not this request,
+     * updates the reply. A reply that is no longer generating needs nothing
+     * more: its final event is already on the stream.
+     */
+    async function stopOwnedChatReply(
+      token: number,
+      target: ChatReplyPathParams
+    ): Promise<void> {
+      try {
+        await dependencies.stopChatReply(target)
+      } catch (error) {
+        if (isRequestOwned(token)) {
+          set({ error: formatReplyStopErrorMessage(error) })
+        }
+      }
+    }
+
+    /**
+     * Stops a reply whose stop was requested before its turn started.
+     *
+     * @param token - Request whose stream just applied an event.
+     * @returns Settlement after the stop request settles, or at once when no
+     * stop is pending for this request or its reply is not known yet.
+     */
+    async function stopRequestedChatReply(token: number): Promise<void> {
+      if (requestedStopToken !== token) return
+      const target = findOwnedReplyTarget(token)
+      if (target === undefined) return
+
+      requestedStopToken = undefined
+      await stopOwnedChatReply(token, target)
+    }
+
+    /**
+     * Stops following the owned request's stream without affecting the
+     * backend.
+     *
+     * @param token - Request token that owns the stream.
+     * @throws If the observable request has no matching private resource.
+     * @remarks The token and resource are cleared before abort so queued
+     * transport events cannot commit state.
+     */
+    function stopFollowingChatReply(token: number): void {
+      const resource = getOwnedRequestResource(token)
       activeRequestResource = undefined
-      set({
-        conversation,
-        request: { status: "idle" }
-      })
+      set({ request: IDLE_CHAT_REQUEST })
       resource.abortController.abort()
     }
 
     /**
-     * Restores initial chat state and silently aborts any active transport.
+     * Implements {@link ChatViewActions.stopStreaming} for this store.
      *
-     * @remarks Reset invalidates the request and open tokens before aborting,
-     * clears draft, conversation, request, open, and error together, and
-     * intentionally reports no cancellation error from superseded work.
+     * @returns A promise with the settlement defined by
+     * {@link ChatViewActions.stopStreaming}.
+     */
+    async function stopStreaming(): Promise<void> {
+      const request = get().request
+      switch (request.status) {
+        case "idle":
+          return
+        case "awaiting-turn":
+          requestedStopToken = request.token
+          return
+        case "reply-completed":
+          stopFollowingChatReply(request.token)
+          return
+        case "reply-streaming": {
+          const target = findOwnedReplyTarget(request.token)
+          if (target !== undefined)
+            await stopOwnedChatReply(request.token, target)
+          return
+        }
+      }
+    }
+
+    /**
+     * Restores initial chat state and stops following any active stream.
+     *
+     * @remarks Reset invalidates the request and open tokens before aborting
+     * the local transports, clears draft, conversation, request, open, and
+     * error together, and reports no error. The backend keeps generating a
+     * reply that was streaming.
      */
     function resetConversation(): void {
       const requestResource = activeRequestResource
@@ -904,7 +1235,8 @@ export function createChatViewStore(
     }
 
     /**
-     * Calculates the shown conversation after its active reply is abandoned.
+     * Calculates the shown conversation after the view stops following its
+     * active reply.
      *
      * @returns The current conversation with any streaming reply owned by the
      * active request marked interrupted, or the unchanged conversation.
@@ -972,33 +1304,98 @@ export function createChatViewStore(
     }
 
     /**
+     * Starts following the reply that ends the shown conversation when that
+     * reply is still generating.
+     *
+     * @returns The started follow, or undefined when the shown conversation
+     * does not end with a streaming reply.
+     * @remarks Runs in the same synchronous step that showed the conversation,
+     * so no request can start in between. The request enters
+     * `reply-streaming` at once, which keeps the composer from sending.
+     */
+    function startStoredReplyFollowing(): StoredReplyFollow | undefined {
+      const conversation = get().conversation
+      const followedReply =
+        conversation === undefined
+          ? undefined
+          : findStreamingReply(conversation)
+      if (conversation === undefined || followedReply === undefined)
+        return undefined
+
+      const token = nextRequestToken
+      nextRequestToken += 1
+      activeRequestResource = createChatRequestResource(token)
+      const followingRequest = {
+        status: "reply-streaming",
+        token,
+        assistantMessageId: followedReply.id
+      } satisfies ChatRequestState
+      set({ request: followingRequest })
+      const target = {
+        conversationId: conversation.id,
+        assistantMessageId: followedReply.id
+      }
+      return { token, target }
+    }
+
+    /**
+     * Reads a followed reply's stream from its snapshot to its end.
+     *
+     * @param follow - Follow started by {@link startStoredReplyFollowing}.
+     * @returns Settlement after the stream ends, fails, or is superseded.
+     * @remarks The snapshot replaces the stored content, so later deltas are
+     * neither lost nor repeated. An early end shows the reply interrupted,
+     * because the store only stopped following it.
+     */
+    async function readStoredReplyStream(
+      follow: StoredReplyFollow
+    ): Promise<void> {
+      await readChatStream(follow.token, {
+        openEvents: (signal) =>
+          readSnapshotFirstReplyEvents(
+            dependencies.streamChatReply(follow.target, signal)
+          ),
+        handleEvent: (event) => {
+          handleChatReplyEvent(event, follow.token)
+        },
+        incompleteStatus: "interrupted",
+        prematureCloseMessage: PREMATURE_REPLY_STREAM_CLOSE_MESSAGE
+      })
+    }
+
+    /**
      * Loads one stored conversation into the view through commit or failure.
      *
      * @param conversationId - Conversation being opened.
      * @param resource - Private read resource owned by this open.
      * @returns A promise that resolves after the outcome commits, the failure
-     * is recorded, or the open is superseded.
+     * is recorded, or the open is superseded. It carries the started follow
+     * when the shown conversation ends with a reply that is still generating.
      * @remarks Superseded reads are ignored silently, including their
      * failures, because a newer open, reset, or close already owns the view.
      */
     async function loadStoredConversation(
       conversationId: string,
       resource: ConversationOpenResource
-    ): Promise<void> {
+    ): Promise<StoredReplyFollow | undefined> {
       try {
         const result = await dependencies.getConversation(
           conversationId,
           resource.abortController.signal
         )
-        if (!isOpenOwned(resource.token)) return
+        if (!isOpenOwned(resource.token)) return undefined
         updateViewWithStoredConversation(result)
+        return result.status === "found"
+          ? startStoredReplyFollowing()
+          : undefined
       } catch (error) {
-        if (!isOpenOwned(resource.token)) return
+        if (!isOpenOwned(resource.token)) return undefined
         activeOpenResource = undefined
         set({
           error: formatConversationOpenErrorMessage(error),
           conversationOpen: IDLE_CONVERSATION_OPEN
         })
+        return undefined
       }
     }
 
@@ -1007,13 +1404,17 @@ export function createChatViewStore(
      *
      * @param conversationId - UUIDv7 of the stored conversation to open.
      * @returns A promise that resolves after the read commits, fails, or is
-     * superseded by a newer open, reset, or close.
+     * superseded by a newer open, reset, or close, and after any followed
+     * reply's stream ends.
      * @remarks Opening the conversation already shown is ignored. Otherwise
-     * the active request, if any, is invalidated first: its streaming reply is
-     * marked interrupted and its transport and any earlier open are aborted.
-     * The previous conversation stays visible until the read succeeds. A
-     * successful open clears the draft only if it still holds the text present
-     * when the open started, so text typed while opening is kept. A missing
+     * the active request, if any, is invalidated first: the view stops
+     * following its reply, which is shown interrupted until the new
+     * conversation replaces it, while the backend keeps generating it. Its
+     * transport and any earlier open are aborted. The previous conversation
+     * stays visible until the read succeeds. A successful open clears the draft
+     * only if it still holds the text present when the open started, so text
+     * typed while opening is kept. When the opened conversation ends with a
+     * reply that is still generating, the store follows it. A missing
      * conversation or a failed read leaves the previous conversation with an
      * inline error.
      */
@@ -1043,7 +1444,8 @@ export function createChatViewStore(
       })
       supersededRequest?.abortController.abort()
       supersededOpen?.abortController.abort()
-      await loadStoredConversation(conversationId, resource)
+      const follow = await loadStoredConversation(conversationId, resource)
+      if (follow !== undefined) await readStoredReplyStream(follow)
     }
 
     /**
@@ -1103,10 +1505,19 @@ function getStoredConversation(
  * {@link ChatViewActions.sendMessage}. The two generation controls are named
  * explicitly because the request contract rejects unknown fields. A saved zero
  * ceiling is omitted so the backend receives no explicit completion-token limit.
+ * The backend origin for following and stopping a reply is sampled when each
+ * request starts.
  */
 export const useChatViewStore: UseBoundStore<StoreApi<ChatViewStore>> =
   createChatViewStore({
     streamChat: readChatEvents,
+    streamChatReply: (target, signal) =>
+      readChatReplyEvents(target, {
+        backendUrl: useLysStore.getState().backendUrl,
+        signal
+      }),
+    stopChatReply: (target) =>
+      stopChatReply(target, { backendUrl: useLysStore.getState().backendUrl }),
     getConversation: getStoredConversation,
     createTimestamp: () => new Date().toISOString(),
     findEligibleChatModel: () => {

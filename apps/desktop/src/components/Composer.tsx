@@ -385,7 +385,7 @@ export function Composer({ messageFieldRef }: ComposerProps): ReactElement {
               <Button
                 aria-label="Stop reply"
                 className="composer__send"
-                onClick={stopStreaming}
+                onClick={() => void stopStreaming()}
                 type="button"
                 variant="secondary"
               >

@@ -63,8 +63,15 @@ A manual Start follows steps 4–8.
    title after the turn-start event. The first usable title assigned is emitted
    before, during, or after the assistant deltas and completion. An untitled
    turn whose title task neither generates nor assigns a title sends no title
-   event; another turn may generate one while the conversation remains untitled.
+   event; a turn started after that task ended requests a title again while
+   the conversation remains untitled. A turn sent while an earlier turn's title
+   task is still running requests no title, so its stream ends with its reply.
 8. The desktop applies each event to immutable local conversation state.
+9. Once the reply is final, the composer shows Send again, even while the
+   stream stays open for a title. Sending the next message then stops following
+   that stream; the backend still saves the title, and the desktop receives it
+   with the next turn or when it reads the conversation again
+   ([issue #96](https://github.com/w3lt/lys/issues/96)).
 
 ## Stop an in-flight reply
 
@@ -79,7 +86,8 @@ A manual Start follows steps 4–8.
 4. The reply task stores the reply as `interrupted` and sends `interrupted` to
    every stream following it; the stop request then answers `204`.
 5. The desktop marks the assistant message `interrupted` when that event
-   arrives. A title may still arrive before the stream closes.
+   arrives and shows Send again. A title may still arrive before the stream
+   closes.
 
 Switching to another conversation or starting a new one only stops the
 desktop from following the stream; the backend keeps generating and storing

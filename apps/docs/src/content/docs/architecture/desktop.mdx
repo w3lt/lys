@@ -46,6 +46,14 @@ Shell state such as backend status is managed independently.
 5. The store applies `start-*`, `delta`, `done`, `interrupted`, `title`, or
    `error` events to local immutable conversation state.
 
+The composer shows Stop while the turn is awaited or the reply streams, and
+Send otherwise. After `done`, `interrupted`, or `error`, the stream can stay
+open for a title; sending the next message then stops following it, and the
+backend still saves the title. The desktop then learns that title only from
+the next turn's start event, from reopening the conversation, or from the
+history dialog; delivering it live is tracked in
+[issue #96](https://github.com/w3lt/lys/issues/96).
+
 The desktop keeps no replay log and does not reconnect a dropped stream on its
 own. Showing a conversation whose reply is still generating, after an open or a
 failed open, follows that reply again from a stored `reply-snapshot`. Quitting

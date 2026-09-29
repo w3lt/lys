@@ -1,5 +1,6 @@
 import { DatabaseSync } from "node:sqlite"
 import type { PathLike } from "node:fs"
+import { updateConversationDatabaseDurability } from "./durability"
 import { calculateConversationSearchMatch } from "./listConversations"
 import { migrateDatabase } from "./migrations"
 import SqliteConversationHistory from "./history"
@@ -37,12 +38,15 @@ export default class SqliteConversationStore {
    * @returns The ready store whose disposal belongs to the caller.
    * @throws If acquisition, migration, or recovery fails; acquired resources are released.
    * @remarks Recovery marks replies left streaming as interrupted without
-   * changing their conversations' activity time or history order.
+   * changing their conversations' activity time or history order. The
+   * connection uses write-ahead logging with `synchronous = NORMAL`; see
+   * {@link updateConversationDatabaseDurability} for the durability trade-off.
    */
   public static open(databaseFilePath: PathLike): SqliteConversationStore {
     using lifetime = new DisposableStack()
     const database = lifetime.use(new DatabaseSync(databaseFilePath))
     database.exec("PRAGMA foreign_keys = ON")
+    updateConversationDatabaseDurability(database)
     database.function(
       "contains_search",
       { deterministic: true },
@@ -71,11 +75,10 @@ export default class SqliteConversationStore {
   /**
    * Creates turn persistence access borrowing this store's guarded lifetime.
    * @returns An adapter valid until this store is disposed; it cannot release the store.
-   * @throws If the store is closed.
+   * @throws If the store is closed or the delta statement cannot be prepared.
    */
   public createTurnAccess(): SqliteConversationTurns {
-    this.#getDatabase()
-    return new SqliteConversationTurns(() => this.#getDatabase())
+    return SqliteConversationTurns.open(() => this.#getDatabase())
   }
 
   /**

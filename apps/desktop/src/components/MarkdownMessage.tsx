@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from "react"
-import ReactMarkdown, { type Components } from "react-markdown"
+import ReactMarkdown, { MarkdownHooks, type Components } from "react-markdown"
 import { Copy } from "lucide-react"
 import { upperFirst } from "lodash"
 import { Button } from "@/components/ui/button"
+import rehypeShiki from "@shikijs/rehype"
 
 import "./MarkdownMessage.scss"
 
@@ -174,7 +175,18 @@ const markdownComponents: Components = {
 export function MarkdownMessage({ text, streaming }: MarkdownMessageProps) {
   return (
     <div className="markdown-message">
-      <ReactMarkdown components={markdownComponents}>{text}</ReactMarkdown>
+      <MarkdownHooks
+        components={markdownComponents}
+        rehypePlugins={[
+          [
+            rehypeShiki,
+            { themes: { dark: "github-dark", light: "github-light" } }
+          ]
+        ]}
+        fallback={<ReactMarkdown>{text}</ReactMarkdown>}
+      >
+        {text}
+      </MarkdownHooks>
       {streaming && (
         <span
           aria-label="Lys is generating"

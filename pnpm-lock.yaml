@@ -113,6 +113,9 @@ importers:
       "@lys/share":
         specifier: workspace:*
         version: link:../../packages/share
+      "@shikijs/rehype":
+        specifier: ^4.4.3
+        version: 4.4.3
       "@tailwindcss/vite":
         specifier: ^4.3.3
         version: 4.3.3(vite@7.3.6(@types/node@26.6.2)(jiti@2.7.0)(lightningcss@1.33.0)(sass@1.105.0)(tsx@4.23.15)(yaml@2.9.1))
@@ -2667,6 +2670,13 @@ packages:
     resolution:
       {
         integrity: sha512-m0wBeLDQDeIxRdUmrCPdQqfuUamDwRL5isCfYbguKD6NiaKpVbsv+3J81DyIKgNW5h4WAIIr8T4EkgQrBBxvaQ==
+      }
+    engines: { node: ">=20" }
+
+  "@shikijs/rehype@4.4.3":
+    resolution:
+      {
+        integrity: sha512-vkG9jG1aRnrx05R31uAOKQHE8qpY7r1cBXE2sAZgFK2IaPnQHwaP4L1C6amQixmZ8thBsKwfbSsYxMDoo46UWQ==
       }
     engines: { node: ">=20" }
 
@@ -10467,6 +10477,15 @@ snapshots:
       "@shikijs/types": 4.4.3
       "@shikijs/vscode-textmate": 10.0.2
       "@types/hast": 3.0.5
+
+  "@shikijs/rehype@4.4.3":
+    dependencies:
+      "@shikijs/types": 4.4.3
+      "@types/hast": 3.0.5
+      hast-util-to-string: 3.0.1
+      shiki: 4.4.3
+      unified: 11.0.5
+      unist-util-visit: 5.1.0
 
   "@shikijs/themes@4.4.3":
     dependencies:

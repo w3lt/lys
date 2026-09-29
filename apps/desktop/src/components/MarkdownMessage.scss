@@ -61,7 +61,7 @@
   text-underline-offset: 3px;
 }
 
-.markdown-message :not(.markdown-message__block-code) > code,
+.markdown-message code:not(.markdown-message__block-code),
 .markdown-message > code {
   background: var(--app-surface-code);
   color: var(--app-text-code);

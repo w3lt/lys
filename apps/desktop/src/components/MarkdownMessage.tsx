@@ -197,6 +197,7 @@ export function MarkdownMessage({ text, streaming }: MarkdownMessageProps) {
             rehypeShiki,
             {
               themes: { dark: "github-dark", light: "github-light" },
+              defaultColor: "light-dark()",
               addLanguageClass: true
             }
           ]

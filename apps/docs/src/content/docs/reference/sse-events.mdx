@@ -1,13 +1,15 @@
 ---
 title: SSE events
-description: The six concrete SSE payload variants currently emitted by the chat route.
+description: The SSE payload variants emitted by the chat and reply-events routes.
 docType: reference
 sidebar:
   order: 2
 ---
 
-The current chat route emits exactly six SSE payload variants. The payload
-shape is defined by `chatApiStreamEventSchema` in `@lys/protocol`.
+The chat route emits exactly seven SSE payload variants, defined by
+`chatApiStreamEventSchema` in `@lys/protocol`. The reply-events route emits
+`reply-snapshot` followed by the five generation variants (`title`, `delta`,
+`done`, `interrupted`, `error`), defined by `chatReplyEventSchema`.
 
 ## Event variants
 
@@ -18,7 +20,9 @@ shape is defined by `chatApiStreamEventSchema` in `@lys/protocol`.
 | `title`                            | `title`                                           | The persisted conversation title, generated or reconciled.           |
 | `delta`                            | `content`                                         | One non-empty assistant text fragment.                               |
 | `done`                             | `finishReason`                                    | Successful assistant completion with `stop` or `length`.             |
+| `interrupted`                      | none                                              | The reply ended before the model finished.                           |
 | `error`                            | `message`                                         | A user-presentable chat generation error string.                     |
+| `reply-snapshot`                   | `conversationTitle`, `assistantMessage`           | Reply-events route only: the stored reply when following began.      |
 
 ## Payload details
 
@@ -59,8 +63,9 @@ ends title generation for the turn. Before that, the OpenAI SDK retries a
 connection failure, timeout, or 408, 409, 429, or 5xx response up to two more
 times, so one attempt can send up to three HTTP requests.
 
-When one title task produces no usable candidate or the client disconnects
-first, that task sends no `title` event. A later turn requests generation when
+When one title task produces no usable candidate or backend shutdown cancels
+it, that task sends no `title` event. Stopping the reply or closing the stream
+does not cancel it. A later turn requests generation when
 the conversation is still untitled. If a title was saved but its event was not
 delivered, a later existing turn sends the stored title again. The backend logs
 title-task failures instead of sending an `error` event.
@@ -83,6 +88,22 @@ Carries:
 
 The only accepted `finishReason` values are `stop` and `length`.
 
+### `interrupted`
+
+Carries no fields. Sent when the reply was stopped, superseded by a newer turn
+in its conversation, deleted with its conversation, or cancelled by backend
+shutdown. The stored reply, if it still exists, is `interrupted` with exactly
+the content delivered before this event. No `delta` or `done` follows it; a
+`title` can.
+
+### `reply-snapshot`
+
+The first event of every reply-events stream. `assistantMessage` is the stored
+reply, including every delta sent before this event, so later `delta` events
+continue from exactly its content. `conversationTitle` is the stored title, or
+`null`. When the reply's generation has already ended, the stream closes right
+after this event.
+
 ### `error`
 
 Carries a non-empty `message` string that reports a chat generation failure.
@@ -99,22 +120,31 @@ as failed locally. Title-generation failures never produce `error` events.
 
 ## Event ordering today
 
-Every valid stream begins with one turn-start event. After that:
+Every valid chat stream begins with one turn-start event. After that:
 
 1. `start-new-conversation-turn` or `start-existing-conversation-turn`
 2. for a titled existing conversation, its stored `title` event arrives next
-3. zero or more `delta` events before a successful `done`
+3. zero or more `delta` events, then exactly one of `done`, `interrupted`, or
+   `error`
 4. for a conversation without a stored title, a generated `title` may arrive
    before, during, or after the chat events
 
-An `error` event reports a chat generation failure and is not followed by
-`done`. A generated `title` event can still arrive after it, because title
-generation runs independently. Failure to send a stored title is logged and
-does not prevent chat generation from continuing.
+A `title` event can still arrive after the reply's final event, because title
+generation runs independently; the stream closes after both have settled.
+Closing the stream never cancels either task. A reply-events stream follows
+the same order after its `reply-snapshot`, starting from wherever the reply
+was when the snapshot was read.
+
+A stream can also close without any of `done`, `interrupted`, or `error`: the
+backend closes a follower that falls 4,096 events behind, and a reply whose
+final state cannot be stored sends none. Such a close says nothing about the
+reply's outcome; following the reply again, or reading its conversation,
+returns the stored state.
 
 ## Coming soon
 
-- Replay and resume markers if stream reconnection is added
+- Replay of missed events (following a reply today starts from a fresh
+  snapshot instead)
 - Tool-call or structured action stream events
 - Stronger protocol versioning around additive event growth
 

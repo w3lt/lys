@@ -11,20 +11,22 @@ route definitions.
 
 ## Routes
 
-| Method   | Path                                    | Request body                                                                | Response                                                   |
-| -------- | --------------------------------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| `GET`    | `/api/v1/heath`                         | none                                                                        | `{ ok: true }`                                             |
-| `GET`    | `/api/v1/llm/list`                      | none                                                                        | `{ llms: LlmInfo[] }`                                      |
-| `GET`    | `/api/v1/llm/:modelId/health`           | none                                                                        | Loaded-state health observation                            |
-| `POST`   | `/api/v1/llm/load`                      | `{ modelId: string }`                                                       | `LlmInfo`                                                  |
-| `PATCH`  | `/api/v1/llm/unload`                    | `{ modelId: string }`                                                       | `204` or typed Problem Details                             |
-| `GET`    | `/api/v1/llm/runtime`                   | none                                                                        | `{ status: "connecting" \| "connected" \| "unreachable" }` |
-| `POST`   | `/api/v1/llm/runtime/connect`           | none                                                                        | Settled `{ status }`, or service-busy Problem Details      |
-| `GET`    | `/api/v1/conversations`                 | none; optional `query`, `cursor`, `limit` query parameters                  | Conversation list page                                     |
-| `GET`    | `/api/v1/conversations/:conversationId` | none                                                                        | Conversation with ordered messages                         |
-| `PATCH`  | `/api/v1/conversations/:conversationId` | `{ title: string }`                                                         | Conversation metadata                                      |
-| `DELETE` | `/api/v1/conversations/:conversationId` | none                                                                        | Bodyless `204`                                             |
-| `POST`   | `/api/v1/chat`                          | `message`, `model`, required `generationOptions`, optional `conversationId` | `text/event-stream`                                        |
+| Method   | Path                                                              | Request body                                                                | Response                                                   |
+| -------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `GET`    | `/api/v1/heath`                                                   | none                                                                        | `{ ok: true }`                                             |
+| `GET`    | `/api/v1/llm/list`                                                | none                                                                        | `{ llms: LlmInfo[] }`                                      |
+| `GET`    | `/api/v1/llm/:modelId/health`                                     | none                                                                        | Loaded-state health observation                            |
+| `POST`   | `/api/v1/llm/load`                                                | `{ modelId: string }`                                                       | `LlmInfo`                                                  |
+| `PATCH`  | `/api/v1/llm/unload`                                              | `{ modelId: string }`                                                       | `204` or typed Problem Details                             |
+| `GET`    | `/api/v1/llm/runtime`                                             | none                                                                        | `{ status: "connecting" \| "connected" \| "unreachable" }` |
+| `POST`   | `/api/v1/llm/runtime/connect`                                     | none                                                                        | Settled `{ status }`, or service-busy Problem Details      |
+| `GET`    | `/api/v1/conversations`                                           | none; optional `query`, `cursor`, `limit` query parameters                  | Conversation list page                                     |
+| `GET`    | `/api/v1/conversations/:conversationId`                           | none                                                                        | Conversation with ordered messages                         |
+| `PATCH`  | `/api/v1/conversations/:conversationId`                           | `{ title: string }`                                                         | Conversation metadata                                      |
+| `DELETE` | `/api/v1/conversations/:conversationId`                           | none                                                                        | Bodyless `204`                                             |
+| `POST`   | `/api/v1/chat`                                                    | `message`, `model`, required `generationOptions`, optional `conversationId` | `text/event-stream`                                        |
+| `GET`    | `/api/v1/chat/:conversationId/replies/:assistantMessageId/events` | none                                                                        | `text/event-stream` (reply snapshot, then live events)     |
+| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/stop`   | none                                                                        | Bodyless `204`, or `409` Problem Details                   |
 
 `/api/v1/heath` is the current spelling in both the shared protocol package and
 the Fastify route registration.
@@ -78,7 +80,23 @@ controls affect chat completion; title generation uses a separate request.
 
 Accepted chat turns respond as SSE. Missing conversations return JSON Problem
 Details before the stream starts. Each event payload must match one of
-the six variants documented in [SSE events](/reference/sse-events/).
+the seven variants documented in [SSE events](/reference/sse-events/).
+
+Closing a chat stream stops only that client's observation. The backend keeps
+generating and storing the reply and its title. To stop a reply, send
+`POST /api/v1/chat/:conversationId/replies/:assistantMessageId/stop`; it
+answers `204` after the reply is stored final (`interrupted`, or `completed`
+or `failed` when the reply ended before the stop) and does not cancel title
+generation. When no
+generation is running for the reply it answers `409` with
+`urn:lys:problem:chat:reply-not-generating`.
+
+To follow a reply again, open
+`GET /api/v1/chat/:conversationId/replies/:assistantMessageId/events`. Its
+first event is a `reply-snapshot` with the stored reply and conversation
+title; live events follow while the generation runs. A missing conversation
+returns the conversation-not-found problem and a missing reply returns `404`
+with `urn:lys:problem:chat:reply-not-found`.
 
 ## Conversation history
 
@@ -124,7 +142,8 @@ with `Content-Type: application/problem+json`:
 ```
 
 Chat creates its user/assistant pair atomically, persists each delta before
-sending it, and stores a terminal status before `done`. Partial content survives
+sending it to every stream following the reply, and stores a terminal status
+before `done`. Partial content survives
 failure or cancellation. Title generation runs only for an untitled conversation
 and publishes a title only if the conditional database write succeeds. On startup,
 remaining streaming assistants become interrupted with refreshed message
@@ -179,7 +198,9 @@ disconnecting the client does not cancel an accepted query. The runtime's
 inventory RPC has no enforced completion deadline, so an unresponsive engine
 can keep the query and shutdown pending.
 
-Chat inference remains separately cancellable through its SSE connection. See the
+Chat inference is cancelled only by the reply-stop route or by backend
+shutdown; closing a chat stream does not cancel it. A newer turn or a deletion
+also ends a reply's inference, once the model sends its next content. See the
 [provider cancellation policy](/architecture/providers/#cancellation-policy).
 
 ## Model health responses

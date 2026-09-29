@@ -14,12 +14,14 @@ const CONVERSATION_NOT_FOUND_PROBLEM_STATUS = 404
  * Validates the RFC 9457 body returned when a conversation route names a
  * conversation that is not stored.
  *
- * @remarks The get, title-update, and delete conversation endpoints transmit
- * this contract with HTTP 404. The `type` literal is the machine-readable
- * discriminator; consumers branch on it and never on `detail`, which is
- * occurrence-specific, caller-safe text. A 404 response without this body,
- * such as an unregistered route, is not evidence that a conversation is
- * absent. Changing any fixed field requires coordinated consumers.
+ * @remarks The get, title-update, and delete conversation endpoints, the
+ * reply-events endpoint, and the chat endpoint when it continues a
+ * conversation transmit this contract with HTTP 404. The `type` literal is
+ * the machine-readable discriminator; consumers branch on it and never on
+ * `detail`, which is occurrence-specific, caller-safe text. A 404 response
+ * without this body, such as an unregistered route, is not evidence that a
+ * conversation is absent. Changing any fixed field requires coordinated
+ * consumers.
  */
 export const conversationNotFoundProblemSchema = z
   .strictObject({

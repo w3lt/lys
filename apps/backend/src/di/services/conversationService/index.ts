@@ -1,5 +1,6 @@
 import { DatabaseSync } from "node:sqlite"
 import type { PathLike } from "node:fs"
+import { updateConversationDatabaseDurability } from "./durability"
 import { calculateConversationSearchMatch } from "./listConversations"
 import { migrateDatabase } from "./migrations"
 import SqliteConversationHistory from "./history"
@@ -37,7 +38,11 @@ export default class SqliteConversationStore {
    * @returns The ready store whose disposal belongs to the caller.
    * @throws If acquisition, migration, or recovery fails; acquired resources are released.
    * @remarks Recovery marks replies left streaming as interrupted without
-   * changing their conversations' activity time or history order.
+   * changing their conversations' activity time or history order. After the
+   * migration accepts the stored version, the connection switches to
+   * write-ahead logging with `synchronous = NORMAL`, so a database from a
+   * newer version is refused unchanged; see
+   * {@link updateConversationDatabaseDurability} for the durability trade-off.
    */
   public static open(databaseFilePath: PathLike): SqliteConversationStore {
     using lifetime = new DisposableStack()
@@ -49,6 +54,7 @@ export default class SqliteConversationStore {
       calculateConversationSearchMatch
     )
     migrateDatabase(database)
+    updateConversationDatabaseDurability(database)
     database
       .prepare(
         `UPDATE conversation_messages SET status = 'interrupted', updated_at = ?
@@ -71,11 +77,10 @@ export default class SqliteConversationStore {
   /**
    * Creates turn persistence access borrowing this store's guarded lifetime.
    * @returns An adapter valid until this store is disposed; it cannot release the store.
-   * @throws If the store is closed.
+   * @throws If the store is closed or the delta statement cannot be prepared.
    */
   public createTurnAccess(): SqliteConversationTurns {
-    this.#getDatabase()
-    return new SqliteConversationTurns(() => this.#getDatabase())
+    return SqliteConversationTurns.open(() => this.#getDatabase())
   }
 
   /**

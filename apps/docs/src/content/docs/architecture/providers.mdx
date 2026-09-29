@@ -126,8 +126,9 @@ application-owned completion-only case defined by `IFACE-018` in
 if a runtime operation never settles, shutdown also keeps waiting for it.
 
 Inference has a separate cancellation lifetime. `ChatService` passes an abort
-signal to the OpenAI SDK for chat and title generation; closing the chat SSE
-connection aborts that signal. Cancelling inference does not unload the model or
+signal to the OpenAI SDK for chat and title generation. The reply-stop route
+aborts the reply's signal; backend shutdown aborts both. Closing a chat SSE
+connection aborts neither. Cancelling inference does not unload the model or
 cancel an accepted model-management operation.
 
 The LM Studio SDK supports cancellation of model loading, but Lys deliberately

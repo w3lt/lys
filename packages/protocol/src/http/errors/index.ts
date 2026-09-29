@@ -8,3 +8,9 @@ export {
   conversationNotFoundProblemSchema,
   type ConversationNotFoundProblem
 } from "./conversation"
+export {
+  chatReplyNotFoundProblemSchema,
+  chatReplyNotGeneratingProblemSchema,
+  type ChatReplyNotFoundProblem,
+  type ChatReplyNotGeneratingProblem
+} from "./chat"

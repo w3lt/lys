@@ -1,3 +1,4 @@
+import type { StatementSync } from "node:sqlite"
 import type {
   ConversationTurnWriter,
   GeneratedConversationTitleWriter
@@ -11,6 +12,10 @@ import type {
 } from "./share"
 import { createConversationTurn } from "./createTurn"
 
+/** Appends one delta to an assistant reply only while it is still streaming. */
+const UPDATE_ASSISTANT_MESSAGE_CONTENT_SQL = `UPDATE conversation_messages SET content = content || ?, updated_at = ?
+      WHERE id = ? AND role = 'assistant' AND status = 'streaming'`
+
 /**
  * Borrows guarded SQLite access to persist atomic turns and their generation lifecycle.
  * @remarks Single-owner synchronous calls; the root store exclusively owns cleanup.
@@ -21,13 +26,44 @@ export default class SqliteConversationTurns
 {
   /** Borrowed guarded database access, valid only for the root store's lifetime. */
   readonly #getDatabase: GetConversationDatabase
+  /**
+   * Delta append prepared once on the store's connection. It is derived from
+   * that connection, is finalized when the store closes it, and is used only
+   * after `#getDatabase` confirms the store is open.
+   */
+  readonly #updateAssistantMessageContentStatement: StatementSync
 
   /**
-   * Retains guarded access without database effects.
+   * Retains guarded access and an already prepared delta statement.
    * @param getDatabase - Borrowed access from the owning store.
+   * @param updateAssistantMessageContentStatement - Statement prepared by
+   * {@link SqliteConversationTurns.open} on the same connection.
    */
-  public constructor(getDatabase: GetConversationDatabase) {
+  private constructor(
+    getDatabase: GetConversationDatabase,
+    updateAssistantMessageContentStatement: StatementSync
+  ) {
     this.#getDatabase = getDatabase
+    this.#updateAssistantMessageContentStatement =
+      updateAssistantMessageContentStatement
+  }
+
+  /**
+   * Opens turn access on the store's connection, preparing the per-delta
+   * statement once.
+   * @param getDatabase - Borrowed guarded access from the owning store.
+   * @returns Turn access valid until the store is disposed; it cannot release
+   * the store.
+   * @throws If the store is closed or SQLite cannot prepare the statement;
+   * nothing is retained then.
+   */
+  public static open(
+    getDatabase: GetConversationDatabase
+  ): SqliteConversationTurns {
+    const statement = getDatabase().prepare(
+      UPDATE_ASSISTANT_MESSAGE_CONTENT_SQL
+    )
+    return new SqliteConversationTurns(getDatabase, statement)
   }
 
   /**
@@ -62,22 +98,23 @@ export default class SqliteConversationTurns
    * @param content - Nonempty delta received from the model.
    * @returns True if appended; false if the reply was deleted or already finalized.
    * @throws If the store is closed, content is empty, or SQLite fails.
+   * @remarks Uses the statement prepared by {@link SqliteConversationTurns.open};
+   * the write commits before this method returns.
    */
   public updateAssistantMessageContent(
     assistantMessageId: string,
     content: string
   ): boolean {
-    const database = this.#getDatabase()
+    // Rejects every write after the store closed, before the statement is used.
+    this.#getDatabase()
     if (content.length === 0)
       throw new Error("Assistant delta must not be empty")
     return (
-      database
-        .prepare(
-          `UPDATE conversation_messages SET content = content || ?, updated_at = ?
-      WHERE id = ? AND role = 'assistant' AND status = 'streaming'`
-        )
-        .run(content, new Date().toISOString(), assistantMessageId).changes ===
-      1
+      this.#updateAssistantMessageContentStatement.run(
+        content,
+        new Date().toISOString(),
+        assistantMessageId
+      ).changes === 1
     )
   }
 

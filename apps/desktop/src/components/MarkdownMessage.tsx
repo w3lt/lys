@@ -31,6 +31,9 @@ type CodeElementProps = {
   children?: ReactNode
   /** Renderer class containing an optional `language-*` marker. */
   className?: string
+}
+
+type CodeBlockProps = CodeElementProps & {
   /** Plain block text, without highlighting markup, that the copy button writes. */
   code: string
 }
@@ -76,7 +79,7 @@ function getCodeText(text: string) {
  * plain text to copy.
  * @returns The code block header, copy control, and code content.
  */
-function CodeBlock({ children, className, code }: CodeElementProps) {
+function CodeBlock({ children, className, code }: CodeBlockProps) {
   const [copied, setCopied] = useState(false)
   const resetTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const language = getCodeLanguage(className)
@@ -219,7 +222,11 @@ export function MarkdownMessage({ text, streaming }: MarkdownMessageProps) {
             {
               themes: { dark: "github-dark", light: "github-light" },
               defaultColor: "light-dark()",
-              addLanguageClass: true
+              addLanguageClass: true,
+              colorsRendering: "none",
+              langs: [],
+              lazy: true,
+              fallbackLanguage: "text"
             }
           ]
         ]}

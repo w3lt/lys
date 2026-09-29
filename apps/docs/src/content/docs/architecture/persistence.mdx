@@ -28,14 +28,16 @@ Only the backend reads or writes the conversation database directly.
 
 The desktop does not query SQLite directly and the Tauri host does not proxy
 conversation SQL. The store lends separate history and turn capabilities, guards
-borrowed access after disposal, and remains open until chat handlers settle.
+borrowed access after disposal, and remains open until every reply generation
+has stored its final state.
 
 ## Migration model
 
 The backend applies schema changes from an in-memory `databaseMigrations` array.
 On startup it:
 
-1. Opens the SQLite file.
+1. Opens the SQLite file with foreign keys enabled, write-ahead logging, and
+   `synchronous = NORMAL`.
 2. Acquires a write transaction and reads `PRAGMA user_version`.
 3. Rejects unsupported future versions or applies each missing migration in order.
 4. Records version 5 and commits; a migration failure rolls back all pending work.
@@ -48,7 +50,9 @@ unchanged; version 4 restricts the conversation timestamp trigger to explicit
 activity updates, so title edits preserve ordering, and version 5 restricts the
 message-update trigger to text changes, so status-only updates preserve it too.
 Turn creation is atomic and first interrupts a reply still streaming in the same
-conversation, and streamed content is committed before it is published.
+conversation, and streamed content is committed before it is sent to any stream
+following the reply. The turn adapter prepares the delta `UPDATE` once, when
+turn access opens.
 
 ## Settings ownership
 

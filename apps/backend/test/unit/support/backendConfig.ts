@@ -1,21 +1,22 @@
-import type { BackendConfig } from "../../../src/config"
+import { backendConfigSchema } from "../../../src/config"
 
 /**
- * Backend configuration that keeps every test-owned resource isolated.
+ * Valid backend configuration for tests that only forward its values.
  *
- * @remarks The conversation database is in memory, so no developer database
- * is opened. The LM Studio host and port are distinct from the production
- * defaults so endpoint derivation is observable; no connection is made because
- * tests replace the SDK and `fetch`. Prompts are short fixed strings.
+ * @remarks Parsed by `backendConfigSchema`, so it satisfies every rule a
+ * production configuration must meet and is frozen. The database path is an
+ * absolute placeholder under a directory that does not exist; no case opens it.
+ * The LM Studio host and port are distinct from the production defaults so
+ * endpoint derivation is observable. Prompts are short fixed strings.
  */
-export const TEST_BACKEND_CONFIG = Object.freeze({
+export const TEST_BACKEND_CONFIG = backendConfigSchema.parse({
   backendHost: "127.0.0.1",
-  backendPort: 0,
+  backendPort: 12_345,
   lmstudioHost: "lmstudio.test",
   lmstudioPort: 4321,
-  databaseFilePath: ":memory:",
+  databaseFilePath: "/nonexistent/lys-test/lys_db.sqlite",
   lysSystemPrompt: "Configured system prompt",
   titleGenerationPrompt: "Configured title prompt",
   titleGenerationMaxAttempts: 2,
   generatedTitleMaxLength: 40
-} satisfies BackendConfig)
+})

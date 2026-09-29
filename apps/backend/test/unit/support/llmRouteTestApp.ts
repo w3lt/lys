@@ -1,56 +1,51 @@
-import LlmService from "../../../src/di/services/llmService"
-import { createFakeLlmRuntime, type FakeLlmRuntime } from "./fakeLlmRuntime"
+import { vi } from "vitest"
+import LlmRuntimeService from "../../../src/di/services/llmRuntimeService"
+import LlmService, {
+  type LlmEngineOperationQueue
+} from "../../../src/di/services/llmService"
 import { createTestFastify, type TestFastify } from "./fastifyTestApp"
 
-/** Accepted operations the LLM service admits at once. */
-const LLM_SERVICE_CAPACITY = 9
-
-/** Test application exposing an LLM service backed by a runtime double. */
+/** Test application exposing the LLM services the LLM routes read. */
 export type LlmRouteTestApp = TestFastify &
   Readonly<{
-    /** Runtime double owned by the decorated service. */
-    runtime: FakeLlmRuntime
-    /** Service decorated as `app.llmService`. */
+    /**
+     * Service decorated as `app.llmService`. Each case stubs the one capability
+     * method its route calls; an unstubbed method rejects.
+     */
     service: LlmService
   }>
 
 /**
- * Creates a test application decorated with an LLM service.
+ * Creates a test application decorated with LLM services that never reach a
+ * runtime.
  *
- * @returns The application, captured logs, service, and runtime double.
- * @remarks The service's clock always reads zero, so reported latency is 0.
- * Routes are not registered; each case registers the route under test.
+ * @returns The application, captured logs, and the decorated LLM service.
+ * @remarks `app.llmService` borrows an operation queue that rejects every
+ * operation with `Unexpected LLM engine operation`, so a route outcome comes
+ * only from the capability method a case stubs with `vi.spyOn`.
+ * `app.llmRuntimeService` holds no runtime: it is never connected, and an
+ * acquisition would reject with `Unexpected LLM runtime acquisition`. Routes
+ * are not registered; each case registers the route under test.
  */
 export function createLlmRouteTestApp(): LlmRouteTestApp {
   const testFastify = createTestFastify()
-  const runtime = createFakeLlmRuntime()
-  const service = new LlmService({ runtime, readMonotonicTimeMs: () => 0 })
-  testFastify.app.decorate("llmService", service)
-  return Object.freeze({ ...testFastify, runtime, service })
-}
-
-/**
- * Fills every admission position of the service with pending health queries.
- *
- * @param testApp - Application whose service and runtime are occupied.
- * @returns A release operation that lets the queries finish and resolves after
- * all of them settle.
- * @remarks Replaces the runtime's loaded-inventory behavior for the rest of
- * the case.
- */
-export function occupyLlmServiceCapacity(
-  testApp: LlmRouteTestApp
-): () => Promise<void> {
-  const gate = Promise.withResolvers<void>()
-  testApp.runtime.listLoadedLlmModelInstances.mockImplementation(async () => {
-    await gate.promise
-    return []
+  const llmEngineOperationQueue: LlmEngineOperationQueue = Object.freeze({
+    handleLlmEngineOperationRequest: async () => {
+      throw new Error("Unexpected LLM engine operation")
+    }
   })
-  const occupied = Array.from({ length: LLM_SERVICE_CAPACITY }, (_, index) =>
-    testApp.service.getLlmModelHealth(`occupying-model-${index}`)
+  const service = new LlmService({ llmEngineOperationQueue })
+  testFastify.app.decorate("llmService", service)
+  testFastify.app.decorate(
+    "llmRuntimeService",
+    new LlmRuntimeService({
+      acquireLlmRuntime: async () => {
+        throw new Error("Unexpected LLM runtime acquisition")
+      },
+      reportLlmRuntimeAcquisitionFailure: vi.fn<(failure: unknown) => void>(),
+      reportLlmRuntimeAvailabilityCheckFailure:
+        vi.fn<(failure: unknown) => void>()
+    })
   )
-  return async () => {
-    gate.resolve()
-    await Promise.all(occupied)
-  }
+  return Object.freeze({ ...testFastify, service })
 }

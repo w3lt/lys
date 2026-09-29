@@ -3,7 +3,7 @@ import updateFastifyWithLlmRoutes from "../../../../../src/modules/llm/routes"
 import { createLlmRouteTestApp } from "../../../support/llmRouteTestApp"
 
 describe("updateFastifyWithLlmRoutes", () => {
-  it("registers the list, load, unload, and health endpoints", async () => {
+  it("registers the list, load, unload, health, runtime-status, and runtime-connect endpoints", async () => {
     const { app } = createLlmRouteTestApp()
 
     await updateFastifyWithLlmRoutes(app)
@@ -16,6 +16,12 @@ describe("updateFastifyWithLlmRoutes", () => {
     )
     expect(
       app.hasRoute({ method: "GET", url: "/api/v1/llm/:modelId/health" })
+    ).toBe(true)
+    expect(app.hasRoute({ method: "GET", url: "/api/v1/llm/runtime" })).toBe(
+      true
+    )
+    expect(
+      app.hasRoute({ method: "POST", url: "/api/v1/llm/runtime/connect" })
     ).toBe(true)
   })
 })

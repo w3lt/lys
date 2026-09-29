@@ -40,7 +40,10 @@ export type CreateChatTaskOptions = Readonly<{
  * Streams a reply, persisting content before publication and status before completion.
  * @param options - Borrowed dependencies and turn-scoped persistence authority.
  * @returns Settlement after completion, cancellation, deletion, or reported failure.
- * @throws If persistence or failure reporting fails; the route observes that rejection.
+ * @throws An aggregate of the stream failure and the persistence failure when
+ * the failed or interrupted state cannot be stored, or the error event's
+ * delivery failure; the route observes that rejection. A delta or completion
+ * write that throws is handled as a stream failure.
  * @remarks Partial text remains stored on cancellation and failure. Cancelled replies
  * become interrupted; upstream failures become failed and are excluded from future context.
  */

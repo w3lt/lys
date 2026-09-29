@@ -1,24 +1,11 @@
-import type { FastifyInstance } from "fastify"
+import type { FastifyInstance, LightMyRequestResponse } from "fastify"
 import { validatorCompiler } from "fastify-type-provider-zod"
-import type { ChatCompletionChunk } from "openai/resources/index.mjs"
-import { onTestFinished } from "vitest"
+import { onTestFinished, vi, type MockInstance } from "vitest"
 import ChatService from "../../../src/di/services/chatService"
 import SqliteConversationStore from "../../../src/di/services/conversationService"
-import {
-  createChatSseTestApp,
-  parseSseEvents,
-  type ChatSseTestAppOptions,
-  type ReceivedSseEvent
-} from "./chatSseRoute"
+import type SqliteConversationTurns from "../../../src/di/services/conversationService/turns"
+import { createChatSseTestApp } from "./chatSseRoute"
 import type { TestFastify } from "./fastifyTestApp"
-import {
-  createChatCompletion,
-  createChatCompletionResponse,
-  createChatCompletionStreamResponse,
-  installOpenAiEndpointFake,
-  type OpenAiEndpointFake,
-  type OpenAiEndpointResponder
-} from "./openAiEndpointFake"
 
 /** Published path of the chat route. */
 const CHAT_PATH = "/api/v1/chat"
@@ -26,104 +13,83 @@ const CHAT_PATH = "/api/v1/chat"
 /** Test application decorated with the services the chat route borrows. */
 export type ChatRouteTestApp = TestFastify &
   Readonly<{
-    /** In-memory store decorated as `app.conversationService`. */
-    store: SqliteConversationStore
-    /** Endpoint receiving the requests of `app.chatService`. */
-    endpoint: OpenAiEndpointFake
+    /**
+     * Store access the route borrows at registration; returns
+     * {@link ChatRouteTestApp.turns} until a case replaces it.
+     */
+    createTurnAccess: MockInstance<SqliteConversationStore["createTurnAccess"]>
+    /** Turn creation of the borrowed access; throws until a case configures it. */
+    createConversationTurn: MockInstance<
+      SqliteConversationTurns["createConversationTurn"]
+    >
+    /** Chat completion of `app.chatService`; rejects if it is ever called. */
+    completeChatStream: MockInstance<ChatService["completeChatStream"]>
+    /** Title generation of `app.chatService`; rejects if it is ever called. */
+    generateTitle: MockInstance<ChatService["generateTitle"]>
   }>
 
-/** Completed chat response. */
-export type ChatRouteResponse = Readonly<{
-  /** HTTP status. */
-  statusCode: number
-  /** Response content type. */
-  contentType: string | undefined
-  /** Raw response body. */
-  body: string
-  /** Decoded events of an SSE response; empty otherwise. */
-  events: readonly ReceivedSseEvent[]
-}>
-
 /**
- * Creates an application with SSE, schema validation, an in-memory
- * conversation store, and a chat service backed by the endpoint fake.
+ * Creates an application with SSE and schema validation whose conversation
+ * store and chat service are real instances with every call the chat route
+ * can reach replaced by a spy.
  *
- * @param respond - Behavior of the OpenAI-compatible endpoint.
- * @param transport - SSE transport faults.
- * @returns The application, captured logs, store, and endpoint log.
+ * @returns The application, captured logs, and the spies.
+ * @throws If the SSE plugin cannot be registered.
  * @remarks The chat route is not registered; each case calls the registrar
- * under test. The store is disposed when the test finishes.
+ * under test. Unconfigured turn creation throws and both chat-service calls
+ * reject with `Unexpected chat route call: <name>`, so a case that reaches
+ * persistence or the model without arranging it fails. No database row is
+ * written and no HTTP request leaves the process. The in-memory store is
+ * disposed when the test finishes.
  */
-export async function createChatRouteTestApp(
-  respond: OpenAiEndpointResponder,
-  transport: ChatSseTestAppOptions = {}
-): Promise<ChatRouteTestApp> {
-  const testFastify = await createChatSseTestApp(transport)
+export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
+  const testFastify = await createChatSseTestApp()
   const store = SqliteConversationStore.open(":memory:")
   onTestFinished(() => {
     store[Symbol.dispose]()
   })
-  const endpoint = installOpenAiEndpointFake(respond)
+  const turns = store.createTurnAccess()
+  const createTurnAccess = vi
+    .spyOn(store, "createTurnAccess")
+    .mockReturnValue(turns)
+  const createConversationTurn = vi
+    .spyOn(turns, "createConversationTurn")
+    .mockImplementation(() => rejectUnexpectedCall("createConversationTurn"))
+  const chatService = new ChatService({
+    openAiBaseUrl: "http://lmstudio.test/v1",
+    titleGenerationPrompt: "Summarize the message as a short title.",
+    generatedTitleMaxLength: 50
+  })
+  const completeChatStream = vi
+    .spyOn(chatService, "completeChatStream")
+    .mockImplementation(async () => rejectUnexpectedCall("completeChatStream"))
+  const generateTitle = vi
+    .spyOn(chatService, "generateTitle")
+    .mockImplementation(async () => rejectUnexpectedCall("generateTitle"))
   testFastify.app.setValidatorCompiler(validatorCompiler)
   testFastify.app.decorate("conversationService", store)
-  testFastify.app.decorate(
-    "chatService",
-    new ChatService({
-      openAiBaseUrl: "http://lmstudio.test/v1",
-      titleGenerationPrompt: "Summarize the message as a short title.",
-      generatedTitleMaxLength: 50
-    })
-  )
-  return Object.freeze({ ...testFastify, store, endpoint })
-}
-
-/**
- * Creates an endpoint behavior that streams a chat reply and answers title
- * requests with one title.
- *
- * @param chatChunks - Chunks of every streamed chat completion.
- * @param title - Title returned by every non-streamed title request.
- * @returns The responder.
- */
-export function respondWithChatAndTitle(
-  chatChunks: readonly ChatCompletionChunk[],
-  title: string
-): OpenAiEndpointResponder {
-  return (request) =>
-    isStreamedRequest(request.body)
-      ? createChatCompletionStreamResponse(chatChunks)
-      : createChatCompletionResponse(
-          createChatCompletion(JSON.stringify({ title }))
-        )
-}
-
-/**
- * Determines whether an observed request body asked for a streamed reply.
- *
- * @param body - JSON-decoded request body.
- * @returns True for a chat completion stream request.
- */
-export function isStreamedRequest(body: unknown): boolean {
-  return (
-    typeof body === "object" &&
-    body !== null &&
-    "stream" in body &&
-    body.stream === true
-  )
+  testFastify.app.decorate("chatService", chatService)
+  return Object.freeze({
+    ...testFastify,
+    createTurnAccess,
+    createConversationTurn,
+    completeChatStream,
+    generateTitle
+  })
 }
 
 /**
  * Sends one chat request accepting an event stream.
  *
  * @param app - Application with the chat route registered.
- * @param payload - Raw request body.
+ * @param payload - Raw request body, serialized as JSON.
  * @returns The completed response.
  */
 export async function requestChat(
   app: FastifyInstance,
   payload: unknown
-): Promise<ChatRouteResponse> {
-  const response = await app.inject({
+): Promise<LightMyRequestResponse> {
+  return await app.inject({
     method: "POST",
     url: CHAT_PATH,
     headers: {
@@ -132,12 +98,14 @@ export async function requestChat(
     },
     payload: JSON.stringify(payload)
   })
-  const contentType = response.headers["content-type"]
-  return Object.freeze({
-    statusCode: response.statusCode,
-    contentType,
-    body: response.body,
-    events:
-      contentType === "text/event-stream" ? parseSseEvents(response.body) : []
-  })
+}
+
+/**
+ * Fails a chat-route dependency call that the current case did not arrange.
+ *
+ * @param operationName - Dependency operation that was called.
+ * @throws Always.
+ */
+function rejectUnexpectedCall(operationName: string): never {
+  throw new Error(`Unexpected chat route call: ${operationName}`)
 }

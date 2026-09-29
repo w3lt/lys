@@ -84,7 +84,7 @@ describe("createConversationTurn", () => {
     vi.useRealTimers()
   })
 
-  it("creates an untitled conversation with the supplied prompt and an empty snapshot", () => {
+  it("creates an untitled conversation with the prompt argument and an empty snapshot", () => {
     const database = openConversationTestDatabase()
 
     const turn = createCommittedTurn(
@@ -92,16 +92,16 @@ describe("createConversationTurn", () => {
       {
         userMessageContent: "Hello",
         model: "qwen/qwen3-8b",
-        systemPrompt: "You are Lys."
+        systemPrompt: "Options prompt"
       },
-      "You are Lys."
+      "Argument prompt"
     )
 
     expect(turn.isNewConversation).toBe(true)
     expect(turn.conversation).toEqual({
       id: expect.any(String),
       title: null,
-      systemPrompt: "You are Lys.",
+      systemPrompt: "Argument prompt",
       createdAt: NOW,
       updatedAt: NOW,
       messages: []

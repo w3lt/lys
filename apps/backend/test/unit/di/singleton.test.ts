@@ -1,6 +1,9 @@
-import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
+import { describe, expect, it, onTestFinished, vi } from "vitest"
 import ChatService from "../../../src/di/services/chatService"
 import SqliteConversationStore from "../../../src/di/services/conversationService"
+import LlmRuntimeService, {
+  type LlmRuntimeFailureReporters
+} from "../../../src/di/services/llmRuntimeService"
 import LlmService from "../../../src/di/services/llmService"
 import {
   closeSingletonServices,
@@ -10,13 +13,21 @@ import {
   type SingletonServices
 } from "../../../src/di/singleton"
 import { TEST_BACKEND_CONFIG } from "../support/backendConfig"
-import { createFakeLlmRuntime } from "../support/fakeLlmRuntime"
-import { fakeLmStudio } from "../support/lmStudioSdkFake"
 
-vi.mock("@lmstudio/sdk", () => import("../support/lmStudioSdkFake"))
+/** Name of each independently acquired service. */
+type ServiceName = "chat" | "conversation" | "llm-runtime"
 
-/** Name of each service in acquisition order. */
-type ServiceName = "chat" | "conversation" | "llm"
+/**
+ * Creates failure reporters that record what they receive.
+ *
+ * @returns Reporters whose calls each case can inspect.
+ */
+function createFailureReporters() {
+  return {
+    reportLlmRuntimeAcquisitionFailure: vi.fn(),
+    reportLlmRuntimeAvailabilityCheckFailure: vi.fn()
+  } satisfies LlmRuntimeFailureReporters
+}
 
 /**
  * Pairs a service with a recorded cleanup capability.
@@ -43,8 +54,9 @@ function createAcquisition<Service>(
  * Creates factories returning real services with recorded cleanup.
  *
  * @returns The factory mocks, their acquisitions, and the cleanup log.
- * @remarks The conversation store is in memory and the LLM service owns a
- * runtime double, so no external resource is acquired.
+ * @remarks The conversation store is in memory, and the LLM runtime service
+ * is never connected: its runtime acquisition rejects if anything attempts it.
+ * No external resource is acquired.
  */
 function createRecordedFactories() {
   const closeLog: ServiceName[] = []
@@ -63,9 +75,14 @@ function createRecordedFactories() {
       closeLog
     ),
     conversation: createAcquisition(store, "conversation", closeLog),
-    llm: createAcquisition(
-      new LlmService({ runtime: createFakeLlmRuntime() }),
-      "llm",
+    llmRuntime: createAcquisition(
+      new LlmRuntimeService({
+        ...createFailureReporters(),
+        acquireLlmRuntime: async () => {
+          throw new Error("Unexpected LLM runtime acquisition")
+        }
+      }),
+      "llm-runtime",
       closeLog
     )
   }
@@ -76,23 +93,21 @@ function createRecordedFactories() {
     createConversationService: vi.fn<
       SingletonServiceFactories["createConversationService"]
     >(() => acquisitions.conversation),
-    createLlmService: vi.fn<SingletonServiceFactories["createLlmService"]>(
-      async () => acquisitions.llm
-    )
+    createLlmRuntimeService: vi.fn<
+      SingletonServiceFactories["createLlmRuntimeService"]
+    >(() => acquisitions.llmRuntime)
   }
   return { factories, acquisitions, closeLog }
 }
 
 describe("createSingletonServices", () => {
-  beforeEach(() => {
-    fakeLmStudio.reset()
-  })
-
   it("derives each service's endpoint and settings from the configuration", async () => {
     const { factories } = createRecordedFactories()
+    const reporters = createFailureReporters()
 
     const services = await createSingletonServices(
       TEST_BACKEND_CONFIG,
+      reporters,
       factories
     )
     onTestFinished(async () => await closeSingletonServices(services))
@@ -105,8 +120,9 @@ describe("createSingletonServices", () => {
     expect(factories.createConversationService).toHaveBeenCalledWith(
       TEST_BACKEND_CONFIG.databaseFilePath
     )
-    expect(factories.createLlmService).toHaveBeenCalledWith(
-      "ws://lmstudio.test:4321"
+    expect(factories.createLlmRuntimeService).toHaveBeenCalledWith(
+      "ws://lmstudio.test:4321",
+      reporters
     )
   })
 
@@ -115,6 +131,7 @@ describe("createSingletonServices", () => {
 
     const services = await createSingletonServices(
       TEST_BACKEND_CONFIG,
+      createFailureReporters(),
       factories
     )
     onTestFinished(async () => await closeSingletonServices(services))
@@ -122,7 +139,8 @@ describe("createSingletonServices", () => {
     expect(Object.isFrozen(services)).toBe(true)
     expect(services.chatService).toBe(acquisitions.chat.service)
     expect(services.conversationService).toBe(acquisitions.conversation.service)
-    expect(services.llmService).toBe(acquisitions.llm.service)
+    expect(services.llmRuntimeService).toBe(acquisitions.llmRuntime.service)
+    expect(services.llmService).toBeInstanceOf(LlmService)
   })
 
   it("releases the chat service when the conversation store cannot be created", async () => {
@@ -133,20 +151,30 @@ describe("createSingletonServices", () => {
     })
 
     await expect(
-      createSingletonServices(TEST_BACKEND_CONFIG, factories)
+      createSingletonServices(
+        TEST_BACKEND_CONFIG,
+        createFailureReporters(),
+        factories
+      )
     ).rejects.toBe(creationFailure)
 
     expect(closeLog).toEqual(["chat"])
-    expect(factories.createLlmService).not.toHaveBeenCalled()
+    expect(factories.createLlmRuntimeService).not.toHaveBeenCalled()
   })
 
-  it("releases earlier services in reverse order when the LLM service cannot be created", async () => {
+  it("releases earlier services in reverse order when the LLM runtime service cannot be created", async () => {
     const { factories, closeLog } = createRecordedFactories()
-    const creationFailure = new Error("The LLM runtime is unavailable.")
-    factories.createLlmService.mockRejectedValue(creationFailure)
+    const creationFailure = new Error("LLM runtime service construction failed")
+    factories.createLlmRuntimeService.mockImplementation(() => {
+      throw creationFailure
+    })
 
     await expect(
-      createSingletonServices(TEST_BACKEND_CONFIG, factories)
+      createSingletonServices(
+        TEST_BACKEND_CONFIG,
+        createFailureReporters(),
+        factories
+      )
     ).rejects.toBe(creationFailure)
 
     expect(closeLog).toEqual(["conversation", "chat"])
@@ -154,13 +182,16 @@ describe("createSingletonServices", () => {
 
   it("keeps both failures when releasing earlier services also fails", async () => {
     const { factories, acquisitions, closeLog } = createRecordedFactories()
-    const creationFailure = new Error("The LLM runtime is unavailable.")
+    const creationFailure = new Error("LLM runtime service construction failed")
     const cleanupFailure = new Error("database is locked")
-    factories.createLlmService.mockRejectedValue(creationFailure)
+    factories.createLlmRuntimeService.mockImplementation(() => {
+      throw creationFailure
+    })
     acquisitions.conversation.closeService.mockRejectedValue(cleanupFailure)
 
     const failure = await createSingletonServices(
       TEST_BACKEND_CONFIG,
+      createFailureReporters(),
       factories
     ).catch((error: unknown) => error)
 
@@ -171,45 +202,6 @@ describe("createSingletonServices", () => {
       cause: cleanupFailure
     })
     expect(closeLog).toEqual(["chat"])
-  })
-
-  describe("with the production factories", () => {
-    it("connects the LLM service to the configured LM Studio endpoint", async () => {
-      const services = await createSingletonServices(TEST_BACKEND_CONFIG)
-      onTestFinished(async () => await closeSingletonServices(services))
-
-      expect(services.chatService).toBeInstanceOf(ChatService)
-      expect(services.llmService).toBeInstanceOf(LlmService)
-      expect(services.conversationService).toBeInstanceOf(
-        SqliteConversationStore
-      )
-      expect(fakeLmStudio.clients).toEqual([
-        { baseUrl: "ws://lmstudio.test:4321", disposeCount: 0 }
-      ])
-    })
-
-    it("closes the LM Studio client and the conversation store", async () => {
-      const services = await createSingletonServices(TEST_BACKEND_CONFIG)
-
-      await closeSingletonServices(services)
-
-      expect(fakeLmStudio.clients[0]?.disposeCount).toBe(1)
-      expect(() => services.conversationService.createHistoryAccess()).toThrow(
-        "Conversation store is closed"
-      )
-    })
-
-    it("rejects and releases the LM Studio client when the runtime is unavailable", async () => {
-      fakeLmStudio.operations.getLMStudioVersion = async () => {
-        throw new Error("connect ECONNREFUSED")
-      }
-
-      await expect(
-        createSingletonServices(TEST_BACKEND_CONFIG)
-      ).rejects.toThrow("The LLM runtime is unavailable.")
-
-      expect(fakeLmStudio.clients[0]?.disposeCount).toBe(1)
-    })
   })
 })
 
@@ -223,6 +215,7 @@ describe("closeSingletonServices", () => {
     const recorded = createRecordedFactories()
     const services: SingletonServices = await createSingletonServices(
       TEST_BACKEND_CONFIG,
+      createFailureReporters(),
       recorded.factories
     )
     return { services, ...recorded }
@@ -233,7 +226,7 @@ describe("closeSingletonServices", () => {
 
     await closeSingletonServices(services)
 
-    expect(closeLog).toEqual(["llm", "conversation", "chat"])
+    expect(closeLog).toEqual(["llm-runtime", "conversation", "chat"])
   })
 
   it("joins repeated and concurrent calls to one release of each service", async () => {
@@ -253,12 +246,12 @@ describe("closeSingletonServices", () => {
   it("attempts every release and rejects with the failure", async () => {
     const { services, acquisitions, closeLog } = await createRecordedServices()
     const releaseFailure = new Error("runtime release failed")
-    acquisitions.llm.closeService.mockRejectedValue(releaseFailure)
+    acquisitions.llmRuntime.closeService.mockRejectedValue(releaseFailure)
 
     await expect(closeSingletonServices(services)).rejects.toBe(releaseFailure)
 
     expect(closeLog).toEqual(["conversation", "chat"])
     await expect(closeSingletonServices(services)).rejects.toBe(releaseFailure)
-    expect(acquisitions.llm.closeService).toHaveBeenCalledOnce()
+    expect(acquisitions.llmRuntime.closeService).toHaveBeenCalledOnce()
   })
 })

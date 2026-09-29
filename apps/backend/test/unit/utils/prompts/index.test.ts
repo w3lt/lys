@@ -10,7 +10,7 @@ describe("readPrompt", () => {
     "reads %s from %s without surrounding whitespace",
     (type, fileName) => {
       const fileText = readFileSync(
-        new URL(`../../../src/utils/prompts/${fileName}`, import.meta.url),
+        new URL(`../../../../src/utils/prompts/${fileName}`, import.meta.url),
         "utf8"
       )
 

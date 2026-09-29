@@ -2,12 +2,12 @@ import {
   createLlmServiceBusyProblem,
   createLlmUnloadProblem
 } from "@lys/protocol"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
+import { createLlmServiceBusyError } from "../../../../../src/modules/llm/llmServiceBusyError"
 import updateFastifyWithLlmModelUnloadRoute from "../../../../../src/modules/llm/routes/unloadModelRoute"
 import { findLogRecords } from "../../../support/fastifyTestApp"
 import {
   createLlmRouteTestApp,
-  occupyLlmServiceCapacity,
   type LlmRouteTestApp
 } from "../../../support/llmRouteTestApp"
 
@@ -34,18 +34,16 @@ async function requestUnload(testApp: LlmRouteTestApp) {
 describe("updateFastifyWithLlmModelUnloadRoute", () => {
   it("responds 204 without a body when every instance stopped", async () => {
     const testApp = createLlmRouteTestApp()
-    testApp.runtime.listLoadedLlmModelInstances
-      .mockResolvedValueOnce([
-        { modelKey: MODEL_KEY, modelIdentifier: MODEL_KEY }
-      ])
-      .mockResolvedValueOnce([])
-    testApp.runtime.stopLoadedLlmModelInstance.mockResolvedValue(undefined)
+    const stopLlmModelsByKey = vi
+      .spyOn(testApp.service, "stopLlmModelsByKey")
+      .mockResolvedValue({ status: "stopped", diagnostics: [] })
     await updateFastifyWithLlmModelUnloadRoute(testApp.app)
 
     const response = await requestUnload(testApp)
 
     expect(response.statusCode).toBe(204)
     expect(response.body).toBe("")
+    expect(stopLlmModelsByKey).toHaveBeenCalledExactlyOnceWith(MODEL_KEY)
     expect(
       findLogRecords(
         testApp.logs,
@@ -56,14 +54,17 @@ describe("updateFastifyWithLlmModelUnloadRoute", () => {
 
   it("warns about stop failures that reconciliation resolved", async () => {
     const testApp = createLlmRouteTestApp()
-    testApp.runtime.listLoadedLlmModelInstances
-      .mockResolvedValueOnce([
-        { modelKey: MODEL_KEY, modelIdentifier: MODEL_KEY }
-      ])
-      .mockResolvedValueOnce([])
-    testApp.runtime.stopLoadedLlmModelInstance.mockRejectedValue(
-      new Error("unload timed out")
-    )
+    const diagnostics = [
+      {
+        operation: "stop-model-instance",
+        modelIdentifier: MODEL_KEY,
+        message: "unload timed out"
+      }
+    ] as const
+    vi.spyOn(testApp.service, "stopLlmModelsByKey").mockResolvedValue({
+      status: "stopped",
+      diagnostics
+    })
     await updateFastifyWithLlmModelUnloadRoute(testApp.app)
 
     const response = await requestUnload(testApp)
@@ -78,20 +79,17 @@ describe("updateFastifyWithLlmModelUnloadRoute", () => {
       expect.objectContaining({
         level: "warn",
         modelKey: MODEL_KEY,
-        diagnostics: [
-          {
-            operation: "stop-model-instance",
-            modelIdentifier: MODEL_KEY,
-            message: "unload timed out"
-          }
-        ]
+        diagnostics
       })
     ])
   })
 
   it("responds with the model-not-found problem when the model is not loaded", async () => {
     const testApp = createLlmRouteTestApp()
-    testApp.runtime.listLoadedLlmModelInstances.mockResolvedValue([])
+    vi.spyOn(testApp.service, "stopLlmModelsByKey").mockResolvedValue({
+      status: "not-loaded",
+      diagnostics: []
+    })
     await updateFastifyWithLlmModelUnloadRoute(testApp.app)
 
     const response = await requestUnload(testApp)
@@ -110,14 +108,21 @@ describe("updateFastifyWithLlmModelUnloadRoute", () => {
 
   it("responds with the runtime-unavailable problem and logs the diagnostics", async () => {
     const testApp = createLlmRouteTestApp()
-    testApp.runtime.listLoadedLlmModelInstances.mockRejectedValue(
-      new Error("socket closed")
-    )
+    const diagnostics = [
+      { operation: "list-initial-model-instances", message: "socket closed" }
+    ] as const
+    vi.spyOn(testApp.service, "stopLlmModelsByKey").mockResolvedValue({
+      status: "runtime-unavailable",
+      diagnostics
+    })
     await updateFastifyWithLlmModelUnloadRoute(testApp.app)
 
     const response = await requestUnload(testApp)
 
     expect(response.statusCode).toBe(503)
+    expect(response.headers["content-type"]).toMatch(
+      /^application\/problem\+json/
+    )
     expect(response.json()).toEqual(
       createLlmUnloadProblem({
         reason: "runtime-unavailable",
@@ -134,29 +139,33 @@ describe("updateFastifyWithLlmModelUnloadRoute", () => {
       expect.objectContaining({
         level: "error",
         modelKey: MODEL_KEY,
-        diagnostics: [
-          {
-            operation: "list-initial-model-instances",
-            message: "socket closed"
-          }
-        ]
+        diagnostics
       })
     ])
   })
 
   it("responds with the unload-failed problem and logs the remaining instances", async () => {
     const testApp = createLlmRouteTestApp()
-    testApp.runtime.listLoadedLlmModelInstances.mockResolvedValue([
-      { modelKey: MODEL_KEY, modelIdentifier: MODEL_KEY }
-    ])
-    testApp.runtime.stopLoadedLlmModelInstance.mockRejectedValue(
-      new Error("refused")
-    )
+    const diagnostics = [
+      {
+        operation: "stop-model-instance",
+        modelIdentifier: MODEL_KEY,
+        message: "refused"
+      }
+    ] as const
+    vi.spyOn(testApp.service, "stopLlmModelsByKey").mockResolvedValue({
+      status: "stop-failed",
+      remainingModelIdentifiers: [MODEL_KEY],
+      diagnostics
+    })
     await updateFastifyWithLlmModelUnloadRoute(testApp.app)
 
     const response = await requestUnload(testApp)
 
     expect(response.statusCode).toBe(503)
+    expect(response.headers["content-type"]).toMatch(
+      /^application\/problem\+json/
+    )
     expect(response.json()).toEqual(
       createLlmUnloadProblem({
         reason: "unload-failed",
@@ -173,13 +182,7 @@ describe("updateFastifyWithLlmModelUnloadRoute", () => {
         level: "error",
         modelKey: MODEL_KEY,
         remainingModelIdentifiers: [MODEL_KEY],
-        diagnostics: [
-          {
-            operation: "stop-model-instance",
-            modelIdentifier: MODEL_KEY,
-            message: "refused"
-          }
-        ]
+        diagnostics
       })
     ])
   })
@@ -190,6 +193,7 @@ describe("updateFastifyWithLlmModelUnloadRoute", () => {
     ["an additional property", { modelId: MODEL_KEY, force: true }]
   ])("rejects %s before stopping", async (_label, payload) => {
     const testApp = createLlmRouteTestApp()
+    const stopLlmModelsByKey = vi.spyOn(testApp.service, "stopLlmModelsByKey")
     await updateFastifyWithLlmModelUnloadRoute(testApp.app)
 
     const response = await testApp.app.inject({
@@ -199,19 +203,22 @@ describe("updateFastifyWithLlmModelUnloadRoute", () => {
     })
 
     expect(response.statusCode).toBe(400)
-    expect(testApp.runtime.listLoadedLlmModelInstances).not.toHaveBeenCalled()
+    expect(stopLlmModelsByKey).not.toHaveBeenCalled()
   })
 
   it("responds with the service-busy problem when admission is refused", async () => {
     const testApp = createLlmRouteTestApp()
+    vi.spyOn(testApp.service, "stopLlmModelsByKey").mockRejectedValue(
+      createLlmServiceBusyError()
+    )
     await updateFastifyWithLlmModelUnloadRoute(testApp.app)
-    const releaseCapacity = occupyLlmServiceCapacity(testApp)
 
     const response = await requestUnload(testApp)
 
     expect(response.statusCode).toBe(503)
+    expect(response.headers["content-type"]).toMatch(
+      /^application\/problem\+json/
+    )
     expect(response.json()).toEqual(createLlmServiceBusyProblem())
-    await releaseCapacity()
-    expect(testApp.runtime.stopLoadedLlmModelInstance).not.toHaveBeenCalled()
   })
 })

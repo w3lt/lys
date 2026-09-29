@@ -1,15 +1,18 @@
 import { createLlmServiceBusyProblem } from "@lys/protocol"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
+import type { LlmModelHealthOutcome } from "../../../../../src/modules/llm/getLlmModelHealth"
+import { createLlmModelHealthDiagnostic } from "../../../../../src/modules/llm/llmModelHealthDiagnostic"
+import { createLlmServiceBusyError } from "../../../../../src/modules/llm/llmServiceBusyError"
 import updateFastifyWithLlmTestModelRoute from "../../../../../src/modules/llm/routes/testModelRoute"
 import { findLogRecords } from "../../../support/fastifyTestApp"
-import {
-  createLlmRouteTestApp,
-  occupyLlmServiceCapacity
-} from "../../../support/llmRouteTestApp"
+import { createLlmRouteTestApp } from "../../../support/llmRouteTestApp"
 
 /** Log message written for a retained inventory failure. */
 const HEALTH_FAILURE_LOG =
   "LLM runtime state could not be established during model health query"
+
+/** Canonical model key requested by most cases. */
+const MODEL_KEY = "qwen/qwen3-8b"
 
 /**
  * Builds the published health path for one model key.
@@ -24,80 +27,97 @@ function healthPath(modelKey: string): string {
 describe("updateFastifyWithLlmTestModelRoute", () => {
   it("responds with a fresh ready observation that must not be cached", async () => {
     const testApp = createLlmRouteTestApp()
-    testApp.runtime.listLoadedLlmModelInstances.mockResolvedValue([
-      { modelKey: "qwen/qwen3-8b", modelIdentifier: "qwen/qwen3-8b" }
-    ])
+    const outcome: LlmModelHealthOutcome = {
+      health: { modelId: MODEL_KEY, status: "ready", latencyMs: 4 },
+      diagnostics: []
+    }
+    const getLlmModelHealth = vi
+      .spyOn(testApp.service, "getLlmModelHealth")
+      .mockResolvedValue(outcome)
     await updateFastifyWithLlmTestModelRoute(testApp.app)
 
     const response = await testApp.app.inject({
       method: "GET",
-      url: healthPath("qwen/qwen3-8b")
+      url: healthPath(MODEL_KEY)
     })
 
     expect(response.statusCode).toBe(200)
     expect(response.headers["cache-control"]).toBe("no-store")
-    expect(response.json()).toEqual({
-      modelId: "qwen/qwen3-8b",
-      status: "ready",
-      latencyMs: 0
-    })
+    expect(response.json()).toEqual(outcome.health)
+    expect(getLlmModelHealth).toHaveBeenCalledExactlyOnceWith(MODEL_KEY)
   })
 
   it("responds not-ready when the model is not loaded", async () => {
     const testApp = createLlmRouteTestApp()
-    testApp.runtime.listLoadedLlmModelInstances.mockResolvedValue([])
+    const outcome: LlmModelHealthOutcome = {
+      health: {
+        modelId: MODEL_KEY,
+        status: "not-ready",
+        reason: "model-not-loaded",
+        latencyMs: 4
+      },
+      diagnostics: []
+    }
+    vi.spyOn(testApp.service, "getLlmModelHealth").mockResolvedValue(outcome)
     await updateFastifyWithLlmTestModelRoute(testApp.app)
 
     const response = await testApp.app.inject({
       method: "GET",
-      url: healthPath("qwen/qwen3-8b")
+      url: healthPath(MODEL_KEY)
     })
 
     expect(response.statusCode).toBe(200)
-    expect(response.json()).toEqual({
-      modelId: "qwen/qwen3-8b",
-      status: "not-ready",
-      reason: "model-not-loaded",
-      latencyMs: 0
-    })
+    expect(response.headers["cache-control"]).toBe("no-store")
+    expect(response.json()).toEqual(outcome.health)
   })
 
   it("logs the retained runtime failure and keeps it out of the response", async () => {
     const testApp = createLlmRouteTestApp()
-    testApp.runtime.listLoadedLlmModelInstances.mockRejectedValue(
-      new Error("connect ECONNREFUSED 127.0.0.1:1234")
-    )
+    const failure = new Error("connect ECONNREFUSED 127.0.0.1:1234")
+    const outcome: LlmModelHealthOutcome = {
+      health: {
+        modelId: MODEL_KEY,
+        status: "not-ready",
+        reason: "runtime-unavailable",
+        latencyMs: 0
+      },
+      diagnostics: [createLlmModelHealthDiagnostic(failure)]
+    }
+    vi.spyOn(testApp.service, "getLlmModelHealth").mockResolvedValue(outcome)
     await updateFastifyWithLlmTestModelRoute(testApp.app)
 
     const response = await testApp.app.inject({
       method: "GET",
-      url: healthPath("qwen/qwen3-8b")
+      url: healthPath(MODEL_KEY)
     })
 
     expect(response.statusCode).toBe(200)
-    expect(response.json()).toEqual({
-      modelId: "qwen/qwen3-8b",
-      status: "not-ready",
-      reason: "runtime-unavailable",
-      latencyMs: 0
-    })
+    expect(response.json()).toEqual(outcome.health)
     expect(response.body).not.toContain("ECONNREFUSED")
     expect(findLogRecords(testApp.logs, HEALTH_FAILURE_LOG)).toEqual([
       expect.objectContaining({
         level: "error",
-        modelKey: "qwen/qwen3-8b",
-        err: expect.objectContaining({
-          message: "connect ECONNREFUSED 127.0.0.1:1234"
-        })
+        modelKey: MODEL_KEY,
+        err: expect.objectContaining({ message: failure.message })
       })
     ])
   })
 
   it("accepts a key of exactly 100 decoded characters", async () => {
     const testApp = createLlmRouteTestApp()
-    testApp.runtime.listLoadedLlmModelInstances.mockResolvedValue([])
-    await updateFastifyWithLlmTestModelRoute(testApp.app)
     const modelKey = `€${"k".repeat(99)}`
+    const getLlmModelHealth = vi
+      .spyOn(testApp.service, "getLlmModelHealth")
+      .mockResolvedValue({
+        health: {
+          modelId: modelKey,
+          status: "not-ready",
+          reason: "model-not-loaded",
+          latencyMs: 0
+        },
+        diagnostics: []
+      })
+    await updateFastifyWithLlmTestModelRoute(testApp.app)
 
     const response = await testApp.app.inject({
       method: "GET",
@@ -105,11 +125,12 @@ describe("updateFastifyWithLlmTestModelRoute", () => {
     })
 
     expect(response.statusCode).toBe(200)
-    expect(response.json()).toMatchObject({ modelId: modelKey })
+    expect(getLlmModelHealth).toHaveBeenCalledExactlyOnceWith(modelKey)
   })
 
-  it("rejects an empty key without querying the runtime", async () => {
+  it("rejects an empty key without querying the service", async () => {
     const testApp = createLlmRouteTestApp()
+    const getLlmModelHealth = vi.spyOn(testApp.service, "getLlmModelHealth")
     await updateFastifyWithLlmTestModelRoute(testApp.app)
 
     const response = await testApp.app.inject({
@@ -119,17 +140,19 @@ describe("updateFastifyWithLlmTestModelRoute", () => {
 
     expect(response.statusCode).toBe(400)
     expect(response.headers["cache-control"]).toBe("no-store")
-    expect(testApp.runtime.listLoadedLlmModelInstances).not.toHaveBeenCalled()
+    expect(getLlmModelHealth).not.toHaveBeenCalled()
   })
 
   it("responds with the service-busy problem when admission is refused", async () => {
     const testApp = createLlmRouteTestApp()
+    vi.spyOn(testApp.service, "getLlmModelHealth").mockRejectedValue(
+      createLlmServiceBusyError()
+    )
     await updateFastifyWithLlmTestModelRoute(testApp.app)
-    const releaseCapacity = occupyLlmServiceCapacity(testApp)
 
     const response = await testApp.app.inject({
       method: "GET",
-      url: healthPath("qwen/qwen3-8b")
+      url: healthPath(MODEL_KEY)
     })
 
     expect(response.statusCode).toBe(503)
@@ -138,6 +161,5 @@ describe("updateFastifyWithLlmTestModelRoute", () => {
       /^application\/problem\+json/
     )
     expect(response.json()).toEqual(createLlmServiceBusyProblem())
-    await releaseCapacity()
   })
 })

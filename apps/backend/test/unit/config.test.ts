@@ -18,17 +18,17 @@ const FIXTURE_PROMPTS = Object.freeze({
 
 describe("loadBackendConfig", () => {
   beforeEach(() => {
-    vi.stubEnv("HOME", "/test-home/lys-user")
+    vi.stubEnv("LYS_HOME", "/test-home/lys")
     vi.mocked(readPrompt).mockImplementation((type) => FIXTURE_PROMPTS[type])
   })
 
-  it("resolves the shared endpoints, the home database path, both prompts, and the fixed title limits", () => {
+  it("resolves the shared endpoints, the Lys home database path, both prompts, and the fixed title limits", () => {
     expect(loadBackendConfig()).toEqual({
       backendHost: BACKEND_HOST,
       backendPort: BACKEND_PORT,
       lmstudioHost: LMSTUDIO_HOST,
       lmstudioPort: LMSTUDIO_PORT,
-      databaseFilePath: "/test-home/lys-user/.lys/lys_db.sqlite",
+      databaseFilePath: "/test-home/lys/lys_db.sqlite",
       lysSystemPrompt: "Fixture system prompt",
       titleGenerationPrompt: "Fixture title prompt",
       titleGenerationMaxAttempts: 3,
@@ -54,14 +54,11 @@ describe("loadBackendConfig", () => {
     expect(() => loadBackendConfig()).toThrow(readFailure)
   })
 
-  it("rejects a database path under a relative home directory", () => {
-    vi.stubEnv("HOME", "relative-home")
+  it("rejects a relative Lys home directory", () => {
+    vi.stubEnv("LYS_HOME", "relative-home")
 
     expect(() => loadBackendConfig()).toThrow(
-      expect.objectContaining({
-        name: "ZodError",
-        issues: [expect.objectContaining({ path: ["databaseFilePath"] })]
-      })
+      'LYS_HOME must be an absolute path, got "relative-home"'
     )
   })
 })

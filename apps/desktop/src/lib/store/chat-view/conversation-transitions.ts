@@ -499,7 +499,7 @@ export function updateAssistantReplyWithSnapshot(
   const assistantMessage = conversation.messages.find(
     (message) => message.id === snapshot.id
   )
-  if (!assistantMessage || assistantMessage.role !== "assistant") {
+  if (assistantMessage?.role !== "assistant") {
     throw new Error(`Assistant message ${snapshot.id} was not found`)
   }
   if (assistantMessage.status !== "streaming") {

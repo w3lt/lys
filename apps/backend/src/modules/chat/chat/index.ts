@@ -265,21 +265,21 @@ async function createTurnReplyTask(
       sendEvent,
       logger: input.logger
     })
-  } catch (taskFailure) {
+  } catch (taskError) {
     try {
       updateUnfinishedReplyState(
         dependencies.turns,
         assistantMessageId,
         abortSignal
       )
-    } catch (finalizationFailure) {
+    } catch (finalizationError) {
       throw new AggregateError(
-        [taskFailure, finalizationFailure],
+        [taskError, finalizationError],
         "Reply failure could not be finalized",
-        { cause: finalizationFailure }
+        { cause: finalizationError }
       )
     }
-    throw taskFailure
+    throw taskError
   }
   updateUnfinishedReplyState(
     dependencies.turns,

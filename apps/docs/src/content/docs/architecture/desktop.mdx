@@ -53,8 +53,11 @@ persisted text, and the conversation can be reopened from history.
 
 The Past conversations button in the composer, or Command+K or Control+K,
 toggles a history dialog above the composer. Opening it reads the first page
-of `GET /api/v1/conversations`, 30 entries at a time; typing in the search
-field reads again with the trimmed query, and older pages load on request.
+of `GET /api/v1/conversations`, 30 entries at a time. Typing in the search
+field reads again with the trimmed query after a 200 ms pause in typing, so
+the backend receives one list request per pause rather than per keystroke.
+Enter in the search field reads a search still waiting for that pause at once
+and then opens its first row. Older pages load on request.
 Rows can be renamed in place or deleted after confirmation through the
 conversation `PATCH` and `DELETE` routes. While the backend is not running,
 these actions fail inline without sending a request.

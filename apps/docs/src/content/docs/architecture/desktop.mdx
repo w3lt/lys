@@ -19,7 +19,7 @@ presentation state, not durable conversation storage.
 | History state       | `src/lib/store/conversation-history` owns the past-conversations dialog, its search and pages, and rename and delete calls.  |
 | Shell/runtime state | `src/lib/store/index.ts` tracks which view is open, whether the backend is running, and settings loaded from Tauri.          |
 | Model lifecycle     | `src/lib/store/model-actions.ts` owns real inventory, load, unload, and health requests shared by settings and the composer. |
-| SSE consumption     | `src/lib/apis/http/chat.ts` opens `POST /api/v1/chat`, parses SSE frames, validates them with Zod, and yields typed events.  |
+| SSE consumption     | `src/lib/apis/http/chat.ts` opens chat and reply-events SSE streams, validates events with Zod, and sends reply stops.       |
 | Theme               | `src/app/theme.ts` applies light or dark mode and stores the choice as `lys.theme` in WebView `localStorage`.                |
 
 ## Chat state split
@@ -42,12 +42,14 @@ Shell state such as backend status is managed independently.
 2. The chat store opens `POST /api/v1/chat`.
 3. The desktop parses SSE frames with `EventSourceParserStream`.
 4. Each payload is validated against `chatApiStreamEventSchema`.
-5. The store applies `start-*`, `delta`, `done`, `title`, or `error` events to
-   local immutable conversation state.
+5. The store applies `start-*`, `delta`, `done`, `interrupted`, `title`, or
+   `error` events to local immutable conversation state.
 
-The desktop does not maintain a replay log or reconnect protocol. If the app
-closes during a reply, that stream is lost; the backend keeps the reply's
-persisted text, and the conversation can be reopened from history.
+The desktop keeps no replay log and does not reconnect a dropped stream on its
+own. Showing a conversation whose reply is still generating, after an open or a
+failed open, follows that reply again from a stored `reply-snapshot`. Quitting
+the app also ends the backend; a reply still generating then keeps its
+persisted text and is marked interrupted when the backend next starts.
 
 ## Conversation history
 
@@ -68,9 +70,9 @@ first stops following any active reply, which keeps generating on the backend,
 then reads `GET /api/v1/conversations/:conversationId`. The previous
 conversation stays visible until the read succeeds, and no message can be sent
 while it is pending. A missing conversation or failed read keeps the previous
-conversation and shows an inline error. When the opened transcript ends with a
-reply that is still generating, the chat store follows it from a stored
-snapshot. The next message sends the opened conversation's
+conversation and shows an inline error. When the conversation then shown,
+opened or kept, ends with a reply that is still generating, the chat store
+follows it from a stored snapshot. The next message sends the opened conversation's
 `conversationId`, so the backend continues it. Deleting the conversation the
 chat view presents, or learning that it no longer exists, resets the view to a
 new conversation.

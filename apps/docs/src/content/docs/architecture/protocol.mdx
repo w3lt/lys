@@ -22,7 +22,7 @@ The public backend surface is small and explicit:
 | Concern                                           | Contract source                                |
 | ------------------------------------------------- | ---------------------------------------------- |
 | API prefix and loopback constants                 | `packages/protocol/src/constant.ts`            |
-| Chat route request and SSE payloads               | `packages/protocol/src/apis/chat/chatRoute.ts` |
+| Chat and reply routes, requests, and SSE payloads | `packages/protocol/src/apis/chat/*.ts`         |
 | Model list, health, load, and unload routes       | `packages/protocol/src/apis/llm/*.ts`          |
 | LM Studio connection status and reconnect routes  | `packages/protocol/src/apis/llm/*.ts`          |
 | Conversation list, get, rename, and delete routes | `packages/protocol/src/apis/conversation/*.ts` |

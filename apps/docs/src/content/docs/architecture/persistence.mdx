@@ -36,12 +36,13 @@ has stored its final state.
 The backend applies schema changes from an in-memory `databaseMigrations` array.
 On startup it:
 
-1. Opens the SQLite file with foreign keys enabled, write-ahead logging, and
-   `synchronous = NORMAL`.
+1. Opens the SQLite file with foreign keys enabled.
 2. Acquires a write transaction and reads `PRAGMA user_version`.
 3. Rejects unsupported future versions or applies each missing migration in order.
 4. Records version 5 and commits; a migration failure rolls back all pending work.
-5. Changes remaining streaming assistants to interrupted with a fresh message
+5. Switches to write-ahead logging with `synchronous = NORMAL`. A database from
+   a newer version was refused in step 3, before anything changed its file.
+6. Changes remaining streaming assistants to interrupted with a fresh message
    timestamp, without changing conversation activity time.
 
 The current migrations create the two tables, add a message index, and install

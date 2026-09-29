@@ -49,10 +49,11 @@ conversation you leave open in front of her.
 She is a desktop application, and the model runtime she reaches for today is a
 local one. Everything between them stays on loopback: no account to create, no
 server holding your half of the conversation, no third party in the middle of
-it. What she keeps is a SQLite file in your home directory,
-`~/.lys/lys_db.sqlite`, alongside a small settings file — both of them yours to
-read, move, or delete. Set `LYS_HOME` to an absolute path and she keeps them
-there instead.
+it. What she keeps is a SQLite database in your home directory,
+`~/.lys/lys_db.sqlite` with its `-wal` and `-shm` files, alongside a small
+settings file — all of them yours to read, move, or delete, as long as the
+[three database files travel together](https://lys.negentropy.studio/operate/data/).
+Set `LYS_HOME` to an absolute path and she keeps them there instead.
 
 That closeness is the design goal rather than a finished guarantee. Local
 ownership is how the system is built, but the handbook is candid about

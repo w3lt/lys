@@ -72,7 +72,8 @@ A manual Start follows steps 4–8.
 2. The desktop sends
    `POST /api/v1/chat/:conversationId/replies/:assistantMessageId/stop`. A
    Stop pressed before the turn-start event is sent as soon as that event
-   names the reply.
+   names the reply, unless the user opens another conversation or starts a new
+   one first; the reply then generates to its end.
 3. The backend aborts the reply's upstream LM Studio request. Title generation
    continues.
 4. The reply task stores the reply as `interrupted` and sends `interrupted` to
@@ -99,8 +100,8 @@ of the new turn's context.
 5. When the read succeeds, the stored transcript replaces the shown
    conversation. A missing conversation or failed read keeps the previous
    conversation and records an inline error.
-6. When the transcript ends with a reply that is still `streaming`, the chat
-   store follows it with
+6. When the conversation then shown, opened or kept, ends with a reply that is
+   still `streaming`, the chat store follows it with
    `GET /api/v1/chat/:conversationId/replies/:assistantMessageId/events`: the
    `reply-snapshot` replaces the stored content, then live events apply as for
    a new message.

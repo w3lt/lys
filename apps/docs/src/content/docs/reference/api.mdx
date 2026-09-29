@@ -86,7 +86,8 @@ Closing a chat stream stops only that client's observation. The backend keeps
 generating and storing the reply and its title. To stop a reply, send
 `POST /api/v1/chat/:conversationId/replies/:assistantMessageId/stop`; it
 answers `204` after the reply is stored final (`interrupted`, or `completed`
-when the model finished first) and does not cancel title generation. When no
+or `failed` when the reply ended before the stop) and does not cancel title
+generation. When no
 generation is running for the reply it answers `409` with
 `urn:lys:problem:chat:reply-not-generating`.
 
@@ -198,7 +199,8 @@ inventory RPC has no enforced completion deadline, so an unresponsive engine
 can keep the query and shutdown pending.
 
 Chat inference is cancelled only by the reply-stop route or by backend
-shutdown; closing a chat stream does not cancel it. See the
+shutdown; closing a chat stream does not cancel it. A newer turn or a deletion
+also ends a reply's inference, once the model sends its next content. See the
 [provider cancellation policy](/architecture/providers/#cancellation-policy).
 
 ## Model health responses

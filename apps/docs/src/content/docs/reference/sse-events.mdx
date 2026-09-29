@@ -135,6 +135,12 @@ Closing the stream never cancels either task. A reply-events stream follows
 the same order after its `reply-snapshot`, starting from wherever the reply
 was when the snapshot was read.
 
+A stream can also close without any of `done`, `interrupted`, or `error`: the
+backend closes a follower that falls 4,096 events behind, and a reply whose
+final state cannot be stored sends none. Such a close says nothing about the
+reply's outcome; following the reply again, or reading its conversation,
+returns the stored state.
+
 ## Coming soon
 
 - Replay of missed events (following a reply today starts from a fresh

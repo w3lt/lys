@@ -1,4 +1,5 @@
 import ReplyGeneration, {
+  type ReplyGenerationTaskContext,
   type StartReplyGenerationOptions
 } from "./replyGeneration"
 
@@ -25,9 +26,10 @@ const CLOSED_REGISTRY_MESSAGE = "Reply generation registry is closed"
  * Owns every running reply generation: admits new ones, finds one for a
  * follower or a stop request, and ends them all at shutdown.
  *
- * @remarks The invariant is that at most one registered generation exists per
- * assistant reply, and a generation stays registered from
- * `startReplyGeneration` until it settles. The registry holds no reply text.
+ * @remarks The invariants are that at most one registered generation exists
+ * per assistant reply, a generation stays registered from
+ * `startReplyGeneration` until it settles, and at most one title task runs per
+ * conversation. The registry holds no reply text.
  * Lifecycle: ready until disposal begins; disposal permanently closes the
  * registry, cancels every generation, and settles after all of them settle,
  * and repeated calls share that completion. After disposal begins, starting
@@ -37,6 +39,8 @@ const CLOSED_REGISTRY_MESSAGE = "Reply generation registry is closed"
 export default class ReplyGenerationRegistry implements AsyncDisposable {
   /** Running generations keyed by assistant message identifier. */
   readonly #generations = new Map<string, RegisteredReplyGeneration>()
+  /** Conversations with a running title task, from admission to settlement. */
+  readonly #conversationIdsGeneratingTitle = new Set<string>()
   /** Shared disposal completion; its presence means the registry is closed. */
   #disposal: Promise<void> | undefined
 
@@ -48,6 +52,10 @@ export default class ReplyGenerationRegistry implements AsyncDisposable {
    * @returns The running generation, registered until it settles.
    * @throws If the registry is closed or a generation for the reply is already
    * running; nothing is started in either case.
+   * @remarks A title launcher is dropped while another generation of the same
+   * conversation is running a title task, so the new generation runs only its
+   * reply and settles without waiting for that title. A later generation can
+   * start a title task once the running one settles, whatever its outcome.
    */
   public startReplyGeneration(
     target: ReplyTarget,
@@ -57,7 +65,14 @@ export default class ReplyGenerationRegistry implements AsyncDisposable {
     if (this.#generations.has(target.assistantMessageId))
       throw new Error("A generation for this reply is already running")
 
-    const generation = ReplyGeneration.start(options)
+    const generation = ReplyGeneration.start({
+      startReplyTask: options.startReplyTask,
+      startTitleTask: this.#startTitleTracking(
+        target.conversationId,
+        options.startTitleTask
+      ),
+      reportTaskFailure: options.reportTaskFailure
+    })
     this.#generations.set(target.assistantMessageId, {
       conversationId: target.conversationId,
       generation
@@ -98,6 +113,58 @@ export default class ReplyGenerationRegistry implements AsyncDisposable {
       )
     ).then(() => undefined)
     return this.#disposal
+  }
+
+  /**
+   * Starts tracking a conversation's title task unless one is already running.
+   *
+   * @param conversationId - Conversation of the generation being admitted.
+   * @param startTitleTask - Requested title launcher, or undefined when the
+   * conversation needs no title.
+   * @returns A launcher that starts the requested task and ends the tracking
+   * once that task settles, or undefined when no title was requested or the
+   * conversation's title task is already running.
+   * @remarks Tracking begins in the admission step, so no other generation of
+   * the conversation is admitted with a title task before this one starts.
+   * The caller hands the launcher to {@link ReplyGeneration.start}, which
+   * always runs a supplied title launcher, so the tracking always ends.
+   */
+  #startTitleTracking(
+    conversationId: string,
+    startTitleTask: StartReplyGenerationOptions["startTitleTask"]
+  ): StartReplyGenerationOptions["startTitleTask"] {
+    if (
+      startTitleTask === undefined ||
+      this.#conversationIdsGeneratingTitle.has(conversationId)
+    )
+      return undefined
+
+    this.#conversationIdsGeneratingTitle.add(conversationId)
+    return (context) =>
+      this.#startTrackedTitleTask(conversationId, startTitleTask, context)
+  }
+
+  /**
+   * Starts an admitted title task and ends its conversation's tracking once
+   * the task settles.
+   *
+   * @param conversationId - Conversation whose title task is tracked.
+   * @param startTitleTask - Title launcher admitted for that conversation.
+   * @param context - Generation-owned cancellation and event sender.
+   * @returns Settlement after the title task settles and tracking ended.
+   * @throws The title task's failure, after tracking ended; the generation
+   * reports it.
+   */
+  async #startTrackedTitleTask(
+    conversationId: string,
+    startTitleTask: NonNullable<StartReplyGenerationOptions["startTitleTask"]>,
+    context: ReplyGenerationTaskContext
+  ): Promise<void> {
+    try {
+      await startTitleTask(context)
+    } finally {
+      this.#conversationIdsGeneratingTitle.delete(conversationId)
+    }
   }
 
   /**

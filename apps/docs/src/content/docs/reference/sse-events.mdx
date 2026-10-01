@@ -65,8 +65,9 @@ times, so one attempt can send up to three HTTP requests.
 
 When one title task produces no usable candidate or backend shutdown cancels
 it, that task sends no `title` event. Stopping the reply or closing the stream
-does not cancel it. A later turn requests generation when
-the conversation is still untitled. If a title was saved but its event was not
+does not cancel it. A turn started after that task ended requests generation
+when the conversation is still untitled; a turn started while it is still
+running requests none and receives no `title` event. If a title was saved but its event was not
 delivered, a later existing turn sends the stored title again. The backend logs
 title-task failures instead of sending an `error` event.
 
@@ -130,7 +131,9 @@ Every valid chat stream begins with one turn-start event. After that:
    before, during, or after the chat events
 
 A `title` event can still arrive after the reply's final event, because title
-generation runs independently; the stream closes after both have settled.
+generation runs independently; the stream closes after both have settled. A
+turn without a title task, including one sent while an earlier turn of its
+conversation is still generating a title, closes after its reply.
 Closing the stream never cancels either task. A reply-events stream follows
 the same order after its `reply-snapshot`, starting from wherever the reply
 was when the snapshot was read.

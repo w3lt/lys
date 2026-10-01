@@ -56,9 +56,11 @@ The Lys system prompt and the title-generation prompt are read once, when
 `loadBackendConfig()` builds the backend configuration at startup.
 
 A new conversation is stored without a title (`null`). Title generation runs
-for every turn whose conversation has no stored title and uses that turn's user
-message, so a conversation that remains untitled after an earlier failed or
-interrupted task gets another try on its next turn. It uses a separate chat
+for a turn whose conversation has no stored title, unless an earlier turn of
+that conversation is still generating one, and uses that turn's user message.
+A conversation that remains untitled after an earlier task failed or was
+cancelled gets another try on its next turn after that task ended. It uses a
+separate chat
 completion request with a JSON-schema response format that limits the title to
 `generatedTitleMaxLength` Unicode code points (100 by default), then validates the
 reply; JSON wrapped in one Markdown code fence is accepted. Only a reply that
@@ -66,15 +68,17 @@ cannot be used as a title leads to another attempt, up to
 `titleGenerationMaxAttempts` attempts per turn (three by default). An HTTP,
 connection, or cancellation failure ends title generation for the turn, after
 the OpenAI SDK has retried a connection failure, timeout, or 408, 409, 429, or
-5xx response up to two more times within the attempt. Concurrent title tasks
-use a conditional first assignment, and only the winning task publishes its
-candidate, so generation cannot overwrite a manual rename. Existing titled turns
+5xx response up to two more times within the attempt. A generated title is
+saved with a conditional first assignment and published only when that
+assignment succeeds, so generation cannot overwrite a manual rename. Existing titled turns
 send the stored title after their start event, which repairs desktop metadata
 after a prior title event was lost.
 
-`ReplyGenerationRegistry` owns every running generation. A `ReplyGeneration`
-owns one turn's reply task and optional title task, their cancellation, and
-the SSE streams following them; no HTTP connection owns it. Each stream is a
+`ReplyGenerationRegistry` owns every running generation and runs at most one
+title task per conversation: a turn sent while an earlier turn's title task is
+still running gets none, so its streams close when its reply ends. A
+`ReplyGeneration` owns one turn's reply task and optional title task, their
+cancellation, and the SSE streams following them; no HTTP connection owns it. Each stream is a
 `ReplyEventSubscription`, an ordered queue that never makes the generation
 wait and closes a follower that falls 4,096 events behind. Only the
 reply-stop route (reply task only) and shutdown (both tasks) cancel work. A

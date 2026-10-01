@@ -145,7 +145,8 @@ Chat creates its user/assistant pair atomically, persists each delta before
 sending it to every stream following the reply, and stores a terminal status
 before `done`. Partial content survives
 failure or cancellation. Title generation runs only for an untitled conversation
-and publishes a title only if the conditional database write succeeds. On startup,
+without a title task already running, and publishes a title only if the
+conditional database write succeeds. On startup,
 remaining streaming assistants become interrupted with refreshed message
 timestamps; conversation activity time and history order do not change.
 

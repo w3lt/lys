@@ -38,7 +38,9 @@ repository today; it is not a promise of unreleased work.
   generate a title asynchronously and emits the first assigned title as a stream
   event. When the conversation remains untitled, its next turn tries again; an
   existing titled turn resends the stored title to reconcile desktop metadata.
-  A generated title is saved only if no rename has won the race.
+  A generated title is saved only if no rename has won the race. Only one
+  title is generated at a time per conversation, and the composer accepts the
+  next message as soon as the reply ends, without waiting for the title.
 - Interrupted streaming rows are recovered on backend startup.
 - Runtime, Model, and Generation settings panes are available. Model controls
   refresh inventory, load and unload weights, and check loaded-state health.

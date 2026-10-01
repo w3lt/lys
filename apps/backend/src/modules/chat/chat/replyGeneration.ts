@@ -14,8 +14,8 @@ export type StartReplyGenerationOptions = Readonly<{
   /** Runs the reply task; its signal is aborted by `stopReply` and disposal. */
   startReplyTask: (context: ReplyGenerationTaskContext) => Promise<void>
   /**
-   * Runs the title task, or is absent when the conversation already has a
-   * title. Its signal is aborted only by disposal.
+   * Runs the title task, or is absent when no title task is requested. Its
+   * signal is aborted only by disposal.
    */
   startTitleTask:
     ((context: ReplyGenerationTaskContext) => Promise<void>) | undefined

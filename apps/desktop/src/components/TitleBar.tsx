@@ -24,7 +24,6 @@ export function TitleBar() {
       <div aria-hidden="true" className="title-bar__native-controls" />
       <div className="title-bar__title" data-tauri-drag-region>
         <span className="title-bar__name">Lys</span>
-        <span className="title-bar__version">v1</span>
       </div>
       <div className="title-bar__actions">
         <Button

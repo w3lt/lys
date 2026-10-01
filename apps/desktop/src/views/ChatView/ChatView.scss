@@ -95,27 +95,12 @@
   object-fit: cover;
 }
 
-/* A two-tone gem split violet and cyan, like the portrait's eyes. */
-.chat-view__gem {
-  display: block;
-  width: 7px;
-  height: 11px;
-  margin-top: 18px;
-  background-image: linear-gradient(
-    90deg,
-    var(--lys-violet) 50%,
-    var(--lys-cyan) 50%
-  );
-  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
-}
-
 /*
  * The empty view's one entrance sequence: the portrait settles, then the
  * introduction and the starter prompts fade in.
  */
 .chat-view__empty h1,
 .chat-view__eyebrow,
-.chat-view__gem,
 .chat-view__subtitle {
   animation: chat-view-starter-fade-in 360ms var(--ease-standard) 200ms both;
 }
@@ -287,7 +272,6 @@
   .chat-view__portrait,
   .chat-view__empty h1,
   .chat-view__eyebrow,
-  .chat-view__gem,
   .chat-view__subtitle,
   .chat-view__starters {
     animation: none;
@@ -328,7 +312,6 @@
     margin-bottom: 12px;
   }
 
-  .chat-view__gem,
   .chat-view__subtitle {
     margin-top: 12px;
   }

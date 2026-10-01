@@ -59,7 +59,6 @@ export default function StarterView({
       <StarterPortrait />
       <h1>Lys</h1>
       <p className="chat-view__eyebrow">Lysiptera Caliginia</p>
-      <span aria-hidden="true" className="chat-view__gem" />
       <p className="chat-view__subtitle">
         One model, one conversation at a time. The transcripts stay on this
         machine.

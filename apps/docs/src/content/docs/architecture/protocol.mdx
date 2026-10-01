@@ -22,7 +22,7 @@ The public backend surface is small and explicit:
 | Concern                                           | Contract source                                |
 | ------------------------------------------------- | ---------------------------------------------- |
 | API prefix and loopback constants                 | `packages/protocol/src/constant.ts`            |
-| Chat route request and SSE payloads               | `packages/protocol/src/apis/chat/chatRoute.ts` |
+| Chat and reply routes, requests, and SSE payloads | `packages/protocol/src/apis/chat/*.ts`         |
 | Model list, health, load, and unload routes       | `packages/protocol/src/apis/llm/*.ts`          |
 | LM Studio connection status and reconnect routes  | `packages/protocol/src/apis/llm/*.ts`          |
 | Conversation list, get, rename, and delete routes | `packages/protocol/src/apis/conversation/*.ts` |
@@ -44,7 +44,8 @@ the same schemas when reading backend event payloads.
 - Contracts are source-level TypeScript and Zod definitions inside the monorepo.
 - The desktop and backend are built from the same workspace source; there is no
   negotiated protocol version or feature-capability handshake.
-- The only current chat event variants are the six variants documented in
+- The only current chat event variants are the seven chat-route variants and
+  the reply-events `reply-snapshot` documented in
   [SSE events](/reference/sse-events/).
 
 ## Coming soon

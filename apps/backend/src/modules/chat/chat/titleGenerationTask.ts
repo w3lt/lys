@@ -1,7 +1,7 @@
+import type { ChatGenerationEvent } from "@lys/protocol"
 import type { FastifyBaseLogger } from "fastify"
 import type { TitleGenerationOptions } from "../../../di/services/chatService"
 import { TitleGenerationOutputError } from "../../../utils/errors"
-import { createEventSender, type ChatRouteReply } from "./share"
 
 /** Inputs, attempt limit, and callbacks for one title-generation task. */
 export type CreateTitleGenerationTaskOptions = {
@@ -11,10 +11,10 @@ export type CreateTitleGenerationTaskOptions = {
   userMessageContent: string
   /** Model identifier passed to the chat service. */
   model: string
-  /** Signal owned by the route and aborted when the SSE client disconnects. */
+  /** Signal owned by the generation and aborted only at backend shutdown. */
   abortSignal: AbortSignal
-  /** Reply whose SSE connection receives the title event. */
-  reply: ChatRouteReply
+  /** Queues the title event for every stream following the turn; never waits. */
+  sendEvent: (event: ChatGenerationEvent) => void
   /** Request-scoped logger that receives title-generation outcomes. */
   logger: FastifyBaseLogger
   /** Positive, inclusive maximum number of title requests validated by the backend configuration. */
@@ -34,10 +34,10 @@ type TitleGenerationAttemptOptions = Pick<
   | "titleGenerationMaxAttempts"
 >
 
-/** Connection, logger, and persistence callback used for a generated title. */
+/** Event sender, logger, and persistence callback used for a generated title. */
 type GeneratedTitleHandlingOptions = Pick<
   CreateTitleGenerationTaskOptions,
-  "reply" | "logger" | "updateConversationTitle"
+  "sendEvent" | "logger" | "updateConversationTitle"
 >
 
 /** Outcome of requesting a title within the attempt limit. */
@@ -51,11 +51,11 @@ type TitleGenerationResult =
       readonly attempts: number
     }
   | {
-      /** The SSE client disconnected, so no further title request is made. */
+      /** Shutdown cancelled title generation, so no further title request is made. */
       readonly status: "abandoned"
-      /** Title requests made before the disconnect was observed. */
+      /** Title requests made before the cancellation was observed. */
       readonly attempts: number
-      /** Failure of the interrupted request, or the abort reason when none was made. */
+      /** Failure of the cancelled request, or the abort reason when none was made. */
       readonly error: unknown
     }
   | {
@@ -77,21 +77,21 @@ type GeneratedTitle = Extract<TitleGenerationResult, { status: "generated" }>
  * Titles are requested up to `titleGenerationMaxAttempts` times; only a reply
  * unusable as a title consumes another request. A generated title is persisted
  * only while the conversation remains untitled, before one `title` event is
- * sent to a still-connected client. If another turn assigned a title first or
- * the conversation was renamed or deleted, this task preserves the stored state
- * and sends no event. Other unsuccessful outcomes leave
- * this task's candidate unsaved; a later turn retries if still untitled.
- * Outcomes are logged with `titleGenerationOutcome` and
- * `titleGenerationAttempts` fields: exhausted attempts or a failure that is not
- * retried at warn level, a client disconnect at debug level, and a persistence
- * failure at error level. An assignment that loses to another title is logged
- * at debug level. The task never sends an `error` event.
+ * sent to the turn's followers. If another turn assigned a title first or the
+ * conversation was renamed or deleted, this task preserves the stored state
+ * and sends no event. Other unsuccessful outcomes leave this task's candidate
+ * unsaved; a later turn retries if still untitled. Stopping the reply does not
+ * cancel this task; only backend shutdown does. Outcomes are logged with
+ * `titleGenerationOutcome` and `titleGenerationAttempts` fields: exhausted
+ * attempts or a failure that is not retried at warn level, a shutdown
+ * cancellation at debug level, and a persistence failure at error level. An
+ * assignment that loses to another title is logged at debug level. The task
+ * never sends an `error` event.
  *
  * @param options - Title generator, prompt input, attempt limit, cancellation
- * signal, SSE reply, logger, and title persistence callback owned by the route.
- * @returns A promise that resolves after the title is published or the outcome
- * is logged; it does not reject, so the route can await it alongside the chat
- * task.
+ * signal, event sender, logger, and title persistence callback.
+ * @returns A promise that resolves after the title is sent or the outcome is
+ * logged; it does not reject.
  */
 export default async function createTitleGenerationTask(
   options: CreateTitleGenerationTaskOptions
@@ -101,7 +101,7 @@ export default async function createTitleGenerationTask(
 
   switch (titleGeneration.status) {
     case "generated":
-      await handleGeneratedTitle(options, titleGeneration)
+      handleGeneratedTitle(options, titleGeneration)
       return
     case "abandoned":
       logger.debug(
@@ -110,7 +110,7 @@ export default async function createTitleGenerationTask(
           titleGenerationOutcome: "abandoned",
           titleGenerationAttempts: titleGeneration.attempts
         },
-        "Title generation stopped because the chat connection closed"
+        "Title generation stopped because the backend is shutting down"
       )
       return
     case "failed":
@@ -127,8 +127,8 @@ export default async function createTitleGenerationTask(
 }
 
 /**
- * Requests a title until one is usable, the attempt limit is reached, or the
- * client disconnects.
+ * Requests a title until one is usable, the attempt limit is reached, or
+ * shutdown cancels it.
  *
  * @remarks Only {@link TitleGenerationOutputError} consumes another attempt.
  * HTTP, connection, and cancellation failures end generation at once; within
@@ -190,21 +190,49 @@ async function generateTitleWithinAttempts({
 /**
  * Assigns a generated title and sends it only when this task wins persistence.
  *
- * @param options - Reply, logger, and persistence callback.
+ * @param options - Event sender, logger, and persistence callback.
  * @param generatedTitle - Usable title and the requests made to generate it.
- * @returns A promise that resolves after the title is sent or its failure is
- * logged: a persistence failure at error level, an already assigned title at
- * debug level, and a send failure at debug level. Only a successful assignment
- * sends an event to a still-connected client. It does not reject.
+ * @remarks Only a successful assignment sends one `title` event to the
+ * turn's followers; every other outcome is logged by
+ * {@link saveGeneratedTitle}. It does not throw.
  */
-async function handleGeneratedTitle(
-  { reply, logger, updateConversationTitle }: GeneratedTitleHandlingOptions,
-  { title, attempts }: GeneratedTitle
-): Promise<void> {
-  let persistedTitle: string | undefined
+function handleGeneratedTitle(
+  options: GeneratedTitleHandlingOptions,
+  generatedTitle: GeneratedTitle
+): void {
+  const persistedTitle = saveGeneratedTitle(options, generatedTitle)
+  if (persistedTitle !== undefined)
+    options.sendEvent({ type: "title", title: persistedTitle })
+}
 
+/**
+ * Saves a generated title while the conversation is still untitled.
+ *
+ * @param options - Logger and persistence callback.
+ * @param generatedTitle - Usable title and the requests made to generate it.
+ * @returns The saved title, or undefined when another title won the
+ * assignment (logged at debug level) or the write failed (logged at error
+ * level).
+ */
+function saveGeneratedTitle(
+  {
+    logger,
+    updateConversationTitle
+  }: Pick<GeneratedTitleHandlingOptions, "logger" | "updateConversationTitle">,
+  { title, attempts }: GeneratedTitle
+): string | undefined {
   try {
-    persistedTitle = updateConversationTitle(title)
+    const persistedTitle = updateConversationTitle(title)
+    if (persistedTitle === undefined) {
+      logger.debug(
+        {
+          titleGenerationOutcome: "already-titled",
+          titleGenerationAttempts: attempts
+        },
+        "Another turn already saved the conversation title"
+      )
+    }
+    return persistedTitle
   } catch (error) {
     logger.error(
       {
@@ -214,27 +242,6 @@ async function handleGeneratedTitle(
       },
       "Generated title could not be saved"
     )
-    return
-  }
-
-  if (persistedTitle === undefined) {
-    logger.debug(
-      {
-        titleGenerationOutcome: "already-titled",
-        titleGenerationAttempts: attempts
-      },
-      "Another turn already saved the conversation title"
-    )
-    return
-  }
-
-  if (!reply.sse.isConnected) {
-    return
-  }
-
-  try {
-    await createEventSender(reply)({ type: "title", title: persistedTitle })
-  } catch (error) {
-    logger.debug({ err: error }, "Could not send the title event")
+    return undefined
   }
 }

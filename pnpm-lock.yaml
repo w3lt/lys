@@ -5,7 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
-  fast-uri: 4.1.4
+  fast-uri: 4.2.1
 
 importers:
   .:
@@ -20,8 +20,8 @@ importers:
         specifier: ^10.1.8
         version: 10.1.8(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))
       eslint-plugin-react-dom:
-        specifier: ^5.20.6
-        version: 5.20.8(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
+        specifier: ^5.21.0
+        version: 5.21.0(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
       eslint-plugin-react-hooks:
         specifier: ^7.1.1
         version: 7.1.1(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)
@@ -29,8 +29,8 @@ importers:
         specifier: ^0.5.7
         version: 0.5.7(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))
       eslint-plugin-react-x:
-        specifier: ^5.20.6
-        version: 5.20.8(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
+        specifier: ^5.21.0
+        version: 5.21.0(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
       globals:
         specifier: ^17.12.0
         version: 17.12.0
@@ -38,7 +38,7 @@ importers:
         specifier: ^9.1.7
         version: 9.1.7
       lint-staged:
-        specifier: ^17.5.1
+        specifier: ^17.6.0
         version: 17.6.0
       prettier:
         specifier: 3.9.6
@@ -54,7 +54,7 @@ importers:
         version: 11.3.0
       "@fastify/sse":
         specifier: ^0.6.0
-        version: 0.6.0(fastify@5.12.4)
+        version: 0.6.0(fastify@5.12.5)
       "@lmstudio/sdk":
         specifier: ^1.5.0
         version: 1.5.0
@@ -65,17 +65,17 @@ importers:
         specifier: workspace:*
         version: link:../../packages/share
       fastify:
-        specifier: 5.12.4
-        version: 5.12.4
+        specifier: 5.12.5
+        version: 5.12.5
       fastify-plugin:
         specifier: ^6.0.0
         version: 6.0.0
       fastify-type-provider-zod:
         specifier: ^7.0.0
-        version: 7.0.0(@fastify/swagger@9.9.0(supports-color@7.2.0))(fastify@5.12.4)(openapi-types@12.1.3)(zod@4.6.5)
+        version: 7.0.0(@fastify/swagger@9.9.0(supports-color@7.2.0))(fastify@5.12.5)(openapi-types@12.1.3)(zod@4.6.5)
       openai:
         specifier: 6.49.0
-        version: 6.49.0(ws@8.21.3)(zod@4.6.5)
+        version: 6.49.0(ws@8.22.0)(zod@4.6.5)
       uuid:
         specifier: ^14.0.2
         version: 14.0.2
@@ -84,7 +84,7 @@ importers:
         version: 4.6.5
     devDependencies:
       "@types/node":
-        specifier: ^26.6.2
+        specifier: ^26.6.3
         version: 26.6.3
       esbuild:
         specifier: ^0.28.2
@@ -123,11 +123,11 @@ importers:
         specifier: ^4.3.3
         version: 4.3.3(vite@7.3.6(@types/node@26.6.3)(jiti@2.7.0)(lightningcss@1.33.0)(sass@1.105.0)(tsx@4.23.15)(yaml@2.9.1))
       "@tauri-apps/api":
-        specifier: ^2.11.1
-        version: 2.11.1
+        specifier: ^2.12.0
+        version: 2.12.0
       "@tauri-apps/plugin-opener":
-        specifier: ^2.5.5
-        version: 2.5.5
+        specifier: ^2.6.0
+        version: 2.6.0
       "@testing-library/jest-dom":
         specifier: ^7.0.1
         version: 7.0.1(@testing-library/dom@10.4.2)(vitest@4.1.11(@types/node@26.6.3)(jsdom@30.1.1)(vite@7.3.6(@types/node@26.6.3)(jiti@2.7.0)(lightningcss@1.33.0)(sass@1.105.0)(tsx@4.23.15)(yaml@2.9.1)))
@@ -156,7 +156,7 @@ importers:
         specifier: ^4.18.1
         version: 4.18.1
       lucide-react:
-        specifier: ^1.47.0
+        specifier: ^1.48.0
         version: 1.48.0(react@19.3.0)
       react:
         specifier: ^19.3.0
@@ -193,13 +193,13 @@ importers:
         version: 5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.7.0(react@19.3.0))
     devDependencies:
       "@tauri-apps/cli":
-        specifier: ^2.11.5
-        version: 2.11.5
+        specifier: ^2.12.0
+        version: 2.12.0
       "@types/lodash":
         specifier: ^4.17.25
         version: 4.17.25
       "@types/node":
-        specifier: ^26.6.2
+        specifier: ^26.6.3
         version: 26.6.3
       "@types/react":
         specifier: ^19.3.0
@@ -247,7 +247,7 @@ importers:
         specifier: ^19.3.0
         version: 19.3.0(@types/react@19.3.0)
       astro:
-        specifier: ^7.3.4
+        specifier: ^7.3.5
         version: 7.3.5(@types/node@26.6.3)(jiti@2.7.0)(sass@1.105.0)(tsx@4.23.15)(yaml@2.9.1)
       class-variance-authority:
         specifier: ^0.7.1
@@ -256,7 +256,7 @@ importers:
         specifier: ^2.1.1
         version: 2.1.1
       lucide-react:
-        specifier: ^1.47.0
+        specifier: ^1.48.0
         version: 1.48.0(react@19.3.0)
       react:
         specifier: ^19.3.0
@@ -268,8 +268,8 @@ importers:
         specifier: ^4.21.0
         version: 4.21.0(supports-color@7.2.0)(typescript@6.0.3)
       sharp:
-        specifier: ^0.35.4
-        version: 0.35.4(@types/node@26.6.3)
+        specifier: ^0.35.5
+        version: 0.35.5(@types/node@26.6.3)
       tailwind-merge:
         specifier: ^3.7.0
         version: 3.7.0
@@ -309,7 +309,7 @@ importers:
         version: 1.9.0
     devDependencies:
       "@types/node":
-        specifier: ^26.6.2
+        specifier: ^26.6.3
         version: 26.6.3
 
 packages:
@@ -319,17 +319,17 @@ packages:
         integrity: sha512-6OzddxPio9UiWTCemp4N8cYLV2ZN1ncRnV1cVGtve7dhPOtRkleRyx32GQCYSwDYgaHU3USMm84tNsvKzRCa1Q==
       }
 
-  "@asamuzakjp/css-color@7.1.0":
+  "@asamuzakjp/css-color@7.1.2":
     resolution:
       {
-        integrity: sha512-s6vMrO4hds+skR2OMmdwSORZiiEbqhAjd56W/0gc/x4PYpTibh/ey5Oy9ywkZ+ycX9EgTcJruhE1T/KkbU7LNA==
+        integrity: sha512-99DHAnXDB5z6EEK+9GMpVI7Mw4oxj97dY5bpOzMnjADQWxI8rN6TvTduuFLUhUMlS7/CfVZ06tcZsus6cltnNw==
       }
     engines: { node: ^22.22.2 || ^24.15.0 || >=26.0.0 }
 
-  "@asamuzakjp/dom-selector@9.2.1":
+  "@asamuzakjp/dom-selector@9.2.2":
     resolution:
       {
-        integrity: sha512-NT4s3yZLjovPpliRpTvdsdzyPjqRqiCZj9MxnarBihbaY5MbAG7DWAJcrLlhmC7xKTNCXsTELcqB8YsqpLnUFQ==
+        integrity: sha512-lSWTBMjAcmu2xn5yEDU7jh6QDV+C8GEKtdJ4pIQhXh26RkKQ7S3FuQlt+zZkUbTdJ4d3XyV1kPI/G0zWXxqaqw==
       }
     engines: { node: ^22.22.2 || ^24.15.0 || >=26.0.0 }
 
@@ -1433,65 +1433,83 @@ packages:
       }
     engines: { node: ^12.0.0 || ^14.0.0 || >=16.0.0 }
 
-  "@eslint-react/ast@5.20.8":
+  "@eslint-react/ast@5.21.0":
     resolution:
       {
-        integrity: sha512-p2LpsgLAbSpn6/TboNRpasnOAMLsSxtPamX9QevRrtbxs1K3aLKWyjuM+mO2D1VJhagknjeyC1x+d4v6yoWf5w==
+        integrity: sha512-9x+lQGJaVD7u6NIK6dx1/xZ0mJBcFlSVC9e9AVu4NOvZErFzVSK1tEP38iBFkP14bcqrLp7jbokze5FOC4gQGg==
       }
     engines: { node: ">=22.0.0" }
     peerDependencies:
       eslint: "*"
       typescript: "*"
+    peerDependenciesMeta:
+      eslint:
+        optional: true
 
-  "@eslint-react/core@5.20.8":
+  "@eslint-react/core@5.21.0":
     resolution:
       {
-        integrity: sha512-EreVZ4/IQlHv2TwlNuDwvG92S0vWhuYnunnl5HMZOegKUWI59ypGMZkg+/4vec0fbJE56Ux9pFfZQVnpNGuROw==
+        integrity: sha512-PAuhwpWxFyFa6YPX771ttuo0W4Ggw/BannJ+4XJmPr0MV1a9s6tBiddMH5qWeWiuuQTT/5fmKzRWGcIMyr6iPg==
       }
     engines: { node: ">=22.0.0" }
     peerDependencies:
       eslint: "*"
       typescript: "*"
+    peerDependenciesMeta:
+      eslint:
+        optional: true
 
-  "@eslint-react/eslint@5.20.8":
+  "@eslint-react/eslint@5.21.0":
     resolution:
       {
-        integrity: sha512-d3Vbp5IWcBGlvxNCDPwy6WFyo0r1EONNKGAA7KAnOZVqFvoZ7fuYCAHrFclPeUjgVpP/KJ57uuJbymlrq/oawQ==
+        integrity: sha512-OdRp+P4s+d8CRd9rvv+5Ondp050imriYz4HH0qUM7REJpVl5NQewdwgYzQSlkJD6i+drmygt4gBh3hpwMPnBzA==
       }
     engines: { node: ">=22.0.0" }
     peerDependencies:
       eslint: "*"
       typescript: "*"
+    peerDependenciesMeta:
+      eslint:
+        optional: true
 
-  "@eslint-react/jsx@5.20.8":
+  "@eslint-react/jsx@5.21.0":
     resolution:
       {
-        integrity: sha512-eWIPY/j+c5OESPdp8FB+r+EHauRynYRk2MTBKgHoWFz9rduqGY7V0+I6JoL29LU5c/s48O+ZkaRLYVeBB/V+Dg==
+        integrity: sha512-/dyHSVYm46aWt4ABZoZXuiXsU622UsONOHIHLodM8hZkgoL/IJC70LHn9ZYk8Dnj2bzWwAbktKrmNDoZDgkvbQ==
       }
     engines: { node: ">=22.0.0" }
     peerDependencies:
       eslint: "*"
       typescript: "*"
+    peerDependenciesMeta:
+      eslint:
+        optional: true
 
-  "@eslint-react/shared@5.20.8":
+  "@eslint-react/shared@5.21.0":
     resolution:
       {
-        integrity: sha512-U32IV1q31lmo7S1zX0HmbUioK3EeW9jpf2t/NKEBRr/C4IfDxNV/Tv2SoqTcxZWcqCnKeEgABrHzH64idlS9Gw==
+        integrity: sha512-IIeMqRpbPMcUGhsMaXqlRfELfNLTAmywC671kag/soW580s+8LKU4DkTIULoorD+XxPenXlB1t0SE3fze23whw==
       }
     engines: { node: ">=22.0.0" }
     peerDependencies:
       eslint: "*"
       typescript: "*"
+    peerDependenciesMeta:
+      eslint:
+        optional: true
 
-  "@eslint-react/var@5.20.8":
+  "@eslint-react/var@5.21.0":
     resolution:
       {
-        integrity: sha512-uGAquJMp3TCaIZZywc2VHuGM2qCDE/Xta1DYvCyyk3qVinR/X9uIXFoHh/SBHeqky5v5Fx8C8nVj40MGa3yRhA==
+        integrity: sha512-segy1jD22R5mOP2GEmnwIDh0vdooJtTtsB+bWu3SC2LB6iLtASvDmIGUA7V0r6uz/YF8vyLf7iKTfv2liiMOBg==
       }
     engines: { node: ">=22.0.0" }
     peerDependencies:
       eslint: "*"
       typescript: "*"
+    peerDependenciesMeta:
+      eslint:
+        optional: true
 
   "@eslint/config-array@0.23.5":
     resolution:
@@ -1723,237 +1741,237 @@ packages:
       }
     engines: { node: ">=18" }
 
-  "@img/sharp-darwin-arm64@0.35.4":
+  "@img/sharp-darwin-arm64@0.35.5":
     resolution:
       {
-        integrity: sha512-Uhfl4V4lhP2nbUVF9+hyH1+luj86f1gUFeo8ALYxFoULoU+G87D43BfeMP8XHsk9boxAnCY/bf2EHwhA7MuGsA==
+        integrity: sha512-QRUlFQ0WxvdWyqqG/WtI3iupfD5rBzmCHXSdPsY91sAtVtTo7Q4cb6zOccZ3gqEqkr0f1As1ehLqmEpDsRf+lg==
       }
     engines: { node: ">=20.9.0" }
     cpu: [arm64]
     os: [darwin]
 
-  "@img/sharp-darwin-x64@0.35.4":
+  "@img/sharp-darwin-x64@0.35.5":
     resolution:
       {
-        integrity: sha512-hWniXY3bG5qKpkKrAwPe4y+VTPmf086YQAnkxWh7uA1YrlRouWGa0M0Mxj3ZjnXFkv7/TD1bTy9lGUK26vRvWw==
+        integrity: sha512-+BR255RhDlpygUpOc/Jdt1nT6DQ3XG/ERo5wbcdOf5Q320dKtPCKPLR1LJs9VGXRaMa8l1uUa0tkCNOXiAxZUw==
       }
     engines: { node: ">=20.9.0" }
     cpu: [x64]
     os: [darwin]
 
-  "@img/sharp-freebsd-wasm32@0.35.4":
+  "@img/sharp-freebsd-wasm32@0.35.5":
     resolution:
       {
-        integrity: sha512-lIsKw/BU+kjB4eZjxrYrZmwOJYi3Ajrv66iAlBmUPyKc3HpnloevB1g3wxGD9P/5BbQ1brBGl65VRRrCvQDEqA==
+        integrity: sha512-Y/z91nEZ4uIBX5X3nfTovjU9lHNKFYbL2lpHCLVNmXQK03VIZvXBBt0KxbPGp2SdGSF+2mQU4e+hQaWOt86iAw==
       }
     engines: { node: ">=20.9.0" }
     os: [freebsd]
 
-  "@img/sharp-libvips-darwin-arm64@1.3.3":
+  "@img/sharp-libvips-darwin-arm64@1.3.4":
     resolution:
       {
-        integrity: sha512-suTBPTDGrI9WodccaDdwZItTSaBYASlBk1NSfElSHrUfzu3szG6lvIF58+WiFvnfzuK8ZBFS5zE00PxqxnRiPg==
+        integrity: sha512-5R89nBYiRdUlSWJxPhO+GVtaXzXSxKnRu/xqMn3KTA3L9EB9Oy/P+Nn2f2vlhPuUdy/Zusb2DarbyTpGCfEDuw==
       }
     cpu: [arm64]
     os: [darwin]
 
-  "@img/sharp-libvips-darwin-x64@1.3.3":
+  "@img/sharp-libvips-darwin-x64@1.3.4":
     resolution:
       {
-        integrity: sha512-FVJZ5mITMobmXIz/hPDTw0EintTW5H3WfrxwLqEqjiIihlu+hVRyGrFQ60xl0Lxn7Bt3zdpevPaQi0HEzqz9fw==
+        integrity: sha512-iR2OKH80yi0U+dUplyh3/xdpFvps6YkCwsXenIJxqxR1v9o+xtKTGbS9H7cps+2Vxjc8B1j96p75NmTGjIhtpQ==
       }
     cpu: [x64]
     os: [darwin]
 
-  "@img/sharp-libvips-linux-arm64@1.3.3":
+  "@img/sharp-libvips-linux-arm64@1.3.4":
     resolution:
       {
-        integrity: sha512-0DaL0A6Xu6sQSQFwe4iVCrKWU2cCTItnRsYsCdxAMm9NF6twAA9BKnoqy4hqz4+azQ0JHuA26qiUKsf1XJ/v5A==
+        integrity: sha512-Y3dgX/6lE2QhQb+Gxy0WZxfg9MEm/JBjamZpS2IklP7xIQoKN4hzAm7KcMVGtaVDt3neE9OKBC7vAfonA/Lr1A==
       }
     cpu: [arm64]
     os: [linux]
     libc: [glibc]
 
-  "@img/sharp-libvips-linux-arm@1.3.3":
+  "@img/sharp-libvips-linux-arm@1.3.4":
     resolution:
       {
-        integrity: sha512-3rbU4vqXXc3hY/OiXdl52xZvT0F1yEngWfvqudtPJg/KkyiaQw2DRsFrNzpmLvfavbwOq3qXn36GP8obHRULQA==
+        integrity: sha512-LmRtTsOHuvM2+wlO2Db37dx5MiZhB0FvSunciw48YjdOkZz9KAiRbm8ujeMOA1INqmei5NapFxYEK1D1ZSidmw==
       }
     cpu: [arm]
     os: [linux]
     libc: [glibc]
 
-  "@img/sharp-libvips-linux-ppc64@1.3.3":
+  "@img/sharp-libvips-linux-ppc64@1.3.4":
     resolution:
       {
-        integrity: sha512-cdn1OvUBwsXhbC0zSzJnNzf5MZ/mTrobawDvNXBTxe8VtqKAm0sRuEY2Evzovb/w9JMk4TvRxqt1mekSuJz64w==
+        integrity: sha512-Le6boB8Tai0Nis+gIxIpKx68UDVVIqdR8Tin5Yf1z2LJJQLDJvCDRqRu+jC2qCoD+eIomonmOwB4smBRxfVpYQ==
       }
     cpu: [ppc64]
     os: [linux]
     libc: [glibc]
 
-  "@img/sharp-libvips-linux-riscv64@1.3.3":
+  "@img/sharp-libvips-linux-riscv64@1.3.4":
     resolution:
       {
-        integrity: sha512-HjPVx7yKz+0lqdhDlTw1tt90wamBoxhiXpvl1XZpJLiHH4RCJ5yDTqH+VlYPv2fwFs89JFw4c1IexYOcQUi4IQ==
+        integrity: sha512-aHkkIEHPRdQEegJN20MLmGtxYD9R2wQr3Cwpddnu5+YKMt6Uzax7S9h5gpZTo8wyrGuZSlfQ63OevL5mTyOC7Q==
       }
     cpu: [riscv64]
     os: [linux]
     libc: [glibc]
 
-  "@img/sharp-libvips-linux-s390x@1.3.3":
+  "@img/sharp-libvips-linux-s390x@1.3.4":
     resolution:
       {
-        integrity: sha512-neWLh+3yCNThxnfy3c4BbVBeGgt9aftno+XbT56iK28RgeDs3UOFWviLWlUu0bArYVYJaFDK+RRohbicUNCm8Q==
+        integrity: sha512-ra/mB6MikESDUO7Yg+Mi95bFBb9GsObURuhnOv3OqknjGe9sZrG8tCe9q0xSIGrtLgvgw0gKnFWcK4blSgQOuQ==
       }
     cpu: [s390x]
     os: [linux]
     libc: [glibc]
 
-  "@img/sharp-libvips-linux-x64@1.3.3":
+  "@img/sharp-libvips-linux-x64@1.3.4":
     resolution:
       {
-        integrity: sha512-4vKmvAst9nrowcqquKFAyZJUDolUaIp8uRiN0mWFguJ1IplC9/pitXtlnnlU4aa/eJw3J7i67V+pwUL+wZGdsA==
+        integrity: sha512-GJ//SSXbnwSDes02umB3nDJLFcQzw8a18V8fyhqr6tV515tOEMdImjjxj1AoafMRz56F3PHgftnj1QEKSU1zkw==
       }
     cpu: [x64]
     os: [linux]
     libc: [glibc]
 
-  "@img/sharp-libvips-linuxmusl-arm64@1.3.3":
+  "@img/sharp-libvips-linuxmusl-arm64@1.3.4":
     resolution:
       {
-        integrity: sha512-Y9kQaLMuNoB0bPYOOdcZMaseNrFpPodIWWMrx+CZyydf2xn68j9WYc6sWWRrDwNkzCQjKYfc68L7jKjGlHMibw==
+        integrity: sha512-hvulFwtjUcagsis6BBxHwGFwWoNZjgYmULGVrZcyfNbjA8hKILbRxGg15/7w5HDyXHXUos/j6baAWqnCyQ2DWA==
       }
     cpu: [arm64]
     os: [linux]
     libc: [musl]
 
-  "@img/sharp-libvips-linuxmusl-x64@1.3.3":
+  "@img/sharp-libvips-linuxmusl-x64@1.3.4":
     resolution:
       {
-        integrity: sha512-fj8Mv0HHfD1Rr+4I68+3agJynxDWtBFgicTbSOb9Bke6pIwzGcJ+RX/yHjmiEGFMCavY/dxvem7MyNaJF+wDiw==
+        integrity: sha512-6zXKeE/p39I1AmA3cJG35eyBGNqNddLnUXjhwBnsGjFPWqf5VKkDBEqaEkPDoTEtkxwi2vv8Tcr2mDyP4So7Fg==
       }
     cpu: [x64]
     os: [linux]
     libc: [musl]
 
-  "@img/sharp-linux-arm64@0.35.4":
+  "@img/sharp-linux-arm64@0.35.5":
     resolution:
       {
-        integrity: sha512-De4jpEnAU8Hd5oT0j1G3uL4ZvTuipVMn7YC6vPaJhy6/7EwEae0SVAoBrUMYQbkLGDm85taVWwuPc1a44LTzCQ==
+        integrity: sha512-LYVx5JTsOM2CBzmxreh+nl64/3H6Xb09iSLknqH47z2T2DFFxDeFLP5y4dJwe6H7uGQlHPyEEtIqyo3DYsRwdQ==
       }
     engines: { node: ">=20.9.0" }
     cpu: [arm64]
     os: [linux]
     libc: [glibc]
 
-  "@img/sharp-linux-arm@0.35.4":
+  "@img/sharp-linux-arm@0.35.5":
     resolution:
       {
-        integrity: sha512-7OAS8gI0EReKGVN2HssHlM6umJgxF5VI3xN0p9FA91p/YO+ou5hiNghLdZ5BEHztwaaK5+bLKRf8x/o2L2nk9A==
+        integrity: sha512-LEaXK2WdXVK5ykcw0buWyPMsmLLL2vpHLD6yrNSW+JGEL3BZPA4tpKN6iaMc4AxTTAoaX/sU1rOL51lcIz48ZQ==
       }
     engines: { node: ">=20.9.0" }
     cpu: [arm]
     os: [linux]
     libc: [glibc]
 
-  "@img/sharp-linux-ppc64@0.35.4":
+  "@img/sharp-linux-ppc64@0.35.5":
     resolution:
       {
-        integrity: sha512-2oYZJeIl4kCcMGk4ouZVjnkCtFrpQFlNEtJ6GbxzhHQchwH0NH/qEb9ykmOl29dqwMq+JhFdZn+1ak2FKhI9fQ==
+        integrity: sha512-QVxAAq8evVRI9ia2vqgwrmWucn5Dfv+JdWzj75pD8omHLPSP7f8p20O8jxzjCcuCEQEOtYOZUmX1hkiZ0kdevA==
       }
     engines: { node: ">=20.9.0" }
     cpu: [ppc64]
     os: [linux]
     libc: [glibc]
 
-  "@img/sharp-linux-riscv64@0.35.4":
+  "@img/sharp-linux-riscv64@0.35.5":
     resolution:
       {
-        integrity: sha512-cPbNChoRURAWdebDIHSenxRpgEdy7JkPydSnUxRm9VvKD7m0/xVaR/8Fzlu81pk5nHEvHH87UZUA7cTtwnbJSA==
+        integrity: sha512-LtdreXguaavKODPIfzJ4kffx7UNt1omwtK0rch4EBbbSTXPnxWmYSayXdLJw0fJzQ97kHt1gL/yh4tvU+nCyRQ==
       }
     engines: { node: ">=20.9.0" }
     cpu: [riscv64]
     os: [linux]
     libc: [glibc]
 
-  "@img/sharp-linux-s390x@0.35.4":
+  "@img/sharp-linux-s390x@0.35.5":
     resolution:
       {
-        integrity: sha512-RY0JFY8Fd6RonCBtHz+DvadaPkXDSI1AUn6yWL9TipqkZ1vY8w8evqdgyDFnkm4/K1ve1TvZiaePP5oSd4+WVQ==
+        integrity: sha512-UZasTOFiYzotTsGOCu42BfUzP6Tu6Do/947iRm1RsLKvlllxwGcn4RN27LibGWceix4Y+Pmw3jsnTcCQIgWjqA==
       }
     engines: { node: ">=20.9.0" }
     cpu: [s390x]
     os: [linux]
     libc: [glibc]
 
-  "@img/sharp-linux-x64@0.35.4":
+  "@img/sharp-linux-x64@0.35.5":
     resolution:
       {
-        integrity: sha512-9qvvEAuk8k89TfWUoX2htWjbAMX8p+NxCppjpcg5k6xMsjhBQPTsoIh36h9Qde4WRuGpJeYnOjdosDn/cnv+OA==
+        integrity: sha512-SxFtLTeJInhAA9Q836kux2vZNeOBQEx658qvbboZScr0wIARym3IcGmW7KpVD5sbVg0Ojy+udFQdayYIZyoNog==
       }
     engines: { node: ">=20.9.0" }
     cpu: [x64]
     os: [linux]
     libc: [glibc]
 
-  "@img/sharp-linuxmusl-arm64@0.35.4":
+  "@img/sharp-linuxmusl-arm64@0.35.5":
     resolution:
       {
-        integrity: sha512-KB5jxpfWQTr0nc3xdHtWChdbifHrBGsd2SM62Eyxrl8afikm+f5qGBU75SJIZBT/S1MC8XyacdlXBMSWq6OURA==
+        integrity: sha512-9HbMclmI1zlNkFRs3z9/eBtDjfD0sGlrX1z6b1qwmiFY5ElDLh4BC0LPBdVp7z1DXFiKlIcznf+ZlsuZzLxQqg==
       }
     engines: { node: ">=20.9.0" }
     cpu: [arm64]
     os: [linux]
     libc: [musl]
 
-  "@img/sharp-linuxmusl-x64@0.35.4":
+  "@img/sharp-linuxmusl-x64@0.35.5":
     resolution:
       {
-        integrity: sha512-f+eZJZIQNEEd26RPSW+76chwOf1XtA2Y/O+5ocVyLliHkeih3e+jhLVBdNTd2rS3IbNXK8+ug93Vf5ZXtF5Lxg==
+        integrity: sha512-4KOphqB035HrVdqLZfCgMzzERrQkkzOwRhl4OAkRO1YCldbaFjySXMaK534Mo0V+LndnlJk+sbUyLeU0ULyD1A==
       }
     engines: { node: ">=20.9.0" }
     cpu: [x64]
     os: [linux]
     libc: [musl]
 
-  "@img/sharp-wasm32@0.35.4":
+  "@img/sharp-wasm32@0.35.5":
     resolution:
       {
-        integrity: sha512-zQnl4Kwp7Q6NHsENtU2T/00Zi+w3AQNwz3+UaTyVBy2FpXrzXzGjndpK61onhZjRtRpQXxCTeqw19bVyXOh7jA==
+        integrity: sha512-Ptsga1su4tQx+LLF1ECS9U6nz5kmrXKo6XVbtR48Ke3ZRxxgaWBu7IDtEe1quo8hiupwm6WFqxVlXaSf7IINGQ==
       }
     engines: { node: ">=20.9.0" }
 
-  "@img/sharp-webcontainers-wasm32@0.35.4":
+  "@img/sharp-webcontainers-wasm32@0.35.5":
     resolution:
       {
-        integrity: sha512-ESfNkywmCfPNyaZjxooddJQiQ+l/nTpGEOGthxiLnIHXC/CmcBixnfwUleX9mCz9ovrUUvKMap/pm8RYbzfwaA==
+        integrity: sha512-hfhF/FmoQyTUkA0bIKFOtw536BQSeBMe6BF6QyWlrPxT754+TFLaZ7sKKTfvvM0yJgKgaYTwnFCIZ/GuDw5SUA==
       }
     engines: { node: ">=20.9.0" }
     cpu: [wasm32]
 
-  "@img/sharp-win32-arm64@0.35.4":
+  "@img/sharp-win32-arm64@0.35.5":
     resolution:
       {
-        integrity: sha512-iNdlBX9gLVvqe2I3uIJSIKTq6wckP/DYxZtcqxm09x5Gi24DnFBmPAWZmr60ZyYMG0xlzo6goG3670ar+RXvRw==
+        integrity: sha512-X4t7g+7ZA5DKblCBEXGjUqqemj4vczING/5viFwAL8h4N3qYeyjwdCvRLHi4EdOUI+2Z7UFlp1VM+p/AuEtm6Q==
       }
     engines: { node: ">=20.9.0" }
     cpu: [arm64]
     os: [win32]
 
-  "@img/sharp-win32-ia32@0.35.4":
+  "@img/sharp-win32-ia32@0.35.5":
     resolution:
       {
-        integrity: sha512-kqRsbaa5CS6KHlpxnN7WhE6vAAugXyZButpRdvDWetlv6Qv4N9WTcrWzF7tXfB9T7MsoadqdI8hmwLq6UlLvtw==
+        integrity: sha512-5Zm82LoBc43nhwNybZlG7Y1KO//Zhsn306fQl29ZOuStHLGTo3BWL83q3cznX0poxSAMuYL1On/BHBxkBeKr6A==
       }
     engines: { node: ^20.9.0 }
     cpu: [ia32]
     os: [win32]
 
-  "@img/sharp-win32-x64@0.35.4":
+  "@img/sharp-win32-x64@0.35.5":
     resolution:
       {
-        integrity: sha512-XtmnYhBcrORsJ4XJngyzr/EWP0hRZLAZRFaApdKuviyqF78+ylxh2y06ZmtULAMOnObJ3ucpN0AcwSWnMowTRg==
+        integrity: sha512-x76eH0vEiHlcMQu8Y8IenntaACtddpT6W0wmXtWrnKcnKI7ME5DdgqhAD6SEWOEl1v2zDvkZDhFA9KnURwpfqg==
       }
     engines: { node: ">=20.9.0" }
     cpu: [x64]
@@ -2864,128 +2882,128 @@ packages:
     peerDependencies:
       vite: ^5.2.0 || ^6 || ^7 || ^8
 
-  "@tauri-apps/api@2.11.1":
+  "@tauri-apps/api@2.12.0":
     resolution:
       {
-        integrity: sha512-M2FPuYND2m+wh5hfW9ZpSdxMPdEJovPBWwoHJmwUpysTYNHaOkVFN419m/K0LIgjb/7KU2vBgsUepJWugQCvAA==
+        integrity: sha512-fUSxFX8VABYe9W9K5ROdEaKVkNUFRcMSRofjruvaxztXA+I0XnQHcYHF8m/a6iExRUxsUf0HsFWhPBuH9IgzJw==
       }
 
-  "@tauri-apps/cli-darwin-arm64@2.11.5":
+  "@tauri-apps/cli-darwin-arm64@2.12.0":
     resolution:
       {
-        integrity: sha512-tggOiVOohjIHdiElbjeBfB41s6cmfsq+ZQ0PX0fEtCdsDdZ9cCi54e5gNK7tdPbR6JbdDe7RA4kbQdyyBUUk/Q==
+        integrity: sha512-v5J+jISihLGtih1+3yWagbsL+5dbLZORu4vaSI0vhY0Heb+MAW+T/1s1RyKxrQrwEPGBG5kqwfDDTnSbmVkuqA==
       }
     engines: { node: ">= 10" }
     cpu: [arm64]
     os: [darwin]
 
-  "@tauri-apps/cli-darwin-x64@2.11.5":
+  "@tauri-apps/cli-darwin-x64@2.12.0":
     resolution:
       {
-        integrity: sha512-SrO+KCbqvG1IvVPdlzQX4GEGZRQDISrmDY9bGcW68DLVFBCC06H+Loz6oyUZETUxsSMR6B4oDfvbQVgD4hxsqQ==
+        integrity: sha512-g27I07pfW/dMS8vcNqB9lamgKF0TqLlcy8e7t9qDGsB1iaeyjJWb2TgBF4tM9ZwLqPAZUXbsz28oXljO12WC4g==
       }
     engines: { node: ">= 10" }
     cpu: [x64]
     os: [darwin]
 
-  "@tauri-apps/cli-linux-arm-gnueabihf@2.11.5":
+  "@tauri-apps/cli-linux-arm-gnueabihf@2.12.0":
     resolution:
       {
-        integrity: sha512-qLrOaCa8hLD5QVPQRjAgOXvhlTFKXmTliVF773GgvADYcWZSdmncnF5zBFAkdu1uQK8KfQbDlBUwqQYZqBfBRQ==
+        integrity: sha512-gXyQ710fNc99YuxFxNyeX9PLSrIpbtgBBj7GQo9tSeRT6fIK40q3/gm7X5jqZo7mWLR2m0R/2ALd3vAWo0Z32Q==
       }
     engines: { node: ">= 10" }
     cpu: [arm]
     os: [linux]
 
-  "@tauri-apps/cli-linux-arm64-gnu@2.11.5":
+  "@tauri-apps/cli-linux-arm64-gnu@2.12.0":
     resolution:
       {
-        integrity: sha512-Tq32xpQjiQEdIrvwDq7lwHhXemn070CXWdbCvr9rdi9rsv9NFTbQ6izVSIfNE+59QaerxuwtUtZ5IxDNWaoYBw==
+        integrity: sha512-H9cyXuq9WgxoHh2NZ+R+oN+W78x5UwaBDEp0/fmqUUkaBoioCuOZErM9xKiIV6bpNAhmw1RoWZ49u37q/vaiAg==
       }
     engines: { node: ">= 10" }
     cpu: [arm64]
     os: [linux]
     libc: [glibc]
 
-  "@tauri-apps/cli-linux-arm64-musl@2.11.5":
+  "@tauri-apps/cli-linux-arm64-musl@2.12.0":
     resolution:
       {
-        integrity: sha512-+OdWKj5Aq+C8HXypQ4t926V8cpVnc0ZcJIdhTXWjVAJHkaNuo8EuQR6KRZKHWIbJJgKdMPCDosvwzIFaBBqHKQ==
+        integrity: sha512-5tFuk3JKMBa1M/iN4gN32OYlSfhY3aqb5PO3zCugxaT+sfecyMKpc3EM9VDbhmwWBE9QD4Tfj7wGhlqx2yy2pQ==
       }
     engines: { node: ">= 10" }
     cpu: [arm64]
     os: [linux]
     libc: [musl]
 
-  "@tauri-apps/cli-linux-riscv64-gnu@2.11.5":
+  "@tauri-apps/cli-linux-riscv64-gnu@2.12.0":
     resolution:
       {
-        integrity: sha512-Q0V2hjpllyDW8dWQZSsITuQDfcY9BpBZuhXkMa2T5AFLZAn+FJPXQSyvnxWNVxRowdQ59Xn0QVtGm6HEHNUEvw==
+        integrity: sha512-LOrMyV+nb7pKq8P0BZtTBQuyzm1ORjn16R9MlupmxuT5LqxtuYJlw3VMwbaeXCToJ8jbP5u9JnkfmbqDlvETXw==
       }
     engines: { node: ">= 10" }
     cpu: [riscv64]
     os: [linux]
     libc: [glibc]
 
-  "@tauri-apps/cli-linux-x64-gnu@2.11.5":
+  "@tauri-apps/cli-linux-x64-gnu@2.12.0":
     resolution:
       {
-        integrity: sha512-Xz1s87gFjZJZMQKAhLa77YeiCJM6yVog3f9OxDgVd/KxDIoB1dA5V2xOnMM+SRkOGk9juwIBqesVAjV0kUB0DA==
+        integrity: sha512-aMIkI+X9qvD2+k80QZB3tuOYT41/cEheikC510CwAIZ31KLXORsRASYYzM4mi1/58ICmtzSLFhCC08keir7COw==
       }
     engines: { node: ">= 10" }
     cpu: [x64]
     os: [linux]
     libc: [glibc]
 
-  "@tauri-apps/cli-linux-x64-musl@2.11.5":
+  "@tauri-apps/cli-linux-x64-musl@2.12.0":
     resolution:
       {
-        integrity: sha512-6A88wqAZXZHgMaBrGiy/Bpa4GgUnftXM7uquKOeOXCuK78/XdBxEECicK/1oHgrT179XBFOaA6lQEHysjRmGig==
+        integrity: sha512-9gl3NhUbfuGhSKjeGCypKSdtoezOQRcDUrkhTWtLQEjnajets6peO6NadgI2DF0OzbiiFOzrnnIGMwBS+Ap6Iw==
       }
     engines: { node: ">= 10" }
     cpu: [x64]
     os: [linux]
     libc: [musl]
 
-  "@tauri-apps/cli-win32-arm64-msvc@2.11.5":
+  "@tauri-apps/cli-win32-arm64-msvc@2.12.0":
     resolution:
       {
-        integrity: sha512-sRGgF/ObRfLcS3PtUdyTbJtkGq3E+PNZTknvAURwMNUtHw9DU/BF6S5si43y9lS5yEO9bWJCA+GGYvnn6cphQw==
+        integrity: sha512-1W+v86wsYLuyBDN0iDessD4CD9o+yNyO0m8Dp3+/vfjiZrJ/v7R7/aTRBeikaq2tLGgxeag0gxnFggBNBGw91A==
       }
     engines: { node: ">= 10" }
     cpu: [arm64]
     os: [win32]
 
-  "@tauri-apps/cli-win32-ia32-msvc@2.11.5":
+  "@tauri-apps/cli-win32-ia32-msvc@2.12.0":
     resolution:
       {
-        integrity: sha512-bHOv/yxqfKpI7ioIFQi5wOfZ7jkbPzJD/UhXY52I/hrmE3qNh71cohIPyqZB5GQn3LZeJWdCUOqmIg/w6XX+Wg==
+        integrity: sha512-SsBjvq4f7YaBGqcWoE3cycoItPf0SrQeqFqWWgfxoeZWAIz01E31LDSeZ2p/etJiIY0R9oi045chkFfb0O7WGw==
       }
     engines: { node: ">= 10" }
     cpu: [ia32]
     os: [win32]
 
-  "@tauri-apps/cli-win32-x64-msvc@2.11.5":
+  "@tauri-apps/cli-win32-x64-msvc@2.12.0":
     resolution:
       {
-        integrity: sha512-vaaOmavqdCeS7oMib2banBZemgrC5v54tSkwoBV+bxrXQZhQZrOwE2EO2i4x+CHNtvQUM/6bSs3iymZMAsycWg==
+        integrity: sha512-9zzDKYUH4TKKBgRdDdVQX8fiRO5gJ8hD1nGsHU9DOHG5Jpm3arjbu9Xg1frR20EusG3Sl8X0dppoO/4EoUXUGg==
       }
     engines: { node: ">= 10" }
     cpu: [x64]
     os: [win32]
 
-  "@tauri-apps/cli@2.11.5":
+  "@tauri-apps/cli@2.12.0":
     resolution:
       {
-        integrity: sha512-YbeJ6tctNoo40purO4u3Eeo3RVqmsjJr0NoKQRu+4pvO4gMLzkjta7x0k96SxSLmx+rQ+8um1ThOlw+HLpgFug==
+        integrity: sha512-GIShnAR4C16kSTA8NO02fo8fOw/I5z5sAUEB5S2HlPHFnBkbihL4c9a/MpkxOm1+q5S+tFd3X4QUjHWxfyGzpQ==
       }
     engines: { node: ">= 10" }
     hasBin: true
 
-  "@tauri-apps/plugin-opener@2.5.5":
+  "@tauri-apps/plugin-opener@2.6.0":
     resolution:
       {
-        integrity: sha512-xvzGai5aQds8j8R8RsUK/lW6pGG50YgOYIPLzvkqmkwAj7dfySOD7sGtejRzvVdMmv1EQfKVEFh1MvmDp8QR0g==
+        integrity: sha512-KIl9qkBGyAUrbzfCtdk+NRPTXUOwpMyUKsKN57H6/qA0q8auVywXpfUyWClqX6I/iH8PHmqAUa/KK9YZPWVQew==
       }
 
   "@testing-library/dom@10.4.2":
@@ -3543,10 +3561,10 @@ packages:
       }
     engines: { node: ">=8" }
 
-  ansi-regex@6.3.0:
+  ansi-regex@6.4.0:
     resolution:
       {
-        integrity: sha512-WpDfL7NO6j7tH88IDBNVdUJxDh9nmCteAVW9dsep846XdwF4naCBK+/tGLX3KJgcpgMRXCFlTM2hKGoK9FsdrQ==
+        integrity: sha512-KzTVk2tCWAHtYrvvvaP8bJKJq2pVinhLcGEQdtLIYPbmNGNyYe8QwNaTUYQp2J7/vIsUKt5QCqAfUkYyG9DkOw==
       }
     engines: { node: ">=12" }
 
@@ -4521,15 +4539,18 @@ packages:
     peerDependencies:
       eslint: ">=7.0.0"
 
-  eslint-plugin-react-dom@5.20.8:
+  eslint-plugin-react-dom@5.21.0:
     resolution:
       {
-        integrity: sha512-IQYQbC0v+F8FlxAabLrQCXxxD6kDy8YHylQLZ1/E2iO2ufUnjOyAsVhhX9VEGVHvUpHck4CDoHCZr47msQ4pow==
+        integrity: sha512-OtaQ73uqxnmjZ7muFthEbnVvJKrQ4MJneO21MFiZ5AR7XfVxew/cMOKJpr42Yvf5P8m7iB/QBRG8BHwXeqinxQ==
       }
     engines: { node: ">=22.0.0" }
     peerDependencies:
       eslint: "*"
       typescript: "*"
+    peerDependenciesMeta:
+      eslint:
+        optional: true
 
   eslint-plugin-react-hooks@7.1.1:
     resolution:
@@ -4548,15 +4569,18 @@ packages:
     peerDependencies:
       eslint: ^9 || ^10
 
-  eslint-plugin-react-x@5.20.8:
+  eslint-plugin-react-x@5.21.0:
     resolution:
       {
-        integrity: sha512-G86Iu4K3cDjFTVwQ+24aZ+fu3+2U6zrIFcJ0xCdMVD3OcAPdreLidwDtHB9NLLWTK3dQ4DeM0H/q0d3jar5Rwg==
+        integrity: sha512-FEdx6h4Xf0aakOb4p6Pk1LpZCpxF0ArC0AMaLYQQEOOF5Z6OSRIZNWj6yKne64xQ6Ss6jQHicOheqbkg7Q0rPg==
       }
     engines: { node: ">=22.0.0" }
     peerDependencies:
       eslint: "*"
       typescript: "*"
+    peerDependenciesMeta:
+      eslint:
+        optional: true
 
   eslint-scope@9.1.2:
     resolution:
@@ -4815,10 +4839,10 @@ packages:
         integrity: sha512-gX8LrtNEI5hq8DVUfRQMbr5lpaS4nMIWV+7XEbXk2b8kiQIizgnlr12B4dA3ZEx3308ze0O4Q1R+cHts8kyUJg==
       }
 
-  fast-uri@4.1.4:
+  fast-uri@4.2.1:
     resolution:
       {
-        integrity: sha512-dODXrIxlS9JSdgAnhIUKOosKV1oMtU2VtVw87QRaHzyl5jxO290Ii5tEZfCfzfWNHi3jKWwBSdQj0qIyshdZdQ==
+        integrity: sha512-TmHQgewjHtMq1E5QKA0tOE0yeYGQs25KZC/ziJpubRtWI15W92e6vPFydWOeZBVROSHBYw/QhD9d5OefdD6LDg==
       }
 
   fast-wrap-ansi@0.2.2:
@@ -4844,10 +4868,10 @@ packages:
       openapi-types: ^12.1.3
       zod: ">=4.1.5"
 
-  fastify@5.12.4:
+  fastify@5.12.5:
     resolution:
       {
-        integrity: sha512-zATD676fP6tBMsn+jQ7Q5/cO/Qo+149TXH0dUqUKel+1/hcZxwIbnflqtPa9EjlrvpY8eCZcL3M1UYrMc31Y7g==
+        integrity: sha512-OB2k1dlxs5/NAABqeKV2FUHkSD2BbENsCak8yULVcymn3fHIPDVa9TI3SDnJSWYSllZmSYuZXy2gTnsT+Sut1A==
       }
 
   fastq@1.20.3:
@@ -6195,10 +6219,10 @@ packages:
         integrity: sha512-sqpDWlsHn7Ac9GNZQMeUzPQSMzR6Wv0WKRNvQRg0KqHh02fpTz69Qc1QSseNX29bhz1ROIyNyxExfawVKTm1GQ==
       }
 
-  mdast-util-gfm-strikethrough@2.0.0:
+  mdast-util-gfm-strikethrough@2.0.1:
     resolution:
       {
-        integrity: sha512-mKKb915TF+OC5ptj5bJ7WFRPdYtuHv0yTRxK2tJvi+BDqbkiG7h7u/9SI89nRAYcmap2xHQL9D+QG/6wSrTtXg==
+        integrity: sha512-OuJHqvr455pwu2OaOrir7dbzqs4jlWKOtlu9L6GjcIjjQwNyw02VntQsr/Ek6/A13vgnXfUhBekWRUP1OkNivw==
       }
 
   mdast-util-gfm-table@2.0.0:
@@ -6261,10 +6285,10 @@ packages:
         integrity: sha512-cctsq2wp5vTsLIcaymblUriiTcZd0CwWtCbLvrOzYCDZoWyMNV8sZ7krj09FSnsiJi3WVsHLM4k6Dq/yaPyCXA==
       }
 
-  mdast-util-to-markdown@2.1.2:
+  mdast-util-to-markdown@2.1.3:
     resolution:
       {
-        integrity: sha512-xj68wMTvGXVOKonmog6LwyJKrYXZPvlwabaryTjLh9LuvovB/KAH+kvi8Gjj+7rJjsFi23nkUxRQv1KqSroMqA==
+        integrity: sha512-wgyJtgUkUcdU7zci7uuwc/tzoAhm0TswWhaXuvnWolqug+8jY7bgNkBBL0dYBnHgc/tHL7lCzRdPsdUxUKKBqw==
       }
 
   mdast-util-to-string@4.0.0:
@@ -6312,10 +6336,10 @@ packages:
       }
     engines: { node: ">= 8" }
 
-  micromark-core-commonmark@2.0.3:
+  micromark-core-commonmark@2.0.4:
     resolution:
       {
-        integrity: sha512-RDBrHEMSxVFLg6xvnXmb1Ayr2WzLAWjeSATAoxwKYJV94TeNavgoIdA0a9ytzDSVzBy2YKFK+emCPOEibLeCrg==
+        integrity: sha512-wxEeE8v8XVvOrxn1TZj74qYhAtTQsSqufHVS3uNVyT1MupXxhyaHk8/9xDNPh9BmL77QNDgWTkZ3RsYHB2ry7w==
       }
 
   micromark-extension-directive@4.0.0:
@@ -6420,10 +6444,10 @@ packages:
         integrity: sha512-kQnEtA3vzucU2BkrIa8/VaSAsP+EJ3CKOvhMuJgOEGg9KDC6OAY6nSnNDVRiVNRqj7Y4SlSzcStaH/5jge8JdQ==
       }
 
-  micromark-factory-space@2.0.1:
+  micromark-factory-space@2.1.0:
     resolution:
       {
-        integrity: sha512-zRkxjtBxxLd2Sc0d+fbnEunsTj46SWXgXciZmHq0kDYGnck/ZSGj9/wULTV95uoeYiK5hRXP2mJ98Uo4cq/LQg==
+        integrity: sha512-fS8hnLIjnjvdQIj39Geug8wWsR0HrYZ43KShKxNfwT7t2LOHo/LbWZEzEaSOjwtjdCsjoE6syHhonEzW0zv0+Q==
       }
 
   micromark-factory-title@2.0.1:
@@ -6474,6 +6498,12 @@ packages:
         integrity: sha512-nDV/77Fj6eH1ynwscYTOsbK7rR//Uj0bZXBwJZRfaLEJ1iGBR6kIfNmlNqaqJf649EP0F3NWNdeJi03elllNUQ==
       }
 
+  micromark-util-edit-map@1.0.0:
+    resolution:
+      {
+        integrity: sha512-Pa2ljlsEL6sVwFaYeyrOLSYbQt73JvGbPOYFq+9AElXiSnfI5Q4465RRZ1sHv7lDjDOnGRDDaqPXqClqWK/q1Q==
+      }
+
   micromark-util-encode@2.0.1:
     resolution:
       {
@@ -6522,16 +6552,16 @@ packages:
         integrity: sha512-vs5t8Apaud9N28kgCrRUdEed4UJ+wWNvicHLPxCa9ENlYuAY31M0ETy5y1vA33YoNPDFTghEbnh6efaE8h4x0Q==
       }
 
-  micromark-util-types@2.0.2:
+  micromark-util-types@2.0.3:
     resolution:
       {
-        integrity: sha512-Yw0ECSpJoViF1qTU4DC6NwtC4aWGt1EkzaQB8KPPyCRR8z9TWeV0HbEFGTO+ZY1wB22zmxnJqhPyTpOVCpeHTA==
+        integrity: sha512-oxB2Ik03hI0gv+VNn9tnh1t1YEe9MDPptViAEgfdf3YQHsn0pzGTgCdlSCJXcwhqm8phaEuM7zeEu3QQzVBrPg==
       }
 
-  micromark@4.0.2:
+  micromark@4.0.3:
     resolution:
       {
-        integrity: sha512-zpe98Q6kvavpCr1NPVSCMebCKfD7CA2NqZ+rykeNhONIJBpc1tFKt9hucLGwha3jNTNI8lHpctWJWoimVF4PfA==
+        integrity: sha512-oGYfQzHSG5dOMovQcJ3fyTmZlWAWpi0XA0sJwJs+i6OT88o1+Jtw/8z0CmdowSLxGhhFK89rQ/oXph/wN02PNw==
       }
 
   micromatch@4.0.8:
@@ -7708,10 +7738,10 @@ packages:
     engines: { node: ">=20.18.1" }
     hasBin: true
 
-  sharp@0.35.4:
+  sharp@0.35.5:
     resolution:
       {
-        integrity: sha512-n++8XWcj+jCOr2IOl7h8LbKnGBDY4aPbmprMONBNFdn0ImXqpGVv5zliDs0V9HbmbCQLpbuo2ej9rAoOQTvMDA==
+        integrity: sha512-Ywn4OnzGukp7CDMrp08RQ50YKmuwG47brZgIVPTvBaaAfQlRlygrRqSrxdCiL9M+LlzLBiJ68IR1QqvzHyjC7g==
       }
     engines: { node: ">=20.9.0" }
     peerDependencies:
@@ -8079,16 +8109,16 @@ packages:
       }
     engines: { node: ">=14.0.0" }
 
-  tldts-core@7.4.15:
+  tldts-core@7.4.16:
     resolution:
       {
-        integrity: sha512-ERuv0p98XgSzmlSLJr8vDNxX+uATGInlN97V3R+JpYWaSqn5IG3ewWgCwczk4bkOpgth/o8Nt5FOi4B4w0n/1A==
+        integrity: sha512-MDolfaSJtlSK5Y0A1xl3277ekubZwobpBjugknDizI9O5Rm60a1m8k4ICK+MRsCDzPygT81mp3BBf5RKDlFRfA==
       }
 
-  tldts@7.4.15:
+  tldts@7.4.16:
     resolution:
       {
-        integrity: sha512-SJVBeHOxDbNoq14CvpAoA2mLEWdbldGK8nR+yumpjY5nrlZxOflcA7p1Qj1gbTGmbu9DY9qLj/bENSWhBzjxRQ==
+        integrity: sha512-QwBER5KMR86IIjpIiO7H/Z3IMJPsZ1A6RKPAqzTTgOyUQUSt9FdnKcqhTaJmkY6HVrgouZHZR0ncK5QxvmnQeg==
       }
     hasBin: true
 
@@ -8906,10 +8936,10 @@ packages:
         integrity: sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==
       }
 
-  ws@8.21.3:
+  ws@8.22.0:
     resolution:
       {
-        integrity: sha512-201TZ/kPWxoPr/OKWjquZR1SWKXcvxdH+e1xrx89b3YbmzLMFCLfnaG1HFIgWzJOEWZ7MvpK++odZufgYR50Rw==
+        integrity: sha512-Ydggc987+RO0AnWtZ/7Wq9FtNvcrL1b/RO0ud9mWjUPgDrsAAwQSF51sm2hm1XofbU/4jkpGEsLFsZZxU+1DOg==
       }
     engines: { node: ">=10.0.0" }
     peerDependencies:
@@ -9084,7 +9114,7 @@ packages:
 snapshots:
   "@adobe/css-tools@4.5.0": {}
 
-  "@asamuzakjp/css-color@7.1.0":
+  "@asamuzakjp/css-color@7.1.2":
     dependencies:
       "@csstools/css-calc": 3.4.1(@csstools/css-parser-algorithms@4.0.1(@csstools/css-tokenizer@4.0.2))(@csstools/css-tokenizer@4.0.2)
       "@csstools/css-color-parser": 4.2.4(@csstools/css-parser-algorithms@4.0.1(@csstools/css-tokenizer@4.0.2))(@csstools/css-tokenizer@4.0.2)
@@ -9092,7 +9122,7 @@ snapshots:
       "@csstools/css-tokenizer": 4.0.2
       lru-cache: 11.5.3
 
-  "@asamuzakjp/dom-selector@9.2.1":
+  "@asamuzakjp/dom-selector@9.2.2":
     dependencies:
       bidi-js: 1.1.0
       css-tree: 3.2.1
@@ -9331,7 +9361,7 @@ snapshots:
       klona: 2.0.6
       magic-string: 0.30.21
       mdast-util-directive: 3.1.0(supports-color@7.2.0)
-      mdast-util-to-markdown: 2.1.2
+      mdast-util-to-markdown: 2.1.3
       mdast-util-to-string: 4.0.0
       pagefind: 1.5.2
       rehype: 13.0.2
@@ -9856,75 +9886,82 @@ snapshots:
 
   "@eslint-community/regexpp@4.12.2": {}
 
-  "@eslint-react/ast@5.20.8(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)":
+  "@eslint-react/ast@5.21.0(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)":
     dependencies:
       "@typescript-eslint/types": 8.70.1
       "@typescript-eslint/typescript-estree": 8.70.1(supports-color@7.2.0)(typescript@6.0.3)
       "@typescript-eslint/utils": 8.70.1(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
-      eslint: 10.11.0(jiti@2.7.0)(supports-color@7.2.0)
       string-ts: 2.3.1
       typescript: 6.0.3
+    optionalDependencies:
+      eslint: 10.11.0(jiti@2.7.0)(supports-color@7.2.0)
     transitivePeerDependencies:
       - supports-color
 
-  "@eslint-react/core@5.20.8(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)":
+  "@eslint-react/core@5.21.0(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)":
     dependencies:
-      "@eslint-react/ast": 5.20.8(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
-      "@eslint-react/eslint": 5.20.8(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
-      "@eslint-react/shared": 5.20.8(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
-      "@eslint-react/var": 5.20.8(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
+      "@eslint-react/ast": 5.21.0(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
+      "@eslint-react/eslint": 5.21.0(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
+      "@eslint-react/shared": 5.21.0(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
+      "@eslint-react/var": 5.21.0(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
       "@typescript-eslint/scope-manager": 8.70.1
       "@typescript-eslint/types": 8.70.1
       "@typescript-eslint/utils": 8.70.1(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
-      eslint: 10.11.0(jiti@2.7.0)(supports-color@7.2.0)
       ts-pattern: 5.9.0
       typescript: 6.0.3
-    transitivePeerDependencies:
-      - supports-color
-
-  "@eslint-react/eslint@5.20.8(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)":
-    dependencies:
-      "@typescript-eslint/utils": 8.70.1(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
+    optionalDependencies:
       eslint: 10.11.0(jiti@2.7.0)(supports-color@7.2.0)
-      typescript: 6.0.3
     transitivePeerDependencies:
       - supports-color
 
-  "@eslint-react/jsx@5.20.8(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)":
+  "@eslint-react/eslint@5.21.0(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)":
     dependencies:
-      "@eslint-react/ast": 5.20.8(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
-      "@eslint-react/eslint": 5.20.8(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
-      "@eslint-react/shared": 5.20.8(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
-      "@eslint-react/var": 5.20.8(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
       "@typescript-eslint/types": 8.70.1
       "@typescript-eslint/utils": 8.70.1(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
-      eslint: 10.11.0(jiti@2.7.0)(supports-color@7.2.0)
-      ts-pattern: 5.9.0
       typescript: 6.0.3
+    optionalDependencies:
+      eslint: 10.11.0(jiti@2.7.0)(supports-color@7.2.0)
     transitivePeerDependencies:
       - supports-color
 
-  "@eslint-react/shared@5.20.8(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)":
+  "@eslint-react/jsx@5.21.0(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)":
     dependencies:
-      "@eslint-react/eslint": 5.20.8(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
+      "@eslint-react/ast": 5.21.0(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
+      "@eslint-react/eslint": 5.21.0(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
+      "@eslint-react/shared": 5.21.0(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
+      "@eslint-react/var": 5.21.0(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
+      "@typescript-eslint/types": 8.70.1
       "@typescript-eslint/utils": 8.70.1(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
+      ts-pattern: 5.9.0
+      typescript: 6.0.3
+    optionalDependencies:
       eslint: 10.11.0(jiti@2.7.0)(supports-color@7.2.0)
+    transitivePeerDependencies:
+      - supports-color
+
+  "@eslint-react/shared@5.21.0(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)":
+    dependencies:
+      "@eslint-react/eslint": 5.21.0(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
+      "@typescript-eslint/utils": 8.70.1(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
       ts-pattern: 5.9.0
       typescript: 6.0.3
       zod: 4.6.5
+    optionalDependencies:
+      eslint: 10.11.0(jiti@2.7.0)(supports-color@7.2.0)
     transitivePeerDependencies:
       - supports-color
 
-  "@eslint-react/var@5.20.8(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)":
+  "@eslint-react/var@5.21.0(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)":
     dependencies:
-      "@eslint-react/ast": 5.20.8(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
-      "@eslint-react/eslint": 5.20.8(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
+      "@eslint-react/ast": 5.21.0(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
+      "@eslint-react/eslint": 5.21.0(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
       "@typescript-eslint/scope-manager": 8.70.1
       "@typescript-eslint/types": 8.70.1
       "@typescript-eslint/utils": 8.70.1(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
-      eslint: 10.11.0(jiti@2.7.0)(supports-color@7.2.0)
       ts-pattern: 5.9.0
       typescript: 6.0.3
+    optionalDependencies:
+      eslint: 10.11.0(jiti@2.7.0)(supports-color@7.2.0)
     transitivePeerDependencies:
       - supports-color
 
@@ -9986,7 +10023,7 @@ snapshots:
     dependencies:
       ajv: 8.20.0
       ajv-formats: 3.0.1(ajv@8.20.0)
-      fast-uri: 4.1.4
+      fast-uri: 4.2.1
 
   "@fastify/cors@11.3.0":
     dependencies:
@@ -10010,10 +10047,10 @@ snapshots:
       "@fastify/forwarded": 3.0.2
       ipaddr.js: 2.5.0
 
-  "@fastify/sse@0.6.0(fastify@5.12.4)":
+  "@fastify/sse@0.6.0(fastify@5.12.5)":
     dependencies:
       "@fastify/error": 4.2.0
-      fastify: 5.12.4
+      fastify: 5.12.5
       fastify-plugin: 6.0.0
 
   "@fastify/swagger@9.9.0(supports-color@7.2.0)":
@@ -10069,108 +10106,108 @@ snapshots:
 
   "@img/colour@1.1.0": {}
 
-  "@img/sharp-darwin-arm64@0.35.4":
+  "@img/sharp-darwin-arm64@0.35.5":
     optionalDependencies:
-      "@img/sharp-libvips-darwin-arm64": 1.3.3
+      "@img/sharp-libvips-darwin-arm64": 1.3.4
     optional: true
 
-  "@img/sharp-darwin-x64@0.35.4":
+  "@img/sharp-darwin-x64@0.35.5":
     optionalDependencies:
-      "@img/sharp-libvips-darwin-x64": 1.3.3
+      "@img/sharp-libvips-darwin-x64": 1.3.4
     optional: true
 
-  "@img/sharp-freebsd-wasm32@0.35.4":
+  "@img/sharp-freebsd-wasm32@0.35.5":
     dependencies:
-      "@img/sharp-wasm32": 0.35.4
+      "@img/sharp-wasm32": 0.35.5
     optional: true
 
-  "@img/sharp-libvips-darwin-arm64@1.3.3":
+  "@img/sharp-libvips-darwin-arm64@1.3.4":
     optional: true
 
-  "@img/sharp-libvips-darwin-x64@1.3.3":
+  "@img/sharp-libvips-darwin-x64@1.3.4":
     optional: true
 
-  "@img/sharp-libvips-linux-arm64@1.3.3":
+  "@img/sharp-libvips-linux-arm64@1.3.4":
     optional: true
 
-  "@img/sharp-libvips-linux-arm@1.3.3":
+  "@img/sharp-libvips-linux-arm@1.3.4":
     optional: true
 
-  "@img/sharp-libvips-linux-ppc64@1.3.3":
+  "@img/sharp-libvips-linux-ppc64@1.3.4":
     optional: true
 
-  "@img/sharp-libvips-linux-riscv64@1.3.3":
+  "@img/sharp-libvips-linux-riscv64@1.3.4":
     optional: true
 
-  "@img/sharp-libvips-linux-s390x@1.3.3":
+  "@img/sharp-libvips-linux-s390x@1.3.4":
     optional: true
 
-  "@img/sharp-libvips-linux-x64@1.3.3":
+  "@img/sharp-libvips-linux-x64@1.3.4":
     optional: true
 
-  "@img/sharp-libvips-linuxmusl-arm64@1.3.3":
+  "@img/sharp-libvips-linuxmusl-arm64@1.3.4":
     optional: true
 
-  "@img/sharp-libvips-linuxmusl-x64@1.3.3":
+  "@img/sharp-libvips-linuxmusl-x64@1.3.4":
     optional: true
 
-  "@img/sharp-linux-arm64@0.35.4":
+  "@img/sharp-linux-arm64@0.35.5":
     optionalDependencies:
-      "@img/sharp-libvips-linux-arm64": 1.3.3
+      "@img/sharp-libvips-linux-arm64": 1.3.4
     optional: true
 
-  "@img/sharp-linux-arm@0.35.4":
+  "@img/sharp-linux-arm@0.35.5":
     optionalDependencies:
-      "@img/sharp-libvips-linux-arm": 1.3.3
+      "@img/sharp-libvips-linux-arm": 1.3.4
     optional: true
 
-  "@img/sharp-linux-ppc64@0.35.4":
+  "@img/sharp-linux-ppc64@0.35.5":
     optionalDependencies:
-      "@img/sharp-libvips-linux-ppc64": 1.3.3
+      "@img/sharp-libvips-linux-ppc64": 1.3.4
     optional: true
 
-  "@img/sharp-linux-riscv64@0.35.4":
+  "@img/sharp-linux-riscv64@0.35.5":
     optionalDependencies:
-      "@img/sharp-libvips-linux-riscv64": 1.3.3
+      "@img/sharp-libvips-linux-riscv64": 1.3.4
     optional: true
 
-  "@img/sharp-linux-s390x@0.35.4":
+  "@img/sharp-linux-s390x@0.35.5":
     optionalDependencies:
-      "@img/sharp-libvips-linux-s390x": 1.3.3
+      "@img/sharp-libvips-linux-s390x": 1.3.4
     optional: true
 
-  "@img/sharp-linux-x64@0.35.4":
+  "@img/sharp-linux-x64@0.35.5":
     optionalDependencies:
-      "@img/sharp-libvips-linux-x64": 1.3.3
+      "@img/sharp-libvips-linux-x64": 1.3.4
     optional: true
 
-  "@img/sharp-linuxmusl-arm64@0.35.4":
+  "@img/sharp-linuxmusl-arm64@0.35.5":
     optionalDependencies:
-      "@img/sharp-libvips-linuxmusl-arm64": 1.3.3
+      "@img/sharp-libvips-linuxmusl-arm64": 1.3.4
     optional: true
 
-  "@img/sharp-linuxmusl-x64@0.35.4":
+  "@img/sharp-linuxmusl-x64@0.35.5":
     optionalDependencies:
-      "@img/sharp-libvips-linuxmusl-x64": 1.3.3
+      "@img/sharp-libvips-linuxmusl-x64": 1.3.4
     optional: true
 
-  "@img/sharp-wasm32@0.35.4":
+  "@img/sharp-wasm32@0.35.5":
     dependencies:
       "@emnapi/runtime": 1.11.3
     optional: true
 
-  "@img/sharp-webcontainers-wasm32@0.35.4":
+  "@img/sharp-webcontainers-wasm32@0.35.5":
     dependencies:
-      "@img/sharp-wasm32": 0.35.4
+      "@img/sharp-wasm32": 0.35.5
     optional: true
 
-  "@img/sharp-win32-arm64@0.35.4":
+  "@img/sharp-win32-arm64@0.35.5":
     optional: true
 
-  "@img/sharp-win32-ia32@0.35.4":
+  "@img/sharp-win32-ia32@0.35.5":
     optional: true
 
-  "@img/sharp-win32-x64@0.35.4":
+  "@img/sharp-win32-x64@0.35.5":
     optional: true
 
   "@jridgewell/gen-mapping@0.3.13":
@@ -10202,7 +10239,7 @@ snapshots:
 
   "@lmstudio/lms-isomorphic@0.4.6":
     dependencies:
-      ws: 8.21.3
+      ws: 8.22.0
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
@@ -10638,58 +10675,58 @@ snapshots:
       tailwindcss: 4.3.3
       vite: 8.3.1(@types/node@26.6.3)(esbuild@0.28.2)(jiti@2.7.0)(sass@1.105.0)(tsx@4.23.15)(yaml@2.9.1)
 
-  "@tauri-apps/api@2.11.1": {}
+  "@tauri-apps/api@2.12.0": {}
 
-  "@tauri-apps/cli-darwin-arm64@2.11.5":
+  "@tauri-apps/cli-darwin-arm64@2.12.0":
     optional: true
 
-  "@tauri-apps/cli-darwin-x64@2.11.5":
+  "@tauri-apps/cli-darwin-x64@2.12.0":
     optional: true
 
-  "@tauri-apps/cli-linux-arm-gnueabihf@2.11.5":
+  "@tauri-apps/cli-linux-arm-gnueabihf@2.12.0":
     optional: true
 
-  "@tauri-apps/cli-linux-arm64-gnu@2.11.5":
+  "@tauri-apps/cli-linux-arm64-gnu@2.12.0":
     optional: true
 
-  "@tauri-apps/cli-linux-arm64-musl@2.11.5":
+  "@tauri-apps/cli-linux-arm64-musl@2.12.0":
     optional: true
 
-  "@tauri-apps/cli-linux-riscv64-gnu@2.11.5":
+  "@tauri-apps/cli-linux-riscv64-gnu@2.12.0":
     optional: true
 
-  "@tauri-apps/cli-linux-x64-gnu@2.11.5":
+  "@tauri-apps/cli-linux-x64-gnu@2.12.0":
     optional: true
 
-  "@tauri-apps/cli-linux-x64-musl@2.11.5":
+  "@tauri-apps/cli-linux-x64-musl@2.12.0":
     optional: true
 
-  "@tauri-apps/cli-win32-arm64-msvc@2.11.5":
+  "@tauri-apps/cli-win32-arm64-msvc@2.12.0":
     optional: true
 
-  "@tauri-apps/cli-win32-ia32-msvc@2.11.5":
+  "@tauri-apps/cli-win32-ia32-msvc@2.12.0":
     optional: true
 
-  "@tauri-apps/cli-win32-x64-msvc@2.11.5":
+  "@tauri-apps/cli-win32-x64-msvc@2.12.0":
     optional: true
 
-  "@tauri-apps/cli@2.11.5":
+  "@tauri-apps/cli@2.12.0":
     optionalDependencies:
-      "@tauri-apps/cli-darwin-arm64": 2.11.5
-      "@tauri-apps/cli-darwin-x64": 2.11.5
-      "@tauri-apps/cli-linux-arm-gnueabihf": 2.11.5
-      "@tauri-apps/cli-linux-arm64-gnu": 2.11.5
-      "@tauri-apps/cli-linux-arm64-musl": 2.11.5
-      "@tauri-apps/cli-linux-riscv64-gnu": 2.11.5
-      "@tauri-apps/cli-linux-x64-gnu": 2.11.5
-      "@tauri-apps/cli-linux-x64-musl": 2.11.5
-      "@tauri-apps/cli-win32-arm64-msvc": 2.11.5
-      "@tauri-apps/cli-win32-ia32-msvc": 2.11.5
-      "@tauri-apps/cli-win32-x64-msvc": 2.11.5
+      "@tauri-apps/cli-darwin-arm64": 2.12.0
+      "@tauri-apps/cli-darwin-x64": 2.12.0
+      "@tauri-apps/cli-linux-arm-gnueabihf": 2.12.0
+      "@tauri-apps/cli-linux-arm64-gnu": 2.12.0
+      "@tauri-apps/cli-linux-arm64-musl": 2.12.0
+      "@tauri-apps/cli-linux-riscv64-gnu": 2.12.0
+      "@tauri-apps/cli-linux-x64-gnu": 2.12.0
+      "@tauri-apps/cli-linux-x64-musl": 2.12.0
+      "@tauri-apps/cli-win32-arm64-msvc": 2.12.0
+      "@tauri-apps/cli-win32-ia32-msvc": 2.12.0
+      "@tauri-apps/cli-win32-x64-msvc": 2.12.0
 
-  "@tauri-apps/plugin-opener@2.5.5":
+  "@tauri-apps/plugin-opener@2.6.0":
     dependencies:
-      "@tauri-apps/api": 2.11.1
+      "@tauri-apps/api": 2.12.0
 
   "@testing-library/dom@10.4.2":
     dependencies:
@@ -11078,7 +11115,7 @@ snapshots:
   ajv@8.20.0:
     dependencies:
       fast-deep-equal: 3.1.3
-      fast-uri: 4.1.4
+      fast-uri: 4.2.1
       json-schema-traverse: 1.0.0
       require-from-string: 2.0.2
 
@@ -11090,7 +11127,7 @@ snapshots:
 
   ansi-regex@5.0.1: {}
 
-  ansi-regex@6.3.0: {}
+  ansi-regex@6.4.0: {}
 
   ansi-styles@4.3.0:
     dependencies:
@@ -11187,7 +11224,7 @@ snapshots:
       yargs-parser: 22.0.0
       zod: 4.6.5
     optionalDependencies:
-      sharp: 0.35.4(@types/node@26.6.3)
+      sharp: 0.35.5(@types/node@26.6.3)
     transitivePeerDependencies:
       - "@azure/app-configuration"
       - "@azure/cosmos"
@@ -11665,19 +11702,20 @@ snapshots:
     dependencies:
       eslint: 10.11.0(jiti@2.7.0)(supports-color@7.2.0)
 
-  eslint-plugin-react-dom@5.20.8(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3):
+  eslint-plugin-react-dom@5.21.0(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3):
     dependencies:
-      "@eslint-react/ast": 5.20.8(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
-      "@eslint-react/core": 5.20.8(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
-      "@eslint-react/eslint": 5.20.8(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
-      "@eslint-react/jsx": 5.20.8(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
-      "@eslint-react/shared": 5.20.8(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
-      "@eslint-react/var": 5.20.8(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
+      "@eslint-react/ast": 5.21.0(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
+      "@eslint-react/core": 5.21.0(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
+      "@eslint-react/eslint": 5.21.0(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
+      "@eslint-react/jsx": 5.21.0(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
+      "@eslint-react/shared": 5.21.0(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
+      "@eslint-react/var": 5.21.0(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
       "@typescript-eslint/types": 8.70.1
       "@typescript-eslint/utils": 8.70.1(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
       compare-versions: 6.1.1
-      eslint: 10.11.0(jiti@2.7.0)(supports-color@7.2.0)
       typescript: 6.0.3
+    optionalDependencies:
+      eslint: 10.11.0(jiti@2.7.0)(supports-color@7.2.0)
     transitivePeerDependencies:
       - supports-color
 
@@ -11696,25 +11734,25 @@ snapshots:
     dependencies:
       eslint: 10.11.0(jiti@2.7.0)(supports-color@7.2.0)
 
-  eslint-plugin-react-x@5.20.8(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3):
+  eslint-plugin-react-x@5.21.0(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3):
     dependencies:
-      "@eslint-react/ast": 5.20.8(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
-      "@eslint-react/core": 5.20.8(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
-      "@eslint-react/eslint": 5.20.8(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
-      "@eslint-react/jsx": 5.20.8(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
-      "@eslint-react/shared": 5.20.8(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
-      "@eslint-react/var": 5.20.8(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
+      "@eslint-react/ast": 5.21.0(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
+      "@eslint-react/core": 5.21.0(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
+      "@eslint-react/eslint": 5.21.0(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
+      "@eslint-react/jsx": 5.21.0(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
+      "@eslint-react/shared": 5.21.0(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
+      "@eslint-react/var": 5.21.0(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
       "@typescript-eslint/scope-manager": 8.70.1
-      "@typescript-eslint/type-utils": 8.70.1(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
       "@typescript-eslint/types": 8.70.1
       "@typescript-eslint/typescript-estree": 8.70.1(supports-color@7.2.0)(typescript@6.0.3)
       "@typescript-eslint/utils": 8.70.1(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
       compare-versions: 6.1.1
-      eslint: 10.11.0(jiti@2.7.0)(supports-color@7.2.0)
       string-ts: 2.3.1
       ts-api-utils: 2.5.0(typescript@6.0.3)
       ts-pattern: 5.9.0
       typescript: 6.0.3
+    optionalDependencies:
+      eslint: 10.11.0(jiti@2.7.0)(supports-color@7.2.0)
     transitivePeerDependencies:
       - supports-color
 
@@ -11929,7 +11967,7 @@ snapshots:
       "@fastify/merge-json-schemas": 0.2.1
       ajv: 8.20.0
       ajv-formats: 3.0.1(ajv@8.20.0)
-      fast-uri: 4.1.4
+      fast-uri: 4.2.1
       json-schema-ref-resolver: 3.0.0
       rfdc: 1.4.1
 
@@ -11945,7 +11983,7 @@ snapshots:
     dependencies:
       fast-string-truncated-width: 3.0.3
 
-  fast-uri@4.1.4: {}
+  fast-uri@4.2.1: {}
 
   fast-wrap-ansi@0.2.2:
     dependencies:
@@ -11953,15 +11991,15 @@ snapshots:
 
   fastify-plugin@6.0.0: {}
 
-  fastify-type-provider-zod@7.0.0(@fastify/swagger@9.9.0(supports-color@7.2.0))(fastify@5.12.4)(openapi-types@12.1.3)(zod@4.6.5):
+  fastify-type-provider-zod@7.0.0(@fastify/swagger@9.9.0(supports-color@7.2.0))(fastify@5.12.5)(openapi-types@12.1.3)(zod@4.6.5):
     dependencies:
       "@fastify/error": 4.2.0
       "@fastify/swagger": 9.9.0(supports-color@7.2.0)
-      fastify: 5.12.4
+      fastify: 5.12.5
       openapi-types: 12.1.3
       zod: 4.6.5
 
-  fastify@5.12.4:
+  fastify@5.12.5:
     dependencies:
       "@fastify/ajv-compiler": 4.0.6
       "@fastify/error": 4.2.0
@@ -12497,8 +12535,8 @@ snapshots:
 
   jsdom@30.1.1:
     dependencies:
-      "@asamuzakjp/css-color": 7.1.0
-      "@asamuzakjp/dom-selector": 9.2.1
+      "@asamuzakjp/css-color": 7.1.2
+      "@asamuzakjp/dom-selector": 9.2.2
       "@bramus/specificity": 2.4.2
       "@csstools/css-syntax-patches-for-csstree": 1.1.14(css-tree@3.2.1)
       "@exodus/bytes": 1.16.0
@@ -12531,7 +12569,7 @@ snapshots:
   json-schema-resolver@3.0.0(supports-color@7.2.0):
     dependencies:
       debug: 4.4.3(supports-color@7.2.0)
-      fast-uri: 4.1.4
+      fast-uri: 4.2.1
       rfdc: 1.4.1
     transitivePeerDependencies:
       - supports-color
@@ -12756,7 +12794,7 @@ snapshots:
       ccount: 2.0.1
       devlop: 1.1.0
       mdast-util-from-markdown: 2.0.3(supports-color@7.2.0)
-      mdast-util-to-markdown: 2.1.2
+      mdast-util-to-markdown: 2.1.3
       parse-entities: 4.0.2
       stringify-entities: 4.0.4
       unist-util-visit-parents: 6.0.2
@@ -12777,12 +12815,12 @@ snapshots:
       decode-named-character-reference: 1.3.0
       devlop: 1.1.0
       mdast-util-to-string: 4.0.0
-      micromark: 4.0.2(supports-color@7.2.0)
+      micromark: 4.0.3(supports-color@7.2.0)
       micromark-util-decode-numeric-character-reference: 2.0.2
       micromark-util-decode-string: 2.0.1
       micromark-util-normalize-identifier: 2.0.1
       micromark-util-symbol: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.3
       unist-util-stringify-position: 4.0.0
     transitivePeerDependencies:
       - supports-color
@@ -12800,16 +12838,16 @@ snapshots:
       "@types/mdast": 4.0.4
       devlop: 1.1.0
       mdast-util-from-markdown: 2.0.3(supports-color@7.2.0)
-      mdast-util-to-markdown: 2.1.2
+      mdast-util-to-markdown: 2.1.3
       micromark-util-normalize-identifier: 2.0.1
     transitivePeerDependencies:
       - supports-color
 
-  mdast-util-gfm-strikethrough@2.0.0(supports-color@7.2.0):
+  mdast-util-gfm-strikethrough@2.0.1(supports-color@7.2.0):
     dependencies:
       "@types/mdast": 4.0.4
       mdast-util-from-markdown: 2.0.3(supports-color@7.2.0)
-      mdast-util-to-markdown: 2.1.2
+      mdast-util-to-markdown: 2.1.3
     transitivePeerDependencies:
       - supports-color
 
@@ -12819,7 +12857,7 @@ snapshots:
       devlop: 1.1.0
       markdown-table: 3.0.4
       mdast-util-from-markdown: 2.0.3(supports-color@7.2.0)
-      mdast-util-to-markdown: 2.1.2
+      mdast-util-to-markdown: 2.1.3
     transitivePeerDependencies:
       - supports-color
 
@@ -12828,7 +12866,7 @@ snapshots:
       "@types/mdast": 4.0.4
       devlop: 1.1.0
       mdast-util-from-markdown: 2.0.3(supports-color@7.2.0)
-      mdast-util-to-markdown: 2.1.2
+      mdast-util-to-markdown: 2.1.3
     transitivePeerDependencies:
       - supports-color
 
@@ -12837,10 +12875,10 @@ snapshots:
       mdast-util-from-markdown: 2.0.3(supports-color@7.2.0)
       mdast-util-gfm-autolink-literal: 2.0.1
       mdast-util-gfm-footnote: 2.1.0(supports-color@7.2.0)
-      mdast-util-gfm-strikethrough: 2.0.0(supports-color@7.2.0)
+      mdast-util-gfm-strikethrough: 2.0.1(supports-color@7.2.0)
       mdast-util-gfm-table: 2.0.0(supports-color@7.2.0)
       mdast-util-gfm-task-list-item: 2.0.0(supports-color@7.2.0)
-      mdast-util-to-markdown: 2.1.2
+      mdast-util-to-markdown: 2.1.3
     transitivePeerDependencies:
       - supports-color
 
@@ -12851,7 +12889,7 @@ snapshots:
       devlop: 1.1.0
       longest-streak: 3.1.0
       mdast-util-from-markdown: 2.0.3(supports-color@7.2.0)
-      mdast-util-to-markdown: 2.1.2
+      mdast-util-to-markdown: 2.1.3
       unist-util-remove-position: 5.0.0
     transitivePeerDependencies:
       - supports-color
@@ -12863,7 +12901,7 @@ snapshots:
       "@types/mdast": 4.0.4
       devlop: 1.1.0
       mdast-util-from-markdown: 2.0.3(supports-color@7.2.0)
-      mdast-util-to-markdown: 2.1.2
+      mdast-util-to-markdown: 2.1.3
     transitivePeerDependencies:
       - supports-color
 
@@ -12876,7 +12914,7 @@ snapshots:
       ccount: 2.0.1
       devlop: 1.1.0
       mdast-util-from-markdown: 2.0.3(supports-color@7.2.0)
-      mdast-util-to-markdown: 2.1.2
+      mdast-util-to-markdown: 2.1.3
       parse-entities: 4.0.2
       stringify-entities: 4.0.4
       unist-util-stringify-position: 4.0.0
@@ -12890,7 +12928,7 @@ snapshots:
       mdast-util-mdx-expression: 2.0.1(supports-color@7.2.0)
       mdast-util-mdx-jsx: 3.2.0(supports-color@7.2.0)
       mdast-util-mdxjs-esm: 2.0.1(supports-color@7.2.0)
-      mdast-util-to-markdown: 2.1.2
+      mdast-util-to-markdown: 2.1.3
     transitivePeerDependencies:
       - supports-color
 
@@ -12901,7 +12939,7 @@ snapshots:
       "@types/mdast": 4.0.4
       devlop: 1.1.0
       mdast-util-from-markdown: 2.0.3(supports-color@7.2.0)
-      mdast-util-to-markdown: 2.1.2
+      mdast-util-to-markdown: 2.1.3
     transitivePeerDependencies:
       - supports-color
 
@@ -12922,15 +12960,17 @@ snapshots:
       unist-util-visit: 5.1.0
       vfile: 6.0.3
 
-  mdast-util-to-markdown@2.1.2:
+  mdast-util-to-markdown@2.1.3:
     dependencies:
       "@types/mdast": 4.0.4
       "@types/unist": 3.0.3
       longest-streak: 3.1.0
       mdast-util-phrasing: 4.1.0
       mdast-util-to-string: 4.0.0
+      micromark-util-character: 2.1.1
       micromark-util-classify-character: 2.0.1
       micromark-util-decode-string: 2.0.1
+      micromark-util-html-tag-name: 2.0.1
       unist-util-visit: 5.1.0
       zwitch: 2.0.4
 
@@ -12950,33 +12990,34 @@ snapshots:
 
   merge2@1.4.1: {}
 
-  micromark-core-commonmark@2.0.3:
+  micromark-core-commonmark@2.0.4:
     dependencies:
       decode-named-character-reference: 1.3.0
       devlop: 1.1.0
       micromark-factory-destination: 2.0.1
       micromark-factory-label: 2.0.1
-      micromark-factory-space: 2.0.1
+      micromark-factory-space: 2.1.0
       micromark-factory-title: 2.0.1
       micromark-factory-whitespace: 2.0.1
       micromark-util-character: 2.1.1
       micromark-util-chunked: 2.0.1
       micromark-util-classify-character: 2.0.1
+      micromark-util-edit-map: 1.0.0
       micromark-util-html-tag-name: 2.0.1
       micromark-util-normalize-identifier: 2.0.1
       micromark-util-resolve-all: 2.0.1
       micromark-util-subtokenize: 2.1.0
       micromark-util-symbol: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.3
 
   micromark-extension-directive@4.0.0:
     dependencies:
       devlop: 1.1.0
-      micromark-factory-space: 2.0.1
+      micromark-factory-space: 2.1.0
       micromark-factory-whitespace: 2.0.1
       micromark-util-character: 2.1.1
       micromark-util-symbol: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.3
       parse-entities: 4.0.2
 
   micromark-extension-gfm-autolink-literal@2.1.0:
@@ -12984,18 +13025,18 @@ snapshots:
       micromark-util-character: 2.1.1
       micromark-util-sanitize-uri: 2.0.1
       micromark-util-symbol: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.3
 
   micromark-extension-gfm-footnote@2.1.0:
     dependencies:
       devlop: 1.1.0
-      micromark-core-commonmark: 2.0.3
-      micromark-factory-space: 2.0.1
+      micromark-core-commonmark: 2.0.4
+      micromark-factory-space: 2.1.0
       micromark-util-character: 2.1.1
       micromark-util-normalize-identifier: 2.0.1
       micromark-util-sanitize-uri: 2.0.1
       micromark-util-symbol: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.3
 
   micromark-extension-gfm-strikethrough@2.1.0:
     dependencies:
@@ -13004,27 +13045,27 @@ snapshots:
       micromark-util-classify-character: 2.0.1
       micromark-util-resolve-all: 2.0.1
       micromark-util-symbol: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.3
 
   micromark-extension-gfm-table@2.1.2:
     dependencies:
       devlop: 1.1.0
-      micromark-factory-space: 2.0.1
+      micromark-factory-space: 2.1.0
       micromark-util-character: 2.1.1
       micromark-util-symbol: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.3
 
   micromark-extension-gfm-tagfilter@2.0.0:
     dependencies:
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.3
 
   micromark-extension-gfm-task-list-item@2.1.0:
     dependencies:
       devlop: 1.1.0
-      micromark-factory-space: 2.0.1
+      micromark-factory-space: 2.1.0
       micromark-util-character: 2.1.1
       micromark-util-symbol: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.3
 
   micromark-extension-gfm@3.0.0:
     dependencies:
@@ -13035,28 +13076,28 @@ snapshots:
       micromark-extension-gfm-tagfilter: 2.0.0
       micromark-extension-gfm-task-list-item: 2.1.0
       micromark-util-combine-extensions: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.3
 
   micromark-extension-math@3.1.0:
     dependencies:
       "@types/katex": 0.16.8
       devlop: 1.1.0
       katex: 0.16.47
-      micromark-factory-space: 2.0.1
+      micromark-factory-space: 2.1.0
       micromark-util-character: 2.1.1
       micromark-util-symbol: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.3
 
   micromark-extension-mdx-expression@3.0.1:
     dependencies:
       "@types/estree": 1.0.9
       devlop: 1.1.0
       micromark-factory-mdx-expression: 2.0.3
-      micromark-factory-space: 2.0.1
+      micromark-factory-space: 2.1.0
       micromark-util-character: 2.1.1
       micromark-util-events-to-acorn: 2.0.3
       micromark-util-symbol: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.3
 
   micromark-extension-mdx-jsx@3.0.2:
     dependencies:
@@ -13064,26 +13105,26 @@ snapshots:
       devlop: 1.1.0
       estree-util-is-identifier-name: 3.0.0
       micromark-factory-mdx-expression: 2.0.3
-      micromark-factory-space: 2.0.1
+      micromark-factory-space: 2.1.0
       micromark-util-character: 2.1.1
       micromark-util-events-to-acorn: 2.0.3
       micromark-util-symbol: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.3
       vfile-message: 4.0.3
 
   micromark-extension-mdx-md@2.0.0:
     dependencies:
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.3
 
   micromark-extension-mdxjs-esm@3.0.0:
     dependencies:
       "@types/estree": 1.0.9
       devlop: 1.1.0
-      micromark-core-commonmark: 2.0.3
+      micromark-core-commonmark: 2.0.4
       micromark-util-character: 2.1.1
       micromark-util-events-to-acorn: 2.0.3
       micromark-util-symbol: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.3
       unist-util-position-from-estree: 2.0.0
       vfile-message: 4.0.3
 
@@ -13096,56 +13137,56 @@ snapshots:
       micromark-extension-mdx-md: 2.0.0
       micromark-extension-mdxjs-esm: 3.0.0
       micromark-util-combine-extensions: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.3
 
   micromark-factory-destination@2.0.1:
     dependencies:
       micromark-util-character: 2.1.1
       micromark-util-symbol: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.3
 
   micromark-factory-label@2.0.1:
     dependencies:
       devlop: 1.1.0
       micromark-util-character: 2.1.1
       micromark-util-symbol: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.3
 
   micromark-factory-mdx-expression@2.0.3:
     dependencies:
       "@types/estree": 1.0.9
       devlop: 1.1.0
-      micromark-factory-space: 2.0.1
+      micromark-factory-space: 2.1.0
       micromark-util-character: 2.1.1
       micromark-util-events-to-acorn: 2.0.3
       micromark-util-symbol: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.3
       unist-util-position-from-estree: 2.0.0
       vfile-message: 4.0.3
 
-  micromark-factory-space@2.0.1:
+  micromark-factory-space@2.1.0:
     dependencies:
       micromark-util-character: 2.1.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.3
 
   micromark-factory-title@2.0.1:
     dependencies:
-      micromark-factory-space: 2.0.1
+      micromark-factory-space: 2.1.0
       micromark-util-character: 2.1.1
       micromark-util-symbol: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.3
 
   micromark-factory-whitespace@2.0.1:
     dependencies:
-      micromark-factory-space: 2.0.1
+      micromark-factory-space: 2.1.0
       micromark-util-character: 2.1.1
       micromark-util-symbol: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.3
 
   micromark-util-character@2.1.1:
     dependencies:
       micromark-util-symbol: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.3
 
   micromark-util-chunked@2.0.1:
     dependencies:
@@ -13155,12 +13196,12 @@ snapshots:
     dependencies:
       micromark-util-character: 2.1.1
       micromark-util-symbol: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.3
 
   micromark-util-combine-extensions@2.0.1:
     dependencies:
       micromark-util-chunked: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.3
 
   micromark-util-decode-numeric-character-reference@2.0.2:
     dependencies:
@@ -13173,6 +13214,10 @@ snapshots:
       micromark-util-decode-numeric-character-reference: 2.0.2
       micromark-util-symbol: 2.0.1
 
+  micromark-util-edit-map@1.0.0:
+    dependencies:
+      micromark-util-types: 2.0.3
+
   micromark-util-encode@2.0.1: {}
 
   micromark-util-events-to-acorn@2.0.3:
@@ -13182,7 +13227,7 @@ snapshots:
       devlop: 1.1.0
       estree-util-visit: 2.0.0
       micromark-util-symbol: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.3
       vfile-message: 4.0.3
 
   micromark-util-html-tag-name@2.0.1: {}
@@ -13193,7 +13238,7 @@ snapshots:
 
   micromark-util-resolve-all@2.0.1:
     dependencies:
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.3
 
   micromark-util-sanitize-uri@2.0.1:
     dependencies:
@@ -13206,31 +13251,32 @@ snapshots:
       devlop: 1.1.0
       micromark-util-chunked: 2.0.1
       micromark-util-symbol: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.3
 
   micromark-util-symbol@2.0.1: {}
 
-  micromark-util-types@2.0.2: {}
+  micromark-util-types@2.0.3: {}
 
-  micromark@4.0.2(supports-color@7.2.0):
+  micromark@4.0.3(supports-color@7.2.0):
     dependencies:
       "@types/debug": 4.1.13
       debug: 4.4.3(supports-color@7.2.0)
       decode-named-character-reference: 1.3.0
       devlop: 1.1.0
-      micromark-core-commonmark: 2.0.3
-      micromark-factory-space: 2.0.1
+      micromark-core-commonmark: 2.0.4
+      micromark-factory-space: 2.1.0
       micromark-util-character: 2.1.1
       micromark-util-chunked: 2.0.1
       micromark-util-combine-extensions: 2.0.1
       micromark-util-decode-numeric-character-reference: 2.0.2
+      micromark-util-edit-map: 1.0.0
       micromark-util-encode: 2.0.1
       micromark-util-normalize-identifier: 2.0.1
       micromark-util-resolve-all: 2.0.1
       micromark-util-sanitize-uri: 2.0.1
       micromark-util-subtokenize: 2.1.0
       micromark-util-symbol: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.3
     transitivePeerDependencies:
       - supports-color
 
@@ -13362,9 +13408,9 @@ snapshots:
       is-docker: 2.2.1
       is-wsl: 2.2.0
 
-  openai@6.49.0(ws@8.21.3)(zod@4.6.5):
+  openai@6.49.0(ws@8.22.0)(zod@4.6.5):
     optionalDependencies:
-      ws: 8.21.3
+      ws: 8.22.0
       zod: 4.6.5
 
   openapi-types@12.1.3: {}
@@ -13787,7 +13833,7 @@ snapshots:
     dependencies:
       "@types/mdast": 4.0.4
       mdast-util-from-markdown: 2.0.3(supports-color@7.2.0)
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.3
       unified: 11.0.5
     transitivePeerDependencies:
       - supports-color
@@ -13810,7 +13856,7 @@ snapshots:
   remark-stringify@11.0.0:
     dependencies:
       "@types/mdast": 4.0.4
-      mdast-util-to-markdown: 2.1.2
+      mdast-util-to-markdown: 2.1.3
       unified: 11.0.5
 
   request-light@0.5.8: {}
@@ -14064,37 +14110,37 @@ snapshots:
       - supports-color
       - typescript
 
-  sharp@0.35.4(@types/node@26.6.3):
+  sharp@0.35.5(@types/node@26.6.3):
     dependencies:
       "@img/colour": 1.1.0
       detect-libc: 2.1.2
       semver: 7.8.5
     optionalDependencies:
-      "@img/sharp-darwin-arm64": 0.35.4
-      "@img/sharp-darwin-x64": 0.35.4
-      "@img/sharp-freebsd-wasm32": 0.35.4
-      "@img/sharp-libvips-darwin-arm64": 1.3.3
-      "@img/sharp-libvips-darwin-x64": 1.3.3
-      "@img/sharp-libvips-linux-arm": 1.3.3
-      "@img/sharp-libvips-linux-arm64": 1.3.3
-      "@img/sharp-libvips-linux-ppc64": 1.3.3
-      "@img/sharp-libvips-linux-riscv64": 1.3.3
-      "@img/sharp-libvips-linux-s390x": 1.3.3
-      "@img/sharp-libvips-linux-x64": 1.3.3
-      "@img/sharp-libvips-linuxmusl-arm64": 1.3.3
-      "@img/sharp-libvips-linuxmusl-x64": 1.3.3
-      "@img/sharp-linux-arm": 0.35.4
-      "@img/sharp-linux-arm64": 0.35.4
-      "@img/sharp-linux-ppc64": 0.35.4
-      "@img/sharp-linux-riscv64": 0.35.4
-      "@img/sharp-linux-s390x": 0.35.4
-      "@img/sharp-linux-x64": 0.35.4
-      "@img/sharp-linuxmusl-arm64": 0.35.4
-      "@img/sharp-linuxmusl-x64": 0.35.4
-      "@img/sharp-webcontainers-wasm32": 0.35.4
-      "@img/sharp-win32-arm64": 0.35.4
-      "@img/sharp-win32-ia32": 0.35.4
-      "@img/sharp-win32-x64": 0.35.4
+      "@img/sharp-darwin-arm64": 0.35.5
+      "@img/sharp-darwin-x64": 0.35.5
+      "@img/sharp-freebsd-wasm32": 0.35.5
+      "@img/sharp-libvips-darwin-arm64": 1.3.4
+      "@img/sharp-libvips-darwin-x64": 1.3.4
+      "@img/sharp-libvips-linux-arm": 1.3.4
+      "@img/sharp-libvips-linux-arm64": 1.3.4
+      "@img/sharp-libvips-linux-ppc64": 1.3.4
+      "@img/sharp-libvips-linux-riscv64": 1.3.4
+      "@img/sharp-libvips-linux-s390x": 1.3.4
+      "@img/sharp-libvips-linux-x64": 1.3.4
+      "@img/sharp-libvips-linuxmusl-arm64": 1.3.4
+      "@img/sharp-libvips-linuxmusl-x64": 1.3.4
+      "@img/sharp-linux-arm": 0.35.5
+      "@img/sharp-linux-arm64": 0.35.5
+      "@img/sharp-linux-ppc64": 0.35.5
+      "@img/sharp-linux-riscv64": 0.35.5
+      "@img/sharp-linux-s390x": 0.35.5
+      "@img/sharp-linux-x64": 0.35.5
+      "@img/sharp-linuxmusl-arm64": 0.35.5
+      "@img/sharp-linuxmusl-x64": 0.35.5
+      "@img/sharp-webcontainers-wasm32": 0.35.5
+      "@img/sharp-win32-arm64": 0.35.5
+      "@img/sharp-win32-ia32": 0.35.5
+      "@img/sharp-win32-x64": 0.35.5
       "@types/node": 26.6.3
 
   shebang-command@2.0.0:
@@ -14220,7 +14266,7 @@ snapshots:
 
   strip-ansi@7.2.0:
     dependencies:
-      ansi-regex: 6.3.0
+      ansi-regex: 6.4.0
 
   strip-bom@3.0.0: {}
 
@@ -14283,11 +14329,11 @@ snapshots:
 
   tinyrainbow@3.1.1: {}
 
-  tldts-core@7.4.15: {}
+  tldts-core@7.4.16: {}
 
-  tldts@7.4.15:
+  tldts@7.4.16:
     dependencies:
-      tldts-core: 7.4.15
+      tldts-core: 7.4.16
 
   to-regex-range@5.0.1:
     dependencies:
@@ -14299,7 +14345,7 @@ snapshots:
 
   tough-cookie@6.0.2:
     dependencies:
-      tldts: 7.4.15
+      tldts: 7.4.16
 
   tr46@6.0.0:
     dependencies:
@@ -14747,7 +14793,7 @@ snapshots:
 
   wrappy@1.0.2: {}
 
-  ws@8.21.3: {}
+  ws@8.22.0: {}
 
   wsl-utils@1.0.0:
     dependencies:

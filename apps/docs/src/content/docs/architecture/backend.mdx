@@ -33,13 +33,14 @@ application.
 4. For an existing conversation with a stored title, the route emits that title
    to reconcile desktop metadata from an earlier missed delivery.
 5. `createChatTask` opens an OpenAI-compatible streaming completion against LM
-   Studio, persists each delta before publication, and stores completion before
-   emitting `done`.
+   Studio, persists each delta before sending it to every stream following the
+   reply, and stores completion before emitting `done`.
 6. When the conversation has no stored title, `createTitleGenerationTask` runs
    in parallel and emits a `title` event only after a conditional write wins the
    first assignment.
-7. Chat generation errors become `error` events when the client is still
-   connected; title-generation failures are logged instead.
+7. Chat generation errors become `error` events for every follower; a reply
+   that ends early becomes `interrupted`; title-generation failures are logged
+   instead.
 
 Each completion receives the saved system prompt, prior user messages, non-empty
 completed or interrupted assistant replies, and the current user message once.
@@ -71,10 +72,19 @@ candidate, so generation cannot overwrite a manual rename. Existing titled turns
 send the stored title after their start event, which repairs desktop metadata
 after a prior title event was lost.
 
-`ChatRequestLifetime` owns complete handler promises, including cleanup after a
-client disconnect. Its close hook drains handlers before singleton disposal can
-close SQLite. Post-stream failures are logged and terminate the SSE response
-without attempting a second HTTP response.
+`ReplyGenerationRegistry` owns every running generation. A `ReplyGeneration`
+owns one turn's reply task and optional title task, their cancellation, and
+the SSE streams following them; no HTTP connection owns it. Each stream is a
+`ReplyEventSubscription`, an ordered queue that never makes the generation
+wait and closes a follower that falls 4,096 events behind. Only the
+reply-stop route (reply task only) and shutdown (both tasks) cancel work. A
+newer turn or a deletion also ends a reply, but only when the model sends its
+next content: that write is refused, which ends the upstream request. The
+title task of a deleted conversation still runs to its end. The
+registry is disposed in Fastify's `preClose` hook, while streams are still
+open: it closes admission, cancels every generation, and waits until each has
+stored its final state before singleton disposal closes SQLite. Task failures
+are logged by the generation that owns them.
 
 ## Persistence
 
@@ -146,22 +156,24 @@ See the [health response contract](/reference/api/#model-health-responses).
 
 ## Failure behavior
 
-| Condition                                                                              | Current behavior                                                                                                           |
-| -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Chat SSE connection closes                                                             | The close handler aborts the signal used by chat and title generation; no further title request is made.                   |
-| Model operation or health-check client disconnects                                     | Accepted work continues until success or failure; user cancellation is unavailable.                                        |
-| LLM runtime queue already has nine accepted operations (including connection attempts) | New inventory/health/load/unload requests receive `503` with `urn:lys:problem:llm:service-busy` before acceptance.         |
-| LM Studio is not connected                                                             | List, load, unload, and health requests receive `503` with `urn:lys:problem:llm:runtime-unavailable` before acceptance.    |
-| A runtime call fails and LM Studio stopped answering                                   | The runtime is released, the status becomes `unreachable`, and a rejected request receives the runtime-unavailable `503`.  |
-| A request resolves after a failed runtime call; the probe or release then fails        | The response keeps its result; the backend logs the probe or release failure at `error`.                                   |
-| Model stream ends without a finish reason                                              | The route treats it as an error and may emit `error`.                                                                      |
-| Assistant row was deleted or already finalized                                         | Late writes return false without recreating data.                                                                          |
-| Assistant terminal state cannot be persisted                                           | The task aggregates the original and persistence failures and rejects; the route logs the rejection.                       |
-| Unknown finish reason                                                                  | The backend throws instead of silently coercing it.                                                                        |
-| Title generation produces no usable title                                              | The task logs a warning and sends no `error` or `title` event; a later turn retries if the conversation is still untitled. |
-| A generated title cannot be saved                                                      | The task logs an error and sends no `title` event; a later turn retries if the conversation is still untitled.             |
-| A stored title cannot be sent after turn start                                         | The backend logs at debug level and continues chat generation; a later turn attempts reconciliation again.                 |
-| Starting a turn fails for another reason                                               | The route rethrows; Fastify logs it and responds `500` if no event was sent. Written rows stay.                            |
+| Condition                                                                              | Current behavior                                                                                                                         |
+| -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Chat SSE connection closes                                                             | Only that follower ends; the reply and its title keep generating and are stored.                                                         |
+| Reply-stop request                                                                     | The reply's upstream request is aborted, the reply is stored interrupted, and followers receive `interrupted`; the title task continues. |
+| Model operation or health-check client disconnects                                     | Accepted work continues until success or failure; user cancellation is unavailable.                                                      |
+| LLM runtime queue already has nine accepted operations (including connection attempts) | New inventory/health/load/unload requests receive `503` with `urn:lys:problem:llm:service-busy` before acceptance.                       |
+| LM Studio is not connected                                                             | List, load, unload, and health requests receive `503` with `urn:lys:problem:llm:runtime-unavailable` before acceptance.                  |
+| A runtime call fails and LM Studio stopped answering                                   | The runtime is released, the status becomes `unreachable`, and a rejected request receives the runtime-unavailable `503`.                |
+| A request resolves after a failed runtime call; the probe or release then fails        | The response keeps its result; the backend logs the probe or release failure at `error`.                                                 |
+| Model stream ends without a finish reason                                              | The route treats it as an error and may emit `error`.                                                                                    |
+| Assistant row was deleted or already finalized                                         | Late writes return false without recreating data.                                                                                        |
+| Assistant terminal state cannot be persisted                                           | The task aggregates the original and storage failures, plus a failed fallback's, and rejects; the generation logs it. No final event.    |
+| Unknown finish reason                                                                  | The backend throws instead of silently coercing it.                                                                                      |
+| Title generation produces no usable title                                              | The task logs a warning and sends no `error` or `title` event; a later turn retries if the conversation is still untitled.               |
+| A generated title cannot be saved                                                      | The task logs an error and sends no `title` event; a later turn retries if the conversation is still untitled.                           |
+| A stored title cannot be sent after turn start                                         | That follower ends silently while generation continues; a later turn attempts reconciliation again.                                      |
+| A follower falls 4,096 events behind                                                   | That follower closes without a final event while generation continues; following the reply again returns its stored state.               |
+| Starting a turn fails for another reason                                               | The route rethrows; Fastify logs it and responds `500` if no event was sent. Written rows stay.                                          |
 
 See the [provider cancellation policy](/architecture/providers/#cancellation-policy)
 for the separate inference and model-management lifetimes.

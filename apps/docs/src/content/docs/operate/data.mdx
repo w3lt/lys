@@ -36,8 +36,16 @@ and model edits in the UI remain session-only.
 
 ## `$LYS_HOME/lys_db.sqlite`
 
-The backend stores conversations in one SQLite database file at
+The backend stores conversations in a SQLite database at
 `$LYS_HOME/lys_db.sqlite`.
+
+The database runs in write-ahead-log mode, so `lys_db.sqlite-wal` and
+`lys_db.sqlite-shm` sit beside it. They usually remain after the app quits,
+because the desktop stops the backend without a clean close, and
+`lys_db.sqlite-wal` can then hold recent conversations that are not yet in
+`lys_db.sqlite`. They are part of the database: copy, move, or delete all three
+together, and only while the backend is stopped. A power loss or operating-system crash can lose the
+last few writes; an application crash cannot.
 
 The checked-in schema currently creates:
 

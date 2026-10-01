@@ -45,7 +45,8 @@ A manual Start follows steps 4–8.
 ## Send one chat message
 
 1. The composer asks the chat store to `sendMessage`.
-2. The desktop creates a request token and an `AbortController`.
+2. The desktop creates a request token and an `AbortController` that ends
+   only its own observation of the stream.
 3. The desktop sends `POST /api/v1/chat` with `message`, `model`, required
    `generationOptions`, and optional `conversationId`. Generation options contain
    the current temperature and an optional reply ceiling; a local zero ceiling
@@ -68,10 +69,21 @@ A manual Start follows steps 4–8.
 ## Stop an in-flight reply
 
 1. The user presses Stop in the composer.
-2. The desktop marks the local assistant message as `interrupted`.
-3. The desktop aborts the owned request controller.
-4. The backend SSE close handler aborts the upstream LM Studio request.
-5. The stream ends without further UI updates for that request token.
+2. The desktop sends
+   `POST /api/v1/chat/:conversationId/replies/:assistantMessageId/stop`. A
+   Stop pressed before the turn-start event is sent as soon as that event
+   names the reply, unless the user opens another conversation or starts a new
+   one first; the reply then generates to its end.
+3. The backend aborts the reply's upstream LM Studio request. Title generation
+   continues.
+4. The reply task stores the reply as `interrupted` and sends `interrupted` to
+   every stream following it; the stop request then answers `204`.
+5. The desktop marks the assistant message `interrupted` when that event
+   arrives. A title may still arrive before the stream closes.
+
+Switching to another conversation or starting a new one only stops the
+desktop from following the stream; the backend keeps generating and storing
+the reply and its title.
 
 If the next message reaches the backend before the stopped reply is finalized,
 creating the new turn interrupts that reply first, so its partial text is part
@@ -83,12 +95,17 @@ of the new turn's context.
 2. The history store reads `GET /api/v1/conversations` for the current search
    query.
 3. Choosing a row closes history and asks the chat store to `openConversation`.
-4. The chat store interrupts any active reply, then reads
-   `GET /api/v1/conversations/:conversationId`.
+4. The chat store stops following any active reply (the backend keeps
+   generating it), then reads `GET /api/v1/conversations/:conversationId`.
 5. When the read succeeds, the stored transcript replaces the shown
    conversation. A missing conversation or failed read keeps the previous
    conversation and records an inline error.
-6. The next message sends that conversation's `conversationId`, so the backend
+6. When the conversation then shown, opened or kept, ends with a reply that is
+   still `streaming`, the chat store follows it with
+   `GET /api/v1/chat/:conversationId/replies/:assistantMessageId/events`: the
+   `reply-snapshot` replaces the stored content, then live events apply as for
+   a new message.
+7. The next message sends that conversation's `conversationId`, so the backend
    continues it.
 
 ## Error path

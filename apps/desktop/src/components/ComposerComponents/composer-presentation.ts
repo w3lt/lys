@@ -14,10 +14,10 @@ import type { ModelRuntimeState } from "@/lib/store/model-runtime"
 /**
  * Chat work that keeps the composer from sending.
  *
- * @remarks `awaiting-reply` lasts from sending until the reply is final; a
- * title that may still arrive after the reply does not keep the composer from
- * sending. `opening-conversation` lasts while a stored conversation is read to
- * replace the shown one.
+ * @remarks `awaiting-reply` lasts while a reply is awaited or streams, until
+ * the reply is final; a title that may still arrive after the reply does not
+ * keep the composer from sending. `opening-conversation` lasts while a stored
+ * conversation is read to replace the shown one.
  */
 export type ComposerActivity =
   "idle" | "awaiting-reply" | "opening-conversation"

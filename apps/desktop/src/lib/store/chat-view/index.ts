@@ -1067,10 +1067,16 @@ export function createChatViewStore(
      */
     function canStartChatRequest(): boolean {
       const { request, conversationOpen } = get()
-      const isRequestReplaceable =
-        request.status === "idle" || request.status === "reply-completed"
+      if (conversationOpen.status === "opening") return false
 
-      return isRequestReplaceable && conversationOpen.status === "idle"
+      switch (request.status) {
+        case "idle":
+        case "reply-completed":
+          return true
+        case "awaiting-turn":
+        case "reply-streaming":
+          return false
+      }
     }
 
     /**

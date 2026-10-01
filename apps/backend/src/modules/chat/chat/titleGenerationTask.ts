@@ -85,9 +85,9 @@ type GeneratedTitle = Extract<TitleGenerationResult, { status: "generated" }>
  * shutdown does. Outcomes are logged with
  * `titleGenerationOutcome` and `titleGenerationAttempts` fields: exhausted
  * attempts or a failure that is not retried at warn level, a shutdown
- * cancellation at debug level, and a persistence failure at error level. An
- * assignment that loses to another title is logged at debug level. The task
- * never sends an `error` event.
+ * cancellation at debug level, and a persistence failure at error level. A
+ * title left unsaved because the conversation was renamed or deleted is logged
+ * at debug level. The task never sends an `error` event.
  *
  * @param options - Title generator, prompt input, attempt limit, cancellation
  * signal, event sender, logger, and title persistence callback.
@@ -211,8 +211,8 @@ function handleGeneratedTitle(
  *
  * @param options - Logger and persistence callback.
  * @param generatedTitle - Usable title and the requests made to generate it.
- * @returns The saved title, or undefined when another title won the
- * assignment (logged at debug level) or the write failed (logged at error
+ * @returns The saved title, or undefined when the conversation was renamed or
+ * deleted first (logged at debug level) or the write failed (logged at error
  * level).
  */
 function saveGeneratedTitle(
@@ -230,7 +230,7 @@ function saveGeneratedTitle(
           titleGenerationOutcome: "already-titled",
           titleGenerationAttempts: attempts
         },
-        "Another turn already saved the conversation title"
+        "The conversation was renamed or deleted before the title was saved"
       )
     }
     return persistedTitle

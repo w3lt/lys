@@ -29,11 +29,11 @@ export type LysMessageProps =
  * @remarks The parent owns the message and
  * its lifecycle; the variant selects only whether content is still arriving.
  * This component exposes no interruption capability: cancellation is reachable
- * in every active request phase, including phases with no assistant message,
- * so the composer owns the single Stop control. Interrupted and failed
- * terminal messages announce polite `Stopped` and `Failed` status text
- * respectively; those statuses are output only after the corresponding
- * terminal message variant is rendered.
+ * while a reply is awaited or streams, including while the turn is awaited and
+ * no assistant message exists, so the composer owns the single Stop control.
+ * Interrupted and failed terminal messages announce polite `Stopped` and
+ * `Failed` status text respectively; those statuses are output only after the
+ * corresponding terminal message variant is rendered.
  * @param props - Lifecycle-refined assistant presentation to render.
  * @returns The rendered assistant transcript message.
  */

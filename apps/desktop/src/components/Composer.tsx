@@ -87,14 +87,14 @@ function findLargestAttachment(
  * drag is over the field, and whether the field has focus. The parent owns the
  * message-field ref. Enter without Shift submits once and suppresses the
  * newline; Shift+Enter keeps it. Sending requires a non-empty draft, and is
- * refused while a request is active, while a past conversation is opening,
- * while generation is unavailable, or while the estimated request exceeds the
- * window. The Past conversations button opens history, or closes it when
- * open, and exposes that state through `aria-expanded`. While generation is
- * unavailable, a banner names the first missing prerequisite — the backend,
- * LM Studio, or loaded weights — and its action starts a stopped backend or
- * opens the settings pane that fixes the problem: Runtime for the backend and
- * LM Studio, Model for inventory and loading.
+ * refused while a reply is awaited or streams, while a past conversation is
+ * opening, while generation is unavailable, or while the estimated request
+ * exceeds the window. The Past conversations button opens history, or closes
+ * it when open, and exposes that state through `aria-expanded`. While
+ * generation is unavailable, a banner names the first missing prerequisite —
+ * the backend, LM Studio, or loaded weights — and its action starts a stopped
+ * backend or opens the settings pane that fixes the problem: Runtime for the
+ * backend and LM Studio, Model for inventory and loading.
  *
  * The primary control is Stop while a reply is awaited — while the
  * conversation turn is awaited and while the reply streams — and Send

@@ -97,7 +97,7 @@ export default function ConversationPanel(
       />
     )
   const conversationBody = isEmptyConversation ? (
-    <StarterView onSend={(prompt) => void onSendMessage(prompt)} />
+    <StarterView onSendStarterPrompt={(prompt) => void onSendMessage(prompt)} />
   ) : (
     transcript
   )

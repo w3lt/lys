@@ -74,75 +74,12 @@
   text-align: center;
 }
 
-/*
- * The starter emblem: Lys's portrait between two constellation wings. The
- * aspect ratio matches the wing SVG's 400 × 160 viewBox, so the portrait stays
- * centered on the wings' shared root at every width.
- */
-.chat-view__emblem {
-  position: relative;
-  display: grid;
-  width: min(400px, 100%);
-  aspect-ratio: 5 / 2;
-  margin-bottom: 20px;
-  place-items: center;
-}
-
-.chat-view__wings {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-}
-
-/*
- * Each wing scales from the portrait's center, which is the SVG origin, so the
- * left wing mirrors the right one and both unfold outward from behind it.
- */
-.chat-view__wing {
-  color: var(--lys-cyan);
-  transform-box: view-box;
-  transform-origin: 0 0;
-  animation: chat-view-wing-unfold-right 640ms var(--ease-standard) 80ms both;
-}
-
-.chat-view__wing--left {
-  color: var(--lys-violet);
-  transform: scaleX(-1);
-  animation-name: chat-view-wing-unfold-left;
-}
-
-.chat-view__wing path {
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.chat-view__wing-membrane {
-  fill: currentColor;
-  fill-opacity: 0.07;
-  stroke-opacity: 0.6;
-  stroke-width: 1;
-}
-
-.chat-view__wing-veins {
-  fill: none;
-  stroke-opacity: 0.3;
-  stroke-width: 1;
-}
-
-.chat-view__wing-stars {
-  fill: none;
-  stroke-width: 3.5;
-}
-
 /* Static: an idle portrait must not pulse or emit an animated glow. */
 .chat-view__portrait {
-  position: relative;
   display: grid;
   width: 88px;
   height: 88px;
+  margin-bottom: 20px;
   padding: 2px;
   border-radius: 50%;
   background-color: var(--background);
@@ -173,8 +110,8 @@
 }
 
 /*
- * The empty view's one entrance sequence: the wings unfold while the portrait
- * settles, then the introduction and the starter prompts fade in.
+ * The empty view's one entrance sequence: the portrait settles, then the
+ * introduction and the starter prompts fade in.
  */
 .chat-view__empty h1,
 .chat-view__eyebrow,
@@ -185,20 +122,6 @@
 
 .chat-view__starters {
   animation: chat-view-starter-fade-in 360ms var(--ease-standard) 300ms both;
-}
-
-@keyframes chat-view-wing-unfold-right {
-  from {
-    opacity: 0;
-    transform: scaleX(0.2);
-  }
-}
-
-@keyframes chat-view-wing-unfold-left {
-  from {
-    opacity: 0;
-    transform: scaleX(-0.2);
-  }
 }
 
 @keyframes chat-view-portrait-enter {
@@ -361,7 +284,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .chat-view__veil,
-  .chat-view__wing,
   .chat-view__portrait,
   .chat-view__empty h1,
   .chat-view__eyebrow,
@@ -400,14 +322,10 @@
     padding-block: 24px;
   }
 
-  .chat-view__emblem {
-    width: min(240px, 100%);
-    margin-bottom: 12px;
-  }
-
   .chat-view__portrait {
     width: 64px;
     height: 64px;
+    margin-bottom: 12px;
   }
 
   .chat-view__gem,

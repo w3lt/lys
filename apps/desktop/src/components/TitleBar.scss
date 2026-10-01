@@ -34,16 +34,6 @@
   letter-spacing: 0.01em;
 }
 
-/* A version tag is short technical metadata, so mono and tracking apply. */
-.title-bar__version {
-  color: var(--app-text-faint);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-}
-
 .title-bar__actions {
   display: flex;
   align-items: center;

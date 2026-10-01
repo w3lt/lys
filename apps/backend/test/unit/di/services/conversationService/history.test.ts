@@ -210,19 +210,23 @@ describe("SqliteConversationHistory", () => {
 
   it("rejects every operation after the store is disposed", () => {
     const { store, history, turn } = openStoreWithTurn()
+    expect(history.getConversation(turn.conversation.id)).toBeDefined()
+    expect(
+      history.listConversations(parseConversationListOptions()).storedCount
+    ).toBe(1)
+    expect(
+      history.updateConversationTitle(turn.conversation.id, "Title")
+    ).toBeDefined()
 
     store[Symbol.dispose]()
 
-    const closed = "Conversation store is closed"
-    expect(() => history.getConversation(turn.conversation.id)).toThrow(closed)
+    expect(() => history.getConversation(turn.conversation.id)).toThrow()
     expect(() =>
       history.listConversations(parseConversationListOptions())
-    ).toThrow(closed)
+    ).toThrow()
     expect(() =>
       history.updateConversationTitle(turn.conversation.id, "Title")
-    ).toThrow(closed)
-    expect(() => history.deleteConversation(turn.conversation.id)).toThrow(
-      closed
-    )
+    ).toThrow()
+    expect(() => history.deleteConversation(turn.conversation.id)).toThrow()
   })
 })

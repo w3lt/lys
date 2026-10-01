@@ -5,7 +5,8 @@ import type { DatabaseSync } from "node:sqlite"
  * @param database - Borrowed connection whose operation failed.
  * @param failure - Original query, validation, or persistence failure.
  * @returns Never returns; preserves the original failure or both failures in an aggregate.
- * @throws The original failure, or an AggregateError if rollback also fails.
+ * @throws The original failure, or an AggregateError holding the original
+ * failure followed by the rollback failure if rollback also fails.
  */
 export function handleConversationTransactionFailure(
   database: DatabaseSync,

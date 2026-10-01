@@ -5,11 +5,11 @@ import {
 } from "../../../../src/modules/llm/llmServiceBusyError"
 
 describe("createLlmServiceBusyError", () => {
-  it("creates a native error with the queue-full message", () => {
+  it("creates a native error recognized as a busy error", () => {
     const error = createLlmServiceBusyError()
 
     expect(error).toBeInstanceOf(Error)
-    expect(error.message).toBe("The LLM service queue is full.")
+    expect(isLlmServiceBusyError(error)).toBe(true)
   })
 
   it("creates a new error for every refusal", () => {

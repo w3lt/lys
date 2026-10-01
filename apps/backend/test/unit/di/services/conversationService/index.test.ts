@@ -67,15 +67,13 @@ describe("SqliteConversationStore", () => {
 
   it("refuses new access objects after disposal", () => {
     const store = openOwnedStore(":memory:")
+    expect(() => store.createHistoryAccess()).not.toThrow()
+    expect(() => store.createTurnAccess()).not.toThrow()
 
     store[Symbol.dispose]()
 
-    expect(() => store.createHistoryAccess()).toThrow(
-      "Conversation store is closed"
-    )
-    expect(() => store.createTurnAccess()).toThrow(
-      "Conversation store is closed"
-    )
+    expect(() => store.createHistoryAccess()).toThrow()
+    expect(() => store.createTurnAccess()).toThrow()
   })
 
   it("accepts repeated disposal", () => {

@@ -73,11 +73,16 @@ export type SingletonServices = Readonly<{
  * @param llmRuntimeFailureReporters - Receive the LLM runtime failures that no
  * caller observes, for logging.
  * @param factories - Service factories owned by the composition root.
- * @returns A promise resolving to the owned service bundle configured with the
- * HTTP `/v1` chat endpoint and WebSocket LM Studio endpoint. No service
- * contacts LM Studio during creation; the runtime service connects later.
- * @throws If service construction fails; every resource acquired before the
- * failure is closed before the rejection settles.
+ * @returns A promise resolving to the frozen bundle of owned services,
+ * configured with the HTTP `/v1` chat endpoint and WebSocket LM Studio
+ * endpoint. No service contacts LM Studio during creation; the runtime service
+ * connects later.
+ * @throws The original construction failure, after every resource acquired
+ * before it is closed.
+ * @throws {AggregateError} If closing the acquired resources also fails; its
+ * errors hold the construction failure followed by the cleanup failure.
+ * @remarks Services are acquired in the order chat, conversation, LLM runtime;
+ * acquisition stops at the first failure.
  */
 export async function createSingletonServices(
   config: BackendConfig,
@@ -213,7 +218,8 @@ export async function closeSingletonServices(
  * @param acquiredResources - Current owner of the acquisitions this call must release.
  * @param failureMessage - Context for the aggregate when construction and cleanup both fail.
  * @returns A promise that always rejects after cleanup settles.
- * @throws The original failure, or an aggregate retaining both construction and cleanup failures.
+ * @throws The original failure, or an aggregate retaining the construction
+ * failure followed by the cleanup failure.
  */
 async function throwCreationFailureAfterClosingResources(
   creationFailure: unknown,

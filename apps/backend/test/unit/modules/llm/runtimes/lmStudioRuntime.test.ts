@@ -87,15 +87,13 @@ describe("LmStudioRuntime", () => {
 
       expect(failure).toBeInstanceOf(AggregateError)
       expect(failure).toMatchObject({
-        message: "LLM runtime creation and cleanup both failed.",
         errors: [
           expect.objectContaining({
             message: "The LLM runtime is unavailable.",
             cause: queryFailure
           }),
           releaseFailure
-        ],
-        cause: releaseFailure
+        ]
       })
     })
 

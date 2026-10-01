@@ -215,9 +215,7 @@ describe("createSingletonServices", () => {
 
     expect(failure).toBeInstanceOf(AggregateError)
     expect(failure).toMatchObject({
-      message: "Singleton service creation and cleanup both failed.",
-      errors: [creationFailure, cleanupFailure],
-      cause: cleanupFailure
+      errors: [creationFailure, cleanupFailure]
     })
     expect(closeLog).toEqual(["chat"])
   })

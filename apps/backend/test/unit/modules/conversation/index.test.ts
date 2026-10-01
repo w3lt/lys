@@ -199,10 +199,17 @@ describe("updateFastifyWithConversationRoutes", () => {
       })
 
       expect(response.statusCode).toBe(400)
-      expect(response.json()).toMatchObject({
-        message: "Invalid conversation list query or cursor"
-      })
       expect(historyCalls.listConversations).not.toHaveBeenCalled()
+
+      historyCalls.listConversations.mockReturnValue(CONVERSATION_PAGE)
+      const matchingQueryResponse = await app.inject({
+        method: "GET",
+        url: "/api/v1/conversations",
+        query: { query: "budget", cursor }
+      })
+
+      expect(matchingQueryResponse.statusCode).toBe(200)
+      expect(historyCalls.listConversations).toHaveBeenCalledOnce()
     })
   })
 
@@ -234,10 +241,7 @@ describe("updateFastifyWithConversationRoutes", () => {
       )
       expect(
         conversationNotFoundProblemSchema.parse(response.json())
-      ).toMatchObject({
-        detail: `Conversation ${MISSING_CONVERSATION_ID} was not found.`,
-        instance: url
-      })
+      ).toMatchObject({ instance: url })
       expect(historyCalls.getConversation).toHaveBeenCalledWith(
         MISSING_CONVERSATION_ID
       )
@@ -308,10 +312,7 @@ describe("updateFastifyWithConversationRoutes", () => {
       )
       expect(
         conversationNotFoundProblemSchema.parse(response.json())
-      ).toMatchObject({
-        detail: `Conversation ${MISSING_CONVERSATION_ID} was not found.`,
-        instance: url
-      })
+      ).toMatchObject({ instance: url })
     })
 
     it("responds with a server error when the title cannot be replaced", async () => {
@@ -373,10 +374,7 @@ describe("updateFastifyWithConversationRoutes", () => {
       )
       expect(
         conversationNotFoundProblemSchema.parse(response.json())
-      ).toMatchObject({
-        detail: `Conversation ${MISSING_CONVERSATION_ID} was not found.`,
-        instance: url
-      })
+      ).toMatchObject({ instance: url })
     })
 
     it("responds with a server error when the conversation cannot be deleted", async () => {

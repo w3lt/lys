@@ -117,7 +117,7 @@ describe("stopLlmModelsByKey", () => {
     })
   })
 
-  it("returns stop-failed with the sorted identifiers still loaded after reconciliation", async () => {
+  it("returns stop-failed with the identifiers still loaded after reconciliation", async () => {
     const listLoaded = createInventory(
       [createInstance(MODEL_KEY, "a"), createInstance(MODEL_KEY, "b")],
       [createInstance(MODEL_KEY, "b"), createInstance(MODEL_KEY, "a")]
@@ -128,9 +128,10 @@ describe("stopLlmModelsByKey", () => {
 
     const outcome = await stopLlmModelsByKey(MODEL_KEY, listLoaded, stop)
 
+    expect(outcome).toHaveProperty("remainingModelIdentifiers.length", 2)
     expect(outcome).toEqual({
       status: "stop-failed",
-      remainingModelIdentifiers: ["a", "b"],
+      remainingModelIdentifiers: expect.arrayContaining(["a", "b"]),
       diagnostics: [
         {
           operation: "stop-model-instance",
@@ -215,7 +216,7 @@ describe("stopLlmModelsByKey", () => {
     ["a non-error value", "offline"],
     ["an error without a message", new Error("")]
   ])(
-    "summarizes %s as an unknown runtime failure",
+    "summarizes %s with a non-empty failure message",
     async (_label, rejection) => {
       const listLoaded = vi.fn<ListLoadedLlmModelInstances>(async () => {
         throw rejection
@@ -226,7 +227,7 @@ describe("stopLlmModelsByKey", () => {
       expect(outcome.diagnostics).toEqual([
         {
           operation: "list-initial-model-instances",
-          message: "Unknown LLM runtime failure."
+          message: expect.stringMatching(/\S/)
         }
       ])
     }

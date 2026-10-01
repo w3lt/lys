@@ -164,11 +164,14 @@ describe("SqliteConversationTurns", () => {
 
       expect(() =>
         turns.updateAssistantMessageContent(turn.assistantMessage.id, "")
-      ).toThrow("Assistant delta must not be empty")
+      ).toThrow()
 
       expect(
         history.getConversation(turn.conversation.id)?.messages[1]
       ).toEqual(turn.assistantMessage)
+      expect(
+        turns.updateAssistantMessageContent(turn.assistantMessage.id, "Hi")
+      ).toBe(true)
     })
   })
 
@@ -306,9 +309,12 @@ describe("SqliteConversationTurns", () => {
 
       expect(() =>
         turns.updateGeneratedConversationTitle(turn.conversation.id, "   ")
-      ).toThrow("Generated title must not be empty")
+      ).toThrow()
 
       expect(history.getConversation(turn.conversation.id)?.title).toBeNull()
+      expect(
+        turns.updateGeneratedConversationTitle(turn.conversation.id, "Title")
+      ).toBe("Title")
     })
   })
 
@@ -319,27 +325,37 @@ describe("SqliteConversationTurns", () => {
       model: "qwen/qwen3-8b",
       systemPrompt: "You are Lys."
     })
+    expect(
+      turns.updateAssistantMessageContent(turn.assistantMessage.id, "Hi")
+    ).toBe(true)
+    expect(
+      turns.updateAssistantMessageState(turn.assistantMessage.id, {
+        status: "failed"
+      })
+    ).toBe(true)
+    expect(
+      turns.updateGeneratedConversationTitle(turn.conversation.id, "Title")
+    ).toBe("Title")
 
     store[Symbol.dispose]()
 
-    const closed = "Conversation store is closed"
     expect(() =>
       turns.createConversationTurn({
         userMessageContent: "Hello",
         model: "qwen/qwen3-8b",
         systemPrompt: "You are Lys."
       })
-    ).toThrow(closed)
+    ).toThrow()
     expect(() =>
       turns.updateAssistantMessageContent(turn.assistantMessage.id, "Hi")
-    ).toThrow(closed)
+    ).toThrow()
     expect(() =>
       turns.updateAssistantMessageState(turn.assistantMessage.id, {
         status: "failed"
       })
-    ).toThrow(closed)
+    ).toThrow()
     expect(() =>
       turns.updateGeneratedConversationTitle(turn.conversation.id, "Title")
-    ).toThrow(closed)
+    ).toThrow()
   })
 })

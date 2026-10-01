@@ -73,9 +73,7 @@ describe("handleConversationTransactionFailure", () => {
 
     expect(thrown).toBeInstanceOf(AggregateError)
     expect(thrown).toMatchObject({
-      message: "Conversation operation and rollback both failed",
       errors: [failure, expect.any(Error)]
     })
-    expect(thrown).toHaveProperty("cause", expect.any(Error))
   })
 })

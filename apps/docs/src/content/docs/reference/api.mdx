@@ -165,6 +165,8 @@ timestamps; conversation activity time and history order do not change.
 - `maxContextLength`
 - `loaded`
 
+`GET /api/v1/llm/list` returns `llms` ordered by `modelKey`, then by `path`.
+
 ## Model operation admission
 
 Inventory, health, load, unload, and LM Studio connection attempts share one

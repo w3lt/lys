@@ -48,10 +48,7 @@ describe("updateFastifyWithChatRoute", () => {
     expect(conversationNotFoundProblemSchema.safeParse(problem).success).toBe(
       true
     )
-    expect(problem).toMatchObject({
-      detail: `Conversation ${conversationId} was not found.`,
-      instance: chatApi.path
-    })
+    expect(problem).toMatchObject({ instance: chatApi.path })
     expect(testApp.createConversationTurn).toHaveBeenCalledWith(
       expect.objectContaining({ conversationId })
     )

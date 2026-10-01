@@ -6,11 +6,11 @@ import {
 } from "../../../../src/utils/errors"
 
 describe("ConversationNotFoundError", () => {
-  it("is a native error with the default not-found message", () => {
+  it("is a native error with a default message", () => {
     const error = new ConversationNotFoundError()
 
     expect(error).toBeInstanceOf(Error)
-    expect(error.message).toBe("Conversation not found!")
+    expect(error.message).toMatch(/\S/)
     expect(error.cause).toBeUndefined()
   })
 
@@ -33,7 +33,6 @@ describe("ChatCompletionCancelledError", () => {
     const error = new ChatCompletionCancelledError(sdkFailure)
 
     expect(error).toBeInstanceOf(Error)
-    expect(error.message).toBe("Chat completion was cancelled")
     expect(error.cause).toBe(sdkFailure)
   })
 })

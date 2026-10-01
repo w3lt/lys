@@ -7,22 +7,30 @@ import createTitleGenerationTask, {
 import { TitleGenerationOutputError } from "../../../../../src/utils/errors"
 import {
   createTestFastify,
-  findLogRecords
+  type CapturedLogRecord
 } from "../../../support/fastifyTestApp"
 
-/** Log message for a title reply that consumes another attempt. */
-const RETRY_LOG = "Generated title was unusable; requesting another"
+/** Documented `titleGenerationOutcome` values of the title task's log records. */
+type TitleGenerationOutcome =
+  | "retrying"
+  | "title-not-generated"
+  | "abandoned"
+  | "already-titled"
+  | "title-not-saved"
 
-/** Log message for generation that ended without a usable title. */
-const FAILURE_LOG = "Title generation failed; this task saved no title"
-
-/** Log message for generation abandoned at backend shutdown. */
-const ABANDONED_LOG =
-  "Title generation stopped because the backend is shutting down"
-
-/** Log message for a title left unsaved because one is already stored. */
-const ALREADY_TITLED_LOG =
-  "The conversation was renamed or deleted before the title was saved"
+/**
+ * Selects the captured records logged for one title-generation outcome.
+ *
+ * @param logs - Records captured from one test application.
+ * @param outcome - `titleGenerationOutcome` value to select.
+ * @returns The matching records in write order.
+ */
+function findOutcomeRecords(
+  logs: readonly CapturedLogRecord[],
+  outcome: TitleGenerationOutcome
+): CapturedLogRecord[] {
+  return logs.filter((record) => record.titleGenerationOutcome === outcome)
+}
 
 /** Test-controlled parts of one title task run. */
 type TitleTaskScenario = Readonly<{
@@ -124,7 +132,7 @@ describe("createTitleGenerationTask", () => {
 
     expect(generateTitle).toHaveBeenCalledTimes(3)
     expect(run.events).toEqual([{ type: "title", title: "Hanoi trip" }])
-    expect(findLogRecords(run.logs, RETRY_LOG)).toEqual([
+    expect(findOutcomeRecords(run.logs, "retrying")).toEqual([
       expect.objectContaining({
         level: "debug",
         titleGenerationOutcome: "retrying",
@@ -153,7 +161,7 @@ describe("createTitleGenerationTask", () => {
     expect(generateTitle).toHaveBeenCalledTimes(2)
     expect(run.updateConversationTitle).not.toHaveBeenCalled()
     expect(run.events).toEqual([])
-    expect(findLogRecords(run.logs, FAILURE_LOG)).toEqual([
+    expect(findOutcomeRecords(run.logs, "title-not-generated")).toEqual([
       expect.objectContaining({
         level: "warn",
         titleGenerationOutcome: "title-not-generated",
@@ -172,8 +180,8 @@ describe("createTitleGenerationTask", () => {
     })
 
     expect(generateTitle).toHaveBeenCalledOnce()
-    expect(findLogRecords(run.logs, RETRY_LOG)).toEqual([])
-    expect(findLogRecords(run.logs, FAILURE_LOG)).toHaveLength(1)
+    expect(findOutcomeRecords(run.logs, "retrying")).toEqual([])
+    expect(findOutcomeRecords(run.logs, "title-not-generated")).toHaveLength(1)
   })
 
   it("does not retry a request failure that is not unusable output", async () => {
@@ -182,7 +190,7 @@ describe("createTitleGenerationTask", () => {
     const run = await runTitleTask({ generateTitle })
 
     expect(generateTitle).toHaveBeenCalledOnce()
-    expect(findLogRecords(run.logs, FAILURE_LOG)).toEqual([
+    expect(findOutcomeRecords(run.logs, "title-not-generated")).toEqual([
       expect.objectContaining({
         titleGenerationOutcome: "title-not-generated",
         titleGenerationAttempts: 1,
@@ -203,7 +211,7 @@ describe("createTitleGenerationTask", () => {
     })
 
     expect(generateTitle).not.toHaveBeenCalled()
-    expect(findLogRecords(run.logs, ABANDONED_LOG)).toEqual([
+    expect(findOutcomeRecords(run.logs, "abandoned")).toEqual([
       expect.objectContaining({
         level: "debug",
         titleGenerationOutcome: "abandoned",
@@ -227,14 +235,14 @@ describe("createTitleGenerationTask", () => {
     })
 
     expect(generateTitle).toHaveBeenCalledOnce()
-    expect(findLogRecords(run.logs, ABANDONED_LOG)).toEqual([
+    expect(findOutcomeRecords(run.logs, "abandoned")).toEqual([
       expect.objectContaining({
         titleGenerationOutcome: "abandoned",
         titleGenerationAttempts: 1,
         err: expect.objectContaining({ message: "blank" })
       })
     ])
-    expect(findLogRecords(run.logs, FAILURE_LOG)).toEqual([])
+    expect(findOutcomeRecords(run.logs, "title-not-generated")).toEqual([])
   })
 
   it("sends no event when the conversation was renamed or deleted first", async () => {
@@ -244,7 +252,7 @@ describe("createTitleGenerationTask", () => {
     })
 
     expect(run.events).toEqual([])
-    expect(findLogRecords(run.logs, ALREADY_TITLED_LOG)).toEqual([
+    expect(findOutcomeRecords(run.logs, "already-titled")).toEqual([
       expect.objectContaining({
         level: "debug",
         titleGenerationOutcome: "already-titled",
@@ -254,24 +262,20 @@ describe("createTitleGenerationTask", () => {
   })
 
   it("logs a storage failure and sends no event", async () => {
+    const storageFailure = new Error("simulated title storage failure")
     const run = await runTitleTask({
       generateTitle: scriptTitles("Hanoi trip"),
       updateConversationTitle: () => {
-        throw new Error("Conversation store is closed")
+        throw storageFailure
       }
     })
 
     expect(run.events).toEqual([])
-    expect(
-      findLogRecords(run.logs, "Generated title could not be saved")
-    ).toEqual([
+    expect(findOutcomeRecords(run.logs, "title-not-saved")).toEqual([
       expect.objectContaining({
         level: "error",
-        titleGenerationOutcome: "title-not-saved",
         titleGenerationAttempts: 1,
-        err: expect.objectContaining({
-          message: "Conversation store is closed"
-        })
+        err: expect.objectContaining({ message: storageFailure.message })
       })
     ])
   })

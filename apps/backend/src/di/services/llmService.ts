@@ -141,8 +141,11 @@ export default class LlmService
    * @param modelKeyOrAlias - Model key or alias for the connected runtime to resolve.
    * @returns A promise resolving to a validated immutable model snapshot after
    * the runtime loads the model and its canonical key is found in inventory.
-   * @throws If loading or inventory fails, the canonical model is absent,
-   * response validation fails, or the queue rejects the operation.
+   * @throws If loading or inventory fails, response validation fails, or the
+   * queue rejects the operation.
+   * @throws An `Error` with the message `Loaded model "<canonical model key>"
+   * was not found in the downloaded LLM inventory` if the canonical model is
+   * absent from inventory after loading.
    */
   public async loadLlmModel(
     modelKeyOrAlias: string
@@ -160,7 +163,8 @@ export default class LlmService
   /**
    * Implements {@link LlmModelInventory.listLlmModels} through the queue.
    *
-   * @returns A promise resolving to snapshots ordered by ascending canonical model key.
+   * @returns A promise resolving to snapshots in the order defined by
+   * {@link LlmModelInventory.listLlmModels}.
    * @throws If an inventory query fails or the queue rejects the operation.
    */
   public async listLlmModels(): Promise<readonly LlmInfo[]> {

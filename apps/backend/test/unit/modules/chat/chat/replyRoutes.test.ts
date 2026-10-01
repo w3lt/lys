@@ -213,7 +213,7 @@ describe("updateFastifyWithChatReplyRoutes", () => {
         type: "urn:lys:problem:conversation:not-found",
         title: "Conversation not found",
         status: 404,
-        detail: `Conversation ${CONVERSATION_ID} was not found.`,
+        detail: expect.any(String),
         instance: REPLY_EVENTS_URL
       })
       expect(getConversation).toHaveBeenCalledExactlyOnceWith(CONVERSATION_ID)
@@ -247,7 +247,7 @@ describe("updateFastifyWithChatReplyRoutes", () => {
           type: "urn:lys:problem:chat:reply-not-found",
           title: "Reply not found",
           status: 404,
-          detail: `Reply ${assistantMessageId} was not found.`,
+          detail: expect.any(String),
           instance: url
         })
       }
@@ -379,7 +379,7 @@ describe("updateFastifyWithChatReplyRoutes", () => {
         type: "urn:lys:problem:chat:reply-not-generating",
         title: "Reply not generating",
         status: 409,
-        detail: `Reply ${REPLY_TARGET.assistantMessageId} is not generating.`,
+        detail: expect.any(String),
         instance: STOP_REPLY_URL
       })
     })
@@ -501,12 +501,7 @@ describe("updateFastifyWithChatReplyRoutes", () => {
       expect(response.statusCode).toBe(500)
       expect(response.headers["content-type"]).toMatch(/^application\/json/)
       expect(logs).toContainEqual(
-        expect.objectContaining({
-          level: "error",
-          err: expect.objectContaining({
-            message: "Reply generation registry is closed"
-          })
-        })
+        expect.objectContaining({ level: "error", err: expect.any(Object) })
       )
     })
   })

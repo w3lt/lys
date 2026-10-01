@@ -91,8 +91,9 @@ describe("migrateDatabase", () => {
     const database = openEmptyDatabase()
     database.exec("PRAGMA user_version = 99")
 
+    // The message names both versions, in either order.
     expect(() => migrateDatabase(database)).toThrow(
-      `Database version 99 is newer than supported version ${CURRENT_SCHEMA_VERSION}`
+      new RegExp(`^(?=.*\\b99\\b)(?=.*\\b${CURRENT_SCHEMA_VERSION}\\b)`)
     )
 
     expect(readUserVersion(database)).toBe(99)
@@ -104,10 +105,10 @@ describe("migrateDatabase", () => {
     const database = openEmptyDatabase()
     database.exec("PRAGMA user_version = -1")
 
-    expect(() => migrateDatabase(database)).toThrow(
-      "Invalid database user_version"
-    )
+    expect(() => migrateDatabase(database)).toThrow()
 
+    expect(readUserVersion(database)).toBe(-1)
+    expect(listSchemaObjects(database, "table")).toEqual([])
     expect(database.isTransaction).toBe(false)
   })
 

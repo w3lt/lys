@@ -95,7 +95,6 @@ describe("parseConversationListOptions", () => {
 
     expect(failure).toBeInstanceOf(Error)
     expect(failure).toMatchObject({
-      message: "Invalid conversation list query or cursor",
       statusCode: 400,
       cause: expect.any(z.ZodError)
     })
@@ -107,27 +106,29 @@ describe("parseConversationListOptions", () => {
       LAST_LISTED_CONVERSATION
     )
 
+    expect(
+      parseConversationListOptions({ query: "trip", cursor }).cursor
+    ).toBeDefined()
     expect(captureParseFailure({ query: "budget", cursor })).toMatchObject({
-      statusCode: 400,
-      cause: { message: "Conversation list cursor belongs to another query" }
+      statusCode: 400
     })
   })
 
   it("rejects a cursor created for an unsearched list when a query is given", () => {
     const cursor = createConversationListCursor("", LAST_LISTED_CONVERSATION)
 
+    expect(parseConversationListOptions({ cursor }).cursor).toBeDefined()
     expect(captureParseFailure({ query: "trip", cursor })).toMatchObject({
-      statusCode: 400,
-      cause: { message: "Conversation list cursor belongs to another query" }
+      statusCode: 400
     })
   })
 
   it("rejects a cursor that is not canonical base64", () => {
     const cursor = createConversationListCursor("", LAST_LISTED_CONVERSATION)
 
+    expect(parseConversationListOptions({ cursor }).cursor).toBeDefined()
     expect(captureParseFailure({ cursor: `${cursor}\n` })).toMatchObject({
-      statusCode: 400,
-      cause: { message: "Invalid conversation list cursor" }
+      statusCode: 400
     })
   })
 

@@ -5,9 +5,7 @@ import * as z from "zod"
 /** Pino fields read by backend log assertions; other fields are retained. */
 const capturedLogRecordSchema = z.looseObject({
   /** Pino level label, such as `debug` or `error`. */
-  level: z.string(),
-  /** Log message written by the backend. */
-  msg: z.string()
+  level: z.string()
 })
 
 /** One structured line written by the logger of a test application. */
@@ -48,18 +46,4 @@ export function createTestFastify(): TestFastify {
     await app.close()
   })
   return Object.freeze({ app, logs })
-}
-
-/**
- * Selects captured records written with one message.
- *
- * @param logs - Records captured from one test application.
- * @param message - Exact log message to select.
- * @returns The matching records in write order.
- */
-export function findLogRecords(
-  logs: readonly CapturedLogRecord[],
-  message: string
-): CapturedLogRecord[] {
-  return logs.filter((record) => record.msg === message)
 }

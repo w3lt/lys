@@ -8,12 +8,7 @@ import { createLlmModelHealthDiagnostic } from "../../../../../src/modules/llm/l
 import { createLlmRuntimeUnavailableError } from "../../../../../src/modules/llm/llmRuntimeUnavailableError"
 import { createLlmServiceBusyError } from "../../../../../src/modules/llm/llmServiceBusyError"
 import updateFastifyWithLlmTestModelRoute from "../../../../../src/modules/llm/routes/testModelRoute"
-import { findLogRecords } from "../../../support/fastifyTestApp"
 import { createLlmRouteTestApp } from "../../../support/llmRouteTestApp"
-
-/** Log message written for a retained inventory failure. */
-const HEALTH_FAILURE_LOG =
-  "LLM runtime state could not be established during model health query"
 
 /** Canonical model key requested by most cases. */
 const MODEL_KEY = "qwen/qwen3-8b"
@@ -98,9 +93,8 @@ describe("updateFastifyWithLlmTestModelRoute", () => {
     expect(response.statusCode).toBe(200)
     expect(response.json()).toEqual(outcome.health)
     expect(response.body).not.toContain("ECONNREFUSED")
-    expect(findLogRecords(testApp.logs, HEALTH_FAILURE_LOG)).toEqual([
+    expect(testApp.logs.filter(({ level }) => level === "error")).toEqual([
       expect.objectContaining({
-        level: "error",
         modelKey: MODEL_KEY,
         err: expect.objectContaining({ message: failure.message })
       })

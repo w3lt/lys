@@ -88,7 +88,9 @@ export default class LmStudioRuntime implements LlmRuntime {
    * @returns A ready runtime whose cleanup ownership transfers to the caller.
    * @throws `The LLM runtime is unavailable.` with the SDK query failure as its
    * cause, or an SDK construction failure. Acquired resources are released before
-   * rejection, preserving acquisition and cleanup failures if both occur.
+   * rejection.
+   * @throws An `AggregateError` containing the acquisition failure followed by
+   * the cleanup failure if releasing acquired resources also fails.
    * @remarks Acquisition completes only after the SDK readiness query settles.
    * The SDK offers no safe deadline or cancellation for this query.
    */

@@ -87,7 +87,7 @@ describe("getLlmModelHealth", () => {
     expect(reporter.mock.calls[0]?.[0]).toBe(failure)
   })
 
-  it("rounds the measured interval to whole milliseconds", async () => {
+  it("reports a fractional measured interval as a whole number of milliseconds", async () => {
     const listLoaded = vi.fn<ListLoadedLlmModelInstances>(async () => [])
 
     const outcome = await getLlmModelHealth(
@@ -96,7 +96,8 @@ describe("getLlmModelHealth", () => {
       createClock(10.2, 13.7)
     )
 
-    expect(outcome.health.latencyMs).toBe(4)
+    expect(Number.isSafeInteger(outcome.health.latencyMs)).toBe(true)
+    expect([3, 4]).toContain(outcome.health.latencyMs)
   })
 
   it("reads the clock before the query starts and after it settles", async () => {

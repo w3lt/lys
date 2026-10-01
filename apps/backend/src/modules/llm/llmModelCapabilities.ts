@@ -58,7 +58,7 @@ export interface LlmModelInventory {
    * Lists the latest known models and their loaded state.
    *
    * @returns A promise resolving to immutable snapshots ordered by ascending
-   * canonical model key.
+   * canonical model key, then by ascending path.
    * @throws If the provider cannot query or validate its model inventory, or
    * its application lifetime has begun cleanup.
    * @throws A service-busy error if the shared model-operation queue is full;

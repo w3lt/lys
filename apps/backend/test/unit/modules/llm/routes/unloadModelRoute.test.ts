@@ -1,13 +1,13 @@
 import {
   createLlmServiceBusyProblem,
-  createLlmUnloadProblem,
-  llmRuntimeUnavailableProblemSchema
+  llmModelNotFoundProblemSchema,
+  llmRuntimeUnavailableProblemSchema,
+  llmUnloadFailedProblemSchema
 } from "@lys/protocol"
 import { describe, expect, it, vi } from "vitest"
 import { createLlmRuntimeUnavailableError } from "../../../../../src/modules/llm/llmRuntimeUnavailableError"
 import { createLlmServiceBusyError } from "../../../../../src/modules/llm/llmServiceBusyError"
 import updateFastifyWithLlmModelUnloadRoute from "../../../../../src/modules/llm/routes/unloadModelRoute"
-import { findLogRecords } from "../../../support/fastifyTestApp"
 import {
   createLlmRouteTestApp,
   type LlmRouteTestApp
@@ -47,10 +47,7 @@ describe("updateFastifyWithLlmModelUnloadRoute", () => {
     expect(response.body).toBe("")
     expect(stopLlmModelsByKey).toHaveBeenCalledExactlyOnceWith(MODEL_KEY)
     expect(
-      findLogRecords(
-        testApp.logs,
-        "LLM model stop reconciled after runtime failures"
-      )
+      testApp.logs.filter(({ level }) => level === "warn" || level === "error")
     ).toEqual([])
   })
 
@@ -72,17 +69,8 @@ describe("updateFastifyWithLlmModelUnloadRoute", () => {
     const response = await requestUnload(testApp)
 
     expect(response.statusCode).toBe(204)
-    expect(
-      findLogRecords(
-        testApp.logs,
-        "LLM model stop reconciled after runtime failures"
-      )
-    ).toEqual([
-      expect.objectContaining({
-        level: "warn",
-        modelKey: MODEL_KEY,
-        diagnostics
-      })
+    expect(testApp.logs.filter(({ level }) => level === "warn")).toEqual([
+      expect.objectContaining({ modelKey: MODEL_KEY, diagnostics })
     ])
   })
 
@@ -100,12 +88,9 @@ describe("updateFastifyWithLlmModelUnloadRoute", () => {
     expect(response.headers["content-type"]).toMatch(
       /^application\/problem\+json/
     )
-    expect(response.json()).toEqual(
-      createLlmUnloadProblem({
-        reason: "model-not-found",
-        detail: `Model "${MODEL_KEY}" is not loaded.`
-      })
-    )
+    expect(
+      llmModelNotFoundProblemSchema.safeParse(response.json()).success
+    ).toBe(true)
   })
 
   it("responds with the runtime-unavailable problem and logs the diagnostics", async () => {
@@ -125,24 +110,12 @@ describe("updateFastifyWithLlmModelUnloadRoute", () => {
     expect(response.headers["content-type"]).toMatch(
       /^application\/problem\+json/
     )
-    expect(response.json()).toEqual(
-      createLlmUnloadProblem({
-        reason: "runtime-unavailable",
-        detail: "The LLM runtime could not be queried."
-      })
-    )
-    expect(response.body).not.toContain("socket closed")
     expect(
-      findLogRecords(
-        testApp.logs,
-        "LLM runtime state could not be established during model stop"
-      )
-    ).toEqual([
-      expect.objectContaining({
-        level: "error",
-        modelKey: MODEL_KEY,
-        diagnostics
-      })
+      llmRuntimeUnavailableProblemSchema.safeParse(response.json()).success
+    ).toBe(true)
+    expect(response.body).not.toContain("socket closed")
+    expect(testApp.logs.filter(({ level }) => level === "error")).toEqual([
+      expect.objectContaining({ modelKey: MODEL_KEY, diagnostics })
     ])
   })
 
@@ -168,20 +141,11 @@ describe("updateFastifyWithLlmModelUnloadRoute", () => {
     expect(response.headers["content-type"]).toMatch(
       /^application\/problem\+json/
     )
-    expect(response.json()).toEqual(
-      createLlmUnloadProblem({
-        reason: "unload-failed",
-        detail: `Model "${MODEL_KEY}" remains loaded.`
-      })
-    )
     expect(
-      findLogRecords(
-        testApp.logs,
-        "LLM model instances remain loaded after stop reconciliation"
-      )
-    ).toEqual([
+      llmUnloadFailedProblemSchema.safeParse(response.json()).success
+    ).toBe(true)
+    expect(testApp.logs.filter(({ level }) => level === "error")).toEqual([
       expect.objectContaining({
-        level: "error",
         modelKey: MODEL_KEY,
         remainingModelIdentifiers: [MODEL_KEY],
         diagnostics

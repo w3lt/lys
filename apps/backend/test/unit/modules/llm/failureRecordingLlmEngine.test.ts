@@ -126,10 +126,11 @@ describe("FailureRecordingLlmEngine", () => {
 
     it("keeps the failure recorded after later calls succeed", async () => {
       const { recorder, engine } = createRecordingEngine()
-      engine.loadLlmModel.mockRejectedValueOnce(new Error("load failed"))
+      const failure = new Error("load failed")
+      engine.loadLlmModel.mockRejectedValueOnce(failure)
       engine.listLoadedLlmModelInstances.mockResolvedValue([LOADED_INSTANCE])
 
-      await expect(recorder.loadLlmModel("qwen3")).rejects.toThrow()
+      await expect(recorder.loadLlmModel("qwen3")).rejects.toBe(failure)
       await expect(recorder.listLoadedLlmModelInstances()).resolves.toEqual([
         LOADED_INSTANCE
       ])
@@ -139,13 +140,14 @@ describe("FailureRecordingLlmEngine", () => {
 
     it("records failures only for the recorder whose call rejected", async () => {
       const engine = createFakeLlmRuntime()
-      engine.listDownloadedLlmModels.mockRejectedValueOnce(
-        new Error("inventory failed")
-      )
+      const failure = new Error("inventory failed")
+      engine.listDownloadedLlmModels.mockRejectedValueOnce(failure)
       const failedOperation = new FailureRecordingLlmEngine(engine)
       const laterOperation = new FailureRecordingLlmEngine(engine)
 
-      await expect(failedOperation.listDownloadedLlmModels()).rejects.toThrow()
+      await expect(failedOperation.listDownloadedLlmModels()).rejects.toBe(
+        failure
+      )
 
       expect(failedOperation.hasRecordedFailure).toBe(true)
       expect(laterOperation.hasRecordedFailure).toBe(false)

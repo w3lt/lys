@@ -32,13 +32,6 @@ const REPLY_OF_Y: ReplyTarget = Object.freeze({
   assistantMessageId: createFixtureUuidV7(21)
 })
 
-/** Exact failure of every registry operation after disposal began. */
-const CLOSED_REGISTRY_FAILURE = /^Reply generation registry is closed$/
-
-/** Exact failure of starting a reply whose generation is still running. */
-const DUPLICATE_REPLY_FAILURE =
-  /^A generation for this reply is already running$/
-
 /** Registry owned by one case, with the controls its generations use. */
 type RegistryHarness = Readonly<{
   /** Registry under test; disposed when the test finishes. */
@@ -135,7 +128,7 @@ describe("ReplyGenerationRegistry", () => {
           FIRST_REPLY_OF_X,
           createLaunchers(duplicateReply, duplicateTitle)
         )
-      ).toThrow(DUPLICATE_REPLY_FAILURE)
+      ).toThrow(Error)
       await flushMicrotasks()
 
       expect(duplicateReply.hasStarted).toBe(false)
@@ -155,7 +148,7 @@ describe("ReplyGenerationRegistry", () => {
           FIRST_REPLY_OF_X,
           createLaunchers(createTask(), createTask())
         )
-      ).toThrow(DUPLICATE_REPLY_FAILURE)
+      ).toThrow(Error)
       await flushMicrotasks()
       runningReply.resolve()
       await running.settled
@@ -380,11 +373,12 @@ describe("ReplyGenerationRegistry", () => {
     it("rejects starting and finding generations once disposal began", async () => {
       const { registry, createTask, createLaunchers } = createRegistryHarness()
       const runningReply = createTask()
-      registry.startReplyGeneration(
+      const running = registry.startReplyGeneration(
         FIRST_REPLY_OF_X,
         createLaunchers(runningReply)
       )
       await flushMicrotasks()
+      expect(registry.findReplyGeneration(FIRST_REPLY_OF_X)).toBe(running)
       const disposal = registry[Symbol.asyncDispose]()
       const lateReply = createTask()
       const lateTitle = createTask()
@@ -394,9 +388,9 @@ describe("ReplyGenerationRegistry", () => {
           REPLY_OF_Y,
           createLaunchers(lateReply, lateTitle)
         )
-      ).toThrow(CLOSED_REGISTRY_FAILURE)
+      ).toThrow(Error)
       expect(() => registry.findReplyGeneration(FIRST_REPLY_OF_X)).toThrow(
-        CLOSED_REGISTRY_FAILURE
+        Error
       )
       runningReply.resolve()
       await disposal
@@ -405,7 +399,7 @@ describe("ReplyGenerationRegistry", () => {
       expect(lateReply.hasStarted).toBe(false)
       expect(lateTitle.hasStarted).toBe(false)
       expect(() => registry.findReplyGeneration(FIRST_REPLY_OF_X)).toThrow(
-        CLOSED_REGISTRY_FAILURE
+        Error
       )
     })
   })

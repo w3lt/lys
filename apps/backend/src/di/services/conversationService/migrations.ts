@@ -170,7 +170,10 @@ function readDatabaseVersion(database: DatabaseSync): number {
  * Applies all pending schema migrations atomically in version order.
  *
  * @param database - Open SQLite database whose schema is migrated in place.
- * @throws If the stored version is unsupported or any migration fails; an active transaction is rolled back before the failure propagates.
+ * @throws If the stored version is unsupported or any migration fails; an
+ * active transaction is rolled back before the failure propagates. A version
+ * newer than the supported one is rejected with a message naming both
+ * versions.
  */
 export function migrateDatabase(database: DatabaseSync): void {
   database.exec("BEGIN IMMEDIATE")

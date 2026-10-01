@@ -1,10 +1,14 @@
-import { chatApi } from "@lys/protocol"
+import { chatApi, chatReplyEventsApi, stopChatReplyApi } from "@lys/protocol"
 import { describe, expect, it } from "vitest"
 import registerChatRoutes from "../../../../src/modules/chat"
 import { createChatRouteTestApp } from "../../support/chatRouteTestApp"
 
 describe("registerChatRoutes", () => {
-  it("installs the chat endpoint", async () => {
+  it.each([
+    ["chat", chatApi],
+    ["reply-events", chatReplyEventsApi],
+    ["reply-stop", stopChatReplyApi]
+  ])("installs the %s endpoint", async (_label, endpoint) => {
     const testApp = await createChatRouteTestApp()
 
     await registerChatRoutes(testApp.app, {
@@ -13,7 +17,7 @@ describe("registerChatRoutes", () => {
     })
 
     expect(
-      testApp.app.hasRoute({ method: chatApi.method, url: chatApi.path })
+      testApp.app.hasRoute({ method: endpoint.method, url: endpoint.path })
     ).toBe(true)
   })
 })

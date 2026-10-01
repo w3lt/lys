@@ -12,6 +12,7 @@ import {
   requestChatSseRoute
 } from "../../../support/chatSseRoute"
 import { flushMicrotasks } from "../../../support/microtasks"
+import { observeSettlement } from "../../../support/settlement"
 
 /** Connection capability read by {@link openReplyEventStream}. */
 type FollowedConnection = Pick<ReplySse, "onClose" | "isConnected">
@@ -148,16 +149,13 @@ describe("openReplyEventStream", () => {
       () => new Promise<void>(() => {})
     )
     subscription.handleStreamEvent({ type: "delta", content: "stalled" })
-    let isSubscriptionClosed = false
-    void subscription.closed.then(() => {
-      isSubscriptionClosed = true
-    })
+    const closedState = observeSettlement(subscription.closed)
 
     const stream = openReplyEventStream(connection, subscription)
     close()
 
     await expect(stream).resolves.toBeUndefined()
     await flushMicrotasks()
-    expect(isSubscriptionClosed).toBe(false)
+    expect(closedState()).toBe("pending")
   })
 })

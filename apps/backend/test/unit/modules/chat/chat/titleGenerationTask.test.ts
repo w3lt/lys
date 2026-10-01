@@ -1,17 +1,14 @@
+import type { ChatGenerationEvent } from "@lys/protocol"
 import { describe, expect, it, vi } from "vitest"
 import type { TitleGenerationOptions } from "../../../../../src/di/services/chatService"
 import createTitleGenerationTask, {
   type CreateTitleGenerationTaskOptions
 } from "../../../../../src/modules/chat/chat/titleGenerationTask"
-import type { ChatRouteReply } from "../../../../../src/modules/chat/chat/share"
 import { TitleGenerationOutputError } from "../../../../../src/utils/errors"
 import {
-  addChatSseRoute,
-  createChatSseTestApp,
-  requestChatSseRoute,
-  type ChatSseTestAppOptions
-} from "../../../support/chatSseRoute"
-import { findLogRecords } from "../../../support/fastifyTestApp"
+  createTestFastify,
+  findLogRecords
+} from "../../../support/fastifyTestApp"
 
 /** Log message for a title reply that consumes another attempt. */
 const RETRY_LOG = "Generated title was unusable; requesting another"
@@ -19,9 +16,13 @@ const RETRY_LOG = "Generated title was unusable; requesting another"
 /** Log message for generation that ended without a usable title. */
 const FAILURE_LOG = "Title generation failed; this task saved no title"
 
-/** Log message for generation abandoned after disconnect. */
+/** Log message for generation abandoned at backend shutdown. */
 const ABANDONED_LOG =
-  "Title generation stopped because the chat connection closed"
+  "Title generation stopped because the backend is shutting down"
+
+/** Log message for a title left unsaved because one is already stored. */
+const ALREADY_TITLED_LOG =
+  "The conversation was renamed or deleted before the title was saved"
 
 /** Test-controlled parts of one title task run. */
 type TitleTaskScenario = Readonly<{
@@ -29,14 +30,10 @@ type TitleTaskScenario = Readonly<{
   generateTitle: CreateTitleGenerationTaskOptions["generateTitle"]
   /** Inclusive attempt limit; 3 by default. */
   titleGenerationMaxAttempts?: number
-  /** Cancellation owned by the case; a fresh signal by default. */
+  /** Shutdown cancellation owned by the case; a fresh signal by default. */
   abortSignal?: AbortSignal
-  /** Conditional title persistence; saves the title unchanged by default. */
+  /** Conditional title storage; saves the title unchanged by default. */
   updateConversationTitle?: CreateTitleGenerationTaskOptions["updateConversationTitle"]
-  /** Action run with the live reply just before the task starts. */
-  prepareReply?: (reply: ChatRouteReply) => void
-  /** Transport faults of the SSE connection. */
-  transport?: ChatSseTestAppOptions
 }>
 
 /**
@@ -62,38 +59,31 @@ function scriptTitles(...outcomes: (string | Error)[]) {
 }
 
 /**
- * Runs one title task inside a live SSE request and records its effects.
+ * Runs one title task to settlement and records its effects.
  *
- * @param scenario - Generator, limit, cancellation, persistence, and transport.
- * @returns The received events, persistence calls, logs, and settlement.
+ * @param scenario - Generator, limit, cancellation, and storage behavior.
+ * @returns The sent events, storage calls, and captured logs.
+ * @throws If the task rejects, which its contract forbids.
  */
 async function runTitleTask(scenario: TitleTaskScenario) {
-  const { app, logs } = await createChatSseTestApp(scenario.transport)
+  const { app, logs } = createTestFastify()
+  const events: ChatGenerationEvent[] = []
   const updateConversationTitle = vi.fn(
     scenario.updateConversationTitle ?? ((title: string) => title)
   )
-  let settled = false
-  addChatSseRoute(app, async (request, reply) => {
-    scenario.prepareReply?.(reply)
-    await createTitleGenerationTask({
-      generateTitle: scenario.generateTitle,
-      userMessageContent: "Plan my trip to Hanoi",
-      model: "qwen/qwen3-8b",
-      abortSignal: scenario.abortSignal ?? new AbortController().signal,
-      reply,
-      logger: request.log,
-      titleGenerationMaxAttempts: scenario.titleGenerationMaxAttempts ?? 3,
-      updateConversationTitle
-    })
-    settled = true
+  await createTitleGenerationTask({
+    generateTitle: scenario.generateTitle,
+    userMessageContent: "Plan my trip to Hanoi",
+    model: "qwen/qwen3-8b",
+    abortSignal: scenario.abortSignal ?? new AbortController().signal,
+    sendEvent: (event) => {
+      events.push(event)
+    },
+    logger: app.log,
+    titleGenerationMaxAttempts: scenario.titleGenerationMaxAttempts ?? 3,
+    updateConversationTitle
   })
-  const response = await requestChatSseRoute(app)
-  return {
-    events: response.events,
-    updateConversationTitle,
-    logs,
-    settled
-  }
+  return { events, updateConversationTitle, logs }
 }
 
 describe("createTitleGenerationTask", () => {
@@ -117,10 +107,7 @@ describe("createTitleGenerationTask", () => {
     })
 
     expect(run.updateConversationTitle).toHaveBeenCalledWith("  Hanoi trip ")
-    expect(run.events).toEqual([
-      { event: "title", data: { type: "title", title: "Hanoi trip" } }
-    ])
-    expect(run.settled).toBe(true)
+    expect(run.events).toEqual([{ type: "title", title: "Hanoi trip" }])
   })
 
   it("requests another title only after unusable output, within the limit", async () => {
@@ -136,9 +123,7 @@ describe("createTitleGenerationTask", () => {
     })
 
     expect(generateTitle).toHaveBeenCalledTimes(3)
-    expect(run.events).toEqual([
-      { event: "title", data: { type: "title", title: "Hanoi trip" } }
-    ])
+    expect(run.events).toEqual([{ type: "title", title: "Hanoi trip" }])
     expect(findLogRecords(run.logs, RETRY_LOG)).toEqual([
       expect.objectContaining({
         level: "debug",
@@ -207,9 +192,9 @@ describe("createTitleGenerationTask", () => {
     expect(run.events).toEqual([])
   })
 
-  it("makes no request once the client has disconnected", async () => {
+  it("makes no request once shutdown has cancelled it", async () => {
     const cancellation = new AbortController()
-    cancellation.abort(new Error("client closed"))
+    cancellation.abort(new Error("backend shutting down"))
     const generateTitle = scriptTitles()
 
     const run = await runTitleTask({
@@ -223,9 +208,10 @@ describe("createTitleGenerationTask", () => {
         level: "debug",
         titleGenerationOutcome: "abandoned",
         titleGenerationAttempts: 0,
-        err: expect.objectContaining({ message: "client closed" })
+        err: expect.objectContaining({ message: "backend shutting down" })
       })
     ])
+    expect(run.events).toEqual([])
   })
 
   it("abandons generation instead of retrying when the failed request was cancelled", async () => {
@@ -251,19 +237,14 @@ describe("createTitleGenerationTask", () => {
     expect(findLogRecords(run.logs, FAILURE_LOG)).toEqual([])
   })
 
-  it("sends no event when another title was saved first", async () => {
+  it("sends no event when the conversation was renamed or deleted first", async () => {
     const run = await runTitleTask({
       generateTitle: scriptTitles("Hanoi trip"),
       updateConversationTitle: () => undefined
     })
 
     expect(run.events).toEqual([])
-    expect(
-      findLogRecords(
-        run.logs,
-        "Another turn already saved the conversation title"
-      )
-    ).toEqual([
+    expect(findLogRecords(run.logs, ALREADY_TITLED_LOG)).toEqual([
       expect.objectContaining({
         level: "debug",
         titleGenerationOutcome: "already-titled",
@@ -272,7 +253,7 @@ describe("createTitleGenerationTask", () => {
     ])
   })
 
-  it("logs a persistence failure and sends no event", async () => {
+  it("logs a storage failure and sends no event", async () => {
     const run = await runTitleTask({
       generateTitle: scriptTitles("Hanoi trip"),
       updateConversationTitle: () => {
@@ -293,40 +274,5 @@ describe("createTitleGenerationTask", () => {
         })
       })
     ])
-    expect(run.settled).toBe(true)
-  })
-
-  it("saves the title without an event when the client has disconnected", async () => {
-    let reply: ChatRouteReply | undefined
-    const run = await runTitleTask({
-      prepareReply: (liveReply) => {
-        reply = liveReply
-      },
-      generateTitle: vi.fn(async () => {
-        reply?.sse.close()
-        return "Hanoi trip"
-      })
-    })
-
-    expect(run.updateConversationTitle).toHaveBeenCalledWith("Hanoi trip")
-    expect(run.events).toEqual([])
-  })
-
-  it("logs a failed title event without rejecting", async () => {
-    const run = await runTitleTask({
-      generateTitle: scriptTitles("Hanoi trip"),
-      transport: { failingEventTypes: ["title"] }
-    })
-
-    expect(run.updateConversationTitle).toHaveBeenCalledWith("Hanoi trip")
-    expect(findLogRecords(run.logs, "Could not send the title event")).toEqual([
-      expect.objectContaining({
-        level: "debug",
-        err: expect.objectContaining({
-          message: "Injected SSE serialization failure for title"
-        })
-      })
-    ])
-    expect(run.settled).toBe(true)
   })
 })

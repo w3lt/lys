@@ -1,7 +1,6 @@
 import fastifySse from "@fastify/sse"
 import type { ChatApiRoute } from "@lys/protocol"
 import type { FastifyInstance } from "fastify"
-import * as z from "zod"
 import type {
   ChatRouteReply,
   ChatRouteRequest
@@ -10,9 +9,6 @@ import { createTestFastify, type TestFastify } from "./fastifyTestApp"
 
 /** Path of the chat-shaped SSE route installed by {@link addChatSseRoute}. */
 const CHAT_SSE_TEST_ROUTE_PATH = "/test/chat-sse"
-
-/** Event payload fields read to select an injected serialization failure. */
-const typedEventSchema = z.looseObject({ type: z.string() })
 
 /** One server-sent event decoded from a captured response body. */
 export type ReceivedSseEvent = Readonly<{
@@ -32,40 +28,17 @@ export type ChatSseRouteResponse = Readonly<{
   events: readonly ReceivedSseEvent[]
 }>
 
-/** Transport faults injected into the SSE plugin of a test application. */
-export type ChatSseTestAppOptions = Readonly<{
-  /**
-   * Event `type` values whose serialization throws, making `reply.sse.send`
-   * reject while the connection remains open.
-   */
-  failingEventTypes?: readonly string[]
-}>
-
 /**
  * Creates a test application with the SSE plugin used by the chat route.
  *
- * @param options - Event types whose transport write fails.
  * @returns The application and its captured logs.
  * @throws If the SSE plugin cannot be registered.
- * @remarks The serializer writes every other event as JSON, like the plugin
- * default. A failure is raised before any byte of that event is written.
+ * @remarks The plugin keeps its default serializer, which writes each event's
+ * data as JSON.
  */
-export async function createChatSseTestApp(
-  options: ChatSseTestAppOptions = {}
-): Promise<TestFastify> {
+export async function createChatSseTestApp(): Promise<TestFastify> {
   const testFastify = createTestFastify()
-  const failingEventTypes = new Set(options.failingEventTypes)
-  await testFastify.app.register(fastifySse, {
-    serializer: (data: unknown) => {
-      const typedEvent = typedEventSchema.safeParse(data)
-      if (typedEvent.success && failingEventTypes.has(typedEvent.data.type)) {
-        throw new Error(
-          `Injected SSE serialization failure for ${typedEvent.data.type}`
-        )
-      }
-      return JSON.stringify(data)
-    }
-  })
+  await testFastify.app.register(fastifySse)
   return testFastify
 }
 

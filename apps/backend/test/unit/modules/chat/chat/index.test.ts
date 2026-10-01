@@ -29,7 +29,10 @@ describe("updateFastifyWithChatRoute", () => {
     testApp.createConversationTurn.mockImplementation(() => {
       throw new ConversationNotFoundError()
     })
-    await updateFastifyWithChatRoute(testApp.app, CHAT_ROUTE_OPTIONS)
+    updateFastifyWithChatRoute(testApp.app, {
+      ...CHAT_ROUTE_OPTIONS,
+      generations: testApp.generations
+    })
     const conversationId = createFixtureUuidV7(404)
 
     const response = await requestChat(testApp.app, {
@@ -62,7 +65,10 @@ describe("updateFastifyWithChatRoute", () => {
     testApp.createConversationTurn.mockImplementation(() => {
       throw storageFailure
     })
-    await updateFastifyWithChatRoute(testApp.app, CHAT_ROUTE_OPTIONS)
+    updateFastifyWithChatRoute(testApp.app, {
+      ...CHAT_ROUTE_OPTIONS,
+      generations: testApp.generations
+    })
 
     const response = await requestChat(testApp.app, NEW_CONVERSATION_REQUEST)
 
@@ -90,7 +96,10 @@ describe("updateFastifyWithChatRoute", () => {
     ["an unknown field", { ...NEW_CONVERSATION_REQUEST, stream: true }]
   ])("rejects %s before storing a turn", async (_label, payload) => {
     const testApp = await createChatRouteTestApp()
-    await updateFastifyWithChatRoute(testApp.app, CHAT_ROUTE_OPTIONS)
+    updateFastifyWithChatRoute(testApp.app, {
+      ...CHAT_ROUTE_OPTIONS,
+      generations: testApp.generations
+    })
 
     const response = await requestChat(testApp.app, payload)
 
@@ -107,8 +116,16 @@ describe("updateFastifyWithChatRoute", () => {
       throw accessFailure
     })
 
-    await expect(
-      updateFastifyWithChatRoute(testApp.app, CHAT_ROUTE_OPTIONS)
-    ).rejects.toBe(accessFailure)
+    let failure: unknown
+    try {
+      updateFastifyWithChatRoute(testApp.app, {
+        ...CHAT_ROUTE_OPTIONS,
+        generations: testApp.generations
+      })
+    } catch (error) {
+      failure = error
+    }
+
+    expect(failure).toBe(accessFailure)
   })
 })

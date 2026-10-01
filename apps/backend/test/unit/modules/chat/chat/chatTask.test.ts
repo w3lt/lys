@@ -1,3 +1,4 @@
+import type { ChatGenerationEvent } from "@lys/protocol"
 import type { ChatCompletionChunk } from "openai/resources/index.mjs"
 import { describe, expect, it, vi } from "vitest"
 import type { CompleteChatOptions } from "../../../../../src/di/services/chatService"
@@ -5,25 +6,27 @@ import type { AssistantMessageCompletion } from "../../../../../src/di/services/
 import createChatTask, {
   type CreateChatTaskOptions
 } from "../../../../../src/modules/chat/chat/chatTask"
-import type { ChatRouteReply } from "../../../../../src/modules/chat/chat/share"
 import { ChatCompletionCancelledError } from "../../../../../src/utils/errors"
 import {
-  addChatSseRoute,
-  createChatSseTestApp,
-  requestChatSseRoute,
-  type ChatSseTestAppOptions
-} from "../../../support/chatSseRoute"
-import { findLogRecords } from "../../../support/fastifyTestApp"
+  createTestFastify,
+  findLogRecords
+} from "../../../support/fastifyTestApp"
 import { createChatCompletionChunk } from "../../../support/openAiEndpointFake"
 
-/** Event sent to the client after a chat failure that was not a cancellation. */
+/** Event sent to followers after a chat failure that was not a cancellation. */
 const CHAT_FAILURE_EVENT = Object.freeze({
-  event: "error",
-  data: { type: "error", message: "Chat completion failed. Please try again." }
+  type: "error",
+  message: "Chat completion failed. Please try again."
 })
 
-/** Log message written for every chat task failure. */
+/** Event sent to followers when the reply ended before it completed. */
+const INTERRUPTED_EVENT = Object.freeze({ type: "interrupted" })
+
+/** Log message written for a chat task failure that was not a cancellation. */
 const CHAT_FAILURE_LOG = "Chat completion stream failed"
+
+/** Log message written when the model stream ended because it was cancelled. */
+const CHAT_CANCELLED_LOG = "Chat completion was cancelled"
 
 /** Inputs forwarded to the model by every case. */
 const CHAT_INPUT = Object.freeze({
@@ -38,14 +41,10 @@ type ChatTaskScenario = Readonly<{
   completeChatStream: CreateChatTaskOptions["completeChatStream"]
   /** Cancellation owned by the case; a fresh signal by default. */
   abortSignal?: AbortSignal
-  /** Delta persistence result; persists every delta by default. */
+  /** Delta storage result; stores every delta by default. */
   updateAssistantMessageContent?: CreateChatTaskOptions["updateAssistantMessageContent"]
-  /** Terminal persistence result; persists every transition by default. */
+  /** Final-state storage result; stores every transition by default. */
   updateAssistantMessageState?: CreateChatTaskOptions["updateAssistantMessageState"]
-  /** Action run with the live reply just before the task starts. */
-  prepareReply?: (reply: ChatRouteReply) => void
-  /** Transport faults of the SSE connection. */
-  transport?: ChatSseTestAppOptions
 }>
 
 /**
@@ -63,14 +62,15 @@ function streamChunks(...chunks: ChatCompletionChunk[]) {
 }
 
 /**
- * Runs one chat task inside a live SSE request and records its effects.
+ * Runs one chat task to settlement and records its effects.
  *
- * @param scenario - Model, persistence, cancellation, and transport behavior.
- * @returns The received events, persisted deltas and states, captured logs,
- * and the task's settlement.
+ * @param scenario - Model, storage, and cancellation behavior.
+ * @returns The sent events, stored deltas and states, captured logs, and the
+ * task's settlement.
  */
 async function runChatTask(scenario: ChatTaskScenario) {
-  const { app, logs } = await createChatSseTestApp(scenario.transport)
+  const { app, logs } = createTestFastify()
+  const events: ChatGenerationEvent[] = []
   const persistedDeltas: string[] = []
   const persistedStates: AssistantMessageCompletion[] = []
   const updateAssistantMessageContent = vi.fn(
@@ -79,37 +79,31 @@ async function runChatTask(scenario: ChatTaskScenario) {
   const updateAssistantMessageState = vi.fn(
     scenario.updateAssistantMessageState ?? (() => true)
   )
-  let settlement:
-    | Readonly<{ status: "resolved" }>
-    | Readonly<{ status: "rejected"; error: unknown }>
-    | undefined
-  addChatSseRoute(app, async (request, reply) => {
-    scenario.prepareReply?.(reply)
-    settlement = await createChatTask({
-      ...CHAT_INPUT,
-      completeChatStream: scenario.completeChatStream,
-      abortSignal: scenario.abortSignal ?? new AbortController().signal,
-      request,
-      reply,
-      updateAssistantMessageContent: (content) => {
-        const persisted = updateAssistantMessageContent(content)
-        if (persisted) {
-          persistedDeltas.push(content)
-        }
-        return persisted
-      },
-      updateAssistantMessageState: (completion) => {
-        persistedStates.push(completion)
-        return updateAssistantMessageState(completion)
+  const settlement = await createChatTask({
+    ...CHAT_INPUT,
+    completeChatStream: scenario.completeChatStream,
+    abortSignal: scenario.abortSignal ?? new AbortController().signal,
+    sendEvent: (event) => {
+      events.push(event)
+    },
+    logger: app.log,
+    updateAssistantMessageContent: (content) => {
+      const persisted = updateAssistantMessageContent(content)
+      if (persisted) {
+        persistedDeltas.push(content)
       }
-    }).then(
-      () => ({ status: "resolved" as const }),
-      (error: unknown) => ({ status: "rejected" as const, error })
-    )
-  })
-  const response = await requestChatSseRoute(app)
+      return persisted
+    },
+    updateAssistantMessageState: (completion) => {
+      persistedStates.push(completion)
+      return updateAssistantMessageState(completion)
+    }
+  }).then(
+    () => ({ status: "resolved" as const }),
+    (error: unknown) => ({ status: "rejected" as const, error })
+  )
   return {
-    events: response.events,
+    events,
     persistedDeltas,
     persistedStates,
     updateAssistantMessageContent,
@@ -133,7 +127,7 @@ describe("createChatTask", () => {
     } satisfies CompleteChatOptions)
   })
 
-  it("persists and publishes each delta, then completes with the finish reason", async () => {
+  it("stores and sends each delta, then completes with the finish reason", async () => {
     const run = await runChatTask({
       completeChatStream: streamChunks(
         createChatCompletionChunk({ content: "Hi" }),
@@ -144,9 +138,9 @@ describe("createChatTask", () => {
 
     expect(run.persistedDeltas).toEqual(["Hi", " there"])
     expect(run.events).toEqual([
-      { event: "delta", data: { type: "delta", content: "Hi" } },
-      { event: "delta", data: { type: "delta", content: " there" } },
-      { event: "done", data: { type: "done", finishReason: "stop" } }
+      { type: "delta", content: "Hi" },
+      { type: "delta", content: " there" },
+      { type: "done", finishReason: "stop" }
     ])
     expect(run.persistedStates).toEqual([
       { status: "completed", finishReason: "stop" }
@@ -162,7 +156,10 @@ describe("createChatTask", () => {
     })
 
     expect(run.persistedDeltas).toEqual(["Cut"])
-    expect(run.events.map(({ event }) => event)).toEqual(["delta", "done"])
+    expect(run.events).toEqual([
+      { type: "delta", content: "Cut" },
+      { type: "done", finishReason: "length" }
+    ])
     expect(run.persistedStates).toEqual([
       { status: "completed", finishReason: "length" }
     ])
@@ -180,10 +177,10 @@ describe("createChatTask", () => {
     })
 
     expect(run.persistedDeltas).toEqual(["Hi"])
-    expect(run.events.map(({ event }) => event)).toEqual(["delta", "done"])
+    expect(run.events.map(({ type }) => type)).toEqual(["delta", "done"])
   })
 
-  it("stops without publishing a delta whose persistence was refused", async () => {
+  it("interrupts without sending a delta whose storage was refused", async () => {
     const run = await runChatTask({
       completeChatStream: streamChunks(
         createChatCompletionChunk({ content: "Hi" }),
@@ -199,13 +196,14 @@ describe("createChatTask", () => {
       ["deleted"]
     ])
     expect(run.events).toEqual([
-      { event: "delta", data: { type: "delta", content: "Hi" } }
+      { type: "delta", content: "Hi" },
+      INTERRUPTED_EVENT
     ])
     expect(run.persistedStates).toEqual([{ status: "interrupted" }])
     expect(run.settlement).toEqual({ status: "resolved" })
   })
 
-  it("sends no terminal event when the completed state was not persisted", async () => {
+  it("reports an interruption when a newer turn or a deletion already finalized the reply", async () => {
     const run = await runChatTask({
       completeChatStream: streamChunks(
         createChatCompletionChunk({ content: "Hi", finishReason: "stop" })
@@ -213,54 +211,14 @@ describe("createChatTask", () => {
       updateAssistantMessageState: () => false
     })
 
-    expect(run.events.map(({ event }) => event)).toEqual(["delta"])
-    expect(run.settlement).toEqual({ status: "resolved" })
-  })
-
-  it("persists completion without an event when the client has disconnected", async () => {
-    let reply: ChatRouteReply | undefined
-    const run = await runChatTask({
-      prepareReply: (liveReply) => {
-        reply = liveReply
-      },
-      completeChatStream: vi.fn(async () =>
-        (async function* () {
-          yield createChatCompletionChunk({ content: "Hi" })
-          reply?.sse.close()
-          yield createChatCompletionChunk({ finishReason: "stop" })
-        })()
-      )
-    })
-
-    expect(run.events.map(({ event }) => event)).toEqual(["delta"])
     expect(run.persistedStates).toEqual([
       { status: "completed", finishReason: "stop" }
     ])
-  })
-
-  it("keeps a persisted completion when the terminal event cannot be sent", async () => {
-    const run = await runChatTask({
-      completeChatStream: streamChunks(
-        createChatCompletionChunk({ content: "Hi", finishReason: "stop" })
-      ),
-      transport: { failingEventTypes: ["done"] }
-    })
-
-    expect(run.persistedStates).toEqual([
-      { status: "completed", finishReason: "stop" }
+    expect(run.events).toEqual([
+      { type: "delta", content: "Hi" },
+      INTERRUPTED_EVENT
     ])
     expect(run.settlement).toEqual({ status: "resolved" })
-    expect(
-      findLogRecords(run.logs, "Could not send the final chat event")
-    ).toEqual([
-      expect.objectContaining({
-        level: "debug",
-        err: expect.objectContaining({
-          message: "Injected SSE serialization failure for done"
-        })
-      })
-    ])
-    expect(findLogRecords(run.logs, CHAT_FAILURE_LOG)).toEqual([])
   })
 
   it("interrupts without contacting the model when already cancelled", async () => {
@@ -273,10 +231,10 @@ describe("createChatTask", () => {
 
     expect(completeChatStream).not.toHaveBeenCalled()
     expect(run.persistedStates).toEqual([{ status: "interrupted" }])
-    expect(run.events).toEqual([])
+    expect(run.events).toEqual([INTERRUPTED_EVENT])
   })
 
-  it("stops consuming the stream once cancelled and keeps the persisted text", async () => {
+  it("stops consuming the stream once cancelled and keeps the stored text", async () => {
     const cancellation = new AbortController()
     const run = await runChatTask({
       abortSignal: cancellation.signal,
@@ -291,7 +249,10 @@ describe("createChatTask", () => {
     })
 
     expect(run.persistedDeltas).toEqual(["Partial"])
-    expect(run.events.map(({ event }) => event)).toEqual(["delta"])
+    expect(run.events).toEqual([
+      { type: "delta", content: "Partial" },
+      INTERRUPTED_EVENT
+    ])
     expect(run.persistedStates).toEqual([{ status: "interrupted" }])
   })
 
@@ -308,10 +269,13 @@ describe("createChatTask", () => {
     })
 
     expect(run.persistedStates).toEqual([{ status: "interrupted" }])
-    expect(run.events.map(({ event }) => event)).toEqual(["delta"])
+    expect(run.events).toEqual([
+      { type: "delta", content: "Partial" },
+      INTERRUPTED_EVENT
+    ])
   })
 
-  it("interrupts without an error event when the model reports cancellation first", async () => {
+  it("interrupts with a debug log when the model reports cancellation before the task observes its abort", async () => {
     const run = await runChatTask({
       completeChatStream: vi.fn(async () => {
         throw new ChatCompletionCancelledError(new Error("aborted"))
@@ -319,8 +283,39 @@ describe("createChatTask", () => {
     })
 
     expect(run.persistedStates).toEqual([{ status: "interrupted" }])
-    expect(run.events).toEqual([])
+    expect(run.events).toEqual([INTERRUPTED_EVENT])
+    expect(findLogRecords(run.logs, CHAT_CANCELLED_LOG)).toEqual([
+      expect.objectContaining({ level: "debug" })
+    ])
+    expect(findLogRecords(run.logs, CHAT_FAILURE_LOG)).toEqual([])
     expect(run.settlement).toEqual({ status: "resolved" })
+  })
+
+  it("interrupts when the stream fails after its own abort", async () => {
+    const cancellation = new AbortController()
+    const run = await runChatTask({
+      abortSignal: cancellation.signal,
+      completeChatStream: vi.fn(async () =>
+        (async function* () {
+          yield createChatCompletionChunk({ content: "Partial" })
+          cancellation.abort()
+          throw new Error("socket hang up")
+        })()
+      )
+    })
+
+    expect(run.persistedStates).toEqual([{ status: "interrupted" }])
+    expect(run.events).toEqual([
+      { type: "delta", content: "Partial" },
+      INTERRUPTED_EVENT
+    ])
+    expect(findLogRecords(run.logs, CHAT_CANCELLED_LOG)).toEqual([
+      expect.objectContaining({
+        level: "debug",
+        err: expect.objectContaining({ message: "socket hang up" })
+      })
+    ])
+    expect(findLogRecords(run.logs, CHAT_FAILURE_LOG)).toEqual([])
   })
 
   it("fails with an error event and log when the model request is rejected", async () => {
@@ -341,7 +336,7 @@ describe("createChatTask", () => {
     expect(run.settlement).toEqual({ status: "resolved" })
   })
 
-  it("fails after the published text when the stream ends without a finish reason", async () => {
+  it("fails after the sent text when the stream ends without a finish reason", async () => {
     const run = await runChatTask({
       completeChatStream: streamChunks(
         createChatCompletionChunk({ content: "Partial" })
@@ -351,7 +346,7 @@ describe("createChatTask", () => {
     expect(run.persistedDeltas).toEqual(["Partial"])
     expect(run.persistedStates).toEqual([{ status: "failed" }])
     expect(run.events).toEqual([
-      { event: "delta", data: { type: "delta", content: "Partial" } },
+      { type: "delta", content: "Partial" },
       CHAT_FAILURE_EVENT
     ])
     expect(findLogRecords(run.logs, CHAT_FAILURE_LOG)).toEqual([
@@ -374,7 +369,7 @@ describe("createChatTask", () => {
     expect(run.events).toEqual([CHAT_FAILURE_EVENT])
   })
 
-  it("fails when a delta cannot be persisted", async () => {
+  it("fails without sending the delta when it cannot be stored", async () => {
     const run = await runChatTask({
       completeChatStream: streamChunks(
         createChatCompletionChunk({ content: "Hi" })
@@ -388,26 +383,7 @@ describe("createChatTask", () => {
     expect(run.events).toEqual([CHAT_FAILURE_EVENT])
   })
 
-  it("fails without an error event when the client has disconnected", async () => {
-    let reply: ChatRouteReply | undefined
-    const run = await runChatTask({
-      prepareReply: (liveReply) => {
-        reply = liveReply
-      },
-      completeChatStream: vi.fn(async () =>
-        (async function* () {
-          yield createChatCompletionChunk({ content: "Hi" })
-          reply?.sse.close()
-          throw new Error("socket hang up")
-        })()
-      )
-    })
-
-    expect(run.persistedStates).toEqual([{ status: "failed" }])
-    expect(run.events.map(({ event }) => event)).toEqual(["delta"])
-  })
-
-  it("rejects with both failures when the failed state cannot be persisted", async () => {
+  it("rejects with both failures and sends no event when the failed state cannot be stored", async () => {
     const streamFailure = new Error("model not loaded")
     const persistenceFailure = new Error("Conversation store is closed")
     const run = await runChatTask({

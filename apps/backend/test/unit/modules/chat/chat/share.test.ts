@@ -1,62 +1,54 @@
+import type { ChatGenerationEvent } from "@lys/protocol"
 import { describe, expect, it } from "vitest"
+import ReplyEventSubscription from "../../../../../src/modules/chat/chat/replyEventSubscription"
 import {
-  createAbortSignal,
-  createEventSender
+  createEventSender,
+  openReplyEventStream,
+  type ReplySse
 } from "../../../../../src/modules/chat/chat/share"
 import {
   addChatSseRoute,
   createChatSseTestApp,
   requestChatSseRoute
 } from "../../../support/chatSseRoute"
+import { flushMicrotasks } from "../../../support/microtasks"
 
-describe("createAbortSignal", () => {
-  it("stays unaborted while the SSE connection is open", async () => {
-    const { app } = await createChatSseTestApp()
-    let abortedWhileOpen: boolean | undefined
-    addChatSseRoute(app, async (_request, reply) => {
-      abortedWhileOpen = createAbortSignal(reply).aborted
-    })
+/** Connection capability read by {@link openReplyEventStream}. */
+type FollowedConnection = Pick<ReplySse, "onClose" | "isConnected">
 
-    await requestChatSseRoute(app)
-
-    expect(abortedWhileOpen).toBe(false)
-  })
-
-  it("aborts when the SSE connection closes", async () => {
-    const { app } = await createChatSseTestApp()
-    let signal: AbortSignal | undefined
-    addChatSseRoute(app, async (_request, reply) => {
-      signal = createAbortSignal(reply)
-      reply.sse.close()
-    })
-
-    await requestChatSseRoute(app)
-
-    expect(signal?.aborted).toBe(true)
-  })
-
-  it("aborts when the route handler finishes and the plugin closes the stream", async () => {
-    const { app } = await createChatSseTestApp()
-    let signal: AbortSignal | undefined
-    addChatSseRoute(app, async (_request, reply) => {
-      signal = createAbortSignal(reply)
-      await reply.sse.send({
-        event: "delta",
-        data: { type: "delta", content: "Hi" }
-      })
-    })
-
-    await requestChatSseRoute(app)
-
-    expect(signal?.aborted).toBe(true)
-  })
-})
+/**
+ * Creates an open connection whose closure the case triggers.
+ *
+ * @returns The connection and a trigger that marks it closed and runs the
+ * close callbacks registered so far.
+ * @remarks Like the SSE plugin, a callback registered after closure never
+ * runs.
+ */
+function createControlledConnection() {
+  const closeCallbacks: (() => void)[] = []
+  let isConnected = true
+  const connection: FollowedConnection = {
+    get isConnected() {
+      return isConnected
+    },
+    onClose: (callback) => {
+      closeCallbacks.push(callback)
+    }
+  }
+  return {
+    connection,
+    close: () => {
+      isConnected = false
+      for (const callback of closeCallbacks.splice(0)) callback()
+    }
+  }
+}
 
 describe("createEventSender", () => {
   it("sends each event named by its type with the event as JSON data", async () => {
     const { app } = await createChatSseTestApp()
     addChatSseRoute(app, async (_request, reply) => {
-      const sendEvent = createEventSender(reply)
+      const sendEvent = createEventSender<ChatGenerationEvent>(reply.sse)
       await sendEvent({ type: "delta", content: "Hi" })
       await sendEvent({ type: "done", finishReason: "stop" })
     })
@@ -75,7 +67,7 @@ describe("createEventSender", () => {
     let failure: unknown
     addChatSseRoute(app, async (_request, reply) => {
       reply.sse.close()
-      failure = await createEventSender(reply)({
+      failure = await createEventSender<ChatGenerationEvent>(reply.sse)({
         type: "delta",
         content: "late"
       }).catch((error: unknown) => error)
@@ -84,5 +76,88 @@ describe("createEventSender", () => {
     await requestChatSseRoute(app)
 
     expect(failure).toBeInstanceOf(Error)
+  })
+})
+
+describe("openReplyEventStream", () => {
+  it("ends once its follower ended and every accepted event was written", async () => {
+    const { app } = await createChatSseTestApp()
+    addChatSseRoute(app, async (_request, reply) => {
+      const subscription = new ReplyEventSubscription<ChatGenerationEvent>(
+        createEventSender(reply.sse)
+      )
+      const stream = openReplyEventStream(reply.sse, subscription)
+      subscription.handleStreamEvent({ type: "delta", content: "Hi" })
+      subscription.handleStreamEvent({ type: "done", finishReason: "stop" })
+      subscription.close()
+      await stream
+    })
+
+    const response = await requestChatSseRoute(app)
+
+    expect(response.events).toEqual([
+      { event: "delta", data: { type: "delta", content: "Hi" } },
+      { event: "done", data: { type: "done", finishReason: "stop" } }
+    ])
+  })
+
+  it("ends its follower when the connection closes", async () => {
+    const { app } = await createChatSseTestApp()
+    let acceptedAfterClose: boolean | undefined
+    addChatSseRoute(app, async (_request, reply) => {
+      const subscription = new ReplyEventSubscription<ChatGenerationEvent>(
+        createEventSender(reply.sse)
+      )
+      const stream = openReplyEventStream(reply.sse, subscription)
+      reply.sse.close()
+      await stream
+      acceptedAfterClose = subscription.handleStreamEvent({
+        type: "delta",
+        content: "late"
+      })
+    })
+
+    await requestChatSseRoute(app)
+
+    expect(acceptedAfterClose).toBe(false)
+  })
+
+  it("ends its follower at once when the connection closed before the stream opened", async () => {
+    const { app } = await createChatSseTestApp()
+    let acceptedAfterOpen: boolean | undefined
+    addChatSseRoute(app, async (_request, reply) => {
+      const subscription = new ReplyEventSubscription<ChatGenerationEvent>(
+        createEventSender(reply.sse)
+      )
+      reply.sse.close()
+      await openReplyEventStream(reply.sse, subscription)
+      acceptedAfterOpen = subscription.handleStreamEvent({
+        type: "delta",
+        content: "late"
+      })
+    })
+
+    await requestChatSseRoute(app)
+
+    expect(acceptedAfterOpen).toBe(false)
+  })
+
+  it("does not wait for a write still pending when the connection closes", async () => {
+    const { connection, close } = createControlledConnection()
+    const subscription = new ReplyEventSubscription<ChatGenerationEvent>(
+      () => new Promise<void>(() => {})
+    )
+    subscription.handleStreamEvent({ type: "delta", content: "stalled" })
+    let isSubscriptionClosed = false
+    void subscription.closed.then(() => {
+      isSubscriptionClosed = true
+    })
+
+    const stream = openReplyEventStream(connection, subscription)
+    close()
+
+    await expect(stream).resolves.toBeUndefined()
+    await flushMicrotasks()
+    expect(isSubscriptionClosed).toBe(false)
   })
 })

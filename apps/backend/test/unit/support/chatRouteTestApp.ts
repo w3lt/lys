@@ -4,6 +4,7 @@ import { onTestFinished, vi, type MockInstance } from "vitest"
 import ChatService from "../../../src/di/services/chatService"
 import SqliteConversationStore from "../../../src/di/services/conversationService"
 import type SqliteConversationTurns from "../../../src/di/services/conversationService/turns"
+import ReplyGenerationRegistry from "../../../src/modules/chat/chat/replyGenerationRegistry"
 import { createChatSseTestApp } from "./chatSseRoute"
 import type { TestFastify } from "./fastifyTestApp"
 
@@ -26,6 +27,11 @@ export type ChatRouteTestApp = TestFastify &
     completeChatStream: MockInstance<ChatService["completeChatStream"]>
     /** Title generation of `app.chatService`; rejects if it is ever called. */
     generateTitle: MockInstance<ChatService["generateTitle"]>
+    /**
+     * Registry a case passes to the chat route; disposed when the test
+     * finishes, before the store closes.
+     */
+    generations: ReplyGenerationRegistry
   }>
 
 /**
@@ -39,8 +45,9 @@ export type ChatRouteTestApp = TestFastify &
  * under test. Unconfigured turn creation throws and both chat-service calls
  * reject with `Unexpected chat route call: <name>`, so a case that reaches
  * persistence or the model without arranging it fails. No database row is
- * written and no HTTP request leaves the process. The in-memory store is
- * disposed when the test finishes.
+ * written and no HTTP request leaves the process. When the test finishes, the
+ * registry is disposed first, so every generation it holds has stored its
+ * final state before the in-memory store is disposed.
  */
 export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
   const testFastify = await createChatSseTestApp()
@@ -66,6 +73,10 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
   const generateTitle = vi
     .spyOn(chatService, "generateTitle")
     .mockImplementation(async () => rejectUnexpectedCall("generateTitle"))
+  const generations = new ReplyGenerationRegistry()
+  onTestFinished(async () => {
+    await generations[Symbol.asyncDispose]()
+  })
   testFastify.app.setValidatorCompiler(validatorCompiler)
   testFastify.app.decorate("conversationService", store)
   testFastify.app.decorate("chatService", chatService)
@@ -74,7 +85,8 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
     createTurnAccess,
     createConversationTurn,
     completeChatStream,
-    generateTitle
+    generateTitle,
+    generations
   })
 }
 

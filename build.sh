@@ -141,5 +141,5 @@ APP_BUNDLE="apps/desktop/src-tauri/target/release/bundle/macos/Lys.app"
 APP_PATH="/Applications/$(basename "$APP_BUNDLE")"
 
 # If we dont remove, the old app will be kept
-rm "$APP_PATH"
+rm -r "$APP_PATH"
 ditto "$APP_BUNDLE" "$APP_PATH"

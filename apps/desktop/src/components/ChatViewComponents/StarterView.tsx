@@ -1,6 +1,7 @@
 import { STARTER_PROMPTS } from "@/app/content"
 import { Button } from "@/components/ui/button"
 import { ArrowRight } from "lucide-react"
+import SpeakerAvatar from "./SpeakerAvatar"
 
 /** Properties accepted by {@link StarterView}. */
 interface StarterViewProps {
@@ -22,9 +23,7 @@ interface StarterViewProps {
 export default function StarterView({ onSend }: StarterViewProps) {
   return (
     <div className="chat-view__empty">
-      <div aria-hidden="true" className="chat-view__mark">
-        <span className="chat-view__mark-dot" />
-      </div>
+      <SpeakerAvatar speaker="lys" />
       <h1>Lys</h1>
       <p className="chat-view__eyebrow">Lysiptera Caliginia</p>
       <p className="chat-view__subtitle">

@@ -10,7 +10,7 @@ import updateFastifyWithChatReplyRoutes from "./chat/replyRoutes"
  * @param options - System prompt and title-generation attempt limit forwarded
  * to the chat route.
  * @returns A promise that resolves after child route registrars complete.
- * @throws If a child route registrar rejects.
+ * @throws If a child route registrar fails.
  * @remarks The registry is disposed in `preClose`, while SSE streams are
  * still open: every generation stores its final state and its followers end
  * before the server waits for requests and before services close SQLite.
@@ -23,6 +23,6 @@ export default async function registerChatRoutes(
   app.addHook("preClose", async () => {
     await generations[Symbol.asyncDispose]()
   })
-  await registerChatRoute(app, { ...options, generations })
+  registerChatRoute(app, { ...options, generations })
   await updateFastifyWithChatReplyRoutes(app, generations)
 }

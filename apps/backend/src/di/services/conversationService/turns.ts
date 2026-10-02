@@ -18,11 +18,12 @@ const UPDATE_ASSISTANT_MESSAGE_CONTENT_SQL = `UPDATE conversation_messages SET c
  * Borrows the shared database's write transactions to persist atomic turns and
  * their generation lifecycle.
  *
- * @remarks Owns no resource: the database's owner closes the connection, after
- * which every operation fails with `Database is closed`. Each call is one write
- * transaction that commits before it returns. Deleted rows and terminal replies
- * reject late writes through false return values. Concurrency model:
- * single-owner, synchronous on the backend's event loop.
+ * @remarks Invariant: once created, no reply left by an earlier process is
+ * still marked streaming. Owns no resource: the database's owner closes the
+ * connection, after which every operation fails with `Database is closed`.
+ * Each call is one write transaction that commits before it returns. Deleted
+ * rows and terminal replies reject late writes through false return values.
+ * Concurrency model: single-owner, synchronous on the backend's event loop.
  */
 export default class SqliteConversationTurns
   implements ConversationTurnWriter, GeneratedConversationTitleWriter
@@ -31,11 +32,39 @@ export default class SqliteConversationTurns
   readonly #databaseWriter: DatabaseWriter
 
   /**
-   * Retains borrowed write access without performing database work.
+   * Retains borrowed write access prepared by
+   * {@link SqliteConversationTurns.create}.
    * @param databaseWriter - Write transactions lent by the database owner.
    */
-  public constructor(databaseWriter: DatabaseWriter) {
+  private constructor(databaseWriter: DatabaseWriter) {
     this.#databaseWriter = databaseWriter
+  }
+
+  /**
+   * Settles the replies an earlier process left streaming and publishes turn
+   * access.
+   * @param databaseWriter - Write transactions lent by the database owner.
+   * @returns The ready turn access; it owns nothing to release.
+   * @throws If the database is closed or the recovery write fails; a failed
+   * recovery changes nothing.
+   * @remarks In one write transaction, marks every reply still streaming as
+   * interrupted with a fresh message timestamp, without changing its
+   * conversation's activity time or history order. Create one instance per
+   * process, before any reply streams: a later creation would also interrupt
+   * the replies streaming at that moment.
+   */
+  public static create(
+    databaseWriter: DatabaseWriter
+  ): SqliteConversationTurns {
+    databaseWriter.handleDatabaseWriteRequest((statements) =>
+      statements
+        .getStatement(
+          `UPDATE conversation_messages SET status = 'interrupted', updated_at = ?
+      WHERE role = 'assistant' AND status = 'streaming'`
+        )
+        .run(new Date().toISOString())
+    )
+    return new SqliteConversationTurns(databaseWriter)
   }
 
   /**
@@ -73,7 +102,7 @@ export default class SqliteConversationTurns
     return this.#databaseWriter.handleDatabaseWriteRequest(
       (statements) =>
         statements
-          .createStatement(UPDATE_ASSISTANT_MESSAGE_CONTENT_SQL)
+          .getStatement(UPDATE_ASSISTANT_MESSAGE_CONTENT_SQL)
           .run(content, new Date().toISOString(), assistantMessageId)
           .changes === 1
     )
@@ -95,7 +124,7 @@ export default class SqliteConversationTurns
     return this.#databaseWriter.handleDatabaseWriteRequest(
       (statements) =>
         statements
-          .createStatement(
+          .getStatement(
             `UPDATE conversation_messages SET status = ?, finish_reason = ?, updated_at = ?
       WHERE id = ? AND role = 'assistant' AND status = 'streaming'`
           )
@@ -126,7 +155,7 @@ export default class SqliteConversationTurns
     const changes = this.#databaseWriter.handleDatabaseWriteRequest(
       (statements) =>
         statements
-          .createStatement(
+          .getStatement(
             "UPDATE conversations SET title = ? WHERE id = ? AND title IS NULL"
           )
           .run(normalizedTitle, conversationId).changes

@@ -2,11 +2,10 @@ import type { FastifyInstance, LightMyRequestResponse } from "fastify"
 import { validatorCompiler } from "fastify-type-provider-zod"
 import { onTestFinished, vi, type MockInstance } from "vitest"
 import ChatService from "../../../src/di/services/chatService"
-import type SqliteConversationStore from "../../../src/di/services/conversationService"
 import type SqliteConversationTurns from "../../../src/di/services/conversationService/turns"
 import ReplyGenerationRegistry from "../../../src/modules/chat/chat/replyGenerationRegistry"
 import { createChatSseTestApp } from "./chatSseRoute"
-import { openConversationTestStore } from "./conversationDatabase"
+import { openConversationTestServices } from "./conversationDatabase"
 import type { TestFastify } from "./fastifyTestApp"
 
 /** Published path of the chat route. */
@@ -16,11 +15,9 @@ const CHAT_PATH = "/api/v1/chat"
 export type ChatRouteTestApp = TestFastify &
   Readonly<{
     /**
-     * Store access the route borrows at registration; returns
-     * {@link ChatRouteTestApp.turns} until a case replaces it.
+     * Turn creation of `app.conversationTurns`; throws until a case configures
+     * it.
      */
-    createTurnAccess: MockInstance<SqliteConversationStore["createTurnAccess"]>
-    /** Turn creation of the borrowed access; throws until a case configures it. */
     createConversationTurn: MockInstance<
       SqliteConversationTurns["createConversationTurn"]
     >
@@ -30,14 +27,14 @@ export type ChatRouteTestApp = TestFastify &
     generateTitle: MockInstance<ChatService["generateTitle"]>
     /**
      * Registry a case passes to the chat route; disposed when the test
-     * finishes, before the store's database closes.
+     * finishes, before the conversation database closes.
      */
     generations: ReplyGenerationRegistry
   }>
 
 /**
  * Creates an application with SSE and schema validation whose conversation
- * store and chat service are real instances with every call the chat route
+ * turns and chat service are real instances with every call the chat route
  * can reach replaced by a spy.
  *
  * @returns The application, captured logs, and the spies.
@@ -48,15 +45,11 @@ export type ChatRouteTestApp = TestFastify &
  * persistence or the model without arranging it fails. No database row is
  * written and no HTTP request leaves the process. When the test finishes, the
  * registry is disposed first, so every generation it holds has stored its
- * final state before the store's in-memory database is closed.
+ * final state before the in-memory conversation database is closed.
  */
 export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
   const testFastify = await createChatSseTestApp()
-  const { store } = openConversationTestStore()
-  const turns = store.createTurnAccess()
-  const createTurnAccess = vi
-    .spyOn(store, "createTurnAccess")
-    .mockReturnValue(turns)
+  const { turns } = openConversationTestServices()
   const createConversationTurn = vi
     .spyOn(turns, "createConversationTurn")
     .mockImplementation(() => handleUnexpectedCall("createConversationTurn"))
@@ -76,11 +69,10 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
     await generations[Symbol.asyncDispose]()
   })
   testFastify.app.setValidatorCompiler(validatorCompiler)
-  testFastify.app.decorate("conversationService", store)
+  testFastify.app.decorate("conversationTurns", turns)
   testFastify.app.decorate("chatService", chatService)
   return Object.freeze({
     ...testFastify,
-    createTurnAccess,
     createConversationTurn,
     completeChatStream,
     generateTitle,

@@ -272,7 +272,7 @@ describe("createConversationTurn", () => {
         )
       ).toThrow(ConversationNotFoundError)
       return statements
-        .createStatement("SELECT count(*) AS count FROM conversation_messages")
+        .getStatement("SELECT count(*) AS count FROM conversation_messages")
         .get()
     })
 

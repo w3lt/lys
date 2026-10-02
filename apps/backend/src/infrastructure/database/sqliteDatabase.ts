@@ -99,26 +99,21 @@ class SqliteTransactionControl {
 }
 
 /**
- * Borrows the shared connection to compile each distinct SQL text of store
- * operations once.
+ * Owns the shared connection's compiled statements, compiling each distinct SQL
+ * text of store operations once.
  *
- * @remarks Exposes statement compilation only, so a store cannot close the
- * connection or run unprepared SQL. Invariant: it holds at most one statement
- * per SQL text and compiles only while an operation holds the connection's
- * transaction. Resource ownership: the connection and every statement are
- * borrowed; {@link SqliteDatabase} owns the connection, whose closing
- * finalizes the statements. The statements grow by one per distinct SQL text,
- * which stores keep fixed. Concurrency model: single-owner, confined to the
- * database's event loop.
- * Implements {@link DatabaseStatementCompiler}.
+ * @remarks Invariant: it holds at most one statement per SQL text. Resource
+ * ownership: the connection is borrowed from {@link SqliteDatabase}, which
+ * owns this cache; every statement stays compiled until that owner closes the
+ * connection, which finalizes it. The statements grow by one per distinct SQL
+ * text, which stores keep fixed. Stores reach the cache only through a
+ * {@link SqliteStatementCompiler} lent to a running operation. Concurrency
+ * model: single-owner, confined to the database's event loop.
  */
-class SqliteStatementCompiler implements DatabaseStatementCompiler {
+class SqliteStatementCache {
   /** Connection borrowed from the owning {@link SqliteDatabase}. */
   readonly #database: DatabaseSync
-  /**
-   * Compiled statements by SQL text, borrowed from the connection, which
-   * finalizes them when it closes.
-   */
+  /** Compiled statements by SQL text, finalized when the connection closes. */
   readonly #statements = new Map<string, StatementSync>()
 
   /**
@@ -132,24 +127,79 @@ class SqliteStatementCompiler implements DatabaseStatementCompiler {
   }
 
   /**
-   * Implements {@link DatabaseStatementCompiler.createStatement}, compiling
-   * the SQL text on its first request.
+   * Gets the statement compiled for one SQL text, compiling it on the first
+   * request.
    *
-   * @param sql - Interface-defined SQL statement.
-   * @returns The interface-defined statement shared by every request of the
-   * same text.
-   * @throws The interface-defined closed, ended-operation, and compilation
-   * failures.
+   * @param sql - One fixed SQL statement.
+   * @returns The statement shared by every request for the same text.
+   * @throws If SQLite rejects the SQL; nothing is kept for that text.
    */
-  public createStatement(sql: string): StatementSync {
-    if (!this.#database.isOpen) throw new Error("Database is closed")
-    if (!this.#database.isTransaction)
-      throw new Error("Database operation has ended")
+  public getStatement(sql: string): StatementSync {
     const compiledStatement = this.#statements.get(sql)
     if (compiledStatement !== undefined) return compiledStatement
     const statement = this.#database.prepare(sql)
     this.#statements.set(sql, statement)
     return statement
+  }
+}
+
+/**
+ * Lends the shared statement cache to one store operation until that operation
+ * returns.
+ *
+ * @remarks Exposes statement compilation only, so a store cannot close the
+ * connection or run unprepared SQL. Invariant: it reaches the cache only while
+ * its operation runs; once disposed, every request fails. Resource ownership:
+ * the connection and the cache are borrowed from {@link SqliteDatabase}; this
+ * compiler owns only its lease on them for one operation, which disposal ends.
+ * Concurrency model: single-owner, confined to the database's event loop.
+ * Implements {@link DatabaseStatementCompiler}.
+ */
+class SqliteStatementCompiler implements DatabaseStatementCompiler, Disposable {
+  /** Connection borrowed from the owning {@link SqliteDatabase}. */
+  readonly #database: DatabaseSync
+  /** Compiled statements borrowed from the owning {@link SqliteDatabase}. */
+  readonly #statementCache: SqliteStatementCache
+  /** Whether the operation this compiler is lent to is still running. */
+  #isOperationRunning = true
+
+  /**
+   * Starts the lease for one operation that is about to run.
+   *
+   * @param database - Open connection holding the operation's transaction.
+   * @param statementCache - Compiled statements of `database`.
+   */
+  public constructor(
+    database: DatabaseSync,
+    statementCache: SqliteStatementCache
+  ) {
+    this.#database = database
+    this.#statementCache = statementCache
+  }
+
+  /**
+   * Implements {@link DatabaseStatementCompiler.getStatement} through the
+   * shared statement cache.
+   *
+   * @param sql - Interface-defined SQL statement.
+   * @returns The interface-defined statement shared by every request of the
+   * same text.
+   * @throws The interface-defined closed, ended-operation, and compilation
+   * failures; `Database is closed` takes precedence once both apply.
+   */
+  public getStatement(sql: string): StatementSync {
+    if (!this.#database.isOpen) throw new Error("Database is closed")
+    if (!this.#isOperationRunning)
+      throw new Error("Database operation has ended")
+    return this.#statementCache.getStatement(sql)
+  }
+
+  /**
+   * Ends the lease once its operation returns, so every later request fails;
+   * a repeated call changes nothing.
+   */
+  public [Symbol.dispose](): void {
+    this.#isOperationRunning = false
   }
 }
 
@@ -184,10 +234,10 @@ export default class SqliteDatabase
   /** Connection borrowed from the exclusively owned disposal stack. */
   readonly #database: DatabaseSync
   /**
-   * Statement-only view of the connection, holding its compiled statements,
-   * lent to every operation.
+   * Compiled statements of the connection, lent to each operation through its
+   * own {@link SqliteStatementCompiler}.
    */
-  readonly #statements: SqliteStatementCompiler
+  readonly #statementCache: SqliteStatementCache
   /** Permission read by the connection's authorizer, granted only by this owner. */
   readonly #transactionControl: SqliteTransactionControl
   /** Sole release owner and terminal admission guard. */
@@ -209,7 +259,7 @@ export default class SqliteDatabase
     lifetime: DisposableStack
   ) {
     this.#database = database
-    this.#statements = new SqliteStatementCompiler(database)
+    this.#statementCache = new SqliteStatementCache(database)
     this.#transactionControl = transactionControl
     this.#lifetime = lifetime
   }
@@ -345,7 +395,7 @@ export default class SqliteDatabase
       this.#transactionControl.handleTransactionControlRequest(() =>
         database.exec(boundary.begin)
       )
-      const result = operation(this.#statements)
+      const result = this.#handleDatabaseOperationRequest(operation)
       if (isPromiseLike(result))
         throw new Error("Database operations must be synchronous")
       this.#transactionControl.handleTransactionControlRequest(() =>
@@ -357,6 +407,24 @@ export default class SqliteDatabase
         handleTransactionFailure(database, failure)
       )
     }
+  }
+
+  /**
+   * Runs one operation with a statement compiler lent for that call only.
+   *
+   * @typeParam Result - Value produced by the operation.
+   * @param operation - Synchronous work running inside the open transaction.
+   * @returns The operation's result; the lent compiler has ended by then.
+   * @throws The operation's failure, after the lent compiler has ended.
+   */
+  #handleDatabaseOperationRequest<Result>(
+    operation: DatabaseOperation<Result>
+  ): Result {
+    using statements = new SqliteStatementCompiler(
+      this.#database,
+      this.#statementCache
+    )
+    return operation(statements)
   }
 }
 

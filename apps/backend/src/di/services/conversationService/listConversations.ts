@@ -50,7 +50,7 @@ export function listConversations(
   const { query, cursor, limit } = options
   const counts = conversationCountsSchema.parse(
     statements
-      .createStatement(
+      .getStatement(
         `SELECT
     (SELECT count(*) FROM conversations) AS storedCount,
     count(*) AS matchCount FROM conversations c WHERE ${matchingConversationSql}`
@@ -58,7 +58,7 @@ export function listConversations(
       .get({ query })
   )
   const rows = statements
-    .createStatement(
+    .getStatement(
       `SELECT c.id, c.title, c.created_at AS createdAt,
     c.updated_at AS updatedAt, p.role AS previewRole, p.content AS previewContent
     FROM conversations c LEFT JOIN conversation_messages p ON p.id = (

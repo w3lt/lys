@@ -12,28 +12,60 @@ import {
   vi
 } from "vitest"
 import * as z from "zod"
+import SqliteConversationHistoryReader from "../../../../../src/di/services/conversationService/historyReader"
+import SqliteConversationTurns from "../../../../../src/di/services/conversationService/turns"
 import { parseConversationListOptions } from "../../../../../src/di/services/conversationService/utils"
+import SqliteDatabase from "../../../../../src/infrastructure/database/sqliteDatabase"
 import { ConversationNotFoundError } from "../../../../../src/utils/errors"
-import { openConversationTestStore } from "../../../support/conversationDatabase"
+import {
+  openConversationTestServices,
+  openTestDatabase,
+  saveAssistantMessageRow,
+  saveConversationRow,
+  saveUserMessageRow
+} from "../../../support/conversationDatabase"
 import { createFixtureUuidV7 } from "../../../support/conversationFixtures"
 
 /** Wall-clock time observed by every case. */
 const NOW = "2026-03-04T05:06:07.890Z"
 
+/** Conversation stored before a recovery case creates the turn access. */
+const CONVERSATION_ID = createFixtureUuidV7(1)
+
 /**
- * Opens an isolated in-memory store owned by the current test.
+ * Stores a conversation whose last activity is a reply in the given state.
  *
- * @returns The test-owned database, the store's turn access, and the history
- * reader and editor that observe and edit its conversations.
+ * @param database - Migrated test database.
+ * @param reply - Stored state of the reply.
  */
-function openStore() {
-  const { database, store } = openConversationTestStore()
-  return {
-    database,
-    turns: store.createTurnAccess(),
-    history: store.createHistoryReader(),
-    editor: store.createHistoryEditor()
-  }
+function saveConversationWithReply(
+  database: SqliteDatabase,
+  reply:
+    | Readonly<{ status: "streaming" | "failed" }>
+    | Readonly<{ status: "completed"; finishReason: "stop" }>
+): void {
+  saveConversationRow(database, {
+    id: CONVERSATION_ID,
+    title: "Trip plan",
+    systemPrompt: "You are Lys.",
+    createdAt: "2025-01-01T00:00:00.000Z"
+  })
+  saveUserMessageRow(database, {
+    id: createFixtureUuidV7(10),
+    conversationId: CONVERSATION_ID,
+    content: "Hello",
+    createdAt: "2025-01-01T00:00:01.000Z"
+  })
+  saveAssistantMessageRow(database, {
+    id: createFixtureUuidV7(11),
+    conversationId: CONVERSATION_ID,
+    model: "qwen/qwen3-8b",
+    content: "Partial",
+    finishReason: null,
+    ...reply,
+    createdAt: "2025-01-01T00:00:02.000Z",
+    updatedAt: "2025-01-01T00:00:02.000Z"
+  })
 }
 
 describe("SqliteConversationTurns", () => {
@@ -46,9 +78,64 @@ describe("SqliteConversationTurns", () => {
     vi.useRealTimers()
   })
 
+  describe("create", () => {
+    it("marks a reply left streaming as interrupted without changing activity time", () => {
+      const database = openTestDatabase()
+      saveConversationWithReply(database, { status: "streaming" })
+
+      SqliteConversationTurns.create(database)
+
+      expect(
+        SqliteConversationHistoryReader.create(database).getConversation(
+          CONVERSATION_ID
+        )
+      ).toMatchObject({
+        updatedAt: "2025-01-01T00:00:02.000Z",
+        messages: [
+          { content: "Hello" },
+          {
+            id: createFixtureUuidV7(11),
+            content: "Partial",
+            status: "interrupted",
+            finishReason: null,
+            updatedAt: NOW
+          }
+        ]
+      })
+    })
+
+    it.each([
+      { status: "completed", finishReason: "stop" } as const,
+      { status: "failed" } as const
+    ])("leaves a $status reply unchanged", (reply) => {
+      const database = openTestDatabase()
+      saveConversationWithReply(database, reply)
+
+      SqliteConversationTurns.create(database)
+
+      expect(
+        SqliteConversationHistoryReader.create(database).getConversation(
+          CONVERSATION_ID
+        )?.messages[1]
+      ).toMatchObject({
+        status: reply.status,
+        updatedAt: "2025-01-01T00:00:02.000Z"
+      })
+    })
+
+    it("refuses a closed database", () => {
+      const database = SqliteDatabase.open(":memory:")
+      database[Symbol.dispose]()
+
+      expect(() => SqliteConversationTurns.create(database)).toThrow(
+        "Database is closed"
+      )
+    })
+  })
+
   describe("createConversationTurn", () => {
     it("commits a new conversation with its user and assistant messages", () => {
-      const { turns, history } = openStore()
+      const { turns, history } = openConversationTestServices()
 
       const turn = turns.createConversationTurn({
         userMessageContent: "Hello",
@@ -69,7 +156,7 @@ describe("SqliteConversationTurns", () => {
     })
 
     it("leaves no conversation behind when the new turn is invalid", () => {
-      const { turns, history } = openStore()
+      const { turns, history } = openConversationTestServices()
 
       expect(() =>
         turns.createConversationTurn({
@@ -85,7 +172,7 @@ describe("SqliteConversationTurns", () => {
     })
 
     it("rejects an absent conversation and remains usable for the next turn", () => {
-      const { turns, history } = openStore()
+      const { turns, history } = openConversationTestServices()
 
       expect(() =>
         turns.createConversationTurn({
@@ -109,7 +196,7 @@ describe("SqliteConversationTurns", () => {
 
   describe("updateAssistantMessageContent", () => {
     it("appends deltas to a streaming reply in call order", () => {
-      const { turns, history } = openStore()
+      const { turns, history } = openConversationTestServices()
       const turn = turns.createConversationTurn({
         userMessageContent: "Hello",
         model: "qwen/qwen3-8b",
@@ -134,8 +221,7 @@ describe("SqliteConversationTurns", () => {
         rmSync(directory, { recursive: true, force: true })
       })
       const databaseFilePath = join(directory, "lys_db.sqlite")
-      const { store } = openConversationTestStore(databaseFilePath)
-      const turns = store.createTurnAccess()
+      const { turns } = openConversationTestServices(databaseFilePath)
       const turn = turns.createConversationTurn({
         userMessageContent: "Hello",
         model: "qwen/qwen3-8b",
@@ -158,7 +244,7 @@ describe("SqliteConversationTurns", () => {
     })
 
     it("returns false for a reply that is already finalized and keeps its text", () => {
-      const { turns, history } = openStore()
+      const { turns, history } = openConversationTestServices()
       const turn = turns.createConversationTurn({
         userMessageContent: "Hello",
         model: "qwen/qwen3-8b",
@@ -179,7 +265,7 @@ describe("SqliteConversationTurns", () => {
     })
 
     it("returns false for a reply that is not stored", () => {
-      const { turns } = openStore()
+      const { turns } = openConversationTestServices()
 
       expect(
         turns.updateAssistantMessageContent(createFixtureUuidV7(9), "Hi")
@@ -187,7 +273,7 @@ describe("SqliteConversationTurns", () => {
     })
 
     it("rejects an empty delta without changing the reply", () => {
-      const { turns, history } = openStore()
+      const { turns, history } = openConversationTestServices()
       const turn = turns.createConversationTurn({
         userMessageContent: "Hello",
         model: "qwen/qwen3-8b",
@@ -209,7 +295,7 @@ describe("SqliteConversationTurns", () => {
 
   describe("updateAssistantMessageState", () => {
     it("completes a streaming reply with its finish reason", () => {
-      const { turns, history } = openStore()
+      const { turns, history } = openConversationTestServices()
       const turn = turns.createConversationTurn({
         userMessageContent: "Hello",
         model: "qwen/qwen3-8b",
@@ -231,7 +317,7 @@ describe("SqliteConversationTurns", () => {
     it.each(["interrupted", "failed"] as const)(
       "stores %s without a finish reason",
       (status) => {
-        const { turns, history } = openStore()
+        const { turns, history } = openConversationTestServices()
         const turn = turns.createConversationTurn({
           userMessageContent: "Hello",
           model: "qwen/qwen3-8b",
@@ -251,7 +337,7 @@ describe("SqliteConversationTurns", () => {
     )
 
     it("finalizes a reply only once", () => {
-      const { turns, history } = openStore()
+      const { turns, history } = openConversationTestServices()
       const turn = turns.createConversationTurn({
         userMessageContent: "Hello",
         model: "qwen/qwen3-8b",
@@ -274,7 +360,7 @@ describe("SqliteConversationTurns", () => {
     })
 
     it("returns false for a reply that is not stored", () => {
-      const { turns } = openStore()
+      const { turns } = openConversationTestServices()
 
       expect(
         turns.updateAssistantMessageState(createFixtureUuidV7(9), {
@@ -286,7 +372,7 @@ describe("SqliteConversationTurns", () => {
 
   describe("updateGeneratedConversationTitle", () => {
     it("saves the trimmed title of an untitled conversation", () => {
-      const { turns, history } = openStore()
+      const { turns, history } = openConversationTestServices()
       const turn = turns.createConversationTurn({
         userMessageContent: "Hello",
         model: "qwen/qwen3-8b",
@@ -306,7 +392,7 @@ describe("SqliteConversationTurns", () => {
     })
 
     it("keeps an existing title and returns undefined", () => {
-      const { turns, history, editor } = openStore()
+      const { turns, history, editor } = openConversationTestServices()
       const turn = turns.createConversationTurn({
         userMessageContent: "Hello",
         model: "qwen/qwen3-8b",
@@ -324,7 +410,7 @@ describe("SqliteConversationTurns", () => {
     })
 
     it("returns undefined for a conversation that is not stored", () => {
-      const { turns } = openStore()
+      const { turns } = openConversationTestServices()
 
       expect(
         turns.updateGeneratedConversationTitle(createFixtureUuidV7(9), "Title")
@@ -332,7 +418,7 @@ describe("SqliteConversationTurns", () => {
     })
 
     it("rejects a blank title without saving it", () => {
-      const { turns, history } = openStore()
+      const { turns, history } = openConversationTestServices()
       const turn = turns.createConversationTurn({
         userMessageContent: "Hello",
         model: "qwen/qwen3-8b",
@@ -351,7 +437,7 @@ describe("SqliteConversationTurns", () => {
   })
 
   it("rejects every operation after the database closes", () => {
-    const { database, turns } = openStore()
+    const { database, turns } = openConversationTestServices()
     const turn = turns.createConversationTurn({
       userMessageContent: "Hello",
       model: "qwen/qwen3-8b",

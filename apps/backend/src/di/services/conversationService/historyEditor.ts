@@ -44,7 +44,7 @@ export default class SqliteConversationHistoryEditor
     const parsed = updateConversationTitleApi.body.parse({ title })
     const row = this.#databaseWriter.handleDatabaseWriteRequest((statements) =>
       statements
-        .createStatement(
+        .getStatement(
           `UPDATE conversations SET title = ? WHERE id = ?
       RETURNING id, title, system_prompt AS systemPrompt, created_at AS createdAt, updated_at AS updatedAt`
         )
@@ -65,7 +65,7 @@ export default class SqliteConversationHistoryEditor
     return this.#databaseWriter.handleDatabaseWriteRequest(
       (statements) =>
         statements
-          .createStatement("DELETE FROM conversations WHERE id = ?")
+          .getStatement("DELETE FROM conversations WHERE id = ?")
           .run(conversationId).changes === 1
     )
   }

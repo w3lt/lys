@@ -1,6 +1,8 @@
 import { onTestFinished } from "vitest"
-import SqliteConversationStore from "../../../src/di/services/conversationService"
+import SqliteConversationHistoryEditor from "../../../src/di/services/conversationService/historyEditor"
+import SqliteConversationHistoryReader from "../../../src/di/services/conversationService/historyReader"
 import { calculateConversationSearchMatch } from "../../../src/di/services/conversationService/listConversations"
+import SqliteConversationTurns from "../../../src/di/services/conversationService/turns"
 import type { DatabaseWriter } from "../../../src/infrastructure/database/databaseTransactions"
 import SqliteDatabase from "../../../src/infrastructure/database/sqliteDatabase"
 
@@ -53,10 +55,13 @@ export type AssistantMessageRowFixture = Readonly<{
  *
  * @param databaseFilePath - SQLite location; an isolated in-memory database
  * when omitted.
- * @returns The open database. It is closed when the test finishes; closing is
- * idempotent, so a case may close it earlier.
+ * @returns The open database, with no application SQL function registered. It
+ * is closed when the test finishes; closing is idempotent, so a case may close
+ * it earlier.
  */
-function openTestDatabase(databaseFilePath = ":memory:"): SqliteDatabase {
+export function openTestDatabase(
+  databaseFilePath = ":memory:"
+): SqliteDatabase {
   const database = SqliteDatabase.open(databaseFilePath)
   onTestFinished(() => {
     database[Symbol.dispose]()
@@ -69,8 +74,8 @@ function openTestDatabase(databaseFilePath = ":memory:"): SqliteDatabase {
  * current test.
  *
  * @returns A database with foreign keys enforced and the `contains_search`
- * function registered, as the conversation store provides to its queries. It
- * is closed when the test finishes.
+ * function registered, as the history reader provides to its queries. It is
+ * closed when the test finishes.
  */
 export function openConversationTestDatabase(): SqliteDatabase {
   const database = openTestDatabase()
@@ -81,32 +86,34 @@ export function openConversationTestDatabase(): SqliteDatabase {
   return database
 }
 
-/** A conversation store and the test-owned database it borrows. */
-export type ConversationTestStore = Readonly<{
+/** The conversation adapters over one test-owned database. */
+export type ConversationTestServices = Readonly<{
   /** Database closed when the test finishes; a case may close it earlier. */
   database: SqliteDatabase
-  /** Ready store over {@link ConversationTestStore.database}. */
-  store: SqliteConversationStore
+  /** Ready turn persistence over {@link ConversationTestServices.database}. */
+  turns: SqliteConversationTurns
+  /** Ready history reading over {@link ConversationTestServices.database}. */
+  history: SqliteConversationHistoryReader
+  /** History editing over {@link ConversationTestServices.database}. */
+  editor: SqliteConversationHistoryEditor
 }>
 
 /**
- * Creates a conversation store over its own backend database, owned by the
- * current test.
+ * Creates the conversation adapters over their own backend database, owned by
+ * the current test, in the order the composition root creates them.
  *
  * @param databaseFilePath - SQLite location; an isolated in-memory database
  * when omitted.
- * @returns The ready store and the database it borrows.
+ * @returns The ready adapters and the database they borrow.
  */
-export function openConversationTestStore(
+export function openConversationTestServices(
   databaseFilePath: string = ":memory:"
-): ConversationTestStore {
+): ConversationTestServices {
   const database = openTestDatabase(databaseFilePath)
-  const store = SqliteConversationStore.create({
-    databaseReader: database,
-    databaseWriter: database,
-    databaseFunctionRegistry: database
-  })
-  return { database, store }
+  const turns = SqliteConversationTurns.create(database)
+  const history = SqliteConversationHistoryReader.create(database)
+  const editor = new SqliteConversationHistoryEditor(database)
+  return { database, turns, history, editor }
 }
 
 /**
@@ -121,7 +128,7 @@ export function saveConversationRow(
 ): void {
   database.handleDatabaseWriteRequest((statements) => {
     statements
-      .createStatement(
+      .getStatement(
         `INSERT INTO conversations (id, title, system_prompt, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?)`
       )
@@ -145,7 +152,7 @@ export function saveUserMessageRow(
 ): void {
   database.handleDatabaseWriteRequest((statements) => {
     statements
-      .createStatement(
+      .getStatement(
         `INSERT INTO conversation_messages (id, conversation_id, role, content, created_at)
       VALUES (?, ?, 'user', ?, ?)`
       )
@@ -166,7 +173,7 @@ export function saveAssistantMessageRow(
 ): void {
   database.handleDatabaseWriteRequest((statements) => {
     statements
-      .createStatement(
+      .getStatement(
         `INSERT INTO conversation_messages
       (id, conversation_id, role, model, content, status, finish_reason, created_at, updated_at)
       VALUES (?, ?, 'assistant', ?, ?, ?, ?, ?, ?)`

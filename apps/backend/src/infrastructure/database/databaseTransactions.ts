@@ -13,7 +13,8 @@ import type { SQLInputValue, SQLOutputValue, StatementSync } from "node:sqlite"
  */
 export interface DatabaseStatementCompiler {
   /**
-   * Returns the shared connection's compiled statement for one SQL text.
+   * Gets the shared connection's statement for one SQL text, compiling it on
+   * the first request.
    *
    * @param sql - One fixed SQL statement, not text built from runtime values;
    * its values are supplied as bound parameters when it runs. Each distinct
@@ -34,7 +35,7 @@ export interface DatabaseStatementCompiler {
    * transaction-control statement, or the `query_only` pragma. The running
    * transaction is unchanged.
    */
-  createStatement(sql: string): StatementSync
+  getStatement(sql: string): StatementSync
 }
 
 /**
@@ -109,8 +110,8 @@ export interface DatabaseReader {
 /**
  * Runs store work in one atomic write transaction on the shared database.
  *
- * @remarks Consumed by conversation history edits, turn persistence, and the
- * conversation store's startup recovery. Lent by the database owner without the
+ * @remarks Consumed by conversation history edits and by turn persistence,
+ * including its startup recovery. Lent by the database owner without the
  * authority to close the connection. Concurrency model: single-owner; each
  * call completes synchronously on the owner's event loop and is never nested
  * inside another operation. Every implementation fails with
@@ -149,8 +150,8 @@ export interface DatabaseWriter {
 /**
  * Adds application SQL functions to the shared database connection.
  *
- * @remarks Consumed by the conversation store, which registers its search
- * function when it is created. Lent by the database owner without the
+ * @remarks Consumed by the conversation history reader, which registers its
+ * search function when it is created. Lent by the database owner without the
  * authority to close the connection. Concurrency model: single-owner.
  */
 export interface DatabaseFunctionRegistry {

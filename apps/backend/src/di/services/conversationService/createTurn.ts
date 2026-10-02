@@ -30,7 +30,7 @@ function createConversation(
     updatedAt: now
   })
   statements
-    .createStatement(
+    .getStatement(
       `INSERT INTO conversations (id, title, system_prompt, created_at, updated_at)
     VALUES (?, NULL, ?, ?, ?)`
     )
@@ -53,7 +53,7 @@ function updateSupersededAssistantMessages(
 ): void {
   const updatedAt = new Date().toISOString()
   statements
-    .createStatement(
+    .getStatement(
       `UPDATE conversation_messages SET status = 'interrupted', updated_at = ?
     WHERE conversation_id = ? AND role = 'assistant' AND status = 'streaming'`
     )
@@ -102,13 +102,13 @@ export function createConversationTurn(
     updatedAt: now
   })
   statements
-    .createStatement(
+    .getStatement(
       `INSERT INTO conversation_messages (id, conversation_id, role, content, created_at)
     VALUES (?, ?, 'user', ?, ?)`
     )
     .run(userMessage.id, conversation.id, userMessage.content, now)
   statements
-    .createStatement(
+    .getStatement(
       `INSERT INTO conversation_messages
     (id, conversation_id, role, model, content, status, finish_reason, created_at, updated_at)
     VALUES (?, ?, 'assistant', ?, '', 'streaming', NULL, ?, ?)`

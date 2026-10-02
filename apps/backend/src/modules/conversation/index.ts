@@ -22,15 +22,14 @@ import { createConversationNotFoundProblem } from "./notFound"
  * Installs all protocol-defined history endpoints on a configured backend.
  * @param app - Application with validation and conversation persistence installed.
  * @returns A promise resolving after route registration.
- * @throws If acquiring the history reader or editor, or route registration,
- * fails.
+ * @throws If route registration fails.
  */
 export default async function updateFastifyWithConversationRoutes(
   app: FastifyInstance
 ): Promise<void> {
   app.setSerializerCompiler(serializerCompiler)
-  const historyReader = app.conversationService.createHistoryReader()
-  const historyEditor = app.conversationService.createHistoryEditor()
+  const historyReader = app.conversationHistoryReader
+  const historyEditor = app.conversationHistoryEditor
   app.route<ListConversationsApiRoute>({
     method: listConversationsApi.method,
     url: listConversationsApi.path,

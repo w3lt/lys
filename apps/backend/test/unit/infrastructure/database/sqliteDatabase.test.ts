@@ -104,7 +104,7 @@ describe("SqliteDatabase", () => {
       createItemsTable(first)
       first.handleDatabaseWriteRequest((statements) => {
         statements
-          .createStatement("INSERT INTO items (name) VALUES ('kept')")
+          .getStatement("INSERT INTO items (name) VALUES ('kept')")
           .run()
       })
       first[Symbol.dispose]()
@@ -127,7 +127,7 @@ describe("SqliteDatabase", () => {
       expect(() =>
         database.handleDatabaseWriteRequest((statements) =>
           statements
-            .createStatement(
+            .getStatement(
               `INSERT INTO conversation_messages (id, conversation_id, role, content, created_at)
               VALUES ('message', 'missing', 'user', 'Hello', '2026-01-01T00:00:00.000Z')`
             )
@@ -180,7 +180,7 @@ describe("SqliteDatabase", () => {
 
       database.handleDatabaseWriteRequest((statements) => {
         statements
-          .createStatement("INSERT INTO items (name) VALUES ('kept')")
+          .getStatement("INSERT INTO items (name) VALUES ('kept')")
           .run()
       })
 
@@ -205,7 +205,7 @@ describe("SqliteDatabase", () => {
       otherConnection.exec("ROLLBACK")
       database.handleDatabaseWriteRequest((statements) => {
         statements
-          .createStatement("INSERT INTO items (name) VALUES ('after')")
+          .getStatement("INSERT INTO items (name) VALUES ('after')")
           .run()
       })
       expect(listItemNames(database)).toEqual(["after"])
@@ -216,7 +216,7 @@ describe("SqliteDatabase", () => {
       const database = openOwnedDatabase(databaseFilePath)
       createItemsTable(database)
       const insertItem = database.handleDatabaseReadRequest((statements) =>
-        statements.createStatement("INSERT INTO items (name) VALUES (?)")
+        statements.getStatement("INSERT INTO items (name) VALUES (?)")
       )
       const otherConnection = openObserverConnection(databaseFilePath)
       otherConnection.exec("BEGIN IMMEDIATE")
@@ -229,9 +229,7 @@ describe("SqliteDatabase", () => {
         /attempt to write a readonly database/
       )
       database.handleDatabaseWriteRequest((statements) => {
-        expect(() => statements.createStatement("BEGIN")).toThrow(
-          /not authorized/
-        )
+        expect(() => statements.getStatement("BEGIN")).toThrow(/not authorized/)
       })
       expect(listItemNames(database)).toEqual([])
     })
@@ -242,7 +240,7 @@ describe("SqliteDatabase", () => {
       const database = openOwnedDatabase()
       createItemsTable(database)
       const insertItem = database.handleDatabaseReadRequest((statements) =>
-        statements.createStatement("INSERT INTO items (name) VALUES (?)")
+        statements.getStatement("INSERT INTO items (name) VALUES (?)")
       )
       const operation = vi.fn()
 

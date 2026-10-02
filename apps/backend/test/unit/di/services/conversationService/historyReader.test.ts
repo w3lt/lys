@@ -1,29 +1,31 @@
 import { describe, expect, it } from "vitest"
 import * as z from "zod"
 import SqliteConversationHistoryReader from "../../../../../src/di/services/conversationService/historyReader"
+import SqliteConversationTurns from "../../../../../src/di/services/conversationService/turns"
 import { parseConversationListOptions } from "../../../../../src/di/services/conversationService/utils"
+import SqliteDatabase from "../../../../../src/infrastructure/database/sqliteDatabase"
 import {
   openConversationTestDatabase,
-  openConversationTestStore,
+  openConversationTestServices,
+  openTestDatabase,
   saveConversationRow
 } from "../../../support/conversationDatabase"
 import { createFixtureUuidV7 } from "../../../support/conversationFixtures"
 
 /**
- * Opens an isolated in-memory store with one committed turn.
+ * Opens isolated in-memory conversation adapters with one committed turn.
  *
  * @returns The test-owned database, turn access, history reader, and the
  * committed turn.
  */
-function openStoreWithTurn() {
-  const { database, store } = openConversationTestStore()
-  const turns = store.createTurnAccess()
+function openHistoryWithTurn() {
+  const { database, turns, history } = openConversationTestServices()
   const turn = turns.createConversationTurn({
     userMessageContent: "Hello",
     model: "qwen/qwen3-8b",
     systemPrompt: "You are Lys."
   })
-  return { database, turns, history: store.createHistoryReader(), turn }
+  return { database, turns, history, turn }
 }
 
 /**
@@ -43,14 +45,42 @@ function createHistoryOverInvalidRow() {
   return {
     database,
     conversationId,
-    history: new SqliteConversationHistoryReader(database)
+    history: SqliteConversationHistoryReader.create(database)
   }
 }
 
 describe("SqliteConversationHistoryReader", () => {
+  describe("create", () => {
+    it("registers case-insensitive conversation search for its list queries", () => {
+      const database = openTestDatabase()
+      SqliteConversationTurns.create(database).createConversationTurn({
+        userMessageContent: "Plan the TRIP",
+        model: "qwen/qwen3-8b",
+        systemPrompt: "You are Lys."
+      })
+
+      const history = SqliteConversationHistoryReader.create(database)
+
+      expect(
+        history.listConversations(
+          parseConversationListOptions({ query: "trip" })
+        ).matchCount
+      ).toBe(1)
+    })
+
+    it("refuses a closed database", () => {
+      const database = SqliteDatabase.open(":memory:")
+      database[Symbol.dispose]()
+
+      expect(() => SqliteConversationHistoryReader.create(database)).toThrow(
+        "Database is closed"
+      )
+    })
+  })
+
   describe("getConversation", () => {
     it("reads the committed conversation and transcript", () => {
-      const { history, turn } = openStoreWithTurn()
+      const { history, turn } = openHistoryWithTurn()
 
       expect(history.getConversation(turn.conversation.id)).toMatchObject({
         id: turn.conversation.id,
@@ -59,13 +89,13 @@ describe("SqliteConversationHistoryReader", () => {
     })
 
     it("returns undefined for an absent conversation", () => {
-      const { history } = openStoreWithTurn()
+      const { history } = openHistoryWithTurn()
 
       expect(history.getConversation(createFixtureUuidV7(9))).toBeUndefined()
     })
 
     it("ends its read snapshot so later writes can begin", () => {
-      const { history, turns, turn } = openStoreWithTurn()
+      const { history, turns, turn } = openHistoryWithTurn()
       history.getConversation(turn.conversation.id)
 
       expect(() =>
@@ -92,7 +122,7 @@ describe("SqliteConversationHistoryReader", () => {
 
   describe("listConversations", () => {
     it("lists committed conversations", () => {
-      const { history, turn } = openStoreWithTurn()
+      const { history, turn } = openHistoryWithTurn()
       const stored = history.getConversation(turn.conversation.id)
 
       expect(history.listConversations(parseConversationListOptions())).toEqual(
@@ -127,7 +157,7 @@ describe("SqliteConversationHistoryReader", () => {
   })
 
   it("rejects every operation after the database closes", () => {
-    const { database, history, turn } = openStoreWithTurn()
+    const { database, history, turn } = openHistoryWithTurn()
     expect(history.getConversation(turn.conversation.id)).toBeDefined()
     expect(
       history.listConversations(parseConversationListOptions()).storedCount

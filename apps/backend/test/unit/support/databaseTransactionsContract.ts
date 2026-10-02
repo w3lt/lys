@@ -55,7 +55,7 @@ const REFUSED_CHANGE_FAILURE = /attempt to write a readonly database/
  */
 export function createItemsTable(database: DatabaseWriter): void {
   database.handleDatabaseWriteRequest((statements) => {
-    statements.createStatement("CREATE TABLE items (name TEXT NOT NULL)").run()
+    statements.getStatement("CREATE TABLE items (name TEXT NOT NULL)").run()
   })
 }
 
@@ -68,7 +68,7 @@ export function createItemsTable(database: DatabaseWriter): void {
 export function listItemNames(database: DatabaseReader): unknown[] {
   return database.handleDatabaseReadRequest((statements) =>
     statements
-      .createStatement("SELECT name FROM items ORDER BY rowid")
+      .getStatement("SELECT name FROM items ORDER BY rowid")
       .all()
       .map((row) => row.name)
   )
@@ -99,11 +99,9 @@ export function getThrownFailure(action: () => unknown): unknown {
  */
 function createDeferredReferenceTables(database: DatabaseWriter): void {
   database.handleDatabaseWriteRequest((statements) => {
+    statements.getStatement("CREATE TABLE parents (id TEXT PRIMARY KEY)").run()
     statements
-      .createStatement("CREATE TABLE parents (id TEXT PRIMARY KEY)")
-      .run()
-    statements
-      .createStatement(
+      .getStatement(
         "CREATE TABLE children (parent_id TEXT REFERENCES parents (id) DEFERRABLE INITIALLY DEFERRED)"
       )
       .run()
@@ -122,9 +120,9 @@ function createDeferredReferenceTables(database: DatabaseWriter): void {
 async function saveItemsAroundAwait(
   statements: DatabaseStatementCompiler
 ): Promise<void> {
-  statements.createStatement("INSERT INTO items (name) VALUES ('before')").run()
+  statements.getStatement("INSERT INTO items (name) VALUES ('before')").run()
   await Promise.resolve()
-  statements.createStatement("INSERT INTO items (name) VALUES ('after')").run()
+  statements.getStatement("INSERT INTO items (name) VALUES ('after')").run()
 }
 
 /**
@@ -141,7 +139,7 @@ export function registerDatabaseReaderContractSuite(
       createItemsTable(database)
       database.handleDatabaseWriteRequest((statements) => {
         statements
-          .createStatement("INSERT INTO items (name) VALUES ('kept')")
+          .getStatement("INSERT INTO items (name) VALUES ('kept')")
           .run()
       })
 
@@ -155,7 +153,7 @@ export function registerDatabaseReaderContractSuite(
       expect(() =>
         database.handleDatabaseReadRequest((statements) =>
           statements
-            .createStatement("INSERT INTO items (name) VALUES ('refused')")
+            .getStatement("INSERT INTO items (name) VALUES ('refused')")
             .run()
         )
       ).toThrow(REFUSED_CHANGE_FAILURE)
@@ -236,7 +234,7 @@ export function registerDatabaseWriterContractSuite(
       const changes = database.handleDatabaseWriteRequest(
         (statements) =>
           statements
-            .createStatement("INSERT INTO items (name) VALUES ('kept')")
+            .getStatement("INSERT INTO items (name) VALUES ('kept')")
             .run().changes
       )
 
@@ -252,7 +250,7 @@ export function registerDatabaseWriterContractSuite(
       const thrown = getThrownFailure(() =>
         database.handleDatabaseWriteRequest((statements) => {
           statements
-            .createStatement("INSERT INTO items (name) VALUES ('discarded')")
+            .getStatement("INSERT INTO items (name) VALUES ('discarded')")
             .run()
           throw failure
         })
@@ -269,9 +267,7 @@ export function registerDatabaseWriterContractSuite(
       expect(() =>
         database.handleDatabaseWriteRequest((statements) => {
           statements
-            .createStatement(
-              "INSERT INTO children (parent_id) VALUES ('missing')"
-            )
+            .getStatement("INSERT INTO children (parent_id) VALUES ('missing')")
             .run()
         })
       ).toThrow(/FOREIGN KEY constraint failed/)
@@ -279,7 +275,7 @@ export function registerDatabaseWriterContractSuite(
       expect(
         database.handleDatabaseReadRequest((statements) =>
           statements
-            .createStatement("SELECT count(*) AS count FROM children")
+            .getStatement("SELECT count(*) AS count FROM children")
             .get()
         )
       ).toEqual({ count: 0 })
@@ -291,17 +287,13 @@ export function registerDatabaseWriterContractSuite(
       expect(() =>
         database.handleDatabaseWriteRequest((statements) => {
           statements
-            .createStatement(
-              "INSERT INTO children (parent_id) VALUES ('missing')"
-            )
+            .getStatement("INSERT INTO children (parent_id) VALUES ('missing')")
             .run()
         })
       ).toThrow(/FOREIGN KEY constraint failed/)
 
       database.handleDatabaseWriteRequest((statements) => {
-        expect(() => statements.createStatement("BEGIN")).toThrow(
-          /not authorized/
-        )
+        expect(() => statements.getStatement("BEGIN")).toThrow(/not authorized/)
       })
     })
 
@@ -314,7 +306,7 @@ export function registerDatabaseWriterContractSuite(
           // @ts-expect-error -- An operation's result type refuses a promise.
           async (statements: DatabaseStatementCompiler) => {
             statements
-              .createStatement("INSERT INTO items (name) VALUES ('discarded')")
+              .getStatement("INSERT INTO items (name) VALUES ('discarded')")
               .run()
           }
         )
@@ -351,7 +343,7 @@ export function registerDatabaseWriterContractSuite(
 
       database.handleDatabaseWriteRequest((statements) => {
         statements
-          .createStatement("INSERT INTO items (name) VALUES ('outer')")
+          .getStatement("INSERT INTO items (name) VALUES ('outer')")
           .run()
         expect(() =>
           database.handleDatabaseReadRequest(() => undefined)
@@ -396,11 +388,11 @@ export function registerDatabaseStatementCompilerContractSuite(
 
         database.handleDatabaseWriteRequest((statements) => {
           statements
-            .createStatement("INSERT INTO items (name) VALUES ('kept')")
+            .getStatement("INSERT INTO items (name) VALUES ('kept')")
             .run()
-          expect(() =>
-            statements.createStatement(transactionControlSql)
-          ).toThrow(/not authorized/)
+          expect(() => statements.getStatement(transactionControlSql)).toThrow(
+            /not authorized/
+          )
         })
 
         expect(listItemNames(database)).toEqual(["kept"])
@@ -413,7 +405,7 @@ export function registerDatabaseStatementCompilerContractSuite(
         const { database } = createHarness()
 
         database.handleDatabaseReadRequest((statements) => {
-          expect(() => statements.createStatement(writeProtectionSql)).toThrow(
+          expect(() => statements.getStatement(writeProtectionSql)).toThrow(
             /not authorized/
           )
         })
@@ -426,7 +418,7 @@ export function registerDatabaseStatementCompilerContractSuite(
 
       expect(() =>
         database.handleDatabaseWriteRequest((statements) =>
-          statements.createStatement("SELEC name FROM items")
+          statements.getStatement("SELEC name FROM items")
         )
       ).toThrow(/syntax error/)
 
@@ -440,12 +432,12 @@ export function registerDatabaseStatementCompilerContractSuite(
 
       const [first, second] = database.handleDatabaseReadRequest(
         (statements) => [
-          statements.createStatement(selectSql),
-          statements.createStatement(selectSql)
+          statements.getStatement(selectSql),
+          statements.getStatement(selectSql)
         ]
       )
       const later = database.handleDatabaseWriteRequest((statements) =>
-        statements.createStatement(selectSql)
+        statements.getStatement(selectSql)
       )
 
       expect(second).toBe(first)
@@ -456,12 +448,12 @@ export function registerDatabaseStatementCompilerContractSuite(
       const { database } = createHarness()
       createItemsTable(database)
       const insertItem = database.handleDatabaseReadRequest((statements) =>
-        statements.createStatement("INSERT INTO items (name) VALUES (?)")
+        statements.getStatement("INSERT INTO items (name) VALUES (?)")
       )
 
       database.handleDatabaseWriteRequest(() => insertItem.run("first"))
       database.handleDatabaseWriteRequest((statements) => {
-        statements.createStatement("CREATE TABLE other (id INTEGER)").run()
+        statements.getStatement("CREATE TABLE other (id INTEGER)").run()
       })
       database.handleDatabaseWriteRequest(() => insertItem.run("second"))
 
@@ -472,7 +464,7 @@ export function registerDatabaseStatementCompilerContractSuite(
       const { database } = createHarness()
       createItemsTable(database)
       const insertItem = database.handleDatabaseWriteRequest((statements) =>
-        statements.createStatement("INSERT INTO items (name) VALUES (?)")
+        statements.getStatement("INSERT INTO items (name) VALUES (?)")
       )
 
       expect(() => insertItem.run("outside")).toThrow(REFUSED_CHANGE_FAILURE)
@@ -487,13 +479,13 @@ export function registerDatabaseStatementCompilerContractSuite(
     it("refuses changes outside operations before any write has run", () => {
       const { database } = createHarness()
       const createTable = database.handleDatabaseReadRequest((statements) =>
-        statements.createStatement("CREATE TABLE items (name TEXT NOT NULL)")
+        statements.getStatement("CREATE TABLE items (name TEXT NOT NULL)")
       )
 
       expect(() => createTable.run()).toThrow(REFUSED_CHANGE_FAILURE)
       expect(() =>
         database.handleDatabaseReadRequest((statements) =>
-          statements.createStatement("SELECT name FROM items").all()
+          statements.getStatement("SELECT name FROM items").all()
         )
       ).toThrow(/no such table: items/)
     })
@@ -502,7 +494,7 @@ export function registerDatabaseStatementCompilerContractSuite(
       const { database } = createHarness()
       createItemsTable(database)
       const insertItem = database.handleDatabaseReadRequest((statements) =>
-        statements.createStatement("INSERT INTO items (name) VALUES (?)")
+        statements.getStatement("INSERT INTO items (name) VALUES (?)")
       )
       expect(() =>
         database.handleDatabaseWriteRequest(() => {
@@ -520,9 +512,44 @@ export function registerDatabaseStatementCompilerContractSuite(
         (statements) => statements
       )
 
-      expect(() => retainedStatements.createStatement("SELECT 1")).toThrow(
+      expect(() => retainedStatements.getStatement("SELECT 1")).toThrow(
         "Database operation has ended"
       )
+    })
+
+    it("refuses to compile inside a later operation and changes nothing", () => {
+      const { database } = createHarness()
+      createItemsTable(database)
+      const retainedStatements = database.handleDatabaseReadRequest(
+        (statements) => statements
+      )
+
+      expect(() =>
+        database.handleDatabaseWriteRequest(() =>
+          retainedStatements
+            .getStatement("INSERT INTO items (name) VALUES ('kept')")
+            .run()
+        )
+      ).toThrow("Database operation has ended")
+      expect(listItemNames(database)).toEqual([])
+    })
+
+    it("refuses an already compiled SQL text inside a later operation", () => {
+      const { database } = createHarness()
+      createItemsTable(database)
+      const selectSql = "SELECT name FROM items"
+      const retainedStatements = database.handleDatabaseReadRequest(
+        (statements) => {
+          statements.getStatement(selectSql)
+          return statements
+        }
+      )
+
+      expect(() =>
+        database.handleDatabaseReadRequest(() =>
+          retainedStatements.getStatement(selectSql)
+        )
+      ).toThrow("Database operation has ended")
     })
 
     it("fails with Database is closed when used after its owner closes the database", () => {
@@ -533,7 +560,7 @@ export function registerDatabaseStatementCompilerContractSuite(
 
       closeDatabase()
 
-      expect(() => retainedStatements.createStatement("SELECT 1")).toThrow(
+      expect(() => retainedStatements.getStatement("SELECT 1")).toThrow(
         "Database is closed"
       )
     })
@@ -559,7 +586,7 @@ export function registerDatabaseFunctionRegistryContractSuite(
 
       expect(
         database.handleDatabaseReadRequest((statements) =>
-          statements.createStatement("SELECT double_value(21) AS result").get()
+          statements.getStatement("SELECT double_value(21) AS result").get()
         )
       ).toEqual({ result: 42 })
     })
@@ -572,7 +599,7 @@ export function registerDatabaseFunctionRegistryContractSuite(
 
       expect(
         database.handleDatabaseReadRequest((statements) =>
-          statements.createStatement("SELECT item_label() AS label").get()
+          statements.getStatement("SELECT item_label() AS label").get()
         )
       ).toEqual({ label: "second" })
     })

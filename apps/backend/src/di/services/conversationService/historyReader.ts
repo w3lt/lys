@@ -1,22 +1,30 @@
 import type { ListConversationsApiResponse } from "@lys/protocol"
 import type { Conversation } from "@lys/share"
-import type { DatabaseReader } from "../../../infrastructure/database/databaseTransactions"
+import type {
+  DatabaseFunctionRegistry,
+  DatabaseReader
+} from "../../../infrastructure/database/databaseTransactions"
 import type {
   ConversationReader,
   ConversationLister
 } from "../../../modules/conversation/capabilities"
 import { getConversation } from "./readConversation"
-import { listConversations } from "./listConversations"
+import {
+  calculateConversationSearchMatch,
+  listConversations
+} from "./listConversations"
 import type { ConversationListOptions } from "./utils"
 
 /**
  * Borrows the shared database's read snapshots to observe conversation
  * history.
  *
- * @remarks Owns no resource: the database's owner closes the connection, after
- * which every operation fails with `Database is closed`. Each call is one read
- * snapshot; returned records are independent copies. Concurrency model:
- * single-owner, synchronous on the backend's event loop.
+ * @remarks Invariant: once created, `contains_search` is registered on the
+ * shared connection for its list queries. Owns no resource: the database's
+ * owner closes the connection, after which every operation fails with
+ * `Database is closed`. Each call is one read snapshot; returned records are
+ * independent copies. Concurrency model: single-owner, synchronous on the
+ * backend's event loop.
  */
 export default class SqliteConversationHistoryReader
   implements ConversationReader, ConversationLister
@@ -25,11 +33,32 @@ export default class SqliteConversationHistoryReader
   readonly #databaseReader: DatabaseReader
 
   /**
-   * Retains borrowed read access without performing database work.
+   * Retains borrowed read access prepared by
+   * {@link SqliteConversationHistoryReader.create}.
    * @param databaseReader - Read snapshots lent by the database owner.
    */
-  public constructor(databaseReader: DatabaseReader) {
+  private constructor(databaseReader: DatabaseReader) {
     this.#databaseReader = databaseReader
+  }
+
+  /**
+   * Registers conversation search on the shared connection and publishes read
+   * access to conversation history.
+   * @param database - Read snapshots and function registration lent by the
+   * database owner; the reader retains only the read snapshots.
+   * @returns The ready reader; it owns nothing to release.
+   * @throws If the database is closed or SQLite rejects the registration.
+   * @remarks Registers `contains_search`, the case-insensitive match used by
+   * history search, replacing a function already registered under that name.
+   */
+  public static create(
+    database: DatabaseReader & DatabaseFunctionRegistry
+  ): SqliteConversationHistoryReader {
+    database.registerDatabaseFunction(
+      "contains_search",
+      calculateConversationSearchMatch
+    )
+    return new SqliteConversationHistoryReader(database)
   }
 
   /**

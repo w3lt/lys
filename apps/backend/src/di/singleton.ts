@@ -4,7 +4,9 @@ import LmStudioRuntime from "../modules/llm/runtimes/lmStudioRuntime"
 import ChatService, {
   type ChatServiceCreationOptions
 } from "./services/chatService"
-import ConversationService from "./services/conversationService"
+import SqliteConversationHistoryEditor from "./services/conversationService/historyEditor"
+import SqliteConversationHistoryReader from "./services/conversationService/historyReader"
+import SqliteConversationTurns from "./services/conversationService/turns"
 import LlmRuntimeService, {
   type LlmRuntimeFailureReporters
 } from "./services/llmRuntimeService"
@@ -35,11 +37,6 @@ export type SingletonServiceFactories = Readonly<{
     databaseFilePath: BackendConfig["databaseFilePath"]
   ) => SingletonServiceAcquisition<SqliteDatabase>
   /**
-   * Creates the conversation service over the shared database. The service
-   * borrows the database and owns nothing to release.
-   */
-  createConversationService: (database: SqliteDatabase) => ConversationService
-  /**
    * Creates the owned LLM runtime service for one LM Studio WebSocket endpoint
    * without contacting it.
    */
@@ -53,7 +50,6 @@ export type SingletonServiceFactories = Readonly<{
 const DEFAULT_SINGLETON_SERVICE_FACTORIES = Object.freeze({
   createChatService,
   createDatabase,
-  createConversationService,
   createLlmRuntimeService
 } satisfies SingletonServiceFactories)
 
@@ -65,8 +61,12 @@ export type SingletonServices = Readonly<{
   llmService: LlmService
   /** LLM runtime connection and model-operation queue owned by the application. */
   llmRuntimeService: LlmRuntimeService
-  /** SQLite-backed conversation persistence owned by the application lifetime. */
-  conversationService: ConversationService
+  /** Turn persistence over the shared database; it owns nothing to release. */
+  conversationTurns: SqliteConversationTurns
+  /** History reading over the shared database; it owns nothing to release. */
+  conversationHistoryReader: SqliteConversationHistoryReader
+  /** History editing over the shared database; it owns nothing to release. */
+  conversationHistoryEditor: SqliteConversationHistoryEditor
   /** Module-private cleanup capability for the complete owned service lifetime. */
   [CLOSE_SINGLETON_SERVICES]: CloseSingletonServices
 }>
@@ -89,8 +89,9 @@ export type SingletonServices = Readonly<{
  * @throws {AggregateError} If closing the acquired resources also fails; its
  * errors hold the construction failure followed by the cleanup failure.
  * @remarks Resources are acquired in the order chat service, database, LLM
- * runtime service, and the conversation service is created over the database
- * before the runtime service; creation stops at the first failure. The
+ * runtime service. The conversation adapters are created over the database
+ * before the runtime service, turn persistence first, so its startup recovery
+ * runs before any history is read; creation stops at the first failure. The
  * database is not part of the returned bundle: the bundle's cleanup closes it
  * after the LLM runtime service and before the chat service.
  */
@@ -102,21 +103,23 @@ export async function createSingletonServices(
   const serviceLifetime = new AsyncDisposableStack()
 
   try {
-    const chatServiceOptions: ChatServiceCreationOptions = {
+    const chatServiceAcquisition = factories.createChatService({
       openAiBaseUrl: `http://${config.lmstudioHost}:${config.lmstudioPort}/v1`,
       titleGenerationPrompt: config.titleGenerationPrompt,
       generatedTitleMaxLength: config.generatedTitleMaxLength
-    }
-    const chatServiceAcquisition =
-      factories.createChatService(chatServiceOptions)
+    })
     serviceLifetime.defer(chatServiceAcquisition.closeService)
 
     const databaseAcquisition = factories.createDatabase(
       config.databaseFilePath
     )
     serviceLifetime.defer(databaseAcquisition.closeService)
-    const conversationService = factories.createConversationService(
-      databaseAcquisition.service
+    const database = databaseAcquisition.service
+    const conversationTurns = SqliteConversationTurns.create(database)
+    const conversationHistoryReader =
+      SqliteConversationHistoryReader.create(database)
+    const conversationHistoryEditor = new SqliteConversationHistoryEditor(
+      database
     )
 
     const llmRuntimeServiceAcquisition = factories.createLlmRuntimeService(
@@ -139,7 +142,9 @@ export async function createSingletonServices(
       chatService: chatServiceAcquisition.service,
       llmService,
       llmRuntimeService: llmRuntimeServiceAcquisition.service,
-      conversationService,
+      conversationTurns,
+      conversationHistoryReader,
+      conversationHistoryEditor,
       [CLOSE_SINGLETON_SERVICES]: closeOwnedSingletonServices
     })
   } catch (creationFailure) {
@@ -185,25 +190,6 @@ function createDatabase(
     closeService: async () => {
       database[Symbol.dispose]()
     }
-  })
-}
-
-/**
- * Creates the production conversation service over the shared database.
- *
- * @param database - Open database owned by the singleton bundle; the service
- * borrows only its read, write, and function-registration capabilities.
- * @returns The ready conversation service, which owns nothing to release.
- * @throws If the database is closed, or registering conversation search or
- * recovering interrupted replies fails.
- */
-function createConversationService(
-  database: SqliteDatabase
-): ConversationService {
-  return ConversationService.create({
-    databaseReader: database,
-    databaseWriter: database,
-    databaseFunctionRegistry: database
   })
 }
 

@@ -83,7 +83,7 @@ type TurnGenerationInput = Readonly<{
  * @param app - Backend with SSE, validation, and singleton services installed.
  * @param registration - System prompt, title attempt limit, and the registry
  * that owns the started generations.
- * @throws If borrowed access or route registration fails.
+ * @throws If route registration fails.
  */
 export default function updateFastifyWithChatRoute(
   app: FastifyInstance,
@@ -93,7 +93,7 @@ export default function updateFastifyWithChatRoute(
     generations
   }: ChatRouteRegistration
 ): void {
-  const turns = app.conversationService.createTurnAccess()
+  const turns = app.conversationTurns
   const dependencies = {
     turns,
     titleWriter: turns,

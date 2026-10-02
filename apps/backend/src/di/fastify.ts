@@ -47,7 +47,15 @@ const singletonPlugin: FastifyPluginAsync<
   app.decorate("chatService", singletonServices.chatService)
   app.decorate("llmService", singletonServices.llmService)
   app.decorate("llmRuntimeService", singletonServices.llmRuntimeService)
-  app.decorate("conversationService", singletonServices.conversationService)
+  app.decorate("conversationTurns", singletonServices.conversationTurns)
+  app.decorate(
+    "conversationHistoryReader",
+    singletonServices.conversationHistoryReader
+  )
+  app.decorate(
+    "conversationHistoryEditor",
+    singletonServices.conversationHistoryEditor
+  )
 }
 
 /** Fastify plugin that installs application-scoped singleton services. */

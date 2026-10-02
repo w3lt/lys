@@ -19,7 +19,7 @@ export function getConversationMetadata(
   conversationId: string
 ): ConversationMetadata | undefined {
   const row = statements
-    .createStatement(
+    .getStatement(
       `SELECT id, title, system_prompt AS systemPrompt,
     created_at AS createdAt, updated_at AS updatedAt FROM conversations WHERE id = ?`
     )
@@ -66,7 +66,7 @@ export function getConversation(
   const metadata = getConversationMetadata(statements, conversationId)
   if (!metadata) return undefined
   const rows = statements
-    .createStatement(
+    .getStatement(
       `SELECT id, role, model, content, status,
     finish_reason AS finishReason, created_at AS createdAt, updated_at AS updatedAt
     FROM conversation_messages WHERE conversation_id = ? ORDER BY created_at, id`

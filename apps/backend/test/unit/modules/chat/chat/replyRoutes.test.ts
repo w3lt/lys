@@ -21,7 +21,7 @@ import {
   createUserMessage,
   FIXTURE_TIMESTAMP
 } from "../../../support/conversationFixtures"
-import { openConversationTestStore } from "../../../support/conversationDatabase"
+import { openConversationTestServices } from "../../../support/conversationDatabase"
 import { createTestFastify } from "../../../support/fastifyTestApp"
 import { waitForMicrotasks } from "../../../support/microtasks"
 
@@ -85,25 +85,24 @@ function handleUnexpectedHistoryCall(operationName: string): never {
  *
  * @returns The application, captured logs, the registry, and a spy for the
  * history read the routes perform.
- * @remarks The routes borrow the history reader once at registration, so the
- * returned spy controls every snapshot; it throws until the case configures
- * it and no database row is read. When the test finishes, the registry is
- * disposed first, then the store's in-memory database, then the application.
+ * @remarks The routes read the decorated history reader at registration, so
+ * the returned spy controls every snapshot; it throws until the case
+ * configures it and no database row is read. When the test finishes, the
+ * registry is disposed first, then the in-memory conversation database, then
+ * the application.
  */
 async function createReplyRouteApp() {
   const testFastify = createTestFastify()
-  const { store } = openConversationTestStore()
+  const { history } = openConversationTestServices()
   const generations = new ReplyGenerationRegistry()
   onTestFinished(async () => {
     await generations[Symbol.asyncDispose]()
   })
-  const history = store.createHistoryReader()
-  vi.spyOn(store, "createHistoryReader").mockReturnValue(history)
   const getConversation = vi
     .spyOn(history, "getConversation")
     .mockImplementation(() => handleUnexpectedHistoryCall("getConversation"))
   await updateFastifyWithHttpTransport(testFastify.app)
-  testFastify.app.decorate("conversationService", store)
+  testFastify.app.decorate("conversationHistoryReader", history)
   await updateFastifyWithChatReplyRoutes(testFastify.app, generations)
   return { ...testFastify, generations, getConversation }
 }

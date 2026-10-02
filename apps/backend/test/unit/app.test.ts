@@ -5,9 +5,9 @@ import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
 import * as z from "zod"
 import { buildApp } from "../../src/app"
 import type { BackendConfig } from "../../src/config"
-import SqliteConversationHistoryEditor from "../../src/di/services/conversationService/historyEditor"
-import SqliteConversationHistoryReader from "../../src/di/services/conversationService/historyReader"
-import SqliteConversationTurns from "../../src/di/services/conversationService/turns"
+import SqliteConversationHistoryEditor from "../../src/infrastructure/database/conversations/historyEditor"
+import SqliteConversationHistoryReader from "../../src/infrastructure/database/conversations/historyReader"
+import SqliteConversationTurns from "../../src/infrastructure/database/conversations/turns"
 import { TEST_BACKEND_CONFIG } from "./support/backendConfig"
 import {
   fakeLmStudio,

@@ -4,9 +4,9 @@ import { join } from "node:path"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { backendConfigSchema } from "../../../src/config"
 import ChatService from "../../../src/di/services/chatService"
-import SqliteConversationHistoryEditor from "../../../src/di/services/conversationService/historyEditor"
-import SqliteConversationHistoryReader from "../../../src/di/services/conversationService/historyReader"
-import SqliteConversationTurns from "../../../src/di/services/conversationService/turns"
+import SqliteConversationHistoryEditor from "../../../src/infrastructure/database/conversations/historyEditor"
+import SqliteConversationHistoryReader from "../../../src/infrastructure/database/conversations/historyReader"
+import SqliteConversationTurns from "../../../src/infrastructure/database/conversations/turns"
 import LlmRuntimeService, {
   type LlmRuntimeFailureReporters
 } from "../../../src/di/services/llmRuntimeService"

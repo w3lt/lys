@@ -1,8 +1,8 @@
 import { onTestFinished } from "vitest"
-import SqliteConversationHistoryEditor from "../../../src/di/services/conversationService/historyEditor"
-import SqliteConversationHistoryReader from "../../../src/di/services/conversationService/historyReader"
-import { calculateConversationSearchMatch } from "../../../src/di/services/conversationService/listConversations"
-import SqliteConversationTurns from "../../../src/di/services/conversationService/turns"
+import SqliteConversationHistoryEditor from "../../../src/infrastructure/database/conversations/historyEditor"
+import SqliteConversationHistoryReader from "../../../src/infrastructure/database/conversations/historyReader"
+import { calculateConversationSearchMatch } from "../../../src/infrastructure/database/conversations/listConversations"
+import SqliteConversationTurns from "../../../src/infrastructure/database/conversations/turns"
 import type { DatabaseWriter } from "../../../src/infrastructure/database/databaseTransactions"
 import SqliteDatabase from "../../../src/infrastructure/database/sqliteDatabase"
 

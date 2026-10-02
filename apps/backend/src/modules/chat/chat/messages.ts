@@ -1,6 +1,6 @@
 import type { ConversationMessage } from "@lys/share"
 import type { CompleteChatOptions } from "../../../di/services/chatService"
-import type { ConversationTurn } from "../../../di/services/conversationService/share"
+import type { ConversationTurn } from "./persistence"
 
 /**
  * Selects stored messages that can supply conversation context.

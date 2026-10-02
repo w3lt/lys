@@ -3,7 +3,7 @@ import type { Conversation } from "@lys/share"
 import type {
   DatabaseFunctionRegistry,
   DatabaseReader
-} from "../../../infrastructure/database/databaseTransactions"
+} from "../databaseTransactions"
 import type {
   ConversationReader,
   ConversationLister
@@ -13,7 +13,7 @@ import {
   calculateConversationSearchMatch,
   listConversations
 } from "./listConversations"
-import type { ConversationListOptions } from "./utils"
+import type { ConversationListOptions } from "../../../modules/conversation/listOptions"
 
 /**
  * Borrows the shared database's read snapshots to observe conversation

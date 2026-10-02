@@ -4,7 +4,7 @@ import {
 } from "@lys/protocol"
 import type { Conversation, ConversationMetadata } from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
-import { createConversationListCursor } from "../../../../src/di/services/conversationService/utils"
+import { createConversationListCursor } from "../../../../src/modules/conversation/listOptions"
 import { updateFastifyWithHttpTransport } from "../../../../src/http"
 import updateFastifyWithConversationRoutes from "../../../../src/modules/conversation"
 import {

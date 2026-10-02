@@ -12,9 +12,9 @@ import {
   vi
 } from "vitest"
 import * as z from "zod"
-import SqliteConversationHistoryReader from "../../../../../src/di/services/conversationService/historyReader"
-import SqliteConversationTurns from "../../../../../src/di/services/conversationService/turns"
-import { parseConversationListOptions } from "../../../../../src/di/services/conversationService/utils"
+import SqliteConversationHistoryReader from "../../../../../src/infrastructure/database/conversations/historyReader"
+import SqliteConversationTurns from "../../../../../src/infrastructure/database/conversations/turns"
+import { parseConversationListOptions } from "../../../../../src/modules/conversation/listOptions"
 import SqliteDatabase from "../../../../../src/infrastructure/database/sqliteDatabase"
 import { ConversationNotFoundError } from "../../../../../src/utils/errors"
 import {

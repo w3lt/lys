@@ -7,8 +7,8 @@ import {
 import {
   createConversationListCursor,
   type ConversationListOptions
-} from "./utils"
-import type { DatabaseStatementCompiler } from "../../../infrastructure/database/databaseTransactions"
+} from "../../../modules/conversation/listOptions"
+import type { DatabaseStatementCompiler } from "../databaseTransactions"
 
 /** Shared SQL predicate for counts and pages; values are always bound parameters. */
 const matchingConversationSql = `($query = '' OR contains_search(c.title, $query)

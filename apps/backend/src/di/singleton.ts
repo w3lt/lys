@@ -4,9 +4,9 @@ import LmStudioRuntime from "../modules/llm/runtimes/lmStudioRuntime"
 import ChatService, {
   type ChatServiceCreationOptions
 } from "./services/chatService"
-import SqliteConversationHistoryEditor from "./services/conversationService/historyEditor"
-import SqliteConversationHistoryReader from "./services/conversationService/historyReader"
-import SqliteConversationTurns from "./services/conversationService/turns"
+import SqliteConversationHistoryEditor from "../infrastructure/database/conversations/historyEditor"
+import SqliteConversationHistoryReader from "../infrastructure/database/conversations/historyReader"
+import SqliteConversationTurns from "../infrastructure/database/conversations/turns"
 import LlmRuntimeService, {
   type LlmRuntimeFailureReporters
 } from "./services/llmRuntimeService"

@@ -3,11 +3,11 @@ import * as z from "zod"
 import {
   calculateConversationSearchMatch,
   listConversations
-} from "../../../../../src/di/services/conversationService/listConversations"
+} from "../../../../../src/infrastructure/database/conversations/listConversations"
 import {
   parseConversationListOptions,
   type ConversationListOptions
-} from "../../../../../src/di/services/conversationService/utils"
+} from "../../../../../src/modules/conversation/listOptions"
 import type SqliteDatabase from "../../../../../src/infrastructure/database/sqliteDatabase"
 import {
   saveAssistantMessageRow,

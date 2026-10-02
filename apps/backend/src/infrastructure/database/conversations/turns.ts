@@ -1,13 +1,11 @@
-import type { DatabaseWriter } from "../../../infrastructure/database/databaseTransactions"
-import type {
-  ConversationTurnWriter,
-  GeneratedConversationTitleWriter
-} from "../../../modules/chat/chat/persistence"
+import type { DatabaseWriter } from "../databaseTransactions"
 import type {
   AssistantMessageCompletion,
   ConversationTurn,
-  CreateConversationTurnOptions
-} from "./share"
+  ConversationTurnWriter,
+  CreateConversationTurnOptions,
+  GeneratedConversationTitleWriter
+} from "../../../modules/chat/chat/persistence"
 import { createConversationTurn } from "./createTurn"
 
 /** Appends one delta to an assistant reply only while it is still streaming. */

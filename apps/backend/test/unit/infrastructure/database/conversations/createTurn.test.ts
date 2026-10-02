@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import * as z from "zod"
-import { createConversationTurn } from "../../../../../src/di/services/conversationService/createTurn"
-import { getConversation } from "../../../../../src/di/services/conversationService/readConversation"
-import type { CreateConversationTurnOptions } from "../../../../../src/di/services/conversationService/share"
+import { createConversationTurn } from "../../../../../src/infrastructure/database/conversations/createTurn"
+import { getConversation } from "../../../../../src/infrastructure/database/conversations/readConversation"
+import type { CreateConversationTurnOptions } from "../../../../../src/modules/chat/chat/persistence"
 import type SqliteDatabase from "../../../../../src/infrastructure/database/sqliteDatabase"
 import { ConversationNotFoundError } from "../../../../../src/utils/errors"
 import {

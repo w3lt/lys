@@ -1,6 +1,6 @@
 import { updateConversationTitleApi } from "@lys/protocol"
 import type { ConversationMetadata } from "@lys/share"
-import type { DatabaseWriter } from "../../../infrastructure/database/databaseTransactions"
+import type { DatabaseWriter } from "../databaseTransactions"
 import type {
   ConversationTitleEditor,
   ConversationDeleter

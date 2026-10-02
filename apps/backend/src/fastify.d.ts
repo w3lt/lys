@@ -1,9 +1,9 @@
 /// <reference types="fastify" />
 
 import type ChatService from "./di/services/chatService"
-import type SqliteConversationHistoryEditor from "./di/services/conversationService/historyEditor"
-import type SqliteConversationHistoryReader from "./di/services/conversationService/historyReader"
-import type SqliteConversationTurns from "./di/services/conversationService/turns"
+import type SqliteConversationHistoryEditor from "./infrastructure/database/conversations/historyEditor"
+import type SqliteConversationHistoryReader from "./infrastructure/database/conversations/historyReader"
+import type SqliteConversationTurns from "./infrastructure/database/conversations/turns"
 import type LlmRuntimeService from "./di/services/llmRuntimeService"
 import type LlmService from "./di/services/llmService"
 

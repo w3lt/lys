@@ -1,6 +1,6 @@
 import type { Conversation, ConversationMetadata } from "@lys/share"
 import type { ListConversationsApiResponse } from "@lys/protocol"
-import type { ConversationListOptions } from "../../di/services/conversationService/utils"
+import type { ConversationListOptions } from "./listOptions"
 
 /** Synchronous read access borrowed for one backend lifetime; calls after closure fail. */
 export interface ConversationReader {

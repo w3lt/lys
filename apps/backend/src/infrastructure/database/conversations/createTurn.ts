@@ -6,9 +6,12 @@ import {
   type Conversation
 } from "@lys/share"
 import { getConversation } from "./readConversation"
-import type { ConversationTurn, CreateConversationTurnOptions } from "./share"
+import type {
+  ConversationTurn,
+  CreateConversationTurnOptions
+} from "../../../modules/chat/chat/persistence"
 import { ConversationNotFoundError } from "../../../utils/errors"
-import type { DatabaseStatementCompiler } from "../../../infrastructure/database/databaseTransactions"
+import type { DatabaseStatementCompiler } from "../databaseTransactions"
 
 /**
  * Creates metadata for a new empty conversation using the supplied system instruction.

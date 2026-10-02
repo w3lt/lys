@@ -14,10 +14,10 @@ const conversationListCursorSchema = z.strictObject({
   id: z.uuidv7()
 })
 
-/** Service-owned page size used only when a caller omits the bounded API limit. */
+/** Page size used only when a caller omits the bounded API limit. */
 const DEFAULT_CONVERSATION_LIST_LIMIT = 30
 
-/** Trusted cursor-bound query and page size supplied to SQLite. */
+/** Trusted cursor-bound query and page size supplied to the history lister. */
 export type ConversationListOptions = Readonly<{
   /** Normalized query; empty only when the query parameter was omitted. */
   query: string
@@ -99,7 +99,7 @@ class ConversationListInputError extends Error {
 /**
  * Translates only pagination parsing failures into the public invalid-input category.
  * @param options - Raw optional query values.
- * @returns Validated options for one SQLite query.
+ * @returns Validated options for one history listing.
  * @throws ConversationListInputError when any input or cursor binding is invalid.
  */
 export function parseConversationListOptions(

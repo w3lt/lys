@@ -1,7 +1,7 @@
 import { MAXIMUM_CONVERSATION_TITLE_LENGTH } from "@lys/protocol"
 import { describe, expect, it } from "vitest"
 import * as z from "zod"
-import { parseConversationListOptions } from "../../../../../src/di/services/conversationService/utils"
+import { parseConversationListOptions } from "../../../../../src/modules/conversation/listOptions"
 import { openConversationTestServices } from "../../../support/conversationDatabase"
 import { createFixtureUuidV7 } from "../../../support/conversationFixtures"
 

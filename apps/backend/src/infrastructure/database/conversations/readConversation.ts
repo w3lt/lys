@@ -1,4 +1,4 @@
-import type { DatabaseStatementCompiler } from "../../../infrastructure/database/databaseTransactions"
+import type { DatabaseStatementCompiler } from "../databaseTransactions"
 import {
   conversationMetadataSchema,
   conversationMessageSchema,

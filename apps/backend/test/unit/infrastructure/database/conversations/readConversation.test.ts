@@ -3,7 +3,7 @@ import * as z from "zod"
 import {
   getConversation,
   getConversationMetadata
-} from "../../../../../src/di/services/conversationService/readConversation"
+} from "../../../../../src/infrastructure/database/conversations/readConversation"
 import type SqliteDatabase from "../../../../../src/infrastructure/database/sqliteDatabase"
 import {
   saveAssistantMessageRow,

@@ -49,16 +49,35 @@ function listConfigIssues(input: unknown): readonly z.core.$ZodIssue[] {
 }
 
 /**
- * Lists the configuration keys that the schema's rejection names.
+ * Lists the issues of the `ZodError` that loading the configuration throws.
  *
- * @param input - Untrusted configuration input.
- * @returns The distinct first segments of the issue paths.
- * @throws If the schema accepts the input.
+ * @returns The issues of the rejection.
+ * @throws If loading succeeds, or the error it throws, when that error is not
+ * a `ZodError`.
  */
-function listRejectedConfigKeys(
-  input: unknown
+function listConfigLoadIssues(): readonly z.core.$ZodIssue[] {
+  try {
+    loadBackendConfig()
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return error.issues
+    }
+    throw error
+  }
+  throw new Error("Expected loadBackendConfig to reject the configuration")
+}
+
+/**
+ * Lists the configuration keys that a rejection names, without its issue
+ * order, which the configuration contract leaves unspecified.
+ *
+ * @param issues - Issues of a configuration `ZodError`.
+ * @returns The distinct first segments of the issue paths.
+ */
+function listIssueKeys(
+  issues: readonly z.core.$ZodIssue[]
 ): ReadonlySet<PropertyKey | undefined> {
-  return new Set(listConfigIssues(input).map(({ path }) => path[0]))
+  return new Set(issues.map(({ path }) => path[0]))
 }
 
 /**
@@ -120,14 +139,8 @@ describe("loadBackendConfig", () => {
       (type) => ` ${FIXTURE_PROMPTS[type]} `
     )
 
-    expect(() => loadBackendConfig()).toThrow(z.ZodError)
-    expect(() => loadBackendConfig()).toThrow(
-      expect.objectContaining({
-        issues: [
-          expect.objectContaining({ path: ["lysSystemPrompt"] }),
-          expect.objectContaining({ path: ["titleGenerationPrompt"] })
-        ]
-      })
+    expect(listIssueKeys(listConfigLoadIssues())).toEqual(
+      new Set(["lysSystemPrompt", "titleGenerationPrompt"])
     )
   })
 
@@ -279,14 +292,14 @@ describe("backendConfigSchema", () => {
       "generatedTitleMaxLength"
     ]
   ])("rejects %s and names only that key", (_label, input, key) => {
-    expect(listRejectedConfigKeys(input)).toEqual(new Set([key]))
+    expect(listIssueKeys(listConfigIssues(input))).toEqual(new Set([key]))
   })
 
   it.each(Object.keys(VALID_RAW_CONFIG))(
     "rejects input without %s and names that key",
     (omittedKey) => {
       expect(
-        listRejectedConfigKeys(createRawConfigWithout(omittedKey))
+        listIssueKeys(listConfigIssues(createRawConfigWithout(omittedKey)))
       ).toEqual(new Set([omittedKey]))
     }
   )

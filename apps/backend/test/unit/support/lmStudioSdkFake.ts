@@ -69,8 +69,9 @@ const EMPTY_LM_STUDIO_INVENTORY: FakeLmStudioInventory = Object.freeze({
  * exact downloaded key and adds a handle whose identifier is the key, suffixed
  * `:<n>` for later instances; `unload` rejects an unknown identifier. Client
  * construction and disposal have no default effect, so a case that observes
- * them replaces those operations with spies. Invariant: the inventory and the
- * operations are each one complete frozen value, and every change replaces the
+ * them replaces those operations with spies. Invariant: the inventory, frozen
+ * together with every record and handle it holds, and the operations are each
+ * one complete frozen value owned by the engine; every change replaces the
  * whole value, so no reader observes a partial update. Each case must call
  * {@link FakeLmStudioEngine.reset} before arranging the engine. Concurrency
  * model: single-owner. Vitest gives each test file its own module instance and
@@ -92,8 +93,8 @@ class FakeLmStudioEngine {
   /**
    * Downloaded and loaded models the default operations serve.
    *
-   * @returns The current frozen inventory. Downloaded records are the records
-   * the engine retained when the inventory was assigned.
+   * @returns The current inventory, frozen together with every record and
+   * handle it holds.
    */
   get inventory(): FakeLmStudioInventory {
     return this.#inventory
@@ -102,14 +103,18 @@ class FakeLmStudioEngine {
   /**
    * Replaces the inventory a case arranges.
    *
-   * @param inventory - Complete inventory. The engine copies both lists and
-   * every loaded handle, and takes ownership of the downloaded vendor records,
-   * which the case must not change afterwards.
+   * @param inventory - Complete inventory. The engine retains frozen copies of
+   * both lists and of every record and handle in them, so later changes to the
+   * case's values do not reach the engine.
    */
   set inventory(inventory: FakeLmStudioInventory) {
     this.#inventory = Object.freeze({
-      downloadedModels: Object.freeze([...inventory.downloadedModels]),
-      loadedModels: Object.freeze(inventory.loadedModels.map(copyLoadedHandle))
+      downloadedModels: Object.freeze(
+        inventory.downloadedModels.map(buildOwnedLlmRecord)
+      ),
+      loadedModels: Object.freeze(
+        inventory.loadedModels.map(buildOwnedLoadedHandle)
+      )
     })
   }
 
@@ -142,17 +147,27 @@ class FakeLmStudioEngine {
     return Object.freeze({
       constructClient: () => undefined,
       getLMStudioVersion: async () => ({ version: "0.3.30", build: 1 }),
-      listDownloadedModels: async (domain: string) => {
-        if (domain !== "llm") {
-          throw new Error(`Unsupported model domain "${domain}".`)
-        }
-        return [...this.#inventory.downloadedModels]
-      },
+      listDownloadedModels: async (domain: string) =>
+        this.#listDownloadedModels(domain),
       listLoaded: async () => [...this.#inventory.loadedModels],
       load: async (modelKey: string) => this.#loadModel(modelKey),
       unload: async (identifier: string) => this.#unloadModel(identifier),
       disposeClient: async () => undefined
     })
+  }
+
+  /**
+   * Lists the downloaded vendor records for one model domain.
+   *
+   * @param domain - SDK model domain; the engine serves only `llm`.
+   * @returns A new array holding the engine's frozen records.
+   * @throws If the domain is not `llm`.
+   */
+  #listDownloadedModels(domain: string): readonly LLMInfo[] {
+    if (domain !== "llm") {
+      throw new Error(`Unsupported model domain "${domain}".`)
+    }
+    return [...this.#inventory.downloadedModels]
   }
 
   /**
@@ -204,12 +219,35 @@ class FakeLmStudioEngine {
 }
 
 /**
- * Copies one loaded handle so the engine owns it.
+ * Builds the engine's own frozen copy of one downloaded vendor record.
  *
- * @param handle - Handle supplied by a case.
+ * @param record - Record supplied by a case; it is not changed.
+ * @returns A frozen record with the same fields. Its quantization, the only
+ * nested value an `LLMInfo` record holds, is copied and frozen as well.
+ */
+function buildOwnedLlmRecord(record: LLMInfo): LLMInfo {
+  const { quantization } = record
+  if (quantization === undefined) {
+    return Object.freeze({ ...record })
+  }
+  return Object.freeze({
+    ...record,
+    quantization: Object.freeze({
+      name: quantization.name,
+      bits: quantization.bits
+    })
+  })
+}
+
+/**
+ * Builds the engine's own frozen copy of one loaded handle.
+ *
+ * @param handle - Handle supplied by a case; it is not changed.
  * @returns A frozen handle with the same key and identifier.
  */
-function copyLoadedHandle(handle: FakeLoadedLlmHandle): FakeLoadedLlmHandle {
+function buildOwnedLoadedHandle(
+  handle: FakeLoadedLlmHandle
+): FakeLoadedLlmHandle {
   return Object.freeze({
     modelKey: handle.modelKey,
     identifier: handle.identifier

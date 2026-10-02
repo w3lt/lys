@@ -1,6 +1,6 @@
 ---
 title: Changelog
-description: Placeholder for a future canonical release log once the repository starts publishing one.
+description: Release notes for each Lys version, rendered from the repository CHANGELOG.md.
 sidebar:
   label: Changelog
   order: 1
@@ -9,37 +9,52 @@ sidebar:
 import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
 import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
 
-What changed and when. The changelog is the chronological change record for
-Lys: git and pull-request history remain the implementation record until the
-repository starts maintaining a canonical release log.
+What changed in each release of Lys, one page per version.
 
 <DocumentMeta
   label="Page metadata"
   entries={[
     { label: "Type", value: "Changelog" },
-    { label: "Current state", value: "Coming soon" }
+    { label: "Source", value: "CHANGELOG.md" }
   ]}
 />
 
-## Coming soon
+## Releases
 
-The repository does not currently have a canonical `CHANGELOG.md`. Git includes
-the `v0.2.0` tag; use tags and their commits to inspect the recorded release
-points.
+- [Lys 0.3.0](/changelog/0.3.0/)
 
-The root `VERSION` file and all checked-in package manifests are versioned
-`0.2.0` today, matching that tag:
+The log starts at 0.3.0. Earlier versions are recorded only by their Git tags.
 
-- repository root package
-- `@lys/docs`
-- `@lys/backend`
-- `@lys/desktop`
-- `@lys/protocol`
-- `@lys/share`
-- `@lys/scripts`
+## Where the release notes live
 
-Until a release log exists, use tags, commit history, and pull requests as the
-authoritative record of change.
+The root
+[`CHANGELOG.md`](https://github.com/w3lt/lys/blob/main/CHANGELOG.md) is the
+only authored copy of the release notes. It follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/): one
+`## [<version>] - <YYYY-MM-DD>` section per release, newest first, with an
+optional `## [Unreleased]` section above them.
+
+When the handbook is built, each release section of that file becomes an entry
+of the `changelog` content collection, and the release page for that version
+renders the entry. The page and the file therefore show the same notes; do not
+copy release notes into a page.
+
+## Recording a release
+
+1. Add the release's section to `CHANGELOG.md`, with a compare link for its
+   heading at the end of the file.
+2. In `apps/docs/src/content/docs/changelog/`, add `<version>.mdx` with
+   `slug: changelog/<version>`, the next `sidebar.order`, and
+   `<ChangelogRelease version="<version>" />` as its body.
+3. Add the new page to the list of releases above.
+
+The handbook build fails when a release page names a version that
+`CHANGELOG.md` does not have, when two sections claim the same version, or when
+a level-2 heading is neither a release heading nor `## [Unreleased]`. Every line
+that begins with `## ` starts a section, including inside fenced code. Each
+section is rendered on its own, so write links inline: a reference-style link
+resolves only when its definition is in the same section. In `astro dev`, an
+edited `CHANGELOG.md` appears after the dev server restarts.
 
 <RelatedDocuments
   documents={[
@@ -57,6 +72,11 @@ authoritative record of change.
       kind: "Reference",
       label: "Runtime dependencies",
       href: "/operate/dependencies/"
+    },
+    {
+      kind: "Guide",
+      label: "Documentation guidelines",
+      href: "/develop/docs/"
     }
   ]}
 />

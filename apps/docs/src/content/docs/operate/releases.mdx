@@ -56,7 +56,9 @@ The script stops at the first failing step. In order, it:
    previously installed backend.
 6. Runs `pnpm run desktop:build:ci` and `pnpm run desktop:bundle:ci`, which
    build the Tauri app without bundling and then bundle only `Lys.app`.
-7. Copies `Lys.app` to `/Applications` with `ditto`.
+7. Removes any previously installed `/Applications/Lys.app`, then copies the
+   new `Lys.app` there with `ditto`. Without the removal, files from the old
+   bundle would remain inside the new one.
 
 The script needs the toolchain from [Environment setup](/develop/setup/), plus
 `curl`, `jq`, and network access to `nodejs.org`.
@@ -73,7 +75,7 @@ from Finder or the Dock looks for the runtime under `~/.lys`.
 
 ## Versioning
 
-The root `VERSION` file holds the release version, currently `0.2.0`. The
+The root `VERSION` file holds the release version, currently `0.3.0`. The
 `@lys/scripts` package writes it into the manifests or checks them:
 
 ```sh
@@ -82,10 +84,12 @@ pnpm --filter @lys/scripts run version:check
 ```
 
 All checked-in workspace manifests, `apps/desktop/src-tauri/Cargo.toml`, and
-`apps/desktop/src-tauri/tauri.conf.json` are currently versioned `0.2.0`, and
-the repository has a matching `v0.2.0` Git tag. See the
+`apps/desktop/src-tauri/tauri.conf.json` are currently versioned `0.3.0`.
+`version:sync` does not rewrite `apps/desktop/src-tauri/Cargo.lock`; update its
+`lys-desktop` entry in the same change. Each release is tagged `v<version>` in
+Git, and the changelog's compare links rely on those tags. See the
 [package reference](/reference/packages/#lysscripts) for what the scripts
-rewrite, and the [changelog](/changelog/) for the recorded release context.
+rewrite, and the [changelog](/changelog/) for the recorded releases.
 
 <RelatedDocuments
   documents={[

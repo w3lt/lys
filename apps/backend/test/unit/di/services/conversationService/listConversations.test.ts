@@ -7,9 +7,9 @@ import {
 } from "../../../../../src/di/services/conversationService/listConversations"
 import { parseConversationListOptions } from "../../../../../src/di/services/conversationService/utils"
 import {
-  insertAssistantMessageRow,
-  insertConversationRow,
-  insertUserMessageRow,
+  saveAssistantMessageRow,
+  saveConversationRow,
+  saveUserMessageRow,
   openConversationTestDatabase
 } from "../../../support/conversationDatabase"
 import { createFixtureUuidV7 } from "../../../support/conversationFixtures"
@@ -27,13 +27,13 @@ type ListedConversationFixture = Readonly<{
 }>
 
 /**
- * Formats a fixture timestamp in the first hour of 2025-01-01.
+ * Creates a fixture timestamp in the first hour of 2025-01-01.
  *
  * @param minute - Minute offset from midnight.
  * @param second - Second offset within the minute.
  * @returns An ISO timestamp with millisecond precision.
  */
-function atMinute(minute: number, second = 0): string {
+function createFixtureTimestamp(minute: number, second = 0): string {
   return new Date(Date.UTC(2025, 0, 1, 0, minute, second)).toISOString()
 }
 
@@ -44,23 +44,23 @@ function atMinute(minute: number, second = 0): string {
  * @param fixture - Conversation values.
  * @returns The stored conversation identity.
  */
-function insertListedConversation(
+function saveListedConversation(
   database: DatabaseSync,
   fixture: ListedConversationFixture
 ): string {
   const id = createFixtureUuidV7(fixture.sequence)
-  insertConversationRow(database, {
+  saveConversationRow(database, {
     id,
     title: fixture.title,
     systemPrompt: "Stored prompt",
-    createdAt: atMinute(fixture.createdAtMinute)
+    createdAt: createFixtureTimestamp(fixture.createdAtMinute)
   })
   fixture.userMessages.forEach((content, index) => {
-    insertUserMessageRow(database, {
+    saveUserMessageRow(database, {
       id: createFixtureUuidV7(fixture.sequence * 100 + index),
       conversationId: id,
       content,
-      createdAt: atMinute(fixture.createdAtMinute, index + 1)
+      createdAt: createFixtureTimestamp(fixture.createdAtMinute, index + 1)
     })
   })
   return id
@@ -104,19 +104,19 @@ describe("listConversations", () => {
 
   it("orders conversations by latest activity and then by descending identity", () => {
     const database = openConversationTestDatabase()
-    const older = insertListedConversation(database, {
+    const older = saveListedConversation(database, {
       sequence: 3,
       title: "Older",
       userMessages: ["a"],
       createdAtMinute: 1
     })
-    const tieLow = insertListedConversation(database, {
+    const tieLow = saveListedConversation(database, {
       sequence: 1,
       title: "Tie low",
       userMessages: ["b"],
       createdAtMinute: 2
     })
-    const tieHigh = insertListedConversation(database, {
+    const tieHigh = saveListedConversation(database, {
       sequence: 2,
       title: "Tie high",
       userMessages: ["c"],
@@ -134,7 +134,7 @@ describe("listConversations", () => {
 
   it("summarizes each conversation without its system prompt", () => {
     const database = openConversationTestDatabase()
-    const id = insertListedConversation(database, {
+    const id = saveListedConversation(database, {
       sequence: 1,
       title: "Trip plan",
       userMessages: ["First", "Latest"],
@@ -147,8 +147,8 @@ describe("listConversations", () => {
       {
         id,
         title: "Trip plan",
-        createdAt: atMinute(1),
-        updatedAt: atMinute(1, 2),
+        createdAt: createFixtureTimestamp(1),
+        updatedAt: createFixtureTimestamp(1, 2),
         preview: { role: "user", content: "Latest" }
       }
     ])
@@ -156,21 +156,21 @@ describe("listConversations", () => {
 
   it("previews the latest message with content, skipping an empty reply", () => {
     const database = openConversationTestDatabase()
-    const id = insertListedConversation(database, {
+    const id = saveListedConversation(database, {
       sequence: 1,
       title: null,
       userMessages: ["Question"],
       createdAtMinute: 1
     })
-    insertAssistantMessageRow(database, {
+    saveAssistantMessageRow(database, {
       id: createFixtureUuidV7(150),
       conversationId: id,
       model: "qwen/qwen3-8b",
       content: "",
       status: "streaming",
       finishReason: null,
-      createdAt: atMinute(1, 30),
-      updatedAt: atMinute(1, 30)
+      createdAt: createFixtureTimestamp(1, 30),
+      updatedAt: createFixtureTimestamp(1, 30)
     })
 
     expect(
@@ -181,7 +181,7 @@ describe("listConversations", () => {
 
   it("previews nothing for a conversation without messages", () => {
     const database = openConversationTestDatabase()
-    insertListedConversation(database, {
+    saveListedConversation(database, {
       sequence: 1,
       title: null,
       userMessages: [],
@@ -196,19 +196,19 @@ describe("listConversations", () => {
 
   it("lists only matching conversations and counts matches separately from stored conversations", () => {
     const database = openConversationTestDatabase()
-    const titleMatch = insertListedConversation(database, {
+    const titleMatch = saveListedConversation(database, {
       sequence: 1,
       title: "TRIP plan",
       userMessages: ["Unrelated"],
       createdAtMinute: 1
     })
-    const messageMatch = insertListedConversation(database, {
+    const messageMatch = saveListedConversation(database, {
       sequence: 2,
       title: "Budget",
       userMessages: ["Book the trip"],
       createdAtMinute: 2
     })
-    insertListedConversation(database, {
+    saveListedConversation(database, {
       sequence: 3,
       title: "Groceries",
       userMessages: ["Milk"],
@@ -230,7 +230,7 @@ describe("listConversations", () => {
 
   it("previews the latest matching message ahead of a newer non-matching message", () => {
     const database = openConversationTestDatabase()
-    insertListedConversation(database, {
+    saveListedConversation(database, {
       sequence: 1,
       title: null,
       userMessages: ["Book the trip", "Anything else"],
@@ -247,7 +247,7 @@ describe("listConversations", () => {
 
   it("previews the latest message when only the title matches", () => {
     const database = openConversationTestDatabase()
-    insertListedConversation(database, {
+    saveListedConversation(database, {
       sequence: 1,
       title: "Trip plan",
       userMessages: ["First", "Latest"],
@@ -265,7 +265,7 @@ describe("listConversations", () => {
   it("continues after the last row of a full page until the final page", () => {
     const database = openConversationTestDatabase()
     const ids = [1, 2, 3].map((sequence) =>
-      insertListedConversation(database, {
+      saveListedConversation(database, {
         sequence,
         title: `Conversation ${sequence}`,
         userMessages: ["message"],
@@ -300,7 +300,7 @@ describe("listConversations", () => {
   it("returns no continuation when the rows exactly fill the page", () => {
     const database = openConversationTestDatabase()
     for (const sequence of [1, 2]) {
-      insertListedConversation(database, {
+      saveListedConversation(database, {
         sequence,
         title: null,
         userMessages: ["message"],
@@ -319,7 +319,7 @@ describe("listConversations", () => {
 
   it("rejects a stored row that violates the summary contract", () => {
     const database = openConversationTestDatabase()
-    insertListedConversation(database, {
+    saveListedConversation(database, {
       sequence: 1,
       title: "",
       userMessages: [],

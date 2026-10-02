@@ -12,12 +12,12 @@ import {
 } from "../../../support/llmRouteTestApp"
 
 /**
- * Requests one runtime connection attempt.
+ * Sends one runtime connection request.
  *
  * @param testApp - Application with the runtime-connect route registered.
  * @returns The completed response.
  */
-async function requestConnect(testApp: LlmRouteTestApp) {
+async function sendConnectRequest(testApp: LlmRouteTestApp) {
   return await testApp.app.inject({
     method: llmRuntimeConnectApi.method,
     url: llmRuntimeConnectApi.path
@@ -34,7 +34,7 @@ describe("updateFastifyWithLlmRuntimeConnectRoute", () => {
         .mockResolvedValue(status)
       await updateFastifyWithLlmRuntimeConnectRoute(testApp.app)
 
-      const response = await requestConnect(testApp)
+      const response = await sendConnectRequest(testApp)
 
       expect(response.statusCode).toBe(200)
       expect(
@@ -51,7 +51,7 @@ describe("updateFastifyWithLlmRuntimeConnectRoute", () => {
     )
     await updateFastifyWithLlmRuntimeConnectRoute(testApp.app)
 
-    const response = await requestConnect(testApp)
+    const response = await sendConnectRequest(testApp)
 
     expect(response.statusCode).toBe(503)
     expect(response.headers["content-type"]).toMatch(
@@ -67,7 +67,7 @@ describe("updateFastifyWithLlmRuntimeConnectRoute", () => {
     )
     await updateFastifyWithLlmRuntimeConnectRoute(testApp.app)
 
-    const response = await requestConnect(testApp)
+    const response = await sendConnectRequest(testApp)
 
     expect(response.statusCode).toBe(500)
   })

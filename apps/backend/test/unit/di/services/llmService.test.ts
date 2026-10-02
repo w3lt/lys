@@ -9,7 +9,7 @@ import type { LlmEngine } from "../../../../src/modules/llm/llmEngine"
 import type { LoadedLlmModelInstance } from "../../../../src/modules/llm/llmRuntimeTypes"
 import { createFakeLlmRuntime } from "../../support/fakeLlmRuntime"
 import { createDownloadedLlmModel } from "../../support/llmFixtures"
-import { flushMicrotasks } from "../../support/microtasks"
+import { waitForMicrotasks } from "../../support/microtasks"
 
 /** Service settings a case may vary; the queue is always the case's double. */
 type LlmServiceTestOptions = Omit<
@@ -76,13 +76,13 @@ type QueuedLlmServiceOperationName = keyof Pick<
 >
 
 /**
- * Calls one service operation with a valid argument.
+ * Sends one request to a public service operation with a valid argument.
  *
  * @param service - Service under test.
  * @param operationName - Public operation to call.
  * @returns The operation's settlement.
  */
-async function callLlmServiceOperation(
+async function sendLlmServiceRequest(
   service: LlmService,
   operationName: QueuedLlmServiceOperationName
 ): Promise<unknown> {
@@ -241,10 +241,10 @@ describe("LlmService", () => {
       })
 
       const health = service.getLlmModelHealth("a/model")
-      await flushMicrotasks()
+      await waitForMicrotasks()
       nowMs = 500
       admission.resolve()
-      await flushMicrotasks()
+      await waitForMicrotasks()
       expect(engine.listLoadedLlmModelInstances).toHaveBeenCalledOnce()
       nowMs = 525
       inventoryQuery.resolve([])
@@ -342,7 +342,7 @@ describe("LlmService", () => {
         requests.mockRejectedValue(refusal)
 
         await expect(
-          callLlmServiceOperation(service, operationName)
+          sendLlmServiceRequest(service, operationName)
         ).rejects.toBe(refusal)
         expect(requests).toHaveBeenCalledOnce()
         expect(engine.listDownloadedLlmModels).not.toHaveBeenCalled()

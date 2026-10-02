@@ -19,7 +19,7 @@ const MODEL_KEY = "qwen/qwen3-8b"
  * @param modelKey - Decoded canonical model key.
  * @returns The request path with the key percent-encoded.
  */
-function healthPath(modelKey: string): string {
+function buildHealthPath(modelKey: string): string {
   return `/api/v1/llm/${encodeURIComponent(modelKey)}/health`
 }
 
@@ -37,7 +37,7 @@ describe("updateFastifyWithLlmTestModelRoute", () => {
 
     const response = await testApp.app.inject({
       method: "GET",
-      url: healthPath(MODEL_KEY)
+      url: buildHealthPath(MODEL_KEY)
     })
 
     expect(response.statusCode).toBe(200)
@@ -62,7 +62,7 @@ describe("updateFastifyWithLlmTestModelRoute", () => {
 
     const response = await testApp.app.inject({
       method: "GET",
-      url: healthPath(MODEL_KEY)
+      url: buildHealthPath(MODEL_KEY)
     })
 
     expect(response.statusCode).toBe(200)
@@ -87,7 +87,7 @@ describe("updateFastifyWithLlmTestModelRoute", () => {
 
     const response = await testApp.app.inject({
       method: "GET",
-      url: healthPath(MODEL_KEY)
+      url: buildHealthPath(MODEL_KEY)
     })
 
     expect(response.statusCode).toBe(200)
@@ -119,7 +119,7 @@ describe("updateFastifyWithLlmTestModelRoute", () => {
 
     const response = await testApp.app.inject({
       method: "GET",
-      url: healthPath(modelKey)
+      url: buildHealthPath(modelKey)
     })
 
     expect(response.statusCode).toBe(200)
@@ -133,7 +133,7 @@ describe("updateFastifyWithLlmTestModelRoute", () => {
 
     const response = await testApp.app.inject({
       method: "GET",
-      url: healthPath("")
+      url: buildHealthPath("")
     })
 
     expect(response.statusCode).toBe(400)
@@ -150,7 +150,7 @@ describe("updateFastifyWithLlmTestModelRoute", () => {
 
     const response = await testApp.app.inject({
       method: "GET",
-      url: healthPath(MODEL_KEY)
+      url: buildHealthPath(MODEL_KEY)
     })
 
     expect(response.statusCode).toBe(503)
@@ -170,7 +170,7 @@ describe("updateFastifyWithLlmTestModelRoute", () => {
 
     const response = await testApp.app.inject({
       method: "GET",
-      url: healthPath(MODEL_KEY)
+      url: buildHealthPath(MODEL_KEY)
     })
 
     expect(response.statusCode).toBe(503)

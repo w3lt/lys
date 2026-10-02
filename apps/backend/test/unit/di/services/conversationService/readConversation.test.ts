@@ -5,9 +5,9 @@ import {
   getConversationMetadata
 } from "../../../../../src/di/services/conversationService/readConversation"
 import {
-  insertAssistantMessageRow,
-  insertConversationRow,
-  insertUserMessageRow,
+  saveAssistantMessageRow,
+  saveConversationRow,
+  saveUserMessageRow,
   openConversationTestDatabase
 } from "../../../support/conversationDatabase"
 import { createFixtureUuidV7 } from "../../../support/conversationFixtures"
@@ -18,7 +18,7 @@ const CONVERSATION_ID = createFixtureUuidV7(1)
 describe("getConversationMetadata", () => {
   it("returns the stored metadata without the transcript", () => {
     const database = openConversationTestDatabase()
-    insertConversationRow(database, {
+    saveConversationRow(database, {
       id: CONVERSATION_ID,
       title: "Trip plan",
       systemPrompt: "You are Lys.",
@@ -42,7 +42,7 @@ describe("getConversationMetadata", () => {
 
   it("rejects stored metadata that violates the conversation contract", () => {
     const database = openConversationTestDatabase()
-    insertConversationRow(database, {
+    saveConversationRow(database, {
       id: CONVERSATION_ID,
       title: "",
       systemPrompt: "You are Lys.",
@@ -64,7 +64,7 @@ describe("getConversation", () => {
 
   it("returns an empty transcript for a conversation without messages", () => {
     const database = openConversationTestDatabase()
-    insertConversationRow(database, {
+    saveConversationRow(database, {
       id: CONVERSATION_ID,
       title: null,
       systemPrompt: "You are Lys.",
@@ -80,19 +80,19 @@ describe("getConversation", () => {
 
   it("projects each role's stored columns into the message contract", () => {
     const database = openConversationTestDatabase()
-    insertConversationRow(database, {
+    saveConversationRow(database, {
       id: CONVERSATION_ID,
       title: null,
       systemPrompt: "You are Lys.",
       createdAt: "2025-01-01T00:00:00.000Z"
     })
-    insertUserMessageRow(database, {
+    saveUserMessageRow(database, {
       id: createFixtureUuidV7(10),
       conversationId: CONVERSATION_ID,
       content: "Hello",
       createdAt: "2025-01-01T00:00:01.000Z"
     })
-    insertAssistantMessageRow(database, {
+    saveAssistantMessageRow(database, {
       id: createFixtureUuidV7(11),
       conversationId: CONVERSATION_ID,
       model: "qwen/qwen3-8b",
@@ -125,25 +125,25 @@ describe("getConversation", () => {
 
   it("orders the transcript by creation time and then by identity", () => {
     const database = openConversationTestDatabase()
-    insertConversationRow(database, {
+    saveConversationRow(database, {
       id: CONVERSATION_ID,
       title: null,
       systemPrompt: "You are Lys.",
       createdAt: "2025-01-01T00:00:00.000Z"
     })
-    insertUserMessageRow(database, {
+    saveUserMessageRow(database, {
       id: createFixtureUuidV7(30),
       conversationId: CONVERSATION_ID,
       content: "later identity, same time",
       createdAt: "2025-01-01T00:00:01.000Z"
     })
-    insertUserMessageRow(database, {
+    saveUserMessageRow(database, {
       id: createFixtureUuidV7(20),
       conversationId: CONVERSATION_ID,
       content: "earlier identity, same time",
       createdAt: "2025-01-01T00:00:01.000Z"
     })
-    insertUserMessageRow(database, {
+    saveUserMessageRow(database, {
       id: createFixtureUuidV7(10),
       conversationId: CONVERSATION_ID,
       content: "latest time",
@@ -165,14 +165,14 @@ describe("getConversation", () => {
     const database = openConversationTestDatabase()
     const otherConversationId = createFixtureUuidV7(2)
     for (const id of [CONVERSATION_ID, otherConversationId]) {
-      insertConversationRow(database, {
+      saveConversationRow(database, {
         id,
         title: null,
         systemPrompt: "You are Lys.",
         createdAt: "2025-01-01T00:00:00.000Z"
       })
     }
-    insertUserMessageRow(database, {
+    saveUserMessageRow(database, {
       id: createFixtureUuidV7(10),
       conversationId: otherConversationId,
       content: "Other",
@@ -184,7 +184,7 @@ describe("getConversation", () => {
 
   it("returns an independent snapshot", () => {
     const database = openConversationTestDatabase()
-    insertConversationRow(database, {
+    saveConversationRow(database, {
       id: CONVERSATION_ID,
       title: null,
       systemPrompt: "You are Lys.",
@@ -203,13 +203,13 @@ describe("getConversation", () => {
 
   it("rejects a stored message that violates the message contract", () => {
     const database = openConversationTestDatabase()
-    insertConversationRow(database, {
+    saveConversationRow(database, {
       id: CONVERSATION_ID,
       title: null,
       systemPrompt: "You are Lys.",
       createdAt: "2025-01-01T00:00:00.000Z"
     })
-    insertUserMessageRow(database, {
+    saveUserMessageRow(database, {
       id: "not-a-uuid",
       conversationId: CONVERSATION_ID,
       content: "Hello",

@@ -6,7 +6,7 @@ import updateFastifyWithChatRoute, {
 import { ConversationNotFoundError } from "../../../../../src/utils/errors"
 import {
   createChatRouteTestApp,
-  requestChat
+  sendChatRequest
 } from "../../../support/chatRouteTestApp"
 import { createFixtureUuidV7 } from "../../../support/conversationFixtures"
 
@@ -35,7 +35,7 @@ describe("updateFastifyWithChatRoute", () => {
     })
     const conversationId = createFixtureUuidV7(404)
 
-    const response = await requestChat(testApp.app, {
+    const response = await sendChatRequest(testApp.app, {
       ...NEW_CONVERSATION_REQUEST,
       conversationId
     })
@@ -67,7 +67,10 @@ describe("updateFastifyWithChatRoute", () => {
       generations: testApp.generations
     })
 
-    const response = await requestChat(testApp.app, NEW_CONVERSATION_REQUEST)
+    const response = await sendChatRequest(
+      testApp.app,
+      NEW_CONVERSATION_REQUEST
+    )
 
     expect(response.statusCode).toBe(500)
     expect(testApp.logs).toContainEqual(
@@ -98,7 +101,7 @@ describe("updateFastifyWithChatRoute", () => {
       generations: testApp.generations
     })
 
-    const response = await requestChat(testApp.app, payload)
+    const response = await sendChatRequest(testApp.app, payload)
 
     expect(response.statusCode).toBe(400)
     expect(testApp.createConversationTurn).not.toHaveBeenCalled()

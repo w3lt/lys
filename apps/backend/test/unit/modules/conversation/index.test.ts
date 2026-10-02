@@ -65,7 +65,7 @@ const CONVERSATION_PAGE = Object.freeze({
  * @param operationName - History operation that was called.
  * @throws Always.
  */
-function rejectUnexpectedHistoryCall(operationName: string): never {
+function handleUnexpectedHistoryCall(operationName: string): never {
   throw new Error(`Unexpected conversation history call: ${operationName}`)
 }
 
@@ -92,20 +92,20 @@ async function createConversationRouteApp() {
     listConversations: vi
       .spyOn(history, "listConversations")
       .mockImplementation(() =>
-        rejectUnexpectedHistoryCall("listConversations")
+        handleUnexpectedHistoryCall("listConversations")
       ),
     getConversation: vi
       .spyOn(history, "getConversation")
-      .mockImplementation(() => rejectUnexpectedHistoryCall("getConversation")),
+      .mockImplementation(() => handleUnexpectedHistoryCall("getConversation")),
     updateConversationTitle: vi
       .spyOn(history, "updateConversationTitle")
       .mockImplementation(() =>
-        rejectUnexpectedHistoryCall("updateConversationTitle")
+        handleUnexpectedHistoryCall("updateConversationTitle")
       ),
     deleteConversation: vi
       .spyOn(history, "deleteConversation")
       .mockImplementation(() =>
-        rejectUnexpectedHistoryCall("deleteConversation")
+        handleUnexpectedHistoryCall("deleteConversation")
       )
   }
   await updateFastifyWithHttpTransport(testFastify.app)

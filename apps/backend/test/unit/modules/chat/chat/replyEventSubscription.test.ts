@@ -1,8 +1,8 @@
 import type { ChatGenerationEvent } from "@lys/protocol"
 import { describe, expect, it } from "vitest"
 import ReplyEventSubscription from "../../../../../src/modules/chat/chat/replyEventSubscription"
-import { flushMicrotasks } from "../../../support/microtasks"
-import { observeSettlement } from "../../../support/settlement"
+import { waitForMicrotasks } from "../../../support/microtasks"
+import { createSettlementReader } from "../../../support/settlement"
 
 /**
  * Most events offered while measuring a subscription's queue capacity, so a
@@ -61,13 +61,13 @@ function createControlledWriter(): ControlledWriter {
   const writeCompletions: PromiseWithResolvers<void>[] = []
 
   /**
-   * Finds the completion of a started write.
+   * Gets the completion of a started write.
    *
    * @param position - Zero-based start order of the write.
    * @returns The write's completion.
    * @throws If no write has started at that position.
    */
-  function requireWrite(position: number): PromiseWithResolvers<void> {
+  function getWriteCompletion(position: number): PromiseWithResolvers<void> {
     const completion = writeCompletions[position]
     if (completion === undefined)
       throw new Error(`Write ${position} has not started`)
@@ -83,10 +83,10 @@ function createControlledWriter(): ControlledWriter {
     },
     startedEvents,
     resolveWrite: (position: number) => {
-      requireWrite(position).resolve()
+      getWriteCompletion(position).resolve()
     },
     rejectWrite: (position: number, error: Error) => {
-      requireWrite(position).reject(error)
+      getWriteCompletion(position).reject(error)
     }
   }
 }
@@ -121,7 +121,7 @@ function createGatedWriter(): GatedWriter {
  * @returns The number of deltas accepted before the first refusal.
  * @throws If no delta was refused within {@link CAPACITY_PROBE_EVENT_LIMIT}.
  */
-function offerUntilRefused(
+function offerDeltasUntilRefused(
   subscription: ReplyEventSubscription<ChatGenerationEvent>
 ): number {
   for (let accepted = 0; accepted < CAPACITY_PROBE_EVENT_LIMIT; accepted += 1) {
@@ -138,18 +138,18 @@ describe("ReplyEventSubscription", () => {
     const accepted = [createDelta(1), createDelta(2), createDelta(3)].map(
       (event) => subscription.handleStreamEvent(event)
     )
-    await flushMicrotasks()
+    await waitForMicrotasks()
 
     expect(accepted).toEqual([true, true, true])
     expect(writer.startedEvents).toEqual([createDelta(1)])
 
     writer.resolveWrite(0)
-    await flushMicrotasks()
+    await waitForMicrotasks()
 
     expect(writer.startedEvents).toEqual([createDelta(1), createDelta(2)])
 
     writer.resolveWrite(1)
-    await flushMicrotasks()
+    await waitForMicrotasks()
 
     expect(writer.startedEvents).toEqual([
       createDelta(1),
@@ -162,9 +162,9 @@ describe("ReplyEventSubscription", () => {
     const subscription = new ReplyEventSubscription(
       createControlledWriter().sendEvent
     )
-    const closedState = observeSettlement(subscription.closed)
+    const closedState = createSettlementReader(subscription.closed)
 
-    await flushMicrotasks()
+    await waitForMicrotasks()
 
     expect(closedState()).toBe("pending")
   })
@@ -173,10 +173,10 @@ describe("ReplyEventSubscription", () => {
     const subscription = new ReplyEventSubscription(
       createControlledWriter().sendEvent
     )
-    const closedState = observeSettlement(subscription.closed)
+    const closedState = createSettlementReader(subscription.closed)
 
     subscription.close()
-    await flushMicrotasks()
+    await waitForMicrotasks()
 
     expect(closedState()).toBe("fulfilled")
   })
@@ -184,23 +184,23 @@ describe("ReplyEventSubscription", () => {
   it("refuses events after close and settles closed only after every accepted write settled", async () => {
     const writer = createControlledWriter()
     const subscription = new ReplyEventSubscription(writer.sendEvent)
-    const closedState = observeSettlement(subscription.closed)
+    const closedState = createSettlementReader(subscription.closed)
     subscription.handleStreamEvent(createDelta(1))
     subscription.handleStreamEvent(createDelta(2))
-    await flushMicrotasks()
+    await waitForMicrotasks()
 
     subscription.close()
     subscription.close()
     const acceptedAfterClose = subscription.handleStreamEvent(createDelta(3))
     writer.resolveWrite(0)
-    await flushMicrotasks()
+    await waitForMicrotasks()
 
     expect(acceptedAfterClose).toBe(false)
     expect(writer.startedEvents).toEqual([createDelta(1), createDelta(2)])
     expect(closedState()).toBe("pending")
 
     writer.resolveWrite(1)
-    await flushMicrotasks()
+    await waitForMicrotasks()
 
     expect(closedState()).toBe("fulfilled")
     expect(writer.startedEvents).toEqual([createDelta(1), createDelta(2)])
@@ -209,22 +209,22 @@ describe("ReplyEventSubscription", () => {
   it("ends after a failed write and settles closed without rejecting once accepted writes settled", async () => {
     const writer = createControlledWriter()
     const subscription = new ReplyEventSubscription(writer.sendEvent)
-    const closedState = observeSettlement(subscription.closed)
+    const closedState = createSettlementReader(subscription.closed)
     const accepted = [
       subscription.handleStreamEvent(createDelta(1)),
       subscription.handleStreamEvent(createDelta(2))
     ]
-    await flushMicrotasks()
+    await waitForMicrotasks()
 
     writer.rejectWrite(0, CLOSED_CONNECTION_FAILURE)
-    await flushMicrotasks()
+    await waitForMicrotasks()
 
     expect(accepted).toEqual([true, true])
     expect(subscription.handleStreamEvent(createDelta(3))).toBe(false)
     expect(closedState()).toBe("pending")
 
     writer.rejectWrite(1, CLOSED_CONNECTION_FAILURE)
-    await flushMicrotasks()
+    await waitForMicrotasks()
 
     expect(closedState()).toBe("fulfilled")
     expect(writer.startedEvents).toEqual([createDelta(1), createDelta(2)])
@@ -233,16 +233,16 @@ describe("ReplyEventSubscription", () => {
   it("refuses the event that would exceed its queue capacity and ends", async () => {
     const writer = createGatedWriter()
     const subscription = new ReplyEventSubscription(writer.sendEvent)
-    const closedState = observeSettlement(subscription.closed)
+    const closedState = createSettlementReader(subscription.closed)
 
-    const capacity = offerUntilRefused(subscription)
-    await flushMicrotasks()
+    const capacity = offerDeltasUntilRefused(subscription)
+    await waitForMicrotasks()
 
     expect(capacity).toBeGreaterThan(1)
     expect(closedState()).toBe("pending")
 
     writer.open()
-    await flushMicrotasks()
+    await waitForMicrotasks()
 
     expect(closedState()).toBe("fulfilled")
     expect(writer.startedEvents).toEqual(
@@ -252,7 +252,7 @@ describe("ReplyEventSubscription", () => {
   })
 
   it("accepts exactly one more event at capacity after one queued write settled", async () => {
-    const capacity = offerUntilRefused(
+    const capacity = offerDeltasUntilRefused(
       new ReplyEventSubscription(createControlledWriter().sendEvent)
     )
     const writer = createControlledWriter()
@@ -260,10 +260,10 @@ describe("ReplyEventSubscription", () => {
     const accepted = Array.from({ length: capacity }, (_, sequence) =>
       subscription.handleStreamEvent(createDelta(sequence))
     )
-    await flushMicrotasks()
+    await waitForMicrotasks()
 
     writer.resolveWrite(0)
-    await flushMicrotasks()
+    await waitForMicrotasks()
 
     expect(accepted.filter(Boolean)).toHaveLength(capacity)
     expect(subscription.handleStreamEvent(createDelta(capacity))).toBe(true)

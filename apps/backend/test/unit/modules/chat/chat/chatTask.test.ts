@@ -47,7 +47,7 @@ type ChatTaskScenario = Readonly<{
  * @param chunks - Chunks yielded in order.
  * @returns A stream starter recording its inputs.
  */
-function streamChunks(...chunks: ChatCompletionChunk[]) {
+function createChunkStream(...chunks: ChatCompletionChunk[]) {
   return vi.fn<CreateChatTaskOptions["completeChatStream"]>(async () =>
     (async function* () {
       yield* chunks
@@ -62,7 +62,7 @@ function streamChunks(...chunks: ChatCompletionChunk[]) {
  * @returns The sent events, stored deltas and states, captured logs, and the
  * task's settlement.
  */
-async function runChatTask(scenario: ChatTaskScenario) {
+async function getChatTaskOutcome(scenario: ChatTaskScenario) {
   const { app, logs } = createTestFastify()
   const events: ChatGenerationEvent[] = []
   const persistedDeltas: string[] = []
@@ -109,11 +109,11 @@ async function runChatTask(scenario: ChatTaskScenario) {
 describe("createChatTask", () => {
   it("forwards the conversation, model, generation options, and signal to the model", async () => {
     const abortSignal = new AbortController().signal
-    const completeChatStream = streamChunks(
+    const completeChatStream = createChunkStream(
       createChatCompletionChunk({ finishReason: "stop" })
     )
 
-    await runChatTask({ completeChatStream, abortSignal })
+    await getChatTaskOutcome({ completeChatStream, abortSignal })
 
     expect(completeChatStream).toHaveBeenCalledWith({
       ...CHAT_INPUT,
@@ -122,8 +122,8 @@ describe("createChatTask", () => {
   })
 
   it("stores and sends each delta, then completes with the finish reason", async () => {
-    const run = await runChatTask({
-      completeChatStream: streamChunks(
+    const run = await getChatTaskOutcome({
+      completeChatStream: createChunkStream(
         createChatCompletionChunk({ content: "Hi" }),
         createChatCompletionChunk({ content: " there" }),
         createChatCompletionChunk({ finishReason: "stop" })
@@ -143,8 +143,8 @@ describe("createChatTask", () => {
   })
 
   it("completes with a length finish reason carried by the final delta", async () => {
-    const run = await runChatTask({
-      completeChatStream: streamChunks(
+    const run = await getChatTaskOutcome({
+      completeChatStream: createChunkStream(
         createChatCompletionChunk({ content: "Cut", finishReason: "length" })
       )
     })
@@ -160,8 +160,8 @@ describe("createChatTask", () => {
   })
 
   it("ignores chunks without text or without the first choice", async () => {
-    const run = await runChatTask({
-      completeChatStream: streamChunks(
+    const run = await getChatTaskOutcome({
+      completeChatStream: createChunkStream(
         { ...createChatCompletionChunk({}), choices: [] },
         createChatCompletionChunk({ content: "other choice", index: 1 }),
         createChatCompletionChunk({ content: null }),
@@ -175,8 +175,8 @@ describe("createChatTask", () => {
   })
 
   it("interrupts without sending a delta whose storage was refused", async () => {
-    const run = await runChatTask({
-      completeChatStream: streamChunks(
+    const run = await getChatTaskOutcome({
+      completeChatStream: createChunkStream(
         createChatCompletionChunk({ content: "Hi" }),
         createChatCompletionChunk({ content: "deleted" }),
         createChatCompletionChunk({ content: "after" }),
@@ -200,8 +200,8 @@ describe("createChatTask", () => {
   })
 
   it("reports an interruption when a newer turn or a deletion already finalized the reply", async () => {
-    const run = await runChatTask({
-      completeChatStream: streamChunks(
+    const run = await getChatTaskOutcome({
+      completeChatStream: createChunkStream(
         createChatCompletionChunk({ content: "Hi", finishReason: "stop" })
       ),
       updateAssistantMessageState: () => false
@@ -218,9 +218,9 @@ describe("createChatTask", () => {
   })
 
   it("interrupts without contacting the model when already cancelled", async () => {
-    const completeChatStream = streamChunks()
+    const completeChatStream = createChunkStream()
 
-    const run = await runChatTask({
+    const run = await getChatTaskOutcome({
       completeChatStream,
       abortSignal: AbortSignal.abort()
     })
@@ -232,7 +232,7 @@ describe("createChatTask", () => {
 
   it("stops consuming the stream once cancelled and keeps the stored text", async () => {
     const cancellation = new AbortController()
-    const run = await runChatTask({
+    const run = await getChatTaskOutcome({
       abortSignal: cancellation.signal,
       completeChatStream: vi.fn(async () =>
         (async function* () {
@@ -254,7 +254,7 @@ describe("createChatTask", () => {
 
   it("interrupts when the stream ends after cancellation", async () => {
     const cancellation = new AbortController()
-    const run = await runChatTask({
+    const run = await getChatTaskOutcome({
       abortSignal: cancellation.signal,
       completeChatStream: vi.fn(async () =>
         (async function* () {
@@ -272,7 +272,7 @@ describe("createChatTask", () => {
   })
 
   it("interrupts with a debug log when the model reports cancellation before the task observes its abort", async () => {
-    const run = await runChatTask({
+    const run = await getChatTaskOutcome({
       completeChatStream: vi.fn(async () => {
         throw new ChatCompletionCancelledError(new Error("aborted"))
       })
@@ -291,7 +291,7 @@ describe("createChatTask", () => {
 
   it("interrupts when the stream fails after its own abort", async () => {
     const cancellation = new AbortController()
-    const run = await runChatTask({
+    const run = await getChatTaskOutcome({
       abortSignal: cancellation.signal,
       completeChatStream: vi.fn(async () =>
         (async function* () {
@@ -316,7 +316,7 @@ describe("createChatTask", () => {
   })
 
   it("fails with an error event and log when the model request is rejected", async () => {
-    const run = await runChatTask({
+    const run = await getChatTaskOutcome({
       completeChatStream: vi.fn(async () => {
         throw new Error("model not loaded")
       })
@@ -333,8 +333,8 @@ describe("createChatTask", () => {
   })
 
   it("fails after the sent text when the stream ends without a finish reason", async () => {
-    const run = await runChatTask({
-      completeChatStream: streamChunks(
+    const run = await getChatTaskOutcome({
+      completeChatStream: createChunkStream(
         createChatCompletionChunk({ content: "Partial" })
       )
     })
@@ -351,8 +351,8 @@ describe("createChatTask", () => {
   })
 
   it("fails on an unsupported finish reason", async () => {
-    const run = await runChatTask({
-      completeChatStream: streamChunks(
+    const run = await getChatTaskOutcome({
+      completeChatStream: createChunkStream(
         createChatCompletionChunk({ finishReason: "tool_calls" })
       )
     })
@@ -362,8 +362,8 @@ describe("createChatTask", () => {
   })
 
   it("fails without sending the delta when it cannot be stored", async () => {
-    const run = await runChatTask({
-      completeChatStream: streamChunks(
+    const run = await getChatTaskOutcome({
+      completeChatStream: createChunkStream(
         createChatCompletionChunk({ content: "Hi" })
       ),
       updateAssistantMessageContent: () => {
@@ -377,8 +377,8 @@ describe("createChatTask", () => {
 
   it("fails after the sent text when the completed state cannot be stored", async () => {
     const persistenceFailure = new Error("Conversation store is closed")
-    const run = await runChatTask({
-      completeChatStream: streamChunks(
+    const run = await getChatTaskOutcome({
+      completeChatStream: createChunkStream(
         createChatCompletionChunk({ content: "Hi", finishReason: "stop" })
       ),
       updateAssistantMessageState: vi
@@ -407,8 +407,8 @@ describe("createChatTask", () => {
 
   it("fails when the interrupted state cannot be stored", async () => {
     const persistenceFailure = new Error("Conversation store is closed")
-    const run = await runChatTask({
-      completeChatStream: streamChunks(
+    const run = await getChatTaskOutcome({
+      completeChatStream: createChunkStream(
         createChatCompletionChunk({ content: "deleted" })
       ),
       updateAssistantMessageContent: () => false,
@@ -436,7 +436,7 @@ describe("createChatTask", () => {
   it("rejects with both failures and sends no event when the failed state cannot be stored", async () => {
     const streamFailure = new Error("model not loaded")
     const persistenceFailure = new Error("Conversation store is closed")
-    const run = await runChatTask({
+    const run = await getChatTaskOutcome({
       completeChatStream: vi.fn(async () => {
         throw streamFailure
       }),

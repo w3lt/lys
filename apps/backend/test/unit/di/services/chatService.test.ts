@@ -14,7 +14,7 @@ import {
   createChatCompletionResponse,
   createChatCompletionStreamResponse,
   createOpenAiErrorResponse,
-  installOpenAiEndpointFake,
+  startOpenAiEndpointFake,
   type OpenAiEndpointResponder
 } from "../../support/openAiEndpointFake"
 
@@ -29,7 +29,7 @@ const SERVICE_OPTIONS = Object.freeze({
 } satisfies ChatServiceCreationOptions)
 
 /**
- * Installs the endpoint fake and creates a service that sends requests to it.
+ * Starts the endpoint fake and creates a service that sends requests to it.
  *
  * @param respond - Endpoint behavior for the case.
  * @param options - Service options overriding {@link SERVICE_OPTIONS}.
@@ -39,7 +39,7 @@ function createServiceWithEndpoint(
   respond: OpenAiEndpointResponder,
   options: Partial<ChatServiceCreationOptions> = {}
 ) {
-  const endpoint = installOpenAiEndpointFake(respond)
+  const endpoint = startOpenAiEndpointFake(respond)
   const service = new ChatService({ ...SERVICE_OPTIONS, ...options })
   return { service, endpoint }
 }
@@ -61,12 +61,12 @@ function createServiceReplyingWithTitle(
 }
 
 /**
- * Collects every chunk of a completion stream.
+ * Lists every chunk of a completion stream, consuming it.
  *
  * @param stream - Stream returned by the service.
  * @returns The chunks in stream order.
  */
-async function collectChunks<Chunk>(
+async function listChunks<Chunk>(
   stream: AsyncIterable<Chunk>
 ): Promise<Chunk[]> {
   const chunks: Chunk[] = []
@@ -83,7 +83,7 @@ describe("ChatService", () => {
         createChatCompletionStreamResponse([])
       )
 
-      await collectChunks(
+      await listChunks(
         await service.completeChatStream({
           messages: [
             { role: "system", content: "You are Lys." },
@@ -116,7 +116,7 @@ describe("ChatService", () => {
         createChatCompletionStreamResponse([])
       )
 
-      await collectChunks(
+      await listChunks(
         await service.completeChatStream({
           messages: [{ role: "user", content: "Hello" }],
           model: "qwen/qwen3-8b",
@@ -140,7 +140,7 @@ describe("ChatService", () => {
         createChatCompletionStreamResponse(chunks)
       )
 
-      const received = await collectChunks(
+      const received = await listChunks(
         await service.completeChatStream({
           messages: [{ role: "user", content: "Hello" }],
           model: "qwen/qwen3-8b",
@@ -158,7 +158,7 @@ describe("ChatService", () => {
       const keyed = new ChatService({ ...SERVICE_OPTIONS, apiKey: "local-key" })
 
       for (const client of [service, keyed]) {
-        await collectChunks(
+        await listChunks(
           await client.completeChatStream({
             messages: [{ role: "user", content: "Hello" }],
             model: "qwen/qwen3-8b",

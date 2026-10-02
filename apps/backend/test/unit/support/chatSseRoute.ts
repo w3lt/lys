@@ -7,7 +7,7 @@ import type {
 } from "../../../src/modules/chat/chat/share"
 import { createTestFastify, type TestFastify } from "./fastifyTestApp"
 
-/** Path of the chat-shaped SSE route installed by {@link addChatSseRoute}. */
+/** Path of the chat-shaped SSE route registered by {@link registerChatSseRoute}. */
 const CHAT_SSE_TEST_ROUTE_PATH = "/test/chat-sse"
 
 /** One server-sent event decoded from a captured response body. */
@@ -43,14 +43,14 @@ export async function createChatSseTestApp(): Promise<TestFastify> {
 }
 
 /**
- * Installs an SSE-only POST route whose handler receives a real chat request
+ * Registers an SSE-only POST route whose handler receives a real chat request
  * and reply owned by the test application.
  *
  * @param app - Application with the SSE plugin registered.
  * @param handleRequest - Test action run with the live request and reply; the
  * connection closes when it settles.
  */
-export function addChatSseRoute(
+export function registerChatSseRoute(
   app: FastifyInstance,
   handleRequest: (
     request: ChatRouteRequest,
@@ -66,12 +66,13 @@ export function addChatSseRoute(
 }
 
 /**
- * Requests the chat-shaped SSE route and decodes its complete event stream.
+ * Sends a request to the chat-shaped SSE route and decodes its complete event
+ * stream.
  *
- * @param app - Application on which {@link addChatSseRoute} installed the route.
+ * @param app - Application on which {@link registerChatSseRoute} registered the route.
  * @returns The response after the handler settled and the stream ended.
  */
-export async function requestChatSseRoute(
+export async function sendChatSseRouteRequest(
   app: FastifyInstance
 ): Promise<ChatSseRouteResponse> {
   const response = await app.inject({

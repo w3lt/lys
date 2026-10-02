@@ -16,23 +16,24 @@ const LAST_LISTED_CONVERSATION = Object.freeze({
 })
 
 /**
- * Encodes a JSON value the way list cursors are transmitted.
+ * Creates a cursor from a JSON value, encoded the way list cursors are
+ * transmitted.
  *
  * @param value - Cursor payload candidate.
  * @returns Canonical base64 of its UTF-8 JSON.
  */
-function encodeCursorPayload(value: unknown): string {
+function createEncodedCursor(value: unknown): string {
   return Buffer.from(JSON.stringify(value), "utf8").toString("base64")
 }
 
 /**
- * Captures the failure thrown while parsing list options.
+ * Gets the failure thrown while parsing list options.
  *
  * @param options - Raw query candidate.
  * @returns The thrown value.
  * @throws If parsing unexpectedly succeeds.
  */
-function captureParseFailure(
+function getParseFailure(
   options: Parameters<typeof parseConversationListOptions>[0]
 ): unknown {
   try {
@@ -91,7 +92,7 @@ describe("parseConversationListOptions", () => {
     ["a limit above 50", { limit: 51 }],
     ["a fractional limit", { limit: 1.5 }]
   ])("rejects %s as invalid input", (_label, options) => {
-    const failure = captureParseFailure(options)
+    const failure = getParseFailure(options)
 
     expect(failure).toBeInstanceOf(Error)
     expect(failure).toMatchObject({
@@ -109,7 +110,7 @@ describe("parseConversationListOptions", () => {
     expect(
       parseConversationListOptions({ query: "trip", cursor }).cursor
     ).toBeDefined()
-    expect(captureParseFailure({ query: "budget", cursor })).toMatchObject({
+    expect(getParseFailure({ query: "budget", cursor })).toMatchObject({
       statusCode: 400
     })
   })
@@ -118,7 +119,7 @@ describe("parseConversationListOptions", () => {
     const cursor = createConversationListCursor("", LAST_LISTED_CONVERSATION)
 
     expect(parseConversationListOptions({ cursor }).cursor).toBeDefined()
-    expect(captureParseFailure({ query: "trip", cursor })).toMatchObject({
+    expect(getParseFailure({ query: "trip", cursor })).toMatchObject({
       statusCode: 400
     })
   })
@@ -127,7 +128,7 @@ describe("parseConversationListOptions", () => {
     const cursor = createConversationListCursor("", LAST_LISTED_CONVERSATION)
 
     expect(parseConversationListOptions({ cursor }).cursor).toBeDefined()
-    expect(captureParseFailure({ cursor: `${cursor}\n` })).toMatchObject({
+    expect(getParseFailure({ cursor: `${cursor}\n` })).toMatchObject({
       statusCode: 400
     })
   })
@@ -135,7 +136,7 @@ describe("parseConversationListOptions", () => {
   it("rejects a cursor whose payload is not JSON", () => {
     const cursor = Buffer.from("not json", "utf8").toString("base64")
 
-    expect(captureParseFailure({ cursor })).toMatchObject({
+    expect(getParseFailure({ cursor })).toMatchObject({
       statusCode: 400,
       cause: expect.any(SyntaxError)
     })
@@ -148,7 +149,7 @@ describe("parseConversationListOptions", () => {
     ["a timestamp without milliseconds", { updatedAt: "2026-01-02T03:04:05Z" }],
     ["an identifier that is not a UUIDv7", { id: "conversation-7" }]
   ])("rejects a cursor with %s", (_label, override) => {
-    const cursor = encodeCursorPayload({
+    const cursor = createEncodedCursor({
       version: 1,
       query: "",
       score: null,
@@ -157,7 +158,7 @@ describe("parseConversationListOptions", () => {
       ...override
     })
 
-    expect(captureParseFailure({ cursor })).toMatchObject({
+    expect(getParseFailure({ cursor })).toMatchObject({
       statusCode: 400,
       cause: expect.any(z.ZodError)
     })

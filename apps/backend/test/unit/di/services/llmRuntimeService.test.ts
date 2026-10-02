@@ -7,7 +7,7 @@ import { isLlmRuntimeUnavailableError } from "../../../../src/modules/llm/llmRun
 import type { LlmRuntimeAvailability } from "../../../../src/modules/llm/llmRuntimeTypes"
 import { isLlmServiceBusyError } from "../../../../src/modules/llm/llmServiceBusyError"
 import { createFakeLlmRuntime } from "../../support/fakeLlmRuntime"
-import { flushMicrotasks } from "../../support/microtasks"
+import { waitForMicrotasks } from "../../support/microtasks"
 
 /** Accepted operations the service admits at once: one active and eight waiting. */
 const SERVICE_CAPACITY = 9
@@ -112,7 +112,7 @@ describe("LlmRuntimeService", () => {
         service.handleLlmEngineOperationRequest(firstOperation)
       const secondResult =
         service.handleLlmEngineOperationRequest(secondOperation)
-      await flushMicrotasks()
+      await waitForMicrotasks()
       expect(firstOperation).toHaveBeenCalledOnce()
       expect(secondOperation).not.toHaveBeenCalled()
 
@@ -201,7 +201,7 @@ describe("LlmRuntimeService", () => {
       )
 
       const disposal = service[Symbol.asyncDispose]()
-      await flushMicrotasks()
+      await waitForMicrotasks()
       expect(runtime[Symbol.asyncDispose]).not.toHaveBeenCalled()
 
       gate.resolve()
@@ -393,7 +393,7 @@ describe("LlmRuntimeService", () => {
 
       const first = service.connectLlmRuntime()
       const second = service.connectLlmRuntime()
-      await flushMicrotasks()
+      await waitForMicrotasks()
       expect(acquireLlmRuntime).toHaveBeenCalledOnce()
       expect(service.llmRuntimeConnectionStatus).toBe("connecting")
 
@@ -470,7 +470,7 @@ describe("LlmRuntimeService", () => {
 
       const failed = service.handleLlmEngineOperationRequest(propagating)
       const next = service.handleLlmEngineOperationRequest(nextOperation)
-      await flushMicrotasks()
+      await waitForMicrotasks()
       expect(runtime.getRuntimeAvailability).toHaveBeenCalledOnce()
       expect(nextOperation).not.toHaveBeenCalled()
 

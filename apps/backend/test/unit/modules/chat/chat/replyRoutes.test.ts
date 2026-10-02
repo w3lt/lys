@@ -23,7 +23,7 @@ import {
   FIXTURE_TIMESTAMP
 } from "../../../support/conversationFixtures"
 import { createTestFastify } from "../../../support/fastifyTestApp"
-import { flushMicrotasks } from "../../../support/microtasks"
+import { waitForMicrotasks } from "../../../support/microtasks"
 
 /** Conversation the stubbed history answers for. */
 const CONVERSATION_ID = createFixtureUuidV7(1)
@@ -75,7 +75,7 @@ type ControlledGeneration = Readonly<{
  * @param operationName - History operation that was called.
  * @throws Always.
  */
-function rejectUnexpectedHistoryCall(operationName: string): never {
+function handleUnexpectedHistoryCall(operationName: string): never {
   throw new Error(`Unexpected conversation history call: ${operationName}`)
 }
 
@@ -104,7 +104,7 @@ async function createReplyRouteApp() {
   vi.spyOn(store, "createHistoryAccess").mockReturnValue(history)
   const getConversation = vi
     .spyOn(history, "getConversation")
-    .mockImplementation(() => rejectUnexpectedHistoryCall("getConversation"))
+    .mockImplementation(() => handleUnexpectedHistoryCall("getConversation"))
   await updateFastifyWithHttpTransport(testFastify.app)
   testFastify.app.decorate("conversationService", store)
   await updateFastifyWithChatReplyRoutes(testFastify.app, generations)
@@ -411,7 +411,7 @@ describe("updateFastifyWithChatReplyRoutes", () => {
     it("cancels only the reply task and answers 204 after that task settled", async () => {
       const { app, generations } = await createReplyRouteApp()
       const generation = startControlledGeneration(generations, REPLY_TARGET)
-      await flushMicrotasks()
+      await waitForMicrotasks()
       const replyAborted = waitForAbort(
         generation.replyTask.context.abortSignal
       )
@@ -425,7 +425,7 @@ describe("updateFastifyWithChatReplyRoutes", () => {
         url: STOP_REPLY_URL
       })
       await replyAborted
-      await flushMicrotasks()
+      await waitForMicrotasks()
 
       expect(generation.titleTask.context.abortSignal.aborted).toBe(false)
       expect(sentStatusCodes).toEqual([])

@@ -5,8 +5,8 @@ import ReplyGenerationRegistry, {
 } from "../../../../../src/modules/chat/chat/replyGenerationRegistry"
 import ControlledReplyTask from "../../../support/controlledReplyTask"
 import { createFixtureUuidV7 } from "../../../support/conversationFixtures"
-import { flushMicrotasks } from "../../../support/microtasks"
-import { observeSettlement } from "../../../support/settlement"
+import { waitForMicrotasks } from "../../../support/microtasks"
+import { createSettlementReader } from "../../../support/settlement"
 
 /** Conversation whose replies share title tracking in the dedup cases. */
 const CONVERSATION_X_ID = createFixtureUuidV7(1)
@@ -99,7 +99,7 @@ describe("ReplyGenerationRegistry", () => {
         FIRST_REPLY_OF_X,
         createLaunchers(replyTask)
       )
-      await flushMicrotasks()
+      await waitForMicrotasks()
 
       expect(replyTask.hasStarted).toBe(true)
       expect(registry.findReplyGeneration(FIRST_REPLY_OF_X)).toBe(generation)
@@ -132,7 +132,7 @@ describe("ReplyGenerationRegistry", () => {
           createLaunchers(duplicateReply, duplicateTitle)
         )
       ).toThrow(Error)
-      await flushMicrotasks()
+      await waitForMicrotasks()
 
       expect(duplicateReply.hasStarted).toBe(false)
       expect(duplicateTitle.hasStarted).toBe(false)
@@ -152,7 +152,7 @@ describe("ReplyGenerationRegistry", () => {
           createLaunchers(createTask(), createTask())
         )
       ).toThrow(Error)
-      await flushMicrotasks()
+      await waitForMicrotasks()
       runningReply.resolve()
       await running.settled
       const laterTitle = createTask()
@@ -161,7 +161,7 @@ describe("ReplyGenerationRegistry", () => {
         SECOND_REPLY_OF_X,
         createLaunchers(createTask(), laterTitle)
       )
-      await flushMicrotasks()
+      await waitForMicrotasks()
 
       expect(laterTitle.hasStarted).toBe(true)
     })
@@ -173,10 +173,10 @@ describe("ReplyGenerationRegistry", () => {
         FIRST_REPLY_OF_X,
         createLaunchers(firstReply)
       )
-      await flushMicrotasks()
+      await waitForMicrotasks()
       firstReply.resolve()
       await first.settled
-      await flushMicrotasks()
+      await waitForMicrotasks()
 
       expect(registry.findReplyGeneration(FIRST_REPLY_OF_X)).toBeUndefined()
 
@@ -185,7 +185,7 @@ describe("ReplyGenerationRegistry", () => {
         FIRST_REPLY_OF_X,
         createLaunchers(nextReply)
       )
-      await flushMicrotasks()
+      await waitForMicrotasks()
 
       expect(next).not.toBe(first)
       expect(registry.findReplyGeneration(FIRST_REPLY_OF_X)).toBe(next)
@@ -209,8 +209,8 @@ describe("ReplyGenerationRegistry", () => {
         SECOND_REPLY_OF_X,
         createLaunchers(secondReply, secondTitle)
       )
-      await flushMicrotasks()
-      const firstSettlement = observeSettlement(first.settled)
+      await waitForMicrotasks()
+      const firstSettlement = createSettlementReader(first.settled)
       secondReply.resolve()
       await second.settled
 
@@ -233,7 +233,7 @@ describe("ReplyGenerationRegistry", () => {
         REPLY_OF_Y,
         createLaunchers(createTask(), titleOfY)
       )
-      await flushMicrotasks()
+      await waitForMicrotasks()
 
       expect(titleOfX.hasStarted).toBe(true)
       expect(titleOfY.hasStarted).toBe(true)
@@ -246,17 +246,17 @@ describe("ReplyGenerationRegistry", () => {
         FIRST_REPLY_OF_X,
         createLaunchers(createTask(), firstTitle)
       )
-      await flushMicrotasks()
-      const firstSettlement = observeSettlement(first.settled)
+      await waitForMicrotasks()
+      const firstSettlement = createSettlementReader(first.settled)
       firstTitle.resolve()
-      await flushMicrotasks()
+      await waitForMicrotasks()
       const laterTitle = createTask()
 
       registry.startReplyGeneration(
         SECOND_REPLY_OF_X,
         createLaunchers(createTask(), laterTitle)
       )
-      await flushMicrotasks()
+      await waitForMicrotasks()
 
       expect(firstSettlement()).toBe("pending")
       expect(laterTitle.hasStarted).toBe(true)
@@ -272,16 +272,16 @@ describe("ReplyGenerationRegistry", () => {
         FIRST_REPLY_OF_X,
         createLaunchers(firstReply, firstTitle)
       )
-      await flushMicrotasks()
+      await waitForMicrotasks()
       firstTitle.reject(titleFailure)
-      await flushMicrotasks()
+      await waitForMicrotasks()
       const laterTitle = createTask()
 
       registry.startReplyGeneration(
         SECOND_REPLY_OF_X,
         createLaunchers(createTask(), laterTitle)
       )
-      await flushMicrotasks()
+      await waitForMicrotasks()
       firstReply.resolve()
       await first.settled
 
@@ -305,10 +305,10 @@ describe("ReplyGenerationRegistry", () => {
         REPLY_OF_Y,
         createLaunchers(replyOfY, titleOfY)
       )
-      await flushMicrotasks()
+      await waitForMicrotasks()
 
       const disposal = registry[Symbol.asyncDispose]()
-      const disposalSettlement = observeSettlement(disposal)
+      const disposalSettlement = createSettlementReader(disposal)
 
       expect(
         [replyOfX, titleOfX, replyOfY, titleOfY].map(
@@ -318,11 +318,11 @@ describe("ReplyGenerationRegistry", () => {
       replyOfX.resolve()
       titleOfX.resolve()
       replyOfY.resolve()
-      await flushMicrotasks()
+      await waitForMicrotasks()
       expect(disposalSettlement()).toBe("pending")
 
-      const settlementOfX = observeSettlement(generationOfX.settled)
-      const settlementOfY = observeSettlement(generationOfY.settled)
+      const settlementOfX = createSettlementReader(generationOfX.settled)
+      const settlementOfY = createSettlementReader(generationOfY.settled)
       titleOfY.resolve()
       await disposal
 
@@ -339,7 +339,7 @@ describe("ReplyGenerationRegistry", () => {
         FIRST_REPLY_OF_X,
         createLaunchers(replyTask)
       )
-      await flushMicrotasks()
+      await waitForMicrotasks()
 
       const disposal = registry[Symbol.asyncDispose]()
       replyTask.reject(replyFailure)
@@ -355,7 +355,7 @@ describe("ReplyGenerationRegistry", () => {
         FIRST_REPLY_OF_X,
         createLaunchers(replyTask)
       )
-      await flushMicrotasks()
+      await waitForMicrotasks()
 
       const first = registry[Symbol.asyncDispose]()
       const concurrent = registry[Symbol.asyncDispose]()
@@ -380,7 +380,7 @@ describe("ReplyGenerationRegistry", () => {
         FIRST_REPLY_OF_X,
         createLaunchers(runningReply)
       )
-      await flushMicrotasks()
+      await waitForMicrotasks()
       expect(registry.findReplyGeneration(FIRST_REPLY_OF_X)).toBe(running)
       const disposal = registry[Symbol.asyncDispose]()
       const lateReply = createTask()
@@ -397,7 +397,7 @@ describe("ReplyGenerationRegistry", () => {
       )
       runningReply.resolve()
       await disposal
-      await flushMicrotasks()
+      await waitForMicrotasks()
 
       expect(lateReply.hasStarted).toBe(false)
       expect(lateTitle.hasStarted).toBe(false)

@@ -2,16 +2,16 @@
 export type SettlementState = "pending" | "fulfilled" | "rejected"
 
 /**
- * Observes a promise's settlement without awaiting it.
+ * Creates a reader of a promise's settlement without awaiting the promise.
  *
  * @param promise - Promise the case checks at its barriers.
  * @returns A reader of the settlement seen so far; it changes only after the
  * promise's reactions have run, so read it after a barrier such as
- * `flushMicrotasks`.
- * @remarks Observing a promise handles its rejection, so a rejection the case
+ * `waitForMicrotasks`.
+ * @remarks Creating the reader handles the promise's rejection, so a rejection the case
  * observes is never reported as unhandled.
  */
-export function observeSettlement(
+export function createSettlementReader(
   promise: Promise<unknown>
 ): () => SettlementState {
   let state: SettlementState = "pending"

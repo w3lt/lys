@@ -36,33 +36,33 @@ export type FakeLlmRuntime = LlmRuntime &
 export function createFakeLlmRuntime(): FakeLlmRuntime {
   return Object.freeze({
     listDownloadedLlmModels: vi.fn<LlmEngine["listDownloadedLlmModels"]>(
-      async () => rejectUnexpectedCall("listDownloadedLlmModels")
+      async () => handleUnexpectedCall("listDownloadedLlmModels")
     ),
     listLoadedLlmModelInstances: vi.fn<
       LlmEngine["listLoadedLlmModelInstances"]
-    >(async () => rejectUnexpectedCall("listLoadedLlmModelInstances")),
+    >(async () => handleUnexpectedCall("listLoadedLlmModelInstances")),
     loadLlmModel: vi.fn<LlmEngine["loadLlmModel"]>(async () =>
-      rejectUnexpectedCall("loadLlmModel")
+      handleUnexpectedCall("loadLlmModel")
     ),
     stopLoadedLlmModelInstance: vi.fn<LlmEngine["stopLoadedLlmModelInstance"]>(
-      async () => rejectUnexpectedCall("stopLoadedLlmModelInstance")
+      async () => handleUnexpectedCall("stopLoadedLlmModelInstance")
     ),
     getRuntimeAvailability: vi.fn<
       LlmRuntimeLifecycle["getRuntimeAvailability"]
-    >(async () => rejectUnexpectedCall("getRuntimeAvailability")),
+    >(async () => handleUnexpectedCall("getRuntimeAvailability")),
     get lifecycleStatus(): never {
-      return rejectUnexpectedCall("lifecycleStatus")
+      return handleUnexpectedCall("lifecycleStatus")
     },
     [Symbol.asyncDispose]: vi.fn(async () => undefined)
   })
 }
 
 /**
- * Rejects an operation that the current case did not arrange.
+ * Fails an operation that the current case did not arrange.
  *
  * @param operationName - Runtime operation that was called.
  * @throws Always.
  */
-function rejectUnexpectedCall(operationName: string): never {
+function handleUnexpectedCall(operationName: string): never {
   throw new Error(`Unexpected LLM runtime call: ${operationName}`)
 }

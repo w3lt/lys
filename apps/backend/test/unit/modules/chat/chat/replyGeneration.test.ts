@@ -3,8 +3,8 @@ import { describe, expect, it, onTestFinished, vi } from "vitest"
 import ReplyEventSubscription from "../../../../../src/modules/chat/chat/replyEventSubscription"
 import ReplyGeneration from "../../../../../src/modules/chat/chat/replyGeneration"
 import ControlledReplyTask from "../../../support/controlledReplyTask"
-import { flushMicrotasks } from "../../../support/microtasks"
-import { observeSettlement } from "../../../support/settlement"
+import { waitForMicrotasks } from "../../../support/microtasks"
+import { createSettlementReader } from "../../../support/settlement"
 
 /** First reply fragment a task sends. */
 const FIRST_DELTA = Object.freeze({
@@ -88,7 +88,7 @@ describe("ReplyGeneration", () => {
       expect(replyTask.hasStarted).toBe(false)
       expect(titleTask.hasStarted).toBe(false)
 
-      await flushMicrotasks()
+      await waitForMicrotasks()
       expect(replyTask.hasStarted).toBe(true)
       expect(titleTask.hasStarted).toBe(true)
     })
@@ -118,7 +118,7 @@ describe("ReplyGeneration", () => {
       "reports a %s launcher that throws synchronously as a task failure",
       async (failingTask) => {
         const launcherFailure = new Error(`${failingTask} launcher failed`)
-        const throwingLauncher = (): Promise<void> => {
+        const startFailingTask = (): Promise<void> => {
           throw launcherFailure
         }
         const reportedFailures: unknown[] = []
@@ -127,9 +127,9 @@ describe("ReplyGeneration", () => {
         expect(() => {
           generation = ReplyGeneration.start({
             startReplyTask:
-              failingTask === "reply" ? throwingLauncher : async () => {},
+              failingTask === "reply" ? startFailingTask : async () => {},
             startTitleTask:
-              failingTask === "title" ? throwingLauncher : async () => {},
+              failingTask === "title" ? startFailingTask : async () => {},
             reportTaskFailure: (error) => {
               reportedFailures.push(error)
             }
@@ -150,7 +150,7 @@ describe("ReplyGeneration", () => {
       const secondFollower = createRecordingFollower()
       generation.openSubscription(firstFollower.subscription)
       generation.openSubscription(secondFollower.subscription)
-      await flushMicrotasks()
+      await waitForMicrotasks()
 
       replyTask.context.sendEvent(FIRST_DELTA)
       titleTask.context.sendEvent(TITLE_EVENT)
@@ -187,13 +187,13 @@ describe("ReplyGeneration", () => {
       generation.openSubscription(closedFollower.subscription)
       generation.openSubscription(remainingFollower.subscription)
       generation.openSubscription(failingFollower)
-      await flushMicrotasks()
+      await waitForMicrotasks()
 
       replyTask.context.sendEvent(FIRST_DELTA)
       closedFollower.subscription.close()
       await failingFollower.closed
       replyTask.context.sendEvent(SECOND_DELTA)
-      await flushMicrotasks()
+      await waitForMicrotasks()
 
       expect(closedFollower.written).toEqual([FIRST_DELTA])
       expect(failingWrite).toHaveBeenCalledExactlyOnceWith(FIRST_DELTA)
@@ -202,14 +202,14 @@ describe("ReplyGeneration", () => {
 
     it("sends a follower opened mid-generation only later events, after its queued events", async () => {
       const { generation, replyTask } = startControlledGeneration()
-      await flushMicrotasks()
+      await waitForMicrotasks()
       replyTask.context.sendEvent(FIRST_DELTA)
       const lateFollower = createRecordingFollower()
       lateFollower.subscription.handleStreamEvent(QUEUED_EVENT)
 
       generation.openSubscription(lateFollower.subscription)
       replyTask.context.sendEvent(SECOND_DELTA)
-      await flushMicrotasks()
+      await waitForMicrotasks()
 
       expect(lateFollower.written).toEqual([QUEUED_EVENT, SECOND_DELTA])
     })
@@ -237,11 +237,11 @@ describe("ReplyGeneration", () => {
       const { generation, replyTask, titleTask } = startControlledGeneration()
       const follower = createRecordingFollower()
       generation.openSubscription(follower.subscription)
-      await flushMicrotasks()
+      await waitForMicrotasks()
 
       void generation.stopReply()
       titleTask.context.sendEvent(TITLE_EVENT)
-      await flushMicrotasks()
+      await waitForMicrotasks()
 
       expect(replyTask.context.abortSignal.aborted).toBe(true)
       expect(titleTask.context.abortSignal.aborted).toBe(false)
@@ -250,22 +250,22 @@ describe("ReplyGeneration", () => {
 
     it("resolves only after the reply task settled, without waiting for the title task", async () => {
       const { generation, replyTask } = startControlledGeneration()
-      await flushMicrotasks()
+      await waitForMicrotasks()
 
-      const stop = observeSettlement(generation.stopReply())
-      const settlement = observeSettlement(generation.settled)
-      await flushMicrotasks()
+      const stop = createSettlementReader(generation.stopReply())
+      const settlement = createSettlementReader(generation.settled)
+      await waitForMicrotasks()
       expect(stop()).toBe("pending")
 
       replyTask.resolve()
-      await flushMicrotasks()
+      await waitForMicrotasks()
       expect(stop()).toBe("fulfilled")
       expect(settlement()).toBe("pending")
     })
 
     it("resolves rather than rejecting when the reply task rejects", async () => {
       const { generation, replyTask } = startControlledGeneration()
-      await flushMicrotasks()
+      await waitForMicrotasks()
       const stop = generation.stopReply()
 
       replyTask.reject(new Error("Reply could not be stored"))
@@ -275,17 +275,17 @@ describe("ReplyGeneration", () => {
 
     it("can be called again while the stop is pending, and both calls resolve", async () => {
       const { generation, replyTask } = startControlledGeneration()
-      await flushMicrotasks()
+      await waitForMicrotasks()
 
-      const firstStop = observeSettlement(generation.stopReply())
-      const secondStop = observeSettlement(generation.stopReply())
-      await flushMicrotasks()
+      const firstStop = createSettlementReader(generation.stopReply())
+      const secondStop = createSettlementReader(generation.stopReply())
+      await waitForMicrotasks()
       expect(firstStop()).toBe("pending")
       expect(secondStop()).toBe("pending")
       expect(replyTask.context.abortSignal.aborted).toBe(true)
 
       replyTask.resolve()
-      await flushMicrotasks()
+      await waitForMicrotasks()
       expect(firstStop()).toBe("fulfilled")
       expect(secondStop()).toBe("fulfilled")
     })
@@ -296,8 +296,8 @@ describe("ReplyGeneration", () => {
       titleTask.resolve()
       await generation.settled
 
-      const stop = observeSettlement(generation.stopReply())
-      await flushMicrotasks()
+      const stop = createSettlementReader(generation.stopReply())
+      await waitForMicrotasks()
 
       expect(stop()).toBe("fulfilled")
     })
@@ -314,18 +314,18 @@ describe("ReplyGeneration", () => {
           startControlledGeneration()
         const follower = createRecordingFollower()
         generation.openSubscription(follower.subscription)
-        await flushMicrotasks()
+        await waitForMicrotasks()
         const [firstTask, remainingTask] =
           firstSettled === "reply"
             ? [replyTask, titleTask]
             : [titleTask, replyTask]
-        const settlement = observeSettlement(generation.settled)
+        const settlement = createSettlementReader(generation.settled)
 
         firstTask.resolve()
-        await flushMicrotasks()
+        await waitForMicrotasks()
         expect(settlement()).toBe("pending")
         remainingTask.context.sendEvent(FIRST_DELTA)
-        await flushMicrotasks()
+        await waitForMicrotasks()
         expect(follower.written).toEqual([FIRST_DELTA])
 
         remainingTask.resolve()
@@ -351,7 +351,7 @@ describe("ReplyGeneration", () => {
       })
       const follower = createRecordingFollower()
       generation.openSubscription(follower.subscription)
-      await flushMicrotasks()
+      await waitForMicrotasks()
 
       replyTask.resolve()
       await generation.settled
@@ -366,7 +366,7 @@ describe("ReplyGeneration", () => {
         startControlledGeneration()
       const follower = createRecordingFollower()
       generation.openSubscription(follower.subscription)
-      await flushMicrotasks()
+      await waitForMicrotasks()
       const replyFailure = new Error("Reply could not be stored")
       const titleFailure = new Error("Title could not be stored")
 
@@ -385,7 +385,7 @@ describe("ReplyGeneration", () => {
   describe("[Symbol.asyncDispose]", () => {
     it("aborts both tasks' signals", async () => {
       const { generation, replyTask, titleTask } = startControlledGeneration()
-      await flushMicrotasks()
+      await waitForMicrotasks()
 
       void generation[Symbol.asyncDispose]()
 
@@ -407,17 +407,17 @@ describe("ReplyGeneration", () => {
       const { generation, replyTask, titleTask } = startControlledGeneration()
       const follower = createRecordingFollower()
       generation.openSubscription(follower.subscription)
-      await flushMicrotasks()
+      await waitForMicrotasks()
 
-      const disposal = observeSettlement(generation[Symbol.asyncDispose]())
-      await flushMicrotasks()
+      const disposal = createSettlementReader(generation[Symbol.asyncDispose]())
+      await waitForMicrotasks()
       expect(disposal()).toBe("pending")
       replyTask.resolve()
-      await flushMicrotasks()
+      await waitForMicrotasks()
       expect(disposal()).toBe("pending")
 
       titleTask.resolve()
-      await flushMicrotasks()
+      await waitForMicrotasks()
       expect(disposal()).toBe("fulfilled")
       expect(follower.subscription.handleStreamEvent(FIRST_DELTA)).toBe(false)
     })

@@ -20,12 +20,12 @@ const UNLOAD_MODEL_PATH = "/api/v1/llm/unload"
 const MODEL_KEY = "qwen/qwen3-8b"
 
 /**
- * Requests an unload of {@link MODEL_KEY}.
+ * Sends an unload request for {@link MODEL_KEY}.
  *
  * @param testApp - Application with the unload route registered.
  * @returns The completed response.
  */
-async function requestUnload(testApp: LlmRouteTestApp) {
+async function sendUnloadRequest(testApp: LlmRouteTestApp) {
   return await testApp.app.inject({
     method: "PATCH",
     url: UNLOAD_MODEL_PATH,
@@ -41,7 +41,7 @@ describe("updateFastifyWithLlmModelUnloadRoute", () => {
       .mockResolvedValue({ status: "stopped", diagnostics: [] })
     await updateFastifyWithLlmModelUnloadRoute(testApp.app)
 
-    const response = await requestUnload(testApp)
+    const response = await sendUnloadRequest(testApp)
 
     expect(response.statusCode).toBe(204)
     expect(response.body).toBe("")
@@ -66,7 +66,7 @@ describe("updateFastifyWithLlmModelUnloadRoute", () => {
     })
     await updateFastifyWithLlmModelUnloadRoute(testApp.app)
 
-    const response = await requestUnload(testApp)
+    const response = await sendUnloadRequest(testApp)
 
     expect(response.statusCode).toBe(204)
     expect(testApp.logs.filter(({ level }) => level === "warn")).toEqual([
@@ -82,7 +82,7 @@ describe("updateFastifyWithLlmModelUnloadRoute", () => {
     })
     await updateFastifyWithLlmModelUnloadRoute(testApp.app)
 
-    const response = await requestUnload(testApp)
+    const response = await sendUnloadRequest(testApp)
 
     expect(response.statusCode).toBe(404)
     expect(response.headers["content-type"]).toMatch(
@@ -104,7 +104,7 @@ describe("updateFastifyWithLlmModelUnloadRoute", () => {
     })
     await updateFastifyWithLlmModelUnloadRoute(testApp.app)
 
-    const response = await requestUnload(testApp)
+    const response = await sendUnloadRequest(testApp)
 
     expect(response.statusCode).toBe(503)
     expect(response.headers["content-type"]).toMatch(
@@ -135,7 +135,7 @@ describe("updateFastifyWithLlmModelUnloadRoute", () => {
     })
     await updateFastifyWithLlmModelUnloadRoute(testApp.app)
 
-    const response = await requestUnload(testApp)
+    const response = await sendUnloadRequest(testApp)
 
     expect(response.statusCode).toBe(503)
     expect(response.headers["content-type"]).toMatch(
@@ -179,7 +179,7 @@ describe("updateFastifyWithLlmModelUnloadRoute", () => {
     )
     await updateFastifyWithLlmModelUnloadRoute(testApp.app)
 
-    const response = await requestUnload(testApp)
+    const response = await sendUnloadRequest(testApp)
 
     expect(response.statusCode).toBe(503)
     expect(response.headers["content-type"]).toMatch(
@@ -195,7 +195,7 @@ describe("updateFastifyWithLlmModelUnloadRoute", () => {
     )
     await updateFastifyWithLlmModelUnloadRoute(testApp.app)
 
-    const response = await requestUnload(testApp)
+    const response = await sendUnloadRequest(testApp)
 
     expect(response.statusCode).toBe(503)
     expect(response.headers["content-type"]).toMatch(

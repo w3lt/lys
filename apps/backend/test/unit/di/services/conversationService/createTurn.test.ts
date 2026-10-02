@@ -6,9 +6,9 @@ import { getConversation } from "../../../../../src/di/services/conversationServ
 import type { CreateConversationTurnOptions } from "../../../../../src/di/services/conversationService/share"
 import { ConversationNotFoundError } from "../../../../../src/utils/errors"
 import {
-  insertAssistantMessageRow,
-  insertConversationRow,
-  insertUserMessageRow,
+  saveAssistantMessageRow,
+  saveConversationRow,
+  saveUserMessageRow,
   openConversationTestDatabase
 } from "../../../support/conversationDatabase"
 import { createFixtureUuidV7 } from "../../../support/conversationFixtures"
@@ -49,20 +49,20 @@ function createCommittedTurn(
  *
  * @param database - Migrated test database.
  */
-function insertExistingConversation(database: DatabaseSync): void {
-  insertConversationRow(database, {
+function saveExistingConversation(database: DatabaseSync): void {
+  saveConversationRow(database, {
     id: EXISTING_CONVERSATION_ID,
     title: "Trip plan",
     systemPrompt: "Stored prompt",
     createdAt: "2026-01-01T00:00:00.000Z"
   })
-  insertUserMessageRow(database, {
+  saveUserMessageRow(database, {
     id: createFixtureUuidV7(10),
     conversationId: EXISTING_CONVERSATION_ID,
     content: "Earlier question",
     createdAt: "2026-01-01T00:00:01.000Z"
   })
-  insertAssistantMessageRow(database, {
+  saveAssistantMessageRow(database, {
     id: createFixtureUuidV7(11),
     conversationId: EXISTING_CONVERSATION_ID,
     model: "qwen/qwen3-8b",
@@ -146,7 +146,7 @@ describe("createConversationTurn", () => {
 
   it("continues an existing conversation with its stored prompt and prior transcript", () => {
     const database = openConversationTestDatabase()
-    insertExistingConversation(database)
+    saveExistingConversation(database)
 
     const turn = createCommittedTurn(
       database,
@@ -178,8 +178,8 @@ describe("createConversationTurn", () => {
 
   it("interrupts a reply still streaming in the continued conversation and keeps its text", () => {
     const database = openConversationTestDatabase()
-    insertExistingConversation(database)
-    insertAssistantMessageRow(database, {
+    saveExistingConversation(database)
+    saveAssistantMessageRow(database, {
       id: createFixtureUuidV7(12),
       conversationId: EXISTING_CONVERSATION_ID,
       model: "qwen/qwen3-8b",
@@ -212,15 +212,15 @@ describe("createConversationTurn", () => {
 
   it("does not interrupt a streaming reply in another conversation", () => {
     const database = openConversationTestDatabase()
-    insertExistingConversation(database)
+    saveExistingConversation(database)
     const otherConversationId = createFixtureUuidV7(2)
-    insertConversationRow(database, {
+    saveConversationRow(database, {
       id: otherConversationId,
       title: null,
       systemPrompt: "Other prompt",
       createdAt: "2026-01-01T00:00:00.000Z"
     })
-    insertAssistantMessageRow(database, {
+    saveAssistantMessageRow(database, {
       id: createFixtureUuidV7(20),
       conversationId: otherConversationId,
       model: "qwen/qwen3-8b",
@@ -277,7 +277,7 @@ describe("createConversationTurn", () => {
     ["an empty model", { userMessageContent: "Hello", model: "" }]
   ])("rejects %s before appending messages", (_label, values) => {
     const database = openConversationTestDatabase()
-    insertExistingConversation(database)
+    saveExistingConversation(database)
     database.exec("BEGIN IMMEDIATE")
 
     expect(() =>

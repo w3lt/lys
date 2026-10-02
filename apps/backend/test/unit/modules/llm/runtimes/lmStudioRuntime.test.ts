@@ -5,7 +5,7 @@ import {
   fakeLmStudio,
   type FakeLmStudioOperations
 } from "../../../support/lmStudioSdkFake"
-import { flushMicrotasks } from "../../../support/microtasks"
+import { waitForMicrotasks } from "../../../support/microtasks"
 
 vi.mock("@lmstudio/sdk", () => import("../../../support/lmStudioSdkFake"))
 
@@ -27,13 +27,13 @@ async function createOwnedRuntime(): Promise<LmStudioRuntime> {
 }
 
 /**
- * Captures the rejection of an operation expected to fail.
+ * Gets the rejection of an operation expected to fail.
  *
  * @param operation - Pending operation.
  * @returns The rejection value.
  * @throws If the operation resolves.
  */
-async function captureRejection(operation: Promise<unknown>): Promise<unknown> {
+async function getRejection(operation: Promise<unknown>): Promise<unknown> {
   return await operation.then(
     () => {
       throw new Error("Expected the operation to reject")
@@ -77,9 +77,7 @@ describe("LmStudioRuntime", () => {
         disposeClient
       }
 
-      const failure = await captureRejection(
-        LmStudioRuntime.create(LM_STUDIO_URL)
-      )
+      const failure = await getRejection(LmStudioRuntime.create(LM_STUDIO_URL))
 
       expect(failure).toMatchObject({
         message: "The LLM runtime is unavailable.",
@@ -101,9 +99,7 @@ describe("LmStudioRuntime", () => {
         }
       }
 
-      const failure = await captureRejection(
-        LmStudioRuntime.create(LM_STUDIO_URL)
-      )
+      const failure = await getRejection(LmStudioRuntime.create(LM_STUDIO_URL))
 
       expect(failure).toBeInstanceOf(AggregateError)
       expect(failure).toMatchObject({
@@ -411,7 +407,7 @@ describe("LmStudioRuntime", () => {
       const active = runtime.listLoadedLlmModelInstances()
 
       const disposal = runtime[Symbol.asyncDispose]()
-      await flushMicrotasks()
+      await waitForMicrotasks()
       expect(runtime.lifecycleStatus).toBe("closing")
       expect(disposeClient).not.toHaveBeenCalled()
 
@@ -458,12 +454,8 @@ describe("LmStudioRuntime", () => {
       })
       fakeLmStudio.operations = { ...fakeLmStudio.operations, disposeClient }
 
-      const firstFailure = await captureRejection(
-        runtime[Symbol.asyncDispose]()
-      )
-      const repeatedFailure = await captureRejection(
-        runtime[Symbol.asyncDispose]()
-      )
+      const firstFailure = await getRejection(runtime[Symbol.asyncDispose]())
+      const repeatedFailure = await getRejection(runtime[Symbol.asyncDispose]())
 
       expect(firstFailure).toMatchObject({
         message: "The LLM runtime could not release its resources.",

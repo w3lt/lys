@@ -6,7 +6,7 @@
  * @remarks A barrier only for promise-only work; it does not wait for I/O or
  * timers started by the code under test.
  */
-export async function flushMicrotasks(): Promise<void> {
+export async function waitForMicrotasks(): Promise<void> {
   await new Promise<void>((resolve) => {
     setImmediate(resolve)
   })

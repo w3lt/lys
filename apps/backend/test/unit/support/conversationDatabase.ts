@@ -3,7 +3,7 @@ import { onTestFinished } from "vitest"
 import { calculateConversationSearchMatch } from "../../../src/di/services/conversationService/listConversations"
 import { migrateDatabase } from "../../../src/di/services/conversationService/migrations"
 
-/** Stored conversation columns written by {@link insertConversationRow}. */
+/** Stored conversation columns written by {@link saveConversationRow}. */
 export type ConversationRowFixture = Readonly<{
   /** Conversation identity. */
   id: string
@@ -15,7 +15,7 @@ export type ConversationRowFixture = Readonly<{
   createdAt: string
 }>
 
-/** Stored user-message columns written by {@link insertUserMessageRow}. */
+/** Stored user-message columns written by {@link saveUserMessageRow}. */
 export type UserMessageRowFixture = Readonly<{
   /** Message identity. */
   id: string
@@ -27,7 +27,7 @@ export type UserMessageRowFixture = Readonly<{
   createdAt: string
 }>
 
-/** Stored assistant-message columns written by {@link insertAssistantMessageRow}. */
+/** Stored assistant-message columns written by {@link saveAssistantMessageRow}. */
 export type AssistantMessageRowFixture = Readonly<{
   /** Message identity. */
   id: string
@@ -75,7 +75,7 @@ export function openConversationTestDatabase(): DatabaseSync {
  * @param database - Migrated test database.
  * @param row - Stored column values.
  */
-export function insertConversationRow(
+export function saveConversationRow(
   database: DatabaseSync,
   row: ConversationRowFixture
 ): void {
@@ -97,7 +97,7 @@ export function insertConversationRow(
  * conversation's creation; an earlier time makes the schema substitute the
  * real clock, and the resulting order is not controlled by the test.
  */
-export function insertUserMessageRow(
+export function saveUserMessageRow(
   database: DatabaseSync,
   row: UserMessageRowFixture
 ): void {
@@ -114,9 +114,9 @@ export function insertUserMessageRow(
  *
  * @param database - Migrated test database.
  * @param row - Stored column values.
- * @remarks The ordering constraint of {@link insertUserMessageRow} applies.
+ * @remarks The ordering constraint of {@link saveUserMessageRow} applies.
  */
-export function insertAssistantMessageRow(
+export function saveAssistantMessageRow(
   database: DatabaseSync,
   row: AssistantMessageRowFixture
 ): void {

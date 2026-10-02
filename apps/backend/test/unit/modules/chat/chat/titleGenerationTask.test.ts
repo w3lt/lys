@@ -50,7 +50,7 @@ type TitleTaskScenario = Readonly<{
  * @param outcomes - Title or failure for the first, second, ... request.
  * @returns A mock generator that rejects once the script is exhausted.
  */
-function scriptTitles(...outcomes: (string | Error)[]) {
+function createScriptedTitleGenerator(...outcomes: (string | Error)[]) {
   const generateTitle = vi.fn<
     (options: TitleGenerationOptions) => Promise<string>
   >(async () => {
@@ -73,7 +73,7 @@ function scriptTitles(...outcomes: (string | Error)[]) {
  * @returns The sent events, storage calls, and captured logs.
  * @throws If the task rejects, which its contract forbids.
  */
-async function runTitleTask(scenario: TitleTaskScenario) {
+async function getTitleTaskOutcome(scenario: TitleTaskScenario) {
   const { app, logs } = createTestFastify()
   const events: ChatGenerationEvent[] = []
   const updateConversationTitle = vi.fn(
@@ -97,9 +97,9 @@ async function runTitleTask(scenario: TitleTaskScenario) {
 describe("createTitleGenerationTask", () => {
   it("requests a title for the user message with the chat model and signal", async () => {
     const abortSignal = new AbortController().signal
-    const generateTitle = scriptTitles("Hanoi trip")
+    const generateTitle = createScriptedTitleGenerator("Hanoi trip")
 
-    await runTitleTask({ generateTitle, abortSignal })
+    await getTitleTaskOutcome({ generateTitle, abortSignal })
 
     expect(generateTitle).toHaveBeenCalledExactlyOnceWith({
       message: "Plan my trip to Hanoi",
@@ -109,8 +109,8 @@ describe("createTitleGenerationTask", () => {
   })
 
   it("saves the generated title and sends the saved value", async () => {
-    const run = await runTitleTask({
-      generateTitle: scriptTitles("  Hanoi trip "),
+    const run = await getTitleTaskOutcome({
+      generateTitle: createScriptedTitleGenerator("  Hanoi trip "),
       updateConversationTitle: () => "Hanoi trip"
     })
 
@@ -119,13 +119,13 @@ describe("createTitleGenerationTask", () => {
   })
 
   it("requests another title only after unusable output, within the limit", async () => {
-    const generateTitle = scriptTitles(
+    const generateTitle = createScriptedTitleGenerator(
       new TitleGenerationOutputError("blank"),
       new TitleGenerationOutputError("not JSON"),
       "Hanoi trip"
     )
 
-    const run = await runTitleTask({
+    const run = await getTitleTaskOutcome({
       generateTitle,
       titleGenerationMaxAttempts: 3
     })
@@ -148,12 +148,12 @@ describe("createTitleGenerationTask", () => {
   })
 
   it("gives up after the last permitted unusable reply without saving", async () => {
-    const generateTitle = scriptTitles(
+    const generateTitle = createScriptedTitleGenerator(
       new TitleGenerationOutputError("blank"),
       new TitleGenerationOutputError("too long")
     )
 
-    const run = await runTitleTask({
+    const run = await getTitleTaskOutcome({
       generateTitle,
       titleGenerationMaxAttempts: 2
     })
@@ -172,9 +172,11 @@ describe("createTitleGenerationTask", () => {
   })
 
   it("makes a single request when the limit is one", async () => {
-    const generateTitle = scriptTitles(new TitleGenerationOutputError("blank"))
+    const generateTitle = createScriptedTitleGenerator(
+      new TitleGenerationOutputError("blank")
+    )
 
-    const run = await runTitleTask({
+    const run = await getTitleTaskOutcome({
       generateTitle,
       titleGenerationMaxAttempts: 1
     })
@@ -185,9 +187,11 @@ describe("createTitleGenerationTask", () => {
   })
 
   it("does not retry a request failure that is not unusable output", async () => {
-    const generateTitle = scriptTitles(new Error("503 Service Unavailable"))
+    const generateTitle = createScriptedTitleGenerator(
+      new Error("503 Service Unavailable")
+    )
 
-    const run = await runTitleTask({ generateTitle })
+    const run = await getTitleTaskOutcome({ generateTitle })
 
     expect(generateTitle).toHaveBeenCalledOnce()
     expect(findOutcomeRecords(run.logs, "title-not-generated")).toEqual([
@@ -203,9 +207,9 @@ describe("createTitleGenerationTask", () => {
   it("makes no request once shutdown has cancelled it", async () => {
     const cancellation = new AbortController()
     cancellation.abort(new Error("backend shutting down"))
-    const generateTitle = scriptTitles()
+    const generateTitle = createScriptedTitleGenerator()
 
-    const run = await runTitleTask({
+    const run = await getTitleTaskOutcome({
       generateTitle,
       abortSignal: cancellation.signal
     })
@@ -229,7 +233,7 @@ describe("createTitleGenerationTask", () => {
       throw new TitleGenerationOutputError("blank")
     })
 
-    const run = await runTitleTask({
+    const run = await getTitleTaskOutcome({
       generateTitle,
       abortSignal: cancellation.signal
     })
@@ -246,8 +250,8 @@ describe("createTitleGenerationTask", () => {
   })
 
   it("sends no event when the conversation was renamed or deleted first", async () => {
-    const run = await runTitleTask({
-      generateTitle: scriptTitles("Hanoi trip"),
+    const run = await getTitleTaskOutcome({
+      generateTitle: createScriptedTitleGenerator("Hanoi trip"),
       updateConversationTitle: () => undefined
     })
 
@@ -263,8 +267,8 @@ describe("createTitleGenerationTask", () => {
 
   it("logs a storage failure and sends no event", async () => {
     const storageFailure = new Error("simulated title storage failure")
-    const run = await runTitleTask({
-      generateTitle: scriptTitles("Hanoi trip"),
+    const run = await getTitleTaskOutcome({
+      generateTitle: createScriptedTitleGenerator("Hanoi trip"),
       updateConversationTitle: () => {
         throw storageFailure
       }

@@ -5,7 +5,7 @@ import SqliteConversationStore from "../../../../../src/di/services/conversation
 import SqliteConversationHistory from "../../../../../src/di/services/conversationService/history"
 import { parseConversationListOptions } from "../../../../../src/di/services/conversationService/utils"
 import {
-  insertConversationRow,
+  saveConversationRow,
   openConversationTestDatabase
 } from "../../../support/conversationDatabase"
 import { createFixtureUuidV7 } from "../../../support/conversationFixtures"
@@ -37,7 +37,7 @@ function openStoreWithTurn() {
 function createHistoryOverInvalidRow() {
   const database = openConversationTestDatabase()
   const conversationId = createFixtureUuidV7(1)
-  insertConversationRow(database, {
+  saveConversationRow(database, {
     id: conversationId,
     title: "",
     systemPrompt: "You are Lys.",

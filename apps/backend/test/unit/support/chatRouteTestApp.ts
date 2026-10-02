@@ -61,7 +61,7 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
     .mockReturnValue(turns)
   const createConversationTurn = vi
     .spyOn(turns, "createConversationTurn")
-    .mockImplementation(() => rejectUnexpectedCall("createConversationTurn"))
+    .mockImplementation(() => handleUnexpectedCall("createConversationTurn"))
   const chatService = new ChatService({
     openAiBaseUrl: "http://lmstudio.test/v1",
     titleGenerationPrompt: "Summarize the message as a short title.",
@@ -69,10 +69,10 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
   })
   const completeChatStream = vi
     .spyOn(chatService, "completeChatStream")
-    .mockImplementation(async () => rejectUnexpectedCall("completeChatStream"))
+    .mockImplementation(async () => handleUnexpectedCall("completeChatStream"))
   const generateTitle = vi
     .spyOn(chatService, "generateTitle")
-    .mockImplementation(async () => rejectUnexpectedCall("generateTitle"))
+    .mockImplementation(async () => handleUnexpectedCall("generateTitle"))
   const generations = new ReplyGenerationRegistry()
   onTestFinished(async () => {
     await generations[Symbol.asyncDispose]()
@@ -97,7 +97,7 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
  * @param payload - Raw request body, serialized as JSON.
  * @returns The completed response.
  */
-export async function requestChat(
+export async function sendChatRequest(
   app: FastifyInstance,
   payload: unknown
 ): Promise<LightMyRequestResponse> {
@@ -118,6 +118,6 @@ export async function requestChat(
  * @param operationName - Dependency operation that was called.
  * @throws Always.
  */
-function rejectUnexpectedCall(operationName: string): never {
+function handleUnexpectedCall(operationName: string): never {
   throw new Error(`Unexpected chat route call: ${operationName}`)
 }

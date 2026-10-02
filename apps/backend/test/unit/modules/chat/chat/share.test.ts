@@ -7,12 +7,12 @@ import {
   type ReplySse
 } from "../../../../../src/modules/chat/chat/share"
 import {
-  addChatSseRoute,
+  registerChatSseRoute,
   createChatSseTestApp,
-  requestChatSseRoute
+  sendChatSseRouteRequest
 } from "../../../support/chatSseRoute"
-import { flushMicrotasks } from "../../../support/microtasks"
-import { observeSettlement } from "../../../support/settlement"
+import { waitForMicrotasks } from "../../../support/microtasks"
+import { createSettlementReader } from "../../../support/settlement"
 
 /** Connection capability read by {@link openReplyEventStream}. */
 type FollowedConnection = Pick<ReplySse, "onClose" | "isConnected">
@@ -48,13 +48,13 @@ function createControlledConnection() {
 describe("createEventSender", () => {
   it("sends each event named by its type with the event as JSON data", async () => {
     const { app } = await createChatSseTestApp()
-    addChatSseRoute(app, async (_request, reply) => {
+    registerChatSseRoute(app, async (_request, reply) => {
       const sendEvent = createEventSender<ChatGenerationEvent>(reply.sse)
       await sendEvent({ type: "delta", content: "Hi" })
       await sendEvent({ type: "done", finishReason: "stop" })
     })
 
-    const response = await requestChatSseRoute(app)
+    const response = await sendChatSseRouteRequest(app)
 
     expect(response.contentType).toBe("text/event-stream")
     expect(response.events).toEqual([
@@ -66,7 +66,7 @@ describe("createEventSender", () => {
   it("rejects when the connection is closed", async () => {
     const { app } = await createChatSseTestApp()
     let failure: unknown
-    addChatSseRoute(app, async (_request, reply) => {
+    registerChatSseRoute(app, async (_request, reply) => {
       reply.sse.close()
       failure = await createEventSender<ChatGenerationEvent>(reply.sse)({
         type: "delta",
@@ -74,7 +74,7 @@ describe("createEventSender", () => {
       }).catch((error: unknown) => error)
     })
 
-    await requestChatSseRoute(app)
+    await sendChatSseRouteRequest(app)
 
     expect(failure).toBeInstanceOf(Error)
   })
@@ -83,7 +83,7 @@ describe("createEventSender", () => {
 describe("openReplyEventStream", () => {
   it("ends once its follower ended and every accepted event was written", async () => {
     const { app } = await createChatSseTestApp()
-    addChatSseRoute(app, async (_request, reply) => {
+    registerChatSseRoute(app, async (_request, reply) => {
       const subscription = new ReplyEventSubscription<ChatGenerationEvent>(
         createEventSender(reply.sse)
       )
@@ -94,7 +94,7 @@ describe("openReplyEventStream", () => {
       await stream
     })
 
-    const response = await requestChatSseRoute(app)
+    const response = await sendChatSseRouteRequest(app)
 
     expect(response.events).toEqual([
       { event: "delta", data: { type: "delta", content: "Hi" } },
@@ -105,7 +105,7 @@ describe("openReplyEventStream", () => {
   it("ends its follower when the connection closes", async () => {
     const { app } = await createChatSseTestApp()
     let acceptedAfterClose: boolean | undefined
-    addChatSseRoute(app, async (_request, reply) => {
+    registerChatSseRoute(app, async (_request, reply) => {
       const subscription = new ReplyEventSubscription<ChatGenerationEvent>(
         createEventSender(reply.sse)
       )
@@ -118,7 +118,7 @@ describe("openReplyEventStream", () => {
       })
     })
 
-    await requestChatSseRoute(app)
+    await sendChatSseRouteRequest(app)
 
     expect(acceptedAfterClose).toBe(false)
   })
@@ -126,7 +126,7 @@ describe("openReplyEventStream", () => {
   it("ends its follower at once when the connection closed before the stream opened", async () => {
     const { app } = await createChatSseTestApp()
     let acceptedAfterOpen: boolean | undefined
-    addChatSseRoute(app, async (_request, reply) => {
+    registerChatSseRoute(app, async (_request, reply) => {
       const subscription = new ReplyEventSubscription<ChatGenerationEvent>(
         createEventSender(reply.sse)
       )
@@ -138,7 +138,7 @@ describe("openReplyEventStream", () => {
       })
     })
 
-    await requestChatSseRoute(app)
+    await sendChatSseRouteRequest(app)
 
     expect(acceptedAfterOpen).toBe(false)
   })
@@ -149,13 +149,13 @@ describe("openReplyEventStream", () => {
       () => new Promise<void>(() => {})
     )
     subscription.handleStreamEvent({ type: "delta", content: "stalled" })
-    const closedState = observeSettlement(subscription.closed)
+    const closedState = createSettlementReader(subscription.closed)
 
     const stream = openReplyEventStream(connection, subscription)
     close()
 
     await expect(stream).resolves.toBeUndefined()
-    await flushMicrotasks()
+    await waitForMicrotasks()
     expect(closedState()).toBe("pending")
   })
 })

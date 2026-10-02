@@ -151,7 +151,8 @@ class FakeLmStudioEngine {
         this.#listDownloadedModels(domain),
       listLoaded: async () => [...this.#inventory.loadedModels],
       load: async (modelKey: string) => this.#loadModel(modelKey),
-      unload: async (identifier: string) => this.#unloadModel(identifier),
+      unload: async (identifier: string) =>
+        this.#stopLoadedModelInstance(identifier),
       disposeClient: async () => undefined
     })
   }
@@ -198,12 +199,12 @@ class FakeLmStudioEngine {
   }
 
   /**
-   * Removes one loaded instance.
+   * Stops one loaded instance, removing it from the inventory.
    *
    * @param identifier - Identifier of a currently loaded instance.
    * @throws If no loaded instance has the identifier.
    */
-  #unloadModel(identifier: string): void {
+  #stopLoadedModelInstance(identifier: string): void {
     const { downloadedModels, loadedModels } = this.#inventory
     const index = loadedModels.findIndex(
       (model) => model.identifier === identifier

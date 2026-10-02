@@ -24,7 +24,7 @@ export type OpenAiEndpointResponder = (
   request: ObservedOpenAiRequest
 ) => Response | Promise<Response>
 
-/** Observation handle of an installed OpenAI-compatible endpoint fake. */
+/** Observation handle of a started OpenAI-compatible endpoint fake. */
 export type OpenAiEndpointFake = Readonly<{
   /** Requests in arrival order; grows as the SDK sends requests. */
   requests: readonly ObservedOpenAiRequest[]
@@ -45,14 +45,14 @@ export type ChatCompletionChunkFixture = Readonly<{
  *
  * @param respond - Produces the response for each request.
  * @returns A handle recording every received request.
- * @remarks Install before constructing the `ChatService` under test, because
+ * @remarks Start it before constructing the `ChatService` under test, because
  * the OpenAI SDK captures `fetch` when its client is created. Vitest removes
  * the substitution after the case (`unstubGlobals`). Like the platform
  * `fetch`, a request whose signal aborts before its response is produced
  * rejects with the signal's abort reason, and an already aborted signal
  * rejects without calling `respond`.
  */
-export function installOpenAiEndpointFake(
+export function startOpenAiEndpointFake(
   respond: OpenAiEndpointResponder
 ): OpenAiEndpointFake {
   const requests: ObservedOpenAiRequest[] = []
@@ -68,21 +68,24 @@ export function installOpenAiEndpointFake(
         body: typeof init.body === "string" ? JSON.parse(init.body) : undefined
       })
       requests.push(request)
-      return await raceAbortSignal(Promise.resolve(respond(request)), signal)
+      return await waitForResponseOrAbort(
+        Promise.resolve(respond(request)),
+        signal
+      )
     }
   )
   return Object.freeze({ requests })
 }
 
 /**
- * Settles with a response unless the request signal aborts first.
+ * Waits for a response unless the request signal aborts first.
  *
  * @param response - Pending endpoint response.
  * @param signal - Request cancellation signal, if any.
  * @returns The response when it settles before cancellation.
  * @throws The signal's abort reason when cancellation wins.
  */
-async function raceAbortSignal(
+async function waitForResponseOrAbort(
   response: Promise<Response>,
   signal: AbortSignal | undefined
 ): Promise<Response> {

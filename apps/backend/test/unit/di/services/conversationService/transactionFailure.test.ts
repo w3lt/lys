@@ -19,13 +19,15 @@ function openDatabase(): DatabaseSync {
 }
 
 /**
- * Captures the value thrown by the failure handler.
+ * Runs the failure handler and returns the value it throws, so a case can
+ * compare that value by identity.
  *
  * @param database - Connection passed to the handler.
  * @param failure - Original operation failure.
  * @returns The thrown value.
+ * @throws If the handler returns without throwing.
  */
-function captureHandledFailure(
+function handleTransactionFailure(
   database: DatabaseSync,
   failure: unknown
 ): unknown {
@@ -44,7 +46,7 @@ describe("handleConversationTransactionFailure", () => {
     database.exec("BEGIN")
     database.exec("INSERT INTO items (name) VALUES ('uncommitted')")
 
-    expect(captureHandledFailure(database, failure)).toBe(failure)
+    expect(handleTransactionFailure(database, failure)).toBe(failure)
 
     expect(database.isTransaction).toBe(false)
     expect(
@@ -57,7 +59,7 @@ describe("handleConversationTransactionFailure", () => {
     database.exec("INSERT INTO items (name) VALUES ('committed')")
     const failure = "non-error failure"
 
-    expect(captureHandledFailure(database, failure)).toBe(failure)
+    expect(handleTransactionFailure(database, failure)).toBe(failure)
 
     expect(
       database.prepare("SELECT count(*) AS count FROM items").get()
@@ -69,7 +71,7 @@ describe("handleConversationTransactionFailure", () => {
     const failure = new Error("constraint failed")
     database.close()
 
-    const thrown = captureHandledFailure(database, failure)
+    const thrown = handleTransactionFailure(database, failure)
 
     expect(thrown).toBeInstanceOf(AggregateError)
     expect(thrown).toMatchObject({

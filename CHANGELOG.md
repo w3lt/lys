@@ -79,8 +79,8 @@ This log starts at 0.3.0. Earlier versions are recorded only by their Git tags.
 
 ### Security
 
-- Dependencies are updated to remove known vulnerabilities, including `fastify`
-  5.12.5 and `fast-uri` 4.2.1.
+- `fastify` 5.12.5 and `fast-uri` 4.2.1 fix known vulnerabilities in the
+  earlier versions.
 - pnpm installs a dependency version only after it has been published for at
   least three days.
 

@@ -32,14 +32,14 @@ type ChatReplyRouteDependencies = Readonly<{
  * @param generations - Registry shared with the chat route; its owner
  * disposes it.
  * @returns Settlement after route registration.
- * @throws If borrowed access or route registration fails.
+ * @throws If route registration fails.
  */
 export default async function updateFastifyWithChatReplyRoutes(
   app: FastifyInstance,
   generations: ReplyGenerationRegistry
 ): Promise<void> {
   const dependencies = {
-    history: app.conversationService.createHistoryAccess(),
+    history: app.conversationHistoryReader,
     generations
   }
   app.route<ChatReplyEventsApiRoute>({

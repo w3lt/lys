@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite"
 import { describe, expect, it, onTestFinished } from "vitest"
-import { migrateDatabase } from "../../../../../src/di/services/conversationService/migrations"
+import { migrateDatabase } from "../../../../src/infrastructure/database/migrations"
 
 /** Schema version produced by the current migration list. */
 const CURRENT_SCHEMA_VERSION = 5

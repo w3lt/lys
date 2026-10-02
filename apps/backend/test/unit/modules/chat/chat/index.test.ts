@@ -108,24 +108,4 @@ describe("updateFastifyWithChatRoute", () => {
     expect(testApp.completeChatStream).not.toHaveBeenCalled()
     expect(testApp.generateTitle).not.toHaveBeenCalled()
   })
-
-  it("fails registration when the turn access cannot be borrowed", async () => {
-    const testApp = await createChatRouteTestApp()
-    const accessFailure = new Error("turn access unavailable")
-    testApp.createTurnAccess.mockImplementation(() => {
-      throw accessFailure
-    })
-
-    let failure: unknown
-    try {
-      updateFastifyWithChatRoute(testApp.app, {
-        ...CHAT_ROUTE_OPTIONS,
-        generations: testApp.generations
-      })
-    } catch (error) {
-      failure = error
-    }
-
-    expect(failure).toBe(accessFailure)
-  })
 })

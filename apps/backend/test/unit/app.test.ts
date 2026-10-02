@@ -5,6 +5,9 @@ import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
 import * as z from "zod"
 import { buildApp } from "../../src/app"
 import type { BackendConfig } from "../../src/config"
+import SqliteConversationHistoryEditor from "../../src/di/services/conversationService/historyEditor"
+import SqliteConversationHistoryReader from "../../src/di/services/conversationService/historyReader"
+import SqliteConversationTurns from "../../src/di/services/conversationService/turns"
 import { TEST_BACKEND_CONFIG } from "./support/backendConfig"
 import {
   fakeLmStudio,
@@ -52,5 +55,26 @@ describe("buildApp", () => {
     })
     expect(constructClient).not.toHaveBeenCalled()
     expect(existsSync(config.databaseFilePath)).toBe(false)
+  })
+
+  it("decorates each conversation adapter and serves history from the configured database", async () => {
+    const app = await buildApp({ config: createOwnedBackendConfig() })
+    onTestFinished(async () => await app.close())
+    await app.ready()
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/conversations"
+    })
+
+    expect(app.conversationTurns).toBeInstanceOf(SqliteConversationTurns)
+    expect(app.conversationHistoryReader).toBeInstanceOf(
+      SqliteConversationHistoryReader
+    )
+    expect(app.conversationHistoryEditor).toBeInstanceOf(
+      SqliteConversationHistoryEditor
+    )
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({ storedCount: 0 })
   })
 })

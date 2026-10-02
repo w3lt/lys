@@ -8,7 +8,6 @@ import {
 } from "@lys/protocol"
 import type { Conversation } from "@lys/share"
 import { describe, expect, it, onTestFinished, vi, type Mock } from "vitest"
-import SqliteConversationStore from "../../../../../src/di/services/conversationService"
 import { updateFastifyWithHttpTransport } from "../../../../../src/http"
 import ReplyGenerationRegistry, {
   type ReplyTarget
@@ -22,6 +21,7 @@ import {
   createUserMessage,
   FIXTURE_TIMESTAMP
 } from "../../../support/conversationFixtures"
+import { openConversationTestServices } from "../../../support/conversationDatabase"
 import { createTestFastify } from "../../../support/fastifyTestApp"
 import { waitForMicrotasks } from "../../../support/microtasks"
 
@@ -81,32 +81,28 @@ function handleUnexpectedHistoryCall(operationName: string): never {
 
 /**
  * Creates an application with the HTTP transport and the reply routes
- * registered over a stubbed history access and a real registry.
+ * registered over a stubbed history reader and a real registry.
  *
  * @returns The application, captured logs, the registry, and a spy for the
  * history read the routes perform.
- * @remarks The routes borrow the history access once at registration, so the
- * returned spy controls every snapshot; it throws until the case configures
- * it and no database row is read. When the test finishes, the registry is
- * disposed first, then the in-memory store, then the application.
+ * @remarks The routes read the decorated history reader at registration, so
+ * the returned spy controls every snapshot; it throws until the case
+ * configures it and no database row is read. When the test finishes, the
+ * registry is disposed first, then the in-memory conversation database, then
+ * the application.
  */
 async function createReplyRouteApp() {
   const testFastify = createTestFastify()
-  const store = SqliteConversationStore.open(":memory:")
-  onTestFinished(() => {
-    store[Symbol.dispose]()
-  })
+  const { history } = openConversationTestServices()
   const generations = new ReplyGenerationRegistry()
   onTestFinished(async () => {
     await generations[Symbol.asyncDispose]()
   })
-  const history = store.createHistoryAccess()
-  vi.spyOn(store, "createHistoryAccess").mockReturnValue(history)
   const getConversation = vi
     .spyOn(history, "getConversation")
     .mockImplementation(() => handleUnexpectedHistoryCall("getConversation"))
   await updateFastifyWithHttpTransport(testFastify.app)
-  testFastify.app.decorate("conversationService", store)
+  testFastify.app.decorate("conversationHistoryReader", history)
   await updateFastifyWithChatReplyRoutes(testFastify.app, generations)
   return { ...testFastify, generations, getConversation }
 }

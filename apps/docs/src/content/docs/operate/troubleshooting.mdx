@@ -71,10 +71,10 @@ save preserves the runtime and model values already on disk.
 
 ## Startup fails after a schema change
 
-The conversation service reads SQLite `PRAGMA user_version` on startup and
-refuses to open a database newer than the running binary supports. If a startup
-failure mentions an unsupported database version, use a matching or newer build
-rather than editing the database by hand.
+The backend's database owner reads SQLite `PRAGMA user_version` when it opens
+the database on startup and refuses to open a database newer than the running
+binary supports. If a startup failure mentions an unsupported database version,
+use a matching or newer build rather than editing the database by hand.
 
 ## The desktop app exits at startup or uses another data directory
 

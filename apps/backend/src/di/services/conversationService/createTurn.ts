@@ -1,4 +1,3 @@
-import type { DatabaseSync } from "node:sqlite"
 import { v7 as uuidv7 } from "uuid"
 import {
   conversationMetadataSchema,
@@ -9,16 +8,17 @@ import {
 import { getConversation } from "./readConversation"
 import type { ConversationTurn, CreateConversationTurnOptions } from "./share"
 import { ConversationNotFoundError } from "../../../utils/errors"
+import type { DatabaseStatementCompiler } from "../../../infrastructure/database/databaseTransactions"
 
 /**
  * Creates metadata for a new empty conversation using the supplied system instruction.
- * @param database - Borrowed connection inside the turn transaction.
+ * @param statements - Statement compilation lent to the turn's write transaction.
  * @param systemPrompt - Default prompt loaded by the turn creator.
  * @returns The newly inserted independent conversation snapshot.
  * @throws If validation or insertion fails.
  */
 function createConversation(
-  database: DatabaseSync,
+  statements: DatabaseStatementCompiler,
   systemPrompt: string
 ): Conversation {
   const now = new Date().toISOString()
@@ -29,8 +29,8 @@ function createConversation(
     createdAt: now,
     updatedAt: now
   })
-  database
-    .prepare(
+  statements
+    .getStatement(
       `INSERT INTO conversations (id, title, system_prompt, created_at, updated_at)
     VALUES (?, NULL, ?, ?, ?)`
     )
@@ -40,7 +40,7 @@ function createConversation(
 
 /**
  * Interrupts replies still streaming in a conversation that a new turn supersedes.
- * @param database - Borrowed connection inside the turn transaction.
+ * @param statements - Statement compilation lent to the turn's write transaction.
  * @param conversationId - Conversation receiving the turn; a missing one changes nothing.
  * @remarks A stopped request can finalize its reply after the client has already
  * sent the next turn. Interrupting it here keeps its partial text in the new
@@ -48,12 +48,12 @@ function createConversation(
  * write from the superseded generation.
  */
 function updateSupersededAssistantMessages(
-  database: DatabaseSync,
+  statements: DatabaseStatementCompiler,
   conversationId: string
 ): void {
   const updatedAt = new Date().toISOString()
-  database
-    .prepare(
+  statements
+    .getStatement(
       `UPDATE conversation_messages SET status = 'interrupted', updated_at = ?
     WHERE conversation_id = ? AND role = 'assistant' AND status = 'streaming'`
     )
@@ -62,7 +62,7 @@ function updateSupersededAssistantMessages(
 
 /**
  * Inserts a validated user/assistant pair inside the caller-owned transaction.
- * @param database - Borrowed connection with an active write transaction.
+ * @param statements - Statement compilation lent to the caller's write transaction.
  * @param options - Conversation selection and authored content. Its
  * `systemPrompt` is not read; the `systemPrompt` argument is the prompt stored.
  * @param systemPrompt - Instruction persisted only with a conversation this turn
@@ -73,16 +73,16 @@ function updateSupersededAssistantMessages(
  * interrupted before the snapshot is read, so the new turn supersedes it.
  */
 export function createConversationTurn(
-  database: DatabaseSync,
+  statements: DatabaseStatementCompiler,
   options: CreateConversationTurnOptions,
   systemPrompt: string
 ): ConversationTurn {
   if (options.conversationId !== undefined)
-    updateSupersededAssistantMessages(database, options.conversationId)
+    updateSupersededAssistantMessages(statements, options.conversationId)
   const conversation =
     options.conversationId === undefined
-      ? createConversation(database, systemPrompt)
-      : getConversation(database, options.conversationId)
+      ? createConversation(statements, systemPrompt)
+      : getConversation(statements, options.conversationId)
   if (!conversation) throw new ConversationNotFoundError()
   const now = new Date().toISOString()
   const userMessage = conversationUserMessageSchema.parse({
@@ -101,14 +101,14 @@ export function createConversationTurn(
     createdAt: now,
     updatedAt: now
   })
-  database
-    .prepare(
+  statements
+    .getStatement(
       `INSERT INTO conversation_messages (id, conversation_id, role, content, created_at)
     VALUES (?, ?, 'user', ?, ?)`
     )
     .run(userMessage.id, conversation.id, userMessage.content, now)
-  database
-    .prepare(
+  statements
+    .getStatement(
       `INSERT INTO conversation_messages
     (id, conversation_id, role, model, content, status, finish_reason, created_at, updated_at)
     VALUES (?, ?, 'assistant', ?, '', 'streaming', NULL, ?, ?)`

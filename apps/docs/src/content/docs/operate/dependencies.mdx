@@ -31,7 +31,7 @@ For local development, the repository root script runs `pnpm --filter
 
 In development builds, the desktop host launches `pnpm run dev` from the backend
 directory in the checkout recorded at host compile time. This requires that
-checkout, installed workspace dependencies, Node 24, and `pnpm` on the process
+checkout, installed workspace dependencies, Node 24.10 or later, and `pnpm` on the process
 search path. Release builds instead run `$LYS_HOME/runtime/node/bin/node` with
 `$LYS_HOME/runtime/backend/backend.mjs`, both installed by `build.sh` on macOS;
 see the [Lys home directory](/reference/configuration/#lys-home-directory).
@@ -44,7 +44,8 @@ The backend itself depends on:
 - an absolute `LYS_HOME` path and local filesystem access for
   `$LYS_HOME/lys_db.sqlite` in an existing directory; see
   [standalone startup](/develop/running/)
-- SQLite support through Node's `node:sqlite`
+- SQLite support through Node's `node:sqlite`, Node 24.10 or later (the
+  database owner uses `DatabaseSync.setAuthorizer`)
 - an LM Studio instance reachable at `127.0.0.1:1234` for model features;
   startup does not require it
 

@@ -3,8 +3,7 @@ import {
   type ListConversationsApiResponse
 } from "@lys/protocol"
 import type { Conversation, ConversationMetadata } from "@lys/share"
-import { describe, expect, it, onTestFinished, vi } from "vitest"
-import SqliteConversationStore from "../../../../src/di/services/conversationService"
+import { describe, expect, it, vi } from "vitest"
 import { createConversationListCursor } from "../../../../src/di/services/conversationService/utils"
 import { updateFastifyWithHttpTransport } from "../../../../src/http"
 import updateFastifyWithConversationRoutes from "../../../../src/modules/conversation"
@@ -14,6 +13,7 @@ import {
   createUserMessage,
   FIXTURE_TIMESTAMP
 } from "../../support/conversationFixtures"
+import { openConversationTestServices } from "../../support/conversationDatabase"
 import { createTestFastify } from "../../support/fastifyTestApp"
 
 /** Identity of the conversation the stubbed history answers for. */
@@ -71,45 +71,43 @@ function handleUnexpectedHistoryCall(operationName: string): never {
 
 /**
  * Creates an application with the HTTP transport and the conversation routes
- * registered over a stubbed history access.
+ * registered over a stubbed history reader and editor.
  *
  * @returns The application, captured logs, and a spy for each history
  * operation the routes can call.
- * @remarks The routes borrow the history access once at registration, so the
- * returned spies control every outcome. Each spy throws until the case
- * configures it; no database row is read or written. The in-memory store that
- * backs the decoration is disposed when the test finishes.
+ * @remarks The routes read the decorated history reader and editor at
+ * registration, so the returned spies control every outcome. Each spy throws
+ * until the case configures it; no database row is read or written. The
+ * in-memory database behind the decorated adapters is closed when the test
+ * finishes.
  */
 async function createConversationRouteApp() {
   const testFastify = createTestFastify()
-  const store = SqliteConversationStore.open(":memory:")
-  onTestFinished(() => {
-    store[Symbol.dispose]()
-  })
-  const history = store.createHistoryAccess()
-  vi.spyOn(store, "createHistoryAccess").mockReturnValue(history)
+  const { history: historyReader, editor: historyEditor } =
+    openConversationTestServices()
   const historyCalls = {
     listConversations: vi
-      .spyOn(history, "listConversations")
+      .spyOn(historyReader, "listConversations")
       .mockImplementation(() =>
         handleUnexpectedHistoryCall("listConversations")
       ),
     getConversation: vi
-      .spyOn(history, "getConversation")
+      .spyOn(historyReader, "getConversation")
       .mockImplementation(() => handleUnexpectedHistoryCall("getConversation")),
     updateConversationTitle: vi
-      .spyOn(history, "updateConversationTitle")
+      .spyOn(historyEditor, "updateConversationTitle")
       .mockImplementation(() =>
         handleUnexpectedHistoryCall("updateConversationTitle")
       ),
     deleteConversation: vi
-      .spyOn(history, "deleteConversation")
+      .spyOn(historyEditor, "deleteConversation")
       .mockImplementation(() =>
         handleUnexpectedHistoryCall("deleteConversation")
       )
   }
   await updateFastifyWithHttpTransport(testFastify.app)
-  testFastify.app.decorate("conversationService", store)
+  testFastify.app.decorate("conversationHistoryReader", historyReader)
+  testFastify.app.decorate("conversationHistoryEditor", historyEditor)
   await updateFastifyWithConversationRoutes(testFastify.app)
   return { ...testFastify, historyCalls }
 }
@@ -390,22 +388,5 @@ describe("updateFastifyWithConversationRoutes", () => {
 
       expect(response.statusCode).toBe(500)
     })
-  })
-
-  it("fails registration when the history access cannot be borrowed", async () => {
-    const testFastify = createTestFastify()
-    const store = SqliteConversationStore.open(":memory:")
-    onTestFinished(() => {
-      store[Symbol.dispose]()
-    })
-    const accessFailure = new Error("history access unavailable")
-    vi.spyOn(store, "createHistoryAccess").mockImplementation(() => {
-      throw accessFailure
-    })
-    testFastify.app.decorate("conversationService", store)
-
-    await expect(
-      updateFastifyWithConversationRoutes(testFastify.app)
-    ).rejects.toBe(accessFailure)
   })
 })

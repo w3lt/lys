@@ -41,8 +41,8 @@ conversation state for the user, and browses stored conversations.
 The local service process. It registers Fastify routes for health checks; model
 inventory, health, load, and unload operations; the LM Studio connection status
 and reconnect; conversation history; and the chat stream. It also owns the
-SQLite conversation store and the LM Studio / OpenAI-compatible service
-adapters.
+SQLite database layer and conversation persistence, and the LM Studio /
+OpenAI-compatible service adapters.
 
 ### `apps/docs`
 

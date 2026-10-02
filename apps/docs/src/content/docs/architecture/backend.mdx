@@ -105,8 +105,9 @@ The backend's database owner, `SqliteDatabase` in `src/infrastructure/database/`
 opens the file once, applies the schema from `migrations.ts` using
 `PRAGMA user_version`, and is the only owner that closes it. Stores borrow read
 and write transactions that expose neither connection closing nor transaction
-control; the history-reading, history-editing, and turn adapters are built on
-them, and each is its own application service. Version 4 preserves activity
+control; the history-reading, history-editing, and turn adapters in
+`src/infrastructure/database/conversations/` are built on them, and each is its
+own application service. Version 4 preserves activity
 timestamps on rename, version 5 preserves them on status-only message updates,
 and turn persistence's startup recovers streaming assistants without reordering
 history.

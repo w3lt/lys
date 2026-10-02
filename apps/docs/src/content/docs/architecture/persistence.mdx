@@ -33,17 +33,20 @@ transaction the connection refuses every change
 (`PRAGMA query_only`), so a read cannot write and a statement kept beyond its
 operation cannot change data.
 
-| Table                   | Owned by                       | Notes                                                                                            |
-| ----------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------ |
-| `conversations`         | `conversationService` adapters | One row per conversation, including `title`, `system_prompt`, `created_at`, and `updated_at`.    |
-| `conversation_messages` | `conversationService` adapters | Ordered user and assistant messages, including assistant `status`, `finish_reason`, and `model`. |
+| Table                   | Owned by                                         | Notes                                                                                            |
+| ----------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| `conversations`         | `infrastructure/database/conversations` adapters | One row per conversation, including `title`, `system_prompt`, `created_at`, and `updated_at`.    |
+| `conversation_messages` | `infrastructure/database/conversations` adapters | Ordered user and assistant messages, including assistant `status`, `finish_reason`, and `model`. |
 
 The desktop does not query SQLite directly and the Tauri host does not proxy
 conversation SQL. The backend creates separate history-reading, history-editing,
 and turn adapters over the shared database and exposes each as its own
-application service. Every borrowed operation fails once the database closes,
-and the database remains open until every reply generation has stored its final
-state.
+application service. They live in
+`apps/backend/src/infrastructure/database/conversations/`, next to the database
+owner, and implement interfaces that the chat and conversation modules own, so
+the modules do not depend on SQLite. Every borrowed operation fails once the
+database closes, and the database remains open until every reply generation has
+stored its final state.
 
 ## Migration model
 

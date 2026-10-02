@@ -1,9 +1,9 @@
-import type { DatabaseSync } from "node:sqlite"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import * as z from "zod"
 import { createConversationTurn } from "../../../../../src/di/services/conversationService/createTurn"
 import { getConversation } from "../../../../../src/di/services/conversationService/readConversation"
 import type { CreateConversationTurnOptions } from "../../../../../src/di/services/conversationService/share"
+import type SqliteDatabase from "../../../../../src/infrastructure/database/sqliteDatabase"
 import { ConversationNotFoundError } from "../../../../../src/utils/errors"
 import {
   saveAssistantMessageRow,
@@ -20,7 +20,7 @@ const NOW = "2026-03-04T05:06:07.890Z"
 const EXISTING_CONVERSATION_ID = createFixtureUuidV7(1)
 
 /**
- * Creates a turn inside a write transaction, as the turn writer does.
+ * Creates a turn inside a write operation, as the turn writer does.
  *
  * @param database - Migrated test database.
  * @param options - Turn selection and content.
@@ -28,20 +28,29 @@ const EXISTING_CONVERSATION_ID = createFixtureUuidV7(1)
  * @returns The created turn after the transaction commits.
  */
 function createCommittedTurn(
-  database: DatabaseSync,
+  database: SqliteDatabase,
   options: CreateConversationTurnOptions,
   systemPrompt: string
 ) {
-  database.exec("BEGIN IMMEDIATE")
-  try {
-    const turn = createConversationTurn(database, options, systemPrompt)
-    database.exec("COMMIT")
-    return turn
-  } finally {
-    if (database.isTransaction) {
-      database.exec("ROLLBACK")
-    }
-  }
+  return database.handleDatabaseWriteRequest((statements) =>
+    createConversationTurn(statements, options, systemPrompt)
+  )
+}
+
+/**
+ * Reads a conversation inside a read snapshot, as history access does.
+ *
+ * @param database - Migrated test database.
+ * @param conversationId - Conversation to read.
+ * @returns The stored conversation, or undefined when absent.
+ */
+function getStoredConversation(
+  database: SqliteDatabase,
+  conversationId: string
+) {
+  return database.handleDatabaseReadRequest((statements) =>
+    getConversation(statements, conversationId)
+  )
 }
 
 /**
@@ -49,7 +58,7 @@ function createCommittedTurn(
  *
  * @param database - Migrated test database.
  */
-function saveExistingConversation(database: DatabaseSync): void {
+function saveExistingConversation(database: SqliteDatabase): void {
   saveConversationRow(database, {
     id: EXISTING_CONVERSATION_ID,
     title: "Trip plan",
@@ -138,10 +147,9 @@ describe("createConversationTurn", () => {
       createdAt: NOW,
       updatedAt: NOW
     })
-    expect(getConversation(database, turn.conversation.id)?.messages).toEqual([
-      turn.userMessage,
-      turn.assistantMessage
-    ])
+    expect(
+      getStoredConversation(database, turn.conversation.id)?.messages
+    ).toEqual([turn.userMessage, turn.assistantMessage])
   })
 
   it("continues an existing conversation with its stored prompt and prior transcript", () => {
@@ -170,7 +178,7 @@ describe("createConversationTurn", () => {
       "Earlier answer"
     ])
     expect(
-      getConversation(database, EXISTING_CONVERSATION_ID)?.messages.map(
+      getStoredConversation(database, EXISTING_CONVERSATION_ID)?.messages.map(
         ({ content }) => content
       )
     ).toEqual(["Earlier question", "Earlier answer", "Next question", ""])
@@ -243,33 +251,32 @@ describe("createConversationTurn", () => {
     )
 
     expect(
-      getConversation(database, otherConversationId)?.messages[0]
+      getStoredConversation(database, otherConversationId)?.messages[0]
     ).toMatchObject({ status: "streaming", content: "Other partial" })
   })
 
   it("rejects an absent conversation without appending messages", () => {
     const database = openConversationTestDatabase()
-    database.exec("BEGIN IMMEDIATE")
 
-    expect(() =>
-      createConversationTurn(
-        database,
-        {
-          conversationId: EXISTING_CONVERSATION_ID,
-          userMessageContent: "Hello",
-          model: "qwen/qwen3-8b",
-          systemPrompt: "You are Lys."
-        },
-        "You are Lys."
-      )
-    ).toThrow(ConversationNotFoundError)
-
-    expect(
-      database
-        .prepare("SELECT count(*) AS count FROM conversation_messages")
+    const messageCount = database.handleDatabaseReadRequest((statements) => {
+      expect(() =>
+        createConversationTurn(
+          statements,
+          {
+            conversationId: EXISTING_CONVERSATION_ID,
+            userMessageContent: "Hello",
+            model: "qwen/qwen3-8b",
+            systemPrompt: "You are Lys."
+          },
+          "You are Lys."
+        )
+      ).toThrow(ConversationNotFoundError)
+      return statements
+        .createStatement("SELECT count(*) AS count FROM conversation_messages")
         .get()
-    ).toEqual({ count: 0 })
-    database.exec("ROLLBACK")
+    })
+
+    expect(messageCount).toEqual({ count: 0 })
   })
 
   it.each([
@@ -278,23 +285,22 @@ describe("createConversationTurn", () => {
   ])("rejects %s before appending messages", (_label, values) => {
     const database = openConversationTestDatabase()
     saveExistingConversation(database)
-    database.exec("BEGIN IMMEDIATE")
 
-    expect(() =>
-      createConversationTurn(
-        database,
-        {
-          conversationId: EXISTING_CONVERSATION_ID,
-          systemPrompt: "Ignored prompt",
-          ...values
-        },
-        "Ignored prompt"
-      )
-    ).toThrow(z.ZodError)
+    const messages = database.handleDatabaseReadRequest((statements) => {
+      expect(() =>
+        createConversationTurn(
+          statements,
+          {
+            conversationId: EXISTING_CONVERSATION_ID,
+            systemPrompt: "Ignored prompt",
+            ...values
+          },
+          "Ignored prompt"
+        )
+      ).toThrow(z.ZodError)
+      return getConversation(statements, EXISTING_CONVERSATION_ID)?.messages
+    })
 
-    expect(
-      getConversation(database, EXISTING_CONVERSATION_ID)?.messages
-    ).toHaveLength(2)
-    database.exec("ROLLBACK")
+    expect(messages).toHaveLength(2)
   })
 })

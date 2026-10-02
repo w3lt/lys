@@ -1,4 +1,4 @@
-import type { DatabaseSync } from "node:sqlite"
+import type { DatabaseStatementCompiler } from "../../../infrastructure/database/databaseTransactions"
 import {
   conversationMetadataSchema,
   conversationMessageSchema,
@@ -9,17 +9,17 @@ import {
 
 /**
  * Reads metadata without changing activity time.
- * @param database - Borrowed open connection.
+ * @param statements - Statement compilation lent to the caller's transaction.
  * @param conversationId - Stored UUIDv7 to look up.
  * @returns Independent metadata, or undefined for an absent conversation.
  * @throws If SQLite access or persisted validation fails.
  */
 export function getConversationMetadata(
-  database: DatabaseSync,
+  statements: DatabaseStatementCompiler,
   conversationId: string
 ): ConversationMetadata | undefined {
-  const row = database
-    .prepare(
+  const row = statements
+    .createStatement(
       `SELECT id, title, system_prompt AS systemPrompt,
     created_at AS createdAt, updated_at AS updatedAt FROM conversations WHERE id = ?`
     )
@@ -54,19 +54,19 @@ function parseConversationMessage(
 
 /**
  * Reads a full transcript in creation-time and UUID order.
- * @param database - Borrowed open connection in the caller's read transaction.
+ * @param statements - Statement compilation lent to the caller's read or write transaction.
  * @param conversationId - Stored UUIDv7 to look up.
  * @returns Independent conversation data, or undefined when absent.
  * @throws If SQLite access or persisted validation fails.
  */
 export function getConversation(
-  database: DatabaseSync,
+  statements: DatabaseStatementCompiler,
   conversationId: string
 ): Conversation | undefined {
-  const metadata = getConversationMetadata(database, conversationId)
+  const metadata = getConversationMetadata(statements, conversationId)
   if (!metadata) return undefined
-  const rows = database
-    .prepare(
+  const rows = statements
+    .createStatement(
       `SELECT id, role, model, content, status,
     finish_reason AS finishReason, created_at AS createdAt, updated_at AS updatedAt
     FROM conversation_messages WHERE conversation_id = ? ORDER BY created_at, id`

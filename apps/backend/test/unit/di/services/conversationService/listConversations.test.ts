@@ -1,11 +1,14 @@
-import type { DatabaseSync } from "node:sqlite"
 import { describe, expect, it } from "vitest"
 import * as z from "zod"
 import {
   calculateConversationSearchMatch,
   listConversations
 } from "../../../../../src/di/services/conversationService/listConversations"
-import { parseConversationListOptions } from "../../../../../src/di/services/conversationService/utils"
+import {
+  parseConversationListOptions,
+  type ConversationListOptions
+} from "../../../../../src/di/services/conversationService/utils"
+import type SqliteDatabase from "../../../../../src/infrastructure/database/sqliteDatabase"
 import {
   saveAssistantMessageRow,
   saveConversationRow,
@@ -45,7 +48,7 @@ function createFixtureTimestamp(minute: number, second = 0): string {
  * @returns The stored conversation identity.
  */
 function saveListedConversation(
-  database: DatabaseSync,
+  database: SqliteDatabase,
   fixture: ListedConversationFixture
 ): string {
   const id = createFixtureUuidV7(fixture.sequence)
@@ -64,6 +67,22 @@ function saveListedConversation(
     })
   })
   return id
+}
+
+/**
+ * Lists conversations inside a read snapshot, as history access does.
+ *
+ * @param database - Migrated test database.
+ * @param options - Validated query and pagination.
+ * @returns The listed page.
+ */
+function listStoredConversations(
+  database: SqliteDatabase,
+  options: ConversationListOptions
+) {
+  return database.handleDatabaseReadRequest((statements) =>
+    listConversations(statements, options)
+  )
 }
 
 describe("calculateConversationSearchMatch", () => {
@@ -97,9 +116,14 @@ describe("listConversations", () => {
   it("returns an empty final page for an empty store", () => {
     const database = openConversationTestDatabase()
 
-    expect(listConversations(database, parseConversationListOptions())).toEqual(
-      { conversations: [], storedCount: 0, matchCount: 0, nextCursor: null }
-    )
+    expect(
+      listStoredConversations(database, parseConversationListOptions())
+    ).toEqual({
+      conversations: [],
+      storedCount: 0,
+      matchCount: 0,
+      nextCursor: null
+    })
   })
 
   it("orders conversations by latest activity and then by descending identity", () => {
@@ -123,7 +147,10 @@ describe("listConversations", () => {
       createdAtMinute: 2
     })
 
-    const page = listConversations(database, parseConversationListOptions())
+    const page = listStoredConversations(
+      database,
+      parseConversationListOptions()
+    )
 
     expect(page.conversations.map(({ id }) => id)).toEqual([
       tieHigh,
@@ -142,7 +169,8 @@ describe("listConversations", () => {
     })
 
     expect(
-      listConversations(database, parseConversationListOptions()).conversations
+      listStoredConversations(database, parseConversationListOptions())
+        .conversations
     ).toEqual([
       {
         id,
@@ -174,7 +202,7 @@ describe("listConversations", () => {
     })
 
     expect(
-      listConversations(database, parseConversationListOptions())
+      listStoredConversations(database, parseConversationListOptions())
         .conversations[0]?.preview
     ).toEqual({ role: "user", content: "Question" })
   })
@@ -189,7 +217,7 @@ describe("listConversations", () => {
     })
 
     expect(
-      listConversations(database, parseConversationListOptions())
+      listStoredConversations(database, parseConversationListOptions())
         .conversations[0]?.preview
     ).toBeNull()
   })
@@ -215,7 +243,7 @@ describe("listConversations", () => {
       createdAtMinute: 3
     })
 
-    const page = listConversations(
+    const page = listStoredConversations(
       database,
       parseConversationListOptions({ query: "trip" })
     )
@@ -238,7 +266,7 @@ describe("listConversations", () => {
     })
 
     expect(
-      listConversations(
+      listStoredConversations(
         database,
         parseConversationListOptions({ query: "trip" })
       ).conversations[0]?.preview
@@ -255,7 +283,7 @@ describe("listConversations", () => {
     })
 
     expect(
-      listConversations(
+      listStoredConversations(
         database,
         parseConversationListOptions({ query: "trip" })
       ).conversations[0]?.preview
@@ -273,7 +301,7 @@ describe("listConversations", () => {
       })
     )
 
-    const firstPage = listConversations(
+    const firstPage = listStoredConversations(
       database,
       parseConversationListOptions({ limit: 2 })
     )
@@ -283,7 +311,7 @@ describe("listConversations", () => {
     ])
     expect(firstPage.nextCursor).toEqual(expect.any(String))
 
-    const secondPage = listConversations(
+    const secondPage = listStoredConversations(
       database,
       parseConversationListOptions({
         limit: 2,
@@ -308,7 +336,7 @@ describe("listConversations", () => {
       })
     }
 
-    const page = listConversations(
+    const page = listStoredConversations(
       database,
       parseConversationListOptions({ limit: 2 })
     )
@@ -327,7 +355,7 @@ describe("listConversations", () => {
     })
 
     expect(() =>
-      listConversations(database, parseConversationListOptions())
+      listStoredConversations(database, parseConversationListOptions())
     ).toThrow(z.ZodError)
   })
 })

@@ -3,8 +3,7 @@ import {
   type ListConversationsApiResponse
 } from "@lys/protocol"
 import type { Conversation, ConversationMetadata } from "@lys/share"
-import { describe, expect, it, onTestFinished, vi } from "vitest"
-import SqliteConversationStore from "../../../../src/di/services/conversationService"
+import { describe, expect, it, vi } from "vitest"
 import { createConversationListCursor } from "../../../../src/di/services/conversationService/utils"
 import { updateFastifyWithHttpTransport } from "../../../../src/http"
 import updateFastifyWithConversationRoutes from "../../../../src/modules/conversation"
@@ -14,6 +13,7 @@ import {
   createUserMessage,
   FIXTURE_TIMESTAMP
 } from "../../support/conversationFixtures"
+import { openConversationTestStore } from "../../support/conversationDatabase"
 import { createTestFastify } from "../../support/fastifyTestApp"
 
 /** Identity of the conversation the stubbed history answers for. */
@@ -77,15 +77,12 @@ function handleUnexpectedHistoryCall(operationName: string): never {
  * operation the routes can call.
  * @remarks The routes borrow the history access once at registration, so the
  * returned spies control every outcome. Each spy throws until the case
- * configures it; no database row is read or written. The in-memory store that
- * backs the decoration is disposed when the test finishes.
+ * configures it; no database row is read or written. The in-memory database
+ * behind the decorated store is closed when the test finishes.
  */
 async function createConversationRouteApp() {
   const testFastify = createTestFastify()
-  const store = SqliteConversationStore.open(":memory:")
-  onTestFinished(() => {
-    store[Symbol.dispose]()
-  })
+  const { store } = openConversationTestStore()
   const history = store.createHistoryAccess()
   vi.spyOn(store, "createHistoryAccess").mockReturnValue(history)
   const historyCalls = {
@@ -394,10 +391,7 @@ describe("updateFastifyWithConversationRoutes", () => {
 
   it("fails registration when the history access cannot be borrowed", async () => {
     const testFastify = createTestFastify()
-    const store = SqliteConversationStore.open(":memory:")
-    onTestFinished(() => {
-      store[Symbol.dispose]()
-    })
+    const { store } = openConversationTestStore()
     const accessFailure = new Error("history access unavailable")
     vi.spyOn(store, "createHistoryAccess").mockImplementation(() => {
       throw accessFailure

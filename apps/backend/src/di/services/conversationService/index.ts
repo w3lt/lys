@@ -1,100 +1,104 @@
-import { DatabaseSync } from "node:sqlite"
-import type { PathLike } from "node:fs"
-import { updateConversationDatabaseDurability } from "./durability"
+import type {
+  DatabaseFunctionRegistry,
+  DatabaseReader,
+  DatabaseWriter
+} from "../../../infrastructure/database/databaseTransactions"
 import { calculateConversationSearchMatch } from "./listConversations"
-import { migrateDatabase } from "./migrations"
 import SqliteConversationHistory from "./history"
 import SqliteConversationTurns from "./turns"
 
-/** Borrows the open database for one synchronous operation; throws after disposal. */
-export type GetConversationDatabase = () => DatabaseSync
+/** Shared-database capabilities the conversation store borrows. */
+export type ConversationStoreDependencies = Readonly<{
+  /** Read snapshots for history queries and turn-statement compilation. */
+  databaseReader: DatabaseReader
+  /** Write transactions for turns, edits, deletion, and startup recovery. */
+  databaseWriter: DatabaseWriter
+  /** Registration of the conversation search function on the shared connection. */
+  databaseFunctionRegistry: DatabaseFunctionRegistry
+}>
 
 /**
- * Owns one SQLite connection and the lifetime of its borrowed history and turn access.
+ * Provides conversation history and turn access over the shared backend
+ * database.
  *
- * @remarks Single-owner, synchronous operations complete before another event-loop
- * callback runs. Callers must finish active requests before disposing the store.
- * Borrowers cannot close the database and reject every operation after disposal.
+ * @remarks Invariant: once created, `contains_search` is registered and no
+ * reply left by an earlier process is still marked streaming. Owns no
+ * resource: it borrows the database's capabilities, whose owner closes the
+ * connection, after which every access operation fails with
+ * `Database is closed`. Concurrency model: single-owner, synchronous on the
+ * backend's event loop.
  */
 export default class SqliteConversationStore {
-  /** Database borrowed from the exclusively owned disposal stack. */
-  readonly #database: DatabaseSync
-  /** Sole release owner and terminal admission guard. */
-  readonly #lifetime: DisposableStack
+  /** Borrowed read snapshots handed to history and turn access. */
+  readonly #databaseReader: DatabaseReader
+  /** Borrowed write transactions handed to history and turn access. */
+  readonly #databaseWriter: DatabaseWriter
 
   /**
-   * Retains a ready database and transfers its protected lifetime.
-   * @param database - Migrated connection borrowed from lifetime.
-   * @param lifetime - Exclusive cleanup obligation transferred by open.
+   * Retains borrowed database access prepared by {@link SqliteConversationStore.create}.
+   * @param databaseReader - Read snapshots lent by the database owner.
+   * @param databaseWriter - Write transactions lent by the database owner.
    */
-  private constructor(database: DatabaseSync, lifetime: DisposableStack) {
-    this.#database = database
-    this.#lifetime = lifetime
+  private constructor(
+    databaseReader: DatabaseReader,
+    databaseWriter: DatabaseWriter
+  ) {
+    this.#databaseReader = databaseReader
+    this.#databaseWriter = databaseWriter
   }
 
   /**
-   * Opens, migrates, and recovers a conversation database before publishing it.
-   * @param databaseFilePath - SQLite location; :memory: creates an isolated store.
-   * @returns The ready store whose disposal belongs to the caller.
-   * @throws If acquisition, migration, or recovery fails; acquired resources are released.
-   * @remarks Recovery marks replies left streaming as interrupted without
-   * changing their conversations' activity time or history order. After the
-   * migration accepts the stored version, the connection switches to
-   * write-ahead logging with `synchronous = NORMAL`, so a database from a
-   * newer version is refused unchanged; see
-   * {@link updateConversationDatabaseDurability} for the durability trade-off.
+   * Prepares the shared database for conversations and publishes the store.
+   * @param dependencies - Capabilities borrowed from the open shared database.
+   * @returns The ready store; it owns nothing to release.
+   * @throws If the database is closed, the search function cannot be
+   * registered, or recovery fails; a failed recovery changes nothing.
+   * @remarks Registers `contains_search` for history search, then, in one write
+   * transaction, marks replies left streaming as interrupted without changing
+   * their conversations' activity time or history order.
    */
-  public static open(databaseFilePath: PathLike): SqliteConversationStore {
-    using lifetime = new DisposableStack()
-    const database = lifetime.use(new DatabaseSync(databaseFilePath))
-    database.exec("PRAGMA foreign_keys = ON")
-    database.function(
+  public static create({
+    databaseReader,
+    databaseWriter,
+    databaseFunctionRegistry
+  }: ConversationStoreDependencies): SqliteConversationStore {
+    databaseFunctionRegistry.registerDatabaseFunction(
       "contains_search",
-      { deterministic: true },
       calculateConversationSearchMatch
     )
-    migrateDatabase(database)
-    updateConversationDatabaseDurability(database)
-    database
-      .prepare(
-        `UPDATE conversation_messages SET status = 'interrupted', updated_at = ?
+    databaseWriter.handleDatabaseWriteRequest((statements) =>
+      statements
+        .createStatement(
+          `UPDATE conversation_messages SET status = 'interrupted', updated_at = ?
       WHERE role = 'assistant' AND status = 'streaming'`
-      )
-      .run(new Date().toISOString())
-    return new SqliteConversationStore(database, lifetime.move())
+        )
+        .run(new Date().toISOString())
+    )
+    return new SqliteConversationStore(databaseReader, databaseWriter)
   }
 
   /**
-   * Creates history access borrowing this store's guarded lifetime.
-   * @returns An adapter valid until this store is disposed; it cannot release the store.
-   * @throws If the store is closed.
+   * Creates history access over the shared database.
+   * @returns An adapter whose operations fail with `Database is closed` after
+   * the database closes; it cannot close the database.
    */
   public createHistoryAccess(): SqliteConversationHistory {
-    this.#getDatabase()
-    return new SqliteConversationHistory(() => this.#getDatabase())
+    return new SqliteConversationHistory(
+      this.#databaseReader,
+      this.#databaseWriter
+    )
   }
 
   /**
-   * Creates turn persistence access borrowing this store's guarded lifetime.
-   * @returns An adapter valid until this store is disposed; it cannot release the store.
-   * @throws If the store is closed or the delta statement cannot be prepared.
+   * Creates turn persistence access, compiling its per-delta statement once.
+   * @returns An adapter whose operations fail with `Database is closed` after
+   * the database closes; it cannot close the database.
+   * @throws `Database is closed`, or a failure to compile the delta statement.
    */
   public createTurnAccess(): SqliteConversationTurns {
-    return SqliteConversationTurns.open(() => this.#getDatabase())
-  }
-
-  /**
-   * Borrows the connection only while its sole owner admits operations.
-   * @returns The open connection for synchronous use by a borrower.
-   * @throws If disposal has begun, including after a failed release.
-   */
-  #getDatabase(): DatabaseSync {
-    if (this.#lifetime.disposed) throw new Error("Conversation store is closed")
-    return this.#database
-  }
-
-  /** Releases the connection once; all borrowed access becomes terminally closed. */
-  public [Symbol.dispose](): void {
-    this.#lifetime.dispose()
+    return SqliteConversationTurns.create(
+      this.#databaseReader,
+      this.#databaseWriter
+    )
   }
 }

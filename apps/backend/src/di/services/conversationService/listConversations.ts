@@ -1,4 +1,4 @@
-import type { DatabaseSync, SQLOutputValue } from "node:sqlite"
+import type { SQLOutputValue } from "node:sqlite"
 import * as z from "zod"
 import {
   listConversationsApi,
@@ -8,6 +8,7 @@ import {
   createConversationListCursor,
   type ConversationListOptions
 } from "./utils"
+import type { DatabaseStatementCompiler } from "../../../infrastructure/database/databaseTransactions"
 
 /** Shared SQL predicate for counts and pages; values are always bound parameters. */
 const matchingConversationSql = `($query = '' OR contains_search(c.title, $query)
@@ -37,27 +38,27 @@ export function calculateConversationSearchMatch(
 
 /**
  * Reads a bounded summary page and both counts from one SQLite snapshot.
- * @param database - Borrowed connection in a caller-owned read transaction.
+ * @param statements - Statement compilation lent to the caller's read transaction.
  * @param options - Validated query, cursor binding, and page size.
  * @returns The strict history page with full preview text and an opaque continuation.
  * @throws If SQLite or stored-record validation fails.
  */
 export function listConversations(
-  database: DatabaseSync,
+  statements: DatabaseStatementCompiler,
   options: ConversationListOptions
 ): ListConversationsApiResponse {
   const { query, cursor, limit } = options
   const counts = conversationCountsSchema.parse(
-    database
-      .prepare(
+    statements
+      .createStatement(
         `SELECT
     (SELECT count(*) FROM conversations) AS storedCount,
     count(*) AS matchCount FROM conversations c WHERE ${matchingConversationSql}`
       )
       .get({ query })
   )
-  const rows = database
-    .prepare(
+  const rows = statements
+    .createStatement(
       `SELECT c.id, c.title, c.created_at AS createdAt,
     c.updated_at AS updatedAt, p.role AS previewRole, p.content AS previewContent
     FROM conversations c LEFT JOIN conversation_messages p ON p.id = (

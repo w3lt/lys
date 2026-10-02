@@ -4,6 +4,7 @@ import {
   getConversation,
   getConversationMetadata
 } from "../../../../../src/di/services/conversationService/readConversation"
+import type SqliteDatabase from "../../../../../src/infrastructure/database/sqliteDatabase"
 import {
   saveAssistantMessageRow,
   saveConversationRow,
@@ -15,6 +16,35 @@ import { createFixtureUuidV7 } from "../../../support/conversationFixtures"
 /** Stored conversation read by the cases. */
 const CONVERSATION_ID = createFixtureUuidV7(1)
 
+/**
+ * Reads metadata inside a read snapshot, as history access does.
+ *
+ * @param database - Migrated test database.
+ * @param conversationId - Conversation to read.
+ * @returns The stored metadata, or undefined when absent.
+ */
+function getStoredMetadata(database: SqliteDatabase, conversationId: string) {
+  return database.handleDatabaseReadRequest((statements) =>
+    getConversationMetadata(statements, conversationId)
+  )
+}
+
+/**
+ * Reads a conversation inside a read snapshot, as history access does.
+ *
+ * @param database - Migrated test database.
+ * @param conversationId - Conversation to read.
+ * @returns The stored conversation, or undefined when absent.
+ */
+function getStoredConversation(
+  database: SqliteDatabase,
+  conversationId: string
+) {
+  return database.handleDatabaseReadRequest((statements) =>
+    getConversation(statements, conversationId)
+  )
+}
+
 describe("getConversationMetadata", () => {
   it("returns the stored metadata without the transcript", () => {
     const database = openConversationTestDatabase()
@@ -25,7 +55,7 @@ describe("getConversationMetadata", () => {
       createdAt: "2025-01-01T00:00:00.000Z"
     })
 
-    expect(getConversationMetadata(database, CONVERSATION_ID)).toEqual({
+    expect(getStoredMetadata(database, CONVERSATION_ID)).toEqual({
       id: CONVERSATION_ID,
       title: "Trip plan",
       systemPrompt: "You are Lys.",
@@ -37,7 +67,7 @@ describe("getConversationMetadata", () => {
   it("returns undefined for an absent conversation", () => {
     const database = openConversationTestDatabase()
 
-    expect(getConversationMetadata(database, CONVERSATION_ID)).toBeUndefined()
+    expect(getStoredMetadata(database, CONVERSATION_ID)).toBeUndefined()
   })
 
   it("rejects stored metadata that violates the conversation contract", () => {
@@ -49,7 +79,7 @@ describe("getConversationMetadata", () => {
       createdAt: "2025-01-01T00:00:00.000Z"
     })
 
-    expect(() => getConversationMetadata(database, CONVERSATION_ID)).toThrow(
+    expect(() => getStoredMetadata(database, CONVERSATION_ID)).toThrow(
       z.ZodError
     )
   })
@@ -59,7 +89,7 @@ describe("getConversation", () => {
   it("returns undefined for an absent conversation", () => {
     const database = openConversationTestDatabase()
 
-    expect(getConversation(database, CONVERSATION_ID)).toBeUndefined()
+    expect(getStoredConversation(database, CONVERSATION_ID)).toBeUndefined()
   })
 
   it("returns an empty transcript for a conversation without messages", () => {
@@ -71,7 +101,7 @@ describe("getConversation", () => {
       createdAt: "2025-01-01T00:00:00.000Z"
     })
 
-    expect(getConversation(database, CONVERSATION_ID)).toMatchObject({
+    expect(getStoredConversation(database, CONVERSATION_ID)).toMatchObject({
       id: CONVERSATION_ID,
       title: null,
       messages: []
@@ -103,7 +133,7 @@ describe("getConversation", () => {
       updatedAt: "2025-01-01T00:00:03.000Z"
     })
 
-    expect(getConversation(database, CONVERSATION_ID)?.messages).toEqual([
+    expect(getStoredConversation(database, CONVERSATION_ID)?.messages).toEqual([
       {
         id: createFixtureUuidV7(10),
         role: "user",
@@ -151,7 +181,7 @@ describe("getConversation", () => {
     })
 
     expect(
-      getConversation(database, CONVERSATION_ID)?.messages.map(
+      getStoredConversation(database, CONVERSATION_ID)?.messages.map(
         ({ content }) => content
       )
     ).toEqual([
@@ -179,7 +209,9 @@ describe("getConversation", () => {
       createdAt: "2025-01-01T00:00:01.000Z"
     })
 
-    expect(getConversation(database, CONVERSATION_ID)?.messages).toEqual([])
+    expect(getStoredConversation(database, CONVERSATION_ID)?.messages).toEqual(
+      []
+    )
   })
 
   it("returns an independent snapshot", () => {
@@ -190,7 +222,7 @@ describe("getConversation", () => {
       systemPrompt: "You are Lys.",
       createdAt: "2025-01-01T00:00:00.000Z"
     })
-    const first = getConversation(database, CONVERSATION_ID)
+    const first = getStoredConversation(database, CONVERSATION_ID)
     first?.messages.push({
       id: createFixtureUuidV7(99),
       role: "user",
@@ -198,7 +230,9 @@ describe("getConversation", () => {
       createdAt: "2025-01-01T00:00:09.000Z"
     })
 
-    expect(getConversation(database, CONVERSATION_ID)?.messages).toEqual([])
+    expect(getStoredConversation(database, CONVERSATION_ID)?.messages).toEqual(
+      []
+    )
   })
 
   it("rejects a stored message that violates the message contract", () => {
@@ -216,6 +250,8 @@ describe("getConversation", () => {
       createdAt: "2025-01-01T00:00:01.000Z"
     })
 
-    expect(() => getConversation(database, CONVERSATION_ID)).toThrow(z.ZodError)
+    expect(() => getStoredConversation(database, CONVERSATION_ID)).toThrow(
+      z.ZodError
+    )
   })
 })

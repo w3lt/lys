@@ -1,32 +1,30 @@
 import { MAXIMUM_CONVERSATION_TITLE_LENGTH } from "@lys/protocol"
-import { describe, expect, it, onTestFinished } from "vitest"
+import { describe, expect, it } from "vitest"
 import * as z from "zod"
-import SqliteConversationStore from "../../../../../src/di/services/conversationService"
 import SqliteConversationHistory from "../../../../../src/di/services/conversationService/history"
 import { parseConversationListOptions } from "../../../../../src/di/services/conversationService/utils"
 import {
-  saveConversationRow,
-  openConversationTestDatabase
+  openConversationTestDatabase,
+  openConversationTestStore,
+  saveConversationRow
 } from "../../../support/conversationDatabase"
 import { createFixtureUuidV7 } from "../../../support/conversationFixtures"
 
 /**
  * Opens an isolated in-memory store with one committed turn.
  *
- * @returns The store, its access objects, and the committed turn.
+ * @returns The test-owned database, its access objects, and the committed
+ * turn.
  */
 function openStoreWithTurn() {
-  const store = SqliteConversationStore.open(":memory:")
-  onTestFinished(() => {
-    store[Symbol.dispose]()
-  })
+  const { database, store } = openConversationTestStore()
   const turns = store.createTurnAccess()
   const turn = turns.createConversationTurn({
     userMessageContent: "Hello",
     model: "qwen/qwen3-8b",
     systemPrompt: "You are Lys."
   })
-  return { store, turns, history: store.createHistoryAccess(), turn }
+  return { database, turns, history: store.createHistoryAccess(), turn }
 }
 
 /**
@@ -46,7 +44,7 @@ function createHistoryOverInvalidRow() {
   return {
     database,
     conversationId,
-    history: new SqliteConversationHistory(() => database)
+    history: new SqliteConversationHistory(database, database)
   }
 }
 
@@ -87,7 +85,9 @@ describe("SqliteConversationHistory", () => {
 
       expect(() => history.getConversation(conversationId)).toThrow(z.ZodError)
 
-      expect(database.isTransaction).toBe(false)
+      expect(database.handleDatabaseWriteRequest(() => "written")).toBe(
+        "written"
+      )
     })
   })
 
@@ -121,7 +121,9 @@ describe("SqliteConversationHistory", () => {
         history.listConversations(parseConversationListOptions())
       ).toThrow(z.ZodError)
 
-      expect(database.isTransaction).toBe(false)
+      expect(database.handleDatabaseWriteRequest(() => "written")).toBe(
+        "written"
+      )
     })
   })
 
@@ -208,8 +210,8 @@ describe("SqliteConversationHistory", () => {
     })
   })
 
-  it("rejects every operation after the store is disposed", () => {
-    const { store, history, turn } = openStoreWithTurn()
+  it("rejects every operation after the database closes", () => {
+    const { database, history, turn } = openStoreWithTurn()
     expect(history.getConversation(turn.conversation.id)).toBeDefined()
     expect(
       history.listConversations(parseConversationListOptions()).storedCount
@@ -218,15 +220,19 @@ describe("SqliteConversationHistory", () => {
       history.updateConversationTitle(turn.conversation.id, "Title")
     ).toBeDefined()
 
-    store[Symbol.dispose]()
+    database[Symbol.dispose]()
 
-    expect(() => history.getConversation(turn.conversation.id)).toThrow()
+    expect(() => history.getConversation(turn.conversation.id)).toThrow(
+      "Database is closed"
+    )
     expect(() =>
       history.listConversations(parseConversationListOptions())
-    ).toThrow()
+    ).toThrow("Database is closed")
     expect(() =>
       history.updateConversationTitle(turn.conversation.id, "Title")
-    ).toThrow()
-    expect(() => history.deleteConversation(turn.conversation.id)).toThrow()
+    ).toThrow("Database is closed")
+    expect(() => history.deleteConversation(turn.conversation.id)).toThrow(
+      "Database is closed"
+    )
   })
 })

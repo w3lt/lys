@@ -60,7 +60,10 @@ export const backendConfigSchema = z
     lmstudioHost: z.hostname(),
     /** TCP port used by backend LM Studio clients. */
     lmstudioPort: tcpPortSchema,
-    /** Absolute filesystem path of the SQLite database owned by the conversation service. */
+    /**
+     * Absolute filesystem path of the backend's SQLite database, opened once by
+     * the composition root and shared by its stores.
+     */
     databaseFilePath: z
       .string()
       .refine(isAbsolute, "Database file path must be absolute."),

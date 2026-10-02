@@ -8,7 +8,6 @@ import {
 } from "@lys/protocol"
 import type { Conversation } from "@lys/share"
 import { describe, expect, it, onTestFinished, vi, type Mock } from "vitest"
-import SqliteConversationStore from "../../../../../src/di/services/conversationService"
 import { updateFastifyWithHttpTransport } from "../../../../../src/http"
 import ReplyGenerationRegistry, {
   type ReplyTarget
@@ -22,6 +21,7 @@ import {
   createUserMessage,
   FIXTURE_TIMESTAMP
 } from "../../../support/conversationFixtures"
+import { openConversationTestStore } from "../../../support/conversationDatabase"
 import { createTestFastify } from "../../../support/fastifyTestApp"
 import { waitForMicrotasks } from "../../../support/microtasks"
 
@@ -88,14 +88,11 @@ function handleUnexpectedHistoryCall(operationName: string): never {
  * @remarks The routes borrow the history access once at registration, so the
  * returned spy controls every snapshot; it throws until the case configures
  * it and no database row is read. When the test finishes, the registry is
- * disposed first, then the in-memory store, then the application.
+ * disposed first, then the store's in-memory database, then the application.
  */
 async function createReplyRouteApp() {
   const testFastify = createTestFastify()
-  const store = SqliteConversationStore.open(":memory:")
-  onTestFinished(() => {
-    store[Symbol.dispose]()
-  })
+  const { store } = openConversationTestStore()
   const generations = new ReplyGenerationRegistry()
   onTestFinished(async () => {
     await generations[Symbol.asyncDispose]()

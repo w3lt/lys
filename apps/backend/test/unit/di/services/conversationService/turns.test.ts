@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { DatabaseSync } from "node:sqlite"
 import {
   afterEach,
   beforeEach,
@@ -8,9 +12,9 @@ import {
   vi
 } from "vitest"
 import * as z from "zod"
-import SqliteConversationStore from "../../../../../src/di/services/conversationService"
 import { parseConversationListOptions } from "../../../../../src/di/services/conversationService/utils"
 import { ConversationNotFoundError } from "../../../../../src/utils/errors"
+import { openConversationTestStore } from "../../../support/conversationDatabase"
 import { createFixtureUuidV7 } from "../../../support/conversationFixtures"
 
 /** Wall-clock time observed by every case. */
@@ -19,15 +23,12 @@ const NOW = "2026-03-04T05:06:07.890Z"
 /**
  * Opens an isolated in-memory store owned by the current test.
  *
- * @returns The store with its turn and history access.
+ * @returns The test-owned database and the store's turn and history access.
  */
 function openStore() {
-  const store = SqliteConversationStore.open(":memory:")
-  onTestFinished(() => {
-    store[Symbol.dispose]()
-  })
+  const { database, store } = openConversationTestStore()
   return {
-    store,
+    database,
     turns: store.createTurnAccess(),
     history: store.createHistoryAccess()
   }
@@ -123,6 +124,35 @@ describe("SqliteConversationTurns", () => {
       expect(
         history.getConversation(turn.conversation.id)?.messages[1]
       ).toMatchObject({ content: "Hi there", status: "streaming" })
+    })
+
+    it("commits each delta before returning, visible to another connection", () => {
+      const directory = mkdtempSync(join(tmpdir(), "lys-turns-test-"))
+      onTestFinished(() => {
+        rmSync(directory, { recursive: true, force: true })
+      })
+      const databaseFilePath = join(directory, "lys_db.sqlite")
+      const { store } = openConversationTestStore(databaseFilePath)
+      const turns = store.createTurnAccess()
+      const turn = turns.createConversationTurn({
+        userMessageContent: "Hello",
+        model: "qwen/qwen3-8b",
+        systemPrompt: "You are Lys."
+      })
+      const observer = new DatabaseSync(databaseFilePath)
+      onTestFinished(() => {
+        observer.close()
+      })
+      const getStoredContent = () =>
+        observer
+          .prepare("SELECT content FROM conversation_messages WHERE id = ?")
+          .get(turn.assistantMessage.id)
+
+      turns.updateAssistantMessageContent(turn.assistantMessage.id, "Hel")
+      expect(getStoredContent()).toEqual({ content: "Hel" })
+
+      turns.updateAssistantMessageContent(turn.assistantMessage.id, "lo")
+      expect(getStoredContent()).toEqual({ content: "Hello" })
     })
 
     it("returns false for a reply that is already finalized and keeps its text", () => {
@@ -318,8 +348,8 @@ describe("SqliteConversationTurns", () => {
     })
   })
 
-  it("rejects every operation after the store is disposed", () => {
-    const { store, turns } = openStore()
+  it("rejects every operation after the database closes", () => {
+    const { database, turns } = openStore()
     const turn = turns.createConversationTurn({
       userMessageContent: "Hello",
       model: "qwen/qwen3-8b",
@@ -337,7 +367,7 @@ describe("SqliteConversationTurns", () => {
       turns.updateGeneratedConversationTitle(turn.conversation.id, "Title")
     ).toBe("Title")
 
-    store[Symbol.dispose]()
+    database[Symbol.dispose]()
 
     expect(() =>
       turns.createConversationTurn({
@@ -345,17 +375,17 @@ describe("SqliteConversationTurns", () => {
         model: "qwen/qwen3-8b",
         systemPrompt: "You are Lys."
       })
-    ).toThrow()
+    ).toThrow("Database is closed")
     expect(() =>
       turns.updateAssistantMessageContent(turn.assistantMessage.id, "Hi")
-    ).toThrow()
+    ).toThrow("Database is closed")
     expect(() =>
       turns.updateAssistantMessageState(turn.assistantMessage.id, {
         status: "failed"
       })
-    ).toThrow()
+    ).toThrow("Database is closed")
     expect(() =>
       turns.updateGeneratedConversationTitle(turn.conversation.id, "Title")
-    ).toThrow()
+    ).toThrow("Database is closed")
   })
 })

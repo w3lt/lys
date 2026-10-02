@@ -1,4 +1,5 @@
 import type { BackendConfig } from "../config"
+import SqliteDatabase from "../infrastructure/database/sqliteDatabase"
 import LmStudioRuntime from "../modules/llm/runtimes/lmStudioRuntime"
 import ChatService, {
   type ChatServiceCreationOptions
@@ -15,24 +16,29 @@ const CLOSE_SINGLETON_SERVICES = Symbol("close-singleton-services")
 /** Closes all resources owned by one singleton-service bundle. */
 type CloseSingletonServices = () => Promise<void>
 
-/** One newly acquired service paired with its exclusive cleanup capability. */
+/** One newly acquired service or resource owner paired with its exclusive cleanup capability. */
 export type SingletonServiceAcquisition<Service> = Readonly<{
-  /** Service value transferred to the singleton bundle. */
+  /** Acquired value whose cleanup the singleton bundle takes over. */
   service: Service
   /** Releases every resource exclusively owned by the service. */
   closeService: () => Promise<void>
 }>
 
-/** Factories for the three independently acquired application services. */
+/** Factories for the independently created application services and the database they share. */
 export type SingletonServiceFactories = Readonly<{
   /** Creates the chat service for one OpenAI-compatible HTTP endpoint and its title settings. */
   createChatService: (
     options: ChatServiceCreationOptions
   ) => SingletonServiceAcquisition<ChatService>
-  /** Creates the conversation store for one database location. */
-  createConversationService: (
+  /** Opens the shared backend database at one location. */
+  createDatabase: (
     databaseFilePath: BackendConfig["databaseFilePath"]
-  ) => SingletonServiceAcquisition<ConversationService>
+  ) => SingletonServiceAcquisition<SqliteDatabase>
+  /**
+   * Creates the conversation service over the shared database. The service
+   * borrows the database and owns nothing to release.
+   */
+  createConversationService: (database: SqliteDatabase) => ConversationService
   /**
    * Creates the owned LLM runtime service for one LM Studio WebSocket endpoint
    * without contacting it.
@@ -46,6 +52,7 @@ export type SingletonServiceFactories = Readonly<{
 /** Production factories used when the composition root supplies no substitutes. */
 const DEFAULT_SINGLETON_SERVICE_FACTORIES = Object.freeze({
   createChatService,
+  createDatabase,
   createConversationService,
   createLlmRuntimeService
 } satisfies SingletonServiceFactories)
@@ -81,8 +88,11 @@ export type SingletonServices = Readonly<{
  * before it is closed.
  * @throws {AggregateError} If closing the acquired resources also fails; its
  * errors hold the construction failure followed by the cleanup failure.
- * @remarks Services are acquired in the order chat, conversation, LLM runtime;
- * acquisition stops at the first failure.
+ * @remarks Resources are acquired in the order chat service, database, LLM
+ * runtime service, and the conversation service is created over the database
+ * before the runtime service; creation stops at the first failure. The
+ * database is not part of the returned bundle: the bundle's cleanup closes it
+ * after the LLM runtime service and before the chat service.
  */
 export async function createSingletonServices(
   config: BackendConfig,
@@ -101,10 +111,13 @@ export async function createSingletonServices(
       factories.createChatService(chatServiceOptions)
     serviceLifetime.defer(chatServiceAcquisition.closeService)
 
-    const conversationServiceAcquisition = factories.createConversationService(
+    const databaseAcquisition = factories.createDatabase(
       config.databaseFilePath
     )
-    serviceLifetime.defer(conversationServiceAcquisition.closeService)
+    serviceLifetime.defer(databaseAcquisition.closeService)
+    const conversationService = factories.createConversationService(
+      databaseAcquisition.service
+    )
 
     const llmRuntimeServiceAcquisition = factories.createLlmRuntimeService(
       `ws://${config.lmstudioHost}:${config.lmstudioPort}`,
@@ -126,7 +139,7 @@ export async function createSingletonServices(
       chatService: chatServiceAcquisition.service,
       llmService,
       llmRuntimeService: llmRuntimeServiceAcquisition.service,
-      conversationService: conversationServiceAcquisition.service,
+      conversationService,
       [CLOSE_SINGLETON_SERVICES]: closeOwnedSingletonServices
     })
   } catch (creationFailure) {
@@ -156,21 +169,41 @@ function createChatService(
 }
 
 /**
- * Creates the production conversation store for one database location.
+ * Opens the production backend database at one location.
  *
- * @param databaseFilePath - SQLite database location owned by the service.
- * @returns The newly owned conversation service and its cleanup capability.
- * @throws If the database cannot be opened, migrated, or prepared.
+ * @param databaseFilePath - Absolute SQLite file location.
+ * @returns The newly owned database and its cleanup capability.
+ * @throws If the database cannot be opened, configured, or migrated; nothing
+ * is left open.
+ */
+function createDatabase(
+  databaseFilePath: BackendConfig["databaseFilePath"]
+): SingletonServiceAcquisition<SqliteDatabase> {
+  const database = SqliteDatabase.open(databaseFilePath)
+  return Object.freeze({
+    service: database,
+    closeService: async () => {
+      database[Symbol.dispose]()
+    }
+  })
+}
+
+/**
+ * Creates the production conversation service over the shared database.
+ *
+ * @param database - Open database owned by the singleton bundle; the service
+ * borrows only its read, write, and function-registration capabilities.
+ * @returns The ready conversation service, which owns nothing to release.
+ * @throws If the database is closed, or registering conversation search or
+ * recovering interrupted replies fails.
  */
 function createConversationService(
-  databaseFilePath: BackendConfig["databaseFilePath"]
-): SingletonServiceAcquisition<ConversationService> {
-  const conversationService = ConversationService.open(databaseFilePath)
-  return Object.freeze({
-    service: conversationService,
-    closeService: async () => {
-      conversationService[Symbol.dispose]()
-    }
+  database: SqliteDatabase
+): ConversationService {
+  return ConversationService.create({
+    databaseReader: database,
+    databaseWriter: database,
+    databaseFunctionRegistry: database
   })
 }
 

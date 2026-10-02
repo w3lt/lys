@@ -2,10 +2,11 @@ import type { FastifyInstance, LightMyRequestResponse } from "fastify"
 import { validatorCompiler } from "fastify-type-provider-zod"
 import { onTestFinished, vi, type MockInstance } from "vitest"
 import ChatService from "../../../src/di/services/chatService"
-import SqliteConversationStore from "../../../src/di/services/conversationService"
+import type SqliteConversationStore from "../../../src/di/services/conversationService"
 import type SqliteConversationTurns from "../../../src/di/services/conversationService/turns"
 import ReplyGenerationRegistry from "../../../src/modules/chat/chat/replyGenerationRegistry"
 import { createChatSseTestApp } from "./chatSseRoute"
+import { openConversationTestStore } from "./conversationDatabase"
 import type { TestFastify } from "./fastifyTestApp"
 
 /** Published path of the chat route. */
@@ -29,7 +30,7 @@ export type ChatRouteTestApp = TestFastify &
     generateTitle: MockInstance<ChatService["generateTitle"]>
     /**
      * Registry a case passes to the chat route; disposed when the test
-     * finishes, before the store closes.
+     * finishes, before the store's database closes.
      */
     generations: ReplyGenerationRegistry
   }>
@@ -47,14 +48,11 @@ export type ChatRouteTestApp = TestFastify &
  * persistence or the model without arranging it fails. No database row is
  * written and no HTTP request leaves the process. When the test finishes, the
  * registry is disposed first, so every generation it holds has stored its
- * final state before the in-memory store is disposed.
+ * final state before the store's in-memory database is closed.
  */
 export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
   const testFastify = await createChatSseTestApp()
-  const store = SqliteConversationStore.open(":memory:")
-  onTestFinished(() => {
-    store[Symbol.dispose]()
-  })
+  const { store } = openConversationTestStore()
   const turns = store.createTurnAccess()
   const createTurnAccess = vi
     .spyOn(store, "createTurnAccess")

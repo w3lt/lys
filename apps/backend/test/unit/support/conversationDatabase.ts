@@ -1,7 +1,8 @@
-import { DatabaseSync } from "node:sqlite"
 import { onTestFinished } from "vitest"
+import SqliteConversationStore from "../../../src/di/services/conversationService"
 import { calculateConversationSearchMatch } from "../../../src/di/services/conversationService/listConversations"
-import { migrateDatabase } from "../../../src/di/services/conversationService/migrations"
+import type { DatabaseWriter } from "../../../src/infrastructure/database/databaseTransactions"
+import SqliteDatabase from "../../../src/infrastructure/database/sqliteDatabase"
 
 /** Stored conversation columns written by {@link saveConversationRow}. */
 export type ConversationRowFixture = Readonly<{
@@ -48,49 +49,90 @@ export type AssistantMessageRowFixture = Readonly<{
 }>
 
 /**
- * Opens a migrated in-memory conversation database owned by the current test.
+ * Opens a migrated backend database owned by the current test.
  *
- * @returns A connection with foreign keys enforced and the `contains_search`
- * function available, as the conversation store provides to its queries.
- * @remarks The connection is closed when the test finishes.
+ * @param databaseFilePath - SQLite location; an isolated in-memory database
+ * when omitted.
+ * @returns The open database. It is closed when the test finishes; closing is
+ * idempotent, so a case may close it earlier.
  */
-export function openConversationTestDatabase(): DatabaseSync {
-  const database = new DatabaseSync(":memory:")
+function openTestDatabase(databaseFilePath = ":memory:"): SqliteDatabase {
+  const database = SqliteDatabase.open(databaseFilePath)
   onTestFinished(() => {
-    database.close()
+    database[Symbol.dispose]()
   })
-  database.exec("PRAGMA foreign_keys = ON")
-  database.function(
+  return database
+}
+
+/**
+ * Opens an in-memory backend database for conversation queries, owned by the
+ * current test.
+ *
+ * @returns A database with foreign keys enforced and the `contains_search`
+ * function registered, as the conversation store provides to its queries. It
+ * is closed when the test finishes.
+ */
+export function openConversationTestDatabase(): SqliteDatabase {
+  const database = openTestDatabase()
+  database.registerDatabaseFunction(
     "contains_search",
-    { deterministic: true },
     calculateConversationSearchMatch
   )
-  migrateDatabase(database)
   return database
+}
+
+/** A conversation store and the test-owned database it borrows. */
+export type ConversationTestStore = Readonly<{
+  /** Database closed when the test finishes; a case may close it earlier. */
+  database: SqliteDatabase
+  /** Ready store over {@link ConversationTestStore.database}. */
+  store: SqliteConversationStore
+}>
+
+/**
+ * Creates a conversation store over its own backend database, owned by the
+ * current test.
+ *
+ * @param databaseFilePath - SQLite location; an isolated in-memory database
+ * when omitted.
+ * @returns The ready store and the database it borrows.
+ */
+export function openConversationTestStore(
+  databaseFilePath: string = ":memory:"
+): ConversationTestStore {
+  const database = openTestDatabase(databaseFilePath)
+  const store = SqliteConversationStore.create({
+    databaseReader: database,
+    databaseWriter: database,
+    databaseFunctionRegistry: database
+  })
+  return { database, store }
 }
 
 /**
  * Inserts one conversation row.
  *
- * @param database - Migrated test database.
+ * @param database - Write access to a migrated test database.
  * @param row - Stored column values.
  */
 export function saveConversationRow(
-  database: DatabaseSync,
+  database: DatabaseWriter,
   row: ConversationRowFixture
 ): void {
-  database
-    .prepare(
-      `INSERT INTO conversations (id, title, system_prompt, created_at, updated_at)
+  database.handleDatabaseWriteRequest((statements) => {
+    statements
+      .createStatement(
+        `INSERT INTO conversations (id, title, system_prompt, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?)`
-    )
-    .run(row.id, row.title, row.systemPrompt, row.createdAt, row.createdAt)
+      )
+      .run(row.id, row.title, row.systemPrompt, row.createdAt, row.createdAt)
+  })
 }
 
 /**
  * Inserts one user-message row.
  *
- * @param database - Migrated test database.
+ * @param database - Write access to a migrated test database.
  * @param row - Stored column values.
  * @remarks The schema's insert trigger sets the conversation's activity time
  * to `createdAt`. Insert messages in ascending time order after the
@@ -98,42 +140,46 @@ export function saveConversationRow(
  * real clock, and the resulting order is not controlled by the test.
  */
 export function saveUserMessageRow(
-  database: DatabaseSync,
+  database: DatabaseWriter,
   row: UserMessageRowFixture
 ): void {
-  database
-    .prepare(
-      `INSERT INTO conversation_messages (id, conversation_id, role, content, created_at)
+  database.handleDatabaseWriteRequest((statements) => {
+    statements
+      .createStatement(
+        `INSERT INTO conversation_messages (id, conversation_id, role, content, created_at)
       VALUES (?, ?, 'user', ?, ?)`
-    )
-    .run(row.id, row.conversationId, row.content, row.createdAt)
+      )
+      .run(row.id, row.conversationId, row.content, row.createdAt)
+  })
 }
 
 /**
  * Inserts one assistant-message row.
  *
- * @param database - Migrated test database.
+ * @param database - Write access to a migrated test database.
  * @param row - Stored column values.
  * @remarks The ordering constraint of {@link saveUserMessageRow} applies.
  */
 export function saveAssistantMessageRow(
-  database: DatabaseSync,
+  database: DatabaseWriter,
   row: AssistantMessageRowFixture
 ): void {
-  database
-    .prepare(
-      `INSERT INTO conversation_messages
+  database.handleDatabaseWriteRequest((statements) => {
+    statements
+      .createStatement(
+        `INSERT INTO conversation_messages
       (id, conversation_id, role, model, content, status, finish_reason, created_at, updated_at)
       VALUES (?, ?, 'assistant', ?, ?, ?, ?, ?, ?)`
-    )
-    .run(
-      row.id,
-      row.conversationId,
-      row.model,
-      row.content,
-      row.status,
-      row.finishReason,
-      row.createdAt,
-      row.updatedAt
-    )
+      )
+      .run(
+        row.id,
+        row.conversationId,
+        row.model,
+        row.content,
+        row.status,
+        row.finishReason,
+        row.createdAt,
+        row.updatedAt
+      )
+  })
 }

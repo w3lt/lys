@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite"
 import { describe, expect, it, onTestFinished } from "vitest"
-import { handleConversationTransactionFailure } from "../../../../../src/di/services/conversationService/transactionFailure"
+import { handleTransactionFailure } from "../../../../src/infrastructure/database/transactionFailure"
 
 /**
  * Opens an in-memory database with one table, owned by the current test.
@@ -27,26 +27,26 @@ function openDatabase(): DatabaseSync {
  * @returns The thrown value.
  * @throws If the handler returns without throwing.
  */
-function handleTransactionFailure(
+function getThrownTransactionFailure(
   database: DatabaseSync,
   failure: unknown
 ): unknown {
   try {
-    handleConversationTransactionFailure(database, failure)
+    handleTransactionFailure(database, failure)
   } catch (error) {
     return error
   }
   throw new Error("Expected the handler to throw")
 }
 
-describe("handleConversationTransactionFailure", () => {
+describe("handleTransactionFailure", () => {
   it("rolls back the active transaction and rethrows the original failure", () => {
     const database = openDatabase()
     const failure = new Error("constraint failed")
     database.exec("BEGIN")
     database.exec("INSERT INTO items (name) VALUES ('uncommitted')")
 
-    expect(handleTransactionFailure(database, failure)).toBe(failure)
+    expect(getThrownTransactionFailure(database, failure)).toBe(failure)
 
     expect(database.isTransaction).toBe(false)
     expect(
@@ -59,7 +59,7 @@ describe("handleConversationTransactionFailure", () => {
     database.exec("INSERT INTO items (name) VALUES ('committed')")
     const failure = "non-error failure"
 
-    expect(handleTransactionFailure(database, failure)).toBe(failure)
+    expect(getThrownTransactionFailure(database, failure)).toBe(failure)
 
     expect(
       database.prepare("SELECT count(*) AS count FROM items").get()
@@ -71,10 +71,11 @@ describe("handleConversationTransactionFailure", () => {
     const failure = new Error("constraint failed")
     database.close()
 
-    const thrown = handleTransactionFailure(database, failure)
+    const thrown = getThrownTransactionFailure(database, failure)
 
     expect(thrown).toBeInstanceOf(AggregateError)
     expect(thrown).toMatchObject({
+      message: "Database operation and rollback both failed",
       errors: [failure, expect.any(Error)]
     })
   })

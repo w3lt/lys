@@ -1,4 +1,8 @@
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
+import { backendConfigSchema } from "../../../src/config"
 import ChatService from "../../../src/di/services/chatService"
 import SqliteConversationStore from "../../../src/di/services/conversationService"
 import LlmRuntimeService, {
@@ -12,10 +16,11 @@ import {
   type SingletonServiceFactories,
   type SingletonServices
 } from "../../../src/di/singleton"
+import SqliteDatabase from "../../../src/infrastructure/database/sqliteDatabase"
 import { TEST_BACKEND_CONFIG } from "../support/backendConfig"
 
-/** Name of each independently acquired service. */
-type ServiceName = "chat" | "conversation" | "llm-runtime"
+/** Name of each acquisition whose release the bundle owns. */
+type AcquisitionName = "chat" | "database" | "llm-runtime"
 
 /**
  * Creates failure reporters that record what they receive.
@@ -30,17 +35,17 @@ function createFailureReporters() {
 }
 
 /**
- * Pairs a service with a recorded cleanup capability.
+ * Pairs an acquired value with a recorded cleanup capability.
  *
- * @param service - Acquired service.
+ * @param service - Acquired value.
  * @param name - Name recorded when the cleanup runs.
  * @param closeLog - Shared log of cleanup calls in call order.
  * @returns The acquisition handed to the composition root.
  */
 function createAcquisition<Service>(
   service: Service,
-  name: ServiceName,
-  closeLog: ServiceName[]
+  name: AcquisitionName,
+  closeLog: AcquisitionName[]
 ) {
   return {
     service,
@@ -53,16 +58,22 @@ function createAcquisition<Service>(
 /**
  * Creates factories returning real services with recorded cleanup.
  *
- * @returns The factory mocks, their acquisitions, and the cleanup log.
- * @remarks The conversation store is in memory, and the LLM runtime service
- * is never connected: its runtime acquisition rejects if anything attempts it.
- * No external resource is acquired.
+ * @returns The factory mocks, their acquisitions, the conversation service,
+ * and the cleanup log.
+ * @remarks The database is in memory and closed when the test finishes, and the
+ * LLM runtime service is never connected: its runtime acquisition rejects if
+ * anything attempts it. No external resource is acquired.
  */
 function createRecordedFactories() {
-  const closeLog: ServiceName[] = []
-  const store = SqliteConversationStore.open(":memory:")
+  const closeLog: AcquisitionName[] = []
+  const database = SqliteDatabase.open(":memory:")
   onTestFinished(() => {
-    store[Symbol.dispose]()
+    database[Symbol.dispose]()
+  })
+  const conversationService = SqliteConversationStore.create({
+    databaseReader: database,
+    databaseWriter: database,
+    databaseFunctionRegistry: database
   })
   const acquisitions = {
     chat: createAcquisition(
@@ -74,7 +85,7 @@ function createRecordedFactories() {
       "chat",
       closeLog
     ),
-    conversation: createAcquisition(store, "conversation", closeLog),
+    database: createAcquisition(database, "database", closeLog),
     llmRuntime: createAcquisition(
       new LlmRuntimeService({
         ...createFailureReporters(),
@@ -90,19 +101,22 @@ function createRecordedFactories() {
     createChatService: vi.fn<SingletonServiceFactories["createChatService"]>(
       () => acquisitions.chat
     ),
+    createDatabase: vi.fn<SingletonServiceFactories["createDatabase"]>(
+      () => acquisitions.database
+    ),
     createConversationService: vi.fn<
       SingletonServiceFactories["createConversationService"]
-    >(() => acquisitions.conversation),
+    >(() => conversationService),
     createLlmRuntimeService: vi.fn<
       SingletonServiceFactories["createLlmRuntimeService"]
     >(() => acquisitions.llmRuntime)
   }
-  return { factories, acquisitions, closeLog }
+  return { factories, acquisitions, conversationService, closeLog }
 }
 
 describe("createSingletonServices", () => {
-  it("derives each service's endpoint and settings from the configuration", async () => {
-    const { factories } = createRecordedFactories()
+  it("derives each acquisition from the configuration and builds conversations over the database", async () => {
+    const { factories, acquisitions } = createRecordedFactories()
     const reporters = createFailureReporters()
 
     const services = await createSingletonServices(
@@ -117,8 +131,11 @@ describe("createSingletonServices", () => {
       titleGenerationPrompt: TEST_BACKEND_CONFIG.titleGenerationPrompt,
       generatedTitleMaxLength: TEST_BACKEND_CONFIG.generatedTitleMaxLength
     })
-    expect(factories.createConversationService).toHaveBeenCalledWith(
+    expect(factories.createDatabase).toHaveBeenCalledWith(
       TEST_BACKEND_CONFIG.databaseFilePath
+    )
+    expect(factories.createConversationService).toHaveBeenCalledWith(
+      acquisitions.database.service
     )
     expect(factories.createLlmRuntimeService).toHaveBeenCalledWith(
       "ws://lmstudio.test:4321",
@@ -126,8 +143,9 @@ describe("createSingletonServices", () => {
     )
   })
 
-  it("returns a frozen bundle of the acquired services", async () => {
-    const { factories, acquisitions } = createRecordedFactories()
+  it("returns a frozen bundle of the services", async () => {
+    const { factories, acquisitions, conversationService } =
+      createRecordedFactories()
 
     const services = await createSingletonServices(
       TEST_BACKEND_CONFIG,
@@ -138,7 +156,7 @@ describe("createSingletonServices", () => {
 
     expect(Object.isFrozen(services)).toBe(true)
     expect(services.chatService).toBe(acquisitions.chat.service)
-    expect(services.conversationService).toBe(acquisitions.conversation.service)
+    expect(services.conversationService).toBe(conversationService)
     expect(services.llmRuntimeService).toBe(acquisitions.llmRuntime.service)
     expect(services.llmService).toBeInstanceOf(LlmService)
   })
@@ -161,9 +179,28 @@ describe("createSingletonServices", () => {
     expect(handleLlmEngineOperationRequest).toHaveBeenCalledOnce()
   })
 
-  it("releases the chat service when the conversation store cannot be created", async () => {
+  it("releases the chat service when the database cannot be opened", async () => {
     const { factories, closeLog } = createRecordedFactories()
     const creationFailure = new Error("unable to open database file")
+    factories.createDatabase.mockImplementation(() => {
+      throw creationFailure
+    })
+
+    await expect(
+      createSingletonServices(
+        TEST_BACKEND_CONFIG,
+        createFailureReporters(),
+        factories
+      )
+    ).rejects.toBe(creationFailure)
+
+    expect(closeLog).toEqual(["chat"])
+    expect(factories.createConversationService).not.toHaveBeenCalled()
+  })
+
+  it("releases the database and the chat service when the conversation service cannot be created", async () => {
+    const { factories, closeLog } = createRecordedFactories()
+    const creationFailure = new Error("recovery failed")
     factories.createConversationService.mockImplementation(() => {
       throw creationFailure
     })
@@ -176,11 +213,11 @@ describe("createSingletonServices", () => {
       )
     ).rejects.toBe(creationFailure)
 
-    expect(closeLog).toEqual(["chat"])
+    expect(closeLog).toEqual(["database", "chat"])
     expect(factories.createLlmRuntimeService).not.toHaveBeenCalled()
   })
 
-  it("releases earlier services in reverse order when the LLM runtime service cannot be created", async () => {
+  it("releases earlier acquisitions in reverse order when the LLM runtime service cannot be created", async () => {
     const { factories, closeLog } = createRecordedFactories()
     const creationFailure = new Error("LLM runtime service construction failed")
     factories.createLlmRuntimeService.mockImplementation(() => {
@@ -195,17 +232,17 @@ describe("createSingletonServices", () => {
       )
     ).rejects.toBe(creationFailure)
 
-    expect(closeLog).toEqual(["conversation", "chat"])
+    expect(closeLog).toEqual(["database", "chat"])
   })
 
-  it("keeps both failures when releasing earlier services also fails", async () => {
+  it("keeps both failures when releasing earlier acquisitions also fails", async () => {
     const { factories, acquisitions, closeLog } = createRecordedFactories()
     const creationFailure = new Error("LLM runtime service construction failed")
     const cleanupFailure = new Error("database is locked")
     factories.createLlmRuntimeService.mockImplementation(() => {
       throw creationFailure
     })
-    acquisitions.conversation.closeService.mockRejectedValue(cleanupFailure)
+    acquisitions.database.closeService.mockRejectedValue(cleanupFailure)
 
     const failure = await createSingletonServices(
       TEST_BACKEND_CONFIG,
@@ -218,6 +255,36 @@ describe("createSingletonServices", () => {
       errors: [creationFailure, cleanupFailure]
     })
     expect(closeLog).toEqual(["chat"])
+  })
+
+  it("opens the configured database with the production factories and closes it with the bundle", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "lys-singleton-test-"))
+    onTestFinished(() => {
+      rmSync(directory, { recursive: true, force: true })
+    })
+    const config = backendConfigSchema.parse({
+      ...TEST_BACKEND_CONFIG,
+      databaseFilePath: join(directory, "lys_db.sqlite")
+    })
+    const services = await createSingletonServices(
+      config,
+      createFailureReporters()
+    )
+    const history = services.conversationService.createHistoryAccess()
+    const turn = services.conversationService
+      .createTurnAccess()
+      .createConversationTurn({
+        userMessageContent: "Hello",
+        model: "qwen/qwen3-8b",
+        systemPrompt: "You are Lys."
+      })
+    expect(history.getConversation(turn.conversation.id)).toBeDefined()
+
+    await closeSingletonServices(services)
+
+    expect(() => history.getConversation(turn.conversation.id)).toThrow(
+      "Database is closed"
+    )
   })
 })
 
@@ -237,15 +304,15 @@ describe("closeSingletonServices", () => {
     return { services, ...recorded }
   }
 
-  it("releases every service in reverse acquisition order", async () => {
+  it("releases every acquisition in reverse acquisition order", async () => {
     const { services, closeLog } = await createRecordedServices()
 
     await closeSingletonServices(services)
 
-    expect(closeLog).toEqual(["llm-runtime", "conversation", "chat"])
+    expect(closeLog).toEqual(["llm-runtime", "database", "chat"])
   })
 
-  it("joins repeated and concurrent calls to one release of each service", async () => {
+  it("joins repeated and concurrent calls to one release of each acquisition", async () => {
     const { services, acquisitions } = await createRecordedServices()
 
     await Promise.all([
@@ -266,7 +333,7 @@ describe("closeSingletonServices", () => {
 
     await expect(closeSingletonServices(services)).rejects.toBe(releaseFailure)
 
-    expect(closeLog).toEqual(["conversation", "chat"])
+    expect(closeLog).toEqual(["database", "chat"])
     await expect(closeSingletonServices(services)).rejects.toBe(releaseFailure)
     expect(acquisitions.llmRuntime.closeService).toHaveBeenCalledOnce()
   })

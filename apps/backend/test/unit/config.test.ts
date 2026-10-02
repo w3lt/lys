@@ -5,7 +5,8 @@ import {
   LMSTUDIO_PORT
 } from "@lys/protocol"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { loadBackendConfig } from "../../src/config"
+import * as z from "zod"
+import { backendConfigSchema, loadBackendConfig } from "../../src/config"
 import { readPrompt, type PromptType } from "../../src/utils/prompts"
 
 vi.mock("../../src/utils/prompts", () => ({ readPrompt: vi.fn() }))
@@ -15,6 +16,66 @@ const FIXTURE_PROMPTS = Object.freeze({
   "lys-system": "Fixture system prompt",
   "title-generation": "Fixture title prompt"
 } satisfies Record<PromptType, string>)
+
+/**
+ * Raw configuration input that satisfies every schema rule; each case varies
+ * only the keys it names.
+ */
+const VALID_RAW_CONFIG = Object.freeze({
+  backendHost: BACKEND_HOST,
+  backendPort: BACKEND_PORT,
+  lmstudioHost: LMSTUDIO_HOST,
+  lmstudioPort: LMSTUDIO_PORT,
+  databaseFilePath: "/test-home/lys/lys_db.sqlite",
+  lysSystemPrompt: "Fixture system prompt",
+  titleGenerationPrompt: "Fixture title prompt",
+  titleGenerationMaxAttempts: 3,
+  generatedTitleMaxLength: 100
+})
+
+/**
+ * Lists the issues of the schema's rejection of raw configuration input.
+ *
+ * @param input - Untrusted configuration input.
+ * @returns The issues of the `ZodError` the schema produces.
+ * @throws If the schema accepts the input.
+ */
+function listConfigIssues(input: unknown): readonly z.core.$ZodIssue[] {
+  const result = backendConfigSchema.safeParse(input)
+  if (result.success) {
+    throw new Error("Expected backendConfigSchema to reject the input")
+  }
+  return result.error.issues
+}
+
+/**
+ * Lists the configuration keys that the schema's rejection names.
+ *
+ * @param input - Untrusted configuration input.
+ * @returns The distinct first segments of the issue paths.
+ * @throws If the schema accepts the input.
+ */
+function listRejectedConfigKeys(
+  input: unknown
+): ReadonlySet<PropertyKey | undefined> {
+  return new Set(listConfigIssues(input).map(({ path }) => path[0]))
+}
+
+/**
+ * Copies the valid raw configuration without one key.
+ *
+ * @param omittedKey - Key left out of the copy.
+ * @returns Raw input that lacks that key and keeps every other valid value.
+ */
+function createRawConfigWithout(
+  omittedKey: string
+): Readonly<Record<string, unknown>> {
+  return Object.freeze(
+    Object.fromEntries(
+      Object.entries(VALID_RAW_CONFIG).filter(([key]) => key !== omittedKey)
+    )
+  )
+}
 
 describe("loadBackendConfig", () => {
   beforeEach(() => {
@@ -54,6 +115,22 @@ describe("loadBackendConfig", () => {
     expect(() => loadBackendConfig()).toThrow(readFailure)
   })
 
+  it("rejects prompt text with surrounding whitespace with a ZodError naming each prompt key", () => {
+    vi.mocked(readPrompt).mockImplementation(
+      (type) => ` ${FIXTURE_PROMPTS[type]} `
+    )
+
+    expect(() => loadBackendConfig()).toThrow(z.ZodError)
+    expect(() => loadBackendConfig()).toThrow(
+      expect.objectContaining({
+        issues: [
+          expect.objectContaining({ path: ["lysSystemPrompt"] }),
+          expect.objectContaining({ path: ["titleGenerationPrompt"] })
+        ]
+      })
+    )
+  })
+
   it.each([
     ["unset", undefined],
     ["empty", ""]
@@ -69,5 +146,159 @@ describe("loadBackendConfig", () => {
     expect(() => loadBackendConfig()).toThrow(
       'LYS_HOME must be an absolute path, got "relative-home"'
     )
+  })
+})
+
+describe("backendConfigSchema", () => {
+  it.each([
+    [
+      "the lowest ports",
+      { ...VALID_RAW_CONFIG, backendPort: 1, lmstudioPort: 1 }
+    ],
+    [
+      "the highest ports",
+      { ...VALID_RAW_CONFIG, backendPort: 65_535, lmstudioPort: 65_535 }
+    ],
+    [
+      "another IPv4 loopback backend host",
+      { ...VALID_RAW_CONFIG, backendHost: "127.0.0.2" }
+    ],
+    [
+      "an IPv4 LM Studio host",
+      { ...VALID_RAW_CONFIG, lmstudioHost: "192.168.1.20" }
+    ],
+    [
+      "limits of 1",
+      {
+        ...VALID_RAW_CONFIG,
+        titleGenerationMaxAttempts: 1,
+        generatedTitleMaxLength: 1
+      }
+    ]
+  ])("accepts %s unchanged as a frozen snapshot", (_label, input) => {
+    const config = backendConfigSchema.parse(input)
+
+    expect(config).toEqual(input)
+    expect(Object.isFrozen(config)).toBe(true)
+  })
+
+  it.each([
+    [
+      "a backend port of 0",
+      { ...VALID_RAW_CONFIG, backendPort: 0 },
+      "backendPort"
+    ],
+    [
+      "a backend port of 65536",
+      { ...VALID_RAW_CONFIG, backendPort: 65_536 },
+      "backendPort"
+    ],
+    [
+      "a fractional backend port",
+      { ...VALID_RAW_CONFIG, backendPort: 1.5 },
+      "backendPort"
+    ],
+    [
+      "a backend port given as text",
+      { ...VALID_RAW_CONFIG, backendPort: "3000" },
+      "backendPort"
+    ],
+    [
+      "an LM Studio port of 0",
+      { ...VALID_RAW_CONFIG, lmstudioPort: 0 },
+      "lmstudioPort"
+    ],
+    [
+      "an LM Studio port of 65536",
+      { ...VALID_RAW_CONFIG, lmstudioPort: 65_536 },
+      "lmstudioPort"
+    ],
+    [
+      "a host name as the backend host",
+      { ...VALID_RAW_CONFIG, backendHost: "localhost" },
+      "backendHost"
+    ],
+    [
+      "the IPv6 loopback as the backend host",
+      { ...VALID_RAW_CONFIG, backendHost: "::1" },
+      "backendHost"
+    ],
+    [
+      "a non-loopback IPv4 backend host",
+      { ...VALID_RAW_CONFIG, backendHost: "10.0.0.1" },
+      "backendHost"
+    ],
+    [
+      "an LM Studio host with a scheme",
+      { ...VALID_RAW_CONFIG, lmstudioHost: "http://localhost" },
+      "lmstudioHost"
+    ],
+    [
+      "an LM Studio host with a port",
+      { ...VALID_RAW_CONFIG, lmstudioHost: "localhost:1234" },
+      "lmstudioHost"
+    ],
+    [
+      "a relative database path",
+      { ...VALID_RAW_CONFIG, databaseFilePath: "lys_db.sqlite" },
+      "databaseFilePath"
+    ],
+    [
+      "the SQLite in-memory database name",
+      { ...VALID_RAW_CONFIG, databaseFilePath: ":memory:" },
+      "databaseFilePath"
+    ],
+    [
+      "a system prompt with leading whitespace",
+      { ...VALID_RAW_CONFIG, lysSystemPrompt: " Fixture system prompt" },
+      "lysSystemPrompt"
+    ],
+    [
+      "an empty system prompt",
+      { ...VALID_RAW_CONFIG, lysSystemPrompt: "" },
+      "lysSystemPrompt"
+    ],
+    [
+      "a title prompt with trailing whitespace",
+      { ...VALID_RAW_CONFIG, titleGenerationPrompt: "Fixture title prompt\n" },
+      "titleGenerationPrompt"
+    ],
+    [
+      "an empty title prompt",
+      { ...VALID_RAW_CONFIG, titleGenerationPrompt: "" },
+      "titleGenerationPrompt"
+    ],
+    [
+      "zero title-generation attempts",
+      { ...VALID_RAW_CONFIG, titleGenerationMaxAttempts: 0 },
+      "titleGenerationMaxAttempts"
+    ],
+    [
+      "a generated-title length limit of 0",
+      { ...VALID_RAW_CONFIG, generatedTitleMaxLength: 0 },
+      "generatedTitleMaxLength"
+    ]
+  ])("rejects %s and names only that key", (_label, input, key) => {
+    expect(listRejectedConfigKeys(input)).toEqual(new Set([key]))
+  })
+
+  it.each(Object.keys(VALID_RAW_CONFIG))(
+    "rejects input without %s and names that key",
+    (omittedKey) => {
+      expect(
+        listRejectedConfigKeys(createRawConfigWithout(omittedKey))
+      ).toEqual(new Set([omittedKey]))
+    }
+  )
+
+  it("rejects an unknown key and names it", () => {
+    expect(
+      listConfigIssues({ ...VALID_RAW_CONFIG, unexpectedSetting: true })
+    ).toEqual([
+      expect.objectContaining({
+        code: "unrecognized_keys",
+        keys: ["unexpectedSetting"]
+      })
+    ])
   })
 })

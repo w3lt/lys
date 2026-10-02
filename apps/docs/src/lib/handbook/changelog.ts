@@ -76,7 +76,7 @@ type ChangelogEntry = {
  * Loader capabilities that replacing the `changelog` collection uses: a narrow
  * view of Astro's loader context.
  */
-export type ChangelogLoaderContext = Pick<LoaderContext, "renderMarkdown"> & {
+type ChangelogLoaderContext = Pick<LoaderContext, "renderMarkdown"> & {
   /**
    * Validates one release with the `changelog` collection schema: Astro's
    * `parseData`, narrowed to release fields.

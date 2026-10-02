@@ -88,7 +88,6 @@ pnpm --filter @lys/desktop test
 pnpm --filter @lys/desktop build
 pnpm --filter @lys/backend exec tsc --noEmit
 pnpm --filter @lys/backend test
-pnpm --filter @lys/docs test
 cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check
 cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
 cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml

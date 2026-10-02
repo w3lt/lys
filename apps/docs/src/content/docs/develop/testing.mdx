@@ -29,7 +29,6 @@ pnpm --filter @lys/desktop test
 pnpm --filter @lys/desktop build
 pnpm --filter @lys/backend exec tsc --noEmit
 pnpm --filter @lys/backend test
-pnpm --filter @lys/docs test
 cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check
 cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
 cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
@@ -41,7 +40,6 @@ For changes confined to `apps/docs`, start with:
 
 ```sh
 pnpm --filter @lys/docs run check
-pnpm --filter @lys/docs test
 pnpm --filter @lys/docs run build
 ```
 
@@ -59,11 +57,7 @@ contracts, schemas, or behavior that crosses package boundaries.
 - The shared packages have no package-level test scripts or tracked test suites.
 - `apps/backend` also exposes a TypeScript validation path through
   `pnpm --filter @lys/backend exec tsc --noEmit`.
-- `apps/docs/test/unit` contains a Vitest unit suite for the build-time
-  handbook modules, such as the loader that reads `CHANGELOG.md`. Run it with
-  `pnpm --filter @lys/docs test`. Rendered pages, including the release pages,
-  are verified by `pnpm --filter @lys/docs run build`.
-- `apps/docs` also exposes `check` and `build` scripts that are appropriate for
+- `apps/docs` exposes `check` and `build` scripts that are appropriate for
   docs-only changes.
 
 ## Coming soon

@@ -100,11 +100,14 @@ The backend stores conversations in SQLite at `$LYS_HOME/lys_db.sqlite`, in the
 | `conversations`         | Stores conversation metadata, title, system prompt, and timestamps.                          |
 | `conversation_messages` | Stores ordered user and assistant messages, assistant status, finish reason, and timestamps. |
 
-The database schema is applied by `conversationService/migrations.ts` using
-`PRAGMA user_version`. The store owns the connection and lends history and turn
-capabilities without exposing connection or disposal authority. Version 4 preserves
-activity timestamps on rename, version 5 preserves them on status-only message
-updates, and startup recovers streaming assistants without reordering history.
+The backend's database owner, `SqliteDatabase` in `src/infrastructure/database/`,
+opens the file once, applies the schema from `migrations.ts` using
+`PRAGMA user_version`, and is the only owner that closes it. Stores borrow read
+and write transactions that expose neither connection closing nor transaction
+control; the conversation store lends history and turn capabilities built on
+them. Version 4 preserves activity timestamps on rename, version 5 preserves
+them on status-only message updates, and the conversation store's startup
+recovers streaming assistants without reordering history.
 Two triggers keep `conversations.updated_at` in sync with message inserts and
 message text updates.
 

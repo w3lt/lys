@@ -17,8 +17,9 @@ Toolchain versions, platform prerequisites, and first build.
 
 ## Required tools
 
-- **Node 24**: the root `.nvmrc` contains `24`, and the docs deployment workflow
-  also builds with Node 24.
+- **Node 24.10 or later**: the root `.nvmrc` contains `24`, and the docs
+  deployment workflow also builds with Node 24. The backend needs at least
+  24.10, because its database owner uses `DatabaseSync.setAuthorizer`.
 - **pnpm 11**: the root workspace pins `pnpm@11.17.0`.
 - **Rust and Cargo**: required because the desktop app uses Tauri and the
   repository validation list includes Cargo-based checks for the host code.

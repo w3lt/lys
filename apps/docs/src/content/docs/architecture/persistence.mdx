@@ -27,20 +27,23 @@ Stores borrow read and write transactions that cannot close the connection or
 end a transaction early. Each store owns the queries on its tables; the shared
 migration list in `migrations.ts` owns every table's schema. The database
 compiles each distinct SQL text once and keeps the statement until it closes.
-Outside a write transaction the connection refuses every change
+Each operation receives its own statement compiler, which refuses every request
+once that operation returns, even inside a later operation. Outside a write
+transaction the connection refuses every change
 (`PRAGMA query_only`), so a read cannot write and a statement kept beyond its
 operation cannot change data.
 
-| Table                   | Owned by                  | Notes                                                                                            |
-| ----------------------- | ------------------------- | ------------------------------------------------------------------------------------------------ |
-| `conversations`         | `SqliteConversationStore` | One row per conversation, including `title`, `system_prompt`, `created_at`, and `updated_at`.    |
-| `conversation_messages` | `SqliteConversationStore` | Ordered user and assistant messages, including assistant `status`, `finish_reason`, and `model`. |
+| Table                   | Owned by                       | Notes                                                                                            |
+| ----------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------ |
+| `conversations`         | `conversationService` adapters | One row per conversation, including `title`, `system_prompt`, `created_at`, and `updated_at`.    |
+| `conversation_messages` | `conversationService` adapters | Ordered user and assistant messages, including assistant `status`, `finish_reason`, and `model`. |
 
 The desktop does not query SQLite directly and the Tauri host does not proxy
-conversation SQL. The conversation store lends separate history-reading,
-history-editing, and turn capabilities over the shared database. Every borrowed
-operation fails once the database closes, and the database remains open until
-every reply generation has stored its final state.
+conversation SQL. The backend creates separate history-reading, history-editing,
+and turn adapters over the shared database and exposes each as its own
+application service. Every borrowed operation fails once the database closes,
+and the database remains open until every reply generation has stored its final
+state.
 
 ## Migration model
 
@@ -57,10 +60,11 @@ On startup the database owner:
 7. Installs an authorizer that refuses transaction-control SQL, including
    savepoints, and changes to write protection from store code.
 
-The conversation store is then created over the open database. It registers its
-search function and, in one write transaction, changes remaining streaming
-assistants to interrupted with a fresh message timestamp, without changing
-conversation activity time.
+The conversation adapters are then created over the open database. Turn
+persistence comes first: in one write transaction it changes remaining
+streaming assistants to interrupted with a fresh message timestamp, without
+changing conversation activity time. The history reader then registers its
+search function.
 
 The current migrations create the two tables, add a message index, and install
 triggers that keep `conversations.updated_at` current. Historical migrations remain

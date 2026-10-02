@@ -1,0 +1,52 @@
+---
+import { getEntry, render } from "astro:content"
+import DocumentMeta from "./DocumentMeta.astro"
+
+type ChangelogReleaseProps = {
+  /**
+   * Version whose release notes are shown, exactly as written in its
+   * `CHANGELOG.md` heading, such as `0.3.0`.
+   */
+  readonly version: string
+}
+
+/** Astro types `Astro.props` from a local declaration named `Props`. */
+type Props = ChangelogReleaseProps
+
+const { version }: ChangelogReleaseProps = Astro.props
+const release = await getEntry("changelog", version)
+
+if (release === undefined) {
+  throw new Error(
+    `CHANGELOG.md has no release ${version}. Add its section, or remove the page that shows it.`
+  )
+}
+
+const { Content } = await render(release)
+---
+
+{/**
+  * The release notes of one version, rendered from its `CHANGELOG.md` section.
+  *
+  * `version` selects the section. The block shows the version and release date,
+  * then a "Release notes" heading followed by the section's notes as rendered by
+  * the site's Markdown pipeline, so the page carries exactly the text that
+  * `CHANGELOG.md` holds. A version missing from `CHANGELOG.md` fails the build
+  * rather than rendering an empty page.
+  *
+  * Accessibility: the metadata delegates to `DocumentMeta`. The second-level
+  * heading takes the place of the version heading in `CHANGELOG.md`, so the
+  * notes' third-level group headings keep a complete outline under the page
+  * title.
+  */}
+<DocumentMeta
+  label="Release metadata"
+  entries={[
+    { label: "Type", value: "Changelog" },
+    { label: "Version", value: release.data.version },
+    { label: "Released", value: release.data.released }
+  ]}
+/>
+
+<h2>Release notes</h2>
+<Content />

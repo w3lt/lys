@@ -2,6 +2,7 @@ import { defineCollection } from "astro:content"
 import { z } from "astro/zod"
 import { docsLoader, i18nLoader } from "@astrojs/starlight/loaders"
 import { docsSchema, i18nSchema } from "@astrojs/starlight/schema"
+import { loadChangelogReleases } from "./lib/handbook/changelog"
 
 /**
  * Calendar dates are authored as `YYYY-MM-DD` strings rather than parsed dates
@@ -157,10 +158,39 @@ const validatedHandbookFrontmatter = handbookFrontmatter.superRefine(
   }
 )
 
+/**
+ * Location of the repository `CHANGELOG.md`, relative to the docs app root that
+ * Astro reports as `config.root`.
+ */
+const CHANGELOG_PATH_FROM_DOCS_ROOT = "../../CHANGELOG.md"
+
 export const collections = {
   docs: defineCollection({
     loader: docsLoader(),
     schema: docsSchema({ extend: validatedHandbookFrontmatter })
+  }),
+  /**
+   * Released versions in `CHANGELOG.md`, one entry per version, keyed by that
+   * version.
+   *
+   * Handbook release pages render these entries, so the release notes are
+   * authored only in `CHANGELOG.md`.
+   */
+  changelog: defineCollection({
+    loader: {
+      name: "lys-changelog",
+      load: (context) =>
+        loadChangelogReleases(
+          new URL(CHANGELOG_PATH_FROM_DOCS_ROOT, context.config.root),
+          context
+        )
+    },
+    schema: z.object({
+      /** Release version, such as `0.3.0`. */
+      version: z.string().min(1),
+      /** Release date, as `YYYY-MM-DD`. */
+      released: z.string().regex(ISO_CALENDAR_DATE)
+    })
   }),
   /**
    * Overrides for Starlight's own interface strings.

@@ -273,13 +273,17 @@ describe("LlmService", () => {
     })
 
     it("measures latency with the process clock by default", async () => {
+      // The query reads the clock once before and once after the inventory
+      // call, so only the process performance clock yields these readings.
+      vi.spyOn(performance, "now")
+        .mockReturnValueOnce(1000)
+        .mockReturnValueOnce(1025)
       const { service, engine } = createServiceWithEngine()
       engine.listLoadedLlmModelInstances.mockResolvedValue([])
 
       const outcome = await service.getLlmModelHealth("qwen/qwen3-8b")
 
-      expect(Number.isSafeInteger(outcome.health.latencyMs)).toBe(true)
-      expect(outcome.health.latencyMs).toBeGreaterThanOrEqual(0)
+      expect(outcome.health.latencyMs).toBe(25)
     })
 
     it.each([

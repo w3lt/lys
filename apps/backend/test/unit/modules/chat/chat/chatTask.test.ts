@@ -375,6 +375,64 @@ describe("createChatTask", () => {
     expect(run.events).toEqual([CHAT_FAILURE_EVENT])
   })
 
+  it("fails after the sent text when the completed state cannot be stored", async () => {
+    const persistenceFailure = new Error("Conversation store is closed")
+    const run = await runChatTask({
+      completeChatStream: streamChunks(
+        createChatCompletionChunk({ content: "Hi", finishReason: "stop" })
+      ),
+      updateAssistantMessageState: vi
+        .fn<CreateChatTaskOptions["updateAssistantMessageState"]>()
+        .mockImplementationOnce(() => {
+          throw persistenceFailure
+        })
+        .mockReturnValue(true)
+    })
+
+    expect(run.persistedStates).toEqual([
+      { status: "completed", finishReason: "stop" },
+      { status: "failed" }
+    ])
+    expect(run.events).toEqual([
+      { type: "delta", content: "Hi" },
+      CHAT_FAILURE_EVENT
+    ])
+    expect(run.logs.filter(({ level }) => level === "error")).toEqual([
+      expect.objectContaining({
+        err: expect.objectContaining({ message: persistenceFailure.message })
+      })
+    ])
+    expect(run.settlement).toEqual({ status: "resolved" })
+  })
+
+  it("fails when the interrupted state cannot be stored", async () => {
+    const persistenceFailure = new Error("Conversation store is closed")
+    const run = await runChatTask({
+      completeChatStream: streamChunks(
+        createChatCompletionChunk({ content: "deleted" })
+      ),
+      updateAssistantMessageContent: () => false,
+      updateAssistantMessageState: vi
+        .fn<CreateChatTaskOptions["updateAssistantMessageState"]>()
+        .mockImplementationOnce(() => {
+          throw persistenceFailure
+        })
+        .mockReturnValue(true)
+    })
+
+    expect(run.persistedStates).toEqual([
+      { status: "interrupted" },
+      { status: "failed" }
+    ])
+    expect(run.events).toEqual([CHAT_FAILURE_EVENT])
+    expect(run.logs.filter(({ level }) => level === "error")).toEqual([
+      expect.objectContaining({
+        err: expect.objectContaining({ message: persistenceFailure.message })
+      })
+    ])
+    expect(run.settlement).toEqual({ status: "resolved" })
+  })
+
   it("rejects with both failures and sends no event when the failed state cannot be stored", async () => {
     const streamFailure = new Error("model not loaded")
     const persistenceFailure = new Error("Conversation store is closed")

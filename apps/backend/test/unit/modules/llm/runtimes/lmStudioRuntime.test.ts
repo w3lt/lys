@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
 import LmStudioRuntime from "../../../../../src/modules/llm/runtimes/lmStudioRuntime"
 import { createLmStudioLlmRecord } from "../../../support/llmFixtures"
-import { fakeLmStudio } from "../../../support/lmStudioSdkFake"
+import {
+  fakeLmStudio,
+  type FakeLmStudioOperations
+} from "../../../support/lmStudioSdkFake"
 import { flushMicrotasks } from "../../../support/microtasks"
 
 vi.mock("@lmstudio/sdk", () => import("../../../support/lmStudioSdkFake"))
@@ -46,18 +49,32 @@ describe("LmStudioRuntime", () => {
 
   describe("create", () => {
     it("connects to the endpoint and returns a ready runtime after the readiness query", async () => {
+      const constructClient = vi.fn<FakeLmStudioOperations["constructClient"]>()
+      const disposeClient = vi.fn(async () => undefined)
+      fakeLmStudio.operations = {
+        ...fakeLmStudio.operations,
+        constructClient,
+        disposeClient
+      }
+
       const runtime = await createOwnedRuntime()
 
       expect(runtime.lifecycleStatus).toBe("ready")
-      expect(fakeLmStudio.clients).toEqual([
-        { baseUrl: LM_STUDIO_URL, disposeCount: 0 }
-      ])
+      expect(constructClient).toHaveBeenCalledExactlyOnceWith({
+        baseUrl: LM_STUDIO_URL
+      })
+      expect(disposeClient).not.toHaveBeenCalled()
     })
 
     it("releases the client and reports unavailability when the readiness query fails", async () => {
       const queryFailure = new Error("connect ECONNREFUSED")
-      fakeLmStudio.operations.getLMStudioVersion = async () => {
-        throw queryFailure
+      const disposeClient = vi.fn(async () => undefined)
+      fakeLmStudio.operations = {
+        ...fakeLmStudio.operations,
+        getLMStudioVersion: async () => {
+          throw queryFailure
+        },
+        disposeClient
       }
 
       const failure = await captureRejection(
@@ -68,17 +85,20 @@ describe("LmStudioRuntime", () => {
         message: "The LLM runtime is unavailable.",
         cause: queryFailure
       })
-      expect(fakeLmStudio.clients[0]?.disposeCount).toBe(1)
+      expect(disposeClient).toHaveBeenCalledOnce()
     })
 
     it("keeps both failures when releasing the client also fails", async () => {
       const queryFailure = new Error("connect ECONNREFUSED")
       const releaseFailure = new Error("socket already destroyed")
-      fakeLmStudio.operations.getLMStudioVersion = async () => {
-        throw queryFailure
-      }
-      fakeLmStudio.operations.disposeClient = async () => {
-        throw releaseFailure
+      fakeLmStudio.operations = {
+        ...fakeLmStudio.operations,
+        getLMStudioVersion: async () => {
+          throw queryFailure
+        },
+        disposeClient: async () => {
+          throw releaseFailure
+        }
       }
 
       const failure = await captureRejection(
@@ -99,14 +119,19 @@ describe("LmStudioRuntime", () => {
 
     it("propagates a client construction failure without a client to release", async () => {
       const constructionFailure = new Error("Invalid baseUrl")
-      fakeLmStudio.operations.constructClient = () => {
-        throw constructionFailure
+      const disposeClient = vi.fn(async () => undefined)
+      fakeLmStudio.operations = {
+        ...fakeLmStudio.operations,
+        constructClient: () => {
+          throw constructionFailure
+        },
+        disposeClient
       }
 
       await expect(LmStudioRuntime.create("not a url")).rejects.toBe(
         constructionFailure
       )
-      expect(fakeLmStudio.clients).toEqual([])
+      expect(disposeClient).not.toHaveBeenCalled()
     })
   })
 
@@ -119,8 +144,11 @@ describe("LmStudioRuntime", () => {
 
     it("reports unavailable when the readiness query fails", async () => {
       const runtime = await createOwnedRuntime()
-      fakeLmStudio.operations.getLMStudioVersion = async () => {
-        throw new Error("socket closed")
+      fakeLmStudio.operations = {
+        ...fakeLmStudio.operations,
+        getLMStudioVersion: async () => {
+          throw new Error("socket closed")
+        }
       }
 
       await expect(runtime.getRuntimeAvailability()).resolves.toBe(
@@ -132,9 +160,12 @@ describe("LmStudioRuntime", () => {
 
   describe("listDownloadedLlmModels", () => {
     it("returns frozen normalized metadata for downloaded LLMs", async () => {
-      fakeLmStudio.downloadedModels = [
-        createLmStudioLlmRecord({ modelKey: "qwen/qwen3-8b" })
-      ]
+      fakeLmStudio.inventory = {
+        downloadedModels: [
+          createLmStudioLlmRecord({ modelKey: "qwen/qwen3-8b" })
+        ],
+        loadedModels: []
+      }
       const runtime = await createOwnedRuntime()
 
       const models = await runtime.listDownloadedLlmModels()
@@ -160,8 +191,11 @@ describe("LmStudioRuntime", () => {
     it("translates a failed query and keeps the SDK failure as its cause", async () => {
       const runtime = await createOwnedRuntime()
       const sdkFailure = new Error("socket closed")
-      fakeLmStudio.operations.listDownloadedModels = async () => {
-        throw sdkFailure
+      fakeLmStudio.operations = {
+        ...fakeLmStudio.operations,
+        listDownloadedModels: async () => {
+          throw sdkFailure
+        }
       }
 
       await expect(runtime.listDownloadedLlmModels()).rejects.toMatchObject({
@@ -173,9 +207,10 @@ describe("LmStudioRuntime", () => {
 
     it("rejects malformed vendor metadata", async () => {
       const runtime = await createOwnedRuntime()
-      fakeLmStudio.operations.listDownloadedModels = async () => [
-        { type: "llm", modelKey: "" }
-      ]
+      fakeLmStudio.operations = {
+        ...fakeLmStudio.operations,
+        listDownloadedModels: async () => [{ type: "llm", modelKey: "" }]
+      }
 
       await expect(runtime.listDownloadedLlmModels()).rejects.toThrow(
         "The LLM runtime returned invalid model metadata."
@@ -185,9 +220,12 @@ describe("LmStudioRuntime", () => {
 
   describe("listLoadedLlmModelInstances", () => {
     it("returns frozen identities of the loaded handles", async () => {
-      fakeLmStudio.loadedModels = [
-        { modelKey: "qwen/qwen3-8b", identifier: "qwen/qwen3-8b:2" }
-      ]
+      fakeLmStudio.inventory = {
+        downloadedModels: [],
+        loadedModels: [
+          { modelKey: "qwen/qwen3-8b", identifier: "qwen/qwen3-8b:2" }
+        ]
+      }
       const runtime = await createOwnedRuntime()
 
       const instances = await runtime.listLoadedLlmModelInstances()
@@ -201,8 +239,11 @@ describe("LmStudioRuntime", () => {
     it("translates a failed query and keeps the SDK failure as its cause", async () => {
       const runtime = await createOwnedRuntime()
       const sdkFailure = new Error("socket closed")
-      fakeLmStudio.operations.listLoaded = async () => {
-        throw sdkFailure
+      fakeLmStudio.operations = {
+        ...fakeLmStudio.operations,
+        listLoaded: async () => {
+          throw sdkFailure
+        }
       }
 
       await expect(runtime.listLoadedLlmModelInstances()).rejects.toMatchObject(
@@ -215,7 +256,10 @@ describe("LmStudioRuntime", () => {
 
     it("rejects a malformed loaded handle", async () => {
       const runtime = await createOwnedRuntime()
-      fakeLmStudio.operations.listLoaded = async () => [{ modelKey: "qwen" }]
+      fakeLmStudio.operations = {
+        ...fakeLmStudio.operations,
+        listLoaded: async () => [{ modelKey: "qwen" }]
+      }
 
       await expect(runtime.listLoadedLlmModelInstances()).rejects.toThrow(
         "The LLM runtime returned an invalid model instance."
@@ -225,16 +269,19 @@ describe("LmStudioRuntime", () => {
 
   describe("loadLlmModel", () => {
     it("loads the selection and returns the loaded instance identity", async () => {
-      fakeLmStudio.downloadedModels = [
-        createLmStudioLlmRecord({ modelKey: "qwen/qwen3-8b" })
-      ]
+      fakeLmStudio.inventory = {
+        downloadedModels: [
+          createLmStudioLlmRecord({ modelKey: "qwen/qwen3-8b" })
+        ],
+        loadedModels: []
+      }
       const runtime = await createOwnedRuntime()
 
       await expect(runtime.loadLlmModel("qwen/qwen3-8b")).resolves.toEqual({
         modelKey: "qwen/qwen3-8b",
         modelIdentifier: "qwen/qwen3-8b"
       })
-      expect(fakeLmStudio.loadedModels).toEqual([
+      expect(fakeLmStudio.inventory.loadedModels).toEqual([
         { modelKey: "qwen/qwen3-8b", identifier: "qwen/qwen3-8b" }
       ])
     })
@@ -255,7 +302,10 @@ describe("LmStudioRuntime", () => {
 
     it("rejects a loaded handle without a valid identity", async () => {
       const runtime = await createOwnedRuntime()
-      fakeLmStudio.operations.load = async () => ({ modelKey: "qwen" })
+      fakeLmStudio.operations = {
+        ...fakeLmStudio.operations,
+        load: async () => ({ modelKey: "qwen" })
+      }
 
       await expect(runtime.loadLlmModel("qwen")).rejects.toThrow(
         "The LLM runtime returned an invalid model instance."
@@ -265,15 +315,18 @@ describe("LmStudioRuntime", () => {
 
   describe("stopLoadedLlmModelInstance", () => {
     it("unloads the addressed instance", async () => {
-      fakeLmStudio.loadedModels = [
-        { modelKey: "qwen/qwen3-8b", identifier: "qwen/qwen3-8b" },
-        { modelKey: "qwen/qwen3-8b", identifier: "qwen/qwen3-8b:2" }
-      ]
+      fakeLmStudio.inventory = {
+        downloadedModels: [],
+        loadedModels: [
+          { modelKey: "qwen/qwen3-8b", identifier: "qwen/qwen3-8b" },
+          { modelKey: "qwen/qwen3-8b", identifier: "qwen/qwen3-8b:2" }
+        ]
+      }
       const runtime = await createOwnedRuntime()
 
       await runtime.stopLoadedLlmModelInstance("qwen/qwen3-8b:2")
 
-      expect(fakeLmStudio.loadedModels).toEqual([
+      expect(fakeLmStudio.inventory.loadedModels).toEqual([
         { modelKey: "qwen/qwen3-8b", identifier: "qwen/qwen3-8b" }
       ])
     })
@@ -297,7 +350,10 @@ describe("LmStudioRuntime", () => {
     it("is active while an operation runs and ready after it settles", async () => {
       const runtime = await createOwnedRuntime()
       const listing = Promise.withResolvers<readonly unknown[]>()
-      fakeLmStudio.operations.listLoaded = () => listing.promise
+      fakeLmStudio.operations = {
+        ...fakeLmStudio.operations,
+        listLoaded: () => listing.promise
+      }
 
       const operation = runtime.listLoadedLlmModelInstances()
       expect(runtime.lifecycleStatus).toBe("active")
@@ -310,9 +366,12 @@ describe("LmStudioRuntime", () => {
     it("refuses an overlapping operation before reaching the SDK", async () => {
       const runtime = await createOwnedRuntime()
       const listing = Promise.withResolvers<readonly unknown[]>()
-      fakeLmStudio.operations.listLoaded = () => listing.promise
       const load = vi.fn(fakeLmStudio.operations.load)
-      fakeLmStudio.operations.load = load
+      fakeLmStudio.operations = {
+        ...fakeLmStudio.operations,
+        listLoaded: () => listing.promise,
+        load
+      }
       const active = runtime.listLoadedLlmModelInstances()
 
       await expect(runtime.loadLlmModel("qwen")).rejects.toThrow(
@@ -330,30 +389,37 @@ describe("LmStudioRuntime", () => {
 
   describe("disposal", () => {
     it("releases the client once and ends closed", async () => {
+      const disposeClient = vi.fn(async () => undefined)
+      fakeLmStudio.operations = { ...fakeLmStudio.operations, disposeClient }
       const runtime = await createOwnedRuntime()
 
       await runtime[Symbol.asyncDispose]()
 
       expect(runtime.lifecycleStatus).toBe("closed")
-      expect(fakeLmStudio.clients[0]?.disposeCount).toBe(1)
+      expect(disposeClient).toHaveBeenCalledOnce()
     })
 
     it("waits for the active operation before releasing the client", async () => {
-      const runtime = await createOwnedRuntime()
       const listing = Promise.withResolvers<readonly unknown[]>()
-      fakeLmStudio.operations.listLoaded = () => listing.promise
+      const disposeClient = vi.fn(async () => undefined)
+      fakeLmStudio.operations = {
+        ...fakeLmStudio.operations,
+        listLoaded: () => listing.promise,
+        disposeClient
+      }
+      const runtime = await createOwnedRuntime()
       const active = runtime.listLoadedLlmModelInstances()
 
       const disposal = runtime[Symbol.asyncDispose]()
       await flushMicrotasks()
       expect(runtime.lifecycleStatus).toBe("closing")
-      expect(fakeLmStudio.clients[0]?.disposeCount).toBe(0)
+      expect(disposeClient).not.toHaveBeenCalled()
 
       listing.resolve([])
       await expect(active).resolves.toEqual([])
       await disposal
       expect(runtime.lifecycleStatus).toBe("closed")
-      expect(fakeLmStudio.clients[0]?.disposeCount).toBe(1)
+      expect(disposeClient).toHaveBeenCalledOnce()
     })
 
     it("refuses operations once cleanup begins", async () => {
@@ -371,6 +437,8 @@ describe("LmStudioRuntime", () => {
     })
 
     it("shares one release across concurrent and repeated calls", async () => {
+      const disposeClient = vi.fn(async () => undefined)
+      fakeLmStudio.operations = { ...fakeLmStudio.operations, disposeClient }
       const runtime = await createOwnedRuntime()
 
       await Promise.all([
@@ -379,15 +447,16 @@ describe("LmStudioRuntime", () => {
       ])
       await runtime[Symbol.asyncDispose]()
 
-      expect(fakeLmStudio.clients[0]?.disposeCount).toBe(1)
+      expect(disposeClient).toHaveBeenCalledOnce()
     })
 
     it("reports a failed release, stays closed, and never retries it", async () => {
       const runtime = await createOwnedRuntime()
       const releaseFailure = new Error("socket already destroyed")
-      fakeLmStudio.operations.disposeClient = async () => {
+      const disposeClient = vi.fn(async () => {
         throw releaseFailure
-      }
+      })
+      fakeLmStudio.operations = { ...fakeLmStudio.operations, disposeClient }
 
       const firstFailure = await captureRejection(
         runtime[Symbol.asyncDispose]()
@@ -402,7 +471,7 @@ describe("LmStudioRuntime", () => {
       })
       expect(repeatedFailure).toBe(firstFailure)
       expect(runtime.lifecycleStatus).toBe("closed")
-      expect(fakeLmStudio.clients[0]?.disposeCount).toBe(1)
+      expect(disposeClient).toHaveBeenCalledOnce()
     })
   })
 })

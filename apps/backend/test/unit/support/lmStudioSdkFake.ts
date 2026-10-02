@@ -14,8 +14,16 @@ export type FakeLoadedLlmHandle = Readonly<{
   identifier: string
 }>
 
+/** Downloaded and loaded models of the fake engine, replaced as one value. */
+export type FakeLmStudioInventory = Readonly<{
+  /** Vendor records returned by `system.listDownloadedModels("llm")`. */
+  downloadedModels: readonly LLMInfo[]
+  /** Handles returned by `llm.listLoaded()`, in load order. */
+  loadedModels: readonly FakeLoadedLlmHandle[]
+}>
+
 /** Replaceable engine behavior reached through every fake SDK client. */
-export type FakeLmStudioOperations = {
+export type FakeLmStudioOperations = Readonly<{
   /** Runs while a client is constructed; throwing fails construction. */
   constructClient: (options: FakeLmStudioClientOptions) => void
   /** Answers the SDK readiness query. */
@@ -30,66 +38,121 @@ export type FakeLmStudioOperations = {
   unload: (identifier: string) => Promise<void>
   /** Releases the resources of one client. */
   disposeClient: () => Promise<void>
-}
+}>
 
-/** Observation of one client constructed through the fake SDK. */
-export type FakeLmStudioClientRecord = {
-  /** Endpoint passed at construction. */
-  readonly baseUrl: string | undefined
-  /** Number of `Symbol.asyncDispose` calls received. */
-  disposeCount: number
-}
+/** SDK `client.system` members the backend adapter uses. */
+type FakeLmStudioSystemNamespace = Pick<
+  FakeLmStudioOperations,
+  "getLMStudioVersion" | "listDownloadedModels"
+>
+
+/** SDK `client.llm` members the backend adapter uses. */
+type FakeLmStudioLlmNamespace = Pick<
+  FakeLmStudioOperations,
+  "listLoaded" | "load" | "unload"
+>
+
+/** Inventory of an engine with no downloaded or loaded model. */
+const EMPTY_LM_STUDIO_INVENTORY: FakeLmStudioInventory = Object.freeze({
+  downloadedModels: Object.freeze([]),
+  loadedModels: Object.freeze([])
+})
 
 /**
- * In-memory LM Studio engine shared by every fake SDK client in one test file.
+ * Owns the model inventory and operation behavior that stand in for the
+ * external LM Studio server, so that every fake SDK client in one test file
+ * reaches the same in-memory engine.
  *
  * @remarks Replaces the external LM Studio server for unit tests that install
  * `vi.mock("@lmstudio/sdk", () => import("../support/lmStudioSdkFake"))`.
- * Default operations keep downloaded and loaded models in memory: `load`
- * accepts only an exact downloaded key and adds a handle whose identifier is
- * the key, suffixed `:<n>` for later instances; `unload` rejects an unknown
- * identifier. Vitest isolates module state per test file, and cases within a
- * file run sequentially; each case must call {@link FakeLmStudioEngine.reset}
- * before arranging the engine.
+ * Default operations keep the inventory in memory: `load` accepts only an
+ * exact downloaded key and adds a handle whose identifier is the key, suffixed
+ * `:<n>` for later instances; `unload` rejects an unknown identifier. Client
+ * construction and disposal have no default effect, so a case that observes
+ * them replaces those operations with spies. Invariant: the inventory and the
+ * operations are each one complete frozen value, and every change replaces the
+ * whole value, so no reader observes a partial update. Each case must call
+ * {@link FakeLmStudioEngine.reset} before arranging the engine. Concurrency
+ * model: single-owner. Vitest gives each test file its own module instance and
+ * runs that file's cases one at a time, and every read and replacement of the
+ * engine's state is synchronous on that file's event loop.
  */
 class FakeLmStudioEngine {
-  /** Vendor records returned by `system.listDownloadedModels("llm")`. */
-  downloadedModels: LLMInfo[] = []
-  /** Handles returned by `llm.listLoaded()`, in load order. */
-  loadedModels: FakeLoadedLlmHandle[] = []
-  /** Clients constructed since the last reset, in construction order. */
-  readonly clients: FakeLmStudioClientRecord[] = []
-  /** Current behavior; a case replaces one entry to inject timing or failure. */
-  operations: FakeLmStudioOperations = this.#createDefaultOperations()
+  /** Current inventory, read and replaced by the default operations. */
+  #inventory: FakeLmStudioInventory = EMPTY_LM_STUDIO_INVENTORY
+  /** Current behavior reached through every fake client. */
+  #operations: FakeLmStudioOperations = this.#createDefaultOperations()
 
-  /** Restores an empty, available engine and forgets constructed clients. */
+  /** Restores an empty inventory and the default operations. */
   reset(): void {
-    this.downloadedModels = []
-    this.loadedModels = []
-    this.clients.length = 0
-    this.operations = this.#createDefaultOperations()
+    this.#inventory = EMPTY_LM_STUDIO_INVENTORY
+    this.#operations = this.#createDefaultOperations()
+  }
+
+  /**
+   * Downloaded and loaded models the default operations serve.
+   *
+   * @returns The current frozen inventory. Downloaded records are the records
+   * the engine retained when the inventory was assigned.
+   */
+  get inventory(): FakeLmStudioInventory {
+    return this.#inventory
+  }
+
+  /**
+   * Replaces the inventory a case arranges.
+   *
+   * @param inventory - Complete inventory. The engine copies both lists and
+   * every loaded handle, and takes ownership of the downloaded vendor records,
+   * which the case must not change afterwards.
+   */
+  set inventory(inventory: FakeLmStudioInventory) {
+    this.#inventory = Object.freeze({
+      downloadedModels: Object.freeze([...inventory.downloadedModels]),
+      loadedModels: Object.freeze(inventory.loadedModels.map(copyLoadedHandle))
+    })
+  }
+
+  /**
+   * Behavior every fake client delegates to.
+   *
+   * @returns The current frozen operations. A case replaces one operation by
+   * assigning a copy that overrides it.
+   */
+  get operations(): FakeLmStudioOperations {
+    return this.#operations
+  }
+
+  /**
+   * Replaces the behavior a case arranges, to inject timing or failure.
+   *
+   * @param operations - Complete operations. The engine retains a frozen copy;
+   * clients reach the new behavior on their next call.
+   */
+  set operations(operations: FakeLmStudioOperations) {
+    this.#operations = Object.freeze({ ...operations })
   }
 
   /**
    * Creates the in-memory behavior of an available engine.
    *
-   * @returns Operations backed by this engine's model collections.
+   * @returns Frozen operations backed by this engine's inventory.
    */
   #createDefaultOperations(): FakeLmStudioOperations {
-    return {
+    return Object.freeze({
       constructClient: () => undefined,
       getLMStudioVersion: async () => ({ version: "0.3.30", build: 1 }),
-      listDownloadedModels: async (domain) => {
+      listDownloadedModels: async (domain: string) => {
         if (domain !== "llm") {
           throw new Error(`Unsupported model domain "${domain}".`)
         }
-        return [...this.downloadedModels]
+        return [...this.#inventory.downloadedModels]
       },
-      listLoaded: async () => [...this.loadedModels],
-      load: async (modelKey) => this.#loadModel(modelKey),
-      unload: async (identifier) => this.#unloadModel(identifier),
+      listLoaded: async () => [...this.#inventory.loadedModels],
+      load: async (modelKey: string) => this.#loadModel(modelKey),
+      unload: async (identifier: string) => this.#unloadModel(identifier),
       disposeClient: async () => undefined
-    }
+    })
   }
 
   /**
@@ -100,10 +163,11 @@ class FakeLmStudioEngine {
    * @throws If the key is not downloaded.
    */
   #loadModel(modelKey: string): FakeLoadedLlmHandle {
-    if (!this.downloadedModels.some((model) => model.modelKey === modelKey)) {
+    const { downloadedModels, loadedModels } = this.#inventory
+    if (!downloadedModels.some((model) => model.modelKey === modelKey)) {
       throw new Error(`Model "${modelKey}" is not downloaded.`)
     }
-    const instanceCount = this.loadedModels.filter(
+    const instanceCount = loadedModels.filter(
       (model) => model.modelKey === modelKey
     ).length
     const handle = Object.freeze({
@@ -111,7 +175,10 @@ class FakeLmStudioEngine {
       identifier:
         instanceCount === 0 ? modelKey : `${modelKey}:${instanceCount + 1}`
     })
-    this.loadedModels.push(handle)
+    this.#inventory = Object.freeze({
+      downloadedModels,
+      loadedModels: Object.freeze([...loadedModels, handle])
+    })
     return handle
   }
 
@@ -122,64 +189,100 @@ class FakeLmStudioEngine {
    * @throws If no loaded instance has the identifier.
    */
   #unloadModel(identifier: string): void {
-    const index = this.loadedModels.findIndex(
+    const { downloadedModels, loadedModels } = this.#inventory
+    const index = loadedModels.findIndex(
       (model) => model.identifier === identifier
     )
     if (index === -1) {
       throw new Error(`No loaded instance "${identifier}".`)
     }
-    this.loadedModels.splice(index, 1)
+    this.#inventory = Object.freeze({
+      downloadedModels,
+      loadedModels: Object.freeze(loadedModels.toSpliced(index, 1))
+    })
   }
+}
+
+/**
+ * Copies one loaded handle so the engine owns it.
+ *
+ * @param handle - Handle supplied by a case.
+ * @returns A frozen handle with the same key and identifier.
+ */
+function copyLoadedHandle(handle: FakeLoadedLlmHandle): FakeLoadedLlmHandle {
+  return Object.freeze({
+    modelKey: handle.modelKey,
+    identifier: handle.identifier
+  })
 }
 
 /** Engine controlling every fake client constructed in the current test file. */
 export const fakeLmStudio = new FakeLmStudioEngine()
 
 /**
- * Stand-in for the SDK client class, delegating to {@link fakeLmStudio}.
+ * Stand-in for the SDK client class that forwards every call to
+ * {@link fakeLmStudio}, so the adapter under test reaches the in-memory engine.
  *
- * @remarks Provides only the members the backend adapter uses. Construction
- * is recorded after `constructClient` succeeds, so a rejected construction
- * leaves no client to dispose.
+ * @remarks Provides only the members the backend adapter uses. The SDK fixes
+ * the constructor signature, so the client reaches the module-level engine
+ * instead of an injected one. A rejected `constructClient` throws from the
+ * constructor, so the adapter receives no client to dispose. Invariant: the
+ * client owns no mutable state; its two namespaces are frozen and read the
+ * engine's current operations on every call. Concurrency model: single-owner,
+ * on the event loop of the test file that owns {@link fakeLmStudio}; the client
+ * adds no synchronization of its own.
  */
 export class LMStudioClient {
-  /** System namespace used for readiness and downloaded inventory. */
-  readonly system = Object.freeze({
+  /** Frozen system namespace forwarding to the engine. */
+  readonly #system: FakeLmStudioSystemNamespace = Object.freeze({
     getLMStudioVersion: async () =>
       await fakeLmStudio.operations.getLMStudioVersion(),
     listDownloadedModels: async (domain: string) =>
       await fakeLmStudio.operations.listDownloadedModels(domain)
   })
-  /** LLM namespace used for loaded inventory, loading, and unloading. */
-  readonly llm = Object.freeze({
+  /** Frozen LLM namespace forwarding to the engine. */
+  readonly #llm: FakeLmStudioLlmNamespace = Object.freeze({
     listLoaded: async () => await fakeLmStudio.operations.listLoaded(),
     load: async (modelKey: string) =>
       await fakeLmStudio.operations.load(modelKey),
     unload: async (identifier: string) =>
       await fakeLmStudio.operations.unload(identifier)
   })
-  /** Observation record shared with {@link fakeLmStudio}. */
-  readonly #record: FakeLmStudioClientRecord
 
   /**
-   * Records a client for the configured endpoint.
+   * Runs the engine's construction behavior for the configured endpoint.
    *
    * @param options - Endpoint options passed by the adapter.
    * @throws Whatever the engine's `constructClient` operation throws.
    */
   constructor(options: FakeLmStudioClientOptions = {}) {
     fakeLmStudio.operations.constructClient(options)
-    this.#record = { baseUrl: options.baseUrl, disposeCount: 0 }
-    fakeLmStudio.clients.push(this.#record)
   }
 
   /**
-   * Records a disposal request and runs the engine's release behavior.
+   * System namespace used for readiness and downloaded inventory.
+   *
+   * @returns The client's frozen system namespace.
+   */
+  get system(): FakeLmStudioSystemNamespace {
+    return this.#system
+  }
+
+  /**
+   * LLM namespace used for loaded inventory, loading, and unloading.
+   *
+   * @returns The client's frozen LLM namespace.
+   */
+  get llm(): FakeLmStudioLlmNamespace {
+    return this.#llm
+  }
+
+  /**
+   * Runs the engine's release behavior.
    *
    * @returns Settlement of the engine's `disposeClient` operation.
    */
   async [Symbol.asyncDispose](): Promise<void> {
-    this.#record.disposeCount += 1
     await fakeLmStudio.operations.disposeClient()
   }
 }

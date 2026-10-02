@@ -17,15 +17,16 @@ export default class ControlledReplyTask {
   #context: ReplyGenerationTaskContext | undefined
 
   /**
-   * Launcher handed to a generation as its reply or title task.
+   * Starts the task for the generation that launches it as its reply or title
+   * task.
    *
    * @param context - Cancellation and event sender lent by the generation.
    * @returns The task's settlement, pending until the case settles it.
    * @throws If the task was already started.
+   * @remarks A case hands the generation a launcher that calls this method,
+   * such as `(context) => task.start(context)`.
    */
-  public readonly start = async (
-    context: ReplyGenerationTaskContext
-  ): Promise<void> => {
+  public async start(context: ReplyGenerationTaskContext): Promise<void> {
     if (this.#context !== undefined)
       throw new Error("Controlled reply task started twice")
     this.#context = context

@@ -66,8 +66,8 @@ function startControlledGeneration() {
   const titleTask = new ControlledReplyTask()
   const reportedFailures: unknown[] = []
   const generation = ReplyGeneration.start({
-    startReplyTask: replyTask.start,
-    startTitleTask: titleTask.start,
+    startReplyTask: (context) => replyTask.start(context),
+    startTitleTask: (context) => titleTask.start(context),
     reportTaskFailure: (error) => {
       reportedFailures.push(error)
     }
@@ -343,7 +343,7 @@ describe("ReplyGeneration", () => {
       const replyTask = new ControlledReplyTask()
       const reportedFailures: unknown[] = []
       const generation = ReplyGeneration.start({
-        startReplyTask: replyTask.start,
+        startReplyTask: (context) => replyTask.start(context),
         startTitleTask: undefined,
         reportTaskFailure: (error) => {
           reportedFailures.push(error)

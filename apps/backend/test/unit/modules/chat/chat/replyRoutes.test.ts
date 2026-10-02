@@ -129,8 +129,8 @@ function startControlledGeneration(
   const titleTask = new ControlledReplyTask()
   const reportTaskFailure = vi.fn<(error: unknown) => void>()
   generations.startReplyGeneration(target, {
-    startReplyTask: replyTask.start,
-    startTitleTask: titleTask.start,
+    startReplyTask: (context) => replyTask.start(context),
+    startTitleTask: (context) => titleTask.start(context),
     reportTaskFailure
   })
   onTestFinished(() => {

@@ -79,8 +79,11 @@ function createRegistryHarness(): RegistryHarness {
       return task
     },
     createLaunchers: (replyTask, titleTask) => ({
-      startReplyTask: replyTask.start,
-      startTitleTask: titleTask?.start,
+      startReplyTask: (context) => replyTask.start(context),
+      startTitleTask:
+        titleTask === undefined
+          ? undefined
+          : (context) => titleTask.start(context),
       reportTaskFailure
     })
   })

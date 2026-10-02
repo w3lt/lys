@@ -6,7 +6,10 @@ import * as z from "zod"
 import { buildApp } from "../../src/app"
 import type { BackendConfig } from "../../src/config"
 import { TEST_BACKEND_CONFIG } from "./support/backendConfig"
-import { fakeLmStudio } from "./support/lmStudioSdkFake"
+import {
+  fakeLmStudio,
+  type FakeLmStudioOperations
+} from "./support/lmStudioSdkFake"
 
 vi.mock("@lmstudio/sdk", () => import("./support/lmStudioSdkFake"))
 
@@ -38,6 +41,8 @@ describe("buildApp", () => {
     // Every interface is refused: the backend does not authenticate
     // non-browser callers, so it must listen on loopback only.
     const config = { ...createOwnedBackendConfig(), backendHost: "0.0.0.0" }
+    const constructClient = vi.fn<FakeLmStudioOperations["constructClient"]>()
+    fakeLmStudio.operations = { ...fakeLmStudio.operations, constructClient }
 
     const build = buildApp({ config })
 
@@ -45,7 +50,7 @@ describe("buildApp", () => {
     await expect(build).rejects.toMatchObject({
       issues: [{ path: ["backendHost"] }]
     })
-    expect(fakeLmStudio.clients).toEqual([])
+    expect(constructClient).not.toHaveBeenCalled()
     expect(existsSync(config.databaseFilePath)).toBe(false)
   })
 })

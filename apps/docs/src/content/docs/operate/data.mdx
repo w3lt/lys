@@ -62,7 +62,7 @@ whose version is newer than the binary understands.
 
 - The settings file is created by the Tauri host on first settings load.
 - The SQLite file is opened once by the backend's database owner when the
-  backend's services start, before the conversation service is created.
+  backend's services start, before the conversation adapters are created.
 - The backend does not create the Lys home directory. A standalone backend
   started with `pnpm backend:dev` uses `~/.lys`, which must already exist; the
   desktop creates the Lys home when initializing a missing settings file. See

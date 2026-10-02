@@ -43,8 +43,8 @@ conversation SQL. The backend creates separate history-reading, history-editing,
 and turn adapters over the shared database and exposes each as its own
 application service. They live in
 `apps/backend/src/infrastructure/database/conversations/`, next to the database
-owner, and implement interfaces that the chat and conversation modules own, so
-the modules do not depend on SQLite. Every borrowed operation fails once the
+owner, and implement interfaces that the chat and conversation modules own; no
+module imports them. Every borrowed operation fails once the
 database closes, and the database remains open until every reply generation has
 stored its final state.
 

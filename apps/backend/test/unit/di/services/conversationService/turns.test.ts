@@ -23,14 +23,16 @@ const NOW = "2026-03-04T05:06:07.890Z"
 /**
  * Opens an isolated in-memory store owned by the current test.
  *
- * @returns The test-owned database and the store's turn and history access.
+ * @returns The test-owned database, the store's turn access, and the history
+ * reader and editor that observe and edit its conversations.
  */
 function openStore() {
   const { database, store } = openConversationTestStore()
   return {
     database,
     turns: store.createTurnAccess(),
-    history: store.createHistoryAccess()
+    history: store.createHistoryReader(),
+    editor: store.createHistoryEditor()
   }
 }
 
@@ -304,13 +306,13 @@ describe("SqliteConversationTurns", () => {
     })
 
     it("keeps an existing title and returns undefined", () => {
-      const { turns, history } = openStore()
+      const { turns, history, editor } = openStore()
       const turn = turns.createConversationTurn({
         userMessageContent: "Hello",
         model: "qwen/qwen3-8b",
         systemPrompt: "You are Lys."
       })
-      history.updateConversationTitle(turn.conversation.id, "Renamed")
+      editor.updateConversationTitle(turn.conversation.id, "Renamed")
 
       expect(
         turns.updateGeneratedConversationTitle(turn.conversation.id, "Greeting")

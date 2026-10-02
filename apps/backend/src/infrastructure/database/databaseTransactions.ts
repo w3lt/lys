@@ -4,40 +4,63 @@ import type { SQLInputValue, SQLOutputValue, StatementSync } from "node:sqlite"
  * Compiles SQL on the shared database connection for the store running an
  * operation.
  *
- * @remarks Lent to each {@link DatabaseOperation} by the database owner. It
- * offers neither connection closing nor unprepared SQL, and the owner refuses
- * to compile transaction-control statements through it, so a store can
- * neither close the database nor end its transaction early.
- * Concurrency model: single-owner, confined to the owner's event loop.
+ * @remarks Lent to each {@link DatabaseOperation} by the database owner for
+ * that call only. It offers neither connection closing nor unprepared SQL, and
+ * the owner refuses to compile transaction-control statements or to lift the
+ * connection's write protection through it, so a store can neither close the
+ * database nor end its transaction early. Concurrency model: single-owner,
+ * confined to the owner's event loop.
  */
 export interface DatabaseStatementCompiler {
   /**
-   * Compiles one SQL statement on the shared connection.
+   * Returns the shared connection's compiled statement for one SQL text.
    *
-   * @param sql - One SQL statement whose values are supplied as bound
-   * parameters when it runs.
-   * @returns A new statement owned by the calling store. The store may keep it
-   * and run it again in later operations, but runs it only inside an
-   * operation. Closing the database finalizes it, after which running it
-   * throws.
+   * @param sql - One fixed SQL statement, not text built from runtime values;
+   * its values are supplied as bound parameters when it runs. Each distinct
+   * text stays compiled until the database closes.
+   * @returns The statement compiled on the first request for this text and
+   * returned again for every later request, in this or any later operation.
+   * It is owned by the database owner, which finalizes it when the database
+   * closes; running it after that throws. Every operation compiling the same
+   * text shares it, so a caller does not change its settings or leave an
+   * iteration open beyond its operation. A statement kept beyond its operation
+   * cannot change the database: outside a write operation SQLite refuses every
+   * change with `attempt to write a readonly database`.
+   * @throws `Database is closed` after the owner closes the database.
+   * @throws `Database operation has ended` once the operation it was lent to
+   * has returned.
    * @throws If SQLite rejects the SQL, including `not authorized` for `BEGIN`,
-   * `COMMIT`, `END`, `ROLLBACK`, or any other transaction-control statement.
-   * The running transaction is unchanged.
+   * `COMMIT`, `END`, `ROLLBACK`, `SAVEPOINT`, `RELEASE`, any other
+   * transaction-control statement, or the `query_only` pragma. The running
+   * transaction is unchanged.
    */
   createStatement(sql: string): StatementSync
 }
+
+/**
+ * Result of a database operation, limited to values that exist when the
+ * operation returns.
+ *
+ * @typeParam Result - Value the operation returns.
+ * @remarks Resolves to `never` for a promise-like result, so an asynchronous
+ * operation does not type-check: its work after the first `await` would run
+ * after the operation's transaction ended.
+ */
+export type SynchronousDatabaseResult<Result> =
+  Result extends PromiseLike<unknown> ? never : Result
 
 /**
  * Synchronous store work run inside one database transaction.
  *
  * @typeParam Result - Value returned to the store after the transaction ends.
  * @remarks The statement compiler is lent for this call only. The operation
- * finishes its database work before returning: a promise-like result is
- * rejected because its transaction has already ended.
+ * finishes its database work before returning; the result type refuses a
+ * promise, and a promise-like result that bypasses the type is rejected at
+ * run time because its transaction has already ended.
  */
 export type DatabaseOperation<Result> = (
   statements: DatabaseStatementCompiler
-) => Result
+) => SynchronousDatabaseResult<Result>
 
 /**
  * Deterministic scalar SQL function added to the shared connection.
@@ -51,16 +74,15 @@ export type DatabaseFunction = (...values: SQLOutputValue[]) => SQLInputValue
 /**
  * Runs store work against one consistent read snapshot of the shared database.
  *
- * @remarks Consumed by conversation history queries and by turn access, which
- * compiles its kept statement once. Lent by the database owner without the
- * authority to close the connection. Concurrency model: single-owner; each
- * call completes synchronously on the owner's event loop and is never nested
- * inside another operation. Every implementation fails with
- * `Database is closed` after its owner closes the database.
+ * @remarks Consumed by conversation history queries. Lent by the database
+ * owner without the authority to close the connection. Concurrency model:
+ * single-owner; each call completes synchronously on the owner's event loop
+ * and is never nested inside another operation. Every implementation fails
+ * with `Database is closed` after its owner closes the database.
  */
 export interface DatabaseReader {
   /**
-   * Runs one operation in a read transaction and discards any change it makes.
+   * Runs one operation in a read transaction that changes nothing.
    *
    * @typeParam Result - Value produced by the operation.
    * @param operation - Synchronous work; its statement compiler is valid for
@@ -73,8 +95,11 @@ export interface DatabaseReader {
    * @throws If SQLite cannot begin the transaction; the operation does not run.
    * @throws `Database operations must be synchronous` when the operation
    * returns a promise-like value, after the snapshot is released.
-   * @throws The operation's own failure after the snapshot is released, or an
-   * `AggregateError` holding it followed by a rollback failure.
+   * @throws The operation's own failure after the snapshot is released,
+   * including `attempt to write a readonly database` for a change it attempts,
+   * or the failure to release the snapshot after the operation succeeded.
+   * @throws An `AggregateError` holding that failure followed by each failure
+   * to release the snapshot or restore write protection.
    */
   handleDatabaseReadRequest<Result>(
     operation: DatabaseOperation<Result>
@@ -107,10 +132,12 @@ export interface DatabaseWriter {
    * locked` while another connection holds the write lock; the operation does
    * not run.
    * @throws `Database operations must be synchronous` when the operation
-   * returns a promise-like value; its changes are rolled back.
+   * returns a promise-like value; the changes it made before returning are
+   * rolled back, and work it does after returning cannot change the database.
    * @throws The operation's or the commit's failure after every change is
-   * rolled back, or an `AggregateError` holding it followed by a rollback
-   * failure.
+   * rolled back.
+   * @throws An `AggregateError` holding that failure followed by each failure
+   * to roll back or restore write protection.
    * @remarks The write lock is taken when the transaction begins, so the
    * operation cannot fail midway for lack of it.
    */

@@ -1,8 +1,4 @@
-import type { StatementSync } from "node:sqlite"
-import type {
-  DatabaseReader,
-  DatabaseWriter
-} from "../../../infrastructure/database/databaseTransactions"
+import type { DatabaseWriter } from "../../../infrastructure/database/databaseTransactions"
 import type {
   ConversationTurnWriter,
   GeneratedConversationTitleWriter
@@ -33,46 +29,13 @@ export default class SqliteConversationTurns
 {
   /** Borrowed write transactions for every turn change. */
   readonly #databaseWriter: DatabaseWriter
-  /**
-   * Delta append compiled once on the shared connection. It belongs to this
-   * access, runs only inside a write operation, and is finalized when the
-   * database closes.
-   */
-  readonly #updateAssistantMessageContentStatement: StatementSync
 
   /**
-   * Retains borrowed write access and the already compiled delta statement.
+   * Retains borrowed write access without performing database work.
    * @param databaseWriter - Write transactions lent by the database owner.
-   * @param updateAssistantMessageContentStatement - Statement compiled by
-   * {@link SqliteConversationTurns.create} on the same database.
    */
-  private constructor(
-    databaseWriter: DatabaseWriter,
-    updateAssistantMessageContentStatement: StatementSync
-  ) {
+  public constructor(databaseWriter: DatabaseWriter) {
     this.#databaseWriter = databaseWriter
-    this.#updateAssistantMessageContentStatement =
-      updateAssistantMessageContentStatement
-  }
-
-  /**
-   * Creates turn access, compiling the per-delta statement once.
-   * @param databaseReader - Read snapshots lent by the database owner, used
-   * once to compile the delta statement.
-   * @param databaseWriter - Write transactions lent by the database owner.
-   * @returns Turn access whose operations fail with `Database is closed` after
-   * the database closes.
-   * @throws `Database is closed`, or a SQLite compilation failure; nothing is
-   * retained then.
-   */
-  public static create(
-    databaseReader: DatabaseReader,
-    databaseWriter: DatabaseWriter
-  ): SqliteConversationTurns {
-    const statement = databaseReader.handleDatabaseReadRequest((statements) =>
-      statements.createStatement(UPDATE_ASSISTANT_MESSAGE_CONTENT_SQL)
-    )
-    return new SqliteConversationTurns(databaseWriter, statement)
   }
 
   /**
@@ -98,8 +61,8 @@ export default class SqliteConversationTurns
    * @returns True if appended; false if the reply was deleted or already finalized.
    * @throws If content is empty (before any database work), the database is
    * closed, or SQLite fails.
-   * @remarks Runs the statement compiled by {@link SqliteConversationTurns.create}
-   * in one write transaction, which commits before this method returns.
+   * @remarks Runs in one write transaction, which commits before this method
+   * returns.
    */
   public updateAssistantMessageContent(
     assistantMessageId: string,
@@ -108,12 +71,11 @@ export default class SqliteConversationTurns
     if (content.length === 0)
       throw new Error("Assistant delta must not be empty")
     return this.#databaseWriter.handleDatabaseWriteRequest(
-      () =>
-        this.#updateAssistantMessageContentStatement.run(
-          content,
-          new Date().toISOString(),
-          assistantMessageId
-        ).changes === 1
+      (statements) =>
+        statements
+          .createStatement(UPDATE_ASSISTANT_MESSAGE_CONTENT_SQL)
+          .run(content, new Date().toISOString(), assistantMessageId)
+          .changes === 1
     )
   }
 

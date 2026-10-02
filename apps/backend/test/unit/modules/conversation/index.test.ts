@@ -71,36 +71,39 @@ function handleUnexpectedHistoryCall(operationName: string): never {
 
 /**
  * Creates an application with the HTTP transport and the conversation routes
- * registered over a stubbed history access.
+ * registered over a stubbed history reader and editor.
  *
  * @returns The application, captured logs, and a spy for each history
  * operation the routes can call.
- * @remarks The routes borrow the history access once at registration, so the
- * returned spies control every outcome. Each spy throws until the case
- * configures it; no database row is read or written. The in-memory database
- * behind the decorated store is closed when the test finishes.
+ * @remarks The routes borrow the history reader and editor once at
+ * registration, so the returned spies control every outcome. Each spy throws
+ * until the case configures it; no database row is read or written. The
+ * in-memory database behind the decorated store is closed when the test
+ * finishes.
  */
 async function createConversationRouteApp() {
   const testFastify = createTestFastify()
   const { store } = openConversationTestStore()
-  const history = store.createHistoryAccess()
-  vi.spyOn(store, "createHistoryAccess").mockReturnValue(history)
+  const historyReader = store.createHistoryReader()
+  vi.spyOn(store, "createHistoryReader").mockReturnValue(historyReader)
+  const historyEditor = store.createHistoryEditor()
+  vi.spyOn(store, "createHistoryEditor").mockReturnValue(historyEditor)
   const historyCalls = {
     listConversations: vi
-      .spyOn(history, "listConversations")
+      .spyOn(historyReader, "listConversations")
       .mockImplementation(() =>
         handleUnexpectedHistoryCall("listConversations")
       ),
     getConversation: vi
-      .spyOn(history, "getConversation")
+      .spyOn(historyReader, "getConversation")
       .mockImplementation(() => handleUnexpectedHistoryCall("getConversation")),
     updateConversationTitle: vi
-      .spyOn(history, "updateConversationTitle")
+      .spyOn(historyEditor, "updateConversationTitle")
       .mockImplementation(() =>
         handleUnexpectedHistoryCall("updateConversationTitle")
       ),
     deleteConversation: vi
-      .spyOn(history, "deleteConversation")
+      .spyOn(historyEditor, "deleteConversation")
       .mockImplementation(() =>
         handleUnexpectedHistoryCall("deleteConversation")
       )
@@ -389,17 +392,20 @@ describe("updateFastifyWithConversationRoutes", () => {
     })
   })
 
-  it("fails registration when the history access cannot be borrowed", async () => {
-    const testFastify = createTestFastify()
-    const { store } = openConversationTestStore()
-    const accessFailure = new Error("history access unavailable")
-    vi.spyOn(store, "createHistoryAccess").mockImplementation(() => {
-      throw accessFailure
-    })
-    testFastify.app.decorate("conversationService", store)
+  it.each(["createHistoryReader", "createHistoryEditor"] as const)(
+    "fails registration when %s cannot provide history access",
+    async (accessFactory) => {
+      const testFastify = createTestFastify()
+      const { store } = openConversationTestStore()
+      const accessFailure = new Error("history access unavailable")
+      vi.spyOn(store, accessFactory).mockImplementation(() => {
+        throw accessFailure
+      })
+      testFastify.app.decorate("conversationService", store)
 
-    await expect(
-      updateFastifyWithConversationRoutes(testFastify.app)
-    ).rejects.toBe(accessFailure)
-  })
+      await expect(
+        updateFastifyWithConversationRoutes(testFastify.app)
+      ).rejects.toBe(accessFailure)
+    }
+  )
 })

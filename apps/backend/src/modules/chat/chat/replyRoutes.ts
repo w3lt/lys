@@ -39,7 +39,7 @@ export default async function updateFastifyWithChatReplyRoutes(
   generations: ReplyGenerationRegistry
 ): Promise<void> {
   const dependencies = {
-    history: app.conversationService.createHistoryAccess(),
+    history: app.conversationService.createHistoryReader(),
     generations
   }
   app.route<ChatReplyEventsApiRoute>({

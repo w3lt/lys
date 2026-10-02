@@ -17,7 +17,7 @@ import { createFixtureUuidV7 } from "../../../support/conversationFixtures"
 const CONVERSATION_ID = createFixtureUuidV7(1)
 
 /**
- * Reads metadata inside a read snapshot, as history access does.
+ * Reads metadata inside a read snapshot, as the history reader does.
  *
  * @param database - Migrated test database.
  * @param conversationId - Conversation to read.
@@ -30,7 +30,7 @@ function getStoredMetadata(database: SqliteDatabase, conversationId: string) {
 }
 
 /**
- * Reads a conversation inside a read snapshot, as history access does.
+ * Reads a conversation inside a read snapshot, as the history reader does.
  *
  * @param database - Migrated test database.
  * @param conversationId - Conversation to read.

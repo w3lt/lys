@@ -38,7 +38,7 @@ function createCommittedTurn(
 }
 
 /**
- * Reads a conversation inside a read snapshot, as history access does.
+ * Reads a conversation inside a read snapshot, as the history reader does.
  *
  * @param database - Migrated test database.
  * @param conversationId - Conversation to read.
@@ -258,7 +258,7 @@ describe("createConversationTurn", () => {
   it("rejects an absent conversation without appending messages", () => {
     const database = openConversationTestDatabase()
 
-    const messageCount = database.handleDatabaseReadRequest((statements) => {
+    const messageCount = database.handleDatabaseWriteRequest((statements) => {
       expect(() =>
         createConversationTurn(
           statements,
@@ -286,7 +286,7 @@ describe("createConversationTurn", () => {
     const database = openConversationTestDatabase()
     saveExistingConversation(database)
 
-    const messages = database.handleDatabaseReadRequest((statements) => {
+    const messages = database.handleDatabaseWriteRequest((statements) => {
       expect(() =>
         createConversationTurn(
           statements,

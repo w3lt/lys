@@ -270,7 +270,8 @@ describe("createSingletonServices", () => {
       config,
       createFailureReporters()
     )
-    const history = services.conversationService.createHistoryAccess()
+    onTestFinished(async () => await closeSingletonServices(services))
+    const history = services.conversationService.createHistoryReader()
     const turn = services.conversationService
       .createTurnAccess()
       .createConversationTurn({

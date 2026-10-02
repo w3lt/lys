@@ -70,7 +70,7 @@ function saveListedConversation(
 }
 
 /**
- * Lists conversations inside a read snapshot, as history access does.
+ * Lists conversations inside a read snapshot, as the history reader does.
  *
  * @param database - Migrated test database.
  * @param options - Validated query and pagination.

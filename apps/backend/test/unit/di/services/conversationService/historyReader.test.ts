@@ -1,7 +1,6 @@
-import { MAXIMUM_CONVERSATION_TITLE_LENGTH } from "@lys/protocol"
 import { describe, expect, it } from "vitest"
 import * as z from "zod"
-import SqliteConversationHistory from "../../../../../src/di/services/conversationService/history"
+import SqliteConversationHistoryReader from "../../../../../src/di/services/conversationService/historyReader"
 import { parseConversationListOptions } from "../../../../../src/di/services/conversationService/utils"
 import {
   openConversationTestDatabase,
@@ -13,8 +12,8 @@ import { createFixtureUuidV7 } from "../../../support/conversationFixtures"
 /**
  * Opens an isolated in-memory store with one committed turn.
  *
- * @returns The test-owned database, its access objects, and the committed
- * turn.
+ * @returns The test-owned database, turn access, history reader, and the
+ * committed turn.
  */
 function openStoreWithTurn() {
   const { database, store } = openConversationTestStore()
@@ -24,13 +23,13 @@ function openStoreWithTurn() {
     model: "qwen/qwen3-8b",
     systemPrompt: "You are Lys."
   })
-  return { database, turns, history: store.createHistoryAccess(), turn }
+  return { database, turns, history: store.createHistoryReader(), turn }
 }
 
 /**
- * Creates history access over a test database holding one invalid row.
+ * Creates a history reader over a test database holding one invalid row.
  *
- * @returns The access object, its database, and the invalid conversation id.
+ * @returns The reader, its database, and the invalid conversation id.
  */
 function createHistoryOverInvalidRow() {
   const database = openConversationTestDatabase()
@@ -44,11 +43,11 @@ function createHistoryOverInvalidRow() {
   return {
     database,
     conversationId,
-    history: new SqliteConversationHistory(database, database)
+    history: new SqliteConversationHistoryReader(database)
   }
 }
 
-describe("SqliteConversationHistory", () => {
+describe("SqliteConversationHistoryReader", () => {
   describe("getConversation", () => {
     it("reads the committed conversation and transcript", () => {
       const { history, turn } = openStoreWithTurn()
@@ -127,98 +126,12 @@ describe("SqliteConversationHistory", () => {
     })
   })
 
-  describe("updateConversationTitle", () => {
-    it("stores the trimmed title and returns metadata with unchanged activity time", () => {
-      const { history, turn } = openStoreWithTurn()
-      const before = history.getConversation(turn.conversation.id)
-
-      const metadata = history.updateConversationTitle(
-        turn.conversation.id,
-        "  Greeting  "
-      )
-
-      expect(metadata).toEqual({
-        id: turn.conversation.id,
-        title: "Greeting",
-        systemPrompt: "You are Lys.",
-        createdAt: before?.createdAt,
-        updatedAt: before?.updatedAt
-      })
-      expect(history.getConversation(turn.conversation.id)).toMatchObject({
-        title: "Greeting",
-        updatedAt: before?.updatedAt,
-        messages: before?.messages
-      })
-    })
-
-    it("accepts a title at the maximum published length", () => {
-      const { history, turn } = openStoreWithTurn()
-      const title = "t".repeat(MAXIMUM_CONVERSATION_TITLE_LENGTH)
-
-      expect(
-        history.updateConversationTitle(turn.conversation.id, title)?.title
-      ).toBe(title)
-    })
-
-    it("returns undefined for an absent conversation", () => {
-      const { history } = openStoreWithTurn()
-
-      expect(
-        history.updateConversationTitle(createFixtureUuidV7(9), "Greeting")
-      ).toBeUndefined()
-    })
-
-    it.each([
-      ["a blank title", "   "],
-      [
-        "a title longer than the published maximum",
-        "t".repeat(MAXIMUM_CONVERSATION_TITLE_LENGTH + 1)
-      ]
-    ])("rejects %s without changing the stored title", (_label, title) => {
-      const { history, turn } = openStoreWithTurn()
-      history.updateConversationTitle(turn.conversation.id, "Kept")
-
-      expect(() =>
-        history.updateConversationTitle(turn.conversation.id, title)
-      ).toThrow(z.ZodError)
-
-      expect(history.getConversation(turn.conversation.id)?.title).toBe("Kept")
-    })
-  })
-
-  describe("deleteConversation", () => {
-    it("removes the conversation and reports whether it existed", () => {
-      const { history, turn } = openStoreWithTurn()
-
-      expect(history.deleteConversation(turn.conversation.id)).toBe(true)
-      expect(history.deleteConversation(turn.conversation.id)).toBe(false)
-
-      expect(history.getConversation(turn.conversation.id)).toBeUndefined()
-      expect(
-        history.listConversations(parseConversationListOptions()).storedCount
-      ).toBe(0)
-    })
-
-    it("removes the transcript with the conversation", () => {
-      const { history, turns, turn } = openStoreWithTurn()
-
-      history.deleteConversation(turn.conversation.id)
-
-      expect(
-        turns.updateAssistantMessageContent(turn.assistantMessage.id, "late")
-      ).toBe(false)
-    })
-  })
-
   it("rejects every operation after the database closes", () => {
     const { database, history, turn } = openStoreWithTurn()
     expect(history.getConversation(turn.conversation.id)).toBeDefined()
     expect(
       history.listConversations(parseConversationListOptions()).storedCount
     ).toBe(1)
-    expect(
-      history.updateConversationTitle(turn.conversation.id, "Title")
-    ).toBeDefined()
 
     database[Symbol.dispose]()
 
@@ -228,11 +141,5 @@ describe("SqliteConversationHistory", () => {
     expect(() =>
       history.listConversations(parseConversationListOptions())
     ).toThrow("Database is closed")
-    expect(() =>
-      history.updateConversationTitle(turn.conversation.id, "Title")
-    ).toThrow("Database is closed")
-    expect(() => history.deleteConversation(turn.conversation.id)).toThrow(
-      "Database is closed"
-    )
   })
 })

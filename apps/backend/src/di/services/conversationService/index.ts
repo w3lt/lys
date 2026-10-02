@@ -4,12 +4,13 @@ import type {
   DatabaseWriter
 } from "../../../infrastructure/database/databaseTransactions"
 import { calculateConversationSearchMatch } from "./listConversations"
-import SqliteConversationHistory from "./history"
+import SqliteConversationHistoryEditor from "./historyEditor"
+import SqliteConversationHistoryReader from "./historyReader"
 import SqliteConversationTurns from "./turns"
 
 /** Shared-database capabilities the conversation store borrows. */
 export type ConversationStoreDependencies = Readonly<{
-  /** Read snapshots for history queries and turn-statement compilation. */
+  /** Read snapshots for history queries. */
   databaseReader: DatabaseReader
   /** Write transactions for turns, edits, deletion, and startup recovery. */
   databaseWriter: DatabaseWriter
@@ -18,8 +19,8 @@ export type ConversationStoreDependencies = Readonly<{
 }>
 
 /**
- * Provides conversation history and turn access over the shared backend
- * database.
+ * Provides conversation history reading, history editing, and turn access over
+ * the shared backend database.
  *
  * @remarks Invariant: once created, `contains_search` is registered and no
  * reply left by an earlier process is still marked streaming. Owns no
@@ -29,9 +30,9 @@ export type ConversationStoreDependencies = Readonly<{
  * backend's event loop.
  */
 export default class SqliteConversationStore {
-  /** Borrowed read snapshots handed to history and turn access. */
+  /** Borrowed read snapshots handed to history readers. */
   readonly #databaseReader: DatabaseReader
-  /** Borrowed write transactions handed to history and turn access. */
+  /** Borrowed write transactions handed to history editors and turn access. */
   readonly #databaseWriter: DatabaseWriter
 
   /**
@@ -78,27 +79,29 @@ export default class SqliteConversationStore {
   }
 
   /**
-   * Creates history access over the shared database.
+   * Creates read access to conversation history over the shared database.
    * @returns An adapter whose operations fail with `Database is closed` after
-   * the database closes; it cannot close the database.
+   * the database closes; it can neither change nor close the database.
    */
-  public createHistoryAccess(): SqliteConversationHistory {
-    return new SqliteConversationHistory(
-      this.#databaseReader,
-      this.#databaseWriter
-    )
+  public createHistoryReader(): SqliteConversationHistoryReader {
+    return new SqliteConversationHistoryReader(this.#databaseReader)
   }
 
   /**
-   * Creates turn persistence access, compiling its per-delta statement once.
+   * Creates edit access to conversation history over the shared database.
    * @returns An adapter whose operations fail with `Database is closed` after
    * the database closes; it cannot close the database.
-   * @throws `Database is closed`, or a failure to compile the delta statement.
+   */
+  public createHistoryEditor(): SqliteConversationHistoryEditor {
+    return new SqliteConversationHistoryEditor(this.#databaseWriter)
+  }
+
+  /**
+   * Creates turn persistence access over the shared database.
+   * @returns An adapter whose operations fail with `Database is closed` after
+   * the database closes; it cannot close the database.
    */
   public createTurnAccess(): SqliteConversationTurns {
-    return SqliteConversationTurns.create(
-      this.#databaseReader,
-      this.#databaseWriter
-    )
+    return new SqliteConversationTurns(this.#databaseWriter)
   }
 }

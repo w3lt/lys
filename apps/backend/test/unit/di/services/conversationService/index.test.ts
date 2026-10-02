@@ -68,7 +68,7 @@ function createStore(database: SqliteDatabase): SqliteConversationStore {
 }
 
 describe("SqliteConversationStore", () => {
-  it("creates turn and history access that share one database", () => {
+  it("creates turn access and a history reader that share one database", () => {
     const { store } = openConversationTestStore()
 
     const turn = store.createTurnAccess().createConversationTurn({
@@ -78,7 +78,7 @@ describe("SqliteConversationStore", () => {
     })
 
     expect(
-      store.createHistoryAccess().getConversation(turn.conversation.id)
+      store.createHistoryReader().getConversation(turn.conversation.id)
     ).toMatchObject({ id: turn.conversation.id, systemPrompt: "You are Lys." })
   })
 
@@ -94,7 +94,7 @@ describe("SqliteConversationStore", () => {
 
     expect(
       second
-        .createHistoryAccess()
+        .createHistoryReader()
         .listConversations(parseConversationListOptions()).storedCount
     ).toBe(0)
   })
@@ -109,7 +109,7 @@ describe("SqliteConversationStore", () => {
 
     expect(
       store
-        .createHistoryAccess()
+        .createHistoryReader()
         .listConversations(parseConversationListOptions({ query: "trip" }))
         .matchCount
     ).toBe(1)
@@ -132,7 +132,7 @@ describe("SqliteConversationStore", () => {
       const store = createStore(database)
 
       expect(
-        store.createHistoryAccess().getConversation(CONVERSATION_ID)
+        store.createHistoryReader().getConversation(CONVERSATION_ID)
       ).toMatchObject({
         updatedAt: "2025-01-01T00:00:02.000Z",
         messages: [
@@ -158,7 +158,7 @@ describe("SqliteConversationStore", () => {
       const store = createStore(database)
 
       expect(
-        store.createHistoryAccess().getConversation(CONVERSATION_ID)
+        store.createHistoryReader().getConversation(CONVERSATION_ID)
           ?.messages[1]
       ).toMatchObject({
         status: reply.status,
@@ -176,7 +176,8 @@ describe("SqliteConversationStore", () => {
 
   it("fails every access operation with Database is closed after the database closes", () => {
     const { database, store } = openConversationTestStore()
-    const history = store.createHistoryAccess()
+    const history = store.createHistoryReader()
+    const editor = store.createHistoryEditor()
     const turns = store.createTurnAccess()
 
     database[Symbol.dispose]()
@@ -184,6 +185,9 @@ describe("SqliteConversationStore", () => {
     expect(() =>
       history.listConversations(parseConversationListOptions())
     ).toThrow("Database is closed")
+    expect(() => editor.deleteConversation(CONVERSATION_ID)).toThrow(
+      "Database is closed"
+    )
     expect(() =>
       turns.createConversationTurn({
         userMessageContent: "Hello",
@@ -191,6 +195,16 @@ describe("SqliteConversationStore", () => {
         systemPrompt: "You are Lys."
       })
     ).toThrow("Database is closed")
-    expect(() => store.createTurnAccess()).toThrow("Database is closed")
+  })
+
+  it("creates access after the database closes whose operations fail with Database is closed", () => {
+    const { database, store } = openConversationTestStore()
+
+    database[Symbol.dispose]()
+
+    const lateTurns = store.createTurnAccess()
+    expect(() =>
+      lateTurns.updateAssistantMessageContent(createFixtureUuidV7(9), "Hi")
+    ).toThrow("Database is closed")
   })
 })

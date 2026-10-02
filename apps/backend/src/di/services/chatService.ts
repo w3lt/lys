@@ -178,9 +178,11 @@ export default class ChatService {
    *
    * @remarks Makes one chat completion call with the configured title prompt
    * and a response format that asks the endpoint to constrain the reply to the
-   * title JSON schema, including its length limit. The reply is still parsed
+   * title JSON schema, including its length limit. The reply's choice whose
+   * `index` is 0 is used; other choices are ignored. The reply is still parsed
    * and validated because that enforcement depends on the endpoint; JSON
-   * wrapped in one Markdown code fence is accepted. The service adds no retries
+   * wrapped in one Markdown code fence that is untagged or tagged `json`, in
+   * any letter case, is accepted. The service adds no retries
    * of its own. The OpenAI SDK can send the request up to three times when it
    * retries a connection failure, timeout, or 408, 409, 429, or 5xx response.
    * @param options - Message, model, and optional cancellation signal for the request.

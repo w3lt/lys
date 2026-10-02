@@ -82,12 +82,15 @@ type GeneratedTitle = Extract<TitleGenerationResult, { status: "generated" }>
  * unsuccessful outcomes leave this task's candidate unsaved; a turn that
  * starts after this task settles retries if the conversation is still
  * untitled. Stopping the reply does not cancel this task; only backend
- * shutdown does. Outcomes are logged with
- * `titleGenerationOutcome` and `titleGenerationAttempts` fields: exhausted
- * attempts or a failure that is not retried at warn level, a shutdown
- * cancellation at debug level, and a persistence failure at error level. A
- * title left unsaved because the conversation was renamed or deleted is logged
- * at debug level. The task never sends an `error` event.
+ * shutdown does. Retries and unsuccessful outcomes are logged with
+ * `titleGenerationOutcome` and `titleGenerationAttempts` fields, plus `err`
+ * for the failure or abort reason behind them: `retrying` at debug level
+ * before each further request; `title-not-generated` at warn level after
+ * exhausted attempts or a failure that is not retried; `abandoned` at debug
+ * level after a shutdown cancellation; `already-titled` at debug level,
+ * without `err`, when the conversation was renamed or deleted first; and
+ * `title-not-saved` at error level after a persistence failure. The task
+ * never sends an `error` event.
  *
  * @param options - Title generator, prompt input, attempt limit, cancellation
  * signal, event sender, logger, and title persistence callback.
@@ -134,8 +137,7 @@ export default async function createTitleGenerationTask(
  * @remarks Only {@link TitleGenerationOutputError} consumes another attempt.
  * HTTP, connection, and cancellation failures end generation at once; within
  * the failed attempt, the OpenAI SDK has already retried connection failures,
- * timeouts, and 408, 409, 429, and 5xx responses. Each retried reply is logged
- * at debug level.
+ * timeouts, and 408, 409, 429, and 5xx responses.
  * @param options - Title generator, prompt input, signal, logger, and attempt limit.
  * @returns A promise that resolves to the generation result; it does not reject.
  */
@@ -212,8 +214,8 @@ function handleGeneratedTitle(
  * @param options - Logger and persistence callback.
  * @param generatedTitle - Usable title and the requests made to generate it.
  * @returns The saved title, or undefined when the conversation was renamed or
- * deleted first (logged at debug level) or the write failed (logged at error
- * level).
+ * deleted first or the write failed, each logged as
+ * {@link createTitleGenerationTask} describes.
  */
 function saveGeneratedTitle(
   {

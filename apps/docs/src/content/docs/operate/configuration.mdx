@@ -69,6 +69,12 @@ The desktop store also derives its backend base URL from those same protocol
 constants. The persisted `runtime.backendAddress` is used in status copy;
 editing it does not redirect HTTP requests or change the backend listener.
 
+The backend validates these addresses with the rest of its configuration when
+it starts. It listens only on an IPv4 loopback address, and an out-of-range
+port or another invalid setting stops startup. See
+[Backend configuration validation](/reference/configuration/#backend-configuration-validation)
+for every rule.
+
 ## Theme preference
 
 The desktop stores `dark` or `light` under the `lys.theme` key in WebView

@@ -47,8 +47,10 @@ contracts, schemas, or behavior that crosses package boundaries.
 
 ## Current test shape
 
-- `apps/backend` has no test script or tracked automated test suite. Its
-  package manifest currently exposes only the `dev` and `build` scripts.
+- `apps/backend/test/unit` contains a Vitest unit suite. Run it with
+  `pnpm --filter @lys/backend exec vitest run`. It needs no LM Studio server,
+  network access, or `LYS_HOME`. The package manifest exposes only the `dev`
+  and `build` scripts, so the backend has no `test` script yet.
 - `apps/desktop` has a `vitest run` script, but no desktop test files are
   currently tracked.
 - The shared packages have no package-level test scripts or tracked test suites.
@@ -59,7 +61,10 @@ contracts, schemas, or behavior that crosses package boundaries.
 
 ## Coming soon
 
-Backend, desktop, and shared-package automated test coverage is currently
+Backend coverage is unit-level only: the backend integration and end-to-end
+suites are tracked in [issue #44](https://github.com/w3lt/lys/issues/44) and
+[issue #45](https://github.com/w3lt/lys/issues/45), and no CI workflow runs the
+unit suite yet. Desktop and shared-package automated test coverage is currently
 absent. A command that exits successfully without executing tests does not
 establish coverage. If you are changing behavior, be explicit in your handoff
 about which paths you verified and which still lack dedicated automation.

@@ -71,7 +71,9 @@ function validateLlmTestModelParams(data: unknown) {
  * @throws If admission is refused, no LLM runtime is connected, or an
  * unexpected application failure occurs. The route boundary translates only
  * the recognized service-busy and runtime-unavailable failures.
- * @remarks Internal runtime diagnostics are logged and excluded from the body.
+ * @remarks Internal runtime diagnostics are excluded from the body. Each
+ * retained runtime failure is logged at error level with the failure as `err`
+ * and the canonical model key as `modelKey`.
  */
 async function handleLlmTestModelRequest(
   request: FastifyRequest<LlmTestModelApiRoute>,

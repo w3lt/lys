@@ -42,12 +42,19 @@ export type CreateChatTaskOptions = Readonly<{
  * @param options - Borrowed dependencies and turn-scoped persistence authority.
  * @returns Settlement after completion, cancellation, supersession, deletion,
  * or a reported failure.
- * @throws If persistence fails; the generation reports that rejection.
+ * @throws An `AggregateError` holding the failure that ended the reply
+ * followed by the persistence failure, when the failed or interrupted state
+ * cannot be stored after that failure; the generation reports that rejection.
+ * A delta, completion, or interrupted-state write that throws before that
+ * point is itself handled as the failure that ended the reply.
  * @remarks When the task settles without throwing it has sent exactly one
  * final event: `done` after a stored completion; `interrupted` after
  * cancellation, or when a newer turn or a deletion ended the reply; `error`
  * after an upstream failure. Partial text stays stored. Interrupted replies
- * stay in later context; failed replies do not.
+ * stay in later context; failed replies do not. Only the choice with index 0
+ * is used; a chunk without it is skipped. Each failure is logged with the
+ * failure as `err`: at debug level when the generation was cancelled or the
+ * upstream reports a cancellation, and at error level otherwise.
  */
 export default async function createChatTask(
   options: CreateChatTaskOptions
@@ -78,12 +85,12 @@ export default async function createChatTask(
  *
  * @param options - Turn-scoped persistence, logger, cancellation, and sender.
  * @param error - Failure raised while streaming the reply.
- * @throws An `AggregateError` holding both failures when the terminal state
- * cannot be stored.
+ * @throws An `AggregateError` holding `error` followed by the persistence
+ * failure when the terminal state cannot be stored.
  * @remarks The upstream reports a cancelled stream even when the task has not
- * yet observed its own abort, so both mean an interrupted reply, logged at
- * debug level. Any other failure is logged at error level, stores `failed`,
- * and sends an `error` event.
+ * yet observed its own abort, so both mean an interrupted reply. Any other
+ * failure stores `failed` and sends an `error` event. Both are logged as
+ * {@link createChatTask} describes.
  */
 function handleChatCompletionFailure(
   options: CreateChatTaskOptions,

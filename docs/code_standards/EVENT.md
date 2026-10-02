@@ -43,7 +43,7 @@ Each active standard retains its exact triggers and permitted cases. Event rules
 | Contract placement, dependency direction, publication, and consumer compatibility                | [Module and File](./MODULE.md) and [Package and Dependency](./PACKAGE.md)                                      |
 | Documentation and change workflow                                                                | [JSDoc Standard](../JSDOC.md) and [Contributing to Lys](../../CONTRIBUTING.md)                                 |
 
-The words publish, emit, send, dispatch, subscribe, and acknowledge describe concepts in this chapter; they do not add repository-designed function verbs to `FUNC-003`. Callback props retain `COMP-036`, named types retain the Type standard, and externally imposed names retain their existing exception. This chapter does not amend that naming vocabulary.
+The words publish, emit, dispatch, subscribe, and acknowledge describe concepts in this chapter; they do not add repository-designed function verbs to `FUNC-003`. The `send` and `offer` verbs keep the exact operations `FUNC-003` defines for them. Callback props retain `COMP-036`, named types retain the Type standard, and externally imposed names retain their existing exception. This chapter does not amend that naming vocabulary.
 
 ## Construction process
 

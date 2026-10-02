@@ -63,8 +63,10 @@ function updateSupersededAssistantMessages(
 /**
  * Inserts a validated user/assistant pair inside the caller-owned transaction.
  * @param database - Borrowed connection with an active write transaction.
- * @param options - Conversation selection and authored content.
- * @param systemPrompt - Default instruction used only for a new conversation.
+ * @param options - Conversation selection and authored content. Its
+ * `systemPrompt` is not read; the `systemPrompt` argument is the prompt stored.
+ * @param systemPrompt - Instruction persisted only with a conversation this turn
+ * creates; an existing conversation keeps its stored prompt.
  * @returns The conversation snapshot and both committed-to-transaction messages.
  * @throws If the conversation is missing, validation fails, or SQLite rejects a write.
  * @remarks A reply still streaming in an existing conversation becomes

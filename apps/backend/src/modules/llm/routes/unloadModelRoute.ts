@@ -61,7 +61,11 @@ export default async function updateFastifyWithLlmModelUnloadRoute(
  * application cleanup has begun. The route boundary translates only the
  * recognized service-busy and runtime-unavailable failures.
  * @remarks Runtime diagnostics and reconciled failures are written to the
- * request logger before their HTTP outcome is sent.
+ * request logger before their HTTP outcome is sent: a stopped outcome with
+ * diagnostics is logged at warn level, and runtime-unavailable and stop-failed
+ * outcomes at error level. Each record carries the canonical model key as
+ * `modelKey` and the outcome's `diagnostics`; a stop-failed record also
+ * carries `remainingModelIdentifiers`.
  */
 async function handleLlmModelUnloadRequest(
   request: FastifyRequest<LlmUnloadModelApiRoute>,

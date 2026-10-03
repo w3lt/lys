@@ -2,8 +2,8 @@ import {
   agentDefinitionSchema,
   agentUpdateSchema,
   type Agent,
-  type AgentDefinition,
-  type AgentUpdate
+  type AgentDefinitionCandidate,
+  type AgentUpdateCandidate
 } from "../../../modules/agent/agent"
 import type { AgentRecordStore } from "./records"
 
@@ -39,7 +39,7 @@ export default class StoredAgents {
    * @throws If validation fails, before any storage work, or the store is
    * closed or the write fails; nothing is then stored.
    */
-  public createAgent(definition: AgentDefinition): Agent | undefined {
+  public createAgent(definition: AgentDefinitionCandidate): Agent | undefined {
     const parsedDefinition = agentDefinitionSchema.parse(definition)
     const now = new Date().toISOString()
     const agent = Object.freeze({
@@ -55,8 +55,7 @@ export default class StoredAgents {
 
   /**
    * Reads one stored agent.
-   * @param code - Code to look up as given; a code that fails the agent code
-   * format is simply not stored.
+   * @param code - Code to look up as given, compared exactly.
    * @returns The stored agent, or undefined when no agent has the code.
    * @throws If the store is closed or the stored agent is invalid.
    */
@@ -73,7 +72,7 @@ export default class StoredAgents {
    * closed, the write fails, or the changed agent is invalid; the agent is then
    * unchanged.
    */
-  public updateAgent(update: AgentUpdate): Agent | undefined {
+  public updateAgent(update: AgentUpdateCandidate): Agent | undefined {
     const parsedUpdate = agentUpdateSchema.parse(update)
     return this.#recordStore.updateAgent(parsedUpdate, new Date().toISOString())
   }

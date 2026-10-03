@@ -30,13 +30,16 @@ function saveAgentRow(
 describe("SqliteAgentRecordStore", () => {
   registerAgentRecordStoreContractSuite(() => openSqliteAgentRecordStore())
 
-  it("rejects a stored row that violates the agent contract", () => {
+  it("rejects a stored row that violates the agent contract and stays usable", () => {
     const records = openSqliteAgentRecordStore()
     saveAgentRow(records.database, "Not A Slug", "2026-01-02T03:04:05.678Z")
+    saveAgentRow(records.database, "lys", "2026-01-02T03:04:05.678Z")
 
     expect(() => records.recordStore.findAgent("Not A Slug")).toThrow(
       z.ZodError
     )
+
+    expect(records.recordStore.findAgent("lys")).toMatchObject({ name: "Lys" })
   })
 
   it("rolls an update back when the updated row violates the agent contract", () => {

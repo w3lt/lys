@@ -58,11 +58,14 @@ export function registerAgentRecordStoreContractSuite(
         expect(recordStore.findAgent("lys")).toBeUndefined()
       })
 
-      it("returns the stored agent exactly as created", () => {
+      it("returns the stored agent exactly as created, frozen", () => {
         const { recordStore } = createHarness()
         recordStore.createAgent(LYS)
 
-        expect(recordStore.findAgent("lys")).toEqual(LYS)
+        const found = recordStore.findAgent("lys")
+
+        expect(found).toEqual(LYS)
+        expect(Object.isFrozen(found)).toBe(true)
       })
     })
 
@@ -97,16 +100,16 @@ export function registerAgentRecordStoreContractSuite(
       it("replaces only the given field and stores the change time", () => {
         const { recordStore } = createHarness()
         recordStore.createAgent(LYS)
-        const updated = { ...LYS, bio: "Archivist.", updatedAt: CHANGED_AT }
+        const expected = { ...LYS, bio: "Archivist.", updatedAt: CHANGED_AT }
 
-        expect(
-          recordStore.updateAgent(
-            { code: "lys", bio: "Archivist." },
-            CHANGED_AT
-          )
-        ).toEqual(updated)
+        const updated = recordStore.updateAgent(
+          { code: "lys", bio: "Archivist." },
+          CHANGED_AT
+        )
 
-        expect(recordStore.findAgent("lys")).toEqual(updated)
+        expect(updated).toEqual(expected)
+        expect(Object.isFrozen(updated)).toBe(true)
+        expect(recordStore.findAgent("lys")).toEqual(expected)
       })
 
       it("replaces every field given together", () => {

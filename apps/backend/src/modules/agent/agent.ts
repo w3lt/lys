@@ -87,8 +87,11 @@ export const agentDefinitionSchema = z
   })
   .readonly()
 
-/** Validated definition of a new agent, without its stored times. */
-export type AgentDefinition = z.infer<typeof agentDefinitionSchema>
+/**
+ * Candidate definition of a new agent, before {@link agentDefinitionSchema}
+ * validates and trims it.
+ */
+export type AgentDefinitionCandidate = z.input<typeof agentDefinitionSchema>
 
 /**
  * Validates a stored agent: its definition with the times it was created and
@@ -136,6 +139,12 @@ export const agentUpdateSchema = z
     { message: "An agent update must change at least one field." }
   )
   .readonly()
+
+/**
+ * Candidate change to one stored agent, before {@link agentUpdateSchema}
+ * validates and trims it.
+ */
+export type AgentUpdateCandidate = z.input<typeof agentUpdateSchema>
 
 /**
  * Validated change to one stored agent. Applying the same change again stores

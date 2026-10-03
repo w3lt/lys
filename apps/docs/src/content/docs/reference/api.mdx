@@ -41,6 +41,11 @@ List, load, health, and unload requests answer `503` with
 LM Studio runtime. The runtime-status route never contacts LM Studio; the
 runtime-connect route waits for one shared connection attempt.
 
+Every request body is limited to 1 MiB (1,048,576 bytes), Fastify's default.
+A larger body is refused with `413 Payload Too Large` before the route runs, so
+nothing is stored or changed. The response is Fastify's JSON error body, with
+`code` `FST_ERR_CTP_BODY_TOO_LARGE`, not Problem Details.
+
 ## Chat request body
 
 ```json
@@ -163,8 +168,9 @@ agent's identity and never changes: a lowercase slug of 1–64 characters made o
 `a`–`z` and `0`–`9` in hyphen-separated groups, compared exactly. A malformed
 code in a path returns `400` before any lookup. Request bodies reject unknown
 fields; the name is trimmed to 1–64 UTF-16 code units, the bio to 1–128, and the
-system prompt must not be blank after trimming. Invalid bodies return `400` and
-change nothing.
+system prompt must not be blank after trimming. The system prompt has no length
+limit of its own; only the 1 MiB request body limit above bounds it. Invalid
+bodies return `400` and change nothing.
 
 List responses have exactly `agents`, `storedCount`, and `nextCursor`. Each
 summary contains `code`, `name`, `bio`, `createdAt`, and `updatedAt`; it does

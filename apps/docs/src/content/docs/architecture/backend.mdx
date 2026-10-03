@@ -12,23 +12,25 @@ application.
 
 ## Current backend shape
 
-| Layer               | Implementation                 | Responsibility                                                                                                                   |
-| ------------------- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
-| App bootstrap       | `src/app.ts`                   | Registers CORS, SSE support, singleton services, and all routes.                                                                 |
-| Runtime config      | `src/config.ts`                | Loads loopback host and port values, the SQLite path under `LYS_HOME`, the system and title prompts, and title limits.           |
-| Singleton services  | `src/di/singleton.ts`          | Opens the shared database and creates the chat service, conversation adapters, and LLM services without contacting LM Studio.    |
-| Database            | `src/infrastructure/database`  | Owns the shared SQLite connection and its migrations, and holds the contracts through which stores borrow its transactions.      |
-| Chat routes         | `src/modules/chat`             | Accepts chat requests, persists turn data, streams SSE responses, and updates conversation titles.                               |
-| Conversation routes | `src/modules/conversation`     | Lists, searches, retrieves, renames, and deletes stored conversations.                                                           |
-| LLM routes          | `src/modules/llm/routes`       | Lists LM Studio models, checks loaded-model health, loads or unloads a model, and reports or refreshes the LM Studio connection. |
-| Health route        | `src/modules/health/routes.ts` | Returns a simple `{ ok: true }` response.                                                                                        |
+| Layer                 | Implementation                        | Responsibility                                                                                                                                                                 |
+| --------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| App bootstrap         | `src/app.ts`                          | Registers CORS, SSE support, singleton services, and all routes.                                                                                                               |
+| Runtime config        | `src/config.ts`                       | Loads loopback host and port values, the SQLite path under `LYS_HOME`, the system and title prompts, and title limits.                                                         |
+| Singleton services    | `src/di/singleton.ts`                 | Opens the shared database and creates the chat service, conversation services over Sqlite records, and LLM services without contacting LM Studio.                              |
+| Conversation services | `src/di/services/conversationService` | Keep the conversation decisions (identities, timestamps, validation, superseding, cursors) over records declared in `records.ts`; contain no SQL.                              |
+| Database              | `src/infrastructure/database`         | Owns the shared SQLite connection and its migrations, holds the contracts through which stores borrow its transactions, and in `conversations/` runs every conversation query. |
+| Chat routes           | `src/modules/chat`                    | Accepts chat requests, persists turn data, streams SSE responses, and updates conversation titles.                                                                             |
+| Conversation routes   | `src/modules/conversation`            | Lists, searches, retrieves, renames, and deletes stored conversations.                                                                                                         |
+| LLM routes            | `src/modules/llm/routes`              | Lists LM Studio models, checks loaded-model health, loads or unloads a model, and reports or refreshes the LM Studio connection.                                               |
+| Health route          | `src/modules/health/routes.ts`        | Returns a simple `{ ok: true }` response.                                                                                                                                      |
 
 ## Chat request flow
 
 1. `POST /api/v1/chat` validates the request body with the shared Zod schema.
-2. `SqliteConversationTurns` creates or loads the conversation, interrupts a
-   reply still streaming in it, and atomically inserts the user message and
-   empty streaming assistant message.
+2. `StoredConversationTurns` creates or loads the conversation, interrupts a
+   reply still streaming in it, and stores the user message and empty
+   streaming assistant message, all in one write transaction of the Sqlite
+   turn records.
 3. The route immediately emits either `start-new-conversation-turn` or
    `start-existing-conversation-turn`.
 4. For an existing conversation with a stored title, the route emits that title
@@ -105,8 +107,10 @@ The backend's database owner, `SqliteDatabase` in `src/infrastructure/database/`
 opens the file once, applies the schema from `migrations.ts` using
 `PRAGMA user_version`, and is the only owner that closes it. Stores borrow read
 and write transactions that expose neither connection closing nor transaction
-control; the history-reading, history-editing, and turn adapters are built on
-them, and each is its own application service. Version 4 preserves activity
+control; the Sqlite conversation records in `conversations/` are built on them
+and hold every conversation query. The history-reading, history-editing, and
+turn services wrap those records, and each is its own application service.
+Version 4 preserves activity
 timestamps on rename, version 5 preserves them on status-only message updates,
 and turn persistence's startup recovers streaming assistants without reordering
 history.

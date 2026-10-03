@@ -1116,7 +1116,7 @@ export function createChatViewStore(
      * @throws The side reading's failure, the signal's abort reason when the
      * request was superseded during the reading, or the stream's failure.
      */
-    async function* streamSubmittedChatRequest(
+    async function* openSubmittedChatStream(
       submittedRequest: SubmittedChatRequest,
       signal: AbortSignal
     ): AsyncGenerator<ChatApiStreamEvent, void, unknown> {
@@ -1173,7 +1173,7 @@ export function createChatViewStore(
       supersededRequest?.abortController.abort()
       await readChatStream(token, {
         openEvents: (signal) =>
-          streamSubmittedChatRequest(submittedRequest, signal),
+          openSubmittedChatStream(submittedRequest, signal),
         handleEvent: async (event) => {
           handleChatStreamEvent(event, token)
           await stopRequestedChatReply(token)

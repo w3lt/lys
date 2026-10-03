@@ -59,9 +59,11 @@ side change while the app was closed or the computer slept also resets the
 theme. An unreadable value, or one with another schema version, is ignored and
 the theme follows the side. The plain `dark`/`light` value that earlier
 versions stored under `lys.theme` is no longer read. A refused storage write
-keeps the choice for the current session only. The document's `dark` class is
-set before the shell's first paint, so a daytime launch does not flash the dark
-theme that `index.html` ships.
+keeps the choice for the current session only. `index.html` ships the `dark`
+class, so the blank window is dark until startup has read the side and loaded
+the settings. The derived theme is applied before the shell's first paint, so
+the shell never appears in the wrong theme; on a daytime launch, the window
+turns light as the shell appears.
 
 ## Chat state split
 

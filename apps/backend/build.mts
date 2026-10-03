@@ -25,8 +25,8 @@ await build({
 // Prompt paths resolve beside the output bundle after bundling.
 for (const filename of [
   "lys.txt",
-  "lys-dark-side.txt",
-  "lys-light-side.txt",
+  "caliginia.txt",
+  "lysiptera.txt",
   "title-generation.txt"
 ]) {
   await copyFile(

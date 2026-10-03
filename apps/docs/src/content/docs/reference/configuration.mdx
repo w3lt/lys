@@ -66,17 +66,17 @@ not find a runtime that `build.sh` installed under another directory.
 
 ## Backend-composed values
 
-| Value                          | Current source                                                                                               |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| Backend listen address         | `BACKEND_HOST` and `BACKEND_PORT`                                                                            |
-| LM Studio HTTP base URL        | `http://${LMSTUDIO_HOST}:${LMSTUDIO_PORT}/v1`                                                                |
-| LM Studio WebSocket base URL   | `ws://${LMSTUDIO_HOST}:${LMSTUDIO_PORT}`                                                                     |
-| SQLite path                    | `$LYS_HOME/lys_db.sqlite`; see [Lys home directory](#lys-home-directory)                                     |
-| Lys system prompt              | `src/utils/prompts/lys.txt`, as `lysSystemPrompt`                                                            |
-| Side tone prompts              | `src/utils/prompts/lys-dark-side.txt` and `lys-light-side.txt`, as `lysPersonalityPrompts.dark` and `.light` |
-| Title-generation prompt        | `src/utils/prompts/title-generation.txt`, as `titleGenerationPrompt`                                         |
-| Title-generation attempt limit | `3`, from `titleGenerationMaxAttempts` in `src/config.ts`; must be a positive integer                        |
-| Generated title length limit   | `100`, from `generatedTitleMaxLength` in `src/config.ts`; must be a positive integer                         |
+| Value                          | Current source                                                                                      |
+| ------------------------------ | --------------------------------------------------------------------------------------------------- |
+| Backend listen address         | `BACKEND_HOST` and `BACKEND_PORT`                                                                   |
+| LM Studio HTTP base URL        | `http://${LMSTUDIO_HOST}:${LMSTUDIO_PORT}/v1`                                                       |
+| LM Studio WebSocket base URL   | `ws://${LMSTUDIO_HOST}:${LMSTUDIO_PORT}`                                                            |
+| SQLite path                    | `$LYS_HOME/lys_db.sqlite`; see [Lys home directory](#lys-home-directory)                            |
+| Lys system prompt              | `src/utils/prompts/lys.txt`, as `lysSystemPrompt`                                                   |
+| Side tone prompts              | `src/utils/prompts/caliginia.txt` and `lysiptera.txt`, as `lysPersonalityPrompts.dark` and `.light` |
+| Title-generation prompt        | `src/utils/prompts/title-generation.txt`, as `titleGenerationPrompt`                                |
+| Title-generation attempt limit | `3`, from `titleGenerationMaxAttempts` in `src/config.ts`; must be a positive integer               |
+| Generated title length limit   | `100`, from `generatedTitleMaxLength` in `src/config.ts`; must be a positive integer                |
 
 `loadBackendConfig()` builds these values once when the backend starts, so a
 changed `LYS_HOME`, prompt file, or limit takes effect after a restart. The

@@ -81,8 +81,8 @@ export const backendConfigSchema = z
      * system prompt of every chat completion answered by that side.
      *
      * @remarks Exactly one entry per side: `dark` is read once from the
-     * maintained `lys-dark-side.txt` prompt file and `light` from
-     * `lys-light-side.txt`, with surrounding whitespace trimmed, when the
+     * maintained `caliginia.txt` prompt file and `light` from
+     * `lysiptera.txt`, with surrounding whitespace trimmed, when the
      * configuration is loaded. The parsed record is frozen.
      */
     lysPersonalityPrompts: z
@@ -145,8 +145,8 @@ export function loadBackendConfig(): BackendConfig {
     databaseFilePath: join(lysHome, "lys_db.sqlite"),
     lysSystemPrompt: readPrompt("lys-system"),
     lysPersonalityPrompts: {
-      dark: readPrompt("lys-dark-side"),
-      light: readPrompt("lys-light-side")
+      dark: readPrompt("caliginia"),
+      light: readPrompt("lysiptera")
     },
     titleGenerationPrompt: readPrompt("title-generation"),
     titleGenerationMaxAttempts: TITLE_GENERATION_MAX_ATTEMPTS,

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs"
 
 /** Identifiers for prompt files maintained by the backend. */
 export type PromptType =
-  "lys-system" | "lys-dark-side" | "lys-light-side" | "title-generation"
+  "lys-system" | "caliginia" | "lysiptera" | "title-generation"
 
 /** Filesystem record associating a prompt identifier with its module-relative path. */
 type PromptProps = {
@@ -19,12 +19,12 @@ const prompts: PromptProps[] = [
     filePath: new URL("./lys.txt", import.meta.url)
   },
   {
-    type: "lys-dark-side",
-    filePath: new URL("./lys-dark-side.txt", import.meta.url)
+    type: "caliginia",
+    filePath: new URL("./caliginia.txt", import.meta.url)
   },
   {
-    type: "lys-light-side",
-    filePath: new URL("./lys-light-side.txt", import.meta.url)
+    type: "lysiptera",
+    filePath: new URL("./lysiptera.txt", import.meta.url)
   },
   {
     type: "title-generation",

@@ -5,8 +5,8 @@ import { readPrompt } from "../../../../src/utils/prompts"
 describe("readPrompt", () => {
   it.each([
     ["lys-system", "lys.txt"],
-    ["lys-dark-side", "lys-dark-side.txt"],
-    ["lys-light-side", "lys-light-side.txt"],
+    ["caliginia", "caliginia.txt"],
+    ["lysiptera", "lysiptera.txt"],
     ["title-generation", "title-generation.txt"]
   ] as const)(
     "reads %s from %s without surrounding whitespace",

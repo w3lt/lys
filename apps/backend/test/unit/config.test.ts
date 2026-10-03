@@ -14,8 +14,8 @@ vi.mock("../../src/utils/prompts", () => ({ readPrompt: vi.fn() }))
 /** Trimmed, non-empty prompt text the substituted reader returns per prompt. */
 const FIXTURE_PROMPTS = Object.freeze({
   "lys-system": "Fixture system prompt",
-  "lys-dark-side": "Fixture dark-side prompt",
-  "lys-light-side": "Fixture light-side prompt",
+  caliginia: "Fixture dark-side prompt",
+  lysiptera: "Fixture light-side prompt",
   "title-generation": "Fixture title prompt"
 } satisfies Record<PromptType, string>)
 

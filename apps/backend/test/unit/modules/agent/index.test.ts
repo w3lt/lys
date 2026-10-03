@@ -34,6 +34,22 @@ const STORED_LYS = Object.freeze({
 })
 
 /**
+ * Encodes a list cursor naming one agent created at {@link NOW}, its JSON
+ * padded with trailing spaces so the cursor has an exact length.
+ *
+ * @param code - Code of the agent the cursor names.
+ * @param length - Length of the cursor text, a multiple of four so that the
+ * base64 is canonical without padding.
+ * @returns A cursor the list endpoint can decode.
+ */
+function createPaddedAgentListCursor(code: string, length: number): string {
+  const json = JSON.stringify({ version: 1, createdAt: NOW, code })
+  return Buffer.from(json.padEnd((length / 4) * 3, " "), "utf8").toString(
+    "base64"
+  )
+}
+
+/**
  * Creates an application with the HTTP transport and the agent routes over
  * the real agent service and an in-memory database owned by the current test.
  *
@@ -124,8 +140,56 @@ describe("updateFastifyWithAgentRoutes", () => {
     })
 
     it.each([
+      ["1", 1],
+      ["50", 50]
+    ])("serves a page of the requested size %s", async (limit, pageSize) => {
+      const { app, agents } = await createAgentRouteApp()
+      for (let index = 0; index < 51; index += 1)
+        agents.createAgent({ ...LYS_DEFINITION, code: `agent-${index}` })
+
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/v1/agents",
+        query: { limit }
+      })
+
+      expect(response.statusCode).toBe(200)
+      expect(response.json().agents).toHaveLength(pageSize)
+      expect(response.json()).toMatchObject({
+        storedCount: 51,
+        nextCursor: expect.any(String)
+      })
+    })
+
+    it("continues after a cursor of the maximum length", async () => {
+      const { app, agents } = await createAgentRouteApp()
+      agents.createAgent({ ...LYS_DEFINITION, code: "a" })
+      agents.createAgent({ ...LYS_DEFINITION, code: "b" })
+      const cursor = createPaddedAgentListCursor("a", 2048)
+
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/v1/agents",
+        query: { cursor }
+      })
+
+      expect(cursor).toHaveLength(2048)
+      expect(response.statusCode).toBe(200)
+      expect(response.json()).toMatchObject({
+        agents: [{ code: "b" }],
+        nextCursor: null
+      })
+    })
+
+    it.each([
       ["a zero page size", { limit: "0" }],
       ["a page size above the maximum", { limit: "51" }],
+      ["a fractional page size", { limit: "1.5" }],
+      ["an empty cursor", { cursor: "" }],
+      [
+        "a cursor over the maximum length",
+        { cursor: createPaddedAgentListCursor("a", 2052) }
+      ],
       ["an unknown parameter", { sort: "name" }],
       ["a cursor that is not an agent cursor", { cursor: "bm90IGpzb24=" }],
       [
@@ -234,10 +298,18 @@ describe("updateFastifyWithAgentRoutes", () => {
     })
 
     it.each([
-      ["a code", { code: "a".repeat(64) }],
-      ["a name", { name: "n".repeat(64) }],
-      ["a bio", { bio: "b".repeat(128) }]
-    ])("accepts %s of the maximum length", async (_label, change) => {
+      ["a code", { code: "a".repeat(64) }, { code: "a".repeat(64) }],
+      [
+        "a name, after trimming",
+        { name: ` ${"n".repeat(64)} ` },
+        { name: "n".repeat(64) }
+      ],
+      [
+        "a bio, after trimming",
+        { bio: `\t${"b".repeat(128)}\n` },
+        { bio: "b".repeat(128) }
+      ]
+    ])("accepts %s of the maximum length", async (_label, change, stored) => {
       const { app } = await createAgentRouteApp()
 
       const response = await app.inject({
@@ -247,7 +319,20 @@ describe("updateFastifyWithAgentRoutes", () => {
       })
 
       expect(response.statusCode).toBe(201)
-      expect(response.json()).toMatchObject(change)
+      expect(response.json()).toMatchObject(stored)
+    })
+
+    it("stores text that starts with a NUL character", async () => {
+      const { app, agents } = await createAgentRouteApp()
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/agents",
+        payload: { ...LYS_DEFINITION, name: "\u0000Lys" }
+      })
+
+      expect(response.statusCode).toBe(201)
+      expect(agents.findAgent("lys")).toMatchObject({ name: "\u0000Lys" })
     })
 
     it("responds with the code-taken problem and keeps the stored agent", async () => {
@@ -277,6 +362,7 @@ describe("updateFastifyWithAgentRoutes", () => {
       ["a code with a leading hyphen", { code: "-lys" }],
       ["a code with a trailing hyphen", { code: "lys-" }],
       ["a code with a doubled hyphen", { code: "web--researcher" }],
+      ["a code with a surrounding space", { code: " lys" }],
       ["a code with an underscore", { code: "web_researcher" }],
       ["a code over the maximum length", { code: "a".repeat(65) }],
       ["a blank name", { name: " \n\t " }],
@@ -284,6 +370,8 @@ describe("updateFastifyWithAgentRoutes", () => {
       ["a blank system prompt", { systemPrompt: "\n" }],
       ["a name over the maximum length", { name: "n".repeat(65) }],
       ["a bio over the maximum length", { bio: "b".repeat(129) }],
+      ["a name with a lone surrogate", { name: "\ud800Lys" }],
+      ["a system prompt with a lone surrogate", { systemPrompt: "You\udc00" }],
       ["an unknown field", { model: "qwen/qwen3-8b" }],
       ["a missing system prompt", { systemPrompt: undefined }]
     ])("rejects %s without storing anything", async (_label, change) => {
@@ -397,6 +485,51 @@ describe("updateFastifyWithAgentRoutes", () => {
       expect(agents.findAgent("lys")).toEqual(expected)
     })
 
+    it("stores the time of a change that keeps every value", async () => {
+      const { app, agents } = await createAgentRouteApp()
+      agents.createAgent(LYS_DEFINITION)
+      vi.setSystemTime(new Date(LATER))
+      const expected = { ...STORED_LYS, updatedAt: LATER }
+
+      const response = await app.inject({
+        method: "PATCH",
+        url: "/api/v1/agents/lys",
+        payload: { bio: LYS_DEFINITION.bio }
+      })
+
+      expect(response.statusCode).toBe(200)
+      expect(response.json()).toEqual(expected)
+      expect(agents.findAgent("lys")).toEqual(expected)
+    })
+
+    it("stores a change that starts with a NUL character", async () => {
+      const { app, agents } = await createAgentRouteApp()
+      agents.createAgent(LYS_DEFINITION)
+
+      const response = await app.inject({
+        method: "PATCH",
+        url: "/api/v1/agents/lys",
+        payload: { bio: "\u0000Bio" }
+      })
+
+      expect(response.statusCode).toBe(200)
+      expect(agents.findAgent("lys")).toMatchObject({ bio: "\u0000Bio" })
+    })
+
+    it("rejects a code that is not a slug without changing anything", async () => {
+      const { app, agents } = await createAgentRouteApp()
+      const updateAgent = vi.spyOn(agents, "updateAgent")
+
+      const response = await app.inject({
+        method: "PATCH",
+        url: "/api/v1/agents/Not%20A%20Slug",
+        payload: { bio: "Archivist." }
+      })
+
+      expect(response.statusCode).toBe(400)
+      expect(updateAgent).not.toHaveBeenCalled()
+    })
+
     it("responds with the missing-agent problem", async () => {
       const { app } = await createAgentRouteApp()
 
@@ -419,6 +552,8 @@ describe("updateFastifyWithAgentRoutes", () => {
       ["no field", {}],
       ["a code", { code: "other" }],
       ["a blank name", { name: "  " }],
+      ["a null bio", { bio: null }],
+      ["a bio with a lone surrogate", { bio: "Bio\udbff" }],
       ["an unknown field", { model: "qwen/qwen3-8b" }],
       ["a name over the maximum length", { name: "n".repeat(65) }]
     ])(

@@ -22,6 +22,9 @@ const CREATED_AT = "2026-01-02T03:04:05.678Z"
 /** Time a case passes as the moment of its change. */
 const CHANGED_AT = "2026-02-03T04:05:06.789Z"
 
+/** Last-change time of the second agent, after its creation time. */
+const RESEARCHER_CHANGED_AT = "2026-01-20T00:00:00.000Z"
+
 /** Agent most cases store and address. */
 const LYS: Agent = Object.freeze({
   code: "lys",
@@ -32,14 +35,17 @@ const LYS: Agent = Object.freeze({
   updatedAt: CREATED_AT
 })
 
-/** Second agent, used to prove a change stays with its agent. */
+/**
+ * Second agent, last changed after its creation; used to prove that both
+ * times are stored as given and that a change stays with its agent.
+ */
 const RESEARCHER: Agent = Object.freeze({
   code: "web-researcher",
   name: "Researcher",
   bio: "Searches the web.",
   systemPrompt: "You research the web.",
   createdAt: CREATED_AT,
-  updatedAt: CREATED_AT
+  updatedAt: RESEARCHER_CHANGED_AT
 })
 
 /** Earlier creation time shared by two listed agents. */
@@ -47,6 +53,9 @@ const FIRST_CREATED_AT = "2026-01-01T00:00:00.000Z"
 
 /** Later creation time of one listed agent. */
 const SECOND_CREATED_AT = "2026-01-01T00:00:00.001Z"
+
+/** Last-change time of listed agent `c`, after every listed creation time. */
+const LISTED_CHANGED_AT = "2026-01-01T00:00:00.002Z"
 
 /**
  * Creates a valid agent whose code and creation time decide its list position.
@@ -67,14 +76,19 @@ function createListedAgent(code: string, createdAt: string): Agent {
 }
 
 /**
- * Stores three agents that creation time alone does not order: `b` and `c`
- * share the earlier time, and `a`, created later, sorts last.
+ * Saves three agents that creation time alone does not order: `b` and `c`
+ * share the earlier time, and `a`, created later, sorts last. `c` was last
+ * changed after `a` was created, so ordering by change time would move it
+ * last.
  *
  * @param recordStore - Records over an empty store.
  */
-function storeListedAgents(recordStore: AgentRecordStore): void {
+function saveListedAgents(recordStore: AgentRecordStore): void {
   recordStore.createAgent(createListedAgent("a", SECOND_CREATED_AT))
-  recordStore.createAgent(createListedAgent("c", FIRST_CREATED_AT))
+  recordStore.createAgent({
+    ...createListedAgent("c", FIRST_CREATED_AT),
+    updatedAt: LISTED_CHANGED_AT
+  })
   recordStore.createAgent(createListedAgent("b", FIRST_CREATED_AT))
 }
 
@@ -100,7 +114,7 @@ export function registerAgentRecordStoreContractSuite(
 
       it("lists summaries by creation time, then code, without system prompts", () => {
         const { recordStore } = createHarness()
-        storeListedAgents(recordStore)
+        saveListedAgents(recordStore)
 
         const page = recordStore.listAgents({ after: undefined, limit: 3 })
 
@@ -112,13 +126,20 @@ export function registerAgentRecordStoreContractSuite(
           createdAt: FIRST_CREATED_AT,
           updatedAt: FIRST_CREATED_AT
         })
+        expect(page.agents[1]).toEqual({
+          code: "c",
+          name: "Agent c",
+          bio: "Bio of c.",
+          createdAt: FIRST_CREATED_AT,
+          updatedAt: LISTED_CHANGED_AT
+        })
         expect(page).toMatchObject({ storedCount: 3, hasMore: false })
         expect(Object.isFrozen(page.agents[0])).toBe(true)
       })
 
       it("stops at the limit and reports that more agents follow", () => {
         const { recordStore } = createHarness()
-        storeListedAgents(recordStore)
+        saveListedAgents(recordStore)
 
         const page = recordStore.listAgents({ after: undefined, limit: 2 })
 
@@ -128,7 +149,7 @@ export function registerAgentRecordStoreContractSuite(
 
       it("continues after the boundary agent, counting every stored agent", () => {
         const { recordStore } = createHarness()
-        storeListedAgents(recordStore)
+        saveListedAgents(recordStore)
 
         const page = recordStore.listAgents({
           after: { createdAt: FIRST_CREATED_AT, code: "c" },
@@ -141,7 +162,7 @@ export function registerAgentRecordStoreContractSuite(
 
       it("continues within agents created at the same time by code", () => {
         const { recordStore } = createHarness()
-        storeListedAgents(recordStore)
+        saveListedAgents(recordStore)
 
         const page = recordStore.listAgents({
           after: { createdAt: FIRST_CREATED_AT, code: "b" },
@@ -161,11 +182,11 @@ export function registerAgentRecordStoreContractSuite(
 
       it("returns the stored agent exactly as created, frozen", () => {
         const { recordStore } = createHarness()
-        recordStore.createAgent(LYS)
+        recordStore.createAgent(RESEARCHER)
 
-        const found = recordStore.findAgent("lys")
+        const found = recordStore.findAgent("web-researcher")
 
-        expect(found).toEqual(LYS)
+        expect(found).toEqual(RESEARCHER)
         expect(Object.isFrozen(found)).toBe(true)
       })
     })
@@ -236,6 +257,22 @@ export function registerAgentRecordStoreContractSuite(
           createdAt: CREATED_AT,
           updatedAt: CHANGED_AT
         })
+      })
+
+      it("stores the change time even when the given values equal the stored ones", () => {
+        const { recordStore } = createHarness()
+        recordStore.createAgent(LYS)
+        const expected = { ...LYS, updatedAt: CHANGED_AT }
+
+        expect(
+          recordStore.updateAgent({
+            code: "lys",
+            changes: { bio: LYS.bio },
+            updatedAt: CHANGED_AT
+          })
+        ).toEqual(expected)
+
+        expect(recordStore.findAgent("lys")).toEqual(expected)
       })
 
       it("returns undefined and stores nothing for a code that is not stored", () => {

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest"
 import * as z from "zod"
-import type { DatabaseWriter } from "../../../../../src/infrastructure/database/databaseTransactions"
+import type {
+  DatabaseStatementCompiler,
+  DatabaseWriter
+} from "../../../../../src/infrastructure/database/databaseTransactions"
 import { openSqliteAgentRecordStore } from "../../../support/agentDatabase"
 import { registerAgentRecordStoreContractSuite } from "../../../support/agentRecordStoreContract"
 
@@ -28,26 +31,42 @@ const VALID_AGENT_ROW: AgentRow = Object.freeze({
 })
 
 /**
- * Inserts one agent row as given, bypassing the agent schemas.
+ * Inserts one agent row as given inside the caller's write transaction,
+ * bypassing the agent schemas.
+ *
+ * @param statements - Statement compilation lent to the caller's write
+ * transaction.
+ * @param row - Stored column values.
+ */
+function insertAgentRow(
+  statements: DatabaseStatementCompiler,
+  row: AgentRow
+): void {
+  statements
+    .getStatement(
+      `INSERT INTO agents (code, name, bio, system_prompt, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      row.code,
+      row.name,
+      row.bio,
+      row.systemPrompt,
+      row.createdAt,
+      row.createdAt
+    )
+}
+
+/**
+ * Inserts one agent row as given in its own write transaction, bypassing the
+ * agent schemas.
  *
  * @param database - Write access to a migrated test database.
  * @param row - Stored column values.
  */
 function saveAgentRow(database: DatabaseWriter, row: AgentRow): void {
   database.handleDatabaseWriteRequest((statements) => {
-    statements
-      .getStatement(
-        `INSERT INTO agents (code, name, bio, system_prompt, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?)`
-      )
-      .run(
-        row.code,
-        row.name,
-        row.bio,
-        row.systemPrompt,
-        row.createdAt,
-        row.createdAt
-      )
+    insertAgentRow(statements, row)
   })
 }
 
@@ -102,6 +121,52 @@ describe("SqliteAgentRecordStore", () => {
     expect(
       records.recordStore.listAgents({ after: undefined, limit: 1 })
     ).toEqual({ agents: [], storedCount: 0, hasMore: false })
+  })
+
+  it("refuses record calls nested in another database operation and keeps its writes", () => {
+    const records = openSqliteAgentRecordStore()
+    const { recordStore } = records
+
+    records.database.handleDatabaseWriteRequest((statements) => {
+      insertAgentRow(statements, VALID_AGENT_ROW)
+      expect(() =>
+        recordStore.listAgents({ after: undefined, limit: 1 })
+      ).toThrow("Database transactions cannot be nested")
+      expect(() => recordStore.findAgent("lys")).toThrow(
+        "Database transactions cannot be nested"
+      )
+      expect(() =>
+        recordStore.createAgent({
+          ...VALID_AGENT_ROW,
+          code: "web-researcher",
+          updatedAt: VALID_AGENT_ROW.createdAt
+        })
+      ).toThrow("Database transactions cannot be nested")
+      expect(() =>
+        recordStore.updateAgent({
+          code: "lys",
+          changes: { name: "Renamed" },
+          updatedAt: "2026-02-03T04:05:06.789Z"
+        })
+      ).toThrow("Database transactions cannot be nested")
+      expect(() => recordStore.deleteAgent("lys")).toThrow(
+        "Database transactions cannot be nested"
+      )
+    })
+
+    expect(recordStore.listAgents({ after: undefined, limit: 2 })).toEqual({
+      agents: [
+        {
+          code: "lys",
+          name: "Lys",
+          bio: "Personal assistant.",
+          createdAt: VALID_AGENT_ROW.createdAt,
+          updatedAt: VALID_AGENT_ROW.createdAt
+        }
+      ],
+      storedCount: 1,
+      hasMore: false
+    })
   })
 
   it("rolls an update back when the updated row violates the agent contract", () => {

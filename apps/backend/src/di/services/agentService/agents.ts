@@ -2,6 +2,7 @@ import type { ListAgentsApiResponse } from "@lys/protocol"
 import {
   agentChangesSchema,
   agentDefinitionSchema,
+  agentSchema,
   type Agent,
   type AgentChangesCandidate,
   type AgentDefinition,
@@ -22,18 +23,21 @@ import {
 import type { AgentRecordStore } from "./records"
 
 /**
- * Builds the stored form of a new agent, created and last changed at one time.
- * @param code - Code the agent is stored under.
+ * Builds and validates the stored form of a new agent, created and last
+ * changed at one time.
+ * @param code - Code the agent is stored under, given or derived.
  * @param definition - Validated, trimmed definition.
  * @param now - Creation time, also stored as the time of the last change.
- * @returns The frozen agent.
+ * @returns The frozen agent, validated against the agent schema.
+ * @throws If the code or the time violates the agent schema, before any
+ * storage work.
  */
 function buildAgent(
   code: string,
   definition: AgentDefinition,
   now: string
 ): Agent {
-  return Object.freeze({
+  return agentSchema.parse({
     code,
     name: definition.name,
     bio: definition.bio,

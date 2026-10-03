@@ -56,7 +56,13 @@ function parseAgentListCursor(cursor: string): AgentListCursor {
   return agentListCursorSchema.parse(JSON.parse(decoded.toString("utf8")))
 }
 
-/** Invalid list cursor mapped by Fastify to a caller-safe HTTP 400. */
+/**
+ * Invalid list cursor mapped by Fastify to a caller-safe HTTP 400.
+ *
+ * @remarks The subclass preserves the native `Error` contract, keeping the
+ * cursor failure as its cause, and always reports status 400. It owns no
+ * mutable state and is safe to construct once per failure.
+ */
 class AgentListInputError extends Error {
   /**
    * Preserves the decoding failure for server diagnostics.
@@ -76,7 +82,8 @@ class AgentListInputError extends Error {
  * @param query - Query values already validated by the list endpoint schema.
  * @returns The boundary named by the cursor, absent without one, and the
  * requested page size or the default.
- * @throws AgentListInputError when the cursor cannot be decoded.
+ * @throws AgentListInputError when the cursor is not canonical base64 of
+ * UTF-8 JSON, or its JSON is not a version-one agent list cursor.
  */
 export function parseAgentListOptions(
   query: ListAgentsApiQuery

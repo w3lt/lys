@@ -1,11 +1,16 @@
 import * as z from "zod"
 
 /**
- * Inclusive maximum length of an agent code, in UTF-16 code units.
+ * Inclusive maximum length of an agent code, in UTF-16 code units, which are
+ * also characters because codes are ASCII.
  *
  * @remarks Enforced on every code the API accepts and on every stored code;
  * the backend also cuts the codes it derives from agent names to this length.
- * Lowering it can make stored agents unreadable.
+ * Codes up to this length are transmitted in agent paths and bodies and
+ * persisted as agent identities, so clients may rely on the value. Raising it
+ * keeps stored agents readable, but clients built with the old value reject
+ * the longer codes; lowering it makes stored agents with longer codes
+ * unreadable.
  */
 export const MAXIMUM_AGENT_CODE_LENGTH = 64
 
@@ -51,25 +56,55 @@ function isTrimmedText(text: string): boolean {
 const UNTRIMMED_AGENT_TEXT_MESSAGE =
   "Agent text must not start or end with whitespace."
 
-/** Validates a stored display name: non-empty, trimmed, and bounded. */
+/** Matches a UTF-16 surrogate code unit that is not part of a pair. */
+const LONE_SURROGATE_PATTERN = /\p{Cs}/u
+
+/**
+ * Answers whether a text is well-formed UTF-16, every surrogate paired.
+ *
+ * @param text - Text to inspect.
+ * @returns True when the text has no lone surrogate, so encoding it as UTF-8
+ * for storage or transmission keeps it unchanged.
+ */
+function isWellFormedText(text: string): boolean {
+  return !LONE_SURROGATE_PATTERN.test(text)
+}
+
+/** Failure reported for text that UTF-8 cannot carry unchanged. */
+const ILL_FORMED_AGENT_TEXT_MESSAGE =
+  "Agent text must not contain a lone surrogate."
+
+/**
+ * Validates a stored display name: non-empty, trimmed, well-formed, and
+ * bounded.
+ */
 const storedAgentNameSchema = z
   .string()
   .min(1)
   .max(MAXIMUM_AGENT_NAME_LENGTH)
   .refine(isTrimmedText, UNTRIMMED_AGENT_TEXT_MESSAGE)
+  .refine(isWellFormedText, ILL_FORMED_AGENT_TEXT_MESSAGE)
 
-/** Validates a stored short description: non-empty, trimmed, and bounded. */
+/**
+ * Validates a stored short description: non-empty, trimmed, well-formed, and
+ * bounded.
+ */
 const storedAgentBioSchema = z
   .string()
   .min(1)
   .max(MAXIMUM_AGENT_BIO_LENGTH)
   .refine(isTrimmedText, UNTRIMMED_AGENT_TEXT_MESSAGE)
+  .refine(isWellFormedText, ILL_FORMED_AGENT_TEXT_MESSAGE)
 
-/** Validates a stored system prompt: non-empty and trimmed, of any length. */
+/**
+ * Validates a stored system prompt: non-empty, trimmed, and well-formed, of
+ * any length.
+ */
 const storedAgentSystemPromptSchema = z
   .string()
   .min(1)
   .refine(isTrimmedText, UNTRIMMED_AGENT_TEXT_MESSAGE)
+  .refine(isWellFormedText, ILL_FORMED_AGENT_TEXT_MESSAGE)
 
 /** Trims a candidate display name, then validates it as stored. */
 const agentNameSchema = z.string().trim().pipe(storedAgentNameSchema)
@@ -92,9 +127,13 @@ const agentSystemPromptSchema = z
  */
 export const agentDefinitionSchema = z
   .strictObject({
+    /** Code to store the agent under; omitted to derive one from the name. */
     code: agentCodeSchema.optional(),
+    /** Display name; names need not be unique. */
     name: agentNameSchema,
+    /** Short description of what the agent does. */
     bio: agentBioSchema,
+    /** System prompt that defines the agent's behavior. */
     systemPrompt: agentSystemPromptSchema
   })
   .readonly()
@@ -116,11 +155,17 @@ export type AgentDefinition = z.infer<typeof agentDefinitionSchema>
  */
 export const agentSchema = z
   .strictObject({
+    /** Immutable identity of the agent, compared exactly. */
     code: agentCodeSchema,
+    /** Display name; names need not be unique. */
     name: storedAgentNameSchema,
+    /** Short description of what the agent does. */
     bio: storedAgentBioSchema,
+    /** System prompt that defines the agent's behavior. */
     systemPrompt: storedAgentSystemPromptSchema,
+    /** Time the agent was stored; it never changes. */
     createdAt: agentTimestampSchema,
+    /** Time of the latest change; equals `createdAt` until the first one. */
     updatedAt: agentTimestampSchema
   })
   .readonly()
@@ -141,8 +186,11 @@ export type Agent = z.infer<typeof agentSchema>
  */
 export const agentChangesSchema = z
   .strictObject({
+    /** Replacement display name; omitted or undefined to keep it. */
     name: agentNameSchema.optional(),
+    /** Replacement short description; omitted or undefined to keep it. */
     bio: agentBioSchema.optional(),
+    /** Replacement system prompt; omitted or undefined to keep it. */
     systemPrompt: agentSystemPromptSchema.optional()
   })
   .refine(

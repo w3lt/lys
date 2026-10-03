@@ -56,8 +56,8 @@ const agentSummarySchema = agentSchema
  * agent is created, so an update never moves an agent. Each page observes
  * the store when it is read: an agent deleted after an earlier page was read
  * is absent from later pages, and an agent created since then appears on a
- * later page unless its creation time sorts before the cursor. `nextCursor`
- * is null on the final page.
+ * later page unless its (`createdAt`, `code`) pair sorts before the cursor's.
+ * `nextCursor` is null on the final page.
  */
 const listAgentsApiResponseSchema = z
   .strictObject({
@@ -84,9 +84,10 @@ const listAgentsApiResponseSchema = z
  * Describes the GET endpoint that lists stored agents, oldest first.
  *
  * @remarks The endpoint observes stored data and changes nothing. The shared
- * descriptor is imported by the backend registrar and its clients; changing
- * its method, path, query, or response schema changes the transmitted
- * contract and requires coordinated consumers.
+ * descriptor is imported by the backend registrar, and its response schema by
+ * the backend's Sqlite agent records, which validate each page with it; no
+ * client imports it yet. Changing its method, path, query, or response schema
+ * changes the transmitted contract and requires coordinated consumers.
  */
 export const listAgentsApi = Object.freeze({
   method: "GET",

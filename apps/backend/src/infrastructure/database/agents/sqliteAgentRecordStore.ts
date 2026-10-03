@@ -79,6 +79,35 @@ function findAgent(
 }
 
 /**
+ * Inserts one new agent inside the caller's write transaction, leaving a
+ * stored agent with the same code untouched.
+ * @param statements - Statement compilation lent to the caller's write
+ * transaction.
+ * @param agent - Validated agent, stored exactly as given.
+ * @returns True when the agent was inserted; false when its code is taken.
+ * @throws If SQLite fails.
+ */
+function insertAgent(
+  statements: DatabaseStatementCompiler,
+  agent: Agent
+): boolean {
+  const result = statements
+    .getStatement(
+      `INSERT INTO agents (code, name, bio, system_prompt, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (code) DO NOTHING`
+    )
+    .run(
+      agent.code,
+      agent.name,
+      agent.bio,
+      agent.systemPrompt,
+      agent.createdAt,
+      agent.updatedAt
+    )
+  return result.changes === 1
+}
+
+/**
  * Applies one agent change inside the caller's write transaction.
  * @param statements - Statement compilation lent to the caller's write
  * transaction.
@@ -171,21 +200,8 @@ export default class SqliteAgentRecordStore implements AgentRecordStore {
    * @throws The interface-defined failures.
    */
   public createAgent(agent: Agent): boolean {
-    return this.#databaseWriter.handleDatabaseWriteRequest(
-      (statements) =>
-        statements
-          .getStatement(
-            `INSERT INTO agents (code, name, bio, system_prompt, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (code) DO NOTHING`
-          )
-          .run(
-            agent.code,
-            agent.name,
-            agent.bio,
-            agent.systemPrompt,
-            agent.createdAt,
-            agent.updatedAt
-          ).changes === 1
+    return this.#databaseWriter.handleDatabaseWriteRequest((statements) =>
+      insertAgent(statements, agent)
     )
   }
 

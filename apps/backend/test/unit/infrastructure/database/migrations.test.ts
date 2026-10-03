@@ -116,24 +116,66 @@ describe("migrateDatabase", () => {
   it.each([
     [
       "a missing code",
-      "NULL",
-      "'Lys'",
+      { code: "NULL" },
       /NOT NULL constraint failed: agents\.code/
     ],
-    ["an empty name", "'lys'", "''", /CHECK constraint failed/]
-  ])("refuses an agent row with %s", (_label, code, name, failure) => {
+    ["an empty code", { code: "''" }, /CHECK constraint failed: code <> ''/],
+    ["an empty name", { name: "''" }, /CHECK constraint failed: name <> ''/],
+    ["an empty bio", { bio: "''" }, /CHECK constraint failed: bio <> ''/],
+    [
+      "an empty system prompt",
+      { systemPrompt: "''" },
+      /CHECK constraint failed: system_prompt <> ''/
+    ]
+  ])("refuses an agent row with %s", (_label, change, failure) => {
     const database = openEmptyDatabase()
     migrateDatabase(database)
+    const row = {
+      code: "'lys'",
+      name: "'Lys'",
+      bio: "'Bio'",
+      systemPrompt: "'Prompt'",
+      ...change
+    }
 
     expect(() =>
       database.exec(
         `INSERT INTO agents (code, name, bio, system_prompt, created_at, updated_at)
-        VALUES (${code}, ${name}, 'Bio', 'Prompt', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`
+        VALUES (${row.code}, ${row.name}, ${row.bio}, ${row.systemPrompt}, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`
       )
     ).toThrow(failure)
     expect(
       database.prepare("SELECT COUNT(*) AS count FROM agents").get()
     ).toEqual({ count: 0 })
+  })
+
+  it("stores agent text that starts with a NUL character", () => {
+    const database = openEmptyDatabase()
+    migrateDatabase(database)
+
+    database
+      .prepare(
+        `INSERT INTO agents (code, name, bio, system_prompt, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        "lys",
+        "\u0000Lys",
+        "\u0000Bio",
+        "\u0000Prompt",
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.000Z"
+      )
+
+    expect(
+      database
+        .prepare("SELECT name, bio, system_prompt AS systemPrompt FROM agents")
+        .get()
+    ).toEqual({
+      name: "\u0000Lys",
+      bio: "\u0000Bio",
+      systemPrompt: "\u0000Prompt"
+    })
   })
 
   it("rejects a database created by a newer version without changing it", () => {

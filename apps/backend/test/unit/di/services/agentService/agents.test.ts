@@ -90,6 +90,19 @@ describe("StoredAgents", () => {
       expect(agents.createAgent(definition)).toMatchObject({ code: "lys-4" })
     })
 
+    it("finds a free code when the first try equals the second", () => {
+      const agents = openStoredAgents()
+      agents.createAgent({ ...LYS_DEFINITION, code: `${"a".repeat(62)}-2` })
+
+      expect(
+        agents.createAgent({
+          ...LYS_DEFINITION,
+          code: undefined,
+          name: `${"a".repeat(62)} 2`
+        })
+      ).toMatchObject({ code: `${"a".repeat(62)}-3` })
+    })
+
     it("derives `agent` from a name without an ASCII letter or digit", () => {
       const agents = openStoredAgents()
 
@@ -110,6 +123,15 @@ describe("StoredAgents", () => {
       ).toThrow(z.ZodError)
 
       expect(agents.findAgent("Lys")).toBeUndefined()
+      expect(agents.findAgent("lys")).toBeUndefined()
+    })
+
+    it("rejects a creation time outside the stored format without storing anything", () => {
+      const agents = openStoredAgents()
+      vi.setSystemTime(new Date("+010000-01-01T00:00:00.000Z"))
+
+      expect(() => agents.createAgent(LYS_DEFINITION)).toThrow(z.ZodError)
+
       expect(agents.findAgent("lys")).toBeUndefined()
     })
   })
@@ -194,18 +216,21 @@ describe("StoredAgents", () => {
       const agents = openStoredAgents()
       for (const code of ["c", "a", "b"])
         agents.createAgent({ ...LYS_DEFINITION, code })
-      const listed: string[] = []
 
-      let page = agents.listAgents({ cursor: undefined, limit: 1 })
-      listed.push(...page.agents.map((agent) => agent.code))
-      while (page.nextCursor !== null) {
-        page = agents.listAgents(
-          parseAgentListOptions({ cursor: page.nextCursor, limit: 1 })
+      const first = agents.listAgents({ cursor: undefined, limit: 1 })
+      const second = agents.listAgents(
+        parseAgentListOptions({ cursor: first.nextCursor ?? "", limit: 1 })
+      )
+      const third = agents.listAgents(
+        parseAgentListOptions({ cursor: second.nextCursor ?? "", limit: 1 })
+      )
+
+      expect(
+        [first, second, third].flatMap((page) =>
+          page.agents.map((agent) => agent.code)
         )
-        listed.push(...page.agents.map((agent) => agent.code))
-      }
-
-      expect(listed).toEqual(["a", "b", "c"])
+      ).toEqual(["a", "b", "c"])
+      expect(third.nextCursor).toBeNull()
     })
 
     it("returns an empty final page when no agent is stored", () => {

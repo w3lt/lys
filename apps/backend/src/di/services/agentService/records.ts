@@ -54,15 +54,16 @@ export type UpdateAgentInput = Readonly<{
  * lookup, creation, change, and deletion by code.
  *
  * @remarks A listing or lookup reads one consistent snapshot and changes
- * nothing. Every other call is one write transaction that commits before it
- * returns and changes nothing when it fails, including when the store cannot
- * begin or commit it; an `AggregateError` then holds that failure followed by
- * each failure to roll back. Returned agents and summaries are frozen
- * independent values, validated against the agent schema. The records never read the clock:
- * callers pass every time they store. Borrowed from the store's owner without
- * the authority to close it; every call fails with `Database is closed` after
- * the owner closes the store. Calls cannot be nested: a call made while
- * another operation on the store runs fails with
+ * nothing; it fails when the store cannot begin or release that snapshot.
+ * Every other call is one write transaction that commits before it returns
+ * and changes nothing when it fails, including when the store cannot begin or
+ * commit it; an `AggregateError` then holds that failure followed by each
+ * failure to roll back. Returned agents and summaries are frozen independent
+ * values, validated against the agent schema. The records never read the
+ * clock: callers pass every time they store. Borrowed from the store's owner
+ * without the authority to close it; every call fails with
+ * `Database is closed` after the owner closes the store. Calls cannot be
+ * nested: a call made while another operation on the store runs fails with
  * `Database transactions cannot be nested` and leaves that operation
  * untouched. Concurrency model: single-owner, synchronous on the backend's
  * event loop.
@@ -73,8 +74,8 @@ export interface AgentRecordStore {
    *
    * @param input - Boundary after which the page starts and its size.
    * @returns The page, its summaries frozen and without system prompts.
-   * @throws If the store is closed or a listed row violates the agent schema;
-   * the records stay usable.
+   * @throws If the store is closed, the snapshot cannot begin or be released,
+   * or a listed row violates the agent schema; the records stay usable.
    */
   listAgents(input: ListAgentsInput): AgentPage
   /**
@@ -82,8 +83,8 @@ export interface AgentRecordStore {
    *
    * @param code - Code to look up, compared exactly.
    * @returns The stored agent, or undefined when no agent has this code.
-   * @throws If the store is closed or the stored row violates the agent
-   * schema; the records stay usable.
+   * @throws If the store is closed, the snapshot cannot begin or be released,
+   * or the stored row violates the agent schema; the records stay usable.
    */
   findAgent(code: string): Agent | undefined
   /**

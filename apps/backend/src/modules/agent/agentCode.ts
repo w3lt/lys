@@ -1,6 +1,9 @@
 import { MAXIMUM_AGENT_CODE_LENGTH } from "@lys/share"
 
-/** Code base used when an agent name contains no ASCII letter or digit. */
+/**
+ * Code base used when an agent name's slug is empty: no letter or digit in the
+ * name has an ASCII form.
+ */
 const FALLBACK_AGENT_CODE = "agent"
 
 /**
@@ -10,14 +13,16 @@ const FALLBACK_AGENT_CODE = "agent"
  * @param name - Agent name to derive the slug from.
  * @returns The slug, of any length, or an empty text when the name has no
  * letter or digit with an ASCII form.
- * @remarks Accents are removed through Unicode compatibility decomposition, so
- * `Trợ lý` gives `tro-ly` and `ﬁ` gives `fi`. A letter without an ASCII
- * decomposition, such as `đ`, separates groups like any other character.
+ * @remarks The name is decomposed with Unicode compatibility decomposition
+ * before it is lowercased, so accents are removed and compatibility forms
+ * become ASCII: `Trợ lý` gives `tro-ly`, `ﬁ` gives `fi`, and `𝐖𝐞𝐛` gives
+ * `web`. A letter without an ASCII decomposition, such as `đ`, separates
+ * groups like any other character.
  */
 function calculateAgentNameSlug(name: string): string {
   return name
-    .toLowerCase()
     .normalize("NFKD")
+    .toLowerCase()
     .replaceAll(/\p{M}/gu, "")
     .replaceAll(/[^a-z0-9]+/g, "-")
     .replace(/^-/, "")
@@ -32,9 +37,10 @@ function calculateAgentNameSlug(name: string): string {
  * try uses the name's slug, and each later try appends `-<attempt>`.
  * @returns A valid agent code of at most `MAXIMUM_AGENT_CODE_LENGTH`
  * characters. The slug is cut, without a trailing hyphen, to leave room for
- * the suffix; a name with no ASCII letter or digit uses `agent` instead.
- * @remarks Tries from the second on give distinct codes, so a caller trying
- * them in order finds a free code once the tries outnumber the stored agents.
+ * the suffix; a name whose slug is empty uses `agent` instead.
+ * @remarks Tries from the second on give distinct codes, but the first may
+ * equal one of them, so a caller trying them in order finds a free code once
+ * the tries after the first outnumber the stored agents.
  */
 export function calculateAgentCode(name: string, attempt: number): string {
   const slug = calculateAgentNameSlug(name)

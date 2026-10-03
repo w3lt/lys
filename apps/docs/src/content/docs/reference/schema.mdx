@@ -35,6 +35,17 @@ JSON schema for runtime, model, and generation settings.
 | `created_at`      | `TEXT NOT NULL` | ISO timestamp                                                                                               |
 | `updated_at`      | `TEXT`          | Required for assistant rows                                                                                 |
 
+### `agents`
+
+| Column          | Type            | Notes                                                                          |
+| --------------- | --------------- | ------------------------------------------------------------------------------ |
+| `code`          | `TEXT NOT NULL` | Primary key; the agent's immutable identity, a lowercase slug                  |
+| `name`          | `TEXT NOT NULL` | Non-empty display name                                                         |
+| `bio`           | `TEXT NOT NULL` | Non-empty short description                                                    |
+| `system_prompt` | `TEXT NOT NULL` | Non-empty system instruction                                                   |
+| `created_at`    | `TEXT NOT NULL` | ISO timestamp, set when the agent is stored                                    |
+| `updated_at`    | `TEXT NOT NULL` | ISO timestamp of the latest change; equals `created_at` until the first update |
+
 ## Important constraints
 
 - User rows must have non-empty content and no model, status, or finish reason.
@@ -42,6 +53,11 @@ JSON schema for runtime, model, and generation settings.
 - Completed assistant rows must also have a non-null finish reason.
 - Streaming, interrupted, and failed assistant rows must keep a null finish
   reason.
+- Agent rows must have a code and non-empty text columns. SQLite checks only
+  that; the backend's agent schemas enforce the rest when they write and read a
+  row: a code of at most 64 lowercase letters, digits, and single inner
+  hyphens; a name of at most 64 and a bio of at most 128 UTF-16 code units;
+  trimmed text; and millisecond ISO timestamps. A row that breaks them fails to read.
 
 The current backend inserts an empty assistant row before generation and later
 appends each streamed delta before publication, then updates its status and finish
@@ -62,7 +78,9 @@ The backend applies schema changes from an ordered array of SQL strings and
 tracks the applied version with `PRAGMA user_version`. Version 4 replaces only the
 conversation timestamp trigger. Version 5 replaces only the message-update
 trigger so that it fires on `content` changes; status-only updates no longer
-count as conversation activity. Versions 1–3 are unchanged. Missing migrations
+count as conversation activity. Version 6 adds the `agents` table and changes
+no existing row; builds that support only version 5 refuse to open a version-6
+database. Versions 1–3 are unchanged. Missing migrations
 and the version marker commit together. At startup, streaming assistant rows
 become interrupted with a refreshed message `updated_at`; content, conversation
 `updated_at`, and history order are preserved.

@@ -591,6 +591,30 @@ export function createChatViewStore(
   }
 
   /**
+   * Reads Lys's current side, then opens the chat stream of one admitted
+   * request.
+   *
+   * @param submittedRequest - Values sampled when the message was submitted.
+   * @param signal - Store-owned signal of the request; a request superseded
+   * while the side is read sends nothing to the backend.
+   * @returns An async generator yielding the request's validated chat
+   * events; it completes when the backend ends the stream.
+   * @throws The side reading's failure, the signal's abort reason when the
+   * request was superseded during the reading, or the stream's failure.
+   */
+  async function* openSubmittedChatStream(
+    submittedRequest: SubmittedChatRequest,
+    signal: AbortSignal
+  ): AsyncGenerator<ChatApiStreamEvent, void, unknown> {
+    const personality = await dependencies.getLysPersonality()
+    signal.throwIfAborted()
+    yield* dependencies.streamChat(
+      createChatRequestPayload(submittedRequest, personality),
+      { signal }
+    )
+  }
+
+  /**
    * Creates the state and actions that own this store's request lifecycle.
    *
    * @param set - Zustand capability that applies observable state changes.
@@ -1102,30 +1126,6 @@ export function createChatViewStore(
         case "reply-streaming":
           return false
       }
-    }
-
-    /**
-     * Reads Lys's current side, then opens the chat stream of one admitted
-     * request.
-     *
-     * @param submittedRequest - Values sampled when the message was submitted.
-     * @param signal - Store-owned signal of the request; a request superseded
-     * while the side is read sends nothing to the backend.
-     * @returns An async generator yielding the request's validated chat
-     * events; it completes when the backend ends the stream.
-     * @throws The side reading's failure, the signal's abort reason when the
-     * request was superseded during the reading, or the stream's failure.
-     */
-    async function* openSubmittedChatStream(
-      submittedRequest: SubmittedChatRequest,
-      signal: AbortSignal
-    ): AsyncGenerator<ChatApiStreamEvent, void, unknown> {
-      const personality = await dependencies.getLysPersonality()
-      signal.throwIfAborted()
-      yield* dependencies.streamChat(
-        createChatRequestPayload(submittedRequest, personality),
-        { signal }
-      )
     }
 
     /**

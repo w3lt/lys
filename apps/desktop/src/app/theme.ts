@@ -99,7 +99,9 @@ export function calculateTheme(
  * @returns Whether the value is one of {@link THEMES}.
  */
 function isTheme(value: unknown): value is Theme {
-  return THEMES.some((theme) => theme === value)
+  const supportedThemes: readonly unknown[] = THEMES
+
+  return supportedThemes.includes(value)
 }
 
 /**

@@ -6,7 +6,7 @@ import type { ConversationAssistantMessageFinishReason } from "@lys/share"
 import type { FastifyBaseLogger } from "fastify"
 import type { ChatCompletionChunk } from "openai/resources/index.mjs"
 import type { CompleteChatOptions } from "../../../di/services/chatService"
-import type { AssistantMessageCompletion } from "../../../di/services/conversationService/share"
+import type { AssistantMessageCompletion } from "./persistence"
 import { ChatCompletionCancelledError } from "../../../utils/errors"
 
 /** Dependencies and persistence callbacks for one owned streamed completion. */

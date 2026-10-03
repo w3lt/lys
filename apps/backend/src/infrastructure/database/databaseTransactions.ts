@@ -75,11 +75,12 @@ export type DatabaseFunction = (...values: SQLOutputValue[]) => SQLInputValue
 /**
  * Runs store work against one consistent read snapshot of the shared database.
  *
- * @remarks Consumed by conversation history queries. Lent by the database
- * owner without the authority to close the connection. Concurrency model:
- * single-owner; each call completes synchronously on the owner's event loop
- * and is never nested inside another operation. Every implementation fails
- * with `Database is closed` after its owner closes the database.
+ * @remarks Consumed by conversation history queries and by agent listings and
+ * lookups. Lent by the database owner without the authority to close the
+ * connection. Concurrency model: single-owner; each call completes
+ * synchronously on the owner's event loop and is never nested inside another
+ * operation. Every implementation fails with `Database is closed` after its
+ * owner closes the database.
  */
 export interface DatabaseReader {
   /**
@@ -110,12 +111,13 @@ export interface DatabaseReader {
 /**
  * Runs store work in one atomic write transaction on the shared database.
  *
- * @remarks Consumed by conversation history edits and by turn persistence,
- * including its startup recovery. Lent by the database owner without the
- * authority to close the connection. Concurrency model: single-owner; each
- * call completes synchronously on the owner's event loop and is never nested
- * inside another operation. Every implementation fails with
- * `Database is closed` after its owner closes the database.
+ * @remarks Consumed by conversation history edits, by turn persistence,
+ * including its startup recovery, and by agent creation, changes, and
+ * deletion. Lent by the database owner without the authority to close the
+ * connection. Concurrency model: single-owner; each call completes
+ * synchronously on the owner's event loop and is never nested inside another
+ * operation. Every implementation fails with `Database is closed` after its
+ * owner closes the database.
  */
 export interface DatabaseWriter {
   /**
@@ -150,7 +152,7 @@ export interface DatabaseWriter {
 /**
  * Adds application SQL functions to the shared database connection.
  *
- * @remarks Consumed by the conversation history reader, which registers its
+ * @remarks Consumed by the conversation record reader, which registers its
  * search function when it is created. Lent by the database owner without the
  * authority to close the connection. Concurrency model: single-owner.
  */

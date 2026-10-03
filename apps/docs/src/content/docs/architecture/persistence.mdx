@@ -6,26 +6,30 @@ sidebar:
   order: 6
 ---
 
-Lys currently persists a SQLite conversation database, a small JSON settings
-file, and one desktop theme preference.
+Lys currently persists a SQLite database of conversations and agent
+definitions, a small JSON settings file, and one desktop theme preference.
 
 ## Persistent artifacts
 
-| Artifact              | Owner           | Location                                      | Purpose                                                                                                                                                                         |
-| --------------------- | --------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Conversation database | Fastify backend | `$LYS_HOME/lys_db.sqlite`                     | Stores conversation metadata and conversation messages.                                                                                                                         |
-| Settings JSON         | Tauri host      | `$LYS_HOME/settings.json`                     | Stores runtime, model, and generation settings.                                                                                                                                 |
-| Theme preference      | Desktop UI      | WebView `localStorage`, key `lys.themeChoice` | Stores the last toggled theme with the side period it was chosen in, as JSON with `schemaVersion` `1`; an invalid, outdated, or unavailable value leaves the theme to the side. |
+| Artifact         | Owner           | Location                                      | Purpose                                                                                                                                                                         |
+| ---------------- | --------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Backend database | Fastify backend | `$LYS_HOME/lys_db.sqlite`                     | Stores conversation metadata, conversation messages, and agent definitions.                                                                                                     |
+| Settings JSON    | Tauri host      | `$LYS_HOME/settings.json`                     | Stores runtime, model, and generation settings.                                                                                                                                 |
+| Theme preference | Desktop UI      | WebView `localStorage`, key `lys.themeChoice` | Stores the last toggled theme with the side period it was chosen in, as JSON with `schemaVersion` `1`; an invalid, outdated, or unavailable value leaves the theme to the side. |
 
 ## SQLite ownership
 
-Only the backend reads or writes the conversation database directly.
+Only the backend reads or writes the database directly.
 `SqliteDatabase` (`apps/backend/src/infrastructure/database/`) owns the
 connection, its schema version, and closing it; the composition root opens it
 once and closes it after the LLM runtime service and before the chat service.
 Stores borrow read and write transactions that cannot close the connection or
-end a transaction early. Each store owns the queries on its tables; the shared
-migration list in `migrations.ts` owns every table's schema. The database
+end a transaction early. The conversation records in
+`src/infrastructure/database/conversations/` own every query on the
+conversation tables, and the agent records in
+`src/infrastructure/database/agents/` own every query on the `agents` table; the
+shared migration list in `migrations.ts` owns every
+table's schema. The database
 compiles each distinct SQL text once and keeps the statement until it closes.
 Each operation receives its own statement compiler, which refuses every request
 once that operation returns, even inside a later operation. Outside a write
@@ -33,15 +37,28 @@ transaction the connection refuses every change
 (`PRAGMA query_only`), so a read cannot write and a statement kept beyond its
 operation cannot change data.
 
-| Table                   | Owned by                       | Notes                                                                                            |
-| ----------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------ |
-| `conversations`         | `conversationService` adapters | One row per conversation, including `title`, `system_prompt`, `created_at`, and `updated_at`.    |
-| `conversation_messages` | `conversationService` adapters | Ordered user and assistant messages, including assistant `status`, `finish_reason`, and `model`. |
+| Table                   | Owned by                    | Notes                                                                                                                   |
+| ----------------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `conversations`         | SQLite conversation records | One row per conversation, including `title`, `system_prompt`, `created_at`, and `updated_at`.                           |
+| `conversation_messages` | SQLite conversation records | Ordered user and assistant messages, including assistant `status`, `finish_reason`, and `model`.                        |
+| `agents`                | SQLite agent records        | One row per agent definition, keyed by its `code`, with `name`, `bio`, `system_prompt`, `created_at`, and `updated_at`. |
 
 The desktop does not query SQLite directly and the Tauri host does not proxy
-conversation SQL. The backend creates separate history-reading, history-editing,
-and turn adapters over the shared database and exposes each as its own
-application service. Every borrowed operation fails once the database closes,
+conversation SQL. The backend creates three SQLite record providers over the
+shared database, for history reading, history editing, and turns, and wraps each
+in a conversation service in `src/di/services/conversationService/`. Each
+service keeps the decisions (identities, timestamps, validation, superseding a
+streaming reply, list cursors) behind records it declares in `records.ts`, and
+contains no SQL. Each service is exposed as its own application service.
+The agent service `StoredAgents` (`src/di/services/agentService/`) wraps
+`SqliteAgentRecordStore` the same way: it validates each definition or change,
+reads the current time once per change, and lists and stores agents through
+records it declares in `records.ts`. Unlike the conversation records, the
+agent records are one interface: the service is their only consumer and uses
+all five operations, while the routes receive narrow capabilities of the
+service instead. It is decorated as `app.agents`, and the agent routes in
+`src/modules/agent/` call it.
+Every borrowed operation fails once the database closes,
 and the database remains open until every reply generation has stored its final
 state.
 
@@ -53,26 +70,35 @@ On startup the database owner:
 1. Opens the SQLite file with foreign keys enabled.
 2. Acquires a write transaction and reads `PRAGMA user_version`.
 3. Rejects unsupported future versions or applies each missing migration in order.
-4. Records version 5 and commits; a migration failure rolls back all pending work.
+4. Records version 6 and commits; a migration failure rolls back all pending work.
 5. Switches to write-ahead logging with `synchronous = NORMAL`. A database from
    a newer version was refused in step 3, before anything changed its file.
 6. Turns on write protection, which only a write transaction lifts.
 7. Installs an authorizer that refuses transaction-control SQL, including
    savepoints, and changes to write protection from store code.
 
-The conversation adapters are then created over the open database. Turn
-persistence comes first: in one write transaction it changes remaining
-streaming assistants to interrupted with a fresh message timestamp, without
-changing conversation activity time. The history reader then registers its
-search function.
+The conversation services are then created over SQLite records on the open
+database. Turn persistence comes first: in one write transaction it changes
+remaining streaming assistants to interrupted with a fresh message timestamp,
+without changing conversation activity time. The record reader then registers
+its search function, and the agent service is created over its records.
 
-The current migrations create the two tables, add a message index, and install
-triggers that keep `conversations.updated_at` current. Historical migrations remain
-unchanged; version 4 restricts the conversation timestamp trigger to explicit
-activity updates, so title edits preserve ordering, and version 5 restricts the
-message-update trigger to text changes, so status-only updates preserve it too.
+The current migrations create the two conversation tables, add a message index,
+and install triggers that keep `conversations.updated_at` current. Historical
+migrations remain unchanged; version 4 restricts the conversation timestamp
+trigger to explicit activity updates, so title edits preserve ordering, and
+version 5 restricts the message-update trigger to text changes, so status-only
+updates preserve it too. Version 6 adds the `agents` table and changes no
+existing row.
 Turn creation is atomic and first interrupts a reply still streaming in the same
-conversation, and streamed content is committed before it is sent to any stream
+conversation: the turn service runs it as one callback inside one write
+transaction of the turn records, which refuse every call once the callback
+returns. The turn service reads the current time once per operation, and every
+value a turn builds carries that time; the message-insert trigger then moves
+the conversation's activity time forward, to a later time when the message's
+time is not later than the stored one. A rename validates
+the renamed conversation before it commits, so an invalid stored row rolls the
+rename back. Streamed content is committed before it is sent to any stream
 following the reply. The delta `UPDATE`, like every statement, is compiled on
 its first use and reused; each delta runs in one write transaction.
 

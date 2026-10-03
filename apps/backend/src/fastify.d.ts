@@ -1,9 +1,10 @@
 /// <reference types="fastify" />
 
+import type StoredAgents from "./di/services/agentService/agents"
 import type ChatService from "./di/services/chatService"
-import type SqliteConversationHistoryEditor from "./di/services/conversationService/historyEditor"
-import type SqliteConversationHistoryReader from "./di/services/conversationService/historyReader"
-import type SqliteConversationTurns from "./di/services/conversationService/turns"
+import type StoredConversationHistoryEditor from "./di/services/conversationService/historyEditor"
+import type StoredConversationHistoryReader from "./di/services/conversationService/historyReader"
+import type StoredConversationTurns from "./di/services/conversationService/turns"
 import type LlmRuntimeService from "./di/services/llmRuntimeService"
 import type LlmService from "./di/services/llmService"
 
@@ -17,10 +18,12 @@ declare module "fastify" {
     /** Application-scoped LLM runtime connection and model-operation queue. */
     llmRuntimeService: LlmRuntimeService
     /** Application-scoped persistence of chat turns and their replies. */
-    conversationTurns: SqliteConversationTurns
+    conversationTurns: StoredConversationTurns
     /** Application-scoped reading and search of conversation history. */
-    conversationHistoryReader: SqliteConversationHistoryReader
+    conversationHistoryReader: StoredConversationHistoryReader
     /** Application-scoped renaming and deletion of stored conversations. */
-    conversationHistoryEditor: SqliteConversationHistoryEditor
+    conversationHistoryEditor: StoredConversationHistoryEditor
+    /** Application-scoped storage of agent definitions. */
+    agents: StoredAgents
   }
 }

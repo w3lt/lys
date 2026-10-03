@@ -24,6 +24,11 @@ route definitions.
 | `GET`    | `/api/v1/conversations/:conversationId`                           | none                                                                                          | Conversation with ordered messages                         |
 | `PATCH`  | `/api/v1/conversations/:conversationId`                           | `{ title: string }`                                                                           | Conversation metadata                                      |
 | `DELETE` | `/api/v1/conversations/:conversationId`                           | none                                                                                          | Bodyless `204`                                             |
+| `GET`    | `/api/v1/agents`                                                  | none; optional `cursor`, `limit` query parameters                                             | Agent list page                                            |
+| `POST`   | `/api/v1/agents`                                                  | `{ code?, name, bio, systemPrompt }`                                                          | `201` agent with `Location`, or `409` Problem Details      |
+| `GET`    | `/api/v1/agents/:agentCode`                                       | none                                                                                          | Agent with its system prompt                               |
+| `PATCH`  | `/api/v1/agents/:agentCode`                                       | at least one of `{ name, bio, systemPrompt }`                                                 | Changed agent                                              |
+| `DELETE` | `/api/v1/agents/:agentCode`                                       | none                                                                                          | Bodyless `204`                                             |
 | `POST`   | `/api/v1/chat`                                                    | `message`, `model`, required `generationOptions` and `personality`, optional `conversationId` | `text/event-stream`                                        |
 | `GET`    | `/api/v1/chat/:conversationId/replies/:assistantMessageId/events` | none                                                                                          | `text/event-stream` (reply snapshot, then live events)     |
 | `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/stop`   | none                                                                                          | Bodyless `204`, or `409` Problem Details                   |
@@ -35,6 +40,11 @@ List, load, health, and unload requests answer `503` with
 `urn:lys:problem:llm:runtime-unavailable` while the backend has no connected
 LM Studio runtime. The runtime-status route never contacts LM Studio; the
 runtime-connect route waits for one shared connection attempt.
+
+Every request body is limited to 1 MiB (1,048,576 bytes), Fastify's default.
+A larger body is refused with `413 Payload Too Large` before the route runs, so
+nothing is stored or changed. The response is Fastify's JSON error body, with
+`code` `FST_ERR_CTP_BODY_TOO_LARGE`, not Problem Details.
 
 ## Chat request body
 
@@ -159,6 +169,77 @@ without a title task already running, and publishes a title only if the
 conditional database write succeeds. On startup,
 remaining streaming assistants become interrupted with refreshed message
 timestamps; conversation activity time and history order do not change.
+
+## Agents
+
+An agent is a stored definition: a `code`, a `name`, a `bio`, a
+`systemPrompt`, and the `createdAt` and `updatedAt` timestamps. The code is the
+agent's identity and never changes: a lowercase slug of 1–64 characters made of
+`a`–`z` and `0`–`9` in hyphen-separated groups, compared exactly. A malformed
+code in a path returns `400` before any lookup. Request bodies reject unknown
+fields; the name is trimmed to 1–64 UTF-16 code units, the bio to 1–128, and the
+system prompt must not be blank after trimming. Text containing a lone UTF-16
+surrogate, which UTF-8 cannot carry unchanged, is rejected. The system prompt
+has no length limit of its own; only the 1 MiB request body limit above bounds
+it. Invalid bodies return `400` and change nothing.
+
+List responses have exactly `agents`, `storedCount`, and `nextCursor`. Each
+summary contains `code`, `name`, `bio`, `createdAt`, and `updatedAt`; it does
+not expose `systemPrompt`, which `GET` by code returns.
+
+| Parameter | Contract                                                                                                  |
+| --------- | --------------------------------------------------------------------------------------------------------- |
+| `limit`   | Integer from 1–50; defaults to 30.                                                                        |
+| `cursor`  | Opaque, at most 2048 characters, taken from the previous page. Malformed or foreign cursors return `400`. |
+
+Agents are ordered by `createdAt ASC, code ASC`, with keyset pagination, and
+`storedCount` counts every stored agent. Neither key changes after creation,
+so an update never moves an agent between pages. Each response reads the count
+and the page from one snapshot; later pages reflect later changes. The next
+cursor is `null` on the last page.
+
+`POST` stores a new agent and answers `201` with the stored agent and a
+`Location: /api/v1/agents/<code>` header. CORS does not expose `Location`, so a
+browser client on another origin, such as the desktop app, uses the returned
+`code` instead. `code` is optional:
+
+- A given code is stored exactly. If another agent already has it, the request
+  returns `409` with `urn:lys:problem:agent:code-taken` and stores nothing.
+- Without a code, the backend derives one from the name: it decomposes the
+  name with Unicode compatibility decomposition (NFKD), which removes accents
+  and turns forms such as `𝐖` or `ﬁ` into ASCII, then lowercases it, joins the
+  remaining ASCII letters and digits with single hyphens, and cuts the result
+  to fit 64 characters. `Web Researcher` becomes `web-researcher` and `Trợ lý`
+  becomes `tro-ly`. A letter without an ASCII form, such as `đ`, acts as a
+  separator. A name in which no letter or digit has an ASCII form, such as
+  `日本語`, gives `agent`. When the code is taken, `-2`, `-3`, and so on are
+  added.
+
+Creating an agent is not idempotent: repeating a request without a code creates
+another agent. After a lost response, list the agents to find out whether it
+was created. Names need not be unique.
+
+`PATCH` replaces only the given fields, trimmed, and stores the time of the
+change as `updatedAt`, even when the values are unchanged. The body cannot
+contain `code`, and an empty body returns `400`. `DELETE` removes the agent
+permanently and returns `204` without a body.
+
+A missing agent on GET, PATCH, or DELETE returns `404` with
+`Content-Type: application/problem+json`:
+
+```json
+{
+  "type": "urn:lys:problem:agent:not-found",
+  "title": "Agent not found",
+  "status": 404,
+  "detail": "Agent web-researcher was not found.",
+  "instance": "/api/v1/agents/web-researcher"
+}
+```
+
+A taken code returns `409` with the same media type, `type`
+`urn:lys:problem:agent:code-taken`, `title` `Agent code taken`, and `instance`
+`/api/v1/agents`.
 
 ## LLM metadata shape
 

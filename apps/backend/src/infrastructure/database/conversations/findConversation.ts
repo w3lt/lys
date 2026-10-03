@@ -1,4 +1,4 @@
-import type { DatabaseStatementCompiler } from "../../../infrastructure/database/databaseTransactions"
+import type { DatabaseStatementCompiler } from "../databaseTransactions"
 import {
   conversationMetadataSchema,
   conversationMessageSchema,
@@ -14,7 +14,7 @@ import {
  * @returns Independent metadata, or undefined for an absent conversation.
  * @throws If SQLite access or persisted validation fails.
  */
-export function getConversationMetadata(
+function findConversationMetadata(
   statements: DatabaseStatementCompiler,
   conversationId: string
 ): ConversationMetadata | undefined {
@@ -29,7 +29,7 @@ export function getConversationMetadata(
 
 /**
  * Projects role-specific SQLite columns into the strict message contract.
- * @param row - Untrusted stored row selected by getConversation.
+ * @param row - Untrusted stored row selected by findConversation.
  * @returns The validated independent message.
  * @throws If the row violates the shared message schema.
  */
@@ -59,11 +59,11 @@ function parseConversationMessage(
  * @returns Independent conversation data, or undefined when absent.
  * @throws If SQLite access or persisted validation fails.
  */
-export function getConversation(
+export function findConversation(
   statements: DatabaseStatementCompiler,
   conversationId: string
 ): Conversation | undefined {
-  const metadata = getConversationMetadata(statements, conversationId)
+  const metadata = findConversationMetadata(statements, conversationId)
   if (!metadata) return undefined
   const rows = statements
     .getStatement(

@@ -139,6 +139,22 @@ const databaseMigrations = [
       SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
       WHERE id = NEW.conversation_id;
     END;
+  `,
+  // Stores agent definitions. SQLite checks only that every column is present
+  // and that the code, name, bio, and system prompt are not empty; comparing
+  // with '' counts every byte, where length() would stop at a NUL character.
+  // The agent schemas check the code format, length limits, trimmed and
+  // well-formed text, and timestamp format of every row the backend writes and
+  // reads, so those rules can change without rebuilding this table.
+  `
+    CREATE TABLE agents (
+      code TEXT NOT NULL PRIMARY KEY CHECK (code <> ''),
+      name TEXT NOT NULL CHECK (name <> ''),
+      bio TEXT NOT NULL CHECK (bio <> ''),
+      system_prompt TEXT NOT NULL CHECK (system_prompt <> ''),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    ) STRICT
   `
 ] as const
 

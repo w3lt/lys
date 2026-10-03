@@ -1,4 +1,5 @@
 import Fastify from "fastify"
+import updateFastifyWithAgentRoutes from "./modules/agent"
 import updateFastifyWithConversationRoutes from "./modules/conversation"
 import registerHealthRoutes from "./modules/health/routes"
 import updateFastifyWithLlmRoutes from "./modules/llm/routes"
@@ -48,6 +49,7 @@ export async function buildApp(options: BuildAppOptions) {
     titleGenerationMaxAttempts: config.titleGenerationMaxAttempts
   })
   await app.register(updateFastifyWithConversationRoutes)
+  await app.register(updateFastifyWithAgentRoutes)
   // =============== REGISTER THE ROUTES =============== //
 
   return app

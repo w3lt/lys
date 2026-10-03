@@ -1,89 +1,73 @@
 import type { ListConversationsApiResponse } from "@lys/protocol"
 import type { Conversation } from "@lys/share"
 import type {
-  DatabaseFunctionRegistry,
-  DatabaseReader
-} from "../../../infrastructure/database/databaseTransactions"
-import type {
   ConversationReader,
   ConversationLister
 } from "../../../modules/conversation/capabilities"
-import { getConversation } from "./readConversation"
 import {
-  calculateConversationSearchMatch,
-  listConversations
-} from "./listConversations"
-import type { ConversationListOptions } from "./utils"
+  createConversationListCursor,
+  type ConversationListOptions
+} from "../../../modules/conversation/listOptions"
+import type { ConversationRecordReader } from "./records"
 
 /**
- * Borrows the shared database's read snapshots to observe conversation
- * history.
+ * Retains borrowed conversation records to serve history reads and paged
+ * listings.
  *
- * @remarks Invariant: once created, `contains_search` is registered on the
- * shared connection for its list queries. Owns no resource: the database's
- * owner closes the connection, after which every operation fails with
- * `Database is closed`. Each call is one read snapshot; returned records are
- * independent copies. Concurrency model: single-owner, synchronous on the
- * backend's event loop.
+ * @remarks Owns no resource: the records' owner closes the store, after which
+ * every operation fails with `Database is closed`. Each call reads one
+ * snapshot; returned records are independent copies. Concurrency model:
+ * single-owner, synchronous on the backend's event loop.
  */
-export default class SqliteConversationHistoryReader
+export default class StoredConversationHistoryReader
   implements ConversationReader, ConversationLister
 {
-  /** Borrowed read snapshots for conversation and list queries. */
-  readonly #databaseReader: DatabaseReader
+  /** Borrowed records for conversation and list reads. */
+  readonly #recordReader: ConversationRecordReader
 
   /**
-   * Retains borrowed read access prepared by
-   * {@link SqliteConversationHistoryReader.create}.
-   * @param databaseReader - Read snapshots lent by the database owner.
+   * Retains borrowed records without reading them.
+   * @param recordReader - Conversation records lent by the composition root.
    */
-  private constructor(databaseReader: DatabaseReader) {
-    this.#databaseReader = databaseReader
-  }
-
-  /**
-   * Registers conversation search on the shared connection and publishes read
-   * access to conversation history.
-   * @param database - Read snapshots and function registration lent by the
-   * database owner; the reader retains only the read snapshots.
-   * @returns The ready reader; it owns nothing to release.
-   * @throws If the database is closed or SQLite rejects the registration.
-   * @remarks Registers `contains_search`, the case-insensitive match used by
-   * history search, replacing a function already registered under that name.
-   */
-  public static create(
-    database: DatabaseReader & DatabaseFunctionRegistry
-  ): SqliteConversationHistoryReader {
-    database.registerDatabaseFunction(
-      "contains_search",
-      calculateConversationSearchMatch
-    )
-    return new SqliteConversationHistoryReader(database)
+  public constructor(recordReader: ConversationRecordReader) {
+    this.#recordReader = recordReader
   }
 
   /**
    * Reads one conversation and its ordered transcript in one snapshot.
    * @param conversationId - Validated UUIDv7 to address.
    * @returns The stored conversation or undefined when absent.
-   * @throws If the database is closed, SQLite fails, or stored data are invalid.
+   * @throws If the store is closed or stored data are invalid.
    */
   public getConversation(conversationId: string): Conversation | undefined {
-    return this.#databaseReader.handleDatabaseReadRequest((statements) =>
-      getConversation(statements, conversationId)
-    )
+    return this.#recordReader.findConversation(conversationId)
   }
 
   /**
-   * Lists search matches and previews from one read snapshot.
+   * Lists search matches and previews from one snapshot and binds the
+   * continuation to the query.
    * @param options - Validated query and cursor from parseConversationListOptions.
-   * @returns A strict page in descending activity-time and UUID order.
-   * @throws If the database is closed, SQLite fails, or persisted rows are invalid.
+   * @returns A strict page in descending activity-time and UUID order; its
+   * cursor continues after the last listed conversation while more match.
+   * @throws If the store is closed or persisted rows are invalid.
    */
   public listConversations(
     options: ConversationListOptions
   ): ListConversationsApiResponse {
-    return this.#databaseReader.handleDatabaseReadRequest((statements) =>
-      listConversations(statements, options)
-    )
+    const page = this.#recordReader.listConversations({
+      query: options.query,
+      after: options.cursor,
+      limit: options.limit
+    })
+    const lastConversation = page.conversations.at(-1)
+    return {
+      conversations: page.conversations,
+      storedCount: page.storedCount,
+      matchCount: page.matchCount,
+      nextCursor:
+        page.hasMore && lastConversation !== undefined
+          ? createConversationListCursor(options.query, lastConversation)
+          : null
+    }
   }
 }

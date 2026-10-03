@@ -2,7 +2,7 @@ import type { FastifyInstance, LightMyRequestResponse } from "fastify"
 import { validatorCompiler } from "fastify-type-provider-zod"
 import { onTestFinished, vi, type MockInstance } from "vitest"
 import ChatService from "../../../src/di/services/chatService"
-import type SqliteConversationTurns from "../../../src/di/services/conversationService/turns"
+import type StoredConversationTurns from "../../../src/di/services/conversationService/turns"
 import ReplyGenerationRegistry from "../../../src/modules/chat/chat/replyGenerationRegistry"
 import { createChatSseTestApp } from "./chatSseRoute"
 import { openConversationTestServices } from "./conversationDatabase"
@@ -19,7 +19,7 @@ export type ChatRouteTestApp = TestFastify &
      * it.
      */
     createConversationTurn: MockInstance<
-      SqliteConversationTurns["createConversationTurn"]
+      StoredConversationTurns["createConversationTurn"]
     >
     /** Chat completion of `app.chatService`; rejects if it is ever called. */
     completeChatStream: MockInstance<ChatService["completeChatStream"]>

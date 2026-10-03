@@ -7,9 +7,10 @@ import type {
 import type {
   ConversationTurnOperation,
   ConversationTurnRecordWriter,
-  ConversationTurnTransaction
+  ConversationTurnTransaction,
+  UpdateAssistantMessageContentInput,
+  UpdateAssistantMessageStateInput
 } from "../../../di/services/conversationService/records"
-import type { AssistantMessageCompletion } from "../../../modules/chat/chat/persistence"
 import type {
   DatabaseStatementCompiler,
   DatabaseWriter
@@ -65,7 +66,8 @@ class SqliteConversationTurnTransaction implements ConversationTurnTransaction {
   /**
    * Implements {@link ConversationTurnTransaction.createConversation}.
    * @param metadata - Interface-defined metadata.
-   * @throws The interface-defined ended-transaction and duplicate failures.
+   * @throws The interface-defined ended-transaction and write failures; a
+   * stored identity fails the primary-key constraint.
    */
   public createConversation(metadata: ConversationMetadata): void {
     this.#statements
@@ -97,7 +99,7 @@ class SqliteConversationTurnTransaction implements ConversationTurnTransaction {
    * @param conversationId - Interface-defined conversation.
    * @param message - Interface-defined message.
    * @throws The interface-defined failures; an absent conversation fails the
-   * foreign-key constraint.
+   * foreign-key constraint and a stored identity the primary-key constraint.
    */
   public createUserMessage(
     conversationId: string,
@@ -116,7 +118,7 @@ class SqliteConversationTurnTransaction implements ConversationTurnTransaction {
    * @param conversationId - Interface-defined conversation.
    * @param message - Interface-defined message.
    * @throws The interface-defined failures; an absent conversation fails the
-   * foreign-key constraint.
+   * foreign-key constraint and a stored identity the primary-key constraint.
    */
   public createAssistantMessage(
     conversationId: string,
@@ -170,8 +172,8 @@ export default class SqliteConversationTurnRecordWriter implements ConversationT
    * @typeParam Result - Interface-defined operation result.
    * @param operation - Interface-defined synchronous work.
    * @returns The interface-defined result after the commit.
-   * @throws The interface-defined operation, asynchronous-operation, closed,
-   * and commit failures.
+   * @throws The interface-defined operation, commit, asynchronous-operation,
+   * closed, nested-call, begin, and rollback failures.
    */
   public handleConversationTurnWriteRequest<Result>(
     operation: ConversationTurnOperation<Result>
@@ -202,39 +204,35 @@ export default class SqliteConversationTurnRecordWriter implements ConversationT
   }
 
   /**
-   * Implements {@link ConversationTurnRecordWriter.updateAssistantMessageContent}.
-   * @param assistantMessageId - Interface-defined reply.
-   * @param content - Interface-defined delta.
-   * @param updatedAt - Interface-defined message timestamp.
+   * Implements {@link ConversationTurnRecordWriter.updateAssistantMessageContent};
+   * the schema's message-update trigger moves the activity time forward.
+   * @param input - Interface-defined reply, delta, and message timestamp.
    * @returns The interface-defined append outcome.
    * @throws The interface-defined closed and write failures.
    */
   public updateAssistantMessageContent(
-    assistantMessageId: string,
-    content: string,
-    updatedAt: string
+    input: UpdateAssistantMessageContentInput
   ): boolean {
     return this.#databaseWriter.handleDatabaseWriteRequest(
       (statements) =>
         statements
           .getStatement(UPDATE_ASSISTANT_MESSAGE_CONTENT_SQL)
-          .run(content, updatedAt, assistantMessageId).changes === 1
+          .run(input.content, input.updatedAt, input.assistantMessageId)
+          .changes === 1
     )
   }
 
   /**
    * Implements {@link ConversationTurnRecordWriter.updateAssistantMessageState}.
-   * @param assistantMessageId - Interface-defined reply.
-   * @param completion - Interface-defined terminal state.
-   * @param updatedAt - Interface-defined message timestamp.
+   * @param input - Interface-defined reply, terminal state, and message
+   * timestamp.
    * @returns The interface-defined finalization outcome.
    * @throws The interface-defined closed and write failures.
    */
   public updateAssistantMessageState(
-    assistantMessageId: string,
-    completion: AssistantMessageCompletion,
-    updatedAt: string
+    input: UpdateAssistantMessageStateInput
   ): boolean {
+    const { assistantMessageId, completion, updatedAt } = input
     const finishReason =
       completion.status === "completed" ? completion.finishReason : null
     return this.#databaseWriter.handleDatabaseWriteRequest(

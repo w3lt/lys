@@ -15,8 +15,11 @@ import {
 } from "../../../support/conversationDatabase"
 import { createFixtureUuidV7 } from "../../../support/conversationFixtures"
 
-/** Wall-clock time observed by every case. */
+/** Wall-clock time observed by every case until it advances the clock. */
 const NOW = "2026-03-04T05:06:07.890Z"
+
+/** Wall-clock time after a case advances the clock past {@link NOW}. */
+const LATER = "2026-03-04T05:06:09.123Z"
 
 /** Conversation stored before a recovery case creates the turn access. */
 const CONVERSATION_ID = createFixtureUuidV7(1)
@@ -209,6 +212,7 @@ describe("StoredConversationTurns", () => {
       expect(
         turns.updateAssistantMessageContent(turn.assistantMessage.id, "Hi")
       ).toBe(true)
+      vi.setSystemTime(new Date(LATER))
       expect(
         turns.updateAssistantMessageContent(turn.assistantMessage.id, " there")
       ).toBe(true)
@@ -218,7 +222,7 @@ describe("StoredConversationTurns", () => {
       ).toMatchObject({
         content: "Hi there",
         status: "streaming",
-        updatedAt: NOW
+        updatedAt: LATER
       })
     })
 
@@ -281,6 +285,8 @@ describe("StoredConversationTurns", () => {
         systemPrompt: "You are Lys."
       })
 
+      vi.setSystemTime(new Date(LATER))
+
       expect(
         turns.updateAssistantMessageState(turn.assistantMessage.id, {
           status: "completed",
@@ -293,7 +299,7 @@ describe("StoredConversationTurns", () => {
       ).toMatchObject({
         status: "completed",
         finishReason: "length",
-        updatedAt: NOW
+        updatedAt: LATER
       })
     })
 
@@ -306,6 +312,7 @@ describe("StoredConversationTurns", () => {
           model: "qwen/qwen3-8b",
           systemPrompt: "You are Lys."
         })
+        vi.setSystemTime(new Date(LATER))
 
         expect(
           turns.updateAssistantMessageState(turn.assistantMessage.id, {
@@ -315,7 +322,7 @@ describe("StoredConversationTurns", () => {
 
         expect(
           history.getConversation(turn.conversation.id)?.messages[1]
-        ).toMatchObject({ status, finishReason: null })
+        ).toMatchObject({ status, finishReason: null, updatedAt: LATER })
       }
     )
 

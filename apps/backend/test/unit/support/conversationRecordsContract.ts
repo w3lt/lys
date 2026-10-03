@@ -1,18 +1,65 @@
-import { describe, expect, it } from "vitest"
+import { MAXIMUM_CONVERSATION_LIST_PAGE_SIZE } from "@lys/protocol"
+import { describe, expect, it, vi } from "vitest"
 import * as z from "zod"
 import type {
   ConversationRecordEditor,
   ConversationRecordReader,
   ConversationTurnRecordWriter,
-  ConversationTurnTransaction
+  ConversationTurnTransaction,
+  ListConversationsInput
 } from "../../../src/di/services/conversationService/records"
-import type {
-  AssistantMessageRowFixture,
-  ConversationRowFixture,
-  UserMessageRowFixture
-} from "./conversationDatabase"
 import { createFixtureUuidV7 } from "./conversationFixtures"
 import { getThrownFailure } from "./databaseTransactionsContract"
+
+/** Stored conversation columns a harness writes exactly as given. */
+export type ConversationRowFixture = Readonly<{
+  /** Conversation identity. */
+  id: string
+  /** Stored title, or null while untitled. */
+  title: string | null
+  /** Stored system prompt. */
+  systemPrompt: string
+  /** Creation time; also the initial activity time. */
+  createdAt: string
+}>
+
+/** Stored user-message columns a harness writes exactly as given. */
+export type UserMessageRowFixture = Readonly<{
+  /** Message identity. */
+  id: string
+  /** Owning conversation identity. */
+  conversationId: string
+  /** Non-empty authored content. */
+  content: string
+  /**
+   * Creation time; becomes the conversation's activity time when it is later
+   * than the stored one.
+   */
+  createdAt: string
+}>
+
+/** Stored assistant-message columns a harness writes exactly as given. */
+export type AssistantMessageRowFixture = Readonly<{
+  /** Message identity. */
+  id: string
+  /** Owning conversation identity. */
+  conversationId: string
+  /** Generating model. */
+  model: string
+  /** Stored reply text. */
+  content: string
+  /** Stored lifecycle status. */
+  status: "streaming" | "completed" | "interrupted" | "failed"
+  /** Stored finish reason, non-null only for completed replies. */
+  finishReason: "stop" | "length" | null
+  /**
+   * Creation time; becomes the conversation's activity time when it is later
+   * than the stored one.
+   */
+  createdAt: string
+  /** Last modification time. */
+  updatedAt: string
+}>
 
 /** Records providers over one empty store, with the controls a case needs. */
 export type ConversationRecordsHarness = Readonly<{
@@ -25,11 +72,12 @@ export type ConversationRecordsHarness = Readonly<{
   /** Stores one conversation exactly as given, valid or not. */
   saveConversation: (row: ConversationRowFixture) => void
   /**
-   * Stores one user message exactly as given; its time becomes the
-   * conversation's activity time, so messages are saved in time order.
+   * Stores one user message exactly as given. Messages are saved in time order
+   * after the conversation's creation, so each one's time becomes the
+   * conversation's activity time; an earlier time lets the store choose it.
    */
   saveUserMessage: (row: UserMessageRowFixture) => void
-  /** Stores one assistant message exactly as given, in time order. */
+  /** Stores one assistant message exactly as given, in the same time order. */
   saveAssistantMessage: (row: AssistantMessageRowFixture) => void
   /** Closes the store as its owner does; a repeated call changes nothing. */
   closeRecords: () => void
@@ -52,6 +100,13 @@ const CREATED_AT = "2025-01-01T00:00:00.000Z"
 
 /** Time a case passes as the moment of its change. */
 const CHANGED_AT = "2026-03-04T05:06:07.890Z"
+
+/** First page of every stored conversation at the default page size. */
+const FIRST_PAGE: ListConversationsInput = {
+  query: "",
+  after: undefined,
+  limit: 30
+}
 
 /** Values that distinguish one stored conversation in list cases. */
 type ListedConversationFixture = Readonly<{
@@ -152,6 +207,20 @@ function createNewConversationMetadata(id: string) {
     createdAt: CHANGED_AT,
     updatedAt: CHANGED_AT
   }
+}
+
+/**
+ * Reads the activity time of the conversation most cases address.
+ *
+ * @param harness - Store under test.
+ * @returns The activity time of {@link CONVERSATION_ID} in epoch milliseconds.
+ * @throws If that conversation is not stored.
+ */
+function getActivityTime(harness: ConversationRecordsHarness): number {
+  const conversation = harness.recordReader.findConversation(CONVERSATION_ID)
+  if (conversation === undefined)
+    throw new Error("Expected the addressed conversation to be stored")
+  return Date.parse(conversation.updatedAt)
 }
 
 /**
@@ -355,7 +424,7 @@ export function registerConversationRecordReaderContractSuite(
       it("returns an empty final page for an empty store", () => {
         const { recordReader } = createHarness()
 
-        expect(recordReader.listConversations("", undefined, 30)).toEqual({
+        expect(recordReader.listConversations(FIRST_PAGE)).toEqual({
           conversations: [],
           storedCount: 0,
           matchCount: 0,
@@ -386,7 +455,7 @@ export function registerConversationRecordReaderContractSuite(
 
         expect(
           harness.recordReader
-            .listConversations("", undefined, 30)
+            .listConversations(FIRST_PAGE)
             .conversations.map(({ id }) => id)
         ).toEqual([tieHigh, tieLow, older])
       })
@@ -401,8 +470,7 @@ export function registerConversationRecordReaderContractSuite(
         })
 
         expect(
-          harness.recordReader.listConversations("", undefined, 30)
-            .conversations
+          harness.recordReader.listConversations(FIRST_PAGE).conversations
         ).toEqual([
           {
             id,
@@ -434,8 +502,8 @@ export function registerConversationRecordReaderContractSuite(
         })
 
         expect(
-          harness.recordReader.listConversations("", undefined, 30)
-            .conversations[0]?.preview
+          harness.recordReader.listConversations(FIRST_PAGE).conversations[0]
+            ?.preview
         ).toEqual({ role: "user", content: "Question" })
       })
 
@@ -449,8 +517,8 @@ export function registerConversationRecordReaderContractSuite(
         })
 
         expect(
-          harness.recordReader.listConversations("", undefined, 30)
-            .conversations[0]?.preview
+          harness.recordReader.listConversations(FIRST_PAGE).conversations[0]
+            ?.preview
         ).toBeNull()
       })
 
@@ -475,11 +543,10 @@ export function registerConversationRecordReaderContractSuite(
           createdAtMinute: 3
         })
 
-        const page = harness.recordReader.listConversations(
-          "trip",
-          undefined,
-          30
-        )
+        const page = harness.recordReader.listConversations({
+          ...FIRST_PAGE,
+          query: "trip"
+        })
 
         expect(page.storedCount).toBe(3)
         expect(page.matchCount).toBe(2)
@@ -499,8 +566,10 @@ export function registerConversationRecordReaderContractSuite(
         })
 
         expect(
-          harness.recordReader.listConversations("trip", undefined, 30)
-            .conversations[0]?.preview
+          harness.recordReader.listConversations({
+            ...FIRST_PAGE,
+            query: "trip"
+          }).conversations[0]?.preview
         ).toEqual({ role: "user", content: "Book the trip" })
       })
 
@@ -514,8 +583,10 @@ export function registerConversationRecordReaderContractSuite(
         })
 
         expect(
-          harness.recordReader.listConversations("trip", undefined, 30)
-            .conversations[0]?.preview
+          harness.recordReader.listConversations({
+            ...FIRST_PAGE,
+            query: "trip"
+          }).conversations[0]?.preview
         ).toEqual({ role: "user", content: "Latest" })
       })
 
@@ -530,11 +601,11 @@ export function registerConversationRecordReaderContractSuite(
           })
         )
 
-        const firstPage = harness.recordReader.listConversations(
-          "",
-          undefined,
-          2
-        )
+        const firstPage = harness.recordReader.listConversations({
+          query: "",
+          after: undefined,
+          limit: 2
+        })
         expect(firstPage.conversations.map(({ id }) => id)).toEqual([
           ids[2],
           ids[1]
@@ -542,13 +613,14 @@ export function registerConversationRecordReaderContractSuite(
         expect(firstPage.hasMore).toBe(true)
 
         const boundary = firstPage.conversations.at(-1)
-        const secondPage = harness.recordReader.listConversations(
-          "",
-          boundary === undefined
-            ? undefined
-            : { updatedAt: boundary.updatedAt, id: boundary.id },
-          2
-        )
+        const secondPage = harness.recordReader.listConversations({
+          query: "",
+          after:
+            boundary === undefined
+              ? undefined
+              : { updatedAt: boundary.updatedAt, id: boundary.id },
+          limit: 2
+        })
         expect(secondPage.conversations.map(({ id }) => id)).toEqual([ids[0]])
         expect(secondPage.hasMore).toBe(false)
         expect(secondPage.storedCount).toBe(3)
@@ -565,10 +637,40 @@ export function registerConversationRecordReaderContractSuite(
           })
         }
 
-        const page = harness.recordReader.listConversations("", undefined, 2)
+        const page = harness.recordReader.listConversations({
+          query: "",
+          after: undefined,
+          limit: 2
+        })
 
         expect(page.conversations).toHaveLength(2)
         expect(page.hasMore).toBe(false)
+      })
+
+      it("accepts the maximum page size", () => {
+        const harness = createHarness()
+        const sequences = Array.from(
+          { length: MAXIMUM_CONVERSATION_LIST_PAGE_SIZE + 1 },
+          (_, index) => index + 1
+        )
+        for (const sequence of sequences) {
+          saveListedConversation(harness, {
+            sequence,
+            title: null,
+            userMessages: [],
+            createdAtMinute: sequence
+          })
+        }
+
+        const page = harness.recordReader.listConversations({
+          ...FIRST_PAGE,
+          limit: MAXIMUM_CONVERSATION_LIST_PAGE_SIZE
+        })
+
+        expect(page.conversations).toHaveLength(
+          MAXIMUM_CONVERSATION_LIST_PAGE_SIZE
+        )
+        expect(page.hasMore).toBe(true)
       })
 
       it("rejects a stored row that violates the summary contract and stays usable", () => {
@@ -581,7 +683,7 @@ export function registerConversationRecordReaderContractSuite(
         })
 
         expect(() =>
-          harness.recordReader.listConversations("", undefined, 30)
+          harness.recordReader.listConversations(FIRST_PAGE)
         ).toThrow(z.ZodError)
 
         expect(
@@ -597,9 +699,9 @@ export function registerConversationRecordReaderContractSuite(
       expect(() =>
         harness.recordReader.findConversation(CONVERSATION_ID)
       ).toThrow("Database is closed")
-      expect(() =>
-        harness.recordReader.listConversations("", undefined, 30)
-      ).toThrow("Database is closed")
+      expect(() => harness.recordReader.listConversations(FIRST_PAGE)).toThrow(
+        "Database is closed"
+      )
     })
   })
 }
@@ -643,6 +745,30 @@ export function registerConversationRecordEditorContractSuite(
         })
       })
 
+      it("stores the same title when the rename repeats", () => {
+        const harness = createHarness()
+        saveListedConversation(harness, {
+          sequence: 1,
+          title: null,
+          userMessages: ["Hello"],
+          createdAtMinute: 1
+        })
+        const first = harness.recordEditor.updateConversationTitle(
+          CONVERSATION_ID,
+          "Greeting"
+        )
+
+        expect(
+          harness.recordEditor.updateConversationTitle(
+            CONVERSATION_ID,
+            "Greeting"
+          )
+        ).toEqual(first)
+        expect(
+          harness.recordReader.findConversation(CONVERSATION_ID)?.title
+        ).toBe("Greeting")
+      })
+
       it("returns undefined for an absent conversation and stores nothing", () => {
         const { recordEditor, recordReader } = createHarness()
 
@@ -650,9 +776,7 @@ export function registerConversationRecordEditorContractSuite(
           recordEditor.updateConversationTitle(CONVERSATION_ID, "Greeting")
         ).toBeUndefined()
 
-        expect(
-          recordReader.listConversations("", undefined, 30).storedCount
-        ).toBe(0)
+        expect(recordReader.listConversations(FIRST_PAGE).storedCount).toBe(0)
       })
     })
 
@@ -677,7 +801,7 @@ export function registerConversationRecordEditorContractSuite(
           harness.recordReader.findConversation(CONVERSATION_ID)
         ).toBeUndefined()
         expect(
-          harness.recordReader.listConversations("", undefined, 30).storedCount
+          harness.recordReader.listConversations(FIRST_PAGE).storedCount
         ).toBe(0)
       })
 
@@ -693,11 +817,11 @@ export function registerConversationRecordEditorContractSuite(
         harness.recordEditor.deleteConversation(CONVERSATION_ID)
 
         expect(
-          harness.turnRecordWriter.updateAssistantMessageContent(
-            createFixtureUuidV7(11),
-            " late",
-            CHANGED_AT
-          )
+          harness.turnRecordWriter.updateAssistantMessageContent({
+            assistantMessageId: createFixtureUuidV7(11),
+            content: " late",
+            updatedAt: CHANGED_AT
+          })
         ).toBe(false)
       })
     })
@@ -842,6 +966,35 @@ export function registerConversationTurnRecordWriterContractSuite(
         expect(recordReader.findConversation(CONVERSATION_ID)).toBeUndefined()
       })
 
+      it("refuses records calls nested in a turn operation and keeps its writes", () => {
+        const harness = createHarness()
+        const metadata = createNewConversationMetadata(CONVERSATION_ID)
+        const nestedOperation = vi.fn(() => "never run")
+
+        harness.turnRecordWriter.handleConversationTurnWriteRequest(
+          (transaction) => {
+            transaction.createConversation(metadata)
+            expect(() =>
+              harness.turnRecordWriter.handleConversationTurnWriteRequest(
+                nestedOperation
+              )
+            ).toThrow("Database transactions cannot be nested")
+            expect(() =>
+              harness.recordReader.findConversation(CONVERSATION_ID)
+            ).toThrow("Database transactions cannot be nested")
+            expect(() =>
+              harness.recordEditor.deleteConversation(CONVERSATION_ID)
+            ).toThrow("Database transactions cannot be nested")
+          }
+        )
+
+        expect(nestedOperation).not.toHaveBeenCalled()
+        expect(harness.recordReader.findConversation(CONVERSATION_ID)).toEqual({
+          ...metadata,
+          messages: []
+        })
+      })
+
       it("refuses every call on a transaction kept after its operation returned", () => {
         const { turnRecordWriter, recordReader } = createHarness()
         const transaction = retainTurnTransaction(turnRecordWriter)
@@ -928,6 +1081,29 @@ export function registerConversationTurnRecordWriterContractSuite(
         }
       })
 
+      it("changes nothing more when repeated", () => {
+        const harness = createHarness()
+        saveConversationWithReply(harness, CONVERSATION_ID, {
+          sequence: 11,
+          content: "Partial",
+          status: "streaming",
+          finishReason: null
+        })
+        harness.turnRecordWriter.updateAllStreamingAssistantMessagesToInterrupted(
+          CHANGED_AT
+        )
+        const afterFirstCall =
+          harness.recordReader.findConversation(CONVERSATION_ID)
+
+        harness.turnRecordWriter.updateAllStreamingAssistantMessagesToInterrupted(
+          "2026-03-04T05:06:08.000Z"
+        )
+
+        expect(harness.recordReader.findConversation(CONVERSATION_ID)).toEqual(
+          afterFirstCall
+        )
+      })
+
       it.each([
         { status: "completed", finishReason: "stop" } as const,
         { status: "failed", finishReason: null } as const
@@ -961,18 +1137,18 @@ export function registerConversationTurnRecordWriterContractSuite(
         const replyId = createFixtureUuidV7(11)
 
         expect(
-          harness.turnRecordWriter.updateAssistantMessageContent(
-            replyId,
-            "Hi",
-            "2026-03-04T05:06:07.000Z"
-          )
+          harness.turnRecordWriter.updateAssistantMessageContent({
+            assistantMessageId: replyId,
+            content: "Hi",
+            updatedAt: "2026-03-04T05:06:07.000Z"
+          })
         ).toBe(true)
         expect(
-          harness.turnRecordWriter.updateAssistantMessageContent(
-            replyId,
-            " there",
-            CHANGED_AT
-          )
+          harness.turnRecordWriter.updateAssistantMessageContent({
+            assistantMessageId: replyId,
+            content: " there",
+            updatedAt: CHANGED_AT
+          })
         ).toBe(true)
 
         expect(
@@ -982,6 +1158,33 @@ export function registerConversationTurnRecordWriterContractSuite(
           status: "streaming",
           updatedAt: CHANGED_AT
         })
+      })
+
+      it("moves the conversation's activity time forward with each delta", () => {
+        const harness = createHarness()
+        saveConversationWithReply(harness, CONVERSATION_ID, {
+          sequence: 11,
+          content: "",
+          status: "streaming",
+          finishReason: null
+        })
+        const replyId = createFixtureUuidV7(11)
+        const beforeDeltas = getActivityTime(harness)
+
+        harness.turnRecordWriter.updateAssistantMessageContent({
+          assistantMessageId: replyId,
+          content: "Hi",
+          updatedAt: CHANGED_AT
+        })
+        const afterFirstDelta = getActivityTime(harness)
+        harness.turnRecordWriter.updateAssistantMessageContent({
+          assistantMessageId: replyId,
+          content: " there",
+          updatedAt: CHANGED_AT
+        })
+
+        expect(afterFirstDelta).toBeGreaterThan(beforeDeltas)
+        expect(getActivityTime(harness)).toBeGreaterThan(afterFirstDelta)
       })
 
       it("returns false for a finalized reply and keeps its text", () => {
@@ -994,11 +1197,11 @@ export function registerConversationTurnRecordWriterContractSuite(
         })
 
         expect(
-          harness.turnRecordWriter.updateAssistantMessageContent(
-            createFixtureUuidV7(11),
-            " late",
-            CHANGED_AT
-          )
+          harness.turnRecordWriter.updateAssistantMessageContent({
+            assistantMessageId: createFixtureUuidV7(11),
+            content: " late",
+            updatedAt: CHANGED_AT
+          })
         ).toBe(false)
 
         expect(
@@ -1013,11 +1216,11 @@ export function registerConversationTurnRecordWriterContractSuite(
         const { turnRecordWriter } = createHarness()
 
         expect(
-          turnRecordWriter.updateAssistantMessageContent(
-            createFixtureUuidV7(11),
-            "Hi",
-            CHANGED_AT
-          )
+          turnRecordWriter.updateAssistantMessageContent({
+            assistantMessageId: createFixtureUuidV7(11),
+            content: "Hi",
+            updatedAt: CHANGED_AT
+          })
         ).toBe(false)
       })
     })
@@ -1033,20 +1236,25 @@ export function registerConversationTurnRecordWriterContractSuite(
         })
 
         expect(
-          harness.turnRecordWriter.updateAssistantMessageState(
-            createFixtureUuidV7(11),
-            { status: "completed", finishReason: "length" },
-            CHANGED_AT
-          )
+          harness.turnRecordWriter.updateAssistantMessageState({
+            assistantMessageId: createFixtureUuidV7(11),
+            completion: { status: "completed", finishReason: "length" },
+            updatedAt: CHANGED_AT
+          })
         ).toBe(true)
 
         expect(
-          harness.recordReader.findConversation(CONVERSATION_ID)?.messages[0]
+          harness.recordReader.findConversation(CONVERSATION_ID)
         ).toMatchObject({
-          content: "Hi",
-          status: "completed",
-          finishReason: "length",
-          updatedAt: CHANGED_AT
+          updatedAt: "2025-01-01T00:00:01.000Z",
+          messages: [
+            {
+              content: "Hi",
+              status: "completed",
+              finishReason: "length",
+              updatedAt: CHANGED_AT
+            }
+          ]
         })
       })
 
@@ -1062,11 +1270,11 @@ export function registerConversationTurnRecordWriterContractSuite(
           })
 
           expect(
-            harness.turnRecordWriter.updateAssistantMessageState(
-              createFixtureUuidV7(11),
-              { status },
-              CHANGED_AT
-            )
+            harness.turnRecordWriter.updateAssistantMessageState({
+              assistantMessageId: createFixtureUuidV7(11),
+              completion: { status },
+              updatedAt: CHANGED_AT
+            })
           ).toBe(true)
 
           expect(
@@ -1085,11 +1293,11 @@ export function registerConversationTurnRecordWriterContractSuite(
         })
 
         expect(
-          harness.turnRecordWriter.updateAssistantMessageState(
-            createFixtureUuidV7(11),
-            { status: "failed" },
-            CHANGED_AT
-          )
+          harness.turnRecordWriter.updateAssistantMessageState({
+            assistantMessageId: createFixtureUuidV7(11),
+            completion: { status: "failed" },
+            updatedAt: CHANGED_AT
+          })
         ).toBe(false)
 
         expect(
@@ -1101,11 +1309,11 @@ export function registerConversationTurnRecordWriterContractSuite(
         const { turnRecordWriter } = createHarness()
 
         expect(
-          turnRecordWriter.updateAssistantMessageState(
-            createFixtureUuidV7(11),
-            { status: "failed" },
-            CHANGED_AT
-          )
+          turnRecordWriter.updateAssistantMessageState({
+            assistantMessageId: createFixtureUuidV7(11),
+            completion: { status: "failed" },
+            updatedAt: CHANGED_AT
+          })
         ).toBe(false)
       })
     })
@@ -1128,8 +1336,11 @@ export function registerConversationTurnRecordWriterContractSuite(
         ).toBe(true)
 
         expect(
-          harness.recordReader.findConversation(CONVERSATION_ID)?.title
-        ).toBe("Greeting")
+          harness.recordReader.findConversation(CONVERSATION_ID)
+        ).toMatchObject({
+          title: "Greeting",
+          updatedAt: createFixtureTimestamp(1)
+        })
       })
 
       it("keeps an existing title and returns false", () => {
@@ -1169,30 +1380,30 @@ export function registerConversationTurnRecordWriterContractSuite(
       const harness = createHarness()
       harness.closeRecords()
       const replyId = createFixtureUuidV7(11)
+      const operation = vi.fn(() => "never run")
 
       expect(() =>
-        harness.turnRecordWriter.handleConversationTurnWriteRequest(
-          () => "never run"
-        )
+        harness.turnRecordWriter.handleConversationTurnWriteRequest(operation)
       ).toThrow("Database is closed")
+      expect(operation).not.toHaveBeenCalled()
       expect(() =>
         harness.turnRecordWriter.updateAllStreamingAssistantMessagesToInterrupted(
           CHANGED_AT
         )
       ).toThrow("Database is closed")
       expect(() =>
-        harness.turnRecordWriter.updateAssistantMessageContent(
-          replyId,
-          "Hi",
-          CHANGED_AT
-        )
+        harness.turnRecordWriter.updateAssistantMessageContent({
+          assistantMessageId: replyId,
+          content: "Hi",
+          updatedAt: CHANGED_AT
+        })
       ).toThrow("Database is closed")
       expect(() =>
-        harness.turnRecordWriter.updateAssistantMessageState(
-          replyId,
-          { status: "failed" },
-          CHANGED_AT
-        )
+        harness.turnRecordWriter.updateAssistantMessageState({
+          assistantMessageId: replyId,
+          completion: { status: "failed" },
+          updatedAt: CHANGED_AT
+        })
       ).toThrow("Database is closed")
       expect(() =>
         harness.turnRecordWriter.updateUntitledConversationTitle(
@@ -1240,6 +1451,149 @@ export function registerConversationTurnTransactionContractSuite(
           transaction.findConversation(CONVERSATION_ID)
         )
       ).toBeUndefined()
+    })
+
+    it("rejects a stored value that violates the conversation contract", () => {
+      const harness = createHarness()
+      harness.saveConversation({
+        id: CONVERSATION_ID,
+        title: "",
+        systemPrompt: "You are Lys.",
+        createdAt: CREATED_AT
+      })
+
+      expect(() =>
+        harness.turnRecordWriter.handleConversationTurnWriteRequest(
+          (transaction) => transaction.findConversation(CONVERSATION_ID)
+        )
+      ).toThrow(z.ZodError)
+    })
+
+    it("refuses a conversation whose identity is already stored and keeps the stored one", () => {
+      const harness = createHarness()
+      harness.saveConversation({
+        id: CONVERSATION_ID,
+        title: "Trip plan",
+        systemPrompt: "Stored prompt",
+        createdAt: CREATED_AT
+      })
+
+      expect(() =>
+        harness.turnRecordWriter.handleConversationTurnWriteRequest(
+          (transaction) => {
+            transaction.createConversation(
+              createNewConversationMetadata(CONVERSATION_ID)
+            )
+          }
+        )
+      ).toThrow()
+
+      expect(harness.recordReader.findConversation(CONVERSATION_ID)).toEqual({
+        id: CONVERSATION_ID,
+        title: "Trip plan",
+        systemPrompt: "Stored prompt",
+        createdAt: CREATED_AT,
+        updatedAt: CREATED_AT,
+        messages: []
+      })
+    })
+
+    it.each([
+      {
+        role: "user",
+        createMessage: (transaction: ConversationTurnTransaction) => {
+          transaction.createUserMessage(CONVERSATION_ID, {
+            id: createFixtureUuidV7(10),
+            role: "user",
+            content: "Hello",
+            createdAt: CHANGED_AT
+          })
+        }
+      },
+      {
+        role: "assistant",
+        createMessage: (transaction: ConversationTurnTransaction) => {
+          transaction.createAssistantMessage(CONVERSATION_ID, {
+            id: createFixtureUuidV7(11),
+            role: "assistant",
+            model: "qwen/qwen3-8b",
+            content: "",
+            status: "streaming",
+            finishReason: null,
+            createdAt: CHANGED_AT,
+            updatedAt: CHANGED_AT
+          })
+        }
+      }
+    ])(
+      "refuses a $role message for a conversation that is not stored and keeps the turn's other writes out",
+      ({ createMessage }) => {
+        const harness = createHarness()
+
+        expect(() =>
+          harness.turnRecordWriter.handleConversationTurnWriteRequest(
+            (transaction) => {
+              transaction.createConversation(
+                createNewConversationMetadata(OTHER_CONVERSATION_ID)
+              )
+              createMessage(transaction)
+            }
+          )
+        ).toThrow()
+
+        expect(
+          harness.recordReader.findConversation(OTHER_CONVERSATION_ID)
+        ).toBeUndefined()
+      }
+    )
+
+    it("moves the activity time to the time of a later message", () => {
+      const harness = createHarness()
+      harness.saveConversation({
+        id: CONVERSATION_ID,
+        title: null,
+        systemPrompt: "You are Lys.",
+        createdAt: CREATED_AT
+      })
+
+      harness.turnRecordWriter.handleConversationTurnWriteRequest(
+        (transaction) => {
+          transaction.createUserMessage(CONVERSATION_ID, {
+            id: createFixtureUuidV7(10),
+            role: "user",
+            content: "Hello",
+            createdAt: CHANGED_AT
+          })
+        }
+      )
+
+      expect(
+        harness.recordReader.findConversation(CONVERSATION_ID)?.updatedAt
+      ).toBe(CHANGED_AT)
+    })
+
+    it("moves the activity time past a message that is not later than it", () => {
+      const harness = createHarness()
+
+      harness.turnRecordWriter.handleConversationTurnWriteRequest(
+        (transaction) => {
+          transaction.createConversation(
+            createNewConversationMetadata(CONVERSATION_ID)
+          )
+          transaction.createAssistantMessage(CONVERSATION_ID, {
+            id: createFixtureUuidV7(11),
+            role: "assistant",
+            model: "qwen/qwen3-8b",
+            content: "",
+            status: "streaming",
+            finishReason: null,
+            createdAt: CHANGED_AT,
+            updatedAt: CHANGED_AT
+          })
+        }
+      )
+
+      expect(getActivityTime(harness)).toBeGreaterThan(Date.parse(CHANGED_AT))
     })
 
     it("appends user and assistant messages exactly as given, in order", () => {
@@ -1304,12 +1658,17 @@ export function registerConversationTurnTransactionContractSuite(
       )
 
       expect(
-        harness.recordReader.findConversation(CONVERSATION_ID)?.messages[0]
+        harness.recordReader.findConversation(CONVERSATION_ID)
       ).toMatchObject({
-        content: "Partial",
-        status: "interrupted",
-        finishReason: null,
-        updatedAt: CHANGED_AT
+        updatedAt: "2025-01-01T00:00:01.000Z",
+        messages: [
+          {
+            content: "Partial",
+            status: "interrupted",
+            finishReason: null,
+            updatedAt: CHANGED_AT
+          }
+        ]
       })
       expect(
         harness.recordReader.findConversation(OTHER_CONVERSATION_ID)

@@ -3,7 +3,36 @@ import {
   type ConversationMetadata
 } from "@lys/share"
 import type { ConversationRecordEditor } from "../../../di/services/conversationService/records"
-import type { DatabaseWriter } from "../databaseTransactions"
+import type {
+  DatabaseStatementCompiler,
+  DatabaseWriter
+} from "../databaseTransactions"
+
+/**
+ * Renames one stored conversation inside the caller's write transaction.
+ * @param statements - Statement compilation lent to the caller's write
+ * transaction.
+ * @param conversationId - UUIDv7 to rename.
+ * @param title - Validated title, stored as given.
+ * @returns The renamed conversation's metadata, or undefined when it is not
+ * stored.
+ * @throws If SQLite fails or the renamed row violates the metadata contract;
+ * the row is validated before the caller's transaction commits, so either
+ * failure rolls the rename back.
+ */
+function updateConversationTitle(
+  statements: DatabaseStatementCompiler,
+  conversationId: string,
+  title: string
+): ConversationMetadata | undefined {
+  const row = statements
+    .getStatement(
+      `UPDATE conversations SET title = ? WHERE id = ?
+      RETURNING id, title, system_prompt AS systemPrompt, created_at AS createdAt, updated_at AS updatedAt`
+    )
+    .get(title, conversationId)
+  return row === undefined ? undefined : conversationMetadataSchema.parse(row)
+}
 
 /**
  * Borrows the shared database's write transactions to apply user edits to
@@ -40,17 +69,9 @@ export default class SqliteConversationRecordEditor implements ConversationRecor
     conversationId: string,
     title: string
   ): ConversationMetadata | undefined {
-    return this.#databaseWriter.handleDatabaseWriteRequest((statements) => {
-      const row = statements
-        .getStatement(
-          `UPDATE conversations SET title = ? WHERE id = ?
-      RETURNING id, title, system_prompt AS systemPrompt, created_at AS createdAt, updated_at AS updatedAt`
-        )
-        .get(title, conversationId)
-      return row === undefined
-        ? undefined
-        : conversationMetadataSchema.parse(row)
-    })
+    return this.#databaseWriter.handleDatabaseWriteRequest((statements) =>
+      updateConversationTitle(statements, conversationId, title)
+    )
   }
 
   /**

@@ -54,11 +54,11 @@ export default class StoredConversationHistoryReader
   public listConversations(
     options: ConversationListOptions
   ): ListConversationsApiResponse {
-    const page = this.#recordReader.listConversations(
-      options.query,
-      options.cursor,
-      options.limit
-    )
+    const page = this.#recordReader.listConversations({
+      query: options.query,
+      after: options.cursor,
+      limit: options.limit
+    })
     const lastConversation = page.conversations.at(-1)
     return {
       conversations: page.conversations,

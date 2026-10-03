@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it } from "vitest"
 import * as z from "zod"
 import { createConversationTurn } from "../../../../../src/di/services/conversationService/createTurn"
 import type { CreateConversationTurnOptions } from "../../../../../src/modules/chat/chat/persistence"
@@ -7,27 +7,25 @@ import { openSqliteConversationRecords } from "../../../support/conversationData
 import { createFixtureUuidV7 } from "../../../support/conversationFixtures"
 import type { ConversationRecordsHarness } from "../../../support/conversationRecordsContract"
 
-/** Wall-clock time observed by every case. */
+/** Time of every turn a case creates. */
 const NOW = "2026-03-04T05:06:07.890Z"
 
 /** Existing conversation used by continuation cases. */
 const EXISTING_CONVERSATION_ID = createFixtureUuidV7(1)
 
 /**
- * Creates a turn inside a turn write, as the turn service does.
+ * Creates a turn at {@link NOW} inside a turn write, as the turn service does.
  *
  * @param records - Records under test.
  * @param options - Turn selection and content.
- * @param systemPrompt - Prompt for a conversation the turn creates.
  * @returns The created turn after the transaction commits.
  */
 function createCommittedTurn(
   records: ConversationRecordsHarness,
-  options: CreateConversationTurnOptions,
-  systemPrompt: string
+  options: CreateConversationTurnOptions
 ) {
   return records.turnRecordWriter.handleConversationTurnWriteRequest(
-    (transaction) => createConversationTurn(transaction, options, systemPrompt)
+    (transaction) => createConversationTurn(transaction, options, NOW)
   )
 }
 
@@ -62,52 +60,38 @@ function saveExistingConversation(records: ConversationRecordsHarness): void {
 }
 
 describe("createConversationTurn", () => {
-  beforeEach(() => {
-    vi.useFakeTimers({ toFake: ["Date"] })
-    vi.setSystemTime(new Date(NOW))
-  })
-
-  afterEach(() => {
-    vi.useRealTimers()
-  })
-
-  it("creates an untitled conversation with the prompt argument and an empty snapshot", () => {
+  it("creates an untitled conversation with the options prompt at the turn time", () => {
     const records = openSqliteConversationRecords()
 
-    const turn = createCommittedTurn(
-      records,
-      {
-        userMessageContent: "Hello",
-        model: "qwen/qwen3-8b",
-        systemPrompt: "Options prompt"
-      },
-      "Argument prompt"
-    )
+    const turn = createCommittedTurn(records, {
+      userMessageContent: "Hello",
+      model: "qwen/qwen3-8b",
+      systemPrompt: "Options prompt"
+    })
 
     expect(turn.isNewConversation).toBe(true)
     expect(turn.conversation).toEqual({
       id: expect.any(String),
       title: null,
-      systemPrompt: "Argument prompt",
+      systemPrompt: "Options prompt",
       createdAt: NOW,
       updatedAt: NOW,
       messages: []
     })
     expect(z.uuidv7().safeParse(turn.conversation.id).success).toBe(true)
+    expect(
+      records.recordReader.findConversation(turn.conversation.id)
+    ).toMatchObject({ systemPrompt: "Options prompt", createdAt: NOW })
   })
 
   it("appends a user message and an empty streaming reply", () => {
     const records = openSqliteConversationRecords()
 
-    const turn = createCommittedTurn(
-      records,
-      {
-        userMessageContent: "Hello",
-        model: "qwen/qwen3-8b",
-        systemPrompt: "You are Lys."
-      },
-      "You are Lys."
-    )
+    const turn = createCommittedTurn(records, {
+      userMessageContent: "Hello",
+      model: "qwen/qwen3-8b",
+      systemPrompt: "You are Lys."
+    })
 
     expect(turn.userMessage).toEqual({
       id: expect.any(String),
@@ -134,16 +118,12 @@ describe("createConversationTurn", () => {
     const records = openSqliteConversationRecords()
     saveExistingConversation(records)
 
-    const turn = createCommittedTurn(
-      records,
-      {
-        conversationId: EXISTING_CONVERSATION_ID,
-        userMessageContent: "Next question",
-        model: "qwen/qwen3-8b",
-        systemPrompt: "Ignored prompt"
-      },
-      "Ignored prompt"
-    )
+    const turn = createCommittedTurn(records, {
+      conversationId: EXISTING_CONVERSATION_ID,
+      userMessageContent: "Next question",
+      model: "qwen/qwen3-8b",
+      systemPrompt: "Ignored prompt"
+    })
 
     expect(turn.isNewConversation).toBe(false)
     expect(turn.conversation).toMatchObject({
@@ -176,16 +156,12 @@ describe("createConversationTurn", () => {
       updatedAt: "2026-01-01T00:00:04.000Z"
     })
 
-    const turn = createCommittedTurn(
-      records,
-      {
-        conversationId: EXISTING_CONVERSATION_ID,
-        userMessageContent: "Next question",
-        model: "qwen/qwen3-8b",
-        systemPrompt: "Ignored prompt"
-      },
-      "Ignored prompt"
-    )
+    const turn = createCommittedTurn(records, {
+      conversationId: EXISTING_CONVERSATION_ID,
+      userMessageContent: "Next question",
+      model: "qwen/qwen3-8b",
+      systemPrompt: "Ignored prompt"
+    })
 
     expect(turn.conversation.messages.at(-1)).toMatchObject({
       id: createFixtureUuidV7(12),
@@ -217,16 +193,12 @@ describe("createConversationTurn", () => {
       updatedAt: "2026-01-01T00:00:05.000Z"
     })
 
-    createCommittedTurn(
-      records,
-      {
-        conversationId: EXISTING_CONVERSATION_ID,
-        userMessageContent: "Next question",
-        model: "qwen/qwen3-8b",
-        systemPrompt: "Ignored prompt"
-      },
-      "Ignored prompt"
-    )
+    createCommittedTurn(records, {
+      conversationId: EXISTING_CONVERSATION_ID,
+      userMessageContent: "Next question",
+      model: "qwen/qwen3-8b",
+      systemPrompt: "Ignored prompt"
+    })
 
     expect(
       records.recordReader.findConversation(otherConversationId)?.messages[0]
@@ -237,29 +209,39 @@ describe("createConversationTurn", () => {
     const records = openSqliteConversationRecords()
 
     expect(() =>
-      createCommittedTurn(
-        records,
-        {
-          conversationId: EXISTING_CONVERSATION_ID,
-          userMessageContent: "Hello",
-          model: "qwen/qwen3-8b",
-          systemPrompt: "You are Lys."
-        },
-        "You are Lys."
-      )
+      createCommittedTurn(records, {
+        conversationId: EXISTING_CONVERSATION_ID,
+        userMessageContent: "Hello",
+        model: "qwen/qwen3-8b",
+        systemPrompt: "You are Lys."
+      })
     ).toThrow(ConversationNotFoundError)
 
     expect(
-      records.recordReader.listConversations("", undefined, 30).storedCount
+      records.recordReader.listConversations({
+        query: "",
+        after: undefined,
+        limit: 30
+      }).storedCount
     ).toBe(0)
   })
 
   it.each([
     ["empty user content", { userMessageContent: "", model: "qwen/qwen3-8b" }],
     ["an empty model", { userMessageContent: "Hello", model: "" }]
-  ])("rejects %s before appending messages", (_label, values) => {
+  ])("rejects %s before any write", (_label, values) => {
     const records = openSqliteConversationRecords()
     saveExistingConversation(records)
+    records.saveAssistantMessage({
+      id: createFixtureUuidV7(12),
+      conversationId: EXISTING_CONVERSATION_ID,
+      model: "qwen/qwen3-8b",
+      content: "Partial",
+      status: "streaming",
+      finishReason: null,
+      createdAt: "2026-01-01T00:00:04.000Z",
+      updatedAt: "2026-01-01T00:00:04.000Z"
+    })
 
     const messages =
       records.turnRecordWriter.handleConversationTurnWriteRequest(
@@ -272,7 +254,7 @@ describe("createConversationTurn", () => {
                 systemPrompt: "Ignored prompt",
                 ...values
               },
-              "Ignored prompt"
+              NOW
             )
           ).toThrow(z.ZodError)
           return transaction.findConversation(EXISTING_CONVERSATION_ID)
@@ -280,6 +262,10 @@ describe("createConversationTurn", () => {
         }
       )
 
-    expect(messages).toHaveLength(2)
+    expect(messages).toHaveLength(3)
+    expect(messages?.at(-1)).toMatchObject({
+      status: "streaming",
+      updatedAt: "2026-01-01T00:00:04.000Z"
+    })
   })
 })

@@ -18,6 +18,22 @@ export type ConversationListBoundary = Readonly<{
   id: string
 }>
 
+/** Selection of one page of conversation summaries. */
+export type ListConversationsInput = Readonly<{
+  /**
+   * Normalized search text matched case-insensitively against titles and
+   * message content; empty matches every conversation.
+   */
+  query: string
+  /** Last conversation of the previous page; undefined for the first page. */
+  after: ConversationListBoundary | undefined
+  /**
+   * Inclusive maximum number of summaries, from one to
+   * `MAXIMUM_CONVERSATION_LIST_PAGE_SIZE` of `@lys/protocol`.
+   */
+  limit: number
+}>
+
 /** One page of conversation summaries read from one consistent snapshot. */
 export type ConversationPage = Readonly<{
   /**
@@ -31,6 +47,26 @@ export type ConversationPage = Readonly<{
   matchCount: number
   /** Whether a matching conversation follows the last one on this page. */
   hasMore: boolean
+}>
+
+/** One delta for a reply that is still streaming. */
+export type UpdateAssistantMessageContentInput = Readonly<{
+  /** UUIDv7 of the reply. */
+  assistantMessageId: string
+  /** Non-empty delta, appended after the stored text. */
+  content: string
+  /** Message timestamp stored with the delta. */
+  updatedAt: string
+}>
+
+/** Terminal state for a reply that is still streaming. */
+export type UpdateAssistantMessageStateInput = Readonly<{
+  /** UUIDv7 of the reply. */
+  assistantMessageId: string
+  /** Terminal state; only a completed reply stores a finish reason. */
+  completion: AssistantMessageCompletion
+  /** Message timestamp stored with the state. */
+  updatedAt: string
 }>
 
 /**
@@ -63,8 +99,12 @@ export type ConversationTurnOperation<Result> = (
  * nothing. Returned values are independent copies, validated against the
  * shared conversation contracts. Borrowed from the store's owner without the
  * authority to close it; every call fails with `Database is closed` after the
- * owner closes the store. Concurrency model: single-owner, synchronous on the
- * backend's event loop.
+ * owner closes the store. Every call also fails when the store cannot begin
+ * or release its snapshot. Calls cannot be nested: a call made while another
+ * operation on the store runs, such as a turn operation, fails with
+ * `Database transactions cannot be nested` and leaves that operation
+ * untouched. Concurrency model: single-owner, synchronous on the backend's
+ * event loop.
  */
 export interface ConversationRecordReader {
   /**
@@ -80,31 +120,28 @@ export interface ConversationRecordReader {
   /**
    * Reads one page of conversation summaries and both counts.
    *
-   * @param query - Normalized search text matched case-insensitively against
-   * titles and message content; empty matches every conversation.
-   * @param after - Last conversation of the previous page; undefined for the
-   * first page.
-   * @param limit - Inclusive maximum number of summaries, at least one.
+   * @param input - Search text, page boundary, and page size.
    * @returns The page; each summary previews its latest matching message with
    * content, or its latest message with content when only the title matches.
    * @throws If the store is closed or a stored value violates the summary
    * contract; the records stay usable.
    */
-  listConversations(
-    query: string,
-    after: ConversationListBoundary | undefined,
-    limit: number
-  ): ConversationPage
+  listConversations(input: ListConversationsInput): ConversationPage
 }
 
 /**
  * Applies user edits to stored conversations for the history editor.
  *
  * @remarks Each call is one write transaction that commits before it returns
- * and changes nothing when it fails. Borrowed from the store's owner without
- * the authority to close it; every call fails with `Database is closed` after
- * the owner closes the store. Concurrency model: single-owner, synchronous on
- * the backend's event loop.
+ * and changes nothing when it fails, including when the store cannot begin or
+ * commit it; an `AggregateError` then holds that failure followed by each
+ * failure to roll back. Borrowed from the store's owner without the authority
+ * to close it; every call fails with `Database is closed` after the owner
+ * closes the store. Calls cannot be nested: a call made while another
+ * operation on the store runs fails with
+ * `Database transactions cannot be nested` and leaves that operation
+ * untouched. Concurrency model: single-owner, synchronous on the backend's
+ * event loop.
  */
 export interface ConversationRecordEditor {
   /**
@@ -137,11 +174,16 @@ export interface ConversationRecordEditor {
  * creation, reply content and state, startup recovery, and generated titles.
  *
  * @remarks Every call runs in one write transaction that commits before it
- * returns and changes nothing when it fails. Deleted rows and finalized
- * replies reject late writes through false results. Borrowed from the store's
- * owner without the authority to close it; every call fails with
- * `Database is closed` after the owner closes the store. Concurrency model:
- * single-owner, synchronous on the backend's event loop.
+ * returns and changes nothing when it fails, including when the store cannot
+ * begin or commit it; an `AggregateError` then holds that failure followed by
+ * each failure to roll back. Deleted rows and finalized replies reject late
+ * writes through false results. Borrowed from the store's owner without the
+ * authority to close it; every call fails with `Database is closed` after the
+ * owner closes the store. Calls cannot be nested: a call made while another
+ * operation on the store runs, including from inside a turn operation, fails
+ * with `Database transactions cannot be nested` and leaves that operation
+ * untouched. Concurrency model: single-owner, synchronous on the backend's
+ * event loop.
  */
 export interface ConversationTurnRecordWriter {
   /**
@@ -151,12 +193,16 @@ export interface ConversationTurnRecordWriter {
    * @param operation - Synchronous work; its transaction is valid for this
    * call only.
    * @returns The operation's result after everything it wrote is committed.
-   * @throws The operation's failure, after everything it wrote is rolled
-   * back.
+   * @throws The operation's or the commit's failure, after everything the
+   * operation wrote is rolled back.
    * @throws `Database operations must be synchronous` when the operation
    * returns a promise-like value; its writes are rolled back, and writes after
    * its first `await` fail with `Database operation has ended`.
-   * @throws If the store is closed; the operation does not run.
+   * @throws If the store is closed, the call is nested, or the store cannot
+   * begin the write, for example while another connection holds its write
+   * lock; the operation does not run.
+   * @throws An `AggregateError` holding the operation's or the commit's
+   * failure followed by each failure to roll back.
    */
   handleConversationTurnWriteRequest<Result>(
     operation: ConversationTurnOperation<Result>
@@ -173,36 +219,30 @@ export interface ConversationTurnRecordWriter {
   /**
    * Appends a delta to a reply that is still streaming.
    *
-   * @param assistantMessageId - UUIDv7 of the reply.
-   * @param content - Non-empty delta, appended after the stored text.
-   * @param updatedAt - Message timestamp stored with the delta.
+   * @param input - Reply, delta, and message timestamp.
    * @returns True when appended; false when the reply is finalized or not
    * stored, which changes nothing.
    * @throws If the store is closed or the write fails.
+   * @remarks An appended delta also moves its conversation's activity time
+   * forward, to the store's current time when that is later than the stored
+   * activity time and otherwise to a later time the store chooses.
    */
   updateAssistantMessageContent(
-    assistantMessageId: string,
-    content: string,
-    updatedAt: string
+    input: UpdateAssistantMessageContentInput
   ): boolean
   /**
-   * Finalizes a reply that is still streaming, keeping its text.
+   * Finalizes a reply that is still streaming, keeping its text and its
+   * conversation's activity time.
    *
-   * @param assistantMessageId - UUIDv7 of the reply.
-   * @param completion - Terminal state; only a completed reply stores a
-   * finish reason.
-   * @param updatedAt - Message timestamp stored with the state.
+   * @param input - Reply, terminal state, and message timestamp.
    * @returns True when finalized; false when it already was or is not stored,
    * which changes nothing.
    * @throws If the store is closed or the write fails.
    */
-  updateAssistantMessageState(
-    assistantMessageId: string,
-    completion: AssistantMessageCompletion,
-    updatedAt: string
-  ): boolean
+  updateAssistantMessageState(input: UpdateAssistantMessageStateInput): boolean
   /**
-   * Stores a title for a conversation that has none.
+   * Stores a title for a conversation that has none, keeping its activity
+   * time.
    *
    * @param conversationId - UUIDv7 of the conversation.
    * @param title - Validated title, stored as given.
@@ -223,8 +263,9 @@ export interface ConversationTurnRecordWriter {
  * @remarks Every change is part of the enclosing transaction: it commits only
  * when the operation returns and is rolled back when it throws. Valid only
  * while that operation runs; afterwards every call fails with
- * `Database operation has ended` and changes nothing. Concurrency model:
- * single-owner, confined to the running operation.
+ * `Database operation has ended`, or with `Database is closed` once the store
+ * is closed, and changes nothing. Concurrency model: single-owner, confined to
+ * the running operation.
  */
 export interface ConversationTurnTransaction {
   /**
@@ -233,8 +274,9 @@ export interface ConversationTurnTransaction {
    * @param conversationId - UUIDv7 of the conversation; an absent one changes
    * nothing.
    * @param updatedAt - Message timestamp stored on each interrupted reply.
-   * @remarks Keeps each reply's text and stores no finish reason; finalized
-   * replies and other conversations are unchanged.
+   * @remarks Keeps each reply's text, stores no finish reason, and keeps the
+   * conversation's activity time; finalized replies and other conversations
+   * are unchanged.
    * @throws If the transaction has ended or the write fails.
    */
   updateStreamingAssistantMessagesToInterrupted(
@@ -245,7 +287,9 @@ export interface ConversationTurnTransaction {
    * Stores a new conversation exactly as given.
    *
    * @param metadata - Valid metadata whose identity is not stored yet.
-   * @throws If the transaction has ended or the identity is already stored.
+   * @throws If the transaction has ended or the write fails.
+   * @throws The store's own error when the identity is already stored, which
+   * breaks the precondition.
    */
   createConversation(metadata: ConversationMetadata): void
   /**
@@ -263,9 +307,13 @@ export interface ConversationTurnTransaction {
    * Appends a user message exactly as given.
    *
    * @param conversationId - UUIDv7 of a stored conversation.
-   * @param message - Valid message whose identity is not stored yet; its time
-   * becomes the conversation's activity time.
-   * @throws If the transaction has ended or the conversation is not stored.
+   * @param message - Valid message whose identity is not stored yet.
+   * @throws If the transaction has ended or the write fails.
+   * @throws The store's own error when the conversation is not stored or the
+   * message's identity is, which breaks the precondition.
+   * @remarks Moves the conversation's activity time forward: to the message's
+   * time when that is later than the stored activity time, and otherwise to a
+   * later time the store chooses.
    */
   createUserMessage(
     conversationId: string,
@@ -276,9 +324,12 @@ export interface ConversationTurnTransaction {
    * state.
    *
    * @param conversationId - UUIDv7 of a stored conversation.
-   * @param message - Valid message whose identity is not stored yet; its time
-   * becomes the conversation's activity time.
-   * @throws If the transaction has ended or the conversation is not stored.
+   * @param message - Valid message whose identity is not stored yet.
+   * @throws If the transaction has ended or the write fails.
+   * @throws The store's own error when the conversation is not stored or the
+   * message's identity is, which breaks the precondition.
+   * @remarks Moves the conversation's activity time forward, as
+   * {@link ConversationTurnTransaction.createUserMessage} does.
    */
   createAssistantMessage(
     conversationId: string,

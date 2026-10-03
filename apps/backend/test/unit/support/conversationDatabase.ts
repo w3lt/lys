@@ -7,51 +7,12 @@ import SqliteConversationRecordReader from "../../../src/infrastructure/database
 import SqliteConversationTurnRecordWriter from "../../../src/infrastructure/database/conversations/sqliteConversationTurnRecordWriter"
 import type { DatabaseWriter } from "../../../src/infrastructure/database/databaseTransactions"
 import SqliteDatabase from "../../../src/infrastructure/database/sqliteDatabase"
-import type { ConversationRecordsHarness } from "./conversationRecordsContract"
-
-/** Stored conversation columns written by {@link saveConversationRow}. */
-export type ConversationRowFixture = Readonly<{
-  /** Conversation identity. */
-  id: string
-  /** Stored title, or null while untitled. */
-  title: string | null
-  /** Stored system prompt. */
-  systemPrompt: string
-  /** Creation time; also the initial activity time. */
-  createdAt: string
-}>
-
-/** Stored user-message columns written by {@link saveUserMessageRow}. */
-export type UserMessageRowFixture = Readonly<{
-  /** Message identity. */
-  id: string
-  /** Owning conversation identity. */
-  conversationId: string
-  /** Non-empty authored content. */
-  content: string
-  /** Creation time; becomes the conversation's activity time. */
-  createdAt: string
-}>
-
-/** Stored assistant-message columns written by {@link saveAssistantMessageRow}. */
-export type AssistantMessageRowFixture = Readonly<{
-  /** Message identity. */
-  id: string
-  /** Owning conversation identity. */
-  conversationId: string
-  /** Generating model. */
-  model: string
-  /** Stored reply text. */
-  content: string
-  /** Stored lifecycle status. */
-  status: "streaming" | "completed" | "interrupted" | "failed"
-  /** Stored finish reason, non-null only for completed replies. */
-  finishReason: "stop" | "length" | null
-  /** Creation time; becomes the conversation's activity time. */
-  createdAt: string
-  /** Last modification time. */
-  updatedAt: string
-}>
+import type {
+  AssistantMessageRowFixture,
+  ConversationRecordsHarness,
+  ConversationRowFixture,
+  UserMessageRowFixture
+} from "./conversationRecordsContract"
 
 /**
  * Opens a migrated backend database owned by the current test.

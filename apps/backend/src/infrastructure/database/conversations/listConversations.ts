@@ -1,8 +1,8 @@
 import * as z from "zod"
 import { listConversationsApi } from "@lys/protocol"
 import type {
-  ConversationListBoundary,
-  ConversationPage
+  ConversationPage,
+  ListConversationsInput
 } from "../../../di/services/conversationService/records"
 import type { DatabaseStatementCompiler } from "../databaseTransactions"
 
@@ -20,19 +20,19 @@ const conversationCountsSchema = z.strictObject({
 /**
  * Reads a bounded summary page and both counts from one SQLite snapshot.
  * @param statements - Statement compilation lent to the caller's read transaction.
- * @param query - Normalized search text; empty matches every conversation.
- * @param after - Last row of the previous page, or undefined for the first page.
- * @param limit - Inclusive page size, at least one.
+ * @param input - Normalized search text, where empty matches every
+ * conversation; the previous page's last row, or undefined for the first page;
+ * and the inclusive page size, from one to
+ * `MAXIMUM_CONVERSATION_LIST_PAGE_SIZE`.
  * @returns The validated page with full preview text, and whether more rows match.
  * @throws If SQLite or stored-record validation fails.
  * @remarks Requires the `contains_search` function on the connection.
  */
 export function listConversations(
   statements: DatabaseStatementCompiler,
-  query: string,
-  after: ConversationListBoundary | undefined,
-  limit: number
+  input: ListConversationsInput
 ): ConversationPage {
+  const { query, after, limit } = input
   const counts = conversationCountsSchema.parse(
     statements
       .getStatement(

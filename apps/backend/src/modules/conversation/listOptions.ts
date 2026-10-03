@@ -14,7 +14,10 @@ const conversationListCursorSchema = z.strictObject({
   id: z.uuidv7()
 })
 
-/** Page size used only when a caller omits the bounded API limit. */
+/**
+ * Page size the list-option parser applies when a caller omits the bounded
+ * API limit; a caller overrides it by passing `limit`.
+ */
 const DEFAULT_CONVERSATION_LIST_LIMIT = 30
 
 /** Trusted cursor-bound query and page size supplied to the history lister. */

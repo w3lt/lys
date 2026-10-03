@@ -17,7 +17,9 @@ import type { ConversationTurnRecordWriter } from "./records"
  * store, after which every operation fails with `Database is closed`. Each
  * call is one write transaction that commits before it returns. Deleted rows
  * and terminal replies reject late writes through false or undefined results.
- * Concurrency model: single-owner, synchronous on the backend's event loop.
+ * Each operation reads the current time once and passes it to everything it
+ * stores; nothing it calls reads the clock. Concurrency model: single-owner,
+ * synchronous on the backend's event loop.
  */
 export default class StoredConversationTurns
   implements ConversationTurnWriter, GeneratedConversationTitleWriter
@@ -60,14 +62,15 @@ export default class StoredConversationTurns
    * @returns An independent snapshot and pair after the whole transaction commits.
    * @throws If lookup, validation, or persistence fails; no partial turn remains.
    * @remarks Implements {@link ConversationTurnWriter.createConversationTurn},
-   * including interruption of a superseded streaming reply.
+   * including interruption of a superseded streaming reply. Every value the
+   * turn builds carries the current time.
    */
   public createConversationTurn(
     options: CreateConversationTurnOptions
   ): ConversationTurn {
+    const now = new Date().toISOString()
     return this.#turnRecordWriter.handleConversationTurnWriteRequest(
-      (transaction) =>
-        createConversationTurn(transaction, options, options.systemPrompt)
+      (transaction) => createConversationTurn(transaction, options, now)
     )
   }
 
@@ -87,11 +90,11 @@ export default class StoredConversationTurns
   ): boolean {
     if (content.length === 0)
       throw new Error("Assistant delta must not be empty")
-    return this.#turnRecordWriter.updateAssistantMessageContent(
+    return this.#turnRecordWriter.updateAssistantMessageContent({
       assistantMessageId,
       content,
-      new Date().toISOString()
-    )
+      updatedAt: new Date().toISOString()
+    })
   }
 
   /**
@@ -106,11 +109,11 @@ export default class StoredConversationTurns
     assistantMessageId: string,
     completion: AssistantMessageCompletion
   ): boolean {
-    return this.#turnRecordWriter.updateAssistantMessageState(
+    return this.#turnRecordWriter.updateAssistantMessageState({
       assistantMessageId,
       completion,
-      new Date().toISOString()
-    )
+      updatedAt: new Date().toISOString()
+    })
   }
 
   /**

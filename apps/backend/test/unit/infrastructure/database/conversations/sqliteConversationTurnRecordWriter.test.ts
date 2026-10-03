@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
-import { describe, expect, it, onTestFinished } from "vitest"
+import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { openSqliteConversationRecords } from "../../../support/conversationDatabase"
 import { createFixtureUuidV7 } from "../../../support/conversationFixtures"
 import {
@@ -65,19 +65,37 @@ describe("SqliteConversationTurnRecordWriter", () => {
         .prepare("SELECT content FROM conversation_messages WHERE id = ?")
         .get(REPLY_ID)
 
-    records.turnRecordWriter.updateAssistantMessageContent(
-      REPLY_ID,
-      "Hel",
-      "2025-01-01T00:00:02.000Z"
-    )
+    records.turnRecordWriter.updateAssistantMessageContent({
+      assistantMessageId: REPLY_ID,
+      content: "Hel",
+      updatedAt: "2025-01-01T00:00:02.000Z"
+    })
     expect(getStoredContent()).toEqual({ content: "Hel" })
 
-    records.turnRecordWriter.updateAssistantMessageContent(
-      REPLY_ID,
-      "lo",
-      "2025-01-01T00:00:03.000Z"
-    )
+    records.turnRecordWriter.updateAssistantMessageContent({
+      assistantMessageId: REPLY_ID,
+      content: "lo",
+      updatedAt: "2025-01-01T00:00:03.000Z"
+    })
     expect(getStoredContent()).toEqual({ content: "Hello" })
+  })
+
+  it("fails before running a turn operation while another connection holds the write lock", () => {
+    const databaseFilePath = createOwnedDatabaseFilePath()
+    const records = openSqliteConversationRecords(databaseFilePath)
+    const otherConnection = new DatabaseSync(databaseFilePath)
+    onTestFinished(() => {
+      otherConnection.close()
+    })
+    otherConnection.exec("BEGIN IMMEDIATE")
+    const operation = vi.fn(() => "never run")
+
+    expect(() =>
+      records.turnRecordWriter.handleConversationTurnWriteRequest(operation)
+    ).toThrow(/database is locked/)
+
+    expect(operation).not.toHaveBeenCalled()
+    otherConnection.exec("ROLLBACK")
   })
 
   it("refuses a message for a conversation that is not stored and keeps the turn's other writes out", () => {
@@ -104,7 +122,11 @@ describe("SqliteConversationTurnRecordWriter", () => {
     ).toThrow("FOREIGN KEY constraint failed")
 
     expect(
-      records.recordReader.listConversations("", undefined, 30).storedCount
+      records.recordReader.listConversations({
+        query: "",
+        after: undefined,
+        limit: 30
+      }).storedCount
     ).toBe(0)
   })
 })

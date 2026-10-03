@@ -1,7 +1,7 @@
 import type {
-  ConversationListBoundary,
   ConversationPage,
-  ConversationRecordReader
+  ConversationRecordReader,
+  ListConversationsInput
 } from "../../../di/services/conversationService/records"
 import type {
   DatabaseFunctionRegistry,
@@ -72,19 +72,14 @@ export default class SqliteConversationRecordReader implements ConversationRecor
   /**
    * Implements {@link ConversationRecordReader.listConversations} in one read
    * snapshot.
-   * @param query - Interface-defined search text.
-   * @param after - Interface-defined page boundary.
-   * @param limit - Interface-defined page size.
+   * @param input - Interface-defined search text, page boundary, and page
+   * size.
    * @returns The interface-defined page.
    * @throws The interface-defined closed and validation failures.
    */
-  public listConversations(
-    query: string,
-    after: ConversationListBoundary | undefined,
-    limit: number
-  ): ConversationPage {
+  public listConversations(input: ListConversationsInput): ConversationPage {
     return this.#databaseReader.handleDatabaseReadRequest((statements) =>
-      listConversations(statements, query, after, limit)
+      listConversations(statements, input)
     )
   }
 }

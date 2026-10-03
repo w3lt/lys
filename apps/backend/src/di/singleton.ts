@@ -1,6 +1,8 @@
 import type { BackendConfig } from "../config"
+import SqliteAgentRecordStore from "../infrastructure/database/agents/sqliteAgentRecordStore"
 import SqliteDatabase from "../infrastructure/database/sqliteDatabase"
 import LmStudioRuntime from "../modules/llm/runtimes/lmStudioRuntime"
+import StoredAgents from "./services/agentService/agents"
 import ChatService, {
   type ChatServiceCreationOptions
 } from "./services/chatService"
@@ -70,9 +72,20 @@ export type SingletonServices = Readonly<{
   conversationHistoryReader: StoredConversationHistoryReader
   /** History editing over the shared database; it owns nothing to release. */
   conversationHistoryEditor: StoredConversationHistoryEditor
+  /** Agent definitions over the shared database; it owns nothing to release. */
+  agents: StoredAgents
   /** Module-private cleanup capability for the complete owned service lifetime. */
   [CLOSE_SINGLETON_SERVICES]: CloseSingletonServices
 }>
+
+/** Services that keep their data in the shared database and own nothing. */
+type DatabaseServices = Pick<
+  SingletonServices,
+  | "conversationTurns"
+  | "conversationHistoryReader"
+  | "conversationHistoryEditor"
+  | "agents"
+>
 
 /**
  * Creates the application-scoped service bundle from backend network configuration.
@@ -92,10 +105,10 @@ export type SingletonServices = Readonly<{
  * @throws {AggregateError} If closing the acquired resources also fails; its
  * errors hold the construction failure followed by the cleanup failure.
  * @remarks Resources are acquired in the order chat service, database, LLM
- * runtime service. The conversation services and the Sqlite records they wrap
- * are created over the database before the runtime service, turn persistence
- * first, so its startup recovery runs before any history is read; creation
- * stops at the first failure. The
+ * runtime service. The conversation services, the agent service, and the
+ * Sqlite records they wrap are created over the database before the runtime
+ * service, turn persistence first, so its startup recovery runs before any
+ * history is read; creation stops at the first failure. The
  * database is not part of the returned bundle: the bundle's cleanup closes it
  * after the LLM runtime service and before the chat service.
  */
@@ -118,16 +131,7 @@ export async function createSingletonServices(
       config.databaseFilePath
     )
     serviceLifetime.defer(databaseAcquisition.closeService)
-    const database = databaseAcquisition.service
-    const conversationTurns = StoredConversationTurns.create(
-      new SqliteConversationTurnRecordWriter(database)
-    )
-    const conversationHistoryReader = new StoredConversationHistoryReader(
-      SqliteConversationRecordReader.create(database)
-    )
-    const conversationHistoryEditor = new StoredConversationHistoryEditor(
-      new SqliteConversationRecordEditor(database)
-    )
+    const databaseServices = createDatabaseServices(databaseAcquisition.service)
 
     const llmRuntimeServiceAcquisition = factories.createLlmRuntimeService(
       `ws://${config.lmstudioHost}:${config.lmstudioPort}`,
@@ -149,9 +153,7 @@ export async function createSingletonServices(
       chatService: chatServiceAcquisition.service,
       llmService,
       llmRuntimeService: llmRuntimeServiceAcquisition.service,
-      conversationTurns,
-      conversationHistoryReader,
-      conversationHistoryEditor,
+      ...databaseServices,
       [CLOSE_SINGLETON_SERVICES]: closeOwnedSingletonServices
     })
   } catch (creationFailure) {
@@ -160,6 +162,35 @@ export async function createSingletonServices(
       serviceLifetime,
       "Singleton service creation and cleanup both failed."
     )
+  }
+}
+
+/**
+ * Creates the conversation services and the agent service over the shared
+ * database, with the Sqlite records they wrap.
+ *
+ * @param database - Shared database lent to every record; the caller keeps
+ * ownership and closes it.
+ * @returns The services, which own nothing to release.
+ * @throws If the database is closed, the startup recovery of streaming replies
+ * fails, or SQLite rejects the conversation search registration; services
+ * created before the failure own nothing to release.
+ * @remarks Turn persistence is created first, so its startup recovery runs
+ * before any history is read.
+ */
+function createDatabaseServices(database: SqliteDatabase): DatabaseServices {
+  const conversationTurns = StoredConversationTurns.create(
+    new SqliteConversationTurnRecordWriter(database)
+  )
+  return {
+    conversationTurns,
+    conversationHistoryReader: new StoredConversationHistoryReader(
+      SqliteConversationRecordReader.create(database)
+    ),
+    conversationHistoryEditor: new StoredConversationHistoryEditor(
+      new SqliteConversationRecordEditor(database)
+    ),
+    agents: new StoredAgents(new SqliteAgentRecordStore(database))
   }
 }
 

@@ -52,9 +52,9 @@ streaming reply, list cursors) behind records it declares in `records.ts`, and
 contains no SQL. Each service is exposed as its own application service.
 The agent service `StoredAgents` (`src/di/services/agentService/`) wraps
 `SqliteAgentRecordStore` the same way: it validates each definition or change,
-reads the current time once per change, and stores agents through records it
-declares in `records.ts`. It is decorated as `app.agents`; no route calls it
-yet.
+reads the current time once per change, and lists and stores agents through
+records it declares in `records.ts`. It is decorated as `app.agents`, and the
+agent routes in `src/modules/agent/` call it.
 Every borrowed operation fails once the database closes,
 and the database remains open until every reply generation has stored its final
 state.

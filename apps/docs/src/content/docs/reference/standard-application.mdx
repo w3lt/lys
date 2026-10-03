@@ -86,31 +86,6 @@ and six public class operations including `create()`. That is a proposed change,
 not an implemented compatibility decision. Behavioral coverage remains separate
 work tracked in [issue #25](https://github.com/w3lt/lys/issues/25).
 
-## Agent service without a caller
-
-The agent service `StoredAgents` and its records store are created by the
-composition root and decorated as `app.agents`, but no route or chat code calls
-them yet. Each public operation therefore lacks the current production consumer
-that
-[CLASS-005](https://github.com/w3lt/lys/blob/main/docs/code_standards/CLASS.md#class-005--public-surface-requires-current-evidence)
-requires. The maintainer approved this exception on 2026-10-03, when the agent
-work was split into steps; the pull request that adds the service records it.
-
-- **Rule excepted:** CLASS-005, for the four public operations of
-  `StoredAgents` (`createAgent`, `findAgent`, `updateAgent`, `deleteAgent`).
-- **Constraint:** the agent HTTP API, its protocol schemas, and its routes are a
-  separate step; adding them here would make one change too large to review.
-- **Alternatives considered:** adding the agent routes now, or making chat
-  turns read an agent's system prompt; both were deferred.
-- **Scope:** `StoredAgents` only. `AgentRecordStore` has a production consumer,
-  `StoredAgents`, which calls all four of its operations.
-- **Risk and control:** the operations could drift from what the API needs
-  before a caller exists. The `AgentRecordStore` contract suite and the service
-  tests fix their behavior, and the API step changes them together with their
-  first caller.
-- **Removal condition:** the agent API step adds a route for each operation, or
-  removes any operation it does not call.
-
 ## API boundaries
 
 Canonical rules: [API-004, API-020, API-034](https://github.com/w3lt/lys/blob/main/docs/code_standards/API.md).

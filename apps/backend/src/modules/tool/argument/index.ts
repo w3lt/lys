@@ -29,7 +29,7 @@ export interface JsonSchemaProperty {
 
 export default class ToolArgument {
   #name: string
-  #desciption: string
+  #description: string
   #type: ToolArgumentType
   #required: boolean
 
@@ -37,7 +37,7 @@ export default class ToolArgument {
     const { name, description, type, required } =
       toolArgumentCreationOptionsSchema.parse(options)
     this.#name = name
-    this.#desciption = description
+    this.#description = description
     this.#type = type
     this.#required = required
   }
@@ -47,7 +47,7 @@ export default class ToolArgument {
   }
 
   public get description(): string {
-    return this.#desciption
+    return this.#description
   }
   public get type(): ToolArgumentType {
     return this.#type
@@ -60,7 +60,7 @@ export default class ToolArgument {
   public toAgentFormat(): JsonSchemaProperty {
     return {
       type: this.#type,
-      description: this.#desciption
+      description: this.#description
     }
   }
 }

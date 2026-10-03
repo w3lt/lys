@@ -150,7 +150,7 @@ export interface DatabaseWriter {
 /**
  * Adds application SQL functions to the shared database connection.
  *
- * @remarks Consumed by the conversation history reader, which registers its
+ * @remarks Consumed by the conversation record reader, which registers its
  * search function when it is created. Lent by the database owner without the
  * authority to close the connection. Concurrency model: single-owner.
  */

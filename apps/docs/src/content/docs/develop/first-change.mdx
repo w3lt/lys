@@ -53,9 +53,12 @@ and eligible transcript; title generation runs only while the title is absent.
 ### 4. Persistence
 
 The backend database layer (`src/infrastructure/database`) owns the SQLite
-connection, schema, and migrations. The conversation service owns the
-conversation SQL: inserts, updates, and conversation title updates. Look at both
-before changing message lifecycle or stored conversation shape.
+connection, schema, and migrations. The SQLite conversation records in
+`src/infrastructure/database/conversations/` own the conversation SQL: inserts,
+updates, and conversation title updates. The conversation services in
+`src/di/services/conversationService/` keep the decisions behind the records
+they declare in `records.ts`. Look at all three before changing message
+lifecycle or stored conversation shape.
 
 ### 5. Desktop stream handling
 

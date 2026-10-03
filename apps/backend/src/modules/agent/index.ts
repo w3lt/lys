@@ -30,14 +30,18 @@ import { parseAgentListOptions } from "./listOptions"
  * Registers all protocol-defined agent endpoints on a configured backend.
  * @param app - Application with validation and the agent service installed.
  * @returns A promise resolving after route registration.
- * @throws If route registration fails.
+ * @throws If route registration fails. The failure rejects the promise, so
+ * `app.register` reports it rather than an uncaught exception.
  */
-export default async function updateFastifyWithAgentRoutes(
+export default function updateFastifyWithAgentRoutes(
   app: FastifyInstance
 ): Promise<void> {
-  app.setSerializerCompiler(serializerCompiler)
-  registerAgentCollectionRoutes(app, app.agents)
-  registerSingleAgentRoutes(app, app.agents)
+  return new Promise((resolve) => {
+    app.setSerializerCompiler(serializerCompiler)
+    registerAgentCollectionRoutes(app, app.agents)
+    registerSingleAgentRoutes(app, app.agents)
+    resolve()
+  })
 }
 
 /**
@@ -57,7 +61,7 @@ function registerAgentCollectionRoutes(
       querystring: listAgentsApi.querystring,
       response: { 200: listAgentsApi.response }
     },
-    handler: async (request) =>
+    handler: (request) =>
       agents.listAgents(parseAgentListOptions(request.query))
   })
   app.route<CreateAgentApiRoute>({
@@ -70,7 +74,7 @@ function registerAgentCollectionRoutes(
         ...createAgentApi.responses
       }
     },
-    handler: async (request, reply) => handleCreateAgent(request, reply, agents)
+    handler: (request, reply) => handleCreateAgent(request, reply, agents)
   })
 }
 
@@ -92,7 +96,7 @@ function registerSingleAgentRoutes(
       params: getAgentApi.params,
       response: { 200: getAgentApi.response, ...getAgentApi.responses }
     },
-    handler: async (request, reply) => handleGetAgent(request, reply, agents)
+    handler: (request, reply) => handleGetAgent(request, reply, agents)
   })
   app.route<UpdateAgentApiRoute>({
     method: updateAgentApi.method,
@@ -102,7 +106,7 @@ function registerSingleAgentRoutes(
       body: updateAgentApi.body,
       response: { 200: updateAgentApi.response, ...updateAgentApi.responses }
     },
-    handler: async (request, reply) => handleUpdateAgent(request, reply, agents)
+    handler: (request, reply) => handleUpdateAgent(request, reply, agents)
   })
   app.route<DeleteAgentApiRoute>({
     method: deleteAgentApi.method,
@@ -111,25 +115,23 @@ function registerSingleAgentRoutes(
       params: deleteAgentApi.params,
       response: deleteAgentApi.responses
     },
-    handler: async (request, reply) => handleDeleteAgent(request, reply, agents)
+    handler: (request, reply) => handleDeleteAgent(request, reply, agents)
   })
 }
 
 /**
- * Stores a new agent, or sends the code-taken problem when its given code is
- * already stored.
+ * Stores a new agent and sends it with a 201 and its `Location`, or sends the
+ * 409 code-taken problem when its given code is already stored.
  * @param request - Validated, trimmed definition.
  * @param reply - HTTP response owner.
  * @param agents - Borrowed agent creation.
- * @returns A promise resolving after the 201 with the agent and its
- * `Location`, or the 409 problem, is sent.
  * @throws If storage access fails.
  */
-async function handleCreateAgent(
+function handleCreateAgent(
   request: FastifyRequest<CreateAgentApiRoute>,
   reply: FastifyReply<CreateAgentApiRoute>,
   agents: AgentCreator
-): Promise<void> {
+): void {
   const agent = agents.createAgent(request.body)
   if (agent === undefined) {
     reply
@@ -147,14 +149,13 @@ async function handleCreateAgent(
  * @param request - Validated agent code.
  * @param reply - HTTP response owner.
  * @param agents - Borrowed agent lookup.
- * @returns A promise resolving after the status-specific response is sent.
  * @throws If storage access fails.
  */
-async function handleGetAgent(
+function handleGetAgent(
   request: FastifyRequest<GetAgentApiRoute>,
   reply: FastifyReply<GetAgentApiRoute>,
   agents: AgentReader
-): Promise<void> {
+): void {
   const agent = agents.findAgent(request.params.agentCode)
   if (agent === undefined) {
     reply
@@ -171,14 +172,13 @@ async function handleGetAgent(
  * @param request - Validated agent code and trimmed fields to replace.
  * @param reply - HTTP response owner.
  * @param agents - Borrowed agent change.
- * @returns A promise resolving after the status-specific response is sent.
  * @throws If storage access fails.
  */
-async function handleUpdateAgent(
+function handleUpdateAgent(
   request: FastifyRequest<UpdateAgentApiRoute>,
   reply: FastifyReply<UpdateAgentApiRoute>,
   agents: AgentEditor
-): Promise<void> {
+): void {
   const agent = agents.updateAgent(request.params.agentCode, request.body)
   if (agent === undefined) {
     reply
@@ -196,14 +196,13 @@ async function handleUpdateAgent(
  * @param request - Validated agent code.
  * @param reply - HTTP response owner.
  * @param agents - Borrowed agent deletion.
- * @returns A promise resolving after the deletion outcome is sent.
  * @throws If storage access fails.
  */
-async function handleDeleteAgent(
+function handleDeleteAgent(
   request: FastifyRequest<DeleteAgentApiRoute>,
   reply: FastifyReply<DeleteAgentApiRoute>,
   agents: AgentDeleter
-): Promise<void> {
+): void {
   if (!agents.deleteAgent(request.params.agentCode)) {
     reply
       .type("application/problem+json")

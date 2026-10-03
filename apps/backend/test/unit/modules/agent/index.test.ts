@@ -77,6 +77,16 @@ describe("updateFastifyWithAgentRoutes", () => {
     vi.useRealTimers()
   })
 
+  it("rejects rather than throws when a route cannot be registered", async () => {
+    const { app } = await createAgentRouteApp()
+
+    const registration = updateFastifyWithAgentRoutes(app)
+
+    await expect(registration).rejects.toMatchObject({
+      code: "FST_ERR_DUPLICATED_ROUTE"
+    })
+  })
+
   describe("GET /api/v1/agents", () => {
     it("responds with an empty final page when no agent is stored", async () => {
       const { app } = await createAgentRouteApp()

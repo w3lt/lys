@@ -1,0 +1,341 @@
+import type { AgentSummary } from "@lys/protocol"
+import {
+  agentCodeSchema,
+  MAXIMUM_AGENT_CODE_LENGTH,
+  MAXIMUM_AGENT_NAME_LENGTH,
+  type Agent
+} from "@lys/share"
+
+/**
+ * Editable text of one agent, exactly as typed.
+ *
+ * @remarks Values are untrimmed; saving trims them. A draft for a stored
+ * agent starts as that agent's stored text.
+ */
+export type AgentDraft = {
+  /** Display name as typed. */
+  readonly name: string
+  /** One-line description as typed. */
+  readonly bio: string
+  /** System prompt as typed. */
+  readonly systemPrompt: string
+}
+
+/** Agent a draft is written for, which decides the checks that apply. */
+export type AgentDraftSubject =
+  | {
+      /** The draft creates an agent. */
+      readonly kind: "new"
+      /** Code typed for it; empty asks the backend to derive one. */
+      readonly code: string
+    }
+  | {
+      /** The draft changes a stored agent. */
+      readonly kind: "stored"
+      /** Code of that agent, which never changes. */
+      readonly code: string
+    }
+
+/**
+ * First reason a draft cannot be saved, in field order: name, code, bio,
+ * system prompt.
+ */
+export type AgentDraftProblem =
+  | {
+      /** The name is blank. */
+      readonly kind: "name-missing"
+    }
+  | {
+      /** Another agent already has the name, compared case-insensitively. */
+      readonly kind: "name-taken"
+      /** The name as typed, trimmed. */
+      readonly name: string
+    }
+  | {
+      /** The typed code is not a valid agent code. */
+      readonly kind: "code-malformed"
+    }
+  | {
+      /** Another listed agent already has the typed code. */
+      readonly kind: "code-taken"
+      /** The typed code. */
+      readonly code: string
+    }
+  | {
+      /** The bio is blank. */
+      readonly kind: "bio-missing"
+    }
+  | {
+      /** The system prompt is blank. */
+      readonly kind: "system-prompt-missing"
+    }
+
+/** Editor field that a draft problem concerns. */
+export type AgentDraftField = "name" | "code" | "bio" | "systemPrompt"
+
+/** Draft of a new agent before anything is typed. */
+export const EMPTY_AGENT_DRAFT: AgentDraft = Object.freeze({
+  name: "",
+  bio: "",
+  systemPrompt: ""
+})
+
+/** Name base used for a copy when the original name is blank. */
+const DUPLICATE_AGENT_FALLBACK_NAME = "Agent"
+
+/**
+ * Calculates the form under which names are compared for uniqueness.
+ *
+ * @param name - Name as typed or stored.
+ * @returns The name trimmed and lowercased.
+ */
+function calculateComparableAgentName(name: string): string {
+  return name.trim().toLowerCase()
+}
+
+/**
+ * Reports whether a listed agent is the stored agent a draft edits.
+ *
+ * @param agent - Listed agent.
+ * @param subject - Agent the draft is written for.
+ * @returns Whether the draft edits that listed agent; never for a new agent.
+ */
+function isDraftSubject(
+  agent: AgentSummary,
+  subject: AgentDraftSubject
+): boolean {
+  return subject.kind === "stored" && agent.code === subject.code
+}
+
+/**
+ * Finds the name problem of a draft.
+ *
+ * @param name - Name as typed.
+ * @param subject - Agent the draft is written for; a stored agent's own name
+ * never counts as taken.
+ * @param agents - Every listed agent.
+ * @returns The name problem, or undefined when the name can be saved.
+ */
+function findAgentNameProblem(
+  name: string,
+  subject: AgentDraftSubject,
+  agents: readonly AgentSummary[]
+): AgentDraftProblem | undefined {
+  const comparableName = calculateComparableAgentName(name)
+  if (comparableName === "") return { kind: "name-missing" }
+
+  const isNameTaken = agents.some(
+    (agent) =>
+      !isDraftSubject(agent, subject) &&
+      calculateComparableAgentName(agent.name) === comparableName
+  )
+  return isNameTaken ? { kind: "name-taken", name: name.trim() } : undefined
+}
+
+/**
+ * Finds the code problem of a draft.
+ *
+ * @param subject - Agent the draft is written for; only a new agent's code is
+ * checked, because a stored agent's code never changes.
+ * @param agents - Every listed agent.
+ * @returns The code problem, or undefined when the code can be saved.
+ */
+function findAgentCodeProblem(
+  subject: AgentDraftSubject,
+  agents: readonly AgentSummary[]
+): AgentDraftProblem | undefined {
+  if (subject.kind === "stored" || subject.code === "") return undefined
+  if (!agentCodeSchema.safeParse(subject.code).success) {
+    return { kind: "code-malformed" }
+  }
+
+  const isCodeTaken = agents.some((agent) => agent.code === subject.code)
+  return isCodeTaken ? { kind: "code-taken", code: subject.code } : undefined
+}
+
+/**
+ * Finds the first reason a draft cannot be saved.
+ *
+ * @param draft - Text as typed.
+ * @param subject - Agent the draft is written for.
+ * @param agents - Every listed agent, against which names and codes are
+ * checked.
+ * @returns The first problem in field order, or undefined when the draft can
+ * be saved.
+ * @remarks Lengths are not checked: the fields cannot hold more than the
+ * shared limits allow. The backend remains the authority on codes; a code
+ * taken since the list was read is refused when saving.
+ */
+export function findAgentDraftProblem(
+  draft: AgentDraft,
+  subject: AgentDraftSubject,
+  agents: readonly AgentSummary[]
+): AgentDraftProblem | undefined {
+  const fieldProblem =
+    findAgentNameProblem(draft.name, subject, agents) ??
+    findAgentCodeProblem(subject, agents)
+  if (fieldProblem !== undefined) return fieldProblem
+  if (draft.bio.trim() === "") return { kind: "bio-missing" }
+  if (draft.systemPrompt.trim() === "") return { kind: "system-prompt-missing" }
+
+  return undefined
+}
+
+/**
+ * Calculates the editor field a draft problem concerns.
+ *
+ * @param problem - Problem found in a draft.
+ * @returns The field to mark invalid and focus.
+ */
+export function calculateAgentDraftProblemField(
+  problem: AgentDraftProblem
+): AgentDraftField {
+  switch (problem.kind) {
+    case "name-missing":
+    case "name-taken":
+      return "name"
+    case "code-malformed":
+    case "code-taken":
+      return "code"
+    case "bio-missing":
+      return "bio"
+    case "system-prompt-missing":
+      return "systemPrompt"
+  }
+}
+
+/**
+ * Calculates the code text kept from text typed into the code field.
+ *
+ * @param text - Text as typed or pasted.
+ * @returns Lowercase ASCII letters and digits in hyphen-separated groups, at
+ * most {@link MAXIMUM_AGENT_CODE_LENGTH} characters. Accents are removed, and
+ * each run of other characters becomes one hyphen; a leading hyphen is
+ * dropped, but a trailing one is kept so that typing can continue after it.
+ */
+export function calculateAgentCodeFromText(text: string): string {
+  return text
+    .normalize("NFKD")
+    .toLowerCase()
+    .replaceAll(/\p{M}/gu, "")
+    .replaceAll(/[^a-z0-9]+/g, "-")
+    .replace(/^-/, "")
+    .slice(0, MAXIMUM_AGENT_CODE_LENGTH)
+}
+
+/**
+ * Calculates the code offered for an agent from its name.
+ *
+ * @param name - Name as typed.
+ * @returns The name's code form without a trailing hyphen; empty when the
+ * name has no letter or digit with an ASCII form.
+ */
+export function calculateAgentCodeFromName(name: string): string {
+  return calculateAgentCodeFromText(name).replace(/-$/, "")
+}
+
+/**
+ * Calculates the start of a name that leaves room for a suffix.
+ *
+ * @param name - Trimmed, non-empty name.
+ * @param suffixLength - UTF-16 length of the suffix that follows.
+ * @returns The name cut to fit {@link MAXIMUM_AGENT_NAME_LENGTH} with the
+ * suffix, without trailing whitespace and without splitting a surrogate pair.
+ */
+function calculateAgentNameBase(name: string, suffixLength: number): string {
+  const cutName = name.slice(0, MAXIMUM_AGENT_NAME_LENGTH - suffixLength)
+  const isPairSplit = /[\uD800-\uDBFF]$/.test(cutName)
+
+  return (isPairSplit ? cutName.slice(0, -1) : cutName).trimEnd()
+}
+
+/**
+ * Builds one candidate name for a copy of an agent.
+ *
+ * @param name - Trimmed, non-empty name of the agent being copied.
+ * @param copyNumber - One-based number of the candidate: the first is
+ * `<name> copy`, and each later one is `<name> copy <n>`.
+ * @returns The candidate, at most {@link MAXIMUM_AGENT_NAME_LENGTH} long.
+ */
+function buildAgentCopyName(name: string, copyNumber: number): string {
+  const suffix = copyNumber === 1 ? " copy" : ` copy ${copyNumber}`
+
+  return `${calculateAgentNameBase(name, suffix.length)}${suffix}`
+}
+
+/**
+ * Calculates the name given to a copy of an agent.
+ *
+ * @param name - Name of the agent being copied.
+ * @param agents - Every listed agent, whose names the copy must not repeat.
+ * @returns `<name> copy`, or `<name> copy <n>` with the smallest n from 2 that
+ * no listed agent uses, compared case-insensitively. The name is cut so the
+ * result fits {@link MAXIMUM_AGENT_NAME_LENGTH}; a blank name is replaced by
+ * `Agent`.
+ */
+export function calculateDuplicateAgentName(
+  name: string,
+  agents: readonly AgentSummary[]
+): string {
+  const takenNames = new Set(
+    agents.map((agent) => calculateComparableAgentName(agent.name))
+  )
+  const trimmedName = name.trim()
+  const copiedName =
+    trimmedName === "" ? DUPLICATE_AGENT_FALLBACK_NAME : trimmedName
+  let copyNumber = 1
+  while (
+    takenNames.has(
+      calculateComparableAgentName(buildAgentCopyName(copiedName, copyNumber))
+    )
+  ) {
+    copyNumber += 1
+  }
+
+  return buildAgentCopyName(copiedName, copyNumber)
+}
+
+/**
+ * Builds the draft that starts editing a stored agent.
+ *
+ * @param agent - Stored agent.
+ * @returns A frozen draft holding the stored text.
+ */
+export function buildStoredAgentDraft(agent: Agent): AgentDraft {
+  return Object.freeze({
+    name: agent.name,
+    bio: agent.bio,
+    systemPrompt: agent.systemPrompt
+  })
+}
+
+/**
+ * Reports whether a draft differs from the stored agent it edits.
+ *
+ * @param draft - Text as typed.
+ * @param agent - Stored agent.
+ * @returns Whether any field differs exactly, whitespace included.
+ */
+export function isAgentDraftChanged(draft: AgentDraft, agent: Agent): boolean {
+  return (
+    draft.name !== agent.name ||
+    draft.bio !== agent.bio ||
+    draft.systemPrompt !== agent.systemPrompt
+  )
+}
+
+/**
+ * Reports whether anything was typed for a new agent.
+ *
+ * @param draft - Text as typed.
+ * @param code - Code as typed.
+ * @returns Whether any field, the code included, holds text.
+ */
+export function isNewAgentDraftStarted(
+  draft: AgentDraft,
+  code: string
+): boolean {
+  const typedTexts = [draft.name, code, draft.bio, draft.systemPrompt]
+
+  return typedTexts.some((text) => text !== "")
+}

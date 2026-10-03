@@ -129,6 +129,32 @@ const PANE_SKELETONS: Record<SettingsPane, PaneSkeletonShape> = {
     ],
     list: [],
     block: false
+  },
+  agents: {
+    cards: [],
+    heading: true,
+    rows: [
+      {
+        id: "first-agent",
+        label: "96px",
+        description: "240px",
+        control: { width: "12px", height: "12px" }
+      },
+      {
+        id: "second-agent",
+        label: "84px",
+        description: "212px",
+        control: { width: "12px", height: "12px" }
+      },
+      {
+        id: "third-agent",
+        label: "104px",
+        description: "228px",
+        control: { width: "12px", height: "12px" }
+      }
+    ],
+    list: [],
+    block: false
   }
 }
 

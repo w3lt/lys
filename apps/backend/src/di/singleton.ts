@@ -1,6 +1,8 @@
 import type { BackendConfig } from "../config"
+import SqliteAgentRecordStore from "../infrastructure/database/agents/sqliteAgentRecordStore"
 import SqliteDatabase from "../infrastructure/database/sqliteDatabase"
 import LmStudioRuntime from "../modules/llm/runtimes/lmStudioRuntime"
+import StoredAgents from "./services/agentService/agents"
 import ChatService, {
   type ChatServiceCreationOptions
 } from "./services/chatService"
@@ -70,6 +72,8 @@ export type SingletonServices = Readonly<{
   conversationHistoryReader: StoredConversationHistoryReader
   /** History editing over the shared database; it owns nothing to release. */
   conversationHistoryEditor: StoredConversationHistoryEditor
+  /** Agent definitions over the shared database; it owns nothing to release. */
+  agents: StoredAgents
   /** Module-private cleanup capability for the complete owned service lifetime. */
   [CLOSE_SINGLETON_SERVICES]: CloseSingletonServices
 }>
@@ -92,10 +96,10 @@ export type SingletonServices = Readonly<{
  * @throws {AggregateError} If closing the acquired resources also fails; its
  * errors hold the construction failure followed by the cleanup failure.
  * @remarks Resources are acquired in the order chat service, database, LLM
- * runtime service. The conversation services and the Sqlite records they wrap
- * are created over the database before the runtime service, turn persistence
- * first, so its startup recovery runs before any history is read; creation
- * stops at the first failure. The
+ * runtime service. The conversation services, the agent service, and the
+ * Sqlite records they wrap are created over the database before the runtime
+ * service, turn persistence first, so its startup recovery runs before any
+ * history is read; creation stops at the first failure. The
  * database is not part of the returned bundle: the bundle's cleanup closes it
  * after the LLM runtime service and before the chat service.
  */
@@ -128,6 +132,7 @@ export async function createSingletonServices(
     const conversationHistoryEditor = new StoredConversationHistoryEditor(
       new SqliteConversationRecordEditor(database)
     )
+    const agents = new StoredAgents(new SqliteAgentRecordStore(database))
 
     const llmRuntimeServiceAcquisition = factories.createLlmRuntimeService(
       `ws://${config.lmstudioHost}:${config.lmstudioPort}`,
@@ -152,6 +157,7 @@ export async function createSingletonServices(
       conversationTurns,
       conversationHistoryReader,
       conversationHistoryEditor,
+      agents,
       [CLOSE_SINGLETON_SERVICES]: closeOwnedSingletonServices
     })
   } catch (creationFailure) {

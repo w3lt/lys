@@ -139,6 +139,19 @@ const databaseMigrations = [
       SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
       WHERE id = NEW.conversation_id;
     END;
+  `,
+  // Stores agent definitions. The code format, length limits, and timestamp
+  // format are checked by the agent schemas when rows are written and read, so
+  // they can change without rebuilding this table.
+  `
+    CREATE TABLE agents (
+      code TEXT NOT NULL PRIMARY KEY CHECK (length(code) > 0),
+      name TEXT NOT NULL CHECK (length(name) > 0),
+      bio TEXT NOT NULL CHECK (length(bio) > 0),
+      system_prompt TEXT NOT NULL CHECK (length(system_prompt) > 0),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    ) STRICT
   `
 ] as const
 

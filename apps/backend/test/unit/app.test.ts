@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
 import * as z from "zod"
 import { buildApp } from "../../src/app"
 import type { BackendConfig } from "../../src/config"
+import StoredAgents from "../../src/di/services/agentService/agents"
 import StoredConversationHistoryEditor from "../../src/di/services/conversationService/historyEditor"
 import StoredConversationHistoryReader from "../../src/di/services/conversationService/historyReader"
 import StoredConversationTurns from "../../src/di/services/conversationService/turns"
@@ -57,7 +58,7 @@ describe("buildApp", () => {
     expect(existsSync(config.databaseFilePath)).toBe(false)
   })
 
-  it("decorates each conversation adapter and serves history from the configured database", async () => {
+  it("decorates the conversation adapters and the agent service and serves history from the configured database", async () => {
     const app = await buildApp({ config: createOwnedBackendConfig() })
     onTestFinished(async () => await app.close())
     await app.ready()
@@ -74,6 +75,7 @@ describe("buildApp", () => {
     expect(app.conversationHistoryEditor).toBeInstanceOf(
       StoredConversationHistoryEditor
     )
+    expect(app.agents).toBeInstanceOf(StoredAgents)
     expect(response.statusCode).toBe(200)
     expect(response.json()).toMatchObject({ storedCount: 0 })
   })

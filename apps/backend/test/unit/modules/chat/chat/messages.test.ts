@@ -6,18 +6,34 @@ import {
   createUserMessage
 } from "../../../support/conversationFixtures"
 
+/** Tone prompt of the side answering the turn in most cases. */
+const DARK_SIDE_PROMPT = "Speak quietly."
+
 describe("buildChatMessages", () => {
-  it("sends the saved system prompt first and the current user message last", () => {
+  it("sends the saved system prompt and the side's tone first and the current user message last", () => {
     const turn = createConversationTurn({
       systemPrompt: "You are Lys.",
       earlierMessages: [],
       userMessageContent: "Hello"
     })
 
-    expect(buildChatMessages(turn)).toEqual([
-      { role: "system", content: "You are Lys." },
+    expect(buildChatMessages(turn, DARK_SIDE_PROMPT)).toEqual([
+      { role: "system", content: "You are Lys.\n\nSpeak quietly." },
       { role: "user", content: "Hello" }
     ])
+  })
+
+  it("follows the saved system prompt with the tone of the side answering this turn", () => {
+    const turn = createConversationTurn({
+      systemPrompt: "You are Lys.",
+      earlierMessages: [],
+      userMessageContent: "Good morning"
+    })
+
+    expect(buildChatMessages(turn, "Speak brightly.")[0]).toEqual({
+      role: "system",
+      content: "You are Lys.\n\nSpeak brightly."
+    })
   })
 
   it("keeps earlier user messages and usable replies in transcript order", () => {
@@ -40,8 +56,8 @@ describe("buildChatMessages", () => {
       userMessageContent: "Current question"
     })
 
-    expect(buildChatMessages(turn)).toEqual([
-      { role: "system", content: "You are Lys." },
+    expect(buildChatMessages(turn, DARK_SIDE_PROMPT)).toEqual([
+      { role: "system", content: "You are Lys.\n\nSpeak quietly." },
       { role: "user", content: "First question" },
       { role: "assistant", content: "Completed answer" },
       { role: "user", content: "Second question" },
@@ -79,8 +95,8 @@ describe("buildChatMessages", () => {
       userMessageContent: "Retry"
     })
 
-    expect(buildChatMessages(turn)).toEqual([
-      { role: "system", content: "You are Lys." },
+    expect(buildChatMessages(turn, DARK_SIDE_PROMPT)).toEqual([
+      { role: "system", content: "You are Lys.\n\nSpeak quietly." },
       { role: "user", content: "Question" },
       { role: "user", content: "Retry" }
     ])
@@ -98,7 +114,7 @@ describe("buildChatMessages", () => {
       userMessageContent: "Next"
     })
 
-    for (const message of buildChatMessages(turn)) {
+    for (const message of buildChatMessages(turn, DARK_SIDE_PROMPT)) {
       expect(Object.keys(message).toSorted()).toEqual(["content", "role"])
     }
   })

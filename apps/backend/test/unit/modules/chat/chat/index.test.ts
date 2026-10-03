@@ -8,11 +8,18 @@ import {
   createChatRouteTestApp,
   sendChatRequest
 } from "../../../support/chatRouteTestApp"
-import { createFixtureUuidV7 } from "../../../support/conversationFixtures"
+import {
+  createConversationTurn,
+  createFixtureUuidV7
+} from "../../../support/conversationFixtures"
 
 /** Settings applied by the chat route in every case. */
 const CHAT_ROUTE_OPTIONS = Object.freeze({
   lysSystemPrompt: "You are Lys.",
+  lysPersonalityPrompts: Object.freeze({
+    dark: "Speak quietly.",
+    light: "Speak brightly."
+  }),
   titleGenerationMaxAttempts: 2
 } satisfies ChatRouteOptions)
 
@@ -20,7 +27,8 @@ const CHAT_ROUTE_OPTIONS = Object.freeze({
 const NEW_CONVERSATION_REQUEST = Object.freeze({
   message: "Plan my trip",
   model: "qwen/qwen3-8b",
-  generationOptions: { temperature: 0.4 }
+  generationOptions: { temperature: 0.4 },
+  personality: "light"
 })
 
 describe("updateFastifyWithChatRoute", () => {
@@ -84,6 +92,50 @@ describe("updateFastifyWithChatRoute", () => {
   })
 
   it.each([
+    ["dark", "Speak quietly."],
+    ["light", "Speak brightly."]
+  ] as const)(
+    "sends the stored system prompt followed by the %s side's tone to the model",
+    async (personality, sidePrompt) => {
+      const testApp = await createChatRouteTestApp()
+      const turn = createConversationTurn({
+        systemPrompt: "Stored conversation prompt",
+        earlierMessages: [],
+        userMessageContent: "Plan my trip"
+      })
+      testApp.createConversationTurn.mockReturnValue({
+        ...turn,
+        conversation: { ...turn.conversation, title: "Trip planning" }
+      })
+      testApp.completeChatStream.mockRejectedValue(new Error("model offline"))
+      updateFastifyWithChatRoute(testApp.app, {
+        ...CHAT_ROUTE_OPTIONS,
+        generations: testApp.generations
+      })
+
+      await sendChatRequest(testApp.app, {
+        ...NEW_CONVERSATION_REQUEST,
+        personality
+      })
+
+      expect(testApp.completeChatStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          messages: [
+            {
+              role: "system",
+              content: `Stored conversation prompt\n\n${sidePrompt}`
+            },
+            { role: "user", content: "Plan my trip" }
+          ]
+        })
+      )
+      expect(testApp.createConversationTurn).toHaveBeenCalledWith(
+        expect.objectContaining({ systemPrompt: "You are Lys." })
+      )
+    }
+  )
+
+  it.each([
     ["an empty message", { ...NEW_CONVERSATION_REQUEST, message: "" }],
     [
       "a conversation identifier that is not a UUIDv7",
@@ -91,8 +143,17 @@ describe("updateFastifyWithChatRoute", () => {
     ],
     [
       "missing generation options",
-      { message: "Plan my trip", model: "qwen/qwen3-8b" }
+      { message: "Plan my trip", model: "qwen/qwen3-8b", personality: "light" }
     ],
+    [
+      "a missing side",
+      {
+        message: "Plan my trip",
+        model: "qwen/qwen3-8b",
+        generationOptions: { temperature: 0.4 }
+      }
+    ],
+    ["an unknown side", { ...NEW_CONVERSATION_REQUEST, personality: "dusk" }],
     ["an unknown field", { ...NEW_CONVERSATION_REQUEST, stream: true }]
   ])("rejects %s before storing a turn", async (_label, payload) => {
     const testApp = await createChatRouteTestApp()

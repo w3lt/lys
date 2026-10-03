@@ -11,8 +11,8 @@ This page documents only the flows implemented in the current codebase.
 ## Start the backend
 
 1. The React app calls `initialize`.
-2. The desktop loads host-managed settings through `load_settings` and shows
-   the shell.
+2. The desktop reads Lys's current side through `get_lys_personality_period`,
+   loads host-managed settings through `load_settings`, and shows the shell.
 3. If `autoStartBackend` is enabled, or a backend process already runs, the
    store starts or checks the backend in the background.
 4. For a stopped backend, the store sets `starting` and calls `start_backend`.
@@ -48,9 +48,11 @@ A manual Start follows steps 4–8.
 2. The desktop creates a request token and an `AbortController` that ends
    only its own observation of the stream.
 3. The desktop sends `POST /api/v1/chat` with `message`, `model`, required
-   `generationOptions`, and optional `conversationId`. Generation options contain
-   the current temperature and an optional reply ceiling; a local zero ceiling
-   is omitted from the request.
+   `generationOptions`, required `personality`, and optional `conversationId`.
+   Generation options contain the current temperature and an optional reply
+   ceiling; a local zero ceiling is omitted from the request. `personality` is
+   the side the Tauri host reports once the request is admitted, read just
+   before the stream opens.
 4. The backend creates or reuses the conversation, inserts the user message, and
    inserts an empty streaming assistant message.
 5. The backend emits a `start-new-conversation-turn` or

@@ -16,6 +16,10 @@ export const TEST_BACKEND_CONFIG = backendConfigSchema.parse({
   lmstudioPort: 4321,
   databaseFilePath: "/nonexistent/lys-test/lys_db.sqlite",
   lysSystemPrompt: "Configured system prompt",
+  lysPersonalityPrompts: {
+    dark: "Configured dark-side prompt",
+    light: "Configured light-side prompt"
+  },
   titleGenerationPrompt: "Configured title prompt",
   titleGenerationMaxAttempts: 2,
   generatedTitleMaxLength: 40

@@ -7,6 +7,8 @@
 @import "katex/dist/katex.min.css";
 
 @custom-variant dark (&:is(.dark *));
+/* Lys's dark side, Caliginia, set by the app shell's `data-lys-personality`. */
+@custom-variant lys-dark (&:is([data-lys-personality="dark"] *));
 
 @keyframes lys-skeleton-sweep {
   from {

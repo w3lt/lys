@@ -17,8 +17,10 @@ type StarterViewProps = {
  *
  * @remarks The portrait repeats the adjacent
  * "Lys" heading, so it is hidden from assistive technology and contains no
- * focusable content. The application's root theme class selects the light or
- * dark portrait. The component owns no state, effects, or resources.
+ * focusable content. The application shell's `data-lys-personality` attribute
+ * selects the portrait of Lys's current side: dark for Caliginia and light
+ * otherwise, whatever the theme. The component owns no state, effects, or
+ * resources.
  * @returns The decorative framed portrait.
  */
 function StarterPortrait(): ReactElement {
@@ -26,12 +28,12 @@ function StarterPortrait(): ReactElement {
     <div aria-hidden="true" className="chat-view__portrait">
       <img
         alt=""
-        className="chat-view__portrait-image dark:hidden"
+        className="chat-view__portrait-image lys-dark:hidden"
         src={lysLightPortrait}
       />
       <img
         alt=""
-        className="chat-view__portrait-image hidden dark:block"
+        className="chat-view__portrait-image hidden lys-dark:block"
         src={lysDarkPortrait}
       />
     </div>

@@ -3,7 +3,8 @@ import * as z from "zod"
 import {
   conversationAssistantMessageSchema,
   conversationMetadataSchema,
-  conversationUserMessageSchema
+  conversationUserMessageSchema,
+  lysPersonalitySchema
 } from "@lys/share"
 import {
   chatDeltaEventSchema,
@@ -33,7 +34,14 @@ export const chatApiRequestBodySchema = z.strictObject({
   /** Non-empty model identifier resolved by the backend runtime. */
   model: z.string().min(1),
   /** Required generation controls; absence is not represented by this contract. */
-  generationOptions: messageGenerationOptionsSchema
+  generationOptions: messageGenerationOptionsSchema,
+  /**
+   * Side of Lys's personality that answers this turn, as reported by the
+   * desktop host when the request is sent. It selects the tone appended to
+   * the conversation's stored system prompt for this turn only and is not
+   * stored.
+   */
+  personality: lysPersonalitySchema
 })
 
 /**
@@ -82,8 +90,9 @@ export const chatApiStreamEventSchema = z.discriminatedUnion("type", [
  * Describes the POST chat endpoint and its text/event-stream response contract.
  *
  * @remarks Strict request and event schemas reject unknown fields. The required
- * generation options have no protocol-level default; an omitted
- * `replyCeiling` remains absent and is translated by the backend runtime.
+ * generation options and personality have no protocol-level default; an
+ * omitted `replyCeiling` remains absent and is translated by the backend
+ * runtime.
  * Closing the response stream ends only this client's observation: the
  * backend keeps generating and storing the reply and its title. The
  * reply-stop endpoint stops a reply, and the reply-events endpoint follows it

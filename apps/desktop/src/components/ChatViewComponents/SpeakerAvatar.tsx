@@ -36,19 +36,21 @@ export default function SpeakerAvatar({
 }
 
 /**
- * Presents Lys's theme-matched transcript portrait.
+ * Presents the transcript portrait of Lys's current side.
  *
- * @remarks The application's root theme
- * class selects one of the decorative portraits without component-owned state.
+ * @remarks The application shell's
+ * `data-lys-personality` attribute selects one of the decorative portraits
+ * without component-owned state: the dark portrait for Caliginia and the light
+ * portrait otherwise. The theme does not affect the choice.
  * @returns The light and dark portrait alternatives for Lys.
  */
 function LysAvatar(): ReactElement {
   return (
     <>
-      <Avatar aria-hidden="true" className="size-7 dark:hidden">
+      <Avatar aria-hidden="true" className="size-7 lys-dark:hidden">
         <AvatarImage alt="" src={lysLightAvatar} />
       </Avatar>
-      <Avatar aria-hidden="true" className="hidden size-7 dark:flex">
+      <Avatar aria-hidden="true" className="hidden size-7 lys-dark:flex">
         <AvatarImage alt="" src={lysDarkAvatar} />
       </Avatar>
     </>

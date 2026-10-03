@@ -3,14 +3,15 @@
 //! This crate resolves the Lys home once at startup, registers commands, owns
 //! the managed backend process state, and stops that process during
 //! application exit. Feature-specific command implementations live in the
-//! `backend` and `settings` modules; `utils` resolves the Lys home; `tools`
-//! contains unregistered helper and input modules.
+//! `backend`, `lys_personality`, and `settings` modules; `utils` resolves the
+//! Lys home; `tools` contains unregistered helper and input modules.
 
 use tauri::Manager;
 
 use crate::utils::lys_home::LysHome;
 
 mod backend;
+mod lys_personality;
 mod settings;
 mod tools;
 mod utils;
@@ -37,10 +38,10 @@ fn greet(name: &str) -> String {
 /// to stderr and the process exits with status 1 before any window opens.
 ///
 /// The builder registers the opener plugin, manages the resolved `LysHome` and
-/// one mutex-protected `backend::Backend` resource, and exposes the backend and
-/// settings commands to the renderer. On `Exit`, the managed backend is stopped
-/// and a failure is reported to stderr without preventing the process from
-/// finishing its exit handling.
+/// one mutex-protected `backend::Backend` resource, and exposes the backend,
+/// Lys personality, and settings commands to the renderer. On `Exit`, the
+/// managed backend is stopped and a failure is reported to stderr without
+/// preventing the process from finishing its exit handling.
 ///
 /// # Panics
 ///
@@ -65,6 +66,7 @@ pub fn run() {
             backend::start_backend,
             backend::stop_backend,
             backend::get_backend_status,
+            lys_personality::get_lys_personality_period,
             settings::commands::load_settings,
             settings::commands::save_settings
         ])

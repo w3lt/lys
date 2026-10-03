@@ -5,6 +5,7 @@ import {
   LMSTUDIO_PORT
 } from "@lys/protocol"
 import { isAbsolute, join } from "node:path"
+import { lysPersonalitySchema } from "@lys/share"
 import { readPrompt } from "./utils/prompts"
 import * as z from "zod"
 
@@ -76,6 +77,18 @@ export const backendConfigSchema = z
      */
     lysSystemPrompt: promptTextSchema,
     /**
+     * Tone prompt of each side of Lys's personality, appended to the stored
+     * system prompt of every chat completion answered by that side.
+     *
+     * @remarks Exactly one entry per side: `dark` is read once from the
+     * maintained `caliginia.txt` prompt file and `light` from
+     * `lysiptera.txt`, with surrounding whitespace trimmed, when the
+     * configuration is loaded. The parsed record is frozen.
+     */
+    lysPersonalityPrompts: z
+      .record(lysPersonalitySchema, promptTextSchema)
+      .readonly(),
+    /**
      * System prompt sent with every title-generation request.
      *
      * @remarks Read once from the maintained `title-generation.txt` prompt file,
@@ -131,6 +144,10 @@ export function loadBackendConfig(): BackendConfig {
     lmstudioPort: LMSTUDIO_PORT,
     databaseFilePath: join(lysHome, "lys_db.sqlite"),
     lysSystemPrompt: readPrompt("lys-system"),
+    lysPersonalityPrompts: {
+      dark: readPrompt("caliginia"),
+      light: readPrompt("lysiptera")
+    },
     titleGenerationPrompt: readPrompt("title-generation"),
     titleGenerationMaxAttempts: TITLE_GENERATION_MAX_ATTEMPTS,
     generatedTitleMaxLength: GENERATED_TITLE_MAX_LENGTH

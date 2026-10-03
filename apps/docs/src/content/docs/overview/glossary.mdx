@@ -37,6 +37,13 @@ Terms that mean something specific inside Lys.
   protocol: `stop` or `length`.
 - **System prompt**: the backend-owned prompt template attached to a new
   conversation record.
+- **Side**: the part of Lys's personality that answers a turn, chosen by the
+  Tauri host's local time of day. **Caliginia** (`dark`) is the dark side,
+  active at night; **Lysiptera** (`light`) is the light side, active during the
+  day. The side adds its tone to the system prompt for one reply and selects
+  Lys's portrait and, when it changes, the theme.
+- **Side period**: one continuous span of a single side, identified by the side
+  and the local date on which it began.
 
 ## Streaming terms
 

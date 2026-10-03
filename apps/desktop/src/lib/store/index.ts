@@ -1,3 +1,4 @@
+import { findStoredThemeChoice } from "@/app/theme"
 import type { SettingsPane } from "@/app/types"
 import { loadSettings } from "@/lib/apis/tauri/settings"
 import { initialSettingsState, type LysSettings } from "./settings"
@@ -14,6 +15,11 @@ import {
   type LmStudioStatus,
   type LmStudioStatusSlice
 } from "./lm-studio-status"
+import {
+  createLysPersonalitySlice,
+  type LysPersonalitySlice
+} from "./lys-personality"
+import { createThemeSlice, type ThemeSlice } from "./theme"
 import { create } from "zustand"
 import { BACKEND_HOST, BACKEND_PORT } from "@lys/protocol"
 import { getBackendStatus, startBackend, stopBackend } from "../apis"
@@ -51,7 +57,10 @@ type LysState = {
   settings: LysSettings
   /** Local HTTP base URL used by desktop transport consumers. */
   backendUrl: string
-  /** True until settings load; a settings failure leaves it true and the shell blank. */
+  /**
+   * True until Lys's personality period and settings load; a failure of
+   * either leaves it true and the shell blank.
+   */
   initializing: boolean
   /** Backend lifecycle tracked by the store. */
   backendServerInfo: BackendServerInfo
@@ -79,12 +88,18 @@ type LysActions = {
    */
   setSettings: (settings: LysSettings) => void
   /**
-   * Loads settings, shows the shell, then starts or checks the backend.
+   * Reads Lys's personality period, settings, and the stored theme choice,
+   * shows the shell, then starts or checks the backend.
    *
-   * @returns A promise resolving after settings load and any backend start settles.
-   * @throws The settings or backend Tauri rejection.
-   * @remarks The backend starts when autostart is on or a process already
-   * runs; either way readiness is established through the health route.
+   * @returns A promise resolving after the shell is shown and any backend
+   * start settles.
+   * @throws The personality reading's host or validation failure, or the
+   * settings Tauri rejection, either of which leaves the shell hidden; or a
+   * later backend Tauri rejection.
+   * @remarks The period is read before settings, so a personality failure
+   * also leaves settings unread. The backend starts when autostart is on or a
+   * process already runs; either way readiness is established through the
+   * health route.
    */
   initialize: () => Promise<void>
   /**
@@ -120,7 +135,9 @@ type LysStore = LysState &
   LysActions &
   ModelSlice &
   GenerationSettingsSlice &
-  LmStudioStatusSlice
+  LmStudioStatusSlice &
+  LysPersonalitySlice &
+  ThemeSlice
 
 /** Initial renderer-side store state before Tauri initialization. */
 const initialState: LysState = {
@@ -138,7 +155,7 @@ const initialState: LysState = {
 
 /**
  * Zustand hook and store for application view, settings, backend lifecycle,
- * and LM Studio status.
+ * LM Studio status, Lys's personality period, and the theme choice.
  *
  * @remarks Initialization and process actions are application-owned
  * asynchronous transitions. Tauri errors propagate from the returned promises;
@@ -250,6 +267,8 @@ export const useLysStore = create<LysStore>()((set, get) => {
       }),
       handleLmStudioStatusChange
     }),
+    ...createLysPersonalitySlice(set, get),
+    ...createThemeSlice(set),
 
     setActiveView: (view) => {
       set({ activeView: view })
@@ -329,8 +348,13 @@ export const useLysStore = create<LysStore>()((set, get) => {
     },
 
     initialize: async () => {
+      await get().updateLysPersonalityPeriod()
       const settings = await loadSettings()
-      set({ settings, initializing: false })
+      set({
+        settings,
+        themeChoice: findStoredThemeChoice(),
+        initializing: false
+      })
       if (
         settings.runtime.autoStartBackend ||
         (await getBackendStatus()).running

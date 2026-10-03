@@ -11,11 +11,11 @@ definitions, a small JSON settings file, and one desktop theme preference.
 
 ## Persistent artifacts
 
-| Artifact         | Owner           | Location                                | Purpose                                                                        |
-| ---------------- | --------------- | --------------------------------------- | ------------------------------------------------------------------------------ |
-| Backend database | Fastify backend | `$LYS_HOME/lys_db.sqlite`               | Stores conversation metadata, conversation messages, and agent definitions.    |
-| Settings JSON    | Tauri host      | `$LYS_HOME/settings.json`               | Stores runtime, model, and generation settings.                                |
-| Theme preference | Desktop UI      | WebView `localStorage`, key `lys.theme` | Stores `dark` or `light`; invalid or unavailable storage falls back to `dark`. |
+| Artifact         | Owner           | Location                                      | Purpose                                                                                                                                                                         |
+| ---------------- | --------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Backend database | Fastify backend | `$LYS_HOME/lys_db.sqlite`                     | Stores conversation metadata, conversation messages, and agent definitions.                                                                                                     |
+| Settings JSON    | Tauri host      | `$LYS_HOME/settings.json`                     | Stores runtime, model, and generation settings.                                                                                                                                 |
+| Theme preference | Desktop UI      | WebView `localStorage`, key `lys.themeChoice` | Stores the last toggled theme with the side period it was chosen in, as JSON with `schemaVersion` `1`; an invalid, outdated, or unavailable value leaves the theme to the side. |
 
 ## SQLite ownership
 

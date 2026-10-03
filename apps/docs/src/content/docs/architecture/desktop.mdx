@@ -11,17 +11,59 @@ presentation state, not durable conversation storage.
 
 ## Main responsibilities
 
-| Area                | Current implementation                                                                                                       |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| App shell           | `App.tsx` swaps between chat and settings views and runs startup initialization.                                             |
-| Chat UI             | `ChatView` renders the transcript, composer, jump-to-latest controls, and the past-conversations dialog.                     |
-| Message rendering   | `MarkdownMessage` renders assistant replies as Markdown with KaTeX math and highlighted, copyable code blocks.               |
-| Chat state          | `src/lib/store/chat-view` owns the active conversation, request lifecycle, conversation opening, and error presentation.     |
-| History state       | `src/lib/store/conversation-history` owns the past-conversations dialog, its search and pages, and rename and delete calls.  |
-| Shell/runtime state | `src/lib/store/index.ts` tracks which view is open, whether the backend is running, and settings loaded from Tauri.          |
-| Model lifecycle     | `src/lib/store/model-actions.ts` owns real inventory, load, unload, and health requests shared by settings and the composer. |
-| SSE consumption     | `src/lib/apis/http/chat.ts` opens chat and reply-events SSE streams, validates events with Zod, and sends reply stops.       |
-| Theme               | `src/app/theme.ts` applies light or dark mode and stores the choice as `lys.theme` in WebView `localStorage`.                |
+| Area                | Current implementation                                                                                                          |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| App shell           | `App.tsx` swaps between chat and settings views and runs startup initialization.                                                |
+| Chat UI             | `ChatView` renders the transcript, composer, jump-to-latest controls, and the past-conversations dialog.                        |
+| Message rendering   | `MarkdownMessage` renders assistant replies as Markdown with KaTeX math and highlighted, copyable code blocks.                  |
+| Chat state          | `src/lib/store/chat-view` owns the active conversation, request lifecycle, conversation opening, and error presentation.        |
+| History state       | `src/lib/store/conversation-history` owns the past-conversations dialog, its search and pages, and rename and delete calls.     |
+| Shell/runtime state | `src/lib/store/index.ts` tracks which view is open, whether the backend is running, and settings loaded from Tauri.             |
+| Model lifecycle     | `src/lib/store/model-actions.ts` owns real inventory, load, unload, and health requests shared by settings and the composer.    |
+| SSE consumption     | `src/lib/apis/http/chat.ts` opens chat and reply-events SSE streams, validates events with Zod, and sends reply stops.          |
+| Lys's side          | `src/lib/store/lys-personality.ts` holds the host-reported side; `App.tsx` refreshes it and exposes it to the portraits.        |
+| Theme               | `src/app/theme.ts` derives light or dark mode from the side and the stored choice, kept as `lys.themeChoice` in `localStorage`. |
+
+## Lys's side and theme
+
+Lys has a dark side, Caliginia, and a light side, Lysiptera, chosen by the
+host's local time of day as described in
+[Tauri host](/architecture/host/#lyss-sides). `initialize` reads the current
+period through `get_lys_personality_period` before it loads settings; if that
+read fails, the shell stays blank as it does for a settings failure. While the
+app runs, `App.tsx` reads the period again every minute, so a side change
+appears within about a minute. A failed refresh keeps the previous side and is
+written to the console.
+
+The side has three effects:
+
+- Every chat request sends it as `personality`, and the backend adds that
+  side's tone to the system prompt for that reply only. The chat store reads
+  the period from the host again once the request is admitted and before its
+  stream opens, so a message sent just after a side change already uses the new
+  side, and the portrait and theme follow at the same moment. If that read
+  fails, the request fails with an inline error. A conversation can therefore
+  be answered by both sides over time.
+- The app shell carries it as `data-lys-personality`. The starter portrait and
+  every Lys avatar in the transcript show the portrait of the current side,
+  whatever the theme.
+- It sets the theme. When a new period begins, the theme becomes the side's
+  theme: dark for Caliginia and light for Lysiptera. The title-bar toggle
+  changes only the theme, never the side, and its choice lasts until the next
+  period begins.
+
+The toggle's choice is stored with the period in which it was made as
+versioned JSON under the `lys.themeChoice` key in WebView `localStorage`. At
+startup the stored choice applies only if its period is still current, so a
+side change while the app was closed or the computer slept also resets the
+theme. An unreadable value, or one with another schema version, is ignored and
+the theme follows the side. The plain `dark`/`light` value that earlier
+versions stored under `lys.theme` is no longer read. A refused storage write
+keeps the choice for the current session only. `index.html` ships the `dark`
+class, so the blank window is dark until startup has read the side and loaded
+the settings. The derived theme is applied before the shell's first paint, so
+the shell never appears in the wrong theme; on a daytime launch, the window
+turns light as the shell appears.
 
 ## Chat state split
 
@@ -31,7 +73,7 @@ The desktop currently has three separate state systems:
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | Chat Zustand store    | Active conversation, request and open tokens, local abort controllers, streamed assistant deltas, inline error text            |
 | History Zustand store | Dialog visibility, search query, displayed conversation pages, the row being renamed or confirmed, pending renames and deletes |
-| Shell Zustand store   | Active top-level view, loaded runtime settings, backend process status, startup progress                                       |
+| Shell Zustand store   | Active top-level view, loaded runtime settings, backend process status, startup progress, Lys's side, the theme choice         |
 
 The transcript shown in the window is built from backend events for the current
 request, or from the stored transcript read when a past conversation is opened.
@@ -128,8 +170,8 @@ the only control that asks the backend to reconnect. A failed model request
 re-reads the status, so a lost LM Studio appears as not reachable without
 polling. The composer banner names the first missing prerequisite—the
 backend, LM Studio, or model weights—and opens the settings pane that fixes
-it. `initialize` shows the shell as soon as settings load; the backend starts
-in the background.
+it. `initialize` shows the shell as soon as Lys's side and settings load; the
+backend starts in the background.
 
 ## Model settings
 

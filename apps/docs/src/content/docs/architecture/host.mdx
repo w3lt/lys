@@ -1,6 +1,6 @@
 ---
 title: Tauri host and lifecycle
-description: Window bootstrap, backend process ownership, and file-backed settings commands.
+description: Window bootstrap, backend process ownership, file-backed settings commands, and Lys's time-of-day side.
 docType: architecture
 sidebar:
   order: 3
@@ -12,13 +12,14 @@ React UI.
 
 ## Registered commands
 
-| Command              | Purpose                                                                                      |
-| -------------------- | -------------------------------------------------------------------------------------------- |
-| `start_backend`      | Starts the backend for the current build mode with the Lys home and stores the child handle. |
-| `stop_backend`       | Kills the backend process group and waits for shutdown.                                      |
-| `get_backend_status` | Reports whether the stored child process is still running.                                   |
-| `load_settings`      | Reads `$LYS_HOME/settings.json`, creating a default file if needed.                          |
-| `save_settings`      | Writes a new settings JSON document to `$LYS_HOME/settings.json`.                            |
+| Command                      | Purpose                                                                                      |
+| ---------------------------- | -------------------------------------------------------------------------------------------- |
+| `start_backend`              | Starts the backend for the current build mode with the Lys home and stores the child handle. |
+| `stop_backend`               | Kills the backend process group and waits for shutdown.                                      |
+| `get_backend_status`         | Reports whether the stored child process is still running.                                   |
+| `get_lys_personality_period` | Reports which side of Lys the host's local time selects, and when that side began.           |
+| `load_settings`              | Reads `$LYS_HOME/settings.json`, creating a default file if needed.                          |
+| `save_settings`              | Writes a new settings JSON document to `$LYS_HOME/settings.json`.                            |
 
 ## Lys home
 
@@ -91,6 +92,28 @@ replacing its generation group, and saving the complete document. Runtime and
 model edits in the UI remain session-only; generation saves preserve those
 groups as already stored on disk. The local context size supports composer
 estimates and does not configure LM Studio's load-time context.
+
+## Lys's sides
+
+Lys has two sides, chosen only by the host's local time of day. Lysiptera, the
+light side, is active from 06:00 until 19:00. Caliginia, the dark side, is
+active from 19:00 until 06:00. The schedule is fixed in
+`src/lys_personality.rs`; no setting changes it, and nobody can switch the
+side by hand.
+
+`get_lys_personality_period` reads the local clock and time zone on every call
+and returns the current period:
+
+```json
+{ "personality": "dark", "startDate": "2026-10-02" }
+```
+
+`startDate` is the local calendar date on which the period began, so a night
+keeps the date of its evening after midnight. Every reading within one period
+is equal, which lets the desktop recognize that the side changed even across a
+restart or sleep. The command fails only for a time before 06:00 on the
+earliest date `chrono` can represent. The desktop's use of the period is
+described in [Desktop](/architecture/desktop/#lyss-side-and-theme).
 
 ## What the host does not currently do
 

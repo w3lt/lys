@@ -13,6 +13,7 @@ describe("registerChatRoutes", () => {
 
     await registerChatRoutes(testApp.app, {
       lysSystemPrompt: "Configured prompt",
+      lysPersonalityPrompts: { dark: "Dark prompt", light: "Light prompt" },
       titleGenerationMaxAttempts: 1
     })
 

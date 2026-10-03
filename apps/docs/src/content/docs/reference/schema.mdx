@@ -53,11 +53,15 @@ JSON schema for runtime, model, and generation settings.
 - Completed assistant rows must also have a non-null finish reason.
 - Streaming, interrupted, and failed assistant rows must keep a null finish
   reason.
-- Agent rows must have a code and non-empty text columns. SQLite checks only
-  that; the backend's agent schemas enforce the rest when they write and read a
-  row: a code of at most 64 lowercase letters, digits, and single inner
-  hyphens; a name of at most 64 and a bio of at most 128 UTF-16 code units;
-  trimmed text; and millisecond ISO timestamps. A row that breaks them fails to read.
+- Agent rows must have every column, and a non-empty `code`, `name`, `bio`,
+  and `system_prompt`. SQLite checks only that, comparing each of the four with
+  `''`, so text that starts with a NUL character still counts as non-empty;
+  `created_at` and `updated_at` have no check. The backend's agent schemas
+  enforce the rest on every row it writes and reads: a code of at most 64
+  lowercase letters, digits, and single inner hyphens; a name of at most 64
+  and a bio of at most 128 UTF-16 code units; trimmed text without a lone
+  UTF-16 surrogate; and millisecond ISO timestamps. A row that breaks them
+  fails to read.
 
 The current backend inserts an empty assistant row before generation and later
 appends each streamed delta before publication, then updates its status and finish

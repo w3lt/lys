@@ -168,9 +168,10 @@ agent's identity and never changes: a lowercase slug of 1–64 characters made o
 `a`–`z` and `0`–`9` in hyphen-separated groups, compared exactly. A malformed
 code in a path returns `400` before any lookup. Request bodies reject unknown
 fields; the name is trimmed to 1–64 UTF-16 code units, the bio to 1–128, and the
-system prompt must not be blank after trimming. The system prompt has no length
-limit of its own; only the 1 MiB request body limit above bounds it. Invalid
-bodies return `400` and change nothing.
+system prompt must not be blank after trimming. Text containing a lone UTF-16
+surrogate, which UTF-8 cannot carry unchanged, is rejected. The system prompt
+has no length limit of its own; only the 1 MiB request body limit above bounds
+it. Invalid bodies return `400` and change nothing.
 
 List responses have exactly `agents`, `storedCount`, and `nextCursor`. Each
 summary contains `code`, `name`, `bio`, `createdAt`, and `updatedAt`; it does
@@ -188,16 +189,21 @@ and the page from one snapshot; later pages reflect later changes. The next
 cursor is `null` on the last page.
 
 `POST` stores a new agent and answers `201` with the stored agent and a
-`Location: /api/v1/agents/<code>` header. `code` is optional:
+`Location: /api/v1/agents/<code>` header. CORS does not expose `Location`, so a
+browser client on another origin, such as the desktop app, uses the returned
+`code` instead. `code` is optional:
 
 - A given code is stored exactly. If another agent already has it, the request
   returns `409` with `urn:lys:problem:agent:code-taken` and stores nothing.
-- Without a code, the backend derives one from the name: it lowercases the
-  name, removes accents, joins the remaining ASCII letters and digits with
-  single hyphens, and cuts the result to fit 64 characters. `Web Researcher`
-  becomes `web-researcher` and `Trợ lý` becomes `tro-ly`. A letter without an
-  ASCII form, such as `đ`, acts as a separator. A name with no ASCII letter or
-  digit gives `agent`. When the code is taken, `-2`, `-3`, and so on are added.
+- Without a code, the backend derives one from the name: it decomposes the
+  name with Unicode compatibility decomposition (NFKD), which removes accents
+  and turns forms such as `𝐖` or `ﬁ` into ASCII, then lowercases it, joins the
+  remaining ASCII letters and digits with single hyphens, and cuts the result
+  to fit 64 characters. `Web Researcher` becomes `web-researcher` and `Trợ lý`
+  becomes `tro-ly`. A letter without an ASCII form, such as `đ`, acts as a
+  separator. A name in which no letter or digit has an ASCII form, such as
+  `日本語`, gives `agent`. When the code is taken, `-2`, `-3`, and so on are
+  added.
 
 Creating an agent is not idempotent: repeating a request without a code creates
 another agent. After a lost response, list the agents to find out whether it

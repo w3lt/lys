@@ -6,16 +6,16 @@ sidebar:
   order: 6
 ---
 
-Lys currently persists a SQLite conversation database, a small JSON settings
-file, and one desktop theme preference.
+Lys currently persists a SQLite database of conversations and agent
+definitions, a small JSON settings file, and one desktop theme preference.
 
 ## Persistent artifacts
 
-| Artifact              | Owner           | Location                                | Purpose                                                                        |
-| --------------------- | --------------- | --------------------------------------- | ------------------------------------------------------------------------------ |
-| Conversation database | Fastify backend | `$LYS_HOME/lys_db.sqlite`               | Stores conversation metadata and conversation messages.                        |
-| Settings JSON         | Tauri host      | `$LYS_HOME/settings.json`               | Stores runtime, model, and generation settings.                                |
-| Theme preference      | Desktop UI      | WebView `localStorage`, key `lys.theme` | Stores `dark` or `light`; invalid or unavailable storage falls back to `dark`. |
+| Artifact         | Owner           | Location                                | Purpose                                                                        |
+| ---------------- | --------------- | --------------------------------------- | ------------------------------------------------------------------------------ |
+| Backend database | Fastify backend | `$LYS_HOME/lys_db.sqlite`               | Stores conversation metadata, conversation messages, and agent definitions.    |
+| Settings JSON    | Tauri host      | `$LYS_HOME/settings.json`               | Stores runtime, model, and generation settings.                                |
+| Theme preference | Desktop UI      | WebView `localStorage`, key `lys.theme` | Stores `dark` or `light`; invalid or unavailable storage falls back to `dark`. |
 
 ## SQLite ownership
 
@@ -53,8 +53,11 @@ contains no SQL. Each service is exposed as its own application service.
 The agent service `StoredAgents` (`src/di/services/agentService/`) wraps
 `SqliteAgentRecordStore` the same way: it validates each definition or change,
 reads the current time once per change, and lists and stores agents through
-records it declares in `records.ts`. It is decorated as `app.agents`, and the
-agent routes in `src/modules/agent/` call it.
+records it declares in `records.ts`. Unlike the conversation records, the
+agent records are one interface: the service is their only consumer and uses
+all five operations, while the routes receive narrow capabilities of the
+service instead. It is decorated as `app.agents`, and the agent routes in
+`src/modules/agent/` call it.
 Every borrowed operation fails once the database closes,
 and the database remains open until every reply generation has stored its final
 state.

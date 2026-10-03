@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import * as z from "zod"
 import StoredAgents from "../../../../../src/di/services/agentService/agents"
 import SqliteAgentRecordStore from "../../../../../src/infrastructure/database/agents/sqliteAgentRecordStore"
+import { parseAgentListOptions } from "../../../../../src/modules/agent/listOptions"
 import { openTestDatabase } from "../../../support/conversationDatabase"
 
 /** Time the clock reads when a case starts. */
@@ -66,6 +67,41 @@ describe("StoredAgents", () => {
       expect(agents.findAgent("lys")).toEqual(first)
     })
 
+    it("derives the code from the name when none is given", () => {
+      const agents = openStoredAgents()
+
+      const created = agents.createAgent({
+        name: "Web Researcher",
+        bio: "Searches the web.",
+        systemPrompt: "You research the web."
+      })
+
+      expect(created).toMatchObject({ code: "web-researcher", createdAt: NOW })
+      expect(agents.findAgent("web-researcher")).toEqual(created)
+    })
+
+    it("appends the first free number when the derived code is taken", () => {
+      const agents = openStoredAgents()
+      const definition = { ...LYS_DEFINITION, code: undefined }
+      agents.createAgent(LYS_DEFINITION)
+      agents.createAgent({ ...LYS_DEFINITION, code: "lys-2" })
+
+      expect(agents.createAgent(definition)).toMatchObject({ code: "lys-3" })
+      expect(agents.createAgent(definition)).toMatchObject({ code: "lys-4" })
+    })
+
+    it("derives `agent` from a name without an ASCII letter or digit", () => {
+      const agents = openStoredAgents()
+
+      expect(
+        agents.createAgent({
+          ...LYS_DEFINITION,
+          code: undefined,
+          name: "日本語"
+        })
+      ).toMatchObject({ code: "agent", name: "日本語" })
+    })
+
     it("rejects an invalid definition without storing it", () => {
       const agents = openStoredAgents()
 
@@ -98,28 +134,88 @@ describe("StoredAgents", () => {
         updatedAt: LATER
       }
 
-      expect(agents.updateAgent({ code: "lys", bio: " Archivist. " })).toEqual(
+      expect(agents.updateAgent("lys", { bio: " Archivist. " })).toEqual(
         expected
       )
 
       expect(agents.findAgent("lys")).toEqual(expected)
     })
 
-    it("returns undefined for an agent that is not stored", () => {
-      const agents = openStoredAgents()
+    it.each(["lys", "Not A Slug"])(
+      "returns undefined for the code %s when no agent has it",
+      (code) => {
+        const agents = openStoredAgents()
 
-      expect(agents.updateAgent({ code: "lys", name: "Lys" })).toBeUndefined()
-      expect(agents.findAgent("lys")).toBeUndefined()
+        expect(agents.updateAgent(code, { name: "Lys" })).toBeUndefined()
+        expect(agents.findAgent(code)).toBeUndefined()
+      }
+    )
+
+    it.each([
+      ["no field", {}],
+      ["only undefined fields", { name: undefined }]
+    ])(
+      "rejects a change with %s without touching the agent",
+      (_label, changes) => {
+        const agents = openStoredAgents()
+        const created = agents.createAgent(LYS_DEFINITION)
+        vi.setSystemTime(new Date(LATER))
+
+        expect(() => agents.updateAgent("lys", changes)).toThrow(z.ZodError)
+
+        expect(agents.findAgent("lys")).toEqual(created)
+      }
+    )
+  })
+
+  describe("listAgents", () => {
+    it("pages through agents oldest first and ends with a null cursor", () => {
+      const agents = openStoredAgents()
+      agents.createAgent({ ...LYS_DEFINITION, code: "b" })
+      vi.setSystemTime(new Date(LATER))
+      agents.createAgent({ ...LYS_DEFINITION, code: "a" })
+      agents.createAgent({ ...LYS_DEFINITION, code: "c" })
+
+      const first = agents.listAgents({ cursor: undefined, limit: 2 })
+      expect(first.agents.map((agent) => agent.code)).toEqual(["b", "a"])
+      expect(first).toMatchObject({
+        storedCount: 3,
+        nextCursor: expect.any(String)
+      })
+
+      const second = agents.listAgents(
+        parseAgentListOptions({ cursor: first.nextCursor ?? "", limit: 2 })
+      )
+      expect(second.agents.map((agent) => agent.code)).toEqual(["c"])
+      expect(second).toMatchObject({ storedCount: 3, nextCursor: null })
     })
 
-    it("rejects an update that changes no field without touching the agent", () => {
+    it("lists each agent created in the same millisecond exactly once", () => {
       const agents = openStoredAgents()
-      const created = agents.createAgent(LYS_DEFINITION)
-      vi.setSystemTime(new Date(LATER))
+      for (const code of ["c", "a", "b"])
+        agents.createAgent({ ...LYS_DEFINITION, code })
+      const listed: string[] = []
 
-      expect(() => agents.updateAgent({ code: "lys" })).toThrow(z.ZodError)
+      let page = agents.listAgents({ cursor: undefined, limit: 1 })
+      listed.push(...page.agents.map((agent) => agent.code))
+      while (page.nextCursor !== null) {
+        page = agents.listAgents(
+          parseAgentListOptions({ cursor: page.nextCursor, limit: 1 })
+        )
+        listed.push(...page.agents.map((agent) => agent.code))
+      }
 
-      expect(agents.findAgent("lys")).toEqual(created)
+      expect(listed).toEqual(["a", "b", "c"])
+    })
+
+    it("returns an empty final page when no agent is stored", () => {
+      const agents = openStoredAgents()
+
+      expect(agents.listAgents({ cursor: undefined, limit: 30 })).toEqual({
+        agents: [],
+        storedCount: 0,
+        nextCursor: null
+      })
     })
   })
 

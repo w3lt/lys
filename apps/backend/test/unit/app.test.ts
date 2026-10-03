@@ -58,7 +58,7 @@ describe("buildApp", () => {
     expect(existsSync(config.databaseFilePath)).toBe(false)
   })
 
-  it("decorates the conversation adapters and the agent service and serves history from the configured database", async () => {
+  it("decorates the conversation adapters and the agent service and serves history and agents from the configured database", async () => {
     const app = await buildApp({ config: createOwnedBackendConfig() })
     onTestFinished(async () => await app.close())
     await app.ready()
@@ -66,6 +66,10 @@ describe("buildApp", () => {
     const response = await app.inject({
       method: "GET",
       url: "/api/v1/conversations"
+    })
+    const agentsResponse = await app.inject({
+      method: "GET",
+      url: "/api/v1/agents"
     })
 
     expect(app.conversationTurns).toBeInstanceOf(StoredConversationTurns)
@@ -78,5 +82,11 @@ describe("buildApp", () => {
     expect(app.agents).toBeInstanceOf(StoredAgents)
     expect(response.statusCode).toBe(200)
     expect(response.json()).toMatchObject({ storedCount: 0 })
+    expect(agentsResponse.statusCode).toBe(200)
+    expect(agentsResponse.json()).toEqual({
+      agents: [],
+      storedCount: 0,
+      nextCursor: null
+    })
   })
 })

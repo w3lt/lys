@@ -1,14 +1,62 @@
-import type { AgentRecordStore } from "../../../di/services/agentService/records"
-import {
-  agentSchema,
-  type Agent,
-  type AgentUpdate
-} from "../../../modules/agent/agent"
+import * as z from "zod"
+import { listAgentsApi } from "@lys/protocol"
+import { agentSchema, type Agent } from "@lys/share"
+import type {
+  AgentPage,
+  AgentRecordStore,
+  ListAgentsInput,
+  UpdateAgentInput
+} from "../../../di/services/agentService/records"
 import type {
   DatabaseReader,
   DatabaseStatementCompiler,
   DatabaseWriter
 } from "../databaseTransactions"
+
+/** Validates the number of stored agents read with a list page. */
+const agentCountSchema = z.strictObject({
+  storedCount: z.int().nonnegative()
+})
+
+/**
+ * Reads the agent count and one page of summaries inside the caller's read
+ * transaction.
+ * @param statements - Statement compilation lent to the caller's transaction.
+ * @param input - Boundary after which the page starts and its size.
+ * @returns The validated page and whether more agents follow it.
+ * @throws If SQLite fails or a listed row violates the agent schema.
+ */
+function listAgents(
+  statements: DatabaseStatementCompiler,
+  input: ListAgentsInput
+): AgentPage {
+  const { storedCount } = agentCountSchema.parse(
+    statements.getStatement("SELECT count(*) AS storedCount FROM agents").get()
+  )
+  const rows = statements
+    .getStatement(
+      `SELECT code, name, bio, created_at AS createdAt, updated_at AS updatedAt
+      FROM agents
+      WHERE $createdAt IS NULL OR created_at > $createdAt
+        OR (created_at = $createdAt AND code > $code)
+      ORDER BY created_at, code LIMIT $limit`
+    )
+    .all({
+      createdAt: input.after?.createdAt ?? null,
+      code: input.after?.code ?? null,
+      limit: input.limit + 1
+    })
+  const page = listAgentsApi.response.parse({
+    agents: rows.slice(0, input.limit),
+    storedCount,
+    nextCursor: null
+  })
+  return {
+    agents: page.agents,
+    storedCount: page.storedCount,
+    hasMore: rows.length > input.limit
+  }
+}
 
 /**
  * Reads one agent inside the caller's transaction.
@@ -34,9 +82,8 @@ function findAgent(
  * Applies one agent change inside the caller's write transaction.
  * @param statements - Statement compilation lent to the caller's write
  * transaction.
- * @param update - Code and the fields to replace; an omitted field keeps its
- * stored value.
- * @param updatedAt - Time stored as the agent's last change.
+ * @param input - Code, the fields to replace (an omitted field keeps its
+ * stored value), and the time stored as the agent's last change.
  * @returns The changed agent, or undefined when no agent has the code.
  * @throws If SQLite fails or the changed row violates the agent schema; the
  * row is validated before the caller's transaction commits, so either failure
@@ -44,8 +91,7 @@ function findAgent(
  */
 function updateAgent(
   statements: DatabaseStatementCompiler,
-  update: AgentUpdate,
-  updatedAt: string
+  input: UpdateAgentInput
 ): Agent | undefined {
   const row = statements
     .getStatement(
@@ -56,11 +102,11 @@ function updateAgent(
       created_at AS createdAt, updated_at AS updatedAt`
     )
     .get(
-      update.name ?? null,
-      update.bio ?? null,
-      update.systemPrompt ?? null,
-      updatedAt,
-      update.code
+      input.changes.name ?? null,
+      input.changes.bio ?? null,
+      input.changes.systemPrompt ?? null,
+      input.updatedAt,
+      input.code
     )
   return row === undefined ? undefined : agentSchema.parse(row)
 }
@@ -70,13 +116,13 @@ function updateAgent(
  * stored agent definitions.
  *
  * @remarks Owns no resource: the database's owner closes the connection, after
- * which every operation fails with `Database is closed`. Each lookup is one
- * read snapshot and each change one write transaction that commits before it
+ * which every operation fails with `Database is closed`. Each listing or
+ * lookup is one read snapshot and each change one write transaction that commits before it
  * returns. Concurrency model: single-owner, synchronous on the backend's event
  * loop. Implements {@link AgentRecordStore}.
  */
 export default class SqliteAgentRecordStore implements AgentRecordStore {
-  /** Borrowed read snapshots for agent lookups. */
+  /** Borrowed read snapshots for agent listings and lookups. */
   readonly #databaseReader: DatabaseReader
 
   /** Borrowed write transactions for agent creation, changes, and deletion. */
@@ -90,6 +136,19 @@ export default class SqliteAgentRecordStore implements AgentRecordStore {
   public constructor(database: DatabaseReader & DatabaseWriter) {
     this.#databaseReader = database
     this.#databaseWriter = database
+  }
+
+  /**
+   * Implements {@link AgentRecordStore.listAgents} in one read snapshot, so
+   * the count and the page agree.
+   * @param input - Interface-defined boundary and page size.
+   * @returns The interface-defined page.
+   * @throws The interface-defined closed and validation failures.
+   */
+  public listAgents(input: ListAgentsInput): AgentPage {
+    return this.#databaseReader.handleDatabaseReadRequest((statements) =>
+      listAgents(statements, input)
+    )
   }
 
   /**
@@ -133,18 +192,14 @@ export default class SqliteAgentRecordStore implements AgentRecordStore {
   /**
    * Implements {@link AgentRecordStore.updateAgent} with one
    * `UPDATE … RETURNING` statement.
-   * @param update - Interface-defined change.
-   * @param updatedAt - Interface-defined change time.
+   * @param input - Interface-defined code, change, and change time.
    * @returns The interface-defined agent or absence.
    * @throws The interface-defined failures; the returned row is validated
    * before the change commits, so an invalid row rolls the change back.
    */
-  public updateAgent(
-    update: AgentUpdate,
-    updatedAt: string
-  ): Agent | undefined {
+  public updateAgent(input: UpdateAgentInput): Agent | undefined {
     return this.#databaseWriter.handleDatabaseWriteRequest((statements) =>
-      updateAgent(statements, update, updatedAt)
+      updateAgent(statements, input)
     )
   }
 

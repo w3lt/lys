@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
+import type { Agent } from "@lys/share"
 import type { AgentRecordStore } from "../../../src/di/services/agentService/records"
-import type { Agent } from "../../../src/modules/agent/agent"
 
 /** Agent records over one empty store, with the controls a case needs. */
 export type AgentRecordStoreHarness = Readonly<{
@@ -42,6 +42,42 @@ const RESEARCHER: Agent = Object.freeze({
   updatedAt: CREATED_AT
 })
 
+/** Earlier creation time shared by two listed agents. */
+const FIRST_CREATED_AT = "2026-01-01T00:00:00.000Z"
+
+/** Later creation time of one listed agent. */
+const SECOND_CREATED_AT = "2026-01-01T00:00:00.001Z"
+
+/**
+ * Creates a valid agent whose code and creation time decide its list position.
+ *
+ * @param code - Code of the agent.
+ * @param createdAt - Creation and last-change time.
+ * @returns The frozen agent.
+ */
+function createListedAgent(code: string, createdAt: string): Agent {
+  return Object.freeze({
+    code,
+    name: `Agent ${code}`,
+    bio: `Bio of ${code}.`,
+    systemPrompt: `You are agent ${code}.`,
+    createdAt,
+    updatedAt: createdAt
+  })
+}
+
+/**
+ * Stores three agents that creation time alone does not order: `b` and `c`
+ * share the earlier time, and `a`, created later, sorts last.
+ *
+ * @param recordStore - Records over an empty store.
+ */
+function storeListedAgents(recordStore: AgentRecordStore): void {
+  recordStore.createAgent(createListedAgent("a", SECOND_CREATED_AT))
+  recordStore.createAgent(createListedAgent("c", FIRST_CREATED_AT))
+  recordStore.createAgent(createListedAgent("b", FIRST_CREATED_AT))
+}
+
 /**
  * Registers the provider-independent {@link AgentRecordStore} contract cases.
  *
@@ -51,6 +87,71 @@ export function registerAgentRecordStoreContractSuite(
   createHarness: AgentRecordStoreHarnessFactory
 ): void {
   describe("AgentRecordStore contract", () => {
+    describe("listAgents", () => {
+      it("returns an empty first page for an empty store", () => {
+        const { recordStore } = createHarness()
+
+        expect(recordStore.listAgents({ after: undefined, limit: 2 })).toEqual({
+          agents: [],
+          storedCount: 0,
+          hasMore: false
+        })
+      })
+
+      it("lists summaries by creation time, then code, without system prompts", () => {
+        const { recordStore } = createHarness()
+        storeListedAgents(recordStore)
+
+        const page = recordStore.listAgents({ after: undefined, limit: 3 })
+
+        expect(page.agents.map((agent) => agent.code)).toEqual(["b", "c", "a"])
+        expect(page.agents[0]).toEqual({
+          code: "b",
+          name: "Agent b",
+          bio: "Bio of b.",
+          createdAt: FIRST_CREATED_AT,
+          updatedAt: FIRST_CREATED_AT
+        })
+        expect(page).toMatchObject({ storedCount: 3, hasMore: false })
+        expect(Object.isFrozen(page.agents[0])).toBe(true)
+      })
+
+      it("stops at the limit and reports that more agents follow", () => {
+        const { recordStore } = createHarness()
+        storeListedAgents(recordStore)
+
+        const page = recordStore.listAgents({ after: undefined, limit: 2 })
+
+        expect(page.agents.map((agent) => agent.code)).toEqual(["b", "c"])
+        expect(page).toMatchObject({ storedCount: 3, hasMore: true })
+      })
+
+      it("continues after the boundary agent, counting every stored agent", () => {
+        const { recordStore } = createHarness()
+        storeListedAgents(recordStore)
+
+        const page = recordStore.listAgents({
+          after: { createdAt: FIRST_CREATED_AT, code: "c" },
+          limit: 2
+        })
+
+        expect(page.agents.map((agent) => agent.code)).toEqual(["a"])
+        expect(page).toMatchObject({ storedCount: 3, hasMore: false })
+      })
+
+      it("continues within agents created at the same time by code", () => {
+        const { recordStore } = createHarness()
+        storeListedAgents(recordStore)
+
+        const page = recordStore.listAgents({
+          after: { createdAt: FIRST_CREATED_AT, code: "b" },
+          limit: 2
+        })
+
+        expect(page.agents.map((agent) => agent.code)).toEqual(["c", "a"])
+      })
+    })
+
     describe("findAgent", () => {
       it("returns undefined for a code that is not stored", () => {
         const { recordStore } = createHarness()
@@ -102,10 +203,11 @@ export function registerAgentRecordStoreContractSuite(
         recordStore.createAgent(LYS)
         const expected = { ...LYS, bio: "Archivist.", updatedAt: CHANGED_AT }
 
-        const updated = recordStore.updateAgent(
-          { code: "lys", bio: "Archivist." },
-          CHANGED_AT
-        )
+        const updated = recordStore.updateAgent({
+          code: "lys",
+          changes: { bio: "Archivist." },
+          updatedAt: CHANGED_AT
+        })
 
         expect(updated).toEqual(expected)
         expect(Object.isFrozen(updated)).toBe(true)
@@ -117,15 +219,15 @@ export function registerAgentRecordStoreContractSuite(
         recordStore.createAgent(LYS)
 
         expect(
-          recordStore.updateAgent(
-            {
-              code: "lys",
+          recordStore.updateAgent({
+            code: "lys",
+            changes: {
               name: "Lysiptera",
               bio: "Archivist.",
               systemPrompt: "You keep the archive."
             },
-            CHANGED_AT
-          )
+            updatedAt: CHANGED_AT
+          })
         ).toEqual({
           code: "lys",
           name: "Lysiptera",
@@ -140,7 +242,11 @@ export function registerAgentRecordStoreContractSuite(
         const { recordStore } = createHarness()
 
         expect(
-          recordStore.updateAgent({ code: "lys", name: "Lys" }, CHANGED_AT)
+          recordStore.updateAgent({
+            code: "lys",
+            changes: { name: "Lys" },
+            updatedAt: CHANGED_AT
+          })
         ).toBeUndefined()
 
         expect(recordStore.findAgent("lys")).toBeUndefined()
@@ -151,7 +257,11 @@ export function registerAgentRecordStoreContractSuite(
         recordStore.createAgent(LYS)
         recordStore.createAgent(RESEARCHER)
 
-        recordStore.updateAgent({ code: "lys", name: "Lysiptera" }, CHANGED_AT)
+        recordStore.updateAgent({
+          code: "lys",
+          changes: { name: "Lysiptera" },
+          updatedAt: CHANGED_AT
+        })
 
         expect(recordStore.findAgent("web-researcher")).toEqual(RESEARCHER)
       })
@@ -188,7 +298,14 @@ export function registerAgentRecordStoreContractSuite(
         "Database is closed"
       )
       expect(() =>
-        recordStore.updateAgent({ code: "lys", name: "Lys" }, CHANGED_AT)
+        recordStore.updateAgent({
+          code: "lys",
+          changes: { name: "Lys" },
+          updatedAt: CHANGED_AT
+        })
+      ).toThrow("Database is closed")
+      expect(() =>
+        recordStore.listAgents({ after: undefined, limit: 1 })
       ).toThrow("Database is closed")
       expect(() => recordStore.deleteAgent("lys")).toThrow("Database is closed")
     })

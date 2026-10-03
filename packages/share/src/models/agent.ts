@@ -1,13 +1,19 @@
 import * as z from "zod"
 
-/** Inclusive maximum length of an agent code, in UTF-16 code units. */
-const MAX_AGENT_CODE_LENGTH = 64
+/**
+ * Inclusive maximum length of an agent code, in UTF-16 code units.
+ *
+ * @remarks Enforced on every code the API accepts and on every stored code;
+ * the backend also cuts the codes it derives from agent names to this length.
+ * Lowering it can make stored agents unreadable.
+ */
+export const MAXIMUM_AGENT_CODE_LENGTH = 64
 
 /** Inclusive maximum length of a trimmed agent name, in UTF-16 code units. */
-const MAX_AGENT_NAME_LENGTH = 64
+const MAXIMUM_AGENT_NAME_LENGTH = 64
 
 /** Inclusive maximum length of a trimmed agent bio, in UTF-16 code units. */
-const MAX_AGENT_BIO_LENGTH = 128
+const MAXIMUM_AGENT_BIO_LENGTH = 128
 
 /**
  * Lowercase ASCII letters and digits in hyphen-separated groups, with no
@@ -22,10 +28,13 @@ const agentTimestampSchema = z.iso.datetime({ precision: 3 })
  * Validates an agent code, the agent's immutable identity: a lowercase slug
  * such as `lys` or `web-researcher`. Codes are compared exactly and never
  * trimmed or case-folded.
+ *
+ * @remarks Shared by stored agents, new agent definitions, and the path
+ * parameter of the agent endpoints.
  */
-const agentCodeSchema = z
+export const agentCodeSchema = z
   .string()
-  .max(MAX_AGENT_CODE_LENGTH)
+  .max(MAXIMUM_AGENT_CODE_LENGTH)
   .regex(AGENT_CODE_PATTERN)
 
 /**
@@ -46,14 +55,14 @@ const UNTRIMMED_AGENT_TEXT_MESSAGE =
 const storedAgentNameSchema = z
   .string()
   .min(1)
-  .max(MAX_AGENT_NAME_LENGTH)
+  .max(MAXIMUM_AGENT_NAME_LENGTH)
   .refine(isTrimmedText, UNTRIMMED_AGENT_TEXT_MESSAGE)
 
 /** Validates a stored short description: non-empty, trimmed, and bounded. */
 const storedAgentBioSchema = z
   .string()
   .min(1)
-  .max(MAX_AGENT_BIO_LENGTH)
+  .max(MAXIMUM_AGENT_BIO_LENGTH)
   .refine(isTrimmedText, UNTRIMMED_AGENT_TEXT_MESSAGE)
 
 /** Validates a stored system prompt: non-empty and trimmed, of any length. */
@@ -77,10 +86,13 @@ const agentSystemPromptSchema = z
 /**
  * Validates the definition of a new agent. The output has its name, bio, and
  * system prompt trimmed and is frozen; unknown fields are rejected.
+ *
+ * @remarks `code` is optional: a given code is kept exactly, and when it is
+ * omitted the backend derives one from the name.
  */
 export const agentDefinitionSchema = z
   .strictObject({
-    code: agentCodeSchema,
+    code: agentCodeSchema.optional(),
     name: agentNameSchema,
     bio: agentBioSchema,
     systemPrompt: agentSystemPromptSchema
@@ -92,6 +104,9 @@ export const agentDefinitionSchema = z
  * validates and trims it.
  */
 export type AgentDefinitionCandidate = z.input<typeof agentDefinitionSchema>
+
+/** Validated definition of a new agent, its text trimmed. */
+export type AgentDefinition = z.infer<typeof agentDefinitionSchema>
 
 /**
  * Validates a stored agent: its definition with the times it was created and
@@ -119,35 +134,34 @@ export const agentSchema = z
 export type Agent = z.infer<typeof agentSchema>
 
 /**
- * Validates a change to one stored agent. `code` selects the agent and is
- * never changed. Each other field present replaces the stored value, trimmed;
- * an omitted or undefined field keeps it. At least one field must be present.
- * The output is frozen; unknown fields are rejected.
+ * Validates a change to one stored agent. Each field present replaces the
+ * stored value, trimmed; an omitted or undefined field keeps it. At least one
+ * field must be present. The output is frozen; unknown fields are rejected,
+ * including `code`: a change never alters the agent's code.
  */
-export const agentUpdateSchema = z
+export const agentChangesSchema = z
   .strictObject({
-    code: agentCodeSchema,
     name: agentNameSchema.optional(),
     bio: agentBioSchema.optional(),
     systemPrompt: agentSystemPromptSchema.optional()
   })
   .refine(
-    (update) =>
-      update.name !== undefined ||
-      update.bio !== undefined ||
-      update.systemPrompt !== undefined,
-    { message: "An agent update must change at least one field." }
+    (changes) =>
+      changes.name !== undefined ||
+      changes.bio !== undefined ||
+      changes.systemPrompt !== undefined,
+    { message: "An agent change must change at least one field." }
   )
   .readonly()
 
 /**
- * Candidate change to one stored agent, before {@link agentUpdateSchema}
+ * Candidate change to one stored agent, before {@link agentChangesSchema}
  * validates and trims it.
  */
-export type AgentUpdateCandidate = z.input<typeof agentUpdateSchema>
+export type AgentChangesCandidate = z.input<typeof agentChangesSchema>
 
 /**
  * Validated change to one stored agent. Applying the same change again stores
  * the same values; only the time of the change moves.
  */
-export type AgentUpdate = z.infer<typeof agentUpdateSchema>
+export type AgentChanges = z.infer<typeof agentChangesSchema>

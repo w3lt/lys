@@ -14,3 +14,9 @@ export {
   type ChatReplyNotFoundProblem,
   type ChatReplyNotGeneratingProblem
 } from "./chat"
+export {
+  agentCodeTakenProblemSchema,
+  agentNotFoundProblemSchema,
+  type AgentCodeTakenProblem,
+  type AgentNotFoundProblem
+} from "./agent"

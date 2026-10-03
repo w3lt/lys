@@ -1,20 +1,276 @@
-//! Provided UTF-8 text-file reading helper with no current caller.
+//! The `read_text_file` tool, which reads one complete UTF-8 text file for Lys.
 
-use std::{fs, path::Path};
+use std::path::Path;
 
-/// Reads the complete UTF-8 contents of `file_path`.
+use serde::Serialize;
+
+use super::text_file::{read_regular_text_file, TextFileReadError};
+
+/// Inclusive maximum size in bytes of a file that `read_text_file` returns.
 ///
-/// This helper is currently unused and is not registered as a Tauri command.
-/// When called, it returns an owned `String` and does not modify the source
-/// file.
+/// A larger file is rejected with [`ReadTextFileError::FileTooLarge`] instead
+/// of being truncated, so returned content is always the complete file. The
+/// limit bounds the memory and IPC payload of one read. Callers cannot change
+/// it; the renderer learns it only from that error.
+const MAX_TEXT_FILE_SIZE_BYTES: u64 = 1024 * 1024;
+
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(
+    tag = "code",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+/// Expected failure of the `read_text_file` command.
+///
+/// The command rejects with a JSON object whose `code` is the camelCase
+/// variant name, such as `{ "code": "fileNotFound" }`, followed by the
+/// variant's fields in camelCase. No file content accompanies a failure.
+pub enum ReadTextFileError {
+    /// The path is not absolute. Relative paths are rejected instead of being
+    /// resolved against the desktop process's working directory.
+    PathNotAbsolute,
+    /// Nothing exists at the path.
+    FileNotFound,
+    /// The operating system denied access to the file or one of its parent
+    /// directories.
+    PermissionDenied,
+    /// The path names a directory, FIFO, socket, or device instead of a
+    /// regular file.
+    NotAFile,
+    /// The file is larger than the read limit, so none of it is returned.
+    FileTooLarge {
+        /// Smallest size in bytes the file was observed to have.
+        size_bytes: u64,
+        /// Inclusive read limit in bytes that the file exceeds.
+        max_size_bytes: u64,
+    },
+    /// The file's bytes are not valid UTF-8, so it cannot be returned as text.
+    NotUtf8Text,
+    /// Opening or reading the file failed for another reason, or the read task
+    /// stopped unexpectedly.
+    ReadFailed {
+        /// Description of the failure from the operating system or the async
+        /// runtime, for display only.
+        message: String,
+    },
+}
+
+#[tauri::command]
+/// Reads the complete UTF-8 text of the file at the absolute `path`.
+///
+/// The renderer invokes this command as `read_text_file` with the argument
+/// object `{ path }`. Any absolute path that the desktop process can read is
+/// accepted: deciding whether Lys may read a path belongs to the caller that
+/// runs tool requests. Symbolic links are followed and the file is never
+/// modified. The read runs on Tauri's blocking-task pool so the window stays
+/// responsive; it cannot be cancelled and is bounded by the 1 MiB read limit.
 ///
 /// # Errors
 ///
-/// Returns an error when the path cannot be read or its bytes are not valid
-/// UTF-8. The filesystem error is returned as a formatted string.
-pub fn read_text_file(file_path: &Path) -> Result<String, String> {
-    let content =
-        fs::read_to_string(file_path).map_err(|err| format!("Error reading file {err}"))?;
+/// Rejects with a [`ReadTextFileError`] when the path is relative, nothing
+/// exists there, access is denied, it is not a regular file, the file exceeds
+/// the read limit or is not UTF-8, or the read fails.
+pub async fn read_text_file(path: String) -> Result<String, ReadTextFileError> {
+    let read_task =
+        tauri::async_runtime::spawn_blocking(move || read_text_file_at(Path::new(&path)));
 
-    Ok(content)
+    match read_task.await {
+        Ok(read_result) => read_result,
+        Err(error) => Err(ReadTextFileError::ReadFailed {
+            message: format!("The file read stopped unexpectedly: {error}"),
+        }),
+    }
+}
+
+/// Reads the text file at `path` after confirming that the path is absolute.
+///
+/// # Errors
+///
+/// Returns the [`ReadTextFileError`] that describes why the file cannot be
+/// returned as text.
+fn read_text_file_at(path: &Path) -> Result<String, ReadTextFileError> {
+    if !path.is_absolute() {
+        return Err(ReadTextFileError::PathNotAbsolute);
+    }
+
+    read_regular_text_file(path, MAX_TEXT_FILE_SIZE_BYTES).map_err(build_read_text_file_error)
+}
+
+/// Builds the command failure that reports a failed text-file read.
+fn build_read_text_file_error(error: TextFileReadError) -> ReadTextFileError {
+    match error {
+        TextFileReadError::NotFound => ReadTextFileError::FileNotFound,
+        TextFileReadError::PermissionDenied => ReadTextFileError::PermissionDenied,
+        TextFileReadError::NotARegularFile => ReadTextFileError::NotAFile,
+        TextFileReadError::TooLarge { size_bytes } => ReadTextFileError::FileTooLarge {
+            size_bytes,
+            max_size_bytes: MAX_TEXT_FILE_SIZE_BYTES,
+        },
+        TextFileReadError::NotUtf8 { .. } => ReadTextFileError::NotUtf8Text,
+        TextFileReadError::Io(error) => ReadTextFileError::ReadFailed {
+            message: error.to_string(),
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{io, os::unix::fs::symlink, path::Path};
+
+    use serde_json::json;
+
+    use super::{
+        build_read_text_file_error, read_text_file, ReadTextFileError, MAX_TEXT_FILE_SIZE_BYTES,
+    };
+    use crate::tools::{test_directory::TestDirectory, text_file::TextFileReadError};
+
+    /// Runs the `read_text_file` command for `path` to completion.
+    fn run_read_text_file(path: &str) -> Result<String, ReadTextFileError> {
+        tauri::async_runtime::block_on(read_text_file(path.to_owned()))
+    }
+
+    /// Returns the UTF-8 form of a test path.
+    fn to_path_text(path: &Path) -> &str {
+        path.to_str().expect("a UTF-8 test path")
+    }
+
+    #[test]
+    fn returns_the_complete_text_of_a_utf8_file() {
+        let directory = TestDirectory::create("read-utf8");
+        let file = directory.write_file("notes.md", "Xin chào, Lys!\nSecond line\n");
+
+        assert_eq!(
+            run_read_text_file(to_path_text(&file)),
+            Ok(String::from("Xin chào, Lys!\nSecond line\n"))
+        );
+    }
+
+    #[test]
+    fn follows_a_symbolic_link_to_a_file() {
+        let directory = TestDirectory::create("read-symlink");
+        let file = directory.write_file("target.txt", "linked text");
+        let link = directory.path().join("link.txt");
+        symlink(&file, &link).expect("create the test symlink");
+
+        assert_eq!(
+            run_read_text_file(to_path_text(&link)),
+            Ok(String::from("linked text"))
+        );
+    }
+
+    #[test]
+    fn rejects_a_relative_path() {
+        assert_eq!(
+            run_read_text_file("notes.md"),
+            Err(ReadTextFileError::PathNotAbsolute)
+        );
+    }
+
+    #[test]
+    fn reports_a_missing_file() {
+        let directory = TestDirectory::create("read-missing");
+        let missing_file = directory.path().join("missing.txt");
+
+        assert_eq!(
+            run_read_text_file(to_path_text(&missing_file)),
+            Err(ReadTextFileError::FileNotFound)
+        );
+    }
+
+    #[test]
+    fn rejects_a_directory() {
+        let directory = TestDirectory::create("read-directory");
+
+        assert_eq!(
+            run_read_text_file(to_path_text(directory.path())),
+            Err(ReadTextFileError::NotAFile)
+        );
+    }
+
+    #[test]
+    fn rejects_a_fifo_without_waiting_for_a_writer() {
+        let directory = TestDirectory::create("read-fifo");
+        let fifo = directory.create_fifo("pipe");
+
+        assert_eq!(
+            run_read_text_file(to_path_text(&fifo)),
+            Err(ReadTextFileError::NotAFile)
+        );
+    }
+
+    #[test]
+    fn accepts_a_file_at_the_size_limit() {
+        let directory = TestDirectory::create("read-at-limit");
+        let content = "a".repeat(MAX_TEXT_FILE_SIZE_BYTES as usize);
+        let file = directory.write_file("at-limit.txt", &content);
+
+        assert_eq!(run_read_text_file(to_path_text(&file)), Ok(content));
+    }
+
+    #[test]
+    fn rejects_a_file_one_byte_over_the_size_limit() {
+        let directory = TestDirectory::create("read-over-limit");
+        let content = "a".repeat(MAX_TEXT_FILE_SIZE_BYTES as usize + 1);
+        let file = directory.write_file("over-limit.txt", content);
+
+        assert_eq!(
+            run_read_text_file(to_path_text(&file)),
+            Err(ReadTextFileError::FileTooLarge {
+                size_bytes: MAX_TEXT_FILE_SIZE_BYTES + 1,
+                max_size_bytes: MAX_TEXT_FILE_SIZE_BYTES,
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_content_that_is_not_utf8() {
+        let directory = TestDirectory::create("read-binary");
+        let file = directory.write_file("image.bin", [0xff, 0xfe, 0x00, 0x41]);
+
+        assert_eq!(
+            run_read_text_file(to_path_text(&file)),
+            Err(ReadTextFileError::NotUtf8Text)
+        );
+    }
+
+    #[test]
+    fn reports_denied_access_and_other_read_failures_separately() {
+        assert_eq!(
+            build_read_text_file_error(TextFileReadError::PermissionDenied),
+            ReadTextFileError::PermissionDenied
+        );
+        assert_eq!(
+            build_read_text_file_error(TextFileReadError::Io(io::Error::other("disk unavailable"))),
+            ReadTextFileError::ReadFailed {
+                message: String::from("disk unavailable")
+            }
+        );
+    }
+
+    #[test]
+    fn serializes_failures_with_a_camel_case_code() {
+        assert_eq!(
+            serde_json::to_value(ReadTextFileError::PathNotAbsolute).expect("serialize"),
+            json!({ "code": "pathNotAbsolute" })
+        );
+        assert_eq!(
+            serde_json::to_value(ReadTextFileError::FileTooLarge {
+                size_bytes: 2_000_000,
+                max_size_bytes: MAX_TEXT_FILE_SIZE_BYTES,
+            })
+            .expect("serialize"),
+            json!({
+                "code": "fileTooLarge",
+                "sizeBytes": 2_000_000,
+                "maxSizeBytes": MAX_TEXT_FILE_SIZE_BYTES
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(ReadTextFileError::ReadFailed {
+                message: String::from("disk unavailable"),
+            })
+            .expect("serialize"),
+            json!({ "code": "readFailed", "message": "disk unavailable" })
+        );
+    }
 }

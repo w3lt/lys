@@ -1,6 +1,6 @@
 ---
 title: Tauri host and lifecycle
-description: Window bootstrap, backend process ownership, and file-backed settings commands.
+description: Window bootstrap, backend process ownership, file-backed settings commands, and file tools.
 docType: architecture
 sidebar:
   order: 3
@@ -19,6 +19,37 @@ React UI.
 | `get_backend_status` | Reports whether the stored child process is still running.                                   |
 | `load_settings`      | Reads `$LYS_HOME/settings.json`, creating a default file if needed.                          |
 | `save_settings`      | Writes a new settings JSON document to `$LYS_HOME/settings.json`.                            |
+| `read_text_file`     | Returns the complete text of one UTF-8 file of at most 1 MiB.                                |
+| `find_files`         | Searches a directory tree for regular files by name or by text content.                      |
+
+## File tools
+
+`read_text_file` and `find_files` are the desktop side of the client tools that
+let Lys work with files on the user's machine. No part of the app invokes them
+yet. The renderer reaches them through `readTextFile` and `findFiles` in
+`apps/desktop/src/lib/apis/tauri/tools.ts`, which validate arguments, results,
+and declared failures with the schemas exported by `@lys/protocol`.
+
+Both commands accept any absolute path that the desktop process can read. They
+are tools, not a permission gateway: deciding whether Lys may use a tool or a
+path belongs to the caller that runs tool requests. Relative paths are rejected
+rather than resolved against the process's working directory. Each call runs on
+Tauri's blocking-task pool, so the window stays responsive, and cannot be
+cancelled.
+
+- `read_text_file` follows symbolic links and returns the whole file. It
+  rejects directories, FIFOs, sockets, and devices without blocking on them,
+  files over 1 MiB, and content that is not UTF-8. It never truncates.
+- `find_files` walks the tree breadth-first, lists each directory in byte order
+  of entry names, and never follows symbolic links below the root. It compares
+  file names, lines of UTF-8 files up to 1 MiB, or both, case-insensitively
+  after Unicode lowercasing. A search stops after the requested number of
+  matches (50 by default, at most 200), 20,000 examined entries, or 64 MiB of
+  read content, and its report says which of these ended it.
+
+Expected failures reject with a JSON object whose `code` names the failure,
+such as `{ "code": "fileNotFound" }`. Any other rejection, such as an
+unregistered command, is thrown by the TypeScript wrappers as an error.
 
 ## Lys home
 
@@ -102,7 +133,8 @@ estimates and does not configure LM Studio's load-time context.
 ## Coming soon
 
 - Credential management and secure secret storage
-- Richer native tooling beyond backend lifecycle and settings I/O
+- Richer native tooling beyond backend lifecycle, settings I/O, and the file
+  tools
 - Portable backend lifecycle support beyond the current Unix implementation
 
 ## Related pages

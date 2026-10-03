@@ -11,6 +11,6 @@ export function calculateConversationSearchMatch(
   query: SQLOutputValue
 ): number {
   if (typeof content !== "string" || typeof query !== "string") return 0
-  const literalQuery = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  const literalQuery = query.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`)
   return new RegExp(literalQuery, "iu").test(content) ? 1 : 0
 }

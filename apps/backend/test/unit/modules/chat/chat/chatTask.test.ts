@@ -2,7 +2,7 @@ import type { ChatGenerationEvent } from "@lys/protocol"
 import type { ChatCompletionChunk } from "openai/resources/index.mjs"
 import { describe, expect, it, vi } from "vitest"
 import type { CompleteChatOptions } from "../../../../../src/di/services/chatService"
-import type { AssistantMessageCompletion } from "../../../../../src/di/services/conversationService/share"
+import type { AssistantMessageCompletion } from "../../../../../src/modules/chat/chat/persistence"
 import createChatTask, {
   type CreateChatTaskOptions
 } from "../../../../../src/modules/chat/chat/chatTask"

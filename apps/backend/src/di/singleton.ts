@@ -4,9 +4,12 @@ import LmStudioRuntime from "../modules/llm/runtimes/lmStudioRuntime"
 import ChatService, {
   type ChatServiceCreationOptions
 } from "./services/chatService"
-import SqliteConversationHistoryEditor from "./services/conversationService/historyEditor"
-import SqliteConversationHistoryReader from "./services/conversationService/historyReader"
-import SqliteConversationTurns from "./services/conversationService/turns"
+import SqliteConversationRecordEditor from "../infrastructure/database/conversations/sqliteConversationRecordEditor"
+import SqliteConversationRecordReader from "../infrastructure/database/conversations/sqliteConversationRecordReader"
+import SqliteConversationTurnRecordWriter from "../infrastructure/database/conversations/sqliteConversationTurnRecordWriter"
+import StoredConversationHistoryEditor from "./services/conversationService/historyEditor"
+import StoredConversationHistoryReader from "./services/conversationService/historyReader"
+import StoredConversationTurns from "./services/conversationService/turns"
 import LlmRuntimeService, {
   type LlmRuntimeFailureReporters
 } from "./services/llmRuntimeService"
@@ -62,11 +65,11 @@ export type SingletonServices = Readonly<{
   /** LLM runtime connection and model-operation queue owned by the application. */
   llmRuntimeService: LlmRuntimeService
   /** Turn persistence over the shared database; it owns nothing to release. */
-  conversationTurns: SqliteConversationTurns
+  conversationTurns: StoredConversationTurns
   /** History reading over the shared database; it owns nothing to release. */
-  conversationHistoryReader: SqliteConversationHistoryReader
+  conversationHistoryReader: StoredConversationHistoryReader
   /** History editing over the shared database; it owns nothing to release. */
-  conversationHistoryEditor: SqliteConversationHistoryEditor
+  conversationHistoryEditor: StoredConversationHistoryEditor
   /** Module-private cleanup capability for the complete owned service lifetime. */
   [CLOSE_SINGLETON_SERVICES]: CloseSingletonServices
 }>
@@ -89,9 +92,10 @@ export type SingletonServices = Readonly<{
  * @throws {AggregateError} If closing the acquired resources also fails; its
  * errors hold the construction failure followed by the cleanup failure.
  * @remarks Resources are acquired in the order chat service, database, LLM
- * runtime service. The conversation adapters are created over the database
- * before the runtime service, turn persistence first, so its startup recovery
- * runs before any history is read; creation stops at the first failure. The
+ * runtime service. The conversation services and the Sqlite records they wrap
+ * are created over the database before the runtime service, turn persistence
+ * first, so its startup recovery runs before any history is read; creation
+ * stops at the first failure. The
  * database is not part of the returned bundle: the bundle's cleanup closes it
  * after the LLM runtime service and before the chat service.
  */
@@ -115,11 +119,14 @@ export async function createSingletonServices(
     )
     serviceLifetime.defer(databaseAcquisition.closeService)
     const database = databaseAcquisition.service
-    const conversationTurns = SqliteConversationTurns.create(database)
-    const conversationHistoryReader =
-      SqliteConversationHistoryReader.create(database)
-    const conversationHistoryEditor = new SqliteConversationHistoryEditor(
-      database
+    const conversationTurns = StoredConversationTurns.create(
+      new SqliteConversationTurnRecordWriter(database)
+    )
+    const conversationHistoryReader = new StoredConversationHistoryReader(
+      SqliteConversationRecordReader.create(database)
+    )
+    const conversationHistoryEditor = new StoredConversationHistoryEditor(
+      new SqliteConversationRecordEditor(database)
     )
 
     const llmRuntimeServiceAcquisition = factories.createLlmRuntimeService(

@@ -1,14 +1,10 @@
-import type { SQLOutputValue } from "node:sqlite"
 import * as z from "zod"
-import {
-  listConversationsApi,
-  type ListConversationsApiResponse
-} from "@lys/protocol"
-import {
-  createConversationListCursor,
-  type ConversationListOptions
-} from "./utils"
-import type { DatabaseStatementCompiler } from "../../../infrastructure/database/databaseTransactions"
+import { listConversationsApi } from "@lys/protocol"
+import type {
+  ConversationListBoundary,
+  ConversationPage
+} from "../../../di/services/conversationService/records"
+import type { DatabaseStatementCompiler } from "../databaseTransactions"
 
 /** Shared SQL predicate for counts and pages; values are always bound parameters. */
 const matchingConversationSql = `($query = '' OR contains_search(c.title, $query)
@@ -22,32 +18,21 @@ const conversationCountsSchema = z.strictObject({
 })
 
 /**
- * Implements literal, locale-independent Unicode case-insensitive matching for SQLite.
- * @param content - Stored text; a null title never matches.
- * @param query - Normalized search text bound by the caller.
- * @returns SQLite integer truth value using JavaScript Unicode simple case folding.
- */
-export function calculateConversationSearchMatch(
-  content: SQLOutputValue,
-  query: SQLOutputValue
-): number {
-  if (typeof content !== "string" || typeof query !== "string") return 0
-  const literalQuery = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-  return new RegExp(literalQuery, "iu").test(content) ? 1 : 0
-}
-
-/**
  * Reads a bounded summary page and both counts from one SQLite snapshot.
  * @param statements - Statement compilation lent to the caller's read transaction.
- * @param options - Validated query, cursor binding, and page size.
- * @returns The strict history page with full preview text and an opaque continuation.
+ * @param query - Normalized search text; empty matches every conversation.
+ * @param after - Last row of the previous page, or undefined for the first page.
+ * @param limit - Inclusive page size, at least one.
+ * @returns The validated page with full preview text, and whether more rows match.
  * @throws If SQLite or stored-record validation fails.
+ * @remarks Requires the `contains_search` function on the connection.
  */
 export function listConversations(
   statements: DatabaseStatementCompiler,
-  options: ConversationListOptions
-): ListConversationsApiResponse {
-  const { query, cursor, limit } = options
+  query: string,
+  after: ConversationListBoundary | undefined,
+  limit: number
+): ConversationPage {
   const counts = conversationCountsSchema.parse(
     statements
       .getStatement(
@@ -72,23 +57,22 @@ export function listConversations(
     )
     .all({
       query,
-      updatedAt: cursor?.updatedAt ?? null,
-      id: cursor?.id ?? null,
+      updatedAt: after?.updatedAt ?? null,
+      id: after?.id ?? null,
       limit: limit + 1
     })
-  const conversations = rows.slice(0, limit).map(buildConversationSummary)
   const page = listConversationsApi.response.parse({
-    conversations,
+    conversations: rows.slice(0, limit).map(buildConversationSummary),
     storedCount: counts.storedCount,
     matchCount: counts.matchCount,
     nextCursor: null
   })
-  const lastConversation = page.conversations.at(-1)
-  const nextCursor =
-    rows.length > limit && lastConversation !== undefined
-      ? createConversationListCursor(query, lastConversation)
-      : null
-  return { ...page, nextCursor }
+  return {
+    conversations: page.conversations,
+    storedCount: page.storedCount,
+    matchCount: page.matchCount,
+    hasMore: rows.length > limit
+  }
 }
 
 /**

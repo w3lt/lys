@@ -1,21 +1,10 @@
-import { mkdtempSync, rmSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
-import { DatabaseSync } from "node:sqlite"
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  onTestFinished,
-  vi
-} from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import * as z from "zod"
-import SqliteConversationHistoryReader from "../../../../../src/di/services/conversationService/historyReader"
-import SqliteConversationTurns from "../../../../../src/di/services/conversationService/turns"
-import { parseConversationListOptions } from "../../../../../src/di/services/conversationService/utils"
+import StoredConversationTurns from "../../../../../src/di/services/conversationService/turns"
+import SqliteConversationRecordReader from "../../../../../src/infrastructure/database/conversations/sqliteConversationRecordReader"
+import SqliteConversationTurnRecordWriter from "../../../../../src/infrastructure/database/conversations/sqliteConversationTurnRecordWriter"
 import SqliteDatabase from "../../../../../src/infrastructure/database/sqliteDatabase"
+import { parseConversationListOptions } from "../../../../../src/modules/conversation/listOptions"
 import { ConversationNotFoundError } from "../../../../../src/utils/errors"
 import {
   openConversationTestServices,
@@ -68,7 +57,31 @@ function saveConversationWithReply(
   })
 }
 
-describe("SqliteConversationTurns", () => {
+/**
+ * Creates the turn service over Sqlite records, running its startup recovery.
+ *
+ * @param database - Migrated test database.
+ * @returns The ready turn service.
+ */
+function createTurns(database: SqliteDatabase): StoredConversationTurns {
+  return StoredConversationTurns.create(
+    new SqliteConversationTurnRecordWriter(database)
+  )
+}
+
+/**
+ * Reads a stored conversation in its own snapshot.
+ *
+ * @param database - Migrated test database.
+ * @returns The conversation stored under {@link CONVERSATION_ID}.
+ */
+function findStoredConversation(database: SqliteDatabase) {
+  return SqliteConversationRecordReader.create(database).findConversation(
+    CONVERSATION_ID
+  )
+}
+
+describe("StoredConversationTurns", () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["Date"] })
     vi.setSystemTime(new Date(NOW))
@@ -83,13 +96,9 @@ describe("SqliteConversationTurns", () => {
       const database = openTestDatabase()
       saveConversationWithReply(database, { status: "streaming" })
 
-      SqliteConversationTurns.create(database)
+      createTurns(database)
 
-      expect(
-        SqliteConversationHistoryReader.create(database).getConversation(
-          CONVERSATION_ID
-        )
-      ).toMatchObject({
+      expect(findStoredConversation(database)).toMatchObject({
         updatedAt: "2025-01-01T00:00:02.000Z",
         messages: [
           { content: "Hello" },
@@ -111,13 +120,9 @@ describe("SqliteConversationTurns", () => {
       const database = openTestDatabase()
       saveConversationWithReply(database, reply)
 
-      SqliteConversationTurns.create(database)
+      createTurns(database)
 
-      expect(
-        SqliteConversationHistoryReader.create(database).getConversation(
-          CONVERSATION_ID
-        )?.messages[1]
-      ).toMatchObject({
+      expect(findStoredConversation(database)?.messages[1]).toMatchObject({
         status: reply.status,
         updatedAt: "2025-01-01T00:00:02.000Z"
       })
@@ -127,9 +132,7 @@ describe("SqliteConversationTurns", () => {
       const database = SqliteDatabase.open(":memory:")
       database[Symbol.dispose]()
 
-      expect(() => SqliteConversationTurns.create(database)).toThrow(
-        "Database is closed"
-      )
+      expect(() => createTurns(database)).toThrow("Database is closed")
     })
   })
 
@@ -212,35 +215,11 @@ describe("SqliteConversationTurns", () => {
 
       expect(
         history.getConversation(turn.conversation.id)?.messages[1]
-      ).toMatchObject({ content: "Hi there", status: "streaming" })
-    })
-
-    it("commits each delta before returning, visible to another connection", () => {
-      const directory = mkdtempSync(join(tmpdir(), "lys-turns-test-"))
-      onTestFinished(() => {
-        rmSync(directory, { recursive: true, force: true })
+      ).toMatchObject({
+        content: "Hi there",
+        status: "streaming",
+        updatedAt: NOW
       })
-      const databaseFilePath = join(directory, "lys_db.sqlite")
-      const { turns } = openConversationTestServices(databaseFilePath)
-      const turn = turns.createConversationTurn({
-        userMessageContent: "Hello",
-        model: "qwen/qwen3-8b",
-        systemPrompt: "You are Lys."
-      })
-      const observer = new DatabaseSync(databaseFilePath)
-      onTestFinished(() => {
-        observer.close()
-      })
-      const getStoredContent = () =>
-        observer
-          .prepare("SELECT content FROM conversation_messages WHERE id = ?")
-          .get(turn.assistantMessage.id)
-
-      turns.updateAssistantMessageContent(turn.assistantMessage.id, "Hel")
-      expect(getStoredContent()).toEqual({ content: "Hel" })
-
-      turns.updateAssistantMessageContent(turn.assistantMessage.id, "lo")
-      expect(getStoredContent()).toEqual({ content: "Hello" })
     })
 
     it("returns false for a reply that is already finalized and keeps its text", () => {
@@ -311,7 +290,11 @@ describe("SqliteConversationTurns", () => {
 
       expect(
         history.getConversation(turn.conversation.id)?.messages[1]
-      ).toMatchObject({ status: "completed", finishReason: "length" })
+      ).toMatchObject({
+        status: "completed",
+        finishReason: "length",
+        updatedAt: NOW
+      })
     })
 
     it.each(["interrupted", "failed"] as const)(

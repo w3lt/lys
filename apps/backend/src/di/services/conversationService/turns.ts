@@ -1,70 +1,57 @@
-import type { DatabaseWriter } from "../../../infrastructure/database/databaseTransactions"
-import type {
-  ConversationTurnWriter,
-  GeneratedConversationTitleWriter
-} from "../../../modules/chat/chat/persistence"
 import type {
   AssistantMessageCompletion,
   ConversationTurn,
-  CreateConversationTurnOptions
-} from "./share"
+  ConversationTurnWriter,
+  CreateConversationTurnOptions,
+  GeneratedConversationTitleWriter
+} from "../../../modules/chat/chat/persistence"
 import { createConversationTurn } from "./createTurn"
-
-/** Appends one delta to an assistant reply only while it is still streaming. */
-const UPDATE_ASSISTANT_MESSAGE_CONTENT_SQL = `UPDATE conversation_messages SET content = content || ?, updated_at = ?
-      WHERE id = ? AND role = 'assistant' AND status = 'streaming'`
+import type { ConversationTurnRecordWriter } from "./records"
 
 /**
- * Borrows the shared database's write transactions to persist atomic turns and
- * their generation lifecycle.
+ * Retains borrowed turn records to persist atomic turns, their generation
+ * lifecycle, and generated titles under the turn policy.
  *
  * @remarks Invariant: once created, no reply left by an earlier process is
- * still marked streaming. Owns no resource: the database's owner closes the
- * connection, after which every operation fails with `Database is closed`.
- * Each call is one write transaction that commits before it returns. Deleted
- * rows and terminal replies reject late writes through false return values.
+ * still marked streaming. Owns no resource: the records' owner closes the
+ * store, after which every operation fails with `Database is closed`. Each
+ * call is one write transaction that commits before it returns. Deleted rows
+ * and terminal replies reject late writes through false or undefined results.
  * Concurrency model: single-owner, synchronous on the backend's event loop.
  */
-export default class SqliteConversationTurns
+export default class StoredConversationTurns
   implements ConversationTurnWriter, GeneratedConversationTitleWriter
 {
-  /** Borrowed write transactions for every turn change. */
-  readonly #databaseWriter: DatabaseWriter
+  /** Borrowed records for every turn change. */
+  readonly #turnRecordWriter: ConversationTurnRecordWriter
 
   /**
-   * Retains borrowed write access prepared by
-   * {@link SqliteConversationTurns.create}.
-   * @param databaseWriter - Write transactions lent by the database owner.
+   * Retains borrowed records prepared by {@link StoredConversationTurns.create}.
+   * @param turnRecordWriter - Turn records lent by the composition root.
    */
-  private constructor(databaseWriter: DatabaseWriter) {
-    this.#databaseWriter = databaseWriter
+  private constructor(turnRecordWriter: ConversationTurnRecordWriter) {
+    this.#turnRecordWriter = turnRecordWriter
   }
 
   /**
    * Settles the replies an earlier process left streaming and publishes turn
    * access.
-   * @param databaseWriter - Write transactions lent by the database owner.
+   * @param turnRecordWriter - Turn records lent by the composition root.
    * @returns The ready turn access; it owns nothing to release.
-   * @throws If the database is closed or the recovery write fails; a failed
+   * @throws If the store is closed or the recovery write fails; a failed
    * recovery changes nothing.
-   * @remarks In one write transaction, marks every reply still streaming as
-   * interrupted with a fresh message timestamp, without changing its
-   * conversation's activity time or history order. Create one instance per
-   * process, before any reply streams: a later creation would also interrupt
-   * the replies streaming at that moment.
+   * @remarks Marks every reply still streaming as interrupted at the current
+   * time, without changing its conversation's activity time or history order.
+   * Create one instance per process, before any reply streams: a later
+   * creation would also interrupt the replies streaming at that moment.
    */
   public static create(
-    databaseWriter: DatabaseWriter
-  ): SqliteConversationTurns {
-    databaseWriter.handleDatabaseWriteRequest((statements) =>
-      statements
-        .getStatement(
-          `UPDATE conversation_messages SET status = 'interrupted', updated_at = ?
-      WHERE role = 'assistant' AND status = 'streaming'`
-        )
-        .run(new Date().toISOString())
+    turnRecordWriter: ConversationTurnRecordWriter
+  ): StoredConversationTurns {
+    turnRecordWriter.updateAllStreamingAssistantMessagesToInterrupted(
+      new Date().toISOString()
     )
-    return new SqliteConversationTurns(databaseWriter)
+    return new StoredConversationTurns(turnRecordWriter)
   }
 
   /**
@@ -78,8 +65,9 @@ export default class SqliteConversationTurns
   public createConversationTurn(
     options: CreateConversationTurnOptions
   ): ConversationTurn {
-    return this.#databaseWriter.handleDatabaseWriteRequest((statements) =>
-      createConversationTurn(statements, options, options.systemPrompt)
+    return this.#turnRecordWriter.handleConversationTurnWriteRequest(
+      (transaction) =>
+        createConversationTurn(transaction, options, options.systemPrompt)
     )
   }
 
@@ -88,10 +76,10 @@ export default class SqliteConversationTurns
    * @param assistantMessageId - UUIDv7 of the streaming reply.
    * @param content - Nonempty delta received from the model.
    * @returns True if appended; false if the reply was deleted or already finalized.
-   * @throws If content is empty (before any database work), the database is
-   * closed, or SQLite fails.
-   * @remarks Runs in one write transaction, which commits before this method
-   * returns.
+   * @throws If content is empty (before any storage work), the store is
+   * closed, or the write fails.
+   * @remarks Stores the current time as the reply's update time, in one write
+   * transaction that commits before this method returns.
    */
   public updateAssistantMessageContent(
     assistantMessageId: string,
@@ -99,12 +87,10 @@ export default class SqliteConversationTurns
   ): boolean {
     if (content.length === 0)
       throw new Error("Assistant delta must not be empty")
-    return this.#databaseWriter.handleDatabaseWriteRequest(
-      (statements) =>
-        statements
-          .getStatement(UPDATE_ASSISTANT_MESSAGE_CONTENT_SQL)
-          .run(content, new Date().toISOString(), assistantMessageId)
-          .changes === 1
+    return this.#turnRecordWriter.updateAssistantMessageContent(
+      assistantMessageId,
+      content,
+      new Date().toISOString()
     )
   }
 
@@ -113,27 +99,17 @@ export default class SqliteConversationTurns
    * @param assistantMessageId - UUIDv7 of the streaming reply.
    * @param completion - Valid coupled status and completion reason.
    * @returns True if finalized; false when the message is no longer streaming or stored.
-   * @throws If the database is closed or SQLite rejects the transition.
+   * @throws If the store is closed or the write fails.
+   * @remarks Stores the current time as the reply's update time.
    */
   public updateAssistantMessageState(
     assistantMessageId: string,
     completion: AssistantMessageCompletion
   ): boolean {
-    const finishReason =
-      completion.status === "completed" ? completion.finishReason : null
-    return this.#databaseWriter.handleDatabaseWriteRequest(
-      (statements) =>
-        statements
-          .getStatement(
-            `UPDATE conversation_messages SET status = ?, finish_reason = ?, updated_at = ?
-      WHERE id = ? AND role = 'assistant' AND status = 'streaming'`
-          )
-          .run(
-            completion.status,
-            finishReason,
-            new Date().toISOString(),
-            assistantMessageId
-          ).changes === 1
+    return this.#turnRecordWriter.updateAssistantMessageState(
+      assistantMessageId,
+      completion,
+      new Date().toISOString()
     )
   }
 
@@ -142,8 +118,8 @@ export default class SqliteConversationTurns
    * @param conversationId - UUIDv7 of the generation's conversation.
    * @param title - Generated text, trimmed and rejected if empty.
    * @returns The persisted title, or undefined after a rename, competing generation, or deletion.
-   * @throws If title is empty (before any database work), the database is
-   * closed, or SQLite fails.
+   * @throws If title is empty (before any storage work), the store is
+   * closed, or the write fails.
    */
   public updateGeneratedConversationTitle(
     conversationId: string,
@@ -152,14 +128,11 @@ export default class SqliteConversationTurns
     const normalizedTitle = title.trim()
     if (normalizedTitle.length === 0)
       throw new Error("Generated title must not be empty")
-    const changes = this.#databaseWriter.handleDatabaseWriteRequest(
-      (statements) =>
-        statements
-          .getStatement(
-            "UPDATE conversations SET title = ? WHERE id = ? AND title IS NULL"
-          )
-          .run(normalizedTitle, conversationId).changes
+    return this.#turnRecordWriter.updateUntitledConversationTitle(
+      conversationId,
+      normalizedTitle
     )
-    return changes === 1 ? normalizedTitle : undefined
+      ? normalizedTitle
+      : undefined
   }
 }

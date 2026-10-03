@@ -10,7 +10,7 @@ import type {
   CompleteChatOptions,
   TitleGenerationOptions
 } from "../../../di/services/chatService"
-import type { ConversationTurn } from "../../../di/services/conversationService/share"
+import type { ConversationTurn } from "./persistence"
 import { ConversationNotFoundError } from "../../../utils/errors"
 import { createConversationNotFoundProblem } from "../../conversation/notFound"
 import createChatTask, { type CreateChatTaskOptions } from "./chatTask"

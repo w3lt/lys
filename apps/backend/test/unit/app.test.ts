@@ -5,9 +5,9 @@ import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
 import * as z from "zod"
 import { buildApp } from "../../src/app"
 import type { BackendConfig } from "../../src/config"
-import SqliteConversationHistoryEditor from "../../src/di/services/conversationService/historyEditor"
-import SqliteConversationHistoryReader from "../../src/di/services/conversationService/historyReader"
-import SqliteConversationTurns from "../../src/di/services/conversationService/turns"
+import StoredConversationHistoryEditor from "../../src/di/services/conversationService/historyEditor"
+import StoredConversationHistoryReader from "../../src/di/services/conversationService/historyReader"
+import StoredConversationTurns from "../../src/di/services/conversationService/turns"
 import { TEST_BACKEND_CONFIG } from "./support/backendConfig"
 import {
   fakeLmStudio,
@@ -67,12 +67,12 @@ describe("buildApp", () => {
       url: "/api/v1/conversations"
     })
 
-    expect(app.conversationTurns).toBeInstanceOf(SqliteConversationTurns)
+    expect(app.conversationTurns).toBeInstanceOf(StoredConversationTurns)
     expect(app.conversationHistoryReader).toBeInstanceOf(
-      SqliteConversationHistoryReader
+      StoredConversationHistoryReader
     )
     expect(app.conversationHistoryEditor).toBeInstanceOf(
-      SqliteConversationHistoryEditor
+      StoredConversationHistoryEditor
     )
     expect(response.statusCode).toBe(200)
     expect(response.json()).toMatchObject({ storedCount: 0 })

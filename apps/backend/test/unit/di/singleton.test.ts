@@ -4,9 +4,9 @@ import { join } from "node:path"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { backendConfigSchema } from "../../../src/config"
 import ChatService from "../../../src/di/services/chatService"
-import SqliteConversationHistoryEditor from "../../../src/di/services/conversationService/historyEditor"
-import SqliteConversationHistoryReader from "../../../src/di/services/conversationService/historyReader"
-import SqliteConversationTurns from "../../../src/di/services/conversationService/turns"
+import StoredConversationHistoryEditor from "../../../src/di/services/conversationService/historyEditor"
+import StoredConversationHistoryReader from "../../../src/di/services/conversationService/historyReader"
+import StoredConversationTurns from "../../../src/di/services/conversationService/turns"
 import LlmRuntimeService, {
   type LlmRuntimeFailureReporters
 } from "../../../src/di/services/llmRuntimeService"
@@ -145,12 +145,12 @@ describe("createSingletonServices", () => {
 
     expect(Object.isFrozen(services)).toBe(true)
     expect(services.chatService).toBe(acquisitions.chat.service)
-    expect(services.conversationTurns).toBeInstanceOf(SqliteConversationTurns)
+    expect(services.conversationTurns).toBeInstanceOf(StoredConversationTurns)
     expect(services.conversationHistoryReader).toBeInstanceOf(
-      SqliteConversationHistoryReader
+      StoredConversationHistoryReader
     )
     expect(services.conversationHistoryEditor).toBeInstanceOf(
-      SqliteConversationHistoryEditor
+      StoredConversationHistoryEditor
     )
     expect(services.llmRuntimeService).toBe(acquisitions.llmRuntime.service)
     expect(services.llmService).toBeInstanceOf(LlmService)

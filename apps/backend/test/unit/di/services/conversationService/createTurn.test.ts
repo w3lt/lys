@@ -1,17 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import * as z from "zod"
 import { createConversationTurn } from "../../../../../src/di/services/conversationService/createTurn"
-import { getConversation } from "../../../../../src/di/services/conversationService/readConversation"
-import type { CreateConversationTurnOptions } from "../../../../../src/di/services/conversationService/share"
-import type SqliteDatabase from "../../../../../src/infrastructure/database/sqliteDatabase"
+import type { CreateConversationTurnOptions } from "../../../../../src/modules/chat/chat/persistence"
 import { ConversationNotFoundError } from "../../../../../src/utils/errors"
-import {
-  saveAssistantMessageRow,
-  saveConversationRow,
-  saveUserMessageRow,
-  openConversationTestDatabase
-} from "../../../support/conversationDatabase"
+import { openSqliteConversationRecords } from "../../../support/conversationDatabase"
 import { createFixtureUuidV7 } from "../../../support/conversationFixtures"
+import type { ConversationRecordsHarness } from "../../../support/conversationRecordsContract"
 
 /** Wall-clock time observed by every case. */
 const NOW = "2026-03-04T05:06:07.890Z"
@@ -20,58 +14,42 @@ const NOW = "2026-03-04T05:06:07.890Z"
 const EXISTING_CONVERSATION_ID = createFixtureUuidV7(1)
 
 /**
- * Creates a turn inside a write operation, as the turn writer does.
+ * Creates a turn inside a turn write, as the turn service does.
  *
- * @param database - Migrated test database.
+ * @param records - Records under test.
  * @param options - Turn selection and content.
  * @param systemPrompt - Prompt for a conversation the turn creates.
  * @returns The created turn after the transaction commits.
  */
 function createCommittedTurn(
-  database: SqliteDatabase,
+  records: ConversationRecordsHarness,
   options: CreateConversationTurnOptions,
   systemPrompt: string
 ) {
-  return database.handleDatabaseWriteRequest((statements) =>
-    createConversationTurn(statements, options, systemPrompt)
-  )
-}
-
-/**
- * Reads a conversation inside a read snapshot, as the history reader does.
- *
- * @param database - Migrated test database.
- * @param conversationId - Conversation to read.
- * @returns The stored conversation, or undefined when absent.
- */
-function getStoredConversation(
-  database: SqliteDatabase,
-  conversationId: string
-) {
-  return database.handleDatabaseReadRequest((statements) =>
-    getConversation(statements, conversationId)
+  return records.turnRecordWriter.handleConversationTurnWriteRequest(
+    (transaction) => createConversationTurn(transaction, options, systemPrompt)
   )
 }
 
 /**
  * Stores a titled conversation with one completed exchange before {@link NOW}.
  *
- * @param database - Migrated test database.
+ * @param records - Records under test.
  */
-function saveExistingConversation(database: SqliteDatabase): void {
-  saveConversationRow(database, {
+function saveExistingConversation(records: ConversationRecordsHarness): void {
+  records.saveConversation({
     id: EXISTING_CONVERSATION_ID,
     title: "Trip plan",
     systemPrompt: "Stored prompt",
     createdAt: "2026-01-01T00:00:00.000Z"
   })
-  saveUserMessageRow(database, {
+  records.saveUserMessage({
     id: createFixtureUuidV7(10),
     conversationId: EXISTING_CONVERSATION_ID,
     content: "Earlier question",
     createdAt: "2026-01-01T00:00:01.000Z"
   })
-  saveAssistantMessageRow(database, {
+  records.saveAssistantMessage({
     id: createFixtureUuidV7(11),
     conversationId: EXISTING_CONVERSATION_ID,
     model: "qwen/qwen3-8b",
@@ -94,10 +72,10 @@ describe("createConversationTurn", () => {
   })
 
   it("creates an untitled conversation with the prompt argument and an empty snapshot", () => {
-    const database = openConversationTestDatabase()
+    const records = openSqliteConversationRecords()
 
     const turn = createCommittedTurn(
-      database,
+      records,
       {
         userMessageContent: "Hello",
         model: "qwen/qwen3-8b",
@@ -119,10 +97,10 @@ describe("createConversationTurn", () => {
   })
 
   it("appends a user message and an empty streaming reply", () => {
-    const database = openConversationTestDatabase()
+    const records = openSqliteConversationRecords()
 
     const turn = createCommittedTurn(
-      database,
+      records,
       {
         userMessageContent: "Hello",
         model: "qwen/qwen3-8b",
@@ -148,16 +126,16 @@ describe("createConversationTurn", () => {
       updatedAt: NOW
     })
     expect(
-      getStoredConversation(database, turn.conversation.id)?.messages
+      records.recordReader.findConversation(turn.conversation.id)?.messages
     ).toEqual([turn.userMessage, turn.assistantMessage])
   })
 
   it("continues an existing conversation with its stored prompt and prior transcript", () => {
-    const database = openConversationTestDatabase()
-    saveExistingConversation(database)
+    const records = openSqliteConversationRecords()
+    saveExistingConversation(records)
 
     const turn = createCommittedTurn(
-      database,
+      records,
       {
         conversationId: EXISTING_CONVERSATION_ID,
         userMessageContent: "Next question",
@@ -178,16 +156,16 @@ describe("createConversationTurn", () => {
       "Earlier answer"
     ])
     expect(
-      getStoredConversation(database, EXISTING_CONVERSATION_ID)?.messages.map(
-        ({ content }) => content
-      )
+      records.recordReader
+        .findConversation(EXISTING_CONVERSATION_ID)
+        ?.messages.map(({ content }) => content)
     ).toEqual(["Earlier question", "Earlier answer", "Next question", ""])
   })
 
   it("interrupts a reply still streaming in the continued conversation and keeps its text", () => {
-    const database = openConversationTestDatabase()
-    saveExistingConversation(database)
-    saveAssistantMessageRow(database, {
+    const records = openSqliteConversationRecords()
+    saveExistingConversation(records)
+    records.saveAssistantMessage({
       id: createFixtureUuidV7(12),
       conversationId: EXISTING_CONVERSATION_ID,
       model: "qwen/qwen3-8b",
@@ -199,7 +177,7 @@ describe("createConversationTurn", () => {
     })
 
     const turn = createCommittedTurn(
-      database,
+      records,
       {
         conversationId: EXISTING_CONVERSATION_ID,
         userMessageContent: "Next question",
@@ -219,16 +197,16 @@ describe("createConversationTurn", () => {
   })
 
   it("does not interrupt a streaming reply in another conversation", () => {
-    const database = openConversationTestDatabase()
-    saveExistingConversation(database)
+    const records = openSqliteConversationRecords()
+    saveExistingConversation(records)
     const otherConversationId = createFixtureUuidV7(2)
-    saveConversationRow(database, {
+    records.saveConversation({
       id: otherConversationId,
       title: null,
       systemPrompt: "Other prompt",
       createdAt: "2026-01-01T00:00:00.000Z"
     })
-    saveAssistantMessageRow(database, {
+    records.saveAssistantMessage({
       id: createFixtureUuidV7(20),
       conversationId: otherConversationId,
       model: "qwen/qwen3-8b",
@@ -240,7 +218,7 @@ describe("createConversationTurn", () => {
     })
 
     createCommittedTurn(
-      database,
+      records,
       {
         conversationId: EXISTING_CONVERSATION_ID,
         userMessageContent: "Next question",
@@ -251,55 +229,56 @@ describe("createConversationTurn", () => {
     )
 
     expect(
-      getStoredConversation(database, otherConversationId)?.messages[0]
+      records.recordReader.findConversation(otherConversationId)?.messages[0]
     ).toMatchObject({ status: "streaming", content: "Other partial" })
   })
 
-  it("rejects an absent conversation without appending messages", () => {
-    const database = openConversationTestDatabase()
+  it("rejects an absent conversation before appending messages", () => {
+    const records = openSqliteConversationRecords()
 
-    const messageCount = database.handleDatabaseWriteRequest((statements) => {
-      expect(() =>
-        createConversationTurn(
-          statements,
-          {
-            conversationId: EXISTING_CONVERSATION_ID,
-            userMessageContent: "Hello",
-            model: "qwen/qwen3-8b",
-            systemPrompt: "You are Lys."
-          },
-          "You are Lys."
-        )
-      ).toThrow(ConversationNotFoundError)
-      return statements
-        .getStatement("SELECT count(*) AS count FROM conversation_messages")
-        .get()
-    })
+    expect(() =>
+      createCommittedTurn(
+        records,
+        {
+          conversationId: EXISTING_CONVERSATION_ID,
+          userMessageContent: "Hello",
+          model: "qwen/qwen3-8b",
+          systemPrompt: "You are Lys."
+        },
+        "You are Lys."
+      )
+    ).toThrow(ConversationNotFoundError)
 
-    expect(messageCount).toEqual({ count: 0 })
+    expect(
+      records.recordReader.listConversations("", undefined, 30).storedCount
+    ).toBe(0)
   })
 
   it.each([
     ["empty user content", { userMessageContent: "", model: "qwen/qwen3-8b" }],
     ["an empty model", { userMessageContent: "Hello", model: "" }]
   ])("rejects %s before appending messages", (_label, values) => {
-    const database = openConversationTestDatabase()
-    saveExistingConversation(database)
+    const records = openSqliteConversationRecords()
+    saveExistingConversation(records)
 
-    const messages = database.handleDatabaseWriteRequest((statements) => {
-      expect(() =>
-        createConversationTurn(
-          statements,
-          {
-            conversationId: EXISTING_CONVERSATION_ID,
-            systemPrompt: "Ignored prompt",
-            ...values
-          },
-          "Ignored prompt"
-        )
-      ).toThrow(z.ZodError)
-      return getConversation(statements, EXISTING_CONVERSATION_ID)?.messages
-    })
+    const messages =
+      records.turnRecordWriter.handleConversationTurnWriteRequest(
+        (transaction) => {
+          expect(() =>
+            createConversationTurn(
+              transaction,
+              {
+                conversationId: EXISTING_CONVERSATION_ID,
+                systemPrompt: "Ignored prompt",
+                ...values
+              },
+              "Ignored prompt"
+            )
+          ).toThrow(z.ZodError)
+          return transaction.findConversation(EXISTING_CONVERSATION_ID)
+            ?.messages
+        }
+      )
 
     expect(messages).toHaveLength(2)
   })

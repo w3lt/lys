@@ -5,23 +5,27 @@ import {
   conversationAssistantMessageSchema,
   type Conversation
 } from "@lys/share"
-import { getConversation } from "./readConversation"
-import type { ConversationTurn, CreateConversationTurnOptions } from "./share"
+import type {
+  ConversationTurn,
+  CreateConversationTurnOptions
+} from "../../../modules/chat/chat/persistence"
 import { ConversationNotFoundError } from "../../../utils/errors"
-import type { DatabaseStatementCompiler } from "../../../infrastructure/database/databaseTransactions"
+import type { ConversationTurnTransaction } from "./records"
 
 /**
- * Creates metadata for a new empty conversation using the supplied system instruction.
- * @param statements - Statement compilation lent to the turn's write transaction.
+ * Creates a new empty, untitled conversation using the supplied system
+ * instruction.
+ * @param transaction - Records lent to the turn's write transaction.
  * @param systemPrompt - Default prompt loaded by the turn creator.
- * @returns The newly inserted independent conversation snapshot.
- * @throws If validation or insertion fails.
+ * @param now - Creation time, also its initial activity time.
+ * @returns The newly stored independent conversation snapshot.
+ * @throws If validation or storage fails.
  */
 function createConversation(
-  statements: DatabaseStatementCompiler,
-  systemPrompt: string
+  transaction: ConversationTurnTransaction,
+  systemPrompt: string,
+  now: string
 ): Conversation {
-  const now = new Date().toISOString()
   const metadata = conversationMetadataSchema.parse({
     id: uuidv7(),
     title: null,
@@ -29,62 +33,57 @@ function createConversation(
     createdAt: now,
     updatedAt: now
   })
-  statements
-    .getStatement(
-      `INSERT INTO conversations (id, title, system_prompt, created_at, updated_at)
-    VALUES (?, NULL, ?, ?, ?)`
-    )
-    .run(metadata.id, metadata.systemPrompt, now, now)
+  transaction.createConversation(metadata)
   return { ...metadata, messages: [] }
 }
 
 /**
- * Interrupts replies still streaming in a conversation that a new turn supersedes.
- * @param statements - Statement compilation lent to the turn's write transaction.
- * @param conversationId - Conversation receiving the turn; a missing one changes nothing.
+ * Selects the conversation a turn continues, after interrupting the reply it
+ * supersedes.
+ * @param transaction - Records lent to the turn's write transaction.
+ * @param conversationId - Conversation receiving the turn.
+ * @param now - Time stored on each interrupted reply.
+ * @returns The conversation snapshot, including the interruption.
+ * @throws ConversationNotFoundError if the conversation is not stored.
  * @remarks A stopped request can finalize its reply after the client has already
  * sent the next turn. Interrupting it here keeps its partial text in the new
  * turn's context, and the streaming-only write guards then reject every later
  * write from the superseded generation.
  */
-function updateSupersededAssistantMessages(
-  statements: DatabaseStatementCompiler,
-  conversationId: string
-): void {
-  const updatedAt = new Date().toISOString()
-  statements
-    .getStatement(
-      `UPDATE conversation_messages SET status = 'interrupted', updated_at = ?
-    WHERE conversation_id = ? AND role = 'assistant' AND status = 'streaming'`
-    )
-    .run(updatedAt, conversationId)
+function findContinuedConversation(
+  transaction: ConversationTurnTransaction,
+  conversationId: string,
+  now: string
+): Conversation {
+  transaction.updateStreamingAssistantMessagesToInterrupted(conversationId, now)
+  const conversation = transaction.findConversation(conversationId)
+  if (!conversation) throw new ConversationNotFoundError()
+  return conversation
 }
 
 /**
- * Inserts a validated user/assistant pair inside the caller-owned transaction.
- * @param statements - Statement compilation lent to the caller's write transaction.
+ * Stores a validated user/assistant pair inside the caller-owned transaction.
+ * @param transaction - Records lent to the caller's write transaction.
  * @param options - Conversation selection and authored content. Its
  * `systemPrompt` is not read; the `systemPrompt` argument is the prompt stored.
  * @param systemPrompt - Instruction persisted only with a conversation this turn
  * creates; an existing conversation keeps its stored prompt.
- * @returns The conversation snapshot and both committed-to-transaction messages.
- * @throws If the conversation is missing, validation fails, or SQLite rejects a write.
- * @remarks A reply still streaming in an existing conversation becomes
+ * @returns The conversation snapshot and both messages written to the transaction.
+ * @throws If the conversation is missing, validation fails, or storage rejects a write.
+ * @remarks Every value the turn stores carries one timestamp, read when the
+ * turn starts. A reply still streaming in an existing conversation becomes
  * interrupted before the snapshot is read, so the new turn supersedes it.
  */
 export function createConversationTurn(
-  statements: DatabaseStatementCompiler,
+  transaction: ConversationTurnTransaction,
   options: CreateConversationTurnOptions,
   systemPrompt: string
 ): ConversationTurn {
-  if (options.conversationId !== undefined)
-    updateSupersededAssistantMessages(statements, options.conversationId)
+  const now = new Date().toISOString()
   const conversation =
     options.conversationId === undefined
-      ? createConversation(statements, systemPrompt)
-      : getConversation(statements, options.conversationId)
-  if (!conversation) throw new ConversationNotFoundError()
-  const now = new Date().toISOString()
+      ? createConversation(transaction, systemPrompt, now)
+      : findContinuedConversation(transaction, options.conversationId, now)
   const userMessage = conversationUserMessageSchema.parse({
     id: uuidv7(),
     role: "user",
@@ -101,19 +100,8 @@ export function createConversationTurn(
     createdAt: now,
     updatedAt: now
   })
-  statements
-    .getStatement(
-      `INSERT INTO conversation_messages (id, conversation_id, role, content, created_at)
-    VALUES (?, ?, 'user', ?, ?)`
-    )
-    .run(userMessage.id, conversation.id, userMessage.content, now)
-  statements
-    .getStatement(
-      `INSERT INTO conversation_messages
-    (id, conversation_id, role, model, content, status, finish_reason, created_at, updated_at)
-    VALUES (?, ?, 'assistant', ?, '', 'streaming', NULL, ?, ?)`
-    )
-    .run(assistantMessage.id, conversation.id, assistantMessage.model, now, now)
+  transaction.createUserMessage(conversation.id, userMessage)
+  transaction.createAssistantMessage(conversation.id, assistantMessage)
   return {
     conversation,
     userMessage,

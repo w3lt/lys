@@ -15,7 +15,7 @@ import type {
   ConversationTitleEditor,
   ConversationDeleter
 } from "./capabilities"
-import { parseConversationListOptions } from "../../di/services/conversationService/utils"
+import { parseConversationListOptions } from "./listOptions"
 import { createConversationNotFoundProblem } from "./notFound"
 
 /**

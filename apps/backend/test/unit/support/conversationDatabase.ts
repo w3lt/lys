@@ -1,10 +1,13 @@
 import { onTestFinished } from "vitest"
-import SqliteConversationHistoryEditor from "../../../src/di/services/conversationService/historyEditor"
-import SqliteConversationHistoryReader from "../../../src/di/services/conversationService/historyReader"
-import { calculateConversationSearchMatch } from "../../../src/di/services/conversationService/listConversations"
-import SqliteConversationTurns from "../../../src/di/services/conversationService/turns"
+import StoredConversationHistoryEditor from "../../../src/di/services/conversationService/historyEditor"
+import StoredConversationHistoryReader from "../../../src/di/services/conversationService/historyReader"
+import StoredConversationTurns from "../../../src/di/services/conversationService/turns"
+import SqliteConversationRecordEditor from "../../../src/infrastructure/database/conversations/sqliteConversationRecordEditor"
+import SqliteConversationRecordReader from "../../../src/infrastructure/database/conversations/sqliteConversationRecordReader"
+import SqliteConversationTurnRecordWriter from "../../../src/infrastructure/database/conversations/sqliteConversationTurnRecordWriter"
 import type { DatabaseWriter } from "../../../src/infrastructure/database/databaseTransactions"
 import SqliteDatabase from "../../../src/infrastructure/database/sqliteDatabase"
+import type { ConversationRecordsHarness } from "./conversationRecordsContract"
 
 /** Stored conversation columns written by {@link saveConversationRow}. */
 export type ConversationRowFixture = Readonly<{
@@ -70,49 +73,72 @@ export function openTestDatabase(
 }
 
 /**
- * Opens an in-memory backend database for conversation queries, owned by the
- * current test.
+ * Creates the Sqlite conversation records over their own backend database,
+ * owned by the current test.
  *
- * @returns A database with foreign keys enforced and the `contains_search`
- * function registered, as the history reader provides to its queries. It is
- * closed when the test finishes.
+ * @param databaseFilePath - SQLite location; an isolated in-memory database
+ * when omitted.
+ * @returns The records, row-level seeding of the same database, and its close.
+ * The turn records are created directly, so no startup recovery runs.
  */
-export function openConversationTestDatabase(): SqliteDatabase {
-  const database = openTestDatabase()
-  database.registerDatabaseFunction(
-    "contains_search",
-    calculateConversationSearchMatch
-  )
-  return database
+export function openSqliteConversationRecords(
+  databaseFilePath = ":memory:"
+): ConversationRecordsHarness & Readonly<{ database: SqliteDatabase }> {
+  const database = openTestDatabase(databaseFilePath)
+  return {
+    database,
+    recordReader: SqliteConversationRecordReader.create(database),
+    recordEditor: new SqliteConversationRecordEditor(database),
+    turnRecordWriter: new SqliteConversationTurnRecordWriter(database),
+    saveConversation: (row) => {
+      saveConversationRow(database, row)
+    },
+    saveUserMessage: (row) => {
+      saveUserMessageRow(database, row)
+    },
+    saveAssistantMessage: (row) => {
+      saveAssistantMessageRow(database, row)
+    },
+    closeRecords: () => {
+      database[Symbol.dispose]()
+    }
+  }
 }
 
-/** The conversation adapters over one test-owned database. */
+/** The conversation services over one test-owned database. */
 export type ConversationTestServices = Readonly<{
   /** Database closed when the test finishes; a case may close it earlier. */
   database: SqliteDatabase
   /** Ready turn persistence over {@link ConversationTestServices.database}. */
-  turns: SqliteConversationTurns
-  /** Ready history reading over {@link ConversationTestServices.database}. */
-  history: SqliteConversationHistoryReader
+  turns: StoredConversationTurns
+  /** History reading over {@link ConversationTestServices.database}. */
+  history: StoredConversationHistoryReader
   /** History editing over {@link ConversationTestServices.database}. */
-  editor: SqliteConversationHistoryEditor
+  editor: StoredConversationHistoryEditor
 }>
 
 /**
- * Creates the conversation adapters over their own backend database, owned by
- * the current test, in the order the composition root creates them.
+ * Creates the conversation services over Sqlite records on their own backend
+ * database, owned by the current test, in the order the composition root
+ * creates them.
  *
  * @param databaseFilePath - SQLite location; an isolated in-memory database
  * when omitted.
- * @returns The ready adapters and the database they borrow.
+ * @returns The ready services and the database their records borrow.
  */
 export function openConversationTestServices(
   databaseFilePath: string = ":memory:"
 ): ConversationTestServices {
   const database = openTestDatabase(databaseFilePath)
-  const turns = SqliteConversationTurns.create(database)
-  const history = SqliteConversationHistoryReader.create(database)
-  const editor = new SqliteConversationHistoryEditor(database)
+  const turns = StoredConversationTurns.create(
+    new SqliteConversationTurnRecordWriter(database)
+  )
+  const history = new StoredConversationHistoryReader(
+    SqliteConversationRecordReader.create(database)
+  )
+  const editor = new StoredConversationHistoryEditor(
+    new SqliteConversationRecordEditor(database)
+  )
   return { database, turns, history, editor }
 }
 

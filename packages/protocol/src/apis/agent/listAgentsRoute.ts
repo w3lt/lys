@@ -84,10 +84,11 @@ const listAgentsApiResponseSchema = z
  * Describes the GET endpoint that lists stored agents, oldest first.
  *
  * @remarks The endpoint observes stored data and changes nothing. The shared
- * descriptor is imported by the backend registrar, and its response schema by
- * the backend's Sqlite agent records, which validate each page with it; no
- * client imports it yet. Changing its method, path, query, or response schema
- * changes the transmitted contract and requires coordinated consumers.
+ * descriptor is imported by the backend registrar and by the desktop agent
+ * adapter, and its response schema by the backend's Sqlite agent records,
+ * which validate each page with it. Changing its method, path, query, or
+ * response schema changes the transmitted contract and requires coordinated
+ * consumers.
  */
 export const listAgentsApi = Object.freeze({
   method: "GET",

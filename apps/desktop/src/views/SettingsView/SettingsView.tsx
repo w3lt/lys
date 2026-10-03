@@ -43,12 +43,22 @@ const ModelPaneContent = lazy(
 const GenerationPaneContent = lazy(
   () => import("@/components/SettingsViewComponents/GenerationPaneContent")
 )
+/**
+ * Lazily loads the agent settings body; the parent supplies the fallback.
+ *
+ * @remarks React owns module loading and
+ * suspension while the settings view owns pane selection and the fallback.
+ */
+const AgentPane = lazy(
+  () => import("@/components/SettingsViewComponents/AgentPaneContent")
+)
 
 /** A no-props settings body that may suspend while its module is imported. */
 type SettingsPaneContentComponent =
   | typeof RuntimePaneContent
   | typeof ModelPaneContent
   | typeof GenerationPaneContent
+  | typeof AgentPane
 
 /** Metadata and lazy body used to render one settings pane. */
 export type SettingsPaneDescriptor = {
@@ -94,6 +104,15 @@ const SETTINGS_PANES: readonly SettingsPaneDescriptor[] = [
     footNote:
       "Saved automatically for future messages, including after restarting Lys. Messages already sent are unchanged.",
     contentComponent: GenerationPaneContent
+  },
+  {
+    value: "agents",
+    label: "Agents",
+    ordinal: "04",
+    note: "Who she is before you say anything. A name, a line for you, and the system prompt the model is given.",
+    footNote:
+      "Saved by the backend in Lys's database. Conversations do not use agents yet; editing one changes no chat.",
+    contentComponent: AgentPane
   }
 ]
 
@@ -193,6 +212,8 @@ export type SettingsViewProps = {
  * Inventory, load, unload, and health requests belong to the application store.
  * Entering settings refreshes inventory; leaving the view does not cancel work.
  * Request errors and loaded-state health observations are rendered by the panes.
+ * Agents are managed through the agent store, which the Agents pane reads
+ * directly rather than through `SettingsContext`.
  *
  * Each pane body is a stable lazy component behind a `Suspense` fallback; a
  * pending body renders a separate busy frame, so its heading and Done action

@@ -14,6 +14,8 @@ vi.mock("../../src/utils/prompts", () => ({ readPrompt: vi.fn() }))
 /** Trimmed, non-empty prompt text the substituted reader returns per prompt. */
 const FIXTURE_PROMPTS = Object.freeze({
   "lys-system": "Fixture system prompt",
+  "lys-dark-side": "Fixture dark-side prompt",
+  "lys-light-side": "Fixture light-side prompt",
   "title-generation": "Fixture title prompt"
 } satisfies Record<PromptType, string>)
 
@@ -28,6 +30,10 @@ const VALID_RAW_CONFIG = Object.freeze({
   lmstudioPort: LMSTUDIO_PORT,
   databaseFilePath: "/test-home/lys/lys_db.sqlite",
   lysSystemPrompt: "Fixture system prompt",
+  lysPersonalityPrompts: {
+    dark: "Fixture dark-side prompt",
+    light: "Fixture light-side prompt"
+  },
   titleGenerationPrompt: "Fixture title prompt",
   titleGenerationMaxAttempts: 3,
   generatedTitleMaxLength: 100
@@ -102,7 +108,7 @@ describe("loadBackendConfig", () => {
     vi.mocked(readPrompt).mockImplementation((type) => FIXTURE_PROMPTS[type])
   })
 
-  it("resolves the shared endpoints, the Lys home database path, both prompts, and the fixed title limits", () => {
+  it("resolves the shared endpoints, the Lys home database path, every prompt, and the fixed title limits", () => {
     expect(loadBackendConfig()).toEqual({
       backendHost: BACKEND_HOST,
       backendPort: BACKEND_PORT,
@@ -110,14 +116,21 @@ describe("loadBackendConfig", () => {
       lmstudioPort: LMSTUDIO_PORT,
       databaseFilePath: "/test-home/lys/lys_db.sqlite",
       lysSystemPrompt: "Fixture system prompt",
+      lysPersonalityPrompts: {
+        dark: "Fixture dark-side prompt",
+        light: "Fixture light-side prompt"
+      },
       titleGenerationPrompt: "Fixture title prompt",
       titleGenerationMaxAttempts: 3,
       generatedTitleMaxLength: 100
     })
   })
 
-  it("returns a frozen snapshot", () => {
-    expect(Object.isFrozen(loadBackendConfig())).toBe(true)
+  it("returns a frozen snapshot, including the side prompts", () => {
+    const config = loadBackendConfig()
+
+    expect(Object.isFrozen(config)).toBe(true)
+    expect(Object.isFrozen(config.lysPersonalityPrompts)).toBe(true)
   })
 
   it("propagates a prompt read failure", () => {
@@ -140,7 +153,11 @@ describe("loadBackendConfig", () => {
     )
 
     expect(listIssueKeys(listConfigLoadIssues())).toEqual(
-      new Set(["lysSystemPrompt", "titleGenerationPrompt"])
+      new Set([
+        "lysSystemPrompt",
+        "lysPersonalityPrompts",
+        "titleGenerationPrompt"
+      ])
     )
   })
 
@@ -270,6 +287,47 @@ describe("backendConfigSchema", () => {
       "an empty system prompt",
       { ...VALID_RAW_CONFIG, lysSystemPrompt: "" },
       "lysSystemPrompt"
+    ],
+    [
+      "a side prompt with trailing whitespace",
+      {
+        ...VALID_RAW_CONFIG,
+        lysPersonalityPrompts: {
+          dark: "Fixture dark-side prompt\n",
+          light: "Fixture light-side prompt"
+        }
+      },
+      "lysPersonalityPrompts"
+    ],
+    [
+      "an empty side prompt",
+      {
+        ...VALID_RAW_CONFIG,
+        lysPersonalityPrompts: {
+          dark: "Fixture dark-side prompt",
+          light: ""
+        }
+      },
+      "lysPersonalityPrompts"
+    ],
+    [
+      "side prompts without the light side",
+      {
+        ...VALID_RAW_CONFIG,
+        lysPersonalityPrompts: { dark: "Fixture dark-side prompt" }
+      },
+      "lysPersonalityPrompts"
+    ],
+    [
+      "a prompt for an unknown side",
+      {
+        ...VALID_RAW_CONFIG,
+        lysPersonalityPrompts: {
+          ...VALID_RAW_CONFIG.lysPersonalityPrompts,
+          dusk: "Fixture dusk prompt"
+        }
+      },
+      "lysPersonalityPrompts"
     ],
     [
       "a title prompt with trailing whitespace",

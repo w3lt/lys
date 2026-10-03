@@ -77,8 +77,12 @@ for every rule.
 
 ## Theme preference
 
-The desktop stores `dark` or `light` under the `lys.theme` key in WebView
-`localStorage`. Missing, invalid, or unavailable storage falls back to `dark`.
+The theme follows Lys's side: dark from 19:00 until 06:00 local time and light
+from 06:00 until 19:00. The title-bar toggle overrides it until the next side
+change, and the desktop stores that choice under the `lys.themeChoice` key in
+WebView `localStorage`. Missing, invalid, or unavailable storage leaves the theme to the
+side. The schedule itself has no setting; see
+[Desktop theme preference](/reference/configuration/#desktop-theme-preference).
 
 ## What is not configurable yet
 

@@ -66,16 +66,17 @@ not find a runtime that `build.sh` installed under another directory.
 
 ## Backend-composed values
 
-| Value                          | Current source                                                                        |
-| ------------------------------ | ------------------------------------------------------------------------------------- |
-| Backend listen address         | `BACKEND_HOST` and `BACKEND_PORT`                                                     |
-| LM Studio HTTP base URL        | `http://${LMSTUDIO_HOST}:${LMSTUDIO_PORT}/v1`                                         |
-| LM Studio WebSocket base URL   | `ws://${LMSTUDIO_HOST}:${LMSTUDIO_PORT}`                                              |
-| SQLite path                    | `$LYS_HOME/lys_db.sqlite`; see [Lys home directory](#lys-home-directory)              |
-| Lys system prompt              | `src/utils/prompts/lys.txt`, as `lysSystemPrompt`                                     |
-| Title-generation prompt        | `src/utils/prompts/title-generation.txt`, as `titleGenerationPrompt`                  |
-| Title-generation attempt limit | `3`, from `titleGenerationMaxAttempts` in `src/config.ts`; must be a positive integer |
-| Generated title length limit   | `100`, from `generatedTitleMaxLength` in `src/config.ts`; must be a positive integer  |
+| Value                          | Current source                                                                                               |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| Backend listen address         | `BACKEND_HOST` and `BACKEND_PORT`                                                                            |
+| LM Studio HTTP base URL        | `http://${LMSTUDIO_HOST}:${LMSTUDIO_PORT}/v1`                                                                |
+| LM Studio WebSocket base URL   | `ws://${LMSTUDIO_HOST}:${LMSTUDIO_PORT}`                                                                     |
+| SQLite path                    | `$LYS_HOME/lys_db.sqlite`; see [Lys home directory](#lys-home-directory)                                     |
+| Lys system prompt              | `src/utils/prompts/lys.txt`, as `lysSystemPrompt`                                                            |
+| Side tone prompts              | `src/utils/prompts/lys-dark-side.txt` and `lys-light-side.txt`, as `lysPersonalityPrompts.dark` and `.light` |
+| Title-generation prompt        | `src/utils/prompts/title-generation.txt`, as `titleGenerationPrompt`                                         |
+| Title-generation attempt limit | `3`, from `titleGenerationMaxAttempts` in `src/config.ts`; must be a positive integer                        |
+| Generated title length limit   | `100`, from `generatedTitleMaxLength` in `src/config.ts`; must be a positive integer                         |
 
 `loadBackendConfig()` builds these values once when the backend starts, so a
 changed `LYS_HOME`, prompt file, or limit takes effect after a restart. The
@@ -97,6 +98,7 @@ and no defaults are applied.
 | `lmstudioHost`                                          | A host name or IPv4 address, used unbracketed in the `http://` and `ws://` URLs               |
 | `databaseFilePath`                                      | An absolute path                                                                              |
 | `lysSystemPrompt`, `titleGenerationPrompt`              | Non-empty text without leading or trailing whitespace                                         |
+| `lysPersonalityPrompts`                                 | Exactly one such text for each side, `dark` and `light`                                       |
 | `titleGenerationMaxAttempts`, `generatedTitleMaxLength` | A positive integer                                                                            |
 
 A value outside these rules stops the backend at startup with a `ZodError`
@@ -157,9 +159,24 @@ generation save does not persist those unsaved groups.
 
 ## Desktop theme preference
 
-The active desktop theme is stored separately in WebView `localStorage` under
-`lys.theme`. Valid values are `dark` and `light`; the fallback is `dark` when
-the value is missing, invalid, or unavailable.
+The theme follows Lys's side: dark for Caliginia, light for Lysiptera. The
+title-bar toggle overrides it until the next side change. That choice is stored
+separately in WebView `localStorage` under `lys.themeChoice`, as JSON holding
+its schema version, the theme, and the side period it was chosen in:
+
+```json
+{
+  "schemaVersion": 1,
+  "theme": "light",
+  "personalityPeriod": { "personality": "dark", "startDate": "2026-10-02" }
+}
+```
+
+The stored theme applies only while that period is current. A missing,
+invalid, or unavailable value, or one with a schema version other than `1`,
+leaves the theme to the current side. Earlier versions stored a plain `dark` or
+`light` value under `lys.theme`; that key is no longer read or written. The side's schedule is
+fixed and has no setting; see [Tauri host](/architecture/host/#lyss-sides).
 
 ## Current caveats
 

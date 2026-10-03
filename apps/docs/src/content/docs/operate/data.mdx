@@ -73,8 +73,11 @@ whose version is newer than the binary understands.
 
 ## WebView theme storage
 
-The desktop theme is stored separately from the Lys home directory under the
-`lys.theme` WebView `localStorage` key. Its valid values are `dark` and `light`.
+The desktop theme choice is stored separately from the Lys home directory under
+the `lys.themeChoice` WebView `localStorage` key, as versioned JSON holding the
+toggled theme and the side period it was chosen in. Earlier versions used the
+`lys.theme` key, which is no longer read. See
+[Desktop theme preference](/reference/configuration/#desktop-theme-preference).
 
 ## What is not documented yet
 

@@ -4,6 +4,7 @@ import {
   type ChatApiStreamEvent,
   type MessageGenerationOptions
 } from "@lys/protocol"
+import type { LysPersonality } from "@lys/share"
 import type { FastifyBaseLogger, FastifyInstance } from "fastify"
 import type { BackendConfig } from "../../../config"
 import type {
@@ -34,7 +35,7 @@ import createTitleGenerationTask from "./titleGenerationTask"
 /** Backend settings the chat route applies to every request. */
 export type ChatRouteOptions = Pick<
   BackendConfig,
-  "lysSystemPrompt" | "titleGenerationMaxAttempts"
+  "lysSystemPrompt" | "lysPersonalityPrompts" | "titleGenerationMaxAttempts"
 >
 
 /** Settings and the generation registry the chat route is installed with. */
@@ -56,6 +57,8 @@ type ChatRouteDependencies = Readonly<{
   generateTitle: (options: TitleGenerationOptions) => Promise<string>
   /** Startup-loaded prompt persisted with a conversation this route creates. */
   lysSystemPrompt: string
+  /** Startup-loaded tone prompt of each side, sent but never persisted. */
+  lysPersonalityPrompts: BackendConfig["lysPersonalityPrompts"]
   /** Inclusive maximum number of title requests permitted for one turn. */
   titleGenerationMaxAttempts: number
   /** Registry that owns every generation this route starts. */
@@ -70,6 +73,8 @@ type TurnGenerationInput = Readonly<{
   model: string
   /** Sampling and reply length controls sent with the request. */
   generationOptions: MessageGenerationOptions
+  /** Side of Lys that the request selected to answer this turn. */
+  personality: LysPersonality
   /** Logger of the request that started the turn. */
   logger: FastifyBaseLogger
   /** Route capabilities borrowed for the route lifetime. */
@@ -81,14 +86,15 @@ type TurnGenerationInput = Readonly<{
  * follows that generation on the response stream.
  *
  * @param app - Backend with SSE, validation, and singleton services installed.
- * @param registration - System prompt, title attempt limit, and the registry
- * that owns the started generations.
+ * @param registration - System prompt, side tone prompts, title attempt
+ * limit, and the registry that owns the started generations.
  * @throws If route registration fails.
  */
 export default function updateFastifyWithChatRoute(
   app: FastifyInstance,
   {
     lysSystemPrompt,
+    lysPersonalityPrompts,
     titleGenerationMaxAttempts,
     generations
   }: ChatRouteRegistration
@@ -102,6 +108,7 @@ export default function updateFastifyWithChatRoute(
     generateTitle: (options: TitleGenerationOptions) =>
       app.chatService.generateTitle(options),
     lysSystemPrompt,
+    lysPersonalityPrompts,
     titleGenerationMaxAttempts,
     generations
   }
@@ -142,6 +149,7 @@ async function handleChatRequest(
     turn,
     model: request.body.model,
     generationOptions: request.body.generationOptions,
+    personality: request.body.personality,
     logger: request.log,
     dependencies
   })
@@ -258,7 +266,10 @@ async function createTurnReplyTask(
           assistantMessageId,
           content
         ),
-      messages: buildChatMessages(turn),
+      messages: buildChatMessages(
+        turn,
+        dependencies.lysPersonalityPrompts[input.personality]
+      ),
       model: input.model,
       generationOptions: input.generationOptions,
       abortSignal,

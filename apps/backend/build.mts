@@ -23,7 +23,12 @@ await build({
 })
 
 // Prompt paths resolve beside the output bundle after bundling.
-for (const filename of ["lys.txt", "title-generation.txt"]) {
+for (const filename of [
+  "lys.txt",
+  "lys-dark-side.txt",
+  "lys-light-side.txt",
+  "title-generation.txt"
+]) {
   await copyFile(
     new URL(`./src/utils/prompts/${filename}`, import.meta.url),
     new URL(`./dist/${filename}`, import.meta.url)

@@ -6,7 +6,10 @@ import type {
   ChatReplyPathParams,
   MessageGenerationOptions
 } from "@lys/protocol"
-import type { ConversationAssistantMessageStatus } from "@lys/share"
+import type {
+  ConversationAssistantMessageStatus,
+  LysPersonality
+} from "@lys/share"
 import { create, type StoreApi, type UseBoundStore } from "zustand"
 
 import {
@@ -98,7 +101,8 @@ export type StoredConversationReader = (
  *
  * @remarks The store owns request and open tokens and their abort controllers;
  * these dependencies provide only transport, stored-conversation reads, reply
- * stops, timestamps, model-selection, and generation-settings capabilities.
+ * stops, timestamps, model-selection, generation-settings, and Lys personality
+ * capabilities.
  * Aborting a store-owned signal ends only the store's observation; the
  * backend keeps generating. The store does not share lifecycle state with
  * another store instance, and does not own the settings it reads.
@@ -128,6 +132,15 @@ export type ChatViewStoreDependencies = {
    * owned by {@link ChatViewActions.sendMessage}.
    */
   readonly readGenerationOptions: () => MessageGenerationOptions
+  /**
+   * Reads the side of Lys that answers the next request from the desktop
+   * host.
+   *
+   * @returns Resolves to the side the host reports at call time. Sampling is
+   * owned by {@link ChatViewActions.sendMessage}.
+   * @throws The host or validation failure of the reading.
+   */
+  readonly getLysPersonality: () => Promise<LysPersonality>
 }
 
 /**
@@ -244,7 +257,9 @@ export type ChatViewActions = {
    * sending stops following its stream, which may still carry a title; the
    * backend keeps generating and saving that title.
    * The eligible model and generation controls are sampled once before request
-   * ownership begins; later edits affect only later requests.
+   * ownership begins; later edits affect only later requests. Lys's side is
+   * read from the desktop host after the request is admitted, before its
+   * stream opens; a failed reading fails the request with an inline error.
    */
   sendMessage: (explicitPrompt?: string) => Promise<void>
   /**
@@ -360,8 +375,13 @@ type StreamingChatReplyState = Extract<
   { status: "reply-streaming" }
 >
 
-/** Inputs sampled to create one immutable chat request payload. */
-type CreateChatRequestPayloadInput = {
+/**
+ * Request values sampled when a message is submitted.
+ *
+ * @remarks Lys's side is not part of them: it is read from the desktop host
+ * after the request is admitted, just before its chat stream opens.
+ */
+type SubmittedChatRequest = {
   /** Existing conversation identifier, when continuing a conversation. */
   readonly conversationId: string | undefined
   /** Trimmed prompt prepared for this turn. */
@@ -476,26 +496,31 @@ function createChatRequestResource(token: number): ChatRequestResource {
 /**
  * Creates the current chat payload with conversation absence represented by omission.
  *
- * @param input - Model, prompt, conversation, and generation values sampled for
- * this request.
+ * @param submittedRequest - Model, prompt, conversation, and generation values
+ * sampled when the message was submitted.
+ * @param personality - Side of Lys read for this request.
  * @returns The complete payload for a new or existing conversation.
  * @remarks The request contract is strict, so conversation absence is
  * represented by omitting the identifier rather than sending an empty one.
  */
-function createChatRequestPayload({
-  conversationId,
-  submittedPrompt,
-  model,
-  generationOptions
-}: CreateChatRequestPayloadInput): ChatApiRequestBody {
+function createChatRequestPayload(
+  {
+    conversationId,
+    submittedPrompt,
+    model,
+    generationOptions
+  }: SubmittedChatRequest,
+  personality: LysPersonality
+): ChatApiRequestBody {
   return conversationId !== undefined
     ? {
         conversationId,
         message: submittedPrompt,
         model,
-        generationOptions
+        generationOptions,
+        personality
       }
-    : { message: submittedPrompt, model, generationOptions }
+    : { message: submittedPrompt, model, generationOptions, personality }
 }
 
 /**
@@ -1080,6 +1105,30 @@ export function createChatViewStore(
     }
 
     /**
+     * Reads Lys's current side, then opens the chat stream of one admitted
+     * request.
+     *
+     * @param submittedRequest - Values sampled when the message was submitted.
+     * @param signal - Store-owned signal of the request; a request superseded
+     * while the side is read sends nothing to the backend.
+     * @returns An async generator yielding the request's validated chat
+     * events; it completes when the backend ends the stream.
+     * @throws The side reading's failure, the signal's abort reason when the
+     * request was superseded during the reading, or the stream's failure.
+     */
+    async function* streamSubmittedChatRequest(
+      submittedRequest: SubmittedChatRequest,
+      signal: AbortSignal
+    ): AsyncGenerator<ChatApiStreamEvent, void, unknown> {
+      const personality = await dependencies.getLysPersonality()
+      signal.throwIfAborted()
+      yield* dependencies.streamChat(
+        createChatRequestPayload(submittedRequest, personality),
+        { signal }
+      )
+    }
+
+    /**
      * Implements {@link ChatViewActions.sendMessage} for this store.
      *
      * @param explicitPrompt - Optional starter prompt supplied outside composer.
@@ -1108,12 +1157,12 @@ export function createChatViewStore(
       nextRequestToken += 1
       const request = createAwaitingTurnRequest(token, submittedComposerDraft)
       const resource = createChatRequestResource(token)
-      const payload = createChatRequestPayload({
+      const submittedRequest: SubmittedChatRequest = {
         conversationId: get().conversation?.id,
         submittedPrompt,
         model,
         generationOptions: dependencies.readGenerationOptions()
-      })
+      }
 
       const supersededRequest = activeRequestResource
       activeRequestResource = resource
@@ -1123,7 +1172,8 @@ export function createChatViewStore(
       })
       supersededRequest?.abortController.abort()
       await readChatStream(token, {
-        openEvents: (signal) => dependencies.streamChat(payload, { signal }),
+        openEvents: (signal) =>
+          streamSubmittedChatRequest(submittedRequest, signal),
         handleEvent: async (event) => {
           handleChatStreamEvent(event, token)
           await stopRequestedChatReply(token)
@@ -1510,6 +1560,23 @@ export function createChatViewStore(
 }
 
 /**
+ * Reads Lys's current side from the desktop host through the application
+ * store.
+ *
+ * @returns Resolves to the side of the period the host reports now. The store
+ * publishes that period when it changed, so the portraits and theme follow
+ * the side sent with the request.
+ * @throws The host or validation failure of the reading.
+ */
+async function getCurrentLysPersonality(): Promise<LysPersonality> {
+  const lysPersonalityPeriod = await useLysStore
+    .getState()
+    .updateLysPersonalityPeriod()
+
+  return lysPersonalityPeriod.personality
+}
+
+/**
  * Reads a stored conversation from the backend the application store names.
  *
  * @param conversationId - UUIDv7 of the conversation to open.
@@ -1533,9 +1600,11 @@ function getStoredConversation(
  * @remarks This singleton owns the live browser request and open lifecycles.
  * Tests or alternate compositions should call {@link createChatViewStore} to
  * obtain separate token and abort-resource owners. Application-store
- * dependencies supply the model and Generation controls to
- * {@link ChatViewActions.sendMessage}. The two generation controls are named
- * explicitly because the request contract rejects unknown fields. A saved zero
+ * dependencies supply the model, Generation controls, and Lys's side to
+ * {@link ChatViewActions.sendMessage}. The side is read from the desktop host
+ * through the application store, which also publishes it. The two generation
+ * controls are named explicitly because the request contract rejects unknown
+ * fields. A saved zero
  * ceiling is omitted so the backend receives no explicit completion-token limit.
  * The backend origin for following and stopping a reply is sampled when each
  * request starts.
@@ -1564,5 +1633,6 @@ export const useChatViewStore: UseBoundStore<StoreApi<ChatViewStore>> =
       return replyCeiling === 0
         ? { temperature }
         : { temperature, replyCeiling }
-    }
+    },
+    getLysPersonality: getCurrentLysPersonality
   })

@@ -40,7 +40,8 @@ Fastify backend -> SQLite
 | Past-conversations dialog                    | Desktop UI              | Held in the history Zustand store; listed conversations are read from the backend.            |
 | Backend process status                       | Desktop UI + Tauri host | The host owns the process; the UI queries status during initialization and lifecycle actions. |
 | Runtime settings JSON                        | Tauri host              | Stored in `$LYS_HOME/settings.json`.                                                          |
-| Theme preference                             | Desktop UI              | Stored as `lys.theme` in WebView `localStorage`.                                              |
+| Lys's side                                   | Tauri host + Desktop UI | The host computes it from local time; the UI reads it at startup and every minute.            |
+| Theme preference                             | Desktop UI              | Stored as `lys.themeChoice` in WebView `localStorage`.                                        |
 | Route and event schemas                      | `@lys/protocol`         | Used by both backend and desktop.                                                             |
 
 ## What this system is not

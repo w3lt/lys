@@ -44,6 +44,7 @@ export async function buildApp(options: BuildAppOptions) {
   await app.register(updateFastifyWithLlmRoutes)
   await app.register(registerChatRoutes, {
     lysSystemPrompt: config.lysSystemPrompt,
+    lysPersonalityPrompts: config.lysPersonalityPrompts,
     titleGenerationMaxAttempts: config.titleGenerationMaxAttempts
   })
   await app.register(updateFastifyWithConversationRoutes)

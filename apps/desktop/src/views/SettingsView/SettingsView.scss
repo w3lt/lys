@@ -665,6 +665,13 @@
   color: var(--app-text-faint);
 }
 
+/* Holds the pane's status line, empty while the agents show, above them. */
+.settings-view__agent-pane {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
 .settings-view__agent-status {
   display: flex;
   flex-direction: column;

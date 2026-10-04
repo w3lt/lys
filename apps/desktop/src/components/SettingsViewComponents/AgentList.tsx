@@ -1,6 +1,6 @@
 import type { AgentSummary } from "@lys/protocol"
 import { ChevronRight, Plus } from "lucide-react"
-import { useId, type ReactElement } from "react"
+import { useId, useLayoutEffect, useRef, type ReactElement } from "react"
 
 import { Button } from "@/components/ui/button"
 
@@ -33,11 +33,23 @@ function focusElementOnAttach(element: HTMLElement | null): void {
 }
 
 /**
+ * Reports whether keyboard focus has fallen back to the document.
+ *
+ * @returns Whether no element other than the body holds focus, as after the
+ * focused element was removed.
+ */
+function isDocumentFocusLost(): boolean {
+  const { activeElement } = document
+
+  return activeElement === null || activeElement === document.body
+}
+
+/**
  * Presents the section for agents that ship with Lys, marked as coming soon.
  *
- * @remarks Primary category: presentational. Built-in agents do not exist
- * yet, so the section holds only its heading and a note; it owns no state,
- * effects, or callbacks. The section is named by its heading.
+ * @remarks Built-in agents do not exist yet, so the section holds only its
+ * heading and a note; it owns no state, effects, or callbacks. The section is
+ * named by its heading.
  * @returns The built-in agents section.
  */
 export function BuiltInAgentSection(): ReactElement {
@@ -58,7 +70,7 @@ export function BuiltInAgentSection(): ReactElement {
 }
 
 /** Properties accepted by {@link AgentListItem}. */
-export type AgentListItemProps = {
+type AgentListItemProps = {
   /** Listed agent shown by the row. */
   readonly agent: AgentSummary
   /** Whether the agent was the one saved most recently. */
@@ -72,7 +84,7 @@ export type AgentListItemProps = {
 /**
  * Presents one stored agent as a button that opens its editor.
  *
- * @remarks Primary category: presentational. The list owner supplies the key
+ * @remarks The list owner supplies the key
  * and decides which row takes focus; the row owns no state or effects. The
  * button is named by the agent's name and code, which tells apart agents
  * sharing a name, and described by its bio and, when the agent was saved most
@@ -80,7 +92,7 @@ export type AgentListItemProps = {
  * @param props - Listed agent, its markers, and the parent-owned open action.
  * @returns One list item holding the row button.
  */
-export function AgentListItem({
+function AgentListItem({
   agent,
   isRecentlySaved,
   isFocusedOnAttach,
@@ -145,7 +157,7 @@ export type CustomAgentSectionProps = {
 /**
  * Presents the user's agents and the action that starts a new one.
  *
- * @remarks Primary category: presentational. The parent owns the agents, the
+ * @remarks The parent owns the agents, the
  * saved marker, the focus target, and both actions; the section owns no state
  * or effects. Agents keep the given order and are keyed by code. Without
  * agents the section says so instead of showing a list. The section is named
@@ -210,7 +222,10 @@ export function CustomAgentSection({
 
 /** Properties accepted by {@link AgentListStatus}. */
 export type AgentListStatusProps = {
-  /** Sentence explaining why the agents are not shown. */
+  /**
+   * Sentence explaining why the agents are not shown, or an empty string
+   * while they can be shown.
+   */
   readonly message: string
   /**
    * Requests that the parent read the agents again; omitted when reading
@@ -222,9 +237,15 @@ export type AgentListStatusProps = {
 /**
  * Explains why the agents are not shown, offering a retry when one can help.
  *
- * @remarks Primary category: presentational. The parent owns the message and
- * the retry; the component owns no state or effects. The message is a polite
- * status so it is announced without taking focus.
+ * @remarks The parent owns the message and the retry, and keeps the
+ * component mounted while the pane is shown, so the message is one polite
+ * status that exists before every change it announces; it is empty and takes
+ * no space while the agents can be shown. A message never takes focus from a
+ * control that still holds it. When a message appears after the focused
+ * control was removed, as when the backend stops or a refresh fails under the
+ * list or an editor, focus moves to Retry when offered, otherwise to the
+ * message. Pressing Retry moves focus to the message first, because Retry
+ * leaves while the agents are read.
  * @param props - Message and the optional parent-owned retry.
  * @returns The status line and any Retry button.
  */
@@ -232,14 +253,37 @@ export function AgentListStatus({
   message,
   onRetryAgents
 }: AgentListStatusProps): ReactElement {
+  const messageRef = useRef<HTMLParagraphElement>(null)
+  const retryButtonRef = useRef<HTMLButtonElement>(null)
+
+  useLayoutEffect(() => {
+    if (message === "" || !isDocumentFocusLost()) return
+
+    const focusSuccessor = retryButtonRef.current ?? messageRef.current
+    focusSuccessor?.focus()
+  }, [message])
+
+  /** Reads the agents again, keeping focus in the status while Retry leaves. */
+  function handleRetryAgents(): void {
+    messageRef.current?.focus()
+    onRetryAgents?.()
+  }
+
   return (
     <div className="settings-view__agent-status">
-      <p aria-live="polite" className="settings-view__note" role="status">
+      <p
+        aria-live="polite"
+        className={message === "" ? undefined : "settings-view__note"}
+        ref={messageRef}
+        role="status"
+        tabIndex={-1}
+      >
         {message}
       </p>
       {onRetryAgents === undefined ? null : (
         <Button
-          onClick={onRetryAgents}
+          onClick={handleRetryAgents}
+          ref={retryButtonRef}
           size="sm"
           type="button"
           variant="outline"

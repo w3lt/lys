@@ -5,7 +5,10 @@ import { Skeleton } from "@/components/ui/skeleton"
 
 /** Geometry and labels for one repeated skeleton row. */
 type SkeletonRow = {
-  /** Name of the setting the row stands in for, unique among its siblings. */
+  /**
+   * Name of the setting or listed entry, such as an agent, that the row stands
+   * in for, unique among its siblings.
+   */
   readonly id: string
   /** Width of the row's primary label placeholder. */
   readonly label: string
@@ -182,10 +185,11 @@ function stagger(index: number, stepMs: number) {
  * effects, resources, callbacks, or persistence. The `role="status"` and
  * visually hidden text provide one polite announcement, while decorative bars
  * are hidden from assistive technology. Pixel widths are CSS geometry strings;
- * stagger delays are milliseconds. The component is intended only as the
- * `Suspense` fallback and renders cards, rows, list lines, or a block according
- * to the selected pane's current shape; it does not claim that the controls
- * themselves are ready or available.
+ * stagger delays are milliseconds. The component is the `Suspense` fallback of
+ * every pane, and the Agents pane also shows it while its first list read is
+ * pending. It renders cards, rows, list lines, or a block according to the
+ * selected pane's current shape; it does not claim that the controls or
+ * entries themselves are ready or available.
  *
  * @param props - Pane identity whose placeholder shape should be rendered.
  * @returns The accessible skeleton stack for the pane.

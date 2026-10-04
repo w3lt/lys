@@ -6,8 +6,9 @@ import {
 } from "@lys/share"
 import { ChevronLeft } from "lucide-react"
 import {
-  useEffect,
+  useEffectEvent,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
   type FormEvent,
@@ -62,30 +63,40 @@ function focusElementOnAttach(element: HTMLElement | null): void {
 }
 
 /**
+ * Reports whether a change to the edited agent awaits the backend.
+ *
+ * @param activity - Change or confirmation in progress in the editor.
+ * @returns Whether a save or delete is pending.
+ */
+function isAgentActivityPending(activity: StoredAgentActivity): boolean {
+  return activity.status === "saving" || activity.status === "deleting"
+}
+
+/**
  * Builds the space-separated identifiers that describe a field.
  *
- * @param hintId - Identifier of the field's visible constraint.
+ * @param constraintIds - Identifiers of the field's visible constraints, in
+ * reading order.
  * @param problemId - Identifier of the problem message, or undefined when
  * the field is valid.
  * @returns The identifiers for `aria-describedby`.
  */
 function buildFieldDescriptionIds(
-  hintId: string,
+  constraintIds: readonly string[],
   problemId: string | undefined
 ): string {
-  return problemId === undefined ? hintId : `${hintId} ${problemId}`
+  const descriptionIds =
+    problemId === undefined ? constraintIds : [...constraintIds, problemId]
+
+  return descriptionIds.join(" ")
 }
 
 /** Properties accepted by {@link AgentEditorHeader}. */
-export type AgentEditorHeaderProps = {
-  /** Whether the editor writes a new agent or changes one of the user's. */
-  readonly agentKind: "new" | "yours"
-  /** Code of the agent; empty while a new agent has no code typed. */
-  readonly agentCode: string
+type AgentEditorHeaderProps = {
+  /** Editor whose draft is written, which names the agent being edited. */
+  readonly editor: DraftingAgentEditor
   /** Whether the draft holds changes that are not saved. */
   readonly isDraftChanged: boolean
-  /** Whether the editor may close; false while a change is pending. */
-  readonly isCloseEnabled: boolean
   /** Requests that the parent close the editor, discarding the draft. */
   readonly onCloseAgentEditor: () => void
 }
@@ -93,26 +104,28 @@ export type AgentEditorHeaderProps = {
 /**
  * Presents the editor's way back to the list and what is being edited.
  *
- * @remarks Primary category: presentational. The parent owns every value and
- * the close action; the header owns no state or effects. The back button is
- * named `agents list`. A new agent without a typed code shows that its code
- * is assigned on save; `unsaved` marks a changed draft in text.
- * @param props - Agent identity, draft state, and the close action.
+ * @remarks The parent owns the editor and the close action; the header owns
+ * no state or effects. The back button is named `agents list` and is
+ * disabled while a change is pending. A new agent is marked `new` and shows
+ * its typed code, or that its code is assigned on save; a stored agent is
+ * marked `yours` with its code. `unsaved` marks a changed draft in text.
+ * @param props - Editor, draft state, and the close action.
  * @returns The editor header.
  */
-export function AgentEditorHeader({
-  agentKind,
-  agentCode,
+function AgentEditorHeader({
+  editor,
   isDraftChanged,
-  isCloseEnabled,
   onCloseAgentEditor
 }: AgentEditorHeaderProps): ReactElement {
+  const isNew = editor.status === "creating"
+  const agentCode = isNew ? editor.code : editor.agent.code
+
   return (
     <div className="settings-view__agent-editor-top">
       <Button
         aria-label="agents list"
         className="settings-view__agent-back"
-        disabled={!isCloseEnabled}
+        disabled={isAgentActivityPending(editor.activity)}
         onClick={onCloseAgentEditor}
         size="sm"
         type="button"
@@ -125,7 +138,9 @@ export function AgentEditorHeader({
         {isDraftChanged ? (
           <span className="settings-view__agent-unsaved">unsaved</span>
         ) : null}
-        <span className="settings-view__agent-kind">{agentKind}</span>
+        <span className="settings-view__agent-kind">
+          {isNew ? "new" : "yours"}
+        </span>
         <span className="settings-view__agent-code">
           {agentCode === "" ? "code assigned on save" : agentCode}
         </span>
@@ -135,12 +150,15 @@ export function AgentEditorHeader({
 }
 
 /** Properties accepted by {@link AgentTextField}. */
-export type AgentTextFieldProps = {
+type AgentTextFieldProps = {
   /** Visible label naming the field. */
   readonly label: string
   /** Text as typed, owned by the parent. */
   readonly text: string
-  /** Inclusive maximum length in UTF-16 code units. */
+  /**
+   * Inclusive maximum length of the trimmed text in UTF-16 code units, the
+   * unit of the shared limits.
+   */
   readonly maximumLength: number
   /** Example shown while the field is empty. */
   readonly placeholder: string
@@ -158,17 +176,19 @@ export type AgentTextFieldProps = {
 }
 
 /**
- * Edits one line of agent text with its length shown against its limit.
+ * Edits one required line of agent text with its length shown against its
+ * limit.
  *
- * @remarks Primary category: presentational. The parent owns the text and
- * accepts or ignores each proposal; the field owns no state or effects. The
- * input is labeled by the visible label, limited to the maximum length, and
- * described by the length counter and, while invalid, by the problem
- * message.
+ * @remarks The parent owns the text and accepts or ignores each proposal;
+ * the field owns no state or effects. The input is labeled by the visible
+ * label, marked required visibly and programmatically, and described by the
+ * length counter and, while invalid, by the problem message. The counter
+ * measures the trimmed text, as it will be saved; the field accepts longer
+ * text, which saving then reports.
  * @param props - Label, text, limit, problem relationship, and change action.
  * @returns The labeled field.
  */
-export function AgentTextField({
+function AgentTextField({
   label,
   text,
   maximumLength,
@@ -184,16 +204,19 @@ export function AgentTextField({
   return (
     <div className="settings-view__agent-field">
       <div className="settings-view__agent-field-top">
-        <label htmlFor={inputId}>{label}</label>
+        <span className="settings-view__agent-field-label">
+          <label htmlFor={inputId}>{label}</label>
+          <span>required</span>
+        </span>
         <span id={counterId}>
-          {text.length} / {maximumLength}
+          {text.trim().length} / {maximumLength}
         </span>
       </div>
       <Input
-        aria-describedby={buildFieldDescriptionIds(counterId, problemId)}
+        aria-describedby={buildFieldDescriptionIds([counterId], problemId)}
         aria-invalid={problemId !== undefined}
+        aria-required
         id={inputId}
-        maxLength={maximumLength}
         onChange={(event) => onTextChange(event.currentTarget.value)}
         placeholder={placeholder}
         readOnly={isReadOnly}
@@ -206,11 +229,11 @@ export function AgentTextField({
 }
 
 /** Properties accepted by {@link AgentCodeField}. */
-export type AgentCodeFieldProps = {
+type AgentCodeFieldProps = {
   /** Code as kept from typing, owned by the parent. */
   readonly code: string
-  /** Whether the name can supply a code, which offers `use name`. */
-  readonly canUseName: boolean
+  /** Name as typed, whose code form `use name` offers. */
+  readonly name: string
   /**
    * Identifier of the message explaining the code's problem; omitted while
    * the code has none.
@@ -220,34 +243,39 @@ export type AgentCodeFieldProps = {
   readonly isReadOnly: boolean
   /** Receives the input host so the parent can move focus to it. */
   readonly fieldRef: RefObject<HTMLInputElement | null>
-  /** Receives the typed text on each edit; the parent keeps its code form. */
+  /**
+   * Receives the typed text on each edit, or the name's code form when
+   * `use name` is pressed; the parent keeps the code form of what it gets.
+   */
   readonly onCodeChange: (typedCode: string) => void
-  /** Requests that the parent fill the code from the agent's name. */
-  readonly onUseNameAsCode: () => void
 }
 
 /**
  * Edits the optional code of a new agent.
  *
- * @remarks Primary category: presentational. The parent owns the code and
- * how typed text becomes one; the field owns no state or effects. The input
- * is labeled `code` and described by its constraint — optional and fixed
- * once created — and, while invalid, by the problem message. `use name`
- * appears only while the code is empty and the name can supply one.
- * @param props - Code, its availability from the name, and the actions.
+ * @remarks The parent owns the code and how typed text becomes one; the
+ * field owns no state or effects. The input is labeled `code` and described
+ * by its constraints — optional and fixed once created, its accepted
+ * characters, and its length against the limit — and, while invalid, by the
+ * problem message. `use name` appears only while the code is empty and the
+ * name has a code form, and proposes that form.
+ * @param props - Code, the typed name, and the change action.
  * @returns The labeled code field.
  */
-export function AgentCodeField({
+function AgentCodeField({
   code,
-  canUseName,
+  name,
   problemId,
   isReadOnly,
   fieldRef,
-  onCodeChange,
-  onUseNameAsCode
+  onCodeChange
 }: AgentCodeFieldProps): ReactElement {
   const inputId = useId()
   const hintId = useId()
+  const formatId = useId()
+  const counterId = useId()
+  const nameCode = calculateAgentCodeFromName(name)
+  const descriptionIds = [hintId, formatId, counterId]
 
   return (
     <div className="settings-view__agent-field">
@@ -257,11 +285,11 @@ export function AgentCodeField({
           <span id={hintId}>optional · fixed once created</span>
         </span>
         <span className="settings-view__agent-field-label">
-          {canUseName ? (
+          {code === "" && nameCode !== "" ? (
             <Button
               className="settings-view__agent-use-name"
               disabled={isReadOnly}
-              onClick={onUseNameAsCode}
+              onClick={() => onCodeChange(nameCode)}
               size="sm"
               type="button"
               variant="ghost"
@@ -269,18 +297,17 @@ export function AgentCodeField({
               use name
             </Button>
           ) : null}
-          <span>
+          <span id={counterId}>
             {code.length} / {MAXIMUM_AGENT_CODE_LENGTH}
           </span>
         </span>
       </div>
       <Input
-        aria-describedby={buildFieldDescriptionIds(hintId, problemId)}
+        aria-describedby={buildFieldDescriptionIds(descriptionIds, problemId)}
         aria-invalid={problemId !== undefined}
         autoComplete="off"
         className="settings-view__agent-mono"
         id={inputId}
-        maxLength={MAXIMUM_AGENT_CODE_LENGTH}
         onChange={(event) => onCodeChange(event.currentTarget.value)}
         placeholder="leave empty to derive it from the name"
         readOnly={isReadOnly}
@@ -289,12 +316,15 @@ export function AgentCodeField({
         type="text"
         value={code}
       />
+      <div className="settings-view__agent-field-top">
+        <span id={formatId}>lowercase letters, digits, and hyphens</span>
+      </div>
     </div>
   )
 }
 
 /** Properties accepted by {@link AgentPromptField}. */
-export type AgentPromptFieldProps = {
+type AgentPromptFieldProps = {
   /** System prompt as typed, owned by the parent. */
   readonly systemPrompt: string
   /** Local estimate of the context window, in tokens. */
@@ -313,16 +343,17 @@ export type AgentPromptFieldProps = {
 }
 
 /**
- * Edits an agent's system prompt with its estimated size.
+ * Edits an agent's required system prompt with its estimated size.
  *
- * @remarks Primary category: presentational. The parent owns the prompt and
- * accepts or ignores each proposal; the field owns no state or effects. The
- * textarea is labeled `system prompt` and described by its estimated size
- * and, while invalid, by the problem message. The size is a local estimate.
+ * @remarks The parent owns the prompt and accepts or ignores each proposal;
+ * the field owns no state or effects. The textarea is labeled
+ * `system prompt`, marked required visibly and programmatically, and
+ * described by its estimated size and, while invalid, by the problem
+ * message. The size is a local estimate.
  * @param props - Prompt, window estimate, problem relationship, and action.
  * @returns The labeled prompt field.
  */
-export function AgentPromptField({
+function AgentPromptField({
   systemPrompt,
   contextSize,
   problemId,
@@ -336,12 +367,16 @@ export function AgentPromptField({
   return (
     <div className="settings-view__agent-field">
       <div className="settings-view__agent-field-top">
-        <label htmlFor={textareaId}>system prompt</label>
+        <span className="settings-view__agent-field-label">
+          <label htmlFor={textareaId}>system prompt</label>
+          <span>required</span>
+        </span>
         <span>the model's instructions</span>
       </div>
       <Textarea
-        aria-describedby={buildFieldDescriptionIds(measureId, problemId)}
+        aria-describedby={buildFieldDescriptionIds([measureId], problemId)}
         aria-invalid={problemId !== undefined}
+        aria-required
         className="settings-view__agent-prompt"
         id={textareaId}
         onChange={(event) => onSystemPromptChange(event.currentTarget.value)}
@@ -361,8 +396,115 @@ export function AgentPromptField({
   )
 }
 
+/** Editor host elements that can receive focus for a problem. */
+type AgentFieldRefs = {
+  /** Name input. */
+  readonly name: RefObject<HTMLInputElement | null>
+  /** Code input, attached only for a new agent. */
+  readonly code: RefObject<HTMLInputElement | null>
+  /** Bio input. */
+  readonly bio: RefObject<HTMLInputElement | null>
+  /** System prompt textarea. */
+  readonly systemPrompt: RefObject<HTMLTextAreaElement | null>
+}
+
+/** Properties accepted by {@link AgentDraftFields}. */
+type AgentDraftFieldsProps = {
+  /** Editor whose draft is written, owned by the agent store. */
+  readonly editor: DraftingAgentEditor
+  /** Problem shown for the draft, or undefined while none is shown. */
+  readonly problem: AgentDraftProblem | undefined
+  /** Identifier of the message the invalid field refers to. */
+  readonly problemId: string
+  /** Hosts the parent moves focus to when a save is rejected. */
+  readonly fieldRefs: AgentFieldRefs
+}
+
+/**
+ * Edits the draft's name, code, bio, and system prompt.
+ *
+ * @remarks The agent store owns the draft and accepts each edit; the
+ * application store supplies the context estimate for the prompt measure.
+ * The parent owns the shown problem, its message, and the field hosts; only
+ * the field the problem concerns is marked invalid. The code field appears
+ * only for a new agent. While a change is pending, every field is read-only.
+ * The fields are rendered as siblings, without a wrapper.
+ * @param props - Editor, shown problem, its message, and the field hosts.
+ * @returns The draft's fields.
+ */
+function AgentDraftFields({
+  editor,
+  problem,
+  problemId,
+  fieldRefs
+}: AgentDraftFieldsProps): ReactElement {
+  const contextSize = useLysStore((state) => state.settings.model.contextSize)
+  const updateAgentDraft = useAgentStore((state) => state.updateAgentDraft)
+  const updateNewAgentCode = useAgentStore((state) => state.updateNewAgentCode)
+  const isReadOnly = isAgentActivityPending(editor.activity)
+
+  /**
+   * Finds the problem message a field refers to.
+   *
+   * @param field - Field being rendered.
+   * @returns The message's identifier while the problem concerns the field.
+   */
+  function findFieldProblemId(field: AgentDraftField): string | undefined {
+    const isFieldInvalid =
+      problem !== undefined &&
+      calculateAgentDraftProblemField(problem) === field
+
+    return isFieldInvalid ? problemId : undefined
+  }
+
+  return (
+    <>
+      <AgentTextField
+        fieldRef={fieldRefs.name}
+        isReadOnly={isReadOnly}
+        label="name"
+        maximumLength={MAXIMUM_AGENT_NAME_LENGTH}
+        onTextChange={(name) => updateAgentDraft({ ...editor.draft, name })}
+        placeholder="Reviewer"
+        problemId={findFieldProblemId("name")}
+        text={editor.draft.name}
+      />
+      {editor.status === "creating" ? (
+        <AgentCodeField
+          code={editor.code}
+          fieldRef={fieldRefs.code}
+          isReadOnly={isReadOnly}
+          name={editor.draft.name}
+          onCodeChange={updateNewAgentCode}
+          problemId={findFieldProblemId("code")}
+        />
+      ) : null}
+      <AgentTextField
+        fieldRef={fieldRefs.bio}
+        isReadOnly={isReadOnly}
+        label="bio"
+        maximumLength={MAXIMUM_AGENT_BIO_LENGTH}
+        onTextChange={(bio) => updateAgentDraft({ ...editor.draft, bio })}
+        placeholder="One line on what this agent is for. For you, not the model."
+        problemId={findFieldProblemId("bio")}
+        text={editor.draft.bio}
+      />
+      <AgentPromptField
+        contextSize={contextSize}
+        fieldRef={fieldRefs.systemPrompt}
+        isReadOnly={isReadOnly}
+        onSystemPromptChange={(systemPrompt) =>
+          updateAgentDraft({ ...editor.draft, systemPrompt })
+        }
+        problemId={findFieldProblemId("systemPrompt")}
+        systemPrompt={editor.draft.systemPrompt}
+      />
+    </>
+  )
+}
+
 /** Properties accepted by {@link AgentEditorFeedback}. */
-export type AgentEditorFeedbackProps = {
+type AgentEditorFeedbackProps = {
   /** First problem of a draft whose save was attempted, or undefined. */
   readonly problem: AgentDraftProblem | undefined
   /** Identifier given to the problem message. */
@@ -375,15 +517,15 @@ export type AgentEditorFeedbackProps = {
  * Explains why a draft cannot be saved and announces pending and failed
  * changes.
  *
- * @remarks Primary category: presentational. The parent owns the problem,
- * its identifier, and the activity; the component owns no state or effects.
- * The problem message exists only while there is a problem, so fields refer
- * to it only then. The pending status is a polite live region and the
- * failure an alert; both regions stay mounted so updates are announced.
+ * @remarks The parent owns the problem, its identifier, and the activity;
+ * the component owns no state or effects. The problem message exists only
+ * while there is a problem, so fields refer to it only then. The pending
+ * status is a polite live region and the failure an alert; both regions stay
+ * mounted so updates are announced.
  * @param props - Problem, its identifier, and the editor activity.
  * @returns The editor's feedback lines.
  */
-export function AgentEditorFeedback({
+function AgentEditorFeedback({
   problem,
   problemId,
   activity
@@ -405,8 +547,77 @@ export function AgentEditorFeedback({
   )
 }
 
+/** Properties accepted by {@link AgentDeleteConfirmation}. */
+type AgentDeleteConfirmationProps = {
+  /** Whether the deletion awaits the backend, which disables both choices. */
+  readonly isDeleting: boolean
+  /** Requests that the parent keep the agent. */
+  readonly onCancelAgentDeletion: () => void
+  /** Requests that the parent delete the agent for good. */
+  readonly onDeleteAgent: () => void
+}
+
+/**
+ * Asks whether to delete an agent for good.
+ *
+ * @remarks The parent owns whether the deletion is pending and both
+ * choices; the component owns no state or effects. The question is a group
+ * named `Delete for good?`. Focus starts on Keep, the least destructive
+ * choice, and Escape on either choice keeps the agent without closing the
+ * editor. While the deletion is pending, both choices are disabled.
+ * @param props - Pending deletion and the parent-owned choices.
+ * @returns The confirmation group.
+ */
+function AgentDeleteConfirmation({
+  isDeleting,
+  onCancelAgentDeletion,
+  onDeleteAgent
+}: AgentDeleteConfirmationProps): ReactElement {
+  /**
+   * Keeps the agent when Escape is pressed on either choice.
+   *
+   * @param event - Key press on a confirmation button.
+   */
+  function handleConfirmationKeyDown(event: KeyboardEvent<HTMLElement>): void {
+    if (event.key !== "Escape") return
+
+    event.preventDefault()
+    event.stopPropagation()
+    onCancelAgentDeletion()
+  }
+
+  return (
+    <fieldset
+      aria-label="Delete for good?"
+      className="settings-view__agent-confirm"
+      disabled={isDeleting}
+    >
+      <span aria-hidden="true">delete for good?</span>
+      <Button
+        autoFocus
+        onClick={onCancelAgentDeletion}
+        onKeyDown={handleConfirmationKeyDown}
+        size="sm"
+        type="button"
+        variant="outline"
+      >
+        Keep
+      </Button>
+      <Button
+        onClick={onDeleteAgent}
+        onKeyDown={handleConfirmationKeyDown}
+        size="sm"
+        type="button"
+        variant="destructive"
+      >
+        Delete
+      </Button>
+    </fieldset>
+  )
+}
+
 /** Properties accepted by {@link StoredAgentActions}. */
-export type StoredAgentActionsProps = {
+type StoredAgentActionsProps = {
   /** Change or confirmation in progress in the editor. */
   readonly activity: StoredAgentActivity
   /** Requests that the parent open a copy of the agent as a new one. */
@@ -422,17 +633,14 @@ export type StoredAgentActionsProps = {
 /**
  * Offers deleting and duplicating a stored agent, confirming deletion first.
  *
- * @remarks Primary category: interactive feature. The parent owns the
- * activity and every action; the component owns only whether its Delete
- * button has been replaced by the confirmation, so that focus returns to
- * that button when the confirmation leaves. The confirmation is a group
- * named `Delete for good?`; focus starts on Keep, the least destructive
- * choice, and Escape inside it keeps the agent without closing the editor.
- * While a change is pending, every action is disabled.
+ * @remarks The parent owns the activity and every action; the component owns
+ * only whether its Delete button has been replaced by the confirmation, so
+ * that focus returns to that button when the confirmation leaves. While a
+ * change is pending, every action is disabled.
  * @param props - Activity and the parent-owned actions.
- * @returns The stored agent's actions.
+ * @returns The stored agent's actions, or the deletion confirmation.
  */
-export function StoredAgentActions({
+function StoredAgentActions({
   activity,
   onDuplicateAgent,
   onRequestAgentDeletion,
@@ -440,8 +648,7 @@ export function StoredAgentActions({
   onDeleteAgent
 }: StoredAgentActionsProps): ReactElement {
   const [hasConfirmationOpened, setHasConfirmationOpened] = useState(false)
-  const isPending =
-    activity.status === "saving" || activity.status === "deleting"
+  const isPending = isAgentActivityPending(activity)
 
   /** Asks whether to delete, remembering that focus must come back. */
   function handleRequestDeletion(): void {
@@ -449,50 +656,16 @@ export function StoredAgentActions({
     onRequestAgentDeletion()
   }
 
-  /**
-   * Keeps the agent when Escape is pressed inside the confirmation.
-   *
-   * @param event - Key press on either confirmation button.
-   */
-  function handleConfirmationKeyDown(event: KeyboardEvent<HTMLElement>): void {
-    if (event.key !== "Escape") return
-
-    event.preventDefault()
-    event.stopPropagation()
-    onCancelAgentDeletion()
-  }
-
   if (
     activity.status === "confirming-delete" ||
     activity.status === "deleting"
   ) {
     return (
-      <fieldset
-        aria-label="Delete for good?"
-        className="settings-view__agent-confirm"
-        disabled={isPending}
-      >
-        <span aria-hidden="true">delete for good?</span>
-        <Button
-          autoFocus
-          onClick={onCancelAgentDeletion}
-          onKeyDown={handleConfirmationKeyDown}
-          size="sm"
-          type="button"
-          variant="outline"
-        >
-          Keep
-        </Button>
-        <Button
-          onClick={onDeleteAgent}
-          onKeyDown={handleConfirmationKeyDown}
-          size="sm"
-          type="button"
-          variant="destructive"
-        >
-          Delete
-        </Button>
-      </fieldset>
+      <AgentDeleteConfirmation
+        isDeleting={isPending}
+        onCancelAgentDeletion={onCancelAgentDeletion}
+        onDeleteAgent={onDeleteAgent}
+      />
     )
   }
 
@@ -534,11 +707,12 @@ export type AgentReadStatusProps = {
 /**
  * Presents an agent being read for its editor, or why it could not be.
  *
- * @remarks Primary category: presentational. The parent owns the editor
- * state and both actions; the component owns no state or effects. Focus
- * moves to the back button when the component is attached, because the row
- * that opened it has left the screen. Reading is a polite status; a failure
- * is an alert with a Retry button.
+ * @remarks The parent owns the editor state and both actions; the component
+ * owns no state. Focus moves to the back button when the component is
+ * attached, because the row that opened it has left the screen, and again
+ * when Retry is pressed, because Retry leaves while the agent is read. One
+ * polite status, present from the start, says the agent is being read and
+ * then why it could not be; Retry appears only after a failure.
  * @param props - Reading editor and the parent-owned actions.
  * @returns The read status with its way back.
  */
@@ -547,6 +721,19 @@ export function AgentReadStatus({
   onCloseAgentEditor,
   onRetryAgent
 }: AgentReadStatusProps): ReactElement {
+  const backButtonRef = useRef<HTMLButtonElement>(null)
+  const isOpening = editor.status === "opening"
+
+  useLayoutEffect(() => {
+    backButtonRef.current?.focus()
+  }, [])
+
+  /** Reads the agent again, keeping focus on the way back while it is read. */
+  function handleRetryAgent(): void {
+    backButtonRef.current?.focus()
+    onRetryAgent()
+  }
+
   return (
     <div className="settings-view__agent-editor">
       <div className="settings-view__agent-editor-top">
@@ -554,7 +741,7 @@ export function AgentReadStatus({
           aria-label="agents list"
           className="settings-view__agent-back"
           onClick={onCloseAgentEditor}
-          ref={focusElementOnAttach}
+          ref={backButtonRef}
           size="sm"
           type="button"
           variant="ghost"
@@ -564,25 +751,27 @@ export function AgentReadStatus({
         </Button>
         <span className="settings-view__agent-code">{editor.agentCode}</span>
       </div>
-      {editor.status === "opening" ? (
-        <p aria-live="polite" className="settings-view__note" role="status">
-          Reading {editor.agentCode}…
+      <div className="settings-view__agent-status">
+        <p
+          aria-live="polite"
+          className={
+            isOpening ? "settings-view__note" : "settings-view__agent-problem"
+          }
+          role="status"
+        >
+          {isOpening ? `Reading ${editor.agentCode}…` : editor.error}
         </p>
-      ) : (
-        <div className="settings-view__agent-status">
-          <p className="settings-view__agent-problem" role="alert">
-            {editor.error}
-          </p>
+        {isOpening ? null : (
           <Button
-            onClick={onRetryAgent}
+            onClick={handleRetryAgent}
             size="sm"
             type="button"
             variant="outline"
           >
             Retry
           </Button>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   )
 }
@@ -595,30 +784,40 @@ export type AgentEditorProps = {
   readonly agents: readonly AgentSummary[]
 }
 
-/** Editor host elements that can receive focus for a problem. */
-type AgentFieldRefs = {
-  /** Name input. */
-  readonly name: RefObject<HTMLInputElement | null>
-  /** Code input, attached only for a new agent. */
-  readonly code: RefObject<HTMLInputElement | null>
-  /** Bio input. */
-  readonly bio: RefObject<HTMLInputElement | null>
-  /** System prompt textarea. */
-  readonly systemPrompt: RefObject<HTMLTextAreaElement | null>
-}
-
 /**
  * Builds the subject a draft is checked for.
  *
  * @param editor - Editor whose draft is written.
- * @returns A new agent with its typed code, or the stored agent's code.
+ * @returns A new agent with its typed code, or the stored agent's code and
+ * stored name.
  */
 function buildAgentDraftSubject(
   editor: DraftingAgentEditor
 ): AgentDraftSubject {
   return editor.status === "creating"
     ? { kind: "new", code: editor.code }
-    : { kind: "stored", code: editor.agent.code }
+    : { kind: "stored", code: editor.agent.code, name: editor.agent.name }
+}
+
+/**
+ * Finds the problem the editor shows.
+ *
+ * @param editor - Editor whose draft is written.
+ * @param agents - Every listed agent.
+ * @returns The draft's first problem once a save was attempted; undefined
+ * before that or when the draft has none.
+ */
+function findShownAgentDraftProblem(
+  editor: DraftingAgentEditor,
+  agents: readonly AgentSummary[]
+): AgentDraftProblem | undefined {
+  if (editor.saveAttemptCount === 0) return undefined
+
+  return findAgentDraftProblem(
+    editor.draft,
+    buildAgentDraftSubject(editor),
+    agents
+  )
 }
 
 /**
@@ -671,19 +870,64 @@ function focusAgentDraftField(
 }
 
 /**
+ * Owns the editor's field hosts and moves focus to the field that needs it.
+ *
+ * @param saveAttemptCount - Reactive count of the editor's save attempts;
+ * each new value is one attempt the agent store has recorded.
+ * @param problem - Problem the editor shows in the current render, read when
+ * focus moves.
+ * @returns The field hosts for the caller to attach. Each host ref keeps its
+ * identity for the editor's lifetime; the record holding them is rebuilt on
+ * every render.
+ * @remarks Focus moves to the name field when the editor appears. In the
+ * layout phase after each recorded save attempt, focus moves to the field of
+ * the shown problem, which is then already marked invalid and described by
+ * the problem; an attempt without a problem leaves focus where it is. An
+ * editor that appears with a problem already shown starts on that field.
+ */
+function useAgentFieldFocus(
+  saveAttemptCount: number,
+  problem: AgentDraftProblem | undefined
+): AgentFieldRefs {
+  const nameFieldRef = useRef<HTMLInputElement>(null)
+  const codeFieldRef = useRef<HTMLInputElement>(null)
+  const bioFieldRef = useRef<HTMLInputElement>(null)
+  const systemPromptFieldRef = useRef<HTMLTextAreaElement>(null)
+  const fieldRefs: AgentFieldRefs = {
+    name: nameFieldRef,
+    code: codeFieldRef,
+    bio: bioFieldRef,
+    systemPrompt: systemPromptFieldRef
+  }
+  const focusShownProblemField = useEffectEvent((): void => {
+    if (problem === undefined) return
+    focusAgentDraftField(fieldRefs, calculateAgentDraftProblemField(problem))
+  })
+
+  useLayoutEffect(() => {
+    nameFieldRef.current?.focus()
+  }, [])
+
+  useLayoutEffect(() => {
+    if (saveAttemptCount > 0) focusShownProblemField()
+  }, [saveAttemptCount])
+
+  return fieldRefs
+}
+
+/**
  * Edits one agent's draft and saves, duplicates, or deletes it.
  *
- * @remarks Primary category: composition/view. The agent store owns the
- * draft, the save attempt, and every change; the application store supplies
- * the context estimate for the prompt measure; the parent supplies the
- * drafting editor and the listed agents, and gives each agent its own
- * instance. The editor is a form named after the agent, or `New agent`.
- * Focus moves to the name field when the editor is attached. Enter in a
- * one-line field or Command or Control with Enter anywhere submits; a draft
- * with a problem is not saved, its first problem is shown, and focus moves
- * to that field. Escape closes the editor, discarding the draft, unless a
- * change is pending; while one is, the fields are read-only and the actions
- * disabled.
+ * @remarks The agent store owns the draft, the save attempts, and every
+ * change; the parent supplies the drafting editor and the listed agents, and
+ * gives each agent its own instance. The editor is a form named after the
+ * agent, or `New agent`. Focus moves to the name field when the editor is
+ * attached. Enter in a one-line field or Command or Control with Enter
+ * anywhere submits; a draft with a problem is not saved, and once the attempt
+ * is committed — its first problem shown, the field marked invalid and
+ * described by the message — focus moves to that field. Escape closes the
+ * editor, discarding the draft, unless a change is pending; while one is, the
+ * fields are read-only and the actions disabled.
  * @param props - Drafting editor and the listed agents.
  * @returns The agent editor form.
  */
@@ -691,57 +935,24 @@ export function AgentEditor({
   editor,
   agents
 }: AgentEditorProps): ReactElement {
-  const contextSize = useLysStore((state) => state.settings.model.contextSize)
-  const updateAgentDraft = useAgentStore((state) => state.updateAgentDraft)
-  const updateNewAgentCode = useAgentStore((state) => state.updateNewAgentCode)
   const saveAgentDraft = useAgentStore((state) => state.saveAgentDraft)
   const closeAgentEditor = useAgentStore((state) => state.closeAgentEditor)
-  const nameFieldRef = useRef<HTMLInputElement>(null)
-  const codeFieldRef = useRef<HTMLInputElement>(null)
-  const bioFieldRef = useRef<HTMLInputElement>(null)
-  const systemPromptFieldRef = useRef<HTMLTextAreaElement>(null)
   const problemId = useId()
-  const { draft, activity } = editor
-  const isPending =
-    activity.status === "saving" || activity.status === "deleting"
   const isDraftChanged = isEditorDraftChanged(editor)
-  const problem = editor.isSaveAttempted
-    ? findAgentDraftProblem(draft, buildAgentDraftSubject(editor), agents)
-    : undefined
-  const problemField =
-    problem === undefined ? undefined : calculateAgentDraftProblemField(problem)
-
-  useEffect(() => {
-    nameFieldRef.current?.focus()
-  }, [nameFieldRef])
+  const problem = findShownAgentDraftProblem(editor, agents)
+  const fieldRefs = useAgentFieldFocus(editor.saveAttemptCount, problem)
 
   /**
-   * Saves the draft, moving focus to the first problem when it has one.
+   * Asks the agent store to save the draft; a draft with a problem is not
+   * sent, and the recorded attempt moves focus to that problem's field.
    *
    * @param event - Submission of the editor form; ignored unless the editor
    * is idle and its draft changed, as the Save button is.
    */
   function handleSubmit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault()
-    if (activity.status !== "idle" || !isDraftChanged) return
+    if (editor.activity.status !== "idle" || !isDraftChanged) return
 
-    const draftProblem = findAgentDraftProblem(
-      draft,
-      buildAgentDraftSubject(editor),
-      agents
-    )
-    if (draftProblem !== undefined) {
-      const fieldRefs: AgentFieldRefs = {
-        name: nameFieldRef,
-        code: codeFieldRef,
-        bio: bioFieldRef,
-        systemPrompt: systemPromptFieldRef
-      }
-      focusAgentDraftField(
-        fieldRefs,
-        calculateAgentDraftProblemField(draftProblem)
-      )
-    }
     void saveAgentDraft()
   }
 
@@ -758,7 +969,7 @@ export function AgentEditor({
       event.currentTarget.requestSubmit()
       return
     }
-    if (event.key === "Escape" && !isPending) {
+    if (event.key === "Escape" && !isAgentActivityPending(editor.activity)) {
       event.preventDefault()
       closeAgentEditor()
     }
@@ -775,61 +986,18 @@ export function AgentEditor({
       onSubmit={handleSubmit}
     >
       <AgentEditorHeader
-        agentCode={
-          editor.status === "creating" ? editor.code : editor.agent.code
-        }
-        agentKind={editor.status === "creating" ? "new" : "yours"}
-        isCloseEnabled={!isPending}
+        editor={editor}
         isDraftChanged={isDraftChanged}
         onCloseAgentEditor={closeAgentEditor}
       />
-      <AgentTextField
-        fieldRef={nameFieldRef}
-        isReadOnly={isPending}
-        label="name"
-        maximumLength={MAXIMUM_AGENT_NAME_LENGTH}
-        onTextChange={(name) => updateAgentDraft({ ...draft, name })}
-        placeholder="Reviewer"
-        problemId={problemField === "name" ? problemId : undefined}
-        text={draft.name}
-      />
-      {editor.status === "creating" ? (
-        <AgentCodeField
-          canUseName={
-            editor.code === "" && calculateAgentCodeFromName(draft.name) !== ""
-          }
-          code={editor.code}
-          fieldRef={codeFieldRef}
-          isReadOnly={isPending}
-          onCodeChange={updateNewAgentCode}
-          onUseNameAsCode={() =>
-            updateNewAgentCode(calculateAgentCodeFromName(draft.name))
-          }
-          problemId={problemField === "code" ? problemId : undefined}
-        />
-      ) : null}
-      <AgentTextField
-        fieldRef={bioFieldRef}
-        isReadOnly={isPending}
-        label="bio"
-        maximumLength={MAXIMUM_AGENT_BIO_LENGTH}
-        onTextChange={(bio) => updateAgentDraft({ ...draft, bio })}
-        placeholder="One line on what this agent is for. For you, not the model."
-        problemId={problemField === "bio" ? problemId : undefined}
-        text={draft.bio}
-      />
-      <AgentPromptField
-        contextSize={contextSize}
-        fieldRef={systemPromptFieldRef}
-        isReadOnly={isPending}
-        onSystemPromptChange={(systemPrompt) =>
-          updateAgentDraft({ ...draft, systemPrompt })
-        }
-        problemId={problemField === "systemPrompt" ? problemId : undefined}
-        systemPrompt={draft.systemPrompt}
+      <AgentDraftFields
+        editor={editor}
+        fieldRefs={fieldRefs}
+        problem={problem}
+        problemId={problemId}
       />
       <AgentEditorFeedback
-        activity={activity}
+        activity={editor.activity}
         problem={problem}
         problemId={problemId}
       />
@@ -839,7 +1007,7 @@ export function AgentEditor({
 }
 
 /** Properties accepted by {@link AgentEditorFooter}. */
-export type AgentEditorFooterProps = {
+type AgentEditorFooterProps = {
   /** Editor whose draft is written, owned by the agent store. */
   readonly editor: DraftingAgentEditor
   /** Whether the draft holds changes that are not saved. */
@@ -850,16 +1018,15 @@ export type AgentEditorFooterProps = {
  * Presents the editor's actions: the stored agent's own, closing, and
  * saving.
  *
- * @remarks Primary category: composition/view. The agent store owns every
- * action; the parent supplies the editor and whether its draft changed, and
- * owns the form that the Save button submits. Close reads `Discard` while
- * the draft holds changes. Save reads `Create` for a new agent and is
- * enabled only for an idle editor with changes. While a change is pending,
- * every action is disabled.
+ * @remarks The agent store owns every action; the parent supplies the editor
+ * and whether its draft changed, and owns the form that the Save button
+ * submits. Close reads `Discard` while the draft holds changes. Save reads
+ * `Create` for a new agent and is enabled only for an idle editor with
+ * changes. While a change is pending, every action is disabled.
  * @param props - Drafting editor and whether its draft changed.
  * @returns The editor footer.
  */
-export function AgentEditorFooter({
+function AgentEditorFooter({
   editor,
   isDraftChanged
 }: AgentEditorFooterProps): ReactElement {
@@ -873,8 +1040,6 @@ export function AgentEditorFooter({
   )
   const deleteAgent = useAgentStore((state) => state.deleteAgent)
   const { activity } = editor
-  const isPending =
-    activity.status === "saving" || activity.status === "deleting"
   const isNew = editor.status === "creating"
 
   return (
@@ -890,7 +1055,7 @@ export function AgentEditorFooter({
       ) : null}
       <div className="settings-view__agent-actions settings-view__agent-actions--commit">
         <Button
-          disabled={isPending}
+          disabled={isAgentActivityPending(activity)}
           onClick={closeAgentEditor}
           size="sm"
           type="button"

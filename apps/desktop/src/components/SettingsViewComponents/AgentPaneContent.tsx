@@ -2,7 +2,11 @@ import type { AgentSummary } from "@lys/protocol"
 import { useEffect, useState, type ReactElement } from "react"
 
 import { useLysStore } from "@/lib/store"
-import { useAgentStore } from "@/lib/store/agents"
+import {
+  useAgentStore,
+  type AgentEditorState,
+  type AgentListState
+} from "@/lib/store/agents"
 
 import { AgentEditor, AgentReadStatus } from "./AgentEditor"
 import {
@@ -11,10 +15,8 @@ import {
   CustomAgentSection,
   type AgentListFocusTarget
 } from "./AgentList"
+import { formatAgentListStatus } from "./agent-presentation"
 import PaneSkeleton from "./PaneSkeleton"
-
-/** Message shown instead of the agents while the backend is not running. */
-const BACKEND_STOPPED_AGENTS_MESSAGE = "Start the backend to manage agents."
 
 /** Shared focus target that leaves focus where it is. */
 const NO_LIST_FOCUS_TARGET: AgentListFocusTarget = Object.freeze({
@@ -25,6 +27,33 @@ const NO_LIST_FOCUS_TARGET: AgentListFocusTarget = Object.freeze({
 const NEW_AGENT_FOCUS_TARGET: AgentListFocusTarget = Object.freeze({
   kind: "new-agent"
 })
+
+/** React key of the new agent's editor; no agent code contains `:`. */
+const NEW_AGENT_EDITOR_KEY = ":new"
+
+/**
+ * Calculates the list control that takes focus when the list returns from
+ * the editor that is open when the workspace appears.
+ *
+ * @param editor - Editor the agent store has open.
+ * @returns The row of the agent being read or edited, the New agent button
+ * for a new agent, or `none` while no editor is open.
+ */
+function calculateEditorReturnTarget(
+  editor: AgentEditorState
+): AgentListFocusTarget {
+  switch (editor.status) {
+    case "closed":
+      return NO_LIST_FOCUS_TARGET
+    case "opening":
+    case "unavailable":
+      return { kind: "agent", agentCode: editor.agentCode }
+    case "creating":
+      return NEW_AGENT_FOCUS_TARGET
+    case "editing":
+      return { kind: "agent", agentCode: editor.agent.code }
+  }
+}
 
 /**
  * Calculates the list control that takes focus when the list returns from
@@ -57,7 +86,7 @@ function calculateListFocusTarget(
 }
 
 /** Properties accepted by {@link AgentWorkspace}. */
-export type AgentWorkspaceProps = {
+type AgentWorkspaceProps = {
   /** Every stored agent, oldest first, as last read. */
   readonly agents: readonly AgentSummary[]
 }
@@ -65,25 +94,29 @@ export type AgentWorkspaceProps = {
 /**
  * Presents the agent list or the editor the agent store has open.
  *
- * @remarks Primary category: composition/view. The agent store owns the
- * editor, the saved marker, and every read and change; the parent supplies
- * the listed agents. The workspace owns only which list control takes focus
- * when the list returns from an editor it opened: the saved agent's row, the
- * opened agent's row, or the New agent button. While the editor is closed,
- * the built-in section, marked coming soon, precedes the user's agents.
- * Each agent's editor is a separate instance, keyed by its code or `new`.
+ * @remarks The agent store owns the editor, the saved marker, and every read
+ * and change; the parent supplies the listed agents. The workspace owns only
+ * which list control takes focus when the list returns from an editor: the
+ * saved agent's row, the opened agent's row, or the New agent button. It
+ * records that control when it opens an editor, and when it appears with an
+ * editor already open, as after the pane was left and entered again, it
+ * starts from that editor's agent. While the editor is closed, the built-in
+ * section, marked coming soon, precedes the user's agents. Each agent's
+ * editor is a separate instance, keyed by its code; the new agent's editor
+ * has a key no code can take.
  * @param props - Listed agents.
  * @returns The agent list, the read status of an agent being opened, or its
  * editor.
  */
-export function AgentWorkspace({ agents }: AgentWorkspaceProps): ReactElement {
+function AgentWorkspace({ agents }: AgentWorkspaceProps): ReactElement {
   const editor = useAgentStore((state) => state.editor)
   const savedAgentCode = useAgentStore((state) => state.savedAgentCode)
   const openAgent = useAgentStore((state) => state.openAgent)
   const openNewAgent = useAgentStore((state) => state.openNewAgent)
   const closeAgentEditor = useAgentStore((state) => state.closeAgentEditor)
-  const [returnTarget, setReturnTarget] =
-    useState<AgentListFocusTarget>(NO_LIST_FOCUS_TARGET)
+  const [returnTarget, setReturnTarget] = useState(() =>
+    calculateEditorReturnTarget(editor)
+  )
 
   /**
    * Opens one agent's editor, recording its row as the return target.
@@ -124,13 +157,19 @@ export function AgentWorkspace({ agents }: AgentWorkspaceProps): ReactElement {
       return (
         <AgentReadStatus
           editor={editor}
-          key={editor.status}
+          key={editor.agentCode}
           onCloseAgentEditor={closeAgentEditor}
           onRetryAgent={() => void openAgent(editor.agentCode)}
         />
       )
     case "creating":
-      return <AgentEditor agents={agents} editor={editor} key="new" />
+      return (
+        <AgentEditor
+          agents={agents}
+          editor={editor}
+          key={NEW_AGENT_EDITOR_KEY}
+        />
+      )
     case "editing":
       return (
         <AgentEditor agents={agents} editor={editor} key={editor.agent.code} />
@@ -138,43 +177,69 @@ export function AgentWorkspace({ agents }: AgentWorkspaceProps): ReactElement {
   }
 }
 
+/** Properties accepted by {@link AgentListBody}. */
+type AgentListBodyProps = {
+  /** Lifecycle of the list of every stored agent, owned by the agent store. */
+  readonly list: AgentListState
+}
+
+/**
+ * Presents the agents once they are read.
+ *
+ * @remarks The parent owns the list state and says why the agents are not
+ * shown; the component owns no state or effects. While the first read is
+ * pending, the agents placeholder stands in. A read list shows the
+ * workspace, which stays while the list is read again. After a failed read
+ * nothing is rendered here.
+ * @param props - List state.
+ * @returns The placeholder, the workspace, or null after a failed read.
+ */
+function AgentListBody({ list }: AgentListBodyProps): ReactElement | null {
+  switch (list.status) {
+    case "idle":
+    case "loading":
+      return <PaneSkeleton pane="agents" />
+    case "failed":
+      return null
+    case "loaded":
+      return <AgentWorkspace agents={list.agents} />
+  }
+}
+
 /**
  * Presents agent management: the list of agents and the editor.
  *
- * @remarks Primary category: composition/view. The application store owns
- * the backend status and the agent store owns the list; the pane reads every
- * stored agent when it appears and whenever the backend starts running, and
- * leaving it cancels nothing. While the backend is not running the pane says
- * so; a first read shows the agents placeholder, and a failed read offers
- * Retry. A displayed list stays while it is read again. The pane accepts no
- * props and is loaded lazily by the settings view.
+ * @remarks The application store owns the backend status and the agent store
+ * owns the list; the pane reads every stored agent when it appears and
+ * whenever the backend starts running, and leaving it cancels nothing. A
+ * status line stays mounted above the agents: while the backend is not
+ * running it says so instead of showing them, and after a failed read it
+ * shows the failure and offers Retry. A first read shows the agents
+ * placeholder, and a displayed list stays while it is read again. The pane
+ * accepts no props and is loaded lazily by the settings view.
  * @returns The agents pane body.
  */
 export default function AgentPane(): ReactElement {
   const backendStatus = useLysStore((state) => state.backendServerInfo.status)
   const list = useAgentStore((state) => state.list)
   const loadAgents = useAgentStore((state) => state.loadAgents)
+  const isBackendRunning = backendStatus === "running"
 
   useEffect(() => {
     if (backendStatus === "running") void loadAgents()
   }, [backendStatus, loadAgents])
 
-  if (backendStatus !== "running") {
-    return <AgentListStatus message={BACKEND_STOPPED_AGENTS_MESSAGE} />
-  }
-
-  switch (list.status) {
-    case "idle":
-    case "loading":
-      return <PaneSkeleton pane="agents" />
-    case "failed":
-      return (
-        <AgentListStatus
-          message={list.error}
-          onRetryAgents={() => void loadAgents()}
-        />
-      )
-    case "loaded":
-      return <AgentWorkspace agents={list.agents} />
-  }
+  return (
+    <div className="settings-view__agent-pane">
+      <AgentListStatus
+        message={formatAgentListStatus(isBackendRunning, list)}
+        onRetryAgents={
+          isBackendRunning && list.status === "failed"
+            ? () => void loadAgents()
+            : undefined
+        }
+      />
+      {isBackendRunning ? <AgentListBody list={list} /> : null}
+    </div>
+  )
 }

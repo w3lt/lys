@@ -205,7 +205,8 @@ export type SettingsViewProps = {
  *
  * @remarks The application store owns the
  * selected pane and the settings value; this view provides `SettingsContext` so
- * every pane reads one authority and proposes patches back through it. Patches
+ * the runtime, model, and generation panes read one authority and propose
+ * patches back through it. Patches
  * apply in memory immediately. Generation edits are saved automatically;
  * runtime and model edits remain session-only.
  *
@@ -213,7 +214,9 @@ export type SettingsViewProps = {
  * Entering settings refreshes inventory; leaving the view does not cancel work.
  * Request errors and loaded-state health observations are rendered by the panes.
  * Agents are managed through the agent store, which the Agents pane reads
- * directly rather than through `SettingsContext`.
+ * directly rather than through `SettingsContext`; its prompt measure reads the
+ * context-window estimate from the application store, and it proposes no
+ * settings patch.
  *
  * Each pane body is a stable lazy component behind a `Suspense` fallback; a
  * pending body renders a separate busy frame, so its heading and Done action

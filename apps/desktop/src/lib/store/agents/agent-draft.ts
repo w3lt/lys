@@ -1,6 +1,7 @@
 import type { AgentSummary } from "@lys/protocol"
 import {
   agentCodeSchema,
+  MAXIMUM_AGENT_BIO_LENGTH,
   MAXIMUM_AGENT_CODE_LENGTH,
   MAXIMUM_AGENT_NAME_LENGTH,
   type Agent
@@ -34,6 +35,11 @@ export type AgentDraftSubject =
       readonly kind: "stored"
       /** Code of that agent, which never changes. */
       readonly code: string
+      /**
+       * Name of that agent as stored; keeping it never counts as taken, even
+       * when another agent has the same name.
+       */
+      readonly name: string
     }
 
 /**
@@ -44,6 +50,10 @@ export type AgentDraftProblem =
   | {
       /** The name is blank. */
       readonly kind: "name-missing"
+    }
+  | {
+      /** The trimmed name is longer than the shared maximum. */
+      readonly kind: "name-too-long"
     }
   | {
       /** Another agent already has the name, compared case-insensitively. */
@@ -64,6 +74,10 @@ export type AgentDraftProblem =
   | {
       /** The bio is blank. */
       readonly kind: "bio-missing"
+    }
+  | {
+      /** The trimmed bio is longer than the shared maximum. */
+      readonly kind: "bio-too-long"
     }
   | {
       /** The system prompt is blank. */
@@ -108,28 +122,52 @@ function isDraftSubject(
 }
 
 /**
+ * Reports whether a draft keeps the name its stored agent already has.
+ *
+ * @param comparableName - Draft name in its comparable form.
+ * @param subject - Agent the draft is written for.
+ * @returns Whether a stored agent keeps its stored name, compared
+ * case-insensitively; never for a new agent.
+ */
+function isStoredAgentNameKept(
+  comparableName: string,
+  subject: AgentDraftSubject
+): boolean {
+  return (
+    subject.kind === "stored" &&
+    calculateComparableAgentName(subject.name) === comparableName
+  )
+}
+
+/**
  * Finds the name problem of a draft.
  *
  * @param name - Name as typed.
  * @param subject - Agent the draft is written for; a stored agent's own name
- * never counts as taken.
+ * never counts as taken, so agents that already share a name stay editable.
  * @param agents - Every listed agent.
- * @returns The name problem, or undefined when the name can be saved.
+ * @returns The name problem, or undefined when the name can be saved. The
+ * trimmed name is measured in UTF-16 code units, as the shared limit is.
  */
 function findAgentNameProblem(
   name: string,
   subject: AgentDraftSubject,
   agents: readonly AgentSummary[]
 ): AgentDraftProblem | undefined {
-  const comparableName = calculateComparableAgentName(name)
-  if (comparableName === "") return { kind: "name-missing" }
+  const trimmedName = name.trim()
+  if (trimmedName === "") return { kind: "name-missing" }
+  if (trimmedName.length > MAXIMUM_AGENT_NAME_LENGTH) {
+    return { kind: "name-too-long" }
+  }
+  const comparableName = calculateComparableAgentName(trimmedName)
+  if (isStoredAgentNameKept(comparableName, subject)) return undefined
 
   const isNameTaken = agents.some(
     (agent) =>
       !isDraftSubject(agent, subject) &&
       calculateComparableAgentName(agent.name) === comparableName
   )
-  return isNameTaken ? { kind: "name-taken", name: name.trim() } : undefined
+  return isNameTaken ? { kind: "name-taken", name: trimmedName } : undefined
 }
 
 /**
@@ -154,6 +192,22 @@ function findAgentCodeProblem(
 }
 
 /**
+ * Finds the bio problem of a draft.
+ *
+ * @param bio - Bio as typed.
+ * @returns The bio problem, or undefined when the bio can be saved. The
+ * trimmed bio is measured in UTF-16 code units, as the shared limit is.
+ */
+function findAgentBioProblem(bio: string): AgentDraftProblem | undefined {
+  const trimmedBio = bio.trim()
+  if (trimmedBio === "") return { kind: "bio-missing" }
+
+  return trimmedBio.length > MAXIMUM_AGENT_BIO_LENGTH
+    ? { kind: "bio-too-long" }
+    : undefined
+}
+
+/**
  * Finds the first reason a draft cannot be saved.
  *
  * @param draft - Text as typed.
@@ -162,23 +216,24 @@ function findAgentCodeProblem(
  * checked.
  * @returns The first problem in field order, or undefined when the draft can
  * be saved.
- * @remarks Lengths are not checked: the fields cannot hold more than the
- * shared limits allow. The backend remains the authority on codes; a code
- * taken since the list was read is refused when saving.
+ * @remarks Names and bios are checked against the shared limits after
+ * trimming, as the backend checks them. The backend remains the authority on
+ * codes; a code taken since the list was read is refused when saving.
  */
 export function findAgentDraftProblem(
   draft: AgentDraft,
   subject: AgentDraftSubject,
   agents: readonly AgentSummary[]
 ): AgentDraftProblem | undefined {
-  const fieldProblem =
+  const problem =
     findAgentNameProblem(draft.name, subject, agents) ??
-    findAgentCodeProblem(subject, agents)
-  if (fieldProblem !== undefined) return fieldProblem
-  if (draft.bio.trim() === "") return { kind: "bio-missing" }
-  if (draft.systemPrompt.trim() === "") return { kind: "system-prompt-missing" }
+    findAgentCodeProblem(subject, agents) ??
+    findAgentBioProblem(draft.bio)
+  if (problem !== undefined) return problem
 
-  return undefined
+  return draft.systemPrompt.trim() === ""
+    ? { kind: "system-prompt-missing" }
+    : undefined
 }
 
 /**
@@ -192,12 +247,14 @@ export function calculateAgentDraftProblemField(
 ): AgentDraftField {
   switch (problem.kind) {
     case "name-missing":
+    case "name-too-long":
     case "name-taken":
       return "name"
     case "code-malformed":
     case "code-taken":
       return "code"
     case "bio-missing":
+    case "bio-too-long":
       return "bio"
     case "system-prompt-missing":
       return "systemPrompt"

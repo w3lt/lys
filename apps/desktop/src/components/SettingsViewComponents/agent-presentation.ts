@@ -1,8 +1,14 @@
+import { MAXIMUM_AGENT_BIO_LENGTH, MAXIMUM_AGENT_NAME_LENGTH } from "@lys/share"
+
 import {
   estimateTextTokens,
   formatTokenCount
 } from "@/components/ComposerComponents/composer-context"
-import type { AgentDraftProblem, StoredAgentActivity } from "@/lib/store/agents"
+import type {
+  AgentDraftProblem,
+  AgentListState,
+  StoredAgentActivity
+} from "@/lib/store/agents"
 
 /**
  * Formats the sentence explaining why a draft cannot be saved.
@@ -14,6 +20,8 @@ export function formatAgentDraftProblem(problem: AgentDraftProblem): string {
   switch (problem.kind) {
     case "name-missing":
       return "An agent needs a name."
+    case "name-too-long":
+      return `A name is at most ${MAXIMUM_AGENT_NAME_LENGTH} characters.`
     case "name-taken":
       return `Another agent already goes by ${problem.name}. Pick another name.`
     case "code-malformed":
@@ -22,9 +30,29 @@ export function formatAgentDraftProblem(problem: AgentDraftProblem): string {
       return `Another agent already uses the code ${problem.code}. Pick another code, or leave it empty.`
     case "bio-missing":
       return "Give the agent a one-line bio."
+    case "bio-too-long":
+      return `A bio is at most ${MAXIMUM_AGENT_BIO_LENGTH} characters.`
     case "system-prompt-missing":
       return "Write a system prompt, even one line."
   }
+}
+
+/**
+ * Formats the status that says why the agents are not shown.
+ *
+ * @param isBackendRunning - Whether the backend process is running.
+ * @param list - Lifecycle of the list of every stored agent.
+ * @returns A request to start the backend while it is not running, the
+ * failure of a list read that failed, and otherwise an empty string, which
+ * leaves nothing to announce.
+ */
+export function formatAgentListStatus(
+  isBackendRunning: boolean,
+  list: AgentListState
+): string {
+  if (!isBackendRunning) return "Start the backend to manage agents."
+
+  return list.status === "failed" ? list.error : ""
 }
 
 /**

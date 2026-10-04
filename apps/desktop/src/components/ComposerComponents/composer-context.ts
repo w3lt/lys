@@ -1,10 +1,12 @@
 /**
- * Context-window accounting for the composer meter.
+ * Context-window accounting for the composer meter, also used by the agent
+ * editor's system-prompt measure.
  *
  * @remarks Every value produced here is a client-side estimate. The backend
  * does not report token counts, so the meter describes what the composer
  * believes it would send rather than what a tokenizer measured. Labels in the
- * composer prefix these values with `~` for that reason.
+ * composer and the agent editor prefix these values with `~` for that reason.
+ * The agent editor uses only the text estimate and the token-count format.
  */
 
 /** Average characters per token used to estimate text length. */

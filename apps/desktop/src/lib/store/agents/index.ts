@@ -176,8 +176,11 @@ export type AgentEditorState =
       readonly draft: AgentDraft
       /** Code as kept from typing; empty asks the backend to derive one. */
       readonly code: string
-      /** Whether a save was attempted, so draft problems are shown. */
-      readonly isSaveAttempted: boolean
+      /**
+       * Number of save attempts since the editor opened; draft problems are
+       * shown once one was made.
+       */
+      readonly saveAttemptCount: number
       /** Save in progress or the latest save failure. */
       readonly activity: NewAgentActivity
     }
@@ -188,8 +191,11 @@ export type AgentEditorState =
       readonly agent: Agent
       /** Text as typed. */
       readonly draft: AgentDraft
-      /** Whether a save was attempted, so draft problems are shown. */
-      readonly isSaveAttempted: boolean
+      /**
+       * Number of save attempts since the editor opened; draft problems are
+       * shown once one was made.
+       */
+      readonly saveAttemptCount: number
       /** Change or confirmation in progress. */
       readonly activity: StoredAgentActivity
     }
@@ -267,10 +273,14 @@ type StoredAgentEditor = Extract<
   { readonly status: "editing" }
 >
 
-/** Store-private transport resource correlated with one read. */
+/**
+ * Store-private transport resource of one read.
+ *
+ * @remarks A read may commit its outcome only while its resource is the
+ * store's active one; ownership is the identity of this object, which each
+ * read creates anew.
+ */
 type AgentReadResource = {
-  /** Token authorizing this read to commit its outcome. */
-  readonly token: number
   /** Controller owned exclusively by the store. */
   readonly abortController: AbortController
 }
@@ -315,8 +325,20 @@ type AgentSaveOutcome =
       readonly agentCode: string
     }
   | {
-      /** The save could not be confirmed. */
+      /**
+       * A change to a stored agent was not confirmed; repeating it stores
+       * the same values.
+       */
       readonly status: "failed"
+      /** User-presentable failure. */
+      readonly error: string
+    }
+  | {
+      /**
+       * A new agent was not confirmed, so the backend may have stored it;
+       * only a later list read can tell.
+       */
+      readonly status: "unconfirmed"
       /** User-presentable failure. */
       readonly error: string
     }
@@ -411,14 +433,18 @@ function formatAgentReadError(error: unknown, fallback: string): string {
 /**
  * Converts an unknown value thrown by a change into a message.
  *
- * @param changeLabel - Gerund naming the failed change, such as `Saving`.
+ * @param outcomeSummary - Sentence start naming the change and its outcome,
+ * such as `Saving failed`.
  * @param error - Value thrown while making the change.
- * @returns A non-empty message naming the change and its reason.
+ * @returns A non-empty message stating the outcome and its reason.
  */
-function formatAgentMutationError(changeLabel: string, error: unknown): string {
+function formatAgentMutationError(
+  outcomeSummary: string,
+  error: unknown
+): string {
   return error instanceof Error && error.message
-    ? `${changeLabel} failed: ${error.message}`
-    : `${changeLabel} failed.`
+    ? `${outcomeSummary}: ${error.message}`
+    : `${outcomeSummary}.`
 }
 
 /**
@@ -527,7 +553,7 @@ function buildStoredAgentEditor(agent: Agent): AgentEditorState {
     status: "editing",
     agent,
     draft: buildStoredAgentDraft(agent),
-    isSaveAttempted: false,
+    saveAttemptCount: 0,
     activity: IDLE_AGENT_ACTIVITY
   })
 }
@@ -543,7 +569,7 @@ function buildNewAgentEditor(draft: AgentDraft): AgentEditorState {
     status: "creating",
     draft,
     code: "",
-    isSaveAttempted: false,
+    saveAttemptCount: 0,
     activity: IDLE_AGENT_ACTIVITY
   })
 }
@@ -698,26 +724,18 @@ function parseAgentListWithPage(
 export function createAgentStore(
   dependencies: AgentStoreDependencies
 ): UseBoundStore<StoreApi<AgentStore>> {
-  /** Next read token; tokens never authorize another store. */
-  let nextReadToken = 1
   /** Current store-owned list read, or absent when none is owned. */
   let activeListRead: AgentReadResource | undefined
   /** Current store-owned agent read, or absent when none is owned. */
   let activeAgentRead: AgentReadResource | undefined
 
   /**
-   * Creates a read resource with a token no earlier read used.
+   * Creates the resource of a new read.
    *
    * @returns A fresh resource owned by the caller.
    */
   function createReadResource(): AgentReadResource {
-    const resource = {
-      token: nextReadToken,
-      abortController: new AbortController()
-    }
-    nextReadToken += 1
-
-    return resource
+    return { abortController: new AbortController() }
   }
 
   /**
@@ -850,7 +868,8 @@ export function createAgentStore(
    *
    * @param editor - Editor of the new agent, its draft free of problems.
    * @param backendUrl - Backend origin sampled when the save started.
-   * @returns The outcome; failures are returned rather than thrown.
+   * @returns The outcome; failures are returned rather than thrown. Creation
+   * is not idempotent, so any failure leaves the outcome unconfirmed.
    */
   async function createStoredAgent(
     editor: NewAgentEditor,
@@ -869,8 +888,8 @@ export function createAgentStore(
           }
     } catch (error) {
       return {
-        status: "failed",
-        error: formatAgentMutationError("Saving", error)
+        status: "unconfirmed",
+        error: formatAgentMutationError("Saving could not be confirmed", error)
       }
     }
   }
@@ -897,7 +916,7 @@ export function createAgentStore(
     } catch (error) {
       return {
         status: "failed",
-        error: formatAgentMutationError("Saving", error)
+        error: formatAgentMutationError("Saving failed", error)
       }
     }
   }
@@ -920,7 +939,7 @@ export function createAgentStore(
     } catch (error) {
       return {
         status: "failed",
-        error: formatAgentMutationError("Deleting", error)
+        error: formatAgentMutationError("Deleting failed", error)
       }
     }
   }
@@ -967,12 +986,13 @@ export function createAgentStore(
     }
 
     /**
-     * Replaces a pending list read after a change to an agent settles.
+     * Replaces a pending list read after a change to an agent settles or an
+     * agent is found no longer stored.
      *
-     * @remarks A read already sent may answer from before the change was
-     * stored, and committing it would undo the change on screen. Without a
-     * pending read, the settled change has already been applied to the
-     * displayed list and nothing is read.
+     * @remarks A read already sent may answer from before the change, and
+     * committing it would undo the change on screen, such as by restoring a
+     * removed row. Without a pending read, the change has already been
+     * applied to the displayed list and nothing is read.
      */
     function loadAgentsAfterMutation(): void {
       if (activeListRead !== undefined) void loadAgents()
@@ -1033,7 +1053,7 @@ export function createAgentStore(
      *
      * @param agentCode - Code of the agent that was read.
      * @param outcome - Owned outcome of the read; an agent no longer stored
-     * is also removed from the list.
+     * is also removed from the list, and a pending list read is replaced.
      */
     function updateAgentEditorAfterOpen(
       agentCode: string,
@@ -1050,6 +1070,7 @@ export function createAgentStore(
           )
           const list = calculateListWithoutAgent(get().list, agentCode)
           set({ editor, list })
+          loadAgentsAfterMutation()
           return
         }
         case "failed":
@@ -1171,7 +1192,8 @@ export function createAgentStore(
      * @param agents - Every listed agent.
      * @returns The backend origin when the draft has no problem and the
      * backend runs, with the editor then saving; otherwise undefined, with
-     * the attempt or the stopped backend recorded.
+     * the attempt or the stopped backend recorded. Every call counts one
+     * attempt.
      */
     function startAgentSave(
       editor: DraftingAgentEditor,
@@ -1180,11 +1202,11 @@ export function createAgentStore(
       const subject: AgentDraftSubject =
         editor.status === "creating"
           ? { kind: "new", code: editor.code }
-          : { kind: "stored", code: editor.agent.code }
+          : { kind: "stored", code: editor.agent.code, name: editor.agent.name }
       if (findAgentDraftProblem(editor.draft, subject, agents) !== undefined) {
         const attemptedEditor: AgentEditorState = Object.freeze({
           ...editor,
-          isSaveAttempted: true
+          saveAttemptCount: editor.saveAttemptCount + 1
         })
         set({ editor: attemptedEditor })
         return undefined
@@ -1195,7 +1217,7 @@ export function createAgentStore(
         : buildFailedAgentActivity(BACKEND_STOPPED_MUTATION_MESSAGE)
       const savingEditor: AgentEditorState = Object.freeze({
         ...editor,
-        isSaveAttempted: true,
+        saveAttemptCount: editor.saveAttemptCount + 1,
         activity
       })
       set({ editor: savingEditor })
@@ -1209,8 +1231,11 @@ export function createAgentStore(
      * @param outcome - Settled outcome of the save.
      * @remarks A saved agent closes the editor, updates or appends its row,
      * and becomes the saved agent; a pending list read is replaced. An agent
-     * found missing is removed from the list while its draft stays. Any
-     * other outcome keeps the draft and reports the failure.
+     * found missing is removed from the list while its draft stays, and a
+     * pending list read is replaced. An unconfirmed creation keeps the draft,
+     * reports the failure, and reads the list again, so an agent the backend
+     * did store is listed and its name and code count as taken. Any other
+     * outcome keeps the draft and reports the failure.
      */
     function updateAgentsAfterSave(outcome: AgentSaveOutcome): void {
       const { editor, list } = get()
@@ -1233,6 +1258,11 @@ export function createAgentStore(
             ),
             list: calculateListWithoutAgent(list, outcome.agentCode)
           })
+          loadAgentsAfterMutation()
+          return
+        case "unconfirmed":
+          set({ editor: buildFailedAgentEditor(editor, outcome.error) })
+          void loadAgents()
           return
         case "refused":
         case "failed":

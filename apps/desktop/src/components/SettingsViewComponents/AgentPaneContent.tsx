@@ -11,25 +11,16 @@ import {
 import { AgentEditor, AgentReadStatus } from "./AgentEditor"
 import {
   AgentListStatus,
-  BuiltInAgentSection,
   CustomAgentSection,
   type AgentListFocusTarget
 } from "./AgentList"
 import { formatAgentListStatus } from "./agent-presentation"
 import PaneSkeleton from "./PaneSkeleton"
 
-/** Shared focus target that leaves focus where it is. */
-const NO_LIST_FOCUS_TARGET: AgentListFocusTarget = Object.freeze({
-  kind: "none"
-})
-
 /** Shared focus target naming the New agent button. */
 const NEW_AGENT_FOCUS_TARGET: AgentListFocusTarget = Object.freeze({
   kind: "new-agent"
 })
-
-/** React key of the new agent's editor; no agent code contains `:`. */
-const NEW_AGENT_EDITOR_KEY = ":new"
 
 /**
  * Calculates the list control that takes focus when the list returns from
@@ -44,7 +35,7 @@ function calculateEditorReturnTarget(
 ): AgentListFocusTarget {
   switch (editor.status) {
     case "closed":
-      return NO_LIST_FOCUS_TARGET
+      return { kind: "none" }
     case "opening":
     case "unavailable":
       return { kind: "agent", agentCode: editor.agentCode }
@@ -100,10 +91,9 @@ type AgentWorkspaceProps = {
  * saved agent's row, the opened agent's row, or the New agent button. It
  * records that control when it opens an editor, and when it appears with an
  * editor already open, as after the pane was left and entered again, it
- * starts from that editor's agent. While the editor is closed, the built-in
- * section, marked coming soon, precedes the user's agents. Each agent's
- * editor is a separate instance, keyed by its code; the new agent's editor
- * has a key no code can take.
+ * starts from that editor's agent. Each agent's editor is a separate
+ * instance, keyed by its code; the new agent's editor is keyed `:new`, which
+ * no code can take because codes never contain `:`.
  * @param props - Listed agents.
  * @returns The agent list, the read status of an agent being opened, or its
  * editor.
@@ -138,7 +128,6 @@ function AgentWorkspace({ agents }: AgentWorkspaceProps): ReactElement {
     case "closed":
       return (
         <div className="settings-view__stack">
-          <BuiltInAgentSection />
           <CustomAgentSection
             agents={agents}
             focusTarget={calculateListFocusTarget(
@@ -163,13 +152,7 @@ function AgentWorkspace({ agents }: AgentWorkspaceProps): ReactElement {
         />
       )
     case "creating":
-      return (
-        <AgentEditor
-          agents={agents}
-          editor={editor}
-          key={NEW_AGENT_EDITOR_KEY}
-        />
-      )
+      return <AgentEditor agents={agents} editor={editor} key=":new" />
     case "editing":
       return (
         <AgentEditor agents={agents} editor={editor} key={editor.agent.code} />

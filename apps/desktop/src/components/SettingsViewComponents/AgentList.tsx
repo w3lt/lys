@@ -24,11 +24,13 @@ export type AgentListFocusTarget =
     }
 
 /**
- * Focuses an element as React attaches it.
+ * Handles the attachment of an element that takes focus when it appears, by
+ * focusing it.
  *
- * @param element - Attached element, or null when React detaches it.
+ * @param element - Attached element, or null when React detaches it, which
+ * is ignored.
  */
-function focusElementOnAttach(element: HTMLElement | null): void {
+function handleFocusTargetAttach(element: HTMLElement | null): void {
   element?.focus()
 }
 
@@ -42,31 +44,6 @@ function isDocumentFocusLost(): boolean {
   const { activeElement } = document
 
   return activeElement === null || activeElement === document.body
-}
-
-/**
- * Presents the section for agents that ship with Lys, marked as coming soon.
- *
- * @remarks Built-in agents do not exist yet, so the section holds only its
- * heading and a note; it owns no state, effects, or callbacks. The section is
- * named by its heading.
- * @returns The built-in agents section.
- */
-export function BuiltInAgentSection(): ReactElement {
-  const headingId = useId()
-
-  return (
-    <section aria-labelledby={headingId} className="settings-view__section">
-      <div className="settings-view__section-heading">
-        <h2 id={headingId}>built-in</h2>
-        <span>coming soon</span>
-      </div>
-      <p className="settings-view__note">
-        Agents that ship with Lys are not available yet. They will come in a
-        later version.
-      </p>
-    </section>
-  )
 }
 
 /** Properties accepted by {@link AgentListItem}. */
@@ -110,7 +87,7 @@ function AgentListItem({
         aria-labelledby={`${nameId} ${codeId}`}
         className="settings-view__agent-choice"
         onClick={() => onOpenAgent(agent.code)}
-        ref={isFocusedOnAttach ? focusElementOnAttach : undefined}
+        ref={isFocusedOnAttach ? handleFocusTargetAttach : undefined}
         type="button"
       >
         <span className="settings-view__agent-lines">
@@ -173,6 +150,27 @@ export function CustomAgentSection({
   onOpenNewAgent
 }: CustomAgentSectionProps): ReactElement {
   const headingId = useId()
+  const focusedAgentCode =
+    focusTarget.kind === "agent" ? focusTarget.agentCode : null
+
+  /**
+   * Builds the row of one listed agent.
+   *
+   * @param agent - Listed agent.
+   * @returns The agent's list item, keyed by its code, focused on attach when
+   * it is the focus target and marked when it was saved most recently.
+   */
+  function buildAgentListItem(agent: AgentSummary): ReactElement {
+    return (
+      <AgentListItem
+        agent={agent}
+        isFocusedOnAttach={agent.code === focusedAgentCode}
+        isRecentlySaved={agent.code === savedAgentCode}
+        key={agent.code}
+        onOpenAgent={onOpenAgent}
+      />
+    )
+  }
 
   return (
     <section aria-labelledby={headingId} className="settings-view__section">
@@ -184,7 +182,7 @@ export function CustomAgentSection({
             onClick={onOpenNewAgent}
             ref={
               focusTarget.kind === "new-agent"
-                ? focusElementOnAttach
+                ? handleFocusTargetAttach
                 : undefined
             }
             size="sm"
@@ -202,18 +200,7 @@ export function CustomAgentSection({
         </p>
       ) : (
         <ul aria-label="Your agents" className="settings-view__agent-list">
-          {agents.map((agent) => (
-            <AgentListItem
-              agent={agent}
-              isFocusedOnAttach={
-                focusTarget.kind === "agent" &&
-                focusTarget.agentCode === agent.code
-              }
-              isRecentlySaved={agent.code === savedAgentCode}
-              key={agent.code}
-              onOpenAgent={onOpenAgent}
-            />
-          ))}
+          {agents.map(buildAgentListItem)}
         </ul>
       )}
     </section>

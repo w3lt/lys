@@ -54,11 +54,13 @@ type ReadingAgentEditor = Extract<
 >
 
 /**
- * Focuses an element as React attaches it.
+ * Handles the attachment of an element that takes focus when it appears, by
+ * focusing it.
  *
- * @param element - Attached element, or null when React detaches it.
+ * @param element - Attached element, or null when React detaches it, which
+ * is ignored.
  */
-function focusElementOnAttach(element: HTMLElement | null): void {
+function handleFocusTargetAttach(element: HTMLElement | null): void {
   element?.focus()
 }
 
@@ -255,8 +257,8 @@ type AgentCodeFieldProps = {
  *
  * @remarks The parent owns the code and how typed text becomes one; the
  * field owns no state or effects. The input is labeled `code` and described
- * by its constraints — optional and fixed once created, its accepted
- * characters, and its length against the limit — and, while invalid, by the
+ * by its constraints — optional and fixed once created, its accepted format,
+ * and its length against the limit — and, while invalid, by the
  * problem message. `use name` appears only while the code is empty and the
  * name has a code form, and proposes that form.
  * @param props - Code, the typed name, and the change action.
@@ -317,7 +319,10 @@ function AgentCodeField({
         value={code}
       />
       <div className="settings-view__agent-field-top">
-        <span id={formatId}>lowercase letters, digits, and hyphens</span>
+        <span id={formatId}>
+          lowercase letters and digits, joined by single hyphens, not ending in
+          one
+        </span>
       </div>
     </div>
   )
@@ -674,7 +679,7 @@ function StoredAgentActions({
       <Button
         disabled={isPending}
         onClick={handleRequestDeletion}
-        ref={hasConfirmationOpened ? focusElementOnAttach : undefined}
+        ref={hasConfirmationOpened ? handleFocusTargetAttach : undefined}
         size="sm"
         type="button"
         variant="destructive"
@@ -844,32 +849,6 @@ function isSaveShortcut(event: KeyboardEvent<HTMLElement>): boolean {
 }
 
 /**
- * Focuses the editor field that a problem concerns.
- *
- * @param fieldRefs - Editor host elements.
- * @param field - Field to focus.
- */
-function focusAgentDraftField(
-  fieldRefs: AgentFieldRefs,
-  field: AgentDraftField
-): void {
-  switch (field) {
-    case "name":
-      fieldRefs.name.current?.focus()
-      return
-    case "code":
-      fieldRefs.code.current?.focus()
-      return
-    case "bio":
-      fieldRefs.bio.current?.focus()
-      return
-    case "systemPrompt":
-      fieldRefs.systemPrompt.current?.focus()
-      return
-  }
-}
-
-/**
  * Owns the editor's field hosts and moves focus to the field that needs it.
  *
  * @param saveAttemptCount - Reactive count of the editor's save attempts;
@@ -899,9 +878,9 @@ function useAgentFieldFocus(
     bio: bioFieldRef,
     systemPrompt: systemPromptFieldRef
   }
-  const focusShownProblemField = useEffectEvent((): void => {
+  const handleSaveAttempt = useEffectEvent((): void => {
     if (problem === undefined) return
-    focusAgentDraftField(fieldRefs, calculateAgentDraftProblemField(problem))
+    fieldRefs[calculateAgentDraftProblemField(problem)].current?.focus()
   })
 
   useLayoutEffect(() => {
@@ -909,7 +888,7 @@ function useAgentFieldFocus(
   }, [])
 
   useLayoutEffect(() => {
-    if (saveAttemptCount > 0) focusShownProblemField()
+    if (saveAttemptCount > 0) handleSaveAttempt()
   }, [saveAttemptCount])
 
   return fieldRefs
@@ -947,7 +926,8 @@ export function AgentEditor({
    * sent, and the recorded attempt moves focus to that problem's field.
    *
    * @param event - Submission of the editor form; ignored unless the editor
-   * is idle and its draft changed, as the Save button is.
+   * is idle and its draft changed, as the Save button is. The agent store
+   * also ignores it while the list is read again, when Save is disabled too.
    */
   function handleSubmit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault()
@@ -1018,11 +998,13 @@ type AgentEditorFooterProps = {
  * Presents the editor's actions: the stored agent's own, closing, and
  * saving.
  *
- * @remarks The agent store owns every action; the parent supplies the editor
- * and whether its draft changed, and owns the form that the Save button
- * submits. Close reads `Discard` while the draft holds changes. Save reads
- * `Create` for a new agent and is enabled only for an idle editor with
- * changes. While a change is pending, every action is disabled.
+ * @remarks The agent store owns every action and the agent list; the parent
+ * supplies the editor and whether its draft changed, and owns the form that
+ * the Save button submits. Close reads `Discard` while the draft holds
+ * changes. Save reads `Create` for a new agent and is enabled only for an
+ * idle editor with changes while the agent list is not being read again,
+ * since names and codes are checked against it. While a change is pending,
+ * every action is disabled.
  * @param props - Drafting editor and whether its draft changed.
  * @returns The editor footer.
  */
@@ -1031,7 +1013,7 @@ function AgentEditorFooter({
   isDraftChanged
 }: AgentEditorFooterProps): ReactElement {
   const closeAgentEditor = useAgentStore((state) => state.closeAgentEditor)
-  const duplicateAgent = useAgentStore((state) => state.duplicateAgent)
+  const openAgentCopy = useAgentStore((state) => state.openAgentCopy)
   const openAgentDeleteConfirmation = useAgentStore(
     (state) => state.openAgentDeleteConfirmation
   )
@@ -1039,6 +1021,9 @@ function AgentEditorFooter({
     (state) => state.closeAgentDeleteConfirmation
   )
   const deleteAgent = useAgentStore((state) => state.deleteAgent)
+  const isListRefreshing = useAgentStore(
+    (state) => state.list.status === "loaded" && state.list.isRefreshing
+  )
   const { activity } = editor
   const isNew = editor.status === "creating"
 
@@ -1049,7 +1034,7 @@ function AgentEditorFooter({
           activity={editor.activity}
           onCancelAgentDeletion={closeAgentDeleteConfirmation}
           onDeleteAgent={() => void deleteAgent()}
-          onDuplicateAgent={duplicateAgent}
+          onDuplicateAgent={openAgentCopy}
           onRequestAgentDeletion={openAgentDeleteConfirmation}
         />
       ) : null}
@@ -1064,7 +1049,9 @@ function AgentEditorFooter({
           {isDraftChanged ? "Discard" : "Close"}
         </Button>
         <Button
-          disabled={!isDraftChanged || activity.status !== "idle"}
+          disabled={
+            !isDraftChanged || activity.status !== "idle" || isListRefreshing
+          }
           size="sm"
           type="submit"
         >

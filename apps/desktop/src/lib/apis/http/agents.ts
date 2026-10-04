@@ -94,49 +94,23 @@ type AgentHttpRequest = AgentApiConnection & {
   readonly body?: string
 }
 
-/** Headers for a request without a body; Fastify rejects empty JSON bodies. */
-const ACCEPT_JSON_HEADERS: Readonly<Record<string, string>> = Object.freeze({
-  Accept: "application/json"
-})
-
-/** Headers for a request carrying a serialized JSON body. */
-const SEND_JSON_HEADERS: Readonly<Record<string, string>> = Object.freeze({
-  Accept: "application/json",
-  "Content-Type": "application/json"
-})
-
-/** Shared absence outcome; it carries no per-occurrence data. */
-const AGENT_NOT_FOUND_RESULT: AgentNotFoundResult = Object.freeze({
-  status: "not-found"
-})
-
-/** Shared deletion outcome; it carries no per-occurrence data. */
-const AGENT_DELETED_RESULT: DeleteAgentResult = Object.freeze({
-  status: "deleted"
-})
-
-/** Shared taken-code outcome; it carries no per-occurrence data. */
-const AGENT_CODE_TAKEN_RESULT: CreateAgentResult = Object.freeze({
-  status: "code-taken"
-})
-
 /** HTTP status of a successful read or update. */
 const HTTP_OK_STATUS = 200
 
-/** HTTP status of a successful creation. */
-const HTTP_CREATED_STATUS = 201
-
 /**
- * Gets the response to one agent request in any HTTP status.
+ * Sends one agent request and returns its response in any HTTP status.
  *
  * @param request - Endpoint, body, origin, and cancellation scope.
  * @returns The response whose body remains owned by the endpoint adapter.
  * @throws The original abort failure when the signal was aborted, or a
  * caller-safe error retaining the transport failure as its cause.
  */
-async function getAgentResponse(request: AgentHttpRequest): Promise<Response> {
-  const headers =
-    request.body === undefined ? ACCEPT_JSON_HEADERS : SEND_JSON_HEADERS
+async function sendAgentRequest(request: AgentHttpRequest): Promise<Response> {
+  // A bodyless request declares no content type; Fastify rejects empty JSON.
+  const headers: Readonly<Record<string, string>> =
+    request.body === undefined
+      ? { Accept: "application/json" }
+      : { Accept: "application/json", "Content-Type": "application/json" }
 
   try {
     return await fetch(`${request.backendUrl}${request.path}`, {
@@ -199,7 +173,7 @@ async function parseAgentFailure(
     throw createAgentResponseError(response.status)
   }
 
-  return AGENT_NOT_FOUND_RESULT
+  return Object.freeze({ status: "not-found" })
 }
 
 /**
@@ -285,7 +259,7 @@ export async function listAgents(
   connection: AgentApiConnection
 ): Promise<ListAgentsApiResponse> {
   const validatedQuery = listAgentsApi.querystring.parse(query)
-  const response = await getAgentResponse({
+  const response = await sendAgentRequest({
     ...connection,
     method: listAgentsApi.method,
     path: buildAgentListPath(validatedQuery)
@@ -319,7 +293,7 @@ export async function getAgent(
   connection: AgentApiConnection
 ): Promise<GetAgentResult> {
   const params = getAgentApi.params.parse({ agentCode })
-  const response = await getAgentResponse({
+  const response = await sendAgentRequest({
     ...connection,
     method: getAgentApi.method,
     path: buildAgentPath(getAgentApi.path, params.agentCode)
@@ -357,7 +331,7 @@ export async function createAgent(
   connection: AgentApiConnection
 ): Promise<CreateAgentResult> {
   const body = createAgentApi.body.parse(definition)
-  const response = await getAgentResponse({
+  const response = await sendAgentRequest({
     ...connection,
     method: createAgentApi.method,
     path: createAgentApi.path,
@@ -366,14 +340,14 @@ export async function createAgent(
   if (response.status === 409) {
     const problem = await readAgentFailureBody(response)
     if (agentCodeTakenProblemSchema.safeParse(problem).success) {
-      return AGENT_CODE_TAKEN_RESULT
+      return Object.freeze({ status: "code-taken" })
     }
   }
   if (!response.ok) throw createAgentResponseError(response.status)
 
   const agent = await parseAgentPayload(
     response,
-    HTTP_CREATED_STATUS,
+    201,
     createAgentApi.response.parse
   )
   if (body.code !== undefined && agent.code !== body.code) {
@@ -401,7 +375,7 @@ export async function updateAgent(
 ): Promise<UpdateAgentResult> {
   const params = updateAgentApi.params.parse({ agentCode: update.agentCode })
   const body = updateAgentApi.body.parse(update.changes)
-  const response = await getAgentResponse({
+  const response = await sendAgentRequest({
     ...connection,
     method: updateAgentApi.method,
     path: buildAgentPath(updateAgentApi.path, params.agentCode),
@@ -439,12 +413,12 @@ export async function deleteAgent(
   connection: AgentApiConnection
 ): Promise<DeleteAgentResult> {
   const params = deleteAgentApi.params.parse({ agentCode })
-  const response = await getAgentResponse({
+  const response = await sendAgentRequest({
     ...connection,
     method: deleteAgentApi.method,
     path: buildAgentPath(deleteAgentApi.path, params.agentCode)
   })
-  if (response.status === 204) return AGENT_DELETED_RESULT
+  if (response.status === 204) return Object.freeze({ status: "deleted" })
   if (!response.ok) return await parseAgentFailure(response)
 
   throw new Error("The backend returned an unexpected delete response.")

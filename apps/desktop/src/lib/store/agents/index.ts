@@ -41,7 +41,7 @@ export {
 } from "./agent-draft"
 
 /** Backend origin and availability sampled when an agent request starts. */
-export type AgentBackend = {
+type AgentBackend = {
   /** Application-owned backend origin. */
   readonly backendUrl: string
   /** Whether the backend process currently admits requests. */
@@ -55,7 +55,7 @@ export type AgentBackend = {
  * starts; these dependencies provide only transport and backend
  * availability.
  */
-export type AgentStoreDependencies = {
+type AgentStoreDependencies = {
   /** Lists one page of agents; the store supplies its abort signal. */
   readonly listAgents: (
     query: ListAgentsApiQuery,
@@ -232,7 +232,7 @@ export type AgentActions = {
   /** Reads one stored agent and opens its editor. */
   readonly openAgent: (agentCode: string) => Promise<void>
   /** Opens an editor for a new agent holding a copy of the edited one. */
-  readonly duplicateAgent: () => void
+  readonly openAgentCopy: () => void
   /** Closes the editor and discards its draft. */
   readonly closeAgentEditor: () => void
   /** Replaces the edited draft. */
@@ -248,7 +248,7 @@ export type AgentActions = {
   readonly closeAgentDeleteConfirmation: () => void
   /**
    * Saves the draft when it has no problem; otherwise records the attempt so
-   * its first problem is shown.
+   * its first problem is shown. Ignored while the list is read again.
    */
   readonly saveAgentDraft: () => Promise<void>
   /** Permanently deletes the edited agent once its deletion is confirmed. */
@@ -356,15 +356,6 @@ type AgentDeletionOutcome =
       readonly error: string
     }
 
-/**
- * Inclusive maximum number of agents one list read collects.
- *
- * @remarks The list is held whole in memory, so a read stops with a failure
- * instead of growing past this many agents. It bounds only the desktop's
- * read; the backend stores any number.
- */
-const MAXIMUM_LISTED_AGENT_COUNT = 1000
-
 /** Failure shown when agents are read while the backend is not running. */
 const BACKEND_STOPPED_READ_MESSAGE =
   "The backend is not running, so agents cannot be read."
@@ -372,13 +363,6 @@ const BACKEND_STOPPED_READ_MESSAGE =
 /** Failure shown when a change is requested while the backend is stopped. */
 const BACKEND_STOPPED_MUTATION_MESSAGE =
   "The backend is not running, so the change was not made."
-
-/** Failure shown when an agent being opened is no longer stored. */
-const MISSING_AGENT_MESSAGE = "That agent no longer exists."
-
-/** Failure shown when an agent being saved is no longer stored. */
-const MISSING_EDITED_AGENT_MESSAGE =
-  "That agent no longer exists. Duplicate it to keep your changes."
 
 /** Shared closed editor; it carries no data. */
 const CLOSED_AGENT_EDITOR: AgentEditorState = Object.freeze({
@@ -389,34 +373,6 @@ const CLOSED_AGENT_EDITOR: AgentEditorState = Object.freeze({
 const IDLE_AGENT_ACTIVITY: NewAgentActivity = Object.freeze({
   status: "idle",
   failure: null
-})
-
-/** Shared saving activity. */
-const SAVING_AGENT_ACTIVITY: NewAgentActivity = Object.freeze({
-  status: "saving"
-})
-
-/** Shared confirming-delete activity. */
-const CONFIRMING_DELETE_ACTIVITY: StoredAgentActivity = Object.freeze({
-  status: "confirming-delete"
-})
-
-/** Shared deleting activity. */
-const DELETING_AGENT_ACTIVITY: StoredAgentActivity = Object.freeze({
-  status: "deleting"
-})
-
-/** Shared list before any read. */
-const IDLE_AGENT_LIST: AgentListState = Object.freeze({ status: "idle" })
-
-/** Shared list while its first read is pending. */
-const LOADING_AGENT_LIST: AgentListState = Object.freeze({ status: "loading" })
-
-/** Initial observable state used as a fresh value by independent stores. */
-const INITIAL_AGENT_STATE: AgentState = Object.freeze({
-  list: IDLE_AGENT_LIST,
-  editor: CLOSED_AGENT_EDITOR,
-  savedAgentCode: null
 })
 
 /**
@@ -497,7 +453,7 @@ function buildFailedAgentList(error: string): AgentListState {
 function calculatePendingAgentList(list: AgentListState): AgentListState {
   return list.status === "loaded"
     ? buildLoadedAgentList(list.agents, true)
-    : LOADING_AGENT_LIST
+    : Object.freeze({ status: "loading" })
 }
 
 /**
@@ -692,13 +648,16 @@ function buildAgentPageQuery(cursor: string | undefined): ListAgentsApiQuery {
  * @param page - Page just read.
  * @returns A frozen list of the earlier agents followed by the page's.
  * @throws When a page that promises more is empty, when an agent repeats an
- * earlier page's, or when the agents exceed
- * {@link MAXIMUM_LISTED_AGENT_COUNT}.
+ * earlier page's, or when the agents exceed 1,000.
+ * @remarks The list is held whole in memory, so a read stops with a failure
+ * instead of collecting more than 1,000 agents. This bounds only the
+ * desktop's read; the backend stores any number.
  */
 function parseAgentListWithPage(
   listedAgents: readonly AgentSummary[],
   page: ListAgentsApiResponse
 ): readonly AgentSummary[] {
+  const maximumListedAgentCount = 1000
   if (page.nextCursor !== null && page.agents.length === 0) {
     throw new Error("The backend returned an empty page of agents.")
   }
@@ -706,9 +665,9 @@ function parseAgentListWithPage(
   if (page.agents.some((agent) => listedCodes.has(agent.code))) {
     throw new Error("The backend listed an agent more than once.")
   }
-  if (listedAgents.length + page.agents.length > MAXIMUM_LISTED_AGENT_COUNT) {
+  if (listedAgents.length + page.agents.length > maximumListedAgentCount) {
     throw new Error(
-      `Lys lists at most ${MAXIMUM_LISTED_AGENT_COUNT} agents, and more are stored.`
+      `Lys lists at most ${maximumListedAgentCount} agents, and more are stored.`
     )
   }
 
@@ -721,7 +680,7 @@ function parseAgentListWithPage(
  * @param dependencies - Transport and backend availability.
  * @returns A Zustand hook and store API owning one agent-management lifecycle.
  */
-export function createAgentStore(
+function createAgentStore(
   dependencies: AgentStoreDependencies
 ): UseBoundStore<StoreApi<AgentStore>> {
   /** Current store-owned list read, or absent when none is owned. */
@@ -1066,7 +1025,7 @@ export function createAgentStore(
         case "missing": {
           const editor = buildUnavailableAgentEditor(
             agentCode,
-            MISSING_AGENT_MESSAGE
+            "That agent no longer exists."
           )
           const list = calculateListWithoutAgent(get().list, agentCode)
           set({ editor, list })
@@ -1085,7 +1044,7 @@ export function createAgentStore(
      * @remarks Applies only to an idle stored-agent editor. The copy's name
      * is one no listed agent uses, and its code is empty.
      */
-    function duplicateAgent(): void {
+    function openAgentCopy(): void {
       const { editor, list } = get()
       if (editor.status !== "editing" || editor.activity.status !== "idle") {
         return
@@ -1159,7 +1118,9 @@ export function createAgentStore(
         return
       }
 
-      const activity = CONFIRMING_DELETE_ACTIVITY
+      const activity: StoredAgentActivity = Object.freeze({
+        status: "confirming-delete"
+      })
       const confirmingEditor: AgentEditorState = Object.freeze({
         ...editor,
         activity
@@ -1212,8 +1173,8 @@ export function createAgentStore(
         return undefined
       }
       const backend = dependencies.getBackend()
-      const activity = backend.isRunning
-        ? SAVING_AGENT_ACTIVITY
+      const activity: NewAgentActivity = backend.isRunning
+        ? Object.freeze({ status: "saving" })
         : buildFailedAgentActivity(BACKEND_STOPPED_MUTATION_MESSAGE)
       const savingEditor: AgentEditorState = Object.freeze({
         ...editor,
@@ -1254,7 +1215,7 @@ export function createAgentStore(
           set({
             editor: buildFailedAgentEditor(
               editor,
-              MISSING_EDITED_AGENT_MESSAGE
+              "That agent no longer exists. Duplicate it to keep your changes."
             ),
             list: calculateListWithoutAgent(list, outcome.agentCode)
           })
@@ -1275,14 +1236,17 @@ export function createAgentStore(
      * Saves the draft when it has no problem.
      *
      * @returns A promise that resolves after the outcome commits.
-     * @remarks Applies only to an idle editor while the list is displayed,
-     * since names are checked against it. A draft with a problem is not sent;
-     * the attempt is recorded so the problem is shown. A stopped backend
-     * reports a failure without sending a request.
+     * @remarks Applies only to an idle editor while the list is displayed and
+     * not being read again, since names and codes are checked against it; a
+     * read that may list an agent stored by an unconfirmed creation must
+     * commit before that draft can be sent again. A draft with a problem is
+     * not sent; the attempt is recorded so the problem is shown. A stopped
+     * backend reports a failure without sending a request.
      */
     async function saveAgentDraft(): Promise<void> {
       const { editor, list } = get()
-      if (list.status !== "loaded" || !isDraftEditable(editor)) return
+      if (list.status !== "loaded" || list.isRefreshing) return
+      if (!isDraftEditable(editor)) return
       if (editor.activity.status !== "idle") return
 
       const backendUrl = startAgentSave(editor, list.agents)
@@ -1323,7 +1287,9 @@ export function createAgentStore(
         return
       }
 
-      const activity = DELETING_AGENT_ACTIVITY
+      const activity: StoredAgentActivity = Object.freeze({
+        status: "deleting"
+      })
       const deletingEditor: AgentEditorState = Object.freeze({
         ...editor,
         activity
@@ -1359,11 +1325,13 @@ export function createAgentStore(
     }
 
     return {
-      ...INITIAL_AGENT_STATE,
+      list: Object.freeze({ status: "idle" }),
+      editor: CLOSED_AGENT_EDITOR,
+      savedAgentCode: null,
       loadAgents,
       openNewAgent,
       openAgent,
-      duplicateAgent,
+      openAgentCopy,
       closeAgentEditor,
       updateAgentDraft,
       updateNewAgentCode,
@@ -1392,8 +1360,7 @@ function getApplicationBackend(): AgentBackend {
  * Agent store used by the desktop React tree.
  *
  * @remarks This singleton manages agents through the backend named by the
- * application store. Tests or alternate compositions should call
- * {@link createAgentStore} to obtain a separate owner.
+ * application store.
  */
 export const useAgentStore: UseBoundStore<StoreApi<AgentStore>> =
   createAgentStore({

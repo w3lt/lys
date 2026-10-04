@@ -94,9 +94,6 @@ export const EMPTY_AGENT_DRAFT: AgentDraft = Object.freeze({
   systemPrompt: ""
 })
 
-/** Name base used for a copy when the original name is blank. */
-const DUPLICATE_AGENT_FALLBACK_NAME = "Agent"
-
 /**
  * Calculates the form under which names are compared for uniqueness.
  *
@@ -338,8 +335,7 @@ export function calculateDuplicateAgentName(
     agents.map((agent) => calculateComparableAgentName(agent.name))
   )
   const trimmedName = name.trim()
-  const copiedName =
-    trimmedName === "" ? DUPLICATE_AGENT_FALLBACK_NAME : trimmedName
+  const copiedName = trimmedName === "" ? "Agent" : trimmedName
   let copyNumber = 1
   while (
     takenNames.has(

@@ -203,11 +203,11 @@ appears because the control holding focus disappeared with the list or an
 editor, focus moves to Retry or to the status line.
 
 The pane lists the user's agents oldest first with their name, code, and bio.
-Built-in agents are not available yet: their section is marked coming soon.
+Built-in agents are not available yet, so the pane has no section for them.
 Opening an agent reads it with its system prompt into an editor; New agent opens
 an empty one. The editor edits the name, bio, and system prompt, and for a new
 agent an optional code. The name, bio, and prompt are marked required, and the
-code field states the characters it accepts. Typed codes keep only lowercase
+code field states the format it accepts. Typed codes keep only lowercase
 letters, digits, and single hyphens; `use name` fills the code from the name,
 and an empty code lets the backend derive one. Limits come from `@lys/share`,
 and the counters measure the trimmed text, as it is saved. Saving checks the
@@ -226,7 +226,9 @@ is replaced, since it may answer from before the change. The same holds when an
 agent being opened or saved turns out to be gone. A creation whose response is
 lost may still have stored the agent, so the editor says the save could not be
 confirmed and the list is read again; an agent that was stored then appears,
-and its name and code count as taken. Agents are not used by chats yet.
+and its name and code count as taken. Saving is unavailable while the list is
+read again, so a draft is never checked against a list that read may change.
+Agents are not used by chats yet.
 
 ## Current limitations
 

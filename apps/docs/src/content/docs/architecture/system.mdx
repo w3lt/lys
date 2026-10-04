@@ -18,7 +18,7 @@ external model runtime, and two shared TypeScript contract packages.
 | Backend                   | Fastify in `apps/backend/src`         | Serves HTTP and SSE endpoints, persists conversations in SQLite, and talks to LM Studio for model inventory and generation.          |
 | Model runtime             | LM Studio on `127.0.0.1:1234`         | Supplies downloaded-model inventory, model loading, chat completions, and title generation.                                          |
 | Shared API contract       | `@lys/protocol`                       | Defines route paths, request bodies, response schemas, and chat SSE event variants with Zod.                                         |
-| Shared conversation model | `@lys/share`                          | Defines the conversation, message, and metadata shapes shared between backend and desktop.                                           |
+| Shared domain model types | `@lys/share`                          | Defines the conversation, message, metadata, and agent shapes shared between backend and desktop.                                    |
 
 ## Process boundary
 
@@ -35,9 +35,10 @@ Fastify backend -> SQLite
 
 | State                                        | Owner                   | Notes                                                                                         |
 | -------------------------------------------- | ----------------------- | --------------------------------------------------------------------------------------------- |
-| Conversation rows and message rows           | Backend                 | Stored in `$LYS_HOME/lys_db.sqlite`.                                                          |
+| Conversation, message, and agent rows        | Backend                 | Stored in `$LYS_HOME/lys_db.sqlite`.                                                          |
 | Chat request lifecycle in the current window | Desktop UI              | Held in the chat Zustand store while one request is active.                                   |
 | Past-conversations dialog                    | Desktop UI              | Held in the history Zustand store; listed conversations are read from the backend.            |
+| Agents pane list and editor                  | Desktop UI              | Held in the agent Zustand store; agents are read from the backend.                            |
 | Backend process status                       | Desktop UI + Tauri host | The host owns the process; the UI queries status during initialization and lifecycle actions. |
 | Runtime settings JSON                        | Tauri host              | Stored in `$LYS_HOME/settings.json`.                                                          |
 | Theme preference                             | Desktop UI              | Stored as `lys.theme` in WebView `localStorage`.                                              |

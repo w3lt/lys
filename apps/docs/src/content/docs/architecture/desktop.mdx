@@ -197,25 +197,36 @@ The Agents pane manages the agents stored by the backend through the
 appears and whenever the backend starts running, one page of 50 after another,
 because names are checked for uniqueness against all of them; a read stops
 with a failure past 1,000 agents. A displayed list stays on screen while it is
-read again. While the backend is not running, the pane says so instead.
+read again. A status line above the agents says why they are not shown: the
+backend is not running, or a read failed, which offers Retry. When the status
+appears because the control holding focus disappeared with the list or an
+editor, focus moves to Retry or to the status line.
 
 The pane lists the user's agents oldest first with their name, code, and bio.
 Built-in agents are not available yet: their section is marked coming soon.
 Opening an agent reads it with its system prompt into an editor; New agent opens
 an empty one. The editor edits the name, bio, and system prompt, and for a new
-agent an optional code. Typed codes keep only lowercase letters, digits, and
-single hyphens; `use name` fills the code from the name, and an empty code lets
-the backend derive one. Limits come from `@lys/share`. Saving checks the draft
-first: a blank name, bio, or prompt, a name another agent has (ignoring case),
-or a malformed or listed code is shown with focus on the field, and nothing is
-sent. The backend still refuses a code taken since the list was read. Duplicate
-opens a copy as a new agent under a free name, and Delete asks for confirmation.
+agent an optional code. The name, bio, and prompt are marked required, and the
+code field states the characters it accepts. Typed codes keep only lowercase
+letters, digits, and single hyphens; `use name` fills the code from the name,
+and an empty code lets the backend derive one. Limits come from `@lys/share`,
+and the counters measure the trimmed text, as it is saved. Saving checks the
+draft first: a blank name, bio, or prompt, a name or bio over its limit once
+trimmed, a name another agent has (ignoring case), or a malformed or listed
+code is shown and nothing is sent. Once the field is marked invalid, focus moves
+to it. Names need not be unique to the backend, so a stored agent that keeps
+its own name can be saved even when another agent shares it. The backend still
+refuses a code taken since the list was read. Duplicate opens a copy as a new
+agent under a free name, and Delete asks for confirmation.
 
 The agent store owns the editor and every change, so a draft survives leaving
 and returning to the pane, and a save or delete continues across pane changes.
 Settled changes are applied to the displayed list; a list read still pending
-is replaced, since it may answer from before the change. Agents are not used
-by chats yet.
+is replaced, since it may answer from before the change. The same holds when an
+agent being opened or saved turns out to be gone. A creation whose response is
+lost may still have stored the agent, so the editor says the save could not be
+confirmed and the list is read again; an agent that was stored then appears,
+and its name and code count as taken. Agents are not used by chats yet.
 
 ## Current limitations
 

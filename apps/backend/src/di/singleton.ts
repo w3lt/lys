@@ -2,20 +2,20 @@ import type { BackendConfig } from "../config"
 import SqliteAgentRecordStore from "../infrastructure/database/agents/sqliteAgentRecordStore"
 import SqliteDatabase from "../infrastructure/database/sqliteDatabase"
 import LmStudioRuntime from "../modules/llm/runtimes/lmStudioRuntime"
-import StoredAgents from "./services/agentService/agents"
+import StoredAgents from "../modules/agent/agents"
 import ChatService, {
   type ChatServiceCreationOptions
-} from "./services/chatService"
+} from "../modules/chat/chatService"
 import SqliteConversationRecordEditor from "../infrastructure/database/conversations/sqliteConversationRecordEditor"
 import SqliteConversationRecordReader from "../infrastructure/database/conversations/sqliteConversationRecordReader"
 import SqliteConversationTurnRecordWriter from "../infrastructure/database/conversations/sqliteConversationTurnRecordWriter"
-import StoredConversationHistoryEditor from "./services/conversationService/historyEditor"
-import StoredConversationHistoryReader from "./services/conversationService/historyReader"
-import StoredConversationTurns from "./services/conversationService/turns"
+import StoredConversationHistoryEditor from "../modules/conversation/historyEditor"
+import StoredConversationHistoryReader from "../modules/conversation/historyReader"
+import StoredConversationTurns from "../modules/conversation/turns"
 import LlmRuntimeService, {
   type LlmRuntimeFailureReporters
-} from "./services/llmRuntimeService"
-import LlmService from "./services/llmService"
+} from "../modules/llm/llmRuntimeService"
+import LlmService from "../modules/llm/llmService"
 
 /** Private close operation owned by one returned singleton-service bundle. */
 const CLOSE_SINGLETON_SERVICES = Symbol("close-singleton-services")

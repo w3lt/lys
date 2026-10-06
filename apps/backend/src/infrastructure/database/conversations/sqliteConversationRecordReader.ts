@@ -2,7 +2,7 @@ import type {
   ConversationPage,
   ConversationRecordReader,
   ListConversationsInput
-} from "../../../di/services/conversationService/records"
+} from "../../../modules/conversation/records"
 import type {
   DatabaseFunctionRegistry,
   DatabaseReader

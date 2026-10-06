@@ -32,7 +32,7 @@ Fastify /api/v1/llm/* -> LlmService -> LlmRuntimeService -> LlmRuntime -> LmStud
 ```
 
 The desktop settings view supplies the shared context for its Runtime, Model,
-and Generation panes. Model controls call the inventory, health, load, and
+and Generation panes; the Agents pane reads the agent store instead. Model controls call the inventory, health, load, and
 unload routes through the application store only while LM Studio is connected;
 the Runtime pane's LM Studio card reads and refreshes the connection. The model
 routes use the application-scoped `llmService` through provider-neutral

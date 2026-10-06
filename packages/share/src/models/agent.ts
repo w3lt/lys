@@ -14,11 +14,25 @@ import * as z from "zod"
  */
 export const MAXIMUM_AGENT_CODE_LENGTH = 64
 
-/** Inclusive maximum length of a trimmed agent name, in UTF-16 code units. */
-const MAXIMUM_AGENT_NAME_LENGTH = 64
+/**
+ * Inclusive maximum length of a trimmed agent name, in UTF-16 code units.
+ *
+ * @remarks Enforced on every name the API accepts and on every stored name;
+ * clients use it to bound name entry. Raising it keeps stored agents
+ * readable, but clients built with the old value reject the longer names;
+ * lowering it makes stored agents with longer names unreadable.
+ */
+export const MAXIMUM_AGENT_NAME_LENGTH = 64
 
-/** Inclusive maximum length of a trimmed agent bio, in UTF-16 code units. */
-const MAXIMUM_AGENT_BIO_LENGTH = 128
+/**
+ * Inclusive maximum length of a trimmed agent bio, in UTF-16 code units.
+ *
+ * @remarks Enforced on every bio the API accepts and on every stored bio;
+ * clients use it to bound bio entry. Raising it keeps stored agents readable,
+ * but clients built with the old value reject the longer bios; lowering it
+ * makes stored agents with longer bios unreadable.
+ */
+export const MAXIMUM_AGENT_BIO_LENGTH = 128
 
 /**
  * Lowercase ASCII letters and digits in hyphen-separated groups, with no

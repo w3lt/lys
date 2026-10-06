@@ -141,9 +141,10 @@ a missing file creates the parent directory and writes the default document.
 
 ## Settings updates
 
-The settings view provides Runtime, Model, and Generation panes. Model inventory,
-load, unload, and loaded-state health controls call the backend through the
-application store. There is no Conversation pane.
+The settings view provides Runtime, Model, Generation, and Agents panes. Model
+inventory, load, unload, and loaded-state health controls call the backend
+through the application store. Agents are stored by the backend, not in
+`settings.json`. There is no Conversation pane.
 
 Generation edits apply to future messages immediately and are saved
 automatically through Tauri. The save reloads the persisted document and replaces

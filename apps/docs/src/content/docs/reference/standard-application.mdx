@@ -86,6 +86,36 @@ and six public class operations including `create()`. That is a proposed change,
 not an implemented compatibility decision. Behavioral coverage remains separate
 work tracked in [issue #25](https://github.com/w3lt/lys/issues/25).
 
+## Agent editor error discovery exception
+
+The Agents pane editor has an approved exception to the multiple-control
+clause of
+[COMP-130](https://github.com/w3lt/lys/blob/main/docs/code_standards/COMPONENT.md):
+when a rejected save leaves more than one field invalid, focus does not move to
+an error summary. The exception was approved by the maintainer on 2026-10-04
+for [PR #116](https://github.com/w3lt/lys/pull/116), following review finding
+I-6.
+
+- **Scope:** only the rejected-save path of the
+  [agent editor](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/SettingsViewComponents/AgentEditor.tsx)
+  when a draft has more than one problem.
+  [`findAgentDraftProblem`](https://github.com/w3lt/lys/blob/main/apps/desktop/src/lib/store/agents/agent-draft.ts)
+  reports the first problem in field order. The single-control clause still
+  applies and is met: the field is marked invalid, described by the problem,
+  and focused, and the entered text stays intact.
+- **Constraint:** the approved pane design shows one problem line. A summary
+  needs design decisions that the design does not make: its placement, its
+  look in both themes, and whether each problem also appears under its field.
+- **Alternatives considered:**
+  - Building a summary without a design was rejected, because it would invent
+    those decisions.
+  - Holding #116 until the summary exists was rejected by the maintainer.
+- **Risk and control:** a draft with several problems shows one of them per
+  save attempt. Nothing is sent while any problem remains, and each problem is
+  announced through its focused field.
+- **Removal condition:** [issue #117](https://github.com/w3lt/lys/issues/117)
+  delivers the summary, and this exception is removed with it.
+
 ## API boundaries
 
 Canonical rules: [API-004, API-020, API-034](https://github.com/w3lt/lys/blob/main/docs/code_standards/API.md).

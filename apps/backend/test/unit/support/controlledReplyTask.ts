@@ -1,4 +1,4 @@
-import type { ReplyGenerationTaskContext } from "../../../src/modules/chat/chat/replyGeneration"
+import type { ReplyGenerationTaskContext } from "../../../src/modules/chat/replyGeneration"
 
 /**
  * Generation task whose start is observable and whose settlement the case

@@ -3,7 +3,7 @@ import type {
   ConversationMessage,
   ConversationUserMessage
 } from "@lys/share"
-import type { ConversationTurn } from "../../../src/modules/chat/chat/persistence"
+import type { ConversationTurn } from "../../../src/modules/chat/persistence"
 
 /**
  * Creates a syntactically valid UUIDv7 whose last group encodes `sequence`.

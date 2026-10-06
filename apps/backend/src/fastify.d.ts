@@ -1,12 +1,12 @@
 /// <reference types="fastify" />
 
-import type StoredAgents from "./di/services/agentService/agents"
-import type ChatService from "./di/services/chatService"
-import type StoredConversationHistoryEditor from "./di/services/conversationService/historyEditor"
-import type StoredConversationHistoryReader from "./di/services/conversationService/historyReader"
-import type StoredConversationTurns from "./di/services/conversationService/turns"
-import type LlmRuntimeService from "./di/services/llmRuntimeService"
-import type LlmService from "./di/services/llmService"
+import type StoredAgents from "./modules/agent/agents"
+import type ChatService from "./modules/chat/chatService"
+import type StoredConversationHistoryEditor from "./modules/conversation/historyEditor"
+import type StoredConversationHistoryReader from "./modules/conversation/historyReader"
+import type StoredConversationTurns from "./modules/conversation/turns"
+import type LlmRuntimeService from "./modules/llm/llmRuntimeService"
+import type LlmService from "./modules/llm/llmService"
 
 declare module "fastify" {
   /** Fastify application services installed by the singleton-services plugin. */

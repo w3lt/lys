@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { Agent } from "@lys/share"
-import type { AgentRecordStore } from "../../../src/di/services/agentService/records"
+import type { AgentRecordStore } from "../../../src/modules/agent/records"
 
 /** Agent records over one empty store, with the controls a case needs. */
 export type AgentRecordStoreHarness = Readonly<{

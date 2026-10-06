@@ -7,7 +7,7 @@ import type {
   ConversationTurnRecordWriter,
   ConversationTurnTransaction,
   ListConversationsInput
-} from "../../../src/di/services/conversationService/records"
+} from "../../../src/modules/conversation/records"
 import { createFixtureUuidV7 } from "./conversationFixtures"
 import { getThrownFailure } from "./databaseTransactionsContract"
 

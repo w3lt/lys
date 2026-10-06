@@ -3,15 +3,15 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { backendConfigSchema } from "../../../src/config"
-import StoredAgents from "../../../src/di/services/agentService/agents"
-import ChatService from "../../../src/di/services/chatService"
-import StoredConversationHistoryEditor from "../../../src/di/services/conversationService/historyEditor"
-import StoredConversationHistoryReader from "../../../src/di/services/conversationService/historyReader"
-import StoredConversationTurns from "../../../src/di/services/conversationService/turns"
+import StoredAgents from "../../../src/modules/agent/agents"
+import ChatService from "../../../src/modules/chat/chatService"
+import StoredConversationHistoryEditor from "../../../src/modules/conversation/historyEditor"
+import StoredConversationHistoryReader from "../../../src/modules/conversation/historyReader"
+import StoredConversationTurns from "../../../src/modules/conversation/turns"
 import LlmRuntimeService, {
   type LlmRuntimeFailureReporters
-} from "../../../src/di/services/llmRuntimeService"
-import LlmService from "../../../src/di/services/llmService"
+} from "../../../src/modules/llm/llmRuntimeService"
+import LlmService from "../../../src/modules/llm/llmService"
 import {
   closeSingletonServices,
   createSingletonServices,

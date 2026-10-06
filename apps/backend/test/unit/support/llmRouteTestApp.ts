@@ -1,8 +1,8 @@
 import { vi } from "vitest"
-import LlmRuntimeService from "../../../src/di/services/llmRuntimeService"
+import LlmRuntimeService from "../../../src/modules/llm/llmRuntimeService"
 import LlmService, {
   type LlmEngineOperationQueue
-} from "../../../src/di/services/llmService"
+} from "../../../src/modules/llm/llmService"
 import { createTestFastify, type TestFastify } from "./fastifyTestApp"
 
 /** Test application exposing the LLM services the LLM routes read. */

@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
 import * as z from "zod"
 import { buildApp } from "../../src/app"
 import type { BackendConfig } from "../../src/config"
+import StoredAgents from "../../src/di/services/agentService/agents"
 import StoredConversationHistoryEditor from "../../src/di/services/conversationService/historyEditor"
 import StoredConversationHistoryReader from "../../src/di/services/conversationService/historyReader"
 import StoredConversationTurns from "../../src/di/services/conversationService/turns"
@@ -35,6 +36,26 @@ function createOwnedBackendConfig(): BackendConfig {
   }
 }
 
+/** Fastify's default request body limit, in bytes, stated in the API reference. */
+const REQUEST_BODY_LIMIT = 1_048_576
+
+/**
+ * Serializes a new agent definition whose JSON body has an exact size.
+ *
+ * @param code - Code of the agent.
+ * @param byteLength - UTF-8 size of the body, at least that of the definition
+ * with an empty system prompt.
+ * @returns The JSON body, padded through an ASCII system prompt.
+ */
+function createAgentBodyOfSize(code: string, byteLength: number): string {
+  const definition = { code, name: "Lys", bio: "Bio" }
+  const emptyBody = JSON.stringify({ ...definition, systemPrompt: "" })
+  return JSON.stringify({
+    ...definition,
+    systemPrompt: "x".repeat(byteLength - emptyBody.length)
+  })
+}
+
 describe("buildApp", () => {
   beforeEach(() => {
     fakeLmStudio.reset()
@@ -57,7 +78,7 @@ describe("buildApp", () => {
     expect(existsSync(config.databaseFilePath)).toBe(false)
   })
 
-  it("decorates each conversation adapter and serves history from the configured database", async () => {
+  it("decorates the conversation adapters and the agent service and serves history and agents from the configured database", async () => {
     const app = await buildApp({ config: createOwnedBackendConfig() })
     onTestFinished(async () => await app.close())
     await app.ready()
@@ -65,6 +86,10 @@ describe("buildApp", () => {
     const response = await app.inject({
       method: "GET",
       url: "/api/v1/conversations"
+    })
+    const agentsResponse = await app.inject({
+      method: "GET",
+      url: "/api/v1/agents"
     })
 
     expect(app.conversationTurns).toBeInstanceOf(StoredConversationTurns)
@@ -74,7 +99,40 @@ describe("buildApp", () => {
     expect(app.conversationHistoryEditor).toBeInstanceOf(
       StoredConversationHistoryEditor
     )
+    expect(app.agents).toBeInstanceOf(StoredAgents)
     expect(response.statusCode).toBe(200)
     expect(response.json()).toMatchObject({ storedCount: 0 })
+    expect(agentsResponse.statusCode).toBe(200)
+    expect(agentsResponse.json()).toEqual({
+      agents: [],
+      storedCount: 0,
+      nextCursor: null
+    })
+  })
+
+  it("accepts a request body at the limit and refuses a larger one before the route runs", async () => {
+    const app = await buildApp({ config: createOwnedBackendConfig() })
+    onTestFinished(async () => await app.close())
+    await app.ready()
+
+    const atLimit = await app.inject({
+      method: "POST",
+      url: "/api/v1/agents",
+      headers: { "content-type": "application/json" },
+      payload: createAgentBodyOfSize("at-limit", REQUEST_BODY_LIMIT)
+    })
+    const overLimit = await app.inject({
+      method: "POST",
+      url: "/api/v1/agents",
+      headers: { "content-type": "application/json" },
+      payload: createAgentBodyOfSize("over-limit", REQUEST_BODY_LIMIT + 1)
+    })
+
+    expect(atLimit.statusCode).toBe(201)
+    expect(overLimit.statusCode).toBe(413)
+    expect(overLimit.json()).toMatchObject({
+      code: "FST_ERR_CTP_BODY_TOO_LARGE"
+    })
+    expect(app.agents.findAgent("over-limit")).toBeUndefined()
   })
 })

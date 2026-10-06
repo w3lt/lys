@@ -3,6 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { backendConfigSchema } from "../../../src/config"
+import StoredAgents from "../../../src/di/services/agentService/agents"
 import ChatService from "../../../src/di/services/chatService"
 import StoredConversationHistoryEditor from "../../../src/di/services/conversationService/historyEditor"
 import StoredConversationHistoryReader from "../../../src/di/services/conversationService/historyReader"
@@ -152,6 +153,7 @@ describe("createSingletonServices", () => {
     expect(services.conversationHistoryEditor).toBeInstanceOf(
       StoredConversationHistoryEditor
     )
+    expect(services.agents).toBeInstanceOf(StoredAgents)
     expect(services.llmRuntimeService).toBe(acquisitions.llmRuntime.service)
     expect(services.llmService).toBeInstanceOf(LlmService)
   })
@@ -182,6 +184,27 @@ describe("createSingletonServices", () => {
     expect(() =>
       services.conversationHistoryReader.getConversation(turn.conversation.id)
     ).toThrow("Database is closed")
+  })
+
+  it("creates the agent service over the acquired database", async () => {
+    const { factories, acquisitions } = createRecordedFactories()
+    const services = await createSingletonServices(
+      TEST_BACKEND_CONFIG,
+      createFailureReporters(),
+      factories
+    )
+    onTestFinished(async () => await closeSingletonServices(services))
+
+    services.agents.createAgent({
+      code: "lys",
+      name: "Lys",
+      bio: "Personal assistant.",
+      systemPrompt: "You are Lys."
+    })
+
+    expect(services.agents.findAgent("lys")).toMatchObject({ name: "Lys" })
+    acquisitions.database.service[Symbol.dispose]()
+    expect(() => services.agents.findAgent("lys")).toThrow("Database is closed")
   })
 
   it("serves the LLM service through the runtime service's operation queue", async () => {

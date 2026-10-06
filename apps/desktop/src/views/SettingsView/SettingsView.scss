@@ -564,6 +564,279 @@
   width: 74px;
 }
 
+/* Agents */
+
+.settings-view__agent-tools {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.settings-view__agent-list {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.settings-view__agent-row {
+  border-bottom: 1px solid var(--app-border-subtle);
+}
+
+/*
+ * The whole row opens the agent, so it is one button; its parts are text
+ * spans, never controls, which keeps the row a single operable target.
+ */
+.settings-view__agent-choice {
+  display: grid;
+  width: 100%;
+  align-items: center;
+  gap: 18px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  padding: 14px 10px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--duration-standard) var(--ease-standard);
+}
+
+.settings-view__agent-choice:hover {
+  background: var(--app-surface-hover);
+}
+
+.settings-view__agent-choice:focus-visible {
+  outline: 2px solid var(--app-focus);
+  outline-offset: -2px;
+}
+
+.settings-view__agent-lines {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.settings-view__agent-title {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.settings-view__agent-name {
+  overflow: hidden;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--app-text-strong);
+}
+
+.settings-view__agent-code {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--app-text-faint);
+}
+
+.settings-view__agent-bio {
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--app-text-muted);
+}
+
+.settings-view__agent-saved {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--app-status-success);
+}
+
+.settings-view__agent-chevron {
+  width: 12px;
+  height: 12px;
+  color: var(--app-text-faint);
+}
+
+/* Holds the pane's status line, empty while the agents show, above them. */
+.settings-view__agent-pane {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+.settings-view__agent-status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.settings-view__agent-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.settings-view__agent-editor-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--app-border-default);
+}
+
+.settings-view__agent-back {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.settings-view__agent-identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+}
+
+.settings-view__agent-unsaved {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--app-status-pending);
+}
+
+.settings-view__agent-kind {
+  padding: 2px 6px;
+  border: 1px solid var(--app-border-strong);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+}
+
+.settings-view__agent-field {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+/* Label and limit on one line: the constraint is read before typing. */
+.settings-view__agent-field-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--app-text-faint);
+}
+
+.settings-view__agent-field-top label {
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+}
+
+.settings-view__agent-field-label {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.settings-view__agent-use-name {
+  height: auto;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.settings-view__agent-field [data-slot="input"] {
+  height: 38px;
+  padding: 10px 12px;
+  font-size: 14px;
+}
+
+.settings-view__agent-mono[data-slot="input"],
+.settings-view__agent-prompt {
+  font-family: var(--font-mono);
+}
+
+.settings-view__agent-prompt {
+  min-height: 260px;
+  padding: 12px 14px;
+  font-size: 12.5px;
+  line-height: 1.65;
+  resize: vertical;
+}
+
+.settings-view__agent-feedback {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-view__agent-feedback .settings-view__note {
+  padding-top: 0;
+}
+
+.settings-view__agent-problem {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  letter-spacing: 0.04em;
+  color: var(--app-text-danger);
+}
+
+.settings-view__agent-footer {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--app-border-subtle);
+}
+
+.settings-view__agent-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-view__agent-actions--commit {
+  margin-left: auto;
+}
+
+.settings-view__agent-confirm {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  color: var(--app-text-danger-muted);
+}
+
 /* Segmented and slider controls */
 
 .settings-view__segments {

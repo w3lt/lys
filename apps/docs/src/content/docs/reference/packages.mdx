@@ -11,14 +11,14 @@ package.
 
 ## Workspace map
 
-| Project         | Kind    | Current role                                                                   |
-| --------------- | ------- | ------------------------------------------------------------------------------ |
-| `@lys/desktop`  | app     | React UI plus Tauri frontend bindings                                          |
-| `@lys/backend`  | app     | Fastify backend serving health, LLM, chat, and conversation history endpoints  |
-| `@lys/docs`     | app     | Astro/Starlight engineering handbook                                           |
-| `@lys/protocol` | package | Shared route constants, request and response schemas, and chat event contracts |
-| `@lys/share`    | package | Shared conversation and message schemas                                        |
-| `@lys/scripts`  | tooling | Release-version synchronization from the root `VERSION` file                   |
+| Project         | Kind    | Current role                                                                         |
+| --------------- | ------- | ------------------------------------------------------------------------------------ |
+| `@lys/desktop`  | app     | React UI plus Tauri frontend bindings                                                |
+| `@lys/backend`  | app     | Fastify backend serving health, LLM, chat, conversation history, and agent endpoints |
+| `@lys/docs`     | app     | Astro/Starlight engineering handbook                                                 |
+| `@lys/protocol` | package | Shared route constants, request and response schemas, and chat event contracts       |
+| `@lys/share`    | package | Shared conversation, message, and agent schemas                                      |
+| `@lys/scripts`  | tooling | Release-version synchronization from the root `VERSION` file                         |
 
 ## Project notes
 
@@ -33,6 +33,8 @@ package.
   call the backend; generation edits are saved through Tauri and sent with chat requests.
 - The past-conversations dialog lists, searches, renames, deletes, and reopens
   stored conversations through the backend history routes.
+- The Agents settings pane lists, creates, edits, and deletes stored agents
+  through the backend agent routes.
 
 ### `@lys/backend`
 
@@ -55,15 +57,18 @@ package.
 ### `@lys/protocol`
 
 - Re-exports API route modules, constants, and HTTP helpers, including conversation
-  list, get, rename, delete, and missing-conversation contracts
+  list, get, rename, delete, and missing-conversation contracts, and the agent
+  list, create, get, update, delete, missing-agent, and taken-code contracts
 - Defines the backend loopback host and port constants used by both backend and
   desktop
 
 ### `@lys/share`
 
-- Exports Zod schemas and inferred TypeScript types for conversations and
-  messages
-- Used by both backend persistence code and desktop chat state
+- Exports Zod schemas and inferred TypeScript types for conversations,
+  messages, and agents
+- Used by both backend persistence code and desktop chat state; the agent
+  schemas and limits are used by the backend, `@lys/protocol`, and the desktop
+  agent store and editor
 
 ### `@lys/scripts`
 

@@ -3,7 +3,7 @@ import { describe, expect, it, onTestFinished } from "vitest"
 import { migrateDatabase } from "../../../../src/infrastructure/database/migrations"
 
 /** Schema version produced by the current migration list. */
-const CURRENT_SCHEMA_VERSION = 5
+const CURRENT_SCHEMA_VERSION = 6
 
 /**
  * Opens an empty in-memory database owned by the current test.
@@ -48,13 +48,14 @@ function listSchemaObjects(
 }
 
 describe("migrateDatabase", () => {
-  it("creates the current conversation schema in an empty database", () => {
+  it("creates the current schema in an empty database", () => {
     const database = openEmptyDatabase()
 
     migrateDatabase(database)
 
     expect(readUserVersion(database)).toBe(CURRENT_SCHEMA_VERSION)
     expect(listSchemaObjects(database, "table")).toEqual([
+      "agents",
       "conversation_messages",
       "conversations"
     ])
@@ -85,6 +86,96 @@ describe("migrateDatabase", () => {
     expect(database.prepare("SELECT id FROM conversations").all()).toEqual([
       { id: "kept" }
     ])
+  })
+
+  it("upgrades a version-5 database by adding the agents table and keeping its conversations", () => {
+    const database = openEmptyDatabase()
+    migrateDatabase(database)
+    // Migration 6 only adds the agents table, so dropping it from a current
+    // database leaves exactly the version-5 schema.
+    database.exec("DROP TABLE agents; PRAGMA user_version = 5")
+    database
+      .prepare(
+        `INSERT INTO conversations (id, title, system_prompt, created_at, updated_at)
+        VALUES ('kept', 'Title', 'prompt', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`
+      )
+      .run()
+
+    migrateDatabase(database)
+
+    expect(readUserVersion(database)).toBe(6)
+    expect(listSchemaObjects(database, "table")).toContain("agents")
+    expect(
+      database.prepare("SELECT COUNT(*) AS count FROM agents").get()
+    ).toEqual({ count: 0 })
+    expect(
+      database.prepare("SELECT id, title FROM conversations").all()
+    ).toEqual([{ id: "kept", title: "Title" }])
+  })
+
+  it.each([
+    [
+      "a missing code",
+      { code: "NULL" },
+      /NOT NULL constraint failed: agents\.code/
+    ],
+    ["an empty code", { code: "''" }, /CHECK constraint failed: code <> ''/],
+    ["an empty name", { name: "''" }, /CHECK constraint failed: name <> ''/],
+    ["an empty bio", { bio: "''" }, /CHECK constraint failed: bio <> ''/],
+    [
+      "an empty system prompt",
+      { systemPrompt: "''" },
+      /CHECK constraint failed: system_prompt <> ''/
+    ]
+  ])("refuses an agent row with %s", (_label, change, failure) => {
+    const database = openEmptyDatabase()
+    migrateDatabase(database)
+    const row = {
+      code: "'lys'",
+      name: "'Lys'",
+      bio: "'Bio'",
+      systemPrompt: "'Prompt'",
+      ...change
+    }
+
+    expect(() =>
+      database.exec(
+        `INSERT INTO agents (code, name, bio, system_prompt, created_at, updated_at)
+        VALUES (${row.code}, ${row.name}, ${row.bio}, ${row.systemPrompt}, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`
+      )
+    ).toThrow(failure)
+    expect(
+      database.prepare("SELECT COUNT(*) AS count FROM agents").get()
+    ).toEqual({ count: 0 })
+  })
+
+  it("stores agent text that starts with a NUL character", () => {
+    const database = openEmptyDatabase()
+    migrateDatabase(database)
+
+    database
+      .prepare(
+        `INSERT INTO agents (code, name, bio, system_prompt, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        "lys",
+        "\u0000Lys",
+        "\u0000Bio",
+        "\u0000Prompt",
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.000Z"
+      )
+
+    expect(
+      database
+        .prepare("SELECT name, bio, system_prompt AS systemPrompt FROM agents")
+        .get()
+    ).toEqual({
+      name: "\u0000Lys",
+      bio: "\u0000Bio",
+      systemPrompt: "\u0000Prompt"
+    })
   })
 
   it("rejects a database created by a newer version without changing it", () => {

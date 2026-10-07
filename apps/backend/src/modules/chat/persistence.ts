@@ -5,19 +5,29 @@ import type {
 } from "@lys/share"
 import type { AssistantMessageCompletion } from "../agent/agent"
 
+/** Conversation a turn starts or continues, selected by `kind`. */
+export type ConversationTurnTarget =
+  | Readonly<{
+      /** The turn creates a conversation. */
+      kind: "new"
+      /** Valid code of the agent that answers the new conversation. */
+      agentCode: string
+    }>
+  | Readonly<{
+      /** The turn continues a stored conversation, which keeps its agent. */
+      kind: "existing"
+      /** UUIDv7 of the stored conversation. */
+      id: string
+    }>
+
 /** Inputs for atomically creating one persisted user/assistant pair. */
 export type CreateConversationTurnOptions = Readonly<{
-  /** Existing UUIDv7; omission creates a conversation. */
-  conversationId?: string | undefined
+  /** Conversation the turn starts or continues. */
+  conversation: ConversationTurnTarget
   /** Nonempty user content appended once to the transcript. */
   userMessageContent: string
   /** Nonempty model identity stored on the assistant reply. */
   model: string
-  /**
-   * Valid code of the agent that answers a conversation this turn creates; an
-   * existing conversation keeps its agent.
-   */
-  agentCode: string
 }>
 
 /** Immutable turn identities plus an independent snapshot of the earlier transcript. */

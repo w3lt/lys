@@ -14,9 +14,9 @@ import { createFixtureUuidV7 } from "../../support/conversationFixtures"
 function openEditorWithTurn() {
   const { database, turns, editor, history } = openConversationTestServices()
   const turn = turns.createConversationTurn({
+    conversation: { kind: "new", agentCode: "lys" },
     userMessageContent: "Hello",
-    model: "qwen/qwen3-8b",
-    agentCode: "lys"
+    model: "qwen/qwen3-8b"
   })
   return { database, turns, editor, history, turn }
 }

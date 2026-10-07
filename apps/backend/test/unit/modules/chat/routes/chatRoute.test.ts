@@ -1,4 +1,8 @@
-import { chatApi, conversationNotFoundProblemSchema } from "@lys/protocol"
+import {
+  agentNotFoundProblemSchema,
+  chatApi,
+  conversationNotFoundProblemSchema
+} from "@lys/protocol"
 import { describe, expect, it, vi } from "vitest"
 import updateFastifyWithChatRoute, {
   type ChatRouteOptions
@@ -24,8 +28,9 @@ const CHAT_ROUTE_OPTIONS = Object.freeze({
   titleGenerationMaxAttempts: 2
 } satisfies ChatRouteOptions)
 
-/** Valid request body starting a new conversation. */
+/** Valid request body starting a new conversation that Lys answers. */
 const NEW_CONVERSATION_REQUEST = Object.freeze({
+  conversation: { kind: "new", agentCode: "lys" },
   message: "Plan my trip",
   model: "qwen/qwen3-8b",
   generationOptions: { temperature: 0.4 }
@@ -45,7 +50,7 @@ describe("updateFastifyWithChatRoute", () => {
 
     const response = await sendChatRequest(testApp.app, {
       ...NEW_CONVERSATION_REQUEST,
-      conversationId
+      conversation: { kind: "existing", id: conversationId }
     })
 
     expect(response.statusCode).toBe(404)
@@ -58,7 +63,9 @@ describe("updateFastifyWithChatRoute", () => {
     )
     expect(problem).toMatchObject({ instance: chatApi.path })
     expect(testApp.createConversationTurn).toHaveBeenCalledWith(
-      expect.objectContaining({ conversationId })
+      expect.objectContaining({
+        conversation: { kind: "existing", id: conversationId }
+      })
     )
     expect(testApp.completeChatStream).not.toHaveBeenCalled()
     expect(testApp.generateTitle).not.toHaveBeenCalled()
@@ -95,11 +102,57 @@ describe("updateFastifyWithChatRoute", () => {
     ["an empty message", { ...NEW_CONVERSATION_REQUEST, message: "" }],
     [
       "a conversation identifier that is not a UUIDv7",
-      { ...NEW_CONVERSATION_REQUEST, conversationId: "conversation-1" }
+      {
+        ...NEW_CONVERSATION_REQUEST,
+        conversation: { kind: "existing", id: "conversation-1" }
+      }
+    ],
+    [
+      "an agent code that is not a valid code",
+      {
+        ...NEW_CONVERSATION_REQUEST,
+        conversation: { kind: "new", agentCode: "Lys" }
+      }
+    ],
+    [
+      "an agent code on a continued conversation",
+      {
+        ...NEW_CONVERSATION_REQUEST,
+        conversation: {
+          kind: "existing",
+          id: createFixtureUuidV7(1),
+          agentCode: "lys"
+        }
+      }
+    ],
+    [
+      "an unknown conversation kind",
+      { ...NEW_CONVERSATION_REQUEST, conversation: { kind: "draft" } }
+    ],
+    [
+      "no conversation",
+      {
+        message: "Plan my trip",
+        model: "qwen/qwen3-8b",
+        generationOptions: { temperature: 0.4 }
+      }
+    ],
+    [
+      "a top-level conversation identifier instead of a conversation",
+      {
+        conversationId: createFixtureUuidV7(1),
+        message: "Plan my trip",
+        model: "qwen/qwen3-8b",
+        generationOptions: { temperature: 0.4 }
+      }
     ],
     [
       "missing generation options",
-      { message: "Plan my trip", model: "qwen/qwen3-8b" }
+      {
+        conversation: { kind: "new", agentCode: "lys" },
+        message: "Plan my trip",
+        model: "qwen/qwen3-8b"
+      }
     ],
     ["an unknown field", { ...NEW_CONVERSATION_REQUEST, stream: true }]
   ])("rejects %s before storing a turn", async (_label, payload) => {
@@ -112,6 +165,31 @@ describe("updateFastifyWithChatRoute", () => {
     const response = await sendChatRequest(testApp.app, payload)
 
     expect(response.statusCode).toBe(400)
+    expect(testApp.createConversationTurn).not.toHaveBeenCalled()
+    expect(testApp.completeChatStream).not.toHaveBeenCalled()
+    expect(testApp.generateTitle).not.toHaveBeenCalled()
+  })
+
+  it("responds with the missing-agent problem before storing a turn when a new conversation names an agent that cannot answer chats", async () => {
+    const testApp = await createChatRouteTestApp()
+    updateFastifyWithChatRoute(testApp.app, {
+      ...CHAT_ROUTE_OPTIONS,
+      generations: testApp.generations
+    })
+
+    const response = await sendChatRequest(testApp.app, {
+      ...NEW_CONVERSATION_REQUEST,
+      conversation: { kind: "new", agentCode: "web-researcher" }
+    })
+
+    expect(response.statusCode).toBe(404)
+    expect(response.headers["content-type"]).toMatch(
+      /^application\/problem\+json/
+    )
+    expect(agentNotFoundProblemSchema.parse(response.json())).toMatchObject({
+      detail: "Agent web-researcher was not found.",
+      instance: chatApi.path
+    })
     expect(testApp.createConversationTurn).not.toHaveBeenCalled()
     expect(testApp.completeChatStream).not.toHaveBeenCalled()
     expect(testApp.generateTitle).not.toHaveBeenCalled()
@@ -179,7 +257,7 @@ describe("updateFastifyWithChatRoute", () => {
 
     const response = await sendChatRequest(testApp.app, {
       ...NEW_CONVERSATION_REQUEST,
-      conversationId: turn.conversation.id
+      conversation: { kind: "existing", id: turn.conversation.id }
     })
 
     expect(response.statusCode).toBe(500)
@@ -220,7 +298,7 @@ describe("updateFastifyWithChatRoute", () => {
 
     const response = await sendChatRequest(testApp.app, {
       ...NEW_CONVERSATION_REQUEST,
-      conversationId: turn.conversation.id
+      conversation: { kind: "existing", id: turn.conversation.id }
     })
 
     expect(response.statusCode).toBe(500)

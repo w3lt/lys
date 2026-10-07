@@ -144,9 +144,9 @@ describe("StoredConversationTurns", () => {
       const { turns, history } = openConversationTestServices()
 
       const turn = turns.createConversationTurn({
+        conversation: { kind: "new", agentCode: "lys" },
         userMessageContent: "Hello",
-        model: "qwen/qwen3-8b",
-        agentCode: "lys"
+        model: "qwen/qwen3-8b"
       })
 
       // Activity time is maintained by the schema's SQLite-clock trigger,
@@ -166,9 +166,9 @@ describe("StoredConversationTurns", () => {
 
       expect(() =>
         turns.createConversationTurn({
+          conversation: { kind: "new", agentCode: "lys" },
           userMessageContent: "",
-          model: "qwen/qwen3-8b",
-          agentCode: "lys"
+          model: "qwen/qwen3-8b"
         })
       ).toThrow(z.ZodError)
 
@@ -182,17 +182,16 @@ describe("StoredConversationTurns", () => {
 
       expect(() =>
         turns.createConversationTurn({
-          conversationId: createFixtureUuidV7(1),
+          conversation: { kind: "existing", id: createFixtureUuidV7(1) },
           userMessageContent: "Hello",
-          model: "qwen/qwen3-8b",
-          agentCode: "lys"
+          model: "qwen/qwen3-8b"
         })
       ).toThrow(ConversationNotFoundError)
 
       const turn = turns.createConversationTurn({
+        conversation: { kind: "new", agentCode: "lys" },
         userMessageContent: "Hello",
-        model: "qwen/qwen3-8b",
-        agentCode: "lys"
+        model: "qwen/qwen3-8b"
       })
       expect(
         history.listConversations(parseConversationListOptions()).conversations
@@ -204,9 +203,9 @@ describe("StoredConversationTurns", () => {
     it("appends deltas to a streaming reply in call order", () => {
       const { turns, history } = openConversationTestServices()
       const turn = turns.createConversationTurn({
+        conversation: { kind: "new", agentCode: "lys" },
         userMessageContent: "Hello",
-        model: "qwen/qwen3-8b",
-        agentCode: "lys"
+        model: "qwen/qwen3-8b"
       })
 
       expect(
@@ -229,9 +228,9 @@ describe("StoredConversationTurns", () => {
     it("returns false for a reply that is already finalized and keeps its text", () => {
       const { turns, history } = openConversationTestServices()
       const turn = turns.createConversationTurn({
+        conversation: { kind: "new", agentCode: "lys" },
         userMessageContent: "Hello",
-        model: "qwen/qwen3-8b",
-        agentCode: "lys"
+        model: "qwen/qwen3-8b"
       })
       turns.updateAssistantMessageContent(turn.assistantMessage.id, "Hi")
       turns.updateAssistantMessageState(turn.assistantMessage.id, {
@@ -258,9 +257,9 @@ describe("StoredConversationTurns", () => {
     it("rejects an empty delta without changing the reply", () => {
       const { turns, history } = openConversationTestServices()
       const turn = turns.createConversationTurn({
+        conversation: { kind: "new", agentCode: "lys" },
         userMessageContent: "Hello",
-        model: "qwen/qwen3-8b",
-        agentCode: "lys"
+        model: "qwen/qwen3-8b"
       })
 
       expect(() =>
@@ -280,9 +279,9 @@ describe("StoredConversationTurns", () => {
     it("completes a streaming reply with its finish reason", () => {
       const { turns, history } = openConversationTestServices()
       const turn = turns.createConversationTurn({
+        conversation: { kind: "new", agentCode: "lys" },
         userMessageContent: "Hello",
-        model: "qwen/qwen3-8b",
-        agentCode: "lys"
+        model: "qwen/qwen3-8b"
       })
 
       vi.setSystemTime(new Date(LATER))
@@ -308,9 +307,9 @@ describe("StoredConversationTurns", () => {
       (status) => {
         const { turns, history } = openConversationTestServices()
         const turn = turns.createConversationTurn({
+          conversation: { kind: "new", agentCode: "lys" },
           userMessageContent: "Hello",
-          model: "qwen/qwen3-8b",
-          agentCode: "lys"
+          model: "qwen/qwen3-8b"
         })
         vi.setSystemTime(new Date(LATER))
 
@@ -329,9 +328,9 @@ describe("StoredConversationTurns", () => {
     it("finalizes a reply only once", () => {
       const { turns, history } = openConversationTestServices()
       const turn = turns.createConversationTurn({
+        conversation: { kind: "new", agentCode: "lys" },
         userMessageContent: "Hello",
-        model: "qwen/qwen3-8b",
-        agentCode: "lys"
+        model: "qwen/qwen3-8b"
       })
       turns.updateAssistantMessageState(turn.assistantMessage.id, {
         status: "completed",
@@ -364,9 +363,9 @@ describe("StoredConversationTurns", () => {
     it("saves the trimmed title of an untitled conversation", () => {
       const { turns, history } = openConversationTestServices()
       const turn = turns.createConversationTurn({
+        conversation: { kind: "new", agentCode: "lys" },
         userMessageContent: "Hello",
-        model: "qwen/qwen3-8b",
-        agentCode: "lys"
+        model: "qwen/qwen3-8b"
       })
 
       expect(
@@ -384,9 +383,9 @@ describe("StoredConversationTurns", () => {
     it("keeps an existing title and returns undefined", () => {
       const { turns, history, editor } = openConversationTestServices()
       const turn = turns.createConversationTurn({
+        conversation: { kind: "new", agentCode: "lys" },
         userMessageContent: "Hello",
-        model: "qwen/qwen3-8b",
-        agentCode: "lys"
+        model: "qwen/qwen3-8b"
       })
       editor.updateConversationTitle(turn.conversation.id, "Renamed")
 
@@ -410,9 +409,9 @@ describe("StoredConversationTurns", () => {
     it("rejects a blank title without saving it", () => {
       const { turns, history } = openConversationTestServices()
       const turn = turns.createConversationTurn({
+        conversation: { kind: "new", agentCode: "lys" },
         userMessageContent: "Hello",
-        model: "qwen/qwen3-8b",
-        agentCode: "lys"
+        model: "qwen/qwen3-8b"
       })
 
       expect(() =>
@@ -429,9 +428,9 @@ describe("StoredConversationTurns", () => {
   it("rejects every operation after the database closes", () => {
     const { database, turns } = openConversationTestServices()
     const turn = turns.createConversationTurn({
+      conversation: { kind: "new", agentCode: "lys" },
       userMessageContent: "Hello",
-      model: "qwen/qwen3-8b",
-      agentCode: "lys"
+      model: "qwen/qwen3-8b"
     })
     expect(
       turns.updateAssistantMessageContent(turn.assistantMessage.id, "Hi")
@@ -449,9 +448,9 @@ describe("StoredConversationTurns", () => {
 
     expect(() =>
       turns.createConversationTurn({
+        conversation: { kind: "new", agentCode: "lys" },
         userMessageContent: "Hello",
-        model: "qwen/qwen3-8b",
-        agentCode: "lys"
+        model: "qwen/qwen3-8b"
       })
     ).toThrow("Database is closed")
     expect(() =>

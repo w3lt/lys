@@ -17,9 +17,9 @@ import { createFixtureUuidV7 } from "../../support/conversationFixtures"
 function openHistoryWithTurn() {
   const { database, turns, history } = openConversationTestServices()
   const turn = turns.createConversationTurn({
+    conversation: { kind: "new", agentCode: "lys" },
     userMessageContent: "Plan the TRIP",
-    model: "qwen/qwen3-8b",
-    agentCode: "lys"
+    model: "qwen/qwen3-8b"
   })
   return { database, turns, history, turn }
 }
@@ -92,10 +92,9 @@ describe("StoredConversationHistoryReader", () => {
 
       expect(() =>
         turns.createConversationTurn({
-          conversationId: turn.conversation.id,
+          conversation: { kind: "existing", id: turn.conversation.id },
           userMessageContent: "Again",
-          model: "qwen/qwen3-8b",
-          agentCode: "lys"
+          model: "qwen/qwen3-8b"
         })
       ).not.toThrow()
     })

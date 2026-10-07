@@ -3,7 +3,8 @@ import {
   agentNotFoundProblemSchema
 } from "@lys/protocol"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import StoredAgents from "../../../../../src/modules/agent/agents"
+import AgentService from "../../../../../src/modules/agent/agentService"
+import type { ReplyModel } from "../../../../../src/modules/agent/replyModel"
 import { updateFastifyWithHttpTransport } from "../../../../../src/http"
 import SqliteAgentRecordStore from "../../../../../src/infrastructure/database/agents/sqliteAgentRecordStore"
 import updateFastifyWithAgentRoutes from "../../../../../src/modules/agent/routes"
@@ -19,19 +20,25 @@ const NOW = "2026-05-06T07:08:09.123Z"
 const LATER = "2026-05-07T00:00:00.000Z"
 
 /** Definition of the agent most cases create. */
-const LYS_DEFINITION = Object.freeze({
-  code: "lys",
-  name: "Lys",
-  bio: "Personal assistant.",
-  systemPrompt: "You are Lys."
+const RESEARCHER_DEFINITION = Object.freeze({
+  code: "researcher",
+  name: "Researcher",
+  bio: "Searches the web.",
+  systemPrompt: "You research the web."
 })
 
-/** {@link LYS_DEFINITION} as stored at {@link NOW}. */
-const STORED_LYS = Object.freeze({
-  ...LYS_DEFINITION,
+/** {@link RESEARCHER_DEFINITION} as stored at {@link NOW}. */
+const STORED_RESEARCHER = Object.freeze({
+  ...RESEARCHER_DEFINITION,
   createdAt: NOW,
   updatedAt: NOW
 })
+
+/** Model access Lys borrows; the agent routes never ask Lys for a reply. */
+const UNUSED_REPLY_MODEL = Object.freeze({
+  openReplyStream: () =>
+    Promise.reject(new Error("Unexpected model call from an agent route"))
+} satisfies ReplyModel)
 
 /**
  * Encodes a list cursor naming one agent created at {@link NOW}, its JSON
@@ -58,11 +65,13 @@ function createPaddedAgentListCursor(code: string, length: number): string {
  */
 async function createAgentRouteApp() {
   const { app } = createTestFastify()
-  const agents = new StoredAgents(
-    new SqliteAgentRecordStore(openTestDatabase())
-  )
+  const agents = new AgentService({
+    recordStore: new SqliteAgentRecordStore(openTestDatabase()),
+    lysSystemPrompt: "You are Lys.",
+    replyModel: UNUSED_REPLY_MODEL
+  })
   await updateFastifyWithHttpTransport(app)
-  app.decorate("agents", agents)
+  app.decorate("agentService", agents)
   await updateFastifyWithAgentRoutes(app)
   return { app, agents }
 }
@@ -106,10 +115,10 @@ describe("updateFastifyWithAgentRoutes", () => {
 
     it("pages through summaries oldest first, then by code", async () => {
       const { app, agents } = await createAgentRouteApp()
-      agents.createAgent({ ...LYS_DEFINITION, code: "b" })
-      agents.createAgent({ ...LYS_DEFINITION, code: "a" })
+      agents.createAgent({ ...RESEARCHER_DEFINITION, code: "b" })
+      agents.createAgent({ ...RESEARCHER_DEFINITION, code: "a" })
       vi.setSystemTime(new Date(LATER))
-      agents.createAgent({ ...LYS_DEFINITION, code: "c" })
+      agents.createAgent({ ...RESEARCHER_DEFINITION, code: "c" })
 
       const first = await app.inject({
         method: "GET",
@@ -128,15 +137,15 @@ describe("updateFastifyWithAgentRoutes", () => {
       expect(firstPage.agents).toEqual([
         {
           code: "a",
-          name: "Lys",
-          bio: "Personal assistant.",
+          name: "Researcher",
+          bio: "Searches the web.",
           createdAt: NOW,
           updatedAt: NOW
         },
         {
           code: "b",
-          name: "Lys",
-          bio: "Personal assistant.",
+          name: "Researcher",
+          bio: "Searches the web.",
           createdAt: NOW,
           updatedAt: NOW
         }
@@ -155,7 +164,7 @@ describe("updateFastifyWithAgentRoutes", () => {
     ])("serves a page of the requested size %s", async (limit, pageSize) => {
       const { app, agents } = await createAgentRouteApp()
       for (let index = 0; index < 51; index += 1)
-        agents.createAgent({ ...LYS_DEFINITION, code: `agent-${index}` })
+        agents.createAgent({ ...RESEARCHER_DEFINITION, code: `agent-${index}` })
 
       const response = await app.inject({
         method: "GET",
@@ -173,8 +182,8 @@ describe("updateFastifyWithAgentRoutes", () => {
 
     it("continues after a cursor of the maximum length", async () => {
       const { app, agents } = await createAgentRouteApp()
-      agents.createAgent({ ...LYS_DEFINITION, code: "a" })
-      agents.createAgent({ ...LYS_DEFINITION, code: "b" })
+      agents.createAgent({ ...RESEARCHER_DEFINITION, code: "a" })
+      agents.createAgent({ ...RESEARCHER_DEFINITION, code: "b" })
       const cursor = createPaddedAgentListCursor("a", 2048)
 
       const response = await app.inject({
@@ -250,17 +259,17 @@ describe("updateFastifyWithAgentRoutes", () => {
       const response = await app.inject({
         method: "POST",
         url: "/api/v1/agents",
-        payload: LYS_DEFINITION
+        payload: RESEARCHER_DEFINITION
       })
 
       expect(response.statusCode).toBe(201)
-      expect(response.json()).toEqual(STORED_LYS)
-      expect(response.headers.location).toBe("/api/v1/agents/lys")
+      expect(response.json()).toEqual(STORED_RESEARCHER)
+      expect(response.headers.location).toBe("/api/v1/agents/researcher")
       const stored = await app.inject({
         method: "GET",
-        url: "/api/v1/agents/lys"
+        url: "/api/v1/agents/researcher"
       })
-      expect(stored.json()).toEqual(STORED_LYS)
+      expect(stored.json()).toEqual(STORED_RESEARCHER)
     })
 
     it("derives the code from the name when none is given", async () => {
@@ -296,15 +305,15 @@ describe("updateFastifyWithAgentRoutes", () => {
         method: "POST",
         url: "/api/v1/agents",
         payload: {
-          code: "lys",
-          name: "  Lys  ",
-          bio: "\tPersonal assistant.\n",
-          systemPrompt: "\n You are Lys. \n"
+          code: "researcher",
+          name: "  Researcher  ",
+          bio: "\tSearches the web.\n",
+          systemPrompt: "\n You research the web. \n"
         }
       })
 
       expect(response.statusCode).toBe(201)
-      expect(response.json()).toEqual(STORED_LYS)
+      expect(response.json()).toEqual(STORED_RESEARCHER)
     })
 
     it.each([
@@ -325,7 +334,7 @@ describe("updateFastifyWithAgentRoutes", () => {
       const response = await app.inject({
         method: "POST",
         url: "/api/v1/agents",
-        payload: { ...LYS_DEFINITION, ...change }
+        payload: { ...RESEARCHER_DEFINITION, ...change }
       })
 
       expect(response.statusCode).toBe(201)
@@ -338,22 +347,24 @@ describe("updateFastifyWithAgentRoutes", () => {
       const response = await app.inject({
         method: "POST",
         url: "/api/v1/agents",
-        payload: { ...LYS_DEFINITION, name: "\u0000Lys" }
+        payload: { ...RESEARCHER_DEFINITION, name: "\u0000Researcher" }
       })
 
       expect(response.statusCode).toBe(201)
-      expect(agents.findAgent("lys")).toMatchObject({ name: "\u0000Lys" })
+      expect(agents.findAgent("researcher")).toMatchObject({
+        name: "\u0000Researcher"
+      })
     })
 
     it("responds with the code-taken problem and keeps the stored agent", async () => {
       const { app, agents } = await createAgentRouteApp()
-      agents.createAgent(LYS_DEFINITION)
+      agents.createAgent(RESEARCHER_DEFINITION)
       vi.setSystemTime(new Date(LATER))
 
       const response = await app.inject({
         method: "POST",
         url: "/api/v1/agents",
-        payload: { ...LYS_DEFINITION, name: "Impostor" }
+        payload: { ...RESEARCHER_DEFINITION, name: "Impostor" }
       })
 
       expect(response.statusCode).toBe(409)
@@ -363,7 +374,26 @@ describe("updateFastifyWithAgentRoutes", () => {
       expect(agentCodeTakenProblemSchema.parse(response.json())).toMatchObject({
         instance: "/api/v1/agents"
       })
-      expect(agents.findAgent("lys")).toEqual(STORED_LYS)
+      expect(agents.findAgent("researcher")).toEqual(STORED_RESEARCHER)
+    })
+
+    it("responds with the code-taken problem for Lys's code and stores nothing", async () => {
+      const { app, agents } = await createAgentRouteApp()
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/agents",
+        payload: { ...RESEARCHER_DEFINITION, code: "lys" }
+      })
+
+      expect(response.statusCode).toBe(409)
+      expect(response.headers["content-type"]).toMatch(
+        /^application\/problem\+json/
+      )
+      expect(agentCodeTakenProblemSchema.parse(response.json())).toMatchObject({
+        instance: "/api/v1/agents"
+      })
+      expect(agents.findAgent("lys")).toBeUndefined()
     })
 
     it.each([
@@ -391,7 +421,7 @@ describe("updateFastifyWithAgentRoutes", () => {
       const response = await app.inject({
         method: "POST",
         url: "/api/v1/agents",
-        payload: { ...LYS_DEFINITION, ...change }
+        payload: { ...RESEARCHER_DEFINITION, ...change }
       })
 
       expect(response.statusCode).toBe(400)
@@ -410,7 +440,7 @@ describe("updateFastifyWithAgentRoutes", () => {
       const response = await app.inject({
         method: "POST",
         url: "/api/v1/agents",
-        payload: LYS_DEFINITION
+        payload: RESEARCHER_DEFINITION
       })
 
       expect(response.statusCode).toBe(500)
@@ -420,15 +450,15 @@ describe("updateFastifyWithAgentRoutes", () => {
   describe("GET /api/v1/agents/:agentCode", () => {
     it("responds with the stored agent and its system prompt", async () => {
       const { app, agents } = await createAgentRouteApp()
-      agents.createAgent(LYS_DEFINITION)
+      agents.createAgent(RESEARCHER_DEFINITION)
 
       const response = await app.inject({
         method: "GET",
-        url: "/api/v1/agents/lys"
+        url: "/api/v1/agents/researcher"
       })
 
       expect(response.statusCode).toBe(200)
-      expect(response.json()).toEqual(STORED_LYS)
+      expect(response.json()).toEqual(STORED_RESEARCHER)
     })
 
     it("responds with the missing-agent problem", async () => {
@@ -436,7 +466,7 @@ describe("updateFastifyWithAgentRoutes", () => {
 
       const response = await app.inject({
         method: "GET",
-        url: "/api/v1/agents/lys"
+        url: "/api/v1/agents/researcher"
       })
 
       expect(response.statusCode).toBe(404)
@@ -444,8 +474,8 @@ describe("updateFastifyWithAgentRoutes", () => {
         /^application\/problem\+json/
       )
       expect(agentNotFoundProblemSchema.parse(response.json())).toMatchObject({
-        detail: "Agent lys was not found.",
-        instance: "/api/v1/agents/lys"
+        detail: "Agent researcher was not found.",
+        instance: "/api/v1/agents/researcher"
       })
     })
 
@@ -470,7 +500,7 @@ describe("updateFastifyWithAgentRoutes", () => {
 
       const response = await app.inject({
         method: "GET",
-        url: "/api/v1/agents/lys"
+        url: "/api/v1/agents/researcher"
       })
 
       expect(response.statusCode).toBe(500)
@@ -480,50 +510,54 @@ describe("updateFastifyWithAgentRoutes", () => {
   describe("PATCH /api/v1/agents/:agentCode", () => {
     it("replaces only the given field, trimmed, at the current time", async () => {
       const { app, agents } = await createAgentRouteApp()
-      agents.createAgent(LYS_DEFINITION)
+      agents.createAgent(RESEARCHER_DEFINITION)
       vi.setSystemTime(new Date(LATER))
-      const expected = { ...STORED_LYS, bio: "Archivist.", updatedAt: LATER }
+      const expected = {
+        ...STORED_RESEARCHER,
+        bio: "Archivist.",
+        updatedAt: LATER
+      }
 
       const response = await app.inject({
         method: "PATCH",
-        url: "/api/v1/agents/lys",
+        url: "/api/v1/agents/researcher",
         payload: { bio: "  Archivist.  " }
       })
 
       expect(response.statusCode).toBe(200)
       expect(response.json()).toEqual(expected)
-      expect(agents.findAgent("lys")).toEqual(expected)
+      expect(agents.findAgent("researcher")).toEqual(expected)
     })
 
     it("stores the time of a change that keeps every value", async () => {
       const { app, agents } = await createAgentRouteApp()
-      agents.createAgent(LYS_DEFINITION)
+      agents.createAgent(RESEARCHER_DEFINITION)
       vi.setSystemTime(new Date(LATER))
-      const expected = { ...STORED_LYS, updatedAt: LATER }
+      const expected = { ...STORED_RESEARCHER, updatedAt: LATER }
 
       const response = await app.inject({
         method: "PATCH",
-        url: "/api/v1/agents/lys",
-        payload: { bio: LYS_DEFINITION.bio }
+        url: "/api/v1/agents/researcher",
+        payload: { bio: RESEARCHER_DEFINITION.bio }
       })
 
       expect(response.statusCode).toBe(200)
       expect(response.json()).toEqual(expected)
-      expect(agents.findAgent("lys")).toEqual(expected)
+      expect(agents.findAgent("researcher")).toEqual(expected)
     })
 
     it("stores a change that starts with a NUL character", async () => {
       const { app, agents } = await createAgentRouteApp()
-      agents.createAgent(LYS_DEFINITION)
+      agents.createAgent(RESEARCHER_DEFINITION)
 
       const response = await app.inject({
         method: "PATCH",
-        url: "/api/v1/agents/lys",
+        url: "/api/v1/agents/researcher",
         payload: { bio: "\u0000Bio" }
       })
 
       expect(response.statusCode).toBe(200)
-      expect(agents.findAgent("lys")).toMatchObject({ bio: "\u0000Bio" })
+      expect(agents.findAgent("researcher")).toMatchObject({ bio: "\u0000Bio" })
     })
 
     it("rejects a code that is not a slug without changing anything", async () => {
@@ -545,8 +579,8 @@ describe("updateFastifyWithAgentRoutes", () => {
 
       const response = await app.inject({
         method: "PATCH",
-        url: "/api/v1/agents/lys",
-        payload: { name: "Lys" }
+        url: "/api/v1/agents/researcher",
+        payload: { name: "Researcher" }
       })
 
       expect(response.statusCode).toBe(404)
@@ -554,7 +588,7 @@ describe("updateFastifyWithAgentRoutes", () => {
         /^application\/problem\+json/
       )
       expect(agentNotFoundProblemSchema.parse(response.json())).toMatchObject({
-        instance: "/api/v1/agents/lys"
+        instance: "/api/v1/agents/researcher"
       })
     })
 
@@ -570,18 +604,18 @@ describe("updateFastifyWithAgentRoutes", () => {
       "rejects a change with %s without touching the agent",
       async (_label, payload) => {
         const { app, agents } = await createAgentRouteApp()
-        agents.createAgent(LYS_DEFINITION)
+        agents.createAgent(RESEARCHER_DEFINITION)
         const updateAgent = vi.spyOn(agents, "updateAgent")
 
         const response = await app.inject({
           method: "PATCH",
-          url: "/api/v1/agents/lys",
+          url: "/api/v1/agents/researcher",
           payload
         })
 
         expect(response.statusCode).toBe(400)
         expect(updateAgent).not.toHaveBeenCalled()
-        expect(agents.findAgent("lys")).toEqual(STORED_LYS)
+        expect(agents.findAgent("researcher")).toEqual(STORED_RESEARCHER)
       }
     )
 
@@ -593,8 +627,8 @@ describe("updateFastifyWithAgentRoutes", () => {
 
       const response = await app.inject({
         method: "PATCH",
-        url: "/api/v1/agents/lys",
-        payload: { name: "Lys" }
+        url: "/api/v1/agents/researcher",
+        payload: { name: "Researcher" }
       })
 
       expect(response.statusCode).toBe(500)
@@ -604,16 +638,16 @@ describe("updateFastifyWithAgentRoutes", () => {
   describe("DELETE /api/v1/agents/:agentCode", () => {
     it("deletes the agent and responds without a body", async () => {
       const { app, agents } = await createAgentRouteApp()
-      agents.createAgent(LYS_DEFINITION)
+      agents.createAgent(RESEARCHER_DEFINITION)
 
       const response = await app.inject({
         method: "DELETE",
-        url: "/api/v1/agents/lys"
+        url: "/api/v1/agents/researcher"
       })
 
       expect(response.statusCode).toBe(204)
       expect(response.body).toBe("")
-      expect(agents.findAgent("lys")).toBeUndefined()
+      expect(agents.findAgent("researcher")).toBeUndefined()
     })
 
     it("responds with the missing-agent problem", async () => {
@@ -621,7 +655,7 @@ describe("updateFastifyWithAgentRoutes", () => {
 
       const response = await app.inject({
         method: "DELETE",
-        url: "/api/v1/agents/lys"
+        url: "/api/v1/agents/researcher"
       })
 
       expect(response.statusCode).toBe(404)
@@ -629,7 +663,7 @@ describe("updateFastifyWithAgentRoutes", () => {
         /^application\/problem\+json/
       )
       expect(agentNotFoundProblemSchema.parse(response.json())).toMatchObject({
-        instance: "/api/v1/agents/lys"
+        instance: "/api/v1/agents/researcher"
       })
     })
 
@@ -639,7 +673,7 @@ describe("updateFastifyWithAgentRoutes", () => {
 
       const response = await app.inject({
         method: "DELETE",
-        url: "/api/v1/agents/LYS"
+        url: "/api/v1/agents/RESEARCHER"
       })
 
       expect(response.statusCode).toBe(400)
@@ -654,7 +688,7 @@ describe("updateFastifyWithAgentRoutes", () => {
 
       const response = await app.inject({
         method: "DELETE",
-        url: "/api/v1/agents/lys"
+        url: "/api/v1/agents/researcher"
       })
 
       expect(response.statusCode).toBe(500)

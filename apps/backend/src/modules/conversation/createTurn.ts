@@ -40,9 +40,9 @@ function createConversation(
 /**
  * Stores a validated user/assistant pair inside the caller-owned transaction.
  * @param transaction - Records lent to the caller's write transaction.
- * @param options - Conversation selection and authored content. Its
- * `agentCode` is stored only with a conversation this turn creates; an
- * existing conversation keeps its agent.
+ * @param options - Conversation selection and authored content. A new
+ * conversation stores the agent code it names; an existing conversation keeps
+ * its agent.
  * @param now - Time of the turn, read once by the caller. Every value the turn
  * builds carries it: a new conversation's times, both messages' times, and
  * the update time of each reply the turn interrupts.
@@ -80,15 +80,13 @@ export function createConversationTurn(
     createdAt: now,
     updatedAt: now
   })
-  if (options.conversationId !== undefined)
-    transaction.updateStreamingAssistantMessagesToInterrupted(
-      options.conversationId,
-      now
-    )
+  const target = options.conversation
+  if (target.kind === "existing")
+    transaction.updateStreamingAssistantMessagesToInterrupted(target.id, now)
   const conversation =
-    options.conversationId === undefined
-      ? createConversation(transaction, options.agentCode, now)
-      : transaction.findConversation(options.conversationId)
+    target.kind === "new"
+      ? createConversation(transaction, target.agentCode, now)
+      : transaction.findConversation(target.id)
   if (conversation === undefined) throw new ConversationNotFoundError()
   transaction.createUserMessage(conversation.id, userMessage)
   transaction.createAssistantMessage(conversation.id, assistantMessage)
@@ -96,6 +94,6 @@ export function createConversationTurn(
     conversation,
     userMessage,
     assistantMessage,
-    isNewConversation: options.conversationId === undefined
+    isNewConversation: target.kind === "new"
   }
 }

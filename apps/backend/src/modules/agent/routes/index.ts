@@ -38,8 +38,8 @@ export default function updateFastifyWithAgentRoutes(
 ): Promise<void> {
   return new Promise((resolve) => {
     app.setSerializerCompiler(serializerCompiler)
-    registerAgentCollectionRoutes(app, app.agents)
-    registerSingleAgentRoutes(app, app.agents)
+    registerAgentCollectionRoutes(app, app.agentService)
+    registerSingleAgentRoutes(app, app.agentService)
     resolve()
   })
 }
@@ -121,7 +121,7 @@ function registerSingleAgentRoutes(
 
 /**
  * Stores a new agent and sends it with a 201 and its `Location`, or sends the
- * 409 code-taken problem when its given code is already stored.
+ * 409 code-taken problem when its given code is Lys's or already stored.
  * @param request - Validated, trimmed definition.
  * @param reply - HTTP response owner.
  * @param agents - Borrowed agent creation.

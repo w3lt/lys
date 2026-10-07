@@ -64,9 +64,9 @@ describe("createConversationTurn", () => {
     const records = openSqliteConversationRecords()
 
     const turn = createCommittedTurn(records, {
+      conversation: { kind: "new", agentCode: "options-agent" },
       userMessageContent: "Hello",
-      model: "qwen/qwen3-8b",
-      agentCode: "options-agent"
+      model: "qwen/qwen3-8b"
     })
 
     expect(turn.isNewConversation).toBe(true)
@@ -88,9 +88,9 @@ describe("createConversationTurn", () => {
     const records = openSqliteConversationRecords()
 
     const turn = createCommittedTurn(records, {
+      conversation: { kind: "new", agentCode: "lys" },
       userMessageContent: "Hello",
-      model: "qwen/qwen3-8b",
-      agentCode: "lys"
+      model: "qwen/qwen3-8b"
     })
 
     expect(turn.userMessage).toEqual({
@@ -119,10 +119,9 @@ describe("createConversationTurn", () => {
     saveExistingConversation(records)
 
     const turn = createCommittedTurn(records, {
-      conversationId: EXISTING_CONVERSATION_ID,
+      conversation: { kind: "existing", id: EXISTING_CONVERSATION_ID },
       userMessageContent: "Next question",
-      model: "qwen/qwen3-8b",
-      agentCode: "ignored-agent"
+      model: "qwen/qwen3-8b"
     })
 
     expect(turn.isNewConversation).toBe(false)
@@ -157,10 +156,9 @@ describe("createConversationTurn", () => {
     })
 
     const turn = createCommittedTurn(records, {
-      conversationId: EXISTING_CONVERSATION_ID,
+      conversation: { kind: "existing", id: EXISTING_CONVERSATION_ID },
       userMessageContent: "Next question",
-      model: "qwen/qwen3-8b",
-      agentCode: "ignored-agent"
+      model: "qwen/qwen3-8b"
     })
 
     expect(turn.conversation.messages.at(-1)).toMatchObject({
@@ -194,10 +192,9 @@ describe("createConversationTurn", () => {
     })
 
     createCommittedTurn(records, {
-      conversationId: EXISTING_CONVERSATION_ID,
+      conversation: { kind: "existing", id: EXISTING_CONVERSATION_ID },
       userMessageContent: "Next question",
-      model: "qwen/qwen3-8b",
-      agentCode: "ignored-agent"
+      model: "qwen/qwen3-8b"
     })
 
     expect(
@@ -210,10 +207,9 @@ describe("createConversationTurn", () => {
 
     expect(() =>
       createCommittedTurn(records, {
-        conversationId: EXISTING_CONVERSATION_ID,
+        conversation: { kind: "existing", id: EXISTING_CONVERSATION_ID },
         userMessageContent: "Hello",
-        model: "qwen/qwen3-8b",
-        agentCode: "lys"
+        model: "qwen/qwen3-8b"
       })
     ).toThrow(ConversationNotFoundError)
 
@@ -250,8 +246,10 @@ describe("createConversationTurn", () => {
             createConversationTurn(
               transaction,
               {
-                conversationId: EXISTING_CONVERSATION_ID,
-                agentCode: "ignored-agent",
+                conversation: {
+                  kind: "existing",
+                  id: EXISTING_CONVERSATION_ID
+                },
                 ...values
               },
               NOW

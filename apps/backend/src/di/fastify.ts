@@ -45,7 +45,6 @@ const singletonPlugin: FastifyPluginAsync<
   })
 
   app.decorate("chatService", singletonServices.chatService)
-  app.decorate("agentRoster", singletonServices.agentRoster)
   app.decorate("llmService", singletonServices.llmService)
   app.decorate("llmRuntimeService", singletonServices.llmRuntimeService)
   app.decorate("conversationTurns", singletonServices.conversationTurns)
@@ -57,7 +56,7 @@ const singletonPlugin: FastifyPluginAsync<
     "conversationHistoryEditor",
     singletonServices.conversationHistoryEditor
   )
-  app.decorate("agents", singletonServices.agents)
+  app.decorate("agentService", singletonServices.agentService)
 }
 
 /** Fastify plugin that installs application-scoped singleton services. */

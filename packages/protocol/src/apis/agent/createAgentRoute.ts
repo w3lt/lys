@@ -18,8 +18,9 @@ const createAgentApiResponseSchemas = Object.freeze({
  * are trimmed. A given `code` is stored exactly; when it is omitted, the
  * backend derives the code from the name. Success is a 201 sent after the
  * agent is stored, carrying the stored agent and a `Location` header with its
- * path. A given code that another agent already has returns the
- * agent-code-taken problem with HTTP 409 and stores nothing. The operation is
+ * path. A given code that another agent already has, Lys's code `lys`
+ * included, returns the agent-code-taken problem with HTTP 409 and stores
+ * nothing. A derived code is never `lys`. The operation is
  * not idempotent: repeating a request without a code stores another agent
  * under the next free derived code. A lost response leaves the creation
  * uncertain; the agent list shows whether it happened. Changing the method,
@@ -43,7 +44,7 @@ export type CreateAgentApiResponse = z.infer<typeof createAgentApi.response>
 export type CreateAgentApiReply = {
   /** The new agent as stored. */
   readonly 201: CreateAgentApiResponse
-  /** The given code is already stored; nothing was created. */
+  /** The given code is Lys's or already stored; nothing was created. */
   readonly 409: AgentCodeTakenProblem
 }
 

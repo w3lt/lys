@@ -6,7 +6,10 @@ import type {
   ChatReplyPathParams,
   MessageGenerationOptions
 } from "@lys/protocol"
-import type { ConversationAssistantMessageStatus } from "@lys/share"
+import {
+  LYS_AGENT_CODE,
+  type ConversationAssistantMessageStatus
+} from "@lys/share"
 import { create, type StoreApi, type UseBoundStore } from "zustand"
 
 import {
@@ -474,13 +477,13 @@ function createChatRequestResource(token: number): ChatRequestResource {
 }
 
 /**
- * Creates the current chat payload with conversation absence represented by omission.
+ * Creates the current chat payload for a new or an existing conversation.
  *
  * @param input - Model, prompt, conversation, and generation values sampled for
  * this request.
- * @returns The complete payload for a new or existing conversation.
- * @remarks The request contract is strict, so conversation absence is
- * represented by omitting the identifier rather than sending an empty one.
+ * @returns The complete payload. Without a conversation it starts a new one
+ * that Lys answers; with one it continues it with the agent it was started
+ * with.
  */
 function createChatRequestPayload({
   conversationId,
@@ -488,14 +491,15 @@ function createChatRequestPayload({
   model,
   generationOptions
 }: CreateChatRequestPayloadInput): ChatApiRequestBody {
-  return conversationId !== undefined
-    ? {
-        conversationId,
-        message: submittedPrompt,
-        model,
-        generationOptions
-      }
-    : { message: submittedPrompt, model, generationOptions }
+  return {
+    conversation:
+      conversationId === undefined
+        ? { kind: "new", agentCode: LYS_AGENT_CODE }
+        : { kind: "existing", id: conversationId },
+    message: submittedPrompt,
+    model,
+    generationOptions
+  }
 }
 
 /**

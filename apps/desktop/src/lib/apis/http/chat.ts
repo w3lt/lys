@@ -77,7 +77,8 @@ const MISSING_REPLY_MESSAGE = "The reply is no longer stored."
  * backend loopback address and port used by the current desktop protocol; an
  * aborted signal propagates through `fetch` and reader cleanup and ends only
  * this observation, not the backend's generation.
- * @param payload - Valid chat prompt and optional conversation identifier.
+ * @param payload - Valid chat prompt and the conversation it starts or
+ * continues.
  * @param options - Optional transport cancellation settings.
  * @returns An async generator yielding validated chat protocol events.
  * @throws If the request, stream read, JSON parse, or event validation fails.

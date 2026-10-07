@@ -7,7 +7,7 @@ import {
 import type { FastifyBaseLogger, FastifyInstance } from "fastify"
 import type { BackendConfig } from "../../../config"
 import type Agent from "../../agent/agent"
-import type AgentRoster from "../../agent/roster"
+import { createAgentNotFoundProblem } from "../../agent/routes/agentProblems"
 import type { TitleGenerationOptions } from "../chatService"
 import { ConversationNotFoundError } from "../../../utils/errors"
 import { createConversationNotFoundProblem } from "../../conversation/routes/notFound"
@@ -44,8 +44,11 @@ type ChatRouteDependencies = Readonly<{
   turns: ConversationTurnWriter
   /** Conditional generated-title persistence borrowed for the route lifetime. */
   titleWriter: GeneratedConversationTitleWriter
-  /** Agents that answer turns, borrowed for the route lifetime. */
-  agentRoster: AgentRoster
+  /**
+   * Agent lookup of the agent service, borrowed for the route lifetime;
+   * undefined means no agent with the code can answer chats.
+   */
+  findChatAgent: (code: string) => Agent | undefined
   /** Bound title operation retained separately from chat completion. */
   generateTitle: (options: TitleGenerationOptions) => Promise<string>
   /** Inclusive maximum number of title requests permitted for one turn. */
@@ -87,7 +90,7 @@ export default function updateFastifyWithChatRoute(
   const dependencies = {
     turns,
     titleWriter: turns,
-    agentRoster: app.agentRoster,
+    findChatAgent: (code: string) => app.agentService.findChatAgent(code),
     generateTitle: (options: TitleGenerationOptions) =>
       app.chatService.generateTitle(options),
     titleGenerationMaxAttempts,
@@ -116,9 +119,9 @@ export default function updateFastifyWithChatRoute(
  * error boundary.
  * @remarks Closing this stream does not cancel the generation. The turn, the
  * generation, and this follower are created in one synchronous step, so the
- * follower receives the start event before any generation event. A
- * conversation whose agent is not available fails the request before the
- * stream starts.
+ * follower receives the start event before any generation event. The agent
+ * stored with the turn's conversation answers it. A stored conversation whose
+ * agent is not available fails the request before the stream starts.
  */
 async function handleChatRequest(
   request: ChatRouteRequest,
@@ -127,7 +130,7 @@ async function handleChatRequest(
 ): Promise<void> {
   const turn = createRequestedTurn(request, reply, dependencies)
   if (turn === undefined) return
-  const agent = dependencies.agentRoster.findAgent(turn.conversation.agentCode)
+  const agent = dependencies.findChatAgent(turn.conversation.agentCode)
   if (agent === undefined) rejectTurnWithoutAgent(turn, dependencies.turns)
 
   const generation = startTurnGeneration({
@@ -148,14 +151,14 @@ async function handleChatRequest(
 }
 
 /**
- * Stores the requested turn, or answers that its conversation is not stored.
+ * Stores the requested turn, or answers that the agent of a new conversation
+ * cannot answer chats or that a continued conversation is not stored.
  *
  * @param request - Validated chat input.
- * @param reply - Response owner used only for the missing-conversation answer.
- * @param dependencies - Borrowed turn persistence and agents; a new
- * conversation gets the default agent.
- * @returns The stored turn, or undefined after the missing-conversation
- * problem was sent.
+ * @param reply - Response owner used only for the two not-found answers.
+ * @param dependencies - Borrowed turn persistence and agent lookup.
+ * @returns The stored turn, or undefined after a not-found problem was sent;
+ * nothing was then stored.
  * @throws Any other persistence failure; nothing was stored.
  */
 function createRequestedTurn(
@@ -163,24 +166,33 @@ function createRequestedTurn(
   reply: ChatRouteReply,
   dependencies: ChatRouteDependencies
 ): ConversationTurn | undefined {
-  const { conversationId } = request.body
+  const { conversation } = request.body
+  if (
+    conversation.kind === "new" &&
+    dependencies.findChatAgent(conversation.agentCode) === undefined
+  ) {
+    reply
+      .type("application/problem+json")
+      .code(404)
+      .send(createAgentNotFoundProblem(conversation.agentCode, request.url))
+    return undefined
+  }
   try {
     return dependencies.turns.createConversationTurn({
-      model: request.body.model,
-      conversationId,
+      conversation,
       userMessageContent: request.body.message,
-      agentCode: dependencies.agentRoster.getDefaultAgent().code
+      model: request.body.model
     })
   } catch (error) {
     if (
       !(error instanceof ConversationNotFoundError) ||
-      conversationId === undefined
+      conversation.kind === "new"
     )
       throw error
     reply
       .type("application/problem+json")
       .code(404)
-      .send(createConversationNotFoundProblem(conversationId, request.url))
+      .send(createConversationNotFoundProblem(conversation.id, request.url))
     return undefined
   }
 }

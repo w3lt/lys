@@ -35,6 +35,17 @@ export const MAXIMUM_AGENT_NAME_LENGTH = 64
 export const MAXIMUM_AGENT_BIO_LENGTH = 128
 
 /**
+ * Code of Lys, the agent the backend ships with.
+ *
+ * @remarks Clients send it to start a conversation that Lys answers, and the
+ * backend reserves it, so no stored agent can be created under it. The
+ * backend stores it on the conversations Lys answers; its schema version 7
+ * recorded it on every earlier conversation. Changing it orphans those
+ * conversations, so it stays fixed across releases.
+ */
+export const LYS_AGENT_CODE = "lys"
+
+/**
  * Lowercase ASCII letters and digits in hyphen-separated groups, with no
  * leading, trailing, or doubled hyphen.
  */

@@ -2,7 +2,7 @@ import {
   conversationMetadataSchema,
   type ConversationMetadata
 } from "@lys/share"
-import type { ConversationRecordEditor } from "../../../di/services/conversationService/records"
+import type { ConversationRecordEditor } from "../../../modules/conversation/records"
 import type {
   DatabaseStatementCompiler,
   DatabaseWriter

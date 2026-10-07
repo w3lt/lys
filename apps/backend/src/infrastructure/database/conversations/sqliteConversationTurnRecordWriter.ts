@@ -10,7 +10,7 @@ import type {
   ConversationTurnTransaction,
   UpdateAssistantMessageContentInput,
   UpdateAssistantMessageStateInput
-} from "../../../di/services/conversationService/records"
+} from "../../../modules/conversation/records"
 import type {
   DatabaseStatementCompiler,
   DatabaseWriter

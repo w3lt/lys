@@ -4,7 +4,7 @@ import type { FastifyInstance } from "fastify"
 import type {
   ChatRouteReply,
   ChatRouteRequest
-} from "../../../src/modules/chat/chat/share"
+} from "../../../src/modules/chat/routes/share"
 import { createTestFastify, type TestFastify } from "./fastifyTestApp"
 
 /** Path of the chat-shaped SSE route registered by {@link registerChatSseRoute}. */

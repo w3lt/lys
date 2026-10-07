@@ -6,7 +6,7 @@ import type {
   AgentRecordStore,
   ListAgentsInput,
   UpdateAgentInput
-} from "../../../di/services/agentService/records"
+} from "../../../modules/agent/records"
 import type {
   DatabaseReader,
   DatabaseStatementCompiler,

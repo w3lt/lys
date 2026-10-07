@@ -3,7 +3,7 @@ import { listConversationsApi } from "@lys/protocol"
 import type {
   ConversationPage,
   ListConversationsInput
-} from "../../../di/services/conversationService/records"
+} from "../../../modules/conversation/records"
 import type { DatabaseStatementCompiler } from "../databaseTransactions"
 
 /** Shared SQL predicate for counts and pages; values are always bound parameters. */

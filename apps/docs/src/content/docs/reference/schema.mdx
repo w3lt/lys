@@ -13,13 +13,13 @@ JSON schema for runtime, model, and generation settings.
 
 ### `conversations`
 
-| Column          | Type            | Notes                                                                                                                                |
-| --------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `id`            | `TEXT`          | Primary key                                                                                                                          |
-| `title`         | `TEXT`          | Null until the first title assignment; untitled turns request one, titled turns reconcile it to the client, and a rename replaces it |
-| `system_prompt` | `TEXT NOT NULL` | Saved instruction forwarded as the system message for every turn                                                                     |
-| `created_at`    | `TEXT NOT NULL` | ISO timestamp                                                                                                                        |
-| `updated_at`    | `TEXT NOT NULL` | ISO timestamp                                                                                                                        |
+| Column       | Type            | Notes                                                                                                                                |
+| ------------ | --------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `id`         | `TEXT`          | Primary key                                                                                                                          |
+| `title`      | `TEXT`          | Null until the first title assignment; untitled turns request one, titled turns reconcile it to the client, and a rename replaces it |
+| `agent_code` | `TEXT NOT NULL` | Code of the agent that answers the conversation; every turn sends that agent's current system prompt                                 |
+| `created_at` | `TEXT NOT NULL` | ISO timestamp                                                                                                                        |
+| `updated_at` | `TEXT NOT NULL` | ISO timestamp                                                                                                                        |
 
 ### `conversation_messages`
 
@@ -53,6 +53,10 @@ JSON schema for runtime, model, and generation settings.
 - Completed assistant rows must also have a non-null finish reason.
 - Streaming, interrupted, and failed assistant rows must keep a null finish
   reason.
+- Conversation rows must have a non-empty `agent_code`; SQLite checks only
+  that, and the shared conversation schema checks its agent code format on
+  every row the backend writes and reads. A row added without the column gets
+  `lys`.
 - Agent rows must have every column, and a non-empty `code`, `name`, `bio`,
   and `system_prompt`. SQLite checks only that, comparing each of the four with
   `''`, so text that starts with a NUL character still counts as non-empty;
@@ -84,7 +88,11 @@ conversation timestamp trigger. Version 5 replaces only the message-update
 trigger so that it fires on `content` changes; status-only updates no longer
 count as conversation activity. Version 6 adds the `agents` table and changes
 no existing row; builds that support only version 5 refuse to open a version-6
-database. Versions 1–3 are unchanged. Missing migrations
+database. Version 7 adds `conversations.agent_code`, set to `lys` for every
+existing conversation because Lys answered every earlier chat, and drops
+`conversations.system_prompt`; the dropped prompts cannot be recovered, and
+builds that support only version 6 refuse a version-7 database. Versions 1–3
+are unchanged. Missing migrations
 and the version marker commit together. At startup, streaming assistant rows
 become interrupted with a refreshed message `updated_at`; content, conversation
 `updated_at`, and history order are preserved.

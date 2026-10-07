@@ -66,7 +66,7 @@ conversation before sending the first stream event.
 `message` and `model` must be non-empty strings. A supplied `conversationId`
 must be a UUIDv7 identifying an existing conversation; an unknown identifier
 returns the conversation-not-found Problem Details response below. Continuation
-uses the saved system prompt, prior user messages, non-empty completed or
+uses the system prompt of the conversation's agent, prior user messages, non-empty completed or
 interrupted assistant messages, then the current user message exactly once.
 Failed and empty assistant messages are excluded from context. A reply still
 streaming in the conversation becomes interrupted when the new turn is created,
@@ -114,7 +114,7 @@ All conversation identifiers must be UUIDv7; malformed identifiers return `400`.
 List responses have exactly `conversations`, `storedCount`, `matchCount`, and
 `nextCursor`. Counts include all stored conversations and all matches before
 pagination, respectively. Each summary contains `id`, nullable `title`,
-`createdAt`, `updatedAt`, and nullable `preview`; it does not expose `systemPrompt`.
+`createdAt`, `updatedAt`, and nullable `preview`; it does not expose `agentCode`.
 A preview contains only `role` and full `content`.
 
 | Parameter | Contract                                                                                                                                                                         |
@@ -130,8 +130,9 @@ Search previews select the latest non-empty matching message, falling back to
 the latest non-empty message for a title-only match. Unfiltered lists select the
 latest non-empty message; conversations without one have `preview: null`.
 
-`GET` by identifier returns conversation metadata, including the saved system
-prompt, and messages ordered by creation time then identifier. `PATCH` accepts
+`GET` by identifier returns conversation metadata, including `agentCode`, the
+code of the agent that answers it (`lys` for every conversation today), and
+messages ordered by creation time then identifier. `PATCH` accepts
 only `title`, trims it to 1–120 UTF-16 code units, and returns updated metadata. Repeating
 a rename is idempotent; renaming never changes activity time or list position.
 `DELETE` cascades to messages and returns `204` without a body. Late generation

@@ -39,7 +39,7 @@ operation cannot change data.
 
 | Table                   | Owned by                    | Notes                                                                                                                   |
 | ----------------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `conversations`         | SQLite conversation records | One row per conversation, including `title`, `system_prompt`, `created_at`, and `updated_at`.                           |
+| `conversations`         | SQLite conversation records | One row per conversation, including `title`, `agent_code`, `created_at`, and `updated_at`.                              |
 | `conversation_messages` | SQLite conversation records | Ordered user and assistant messages, including assistant `status`, `finish_reason`, and `model`.                        |
 | `agents`                | SQLite agent records        | One row per agent definition, keyed by its `code`, with `name`, `bio`, `system_prompt`, `created_at`, and `updated_at`. |
 
@@ -70,7 +70,7 @@ On startup the database owner:
 1. Opens the SQLite file with foreign keys enabled.
 2. Acquires a write transaction and reads `PRAGMA user_version`.
 3. Rejects unsupported future versions or applies each missing migration in order.
-4. Records version 6 and commits; a migration failure rolls back all pending work.
+4. Records version 7 and commits; a migration failure rolls back all pending work.
 5. Switches to write-ahead logging with `synchronous = NORMAL`. A database from
    a newer version was refused in step 3, before anything changed its file.
 6. Turns on write protection, which only a write transaction lifts.

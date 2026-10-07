@@ -41,9 +41,13 @@ the services together.
    `start-existing-conversation-turn`.
 4. For an existing conversation with a stored title, the route emits that title
    to reconcile desktop metadata from an earlier missed delivery.
-5. `createChatTask` opens an OpenAI-compatible streaming completion against LM
-   Studio, persists each delta before sending it to every stream following the
-   reply, and stores completion before emitting `done`.
+5. The route asks the agent roster (`app.agentRoster`) for the conversation's
+   agent, which is Lys for every conversation today. The agent's `createReply`
+   opens an OpenAI-compatible streaming completion against LM Studio through
+   `OpenAiReplyModel`, persists each delta before sending it to every stream
+   following the reply, and stores completion before emitting `done`. A
+   conversation whose agent the roster does not know fails its request with
+   HTTP 500 before streaming, and its reply is stored as failed.
 6. When the conversation has no stored title, `createTitleGenerationTask` runs
    in parallel and emits a `title` event only after a conditional write wins the
    first assignment.
@@ -51,7 +55,8 @@ the services together.
    that ends early becomes `interrupted`; title-generation failures are logged
    instead.
 
-Each completion receives the saved system prompt, prior user messages, non-empty
+Each completion receives the system prompt of the conversation's agent, prior
+user messages, non-empty
 completed or interrupted assistant replies, and the current user message once.
 Failed and empty assistant replies are excluded from model context. A reply
 still streaming when the next turn is created becomes interrupted first, so its
@@ -107,7 +112,7 @@ The backend stores conversations and agent definitions in SQLite at
 
 | Table                   | Purpose                                                                                      |
 | ----------------------- | -------------------------------------------------------------------------------------------- |
-| `conversations`         | Stores conversation metadata, title, system prompt, and timestamps.                          |
+| `conversations`         | Stores conversation metadata: title, agent code, and timestamps.                             |
 | `conversation_messages` | Stores ordered user and assistant messages, assistant status, finish reason, and timestamps. |
 | `agents`                | Stores agent definitions: code, name, bio, system prompt, and timestamps.                    |
 
@@ -120,9 +125,18 @@ and hold every conversation query. The history-reading, history-editing, and
 turn services wrap those records, and each is its own application service.
 The agent service `StoredAgents` wraps the SQLite agent records in `agents/` in
 the same way.
+
+`Agent` (`src/modules/agent/agent.ts`) answers turns with its own system prompt
+through a `ReplyModel`. `AgentRoster` (`src/modules/agent/roster.ts`) holds the
+agents that answer chats: today only Lys, under the code `lys`, built from the
+Lys system prompt. The chat module's `OpenAiReplyModel` implements `ReplyModel`
+over `ChatService`'s streaming completion, using only choice 0 and refusing
+finish reasons other than `stop` and `length`. The chat route passes the agent
+the turn's history, its reply writes, its event sender, and its Stop signal.
 Version 4 preserves activity
 timestamps on rename, version 5 preserves them on status-only message updates,
-version 6 adds the `agents` table, and turn persistence's startup recovers
+version 6 adds the `agents` table, version 7 replaces the stored system prompt
+with the conversation's agent code, and turn persistence's startup recovers
 streaming assistants without reordering history.
 Two triggers keep `conversations.updated_at` in sync with message inserts and
 message text updates.

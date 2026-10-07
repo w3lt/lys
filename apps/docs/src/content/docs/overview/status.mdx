@@ -45,7 +45,8 @@ repository today; it is not a promise of unreleased work.
 - Runtime, Model, Generation, and Agents settings panes are available. Model
   controls refresh inventory, load and unload weights, and check loaded-state
   health. The Agents pane creates, edits, duplicates, and deletes the user's
-  agents through the backend; chats do not use agents yet.
+  agents through the backend. Chats are answered by Lys, a built-in agent
+  defined in the backend; it is not listed in the Agents pane.
 - Generation controls apply to future chat requests and save automatically
   through Tauri to `$LYS_HOME/settings.json`, which contains runtime, model, and
   generation groups. Runtime and model edits remain session-only.
@@ -62,7 +63,8 @@ The current repository does not yet provide:
 - sending composer attachments; the composer stages files and long pastes only
   for its local context estimate
 - a Conversation settings pane
-- built-in agents that ship with Lys, and chats that use an agent
+- chats that use one of the user's agents, and built-in agents listed in the
+  Agents pane
 - replay or reconnect semantics for chat streams
 - tool-call stream events
 - a production desktop release workflow

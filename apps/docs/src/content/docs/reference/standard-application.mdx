@@ -116,6 +116,47 @@ I-6.
 - **Removal condition:** [issue #117](https://github.com/w3lt/lys/issues/117)
   delivers the summary, and this exception is removed with it.
 
+## File tool path exception
+
+The `read_text_file` and `find_files` desktop commands have an approved
+exception to
+[API-018](https://github.com/w3lt/lys/blob/main/docs/code_standards/API.md):
+they accept any absolute path that the desktop process can read, instead of
+constraining it to the resources Lys may use. The exception was approved by
+the maintainer on 2026-10-07 for
+[PR #115](https://github.com/w3lt/lys/pull/115), following review finding I-1.
+
+- **Scope:** only the
+  [read-text-file](https://github.com/w3lt/lys/blob/main/apps/desktop/src-tauri/src/tools/read_text_file.rs)
+  and
+  [search-files](https://github.com/w3lt/lys/blob/main/apps/desktop/src-tauri/src/tools/search_files.rs)
+  commands. Every other path-taking API still follows API-018.
+- **Constraint:** the commands are tools, not the permission gateway, and Lys
+  has no path policy yet for them to check against. The paths they can reach
+  are bounded only by the operating-system user that runs Lys, which today is
+  the person who launched it.
+- **Alternatives considered:**
+  - A fixed restriction inside the commands, such as the home directory only
+    or no hidden files, was rejected when the tools were designed: it would be
+    a second path policy, separate from the gateway's.
+  - A path check in the permission gateway that
+    [issue #110](https://github.com/w3lt/lys/issues/110) introduces needs that
+    gateway, and it would still run with the full access of the person's
+    account.
+- **Risk and control:** any renderer code can read or list every file that the
+  operating-system user running Lys can read. No part of the app invokes the
+  commands yet, and the renderer's Markdown pipeline does not render raw HTML,
+  so review found no path for injected script to reach them. The window has no
+  content security policy, so this control depends on the renderer running
+  only its own code. The commands must not be offered to a model before the
+  gateway exists.
+- **Removal condition:** [issue #122](https://github.com/w3lt/lys/issues/122)
+  runs Lys's file access as a dedicated, less-privileged operating-system user,
+  so the operating system limits the commands to the paths that user is
+  granted, on the provider side as
+  [API-015](https://github.com/w3lt/lys/blob/main/docs/code_standards/API.md)
+  requires. This exception is removed with that change.
+
 ## API boundaries
 
 Canonical rules: [API-004, API-020, API-034](https://github.com/w3lt/lys/blob/main/docs/code_standards/API.md).

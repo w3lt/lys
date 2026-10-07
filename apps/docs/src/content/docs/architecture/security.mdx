@@ -19,6 +19,7 @@ Zod, and there is no credential-management subsystem yet.
 | Fastify backend -> LM Studio | Loopback connections to local LM Studio HTTP and WebSocket endpoints. |
 | Backend -> SQLite file       | Local filesystem access to `$LYS_HOME/lys_db.sqlite`.                 |
 | Tauri host -> settings file  | Local filesystem access to `$LYS_HOME/settings.json`.                 |
+| Tauri host -> user files     | File tools read any path the OS user running Lys can read.            |
 
 ## Current controls
 
@@ -48,6 +49,10 @@ does not yet implement those guarantees.
 
 ## Coming soon
 
+- Running Lys's file access as a dedicated, less-privileged OS user, which
+  removes the
+  [file tool path exception](/reference/standard-application/#file-tool-path-exception)
+  ([issue #122](https://github.com/w3lt/lys/issues/122))
 - Credential storage and retrieval
 - Provider authentication flows
 - More explicit diagnostics and log-redaction policy

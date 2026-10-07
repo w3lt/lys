@@ -254,7 +254,8 @@ The tool-calls card holds the master switch, a status line, and calls per reply
 (4, 8, or 16). The status line names the loaded model and how many tools are
 offered with their summed estimate. When the loaded model's `trainedForToolUse`
 is false, Lys offers it no tools: a card says the model isn't trained for tool
-calls, and every control below it recedes and is disabled.
+calls, and every control below it recedes and is disabled. An expanded row
+closes while the controls are locked and opens again when they unlock.
 
 Every choice on the pane is a mock kept in the tool store for the session: tool
 calls on or off, calls per reply, each tool's switch, and Ask me or Just run.

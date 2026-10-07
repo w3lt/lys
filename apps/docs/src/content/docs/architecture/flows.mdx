@@ -47,8 +47,10 @@ A manual Start follows steps 4–8.
 1. The composer asks the chat store to `sendMessage`.
 2. The desktop creates a request token and an `AbortController` that ends
    only its own observation of the stream.
-3. The desktop sends `POST /api/v1/chat` with `message`, `model`, required
-   `generationOptions`, and optional `conversationId`. Generation options contain
+3. The desktop sends `POST /api/v1/chat` with `conversation`, `message`,
+   `model`, and required `generationOptions`. `conversation` is
+   `{ kind: "new", agentCode: "lys" }` for a new conversation and
+   `{ kind: "existing", id }` to continue one. Generation options contain
    the current temperature and an optional reply ceiling; a local zero ceiling
    is omitted from the request.
 4. The backend creates or reuses the conversation, inserts the user message, and
@@ -113,8 +115,8 @@ of the new turn's context.
    `GET /api/v1/chat/:conversationId/replies/:assistantMessageId/events`: the
    `reply-snapshot` replaces the stored content, then live events apply as for
    a new message.
-7. The next message sends that conversation's `conversationId`, so the backend
-   continues it.
+7. The next message sends that conversation as `{ kind: "existing", id }`, so
+   the backend continues it.
 
 ## Error path
 

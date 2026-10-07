@@ -50,14 +50,16 @@ in a conversation service in `src/modules/conversation/`. Each
 service keeps the decisions (identities, timestamps, validation, superseding a
 streaming reply, list cursors) behind records it declares in `records.ts`, and
 contains no SQL. Each service is exposed as its own application service.
-The agent service `StoredAgents` (`src/modules/agent/`) wraps
+The agent service `AgentService` (`src/modules/agent/agentService.ts`) uses
 `SqliteAgentRecordStore` the same way: it validates each definition or change,
 reads the current time once per change, and lists and stores agents through
 records it declares in `records.ts`. Unlike the conversation records, the
 agent records are one interface: the service is their only consumer and uses
 all five operations, while the routes receive narrow capabilities of the
-service instead. It is decorated as `app.agents`, and the agent routes in
-`src/modules/agent/routes/` call it.
+service instead. The service is not a database service: it also owns the
+built-in Lys, which is never stored, and refuses to store another agent under
+Lys's code `lys`. It is decorated as `app.agentService`; the agent routes in
+`src/modules/agent/routes/` and the chat route call it.
 Every borrowed operation fails once the database closes,
 and the database remains open until every reply generation has stored its final
 state.

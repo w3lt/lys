@@ -3,7 +3,10 @@ import { describe, expect, it, vi } from "vitest"
 import updateFastifyWithChatRoute, {
   type ChatRouteOptions
 } from "../../../../../src/modules/chat/routes/chatRoute"
-import { ConversationNotFoundError } from "../../../../../src/utils/errors"
+import {
+  ChatCompletionCancelledError,
+  ConversationNotFoundError
+} from "../../../../../src/utils/errors"
 import {
   createChatRouteTestApp,
   sendChatRequest,
@@ -195,4 +198,92 @@ describe("updateFastifyWithChatRoute", () => {
     expect(testApp.completeChatStream).not.toHaveBeenCalled()
     expect(testApp.generateTitle).not.toHaveBeenCalled()
   })
+
+  it("keeps the missing-agent failure observable when the failed reply cannot be stored", async () => {
+    const testApp = await createChatRouteTestApp()
+    const turn = createConversationTurnFixture({
+      agentCode: "retired-agent",
+      earlierMessages: [],
+      userMessageContent: "Plan my trip"
+    })
+    testApp.createConversationTurn.mockReturnValue(turn)
+    vi.spyOn(
+      testApp.app.conversationTurns,
+      "updateAssistantMessageState"
+    ).mockImplementation(() => {
+      throw new Error("database is locked")
+    })
+    updateFastifyWithChatRoute(testApp.app, {
+      ...CHAT_ROUTE_OPTIONS,
+      generations: testApp.generations
+    })
+
+    const response = await sendChatRequest(testApp.app, {
+      ...NEW_CONVERSATION_REQUEST,
+      conversationId: turn.conversation.id
+    })
+
+    expect(response.statusCode).toBe(500)
+    expect(testApp.logs).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        err: expect.objectContaining({
+          type: "AggregateError",
+          aggregateErrors: [
+            expect.objectContaining({
+              message: "Conversation agent retired-agent is not available"
+            }),
+            expect.objectContaining({ message: "database is locked" })
+          ]
+        })
+      })
+    )
+    expect(testApp.completeChatStream).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    [
+      "an error-level failure",
+      new Error("model not loaded"),
+      "error",
+      "Chat completion stream failed"
+    ],
+    [
+      "a debug-level cancellation",
+      new ChatCompletionCancelledError(new Error("aborted")),
+      "debug",
+      "Chat completion was cancelled"
+    ]
+  ])(
+    "logs a reply ended by the model's rejection as %s with the request's logger",
+    async (_label, rejection, level, msg) => {
+      const testApp = await createChatRouteTestApp()
+      // Store the turn for real, so the reply's writes reach a stored message.
+      testApp.createConversationTurn.mockRestore()
+      testApp.completeChatStream.mockRejectedValue(rejection)
+      testApp.generateTitle.mockResolvedValue("Trip plan")
+      updateFastifyWithChatRoute(testApp.app, {
+        ...CHAT_ROUTE_OPTIONS,
+        generations: testApp.generations
+      })
+
+      const response = await sendChatRequest(
+        testApp.app,
+        NEW_CONVERSATION_REQUEST
+      )
+
+      expect(response.statusCode).toBe(200)
+      expect(testApp.logs).toContainEqual(
+        expect.objectContaining({
+          level,
+          msg,
+          reqId: expect.any(String),
+          // Pino appends the messages of the failure's causes.
+          err: expect.objectContaining({
+            message: expect.stringContaining(rejection.message)
+          })
+        })
+      )
+    }
+  )
 })

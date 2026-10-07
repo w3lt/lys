@@ -4,7 +4,6 @@ import type {
   ReplyStreamEvent
 } from "../../../../src/modules/agent/replyModel"
 import AgentRoster from "../../../../src/modules/agent/roster"
-import { createTestFastify } from "../../support/fastifyTestApp"
 
 /**
  * Creates a roster whose model ends every reply at once.
@@ -31,7 +30,6 @@ describe("AgentRoster", () => {
 
   it("answers as Lys with the configured system prompt", async () => {
     const { roster, openReplyStream } = createRoster()
-    const { app } = createTestFastify()
 
     await roster.getDefaultAgent().createReply({
       history: [],
@@ -42,7 +40,8 @@ describe("AgentRoster", () => {
       updateAssistantMessageContent: () => true,
       updateAssistantMessageState: () => true,
       sendEvent: vi.fn(),
-      logger: app.log
+      reportReplyCancellation: vi.fn(),
+      reportReplyFailure: vi.fn()
     })
 
     expect(openReplyStream).toHaveBeenCalledWith(

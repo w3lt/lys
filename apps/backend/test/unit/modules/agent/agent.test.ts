@@ -14,7 +14,6 @@ import {
   createAssistantMessage,
   createUserMessage
 } from "../../support/conversationFixtures"
-import { createTestFastify } from "../../support/fastifyTestApp"
 
 /** Opens one reply stream for the agent under test. */
 type OpenReplyStream = ReplyModel["openReplyStream"]
@@ -76,12 +75,13 @@ function createEventStream(...events: ReplyStreamEvent[]) {
  * Has one agent answer one turn to settlement and records the effects.
  *
  * @param scenario - Model, history, storage, and cancellation behavior.
- * @returns The sent events, stored deltas and states, captured logs, and the
- * reply's settlement.
+ * @returns The sent events, stored deltas and states, reported cancellations
+ * and failures, and the reply's settlement.
  */
 async function getAgentReplyOutcome(scenario: AgentReplyScenario) {
-  const { app, logs } = createTestFastify()
   const events: ChatGenerationEvent[] = []
+  const reportedCancellations: unknown[] = []
+  const reportedFailures: unknown[] = []
   const persistedDeltas: string[] = []
   const persistedStates: AssistantMessageCompletion[] = []
   const updateAssistantMessageContent = vi.fn(
@@ -101,7 +101,12 @@ async function getAgentReplyOutcome(scenario: AgentReplyScenario) {
       sendEvent: (event) => {
         events.push(event)
       },
-      logger: app.log,
+      reportReplyCancellation: (failure) => {
+        reportedCancellations.push(failure)
+      },
+      reportReplyFailure: (failure) => {
+        reportedFailures.push(failure)
+      },
       updateAssistantMessageContent: (content) => {
         const persisted = updateAssistantMessageContent(content)
         if (persisted) {
@@ -123,7 +128,8 @@ async function getAgentReplyOutcome(scenario: AgentReplyScenario) {
     persistedDeltas,
     persistedStates,
     updateAssistantMessageContent,
-    logs,
+    reportedCancellations,
+    reportedFailures,
     settlement
   }
 }
@@ -320,21 +326,18 @@ describe("Agent", () => {
     ])
   })
 
-  it("interrupts with a debug log when the model reports cancellation before the agent observes its abort", async () => {
+  it("interrupts and reports a cancellation when the model reports cancellation before the agent observes its abort", async () => {
+    const cancellation = new ChatCompletionCancelledError(new Error("aborted"))
     const run = await getAgentReplyOutcome({
       openReplyStream: vi.fn<OpenReplyStream>(async () => {
-        throw new ChatCompletionCancelledError(new Error("aborted"))
+        throw cancellation
       })
     })
 
     expect(run.persistedStates).toEqual([{ status: "interrupted" }])
     expect(run.events).toEqual([INTERRUPTED_EVENT])
-    expect(run.logs.filter(({ level }) => level === "debug")).toEqual([
-      expect.objectContaining({
-        err: expect.objectContaining({ type: "ChatCompletionCancelledError" })
-      })
-    ])
-    expect(run.logs.filter(({ level }) => level === "error")).toEqual([])
+    expect(run.reportedCancellations).toEqual([cancellation])
+    expect(run.reportedFailures).toEqual([])
     expect(run.settlement).toEqual({ status: "resolved" })
   })
 
@@ -350,7 +353,10 @@ describe("Agent", () => {
 
     expect(run.persistedStates).toEqual([{ status: "interrupted" }])
     expect(run.events).toEqual([INTERRUPTED_EVENT])
-    expect(run.logs.filter(({ level }) => level === "error")).toEqual([])
+    expect(run.reportedCancellations).toEqual([
+      expect.objectContaining({ message: "socket hang up" })
+    ])
+    expect(run.reportedFailures).toEqual([])
   })
 
   it("interrupts when the stream fails after its own abort", async () => {
@@ -371,28 +377,24 @@ describe("Agent", () => {
       { type: "delta", content: "Partial" },
       INTERRUPTED_EVENT
     ])
-    expect(run.logs.filter(({ level }) => level === "debug")).toEqual([
-      expect.objectContaining({
-        err: expect.objectContaining({ message: "socket hang up" })
-      })
+    expect(run.reportedCancellations).toEqual([
+      expect.objectContaining({ message: "socket hang up" })
     ])
-    expect(run.logs.filter(({ level }) => level === "error")).toEqual([])
+    expect(run.reportedFailures).toEqual([])
   })
 
-  it("fails with an error event and log when the model request is rejected", async () => {
+  it("fails with an error event and reports the failure when the model request is rejected", async () => {
+    const rejection = new Error("model not loaded")
     const run = await getAgentReplyOutcome({
       openReplyStream: vi.fn<OpenReplyStream>(async () => {
-        throw new Error("model not loaded")
+        throw rejection
       })
     })
 
     expect(run.persistedStates).toEqual([{ status: "failed" }])
     expect(run.events).toEqual([CHAT_FAILURE_EVENT])
-    expect(run.logs.filter(({ level }) => level === "error")).toEqual([
-      expect.objectContaining({
-        err: expect.objectContaining({ message: "model not loaded" })
-      })
-    ])
+    expect(run.reportedFailures).toEqual([rejection])
+    expect(run.reportedCancellations).toEqual([])
     expect(run.settlement).toEqual({ status: "resolved" })
   })
 
@@ -425,8 +427,8 @@ describe("Agent", () => {
       { type: "delta", content: "Partial" },
       CHAT_FAILURE_EVENT
     ])
-    expect(run.logs.filter(({ level }) => level === "error")).toEqual([
-      expect.objectContaining({ err: expect.any(Object) })
+    expect(run.reportedFailures).toEqual([
+      new Error("Model stream ended without a finish reason")
     ])
   })
 
@@ -465,11 +467,7 @@ describe("Agent", () => {
       { type: "delta", content: "Hi" },
       CHAT_FAILURE_EVENT
     ])
-    expect(run.logs.filter(({ level }) => level === "error")).toEqual([
-      expect.objectContaining({
-        err: expect.objectContaining({ message: persistenceFailure.message })
-      })
-    ])
+    expect(run.reportedFailures).toEqual([persistenceFailure])
     expect(run.settlement).toEqual({ status: "resolved" })
   })
 
@@ -517,7 +515,6 @@ describe("Agent", () => {
   })
 
   it("answers overlapping turns independently", async () => {
-    const { app } = createTestFastify()
     const firstReplyGate = Promise.withResolvers<void>()
     const agent = new Agent(AGENT_PROFILE, {
       openReplyStream: async (request) => {
@@ -551,7 +548,8 @@ describe("Agent", () => {
       sendEvent: (event) => {
         events.push(event)
       },
-      logger: app.log
+      reportReplyCancellation: () => undefined,
+      reportReplyFailure: () => undefined
     })
 
     const firstReply = agent.createReply(createTurn("First", firstEvents))

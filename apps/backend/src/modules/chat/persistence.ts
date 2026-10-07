@@ -22,7 +22,7 @@ export type CreateConversationTurnOptions = Readonly<{
 
 /** Immutable turn identities plus an independent snapshot of the earlier transcript. */
 export type ConversationTurn = Readonly<{
-  /** Snapshot before this turn, including the saved system prompt. */
+  /** Snapshot before this turn, including the code of its agent. */
   conversation: Conversation
   /** User message committed with this turn. */
   userMessage: ConversationUserMessage

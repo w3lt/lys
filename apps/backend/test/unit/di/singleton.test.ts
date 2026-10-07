@@ -22,7 +22,6 @@ import {
 } from "../../../src/di/singleton"
 import SqliteDatabase from "../../../src/infrastructure/database/sqliteDatabase"
 import { TEST_BACKEND_CONFIG } from "../support/backendConfig"
-import { createTestFastify } from "../support/fastifyTestApp"
 
 /** Name of each acquisition whose release the bundle owns. */
 type AcquisitionName = "chat" | "database" | "llm-runtime"
@@ -221,7 +220,6 @@ describe("createSingletonServices", () => {
     const completeChatStream = vi
       .spyOn(acquisitions.chat.service, "completeChatStream")
       .mockRejectedValue(new Error("model not loaded"))
-    const logger = createTestFastify().app.log
 
     await services.agentRoster.getDefaultAgent().createReply({
       history: [],
@@ -232,7 +230,8 @@ describe("createSingletonServices", () => {
       updateAssistantMessageContent: () => true,
       updateAssistantMessageState: () => true,
       sendEvent: vi.fn(),
-      logger
+      reportReplyCancellation: vi.fn(),
+      reportReplyFailure: vi.fn()
     })
 
     expect(completeChatStream).toHaveBeenCalledWith(

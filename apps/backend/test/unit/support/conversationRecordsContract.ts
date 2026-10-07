@@ -460,7 +460,7 @@ export function registerConversationRecordReaderContractSuite(
         ).toEqual([tieHigh, tieLow, older])
       })
 
-      it("summarizes each conversation without its system prompt", () => {
+      it("summarizes each conversation without its agent code", () => {
         const harness = createHarness()
         const id = saveListedConversation(harness, {
           sequence: 1,

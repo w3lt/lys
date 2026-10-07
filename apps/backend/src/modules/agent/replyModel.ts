@@ -50,10 +50,12 @@ export interface ReplyModel {
    * borrowed until the stream ends.
    * @returns A promise resolving once the model accepted the request, to the
    * reply's events in order. A `finish` event ends the reply. Leaving the
-   * iteration early releases the model request.
+   * iteration early releases the model request. Cancelling the request after
+   * the model accepted it also releases the request: the stream then ends
+   * early, possibly before a `finish` event, or rejects with the model's own
+   * failure.
    * @throws `ChatCompletionCancelledError` If the request is cancelled before
-   * the model accepts it; other cancellations surface as the model's own
-   * failure while the request's signal is aborted.
+   * the model accepts it.
    * @throws If the model rejects the request, or the stream fails or carries
    * a finish reason other than `stop` or `length`; the stream rejects with
    * that failure after the events before it.

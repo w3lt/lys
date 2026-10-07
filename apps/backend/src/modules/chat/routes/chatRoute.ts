@@ -127,10 +127,12 @@ async function handleChatRequest(
 ): Promise<void> {
   const turn = createRequestedTurn(request, reply, dependencies)
   if (turn === undefined) return
+  const agent = dependencies.agentRoster.findAgent(turn.conversation.agentCode)
+  if (agent === undefined) rejectTurnWithoutAgent(turn, dependencies.turns)
 
   const generation = startTurnGeneration({
     turn,
-    agent: getTurnAgent(turn, dependencies),
+    agent,
     model: request.body.model,
     generationOptions: request.body.generationOptions,
     logger: request.log,
@@ -184,25 +186,34 @@ function createRequestedTurn(
 }
 
 /**
- * Gets the agent that answers a stored turn's conversation.
+ * Rejects a stored turn whose conversation's agent is not available, storing
+ * its reply as failed so it does not stay streaming.
  *
- * @param turn - Stored turn whose conversation names its agent.
- * @param dependencies - Borrowed agents and turn persistence.
- * @returns The conversation's agent.
- * @throws If no agent has the conversation's agent code; the turn's reply is
- * stored as failed first, so no reply stays streaming.
+ * @param turn - Stored turn whose reply is still streaming.
+ * @param turns - Turn persistence borrowed for the route lifetime.
+ * @throws Always: `Conversation agent <code> is not available` after the
+ * reply was stored as failed, or an `AggregateError` holding that error
+ * followed by the persistence failure when the failed state cannot be stored.
  */
-function getTurnAgent(
+function rejectTurnWithoutAgent(
   turn: ConversationTurn,
-  dependencies: ChatRouteDependencies
-): Agent {
-  const { agentCode } = turn.conversation
-  const agent = dependencies.agentRoster.findAgent(agentCode)
-  if (agent !== undefined) return agent
-  dependencies.turns.updateAssistantMessageState(turn.assistantMessage.id, {
-    status: "failed"
-  })
-  throw new Error(`Conversation agent ${agentCode} is not available`)
+  turns: ConversationTurnWriter
+): never {
+  const missingAgent = new Error(
+    `Conversation agent ${turn.conversation.agentCode} is not available`
+  )
+  try {
+    turns.updateAssistantMessageState(turn.assistantMessage.id, {
+      status: "failed"
+    })
+  } catch (persistenceError) {
+    throw new AggregateError(
+      [missingAgent, persistenceError],
+      "Missing agent failure could not be finalized",
+      { cause: persistenceError }
+    )
+  }
+  throw missingAgent
 }
 
 /**
@@ -279,7 +290,12 @@ async function createTurnReplyTask(
           completion
         ),
       sendEvent,
-      logger: input.logger
+      reportReplyCancellation: (failure) => {
+        input.logger.debug({ err: failure }, "Chat completion was cancelled")
+      },
+      reportReplyFailure: (failure) => {
+        input.logger.error({ err: failure }, "Chat completion stream failed")
+      }
     })
   } catch (taskError) {
     try {

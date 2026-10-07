@@ -68,8 +68,8 @@ export const backendConfigSchema = z
       .string()
       .refine(isAbsolute, "Database file path must be absolute."),
     /**
-     * System prompt sent before the user message in every chat completion and
-     * stored with each new conversation.
+     * System prompt of the Lys agent, sent first in the context of every reply
+     * Lys writes.
      *
      * @remarks Read once from the maintained `lys.txt` prompt file, with
      * surrounding whitespace trimmed, when the configuration is loaded.

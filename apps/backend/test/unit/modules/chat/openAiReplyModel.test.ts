@@ -4,9 +4,21 @@ import type {
   ReplyStreamEvent,
   ReplyStreamRequest
 } from "../../../../src/modules/agent/replyModel"
+import ChatService from "../../../../src/modules/chat/chatService"
 import OpenAiReplyModel from "../../../../src/modules/chat/openAiReplyModel"
 import { ChatCompletionCancelledError } from "../../../../src/utils/errors"
-import { createChatCompletionChunk } from "../../support/openAiEndpointFake"
+import {
+  createChatCompletionChunk,
+  createChatCompletionStreamResponse,
+  createOpenAiErrorResponse,
+  createOpenChatCompletionStreamResponse,
+  startOpenAiEndpointFake
+} from "../../support/openAiEndpointFake"
+import {
+  registerReplyModelContractSuite,
+  type ReplyModelHarness,
+  type ReplyModelScript
+} from "../../support/replyModelContract"
 
 /** Chat completion the adapter borrows. */
 type CompleteChatStream = ConstructorParameters<typeof OpenAiReplyModel>[0]
@@ -55,7 +67,79 @@ async function listReplyStreamEvents(completeChatStream: CompleteChatStream) {
   }
 }
 
+/**
+ * Creates the endpoint response that carries out a reply model script.
+ *
+ * @param script - What the model does with the request.
+ * @param handleRequestRelease - Called when an open reply's body is
+ * cancelled, which is how the SDK releases the request.
+ * @returns The response, or a promise that never settles for a request the
+ * model does not accept.
+ */
+function createScriptedResponse(
+  script: ReplyModelScript,
+  handleRequestRelease: () => void
+): Response | Promise<Response> {
+  switch (script.kind) {
+    case "finished-reply":
+    case "unsupported-finish":
+      return createChatCompletionStreamResponse([
+        ...script.texts.map((content) =>
+          createChatCompletionChunk({ content })
+        ),
+        createChatCompletionChunk({
+          finishReason:
+            script.kind === "finished-reply"
+              ? script.finishReason
+              : "tool_calls"
+        })
+      ])
+    case "open-reply":
+      return createOpenChatCompletionStreamResponse(
+        script.texts.map((content) => createChatCompletionChunk({ content })),
+        handleRequestRelease
+      )
+    case "unaccepted-request":
+      return new Promise<Response>(() => undefined)
+    case "rejected-request":
+      return createOpenAiErrorResponse(400, "model not loaded")
+  }
+}
+
+/**
+ * Creates an OpenAI reply model over a chat service whose in-process
+ * endpoint answers every request as the script says, as the composition root
+ * wires them.
+ *
+ * @param script - What the model does with each request.
+ * @returns The reply model and the endpoint's observations.
+ */
+function createOpenAiReplyModelHarness(
+  script: ReplyModelScript
+): ReplyModelHarness {
+  const modelRequest = Promise.withResolvers<void>()
+  const requestRelease = Promise.withResolvers<void>()
+  startOpenAiEndpointFake(() => {
+    modelRequest.resolve()
+    return createScriptedResponse(script, requestRelease.resolve)
+  })
+  const chatService = new ChatService({
+    openAiBaseUrl: "http://lmstudio.test/v1",
+    titleGenerationPrompt: "Summarize the message as a short title.",
+    generatedTitleMaxLength: 50
+  })
+  return Object.freeze({
+    replyModel: new OpenAiReplyModel((options) =>
+      chatService.completeChatStream(options)
+    ),
+    waitForModelRequest: () => modelRequest.promise,
+    waitForRequestRelease: () => requestRelease.promise
+  })
+}
+
 describe("OpenAiReplyModel", () => {
+  registerReplyModelContractSuite(createOpenAiReplyModelHarness)
+
   it("sends the context, model, generation options, and signal to the chat completion", async () => {
     const completeChatStream = createChunkStream()
 
@@ -69,25 +153,6 @@ describe("OpenAiReplyModel", () => {
       model: REPLY_REQUEST.model,
       generationOptions: REPLY_REQUEST.generationOptions,
       signal: REPLY_REQUEST.abortSignal
-    })
-  })
-
-  it("yields the first choice's text, then its finish reason", async () => {
-    const run = await listReplyStreamEvents(
-      createChunkStream(
-        createChatCompletionChunk({ content: "Hi" }),
-        createChatCompletionChunk({ content: " there" }),
-        createChatCompletionChunk({ finishReason: "stop" })
-      )
-    )
-
-    expect(run).toEqual({
-      events: [
-        { type: "text", content: "Hi" },
-        { type: "text", content: " there" },
-        { type: "finish", finishReason: "stop" }
-      ],
-      failure: undefined
     })
   })
 
@@ -144,28 +209,5 @@ describe("OpenAiReplyModel", () => {
     await expect(model.openReplyStream(REPLY_REQUEST)).rejects.toBe(
       cancellation
     )
-  })
-
-  it("releases the chat completion stream when its reader stops early", async () => {
-    let isUpstreamReleased = false
-    const stream = await new OpenAiReplyModel(
-      vi.fn<CompleteChatStream>(async () =>
-        (async function* () {
-          try {
-            yield createChatCompletionChunk({ content: "Hi" })
-            yield createChatCompletionChunk({ content: "unread" })
-          } finally {
-            isUpstreamReleased = true
-          }
-        })()
-      )
-    ).openReplyStream(REPLY_REQUEST)
-
-    for await (const event of stream) {
-      expect(event).toEqual({ type: "text", content: "Hi" })
-      break
-    }
-
-    expect(isUpstreamReleased).toBe(true)
   })
 })

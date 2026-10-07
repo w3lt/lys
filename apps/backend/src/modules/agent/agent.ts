@@ -6,7 +6,6 @@ import type {
   ConversationAssistantMessageFinishReason,
   ConversationMessage
 } from "@lys/share"
-import type { FastifyBaseLogger } from "fastify"
 import { ChatCompletionCancelledError } from "../../utils/errors"
 import { buildAgentContext } from "./agentContext"
 import type { ReplyModel } from "./replyModel"
@@ -36,8 +35,8 @@ export type AssistantMessageCompletion =
     }>
 
 /**
- * One turn an agent answers, with the capabilities it uses to store and
- * publish the reply.
+ * One turn an agent answers, with the capabilities it uses to store, publish,
+ * and report the reply.
  */
 export type AgentTurn = Readonly<{
   /** Stored transcript before this turn, in conversation order. */
@@ -58,8 +57,13 @@ export type AgentTurn = Readonly<{
   ) => boolean
   /** Queues one event for every stream following the reply; never waits. */
   sendEvent: (event: ChatGenerationEvent) => void
-  /** Logger that records reply failures. */
-  logger: FastifyBaseLogger
+  /**
+   * Receives the failure that ended a reply cancelled by Stop or shutdown, or
+   * reported as cancelled by the model.
+   */
+  reportReplyCancellation: (failure: unknown) => void
+  /** Receives the failure that ended a reply stored as failed. */
+  reportReplyFailure: (failure: unknown) => void
 }>
 
 /**
@@ -104,8 +108,9 @@ export default class Agent {
    * Answers one turn, storing each delta before sending it and the final
    * state before the final event.
    *
-   * @param turn - Context, request settings, cancellation, reply storage, and
-   * event sender, borrowed until the returned promise settles.
+   * @param turn - Context, request settings, cancellation, reply storage,
+   * event sender, and failure reporters, borrowed until the returned promise
+   * settles.
    * @returns Settlement after completion, cancellation, supersession,
    * deletion, or a reported failure.
    * @throws An `AggregateError` holding the failure that ended the reply
@@ -117,9 +122,10 @@ export default class Agent {
    * final event: `done` after a stored completion; `interrupted` after
    * cancellation, or when a newer turn or a deletion ended the reply; `error`
    * after a model failure. Partial text stays stored. Interrupted replies stay
-   * in later context; failed replies do not. Each failure is logged with the
-   * failure as `err`: at debug level when the turn was cancelled or the model
-   * reports a cancellation, and at error level otherwise.
+   * in later context; failed replies do not. Each failure is reported once,
+   * before its final state is stored: to `reportReplyCancellation` when the
+   * turn was cancelled or the model reports a cancellation, and to
+   * `reportReplyFailure` otherwise.
    */
   public async createReply(turn: AgentTurn): Promise<void> {
     try {
@@ -184,32 +190,33 @@ export default class Agent {
 /**
  * Stores and reports a reply that failed or was cancelled.
  *
- * @param turn - Turn-scoped persistence, logger, cancellation, and sender.
+ * @param turn - Turn-scoped persistence, failure reporters, cancellation, and
+ * sender.
  * @param error - Failure raised while answering.
  * @throws An `AggregateError` holding `error` followed by the persistence
  * failure when the terminal state cannot be stored.
  * @remarks The model reports a cancelled request even when the agent has not
  * yet observed its own abort, so both mean an interrupted reply. Any other
- * failure stores `failed` and sends an `error` event. Both are logged as
+ * failure stores `failed` and sends an `error` event. Both are reported as
  * {@link Agent.createReply} describes.
  */
 function handleReplyFailure(turn: AgentTurn, error: unknown): void {
   const isCancelled =
     turn.abortSignal.aborted || error instanceof ChatCompletionCancelledError
   if (isCancelled) {
-    turn.logger.debug({ err: error }, "Chat completion was cancelled")
+    turn.reportReplyCancellation(error)
   } else {
-    turn.logger.error({ err: error }, "Chat completion stream failed")
+    turn.reportReplyFailure(error)
   }
   try {
     turn.updateAssistantMessageState({
       status: isCancelled ? "interrupted" : "failed"
     })
-  } catch (persistenceFailure) {
+  } catch (persistenceError) {
     throw new AggregateError(
-      [error, persistenceFailure],
+      [error, persistenceError],
       "Chat failure could not be finalized",
-      { cause: persistenceFailure }
+      { cause: persistenceError }
     )
   }
   turn.sendEvent(

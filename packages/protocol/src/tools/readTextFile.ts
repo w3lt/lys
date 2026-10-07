@@ -1,4 +1,5 @@
 import * as z from "zod"
+import { buildCodeOnlyFailureSchema } from "./_share"
 
 /**
  * Validates the argument object of the desktop `read_text_file` command.
@@ -37,30 +38,14 @@ export const readTextFileContentSchema = z.string()
  * compatibility change for consumers that branch exhaustively.
  */
 export const readTextFileErrorSchema = z.discriminatedUnion("code", [
-  z
-    .strictObject({
-      /** The path is not absolute; relative paths are never resolved. */
-      code: z.literal("pathNotAbsolute")
-    })
-    .readonly(),
-  z
-    .strictObject({
-      /** Nothing exists at the path. */
-      code: z.literal("fileNotFound")
-    })
-    .readonly(),
-  z
-    .strictObject({
-      /** The operating system denied access to the file or a parent directory. */
-      code: z.literal("permissionDenied")
-    })
-    .readonly(),
-  z
-    .strictObject({
-      /** The path names a directory, FIFO, socket, or device, not a regular file. */
-      code: z.literal("notAFile")
-    })
-    .readonly(),
+  /** The path is not absolute; relative paths are never resolved. */
+  buildCodeOnlyFailureSchema("pathNotAbsolute"),
+  /** Nothing exists at the path. */
+  buildCodeOnlyFailureSchema("fileNotFound"),
+  /** The operating system denied access to the file or a parent directory. */
+  buildCodeOnlyFailureSchema("permissionDenied"),
+  /** The path names a directory, FIFO, socket, or device, not a regular file. */
+  buildCodeOnlyFailureSchema("notAFile"),
   z
     .strictObject({
       /** The file exceeds the desktop's read limit, so none of it was returned. */
@@ -71,12 +56,8 @@ export const readTextFileErrorSchema = z.discriminatedUnion("code", [
       maxSizeBytes: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
     })
     .readonly(),
-  z
-    .strictObject({
-      /** The file's bytes are not valid UTF-8, so it cannot be read as text. */
-      code: z.literal("notUtf8Text")
-    })
-    .readonly(),
+  /** The file's bytes are not valid UTF-8, so it cannot be read as text. */
+  buildCodeOnlyFailureSchema("notUtf8Text"),
   z
     .strictObject({
       /**

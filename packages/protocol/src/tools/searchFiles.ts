@@ -1,4 +1,5 @@
 import * as z from "zod"
+import { buildCodeOnlyFailureSchema } from "./_share"
 
 /** Validates a count reported by the desktop, which fits a safe integer. */
 const searchFilesCountSchema = z
@@ -151,42 +152,18 @@ export type SearchFilesReport = z.infer<typeof searchFilesReportSchema>
  * a compatibility change for consumers that branch exhaustively.
  */
 export const searchFilesErrorSchema = z.discriminatedUnion("code", [
-  z
-    .strictObject({
-      /** The root is not an absolute path. */
-      code: z.literal("rootNotAbsolute")
-    })
-    .readonly(),
-  z
-    .strictObject({
-      /** Nothing exists at the root path. */
-      code: z.literal("rootNotFound")
-    })
-    .readonly(),
-  z
-    .strictObject({
-      /** The root exists but is not a directory. */
-      code: z.literal("rootNotADirectory")
-    })
-    .readonly(),
-  z
-    .strictObject({
-      /** The operating system denied access to the root directory. */
-      code: z.literal("permissionDenied")
-    })
-    .readonly(),
-  z
-    .strictObject({
-      /** The query is empty or contains only whitespace. */
-      code: z.literal("emptyQuery")
-    })
-    .readonly(),
-  z
-    .strictObject({
-      /** The query contains a line break, so it could never match one line. */
-      code: z.literal("multilineQuery")
-    })
-    .readonly(),
+  /** The root is not an absolute path. */
+  buildCodeOnlyFailureSchema("rootNotAbsolute"),
+  /** Nothing exists at the root path. */
+  buildCodeOnlyFailureSchema("rootNotFound"),
+  /** The root exists but is not a directory. */
+  buildCodeOnlyFailureSchema("rootNotADirectory"),
+  /** The operating system denied access to the root directory. */
+  buildCodeOnlyFailureSchema("permissionDenied"),
+  /** The query is empty or contains only whitespace. */
+  buildCodeOnlyFailureSchema("emptyQuery"),
+  /** The query contains a line break, so it could never match one line. */
+  buildCodeOnlyFailureSchema("multilineQuery"),
   z
     .strictObject({
       /** The query is longer than the desktop's query limit. */

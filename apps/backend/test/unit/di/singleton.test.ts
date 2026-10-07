@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { backendConfigSchema } from "../../../src/config"
 import StoredAgents from "../../../src/modules/agent/agents"
+import AgentRoster from "../../../src/modules/agent/roster"
 import ChatService from "../../../src/modules/chat/chatService"
 import StoredConversationHistoryEditor from "../../../src/modules/conversation/historyEditor"
 import StoredConversationHistoryReader from "../../../src/modules/conversation/historyReader"
@@ -21,6 +22,7 @@ import {
 } from "../../../src/di/singleton"
 import SqliteDatabase from "../../../src/infrastructure/database/sqliteDatabase"
 import { TEST_BACKEND_CONFIG } from "../support/backendConfig"
+import { createTestFastify } from "../support/fastifyTestApp"
 
 /** Name of each acquisition whose release the bundle owns. */
 type AcquisitionName = "chat" | "database" | "llm-runtime"
@@ -154,6 +156,7 @@ describe("createSingletonServices", () => {
       StoredConversationHistoryEditor
     )
     expect(services.agents).toBeInstanceOf(StoredAgents)
+    expect(services.agentRoster).toBeInstanceOf(AgentRoster)
     expect(services.llmRuntimeService).toBe(acquisitions.llmRuntime.service)
     expect(services.llmService).toBeInstanceOf(LlmService)
   })
@@ -170,7 +173,7 @@ describe("createSingletonServices", () => {
     const turn = services.conversationTurns.createConversationTurn({
       userMessageContent: "Hello",
       model: "qwen/qwen3-8b",
-      systemPrompt: "You are Lys."
+      agentCode: "lys"
     })
     services.conversationHistoryEditor.updateConversationTitle(
       turn.conversation.id,
@@ -205,6 +208,41 @@ describe("createSingletonServices", () => {
     expect(services.agents.findAgent("lys")).toMatchObject({ name: "Lys" })
     acquisitions.database.service[Symbol.dispose]()
     expect(() => services.agents.findAgent("lys")).toThrow("Database is closed")
+  })
+
+  it("builds Lys from the configured prompt over the acquired chat service", async () => {
+    const { factories, acquisitions } = createRecordedFactories()
+    const services = await createSingletonServices(
+      TEST_BACKEND_CONFIG,
+      createFailureReporters(),
+      factories
+    )
+    onTestFinished(async () => await closeSingletonServices(services))
+    const completeChatStream = vi
+      .spyOn(acquisitions.chat.service, "completeChatStream")
+      .mockRejectedValue(new Error("model not loaded"))
+    const logger = createTestFastify().app.log
+
+    await services.agentRoster.getDefaultAgent().createReply({
+      history: [],
+      userMessageContent: "Hello",
+      model: "qwen/qwen3-8b",
+      generationOptions: { temperature: 0.4 },
+      abortSignal: new AbortController().signal,
+      updateAssistantMessageContent: () => true,
+      updateAssistantMessageState: () => true,
+      sendEvent: vi.fn(),
+      logger
+    })
+
+    expect(completeChatStream).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages: [
+          { role: "system", content: TEST_BACKEND_CONFIG.lysSystemPrompt },
+          { role: "user", content: "Hello" }
+        ]
+      })
+    )
   })
 
   it("serves the LLM service through the runtime service's operation queue", async () => {
@@ -318,7 +356,7 @@ describe("createSingletonServices", () => {
     const turn = services.conversationTurns.createConversationTurn({
       userMessageContent: "Hello",
       model: "qwen/qwen3-8b",
-      systemPrompt: "You are Lys."
+      agentCode: "lys"
     })
     expect(history.getConversation(turn.conversation.id)).toBeDefined()
 

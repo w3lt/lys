@@ -12,7 +12,6 @@ describe("registerChatRoutes", () => {
     const testApp = await createChatRouteTestApp()
 
     await registerChatRoutes(testApp.app, {
-      lysSystemPrompt: "Configured prompt",
       titleGenerationMaxAttempts: 1
     })
 

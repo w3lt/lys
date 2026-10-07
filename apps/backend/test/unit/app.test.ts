@@ -6,6 +6,7 @@ import * as z from "zod"
 import { buildApp } from "../../src/app"
 import type { BackendConfig } from "../../src/config"
 import StoredAgents from "../../src/modules/agent/agents"
+import AgentRoster from "../../src/modules/agent/roster"
 import StoredConversationHistoryEditor from "../../src/modules/conversation/historyEditor"
 import StoredConversationHistoryReader from "../../src/modules/conversation/historyReader"
 import StoredConversationTurns from "../../src/modules/conversation/turns"
@@ -100,6 +101,7 @@ describe("buildApp", () => {
       StoredConversationHistoryEditor
     )
     expect(app.agents).toBeInstanceOf(StoredAgents)
+    expect(app.agentRoster).toBeInstanceOf(AgentRoster)
     expect(response.statusCode).toBe(200)
     expect(response.json()).toMatchObject({ storedCount: 0 })
     expect(agentsResponse.statusCode).toBe(200)

@@ -1,9 +1,9 @@
 import type {
   Conversation,
   ConversationAssistantMessage,
-  ConversationAssistantMessageFinishReason,
   ConversationUserMessage
 } from "@lys/share"
+import type { AssistantMessageCompletion } from "../agent/agent"
 
 /** Inputs for atomically creating one persisted user/assistant pair. */
 export type CreateConversationTurnOptions = Readonly<{
@@ -13,8 +13,11 @@ export type CreateConversationTurnOptions = Readonly<{
   userMessageContent: string
   /** Nonempty model identity stored on the assistant reply. */
   model: string
-  /** Startup-loaded prompt persisted only with a conversation this turn creates. */
-  systemPrompt: string
+  /**
+   * Valid code of the agent that answers a conversation this turn creates; an
+   * existing conversation keeps its agent.
+   */
+  agentCode: string
 }>
 
 /** Immutable turn identities plus an independent snapshot of the earlier transcript. */
@@ -28,19 +31,6 @@ export type ConversationTurn = Readonly<{
   /** Whether this operation created the conversation. */
   isNewConversation: boolean
 }>
-
-/** Valid terminal assistant state; only completed replies carry a finish reason. */
-export type AssistantMessageCompletion =
-  | Readonly<{
-      /** The upstream supplied a supported completion reason. */
-      status: "completed"
-      /** Supported terminal model reason. */
-      finishReason: ConversationAssistantMessageFinishReason
-    }>
-  | Readonly<{
-      /** Cancellation preserves partial content; failure is retained but excluded from context. */
-      status: "interrupted" | "failed"
-    }>
 
 /** Synchronous turn writes borrowed until the backend store closes; no cleanup authority. */
 export interface ConversationTurnWriter {

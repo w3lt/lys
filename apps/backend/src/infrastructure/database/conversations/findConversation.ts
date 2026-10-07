@@ -20,7 +20,7 @@ function findConversationMetadata(
 ): ConversationMetadata | undefined {
   const row = statements
     .getStatement(
-      `SELECT id, title, system_prompt AS systemPrompt,
+      `SELECT id, title, agent_code AS agentCode,
     created_at AS createdAt, updated_at AS updatedAt FROM conversations WHERE id = ?`
     )
     .get(conversationId)

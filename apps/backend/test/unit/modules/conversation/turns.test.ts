@@ -39,7 +39,7 @@ function saveConversationWithReply(
   saveConversationRow(database, {
     id: CONVERSATION_ID,
     title: "Trip plan",
-    systemPrompt: "You are Lys.",
+    agentCode: "lys",
     createdAt: "2025-01-01T00:00:00.000Z"
   })
   saveUserMessageRow(database, {
@@ -146,7 +146,7 @@ describe("StoredConversationTurns", () => {
       const turn = turns.createConversationTurn({
         userMessageContent: "Hello",
         model: "qwen/qwen3-8b",
-        systemPrompt: "You are Lys."
+        agentCode: "lys"
       })
 
       // Activity time is maintained by the schema's SQLite-clock trigger,
@@ -154,7 +154,7 @@ describe("StoredConversationTurns", () => {
       expect(history.getConversation(turn.conversation.id)).toEqual({
         id: turn.conversation.id,
         title: null,
-        systemPrompt: "You are Lys.",
+        agentCode: "lys",
         createdAt: NOW,
         updatedAt: expect.any(String),
         messages: [turn.userMessage, turn.assistantMessage]
@@ -168,7 +168,7 @@ describe("StoredConversationTurns", () => {
         turns.createConversationTurn({
           userMessageContent: "",
           model: "qwen/qwen3-8b",
-          systemPrompt: "You are Lys."
+          agentCode: "lys"
         })
       ).toThrow(z.ZodError)
 
@@ -185,14 +185,14 @@ describe("StoredConversationTurns", () => {
           conversationId: createFixtureUuidV7(1),
           userMessageContent: "Hello",
           model: "qwen/qwen3-8b",
-          systemPrompt: "You are Lys."
+          agentCode: "lys"
         })
       ).toThrow(ConversationNotFoundError)
 
       const turn = turns.createConversationTurn({
         userMessageContent: "Hello",
         model: "qwen/qwen3-8b",
-        systemPrompt: "You are Lys."
+        agentCode: "lys"
       })
       expect(
         history.listConversations(parseConversationListOptions()).conversations
@@ -206,7 +206,7 @@ describe("StoredConversationTurns", () => {
       const turn = turns.createConversationTurn({
         userMessageContent: "Hello",
         model: "qwen/qwen3-8b",
-        systemPrompt: "You are Lys."
+        agentCode: "lys"
       })
 
       expect(
@@ -231,7 +231,7 @@ describe("StoredConversationTurns", () => {
       const turn = turns.createConversationTurn({
         userMessageContent: "Hello",
         model: "qwen/qwen3-8b",
-        systemPrompt: "You are Lys."
+        agentCode: "lys"
       })
       turns.updateAssistantMessageContent(turn.assistantMessage.id, "Hi")
       turns.updateAssistantMessageState(turn.assistantMessage.id, {
@@ -260,7 +260,7 @@ describe("StoredConversationTurns", () => {
       const turn = turns.createConversationTurn({
         userMessageContent: "Hello",
         model: "qwen/qwen3-8b",
-        systemPrompt: "You are Lys."
+        agentCode: "lys"
       })
 
       expect(() =>
@@ -282,7 +282,7 @@ describe("StoredConversationTurns", () => {
       const turn = turns.createConversationTurn({
         userMessageContent: "Hello",
         model: "qwen/qwen3-8b",
-        systemPrompt: "You are Lys."
+        agentCode: "lys"
       })
 
       vi.setSystemTime(new Date(LATER))
@@ -310,7 +310,7 @@ describe("StoredConversationTurns", () => {
         const turn = turns.createConversationTurn({
           userMessageContent: "Hello",
           model: "qwen/qwen3-8b",
-          systemPrompt: "You are Lys."
+          agentCode: "lys"
         })
         vi.setSystemTime(new Date(LATER))
 
@@ -331,7 +331,7 @@ describe("StoredConversationTurns", () => {
       const turn = turns.createConversationTurn({
         userMessageContent: "Hello",
         model: "qwen/qwen3-8b",
-        systemPrompt: "You are Lys."
+        agentCode: "lys"
       })
       turns.updateAssistantMessageState(turn.assistantMessage.id, {
         status: "completed",
@@ -366,7 +366,7 @@ describe("StoredConversationTurns", () => {
       const turn = turns.createConversationTurn({
         userMessageContent: "Hello",
         model: "qwen/qwen3-8b",
-        systemPrompt: "You are Lys."
+        agentCode: "lys"
       })
 
       expect(
@@ -386,7 +386,7 @@ describe("StoredConversationTurns", () => {
       const turn = turns.createConversationTurn({
         userMessageContent: "Hello",
         model: "qwen/qwen3-8b",
-        systemPrompt: "You are Lys."
+        agentCode: "lys"
       })
       editor.updateConversationTitle(turn.conversation.id, "Renamed")
 
@@ -412,7 +412,7 @@ describe("StoredConversationTurns", () => {
       const turn = turns.createConversationTurn({
         userMessageContent: "Hello",
         model: "qwen/qwen3-8b",
-        systemPrompt: "You are Lys."
+        agentCode: "lys"
       })
 
       expect(() =>
@@ -431,7 +431,7 @@ describe("StoredConversationTurns", () => {
     const turn = turns.createConversationTurn({
       userMessageContent: "Hello",
       model: "qwen/qwen3-8b",
-      systemPrompt: "You are Lys."
+      agentCode: "lys"
     })
     expect(
       turns.updateAssistantMessageContent(turn.assistantMessage.id, "Hi")
@@ -451,7 +451,7 @@ describe("StoredConversationTurns", () => {
       turns.createConversationTurn({
         userMessageContent: "Hello",
         model: "qwen/qwen3-8b",
-        systemPrompt: "You are Lys."
+        agentCode: "lys"
       })
     ).toThrow("Database is closed")
     expect(() =>

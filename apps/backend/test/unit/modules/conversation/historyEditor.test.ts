@@ -16,7 +16,7 @@ function openEditorWithTurn() {
   const turn = turns.createConversationTurn({
     userMessageContent: "Hello",
     model: "qwen/qwen3-8b",
-    systemPrompt: "You are Lys."
+    agentCode: "lys"
   })
   return { database, turns, editor, history, turn }
 }
@@ -35,7 +35,7 @@ describe("StoredConversationHistoryEditor", () => {
       expect(metadata).toEqual({
         id: turn.conversation.id,
         title: "Greeting",
-        systemPrompt: "You are Lys.",
+        agentCode: "lys",
         createdAt: before?.createdAt,
         updatedAt: before?.updatedAt
       })

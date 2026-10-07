@@ -46,7 +46,7 @@ const REPLY_TARGET = Object.freeze({
 const CONVERSATION = Object.freeze({
   id: CONVERSATION_ID,
   title: "Trip plan",
-  systemPrompt: "You are Lys.",
+  agentCode: "lys",
   createdAt: FIXTURE_TIMESTAMP,
   updatedAt: FIXTURE_TIMESTAMP,
   messages: [USER_MESSAGE, ASSISTANT_MESSAGE]

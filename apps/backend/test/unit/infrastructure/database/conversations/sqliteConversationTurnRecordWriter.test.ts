@@ -43,7 +43,7 @@ describe("SqliteConversationTurnRecordWriter", () => {
     records.saveConversation({
       id: CONVERSATION_ID,
       title: null,
-      systemPrompt: "You are Lys.",
+      agentCode: "lys",
       createdAt: "2025-01-01T00:00:00.000Z"
     })
     records.saveAssistantMessage({
@@ -107,7 +107,7 @@ describe("SqliteConversationTurnRecordWriter", () => {
           transaction.createConversation({
             id: createFixtureUuidV7(2),
             title: null,
-            systemPrompt: "You are Lys.",
+            agentCode: "lys",
             createdAt: "2025-01-01T00:00:00.000Z",
             updatedAt: "2025-01-01T00:00:00.000Z"
           })

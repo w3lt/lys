@@ -19,7 +19,7 @@ function openHistoryWithTurn() {
   const turn = turns.createConversationTurn({
     userMessageContent: "Plan the TRIP",
     model: "qwen/qwen3-8b",
-    systemPrompt: "You are Lys."
+    agentCode: "lys"
   })
   return { database, turns, history, turn }
 }
@@ -37,7 +37,7 @@ function openHistoryWithTiedConversations() {
     records.saveConversation({
       id,
       title: `Conversation ${sequence}`,
-      systemPrompt: "You are Lys.",
+      agentCode: "lys",
       createdAt: "2025-01-01T00:05:00.000Z"
     })
     return id
@@ -59,7 +59,7 @@ function createHistoryOverInvalidRow() {
   records.saveConversation({
     id: conversationId,
     title: "",
-    systemPrompt: "You are Lys.",
+    agentCode: "lys",
     createdAt: "2025-01-01T00:00:00.000Z"
   })
   return {
@@ -95,7 +95,7 @@ describe("StoredConversationHistoryReader", () => {
           conversationId: turn.conversation.id,
           userMessageContent: "Again",
           model: "qwen/qwen3-8b",
-          systemPrompt: "You are Lys."
+          agentCode: "lys"
         })
       ).not.toThrow()
     })

@@ -28,7 +28,7 @@ function updateConversationTitle(
   const row = statements
     .getStatement(
       `UPDATE conversations SET title = ? WHERE id = ?
-      RETURNING id, title, system_prompt AS systemPrompt, created_at AS createdAt, updated_at AS updatedAt`
+      RETURNING id, title, agent_code AS agentCode, created_at AS createdAt, updated_at AS updatedAt`
     )
     .get(title, conversationId)
   return row === undefined ? undefined : conversationMetadataSchema.parse(row)

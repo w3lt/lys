@@ -1,18 +1,23 @@
 import { chatApi, conversationNotFoundProblemSchema } from "@lys/protocol"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import updateFastifyWithChatRoute, {
   type ChatRouteOptions
 } from "../../../../../src/modules/chat/routes/chatRoute"
 import { ConversationNotFoundError } from "../../../../../src/utils/errors"
 import {
   createChatRouteTestApp,
-  sendChatRequest
+  sendChatRequest,
+  TEST_LYS_SYSTEM_PROMPT
 } from "../../../support/chatRouteTestApp"
-import { createFixtureUuidV7 } from "../../../support/conversationFixtures"
+import { parseSseEvents } from "../../../support/chatSseRoute"
+import {
+  createConversationTurn as createConversationTurnFixture,
+  createFixtureUuidV7
+} from "../../../support/conversationFixtures"
+import { createChatCompletionChunk } from "../../../support/openAiEndpointFake"
 
 /** Settings applied by the chat route in every case. */
 const CHAT_ROUTE_OPTIONS = Object.freeze({
-  lysSystemPrompt: "You are Lys.",
   titleGenerationMaxAttempts: 2
 } satisfies ChatRouteOptions)
 
@@ -105,6 +110,88 @@ describe("updateFastifyWithChatRoute", () => {
 
     expect(response.statusCode).toBe(400)
     expect(testApp.createConversationTurn).not.toHaveBeenCalled()
+    expect(testApp.completeChatStream).not.toHaveBeenCalled()
+    expect(testApp.generateTitle).not.toHaveBeenCalled()
+  })
+
+  it("has the Lys agent answer with her own system prompt and streams the stored reply", async () => {
+    const testApp = await createChatRouteTestApp()
+    // Store the turn for real, so the reply's writes reach a stored message.
+    testApp.createConversationTurn.mockRestore()
+    testApp.completeChatStream.mockImplementation(async () =>
+      (async function* () {
+        yield createChatCompletionChunk({ content: "Hi", finishReason: "stop" })
+      })()
+    )
+    testApp.generateTitle.mockResolvedValue("Trip plan")
+    updateFastifyWithChatRoute(testApp.app, {
+      ...CHAT_ROUTE_OPTIONS,
+      generations: testApp.generations
+    })
+
+    const response = await sendChatRequest(
+      testApp.app,
+      NEW_CONVERSATION_REQUEST
+    )
+
+    expect(response.statusCode).toBe(200)
+    expect(parseSseEvents(response.body)[0]).toMatchObject({
+      event: "start-new-conversation-turn",
+      data: { conversation: { agentCode: "lys" } }
+    })
+    expect(testApp.completeChatStream).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages: [
+          { role: "system", content: TEST_LYS_SYSTEM_PROMPT },
+          { role: "user", content: NEW_CONVERSATION_REQUEST.message }
+        ],
+        model: NEW_CONVERSATION_REQUEST.model
+      })
+    )
+    const replyEvents = parseSseEvents(response.body).filter(
+      ({ event }) => event === "delta" || event === "done"
+    )
+    expect(replyEvents).toEqual([
+      { event: "delta", data: { type: "delta", content: "Hi" } },
+      { event: "done", data: { type: "done", finishReason: "stop" } }
+    ])
+  })
+
+  it("fails the stored reply with a server error, without contacting the model, when the conversation's agent is not available", async () => {
+    const testApp = await createChatRouteTestApp()
+    const turn = createConversationTurnFixture({
+      agentCode: "retired-agent",
+      earlierMessages: [],
+      userMessageContent: "Plan my trip"
+    })
+    testApp.createConversationTurn.mockReturnValue(turn)
+    const updateAssistantMessageState = vi.spyOn(
+      testApp.app.conversationTurns,
+      "updateAssistantMessageState"
+    )
+    updateFastifyWithChatRoute(testApp.app, {
+      ...CHAT_ROUTE_OPTIONS,
+      generations: testApp.generations
+    })
+
+    const response = await sendChatRequest(testApp.app, {
+      ...NEW_CONVERSATION_REQUEST,
+      conversationId: turn.conversation.id
+    })
+
+    expect(response.statusCode).toBe(500)
+    expect(updateAssistantMessageState).toHaveBeenCalledWith(
+      turn.assistantMessage.id,
+      { status: "failed" }
+    )
+    expect(testApp.logs).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        err: expect.objectContaining({
+          message: "Conversation agent retired-agent is not available"
+        })
+      })
+    )
     expect(testApp.completeChatStream).not.toHaveBeenCalled()
     expect(testApp.generateTitle).not.toHaveBeenCalled()
   })

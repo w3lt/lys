@@ -7,8 +7,7 @@ import updateFastifyWithChatReplyRoutes from "./replyRoutes"
  * Registers all chat routes and the registry that owns their generations.
  *
  * @param app - Application instance that receives the chat route group.
- * @param options - System prompt and title-generation attempt limit forwarded
- * to the chat route.
+ * @param options - Title-generation attempt limit forwarded to the chat route.
  * @returns A promise that resolves after child route registrars complete.
  * @throws If a child route registrar fails.
  * @remarks The registry is disposed in `preClose`, while SSE streams are

@@ -5,7 +5,7 @@ import type {
   ConversationMetadata,
   ConversationUserMessage
 } from "@lys/share"
-import type { AssistantMessageCompletion } from "../chat/persistence"
+import type { AssistantMessageCompletion } from "../agent/agent"
 
 /**
  * Position after which a conversation list page starts: the activity time and

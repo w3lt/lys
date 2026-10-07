@@ -1,6 +1,7 @@
 /// <reference types="fastify" />
 
 import type StoredAgents from "./modules/agent/agents"
+import type AgentRoster from "./modules/agent/roster"
 import type ChatService from "./modules/chat/chatService"
 import type StoredConversationHistoryEditor from "./modules/conversation/historyEditor"
 import type StoredConversationHistoryReader from "./modules/conversation/historyReader"
@@ -13,6 +14,8 @@ declare module "fastify" {
   interface FastifyInstance {
     /** Application-scoped service for OpenAI-compatible chat completion streams. */
     chatService: ChatService
+    /** Application-scoped agents that answer chat turns. */
+    agentRoster: AgentRoster
     /** Application-scoped model inventory, lifecycle, and health policy. */
     llmService: LlmService
     /** Application-scoped LLM runtime connection and model-operation queue. */

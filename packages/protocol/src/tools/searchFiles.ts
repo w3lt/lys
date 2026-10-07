@@ -152,18 +152,30 @@ export type SearchFilesReport = z.infer<typeof searchFilesReportSchema>
  * a compatibility change for consumers that branch exhaustively.
  */
 export const searchFilesErrorSchema = z.discriminatedUnion("code", [
-  /** The root is not an absolute path. */
-  buildCodeOnlyFailureSchema("rootNotAbsolute"),
-  /** Nothing exists at the root path. */
-  buildCodeOnlyFailureSchema("rootNotFound"),
-  /** The root exists but is not a directory. */
-  buildCodeOnlyFailureSchema("rootNotADirectory"),
-  /** The operating system denied access to the root directory. */
-  buildCodeOnlyFailureSchema("permissionDenied"),
-  /** The query is empty or contains only whitespace. */
-  buildCodeOnlyFailureSchema("emptyQuery"),
-  /** The query contains a line break, so it could never match one line. */
-  buildCodeOnlyFailureSchema("multilineQuery"),
+  buildCodeOnlyFailureSchema({
+    /** The root is not an absolute path. */
+    code: z.literal("rootNotAbsolute")
+  }),
+  buildCodeOnlyFailureSchema({
+    /** Nothing exists at the root path. */
+    code: z.literal("rootNotFound")
+  }),
+  buildCodeOnlyFailureSchema({
+    /** The root exists but is not a directory. */
+    code: z.literal("rootNotADirectory")
+  }),
+  buildCodeOnlyFailureSchema({
+    /** The operating system denied access to the root directory. */
+    code: z.literal("permissionDenied")
+  }),
+  buildCodeOnlyFailureSchema({
+    /** The query is empty or contains only whitespace. */
+    code: z.literal("emptyQuery")
+  }),
+  buildCodeOnlyFailureSchema({
+    /** The query contains a line break, so it could never match one line. */
+    code: z.literal("multilineQuery")
+  }),
   z
     .strictObject({
       /** The query is longer than the desktop's query limit. */

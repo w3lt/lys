@@ -211,7 +211,7 @@ export function createFailedChatCompletionStreamResponse(
 ): Response {
   const encoder = new TextEncoder()
   const body = ReadableStream.from(
-    (async function* () {
+    (function* () {
       for (const chunk of chunks)
         yield encoder.encode(buildChatCompletionChunkEvent(chunk))
       throw failure

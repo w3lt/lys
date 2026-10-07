@@ -28,7 +28,8 @@ repository today; it is not a promise of unreleased work.
   rows in SQLite, and streams typed SSE events back to the desktop.
 - Conversation history supports search, cursor pagination, transcript retrieval,
   rename, and deletion. Assistant deltas are persisted before publication;
-  continuation uses the saved prompt and eligible stored history.
+  continuation uses the current prompt of the conversation's agent and eligible
+  stored history.
 - The desktop's past-conversations dialog, opened from the composer or with
   Command+K or Control+K, searches, renames, and deletes stored conversations,
   and reopens one so its next message continues it.

@@ -132,7 +132,11 @@ agents that answer chats: today only Lys, under the code `lys`, built from the
 Lys system prompt. The chat module's `OpenAiReplyModel` implements `ReplyModel`
 over `ChatService`'s streaming completion, using only choice 0 and refusing
 finish reasons other than `stop` and `length`. The chat route passes the agent
-the turn's history, its reply writes, its event sender, and its Stop signal.
+the turn's history, its reply writes, its event sender, its Stop signal, and
+two reporters that log a cancelled reply at debug level and a failed one at
+error level with the request's logger. When a conversation names an agent that
+is not available, the chat route stores the reply as failed and answers with a
+server error.
 Version 4 preserves activity
 timestamps on rename, version 5 preserves them on status-only message updates,
 version 6 adds the `agents` table, version 7 replaces the stored system prompt

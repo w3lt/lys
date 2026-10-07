@@ -28,15 +28,16 @@ Terms that mean something specific inside Lys.
 
 ## Conversation terms
 
-- **Conversation**: the stored chat unit with metadata such as ID, title,
-  system prompt, and timestamps.
+- **Conversation**: the stored chat unit with metadata such as ID, title, the
+  code of the agent that answers it, and timestamps.
 - **User message**: a persisted message with role `user` and non-empty content.
 - **Assistant message**: a persisted message with role `assistant`, a model
   name, lifecycle status, and an optional finish reason.
 - **Finish reason**: the terminal model reason currently supported by the
   protocol: `stop` or `length`.
-- **System prompt**: the backend-owned prompt template attached to a new
-  conversation record.
+- **System prompt**: the instructions an agent sends first in the context of
+  every reply. Lys's comes from the backend's `lys.txt` prompt file; it is not
+  stored with conversations.
 
 ## Streaming terms
 

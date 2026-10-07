@@ -4,7 +4,10 @@ use std::path::Path;
 
 use serde::Serialize;
 
-use super::text_file::{read_regular_text_file, TextFileReadError};
+use super::{
+    definition::{ToolAccess, ToolArgumentDefinition, ToolArgumentType, ToolDefinition, ToolGroup},
+    text_file::{read_regular_text_file, TextFileReadError},
+};
 
 /// Inclusive maximum size in bytes of a file that `read_text_file` returns.
 ///
@@ -13,6 +16,9 @@ use super::text_file::{read_regular_text_file, TextFileReadError};
 /// limit bounds the memory and IPC payload of one read. Callers cannot change
 /// it; the renderer learns it only from that error.
 const MAX_TEXT_FILE_SIZE_BYTES: u64 = 1024 * 1024;
+
+/// Number of bytes in one mebibyte, used to state the read limit in MiB.
+const BYTES_PER_MEBIBYTE: u64 = 1024 * 1024;
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
 #[serde(
@@ -110,6 +116,31 @@ fn build_read_text_file_error(error: TextFileReadError) -> ReadTextFileError {
         TextFileReadError::Io(error) => ReadTextFileError::ReadFailed {
             message: error.to_string(),
         },
+    }
+}
+
+/// Builds the definition of the read-text-file tool for the client tool list.
+///
+/// The description states the read limit taken from
+/// [`MAX_TEXT_FILE_SIZE_BYTES`], in whole mebibytes, so it changes with the
+/// limit the command enforces. The only argument is the command's `path`.
+pub(super) fn build_read_text_file_definition() -> ToolDefinition {
+    let max_size_mebibytes = MAX_TEXT_FILE_SIZE_BYTES / BYTES_PER_MEBIBYTE;
+    let path_argument = ToolArgumentDefinition {
+        name: "path",
+        description: String::from("Absolute path of the file. Symbolic links are followed."),
+        required: true,
+        argument_type: ToolArgumentType::String,
+    };
+
+    ToolDefinition {
+        name: "read_text_file",
+        description: format!(
+            "Read one UTF-8 text file and return its complete text. A file over {max_size_mebibytes} MiB or one that is not UTF-8 text is refused, never truncated."
+        ),
+        group: ToolGroup::Files,
+        access: ToolAccess::Reads,
+        arguments: vec![path_argument],
     }
 }
 

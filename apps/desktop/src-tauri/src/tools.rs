@@ -7,7 +7,14 @@
 //! use a tool or a path; that decision belongs to the caller that runs tool
 //! requests. File work runs on Tauri's blocking-task pool so the window stays
 //! responsive.
+//!
+//! `list_tools` returns the definition of every client tool, which the Tools
+//! settings pane lists and a model will be offered.
 
+/// Provides the `list_tools` command and the list of every client tool.
+pub mod client_tools;
+/// Types of the client tool definitions that `list_tools` returns.
+mod definition;
 /// Provides the `read_text_file` command.
 pub mod read_text_file;
 /// Provides the `find_files` command of the search-files tool.

@@ -10,6 +10,7 @@ import { ChatCompletionCancelledError } from "../../../../src/utils/errors"
 import {
   createChatCompletionChunk,
   createChatCompletionStreamResponse,
+  createFailedChatCompletionStreamResponse,
   createOpenAiErrorResponse,
   createOpenChatCompletionStreamResponse,
   startOpenAiEndpointFake
@@ -98,6 +99,12 @@ function createScriptedResponse(
       return createOpenChatCompletionStreamResponse(
         script.texts.map((content) => createChatCompletionChunk({ content })),
         handleRequestRelease
+      )
+    case "failed-stream":
+      return createFailedChatCompletionStreamResponse(
+        script.texts.map((content) => createChatCompletionChunk({ content })),
+        // Node's `fetch` fails a body this way when its connection ends early.
+        new TypeError("terminated")
       )
     case "unaccepted-request":
       return new Promise<Response>(() => undefined)
@@ -196,6 +203,22 @@ describe("OpenAiReplyModel", () => {
 
     expect(run.events).toEqual([{ type: "text", content: "Hi" }])
     expect(run.failure).toEqual(new Error("Unsupported chat finish reason"))
+  })
+
+  it("passes a failure of the chat completion stream through unchanged after the earlier text", async () => {
+    const failure = new TypeError("terminated")
+
+    const run = await listReplyStreamEvents(
+      vi.fn<CompleteChatStream>(async () =>
+        (async function* () {
+          yield createChatCompletionChunk({ content: "Hi" })
+          throw failure
+        })()
+      )
+    )
+
+    expect(run.events).toEqual([{ type: "text", content: "Hi" }])
+    expect(run.failure).toBe(failure)
   })
 
   it("passes a rejected chat completion through unchanged", async () => {

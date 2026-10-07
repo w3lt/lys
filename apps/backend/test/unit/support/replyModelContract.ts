@@ -28,6 +28,15 @@ export type ReplyModelScript =
     }>
   | Readonly<{
       /**
+       * The model writes `texts` in order, then its stream fails before the
+       * reply ends, such as when the connection to the model drops.
+       */
+      kind: "failed-stream"
+      /** Nonempty texts written before the failure, in order. */
+      texts: readonly string[]
+    }>
+  | Readonly<{
+      /**
        * The model writes `texts` in order and keeps writing the reply until
        * its request is released.
        */
@@ -106,8 +115,8 @@ async function readReplyStream(
   try {
     for await (const event of stream) events.push(event)
     return { events, failure: undefined }
-  } catch (failure) {
-    return { events, failure }
+  } catch (error) {
+    return { events, failure: error }
   }
 }
 
@@ -130,8 +139,8 @@ async function readReplyStreamCancellingAtFirstEvent(
       cancellation.abort()
     }
     return { events, failure: undefined }
-  } catch (failure) {
-    return { events, failure }
+  } catch (error) {
+    return { events, failure: error }
   }
 }
 
@@ -169,21 +178,24 @@ export function registerReplyModelContractSuite(
       }
     )
 
-    it("rejects the stream after the earlier text when the reply ends for an unsupported reason", async () => {
-      const { replyModel } = createHarness({
-        kind: "unsupported-finish",
-        texts: ["Hi"]
-      })
+    it.each([
+      ["the reply ends for an unsupported reason", "unsupported-finish"],
+      ["the model's stream fails before the reply ends", "failed-stream"]
+    ] as const)(
+      "rejects the stream after the earlier text when %s",
+      async (_label, kind) => {
+        const { replyModel } = createHarness({ kind, texts: ["Hi"] })
 
-      const stream = await replyModel.openReplyStream(
-        createReplyStreamRequest(new AbortController().signal)
-      )
-      const reading = await readReplyStream(stream)
+        const stream = await replyModel.openReplyStream(
+          createReplyStreamRequest(new AbortController().signal)
+        )
+        const reading = await readReplyStream(stream)
 
-      expect(reading.events).toEqual([{ type: "text", content: "Hi" }])
-      expect(reading.failure).toBeInstanceOf(Error)
-      expect(reading.failure).not.toBeInstanceOf(ChatCompletionCancelledError)
-    })
+        expect(reading.events).toEqual([{ type: "text", content: "Hi" }])
+        expect(reading.failure).toBeInstanceOf(Error)
+        expect(reading.failure).not.toBeInstanceOf(ChatCompletionCancelledError)
+      }
+    )
 
     it("rejects opening, without reporting a cancellation, when the model rejects the request", async () => {
       const { replyModel } = createHarness({ kind: "rejected-request" })
@@ -225,17 +237,19 @@ export function registerReplyModelContractSuite(
 
     it("releases the request when the reader leaves the stream early", async () => {
       const harness = createHarness({ kind: "open-reply", texts: ["Hi"] })
-      const events: ReplyStreamEvent[] = []
 
       const stream = await harness.replyModel.openReplyStream(
         createReplyStreamRequest(new AbortController().signal)
       )
-      for await (const event of stream) {
-        events.push(event)
-        break
-      }
+      // Leaves after the first event the way `break` leaves a `for await` loop.
+      const eventIterator = stream[Symbol.asyncIterator]()
+      const firstIteration = await eventIterator.next()
+      await eventIterator.return?.()
 
-      expect(events).toEqual([{ type: "text", content: "Hi" }])
+      expect(firstIteration).toEqual({
+        done: false,
+        value: { type: "text", content: "Hi" }
+      })
       await harness.waitForRequestRelease()
     })
 

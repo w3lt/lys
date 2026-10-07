@@ -194,6 +194,36 @@ export function createOpenChatCompletionStreamResponse(
 }
 
 /**
+ * Creates a streamed chat completion response that sends some chunks and
+ * then fails, like a connection that drops while the model writes its reply.
+ *
+ * @param chunks - Chunks sent in order; no `[DONE]` marker follows them.
+ * @param failure - Error the body fails with once the reader asks for more
+ * than the chunks, as a platform `fetch` body does when its connection ends
+ * early. Failing only then keeps the chunks readable, because a failed body
+ * discards the chunks its reader has not read.
+ * @returns A 200 `text/event-stream` response whose body fails after the
+ * chunks.
+ */
+export function createFailedChatCompletionStreamResponse(
+  chunks: readonly ChatCompletionChunk[],
+  failure: Error
+): Response {
+  const encoder = new TextEncoder()
+  const body = ReadableStream.from(
+    (async function* () {
+      for (const chunk of chunks)
+        yield encoder.encode(buildChatCompletionChunkEvent(chunk))
+      throw failure
+    })()
+  )
+  return new Response(body, {
+    status: 200,
+    headers: { "content-type": "text/event-stream" }
+  })
+}
+
+/**
  * Creates a non-streamed chat completion response.
  *
  * @param completion - Completion returned as the JSON body.

@@ -28,10 +28,14 @@ export interface JsonSchemaProperty {
 }
 
 export default class ToolArgument {
-  #name: string
-  #description: string
-  #type: ToolArgumentType
-  #required: boolean
+  /** Non-empty key of the argument in the tool's parameters object. */
+  readonly #name: string
+  /** Non-empty text that tells the model what the argument means. */
+  readonly #description: string
+  /** JSON Schema type that the argument's value must have. */
+  readonly #type: ToolArgumentType
+  /** Whether the model must supply the argument. */
+  readonly #required: boolean
 
   public constructor(options: ToolArgumentCreationOptions) {
     const { name, description, type, required } =

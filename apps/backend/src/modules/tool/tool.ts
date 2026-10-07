@@ -27,9 +27,12 @@ export interface OpenAIFunctionTool {
 }
 
 export default class AgentTool {
-  #name: string
-  #description: string
-  #arguments: ToolArgument[]
+  /** Non-empty function name that the model calls the tool by. */
+  readonly #name: string
+  /** Non-empty text that tells the model what the tool does. */
+  readonly #description: string
+  /** The tool's arguments, in the order they were declared. */
+  readonly #arguments: ToolArgument[]
 
   public constructor(options: AgentToolCreationOptions) {
     const {

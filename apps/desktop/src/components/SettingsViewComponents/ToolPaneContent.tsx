@@ -12,7 +12,8 @@ import { ToolUnavailableCard } from "./ToolUnavailableCard"
 import {
   buildToolGroups,
   calculateOfferedToolTotals,
-  calculateToolModelSupport
+  calculateToolModelSupport,
+  type ToolGroupListing
 } from "./tool-presentation"
 
 /** Properties accepted by {@link ToolListStatus}. */
@@ -72,6 +73,67 @@ function ToolListStatus({
   )
 }
 
+/** Properties accepted by {@link ToolGroupList}. */
+type ToolGroupListProps = {
+  /** Every client tool, in the order Settings lists them. */
+  readonly tools: readonly ToolDefinition[]
+  /** Name of the tool whose details are shown, or null when none is. */
+  readonly expandedToolName: string | null
+  /** Whether the tool controls are locked. */
+  readonly isLocked: boolean
+  /** Whether the groups recede because tool calls are off. */
+  readonly isDimmed: boolean
+  /** Proposes showing one tool's details, or none with null. */
+  readonly onExpandedToolNameChange: (toolName: string | null) => void
+}
+
+/**
+ * Presents every group of tools with the choices made about them.
+ *
+ * @remarks The tool store owns each tool's switch and approval, and the
+ * component passes their changes to it. The parent owns which tool is
+ * expanded, the lock, and the dimming. Groups keep the order in which the
+ * listed tools first name them.
+ * @param props - Listed tools, expansion, lock, dimming, and the expansion
+ * proposal.
+ * @returns One section per tool group.
+ */
+function ToolGroupList({
+  tools,
+  expandedToolName,
+  isLocked,
+  isDimmed,
+  onExpandedToolNameChange
+}: ToolGroupListProps): ReactElement {
+  const toolChoices = useToolStore((state) => state.toolChoices)
+  const updateToolOn = useToolStore((state) => state.updateToolOn)
+  const updateToolApproval = useToolStore((state) => state.updateToolApproval)
+
+  /**
+   * Builds the section of one tool group.
+   *
+   * @param listing - Group and its tools, in list order.
+   * @returns The group's section, keyed by its group.
+   */
+  function buildToolGroupSection(listing: ToolGroupListing): ReactElement {
+    return (
+      <ToolGroupSection
+        expandedToolName={expandedToolName}
+        isDimmed={isDimmed}
+        isLocked={isLocked}
+        key={listing.group}
+        listing={listing}
+        onExpandedToolNameChange={onExpandedToolNameChange}
+        onToolApprovalChange={updateToolApproval}
+        onToolOnChange={updateToolOn}
+        toolChoices={toolChoices}
+      />
+    )
+  }
+
+  return <>{buildToolGroups(tools).map(buildToolGroupSection)}</>
+}
+
 /** Properties accepted by {@link ToolWorkspace}. */
 type ToolWorkspaceProps = {
   /** Every client tool, in the order Settings lists them. */
@@ -86,7 +148,9 @@ type ToolWorkspaceProps = {
  * the loaded model and the inventory; the workspace owns only which tool's
  * details are shown, at most one, which resets when the pane is left. While
  * the loaded model was not trained for tools, the controls below the card
- * recede and are disabled. Every choice is a session-only mock.
+ * recede and are disabled, and no tool's details are shown; the tool that
+ * was expanded opens again once the controls unlock. Every choice is a
+ * session-only mock.
  * @param props - Listed tools.
  * @returns The tool controls.
  */
@@ -96,13 +160,12 @@ function ToolWorkspace({ tools }: ToolWorkspaceProps): ReactElement {
   const toolChoices = useToolStore((state) => state.toolChoices)
   const updateToolCallsOn = useToolStore((state) => state.updateToolCallsOn)
   const updateCallsPerReply = useToolStore((state) => state.updateCallsPerReply)
-  const updateToolOn = useToolStore((state) => state.updateToolOn)
-  const updateToolApproval = useToolStore((state) => state.updateToolApproval)
   const modelRuntime = useLysStore((state) => state.modelRuntime)
   const modelInventory = useLysStore((state) => state.modelInventory)
   const [expandedToolName, setExpandedToolName] = useState<string | null>(null)
   const support = calculateToolModelSupport(modelRuntime, modelInventory)
   const isLocked = support.status === "untrained"
+  const shownToolName = isLocked ? null : expandedToolName
   const totals = calculateOfferedToolTotals(tools, toolChoices)
 
   return (
@@ -126,19 +189,13 @@ function ToolWorkspace({ tools }: ToolWorkspaceProps): ReactElement {
             offeredTokenCount: totals.offeredTokenCount
           }}
         />
-        {buildToolGroups(tools).map((listing) => (
-          <ToolGroupSection
-            expandedToolName={expandedToolName}
-            isDimmed={!areToolCallsOn}
-            isLocked={isLocked}
-            key={listing.group}
-            listing={listing}
-            onExpandedToolNameChange={setExpandedToolName}
-            onToolApprovalChange={updateToolApproval}
-            onToolOnChange={updateToolOn}
-            toolChoices={toolChoices}
-          />
-        ))}
+        <ToolGroupList
+          expandedToolName={shownToolName}
+          isDimmed={!areToolCallsOn}
+          isLocked={isLocked}
+          onExpandedToolNameChange={setExpandedToolName}
+          tools={tools}
+        />
       </div>
     </div>
   )

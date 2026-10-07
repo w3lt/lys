@@ -38,7 +38,8 @@ export function ToolUnavailableCard({
         <p>
           <span className="settings-view__tool-model">{modelKey}</span> wasn't
           trained to call tools, so Lys doesn't offer it any. Your choices are
-          kept and apply once you load weights that were.
+          kept for this session, and you can change them again once you load
+          weights that were.
         </p>
       </div>
     </section>

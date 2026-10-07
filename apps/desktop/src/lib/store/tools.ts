@@ -199,8 +199,11 @@ function createToolStore(
   /** List read in flight; a read requested meanwhile joins it. */
   let pendingListRead: Promise<void> | undefined
 
-  /** Forgets the settled list read, so the next request starts a new one. */
-  function clearPendingListRead(): void {
+  /**
+   * Resets the list read in flight to none, discarding the settled read so the
+   * next request starts a new one.
+   */
+  function resetPendingListRead(): void {
     pendingListRead = undefined
   }
 
@@ -236,7 +239,7 @@ function createToolStore(
      * committed.
      */
     function loadTools(): Promise<void> {
-      pendingListRead ??= readToolList().finally(clearPendingListRead)
+      pendingListRead ??= readToolList().finally(resetPendingListRead)
 
       return pendingListRead
     }

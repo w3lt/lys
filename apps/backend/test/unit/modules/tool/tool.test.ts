@@ -1,8 +1,7 @@
-import type { ToolDefinitionCandidate } from "@lys/share"
+import { toolDefinitionSchema, type ToolDefinitionCandidate } from "@lys/share"
 import { describe, expect, it } from "vitest"
 import * as z from "zod"
 
-import ToolArgument from "../../../../src/modules/tool/argument"
 import AgentTool from "../../../../src/modules/tool/tool"
 
 describe("AgentTool", () => {
@@ -216,51 +215,131 @@ describe("AgentTool", () => {
   })
 })
 
-describe("ToolArgument", () => {
-  it("offers an enum argument to the model as a string limited to its values", () => {
-    const argument = new ToolArgument({
-      type: "enum",
-      name: "target",
-      description: "What is compared with the query.",
-      values: ["name", "content"]
-    })
+describe("toolDefinitionSchema", () => {
+  /** Valid string argument that a case may change in one field. */
+  const rootArgument = {
+    type: "string",
+    name: "root",
+    description: "Directory whose tree is searched."
+  }
 
-    expect(argument.toAgentFormat()).toEqual({
-      type: "string",
-      description: "What is compared with the query.",
-      enum: ["name", "content"]
+  /** Valid enum argument with two values. */
+  const targetArgument = {
+    type: "enum",
+    name: "target",
+    description: "What is compared with the query.",
+    values: ["name", "content"]
+  }
+
+  /** Valid definition that each rejection case changes in one field. */
+  const searchFilesDefinition = {
+    name: "search_files",
+    description: "Find files under a directory.",
+    group: "files",
+    access: "reads",
+    arguments: [rootArgument]
+  }
+
+  it("returns a definition that cannot be changed through any of its parts", () => {
+    const definition = toolDefinitionSchema.parse({
+      ...searchFilesDefinition,
+      arguments: [rootArgument, targetArgument]
     })
+    const [root, target] = definition.arguments
+
+    expect(Object.isFrozen(definition)).toBe(true)
+    expect(Object.isFrozen(definition.arguments)).toBe(true)
+    expect(Object.isFrozen(root)).toBe(true)
+    expect(Object.isFrozen(target)).toBe(true)
+    expect(target?.type === "enum" && Object.isFrozen(target.values)).toBe(true)
   })
 
-  it("exposes the validated definition, with required defaulting to true", () => {
-    const argument = new ToolArgument({
-      type: "integer",
-      name: "maxResults",
-      description: "Most matching files to return."
+  it("accepts tool and argument names of 64 characters", () => {
+    const name = "a".repeat(64)
+
+    const definition = toolDefinitionSchema.parse({
+      ...searchFilesDefinition,
+      name,
+      arguments: [{ ...rootArgument, name }]
     })
 
-    expect({
-      name: argument.name,
-      description: argument.description,
-      type: argument.type,
-      required: argument.required
-    }).toEqual({
-      name: "maxResults",
-      description: "Most matching files to return.",
-      type: "integer",
-      required: true
-    })
+    expect(definition.name).toBe(name)
+    expect(definition.arguments[0]?.name).toBe(name)
   })
 
-  it("rejects an enum argument without values", () => {
+  it.each<{
+    readonly problem: string
+    readonly input: unknown
+    readonly issue: {
+      readonly code: string
+      readonly path: readonly (string | number)[]
+    }
+  }>([
+    {
+      problem: "a field the definition lacks",
+      input: { ...searchFilesDefinition, version: 1 },
+      issue: { code: "unrecognized_keys", path: [] }
+    },
+    {
+      problem: "an argument field the definition lacks",
+      input: {
+        ...searchFilesDefinition,
+        arguments: [{ ...rootArgument, default: "/" }]
+      },
+      issue: { code: "unrecognized_keys", path: ["arguments", 0] }
+    },
+    {
+      problem: "a group Settings does not list",
+      input: { ...searchFilesDefinition, group: "network" },
+      issue: { code: "invalid_value", path: ["group"] }
+    },
+    {
+      problem: "an access level no tool has",
+      input: { ...searchFilesDefinition, access: "writes" },
+      issue: { code: "invalid_value", path: ["access"] }
+    },
+    {
+      problem: "an empty enum value",
+      input: {
+        ...searchFilesDefinition,
+        arguments: [{ ...targetArgument, values: ["name", ""] }]
+      },
+      issue: { code: "too_small", path: ["arguments", 0, "values", 1] }
+    },
+    {
+      problem: "an argument name that starts with a digit",
+      input: {
+        ...searchFilesDefinition,
+        arguments: [{ ...rootArgument, name: "1" }]
+      },
+      issue: { code: "invalid_format", path: ["arguments", 0, "name"] }
+    },
+    {
+      problem: "a tool name longer than 64 characters",
+      input: { ...searchFilesDefinition, name: "a".repeat(65) },
+      issue: { code: "invalid_format", path: ["name"] }
+    },
+    {
+      problem: "an argument name longer than 64 characters",
+      input: {
+        ...searchFilesDefinition,
+        arguments: [{ ...rootArgument, name: "a".repeat(65) }]
+      },
+      issue: { code: "invalid_format", path: ["arguments", 0, "name"] }
+    },
+    {
+      problem: "an argument with an empty description",
+      input: {
+        ...searchFilesDefinition,
+        arguments: [{ ...rootArgument, description: "" }]
+      },
+      issue: { code: "too_small", path: ["arguments", 0, "description"] }
+    }
+  ])("rejects $problem", ({ input, issue }) => {
+    const result = toolDefinitionSchema.safeParse(input)
+
     expect(
-      () =>
-        new ToolArgument({
-          type: "enum",
-          name: "target",
-          description: "What is compared.",
-          values: []
-        })
-    ).toThrow(z.ZodError)
+      result.error?.issues.map(({ code, path }) => ({ code, path }))
+    ).toEqual([issue])
   })
 })

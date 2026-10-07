@@ -107,13 +107,14 @@ export function calculateToolModelSupport(
 }
 
 /**
- * Estimates the tokens a tool adds to each request it is offered in.
+ * Calculates an estimate of the tokens a tool adds to each request it is
+ * offered in.
  *
  * @param tool - Tool definition.
  * @returns The estimate for the function tool the model receives, which
  * varies with the model's tokenizer.
  */
-export function estimateToolTokenCount(tool: ToolDefinition): number {
+export function calculateToolTokenEstimate(tool: ToolDefinition): number {
   return estimateTextTokens(JSON.stringify(buildToolFunctionFormat(tool)))
 }
 
@@ -132,7 +133,7 @@ export function calculateOfferedToolTotals(
     (tool) => getToolChoice(toolChoices, tool.name).isOn
   )
   const offeredTokenCount = offeredTools.reduce(
-    (tokenCount, tool) => tokenCount + estimateToolTokenCount(tool),
+    (tokenCount, tool) => tokenCount + calculateToolTokenEstimate(tool),
     0
   )
 

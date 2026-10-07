@@ -12,7 +12,7 @@ import {
 } from "@/lib/store/tools"
 
 import {
-  estimateToolTokenCount,
+  calculateToolTokenEstimate,
   findToolApproval,
   formatToolAccessLabel,
   formatToolApprovalLabel,
@@ -73,6 +73,75 @@ function ToolArgumentItem({ argument }: ToolArgumentItemProps): ReactElement {
   )
 }
 
+/** Properties accepted by {@link ToolApprovalRow}. */
+type ToolApprovalRowProps = {
+  /** When the tool runs once the model asks for it, owned by the parent. */
+  readonly approval: ToolApproval
+  /** Whether the tool controls are locked. */
+  readonly isLocked: boolean
+  /** Proposes another approval for the tool. */
+  readonly onApprovalChange: (approval: ToolApproval) => void
+}
+
+/**
+ * Presents whether Lys asks before a tool runs, with the choice between Ask me
+ * and Just run.
+ *
+ * @remarks The parent owns the approval and the lock; the row owns no state or
+ * effects. The approval is a single-choice toggle group named by its label and
+ * described by the current approval's note; pressing the selected approval
+ * again proposes nothing, and the group is disabled while the controls are
+ * locked.
+ * @param props - Approval, lock, and the approval proposal.
+ * @returns The approval row of a tool's details.
+ */
+function ToolApprovalRow({
+  approval,
+  isLocked,
+  onApprovalChange
+}: ToolApprovalRowProps): ReactElement {
+  const approvalLabelId = useId()
+  const approvalNoteId = useId()
+
+  /**
+   * Proposes the approval the toggle group selected.
+   *
+   * @param groupValue - Pressed item values the toggle group reports.
+   */
+  function handleApprovalValueChange(groupValue: string[]): void {
+    const nextApproval = findToolApproval(groupValue)
+    if (nextApproval !== undefined) onApprovalChange(nextApproval)
+  }
+
+  return (
+    <div className="settings-view__tool-detail-row">
+      <div className="settings-view__identity-lines">
+        <h3 id={approvalLabelId}>Before it runs</h3>
+        <p id={approvalNoteId}>{formatToolApprovalNote(approval)}</p>
+      </div>
+      <ToggleGroup
+        aria-describedby={approvalNoteId}
+        aria-labelledby={approvalLabelId}
+        disabled={isLocked}
+        onValueChange={handleApprovalValueChange}
+        size="sm"
+        value={[approval]}
+        variant="outline"
+      >
+        {TOOL_APPROVALS.map((option) => (
+          <ToggleGroupItem
+            className="settings-view__tool-segment"
+            key={option}
+            value={option}
+          >
+            {formatToolApprovalLabel(option)}
+          </ToggleGroupItem>
+        ))}
+      </ToggleGroup>
+    </div>
+  )
+}
+
 /** Properties accepted by {@link ToolDetails}. */
 type ToolDetailsProps = {
   /** Identifier the row's expand button controls. */
@@ -92,10 +161,7 @@ type ToolDetailsProps = {
  * and whether Lys asks before it runs.
  *
  * @remarks The row owns whether the details are shown and the approval; the
- * details own no state or effects. A tool without arguments says so. The
- * approval is a single-choice toggle group named by its label and described
- * by the current approval's note; pressing the selected approval again
- * proposes nothing, and the group is disabled while the controls are locked.
+ * details own no state or effects. A tool without arguments says so.
  * @param props - Tool, choice, lock, identifier, and the approval proposal.
  * @returns The tool's details.
  */
@@ -107,18 +173,6 @@ function ToolDetails({
   onApprovalChange
 }: ToolDetailsProps): ReactElement {
   const argumentsHeadingId = useId()
-  const approvalLabelId = useId()
-  const approvalNoteId = useId()
-
-  /**
-   * Proposes the approval the toggle group selected.
-   *
-   * @param groupValue - Pressed item values the toggle group reports.
-   */
-  function handleApprovalValueChange(groupValue: string[]): void {
-    const approval = findToolApproval(groupValue)
-    if (approval !== undefined) onApprovalChange(approval)
-  }
 
   return (
     <div className="settings-view__tool-details" id={detailsId}>
@@ -152,32 +206,158 @@ function ToolDetails({
         <span className="settings-view__tool-origin">in Lys</span>
       </div>
 
-      <div className="settings-view__tool-detail-row">
-        <div className="settings-view__identity-lines">
-          <h3 id={approvalLabelId}>Before it runs</h3>
-          <p id={approvalNoteId}>{formatToolApprovalNote(choice.approval)}</p>
-        </div>
-        <ToggleGroup
-          aria-describedby={approvalNoteId}
-          aria-labelledby={approvalLabelId}
-          disabled={isLocked}
-          onValueChange={handleApprovalValueChange}
-          size="sm"
-          value={[choice.approval]}
-          variant="outline"
-        >
-          {TOOL_APPROVALS.map((approval) => (
-            <ToggleGroupItem
-              className="settings-view__tool-segment"
-              key={approval}
-              value={approval}
-            >
-              {formatToolApprovalLabel(approval)}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-      </div>
+      <ToolApprovalRow
+        approval={choice.approval}
+        isLocked={isLocked}
+        onApprovalChange={onApprovalChange}
+      />
     </div>
+  )
+}
+
+/** Properties accepted by {@link ToolSummary}. */
+type ToolSummaryProps = {
+  /** Tool summarized. */
+  readonly tool: ToolDefinition
+  /** Whether the tool is on and asks before it runs. */
+  readonly isAskingFirst: boolean
+  /** Identifier given to the tool's name. */
+  readonly nameId: string
+  /** Identifier given to the access badge. */
+  readonly accessId: string
+  /** Identifier given to the origin badge. */
+  readonly originId: string
+  /** Identifier given to the description. */
+  readonly descriptionId: string
+  /** Identifier given to the note that the tool asks before it runs. */
+  readonly asksId: string
+}
+
+/**
+ * Presents a tool's name, its badges, and its description inside the row's
+ * expand button.
+ *
+ * @remarks The expand button owns the identifiers, which name and describe
+ * it; the summary owns no state or effects. When the tool asks first, a
+ * decorative lock and a visually hidden note follow the name.
+ * @param props - Tool, whether it asks first, and the parent's identifiers.
+ * @returns The summary lines of one tool.
+ */
+function ToolSummary({
+  tool,
+  isAskingFirst,
+  nameId,
+  accessId,
+  originId,
+  descriptionId,
+  asksId
+}: ToolSummaryProps): ReactElement {
+  return (
+    <span className="settings-view__tool-lines">
+      <span className="settings-view__tool-title">
+        <span className="settings-view__tool-name" id={nameId}>
+          {tool.name}
+        </span>
+        {isAskingFirst ? (
+          <span className="settings-view__tool-asks">
+            <Lock aria-hidden="true" />
+            <span className="sr-only" id={asksId}>
+              asks before it runs
+            </span>
+          </span>
+        ) : null}
+        <span
+          className="settings-view__tool-badge"
+          data-badge="access"
+          id={accessId}
+        >
+          {formatToolAccessLabel(tool.access)}
+        </span>
+        <span
+          className="settings-view__tool-badge"
+          data-badge="origin"
+          id={originId}
+          title="Runs inside the Lys app"
+        >
+          in Lys
+        </span>
+      </span>
+      <span className="settings-view__tool-description" id={descriptionId}>
+        {tool.description}
+      </span>
+    </span>
+  )
+}
+
+/** Properties accepted by {@link ToolRowToggle}. */
+type ToolRowToggleProps = {
+  /** Tool whose row the button expands. */
+  readonly tool: ToolDefinition
+  /** Whether the tool is on and asks before it runs. */
+  readonly isAskingFirst: boolean
+  /** Whether the row's details are shown, owned by the parent. */
+  readonly isExpanded: boolean
+  /** Whether the tool controls are locked. */
+  readonly isLocked: boolean
+  /** Identifier of the details the button controls while they are shown. */
+  readonly detailsId: string
+  /** Proposes showing or hiding the row's details. */
+  readonly onIsExpandedChange: (isExpanded: boolean) => void
+}
+
+/**
+ * Presents the button that expands a tool row into its details.
+ *
+ * @remarks The parent owns whether the row is expanded and the lock; the
+ * button owns no state or effects. It is named by the tool's name, reports
+ * whether the details are shown, and is described by the tool's badges,
+ * description, and, when the tool asks first, that it asks before it runs.
+ * It is disabled while the controls are locked.
+ * @param props - Tool, expansion, lock, details identifier, and the proposal.
+ * @returns The expand button of one tool row.
+ */
+function ToolRowToggle({
+  tool,
+  isAskingFirst,
+  isExpanded,
+  isLocked,
+  detailsId,
+  onIsExpandedChange
+}: ToolRowToggleProps): ReactElement {
+  const nameId = useId()
+  const accessId = useId()
+  const originId = useId()
+  const descriptionId = useId()
+  const asksId = useId()
+  const describedById = isAskingFirst
+    ? `${accessId} ${originId} ${descriptionId} ${asksId}`
+    : `${accessId} ${originId} ${descriptionId}`
+
+  return (
+    <button
+      aria-controls={isExpanded ? detailsId : undefined}
+      aria-describedby={describedById}
+      aria-expanded={isExpanded}
+      aria-labelledby={nameId}
+      className="settings-view__tool-toggle"
+      disabled={isLocked}
+      onClick={() => onIsExpandedChange(!isExpanded)}
+      type="button"
+    >
+      <ChevronRight
+        aria-hidden="true"
+        className="settings-view__tool-chevron"
+      />
+      <ToolSummary
+        accessId={accessId}
+        asksId={asksId}
+        descriptionId={descriptionId}
+        isAskingFirst={isAskingFirst}
+        nameId={nameId}
+        originId={originId}
+        tool={tool}
+      />
+    </button>
   )
 }
 
@@ -205,12 +385,8 @@ type ToolRowProps = {
  *
  * @remarks The parent owns whether the row is expanded, the choice, and the
  * lock; the row owns no state or effects. The expand button and the switch
- * are sibling controls. The button is named by the tool's name, reports
- * whether the details are shown, and is described by the tool's badges,
- * description, and, when the tool is on and asks first, that it asks before
- * it runs; the lock icon itself is decorative. The switch is named Use
- * followed by the tool's name. While the controls are locked, both are
- * disabled.
+ * are sibling controls. The switch is named Use followed by the tool's name.
+ * While the controls are locked, both are disabled.
  * @param props - Tool, choice, expansion, lock, and the parent's proposals.
  * @returns One list item holding the row and, when expanded, its details.
  */
@@ -223,16 +399,7 @@ function ToolRow({
   onIsOnChange,
   onApprovalChange
 }: ToolRowProps): ReactElement {
-  const nameId = useId()
-  const accessId = useId()
-  const originId = useId()
-  const descriptionId = useId()
-  const asksId = useId()
   const detailsId = useId()
-  const isAskingFirst = choice.isOn && choice.approval === "ask"
-  const describedById = isAskingFirst
-    ? `${accessId} ${originId} ${descriptionId} ${asksId}`
-    : `${accessId} ${originId} ${descriptionId}`
 
   return (
     <li
@@ -241,59 +408,16 @@ function ToolRow({
       data-off={choice.isOn ? undefined : ""}
     >
       <div className="settings-view__tool-header">
-        <button
-          aria-controls={isExpanded ? detailsId : undefined}
-          aria-describedby={describedById}
-          aria-expanded={isExpanded}
-          aria-labelledby={nameId}
-          className="settings-view__tool-toggle"
-          disabled={isLocked}
-          onClick={() => onIsExpandedChange(!isExpanded)}
-          type="button"
-        >
-          <ChevronRight
-            aria-hidden="true"
-            className="settings-view__tool-chevron"
-          />
-          <span className="settings-view__tool-lines">
-            <span className="settings-view__tool-title">
-              <span className="settings-view__tool-name" id={nameId}>
-                {tool.name}
-              </span>
-              {isAskingFirst ? (
-                <span className="settings-view__tool-asks">
-                  <Lock aria-hidden="true" />
-                  <span className="sr-only" id={asksId}>
-                    asks before it runs
-                  </span>
-                </span>
-              ) : null}
-              <span
-                className="settings-view__tool-badge"
-                data-badge="access"
-                id={accessId}
-              >
-                {formatToolAccessLabel(tool.access)}
-              </span>
-              <span
-                className="settings-view__tool-badge"
-                data-badge="origin"
-                id={originId}
-                title="Runs inside the Lys app"
-              >
-                in Lys
-              </span>
-            </span>
-            <span
-              className="settings-view__tool-description"
-              id={descriptionId}
-            >
-              {tool.description}
-            </span>
-          </span>
-        </button>
+        <ToolRowToggle
+          detailsId={detailsId}
+          isAskingFirst={choice.isOn && choice.approval === "ask"}
+          isExpanded={isExpanded}
+          isLocked={isLocked}
+          onIsExpandedChange={onIsExpandedChange}
+          tool={tool}
+        />
         <span className="settings-view__tool-tokens">
-          {formatToolTokenEstimate(estimateToolTokenCount(tool))}
+          {formatToolTokenEstimate(calculateToolTokenEstimate(tool))}
         </span>
         <Switch
           aria-label={`Use ${tool.name}`}

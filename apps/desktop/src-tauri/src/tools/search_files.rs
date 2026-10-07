@@ -1549,19 +1549,27 @@ mod tests {
 
     #[test]
     fn offers_every_target_value_the_filter_accepts() {
-        let targets: Vec<SearchFilesTarget> = SEARCH_FILES_TARGET_VALUES
-            .iter()
-            .map(|value| serde_json::from_value(json!(value)).expect("a target the filter accepts"))
-            .collect();
+        let mut spelled_values = Vec::new();
+        for target in [
+            SearchFilesTarget::Name,
+            SearchFilesTarget::Content,
+            SearchFilesTarget::NameAndContent,
+        ] {
+            // No wildcard arm: a new target fails to compile until it is
+            // spelled here. Listed above too, it then fails the comparison
+            // below until SEARCH_FILES_TARGET_VALUES offers it.
+            let value = match target {
+                SearchFilesTarget::Name => "name",
+                SearchFilesTarget::Content => "content",
+                SearchFilesTarget::NameAndContent => "nameAndContent",
+            };
+            let parsed: SearchFilesTarget =
+                serde_json::from_value(json!(value)).expect("a target the filter accepts");
+            assert_eq!(parsed, target);
+            spelled_values.push(value);
+        }
 
-        assert_eq!(
-            targets,
-            vec![
-                SearchFilesTarget::Name,
-                SearchFilesTarget::Content,
-                SearchFilesTarget::NameAndContent
-            ]
-        );
+        assert_eq!(spelled_values, SEARCH_FILES_TARGET_VALUES);
     }
 
     #[test]

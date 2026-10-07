@@ -131,7 +131,7 @@ const SETTINGS_PANES: readonly SettingsPaneDescriptor[] = [
     ordinal: "05",
     note: "What the agents can reach for. Every tool that is on is described to the model with each request, so off is cheaper than unused.",
     footNote:
-      "Tools come from Lys itself or from the backend and cannot be added or removed here. Nothing here is saved yet, and conversations do not use tools yet.",
+      "Tools come from Lys itself and cannot be added or removed here. Nothing here is saved yet, and conversations do not use tools yet.",
     contentComponent: ToolPane
   }
 ]

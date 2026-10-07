@@ -3,11 +3,11 @@ import * as z from "zod"
 /**
  * Validates the argument object of the desktop `read_text_file` command.
  *
- * @remarks The schema checks only the shape the desktop can deserialize.
- * Whether the path is absolute, exists, and holds UTF-8 text within the
- * desktop's read limit is decided by the desktop, which reports those outcomes
- * through {@link readTextFileErrorSchema}. Unknown keys are rejected because
- * the desktop rejects them too.
+ * @remarks The schema checks only the argument's shape. Whether the path is
+ * absolute, exists, and holds UTF-8 text within the desktop's read limit is
+ * decided by the desktop, which reports those outcomes through
+ * {@link readTextFileErrorSchema}. Unknown keys are rejected here, because the
+ * desktop ignores extra argument keys instead of reporting them.
  */
 export const readTextFileInputSchema = z
   .strictObject({

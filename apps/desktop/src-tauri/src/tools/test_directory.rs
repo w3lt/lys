@@ -3,7 +3,7 @@
 use std::{
     ffi::CString,
     fs,
-    os::unix::ffi::OsStrExt,
+    os::unix::{ffi::OsStrExt, net::UnixListener},
     path::{Path, PathBuf},
     sync::atomic::{AtomicUsize, Ordering},
 };
@@ -44,13 +44,13 @@ impl TestDirectory {
         &self.0
     }
 
-    /// Writes `contents` to the file at `relative_path`, creating missing
+    /// Creates the file at `relative_path` holding `contents`, creating missing
     /// parent directories, and returns the file's absolute path.
     ///
     /// # Panics
     ///
     /// Panics when a directory or the file cannot be written.
-    pub fn write_file(&self, relative_path: &str, contents: impl AsRef<[u8]>) -> PathBuf {
+    pub fn create_file(&self, relative_path: &str, contents: impl AsRef<[u8]>) -> PathBuf {
         let path = self.0.join(relative_path);
 
         if let Some(parent) = path.parent() {
@@ -93,6 +93,21 @@ impl TestDirectory {
             "create the test FIFO: {}",
             std::io::Error::last_os_error()
         );
+
+        path
+    }
+
+    /// Creates a Unix domain socket at `relative_path` and returns its absolute
+    /// path. Nothing listens on the socket once this returns.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the socket cannot be created, including when its absolute
+    /// path is too long for a socket address.
+    pub fn create_socket(&self, relative_path: &str) -> PathBuf {
+        let path = self.0.join(relative_path);
+
+        UnixListener::bind(&path).expect("create the test socket");
 
         path
     }

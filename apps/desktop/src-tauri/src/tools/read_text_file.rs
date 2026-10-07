@@ -124,23 +124,24 @@ mod tests {
     };
     use crate::tools::{test_directory::TestDirectory, text_file::TextFileReadError};
 
-    /// Runs the `read_text_file` command for `path` to completion.
-    fn run_read_text_file(path: &str) -> Result<String, ReadTextFileError> {
+    /// Reads the file at `path` through the `read_text_file` command, blocking
+    /// until the command completes.
+    fn read_text_file_blocking(path: &str) -> Result<String, ReadTextFileError> {
         tauri::async_runtime::block_on(read_text_file(path.to_owned()))
     }
 
     /// Returns the UTF-8 form of a test path.
-    fn to_path_text(path: &Path) -> &str {
+    fn get_path_text(path: &Path) -> &str {
         path.to_str().expect("a UTF-8 test path")
     }
 
     #[test]
     fn returns_the_complete_text_of_a_utf8_file() {
         let directory = TestDirectory::create("read-utf8");
-        let file = directory.write_file("notes.md", "Xin chào, Lys!\nSecond line\n");
+        let file = directory.create_file("notes.md", "Xin chào, Lys!\nSecond line\n");
 
         assert_eq!(
-            run_read_text_file(to_path_text(&file)),
+            read_text_file_blocking(get_path_text(&file)),
             Ok(String::from("Xin chào, Lys!\nSecond line\n"))
         );
     }
@@ -148,12 +149,12 @@ mod tests {
     #[test]
     fn follows_a_symbolic_link_to_a_file() {
         let directory = TestDirectory::create("read-symlink");
-        let file = directory.write_file("target.txt", "linked text");
+        let file = directory.create_file("target.txt", "linked text");
         let link = directory.path().join("link.txt");
         symlink(&file, &link).expect("create the test symlink");
 
         assert_eq!(
-            run_read_text_file(to_path_text(&link)),
+            read_text_file_blocking(get_path_text(&link)),
             Ok(String::from("linked text"))
         );
     }
@@ -161,7 +162,7 @@ mod tests {
     #[test]
     fn rejects_a_relative_path() {
         assert_eq!(
-            run_read_text_file("notes.md"),
+            read_text_file_blocking("notes.md"),
             Err(ReadTextFileError::PathNotAbsolute)
         );
     }
@@ -172,7 +173,18 @@ mod tests {
         let missing_file = directory.path().join("missing.txt");
 
         assert_eq!(
-            run_read_text_file(to_path_text(&missing_file)),
+            read_text_file_blocking(get_path_text(&missing_file)),
+            Err(ReadTextFileError::FileNotFound)
+        );
+    }
+
+    #[test]
+    fn reports_a_path_below_a_file_as_missing() {
+        let directory = TestDirectory::create("read-below-file");
+        let file = directory.create_file("notes.txt", "notes");
+
+        assert_eq!(
+            read_text_file_blocking(get_path_text(&file.join("child"))),
             Err(ReadTextFileError::FileNotFound)
         );
     }
@@ -182,7 +194,7 @@ mod tests {
         let directory = TestDirectory::create("read-directory");
 
         assert_eq!(
-            run_read_text_file(to_path_text(directory.path())),
+            read_text_file_blocking(get_path_text(directory.path())),
             Err(ReadTextFileError::NotAFile)
         );
     }
@@ -193,7 +205,18 @@ mod tests {
         let fifo = directory.create_fifo("pipe");
 
         assert_eq!(
-            run_read_text_file(to_path_text(&fifo)),
+            read_text_file_blocking(get_path_text(&fifo)),
+            Err(ReadTextFileError::NotAFile)
+        );
+    }
+
+    #[test]
+    fn rejects_a_socket() {
+        let directory = TestDirectory::create("read-socket");
+        let socket = directory.create_socket("socket");
+
+        assert_eq!(
+            read_text_file_blocking(get_path_text(&socket)),
             Err(ReadTextFileError::NotAFile)
         );
     }
@@ -202,19 +225,19 @@ mod tests {
     fn accepts_a_file_at_the_size_limit() {
         let directory = TestDirectory::create("read-at-limit");
         let content = "a".repeat(MAX_TEXT_FILE_SIZE_BYTES as usize);
-        let file = directory.write_file("at-limit.txt", &content);
+        let file = directory.create_file("at-limit.txt", &content);
 
-        assert_eq!(run_read_text_file(to_path_text(&file)), Ok(content));
+        assert_eq!(read_text_file_blocking(get_path_text(&file)), Ok(content));
     }
 
     #[test]
     fn rejects_a_file_one_byte_over_the_size_limit() {
         let directory = TestDirectory::create("read-over-limit");
         let content = "a".repeat(MAX_TEXT_FILE_SIZE_BYTES as usize + 1);
-        let file = directory.write_file("over-limit.txt", content);
+        let file = directory.create_file("over-limit.txt", content);
 
         assert_eq!(
-            run_read_text_file(to_path_text(&file)),
+            read_text_file_blocking(get_path_text(&file)),
             Err(ReadTextFileError::FileTooLarge {
                 size_bytes: MAX_TEXT_FILE_SIZE_BYTES + 1,
                 max_size_bytes: MAX_TEXT_FILE_SIZE_BYTES,
@@ -225,10 +248,10 @@ mod tests {
     #[test]
     fn rejects_content_that_is_not_utf8() {
         let directory = TestDirectory::create("read-binary");
-        let file = directory.write_file("image.bin", [0xff, 0xfe, 0x00, 0x41]);
+        let file = directory.create_file("image.bin", [0xff, 0xfe, 0x00, 0x41]);
 
         assert_eq!(
-            run_read_text_file(to_path_text(&file)),
+            read_text_file_blocking(get_path_text(&file)),
             Err(ReadTextFileError::NotUtf8Text)
         );
     }

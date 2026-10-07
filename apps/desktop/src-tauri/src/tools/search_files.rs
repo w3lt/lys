@@ -191,12 +191,14 @@ pub enum SearchCompletion {
 #[serde(tag = "kind", rename_all = "camelCase")]
 /// One matching regular file, identified by what matched.
 pub enum FileMatch {
-    /// Only the file's name contains the query.
+    /// The file's name contains the query; its content does not, or was not
+    /// compared.
     Name {
         /// Absolute path of the file, starting with the search root as given.
         path: String,
     },
-    /// Only the file's content contains the query.
+    /// The file's content contains the query; its name does not, or was not
+    /// compared.
     Content {
         /// Absolute path of the file, starting with the search root as given.
         path: String,
@@ -451,7 +453,7 @@ fn parse_search_root(root: PathBuf) -> Result<PathBuf, SearchFilesError> {
 /// Builds the failure reported when the search root cannot be inspected.
 fn build_root_error(error: io::Error) -> SearchFilesError {
     match error.kind() {
-        io::ErrorKind::NotFound => SearchFilesError::RootNotFound,
+        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory => SearchFilesError::RootNotFound,
         io::ErrorKind::PermissionDenied => SearchFilesError::PermissionDenied,
         _ => SearchFilesError::SearchFailed {
             message: error.to_string(),
@@ -506,10 +508,13 @@ fn find_matching_files(search: &FileSearch) -> SearchFilesReport {
 
 /// Lists the entries of `directory`, sorted in byte order of their names.
 ///
-/// At most [`MAX_SCANNED_ENTRY_COUNT`] entries are read, because a search never
-/// examines more; in a larger directory, only the entries the operating system
-/// returns first are listed. Entries that the operating system fails to return
-/// are listed last as [`ListedEntry::Unexaminable`].
+/// At most [`MAX_SCANNED_ENTRY_COUNT`] + 1 entries are read: a search never
+/// examines more than [`MAX_SCANNED_ENTRY_COUNT`], and the one extra entry
+/// makes a search that reaches the end of a truncated listing stop with
+/// [`SearchCompletion::ScanLimitReached`] instead of reporting it complete. In
+/// a larger directory, only the entries the operating system returns first are
+/// listed. Entries that the operating system fails to return are listed last
+/// as [`ListedEntry::Unexaminable`].
 ///
 /// # Errors
 ///
@@ -518,7 +523,7 @@ fn list_directory_entries(directory: &Path) -> io::Result<Vec<ListedEntry>> {
     let mut named_entries = Vec::new();
     let mut unreadable_entry_count = 0;
 
-    for entry in fs::read_dir(directory)?.take(MAX_SCANNED_ENTRY_COUNT) {
+    for entry in fs::read_dir(directory)?.take(MAX_SCANNED_ENTRY_COUNT + 1) {
         match entry {
             Ok(entry) => named_entries.push((entry.file_name(), build_listed_entry(&entry))),
             Err(_) => unreadable_entry_count += 1,
@@ -776,9 +781,9 @@ mod tests {
     };
     use crate::tools::test_directory::TestDirectory;
 
-    /// Deserializes `filter` as Tauri does for the `filter` argument and runs
-    /// `find_files` to completion.
-    fn run_find_files(filter: Value) -> Result<SearchFilesReport, SearchFilesError> {
+    /// Deserializes `filter` as Tauri does for the `filter` argument and finds
+    /// files through the `find_files` command, blocking until it completes.
+    fn find_files_blocking(filter: Value) -> Result<SearchFilesReport, SearchFilesError> {
         let filter: SearchFilesFilter =
             serde_json::from_value(filter).expect("a filter that deserializes");
 
@@ -794,7 +799,7 @@ mod tests {
     }
 
     /// Returns the UTF-8 form of a test path.
-    fn to_path_text(path: &Path) -> String {
+    fn get_path_text(path: &Path) -> String {
         path.to_str().expect("a UTF-8 test path").to_owned()
     }
 
@@ -812,12 +817,20 @@ mod tests {
         report.matches.iter().map(get_match_path).collect()
     }
 
+    /// Creates `count` empty files directly under `directory`. Their names are
+    /// zero-padded numbers, so none contains the query `todo`.
+    fn create_unmatched_empty_files(directory: &TestDirectory, count: usize) {
+        for file_index in 0..count {
+            directory.create_file(&format!("{file_index:05}"), "");
+        }
+    }
+
     #[test]
     fn parses_camel_case_filter_keys() {
         let directory = TestDirectory::create("filter-keys");
 
         let search = parse_filter(json!({
-            "root": to_path_text(directory.path()),
+            "root": get_path_text(directory.path()),
             "query": "Todo",
             "target": "nameAndContent",
             "maxResults": 7,
@@ -835,7 +848,7 @@ mod tests {
     #[test]
     fn applies_default_limits_when_they_are_omitted_or_null() {
         let directory = TestDirectory::create("filter-defaults");
-        let root = to_path_text(directory.path());
+        let root = get_path_text(directory.path());
 
         let omitted = parse_filter(json!({ "root": root, "query": "a", "target": "name" }))
             .expect("a valid filter");
@@ -876,7 +889,7 @@ mod tests {
     #[test]
     fn rejects_invalid_roots() {
         let directory = TestDirectory::create("filter-roots");
-        let file = directory.write_file("notes.txt", "notes");
+        let file = directory.create_file("notes.txt", "notes");
         let parse_root = |root: String| {
             parse_filter(json!({ "root": root, "query": "a", "target": "name" })).err()
         };
@@ -886,13 +899,59 @@ mod tests {
             Some(SearchFilesError::RootNotAbsolute)
         );
         assert_eq!(
-            parse_root(to_path_text(&directory.path().join("missing"))),
+            parse_root(get_path_text(&directory.path().join("missing"))),
             Some(SearchFilesError::RootNotFound)
         );
         assert_eq!(
-            parse_root(to_path_text(&file)),
+            parse_root(get_path_text(&file)),
             Some(SearchFilesError::RootNotADirectory)
         );
+        assert_eq!(
+            parse_root(get_path_text(&file.join("child"))),
+            Some(SearchFilesError::RootNotFound)
+        );
+    }
+
+    #[test]
+    fn reports_a_root_that_cannot_be_listed_as_permission_denied() {
+        let directory = TestDirectory::create("search-locked-root");
+        let locked = directory.create_subdirectory("locked");
+        fs::set_permissions(&locked, Permissions::from_mode(0o000)).expect("lock the directory");
+        let is_listing_denied = fs::read_dir(&locked).is_err();
+
+        let search_result = find_files_blocking(json!({
+            "root": get_path_text(&locked),
+            "query": "todo",
+            "target": "name"
+        }));
+        fs::set_permissions(&locked, Permissions::from_mode(0o700)).expect("unlock the directory");
+
+        assert!(
+            is_listing_denied,
+            "this test needs a user whose access to a mode-000 directory is denied"
+        );
+        assert_eq!(
+            search_result.err(),
+            Some(SearchFilesError::PermissionDenied)
+        );
+    }
+
+    #[test]
+    fn reports_a_root_that_cannot_be_resolved_as_a_search_failure() {
+        let directory = TestDirectory::create("search-looped-root");
+        let looped_root = directory.path().join("loop");
+        symlink(&looped_root, &looped_root).expect("link the root to itself");
+
+        let search_result = find_files_blocking(json!({
+            "root": get_path_text(&looped_root),
+            "query": "todo",
+            "target": "name"
+        }));
+
+        assert!(matches!(
+            search_result,
+            Err(SearchFilesError::SearchFailed { .. })
+        ));
     }
 
     #[test]
@@ -976,14 +1035,14 @@ mod tests {
     #[test]
     fn finds_file_names_case_insensitively_breadth_first() {
         let directory = TestDirectory::create("search-names");
-        directory.write_file("b-Report.txt", "");
-        directory.write_file("c-notes.txt", "report");
-        directory.write_file("a/report-2024.md", "");
-        directory.write_file("a/deep/REPORT.csv", "");
+        directory.create_file("b-Report.txt", "");
+        directory.create_file("c-notes.txt", "report");
+        directory.create_file("a/report-2024.md", "");
+        directory.create_file("a/deep/REPORT.csv", "");
         directory.create_subdirectory("reports");
 
-        let report = run_find_files(json!({
-            "root": to_path_text(directory.path()),
+        let report = find_files_blocking(json!({
+            "root": get_path_text(directory.path()),
             "query": "rEpOrT",
             "target": "name"
         }))
@@ -992,9 +1051,9 @@ mod tests {
         assert_eq!(
             list_match_paths(&report),
             [
-                to_path_text(&directory.path().join("b-Report.txt")),
-                to_path_text(&directory.path().join("a/report-2024.md")),
-                to_path_text(&directory.path().join("a/deep/REPORT.csv")),
+                get_path_text(&directory.path().join("b-Report.txt")),
+                get_path_text(&directory.path().join("a/report-2024.md")),
+                get_path_text(&directory.path().join("a/deep/REPORT.csv")),
             ]
         );
         assert!(report
@@ -1007,13 +1066,13 @@ mod tests {
     #[test]
     fn reports_matching_lines_with_their_numbers() {
         let directory = TestDirectory::create("search-content");
-        let file = directory.write_file(
+        let file = directory.create_file(
             "plan.md",
             "alpha\r\nTODO one\nbeta\n    todo two\nTODO three\n",
         );
 
-        let report = run_find_files(json!({
-            "root": to_path_text(directory.path()),
+        let report = find_files_blocking(json!({
+            "root": get_path_text(directory.path()),
             "query": "todo",
             "target": "content",
             "maxSnippetsPerFile": 2
@@ -1024,7 +1083,7 @@ mod tests {
             serde_json::to_value(&report.matches).expect("serialize"),
             json!([{
                 "kind": "content",
-                "path": to_path_text(&file),
+                "path": get_path_text(&file),
                 "snippets": [
                     { "lineNumber": 2, "text": "TODO one", "isPartialLine": false },
                     { "lineNumber": 4, "text": "    todo two", "isPartialLine": false }
@@ -1036,13 +1095,13 @@ mod tests {
     #[test]
     fn reports_whether_the_name_the_content_or_both_matched() {
         let directory = TestDirectory::create("search-both");
-        let name_only = directory.write_file("a-todo.txt", "nothing here");
-        let content_only = directory.write_file("b-notes.txt", "a todo item");
-        let both = directory.write_file("c-todo-list.txt", "todo: ship it");
-        directory.write_file("d-other.txt", "unrelated");
+        let name_only = directory.create_file("a-todo.txt", "nothing here");
+        let content_only = directory.create_file("b-notes.txt", "a todo item");
+        let both = directory.create_file("c-todo-list.txt", "todo: ship it");
+        directory.create_file("d-other.txt", "unrelated");
 
-        let report = run_find_files(json!({
-            "root": to_path_text(directory.path()),
+        let report = find_files_blocking(json!({
+            "root": get_path_text(directory.path()),
             "query": "todo",
             "target": "nameAndContent"
         }))
@@ -1054,19 +1113,19 @@ mod tests {
                 FileMatch::Name { path: first },
                 FileMatch::Content { path: second, .. },
                 FileMatch::NameAndContent { path: third, .. },
-            ] if *first == to_path_text(&name_only)
-                && *second == to_path_text(&content_only)
-                && *third == to_path_text(&both)
+            ] if *first == get_path_text(&name_only)
+                && *second == get_path_text(&content_only)
+                && *third == get_path_text(&both)
         ));
     }
 
     #[test]
     fn compares_names_only_for_the_name_target() {
         let directory = TestDirectory::create("search-name-target");
-        directory.write_file("notes.txt", "todo");
+        directory.create_file("notes.txt", "todo");
 
-        let report = run_find_files(json!({
-            "root": to_path_text(directory.path()),
+        let report = find_files_blocking(json!({
+            "root": get_path_text(directory.path()),
             "query": "todo",
             "target": "name"
         }))
@@ -1079,25 +1138,25 @@ mod tests {
     #[test]
     fn matches_unicode_text_case_insensitively() {
         let directory = TestDirectory::create("search-unicode");
-        let file = directory.write_file("trip.txt", "Chuyến đi Đà Nẵng\n");
+        let file = directory.create_file("trip.txt", "Chuyến đi Đà Nẵng\n");
 
-        let report = run_find_files(json!({
-            "root": to_path_text(directory.path()),
+        let report = find_files_blocking(json!({
+            "root": get_path_text(directory.path()),
             "query": "ĐÀ NẴNG",
             "target": "content"
         }))
         .expect("a completed search");
 
-        assert_eq!(list_match_paths(&report), [to_path_text(&file)]);
+        assert_eq!(list_match_paths(&report), [get_path_text(&file)]);
     }
 
     #[test]
     fn does_not_match_content_that_is_not_utf8() {
         let directory = TestDirectory::create("search-binary");
-        directory.write_file("data.bin", b"todo\xff\xfe");
+        directory.create_file("data.bin", b"todo\xff\xfe");
 
-        let report = run_find_files(json!({
-            "root": to_path_text(directory.path()),
+        let report = find_files_blocking(json!({
+            "root": get_path_text(directory.path()),
             "query": "todo",
             "target": "content"
         }))
@@ -1115,8 +1174,8 @@ mod tests {
             "todo{}",
             "a".repeat(MAX_SEARCHED_FILE_SIZE_BYTES as usize - 4)
         );
-        let at_limit = directory.write_file("at-limit.txt", at_limit_content);
-        directory.write_file(
+        let at_limit = directory.create_file("at-limit.txt", at_limit_content);
+        directory.create_file(
             "over-limit.txt",
             format!(
                 "todo{}",
@@ -1124,14 +1183,14 @@ mod tests {
             ),
         );
 
-        let report = run_find_files(json!({
-            "root": to_path_text(directory.path()),
+        let report = find_files_blocking(json!({
+            "root": get_path_text(directory.path()),
             "query": "todo",
             "target": "content"
         }))
         .expect("a completed search");
 
-        assert_eq!(list_match_paths(&report), [to_path_text(&at_limit)]);
+        assert_eq!(list_match_paths(&report), [get_path_text(&at_limit)]);
         assert_eq!(report.oversized_file_count, 1);
         assert_eq!(report.skipped_path_count, 0);
     }
@@ -1139,12 +1198,12 @@ mod tests {
     #[test]
     fn stops_after_the_requested_number_of_matches() {
         let directory = TestDirectory::create("search-max-results");
-        let first = directory.write_file("a-todo.txt", "");
-        let second = directory.write_file("b-todo.txt", "");
-        directory.write_file("c-todo.txt", "");
+        let first = directory.create_file("a-todo.txt", "");
+        let second = directory.create_file("b-todo.txt", "");
+        directory.create_file("c-todo.txt", "");
 
-        let report = run_find_files(json!({
-            "root": to_path_text(directory.path()),
+        let report = find_files_blocking(json!({
+            "root": get_path_text(directory.path()),
             "query": "todo",
             "target": "name",
             "maxResults": 2
@@ -1153,7 +1212,7 @@ mod tests {
 
         assert_eq!(
             list_match_paths(&report),
-            [to_path_text(&first), to_path_text(&second)]
+            [get_path_text(&first), get_path_text(&second)]
         );
         assert_eq!(report.completion, SearchCompletion::ResultLimitReached);
     }
@@ -1161,7 +1220,7 @@ mod tests {
     #[test]
     fn neither_follows_nor_reports_symbolic_links() {
         let directory = TestDirectory::create("search-symlinks");
-        let target = directory.write_file("real/todo.txt", "todo");
+        let target = directory.create_file("real/todo.txt", "todo");
         symlink(&target, directory.path().join("link-todo.txt")).expect("link a file");
         symlink(
             directory.path().join("real"),
@@ -1170,14 +1229,14 @@ mod tests {
         .expect("link a directory");
         symlink(directory.path(), directory.path().join("real/loop")).expect("link the root");
 
-        let report = run_find_files(json!({
-            "root": to_path_text(directory.path()),
+        let report = find_files_blocking(json!({
+            "root": get_path_text(directory.path()),
             "query": "todo",
             "target": "nameAndContent"
         }))
         .expect("a completed search");
 
-        assert_eq!(list_match_paths(&report), [to_path_text(&target)]);
+        assert_eq!(list_match_paths(&report), [get_path_text(&target)]);
         assert_eq!(report.completion, SearchCompletion::Complete);
     }
 
@@ -1186,8 +1245,8 @@ mod tests {
         let directory = TestDirectory::create("search-fifo");
         directory.create_fifo("todo-pipe");
 
-        let report = run_find_files(json!({
-            "root": to_path_text(directory.path()),
+        let report = find_files_blocking(json!({
+            "root": get_path_text(directory.path()),
             "query": "todo",
             "target": "nameAndContent"
         }))
@@ -1201,12 +1260,12 @@ mod tests {
     fn counts_a_directory_that_cannot_be_listed_as_skipped() {
         let directory = TestDirectory::create("search-unlistable");
         let locked = directory.create_subdirectory("locked");
-        directory.write_file("locked/todo.txt", "todo");
+        directory.create_file("locked/todo.txt", "todo");
         fs::set_permissions(&locked, Permissions::from_mode(0o000)).expect("lock the directory");
         let is_listing_denied = fs::read_dir(&locked).is_err();
 
-        let search_result = run_find_files(json!({
-            "root": to_path_text(directory.path()),
+        let search_result = find_files_blocking(json!({
+            "root": get_path_text(directory.path()),
             "query": "todo",
             "target": "name"
         }));
@@ -1223,15 +1282,92 @@ mod tests {
     }
 
     #[test]
+    fn counts_a_file_that_cannot_be_read_as_skipped() {
+        let directory = TestDirectory::create("search-unreadable");
+        let locked = directory.create_file("notes.txt", "todo");
+        fs::set_permissions(&locked, Permissions::from_mode(0o000)).expect("lock the file");
+        let is_reading_denied = fs::read(&locked).is_err();
+
+        let search_result = find_files_blocking(json!({
+            "root": get_path_text(directory.path()),
+            "query": "todo",
+            "target": "content"
+        }));
+        fs::set_permissions(&locked, Permissions::from_mode(0o600)).expect("unlock the file");
+
+        assert!(
+            is_reading_denied,
+            "this test needs a user whose access to a mode-000 file is denied"
+        );
+        let report = search_result.expect("a completed search");
+        assert!(report.matches.is_empty());
+        assert_eq!(report.skipped_path_count, 1);
+        assert_eq!(report.completion, SearchCompletion::Complete);
+    }
+
+    #[test]
+    fn stops_at_the_entry_budget_in_a_larger_root() {
+        let directory = TestDirectory::create("search-entry-budget");
+        create_unmatched_empty_files(&directory, MAX_SCANNED_ENTRY_COUNT + 1);
+
+        let report = find_files_blocking(json!({
+            "root": get_path_text(directory.path()),
+            "query": "todo",
+            "target": "name"
+        }))
+        .expect("a completed search");
+
+        assert!(report.matches.is_empty());
+        assert_eq!(report.completion, SearchCompletion::ScanLimitReached);
+    }
+
+    #[test]
+    fn completes_a_root_that_holds_exactly_the_entry_budget() {
+        let directory = TestDirectory::create("search-entry-budget-exact");
+        create_unmatched_empty_files(&directory, MAX_SCANNED_ENTRY_COUNT);
+
+        let report = find_files_blocking(json!({
+            "root": get_path_text(directory.path()),
+            "query": "todo",
+            "target": "name"
+        }))
+        .expect("a completed search");
+
+        assert!(report.matches.is_empty());
+        assert_eq!(report.completion, SearchCompletion::Complete);
+    }
+
+    #[test]
+    fn stops_at_the_content_budget_before_the_next_file() {
+        let directory = TestDirectory::create("search-content-budget");
+        let full_file_content = "a".repeat(MAX_SEARCHED_FILE_SIZE_BYTES as usize);
+        let full_file_count = MAX_SCANNED_CONTENT_BYTES / MAX_SEARCHED_FILE_SIZE_BYTES;
+        for file_index in 0..full_file_count {
+            directory.create_file(&format!("a-{file_index:02}.txt"), &full_file_content);
+        }
+        directory.create_file("b.txt", "todo");
+
+        let report = find_files_blocking(json!({
+            "root": get_path_text(directory.path()),
+            "query": "todo",
+            "target": "content"
+        }))
+        .expect("a completed search");
+
+        assert!(report.matches.is_empty());
+        assert_eq!(report.completion, SearchCompletion::ScanLimitReached);
+    }
+
+    #[test]
     fn cuts_a_long_line_to_a_window_that_starts_before_the_match() {
         let directory = TestDirectory::create("search-long-line");
-        directory.write_file(
+        directory.create_file(
             "minified.js",
             format!("{}Needle{}", "x".repeat(300), "y".repeat(300)),
         );
 
-        let report = run_find_files(json!({
-            "root": to_path_text(directory.path()),
+        let report = find_files_blocking(json!({
+            "root": get_path_text(directory.path()),
             "query": "needle",
             "target": "content"
         }))
@@ -1249,10 +1385,10 @@ mod tests {
     #[test]
     fn keeps_a_full_window_when_the_match_is_near_the_line_end() {
         let directory = TestDirectory::create("search-line-end");
-        directory.write_file("minified.js", format!("{}Needle", "x".repeat(300)));
+        directory.create_file("minified.js", format!("{}Needle", "x".repeat(300)));
 
-        let report = run_find_files(json!({
-            "root": to_path_text(directory.path()),
+        let report = find_files_blocking(json!({
+            "root": get_path_text(directory.path()),
             "query": "needle",
             "target": "content"
         }))
@@ -1309,10 +1445,10 @@ mod tests {
     #[test]
     fn serializes_the_report_in_camel_case() {
         let directory = TestDirectory::create("search-report-json");
-        let file = directory.write_file("todo.txt", "nothing");
+        let file = directory.create_file("todo.txt", "nothing");
 
-        let report = run_find_files(json!({
-            "root": to_path_text(directory.path()),
+        let report = find_files_blocking(json!({
+            "root": get_path_text(directory.path()),
             "query": "todo",
             "target": "name"
         }))
@@ -1321,7 +1457,7 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&report).expect("serialize"),
             json!({
-                "matches": [{ "kind": "name", "path": to_path_text(&file) }],
+                "matches": [{ "kind": "name", "path": get_path_text(&file) }],
                 "completion": "complete",
                 "skippedPathCount": 0,
                 "oversizedFileCount": 0

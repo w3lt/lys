@@ -72,11 +72,12 @@ type TauriCommandSettlement =
  * @returns A promise that resolves once the desktop finishes the read:
  * `succeeded` with the complete text, or `failed` with the failure the desktop
  * declared.
- * @throws A Zod error when `input` has a key or value the command cannot
- * deserialize, or when the desktop returns something other than text.
+ * @throws A Zod error, before the command is sent, when `input` does not match
+ * {@link readTextFileInputSchema}, or when the desktop returns something other
+ * than text.
  * @throws An `Error` whose `cause` is the rejection when the desktop rejects
  * without a declared failure, for example because the command is not
- * registered.
+ * registered or cannot decode a path that is not well-formed UTF-16.
  * @remarks The desktop reads any absolute path its process can read; deciding
  * whether Lys may read the path belongs to the caller. The read cannot be
  * cancelled.
@@ -120,11 +121,12 @@ export async function readTextFile(
  * @returns A promise that resolves once the desktop finishes the search:
  * `succeeded` with the report, whose `completion` tells whether more matches
  * may exist, or `failed` with the failure the desktop declared.
- * @throws A Zod error when `filter` has a key or value the command cannot
- * deserialize, or when the desktop returns a malformed report.
+ * @throws A Zod error, before the command is sent, when `filter` does not match
+ * {@link searchFilesFilterSchema}, or when the desktop returns a malformed
+ * report.
  * @throws An `Error` whose `cause` is the rejection when the desktop rejects
  * without a declared failure, for example because the command is not
- * registered.
+ * registered or cannot decode a root or query that is not well-formed UTF-16.
  * @remarks The desktop searches any absolute root its process can list;
  * deciding whether Lys may search the directory belongs to the caller. The
  * search cannot be cancelled; the desktop's result and scan budgets bound it.

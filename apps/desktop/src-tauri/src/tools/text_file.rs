@@ -1,7 +1,7 @@
 //! Bounded reads of regular UTF-8 text files, shared by the file tools.
 
 use std::{
-    fs::{File, OpenOptions},
+    fs::{self, File, OpenOptions},
     io::{self, ErrorKind, Read},
     os::unix::fs::OpenOptionsExt,
     path::Path,
@@ -37,24 +37,32 @@ pub enum TextFileReadError {
 
 /// Reads the complete UTF-8 text of the regular file at `path`.
 ///
-/// Symbolic links are followed. The file is opened without blocking, so a FIFO
-/// or device at the path is rejected as [`TextFileReadError::NotARegularFile`]
-/// instead of waiting for a writer. The regular-file check and the size limit
-/// apply to the opened file rather than to an earlier lookup of the path. At
-/// most `max_size_bytes + 1` bytes are read, so a file that grows past the
-/// limit while it is read is still rejected. The file is never modified, and
-/// its read-only handle is closed before returning.
+/// Symbolic links are followed. The path is looked up before it is opened, so
+/// a directory, FIFO, socket, or device is rejected as
+/// [`TextFileReadError::NotARegularFile`] without being opened. The file is
+/// then opened without blocking and checked again, so a path replaced by a
+/// FIFO or device between the two steps is rejected instead of waited on. The
+/// size limit applies to the opened file. At most `max_size_bytes + 1` bytes
+/// are read, so a file that grows past the limit while it is read is still
+/// rejected. The file is never modified, and its read-only handle is closed
+/// before returning.
 ///
 /// # Errors
 ///
-/// Returns the matching [`TextFileReadError`] when the file cannot be opened,
-/// is not a regular file, is larger than `max_size_bytes`, cannot be read, or
-/// is not valid UTF-8.
+/// Returns the matching [`TextFileReadError`] when the path cannot be looked
+/// up or opened, is not a regular file, is larger than `max_size_bytes`,
+/// cannot be read, or is not valid UTF-8.
 pub fn read_regular_text_file(
     path: &Path,
     max_size_bytes: u64,
 ) -> Result<String, TextFileReadError> {
-    let file = open_file_without_blocking(path).map_err(build_open_error)?;
+    let path_metadata = fs::metadata(path).map_err(build_path_error)?;
+
+    if !path_metadata.is_file() {
+        return Err(TextFileReadError::NotARegularFile);
+    }
+
+    let file = open_file_without_blocking(path).map_err(build_path_error)?;
     let size_bytes = get_regular_file_size_bytes(&file)?;
 
     if size_bytes > max_size_bytes {
@@ -126,13 +134,14 @@ fn read_bounded_bytes(file: File, max_size_bytes: u64) -> Result<Vec<u8>, TextFi
     Ok(bytes)
 }
 
-/// Builds the failure reported when a file cannot be opened.
+/// Builds the failure reported when a path cannot be looked up or opened.
 ///
-/// Missing paths and denied access keep their own variants; every other
-/// operating-system error is preserved unchanged in [`TextFileReadError::Io`].
-fn build_open_error(error: io::Error) -> TextFileReadError {
+/// Missing paths, including a path that continues below a file, and denied
+/// access keep their own variants; every other operating-system error is
+/// preserved unchanged in [`TextFileReadError::Io`].
+fn build_path_error(error: io::Error) -> TextFileReadError {
     match error.kind() {
-        ErrorKind::NotFound => TextFileReadError::NotFound,
+        ErrorKind::NotFound | ErrorKind::NotADirectory => TextFileReadError::NotFound,
         ErrorKind::PermissionDenied => TextFileReadError::PermissionDenied,
         _ => TextFileReadError::Io(error),
     }
@@ -142,23 +151,27 @@ fn build_open_error(error: io::Error) -> TextFileReadError {
 mod tests {
     use std::io::{self, ErrorKind};
 
-    use super::{build_open_error, TextFileReadError};
+    use super::{build_path_error, TextFileReadError};
 
     #[test]
-    fn open_errors_keep_missing_and_denied_paths_distinct() {
+    fn path_errors_keep_missing_and_denied_paths_distinct() {
         assert!(matches!(
-            build_open_error(io::Error::from(ErrorKind::NotFound)),
+            build_path_error(io::Error::from(ErrorKind::NotFound)),
             TextFileReadError::NotFound
         ));
         assert!(matches!(
-            build_open_error(io::Error::from(ErrorKind::PermissionDenied)),
+            build_path_error(io::Error::from(ErrorKind::NotADirectory)),
+            TextFileReadError::NotFound
+        ));
+        assert!(matches!(
+            build_path_error(io::Error::from(ErrorKind::PermissionDenied)),
             TextFileReadError::PermissionDenied
         ));
     }
 
     #[test]
-    fn unrecognized_open_errors_keep_the_original_error() {
-        let failure = build_open_error(io::Error::other("disk unavailable"));
+    fn unrecognized_path_errors_keep_the_original_error() {
+        let failure = build_path_error(io::Error::other("disk unavailable"));
 
         let TextFileReadError::Io(error) = failure else {
             panic!("expected an I/O failure, got {failure:?}");

@@ -11,12 +11,12 @@ const searchFilesCountSchema = z
  * Validates the search request sent as the `filter` argument of the desktop
  * `find_files` command, which implements the search-files tool.
  *
- * @remarks The schema checks only the shape the desktop can deserialize. The
- * desktop owns the query and limit rules: it rejects a blank, multiline, or
- * overlong query and limits outside its accepted ranges with a declared
- * failure from {@link searchFilesErrorSchema}, and it applies its own default
- * to each omitted limit. Unknown keys are rejected because the desktop
- * rejects them too.
+ * @remarks The schema checks only the filter's shape. The desktop owns the
+ * query and limit rules: it rejects a blank, multiline, or overlong query and
+ * limits outside its accepted ranges with a declared failure from
+ * {@link searchFilesErrorSchema}, and it applies its own default to each
+ * omitted limit. Unknown keys are rejected because the desktop rejects them
+ * too.
  */
 export const searchFilesFilterSchema = z
   .strictObject({
@@ -69,7 +69,10 @@ const contentSnippetsSchema = z.array(contentSnippetSchema).min(1).readonly()
 const fileMatchSchema = z.discriminatedUnion("kind", [
   z
     .strictObject({
-      /** Only the file's name contains the query. */
+      /**
+       * The file's name contains the query; its content does not, or was not
+       * compared.
+       */
       kind: z.literal("name"),
       /** Absolute path of the file. */
       path: z.string().min(1)
@@ -77,7 +80,10 @@ const fileMatchSchema = z.discriminatedUnion("kind", [
     .readonly(),
   z
     .strictObject({
-      /** Only the file's content contains the query. */
+      /**
+       * The file's content contains the query; its name does not, or was not
+       * compared.
+       */
       kind: z.literal("content"),
       /** Absolute path of the file. */
       path: z.string().min(1),

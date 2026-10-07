@@ -45,7 +45,8 @@ cancelled.
   file names, lines of UTF-8 files up to 1 MiB, or both, case-insensitively
   after Unicode lowercasing. A search stops after the requested number of
   matches (50 by default, at most 200), 20,000 examined entries, or 64 MiB of
-  read content, and its report says which of these ended it.
+  read content, and its report says whether the result limit or a scan budget
+  ended it.
 
 Expected failures reject with a JSON object whose `code` names the failure,
 such as `{ "code": "fileNotFound" }`. Any other rejection, such as an

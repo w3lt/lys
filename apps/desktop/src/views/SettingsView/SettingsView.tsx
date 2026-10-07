@@ -53,12 +53,23 @@ const AgentPane = lazy(
   () => import("@/components/SettingsViewComponents/AgentPaneContent")
 )
 
+/**
+ * Lazily loads the tools settings body; the parent supplies the fallback.
+ *
+ * @remarks React owns module loading and
+ * suspension while the settings view owns pane selection and the fallback.
+ */
+const ToolPane = lazy(
+  () => import("@/components/SettingsViewComponents/ToolPaneContent")
+)
+
 /** A no-props settings body that may suspend while its module is imported. */
 type SettingsPaneContentComponent =
   | typeof RuntimePaneContent
   | typeof ModelPaneContent
   | typeof GenerationPaneContent
   | typeof AgentPane
+  | typeof ToolPane
 
 /** Metadata and lazy body used to render one settings pane. */
 export type SettingsPaneDescriptor = {
@@ -113,6 +124,15 @@ const SETTINGS_PANES: readonly SettingsPaneDescriptor[] = [
     footNote:
       "Saved by the backend in Lys's database. Conversations do not use agents yet; editing one changes no chat.",
     contentComponent: AgentPane
+  },
+  {
+    value: "tools",
+    label: "Tools",
+    ordinal: "05",
+    note: "What the agents can reach for. Every tool that is on is described to the model with each request, so off is cheaper than unused.",
+    footNote:
+      "Tools come from Lys itself or from the backend and cannot be added or removed here. Nothing here is saved yet, and conversations do not use tools yet.",
+    contentComponent: ToolPane
   }
 ]
 
@@ -216,7 +236,9 @@ export type SettingsViewProps = {
  * Agents are managed through the agent store, which the Agents pane reads
  * directly rather than through `SettingsContext`; its prompt measure reads the
  * context-window estimate from the application store, and it proposes no
- * settings patch.
+ * settings patch. The Tools pane likewise reads the tool store directly; it
+ * lists the client tools the desktop reports, and its choices are mocked for
+ * the session and never saved.
  *
  * Each pane body is a stable lazy component behind a `Suspense` fallback; a
  * pending body renders a separate busy frame, so its heading and Done action

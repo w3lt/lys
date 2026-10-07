@@ -395,6 +395,16 @@
   background: var(--app-status-danger);
 }
 
+/* A steady amber: something needs attention, but nothing is in progress. */
+.settings-view__status-dot[data-tone="warning"] {
+  background: var(--app-status-pending);
+  box-shadow: var(--app-status-pending-ring);
+}
+
+.settings-view__meta[data-tone="warning"] {
+  color: var(--app-status-pending);
+}
+
 @keyframes settings-view-status-pulse {
   0%,
   100% {
@@ -835,6 +845,437 @@
   letter-spacing: 0.04em;
   white-space: nowrap;
   color: var(--app-text-danger-muted);
+}
+
+/* Tools */
+
+.settings-view__tool-pane {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+.settings-view__tool-status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+/*
+ * Everything below the unavailable card. While the loaded model cannot be
+ * offered tools it fades toward the bottom and loses its colour; its controls
+ * are disabled in the markup, so the styling only shows what that means.
+ */
+.settings-view__tool-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+  transition:
+    opacity var(--duration-enter) var(--ease-standard),
+    filter var(--duration-enter) var(--ease-standard);
+}
+
+.settings-view__tool-controls[data-locked] {
+  opacity: 0.5;
+  filter: saturate(0.2);
+  mask-image: linear-gradient(
+    180deg,
+    #000 0%,
+    rgb(0 0 0 / 55%) 45%,
+    rgb(0 0 0 / 12%) 100%
+  );
+}
+
+/* Calls per reply and the tool groups recede while tool calls are off. */
+.settings-view__tool-calls-row[data-dimmed],
+.settings-view__tool-group[data-dimmed] {
+  opacity: 0.45;
+}
+
+.settings-view__tool-calls-row,
+.settings-view__tool-group {
+  transition: opacity var(--duration-enter) var(--ease-standard);
+}
+
+/* A setting inside a card or an expanded tool reads quieter than a heading. */
+.settings-view__tool-calls-row h3,
+.settings-view__tool-detail-row h3 {
+  font-weight: 400;
+  color: var(--app-text);
+}
+
+.settings-view__tool-segment {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+
+.settings-view__tool-unavailable {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: 44px minmax(0, 1fr);
+  padding: 22px 24px 20px;
+  border: 1px solid
+    color-mix(in oklch, var(--app-status-pending) 45%, var(--app-border-subtle));
+  border-radius: var(--radius-surface);
+  background:
+    radial-gradient(
+      90% 120% at 0% 0%,
+      color-mix(in oklch, var(--app-status-pending) 9%, transparent) 0%,
+      transparent 55%
+    ),
+    var(--app-surface-panel);
+}
+
+.settings-view__tool-unavailable-icon {
+  display: flex;
+  width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid
+    color-mix(in oklch, var(--app-status-pending) 28%, transparent);
+  border-radius: var(--radius-control);
+  color: var(--app-status-pending);
+}
+
+.settings-view__tool-unavailable-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.settings-view__tool-unavailable-lines {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.settings-view__tool-unavailable-lines h2 {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  color: var(--app-text-strong);
+}
+
+.settings-view__tool-unavailable-lines p {
+  max-width: 560px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  text-wrap: pretty;
+  color: var(--app-text-muted);
+}
+
+.settings-view__tool-unavailable-lines
+  .settings-view__tool-unavailable-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--app-status-pending);
+}
+
+.settings-view__tool-model {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--app-text);
+}
+
+.settings-view__tool-list {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.settings-view__tool-row {
+  border-bottom: 1px solid var(--app-border-subtle);
+  transition: background-color var(--duration-standard) var(--ease-standard);
+}
+
+.settings-view__tool-row[data-expanded] {
+  background: var(--app-surface-selected);
+}
+
+.settings-view__tool-header {
+  display: grid;
+  align-items: center;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  padding-inline-end: 10px;
+}
+
+/*
+ * The expand button holds only text and the chevron; the switch is its
+ * sibling, so the row never nests one control inside another.
+ */
+.settings-view__tool-toggle {
+  display: grid;
+  min-width: 0;
+  align-items: center;
+  gap: 14px;
+  grid-template-columns: 12px minmax(0, 1fr);
+  padding: 13px 10px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--duration-standard) var(--ease-standard);
+}
+
+.settings-view__tool-toggle:hover:not(:disabled) {
+  background: var(--app-surface-hover);
+}
+
+.settings-view__tool-toggle:focus-visible {
+  outline: 2px solid var(--app-focus);
+  outline-offset: -2px;
+}
+
+.settings-view__tool-toggle:disabled {
+  cursor: not-allowed;
+}
+
+.settings-view__tool-chevron {
+  width: 12px;
+  height: 12px;
+  color: var(--app-text-faint);
+  transition: transform var(--duration-standard) var(--ease-standard);
+}
+
+.settings-view__tool-row[data-expanded] .settings-view__tool-chevron {
+  transform: rotate(90deg);
+}
+
+.settings-view__tool-lines {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.settings-view__tool-title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-view__tool-name {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--app-text-strong);
+}
+
+.settings-view__tool-asks {
+  display: flex;
+  flex: none;
+  color: var(--app-text-muted);
+}
+
+.settings-view__tool-asks svg {
+  width: 13px;
+  height: 13px;
+}
+
+.settings-view__tool-badge {
+  flex: none;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--app-text-muted);
+  background: color-mix(in oklch, var(--app-text-muted) 14%, transparent);
+}
+
+.settings-view__tool-badge[data-badge="origin"] {
+  color: var(--app-text-link);
+  background: color-mix(in oklch, var(--app-text-link) 13%, transparent);
+}
+
+.settings-view__tool-description {
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--app-text-muted);
+}
+
+.settings-view__tool-row[data-expanded] .settings-view__tool-description {
+  white-space: normal;
+  text-wrap: pretty;
+}
+
+/* A switched-off tool keeps its place but loses its emphasis. */
+.settings-view__tool-row[data-off] .settings-view__tool-name {
+  color: var(--app-text-muted);
+}
+
+.settings-view__tool-row[data-off] .settings-view__tool-badge,
+.settings-view__tool-row[data-off] .settings-view__tool-description {
+  color: var(--app-text-faint);
+}
+
+.settings-view__tool-row[data-off] .settings-view__tool-badge {
+  background: color-mix(in oklch, var(--app-text-faint) 10%, transparent);
+}
+
+.settings-view__tool-tokens {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  color: var(--app-text-faint);
+}
+
+.settings-view__tool-details {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 2px 10px 20px 36px;
+}
+
+.settings-view__tool-subheading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--app-border-default);
+}
+
+.settings-view__tool-subheading h3 {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+}
+
+.settings-view__tool-subheading span {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--app-text-faint);
+}
+
+.settings-view__tool-argument-list {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.settings-view__tool-argument {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 132px minmax(0, 1fr);
+  padding: 10px 0;
+  border-bottom: 1px solid var(--app-border-subtle);
+}
+
+.settings-view__tool-argument-key {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-view__tool-argument-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  color: var(--app-text);
+}
+
+.settings-view__tool-argument-meta {
+  display: flex;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--app-text-faint);
+}
+
+.settings-view__tool-argument-meta [data-required] {
+  color: var(--app-action);
+}
+
+.settings-view__tool-argument-body {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-view__tool-argument-body p,
+.settings-view__tool-empty {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  text-wrap: pretty;
+  color: var(--app-text-muted);
+}
+
+.settings-view__tool-empty {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--app-border-subtle);
+}
+
+.settings-view__tool-values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.settings-view__tool-values li {
+  display: flex;
+  height: 22px;
+  align-items: center;
+  padding: 0 8px;
+  border: 1px solid var(--app-border-default);
+  border-radius: var(--radius-control);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--app-text-muted);
+  background: var(--app-surface-content);
+}
+
+.settings-view__tool-detail-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.settings-view__tool-origin {
+  flex: none;
+  padding: 2px 6px;
+  border: 1px solid
+    color-mix(in oklch, var(--app-text-link) 40%, var(--app-border-subtle));
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--app-text-link);
 }
 
 /* Segmented and slider controls */

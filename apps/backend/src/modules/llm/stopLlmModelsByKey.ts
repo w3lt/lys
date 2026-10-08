@@ -107,8 +107,10 @@ const EMPTY_LLM_MODEL_STOP_DIAGNOSTICS = Object.freeze([])
  * @param listLoadedLlmModelInstances - Runtime query returning an immutable snapshot of loaded instances.
  * @param stopLoadedLlmModelInstance - Command that stops one instance by its runtime identifier.
  * @returns A promise resolving to the reconciled, immutable stop outcome after all initially matching instances are attempted.
- * @remarks Stop attempts run sequentially in ascending runtime-identifier
- * order and continue after individual failures. The result describes the final
+ * @remarks Stop attempts for every matching instance run concurrently, start
+ * in ascending runtime-identifier order, and are not affected by individual
+ * failures; reconciliation starts after all of them settle, and stop
+ * diagnostics keep that identifier order. The result describes the final
  * observable reconciliation snapshot, not a durable guarantee against later
  * loads by another runtime client. Unloading is completion-only by product
  * design. The calling application service owns and awaits the inventory, stop,
@@ -232,33 +234,55 @@ async function listLlmModelInstancesByKey(
 }
 
 /**
- * Attempts to stop every supplied loaded model instance in collection order.
+ * Attempts to stop every supplied loaded model instance concurrently.
  *
  * @param modelInstances - Borrowed immutable instances selected for stopping.
  * @param stopLoadedLlmModelInstance - Command that stops one instance by its runtime identifier.
- * @returns A promise resolving to immutable diagnostics for failed commands after every instance has been attempted.
+ * @returns A promise resolving after every command settles, to immutable
+ * diagnostics for the failed commands in collection order.
+ * @remarks Every command starts, in collection order, before any of them
+ * settles; a failed command does not affect the others.
  */
 async function stopLlmModelInstances(
   modelInstances: readonly LoadedLlmModelInstance[],
   stopLoadedLlmModelInstance: StopLoadedLlmModelInstance
 ): Promise<readonly LlmModelStopDiagnostic[]> {
-  let stopDiagnostics: readonly LlmModelStopDiagnostic[] =
-    EMPTY_LLM_MODEL_STOP_DIAGNOSTICS
+  const stopOutcomes = await Promise.all(
+    modelInstances.map(({ modelIdentifier }) =>
+      stopLlmModelInstance(modelIdentifier, stopLoadedLlmModelInstance)
+    )
+  )
+  const stopDiagnostics = stopOutcomes.filter(
+    (stopDiagnostic) => stopDiagnostic !== undefined
+  )
 
-  for (const { modelIdentifier } of modelInstances) {
-    try {
-      await stopLoadedLlmModelInstance(modelIdentifier)
-    } catch (error) {
-      const diagnostic = Object.freeze({
-        operation: "stop-model-instance",
-        modelIdentifier,
-        message: formatLlmRuntimeFailureMessage(error)
-      } as const satisfies LlmModelStopDiagnostic)
-      stopDiagnostics = Object.freeze([...stopDiagnostics, diagnostic])
-    }
+  return stopDiagnostics.length === 0
+    ? EMPTY_LLM_MODEL_STOP_DIAGNOSTICS
+    : Object.freeze(stopDiagnostics)
+}
+
+/**
+ * Attempts one stop command and keeps its failure as a diagnostic.
+ *
+ * @param modelIdentifier - Runtime identifier of the instance to stop.
+ * @param stopLoadedLlmModelInstance - Command that stops one instance by its runtime identifier.
+ * @returns A promise resolving after the command settles: undefined when it
+ * succeeded, otherwise an immutable diagnostic for its failure.
+ */
+async function stopLlmModelInstance(
+  modelIdentifier: string,
+  stopLoadedLlmModelInstance: StopLoadedLlmModelInstance
+): Promise<LlmModelStopDiagnostic | undefined> {
+  try {
+    await stopLoadedLlmModelInstance(modelIdentifier)
+    return undefined
+  } catch (error) {
+    return Object.freeze({
+      operation: "stop-model-instance",
+      modelIdentifier,
+      message: formatLlmRuntimeFailureMessage(error)
+    } as const satisfies LlmModelStopDiagnostic)
   }
-
-  return stopDiagnostics
 }
 
 /**

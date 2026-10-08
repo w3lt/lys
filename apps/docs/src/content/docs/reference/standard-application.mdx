@@ -144,12 +144,14 @@ the maintainer on 2026-10-07 for
     gateway, and it would still run with the full access of the person's
     account.
 - **Risk and control:** any renderer code can read or list every file that the
-  operating-system user running Lys can read. No part of the app invokes the
-  commands yet, and the renderer's Markdown pipeline does not render raw HTML,
-  so review found no path for injected script to reach them. The window has no
-  content security policy, so this control depends on the renderer running
-  only its own code. The commands must not be offered to a model before the
-  gateway exists.
+  operating-system user running Lys can read. The desktop runs the commands
+  only for tool calls that pass the Ask me or Just run gateway in the Tools
+  pane: each tool asks the person before each call unless they chose Just run
+  for the session, and tools are offered only to models trained for tool use.
+  The renderer's Markdown pipeline does not render raw HTML, so review found no
+  path for injected script to reach the commands. The window has no content
+  security policy, so this control depends on the renderer running only its
+  own code. The commands must not be offered to a model without that gateway.
 - **Removal condition:** [issue #122](https://github.com/w3lt/lys/issues/122)
   runs Lys's file access as a dedicated, less-privileged operating-system user,
   so the operating system limits the commands to the paths that user is

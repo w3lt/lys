@@ -34,13 +34,14 @@ export interface AgentReader {
 export interface AgentCreator {
   /**
    * Validates and stores a new agent; a definition without a code is stored
-   * under a free code derived from its name. Lys's code is never free.
+   * under the first free code that `calculateAgentCode` tries for its name.
+   * Lys's code is never free.
    * @param definition - Candidate definition, validated and trimmed before any
    * storage work.
    * @returns The stored agent, or undefined when the given code is Lys's or
    * already stored, which stores nothing.
-   * @throws If validation fails, or the store is closed or the write fails;
-   * nothing is then stored.
+   * @throws If validation fails; with `Database is closed` once the store's
+   * owner has closed it; or if the write fails. Nothing is then stored.
    */
   createAgent(definition: AgentDefinitionCandidate): Agent | undefined
 }

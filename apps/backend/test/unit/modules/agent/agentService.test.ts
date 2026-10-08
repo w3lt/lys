@@ -1,3 +1,4 @@
+import { agentSchema } from "@lys/share"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import * as z from "zod"
 import AgentService from "../../../../src/modules/agent/agentService"
@@ -7,6 +8,11 @@ import type {
 } from "../../../../src/modules/agent/replyModel"
 import SqliteAgentRecordStore from "../../../../src/infrastructure/database/agents/sqliteAgentRecordStore"
 import { parseAgentListOptions } from "../../../../src/modules/agent/listOptions"
+import { openSqliteAgentRecordStore } from "../../support/agentDatabase"
+import {
+  registerAgentCreatorContractSuite,
+  type AgentCreatorHarness
+} from "../../support/agentCreatorContract"
 import { openTestDatabase } from "../../support/conversationDatabase"
 
 /** Time the clock reads when a case starts. */
@@ -59,7 +65,51 @@ function createAgentService(
   })
 }
 
+/**
+ * Creates the agent service over Sqlite records on an in-memory database
+ * owned by the current test, for the `AgentCreator` contract suite.
+ *
+ * @returns The service, a direct read of the stored agent rows, a write
+ * failure raised by a temporary trigger on agent inserts, and the database's
+ * close.
+ */
+function createAgentCreatorHarness(): AgentCreatorHarness {
+  const { database, recordStore, closeRecords } = openSqliteAgentRecordStore()
+  return {
+    agentCreator: new AgentService({
+      recordStore,
+      lysSystemPrompt: LYS_SYSTEM_PROMPT,
+      replyModel: createFinishingReplyModel()
+    }),
+    readStoredAgents: () =>
+      z.array(agentSchema).parse(
+        database.handleDatabaseReadRequest((statements) =>
+          statements
+            .getStatement(
+              `SELECT code, name, bio, system_prompt AS systemPrompt,
+                created_at AS createdAt, updated_at AS updatedAt
+              FROM agents ORDER BY code`
+            )
+            .all()
+        )
+      ),
+    failAgentWrites: (message) => {
+      database.handleDatabaseWriteRequest((statements) => {
+        statements
+          .getStatement(
+            `CREATE TEMP TRIGGER fail_agent_writes BEFORE INSERT ON agents
+            BEGIN SELECT RAISE(ABORT, '${message.replaceAll("'", "''")}'); END`
+          )
+          .run()
+      })
+    },
+    closeStore: closeRecords
+  }
+}
+
 describe("AgentService", () => {
+  registerAgentCreatorContractSuite(createAgentCreatorHarness)
+
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["Date"] })
     vi.setSystemTime(new Date(NOW))
@@ -89,73 +139,6 @@ describe("AgentService", () => {
       expect(agents.findAgent("researcher")).toEqual(expected)
     })
 
-    it("returns undefined and keeps the stored agent when the code is taken", () => {
-      const agents = createAgentService()
-      const first = agents.createAgent(RESEARCHER_DEFINITION)
-      vi.setSystemTime(new Date(LATER))
-
-      expect(
-        agents.createAgent({ ...RESEARCHER_DEFINITION, name: "Impostor" })
-      ).toBeUndefined()
-
-      expect(agents.findAgent("researcher")).toEqual(first)
-    })
-
-    it("refuses Lys's code without storing anything", () => {
-      const agents = createAgentService()
-
-      expect(
-        agents.createAgent({ ...RESEARCHER_DEFINITION, code: "lys" })
-      ).toBeUndefined()
-
-      expect(agents.findAgent("lys")).toBeUndefined()
-      expect(agents.listAgents({ cursor: undefined, limit: 30 })).toEqual({
-        agents: [],
-        storedCount: 0,
-        nextCursor: null
-      })
-    })
-
-    it("derives the code from the name when none is given", () => {
-      const agents = createAgentService()
-
-      const created = agents.createAgent({
-        name: "Web Researcher",
-        bio: "Searches the web.",
-        systemPrompt: "You research the web."
-      })
-
-      expect(created).toMatchObject({ code: "web-researcher", createdAt: NOW })
-      expect(agents.findAgent("web-researcher")).toEqual(created)
-    })
-
-    it("appends the first free number when the derived code is taken", () => {
-      const agents = createAgentService()
-      const definition = { ...RESEARCHER_DEFINITION, code: undefined }
-      agents.createAgent(RESEARCHER_DEFINITION)
-      agents.createAgent({ ...RESEARCHER_DEFINITION, code: "researcher-2" })
-
-      expect(agents.createAgent(definition)).toMatchObject({
-        code: "researcher-3"
-      })
-      expect(agents.createAgent(definition)).toMatchObject({
-        code: "researcher-4"
-      })
-    })
-
-    it("skips Lys's code when the name derives it", () => {
-      const agents = createAgentService()
-
-      expect(
-        agents.createAgent({
-          ...RESEARCHER_DEFINITION,
-          code: undefined,
-          name: "Lys"
-        })
-      ).toMatchObject({ code: "lys-2", name: "Lys" })
-      expect(agents.findAgent("lys")).toBeUndefined()
-    })
-
     it("finds a free code when the first try equals the second", () => {
       const agents = createAgentService()
       agents.createAgent({
@@ -182,17 +165,6 @@ describe("AgentService", () => {
           name: "日本語"
         })
       ).toMatchObject({ code: "agent", name: "日本語" })
-    })
-
-    it("rejects an invalid definition without storing it", () => {
-      const agents = createAgentService()
-
-      expect(() =>
-        agents.createAgent({ ...RESEARCHER_DEFINITION, code: "Researcher" })
-      ).toThrow(z.ZodError)
-
-      expect(agents.findAgent("Researcher")).toBeUndefined()
-      expect(agents.findAgent("researcher")).toBeUndefined()
     })
 
     it("rejects a creation time outside the stored format without storing anything", () => {

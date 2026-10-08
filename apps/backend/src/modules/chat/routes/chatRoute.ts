@@ -7,7 +7,7 @@ import {
 import type { FastifyBaseLogger, FastifyInstance } from "fastify"
 import type { BackendConfig } from "../../../config"
 import type Agent from "../../agent/agent"
-import { createAgentNotFoundProblem } from "../../agent/routes/agentProblems"
+import { createChatAgentNotFoundProblem } from "../../agent/routes/agentProblems"
 import type { TitleGenerationOptions } from "../chatService"
 import { ConversationNotFoundError } from "../../../utils/errors"
 import { createConversationNotFoundProblem } from "../../conversation/routes/notFound"
@@ -113,8 +113,7 @@ export default function updateFastifyWithChatRoute(
  * @param request - Validated chat input and request logger.
  * @param reply - SSE or pre-stream error response owner.
  * @param dependencies - Borrowed persistence, agents, and registry.
- * @returns Settlement after the stream ends, or after the missing-conversation
- * response.
+ * @returns Settlement after the stream ends, or after a not-found response.
  * @throws Unexpected failures before the stream starts, for Fastify's HTTP
  * error boundary.
  * @remarks Closing this stream does not cancel the generation. The turn, the
@@ -174,7 +173,7 @@ function createRequestedTurn(
     reply
       .type("application/problem+json")
       .code(404)
-      .send(createAgentNotFoundProblem(conversation.agentCode, request.url))
+      .send(createChatAgentNotFoundProblem(conversation.agentCode, request.url))
     return undefined
   }
   try {

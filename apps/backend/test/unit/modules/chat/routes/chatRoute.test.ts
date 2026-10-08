@@ -36,6 +36,14 @@ const NEW_CONVERSATION_REQUEST = Object.freeze({
   generationOptions: { temperature: 0.4 }
 })
 
+/** Definition of a stored agent, which cannot answer chats yet. */
+const WEB_RESEARCHER_DEFINITION = Object.freeze({
+  code: "web-researcher",
+  name: "Web Researcher",
+  bio: "Searches the web.",
+  systemPrompt: "You research the web."
+})
+
 describe("updateFastifyWithChatRoute", () => {
   it("responds with the missing-conversation problem before contacting the model", async () => {
     const testApp = await createChatRouteTestApp()
@@ -170,30 +178,38 @@ describe("updateFastifyWithChatRoute", () => {
     expect(testApp.generateTitle).not.toHaveBeenCalled()
   })
 
-  it("responds with the missing-agent problem before storing a turn when a new conversation names an agent that cannot answer chats", async () => {
-    const testApp = await createChatRouteTestApp()
-    updateFastifyWithChatRoute(testApp.app, {
-      ...CHAT_ROUTE_OPTIONS,
-      generations: testApp.generations
-    })
+  it.each([
+    ["no agent has", []],
+    ["only a stored agent has", [WEB_RESEARCHER_DEFINITION]]
+  ])(
+    "responds with the missing-agent problem before storing a turn when a new conversation names a code %s",
+    async (_label, storedDefinitions) => {
+      const testApp = await createChatRouteTestApp()
+      for (const definition of storedDefinitions)
+        testApp.app.agentService.createAgent(definition)
+      updateFastifyWithChatRoute(testApp.app, {
+        ...CHAT_ROUTE_OPTIONS,
+        generations: testApp.generations
+      })
 
-    const response = await sendChatRequest(testApp.app, {
-      ...NEW_CONVERSATION_REQUEST,
-      conversation: { kind: "new", agentCode: "web-researcher" }
-    })
+      const response = await sendChatRequest(testApp.app, {
+        ...NEW_CONVERSATION_REQUEST,
+        conversation: { kind: "new", agentCode: "web-researcher" }
+      })
 
-    expect(response.statusCode).toBe(404)
-    expect(response.headers["content-type"]).toMatch(
-      /^application\/problem\+json/
-    )
-    expect(agentNotFoundProblemSchema.parse(response.json())).toMatchObject({
-      detail: "Agent web-researcher was not found.",
-      instance: chatApi.path
-    })
-    expect(testApp.createConversationTurn).not.toHaveBeenCalled()
-    expect(testApp.completeChatStream).not.toHaveBeenCalled()
-    expect(testApp.generateTitle).not.toHaveBeenCalled()
-  })
+      expect(response.statusCode).toBe(404)
+      expect(response.headers["content-type"]).toMatch(
+        /^application\/problem\+json/
+      )
+      expect(agentNotFoundProblemSchema.parse(response.json())).toMatchObject({
+        detail: "No agent that can answer chats has the code web-researcher.",
+        instance: chatApi.path
+      })
+      expect(testApp.createConversationTurn).not.toHaveBeenCalled()
+      expect(testApp.completeChatStream).not.toHaveBeenCalled()
+      expect(testApp.generateTitle).not.toHaveBeenCalled()
+    }
+  )
 
   it("has the Lys agent answer with her own system prompt and streams the stored reply", async () => {
     const testApp = await createChatRouteTestApp()

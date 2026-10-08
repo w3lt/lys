@@ -2,6 +2,7 @@ import type { ToolDefinition } from "@lys/share"
 import { useEffect, useRef, useState, type ReactElement } from "react"
 
 import { Button } from "@/components/ui/button"
+import { calculateToolModelSupport } from "@/lib/models/tool-model-support"
 import { useLysStore } from "@/lib/store"
 import { useToolStore, type ToolListState } from "@/lib/store/tools"
 
@@ -12,7 +13,6 @@ import { ToolUnavailableCard } from "./ToolUnavailableCard"
 import {
   buildToolGroups,
   calculateOfferedToolTotals,
-  calculateToolModelSupport,
   type ToolGroupListing
 } from "./tool-presentation"
 
@@ -149,8 +149,8 @@ type ToolWorkspaceProps = {
  * details are shown, at most one, which resets when the pane is left. While
  * the loaded model was not trained for tools, the controls below the card
  * recede and are disabled, and no tool's details are shown; the tool that
- * was expanded opens again once the controls unlock. Every choice is a
- * session-only mock.
+ * was expanded opens again once the controls unlock. Every choice lasts for
+ * this session only and applies to the next tool call or chat request.
  * @param props - Listed tools.
  * @returns The tool controls.
  */

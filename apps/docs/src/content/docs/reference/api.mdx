@@ -242,8 +242,11 @@ A missing agent on GET, PATCH, or DELETE returns `404` with
 }
 ```
 
-The chat endpoint returns the same problem, with `instance` `/api/v1/chat`,
-when a new conversation names an agent that cannot answer chats. Lys is built
+The chat endpoint returns the same problem type, with `instance`
+`/api/v1/chat`, when a new conversation names a code that no agent able to
+answer chats has. A stored agent may still have that code, so the `detail`
+says only that, for example
+`No agent that can answer chats has the code web-researcher.` Lys is built
 into the backend and not stored, so the agent endpoints neither list Lys nor
 find, change, or delete `lys`.
 

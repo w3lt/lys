@@ -34,7 +34,7 @@ describe("AgentTool", () => {
       ]
     })
 
-    const format = tool.toAgentFormat()
+    const format = tool.buildAgentFormat()
 
     expect(format).toEqual({
       type: "function",
@@ -81,7 +81,9 @@ describe("AgentTool", () => {
       ]
     })
 
-    expect(tool.toAgentFormat().function.parameters.required).toEqual(["path"])
+    expect(tool.buildAgentFormat().function.parameters.required).toEqual([
+      "path"
+    ])
   })
 
   it("offers a tool without arguments an empty parameters object", () => {
@@ -93,7 +95,7 @@ describe("AgentTool", () => {
       arguments: []
     })
 
-    expect(tool.toAgentFormat().function.parameters).toEqual({
+    expect(tool.buildAgentFormat().function.parameters).toEqual({
       type: "object",
       properties: {},
       required: [],
@@ -115,7 +117,7 @@ describe("AgentTool", () => {
           values: ["name", "content"]
         }
       ]
-    }).toAgentFormat()
+    }).buildAgentFormat()
     const parameters = format.function.parameters
 
     expect(Object.isFrozen(format)).toBe(true)

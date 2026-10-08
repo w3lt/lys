@@ -12,7 +12,7 @@ describe("ToolArgument", () => {
       values: ["name", "content"]
     })
 
-    expect(argument.toAgentFormat()).toEqual({
+    expect(argument.buildAgentFormat()).toEqual({
       type: "string",
       description: "What is compared with the query.",
       enum: ["name", "content"]

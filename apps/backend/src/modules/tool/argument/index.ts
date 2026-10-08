@@ -74,7 +74,7 @@ export default class ToolArgument {
    * @returns A frozen schema; an enum argument becomes a string limited to
    * its values.
    */
-  public toAgentFormat(): JsonSchemaProperty {
+  public buildAgentFormat(): JsonSchemaProperty {
     return buildToolArgumentFormat(this.#definition)
   }
 }

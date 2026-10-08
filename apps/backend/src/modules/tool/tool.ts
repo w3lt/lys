@@ -38,7 +38,7 @@ export default class AgentTool {
    * @returns A deeply frozen OpenAI function tool whose arguments keep their
    * declaration order.
    */
-  public toAgentFormat(): OpenAIFunctionTool {
+  public buildAgentFormat(): OpenAIFunctionTool {
     return buildToolFunctionFormat(this.#definition)
   }
 }

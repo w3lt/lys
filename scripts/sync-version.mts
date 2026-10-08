@@ -103,7 +103,7 @@ function buildCargoVersion(contents: string, version: ReleaseVersion): string {
     Array.isArray(packageTable) ||
     packageTable instanceof Date
   ) {
-    throw new Error("Cargo.toml must contain a package table.")
+    throw new TypeError("Cargo.toml must contain a package table.")
   }
   if (packageTable.version === version) {
     return contents

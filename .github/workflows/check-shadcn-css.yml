@@ -1,0 +1,91 @@
+name: Check Shadcn Tailwind CSS
+
+on:
+  schedule:
+    - cron: "23 7 * * 5"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Compare upstream stylesheet
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Compare with latest Shadcn
+        id: compare
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+
+          version="$(npm view shadcn@latest version)"
+          package="$(npm pack "shadcn@$version" \
+            --silent --pack-destination "$tmp")"
+
+          tar -xzf "$tmp/$package" \
+            -C "$tmp" package/dist/tailwind.css
+
+          local_css="package/share/src/styles/shadcn-tailwind.css"
+          upstream_css="$tmp/package/dist/tailwind.css"
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          if cmp -s "$local_css" "$upstream_css"; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Stylesheet is up to date"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::shadcn stylesheet differs from upstream"
+            diff -u "$local_css" "$upstream_css" || true
+          fi
+
+      - name: Open tracking issue
+        if: steps.compare.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ steps.compare.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          title="Update vendored shadcn Tailwind CSS"
+
+          existing="$(gh issue list \
+            --state open \
+            --limit 100 \
+            --json title \
+            --jq ".[] | select(.title == \"$title\") | .title")"
+
+          if [ -n "$existing" ]; then
+            echo "An update issue is already open."
+            exit 0
+          fi
+
+          gh issue create \
+            --title "$title" \
+            --body "The vendored shadcn stylesheet differs from shadcn@$VERSION.
+
+          File: \`packages/share/src/styles/shadcn-tailwind.css\`
+
+          Review the comparison in the GitHub Actions logs before updating the file.
+
+          This workflow does not automatically update application code."

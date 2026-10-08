@@ -1,5 +1,6 @@
 export {
   MAXIMUM_GENERATION_TEMPERATURE,
+  MAXIMUM_TOOL_CALLS_PER_REPLY,
   chatApi,
   chatApiRequestBodySchema,
   chatApiStreamEventSchema,
@@ -8,9 +9,14 @@ export {
   type ChatApiResponse,
   type ChatApiRoute,
   type ChatApiStreamEvent,
+  type ChatToolOffer,
   type MessageGenerationOptions
 } from "./chatRoute"
-export type { ChatGenerationEvent, ChatReplyPathParams } from "./_share"
+export type {
+  ChatGenerationEvent,
+  ChatReplyPathParams,
+  ChatToolCall
+} from "./_share"
 export {
   chatReplyEventSchema,
   chatReplyEventsApi,
@@ -22,3 +28,12 @@ export {
   type StopChatReplyApiReply,
   type StopChatReplyApiRoute
 } from "./stopReplyRoute"
+export {
+  MAXIMUM_TOOL_RESULT_BODY_BYTES,
+  chatToolResultSchema,
+  sendChatToolResultApi,
+  type ChatToolResult,
+  type ChatToolResultPathParams,
+  type SendChatToolResultApiReply,
+  type SendChatToolResultApiRoute
+} from "./toolResultRoute"

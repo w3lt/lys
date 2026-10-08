@@ -1,3 +1,4 @@
+import { toolArgumentNameSchema, toolNameSchema } from "@lys/share"
 import * as z from "zod"
 
 /**
@@ -62,6 +63,46 @@ export const chatErrorEventSchema = z.strictObject({
 })
 
 /**
+ * Validates one tool call that the backend asks a client to answer.
+ *
+ * @remarks The backend creates the identifier and has already checked the
+ * arguments against the definition of the tool it offered, so an optional
+ * argument the model left out is an absent key. The call is never stored; it
+ * lives only until it is answered or its reply ends.
+ */
+export const chatToolCallSchema = z
+  .strictObject({
+    /** UUIDv7 the backend gave this call; unique within the backend process. */
+    id: z.uuidv7(),
+    /** Name of the offered tool the model called. */
+    toolName: toolNameSchema,
+    /** Argument values by declared argument name, as the model sent them. */
+    arguments: z
+      .record(
+        toolArgumentNameSchema,
+        z.union([z.string(), z.number(), z.boolean()])
+      )
+      .readonly()
+  })
+  .readonly()
+
+/** One tool call that the backend asks a client to answer. */
+export type ChatToolCall = z.infer<typeof chatToolCallSchema>
+
+/**
+ * Validates the event asking a client to answer one tool call.
+ *
+ * @remarks Live only: a client that was not following when it was sent finds
+ * the call in the next `reply-snapshot`'s `pendingToolCalls`. The calls of
+ * one model round arrive in the model's order.
+ */
+export const chatToolCallEventSchema = z.strictObject({
+  type: z.literal("tool-call"),
+  /** Call the client answers through the tool-result endpoint. */
+  call: chatToolCallSchema
+})
+
+/**
  * Events a running generation produces for every stream that follows its
  * reply.
  *
@@ -71,7 +112,8 @@ export const chatErrorEventSchema = z.strictObject({
  * the three: the backend ends a follower that falls too far behind, and a
  * reply whose final state cannot be stored sends none. Such a close says
  * nothing about the reply's outcome; following the reply again or reading
- * its conversation returns the stored state.
+ * its conversation returns the stored state. `tool-call` events arrive while
+ * the reply waits for a client to answer them.
  */
 export type ChatGenerationEvent =
   | z.infer<typeof chatTitleEventSchema>
@@ -79,3 +121,4 @@ export type ChatGenerationEvent =
   | z.infer<typeof chatDoneEventSchema>
   | z.infer<typeof chatInterruptedEventSchema>
   | z.infer<typeof chatErrorEventSchema>
+  | z.infer<typeof chatToolCallEventSchema>

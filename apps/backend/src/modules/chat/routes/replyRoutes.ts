@@ -108,7 +108,9 @@ async function handleChatReplyEventsRequest(
   subscription.handleStreamEvent({
     type: "reply-snapshot",
     conversationTitle: conversation.title,
-    assistantMessage
+    assistantMessage,
+    // No reply is offered tools yet, so no tool call is ever pending.
+    pendingToolCalls: []
   })
   if (generation === undefined) subscription.close()
   else generation.openSubscription(subscription)

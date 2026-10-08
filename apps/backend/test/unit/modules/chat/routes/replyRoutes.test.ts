@@ -56,7 +56,8 @@ const CONVERSATION = Object.freeze({
 const REPLY_SNAPSHOT_EVENT = Object.freeze({
   type: "reply-snapshot",
   conversationTitle: "Trip plan",
-  assistantMessage: ASSISTANT_MESSAGE
+  assistantMessage: ASSISTANT_MESSAGE,
+  pendingToolCalls: []
 })
 
 /** Generation running for one reply, with both of its controlled tasks. */

@@ -9,6 +9,8 @@ import {
   chatInterruptedEventSchema,
   chatReplyPathParamsSchema,
   chatTitleEventSchema,
+  chatToolCallEventSchema,
+  chatToolCallSchema,
   type ChatReplyPathParams
 } from "./_share"
 import { apiChatReplyEventsRoute } from "./routes"
@@ -24,7 +26,13 @@ const chatReplySnapshotEventSchema = z.strictObject({
   /** Stored conversation title when the snapshot was read; null while untitled. */
   conversationTitle: z.string().min(1).nullable(),
   /** Stored reply, including every delta sent to followers before this event. */
-  assistantMessage: conversationAssistantMessageSchema
+  assistantMessage: conversationAssistantMessageSchema,
+  /**
+   * Tool calls sent and not yet answered when the snapshot was read, in the
+   * order sent; empty when the reply is not generating. Each pending call
+   * reaches a follower once: here or as a later `tool-call` event.
+   */
+  pendingToolCalls: z.array(chatToolCallSchema).readonly()
 })
 
 /**
@@ -42,7 +50,8 @@ export const chatReplyEventSchema = z.discriminatedUnion("type", [
   chatDeltaEventSchema,
   chatDoneEventSchema,
   chatInterruptedEventSchema,
-  chatErrorEventSchema
+  chatErrorEventSchema,
+  chatToolCallEventSchema
 ])
 
 /** Typed event union accepted by the reply-events SSE transport. */

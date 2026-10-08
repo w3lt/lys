@@ -78,3 +78,43 @@ export const chatReplyNotGeneratingProblemSchema = z
 export type ChatReplyNotGeneratingProblem = z.infer<
   typeof chatReplyNotGeneratingProblemSchema
 >
+
+/** Stable problem category for answering a tool call that is not pending. */
+const CHAT_TOOL_CALL_NOT_PENDING_PROBLEM_TYPE =
+  "urn:lys:problem:chat:tool-call-not-pending"
+
+/** Client-facing summary shared by every not-pending occurrence. */
+const CHAT_TOOL_CALL_NOT_PENDING_PROBLEM_TITLE = "Tool call not pending"
+
+/** HTTP status accompanying a not-pending problem body. */
+const CHAT_TOOL_CALL_NOT_PENDING_PROBLEM_STATUS = 409
+
+/**
+ * Validates the RFC 9457 body returned when a tool result names a call that
+ * is not waiting for an answer.
+ *
+ * @remarks The tool-result endpoint transmits this contract with HTTP 409
+ * when the call is unknown, was already answered, or its reply ended. The
+ * request changed nothing. The `type` literal is the machine-readable
+ * discriminator; `detail` is occurrence-specific, caller-safe text. Changing
+ * any fixed field requires coordinated consumers.
+ */
+export const chatToolCallNotPendingProblemSchema = z
+  .strictObject({
+    /** Stable discriminator separating a non-pending call from other failures. */
+    type: z.literal(CHAT_TOOL_CALL_NOT_PENDING_PROBLEM_TYPE),
+    /** Human-readable category summary shared across occurrences. */
+    title: z.literal(CHAT_TOOL_CALL_NOT_PENDING_PROBLEM_TITLE),
+    /** HTTP status accompanying this problem body. */
+    status: z.literal(CHAT_TOOL_CALL_NOT_PENDING_PROBLEM_STATUS),
+    /** Caller-safe explanation of this occurrence. */
+    detail: z.string().min(1),
+    /** Optional identifier of this problem occurrence. */
+    instance: z.string().min(1).optional()
+  })
+  .readonly()
+
+/** Tool-call-not-pending Problem Details body inferred from its schema. */
+export type ChatToolCallNotPendingProblem = z.infer<
+  typeof chatToolCallNotPendingProblemSchema
+>

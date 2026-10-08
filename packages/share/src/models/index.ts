@@ -17,8 +17,11 @@ export * from "./conversation"
 export {
   buildToolArgumentFormat,
   buildToolFunctionFormat,
+  hasDistinctToolNames,
   toolArgumentDefinitionSchema,
+  toolArgumentNameSchema,
   toolDefinitionSchema,
+  toolNameSchema,
   type JsonSchemaProperty,
   type OpenAIFunctionTool,
   type ToolAccess,

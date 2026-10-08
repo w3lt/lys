@@ -14,3 +14,18 @@ export {
   type AgentDefinitionCandidate
 } from "./agent"
 export * from "./conversation"
+export {
+  buildToolArgumentFormat,
+  buildToolFunctionFormat,
+  toolArgumentDefinitionSchema,
+  toolDefinitionSchema,
+  type JsonSchemaProperty,
+  type OpenAIFunctionTool,
+  type ToolAccess,
+  type ToolArgumentDefinition,
+  type ToolArgumentDefinitionCandidate,
+  type ToolArgumentType,
+  type ToolDefinition,
+  type ToolDefinitionCandidate,
+  type ToolGroup
+} from "./tool"

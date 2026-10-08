@@ -1,10 +1,12 @@
 import {
+  listToolsResultSchema,
   readTextFileContentSchema,
   readTextFileErrorSchema,
   readTextFileInputSchema,
   searchFilesErrorSchema,
   searchFilesFilterSchema,
   searchFilesReportSchema,
+  type ListToolsResult,
   type ReadTextFileError,
   type ReadTextFileInput,
   type SearchFilesError,
@@ -18,6 +20,9 @@ const READ_TEXT_FILE_COMMAND = "read_text_file"
 
 /** Registered name of the Tauri command that implements the search-files tool. */
 const FIND_FILES_COMMAND = "find_files"
+
+/** Registered name of the Tauri command that lists every client tool. */
+const LIST_TOOLS_COMMAND = "list_tools"
 
 /** Outcome of one read-text-file tool call. */
 export type ReadTextFileResult =
@@ -158,6 +163,25 @@ export async function findFiles(
     status: "failed",
     error: failure.data
   } satisfies SearchFilesResult)
+}
+
+/**
+ * Lists every client tool Lys has, in the order Settings shows them.
+ *
+ * @returns A promise that resolves with the validated, frozen list once the
+ * desktop answers.
+ * @throws A Zod error when the desktop returns a list that does not match
+ * {@link listToolsResultSchema}, such as a definition that drifted from the
+ * shared shape.
+ * @throws The Tauri rejection when the command is not registered.
+ * @remarks The desktop builds the list from its own definitions and reads
+ * nothing from disk, so the command declares no failure of its own. The read
+ * cannot be cancelled.
+ */
+export async function listTools(): Promise<ListToolsResult> {
+  const value = await invoke<unknown>(LIST_TOOLS_COMMAND)
+
+  return listToolsResultSchema.parse(value)
 }
 
 /**

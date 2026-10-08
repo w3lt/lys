@@ -37,7 +37,7 @@ fn greet(name: &str) -> String {
 ///
 /// The builder registers the opener plugin, manages the resolved `LysHome` and
 /// one mutex-protected `backend::Backend` resource, and exposes the backend,
-/// settings, and file tool commands to the renderer. On `Exit`, the managed
+/// settings, and client tool commands to the renderer. On `Exit`, the managed
 /// backend is stopped and a failure is reported to stderr without preventing
 /// the process from finishing its exit handling.
 ///
@@ -66,6 +66,7 @@ pub fn run() {
             backend::get_backend_status,
             settings::commands::load_settings,
             settings::commands::save_settings,
+            tools::client_tools::list_tools,
             tools::read_text_file::read_text_file,
             tools::search_files::find_files
         ])

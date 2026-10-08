@@ -159,47 +159,39 @@ the maintainer on 2026-10-07 for
 
 ## Backend tool class exception
 
-The backend's `AgentTool` and `ToolArgument` classes have a proposed exception
+The backend's `AgentTool` and `ToolArgument` classes have an approved exception
 to [CLASS-005](https://github.com/w3lt/lys/blob/main/docs/code_standards/CLASS.md)
 and
 [MODULE-008](https://github.com/w3lt/lys/blob/main/docs/code_standards/MODULE.md):
 they, their public members, and the `buildToolArgumentFormat` export of
-`@lys/share` have no production consumer yet. Their `toAgentFormat` methods
-also have a proposed exception to
-[FUNC-003](https://github.com/w3lt/lys/blob/main/docs/code_standards/FUNCTION.md),
-which requires the `build` verb for an operation that assembles an in-memory
-representation.
-The exception was requested for [PR #124](https://github.com/w3lt/lys/pull/124),
-following review findings I-3 and I-4, and is not yet approved by the
-maintainer.
+`@lys/share` have no production consumer yet. The exception was approved by
+the maintainer on 2026-10-08 for [PR #124](https://github.com/w3lt/lys/pull/124)
+only, following review finding I-3.
 
 - **Scope:**
   [`AgentTool`](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/tool/tool.ts),
   [`ToolArgument`](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/tool/argument/index.ts),
   and
   [`buildToolArgumentFormat`](https://github.com/w3lt/lys/blob/main/packages/share/src/models/tool.ts),
-  which `@lys/share` exports only for `ToolArgument`. Every other class and
-  export still follows CLASS-005 and MODULE-008, and every other function name
-  follows FUNC-003.
+  which `@lys/share` exports only for `ToolArgument`, as PR #124 leaves them.
+  A later change that adds public surface to them before #89 follows these
+  rules or needs its own approval. Every other class and export still follows
+  CLASS-005 and MODULE-008.
 - **Constraint:** the maintainer asked to keep both classes for the agent loop
   of [issue #89](https://github.com/w3lt/lys/issues/89), which will offer tools
-  to a model through them, and chose the `toAgentFormat` name. Until that loop
-  exists, the backend unit tests are their only callers.
-- **Alternatives considered:**
-  - Removing `ToolArgument` and the `buildToolArgumentFormat` export until #89
-    needs them, as the review offered, was not taken because the maintainer
-    asked to keep the classes.
-  - Renaming `toAgentFormat` to a `build…` name was not taken because the
-    maintainer chose the name.
+  to a model through them. Until that loop exists, the backend unit tests are
+  their only callers.
+- **Alternatives considered:** removing `ToolArgument` and the
+  `buildToolArgumentFormat` export until #89 needs them, as the review offered,
+  was not taken because the maintainer asked to keep the classes.
 - **Risk and control:** public surface without a consumer can drift from what
   #89 needs. The classes own only a frozen, validated definition and have no
   side effects, no production code reaches them, and the backend unit tests
   cover their whole public surface, so the cost is limited to maintaining
   them.
 - **Removal condition:** the #89 loop builds the tools it offers through these
-  classes. That change removes this exception: whatever is still unused is
-  deleted, and `toAgentFormat` is renamed to a FUNC-003 verb or recorded as a
-  permanent exception with its reason.
+  classes. That change removes this exception, and whatever is still unused is
+  deleted.
 
 ## API boundaries
 

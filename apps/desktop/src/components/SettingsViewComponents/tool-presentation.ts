@@ -78,6 +78,16 @@ const UNKNOWN_TOOL_MODEL_SUPPORT: ToolModelSupport = Object.freeze({
   status: "unknown"
 })
 
+/** Lowercase heading text of every tool group; a new group must add one. */
+const TOOL_GROUP_LABELS = Object.freeze({
+  files: "files"
+} satisfies Readonly<Record<ToolGroup, string>>)
+
+/** Lowercase badge text of every access level; a new level must add one. */
+const TOOL_ACCESS_LABELS = Object.freeze({
+  reads: "reads"
+} satisfies Readonly<Record<ToolAccess, string>>)
+
 /**
  * Calculates whether the loaded model can be offered tools.
  *
@@ -225,10 +235,7 @@ export function buildToolGroups(
  * @returns The group's lowercase heading text.
  */
 export function formatToolGroupLabel(group: ToolGroup): string {
-  switch (group) {
-    case "files":
-      return "files"
-  }
+  return TOOL_GROUP_LABELS[group]
 }
 
 /**
@@ -252,10 +259,7 @@ export function formatToolGroupCount(
  * @returns The badge's lowercase text.
  */
 export function formatToolAccessLabel(access: ToolAccess): string {
-  switch (access) {
-    case "reads":
-      return "reads"
-  }
+  return TOOL_ACCESS_LABELS[access]
 }
 
 /**

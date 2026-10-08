@@ -14,7 +14,7 @@ const TOOL_NAME_PATTERN = /^[A-Za-z0-9_-]{1,64}$/
  * so the parameters object a model receives never touches an object
  * prototype and lists the arguments in declaration order.
  */
-const TOOL_ARGUMENT_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,63}$/
+const TOOL_ARGUMENT_NAME_PATTERN = /^[A-Za-z]\w{0,63}$/
 
 /**
  * Answers whether every value in a list appears once.

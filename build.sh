@@ -24,13 +24,16 @@ mkdir -p "$LYS_HOME"
 mkdir -p "$LYS_HOME/runtime"
 
 # Step 6: Detect the target NodeJS version
+# curl --proto value that allows only HTTPS transfers
+readonly CURL_HTTPS_ONLY_PROTOCOLS="=https"
+
 get_latest_lts_node_version() {
-  curl --proto "=https" -fsSL https://nodejs.org/dist/index.json | jq -er '[.[] | select(.lts)][0].version'
+  curl --proto "$CURL_HTTPS_ONLY_PROTOCOLS" -fsSL https://nodejs.org/dist/index.json | jq -er '[.[] | select(.lts)][0].version'
 }
 
 get_latest_node_major_version() {
   local major="$1"
-  curl --proto "=https" -fsSL --retry 3 https://nodejs.org/dist/index.json |
+  curl --proto "$CURL_HTTPS_ONLY_PROTOCOLS" -fsSL --retry 3 https://nodejs.org/dist/index.json |
     jq -er --arg prefix "v${major}." \
       '[.[] | select(.version | startswith($prefix))][0].version'
 }
@@ -98,8 +101,8 @@ else
   trap 'rm -rf "$TMP_DIR"' EXIT
 
   echo "Downloading $NODE_TARBALL..."
-  curl --proto "=https" -fsSL --retry 3 -o "$TMP_DIR/$NODE_TARBALL" "$NODE_BASE_URL/$NODE_TARBALL"
-  curl --proto "=https" -fsSL --retry 3 -o "$TMP_DIR/SHASUMS256.txt" "$NODE_BASE_URL/SHASUMS256.txt"
+  curl --proto "$CURL_HTTPS_ONLY_PROTOCOLS" -fsSL --retry 3 -o "$TMP_DIR/$NODE_TARBALL" "$NODE_BASE_URL/$NODE_TARBALL"
+  curl --proto "$CURL_HTTPS_ONLY_PROTOCOLS" -fsSL --retry 3 -o "$TMP_DIR/SHASUMS256.txt" "$NODE_BASE_URL/SHASUMS256.txt"
 
   EXPECTED_SHA=$(awk -v f="$NODE_TARBALL" '$2 == f {print $1}' "$TMP_DIR/SHASUMS256.txt")
   ACTUAL_SHA=$(sha256_of "$TMP_DIR/$NODE_TARBALL")

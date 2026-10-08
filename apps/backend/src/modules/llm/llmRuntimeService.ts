@@ -308,9 +308,9 @@ export default class LlmRuntimeService
       const llmRuntime = await this.#acquireLlmRuntime()
       this.#connection = Object.freeze({ status: "connected", llmRuntime })
       return "connected"
-    } catch (acquisitionFailure) {
+    } catch (acquisitionError) {
       this.#connection = UNREACHABLE_LLM_RUNTIME_CONNECTION_STATE
-      this.#reportLlmRuntimeAcquisitionFailure(acquisitionFailure)
+      this.#reportLlmRuntimeAcquisitionFailure(acquisitionError)
       return "unreachable"
     }
   }
@@ -384,19 +384,19 @@ export default class LlmRuntimeService
     let result: Result
     try {
       result = await operation(llmEngine)
-    } catch (operationFailure) {
+    } catch (operationError) {
       throw await this.#handleLlmEngineOperationFailure(
         connection.llmRuntime,
         llmEngine,
-        operationFailure
+        operationError
       )
     }
 
     if (llmEngine.hasRecordedFailure) {
       try {
         await this.#updateLlmRuntimeAvailability(connection.llmRuntime)
-      } catch (availabilityFailure) {
-        this.#reportLlmRuntimeAvailabilityCheckFailure(availabilityFailure)
+      } catch (availabilityError) {
+        this.#reportLlmRuntimeAvailabilityCheckFailure(availabilityError)
       }
     }
     return result
@@ -427,11 +427,11 @@ export default class LlmRuntimeService
       return status === "connected"
         ? operationFailure
         : createLlmRuntimeUnavailableError([operationFailure])
-    } catch (availabilityFailure) {
+    } catch (availabilityError) {
       return new AggregateError(
-        [operationFailure, availabilityFailure],
+        [operationFailure, availabilityError],
         "The LLM operation and the runtime availability check both failed.",
-        { cause: availabilityFailure }
+        { cause: availabilityError }
       )
     }
   }

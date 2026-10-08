@@ -9,10 +9,16 @@ import type { FastifyInstance } from "fastify"
  *
  * @param app - Application instance that receives the health route.
  * @returns A promise that resolves after route registration completes.
- * @throws If Fastify cannot register the route.
+ * @throws If Fastify cannot register the route. The failure rejects the
+ * promise, so `app.register` reports it rather than an uncaught exception.
  */
-export default async function registerHealthRoutes(app: FastifyInstance) {
-  app.get(apiHeathCheckRoute, async () => ({
-    ok: true
-  }))
+export default function registerHealthRoutes(
+  app: FastifyInstance
+): Promise<void> {
+  return new Promise((resolve) => {
+    app.get(apiHeathCheckRoute, () => ({
+      ok: true
+    }))
+    resolve()
+  })
 }

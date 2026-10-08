@@ -129,15 +129,15 @@ async function readInventoryOutcome(
       modelError: priorError,
       isModelRuntimeUnavailable: false
     }
-  } catch (failure) {
-    if (isModelRuntimeUnavailableError(failure)) {
+  } catch (error) {
+    if (isModelRuntimeUnavailableError(error)) {
       return {
         modelInventory: { status: "unavailable" },
         modelError: priorError,
         isModelRuntimeUnavailable: true
       }
     }
-    const message = formatModelFailure(failure)
+    const message = formatModelFailure(error)
     return {
       modelInventory: { status: "failed" },
       modelError: priorError
@@ -240,8 +240,8 @@ export function createModelSlice(
     let modelError: string | null = null
     try {
       modelHealth = await updateModelOperation(request, connection)
-    } catch (failure) {
-      modelError = formatModelFailure(failure)
+    } catch (error) {
+      modelError = formatModelFailure(error)
     }
     if (!isCurrentRequest(controller, current.backendUrl)) return
     const result = await readInventoryOutcome(connection, modelError)

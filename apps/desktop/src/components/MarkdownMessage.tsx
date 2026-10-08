@@ -17,9 +17,9 @@ import "./MarkdownMessage.scss"
 /** Properties accepted by {@link MarkdownMessage}. */
 type MarkdownMessageProps = {
   /** Markdown source projected into the assistant message body. */
-  text: string
+  readonly text: string
   /** Whether generation remains active and needs a polite caret status. */
-  streaming: boolean
+  readonly streaming: boolean
 }
 
 /** Properties react-markdown supplies to the `code` element inside a `pre`. */

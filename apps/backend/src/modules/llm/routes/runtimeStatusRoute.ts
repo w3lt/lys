@@ -11,13 +11,27 @@ import type { LlmRuntimeConnectionObserver } from "../llmRuntimeCapabilities"
  *
  * @param app - Application instance that receives the runtime-status route.
  * @returns A promise that resolves after route registration completes.
- * @throws If Fastify cannot register the route.
+ * @throws If Fastify cannot register the route. The failure rejects the
+ * promise rather than escaping the call synchronously.
  * @remarks The handler reads the in-memory status without contacting LM
  * Studio or entering the model-operation queue.
  */
-export default async function updateFastifyWithLlmRuntimeStatusRoute(
+export default function updateFastifyWithLlmRuntimeStatusRoute(
   app: FastifyInstance
 ): Promise<void> {
+  return new Promise((resolve) => {
+    registerLlmRuntimeStatusRoute(app)
+    resolve()
+  })
+}
+
+/**
+ * Registers the LLM runtime status endpoint.
+ *
+ * @param app - Application instance that receives the route.
+ * @throws If Fastify cannot register the route.
+ */
+function registerLlmRuntimeStatusRoute(app: FastifyInstance): void {
   const llmRuntimeConnectionObserver: LlmRuntimeConnectionObserver =
     app.llmRuntimeService
 
@@ -31,7 +45,7 @@ export default async function updateFastifyWithLlmRuntimeStatusRoute(
         })
       }
     },
-    handler: async function () {
+    handler: function () {
       return Object.freeze({
         status: llmRuntimeConnectionObserver.llmRuntimeConnectionStatus
       })

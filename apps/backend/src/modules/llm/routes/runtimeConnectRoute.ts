@@ -12,15 +12,29 @@ import handleLlmServiceRequestFailure from "./handleLlmServiceRequestFailure"
  *
  * @param app - Application instance that receives the runtime-connect route.
  * @returns A promise that resolves after route registration completes.
- * @throws If Fastify cannot register the route.
+ * @throws If Fastify cannot register the route. The failure rejects the
+ * promise rather than escaping the call synchronously.
  * @remarks The handler waits for the shared connection attempt and returns its
  * settled status. A full queue returns service-busy Problem Details; other
  * failures remain owned by Fastify's parent error boundary. A client
  * disconnect does not cancel an accepted attempt.
  */
-export default async function updateFastifyWithLlmRuntimeConnectRoute(
+export default function updateFastifyWithLlmRuntimeConnectRoute(
   app: FastifyInstance
 ): Promise<void> {
+  return new Promise((resolve) => {
+    registerLlmRuntimeConnectRoute(app)
+    resolve()
+  })
+}
+
+/**
+ * Registers the LLM runtime connect endpoint.
+ *
+ * @param app - Application instance that receives the route.
+ * @throws If Fastify cannot register the route.
+ */
+function registerLlmRuntimeConnectRoute(app: FastifyInstance): void {
   const llmRuntimeConnector: LlmRuntimeConnector = app.llmRuntimeService
 
   app.route<LlmRuntimeConnectApiRoute>({

@@ -24,13 +24,13 @@ export function handleTransactionFailure(
   const cleanupFailures: unknown[] = []
   try {
     if (database.isTransaction) database.exec("ROLLBACK")
-  } catch (rollbackFailure) {
-    cleanupFailures.push(rollbackFailure)
+  } catch (rollbackError) {
+    cleanupFailures.push(rollbackError)
   }
   try {
     updateDatabaseWriteProtection(database)
-  } catch (protectionFailure) {
-    cleanupFailures.push(protectionFailure)
+  } catch (protectionError) {
+    cleanupFailures.push(protectionError)
   }
   if (cleanupFailures.length === 0) throw failure
   throw new AggregateError(

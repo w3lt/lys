@@ -183,7 +183,7 @@ export function registerDatabaseReaderContractSuite(
 
       expect(() =>
         // @ts-expect-error -- An operation's result type refuses a promise.
-        database.handleDatabaseReadRequest(async () => "late")
+        database.handleDatabaseReadRequest(() => Promise.resolve("late"))
       ).toThrow("Database operations must be synchronous")
 
       expect(database.handleDatabaseWriteRequest(() => "written")).toBe(
@@ -304,11 +304,13 @@ export function registerDatabaseWriterContractSuite(
       expect(() =>
         database.handleDatabaseWriteRequest(
           // @ts-expect-error -- An operation's result type refuses a promise.
-          async (statements: DatabaseStatementCompiler) => {
-            statements
-              .getStatement("INSERT INTO items (name) VALUES ('discarded')")
-              .run()
-          }
+          (statements: DatabaseStatementCompiler) =>
+            new Promise<void>((resolve) => {
+              statements
+                .getStatement("INSERT INTO items (name) VALUES ('discarded')")
+                .run()
+              resolve()
+            })
         )
       ).toThrow("Database operations must be synchronous")
 

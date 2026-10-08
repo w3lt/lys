@@ -402,9 +402,9 @@ export default class SqliteDatabase
         database.exec(boundary.end)
       )
       return result
-    } catch (failure) {
+    } catch (error) {
       return this.#transactionControl.handleTransactionControlRequest(() =>
-        handleTransactionFailure(database, failure)
+        handleTransactionFailure(database, error)
       )
     }
   }

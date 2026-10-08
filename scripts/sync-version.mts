@@ -25,7 +25,7 @@ type ManifestUpdate = {
  */
 function parseReleaseVersion(contents: string): ReleaseVersion {
   const version = contents.trim()
-  const pattern = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/
+  const pattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
   if (!pattern.test(version)) {
     throw new Error("VERSION must use major.minor.patch, such as 1.2.3.")
   }
@@ -103,7 +103,7 @@ function buildCargoVersion(contents: string, version: ReleaseVersion): string {
     Array.isArray(packageTable) ||
     packageTable instanceof Date
   ) {
-    throw new Error("Cargo.toml must contain a package table.")
+    throw new TypeError("Cargo.toml must contain a package table.")
   }
   if (packageTable.version === version) {
     return contents

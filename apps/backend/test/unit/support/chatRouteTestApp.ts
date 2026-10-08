@@ -72,10 +72,14 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
   })
   const completeChatStream = vi
     .spyOn(chatService, "completeChatStream")
-    .mockImplementation(async () => handleUnexpectedCall("completeChatStream"))
+    .mockImplementation(() =>
+      Promise.reject(createUnexpectedCallError("completeChatStream"))
+    )
   const generateTitle = vi
     .spyOn(chatService, "generateTitle")
-    .mockImplementation(async () => handleUnexpectedCall("generateTitle"))
+    .mockImplementation(() =>
+      Promise.reject(createUnexpectedCallError("generateTitle"))
+    )
   const agentService = new AgentService({
     recordStore: new SqliteAgentRecordStore(database),
     lysSystemPrompt: TEST_LYS_SYSTEM_PROMPT,
@@ -129,5 +133,16 @@ export async function sendChatRequest(
  * @throws Always.
  */
 function handleUnexpectedCall(operationName: string): never {
-  throw new Error(`Unexpected chat route call: ${operationName}`)
+  throw createUnexpectedCallError(operationName)
+}
+
+/**
+ * Creates the failure for a chat-route dependency call that the current case
+ * did not arrange.
+ *
+ * @param operationName - Dependency operation that was called.
+ * @returns An error with the message `Unexpected chat route call: <name>`.
+ */
+function createUnexpectedCallError(operationName: string): Error {
+  return new Error(`Unexpected chat route call: ${operationName}`)
 }

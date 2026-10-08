@@ -35,25 +35,30 @@ export type FakeLlmRuntime = LlmRuntime &
  */
 export function createFakeLlmRuntime(): FakeLlmRuntime {
   return Object.freeze({
-    listDownloadedLlmModels: vi.fn<LlmEngine["listDownloadedLlmModels"]>(
-      async () => handleUnexpectedCall("listDownloadedLlmModels")
+    listDownloadedLlmModels: vi.fn<LlmEngine["listDownloadedLlmModels"]>(() =>
+      Promise.reject(createUnexpectedCallError("listDownloadedLlmModels"))
     ),
     listLoadedLlmModelInstances: vi.fn<
       LlmEngine["listLoadedLlmModelInstances"]
-    >(async () => handleUnexpectedCall("listLoadedLlmModelInstances")),
-    loadLlmModel: vi.fn<LlmEngine["loadLlmModel"]>(async () =>
-      handleUnexpectedCall("loadLlmModel")
+    >(() =>
+      Promise.reject(createUnexpectedCallError("listLoadedLlmModelInstances"))
+    ),
+    loadLlmModel: vi.fn<LlmEngine["loadLlmModel"]>(() =>
+      Promise.reject(createUnexpectedCallError("loadLlmModel"))
     ),
     stopLoadedLlmModelInstance: vi.fn<LlmEngine["stopLoadedLlmModelInstance"]>(
-      async () => handleUnexpectedCall("stopLoadedLlmModelInstance")
+      () =>
+        Promise.reject(createUnexpectedCallError("stopLoadedLlmModelInstance"))
     ),
     getRuntimeAvailability: vi.fn<
       LlmRuntimeLifecycle["getRuntimeAvailability"]
-    >(async () => handleUnexpectedCall("getRuntimeAvailability")),
+    >(() =>
+      Promise.reject(createUnexpectedCallError("getRuntimeAvailability"))
+    ),
     get lifecycleStatus(): never {
       return handleUnexpectedCall("lifecycleStatus")
     },
-    [Symbol.asyncDispose]: vi.fn(async () => undefined)
+    [Symbol.asyncDispose]: vi.fn(() => Promise.resolve())
   })
 }
 
@@ -64,5 +69,15 @@ export function createFakeLlmRuntime(): FakeLlmRuntime {
  * @throws Always.
  */
 function handleUnexpectedCall(operationName: string): never {
-  throw new Error(`Unexpected LLM runtime call: ${operationName}`)
+  throw createUnexpectedCallError(operationName)
+}
+
+/**
+ * Creates the failure for an operation that the current case did not arrange.
+ *
+ * @param operationName - Runtime operation that was called.
+ * @returns An error with the message `Unexpected LLM runtime call: <name>`.
+ */
+function createUnexpectedCallError(operationName: string): Error {
+  return new Error(`Unexpected LLM runtime call: ${operationName}`)
 }

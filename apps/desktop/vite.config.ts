@@ -18,7 +18,7 @@ const host = process.env.TAURI_DEV_HOST
  * source directory, while Vitest runs in jsdom with the shared test setup and
  * CSS handling. The `src-tauri` directory is excluded from Vite watch work.
  */
-export default defineConfig(async () => ({
+export default defineConfig(() => ({
   // Renderer transforms required by the desktop bundle.
   plugins: [react(), tailwindcss()],
 

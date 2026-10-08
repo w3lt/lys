@@ -52,14 +52,4 @@ export class ChatCompletionCancelledError extends Error {
  * The subclass preserves the native `Error` contract, owns no mutable state,
  * and keeps the underlying parse failure as its cause when one exists.
  */
-export class TitleGenerationOutputError extends Error {
-  /**
-   * Creates an unusable-title-output failure with an optional cause.
-   *
-   * @param message - Human-readable reason the reply is unusable.
-   * @param options - Native error options, including an optional cause.
-   */
-  constructor(message: string, options?: ErrorOptions) {
-    super(message, options)
-  }
-}
+export class TitleGenerationOutputError extends Error {}

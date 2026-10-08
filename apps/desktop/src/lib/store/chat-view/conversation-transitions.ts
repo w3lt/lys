@@ -200,7 +200,7 @@ export function updateAssistantReplyContent(
   const assistantMessage = conversation.messages.find(
     (message) => message.id === options.assistantMessageId
   )
-  if (!assistantMessage || assistantMessage.role !== "assistant") {
+  if (assistantMessage?.role !== "assistant") {
     throw new Error(
       `Assistant message ${options.assistantMessageId} was not found`
     )
@@ -277,7 +277,7 @@ export function updateAssistantReplyStatus(
   const assistantMessage = conversation.messages.find(
     (message) => message.id === options.assistantMessageId
   )
-  if (!assistantMessage || assistantMessage.role !== "assistant") {
+  if (assistantMessage?.role !== "assistant") {
     throw new Error(
       `Assistant message ${options.assistantMessageId} was not found`
     )

@@ -10,16 +10,30 @@ import handleLlmServiceRequestFailure from "./handleLlmServiceRequestFailure"
  *
  * @param app - Application instance that receives the LLM health route.
  * @returns A promise that resolves after route registration completes.
- * @throws If Fastify cannot register the route.
+ * @throws If Fastify cannot register the route. The failure rejects the
+ * promise rather than escaping the call synchronously.
  * @remarks Every response prevents caching because health is a fresh observation.
  * Refused queue admission returns service-busy Problem Details, and a missing
  * or lost LLM runtime connection returns runtime-unavailable Problem Details.
  * Accepted health work remains owned by the application service after client
  * disconnect.
  */
-export default async function updateFastifyWithLlmTestModelRoute(
+export default function updateFastifyWithLlmTestModelRoute(
   app: FastifyInstance
 ): Promise<void> {
+  return new Promise((resolve) => {
+    registerLlmTestModelRoute(app)
+    resolve()
+  })
+}
+
+/**
+ * Registers the loaded-model health endpoint.
+ *
+ * @param app - Application instance that receives the route.
+ * @throws If Fastify cannot register the route.
+ */
+function registerLlmTestModelRoute(app: FastifyInstance): void {
   const llmModelHealthReader: LlmModelHealthReader = app.llmService
 
   app.route<LlmTestModelApiRoute>({
@@ -39,8 +53,9 @@ export default async function updateFastifyWithLlmTestModelRoute(
       }
     },
     validatorCompiler: () => validateLlmTestModelParams,
-    onRequest: async (_request, reply) => {
+    onRequest: (_request, reply) => {
       reply.header("Cache-Control", "no-store")
+      return Promise.resolve()
     },
     errorHandler: handleLlmServiceRequestFailure,
     handler: async (request, reply) =>

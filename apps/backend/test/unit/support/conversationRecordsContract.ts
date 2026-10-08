@@ -934,11 +934,13 @@ export function registerConversationTurnRecordWriterContractSuite(
         expect(() =>
           turnRecordWriter.handleConversationTurnWriteRequest(
             // @ts-expect-error -- An operation's result type refuses a promise.
-            async (transaction: ConversationTurnTransaction) => {
-              transaction.createConversation(
-                createNewConversationMetadata(CONVERSATION_ID)
-              )
-            }
+            (transaction: ConversationTurnTransaction) =>
+              new Promise<void>((resolve) => {
+                transaction.createConversation(
+                  createNewConversationMetadata(CONVERSATION_ID)
+                )
+                resolve()
+              })
           )
         ).toThrow("Database operations must be synchronous")
 

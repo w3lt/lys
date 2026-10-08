@@ -35,15 +35,13 @@ export type LlmRouteTestApp = TestFastify &
 export function createLlmRouteTestApp(): LlmRouteTestApp {
   const testFastify = createTestFastify()
   const llmEngineOperationQueue: LlmEngineOperationQueue = Object.freeze({
-    handleLlmEngineOperationRequest: async () => {
-      throw new Error("Unexpected LLM engine operation")
-    }
+    handleLlmEngineOperationRequest: () =>
+      Promise.reject(new Error("Unexpected LLM engine operation"))
   })
   const service = new LlmService({ llmEngineOperationQueue })
   const runtimeService = new LlmRuntimeService({
-    acquireLlmRuntime: async () => {
-      throw new Error("Unexpected LLM runtime acquisition")
-    },
+    acquireLlmRuntime: () =>
+      Promise.reject(new Error("Unexpected LLM runtime acquisition")),
     reportLlmRuntimeAcquisitionFailure: vi.fn<(failure: unknown) => void>(),
     reportLlmRuntimeAvailabilityCheckFailure:
       vi.fn<(failure: unknown) => void>()

@@ -70,7 +70,7 @@ describe("stopLlmModelsByKey", () => {
     expect(stop.mock.calls).toEqual([[MODEL_KEY], [`${MODEL_KEY}:2`]])
   })
 
-  it("starts the next stop only after the previous stop settles", async () => {
+  it("starts every stop before any stop settles and reconciles after all settle", async () => {
     const listLoaded = createInventory(
       [createInstance(MODEL_KEY, "a"), createInstance(MODEL_KEY, "b")],
       []
@@ -83,12 +83,48 @@ describe("stopLlmModelsByKey", () => {
     })
 
     const outcome = stopLlmModelsByKey(MODEL_KEY, listLoaded, stop)
-    await vi.waitFor(() => expect(stop).toHaveBeenCalledOnce())
-    expect(stop).toHaveBeenLastCalledWith("a")
+    await vi.waitFor(() => expect(stop).toHaveBeenCalledTimes(2))
+    expect(stop.mock.calls).toEqual([["a"], ["b"]])
+    expect(listLoaded).toHaveBeenCalledOnce()
     firstStop.resolve()
 
     await expect(outcome).resolves.toMatchObject({ status: "stopped" })
-    expect(stop.mock.calls).toEqual([["a"], ["b"]])
+    expect(listLoaded).toHaveBeenCalledTimes(2)
+  })
+
+  it("reports stop failures in identifier order when they settle out of order", async () => {
+    const listLoaded = createInventory(
+      [createInstance(MODEL_KEY, "a"), createInstance(MODEL_KEY, "b")],
+      []
+    )
+    const firstStop = Promise.withResolvers<void>()
+    const stop = vi.fn<StopLoadedLlmModelInstance>(async (identifier) => {
+      if (identifier === "a") {
+        await firstStop.promise
+      }
+      throw new Error(`${identifier} refused`)
+    })
+
+    const outcome = stopLlmModelsByKey(MODEL_KEY, listLoaded, stop)
+    await vi.waitFor(() => expect(stop).toHaveBeenCalledTimes(2))
+    await expect(stop.mock.results[1]?.value).rejects.toThrow("b refused")
+    firstStop.resolve()
+
+    await expect(outcome).resolves.toEqual({
+      status: "stopped",
+      diagnostics: [
+        {
+          operation: "stop-model-instance",
+          modelIdentifier: "a",
+          message: "a refused"
+        },
+        {
+          operation: "stop-model-instance",
+          modelIdentifier: "b",
+          message: "b refused"
+        }
+      ]
+    })
   })
 
   it("keeps stopping after a failed stop and reports it when reconciliation is empty", async () => {

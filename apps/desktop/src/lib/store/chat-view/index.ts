@@ -578,8 +578,7 @@ export function createChatViewStore(
       (message) => message.id === request.assistantMessageId
     )
     if (
-      !ownedMessage ||
-      ownedMessage.role !== "assistant" ||
+      ownedMessage?.role !== "assistant" ||
       ownedMessage.status !== "streaming"
     ) {
       return conversation
@@ -1165,8 +1164,7 @@ export function createChatViewStore(
     async function sendMessage(explicitPrompt?: string): Promise<void> {
       if (!canStartChatRequest()) return
 
-      const promptSource =
-        explicitPrompt === undefined ? get().inputDraft : explicitPrompt
+      const promptSource = explicitPrompt ?? get().inputDraft
       const submittedComposerDraft =
         explicitPrompt === undefined ? promptSource : undefined
       const submittedPrompt = promptSource.trim()

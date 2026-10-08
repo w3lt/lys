@@ -146,14 +146,18 @@ class FakeLmStudioEngine {
   #createDefaultOperations(): FakeLmStudioOperations {
     return Object.freeze({
       constructClient: () => undefined,
-      getLMStudioVersion: async () => ({ version: "0.3.30", build: 1 }),
-      listDownloadedModels: async (domain: string) =>
-        this.#listDownloadedModels(domain),
-      listLoaded: async () => [...this.#inventory.loadedModels],
-      load: async (modelKey: string) => this.#loadModel(modelKey),
-      unload: async (identifier: string) =>
-        this.#stopLoadedModelInstance(identifier),
-      disposeClient: async () => undefined
+      getLMStudioVersion: () =>
+        Promise.resolve({ version: "0.3.30", build: 1 }),
+      listDownloadedModels: (domain: string) =>
+        Promise.resolve(this.#listDownloadedModels(domain)),
+      listLoaded: () => Promise.resolve([...this.#inventory.loadedModels]),
+      load: (modelKey: string) => Promise.resolve(this.#loadModel(modelKey)),
+      unload: (identifier: string) =>
+        new Promise<void>((resolve) => {
+          this.#stopLoadedModelInstance(identifier)
+          resolve()
+        }),
+      disposeClient: () => Promise.resolve()
     })
   }
 

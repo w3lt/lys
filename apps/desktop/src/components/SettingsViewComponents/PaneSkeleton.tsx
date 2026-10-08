@@ -230,7 +230,7 @@ export default function PaneSkeleton({
   pane
 }: {
   /** Settings pane whose loading geometry is displayed. */
-  pane: SettingsPane
+  readonly pane: SettingsPane
 }) {
   const shape = PANE_SKELETONS[pane]
   const hasLines = shape.heading || shape.rows.length > 0

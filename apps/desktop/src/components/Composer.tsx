@@ -14,12 +14,14 @@ import { Textarea } from "@/components/ui/textarea"
 import { useLysStore } from "@/lib/store"
 import { useChatViewStore } from "@/lib/store/chat-view"
 import { useConversationHistoryStore } from "@/lib/store/conversation-history"
+import { selectShownToolCall, useToolCallStore } from "@/lib/store/tool-calls"
 
 import ComposerAttachmentTray from "./ComposerComponents/ComposerAttachmentTray"
 import ComposerContextMeter from "./ComposerComponents/ComposerContextMeter"
 import ComposerModelMenu from "./ComposerComponents/ComposerModelMenu"
 import ComposerOfflineBanner from "./ComposerComponents/ComposerOfflineBanner"
 import ComposerPlusMenu from "./ComposerComponents/ComposerPlusMenu"
+import ComposerToolApproval from "./ComposerComponents/ComposerToolApproval"
 import {
   PASTED_TEXT_ATTACHMENT_THRESHOLD,
   removeComposerAttachment,
@@ -40,6 +42,7 @@ import {
   formatUnavailableRuntimeMessage,
   calculateLocalRuntimeConnection
 } from "./ComposerComponents/composer-presentation"
+import { formatToolCallAnnouncement } from "./ComposerComponents/tool-approval-presentation"
 import { calculateModelRuntimeAvailability } from "@/lib/models/lm-studio-connection"
 
 import "./Composer.scss"
@@ -113,6 +116,14 @@ function findLargestAttachment(
  * repeated stop requests, which the backend treats idempotently. Moving to
  * another conversation stops following a reply without stopping it.
  *
+ * Above the field, a card shows the first tool call of the shown conversation
+ * that waits for the person or whose answer failed to send; the tool-call
+ * store owns the calls and their answers. While a call waits, Escape in the
+ * field rejects it with the draft as the reason, and Enter without Shift
+ * allows it once when the draft is empty or rejects it with the draft as the
+ * reason otherwise. A rejection clears the draft; Allow anyway keeps it. A
+ * polite status line announces each call that starts waiting.
+ *
  * Two affordances are staged ahead of the capability behind them and are
  * deliberately inert: attachments are held in the renderer and never sent
  * because the chat protocol carries no attachment field; and selecting weights
@@ -141,6 +152,14 @@ export function Composer({ messageFieldRef }: ComposerProps): ReactElement {
   const sendMessage = useChatViewStore((state) => state.sendMessage)
   const setInputDraft = useChatViewStore((state) => state.setInputDraft)
   const stopStreaming = useChatViewStore((state) => state.stopStreaming)
+
+  const conversationId = conversation?.id
+  const shownToolCall = useToolCallStore((state) =>
+    selectShownToolCall(state, conversationId)
+  )
+  const allowToolCall = useToolCallStore((state) => state.allowToolCall)
+  const rejectToolCall = useToolCallStore((state) => state.rejectToolCall)
+  const retryToolResult = useToolCallStore((state) => state.retryToolResult)
 
   const isHistoryOpen = useConversationHistoryStore(
     (state) => state.visibility.status === "open"
@@ -184,15 +203,60 @@ export function Composer({ messageFieldRef }: ComposerProps): ReactElement {
   const largestAttachment = findLargestAttachment(attachments)
   const isOverWindow = contextUsage.overflowTokens > 0
 
-  const canSubmitDraft = inputDraft.trim().length > 0 && !isOverWindow
+  const hasDraft = inputDraft.trim().length > 0
+  const canSubmitDraft = hasDraft && !isOverWindow
   const isSendDisabled = activity !== "idle" || isUnavailable || !canSubmitDraft
 
   /**
-   * Sends the current draft when Enter is pressed without a Shift modifier.
+   * Rejects the waiting tool call with the draft as the person's reason, and
+   * clears the draft.
+   *
+   * @param callId - Call that waits for the person.
+   */
+  function rejectShownToolCall(callId: string): void {
+    void rejectToolCall(callId, inputDraft)
+    setInputDraft("")
+  }
+
+  /**
+   * Answers the waiting tool call from the keyboard: Escape rejects it with
+   * the draft as the reason, and Enter without Shift allows it when the draft
+   * is empty or rejects it with the draft otherwise.
+   *
+   * @param event - Keyboard event emitted by the composer textarea.
+   * @param callId - Call that waits for the person.
+   * @returns Whether the key answered the call.
+   */
+  function handleToolCallKeyDown(
+    event: KeyboardEvent<HTMLTextAreaElement>,
+    callId: string
+  ): boolean {
+    if (event.key === "Escape") {
+      event.preventDefault()
+      rejectShownToolCall(callId)
+      return true
+    }
+    if (event.key !== "Enter" || event.shiftKey) return false
+
+    event.preventDefault()
+    if (hasDraft) rejectShownToolCall(callId)
+    else void allowToolCall(callId)
+    return true
+  }
+
+  /**
+   * Answers a waiting tool call from the keyboard, or otherwise sends the
+   * current draft when Enter is pressed without a Shift modifier.
    *
    * @param event - Keyboard event emitted by the composer textarea.
    */
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
+    if (
+      shownToolCall?.answer.status === "awaiting-person" &&
+      handleToolCallKeyDown(event, shownToolCall.call.id)
+    ) {
+      return
+    }
     if (event.key !== "Enter" || event.shiftKey) return
 
     event.preventDefault()
@@ -335,6 +399,23 @@ export function Composer({ messageFieldRef }: ComposerProps): ReactElement {
       ) : null}
 
       <div className="composer__inner">
+        <p className="sr-only" role="status">
+          {formatToolCallAnnouncement(shownToolCall)}
+        </p>
+
+        {shownToolCall === undefined ? null : (
+          <ComposerToolApproval
+            hasDraft={hasDraft}
+            key={shownToolCall.call.id}
+            onAllowToolCall={() => void allowToolCall(shownToolCall.call.id)}
+            onRejectToolCall={() => rejectShownToolCall(shownToolCall.call.id)}
+            onRetryToolResult={() =>
+              void retryToolResult(shownToolCall.call.id)
+            }
+            toolCall={shownToolCall}
+          />
+        )}
+
         <div
           className="composer__field"
           data-dropping={isDropping && !isUnavailable ? "" : undefined}

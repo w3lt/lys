@@ -149,14 +149,9 @@ class FakeLmStudioEngine {
       getLMStudioVersion: () =>
         Promise.resolve({ version: "0.3.30", build: 1 }),
       listDownloadedModels: (domain: string) =>
-        new Promise<readonly LLMInfo[]>((resolve) => {
-          resolve(this.#listDownloadedModels(domain))
-        }),
+        Promise.resolve(this.#listDownloadedModels(domain)),
       listLoaded: () => Promise.resolve([...this.#inventory.loadedModels]),
-      load: (modelKey: string) =>
-        new Promise<FakeLoadedLlmHandle>((resolve) => {
-          resolve(this.#loadModel(modelKey))
-        }),
+      load: (modelKey: string) => Promise.resolve(this.#loadModel(modelKey)),
       unload: (identifier: string) =>
         new Promise<void>((resolve) => {
           this.#stopLoadedModelInstance(identifier)

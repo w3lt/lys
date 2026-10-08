@@ -17,8 +17,8 @@ export type ConversationRowFixture = Readonly<{
   id: string
   /** Stored title, or null while untitled. */
   title: string | null
-  /** Stored system prompt. */
-  systemPrompt: string
+  /** Stored agent code. */
+  agentCode: string
   /** Creation time; also the initial activity time. */
   createdAt: string
 }>
@@ -146,7 +146,7 @@ function saveListedConversation(
   harness.saveConversation({
     id,
     title: fixture.title,
-    systemPrompt: "Stored prompt",
+    agentCode: "stored-agent",
     createdAt: createFixtureTimestamp(fixture.createdAtMinute)
   })
   fixture.userMessages.forEach((content, index) => {
@@ -178,7 +178,7 @@ function saveConversationWithReply(
   harness.saveConversation({
     id: conversationId,
     title: null,
-    systemPrompt: "Stored prompt",
+    agentCode: "stored-agent",
     createdAt: CREATED_AT
   })
   harness.saveAssistantMessage({
@@ -203,7 +203,7 @@ function createNewConversationMetadata(id: string) {
   return {
     id,
     title: null,
-    systemPrompt: "You are Lys.",
+    agentCode: "lys",
     createdAt: CHANGED_AT,
     updatedAt: CHANGED_AT
   }
@@ -245,14 +245,14 @@ export function registerConversationRecordReaderContractSuite(
         harness.saveConversation({
           id: CONVERSATION_ID,
           title: "Trip plan",
-          systemPrompt: "You are Lys.",
+          agentCode: "lys",
           createdAt: CREATED_AT
         })
 
         expect(harness.recordReader.findConversation(CONVERSATION_ID)).toEqual({
           id: CONVERSATION_ID,
           title: "Trip plan",
-          systemPrompt: "You are Lys.",
+          agentCode: "lys",
           createdAt: CREATED_AT,
           updatedAt: CREATED_AT,
           messages: []
@@ -264,7 +264,7 @@ export function registerConversationRecordReaderContractSuite(
         harness.saveConversation({
           id: CONVERSATION_ID,
           title: null,
-          systemPrompt: "You are Lys.",
+          agentCode: "lys",
           createdAt: CREATED_AT
         })
         harness.saveUserMessage({
@@ -311,7 +311,7 @@ export function registerConversationRecordReaderContractSuite(
         harness.saveConversation({
           id: CONVERSATION_ID,
           title: null,
-          systemPrompt: "You are Lys.",
+          agentCode: "lys",
           createdAt: CREATED_AT
         })
         for (const [sequence, content, createdAt] of [
@@ -344,7 +344,7 @@ export function registerConversationRecordReaderContractSuite(
           harness.saveConversation({
             id,
             title: null,
-            systemPrompt: "You are Lys.",
+            agentCode: "lys",
             createdAt: CREATED_AT
           })
         }
@@ -365,7 +365,7 @@ export function registerConversationRecordReaderContractSuite(
         harness.saveConversation({
           id: CONVERSATION_ID,
           title: null,
-          systemPrompt: "You are Lys.",
+          agentCode: "lys",
           createdAt: CREATED_AT
         })
         const first = harness.recordReader.findConversation(CONVERSATION_ID)
@@ -386,7 +386,7 @@ export function registerConversationRecordReaderContractSuite(
         harness.saveConversation({
           id: CONVERSATION_ID,
           title: "",
-          systemPrompt: "You are Lys.",
+          agentCode: "lys",
           createdAt: CREATED_AT
         })
 
@@ -404,7 +404,7 @@ export function registerConversationRecordReaderContractSuite(
         harness.saveConversation({
           id: CONVERSATION_ID,
           title: null,
-          systemPrompt: "You are Lys.",
+          agentCode: "lys",
           createdAt: CREATED_AT
         })
         harness.saveUserMessage({
@@ -460,7 +460,7 @@ export function registerConversationRecordReaderContractSuite(
         ).toEqual([tieHigh, tieLow, older])
       })
 
-      it("summarizes each conversation without its system prompt", () => {
+      it("summarizes each conversation without its agent code", () => {
         const harness = createHarness()
         const id = saveListedConversation(harness, {
           sequence: 1,
@@ -735,7 +735,7 @@ export function registerConversationRecordEditorContractSuite(
         expect(metadata).toEqual({
           id: CONVERSATION_ID,
           title: "Greeting",
-          systemPrompt: "Stored prompt",
+          agentCode: "stored-agent",
           createdAt: createFixtureTimestamp(1),
           updatedAt: createFixtureTimestamp(1, 1)
         })
@@ -1458,7 +1458,7 @@ export function registerConversationTurnTransactionContractSuite(
       harness.saveConversation({
         id: CONVERSATION_ID,
         title: "",
-        systemPrompt: "You are Lys.",
+        agentCode: "lys",
         createdAt: CREATED_AT
       })
 
@@ -1474,7 +1474,7 @@ export function registerConversationTurnTransactionContractSuite(
       harness.saveConversation({
         id: CONVERSATION_ID,
         title: "Trip plan",
-        systemPrompt: "Stored prompt",
+        agentCode: "stored-agent",
         createdAt: CREATED_AT
       })
 
@@ -1491,7 +1491,7 @@ export function registerConversationTurnTransactionContractSuite(
       expect(harness.recordReader.findConversation(CONVERSATION_ID)).toEqual({
         id: CONVERSATION_ID,
         title: "Trip plan",
-        systemPrompt: "Stored prompt",
+        agentCode: "stored-agent",
         createdAt: CREATED_AT,
         updatedAt: CREATED_AT,
         messages: []
@@ -1552,7 +1552,7 @@ export function registerConversationTurnTransactionContractSuite(
       harness.saveConversation({
         id: CONVERSATION_ID,
         title: null,
-        systemPrompt: "You are Lys.",
+        agentCode: "lys",
         createdAt: CREATED_AT
       })
 

@@ -1,5 +1,5 @@
+import type { AssistantMessageCompletion } from "../agent/agent"
 import type {
-  AssistantMessageCompletion,
   ConversationTurn,
   ConversationTurnWriter,
   CreateConversationTurnOptions,

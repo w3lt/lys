@@ -1,6 +1,6 @@
 /// <reference types="fastify" />
 
-import type StoredAgents from "./modules/agent/agents"
+import type AgentService from "./modules/agent/agentService"
 import type ChatService from "./modules/chat/chatService"
 import type StoredConversationHistoryEditor from "./modules/conversation/historyEditor"
 import type StoredConversationHistoryReader from "./modules/conversation/historyReader"
@@ -23,7 +23,7 @@ declare module "fastify" {
     conversationHistoryReader: StoredConversationHistoryReader
     /** Application-scoped renaming and deletion of stored conversations. */
     conversationHistoryEditor: StoredConversationHistoryEditor
-    /** Application-scoped storage of agent definitions. */
-    agents: StoredAgents
+    /** Application-scoped agent definitions and the agents that answer chats. */
+    agentService: AgentService
   }
 }

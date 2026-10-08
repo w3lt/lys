@@ -26,7 +26,7 @@ const MISSING_CONVERSATION_ID = createFixtureUuidV7(404)
 const CONVERSATION_METADATA = Object.freeze({
   id: CONVERSATION_ID,
   title: "Trip plan",
-  systemPrompt: "You are Lys.",
+  agentCode: "lys",
   createdAt: FIXTURE_TIMESTAMP,
   updatedAt: FIXTURE_TIMESTAMP
 } satisfies ConversationMetadata)

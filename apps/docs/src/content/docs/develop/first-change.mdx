@@ -47,8 +47,9 @@ The backend chat route:
 5. streams assistant deltas and a final done or error event
 
 The backend persists each assistant delta before emitting it, then stores terminal
-status and finish reason before completion. Continuation reads the saved prompt
-and eligible transcript; title generation runs only while the title is absent.
+status and finish reason before completion. Continuation uses the current prompt
+of the conversation's agent and the eligible transcript; title generation runs
+only while the title is absent.
 
 ### 4. Persistence
 

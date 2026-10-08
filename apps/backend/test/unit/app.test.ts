@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
 import * as z from "zod"
 import { buildApp } from "../../src/app"
 import type { BackendConfig } from "../../src/config"
-import StoredAgents from "../../src/modules/agent/agents"
+import AgentService from "../../src/modules/agent/agentService"
 import StoredConversationHistoryEditor from "../../src/modules/conversation/historyEditor"
 import StoredConversationHistoryReader from "../../src/modules/conversation/historyReader"
 import StoredConversationTurns from "../../src/modules/conversation/turns"
@@ -99,7 +99,7 @@ describe("buildApp", () => {
     expect(app.conversationHistoryEditor).toBeInstanceOf(
       StoredConversationHistoryEditor
     )
-    expect(app.agents).toBeInstanceOf(StoredAgents)
+    expect(app.agentService).toBeInstanceOf(AgentService)
     expect(response.statusCode).toBe(200)
     expect(response.json()).toMatchObject({ storedCount: 0 })
     expect(agentsResponse.statusCode).toBe(200)
@@ -133,6 +133,6 @@ describe("buildApp", () => {
     expect(overLimit.json()).toMatchObject({
       code: "FST_ERR_CTP_BODY_TOO_LARGE"
     })
-    expect(app.agents.findAgent("over-limit")).toBeUndefined()
+    expect(app.agentService.findAgent("over-limit")).toBeUndefined()
   })
 })

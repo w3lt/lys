@@ -2,10 +2,11 @@ import type { BackendConfig } from "../config"
 import SqliteAgentRecordStore from "../infrastructure/database/agents/sqliteAgentRecordStore"
 import SqliteDatabase from "../infrastructure/database/sqliteDatabase"
 import LmStudioRuntime from "../modules/llm/runtimes/lmStudioRuntime"
-import StoredAgents from "../modules/agent/agents"
+import AgentService from "../modules/agent/agentService"
 import ChatService, {
   type ChatServiceCreationOptions
 } from "../modules/chat/chatService"
+import OpenAiReplyModel from "../modules/chat/openAiReplyModel"
 import SqliteConversationRecordEditor from "../infrastructure/database/conversations/sqliteConversationRecordEditor"
 import SqliteConversationRecordReader from "../infrastructure/database/conversations/sqliteConversationRecordReader"
 import SqliteConversationTurnRecordWriter from "../infrastructure/database/conversations/sqliteConversationTurnRecordWriter"
@@ -72,8 +73,11 @@ export type SingletonServices = Readonly<{
   conversationHistoryReader: StoredConversationHistoryReader
   /** History editing over the shared database; it owns nothing to release. */
   conversationHistoryEditor: StoredConversationHistoryEditor
-  /** Agent definitions over the shared database; it owns nothing to release. */
-  agents: StoredAgents
+  /**
+   * Agent definitions over agent records on the shared database, and Lys over
+   * the chat service; it owns nothing to release.
+   */
+  agentService: AgentService
   /** Module-private cleanup capability for the complete owned service lifetime. */
   [CLOSE_SINGLETON_SERVICES]: CloseSingletonServices
 }>
@@ -84,15 +88,14 @@ type DatabaseServices = Pick<
   | "conversationTurns"
   | "conversationHistoryReader"
   | "conversationHistoryEditor"
-  | "agents"
 >
 
 /**
  * Creates the application-scoped service bundle from backend network configuration.
  *
  * @param config - LM Studio host and port used to derive local service endpoints,
- * and the title-generation prompt and title length limit given to the chat
- * service.
+ * the title-generation prompt and title length limit given to the chat
+ * service, and the Lys system prompt given to the agent service.
  * @param llmRuntimeFailureReporters - Receive the LLM runtime failures that no
  * caller observes, for logging.
  * @param factories - Service factories owned by the composition root.
@@ -105,12 +108,14 @@ type DatabaseServices = Pick<
  * @throws {AggregateError} If closing the acquired resources also fails; its
  * errors hold the construction failure followed by the cleanup failure.
  * @remarks Resources are acquired in the order chat service, database, LLM
- * runtime service. The conversation services, the agent service, and the
- * Sqlite records they wrap are created over the database before the runtime
- * service, turn persistence first, so its startup recovery runs before any
- * history is read; creation stops at the first failure. The
- * database is not part of the returned bundle: the bundle's cleanup closes it
- * after the LLM runtime service and before the chat service.
+ * runtime service. The conversation services and the Sqlite records they
+ * wrap are created over the database before the runtime service, turn
+ * persistence first, so its startup recovery runs before any history is
+ * read. The agent service is created next, over its Sqlite records and the
+ * chat service; it reads nothing at creation and owns nothing to release.
+ * Creation stops at the first failure. The database is not part of the
+ * returned bundle: the bundle's cleanup closes it after the LLM runtime
+ * service and before the chat service.
  */
 export async function createSingletonServices(
   config: BackendConfig,
@@ -126,12 +131,20 @@ export async function createSingletonServices(
       generatedTitleMaxLength: config.generatedTitleMaxLength
     })
     serviceLifetime.defer(chatServiceAcquisition.closeService)
+    const chatService = chatServiceAcquisition.service
 
     const databaseAcquisition = factories.createDatabase(
       config.databaseFilePath
     )
     serviceLifetime.defer(databaseAcquisition.closeService)
     const databaseServices = createDatabaseServices(databaseAcquisition.service)
+    const agentService = new AgentService({
+      recordStore: new SqliteAgentRecordStore(databaseAcquisition.service),
+      lysSystemPrompt: config.lysSystemPrompt,
+      replyModel: new OpenAiReplyModel((options) =>
+        chatService.completeChatStream(options)
+      )
+    })
 
     const llmRuntimeServiceAcquisition = factories.createLlmRuntimeService(
       `ws://${config.lmstudioHost}:${config.lmstudioPort}`,
@@ -150,10 +163,11 @@ export async function createSingletonServices(
     }
 
     return Object.freeze({
-      chatService: chatServiceAcquisition.service,
+      chatService,
       llmService,
       llmRuntimeService: llmRuntimeServiceAcquisition.service,
       ...databaseServices,
+      agentService,
       [CLOSE_SINGLETON_SERVICES]: closeOwnedSingletonServices
     })
   } catch (creationFailure) {
@@ -166,8 +180,8 @@ export async function createSingletonServices(
 }
 
 /**
- * Creates the conversation services and the agent service over the shared
- * database, with the Sqlite records they wrap.
+ * Creates the conversation services over the shared database, with the Sqlite
+ * records they wrap.
  *
  * @param database - Shared database lent to every record; the caller keeps
  * ownership and closes it.
@@ -189,8 +203,7 @@ function createDatabaseServices(database: SqliteDatabase): DatabaseServices {
     ),
     conversationHistoryEditor: new StoredConversationHistoryEditor(
       new SqliteConversationRecordEditor(database)
-    ),
-    agents: new StoredAgents(new SqliteAgentRecordStore(database))
+    )
   }
 }
 

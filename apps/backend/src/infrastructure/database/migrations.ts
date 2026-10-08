@@ -155,6 +155,18 @@ const databaseMigrations = [
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     ) STRICT
+  `,
+  // Replaces each conversation's stored system prompt with the code of the
+  // agent that answers it; every turn sends that agent's current prompt.
+  // Every conversation stored before this version was answered by Lys, the
+  // only agent chats could use, so existing rows get `lys`. SQLite requires a
+  // default to add a NOT NULL column; the backend always writes the code.
+  // Dropping system_prompt discards the prompt text stored with each
+  // conversation, and it cannot be recovered.
+  `
+    ALTER TABLE conversations
+      ADD COLUMN agent_code TEXT NOT NULL DEFAULT 'lys' CHECK (agent_code <> '');
+    ALTER TABLE conversations DROP COLUMN system_prompt;
   `
 ] as const
 

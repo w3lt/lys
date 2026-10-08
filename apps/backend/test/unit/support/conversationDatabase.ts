@@ -116,10 +116,10 @@ export function saveConversationRow(
   database.handleDatabaseWriteRequest((statements) => {
     statements
       .getStatement(
-        `INSERT INTO conversations (id, title, system_prompt, created_at, updated_at)
+        `INSERT INTO conversations (id, title, agent_code, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?)`
       )
-      .run(row.id, row.title, row.systemPrompt, row.createdAt, row.createdAt)
+      .run(row.id, row.title, row.agentCode, row.createdAt, row.createdAt)
   })
 }
 

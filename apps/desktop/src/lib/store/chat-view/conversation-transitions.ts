@@ -457,7 +457,7 @@ export function createStoredChatViewConversation(
   return Object.freeze({
     id: conversation.id,
     title: conversation.title,
-    systemPrompt: conversation.systemPrompt,
+    agentCode: conversation.agentCode,
     messages,
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt

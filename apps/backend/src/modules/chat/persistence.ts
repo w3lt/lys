@@ -1,25 +1,38 @@
 import type {
   Conversation,
   ConversationAssistantMessage,
-  ConversationAssistantMessageFinishReason,
   ConversationUserMessage
 } from "@lys/share"
+import type { AssistantMessageCompletion } from "../agent/agent"
+
+/** Conversation a turn starts or continues, selected by `kind`. */
+export type ConversationTurnTarget =
+  | Readonly<{
+      /** The turn creates a conversation. */
+      kind: "new"
+      /** Valid code of the agent that answers the new conversation. */
+      agentCode: string
+    }>
+  | Readonly<{
+      /** The turn continues a stored conversation, which keeps its agent. */
+      kind: "existing"
+      /** UUIDv7 of the stored conversation. */
+      id: string
+    }>
 
 /** Inputs for atomically creating one persisted user/assistant pair. */
 export type CreateConversationTurnOptions = Readonly<{
-  /** Existing UUIDv7; omission creates a conversation. */
-  conversationId?: string | undefined
+  /** Conversation the turn starts or continues. */
+  conversation: ConversationTurnTarget
   /** Nonempty user content appended once to the transcript. */
   userMessageContent: string
   /** Nonempty model identity stored on the assistant reply. */
   model: string
-  /** Startup-loaded prompt persisted only with a conversation this turn creates. */
-  systemPrompt: string
 }>
 
 /** Immutable turn identities plus an independent snapshot of the earlier transcript. */
 export type ConversationTurn = Readonly<{
-  /** Snapshot before this turn, including the saved system prompt. */
+  /** Snapshot before this turn, including the code of its agent. */
   conversation: Conversation
   /** User message committed with this turn. */
   userMessage: ConversationUserMessage
@@ -28,19 +41,6 @@ export type ConversationTurn = Readonly<{
   /** Whether this operation created the conversation. */
   isNewConversation: boolean
 }>
-
-/** Valid terminal assistant state; only completed replies carry a finish reason. */
-export type AssistantMessageCompletion =
-  | Readonly<{
-      /** The upstream supplied a supported completion reason. */
-      status: "completed"
-      /** Supported terminal model reason. */
-      finishReason: ConversationAssistantMessageFinishReason
-    }>
-  | Readonly<{
-      /** Cancellation preserves partial content; failure is retained but excluded from context. */
-      status: "interrupted" | "failed"
-    }>
 
 /** Synchronous turn writes borrowed until the backend store closes; no cleanup authority. */
 export interface ConversationTurnWriter {

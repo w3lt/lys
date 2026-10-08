@@ -1,6 +1,9 @@
 import * as z from "zod"
 
-/** Stable problem category for a route naming an agent that is not stored. */
+/**
+ * Stable problem category for a request naming a code that no agent available
+ * to that request has.
+ */
 const AGENT_NOT_FOUND_PROBLEM_TYPE = "urn:lys:problem:agent:not-found"
 
 /** Client-facing summary shared by every missing-agent occurrence. */
@@ -9,7 +12,10 @@ const AGENT_NOT_FOUND_PROBLEM_TITLE = "Agent not found"
 /** HTTP status accompanying a missing-agent problem body. */
 const AGENT_NOT_FOUND_PROBLEM_STATUS = 404
 
-/** Stable problem category for creating an agent under a code already stored. */
+/**
+ * Stable problem category for creating an agent under a code that Lys or a
+ * stored agent has.
+ */
 const AGENT_CODE_TAKEN_PROBLEM_TYPE = "urn:lys:problem:agent:code-taken"
 
 /** Client-facing summary shared by every taken-code occurrence. */
@@ -19,15 +25,19 @@ const AGENT_CODE_TAKEN_PROBLEM_TITLE = "Agent code taken"
 const AGENT_CODE_TAKEN_PROBLEM_STATUS = 409
 
 /**
- * Validates the RFC 9457 body returned when an agent route names an agent
- * that is not stored.
+ * Validates the RFC 9457 body returned when a request names a code that no
+ * agent available to that request has.
  *
  * @remarks The get, update, and delete agent endpoints transmit this contract
- * with HTTP 404; the request changed nothing. The `type` literal is the
- * machine-readable discriminator; consumers branch on it and never on
- * `detail`, which is occurrence-specific, caller-safe text. A 404 response
- * without this body, such as an unregistered route, is not evidence that an
- * agent is absent. Changing any fixed field requires coordinated consumers.
+ * with HTTP 404 when no stored agent has the code. The chat endpoint
+ * transmits it with HTTP 404 when a new conversation names a code that no
+ * agent able to answer chats has, even if a stored agent has it; for now only
+ * Lys can answer chats. Either way the request changed nothing. The `type`
+ * literal is the machine-readable discriminator; consumers branch on it and
+ * never on `detail`, which is occurrence-specific, caller-safe text. A 404
+ * response without this body, such as an unregistered route, is not evidence
+ * that an agent is absent. Changing any fixed field requires coordinated
+ * consumers.
  */
 export const agentNotFoundProblemSchema = z
   .strictObject({
@@ -49,13 +59,14 @@ export type AgentNotFoundProblem = z.infer<typeof agentNotFoundProblemSchema>
 
 /**
  * Validates the RFC 9457 body returned when a create request names a code
- * that another stored agent already has.
+ * that Lys or another stored agent already has.
  *
  * @remarks The create-agent endpoint transmits this contract with HTTP 409
- * when the request carries a code that is taken; the stored agent is left
- * unchanged and nothing is created. A request without a code never receives
- * it. The `type` literal is the machine-readable discriminator; `detail` is
- * caller-safe text. Changing any fixed field requires coordinated consumers.
+ * when the request carries a code that Lys or another stored agent has; every
+ * agent is left unchanged and nothing is created. A request without a code
+ * never receives it. The `type` literal is the machine-readable
+ * discriminator; `detail` is caller-safe text. Changing any fixed field
+ * requires coordinated consumers.
  */
 export const agentCodeTakenProblemSchema = z
   .strictObject({

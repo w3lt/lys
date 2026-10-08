@@ -73,8 +73,8 @@ export function createAssistantMessage(
 
 /** Values that distinguish one turn fixture from another. */
 export type ConversationTurnFixture = Readonly<{
-  /** Stored system prompt of the conversation. */
-  systemPrompt: string
+  /** Code of the conversation's agent. */
+  agentCode: string
   /** Transcript before the new turn. */
   earlierMessages: readonly ConversationMessage[]
   /** Content of the new user message. */
@@ -84,7 +84,7 @@ export type ConversationTurnFixture = Readonly<{
 /**
  * Creates a persisted turn for an untitled existing conversation.
  *
- * @param fixture - System prompt, earlier transcript, and new user content.
+ * @param fixture - Agent code, earlier transcript, and new user content.
  * @returns A turn whose new pair uses identity sequences 1001 and 1002.
  */
 export function createConversationTurn(
@@ -94,7 +94,7 @@ export function createConversationTurn(
     conversation: {
       id: FIXTURE_CONVERSATION_ID,
       title: null,
-      systemPrompt: fixture.systemPrompt,
+      agentCode: fixture.agentCode,
       createdAt: FIXTURE_TIMESTAMP,
       updatedAt: FIXTURE_TIMESTAMP,
       messages: [...fixture.earlierMessages]

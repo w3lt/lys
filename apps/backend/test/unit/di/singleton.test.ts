@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { backendConfigSchema } from "../../../src/config"
-import StoredAgents from "../../../src/modules/agent/agents"
+import AgentService from "../../../src/modules/agent/agentService"
 import ChatService from "../../../src/modules/chat/chatService"
 import StoredConversationHistoryEditor from "../../../src/modules/conversation/historyEditor"
 import StoredConversationHistoryReader from "../../../src/modules/conversation/historyReader"
@@ -153,7 +153,7 @@ describe("createSingletonServices", () => {
     expect(services.conversationHistoryEditor).toBeInstanceOf(
       StoredConversationHistoryEditor
     )
-    expect(services.agents).toBeInstanceOf(StoredAgents)
+    expect(services.agentService).toBeInstanceOf(AgentService)
     expect(services.llmRuntimeService).toBe(acquisitions.llmRuntime.service)
     expect(services.llmService).toBeInstanceOf(LlmService)
   })
@@ -168,9 +168,9 @@ describe("createSingletonServices", () => {
     onTestFinished(async () => await closeSingletonServices(services))
 
     const turn = services.conversationTurns.createConversationTurn({
+      conversation: { kind: "new", agentCode: "lys" },
       userMessageContent: "Hello",
-      model: "qwen/qwen3-8b",
-      systemPrompt: "You are Lys."
+      model: "qwen/qwen3-8b"
     })
     services.conversationHistoryEditor.updateConversationTitle(
       turn.conversation.id,
@@ -195,16 +195,55 @@ describe("createSingletonServices", () => {
     )
     onTestFinished(async () => await closeSingletonServices(services))
 
-    services.agents.createAgent({
-      code: "lys",
-      name: "Lys",
-      bio: "Personal assistant.",
-      systemPrompt: "You are Lys."
+    services.agentService.createAgent({
+      code: "researcher",
+      name: "Researcher",
+      bio: "Searches the web.",
+      systemPrompt: "You research the web."
     })
 
-    expect(services.agents.findAgent("lys")).toMatchObject({ name: "Lys" })
+    expect(services.agentService.findAgent("researcher")).toMatchObject({
+      name: "Researcher"
+    })
     acquisitions.database.service[Symbol.dispose]()
-    expect(() => services.agents.findAgent("lys")).toThrow("Database is closed")
+    expect(() => services.agentService.findAgent("researcher")).toThrow(
+      "Database is closed"
+    )
+  })
+
+  it("builds Lys from the configured prompt over the acquired chat service", async () => {
+    const { factories, acquisitions } = createRecordedFactories()
+    const services = await createSingletonServices(
+      TEST_BACKEND_CONFIG,
+      createFailureReporters(),
+      factories
+    )
+    onTestFinished(async () => await closeSingletonServices(services))
+    const completeChatStream = vi
+      .spyOn(acquisitions.chat.service, "completeChatStream")
+      .mockRejectedValue(new Error("model not loaded"))
+
+    await services.agentService.findChatAgent("lys")?.createReply({
+      history: [],
+      userMessageContent: "Hello",
+      model: "qwen/qwen3-8b",
+      generationOptions: { temperature: 0.4 },
+      abortSignal: new AbortController().signal,
+      updateAssistantMessageContent: () => true,
+      updateAssistantMessageState: () => true,
+      sendEvent: vi.fn(),
+      reportReplyCancellation: vi.fn(),
+      reportReplyFailure: vi.fn()
+    })
+
+    expect(completeChatStream).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages: [
+          { role: "system", content: TEST_BACKEND_CONFIG.lysSystemPrompt },
+          { role: "user", content: "Hello" }
+        ]
+      })
+    )
   })
 
   it("serves the LLM service through the runtime service's operation queue", async () => {
@@ -316,9 +355,9 @@ describe("createSingletonServices", () => {
     onTestFinished(async () => await closeSingletonServices(services))
     const history = services.conversationHistoryReader
     const turn = services.conversationTurns.createConversationTurn({
+      conversation: { kind: "new", agentCode: "lys" },
       userMessageContent: "Hello",
-      model: "qwen/qwen3-8b",
-      systemPrompt: "You are Lys."
+      model: "qwen/qwen3-8b"
     })
     expect(history.getConversation(turn.conversation.id)).toBeDefined()
 

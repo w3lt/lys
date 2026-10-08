@@ -1,6 +1,7 @@
 import { apiChatRoute } from "../llm"
 import * as z from "zod"
 import {
+  agentCodeSchema,
   conversationAssistantMessageSchema,
   conversationMetadataSchema,
   conversationUserMessageSchema
@@ -24,10 +25,32 @@ export const messageGenerationOptionsSchema = z.strictObject({
   replyCeiling: z.coerce.number().int().min(0).optional()
 })
 
-/** Validates a chat request with an optional existing conversation identity. */
+/**
+ * Validates the conversation a chat turn starts or continues.
+ *
+ * @remarks `kind` selects the variant. A new conversation names the agent
+ * that answers it; a continued conversation keeps the agent it was started
+ * with, so it names none.
+ */
+const chatConversationTargetSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    /** The turn starts a new conversation. */
+    kind: z.literal("new"),
+    /** Code of the agent that answers the new conversation, such as `lys`. */
+    agentCode: agentCodeSchema
+  }),
+  z.strictObject({
+    /** The turn continues a stored conversation. */
+    kind: z.literal("existing"),
+    /** UUIDv7 of the stored conversation. */
+    id: z.uuidv7()
+  })
+])
+
+/** Validates a chat request for a new or an existing conversation. */
 export const chatApiRequestBodySchema = z.strictObject({
-  /** Omit to start a new conversation; provide a UUIDv7 to continue one. */
-  conversationId: z.uuidv7().optional(),
+  /** Conversation the turn starts or continues. */
+  conversation: chatConversationTargetSchema,
   /** Non-empty user-authored prompt sent to the selected model. */
   message: z.string().min(1),
   /** Non-empty model identifier resolved by the backend runtime. */

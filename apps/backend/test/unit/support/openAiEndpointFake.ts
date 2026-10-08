@@ -49,8 +49,9 @@ export type ChatCompletionChunkFixture = Readonly<{
  * the OpenAI SDK captures `fetch` when its client is created. Vitest removes
  * the substitution after the case (`unstubGlobals`). Like the platform
  * `fetch`, a request whose signal aborts before its response is produced
- * rejects with the signal's abort reason, and an already aborted signal
- * rejects without calling `respond`.
+ * rejects with the signal's abort reason, an already aborted signal rejects
+ * without calling `respond`, and a signal that aborts later errors the
+ * response body with its reason and cancels the body `respond` produced.
  */
 export function startOpenAiEndpointFake(
   respond: OpenAiEndpointResponder
@@ -68,10 +69,13 @@ export function startOpenAiEndpointFake(
         body: typeof init.body === "string" ? JSON.parse(init.body) : undefined
       })
       requests.push(request)
-      return await waitForResponseOrAbort(
+      const response = await waitForResponseOrAbort(
         Promise.resolve(respond(request)),
         signal
       )
+      return signal === undefined
+        ? response
+        : buildAbortableResponse(response, signal)
     }
   )
   return Object.freeze({ requests })
@@ -107,6 +111,43 @@ async function waitForResponseOrAbort(
 }
 
 /**
+ * Builds a response whose body errors with a request signal's abort reason
+ * once that signal aborts, as a platform `fetch` body does.
+ *
+ * @param response - Endpoint response; the returned response owns its body.
+ * @param signal - Cancellation of the request the response answers.
+ * @returns The response, unchanged when it has no body.
+ * @remarks An abort also cancels the original body, so a body that stays
+ * open observes the release.
+ */
+function buildAbortableResponse(
+  response: Response,
+  signal: AbortSignal
+): Response {
+  if (response.body === null) {
+    return response
+  }
+  return new Response(
+    response.body.pipeThrough(new TransformStream(), { signal }),
+    {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers
+    }
+  )
+}
+
+/**
+ * Builds one server-sent event carrying a chat completion chunk.
+ *
+ * @param chunk - Chunk sent as the event's JSON data.
+ * @returns The event text, ending with its blank line.
+ */
+function buildChatCompletionChunkEvent(chunk: ChatCompletionChunk): string {
+  return `data: ${JSON.stringify(chunk)}\n\n`
+}
+
+/**
  * Creates a streamed chat completion response in the endpoint's SSE format.
  *
  * @param chunks - Chunks sent in order before the terminal `[DONE]` marker.
@@ -116,9 +157,66 @@ export function createChatCompletionStreamResponse(
   chunks: readonly ChatCompletionChunk[]
 ): Response {
   const body = [
-    ...chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`),
+    ...chunks.map(buildChatCompletionChunkEvent),
     "data: [DONE]\n\n"
   ].join("")
+  return new Response(body, {
+    status: 200,
+    headers: { "content-type": "text/event-stream" }
+  })
+}
+
+/**
+ * Creates a streamed chat completion response that sends some chunks and
+ * then stays open, like a model still writing its reply.
+ *
+ * @param chunks - Chunks sent in order; no `[DONE]` marker follows them.
+ * @param handleBodyCancel - Called once when the reader cancels the body,
+ * which is how the SDK releases a request it stops reading.
+ * @returns A 200 `text/event-stream` response whose body never closes.
+ */
+export function createOpenChatCompletionStreamResponse(
+  chunks: readonly ChatCompletionChunk[],
+  handleBodyCancel: () => void
+): Response {
+  const encoder = new TextEncoder()
+  const body = new ReadableStream<Uint8Array>({
+    start: (controller) => {
+      for (const chunk of chunks)
+        controller.enqueue(encoder.encode(buildChatCompletionChunkEvent(chunk)))
+    },
+    cancel: handleBodyCancel
+  })
+  return new Response(body, {
+    status: 200,
+    headers: { "content-type": "text/event-stream" }
+  })
+}
+
+/**
+ * Creates a streamed chat completion response that sends some chunks and
+ * then fails, like a connection that drops while the model writes its reply.
+ *
+ * @param chunks - Chunks sent in order; no `[DONE]` marker follows them.
+ * @param failure - Error the body fails with once the reader asks for more
+ * than the chunks, as a platform `fetch` body does when its connection ends
+ * early. Failing only then keeps the chunks readable, because a failed body
+ * discards the chunks its reader has not read.
+ * @returns A 200 `text/event-stream` response whose body fails after the
+ * chunks.
+ */
+export function createFailedChatCompletionStreamResponse(
+  chunks: readonly ChatCompletionChunk[],
+  failure: Error
+): Response {
+  const encoder = new TextEncoder()
+  const body = ReadableStream.from(
+    (function* () {
+      for (const chunk of chunks)
+        yield encoder.encode(buildChatCompletionChunkEvent(chunk))
+      throw failure
+    })()
+  )
   return new Response(body, {
     status: 200,
     headers: { "content-type": "text/event-stream" }

@@ -83,7 +83,7 @@ const conversationPreviewSchema = z
   .readonly()
 
 /**
- * Validates one listed conversation without its system prompt or transcript.
+ * Validates one listed conversation without its agent code or transcript.
  *
  * @remarks This read projection derives its identity, title, and timestamps
  * from the persisted conversation metadata contract. `updatedAt` is the

@@ -72,13 +72,13 @@ class SqliteConversationTurnTransaction implements ConversationTurnTransaction {
   public createConversation(metadata: ConversationMetadata): void {
     this.#statements
       .getStatement(
-        `INSERT INTO conversations (id, title, system_prompt, created_at, updated_at)
+        `INSERT INTO conversations (id, title, agent_code, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?)`
       )
       .run(
         metadata.id,
         metadata.title,
-        metadata.systemPrompt,
+        metadata.agentCode,
         metadata.createdAt,
         metadata.updatedAt
       )

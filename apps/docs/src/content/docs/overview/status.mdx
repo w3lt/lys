@@ -28,7 +28,8 @@ repository today; it is not a promise of unreleased work.
   rows in SQLite, and streams typed SSE events back to the desktop.
 - Conversation history supports search, cursor pagination, transcript retrieval,
   rename, and deletion. Assistant deltas are persisted before publication;
-  continuation uses the saved prompt and eligible stored history.
+  continuation uses the current prompt of the conversation's agent and eligible
+  stored history.
 - The desktop's past-conversations dialog, opened from the composer or with
   Command+K or Control+K, searches, renames, and deletes stored conversations,
   and reopens one so its next message continues it.
@@ -45,9 +46,10 @@ repository today; it is not a promise of unreleased work.
 - Runtime, Model, Generation, Agents, and Tools settings panes are available.
   Model controls refresh inventory, load and unload weights, and check
   loaded-state health. The Agents pane creates, edits, duplicates, and deletes
-  the user's agents through the backend; chats do not use agents yet. The Tools
-  pane lists Lys's client tools from the desktop; its switches are session-only
-  mocks, and no chat offers tools yet.
+  the user's agents through the backend. Chats are answered by Lys, a built-in
+  agent defined in the backend; it is not listed in the Agents pane. The Tools
+  pane lists the desktop's client tools; its switches are session-only mocks,
+  and no chat offers tools yet.
 - Generation controls apply to future chat requests and save automatically
   through Tauri to `$LYS_HOME/settings.json`, which contains runtime, model, and
   generation groups. Runtime and model edits remain session-only.
@@ -64,7 +66,8 @@ The current repository does not yet provide:
 - sending composer attachments; the composer stages files and long pastes only
   for its local context estimate
 - a Conversation settings pane
-- built-in agents that ship with Lys, and chats that use an agent
+- chats that use one of the user's agents, and built-in agents listed in the
+  Agents pane
 - replay or reconnect semantics for chat streams
 - tool-call stream events, and tool choices that are saved and applied to chats
 - a production desktop release workflow

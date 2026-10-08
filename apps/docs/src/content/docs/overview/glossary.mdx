@@ -25,18 +25,27 @@ Terms that mean something specific inside Lys.
 - **Protocol**: the shared HTTP and SSE contract exported by
   `packages/protocol`.
 - **Share**: the shared domain-model package exported by `packages/share`.
+- **Service**: a backend class named for its module, such as `AgentService`,
+  `ChatService`, or `LlmService`, that the composition root creates once per
+  backend and installs on Fastify (`app.agentService`, `app.chatService`) to
+  own that module's operations.
 
 ## Conversation terms
 
-- **Conversation**: the stored chat unit with metadata such as ID, title,
-  system prompt, and timestamps.
+- **Conversation**: the stored chat unit with metadata such as ID, title, the
+  code of the agent that answers it, and timestamps. A new conversation names
+  its agent; a continued one keeps it.
+- **Lys**: the agent built into the backend, under the code `lys`. It is never
+  stored, no stored agent can take its code, and it is the only agent that
+  answers chats today.
 - **User message**: a persisted message with role `user` and non-empty content.
 - **Assistant message**: a persisted message with role `assistant`, a model
   name, lifecycle status, and an optional finish reason.
 - **Finish reason**: the terminal model reason currently supported by the
   protocol: `stop` or `length`.
-- **System prompt**: the backend-owned prompt template attached to a new
-  conversation record.
+- **System prompt**: the instructions an agent sends first in the context of
+  every reply. Lys's comes from the backend's `lys.txt` prompt file; it is not
+  stored with conversations.
 
 ## Streaming terms
 

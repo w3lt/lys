@@ -6,14 +6,11 @@ import {
 } from "@lys/protocol"
 import type { FastifyBaseLogger, FastifyInstance } from "fastify"
 import type { BackendConfig } from "../../../config"
-import type {
-  CompleteChatOptions,
-  TitleGenerationOptions
-} from "../chatService"
+import type Agent from "../../agent/agent"
+import { createChatAgentNotFoundProblem } from "../../agent/routes/agentProblems"
+import type { TitleGenerationOptions } from "../chatService"
 import { ConversationNotFoundError } from "../../../utils/errors"
 import { createConversationNotFoundProblem } from "../../conversation/routes/notFound"
-import createChatTask, { type CreateChatTaskOptions } from "../chatTask"
-import { buildChatMessages } from "../messages"
 import type {
   ConversationTurn,
   ConversationTurnWriter,
@@ -32,10 +29,7 @@ import {
 import createTitleGenerationTask from "../titleGenerationTask"
 
 /** Backend settings the chat route applies to every request. */
-export type ChatRouteOptions = Pick<
-  BackendConfig,
-  "lysSystemPrompt" | "titleGenerationMaxAttempts"
->
+export type ChatRouteOptions = Pick<BackendConfig, "titleGenerationMaxAttempts">
 
 /** Settings and the generation registry the chat route is installed with. */
 export type ChatRouteRegistration = ChatRouteOptions &
@@ -50,12 +44,13 @@ type ChatRouteDependencies = Readonly<{
   turns: ConversationTurnWriter
   /** Conditional generated-title persistence borrowed for the route lifetime. */
   titleWriter: GeneratedConversationTitleWriter
-  /** Bound application inference operation; no adapter cleanup authority. */
-  completeChatStream: CreateChatTaskOptions["completeChatStream"]
+  /**
+   * Agent lookup of the agent service, borrowed for the route lifetime;
+   * undefined means no agent with the code can answer chats.
+   */
+  findChatAgent: (code: string) => Agent | undefined
   /** Bound title operation retained separately from chat completion. */
   generateTitle: (options: TitleGenerationOptions) => Promise<string>
-  /** Startup-loaded prompt persisted with a conversation this route creates. */
-  lysSystemPrompt: string
   /** Inclusive maximum number of title requests permitted for one turn. */
   titleGenerationMaxAttempts: number
   /** Registry that owns every generation this route starts. */
@@ -66,6 +61,8 @@ type ChatRouteDependencies = Readonly<{
 type TurnGenerationInput = Readonly<{
   /** Stored turn and prior transcript snapshot. */
   turn: ConversationTurn
+  /** Agent that answers the turn. */
+  agent: Agent
   /** Model selected by the request. */
   model: string
   /** Sampling and reply length controls sent with the request. */
@@ -81,27 +78,21 @@ type TurnGenerationInput = Readonly<{
  * follows that generation on the response stream.
  *
  * @param app - Backend with SSE, validation, and singleton services installed.
- * @param registration - System prompt, title attempt limit, and the registry
- * that owns the started generations.
+ * @param registration - Title attempt limit and the registry that owns the
+ * started generations.
  * @throws If route registration fails.
  */
 export default function updateFastifyWithChatRoute(
   app: FastifyInstance,
-  {
-    lysSystemPrompt,
-    titleGenerationMaxAttempts,
-    generations
-  }: ChatRouteRegistration
+  { titleGenerationMaxAttempts, generations }: ChatRouteRegistration
 ): void {
   const turns = app.conversationTurns
   const dependencies = {
     turns,
     titleWriter: turns,
-    completeChatStream: (options: CompleteChatOptions) =>
-      app.chatService.completeChatStream(options),
+    findChatAgent: (code: string) => app.agentService.findChatAgent(code),
     generateTitle: (options: TitleGenerationOptions) =>
       app.chatService.generateTitle(options),
-    lysSystemPrompt,
     titleGenerationMaxAttempts,
     generations
   }
@@ -121,14 +112,15 @@ export default function updateFastifyWithChatRoute(
  *
  * @param request - Validated chat input and request logger.
  * @param reply - SSE or pre-stream error response owner.
- * @param dependencies - Borrowed persistence, inference, and registry.
- * @returns Settlement after the stream ends, or after the missing-conversation
- * response.
+ * @param dependencies - Borrowed persistence, agents, and registry.
+ * @returns Settlement after the stream ends, or after a not-found response.
  * @throws Unexpected failures before the stream starts, for Fastify's HTTP
  * error boundary.
  * @remarks Closing this stream does not cancel the generation. The turn, the
  * generation, and this follower are created in one synchronous step, so the
- * follower receives the start event before any generation event.
+ * follower receives the start event before any generation event. The agent
+ * stored with the turn's conversation answers it. A stored conversation whose
+ * agent is not available fails the request before the stream starts.
  */
 async function handleChatRequest(
   request: ChatRouteRequest,
@@ -137,9 +129,12 @@ async function handleChatRequest(
 ): Promise<void> {
   const turn = createRequestedTurn(request, reply, dependencies)
   if (turn === undefined) return
+  const agent = dependencies.findChatAgent(turn.conversation.agentCode)
+  if (agent === undefined) rejectTurnWithoutAgent(turn, dependencies.turns)
 
   const generation = startTurnGeneration({
     turn,
+    agent,
     model: request.body.model,
     generationOptions: request.body.generationOptions,
     logger: request.log,
@@ -155,13 +150,14 @@ async function handleChatRequest(
 }
 
 /**
- * Stores the requested turn, or answers that its conversation is not stored.
+ * Stores the requested turn, or answers that the agent of a new conversation
+ * cannot answer chats or that a continued conversation is not stored.
  *
  * @param request - Validated chat input.
- * @param reply - Response owner used only for the missing-conversation answer.
- * @param dependencies - Borrowed turn persistence and system prompt.
- * @returns The stored turn, or undefined after the missing-conversation
- * problem was sent.
+ * @param reply - Response owner used only for the two not-found answers.
+ * @param dependencies - Borrowed turn persistence and agent lookup.
+ * @returns The stored turn, or undefined after a not-found problem was sent;
+ * nothing was then stored.
  * @throws Any other persistence failure; nothing was stored.
  */
 function createRequestedTurn(
@@ -169,26 +165,66 @@ function createRequestedTurn(
   reply: ChatRouteReply,
   dependencies: ChatRouteDependencies
 ): ConversationTurn | undefined {
-  const { conversationId } = request.body
+  const { conversation } = request.body
+  if (
+    conversation.kind === "new" &&
+    dependencies.findChatAgent(conversation.agentCode) === undefined
+  ) {
+    reply
+      .type("application/problem+json")
+      .code(404)
+      .send(createChatAgentNotFoundProblem(conversation.agentCode, request.url))
+    return undefined
+  }
   try {
     return dependencies.turns.createConversationTurn({
-      model: request.body.model,
-      conversationId,
+      conversation,
       userMessageContent: request.body.message,
-      systemPrompt: dependencies.lysSystemPrompt
+      model: request.body.model
     })
   } catch (error) {
     if (
       !(error instanceof ConversationNotFoundError) ||
-      conversationId === undefined
+      conversation.kind === "new"
     )
       throw error
     reply
       .type("application/problem+json")
       .code(404)
-      .send(createConversationNotFoundProblem(conversationId, request.url))
+      .send(createConversationNotFoundProblem(conversation.id, request.url))
     return undefined
   }
+}
+
+/**
+ * Rejects a stored turn whose conversation's agent is not available, storing
+ * its reply as failed so it does not stay streaming.
+ *
+ * @param turn - Stored turn whose reply is still streaming.
+ * @param turns - Turn persistence borrowed for the route lifetime.
+ * @throws Always: `Conversation agent <code> is not available` after the
+ * reply was stored as failed, or an `AggregateError` holding that error
+ * followed by the persistence failure when the failed state cannot be stored.
+ */
+function rejectTurnWithoutAgent(
+  turn: ConversationTurn,
+  turns: ConversationTurnWriter
+): never {
+  const missingAgent = new Error(
+    `Conversation agent ${turn.conversation.agentCode} is not available`
+  )
+  try {
+    turns.updateAssistantMessageState(turn.assistantMessage.id, {
+      status: "failed"
+    })
+  } catch (persistenceError) {
+    throw new AggregateError(
+      [missingAgent, persistenceError],
+      "Missing agent failure could not be finalized",
+      { cause: persistenceError }
+    )
+  }
+  throw missingAgent
 }
 
 /**
@@ -227,17 +263,19 @@ function startTurnGeneration(input: TurnGenerationInput): ReplyGeneration {
 }
 
 /**
- * Runs one turn's reply task and finalizes a reply it left streaming.
+ * Has the turn's agent write its reply, then finalizes a reply it left
+ * streaming.
  *
- * @param input - Stored turn and the request values the task keeps.
+ * @param input - Stored turn, its agent, and the request values the reply
+ * keeps.
  * @param context - Generation-owned cancellation and event sender.
  * @returns Settlement after the reply is final.
- * @throws The task's failure after the fallback finalization; an
- * `AggregateError` of the task's failure and the fallback's failure when the
- * fallback also fails; or the fallback's failure after a task that succeeded.
- * The generation reports it.
+ * @throws The agent's failure after the fallback finalization; an
+ * `AggregateError` of the agent's failure and the fallback's failure when the
+ * fallback also fails; or the fallback's failure after an agent that
+ * succeeded. The generation reports it.
  * @remarks The fallback stores `interrupted` after cancellation and `failed`
- * otherwise; it changes nothing when the task already finalized the reply.
+ * otherwise; it changes nothing when the agent already finalized the reply.
  */
 async function createTurnReplyTask(
   input: TurnGenerationInput,
@@ -246,24 +284,29 @@ async function createTurnReplyTask(
   const { turn, dependencies } = input
   const assistantMessageId = turn.assistantMessage.id
   try {
-    await createChatTask({
-      completeChatStream: dependencies.completeChatStream,
-      updateAssistantMessageState: (completion) =>
-        dependencies.turns.updateAssistantMessageState(
-          assistantMessageId,
-          completion
-        ),
+    await input.agent.createReply({
+      history: turn.conversation.messages,
+      userMessageContent: turn.userMessage.content,
+      model: input.model,
+      generationOptions: input.generationOptions,
+      abortSignal,
       updateAssistantMessageContent: (content) =>
         dependencies.turns.updateAssistantMessageContent(
           assistantMessageId,
           content
         ),
-      messages: buildChatMessages(turn),
-      model: input.model,
-      generationOptions: input.generationOptions,
-      abortSignal,
+      updateAssistantMessageState: (completion) =>
+        dependencies.turns.updateAssistantMessageState(
+          assistantMessageId,
+          completion
+        ),
       sendEvent,
-      logger: input.logger
+      reportReplyCancellation: (failure) => {
+        input.logger.debug({ err: failure }, "Chat completion was cancelled")
+      },
+      reportReplyFailure: (failure) => {
+        input.logger.error({ err: failure }, "Chat completion stream failed")
+      }
     })
   } catch (taskError) {
     try {
@@ -350,8 +393,8 @@ function createTurnTitleTask(
 function buildTurnStartEvents(turn: ConversationTurn): ChatApiStreamEvent[] {
   const { userMessage, assistantMessage } = turn
   if (turn.isNewConversation) {
-    const { id, title, systemPrompt, createdAt, updatedAt } = turn.conversation
-    const conversation = { id, title, systemPrompt, createdAt, updatedAt }
+    const { id, title, agentCode, createdAt, updatedAt } = turn.conversation
+    const conversation = { id, title, agentCode, createdAt, updatedAt }
     return [
       {
         type: "start-new-conversation-turn",

@@ -3,7 +3,7 @@ import { describe, expect, it, onTestFinished } from "vitest"
 import { migrateDatabase } from "../../../../src/infrastructure/database/migrations"
 
 /** Schema version produced by the current migration list. */
-const CURRENT_SCHEMA_VERSION = 6
+const CURRENT_SCHEMA_VERSION = 7
 
 /**
  * Opens an empty in-memory database owned by the current test.
@@ -47,6 +47,41 @@ function listSchemaObjects(
     .map((row) => row.name)
 }
 
+/**
+ * Lists a table's column names in declaration order.
+ *
+ * @param database - Open connection.
+ * @param table - Table name.
+ * @returns Column names.
+ */
+function listColumns(database: DatabaseSync, table: string): unknown[] {
+  return database
+    .prepare("SELECT name FROM pragma_table_info(?)")
+    .all(table)
+    .map((row) => row.name)
+}
+
+/**
+ * Creates a database with the version-6 conversations table.
+ *
+ * @returns A connection at `user_version` 6, closed when the test finishes.
+ * @remarks Migrates to the current version and reverses migration 7, which
+ * changes only the conversations table: it drops `agent_code` and adds
+ * `system_prompt` back. SQLite requires the re-added column to have a default,
+ * which the version-6 table lacked; every case writes the column explicitly,
+ * so the default is never used.
+ */
+function createVersion6Database(): DatabaseSync {
+  const database = openEmptyDatabase()
+  migrateDatabase(database)
+  database.exec(`
+    ALTER TABLE conversations DROP COLUMN agent_code;
+    ALTER TABLE conversations ADD COLUMN system_prompt TEXT NOT NULL DEFAULT '';
+    PRAGMA user_version = 6
+  `)
+  return database
+}
+
 describe("migrateDatabase", () => {
   it("creates the current schema in an empty database", () => {
     const database = openEmptyDatabase()
@@ -75,8 +110,8 @@ describe("migrateDatabase", () => {
     migrateDatabase(database)
     database
       .prepare(
-        `INSERT INTO conversations (id, title, system_prompt, created_at, updated_at)
-        VALUES ('kept', NULL, 'prompt', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`
+        `INSERT INTO conversations (id, title, agent_code, created_at, updated_at)
+        VALUES ('kept', NULL, 'lys', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`
       )
       .run()
 
@@ -89,9 +124,8 @@ describe("migrateDatabase", () => {
   })
 
   it("upgrades a version-5 database by adding the agents table and keeping its conversations", () => {
-    const database = openEmptyDatabase()
-    migrateDatabase(database)
-    // Migration 6 only adds the agents table, so dropping it from a current
+    const database = createVersion6Database()
+    // Migration 6 only adds the agents table, so dropping it from a version-6
     // database leaves exactly the version-5 schema.
     database.exec("DROP TABLE agents; PRAGMA user_version = 5")
     database
@@ -103,7 +137,7 @@ describe("migrateDatabase", () => {
 
     migrateDatabase(database)
 
-    expect(readUserVersion(database)).toBe(6)
+    expect(readUserVersion(database)).toBe(CURRENT_SCHEMA_VERSION)
     expect(listSchemaObjects(database, "table")).toContain("agents")
     expect(
       database.prepare("SELECT COUNT(*) AS count FROM agents").get()
@@ -111,6 +145,64 @@ describe("migrateDatabase", () => {
     expect(
       database.prepare("SELECT id, title FROM conversations").all()
     ).toEqual([{ id: "kept", title: "Title" }])
+  })
+
+  it("upgrades a version-6 database by recording Lys as every conversation's agent and dropping the stored prompts", () => {
+    const database = createVersion6Database()
+    database
+      .prepare(
+        `INSERT INTO conversations (id, title, system_prompt, created_at, updated_at)
+        VALUES ('kept', 'Title', 'Old prompt', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`
+      )
+      .run()
+    database
+      .prepare(
+        `INSERT INTO conversation_messages (id, conversation_id, role, content, created_at)
+        VALUES ('question', 'kept', 'user', 'Hello', '2026-01-02T00:00:00.000Z')`
+      )
+      .run()
+    const conversationsBefore = database
+      .prepare("SELECT id, title, created_at, updated_at FROM conversations")
+      .all()
+    const messagesBefore = database
+      .prepare("SELECT * FROM conversation_messages")
+      .all()
+
+    migrateDatabase(database)
+
+    expect(readUserVersion(database)).toBe(7)
+    expect(listColumns(database, "conversations")).toEqual([
+      "id",
+      "title",
+      "created_at",
+      "updated_at",
+      "agent_code"
+    ])
+    expect(
+      database
+        .prepare("SELECT id, title, created_at, updated_at FROM conversations")
+        .all()
+    ).toEqual(conversationsBefore)
+    expect(
+      database
+        .prepare("SELECT agent_code AS agentCode FROM conversations")
+        .all()
+    ).toEqual([{ agentCode: "lys" }])
+    expect(
+      database.prepare("SELECT * FROM conversation_messages").all()
+    ).toEqual(messagesBefore)
+  })
+
+  it("refuses a conversation row with an empty agent code", () => {
+    const database = openEmptyDatabase()
+    migrateDatabase(database)
+
+    expect(() =>
+      database.exec(
+        `INSERT INTO conversations (id, title, agent_code, created_at, updated_at)
+        VALUES ('empty', NULL, '', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`
+      )
+    ).toThrow(/CHECK constraint failed: agent_code <> ''/)
   })
 
   it.each([

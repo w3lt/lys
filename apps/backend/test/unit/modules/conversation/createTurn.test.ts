@@ -38,7 +38,7 @@ function saveExistingConversation(records: ConversationRecordsHarness): void {
   records.saveConversation({
     id: EXISTING_CONVERSATION_ID,
     title: "Trip plan",
-    systemPrompt: "Stored prompt",
+    agentCode: "stored-agent",
     createdAt: "2026-01-01T00:00:00.000Z"
   })
   records.saveUserMessage({
@@ -60,20 +60,20 @@ function saveExistingConversation(records: ConversationRecordsHarness): void {
 }
 
 describe("createConversationTurn", () => {
-  it("creates an untitled conversation with the options prompt at the turn time", () => {
+  it("creates an untitled conversation with the options agent at the turn time", () => {
     const records = openSqliteConversationRecords()
 
     const turn = createCommittedTurn(records, {
+      conversation: { kind: "new", agentCode: "options-agent" },
       userMessageContent: "Hello",
-      model: "qwen/qwen3-8b",
-      systemPrompt: "Options prompt"
+      model: "qwen/qwen3-8b"
     })
 
     expect(turn.isNewConversation).toBe(true)
     expect(turn.conversation).toEqual({
       id: expect.any(String),
       title: null,
-      systemPrompt: "Options prompt",
+      agentCode: "options-agent",
       createdAt: NOW,
       updatedAt: NOW,
       messages: []
@@ -81,16 +81,16 @@ describe("createConversationTurn", () => {
     expect(z.uuidv7().safeParse(turn.conversation.id).success).toBe(true)
     expect(
       records.recordReader.findConversation(turn.conversation.id)
-    ).toMatchObject({ systemPrompt: "Options prompt", createdAt: NOW })
+    ).toMatchObject({ agentCode: "options-agent", createdAt: NOW })
   })
 
   it("appends a user message and an empty streaming reply", () => {
     const records = openSqliteConversationRecords()
 
     const turn = createCommittedTurn(records, {
+      conversation: { kind: "new", agentCode: "lys" },
       userMessageContent: "Hello",
-      model: "qwen/qwen3-8b",
-      systemPrompt: "You are Lys."
+      model: "qwen/qwen3-8b"
     })
 
     expect(turn.userMessage).toEqual({
@@ -114,22 +114,21 @@ describe("createConversationTurn", () => {
     ).toEqual([turn.userMessage, turn.assistantMessage])
   })
 
-  it("continues an existing conversation with its stored prompt and prior transcript", () => {
+  it("continues an existing conversation with its stored agent and prior transcript", () => {
     const records = openSqliteConversationRecords()
     saveExistingConversation(records)
 
     const turn = createCommittedTurn(records, {
-      conversationId: EXISTING_CONVERSATION_ID,
+      conversation: { kind: "existing", id: EXISTING_CONVERSATION_ID },
       userMessageContent: "Next question",
-      model: "qwen/qwen3-8b",
-      systemPrompt: "Ignored prompt"
+      model: "qwen/qwen3-8b"
     })
 
     expect(turn.isNewConversation).toBe(false)
     expect(turn.conversation).toMatchObject({
       id: EXISTING_CONVERSATION_ID,
       title: "Trip plan",
-      systemPrompt: "Stored prompt"
+      agentCode: "stored-agent"
     })
     expect(turn.conversation.messages.map(({ content }) => content)).toEqual([
       "Earlier question",
@@ -157,10 +156,9 @@ describe("createConversationTurn", () => {
     })
 
     const turn = createCommittedTurn(records, {
-      conversationId: EXISTING_CONVERSATION_ID,
+      conversation: { kind: "existing", id: EXISTING_CONVERSATION_ID },
       userMessageContent: "Next question",
-      model: "qwen/qwen3-8b",
-      systemPrompt: "Ignored prompt"
+      model: "qwen/qwen3-8b"
     })
 
     expect(turn.conversation.messages.at(-1)).toMatchObject({
@@ -179,7 +177,7 @@ describe("createConversationTurn", () => {
     records.saveConversation({
       id: otherConversationId,
       title: null,
-      systemPrompt: "Other prompt",
+      agentCode: "other-agent",
       createdAt: "2026-01-01T00:00:00.000Z"
     })
     records.saveAssistantMessage({
@@ -194,10 +192,9 @@ describe("createConversationTurn", () => {
     })
 
     createCommittedTurn(records, {
-      conversationId: EXISTING_CONVERSATION_ID,
+      conversation: { kind: "existing", id: EXISTING_CONVERSATION_ID },
       userMessageContent: "Next question",
-      model: "qwen/qwen3-8b",
-      systemPrompt: "Ignored prompt"
+      model: "qwen/qwen3-8b"
     })
 
     expect(
@@ -210,10 +207,9 @@ describe("createConversationTurn", () => {
 
     expect(() =>
       createCommittedTurn(records, {
-        conversationId: EXISTING_CONVERSATION_ID,
+        conversation: { kind: "existing", id: EXISTING_CONVERSATION_ID },
         userMessageContent: "Hello",
-        model: "qwen/qwen3-8b",
-        systemPrompt: "You are Lys."
+        model: "qwen/qwen3-8b"
       })
     ).toThrow(ConversationNotFoundError)
 
@@ -250,8 +246,10 @@ describe("createConversationTurn", () => {
             createConversationTurn(
               transaction,
               {
-                conversationId: EXISTING_CONVERSATION_ID,
-                systemPrompt: "Ignored prompt",
+                conversation: {
+                  kind: "existing",
+                  id: EXISTING_CONVERSATION_ID
+                },
                 ...values
               },
               NOW

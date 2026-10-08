@@ -110,8 +110,8 @@ conversation stays visible until the read succeeds, and no message can be sent
 while it is pending. A missing conversation or failed read keeps the previous
 conversation and shows an inline error. When the conversation then shown,
 opened or kept, ends with a reply that is still generating, the chat store
-follows it from a stored snapshot. The next message sends the opened conversation's
-`conversationId`, so the backend continues it. Deleting the conversation the
+follows it from a stored snapshot. The next message sends the opened
+conversation as `{ kind: "existing", id }`, so the backend continues it. Deleting the conversation the
 chat view presents, or learning that it no longer exists, resets the view to a
 new conversation.
 

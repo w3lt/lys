@@ -1,4 +1,5 @@
 import * as z from "zod"
+import { agentCodeSchema } from "./agent"
 
 /** Validates ISO-8601 timestamps persisted with exactly millisecond precision. */
 const timestampSchema = z.iso.datetime({ precision: 3 })
@@ -59,8 +60,11 @@ export const conversationSchema = z.strictObject({
   id: z.uuidv7(),
   /** Non-empty title; null until title generation saves one. */
   title: z.string().min(1).nullable(),
-  /** Non-empty system instruction persisted with the conversation. */
-  systemPrompt: z.string().min(1),
+  /**
+   * Code of the agent that answers the conversation, set when it is created;
+   * every turn sends that agent's current system prompt.
+   */
+  agentCode: agentCodeSchema,
   /** Messages remain in persisted conversation order. */
   messages: z.array(conversationMessageSchema),
   createdAt: timestampSchema,

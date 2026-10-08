@@ -27,6 +27,30 @@ export function createAgentNotFoundProblem(
 }
 
 /**
+ * Creates the caller-safe response for a new conversation naming an agent
+ * that cannot answer chats.
+ *
+ * @param agentCode - Validated code that no agent able to answer chats has; a
+ * stored agent may have it.
+ * @param instance - Request path identifying this occurrence.
+ * @returns The strict problem accepted by chat endpoint consumers. Its detail
+ * does not claim that no agent has the code.
+ */
+export function createChatAgentNotFoundProblem(
+  agentCode: string,
+  instance: string
+): AgentNotFoundProblem {
+  const { shape } = agentNotFoundProblemSchema.unwrap()
+  return {
+    type: shape.type.value,
+    title: shape.title.value,
+    status: shape.status.value,
+    detail: `No agent that can answer chats has the code ${agentCode}.`,
+    instance
+  }
+}
+
+/**
  * Creates the caller-safe response for creating an agent under a taken code.
  *
  * @param instance - Request path identifying this occurrence.

@@ -76,7 +76,7 @@ export function listConversations(
 }
 
 /**
- * Projects SQLite summary columns without leaking the system prompt or raw aliases.
+ * Projects SQLite summary columns without leaking the agent code or raw aliases.
  * @param row - Untrusted summary row, validated by the complete page parser.
  * @returns The untrusted protocol projection ready for validation.
  */

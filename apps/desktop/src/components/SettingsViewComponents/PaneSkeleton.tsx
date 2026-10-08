@@ -158,6 +158,38 @@ const PANE_SKELETONS: Record<SettingsPane, PaneSkeletonShape> = {
     ],
     list: [],
     block: false
+  },
+  tools: {
+    cards: [
+      {
+        id: "tool-calls",
+        title: "112px",
+        meta: "236px",
+        row: {
+          id: "calls-per-reply",
+          label: "104px",
+          description: "268px",
+          control: { width: "108px", height: "28px" }
+        }
+      }
+    ],
+    heading: true,
+    rows: [
+      {
+        id: "first-tool",
+        label: "120px",
+        description: "236px",
+        control: { width: "44px", height: "24px" }
+      },
+      {
+        id: "second-tool",
+        label: "104px",
+        description: "260px",
+        control: { width: "44px", height: "24px" }
+      }
+    ],
+    list: [],
+    block: false
   }
 }
 
@@ -186,8 +218,8 @@ function stagger(index: number, stepMs: number) {
  * visually hidden text provide one polite announcement, while decorative bars
  * are hidden from assistive technology. Pixel widths are CSS geometry strings;
  * stagger delays are milliseconds. The component is the `Suspense` fallback of
- * every pane, and the Agents pane also shows it while its first list read is
- * pending. It renders cards, rows, list lines, or a block according to the
+ * every pane, and the Agents and Tools panes also show it while their first
+ * list read is pending. It renders cards, rows, list lines, or a block according to the
  * selected pane's current shape; it does not claim that the controls or
  * entries themselves are ready or available.
  *

@@ -19,6 +19,7 @@ presentation state, not durable conversation storage.
 | Chat state          | `src/lib/store/chat-view` owns the active conversation, request lifecycle, conversation opening, and error presentation.     |
 | History state       | `src/lib/store/conversation-history` owns the past-conversations dialog, its search and pages, and rename and delete calls.  |
 | Agent state         | `src/lib/store/agents` owns the Agents pane's list, its editor and draft, and the agent create, update, and delete calls.    |
+| Tool state          | `src/lib/store/tools.ts` owns the Tools pane's list of client tools and its session-only, mocked choices.                    |
 | Shell/runtime state | `src/lib/store/index.ts` tracks which view is open, whether the backend is running, and settings loaded from Tauri.          |
 | Model lifecycle     | `src/lib/store/model-actions.ts` owns real inventory, load, unload, and health requests shared by settings and the composer. |
 | SSE consumption     | `src/lib/apis/http/chat.ts` opens chat and reply-events SSE streams, validates events with Zod, and sends reply stops.       |
@@ -26,13 +27,14 @@ presentation state, not durable conversation storage.
 
 ## Chat state split
 
-The desktop currently has four separate state systems:
+The desktop currently has five separate state systems:
 
 | Store                 | Owns                                                                                                                           |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | Chat Zustand store    | Active conversation, request and open tokens, local abort controllers, streamed assistant deltas, inline error text            |
 | History Zustand store | Dialog visibility, search query, displayed conversation pages, the row being renamed or confirmed, pending renames and deletes |
 | Agent Zustand store   | Every listed agent, the open editor and its draft, the save attempt, the pending save or delete, the most recently saved agent |
+| Tool Zustand store    | The client tool list read from the desktop, tool calls on or off, calls per reply, each tool's switch and approval             |
 | Shell Zustand store   | Active top-level view, loaded runtime settings, backend process status, startup progress                                       |
 
 The transcript shown in the window is built from backend events for the current
@@ -230,6 +232,35 @@ and its name and code count as taken. Saving is unavailable while the list is
 read again, so a draft is never checked against a list that read may change.
 Agents are not used by chats yet.
 
+## Tool settings
+
+The Tools pane lists Lys's client tools: the tools that run in the desktop app
+and work with files on the user's machine. The tool store reads them from the
+[`list_tools` command](/architecture/host/#client-tool-list) when the pane first
+appears; they do not depend on the backend. A failed read shows the failure
+above the pane with Retry. Tools are grouped by their `group`, and each group
+says how many of its tools are on.
+
+Each row shows the tool's name, what it does with the machine (`reads`), that it
+runs in Lys, its description, an estimate of the tokens it adds to each request,
+and a switch. The estimate measures the function tool a model receives, built
+by `buildToolFunctionFormat` from `@lys/share`, with the composer's text
+estimator, so it varies with the model's tokenizer. Expanding a row, one at a
+time, shows the tool's arguments with their type and whether they are required;
+an enum argument shows `enum · N` and its accepted values. It also shows where
+the tool runs and whether Lys asks before it runs.
+
+The tool-calls card holds the master switch, a status line, and calls per reply
+(4, 8, or 16). The status line names the loaded model and how many tools are
+offered with their summed estimate. When the loaded model's `trainedForToolUse`
+is false, Lys offers it no tools: a card says the model isn't trained for tool
+calls, and every control below it recedes and is disabled. An expanded row
+closes while the controls are locked and opens again when they unlock.
+
+Every choice on the pane is a mock kept in the tool store for the session: tool
+calls on or off, calls per reply, each tool's switch, and Ask me or Just run.
+Nothing is saved, and nothing reaches the backend or a model yet.
+
 ## Current limitations
 
 - Runtime and model edits remain session-only. Generation settings save
@@ -245,6 +276,8 @@ Agents are not used by chats yet.
 - The composer's attachment tray stages files and long pastes for its local
   context estimate only. The chat protocol has no attachment field, so staged
   attachments are never sent.
+- The Tools pane's choices are session-only mocks. No conversation offers tools
+  to a model yet, so they change nothing a chat does.
 
 ## Related pages
 

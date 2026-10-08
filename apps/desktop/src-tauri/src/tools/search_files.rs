@@ -15,7 +15,10 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use super::text_file::{read_regular_text_file, TextFileReadError};
+use super::{
+    definition::{ToolAccess, ToolArgumentDefinition, ToolArgumentType, ToolDefinition, ToolGroup},
+    text_file::{read_regular_text_file, TextFileReadError},
+};
 
 /// Number of matching files reported when the filter omits `maxResults`.
 const DEFAULT_MAX_RESULTS: usize = 50;
@@ -59,6 +62,10 @@ const MAX_SNIPPET_CHARS: usize = 200;
 /// Number of characters kept before the first match when a line longer than
 /// [`MAX_SNIPPET_CHARS`] is cut down to a snippet.
 const SNIPPET_LEADING_CHARS: usize = 40;
+
+/// Every [`SearchFilesTarget`] as the filter's `target` key spells it, in the
+/// order the search-files tool offers them to a model.
+const SEARCH_FILES_TARGET_VALUES: [&str; 3] = ["name", "content", "nameAndContent"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -762,6 +769,81 @@ fn build_search_report(tally: SearchTally, completion: SearchCompletion) -> Sear
     }
 }
 
+/// Builds the definition of the search-files tool for the client tool list.
+///
+/// The tool is named `search_files`, the name the protocol and Settings use,
+/// although its command is `find_files`. Its arguments are the keys of the
+/// command's `filter` argument, so a model's arguments can be passed on
+/// unchanged.
+pub(super) fn build_search_files_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "search_files",
+        description: String::from(
+            "Find files under a directory whose name or content contains the query, ignoring case. Returns each matching file's absolute path and, for content matches, its first matching lines with their line numbers.",
+        ),
+        group: ToolGroup::Files,
+        access: ToolAccess::Reads,
+        arguments: build_search_files_arguments(),
+    }
+}
+
+/// Builds the arguments of the search-files tool in the filter's key order.
+///
+/// The descriptions state the query and result limits taken from the
+/// constants that `parse_search_files_filter` enforces, so they change with
+/// those limits.
+fn build_search_files_arguments() -> Vec<ToolArgumentDefinition> {
+    let root_argument = ToolArgumentDefinition {
+        name: "root",
+        description: String::from(
+            "Absolute path of the directory whose tree is searched. Symbolic links below it are not followed.",
+        ),
+        required: true,
+        argument_type: ToolArgumentType::String,
+    };
+    let query_argument = ToolArgumentDefinition {
+        name: "query",
+        description: format!("Text to find, on one line, at most {MAX_QUERY_CHARS} characters."),
+        required: true,
+        argument_type: ToolArgumentType::String,
+    };
+    let target_type = ToolArgumentType::Enum {
+        values: SEARCH_FILES_TARGET_VALUES.to_vec(),
+    };
+    let target_argument = ToolArgumentDefinition {
+        name: "target",
+        description: String::from(
+            "What is compared with the query: file names, file contents, or both.",
+        ),
+        required: true,
+        argument_type: target_type,
+    };
+    let max_results_argument = ToolArgumentDefinition {
+        name: "maxResults",
+        description: format!(
+            "Most matching files to return, 1–{MAX_RESULTS_LIMIT}. Defaults to {DEFAULT_MAX_RESULTS}."
+        ),
+        required: false,
+        argument_type: ToolArgumentType::Integer,
+    };
+    let max_snippets_per_file_argument = ToolArgumentDefinition {
+        name: "maxSnippetsPerFile",
+        description: format!(
+            "Most matching lines per file, 1–{MAX_SNIPPETS_PER_FILE_LIMIT}. Defaults to {DEFAULT_MAX_SNIPPETS_PER_FILE}. Unused when target is name."
+        ),
+        required: false,
+        argument_type: ToolArgumentType::Integer,
+    };
+
+    vec![
+        root_argument,
+        query_argument,
+        target_argument,
+        max_results_argument,
+        max_snippets_per_file_argument,
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -777,7 +859,7 @@ mod tests {
         FileMatch, FileSearch, SearchCompletion, SearchFilesError, SearchFilesFilter,
         SearchFilesReport, SearchFilesTarget, SearchTally, MAX_QUERY_CHARS, MAX_RESULTS_LIMIT,
         MAX_SCANNED_CONTENT_BYTES, MAX_SCANNED_ENTRY_COUNT, MAX_SEARCHED_FILE_SIZE_BYTES,
-        MAX_SNIPPETS_PER_FILE_LIMIT, MAX_SNIPPET_CHARS,
+        MAX_SNIPPETS_PER_FILE_LIMIT, MAX_SNIPPET_CHARS, SEARCH_FILES_TARGET_VALUES,
     };
     use crate::tools::test_directory::TestDirectory;
 
@@ -1463,6 +1545,31 @@ mod tests {
                 "oversizedFileCount": 0
             })
         );
+    }
+
+    #[test]
+    fn offers_every_target_value_the_filter_accepts() {
+        let mut spelled_values = Vec::new();
+        for target in [
+            SearchFilesTarget::Name,
+            SearchFilesTarget::Content,
+            SearchFilesTarget::NameAndContent,
+        ] {
+            // No wildcard arm: a new target fails to compile until it is
+            // spelled here. Listed above too, it then fails the comparison
+            // below until SEARCH_FILES_TARGET_VALUES offers it.
+            let value = match target {
+                SearchFilesTarget::Name => "name",
+                SearchFilesTarget::Content => "content",
+                SearchFilesTarget::NameAndContent => "nameAndContent",
+            };
+            let parsed: SearchFilesTarget =
+                serde_json::from_value(json!(value)).expect("a target the filter accepts");
+            assert_eq!(parsed, target);
+            spelled_values.push(value);
+        }
+
+        assert_eq!(spelled_values, SEARCH_FILES_TARGET_VALUES);
     }
 
     #[test]

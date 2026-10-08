@@ -1,3 +1,4 @@
+export { listToolsResultSchema, type ListToolsResult } from "./listTools"
 export {
   readTextFileContentSchema,
   readTextFileErrorSchema,

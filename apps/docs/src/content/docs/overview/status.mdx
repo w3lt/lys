@@ -42,10 +42,12 @@ repository today; it is not a promise of unreleased work.
   title is generated at a time per conversation, and the composer accepts the
   next message as soon as the reply ends, without waiting for the title.
 - Interrupted streaming rows are recovered on backend startup.
-- Runtime, Model, Generation, and Agents settings panes are available. Model
-  controls refresh inventory, load and unload weights, and check loaded-state
-  health. The Agents pane creates, edits, duplicates, and deletes the user's
-  agents through the backend; chats do not use agents yet.
+- Runtime, Model, Generation, Agents, and Tools settings panes are available.
+  Model controls refresh inventory, load and unload weights, and check
+  loaded-state health. The Agents pane creates, edits, duplicates, and deletes
+  the user's agents through the backend; chats do not use agents yet. The Tools
+  pane lists Lys's client tools from the desktop; its switches are session-only
+  mocks, and no chat offers tools yet.
 - Generation controls apply to future chat requests and save automatically
   through Tauri to `$LYS_HOME/settings.json`, which contains runtime, model, and
   generation groups. Runtime and model edits remain session-only.
@@ -64,7 +66,7 @@ The current repository does not yet provide:
 - a Conversation settings pane
 - built-in agents that ship with Lys, and chats that use an agent
 - replay or reconnect semantics for chat streams
-- tool-call stream events
+- tool-call stream events, and tool choices that are saved and applied to chats
 - a production desktop release workflow
 - evidenced ADR and RFC records, and a canonical release log
 

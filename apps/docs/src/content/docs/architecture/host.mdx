@@ -1,6 +1,6 @@
 ---
 title: Tauri host and lifecycle
-description: Window bootstrap, backend process ownership, file-backed settings commands, and file tools.
+description: Window bootstrap, backend process ownership, file-backed settings commands, and client tools.
 docType: architecture
 sidebar:
   order: 3
@@ -21,6 +21,7 @@ React UI.
 | `save_settings`      | Writes a new settings JSON document to `$LYS_HOME/settings.json`.                            |
 | `read_text_file`     | Returns the complete text of one UTF-8 file of at most 1 MiB.                                |
 | `find_files`         | Searches a directory tree for regular files by name or by text content.                      |
+| `list_tools`         | Returns the definition of every client tool, for the Tools settings pane.                    |
 
 ## File tools
 
@@ -51,6 +52,23 @@ cancelled.
 Expected failures reject with a JSON object whose `code` names the failure,
 such as `{ "code": "fileNotFound" }`. Any other rejection, such as an
 unregistered command, is thrown by the TypeScript wrappers as an error.
+
+## Client tool list
+
+`list_tools` returns `CLIENT_TOOLS` from `src-tauri/src/tools/client_tools.rs`:
+the definition of every client tool, in the order Settings lists them. A
+definition holds what a model is offered for the tool, its name, description,
+and arguments, plus the `group` and `access` that Settings shows. It mirrors
+`toolDefinitionSchema` in `@lys/share`, which the backend's `AgentTool` also
+uses, and the renderer's `listTools` validates the list with
+`listToolsResultSchema` from `@lys/protocol`.
+
+Each tool builds its own definition next to the limits it enforces, so a
+description states the current limits. The tools are named `read_text_file`
+and `search_files`; the search-files tool keeps its name although its command
+is `find_files`. Its arguments are the exact keys of the `find_files` filter,
+and `target` is an enum of `name`, `content`, and `nameAndContent`. The command
+reads nothing and never fails.
 
 ## Lys home
 

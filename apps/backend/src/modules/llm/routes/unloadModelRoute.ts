@@ -13,15 +13,29 @@ import handleLlmServiceRequestFailure from "./handleLlmServiceRequestFailure"
  *
  * @param app - Application instance that receives the LLM unload route.
  * @returns A promise that resolves after the route is added.
- * @throws If Fastify cannot register the route.
+ * @throws If Fastify cannot register the route. The failure rejects the
+ * promise rather than escaping the call synchronously.
  * @remarks Refused queue admission returns service-busy Problem Details, and a
  * missing or lost LLM runtime connection returns runtime-unavailable Problem
  * Details. Other service rejections remain owned by Fastify's parent error
  * boundary.
  */
-export default async function updateFastifyWithLlmModelUnloadRoute(
+export default function updateFastifyWithLlmModelUnloadRoute(
   app: FastifyInstance
 ): Promise<void> {
+  return new Promise((resolve) => {
+    registerLlmModelUnloadRoute(app)
+    resolve()
+  })
+}
+
+/**
+ * Registers the model-unload endpoint.
+ *
+ * @param app - Application instance that receives the route.
+ * @throws If Fastify cannot register the route.
+ */
+function registerLlmModelUnloadRoute(app: FastifyInstance): void {
   const llmModelStopper: LlmModelStopper = app.llmService
 
   app.route<LlmUnloadModelApiRoute>({

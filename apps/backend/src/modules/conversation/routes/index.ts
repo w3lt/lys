@@ -22,11 +22,25 @@ import { createConversationNotFoundProblem } from "./notFound"
  * Installs all protocol-defined history endpoints on a configured backend.
  * @param app - Application with validation and conversation persistence installed.
  * @returns A promise resolving after route registration.
- * @throws If route registration fails.
+ * @throws If route registration fails. The failure rejects the promise, so
+ * `app.register` reports it rather than an uncaught exception.
  */
-export default async function updateFastifyWithConversationRoutes(
+export default function updateFastifyWithConversationRoutes(
   app: FastifyInstance
 ): Promise<void> {
+  return new Promise((resolve) => {
+    registerConversationRoutes(app)
+    resolve()
+  })
+}
+
+/**
+ * Registers the list, read, title-update, and delete endpoints and the
+ * response serializer they share.
+ * @param app - Application with validation and conversation persistence installed.
+ * @throws If route registration fails.
+ */
+function registerConversationRoutes(app: FastifyInstance): void {
   app.setSerializerCompiler(serializerCompiler)
   const historyReader = app.conversationHistoryReader
   const historyEditor = app.conversationHistoryEditor
@@ -37,7 +51,7 @@ export default async function updateFastifyWithConversationRoutes(
       querystring: listConversationsApi.querystring,
       response: { 200: listConversationsApi.response }
     },
-    handler: async (request) =>
+    handler: (request) =>
       historyReader.listConversations(
         parseConversationListOptions(request.query)
       )
@@ -52,7 +66,7 @@ export default async function updateFastifyWithConversationRoutes(
         ...getConversationApi.responses
       }
     },
-    handler: async (request, reply) =>
+    handler: (request, reply) =>
       handleGetConversation(request, reply, historyReader)
   })
   app.route<UpdateConversationTitleApiRoute>({
@@ -66,7 +80,7 @@ export default async function updateFastifyWithConversationRoutes(
         ...updateConversationTitleApi.responses
       }
     },
-    handler: async (request, reply) =>
+    handler: (request, reply) =>
       handleUpdateConversationTitle(request, reply, historyEditor)
   })
   app.route<DeleteConversationApiRoute>({
@@ -76,24 +90,24 @@ export default async function updateFastifyWithConversationRoutes(
       params: deleteConversationApi.params,
       response: deleteConversationApi.responses
     },
-    handler: async (request, reply) =>
+    handler: (request, reply) =>
       handleDeleteConversation(request, reply, historyEditor)
   })
 }
 
 /**
- * Reads a transcript or sends the declared missing-conversation problem.
+ * Sends a transcript with a 200, or sends the declared missing-conversation
+ * problem.
  * @param request - Validated identifier.
  * @param reply - HTTP response owner.
  * @param history - Borrowed history reader valid for this request.
- * @returns The status-specific HTTP reply.
  * @throws If storage access fails.
  */
-async function handleGetConversation(
+function handleGetConversation(
   request: FastifyRequest<GetConversationApiRoute>,
   reply: FastifyReply<GetConversationApiRoute>,
   history: ConversationReader
-): Promise<void> {
+): void {
   const conversation = history.getConversation(request.params.conversationId)
   if (conversation === undefined) {
     reply
@@ -111,18 +125,18 @@ async function handleGetConversation(
 }
 
 /**
- * Persists a title replacement without changing activity order.
+ * Persists a title replacement without changing activity order, then sends
+ * the status-specific response.
  * @param request - Validated target and title.
  * @param reply - HTTP response owner.
  * @param history - Borrowed history edit access.
- * @returns A promise resolving after the status-specific response is sent.
  * @throws If storage access fails.
  */
-async function handleUpdateConversationTitle(
+function handleUpdateConversationTitle(
   request: FastifyRequest<UpdateConversationTitleApiRoute>,
   reply: FastifyReply<UpdateConversationTitleApiRoute>,
   history: ConversationTitleEditor
-): Promise<void> {
+): void {
   const metadata = history.updateConversationTitle(
     request.params.conversationId,
     request.body.title
@@ -143,18 +157,18 @@ async function handleUpdateConversationTitle(
 }
 
 /**
- * Deletes the conversation and transcript before sending a bodyless success.
+ * Deletes the conversation and transcript before sending a bodyless success,
+ * or sends the declared missing-conversation problem.
  * @param request - Validated target identifier.
  * @param reply - HTTP response owner.
  * @param history - Borrowed history deletion access.
- * @returns A promise resolving after the deletion outcome is sent.
  * @throws If storage access fails.
  */
-async function handleDeleteConversation(
+function handleDeleteConversation(
   request: FastifyRequest<DeleteConversationApiRoute>,
   reply: FastifyReply<DeleteConversationApiRoute>,
   history: ConversationDeleter
-): Promise<void> {
+): void {
   if (!history.deleteConversation(request.params.conversationId)) {
     reply
       .type("application/problem+json")

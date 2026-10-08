@@ -107,17 +107,17 @@ export default class LmStudioRuntime implements LlmRuntime {
         throw new Error("The LLM runtime is unavailable.", { cause })
       }
       return new LmStudioRuntime(client, clientLifetime)
-    } catch (creationFailure) {
+    } catch (creationError) {
       try {
         await clientLifetime.disposeAsync()
-      } catch (cleanupFailure) {
+      } catch (cleanupError) {
         throw new AggregateError(
-          [creationFailure, cleanupFailure],
+          [creationError, cleanupError],
           "LLM runtime creation and cleanup both failed.",
-          { cause: cleanupFailure }
+          { cause: cleanupError }
         )
       }
-      throw creationFailure
+      throw creationError
     }
   }
 

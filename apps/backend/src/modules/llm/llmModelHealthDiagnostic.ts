@@ -62,11 +62,11 @@ class RetainedLlmModelHealthDiagnostic implements LlmModelHealthDiagnostic {
   ): void {
     try {
       reporter(this.#failure)
-    } catch (reporterFailure) {
+    } catch (reporterError) {
       throw new AggregateError(
-        [this.#failure, reporterFailure],
+        [this.#failure, reporterError],
         "Reporting the LLM model health failure did not complete.",
-        { cause: reporterFailure }
+        { cause: reporterError }
       )
     }
   }

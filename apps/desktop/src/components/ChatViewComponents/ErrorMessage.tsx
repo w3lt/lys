@@ -5,7 +5,7 @@ import { Button } from "../ui/button"
 /** Properties accepted by {@link ErrorMessage}. */
 type ErrorMessageProps = {
   /** Legacy error record selected by the parent. */
-  message: ErrorMessage
+  readonly message: ErrorMessage
 }
 
 /**

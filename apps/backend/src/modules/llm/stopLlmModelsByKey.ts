@@ -211,8 +211,8 @@ async function listLlmModelInstancesByKey(
       status: "listed",
       modelInstances: Object.freeze(matchingModelInstances)
     })
-  } catch (failure) {
-    const message = formatLlmRuntimeFailureMessage(failure)
+  } catch (error) {
+    const message = formatLlmRuntimeFailureMessage(error)
     const diagnostic =
       operation === "list-initial-model-instances"
         ? Object.freeze({
@@ -248,11 +248,11 @@ async function stopLlmModelInstances(
   for (const { modelIdentifier } of modelInstances) {
     try {
       await stopLoadedLlmModelInstance(modelIdentifier)
-    } catch (failure) {
+    } catch (error) {
       const diagnostic = Object.freeze({
         operation: "stop-model-instance",
         modelIdentifier,
-        message: formatLlmRuntimeFailureMessage(failure)
+        message: formatLlmRuntimeFailureMessage(error)
       } as const satisfies LlmModelStopDiagnostic)
       stopDiagnostics = Object.freeze([...stopDiagnostics, diagnostic])
     }

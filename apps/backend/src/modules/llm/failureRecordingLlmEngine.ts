@@ -111,9 +111,9 @@ export default class FailureRecordingLlmEngine implements LlmEngine {
   ): Promise<Result> {
     try {
       return await llmEngineCall()
-    } catch (failure) {
+    } catch (error) {
       this.#hasRecordedFailure = true
-      throw failure
+      throw error
     }
   }
 }

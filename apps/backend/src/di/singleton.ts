@@ -170,9 +170,9 @@ export async function createSingletonServices(
       agentService,
       [CLOSE_SINGLETON_SERVICES]: closeOwnedSingletonServices
     })
-  } catch (creationFailure) {
+  } catch (creationError) {
     return await throwCreationFailureAfterClosingResources(
-      creationFailure,
+      creationError,
       serviceLifetime,
       "Singleton service creation and cleanup both failed."
     )
@@ -238,9 +238,11 @@ function createDatabase(
   const database = SqliteDatabase.open(databaseFilePath)
   return Object.freeze({
     service: database,
-    closeService: async () => {
-      database[Symbol.dispose]()
-    }
+    closeService: () =>
+      new Promise<void>((resolve) => {
+        database[Symbol.dispose]()
+        resolve()
+      })
   })
 }
 
@@ -298,12 +300,10 @@ async function throwCreationFailureAfterClosingResources(
 ): Promise<never> {
   try {
     await acquiredResources[Symbol.asyncDispose]()
-  } catch (cleanupFailure) {
-    throw new AggregateError(
-      [creationFailure, cleanupFailure],
-      failureMessage,
-      { cause: cleanupFailure }
-    )
+  } catch (cleanupError) {
+    throw new AggregateError([creationFailure, cleanupError], failureMessage, {
+      cause: cleanupError
+    })
   }
 
   throw creationFailure

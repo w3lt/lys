@@ -25,7 +25,7 @@ type ManifestUpdate = {
  */
 function parseReleaseVersion(contents: string): ReleaseVersion {
   const version = contents.trim()
-  const pattern = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/
+  const pattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
   if (!pattern.test(version)) {
     throw new Error("VERSION must use major.minor.patch, such as 1.2.3.")
   }

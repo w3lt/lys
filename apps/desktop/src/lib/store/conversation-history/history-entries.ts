@@ -90,7 +90,10 @@ export function findTextMatch(
   text: string,
   query: string
 ): TextMatch | undefined {
-  const pattern = new RegExp(query.replace(REGEXP_SYNTAX_PATTERN, "\\$&"), "iu")
+  const pattern = new RegExp(
+    query.replace(REGEXP_SYNTAX_PATTERN, String.raw`\$&`),
+    "iu"
+  )
   const match = pattern.exec(text)
   if (match === null) return undefined
 

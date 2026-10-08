@@ -105,10 +105,6 @@
   animation: chat-view-starter-fade-in 360ms var(--ease-standard) 200ms both;
 }
 
-.chat-view__starters {
-  animation: chat-view-starter-fade-in 360ms var(--ease-standard) 300ms both;
-}
-
 @keyframes chat-view-portrait-enter {
   from {
     opacity: 0;
@@ -166,6 +162,7 @@
   max-width: 580px;
   margin-top: 48px;
   gap: 8px;
+  animation: chat-view-starter-fade-in 360ms var(--ease-standard) 300ms both;
 }
 
 .chat-view__starter {

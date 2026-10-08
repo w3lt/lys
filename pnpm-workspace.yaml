@@ -7,3 +7,5 @@ allowBuilds:
   esbuild: true
 minimumReleaseAge: 4320
 minimumReleaseAgeStrict: true
+overrides:
+  katex: "^0.18.9"

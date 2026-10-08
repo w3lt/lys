@@ -116,9 +116,9 @@ of the new turn's context.
    `POST /api/v1/chat/:conversationId/replies/:assistantMessageId/tool-results/:callId`.
    The backend answers `204`, or `409` when the call is no longer pending.
 5. Once every call of the round has an answer, the backend asks the model
-   again with the results. The loop ends when a round answers with text or
-   the reply reaches `maxCalls`; only that final text is streamed as `delta`
-   and stored, then `done`.
+   again with the results. The reply makes at most `maxCalls` tool calls, and
+   the loop ends when a round answers with text; only that final text is
+   streamed as `delta` and stored, then `done`.
 
 The backend sets no time limit on a pending call. It waits until the call is
 answered, the reply is stopped, a newer turn starts in the conversation, the

@@ -36,13 +36,16 @@ export function formatToolCallSummary(input: ClientToolInput): string {
  * Formats the announcement of the call shown above the composer.
  *
  * @param toolCall - Call shown, or undefined when none is.
- * @returns A sentence while a call waits for the person, and an empty string
- * otherwise; a failed answer is announced by its own card.
+ * @returns While a call waits for the person, a sentence naming the tool and
+ * what the call will do, so consecutive calls of one tool stay
+ * distinguishable; otherwise an empty string, because a failed answer is
+ * announced by its own card.
  */
 export function formatToolCallAnnouncement(
   toolCall: ShownToolCall | undefined
 ): string {
-  return toolCall?.answer.status === "awaiting-person"
-    ? `Lys is waiting for you to allow or reject ${toolCall.call.toolName}.`
-    : ""
+  if (toolCall?.answer.status !== "awaiting-person") return ""
+
+  const summary = formatToolCallSummary(toolCall.answer.input)
+  return `Lys is waiting for you to allow or reject ${toolCall.call.toolName}: ${summary}`
 }

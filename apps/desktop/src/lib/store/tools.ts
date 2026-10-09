@@ -3,20 +3,6 @@ import { create, type StoreApi, type UseBoundStore } from "zustand"
 
 import { listTools } from "@/lib/apis/tauri/tools"
 
-/** Every number of calls per reply the Tools pane offers, smallest first. */
-export const CALLS_PER_REPLY_OPTIONS = Object.freeze([4, 8, 16] as const)
-
-/**
- * Number of tool calls a reply may make before it has to answer.
- *
- * @remarks The chat request sends it as the offer's `maxCalls`; the backend
- * enforces it.
- */
-export type CallsPerReply = (typeof CALLS_PER_REPLY_OPTIONS)[number]
-
-/** Calls per reply until the person picks another number in this session. */
-const DEFAULT_CALLS_PER_REPLY: CallsPerReply = 8
-
 /** Every approval the Tools pane offers for a tool, in display order. */
 export const TOOL_APPROVALS = Object.freeze(["ask", "run"] as const)
 
@@ -79,8 +65,6 @@ type ToolStoreState = {
   readonly list: ToolListState
   /** Whether agents may call tools at all; on until switched off. */
   readonly areToolCallsOn: boolean
-  /** Number of tool calls a reply may make before it has to answer. */
-  readonly callsPerReply: CallsPerReply
   /**
    * Choices the person changed, keyed by tool name. A tool without an entry
    * uses the default choice that {@link getToolChoice} returns.
@@ -106,12 +90,6 @@ type ToolStoreActions = {
    * @param areToolCallsOn - Whether agents may call tools.
    */
   updateToolCallsOn: (areToolCallsOn: boolean) => void
-  /**
-   * Replaces the number of tool calls a reply may make.
-   *
-   * @param callsPerReply - One of {@link CALLS_PER_REPLY_OPTIONS}.
-   */
-  updateCallsPerReply: (callsPerReply: CallsPerReply) => void
   /**
    * Switches one tool on or off, keeping its approval.
    *
@@ -192,8 +170,6 @@ export type BuildChatToolOfferInput = {
   readonly list: ToolListState
   /** Choices the person changed, keyed by tool name. */
   readonly toolChoices: ReadonlyMap<string, ToolChoice>
-  /** Calls the reply may make before it has to answer. */
-  readonly callsPerReply: CallsPerReply
 }
 
 /** Action that lets the person chat when the tool list cannot be read. */
@@ -212,8 +188,7 @@ const TOOL_LIST_RECOVERY_ACTION =
  */
 export function buildChatToolOffer({
   list,
-  toolChoices,
-  callsPerReply
+  toolChoices
 }: BuildChatToolOfferInput): ChatToolOfferResult {
   if (list.status !== "loaded") {
     const reason =
@@ -230,10 +205,7 @@ export function buildChatToolOffer({
   )
   if (definitions.length === 0) return NO_CHAT_TOOL_OFFER
 
-  const offer = Object.freeze({
-    definitions,
-    maxCalls: callsPerReply
-  } satisfies ChatToolOffer)
+  const offer = Object.freeze({ definitions } satisfies ChatToolOffer)
 
   return Object.freeze({ status: "offered", offer })
 }
@@ -368,11 +340,9 @@ function createToolStore(
     return {
       list: Object.freeze({ status: "idle" }),
       areToolCallsOn: true,
-      callsPerReply: DEFAULT_CALLS_PER_REPLY,
       toolChoices: new Map(),
       loadTools,
       updateToolCallsOn: (areToolCallsOn) => set({ areToolCallsOn }),
-      updateCallsPerReply: (callsPerReply) => set({ callsPerReply }),
       updateToolOn,
       updateToolApproval
     }
@@ -386,10 +356,10 @@ function createToolStore(
  * tool-call store.
  *
  * @remarks This singleton owns the list of client tools read from the desktop
- * and the person's choices: tool calls on or off, calls per reply, and each
- * tool's switch and approval. The chat view offers the switched-on tools to a
- * model trained for tool use, and the tool-call store applies each tool's
- * approval. The choices last for the session only; nothing is saved.
+ * and the person's choices: tool calls on or off and each tool's switch and
+ * approval. The chat view offers the switched-on tools to a model trained for
+ * tool use, and the tool-call store applies each tool's approval. The choices
+ * last for the session only; nothing is saved.
  */
 export const useToolStore: UseBoundStore<StoreApi<ToolStore>> = createToolStore(
   { listTools }

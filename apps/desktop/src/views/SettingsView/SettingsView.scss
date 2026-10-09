@@ -887,19 +887,16 @@
   );
 }
 
-/* Calls per reply and the tool groups recede while tool calls are off. */
-.settings-view__tool-calls-row[data-dimmed],
+/* The tool groups recede while tool calls are off. */
 .settings-view__tool-group[data-dimmed] {
   opacity: 0.45;
 }
 
-.settings-view__tool-calls-row,
 .settings-view__tool-group {
   transition: opacity var(--duration-enter) var(--ease-standard);
 }
 
-/* A setting inside a card or an expanded tool reads quieter than a heading. */
-.settings-view__tool-calls-row h3,
+/* A setting inside an expanded tool reads quieter than a heading. */
 .settings-view__tool-detail-row h3 {
   font-weight: 400;
   color: var(--app-text);

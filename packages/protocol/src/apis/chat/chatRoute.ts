@@ -50,9 +50,6 @@ const chatConversationTargetSchema = z.discriminatedUnion("kind", [
   })
 ])
 
-/** Most tool calls one reply may make; the reply then has to answer. */
-export const MAXIMUM_TOOL_CALLS_PER_REPLY = 16
-
 /**
  * Validates the client tools a chat request offers to the model.
  *
@@ -66,9 +63,7 @@ const chatToolOfferSchema = z.strictObject({
     .array(toolDefinitionSchema)
     .min(1)
     .refine(hasDistinctToolNames, "A request offers each tool name once.")
-    .readonly(),
-  /** Tool calls the reply may make before it has to answer, at most 16. */
-  maxCalls: z.number().int().min(1).max(MAXIMUM_TOOL_CALLS_PER_REPLY)
+    .readonly()
 })
 
 /** Client tools one chat request offers to the model. */

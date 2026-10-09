@@ -1,6 +1,5 @@
 export {
   MAXIMUM_GENERATION_TEMPERATURE,
-  MAXIMUM_TOOL_CALLS_PER_REPLY,
   chatApi,
   chatApiRequestBodySchema,
   chatApiStreamEventSchema,

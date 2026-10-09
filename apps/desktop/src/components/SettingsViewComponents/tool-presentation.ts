@@ -12,10 +12,8 @@ import {
 } from "@/components/ComposerComponents/composer-context"
 import type { ToolModelSupport } from "@/lib/models/tool-model-support"
 import {
-  CALLS_PER_REPLY_OPTIONS,
   TOOL_APPROVALS,
   getToolChoice,
-  type CallsPerReply,
   type ToolApproval,
   type ToolChoice
 } from "@/lib/store/tools"
@@ -288,21 +286,6 @@ export function formatToolApprovalNote(approval: ToolApproval): string {
     case "run":
       return "Runs the moment the model asks for it."
   }
-}
-
-/**
- * Finds the number of calls per reply a toggle group selected.
- *
- * @param groupValue - Pressed item values the toggle group reports.
- * @returns The selected number, or `undefined` when the group reports no
- * offered number, as when the pressed item is pressed again.
- */
-export function findCallsPerReply(
-  groupValue: readonly string[]
-): CallsPerReply | undefined {
-  return CALLS_PER_REPLY_OPTIONS.find((option) =>
-    groupValue.includes(String(option))
-  )
 }
 
 /**

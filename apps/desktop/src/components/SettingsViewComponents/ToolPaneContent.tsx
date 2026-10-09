@@ -156,10 +156,8 @@ type ToolWorkspaceProps = {
  */
 function ToolWorkspace({ tools }: ToolWorkspaceProps): ReactElement {
   const areToolCallsOn = useToolStore((state) => state.areToolCallsOn)
-  const callsPerReply = useToolStore((state) => state.callsPerReply)
   const toolChoices = useToolStore((state) => state.toolChoices)
   const updateToolCallsOn = useToolStore((state) => state.updateToolCallsOn)
-  const updateCallsPerReply = useToolStore((state) => state.updateCallsPerReply)
   const modelRuntime = useLysStore((state) => state.modelRuntime)
   const modelInventory = useLysStore((state) => state.modelInventory)
   const [expandedToolName, setExpandedToolName] = useState<string | null>(null)
@@ -178,10 +176,8 @@ function ToolWorkspace({ tools }: ToolWorkspaceProps): ReactElement {
         data-locked={isLocked ? "" : undefined}
       >
         <ToolCallsCard
-          callsPerReply={callsPerReply}
           isLocked={isLocked}
           onAreToolCallsOnChange={updateToolCallsOn}
-          onCallsPerReplyChange={updateCallsPerReply}
           summary={{
             areToolCallsOn,
             support,

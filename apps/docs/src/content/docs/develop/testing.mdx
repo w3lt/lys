@@ -52,8 +52,18 @@ contracts, schemas, or behavior that crosses package boundaries.
   `pnpm --filter @lys/backend test`, or rerun it on every change with
   `pnpm --filter @lys/backend run test:watch`. It needs no LM Studio server,
   network access, or `LYS_HOME`.
-- `apps/desktop` has a `vitest run` script, but no desktop test files are
-  currently tracked.
+- `apps/desktop/test/unit` contains a Vitest unit suite for the renderer's
+  `src/lib` and `src/app` code: the HTTP and Tauri API wrappers, the stores, and
+  their pure logic. Run it once with `pnpm --filter @lys/desktop test`, or rerun
+  it on every change with `pnpm --filter @lys/desktop run test:watch`.
+  `pnpm --filter @lys/desktop exec tsc` typechecks the renderer and the suite.
+  The suite needs no LM Studio server, running backend, Tauri runtime, or
+  personal settings: it substitutes the backend behind `fetch` and the native
+  host behind Tauri's `mockIPC`. Its
+  [coverage inventory](https://github.com/w3lt/lys/blob/main/apps/desktop/test/unit/COVERAGE.md)
+  lists what each test file covers and what it cannot prove.
+- The `Desktop unit tests` workflow runs that typecheck and the desktop suite on
+  every pull request and on every push to `main`.
 - The shared packages have no package-level test scripts or tracked test suites.
 - `apps/backend` also exposes a TypeScript validation path through
   `pnpm --filter @lys/backend exec tsc --noEmit`.
@@ -65,9 +75,14 @@ contracts, schemas, or behavior that crosses package boundaries.
 Backend coverage is unit-level only: the backend integration and end-to-end
 suites are tracked in [issue #44](https://github.com/w3lt/lys/issues/44) and
 [issue #45](https://github.com/w3lt/lys/issues/45), and no CI workflow runs the
-unit suite yet. Desktop and shared-package automated test coverage is currently
-absent. A command that exits successfully without executing tests does not
-establish coverage. If you are changing behavior, be explicit in your handoff
+backend unit suite yet. The desktop unit suite does not yet cover components,
+renderer hooks, or views; they are the next part of
+[issue #132](https://github.com/w3lt/lys/issues/132). Native Tauri tests and
+end-to-end desktop tests are tracked in
+[issue #133](https://github.com/w3lt/lys/issues/133) and
+[issue #134](https://github.com/w3lt/lys/issues/134). Shared-package automated
+test coverage is currently absent. A command that exits successfully without
+executing tests does not establish coverage. If you are changing behavior, be explicit in your handoff
 about which paths you verified and which still lack dedicated automation.
 
 <RelatedDocuments

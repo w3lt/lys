@@ -217,11 +217,13 @@ export function Composer({ messageFieldRef }: ComposerProps): ReactElement {
    * Stages files chosen through the hidden file input.
    *
    * @param event - Change event emitted by the file input.
+   * @remarks The chosen files are copied out of the event before staging,
+   * because React may run the state updater after this handler returns, when
+   * the event no longer has a current target and the input has been reset.
    */
   function handleFilesChosen(event: ChangeEvent<HTMLInputElement>): void {
-    setAttachments((staged) =>
-      stageComposerFiles(staged, Array.from(event.currentTarget.files ?? []))
-    )
+    const chosenFiles = Array.from(event.currentTarget.files ?? [])
+    setAttachments((staged) => stageComposerFiles(staged, chosenFiles))
     event.currentTarget.value = ""
   }
 
@@ -258,15 +260,17 @@ export function Composer({ messageFieldRef }: ComposerProps): ReactElement {
    * Stages files released over the composer field.
    *
    * @param event - Drop event carrying the released files.
+   * @remarks The released files are copied out of the event before staging,
+   * because React may run the state updater after this handler returns, when
+   * the browser no longer exposes the drag data.
    */
   function handleDrop(event: DragEvent<HTMLDivElement>): void {
     event.preventDefault()
     setIsDropping(false)
     if (isUnavailable) return
 
-    setAttachments((staged) =>
-      stageComposerFiles(staged, Array.from(event.dataTransfer.files))
-    )
+    const droppedFiles = Array.from(event.dataTransfer.files)
+    setAttachments((staged) => stageComposerFiles(staged, droppedFiles))
   }
 
   /**

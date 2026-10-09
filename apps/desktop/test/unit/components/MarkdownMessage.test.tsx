@@ -119,11 +119,17 @@ describe("MarkdownMessage", () => {
     expect(screen.getByRole("button", { name: "copied" })).toBe(copyButton)
   })
 
-  it("labels a code block without a language as Text", async () => {
-    await renderCodeBlock("```\nplain words\n```\n")
+  it("labels a code block without a language as Text and copies it without the final newline", async () => {
+    const writeText = installClipboard()
+    const { copyButton } = await renderCodeBlock("```\nplain words\n```\n")
 
     expect(screen.getByText("Text")).toBeInTheDocument()
     expect(screen.getByText("plain words")).toBeInTheDocument()
+
+    fireEvent.click(copyButton)
+    await waitForMicrotasks()
+
+    expect(writeText).toHaveBeenCalledExactlyOnceWith("plain words")
   })
 
   it("shows code in a language it cannot highlight as plain text", async () => {

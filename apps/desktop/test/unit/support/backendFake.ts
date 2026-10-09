@@ -216,7 +216,8 @@ export type BackendEventStream = Readonly<{
  *
  * @returns The response and the controls a case uses to write it.
  * @remarks The stream stays open until the case closes it or the client
- * cancels it.
+ * cancels it. Writes after the client cancelled are dropped, as a server's
+ * writes to a closed connection are.
  */
 export function startBackendEventStream(): BackendEventStream {
   const encoder = new TextEncoder()
@@ -233,7 +234,7 @@ export function startBackendEventStream(): BackendEventStream {
     }
   })
   const write = (text: string) => {
-    streamController.enqueue(encoder.encode(text))
+    if (!isStreamCancelled) streamController.enqueue(encoder.encode(text))
   }
   return Object.freeze({
     response: new Response(body, {
@@ -245,7 +246,7 @@ export function startBackendEventStream(): BackendEventStream {
     },
     sendText: write,
     close: () => {
-      streamController.close()
+      if (!isStreamCancelled) streamController.close()
     },
     isCancelled: () => isStreamCancelled
   })

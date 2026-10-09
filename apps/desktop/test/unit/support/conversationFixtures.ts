@@ -63,37 +63,106 @@ export function buildUserMessage(
   )
 }
 
-/** Lifecycle fields that distinguish assistant-message fixtures. */
-export type AssistantMessageFixtureState =
-  | Readonly<{ status: "completed"; finishReason: "stop" | "length" }>
-  | Readonly<{ status: "streaming" | "interrupted" | "failed" }>
+/** Fields every assistant-message fixture shares, by lifecycle. */
+type AssistantMessageFixture<
+  Status extends ConversationAssistantMessage["status"],
+  FinishReason extends ConversationAssistantMessage["finishReason"]
+> = Readonly<
+  Omit<ConversationAssistantMessage, "status" | "finishReason"> & {
+    /** Lifecycle state of the reply. */
+    status: Status
+    /** Model completion reason; set only for a completed reply. */
+    finishReason: FinishReason
+  }
+>
 
 /**
- * Builds a stored assistant message.
+ * Freezes an assistant-message fixture after the shared schema accepts it.
+ *
+ * @param message - Fixture whose literal type records its lifecycle.
+ * @returns The same fixture, frozen, keeping its precise type.
+ */
+function freezeAssistantMessage<T extends ConversationAssistantMessage>(
+  message: T
+): Readonly<T> {
+  conversationAssistantMessageSchema.parse(message)
+  return Object.freeze(message)
+}
+
+/**
+ * Builds the shared fields of an assistant message from {@link FIXTURE_MODEL}.
  *
  * @param sequence - Identity sequence of the message.
  * @param content - Stored reply text, possibly empty.
- * @param state - Lifecycle status and, for completed replies, finish reason.
- * @returns A frozen assistant message from {@link FIXTURE_MODEL}, validated by
- * the shared schema.
+ * @returns The fields that do not depend on the lifecycle.
  */
-export function buildAssistantMessage(
+function buildAssistantMessageBase(sequence: number, content: string) {
+  return {
+    id: createFixtureUuidV7(sequence),
+    role: "assistant" as const,
+    model: FIXTURE_MODEL,
+    content,
+    createdAt: FIXTURE_TIMESTAMP,
+    updatedAt: FIXTURE_TIMESTAMP
+  }
+}
+
+/**
+ * Builds an assistant message whose generation is still running.
+ *
+ * @param sequence - Identity sequence of the message.
+ * @param content - Reply text received so far, possibly empty.
+ * @returns A frozen streaming reply validated by the shared schema.
+ */
+export function buildStreamingAssistantMessage(
+  sequence: number,
+  content: string
+): AssistantMessageFixture<"streaming", null> {
+  return freezeAssistantMessage({
+    ...buildAssistantMessageBase(sequence, content),
+    status: "streaming" as const,
+    finishReason: null
+  })
+}
+
+/**
+ * Builds an assistant message the model completed.
+ *
+ * @param sequence - Identity sequence of the message.
+ * @param content - Complete reply text.
+ * @param finishReason - Reason the model stopped; defaults to `stop`.
+ * @returns A frozen completed reply validated by the shared schema.
+ */
+export function buildCompletedAssistantMessage(
   sequence: number,
   content: string,
-  state: AssistantMessageFixtureState
-): ConversationAssistantMessage {
-  return Object.freeze(
-    conversationAssistantMessageSchema.parse({
-      id: createFixtureUuidV7(sequence),
-      role: "assistant",
-      model: FIXTURE_MODEL,
-      content,
-      status: state.status,
-      finishReason: state.status === "completed" ? state.finishReason : null,
-      createdAt: FIXTURE_TIMESTAMP,
-      updatedAt: FIXTURE_TIMESTAMP
-    })
-  )
+  finishReason: "stop" | "length" = "stop"
+): AssistantMessageFixture<"completed", "stop" | "length"> {
+  return freezeAssistantMessage({
+    ...buildAssistantMessageBase(sequence, content),
+    status: "completed" as const,
+    finishReason
+  })
+}
+
+/**
+ * Builds an assistant message whose generation ended without completing.
+ *
+ * @param sequence - Identity sequence of the message.
+ * @param content - Reply text stored before it ended.
+ * @param status - Whether the reply was interrupted or failed.
+ * @returns A frozen ended reply validated by the shared schema.
+ */
+export function buildEndedAssistantMessage(
+  sequence: number,
+  content: string,
+  status: "interrupted" | "failed"
+): AssistantMessageFixture<"interrupted" | "failed", null> {
+  return freezeAssistantMessage({
+    ...buildAssistantMessageBase(sequence, content),
+    status,
+    finishReason: null
+  })
 }
 
 /**

@@ -12,7 +12,7 @@ import {
   type BackendEventStream
 } from "../../../support/backendFake"
 import {
-  buildAssistantMessage,
+  buildStreamingAssistantMessage,
   buildConversationMetadata,
   buildConversationNotFoundProblem,
   buildReplyNotFoundProblem,
@@ -50,7 +50,7 @@ const NEW_CONVERSATION_START_EVENT = Object.freeze({
   type: "start-new-conversation-turn",
   conversation: buildConversationMetadata(FIXTURE_CONVERSATION_ID, null),
   userMessage: buildUserMessage(2, "Hello"),
-  assistantMessage: buildAssistantMessage(3, "", { status: "streaming" })
+  assistantMessage: buildStreamingAssistantMessage(3, "")
 })
 
 /**
@@ -219,9 +219,7 @@ describe("readChatReplyEvents", () => {
       {
         type: "reply-snapshot",
         conversationTitle: null,
-        assistantMessage: buildAssistantMessage(3, "Hi", {
-          status: "streaming"
-        })
+        assistantMessage: buildStreamingAssistantMessage(3, "Hi")
       },
       { type: "delta", content: " there" },
       { type: "done", finishReason: "length" }

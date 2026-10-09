@@ -1,3 +1,5 @@
+import { vi } from "vitest"
+
 /** Settlement of a promise as seen by a case that does not await it. */
 export type SettlementState = "pending" | "fulfilled" | "rejected"
 
@@ -7,10 +9,14 @@ export type SettlementState = "pending" | "fulfilled" | "rejected"
  * @returns Settlement on the next macrotask turn, after the microtask queue,
  * including continuations queued while it drains, is empty.
  * @remarks A barrier only for promise-only work; it does not wait for I/O or
- * timers started by the code under test. Under fake timers, which also fake
- * this zero-delay timer, use `vi.advanceTimersByTimeAsync(0)` instead.
+ * for timers the code under test started with a delay. Under fake timers it
+ * advances the fake clock by zero, which runs only timers already due.
  */
 export async function waitForMicrotasks(): Promise<void> {
+  if (vi.isFakeTimers()) {
+    await vi.advanceTimersByTimeAsync(0)
+    return
+  }
   await new Promise<void>((resolve) => {
     setTimeout(resolve, 0)
   })

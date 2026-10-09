@@ -20,7 +20,7 @@ const ON_DISK = buildModelDescriptor(buildLlmInfo("gemma-3"))
  * @param props - Row facts the case varies.
  * @returns The action spies.
  */
-function renderModelRow(props: Partial<ComponentProps<typeof ModelRow>> = {}) {
+function startModelRow(props: Partial<ComponentProps<typeof ModelRow>> = {}) {
   const actions = {
     onSelect: vi.fn(),
     onLoad: vi.fn(() => Promise.resolve()),
@@ -44,7 +44,7 @@ function renderModelRow(props: Partial<ComponentProps<typeof ModelRow>> = {}) {
 
 describe("ModelRow", () => {
   it("makes the model the default without loading it", async () => {
-    const actions = renderModelRow()
+    const actions = startModelRow()
     const user = userEvent.setup()
 
     const choice = screen.getByRole("button", {
@@ -61,7 +61,7 @@ describe("ModelRow", () => {
   })
 
   it("marks the default model as pressed and labelled default", () => {
-    renderModelRow({ isDefault: true })
+    startModelRow({ isDefault: true })
 
     expect(
       screen.getByRole("button", { pressed: true, name: /^gemma-3default/ })
@@ -69,19 +69,19 @@ describe("ModelRow", () => {
   })
 
   it("loads a model on disk and unloads a resident one", async () => {
-    const onDisk = renderModelRow()
+    const onDisk = startModelRow()
     const user = userEvent.setup()
 
     await user.click(screen.getByRole("button", { name: "Load gemma-3" }))
     expect(onDisk.onLoad).toHaveBeenCalledExactlyOnceWith("gemma-3")
 
-    const resident = renderModelRow({ model: RESIDENT })
+    const resident = startModelRow({ model: RESIDENT })
     await user.click(screen.getByRole("button", { name: "Unload qwen3-8b" }))
     expect(resident.onUnload).toHaveBeenCalledExactlyOnceWith("qwen3-8b")
   })
 
   it("tests whether the model is loaded", async () => {
-    const actions = renderModelRow({ model: RESIDENT })
+    const actions = startModelRow({ model: RESIDENT })
     const user = userEvent.setup()
 
     await user.click(screen.getByRole("button", { name: "Test qwen3-8b" }))
@@ -96,7 +96,7 @@ describe("ModelRow", () => {
     "offers testing a %d-character key only when the health check accepts it",
     (keyLength, isTestable) => {
       const modelKey = "m".repeat(keyLength)
-      renderModelRow({ model: buildModelDescriptor(buildLlmInfo(modelKey)) })
+      startModelRow({ model: buildModelDescriptor(buildLlmInfo(modelKey)) })
 
       expect(
         screen.getByRole("button", { name: `Test ${modelKey}` })
@@ -105,7 +105,7 @@ describe("ModelRow", () => {
   )
 
   it("disables its actions, but not the default choice, while requests cannot be made", async () => {
-    const actions = renderModelRow({ disabled: true })
+    const actions = startModelRow({ disabled: true })
     const user = userEvent.setup()
 
     expect(screen.getByRole("button", { name: "Test gemma-3" })).toBeDisabled()

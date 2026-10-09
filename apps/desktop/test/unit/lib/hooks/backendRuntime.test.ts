@@ -66,7 +66,7 @@ async function loadFreshUptimeHook() {
  *
  * @param milliseconds - Time to advance.
  */
-function advanceClock(milliseconds: number): void {
+function updateFakeClock(milliseconds: number): void {
   act(() => {
     vi.advanceTimersByTime(milliseconds)
   })
@@ -101,13 +101,13 @@ describe("useBackendUptimeMs", () => {
     })
     const { result } = renderHook(() => useBackendUptimeMs())
 
-    advanceClock(999)
+    updateFakeClock(999)
     expect(result.current).toBe(5000)
 
-    advanceClock(1)
+    updateFakeClock(1)
     expect(result.current).toBe(6000)
 
-    advanceClock(2500)
+    updateFakeClock(2500)
     expect(result.current).toBe(8000)
   })
 
@@ -128,7 +128,7 @@ describe("useBackendUptimeMs", () => {
         stoppedAt: new Date(RENDERED_AT_MS + 500)
       }
     })
-    advanceClock(3000)
+    updateFakeClock(3000)
 
     expect(result.current).toBe(5500)
   })
@@ -137,7 +137,7 @@ describe("useBackendUptimeMs", () => {
     const { useBackendUptimeMs } = await loadFreshUptimeHook()
 
     const { result } = renderHook(() => useBackendUptimeMs())
-    advanceClock(2000)
+    updateFakeClock(2000)
 
     expect(result.current).toBe(0)
   })

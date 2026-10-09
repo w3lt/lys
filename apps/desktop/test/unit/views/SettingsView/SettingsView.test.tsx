@@ -44,7 +44,7 @@ function getRailTab(label: string, ordinal: string): HTMLElement {
 /**
  * Lets pending requests and store updates settle inside a React update scope.
  */
-async function settle(): Promise<void> {
+async function waitForRenderedWork(): Promise<void> {
   await act(async () => {
     await waitForMicrotasks()
   })
@@ -73,7 +73,7 @@ describe("SettingsView", () => {
     expect(
       screen.getByRole("heading", { level: 1, name: "Generation" })
     ).toBeInTheDocument()
-    await settle()
+    await waitForRenderedWork()
   })
 
   it("keeps the heading and Done while a pane loads, then shows it with its closing note", async () => {
@@ -106,7 +106,7 @@ describe("SettingsView", () => {
     expect(
       screen.getByRole("heading", { level: 1, name: "Model" })
     ).toBeInTheDocument()
-    await settle()
+    await waitForRenderedWork()
   })
 
   it("moves through the rail with the arrow keys and selects with Enter", async () => {
@@ -120,7 +120,7 @@ describe("SettingsView", () => {
 
     expect(getRailTab("Generation", "03")).toHaveFocus()
     expect(useLysStore.getState().settingsPane).toBe("generation")
-    await settle()
+    await waitForRenderedWork()
   })
 
   it("leaves once per press of Done", async () => {
@@ -133,7 +133,7 @@ describe("SettingsView", () => {
     await user.click(screen.getByRole("button", { name: "Done" }))
 
     expect(onDone).toHaveBeenCalledOnce()
-    await settle()
+    await waitForRenderedWork()
   })
 
   it.each<
@@ -229,7 +229,7 @@ describe("SettingsView", () => {
       expect(
         screen.getByRole("tablist", { name: "Settings sections" })
       ).toHaveTextContent(new RegExp(`${summary}$`))
-      await settle()
+      await waitForRenderedWork()
     }
   )
 
@@ -240,7 +240,7 @@ describe("SettingsView", () => {
     const { SettingsView } = await loadFreshSettingsView("generation")
 
     render(<SettingsView onDone={vi.fn()} />)
-    await settle()
+    await waitForRenderedWork()
 
     expect(backend.requests.map((request) => request.method)).toEqual(["GET"])
     expect(new URL(backend.requests[0]?.url ?? "").pathname).toBe(
@@ -256,7 +256,7 @@ describe("SettingsView", () => {
     )
 
     render(<SettingsView onDone={vi.fn()} />)
-    await settle()
+    await waitForRenderedWork()
 
     expect(backend.requests).toEqual([])
   })

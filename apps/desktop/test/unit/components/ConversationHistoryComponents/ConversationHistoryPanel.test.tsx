@@ -94,7 +94,7 @@ type HistoryPanelModules = Awaited<ReturnType<typeof loadFreshHistoryPanel>>
  * @returns Spies for opening and starting a conversation; both close history,
  * as the chat view does around them.
  */
-function renderHistoryParent(modules: HistoryPanelModules, isStrict = false) {
+function startHistoryParent(modules: HistoryPanelModules, isStrict = false) {
   const { useConversationHistoryStore, ConversationHistoryPanel } = modules
   const onOpenConversation = vi.fn<(conversationId: string) => void>(() => {
     useConversationHistoryStore.getState().closeConversationHistory()
@@ -169,7 +169,7 @@ async function openHistoryPanel(
     ...routes
   })
   const modules = await loadFreshHistoryPanel()
-  const parent = renderHistoryParent(modules)
+  const parent = startHistoryParent(modules)
   await openHistoryFromOpener(modules)
   return { ...modules, ...parent, backend }
 }
@@ -177,7 +177,7 @@ async function openHistoryPanel(
 /**
  * Lets pending requests and store updates settle inside a React update scope.
  */
-async function settle(): Promise<void> {
+async function waitForRenderedWork(): Promise<void> {
   await act(async () => {
     await waitForMicrotasks()
   })
@@ -237,7 +237,7 @@ describe("ConversationHistoryPanel", () => {
     it("returns focus to its opener after StrictMode replays its effects", async () => {
       startBackendFake({ [LIST_ROUTE]: buildSearchingListRoute([TRIP]) })
       const modules = await loadFreshHistoryPanel()
-      renderHistoryParent(modules, true)
+      startHistoryParent(modules, true)
       await openHistoryFromOpener(modules)
       const user = userEvent.setup()
 
@@ -320,7 +320,7 @@ describe("ConversationHistoryPanel", () => {
       const user = userEvent.setup()
 
       await user.type(getSearchBox(), "rec{Enter}")
-      await settle()
+      await waitForRenderedWork()
 
       expect(onOpenConversation).toHaveBeenCalledExactlyOnceWith(RECIPE.id)
       expect(
@@ -336,7 +336,7 @@ describe("ConversationHistoryPanel", () => {
       const user = userEvent.setup()
 
       await user.type(getSearchBox(), "zebra{Enter}")
-      await settle()
+      await waitForRenderedWork()
 
       expect(onOpenConversation).not.toHaveBeenCalled()
       expect(screen.getByText("Nothing matches that.")).toBeInTheDocument()
@@ -361,7 +361,7 @@ describe("ConversationHistoryPanel", () => {
       const field = screen.getByRole("textbox", { name: "rename conversation" })
       await user.clear(field)
       await user.type(field, "Tour{Enter}")
-      await settle()
+      await waitForRenderedWork()
 
       expect(backend.requests.at(-1)?.body).toEqual({ title: "Tour" })
       expect(getOpenButton("Tour")).toHaveFocus()
@@ -381,7 +381,7 @@ describe("ConversationHistoryPanel", () => {
         screen.getByText("Deleting cannot be undone · ESC keeps it")
       ).toBeInTheDocument()
       await user.click(screen.getByRole("button", { name: "Delete" }))
-      await settle()
+      await waitForRenderedWork()
 
       expect(screen.queryByRole("button", { name: /^Trip/ })).toBeNull()
       expect(getOpenButton("Recipe")).toHaveFocus()
@@ -398,7 +398,7 @@ describe("ConversationHistoryPanel", () => {
         screen.getByRole("textbox", { name: "rename conversation" }),
         "!{Enter}"
       )
-      await settle()
+      await waitForRenderedWork()
 
       expect(screen.getByText(/^Renaming/)).toHaveAttribute("role", "status")
     })

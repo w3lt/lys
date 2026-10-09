@@ -30,7 +30,7 @@ const RESEARCHER = buildAgent("researcher", {
  * @param options - Backend options; the inventory read is always answered.
  * @returns The agent backend.
  */
-async function renderAgentPane(options: AgentBackendOptions = {}) {
+async function startAgentPane(options: AgentBackendOptions = {}) {
   const agentBackend = startAgentBackend([RESEARCHER], {
     ...options,
     routes: { [INVENTORY_ROUTE]: buildInventoryRoute(), ...options.routes }
@@ -38,14 +38,14 @@ async function renderAgentPane(options: AgentBackendOptions = {}) {
   const { SettingsView } = await loadFreshSettingsView("agents")
   render(<SettingsView onDone={vi.fn()} />)
   await screen.findByText(/^Saved by the backend in Lys's database/)
-  await settle()
+  await waitForRenderedWork()
   return agentBackend
 }
 
 /**
  * Lets pending requests and store updates settle inside a React update scope.
  */
-async function settle(): Promise<void> {
+async function waitForRenderedWork(): Promise<void> {
   await act(async () => {
     await waitForMicrotasks()
   })
@@ -76,7 +76,7 @@ async function openResearcherEditor(
   await user.click(
     screen.getByRole("button", { name: "Researcher researcher" })
   )
-  await settle()
+  await waitForRenderedWork()
   return screen.getByRole("form", { name: "Researcher" })
 }
 
@@ -96,7 +96,7 @@ function getField(label: "name" | "code" | "bio" | "system prompt") {
  * @param user - User-event session of the case.
  * @param fields - Text typed into each field.
  */
-async function fillNewAgent(
+async function updateNewAgentFields(
   user: ReturnType<typeof userEvent.setup>,
   fields: {
     readonly name: string
@@ -112,7 +112,7 @@ async function fillNewAgent(
 describe("AgentEditor", () => {
   describe("a new agent", () => {
     it("starts on the name field of an empty form whose code is assigned on save", async () => {
-      await renderAgentPane()
+      await startAgentPane()
       const user = userEvent.setup()
 
       const form = await openNewAgentEditor(user)
@@ -133,7 +133,7 @@ describe("AgentEditor", () => {
     })
 
     it("marks a started draft unsaved, measures its name, and offers the name's code form", async () => {
-      await renderAgentPane()
+      await startAgentPane()
       const user = userEvent.setup()
       const form = await openNewAgentEditor(user)
 
@@ -156,7 +156,7 @@ describe("AgentEditor", () => {
     })
 
     it("refuses to create a draft with a problem, explaining it at the field and focusing it", async () => {
-      const { backend } = await renderAgentPane()
+      const { backend } = await startAgentPane()
       const user = userEvent.setup()
       await openNewAgentEditor(user)
       await user.type(getField("name"), "Reviewer")
@@ -177,10 +177,10 @@ describe("AgentEditor", () => {
     })
 
     it("refuses a name another agent already has", async () => {
-      await renderAgentPane()
+      await startAgentPane()
       const user = userEvent.setup()
       await openNewAgentEditor(user)
-      await fillNewAgent(user, {
+      await updateNewAgentFields(user, {
         name: "researcher",
         bio: "Another one.",
         prompt: "You research."
@@ -197,10 +197,10 @@ describe("AgentEditor", () => {
     })
 
     it("creates the agent and returns to the list with its row focused and marked saved", async () => {
-      const { backend } = await renderAgentPane({ createdCodes: ["reviewer"] })
+      const { backend } = await startAgentPane({ createdCodes: ["reviewer"] })
       const user = userEvent.setup()
       await openNewAgentEditor(user)
-      await fillNewAgent(user, {
+      await updateNewAgentFields(user, {
         name: " Reviewer ",
         bio: "Reads diffs.",
         prompt: "You review code."
@@ -208,7 +208,7 @@ describe("AgentEditor", () => {
       await user.type(getField("code"), "reviewer")
 
       await user.click(screen.getByRole("button", { name: "Create" }))
-      await settle()
+      await waitForRenderedWork()
 
       expect(
         backend.requests.find((request) => request.method === "POST")?.body
@@ -224,17 +224,17 @@ describe("AgentEditor", () => {
     })
 
     it("lets the backend derive the code when none is typed", async () => {
-      const { backend } = await renderAgentPane({ derivedCode: "reviewer" })
+      const { backend } = await startAgentPane({ derivedCode: "reviewer" })
       const user = userEvent.setup()
       await openNewAgentEditor(user)
-      await fillNewAgent(user, {
+      await updateNewAgentFields(user, {
         name: "Reviewer",
         bio: "Reads diffs.",
         prompt: "You review code."
       })
 
       await user.click(screen.getByRole("button", { name: "Create" }))
-      await settle()
+      await waitForRenderedWork()
 
       expect(
         backend.requests.find((request) => request.method === "POST")?.body
@@ -250,12 +250,12 @@ describe("AgentEditor", () => {
     ])(
       "creates with %s+Enter from the system prompt",
       async (_key, modifier) => {
-        const { backend } = await renderAgentPane({
+        const { backend } = await startAgentPane({
           createdCodes: ["reviewer"]
         })
         const user = userEvent.setup()
         await openNewAgentEditor(user)
-        await fillNewAgent(user, {
+        await updateNewAgentFields(user, {
           name: "Reviewer",
           bio: "Reads diffs.",
           prompt: "You review code."
@@ -266,7 +266,7 @@ describe("AgentEditor", () => {
           key: "Enter",
           ...modifier
         })
-        await settle()
+        await waitForRenderedWork()
 
         expect(
           backend.requests.filter((request) => request.method === "POST")
@@ -275,7 +275,7 @@ describe("AgentEditor", () => {
     )
 
     it("discards the draft on Escape without a request", async () => {
-      const { backend } = await renderAgentPane()
+      const { backend } = await startAgentPane()
       const user = userEvent.setup()
       await openNewAgentEditor(user)
       await user.type(getField("name"), "Reviewer")
@@ -292,7 +292,7 @@ describe("AgentEditor", () => {
 
   describe("a stored agent", () => {
     it("shows the stored fields, without a code field, and saves nothing until changed", async () => {
-      await renderAgentPane()
+      await startAgentPane()
       const user = userEvent.setup()
 
       const form = await openResearcherEditor(user)
@@ -306,12 +306,12 @@ describe("AgentEditor", () => {
     })
 
     it("ignores the save shortcut while nothing changed", async () => {
-      const { backend } = await renderAgentPane()
+      const { backend } = await startAgentPane()
       const user = userEvent.setup()
       await openResearcherEditor(user)
 
       fireEvent.keyDown(getField("bio"), { key: "Enter", metaKey: true })
-      await settle()
+      await waitForRenderedWork()
 
       expect(
         backend.requests.filter((request) => request.method === "PATCH")
@@ -322,7 +322,7 @@ describe("AgentEditor", () => {
     })
 
     it("measures the system prompt as an estimate of the context window", async () => {
-      await renderAgentPane()
+      await startAgentPane()
       const user = userEvent.setup()
       await openResearcherEditor(user)
 
@@ -332,7 +332,7 @@ describe("AgentEditor", () => {
     })
 
     it("saves a changed field and returns to the list with the row focused", async () => {
-      const { backend } = await renderAgentPane()
+      const { backend } = await startAgentPane()
       const user = userEvent.setup()
       const form = await openResearcherEditor(user)
 
@@ -340,7 +340,7 @@ describe("AgentEditor", () => {
       await user.type(getField("bio"), "Finds and checks sources.")
       expect(form).toHaveTextContent(/^.*unsavedyours/)
       await user.click(within(form).getByRole("button", { name: "Save" }))
-      await settle()
+      await waitForRenderedWork()
 
       expect(
         backend.requests.find((request) => request.method === "PATCH")?.body
@@ -352,7 +352,7 @@ describe("AgentEditor", () => {
 
     it("locks the editor while a save is pending", async () => {
       const save = createControlledPromise<Response>()
-      await renderAgentPane({
+      await startAgentPane({
         routes: { "PATCH /api/v1/agents/researcher": () => save.promise }
       })
       const user = userEvent.setup()
@@ -360,7 +360,7 @@ describe("AgentEditor", () => {
       await user.type(getField("bio"), "!")
 
       await user.click(within(form).getByRole("button", { name: "Save" }))
-      await settle()
+      await waitForRenderedWork()
 
       expect(within(form).getByText("Saving…")).toHaveAttribute(
         "role",
@@ -391,11 +391,11 @@ describe("AgentEditor", () => {
           })
         )
       )
-      await settle()
+      await waitForRenderedWork()
     })
 
     it("alerts a failed save and keeps the draft editable", async () => {
-      await renderAgentPane({
+      await startAgentPane({
         routes: {
           "PATCH /api/v1/agents/researcher": () =>
             new Response(null, { status: 500 })
@@ -406,7 +406,7 @@ describe("AgentEditor", () => {
       await user.type(getField("bio"), "!")
 
       await user.click(within(form).getByRole("button", { name: "Save" }))
-      await settle()
+      await waitForRenderedWork()
 
       expect(within(form).getByRole("alert")).not.toBeEmptyDOMElement()
       expect(getField("bio")).not.toHaveAttribute("readonly")
@@ -414,7 +414,7 @@ describe("AgentEditor", () => {
     })
 
     it("asks before deleting, starting on Keep, and keeps the agent on Escape", async () => {
-      await renderAgentPane()
+      await startAgentPane()
       const user = userEvent.setup()
       const form = await openResearcherEditor(user)
 
@@ -434,7 +434,7 @@ describe("AgentEditor", () => {
     })
 
     it("deletes the agent and returns to the list with New agent focused", async () => {
-      const { listStoredAgents } = await renderAgentPane()
+      const { listStoredAgents } = await startAgentPane()
       const user = userEvent.setup()
       const form = await openResearcherEditor(user)
       await user.click(within(form).getByRole("button", { name: "Delete" }))
@@ -444,7 +444,7 @@ describe("AgentEditor", () => {
           within(form).getByRole("group", { name: "Delete for good?" })
         ).getByRole("button", { name: "Delete" })
       )
-      await settle()
+      await waitForRenderedWork()
 
       expect(listStoredAgents()).toEqual([])
       expect(screen.queryByRole("button", { name: /^Researcher/ })).toBeNull()
@@ -452,14 +452,14 @@ describe("AgentEditor", () => {
     })
 
     it("focuses the created copy, not the agent it was copied from, back in the list", async () => {
-      await renderAgentPane({ createdCodes: ["researcher-copy"] })
+      await startAgentPane({ createdCodes: ["researcher-copy"] })
       const user = userEvent.setup()
       const form = await openResearcherEditor(user)
       await user.click(within(form).getByRole("button", { name: "Duplicate" }))
 
       await user.type(getField("code"), "researcher-copy")
       await user.click(screen.getByRole("button", { name: "Create" }))
-      await settle()
+      await waitForRenderedWork()
 
       expect(
         screen.getByRole("button", { name: "Researcher copy researcher-copy" })
@@ -467,7 +467,7 @@ describe("AgentEditor", () => {
     })
 
     it("opens a copy as a new agent under another name", async () => {
-      await renderAgentPane()
+      await startAgentPane()
       const user = userEvent.setup()
       const form = await openResearcherEditor(user)
 

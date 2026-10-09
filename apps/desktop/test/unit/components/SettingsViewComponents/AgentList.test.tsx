@@ -25,7 +25,7 @@ const AGENTS = [
  * @param options - Agents, saved marker, and focus target the case varies.
  * @returns The action spies.
  */
-function renderAgentSection(
+function startAgentSection(
   options: {
     readonly agents?: typeof AGENTS
     readonly savedAgentCode?: string | null
@@ -48,7 +48,7 @@ function renderAgentSection(
 
 describe("CustomAgentSection", () => {
   it("lists the agents in order, each named by name and code and described by its bio", () => {
-    renderAgentSection()
+    startAgentSection()
 
     const section = screen.getByRole("region", { name: "yours" })
     expect(section).toHaveTextContent("2 saved · deletable")
@@ -64,7 +64,7 @@ describe("CustomAgentSection", () => {
   })
 
   it("marks the agent saved most recently in its description", () => {
-    renderAgentSection({ savedAgentCode: "writer" })
+    startAgentSection({ savedAgentCode: "writer" })
 
     expect(
       screen.getByRole("button", { name: "Writer writer" })
@@ -75,7 +75,7 @@ describe("CustomAgentSection", () => {
   })
 
   it("opens the pressed agent and starts a new one", async () => {
-    const { onOpenAgent, onOpenNewAgent } = renderAgentSection()
+    const { onOpenAgent, onOpenNewAgent } = startAgentSection()
     const user = userEvent.setup()
 
     await user.click(screen.getByRole("button", { name: "Writer writer" }))
@@ -86,7 +86,7 @@ describe("CustomAgentSection", () => {
   })
 
   it("says there are none yet instead of an empty list", () => {
-    renderAgentSection({ agents: [] })
+    startAgentSection({ agents: [] })
 
     expect(
       screen.getByText("None of your own yet. Start one with New agent.")
@@ -101,13 +101,13 @@ describe("CustomAgentSection", () => {
     [{ kind: "agent", agentCode: "writer" }, "Writer writer"],
     [{ kind: "new-agent" }, "New agent"]
   ])("focuses the target %o when it appears", (focusTarget, focusedName) => {
-    renderAgentSection({ focusTarget })
+    startAgentSection({ focusTarget })
 
     expect(screen.getByRole("button", { name: focusedName })).toHaveFocus()
   })
 
   it("leaves focus alone without a target", () => {
-    renderAgentSection()
+    startAgentSection()
 
     expect(document.body).toHaveFocus()
   })
@@ -120,7 +120,7 @@ describe("CustomAgentSection", () => {
  * @param onRetryAgents - Retry the status offers, if any.
  * @returns A function that removes the focused button and shows a message.
  */
-function renderStatusBesideRemovableControl(onRetryAgents?: () => void) {
+function startStatusBesideRemovableControl(onRetryAgents?: () => void) {
   let showFailure: () => void = () => undefined
 
   /**
@@ -158,7 +158,7 @@ describe("AgentListStatus", () => {
   })
 
   it("moves focus to Retry when a failure replaces the focused control", () => {
-    const showFailure = renderStatusBesideRemovableControl(vi.fn())
+    const showFailure = startStatusBesideRemovableControl(vi.fn())
     screen.getByRole("button", { name: "Agent row" }).focus()
 
     showFailure()
@@ -170,7 +170,7 @@ describe("AgentListStatus", () => {
   })
 
   it("moves focus to the message when no retry is offered", () => {
-    const showFailure = renderStatusBesideRemovableControl()
+    const showFailure = startStatusBesideRemovableControl()
     screen.getByRole("button", { name: "Agent row" }).focus()
 
     showFailure()

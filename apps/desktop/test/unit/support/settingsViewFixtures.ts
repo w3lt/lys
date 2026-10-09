@@ -3,7 +3,7 @@ import { vi } from "vitest"
 import type { SettingsPane } from "@/app/types"
 import { buildJsonResponse, type BackendRoute } from "./backendFake"
 import {
-  arrangeRuntime,
+  updateStoreRuntime,
   READY_RUNTIME,
   type RuntimeArrangement
 } from "./runtimeFixtures"
@@ -46,7 +46,7 @@ export async function loadFreshSettingsView(
   const { useLysStore } = await import("@/lib/store")
   const { default: SettingsView } =
     await import("@/views/SettingsView/SettingsView")
-  arrangeRuntime(useLysStore, runtime)
+  updateStoreRuntime(useLysStore, runtime)
   useLysStore.setState({ settingsPane: pane })
   return { useLysStore, SettingsView }
 }

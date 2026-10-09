@@ -19,7 +19,7 @@ const OFFERING: ToolCallsSummary = {
  * @param props - Card facts the case varies.
  * @returns The proposal spies.
  */
-function renderToolCallsCard(
+function startToolCallsCard(
   props: Partial<ComponentProps<typeof ToolCallsCard>> = {}
 ) {
   const proposals = {
@@ -49,7 +49,7 @@ function getCallsPerReplyGroup(): HTMLElement {
 
 describe("ToolCallsCard", () => {
   it("names the switch Tool calls and describes it with what agents are offered", () => {
-    renderToolCallsCard()
+    startToolCallsCard()
 
     expect(
       screen.getByRole("region", { name: "Tool calls on" })
@@ -62,7 +62,7 @@ describe("ToolCallsCard", () => {
   })
 
   it("names the card after the switch when tool calls are off", () => {
-    renderToolCallsCard({ summary: { ...OFFERING, areToolCallsOn: false } })
+    startToolCallsCard({ summary: { ...OFFERING, areToolCallsOn: false } })
 
     expect(
       screen.getByRole("region", { name: "Tool calls off" })
@@ -71,7 +71,7 @@ describe("ToolCallsCard", () => {
   })
 
   it("proposes switching tool calls off", async () => {
-    const { onAreToolCallsOnChange } = renderToolCallsCard()
+    const { onAreToolCallsOnChange } = startToolCallsCard()
     const user = userEvent.setup()
 
     await user.click(screen.getByRole("switch", { name: "Tool calls" }))
@@ -80,7 +80,7 @@ describe("ToolCallsCard", () => {
   })
 
   it("offers 4, 8, or 16 calls per reply, pressing the current number", () => {
-    renderToolCallsCard({ callsPerReply: 16 })
+    startToolCallsCard({ callsPerReply: 16 })
 
     const group = getCallsPerReplyGroup()
     expect(group).toHaveAccessibleDescription(
@@ -101,7 +101,7 @@ describe("ToolCallsCard", () => {
   })
 
   it("proposes another number, and nothing when the current one is pressed again", async () => {
-    const { onCallsPerReplyChange } = renderToolCallsCard()
+    const { onCallsPerReplyChange } = startToolCallsCard()
     const user = userEvent.setup()
     const group = getCallsPerReplyGroup()
 
@@ -112,7 +112,7 @@ describe("ToolCallsCard", () => {
   })
 
   it("keeps calls per reply operable while tool calls are off", async () => {
-    const { onCallsPerReplyChange } = renderToolCallsCard({
+    const { onCallsPerReplyChange } = startToolCallsCard({
       summary: { ...OFFERING, areToolCallsOn: false }
     })
     const user = userEvent.setup()
@@ -125,7 +125,7 @@ describe("ToolCallsCard", () => {
   })
 
   it("disables both controls while locked", async () => {
-    const proposals = renderToolCallsCard({
+    const proposals = startToolCallsCard({
       isLocked: true,
       summary: {
         ...OFFERING,

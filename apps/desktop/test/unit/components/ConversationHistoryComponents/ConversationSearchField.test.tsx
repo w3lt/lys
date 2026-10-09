@@ -12,7 +12,7 @@ import ConversationSearchField from "@/components/ConversationHistoryComponents/
  * @param query - Search text owned by the parent.
  * @returns The field's callbacks, the container's key spy, and the input ref.
  */
-function renderSearchField(query: string) {
+function startSearchField(query: string) {
   const callbacks = {
     onQueryChange: vi.fn(),
     onOpenFirstConversation: vi.fn(),
@@ -47,7 +47,7 @@ function getSearchBox(): HTMLElement {
 
 describe("ConversationSearchField", () => {
   it("is a labelled, bounded search box described by the panel hint", () => {
-    const { searchFieldRef } = renderSearchField("lys")
+    const { searchFieldRef } = startSearchField("lys")
 
     const searchBox = getSearchBox()
     expect(searchBox).toHaveValue("lys")
@@ -60,7 +60,7 @@ describe("ConversationSearchField", () => {
   })
 
   it("proposes the text exactly as typed", async () => {
-    const { onQueryChange } = renderSearchField("")
+    const { onQueryChange } = startSearchField("")
     const user = userEvent.setup()
 
     await user.type(getSearchBox(), "L")
@@ -70,7 +70,7 @@ describe("ConversationSearchField", () => {
 
   it("moves to the first result on Arrow Down and opens it on Enter", () => {
     const { onFocusFirstConversation, onOpenFirstConversation } =
-      renderSearchField("lys")
+      startSearchField("lys")
 
     fireEvent.keyDown(getSearchBox(), { key: "ArrowDown" })
     fireEvent.keyDown(getSearchBox(), { key: "Enter" })
@@ -81,7 +81,7 @@ describe("ConversationSearchField", () => {
 
   it("ignores Arrow Down and Enter while an input method composes text", () => {
     const { onFocusFirstConversation, onOpenFirstConversation } =
-      renderSearchField("ly")
+      startSearchField("ly")
 
     fireEvent.keyDown(getSearchBox(), { key: "ArrowDown", isComposing: true })
     fireEvent.keyDown(getSearchBox(), { key: "Enter", isComposing: true })
@@ -92,7 +92,7 @@ describe("ConversationSearchField", () => {
 
   it("clears typed text on Escape without closing history or reaching the panel", () => {
     const { onQueryChange, onCloseConversationHistory, onPanelKeyDown } =
-      renderSearchField("lys")
+      startSearchField("lys")
 
     fireEvent.keyDown(getSearchBox(), { key: "Escape" })
 
@@ -103,7 +103,7 @@ describe("ConversationSearchField", () => {
 
   it("closes history on Escape once the search is empty, without reaching the panel", () => {
     const { onQueryChange, onCloseConversationHistory, onPanelKeyDown } =
-      renderSearchField("")
+      startSearchField("")
 
     fireEvent.keyDown(getSearchBox(), { key: "Escape" })
 
@@ -113,7 +113,7 @@ describe("ConversationSearchField", () => {
   })
 
   it("offers clearing only while there is text, and keeps focus in the field", async () => {
-    const { onQueryChange } = renderSearchField("lys")
+    const { onQueryChange } = startSearchField("lys")
     const user = userEvent.setup()
 
     await user.click(screen.getByRole("button", { name: "Clear search" }))
@@ -123,7 +123,7 @@ describe("ConversationSearchField", () => {
   })
 
   it("shows no clear button for an empty search", () => {
-    renderSearchField("")
+    startSearchField("")
 
     expect(
       screen.queryByRole("button", { name: "Clear search" })
@@ -131,7 +131,7 @@ describe("ConversationSearchField", () => {
   })
 
   it("announces the result count politely", () => {
-    renderSearchField("lys")
+    startSearchField("lys")
 
     const count = screen.getByRole("status")
     expect(count).toHaveTextContent("3 of 12")

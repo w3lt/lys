@@ -63,7 +63,7 @@ export function buildUnreachableRuntime(
  * default model with the store's own projection, so the arranged state is
  * one the store could reach. Every other field keeps its initial value.
  */
-export function arrangeRuntime(
+export function updateStoreRuntime(
   store: typeof useLysStore,
   runtime: RuntimeArrangement
 ): void {

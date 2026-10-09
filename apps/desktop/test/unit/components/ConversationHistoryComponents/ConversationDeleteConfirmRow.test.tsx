@@ -9,7 +9,7 @@ import ConversationDeleteConfirmRow from "@/components/ConversationHistoryCompon
  *
  * @returns The two outcomes' spies and the container's key spy.
  */
-function renderDeleteConfirmRow() {
+function startDeleteConfirmRow() {
   const onConfirmDelete = vi.fn()
   const onCancelDelete = vi.fn()
   const onPanelKeyDown = vi.fn()
@@ -29,7 +29,7 @@ function renderDeleteConfirmRow() {
 
 describe("ConversationDeleteConfirmRow", () => {
   it("asks in a named group and starts on Keep", () => {
-    renderDeleteConfirmRow()
+    startDeleteConfirmRow()
 
     const prompt = screen.getByRole("group", {
       name: "Delete Streaming pipeline for good?"
@@ -39,7 +39,7 @@ describe("ConversationDeleteConfirmRow", () => {
   })
 
   it("keeps the conversation on Keep", async () => {
-    const { onCancelDelete, onConfirmDelete } = renderDeleteConfirmRow()
+    const { onCancelDelete, onConfirmDelete } = startDeleteConfirmRow()
     const user = userEvent.setup()
 
     await user.click(screen.getByRole("button", { name: "Keep" }))
@@ -49,7 +49,7 @@ describe("ConversationDeleteConfirmRow", () => {
   })
 
   it("deletes once per press of Delete", async () => {
-    const { onCancelDelete, onConfirmDelete } = renderDeleteConfirmRow()
+    const { onCancelDelete, onConfirmDelete } = startDeleteConfirmRow()
     const user = userEvent.setup()
 
     await user.click(screen.getByRole("button", { name: "Delete" }))
@@ -62,7 +62,7 @@ describe("ConversationDeleteConfirmRow", () => {
     "keeps the conversation on Escape from %s without the key reaching the panel",
     (choice) => {
       const { onCancelDelete, onConfirmDelete, onPanelKeyDown } =
-        renderDeleteConfirmRow()
+        startDeleteConfirmRow()
 
       fireEvent.keyDown(screen.getByRole("button", { name: choice }), {
         key: "Escape"

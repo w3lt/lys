@@ -14,24 +14,31 @@ import { waitForMicrotasks } from "../../support/settlement"
 
 /**
  * Starts a native host that keeps the settings document it is given and
- * records every save.
+ * records every successful save.
  *
  * @param save - Result of each save; throwing fails it.
- * @returns The saved documents' generation groups, in order.
+ * @returns The arguments of each successful save, in order.
  */
 function startSettingsHost(save: () => void = () => undefined) {
-  const savedGenerations: GenerationSettings[] = []
+  const saves: unknown[] = []
   startNativeHostFake({
     load_settings: () => initialSettingsState,
     save_settings: (args) => {
       save()
-      const { newSettings } = args as {
-        readonly newSettings: { readonly generation: GenerationSettings }
-      }
-      savedGenerations.push(newSettings.generation)
+      saves.push(args)
     }
   })
-  return savedGenerations
+  return saves
+}
+
+/**
+ * Builds the matcher of a save that wrote one generation group.
+ *
+ * @param generation - Generation settings the save must hold.
+ * @returns The expected save arguments, other groups unconstrained.
+ */
+function buildGenerationSave(generation: GenerationSettings) {
+  return { newSettings: expect.objectContaining({ generation }) }
 }
 
 /**
@@ -40,7 +47,7 @@ function startSettingsHost(save: () => void = () => undefined) {
  * @param generation - Generation settings in effect.
  * @returns The application store.
  */
-async function renderGenerationPane(
+async function startGenerationPane(
   generation: GenerationSettings = initialSettingsState.generation
 ) {
   startBackendFake({ [INVENTORY_ROUTE]: buildInventoryRoute() })
@@ -50,14 +57,14 @@ async function renderGenerationPane(
   useLysStore.setState({ settings: { ...settings, generation } })
   render(<SettingsView onDone={vi.fn()} />)
   await screen.findByRole("switch", { name: "Reply ceiling" })
-  await settle()
+  await waitForRenderedWork()
   return useLysStore
 }
 
 /**
  * Lets pending commands and store updates settle inside a React update scope.
  */
-async function settle(): Promise<void> {
+async function waitForRenderedWork(): Promise<void> {
   await act(async () => {
     await waitForMicrotasks()
   })
@@ -77,7 +84,7 @@ function getSlider(name: string): HTMLElement {
 
 describe("GenerationPaneContent", () => {
   it("shows the temperature on a named slider with its value to two decimals", async () => {
-    await renderGenerationPane()
+    await startGenerationPane()
 
     const temperature = getSlider("Temperature")
     expect(temperature).toHaveValue("0.7")
@@ -87,21 +94,21 @@ describe("GenerationPaneContent", () => {
   })
 
   it("changes the temperature from the keyboard and saves it", async () => {
-    const savedGenerations = startSettingsHost()
-    const useLysStore = await renderGenerationPane()
+    const saves = startSettingsHost()
+    const useLysStore = await startGenerationPane()
 
     fireEvent.keyDown(getSlider("Temperature"), { key: "ArrowRight" })
-    await settle()
+    await waitForRenderedWork()
 
     expect(useLysStore.getState().settings.generation.temperature).toBe(0.75)
     expect(screen.getByText("0.75")).toBeInTheDocument()
-    expect(savedGenerations).toEqual([
-      { temperature: 0.75, replyCeiling: 2048 }
+    expect(saves).toEqual([
+      buildGenerationSave({ temperature: 0.75, replyCeiling: 2048 })
     ])
   })
 
   it("names the reply ceiling switch and the enabled ceiling slider", async () => {
-    await renderGenerationPane()
+    await startGenerationPane()
 
     expect(screen.getByRole("switch", { name: "Reply ceiling" })).toBeChecked()
     expect(
@@ -115,8 +122,8 @@ describe("GenerationPaneContent", () => {
   })
 
   it("switches the reply ceiling off, and back on to the default", async () => {
-    const savedGenerations = startSettingsHost()
-    const useLysStore = await renderGenerationPane({
+    const saves = startSettingsHost()
+    const useLysStore = await startGenerationPane({
       temperature: 0.7,
       replyCeiling: 512
     })
@@ -124,7 +131,7 @@ describe("GenerationPaneContent", () => {
     const ceilingSwitch = screen.getByRole("switch", { name: "Reply ceiling" })
 
     await user.click(ceilingSwitch)
-    await settle()
+    await waitForRenderedWork()
 
     expect(ceilingSwitch).not.toBeChecked()
     expect(ceilingSwitch).toHaveAccessibleDescription(
@@ -136,15 +143,19 @@ describe("GenerationPaneContent", () => {
     expect(useLysStore.getState().settings.generation.replyCeiling).toBe(0)
 
     await user.click(ceilingSwitch)
-    await settle()
+    await waitForRenderedWork()
 
     expect(useLysStore.getState().settings.generation.replyCeiling).toBe(
       initialSettingsState.generation.replyCeiling
     )
     expect(getSlider("Ceiling")).toBeInTheDocument()
-    expect(
-      savedGenerations.map((generation) => generation.replyCeiling)
-    ).toEqual([0, initialSettingsState.generation.replyCeiling])
+    expect(saves).toEqual([
+      buildGenerationSave({ temperature: 0.7, replyCeiling: 0 }),
+      buildGenerationSave({
+        temperature: 0.7,
+        replyCeiling: initialSettingsState.generation.replyCeiling
+      })
+    ])
   })
 
   it.each([
@@ -154,7 +165,7 @@ describe("GenerationPaneContent", () => {
   ])(
     "ranges the slider to keep %s visible without clamping it",
     async (_case, replyCeiling, minimum, maximum) => {
-      await renderGenerationPane({ temperature: 0.7, replyCeiling })
+      await startGenerationPane({ temperature: 0.7, replyCeiling })
 
       const ceiling = getSlider("Ceiling")
       expect(ceiling).toHaveValue(String(replyCeiling))
@@ -165,14 +176,14 @@ describe("GenerationPaneContent", () => {
 
   it("announces a failed save, keeps the edit, and retries on request", async () => {
     let isSaveFailing = true
-    const savedGenerations = startSettingsHost(() => {
+    const saves = startSettingsHost(() => {
       if (isSaveFailing) throw "Settings could not be written."
     })
-    const useLysStore = await renderGenerationPane()
+    const useLysStore = await startGenerationPane()
     const user = userEvent.setup()
 
     fireEvent.keyDown(getSlider("Temperature"), { key: "ArrowLeft" })
-    await settle()
+    await waitForRenderedWork()
 
     const status = screen.getByRole("status", {
       name: "Generation settings save"
@@ -184,12 +195,12 @@ describe("GenerationPaneContent", () => {
 
     isSaveFailing = false
     await user.click(screen.getByRole("button", { name: "Retry saving" }))
-    await settle()
+    await waitForRenderedWork()
 
     expect(status).toBeEmptyDOMElement()
     expect(screen.queryByRole("button", { name: "Retry saving" })).toBeNull()
-    expect(savedGenerations).toEqual([
-      { temperature: 0.65, replyCeiling: 2048 }
+    expect(saves).toEqual([
+      buildGenerationSave({ temperature: 0.65, replyCeiling: 2048 })
     ])
   })
 })

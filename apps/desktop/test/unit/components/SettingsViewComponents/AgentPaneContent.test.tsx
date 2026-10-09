@@ -34,7 +34,7 @@ const WRITER = buildAgent("writer", { name: "Writer", bio: "Drafts prose." })
  * @param runtime - Backend, LM Studio, and model facts.
  * @returns The application store.
  */
-async function renderAgentPane(runtime: RuntimeArrangement = READY_RUNTIME) {
+async function startAgentPane(runtime: RuntimeArrangement = READY_RUNTIME) {
   const { useLysStore, SettingsView } = await loadFreshSettingsView(
     "agents",
     runtime
@@ -48,7 +48,7 @@ async function renderAgentPane(runtime: RuntimeArrangement = READY_RUNTIME) {
 /**
  * Lets pending requests and store updates settle inside a React update scope.
  */
-async function settle(): Promise<void> {
+async function waitForRenderedWork(): Promise<void> {
   await act(async () => {
     await waitForMicrotasks()
   })
@@ -66,8 +66,8 @@ function buildInventoryRoutes() {
 describe("AgentPaneContent", () => {
   it("asks for the backend instead of showing agents while it is stopped", async () => {
     const { backend } = startAgentBackend([RESEARCHER])
-    await renderAgentPane(buildUnreachableRuntime("stopped"))
-    await settle()
+    await startAgentPane(buildUnreachableRuntime("stopped"))
+    await waitForRenderedWork()
 
     expect(screen.getByRole("status")).toHaveTextContent(
       "Start the backend to manage agents."
@@ -84,8 +84,8 @@ describe("AgentPaneContent", () => {
         "GET /api/v1/agents": () => list.promise
       }
     })
-    await renderAgentPane()
-    await settle()
+    await startAgentPane()
+    await waitForRenderedWork()
 
     expect(
       screen.getAllByRole("status").map((status) => status.textContent)
@@ -94,7 +94,7 @@ describe("AgentPaneContent", () => {
     list.resolve(
       buildJsonResponse(200, buildAgentListPage([RESEARCHER, WRITER]))
     )
-    await settle()
+    await waitForRenderedWork()
 
     expect(
       screen.getByRole("button", { name: "Researcher researcher" })
@@ -114,14 +114,14 @@ describe("AgentPaneContent", () => {
         "GET /api/v1/agents": failingThenWorking
       }
     })
-    await renderAgentPane()
-    await settle()
+    await startAgentPane()
+    await waitForRenderedWork()
     const user = userEvent.setup()
 
     expect(screen.getByRole("status")).not.toBeEmptyDOMElement()
     isListFailing = false
     await user.click(screen.getByRole("button", { name: "Retry" }))
-    await settle()
+    await waitForRenderedWork()
 
     expect(
       screen.getByRole("button", { name: "Researcher researcher" })
@@ -133,16 +133,16 @@ describe("AgentPaneContent", () => {
     const { backend } = startAgentBackend([RESEARCHER], {
       routes: buildInventoryRoutes()
     })
-    const useLysStore = await renderAgentPane(
+    const useLysStore = await startAgentPane(
       buildUnreachableRuntime("starting")
     )
-    await settle()
+    await waitForRenderedWork()
     expect(backend.requests).toEqual([])
 
     act(() => {
       useLysStore.setState({ backendServerInfo: { status: "running" } })
     })
-    await settle()
+    await waitForRenderedWork()
 
     expect(
       screen.getByRole("button", { name: "Researcher researcher" })
@@ -157,14 +157,14 @@ describe("AgentPaneContent", () => {
         "GET /api/v1/agents/researcher": () => read.promise
       }
     })
-    await renderAgentPane()
-    await settle()
+    await startAgentPane()
+    await waitForRenderedWork()
     const user = userEvent.setup()
 
     await user.click(
       screen.getByRole("button", { name: "Researcher researcher" })
     )
-    await settle()
+    await waitForRenderedWork()
 
     expect(screen.getByText("Reading researcher…")).toHaveAttribute(
       "role",
@@ -173,7 +173,7 @@ describe("AgentPaneContent", () => {
     expect(screen.getByRole("button", { name: "agents list" })).toHaveFocus()
 
     read.resolve(buildJsonResponse(200, RESEARCHER))
-    await settle()
+    await waitForRenderedWork()
 
     expect(screen.getByRole("form", { name: "Researcher" })).toBeInTheDocument()
   })
@@ -187,13 +187,13 @@ describe("AgentPaneContent", () => {
         "GET /api/v1/agents/researcher": () => reads.shift() ?? retry.promise
       }
     })
-    await renderAgentPane()
-    await settle()
+    await startAgentPane()
+    await waitForRenderedWork()
     const user = userEvent.setup()
     await user.click(
       screen.getByRole("button", { name: "Researcher researcher" })
     )
-    await settle()
+    await waitForRenderedWork()
 
     expect(
       screen.getByText(/could not complete the agent request/)
@@ -204,17 +204,17 @@ describe("AgentPaneContent", () => {
     expect(screen.getByRole("button", { name: "agents list" })).toHaveFocus()
 
     retry.resolve(buildJsonResponse(200, RESEARCHER))
-    await settle()
+    await waitForRenderedWork()
     expect(screen.getByRole("form", { name: "Researcher" })).toBeInTheDocument()
   })
 
   it("returns focus to the opened agent's row when its editor closes", async () => {
     startAgentBackend([RESEARCHER, WRITER], { routes: buildInventoryRoutes() })
-    await renderAgentPane()
-    await settle()
+    await startAgentPane()
+    await waitForRenderedWork()
     const user = userEvent.setup()
     await user.click(screen.getByRole("button", { name: "Writer writer" }))
-    await settle()
+    await waitForRenderedWork()
 
     await user.click(screen.getByRole("button", { name: "Close" }))
 
@@ -223,8 +223,8 @@ describe("AgentPaneContent", () => {
 
   it("returns focus to New agent when a new agent's editor closes", async () => {
     startAgentBackend([RESEARCHER], { routes: buildInventoryRoutes() })
-    await renderAgentPane()
-    await settle()
+    await startAgentPane()
+    await waitForRenderedWork()
     const user = userEvent.setup()
     await user.click(screen.getByRole("button", { name: "New agent" }))
 
@@ -235,13 +235,13 @@ describe("AgentPaneContent", () => {
 
   it("returns to the editor that was open when the pane appears again", async () => {
     startAgentBackend([RESEARCHER], { routes: buildInventoryRoutes() })
-    const useLysStore = await renderAgentPane()
-    await settle()
+    const useLysStore = await startAgentPane()
+    await waitForRenderedWork()
     const user = userEvent.setup()
     await user.click(
       screen.getByRole("button", { name: "Researcher researcher" })
     )
-    await settle()
+    await waitForRenderedWork()
 
     act(() => {
       useLysStore.setState({ settingsPane: "runtime" })
@@ -249,7 +249,7 @@ describe("AgentPaneContent", () => {
     act(() => {
       useLysStore.setState({ settingsPane: "agents" })
     })
-    await settle()
+    await waitForRenderedWork()
 
     expect(
       await screen.findByRole("form", { name: "Researcher" })

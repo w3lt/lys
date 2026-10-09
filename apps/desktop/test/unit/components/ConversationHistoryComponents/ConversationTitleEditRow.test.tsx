@@ -11,7 +11,7 @@ import ConversationTitleEditRow from "@/components/ConversationHistoryComponents
  * @param draftTitle - Draft owned by the parent.
  * @returns The row's callbacks and the container's key spy.
  */
-function renderTitleEditRow(draftTitle: string) {
+function startTitleEditRow(draftTitle: string) {
   const callbacks = {
     onDraftTitleChange: vi.fn(),
     onSubmitTitle: vi.fn(),
@@ -48,7 +48,7 @@ function getTitleField(): HTMLElement {
 
 describe("ConversationTitleEditRow", () => {
   it("focuses a labelled, bounded field holding the draft, beside the excerpt", () => {
-    renderTitleEditRow("Streaming pipeline")
+    startTitleEditRow("Streaming pipeline")
 
     const field = getTitleField()
     expect(field).toHaveFocus()
@@ -62,7 +62,7 @@ describe("ConversationTitleEditRow", () => {
   })
 
   it("proposes each edit", async () => {
-    const { onDraftTitleChange } = renderTitleEditRow("Streaming")
+    const { onDraftTitleChange } = startTitleEditRow("Streaming")
     const user = userEvent.setup()
 
     await user.type(getTitleField(), "!")
@@ -71,7 +71,7 @@ describe("ConversationTitleEditRow", () => {
   })
 
   it("submits the draft on Enter, except while an input method composes text", () => {
-    const { onSubmitTitle } = renderTitleEditRow("New title")
+    const { onSubmitTitle } = startTitleEditRow("New title")
 
     fireEvent.keyDown(getTitleField(), { key: "Enter", isComposing: true })
     expect(onSubmitTitle).not.toHaveBeenCalled()
@@ -81,7 +81,7 @@ describe("ConversationTitleEditRow", () => {
   })
 
   it("cancels on Escape without the key reaching the panel", () => {
-    const { onCancelTitleEdit, onPanelKeyDown } = renderTitleEditRow("Draft")
+    const { onCancelTitleEdit, onPanelKeyDown } = startTitleEditRow("Draft")
 
     fireEvent.keyDown(getTitleField(), { key: "Escape" })
 
@@ -90,7 +90,7 @@ describe("ConversationTitleEditRow", () => {
   })
 
   it("reports the draft when focus moves to another element", async () => {
-    const { onLeaveTitleField } = renderTitleEditRow("Draft")
+    const { onLeaveTitleField } = startTitleEditRow("Draft")
     const user = userEvent.setup()
 
     await user.click(screen.getByRole("button", { name: "Elsewhere" }))
@@ -100,7 +100,7 @@ describe("ConversationTitleEditRow", () => {
 
   it("keeps the edit when focus leaves for no element, as when the window blurs", () => {
     const { onLeaveTitleField, onSubmitTitle, onCancelTitleEdit } =
-      renderTitleEditRow("Draft")
+      startTitleEditRow("Draft")
 
     fireEvent.blur(getTitleField(), { relatedTarget: null })
 

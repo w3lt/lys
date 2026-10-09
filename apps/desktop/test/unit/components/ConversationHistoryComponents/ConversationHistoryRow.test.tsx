@@ -25,7 +25,7 @@ const ENTRY: ConversationHistoryEntry = Object.freeze({
  * @param options - The row facts a case varies.
  * @returns The row's action spies and the open-button ref.
  */
-function renderRow(
+function startRow(
   options: {
     readonly entry?: ConversationHistoryEntry
     readonly isOpenInChat?: boolean
@@ -68,7 +68,7 @@ function getOpenButton(title = "Streaming pipeline"): HTMLElement {
 
 describe("ConversationHistoryRow", () => {
   it("opens the conversation from a button holding its title, excerpt, and time", async () => {
-    const { onOpenConversation, openButtonRef } = renderRow()
+    const { onOpenConversation, openButtonRef } = startRow()
     const user = userEvent.setup()
 
     const openButton = getOpenButton()
@@ -87,7 +87,7 @@ describe("ConversationHistoryRow", () => {
   })
 
   it("titles an untitled conversation Untitled", () => {
-    renderRow({ entry: { ...ENTRY, title: null } })
+    startRow({ entry: { ...ENTRY, title: null } })
 
     expect(getOpenButton("Untitled")).toBeInTheDocument()
     expect(
@@ -96,7 +96,7 @@ describe("ConversationHistoryRow", () => {
   })
 
   it("marks the conversation the chat view presents", () => {
-    renderRow({ isOpenInChat: true })
+    startRow({ isOpenInChat: true })
 
     const openButton = getOpenButton()
     expect(openButton).toHaveAttribute("aria-current", "true")
@@ -104,14 +104,14 @@ describe("ConversationHistoryRow", () => {
   })
 
   it("marks no other conversation as presented", () => {
-    renderRow()
+    startRow()
 
     expect(getOpenButton()).not.toHaveAttribute("aria-current")
     expect(screen.queryByText("open")).not.toBeInTheDocument()
   })
 
   it("asks to move focus on Arrow Down and Arrow Up, and to rename on F2", () => {
-    const actions = renderRow()
+    const actions = startRow()
 
     fireEvent.keyDown(getOpenButton(), { key: "ArrowDown" })
     fireEvent.keyDown(getOpenButton(), { key: "ArrowUp" })
@@ -123,7 +123,7 @@ describe("ConversationHistoryRow", () => {
   })
 
   it("offers renaming and deleting with buttons named after the title", async () => {
-    const { onStartTitleEdit, onRequestDelete } = renderRow()
+    const { onStartTitleEdit, onRequestDelete } = startRow()
     const user = userEvent.setup()
 
     await user.click(
@@ -138,7 +138,7 @@ describe("ConversationHistoryRow", () => {
   })
 
   it("shows a pending rename in words, marks the row busy, and keeps it openable", async () => {
-    const { onOpenConversation, onStartTitleEdit } = renderRow({
+    const { onOpenConversation, onStartTitleEdit } = startRow({
       pendingOperation: "update-title"
     })
     const user = userEvent.setup()
@@ -157,7 +157,7 @@ describe("ConversationHistoryRow", () => {
   })
 
   it("shows a pending deletion in words and stops opening the conversation", async () => {
-    const { onOpenConversation } = renderRow({ pendingOperation: "delete" })
+    const { onOpenConversation } = startRow({ pendingOperation: "delete" })
     const user = userEvent.setup()
 
     expect(screen.getByText("deleting…")).toBeInTheDocument()

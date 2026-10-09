@@ -43,7 +43,7 @@ const TWO_MODELS: RuntimeArrangement = {
  * @param routes - Backend routes replacing or adding to the inventory read.
  * @returns The application store and the backend observation handle.
  */
-async function renderModelPane(
+async function startModelPane(
   runtime: RuntimeArrangement = TWO_MODELS,
   routes: BackendRoutes = {}
 ) {
@@ -57,14 +57,14 @@ async function renderModelPane(
   )
   render(<SettingsView onDone={vi.fn()} />)
   await screen.findByRole("heading", { name: "load configuration" })
-  await settle()
+  await waitForRenderedWork()
   return { useLysStore, backend }
 }
 
 /**
  * Lets pending requests and store updates settle inside a React update scope.
  */
-async function settle(): Promise<void> {
+async function waitForRenderedWork(): Promise<void> {
   await act(async () => {
     await waitForMicrotasks()
   })
@@ -81,7 +81,7 @@ function getRefreshButton(): HTMLElement {
 
 describe("ModelPaneContent", () => {
   it("lists the downloaded models, marking the default", async () => {
-    await renderModelPane()
+    await startModelPane()
 
     const list = screen.getByRole("list", { name: "Downloaded models" })
     const rows = within(list).getAllByRole("listitem")
@@ -95,7 +95,7 @@ describe("ModelPaneContent", () => {
   })
 
   it("makes a row the default for this session without loading it", async () => {
-    const { useLysStore, backend } = await renderModelPane()
+    const { useLysStore, backend } = await startModelPane()
     const user = userEvent.setup()
 
     await user.click(
@@ -110,7 +110,7 @@ describe("ModelPaneContent", () => {
   })
 
   it("loads, unloads, and tests models from their rows", async () => {
-    const { backend } = await renderModelPane(TWO_MODELS, {
+    const { backend } = await startModelPane(TWO_MODELS, {
       "POST /api/v1/llm/load": () =>
         buildJsonResponse(200, buildLlmInfo("gemma-3", { loaded: true })),
       "PATCH /api/v1/llm/unload": () => new Response(null, { status: 204 }),
@@ -124,15 +124,15 @@ describe("ModelPaneContent", () => {
     const user = userEvent.setup()
 
     await user.click(screen.getByRole("button", { name: "Test qwen3-8b" }))
-    await settle()
+    await waitForRenderedWork()
     expect(
       screen.getByText("qwen3-8b: loaded · health query 12 ms")
     ).toBeInTheDocument()
 
     await user.click(screen.getByRole("button", { name: "Load gemma-3" }))
-    await settle()
+    await waitForRenderedWork()
     await user.click(screen.getByRole("button", { name: "Unload qwen3-8b" }))
-    await settle()
+    await waitForRenderedWork()
 
     expect(
       backend.requests
@@ -151,7 +151,7 @@ describe("ModelPaneContent", () => {
       reads.push(read)
       return read.promise
     }
-    const { backend } = await renderModelPane(TWO_MODELS, {
+    const { backend } = await startModelPane(TWO_MODELS, {
       [INVENTORY_ROUTE]: controlledInventory
     })
     const user = userEvent.setup()
@@ -163,10 +163,10 @@ describe("ModelPaneContent", () => {
             : []
       })
     )
-    await settle()
+    await waitForRenderedWork()
 
     await user.click(getRefreshButton())
-    await settle()
+    await waitForRenderedWork()
 
     expect(getRefreshButton()).toBeDisabled()
     expect(screen.getByRole("button", { name: "Load gemma-3" })).toBeDisabled()
@@ -179,7 +179,7 @@ describe("ModelPaneContent", () => {
     reads[1]?.resolve(
       buildJsonResponse(200, { llms: [buildLlmInfo("llama-4")] })
     )
-    await settle()
+    await waitForRenderedWork()
 
     expect(getRefreshButton()).toBeEnabled()
     expect(
@@ -206,14 +206,14 @@ describe("ModelPaneContent", () => {
       "No downloaded language models found in LM Studio."
     ]
   ])("explains an empty list when %s", async (_case, runtime, message) => {
-    await renderModelPane(runtime)
+    await startModelPane(runtime)
 
     expect(screen.queryAllByRole("listitem")).toEqual([])
     expect(screen.getByText(message)).toBeInTheDocument()
   })
 
   it("explains a failed inventory read and offers Refresh", async () => {
-    await renderModelPane(TWO_MODELS, {
+    await startModelPane(TWO_MODELS, {
       [INVENTORY_ROUTE]: () => new Response(null, { status: 500 }),
       "GET /api/v1/llm/runtime": () =>
         buildJsonResponse(200, { status: "connected" })
@@ -226,7 +226,7 @@ describe("ModelPaneContent", () => {
   })
 
   it("disables Refresh while LM Studio is not reachable, describing why", async () => {
-    await renderModelPane(buildUnreachableRuntime("running", "unreachable"))
+    await startModelPane(buildUnreachableRuntime("running", "unreachable"))
 
     expect(getRefreshButton()).toBeDisabled()
     expect(getRefreshButton()).toHaveAccessibleDescription(
@@ -236,7 +236,7 @@ describe("ModelPaneContent", () => {
   })
 
   it("repeats why Refresh is disabled in a tooltip on hover", async () => {
-    await renderModelPane(buildUnreachableRuntime("running", "unreachable"))
+    await startModelPane(buildUnreachableRuntime("running", "unreachable"))
     const user = userEvent.setup()
 
     await user.hover(getRefreshButton().parentElement ?? getRefreshButton())
@@ -248,14 +248,14 @@ describe("ModelPaneContent", () => {
   })
 
   it("describes Refresh only while LM Studio is not reachable", async () => {
-    await renderModelPane()
+    await startModelPane()
 
     expect(getRefreshButton()).toBeEnabled()
     expect(getRefreshButton()).not.toHaveAttribute("aria-describedby")
   })
 
   it("states the local context estimate and that LM Studio manages loading", async () => {
-    await renderModelPane()
+    await startModelPane()
 
     expect(screen.getByText("managed by LM Studio")).toBeInTheDocument()
     expect(

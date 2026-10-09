@@ -18,7 +18,7 @@ import {
  *
  * @param actions - Spies for the action and the radio selection.
  */
-function renderMenu(actions: {
+function startMenu(actions: {
   readonly onAttach: () => void
   readonly onValueChange: (value: string) => void
 }): void {
@@ -59,7 +59,7 @@ async function openMenu(user: ReturnType<typeof userEvent.setup>) {
 describe("DropdownMenu", () => {
   it("opens a menu of items from its trigger, which reports the open state", async () => {
     const user = userEvent.setup()
-    renderMenu({ onAttach: vi.fn(), onValueChange: vi.fn() })
+    startMenu({ onAttach: vi.fn(), onValueChange: vi.fn() })
     const trigger = screen.getByRole("button", { name: "Add" })
     expect(trigger).toHaveAttribute("aria-haspopup", "menu")
     expect(trigger).toHaveAttribute("aria-expanded", "false")
@@ -80,7 +80,7 @@ describe("DropdownMenu", () => {
   it("runs a chosen item once and closes, returning focus to the trigger", async () => {
     const onAttach = vi.fn()
     const user = userEvent.setup()
-    renderMenu({ onAttach, onValueChange: vi.fn() })
+    startMenu({ onAttach, onValueChange: vi.fn() })
     await openMenu(user)
 
     await user.click(screen.getByRole("menuitem", { name: "Attach" }))
@@ -93,7 +93,7 @@ describe("DropdownMenu", () => {
   it("checks the selected radio item and proposes another", async () => {
     const onValueChange = vi.fn()
     const user = userEvent.setup()
-    renderMenu({ onAttach: vi.fn(), onValueChange })
+    startMenu({ onAttach: vi.fn(), onValueChange })
     await openMenu(user)
 
     expect(screen.getByRole("menuitemradio", { name: "qwen" })).toHaveAttribute(
@@ -107,7 +107,7 @@ describe("DropdownMenu", () => {
 
   it("closes on Escape and returns focus to the trigger", async () => {
     const user = userEvent.setup()
-    renderMenu({ onAttach: vi.fn(), onValueChange: vi.fn() })
+    startMenu({ onAttach: vi.fn(), onValueChange: vi.fn() })
     await openMenu(user)
 
     await user.keyboard("{Escape}")

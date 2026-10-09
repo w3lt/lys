@@ -37,7 +37,7 @@ function buildSettingsContext(
  *
  * @param modelState - Model fields the case varies.
  */
-function renderFeedback(modelState: Partial<ModelState>): void {
+function startFeedback(modelState: Partial<ModelState>): void {
   render(
     <SettingsContext value={buildSettingsContext(modelState)}>
       <ModelRequestFeedback />
@@ -47,7 +47,7 @@ function renderFeedback(modelState: Partial<ModelState>): void {
 
 describe("ModelRequestFeedback", () => {
   it("keeps an empty status and alert while nothing happens", () => {
-    renderFeedback({})
+    startFeedback({})
 
     expect(screen.getByRole("status")).toBeEmptyDOMElement()
     expect(screen.getByRole("alert")).toBeEmptyDOMElement()
@@ -59,14 +59,14 @@ describe("ModelRequestFeedback", () => {
     [{ status: "unloading", modelKey: "qwen3-8b" }, "unloading qwen3-8b…"],
     [{ status: "testing", modelKey: "qwen3-8b" }, "testing qwen3-8b…"]
   ])("announces the pending request %o", (modelRequest, announcement) => {
-    renderFeedback({ modelRequest })
+    startFeedback({ modelRequest })
 
     expect(screen.getByRole("status")).toHaveTextContent(announcement)
     expect(screen.getByRole("status")).toHaveAttribute("aria-live", "polite")
   })
 
   it("reports a loaded-state health check without claiming inference ran", () => {
-    renderFeedback({
+    startFeedback({
       modelHealth: { status: "ready", modelId: "qwen3-8b", latencyMs: 42 }
     })
 
@@ -81,7 +81,7 @@ describe("ModelRequestFeedback", () => {
   ] as const)(
     "reports a health check that found the model %s",
     (reason, label) => {
-      renderFeedback({
+      startFeedback({
         modelHealth: {
           status: "not-ready",
           reason,
@@ -97,7 +97,7 @@ describe("ModelRequestFeedback", () => {
   )
 
   it("prefers the pending request over the last health result", () => {
-    renderFeedback({
+    startFeedback({
       modelRequest: { status: "listing" },
       modelHealth: { status: "ready", modelId: "qwen3-8b", latencyMs: 42 }
     })
@@ -108,7 +108,7 @@ describe("ModelRequestFeedback", () => {
   })
 
   it("alerts the latest request failure", () => {
-    renderFeedback({ modelError: "LM Studio could not load qwen3-8b." })
+    startFeedback({ modelError: "LM Studio could not load qwen3-8b." })
 
     expect(screen.getByRole("alert")).toHaveTextContent(
       "LM Studio could not load qwen3-8b."

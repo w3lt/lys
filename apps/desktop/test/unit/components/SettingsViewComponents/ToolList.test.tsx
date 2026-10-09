@@ -34,7 +34,7 @@ const [FILES_GROUP] = buildToolGroups([READ_TEXT_FILE, LIST_ROOTS])
  * @param props - Group facts the case varies.
  * @returns The proposal spies.
  */
-function renderToolGroup(
+function startToolGroup(
   props: Partial<ComponentProps<typeof ToolGroupSection>> = {}
 ) {
   const proposals = {
@@ -68,7 +68,7 @@ function getToolToggle(toolName: string): HTMLElement {
 
 describe("ToolGroupSection", () => {
   it("lists the group's tools under its heading with how many are on", () => {
-    renderToolGroup({
+    startToolGroup({
       toolChoices: new Map<string, ToolChoice>([
         ["list_roots", { isOn: false, approval: "run" }]
       ])
@@ -84,14 +84,15 @@ describe("ToolGroupSection", () => {
   })
 
   it("describes each tool's row with its badges and description, beside its estimate and switch", () => {
-    renderToolGroup()
+    startToolGroup()
 
     const toggle = getToolToggle("read_text_file")
     expect(toggle).toHaveAttribute("aria-expanded", "false")
     expect(toggle).toHaveAccessibleDescription(
       "reads in Lys Runs read_text_file."
     )
-    const row = toggle.closest("li") as HTMLElement
+    const row = toggle.closest("li")
+    if (row === null) throw new Error("The tool row is not a list item")
     expect(row).toHaveTextContent(
       `~${calculateToolTokenEstimate(READ_TEXT_FILE)} tok`
     )
@@ -101,7 +102,7 @@ describe("ToolGroupSection", () => {
   })
 
   it("notes a tool that is on and asks before it runs", () => {
-    renderToolGroup({
+    startToolGroup({
       toolChoices: new Map<string, ToolChoice>([
         ["read_text_file", { isOn: true, approval: "ask" }],
         ["list_roots", { isOn: false, approval: "ask" }]
@@ -117,7 +118,7 @@ describe("ToolGroupSection", () => {
   })
 
   it("proposes expanding a collapsed row", async () => {
-    const collapsed = renderToolGroup()
+    const collapsed = startToolGroup()
     const user = userEvent.setup()
 
     await user.click(getToolToggle("read_text_file"))
@@ -128,7 +129,7 @@ describe("ToolGroupSection", () => {
   })
 
   it("collapses an expanded row on request", async () => {
-    const expanded = renderToolGroup({ expandedToolName: "read_text_file" })
+    const expanded = startToolGroup({ expandedToolName: "read_text_file" })
     const user = userEvent.setup()
 
     await user.click(getToolToggle("read_text_file"))
@@ -139,7 +140,7 @@ describe("ToolGroupSection", () => {
   })
 
   it("shows an expanded tool's arguments, where it runs, and its approval", () => {
-    renderToolGroup({ expandedToolName: "read_text_file" })
+    startToolGroup({ expandedToolName: "read_text_file" })
 
     const toggle = getToolToggle("read_text_file")
     expect(toggle).toHaveAttribute("aria-expanded", "true")
@@ -180,7 +181,7 @@ describe("ToolGroupSection", () => {
   })
 
   it("says when an expanded tool takes no arguments", () => {
-    renderToolGroup({ expandedToolName: "list_roots" })
+    startToolGroup({ expandedToolName: "list_roots" })
 
     expect(screen.getByRole("region", { name: "arguments" })).toHaveTextContent(
       "argumentsnoneTakes no arguments."
@@ -188,7 +189,7 @@ describe("ToolGroupSection", () => {
   })
 
   it("proposes switching a tool off and another approval, but not the current one", async () => {
-    const proposals = renderToolGroup({ expandedToolName: "read_text_file" })
+    const proposals = startToolGroup({ expandedToolName: "read_text_file" })
     const user = userEvent.setup()
 
     await user.click(screen.getByRole("switch", { name: "Use read_text_file" }))
@@ -206,7 +207,7 @@ describe("ToolGroupSection", () => {
   })
 
   it("disables every control while locked", async () => {
-    const proposals = renderToolGroup({
+    const proposals = startToolGroup({
       expandedToolName: "read_text_file",
       isLocked: true
     })

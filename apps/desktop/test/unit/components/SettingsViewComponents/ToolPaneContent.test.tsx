@@ -70,7 +70,7 @@ function formatOffer(tools: typeof TOOLS): string {
  * @param runtime - Backend, LM Studio, and model facts.
  * @returns The application store.
  */
-async function renderToolPane(runtime: RuntimeArrangement = TRAINED_RUNTIME) {
+async function startToolPane(runtime: RuntimeArrangement = TRAINED_RUNTIME) {
   startBackendFake({ [INVENTORY_ROUTE]: buildInventoryRoute(runtime) })
   const { useLysStore, SettingsView } = await loadFreshSettingsView(
     "tools",
@@ -79,14 +79,14 @@ async function renderToolPane(runtime: RuntimeArrangement = TRAINED_RUNTIME) {
   render(<SettingsView onDone={vi.fn()} />)
   // The closing note is withheld until the lazily loaded pane body is shown.
   await screen.findByText(/^Tools come from Lys itself/)
-  await settle()
+  await waitForRenderedWork()
   return useLysStore
 }
 
 /**
  * Lets pending commands and store updates settle inside a React update scope.
  */
-async function settle(): Promise<void> {
+async function waitForRenderedWork(): Promise<void> {
   await act(async () => {
     await waitForMicrotasks()
   })
@@ -96,14 +96,14 @@ describe("ToolPaneContent", () => {
   it("reads the tools when first shown, with a placeholder meanwhile", async () => {
     const tools = createControlledPromise<unknown>()
     startNativeHostFake({ list_tools: () => tools.promise })
-    await renderToolPane()
+    await startToolPane()
 
     expect(
       screen.getAllByRole("status").map((status) => status.textContent)
     ).toEqual(["", "Reading tools settings"])
 
     tools.resolve(TOOLS)
-    await settle()
+    await waitForRenderedWork()
 
     expect(screen.getByRole("region", { name: "files" })).toBeInTheDocument()
     expect(
@@ -118,14 +118,14 @@ describe("ToolPaneContent", () => {
     const host = startNativeHostFake({
       list_tools: () => (reads.shift() ?? (() => TOOLS))()
     })
-    await renderToolPane()
+    await startToolPane()
     const user = userEvent.setup()
 
     expect(
       screen.getByText("Lys couldn't read its tool list.")
     ).toHaveAttribute("role", "status")
     await user.click(screen.getByRole("button", { name: "Retry" }))
-    await settle()
+    await waitForRenderedWork()
 
     expect(host.commands).toHaveLength(2)
     expect(screen.getByRole("region", { name: "files" })).toBeInTheDocument()
@@ -134,7 +134,7 @@ describe("ToolPaneContent", () => {
 
   it("keeps the tools it read when the pane is shown again", async () => {
     const host = startNativeHostFake({ list_tools: () => TOOLS })
-    const useLysStore = await renderToolPane()
+    const useLysStore = await startToolPane()
 
     act(() => {
       useLysStore.setState({ settingsPane: "runtime" })
@@ -149,7 +149,7 @@ describe("ToolPaneContent", () => {
 
   it("states what a trained model is offered and updates it as tools are switched", async () => {
     startNativeHostFake({ list_tools: () => TOOLS })
-    await renderToolPane()
+    await startToolPane()
     const user = userEvent.setup()
     const toolCalls = screen.getByRole("switch", { name: "Tool calls" })
 
@@ -168,7 +168,7 @@ describe("ToolPaneContent", () => {
 
   it("offers nothing once tool calls are switched off", async () => {
     startNativeHostFake({ list_tools: () => TOOLS })
-    await renderToolPane()
+    await startToolPane()
     const user = userEvent.setup()
 
     await user.click(screen.getByRole("switch", { name: "Tool calls" }))
@@ -185,7 +185,7 @@ describe("ToolPaneContent", () => {
 
   it("expands at most one tool at a time", async () => {
     startNativeHostFake({ list_tools: () => TOOLS })
-    await renderToolPane()
+    await startToolPane()
     const user = userEvent.setup()
 
     await user.click(screen.getByRole("button", { name: "read_text_file" }))
@@ -202,7 +202,7 @@ describe("ToolPaneContent", () => {
 
   it("locks the controls for a model not trained for tools, and restores them when it changes", async () => {
     startNativeHostFake({ list_tools: () => TOOLS })
-    const useLysStore = await renderToolPane(TRAINED_RUNTIME)
+    const useLysStore = await startToolPane(TRAINED_RUNTIME)
     const user = userEvent.setup()
     await user.click(screen.getByRole("button", { name: "read_text_file" }))
 

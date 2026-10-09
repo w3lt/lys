@@ -21,7 +21,10 @@ import {
   createFixtureUuidV7,
   FIXTURE_CONVERSATION_ID
 } from "../../support/conversationFixtures"
-import { arrangeRuntime, READY_RUNTIME } from "../../support/runtimeFixtures"
+import {
+  updateStoreRuntime,
+  READY_RUNTIME
+} from "../../support/runtimeFixtures"
 import {
   createControlledPromise,
   waitForMicrotasks
@@ -62,7 +65,7 @@ async function loadFreshChatView() {
   const { useConversationHistoryStore } =
     await import("@/lib/store/conversation-history")
   const { default: ChatView } = await import("@/views/ChatView/ChatView")
-  arrangeRuntime(useLysStore, READY_RUNTIME)
+  updateStoreRuntime(useLysStore, READY_RUNTIME)
   return { useChatViewStore, useConversationHistoryStore, ChatView }
 }
 
@@ -99,7 +102,7 @@ function startChatViewBackend(routes: BackendRoutes = {}) {
  *
  * @returns The recorder; each call keeps the options and the element.
  */
-function installScrollTo() {
+function startScrollRecorder() {
   const scrollTo = vi.fn()
   Object.defineProperty(HTMLElement.prototype, "scrollTo", {
     configurable: true,
@@ -125,7 +128,7 @@ function getTranscriptHost(): HTMLElement {
 /**
  * Lets pending requests and store updates settle inside a React update scope.
  */
-async function settle(): Promise<void> {
+async function waitForRenderedWork(): Promise<void> {
   await act(async () => {
     await waitForMicrotasks()
   })
@@ -137,7 +140,7 @@ async function settle(): Promise<void> {
  * @param init - Modifier state and repetition of the press.
  * @returns Whether the press kept its default action.
  */
-function pressHistoryShortcut(init: KeyboardEventInit): boolean {
+function sendHistoryShortcut(init: KeyboardEventInit): boolean {
   let isDefaultKept = true
   act(() => {
     isDefaultKept = fireEvent.keyDown(document, { key: "k", ...init })
@@ -172,13 +175,13 @@ describe("ChatView", () => {
           await loadFreshChatView()
         render(<ChatView atBottom onScrollPositionChange={vi.fn()} />)
 
-        expect(pressHistoryShortcut(modifier)).toBe(false)
-        await settle()
+        expect(sendHistoryShortcut(modifier)).toBe(false)
+        await waitForRenderedWork()
         expect(
           screen.getByRole("dialog", { name: "Past conversations" })
         ).toBeInTheDocument()
 
-        expect(pressHistoryShortcut({ ...modifier, key: "K" })).toBe(false)
+        expect(sendHistoryShortcut({ ...modifier, key: "K" })).toBe(false)
         expect(useConversationHistoryStore.getState().visibility.status).toBe(
           "closed"
         )
@@ -196,7 +199,7 @@ describe("ChatView", () => {
       const { ChatView } = await loadFreshChatView()
       render(<ChatView atBottom onScrollPositionChange={vi.fn()} />)
 
-      expect(pressHistoryShortcut(init)).toBe(true)
+      expect(sendHistoryShortcut(init)).toBe(true)
       expect(screen.queryByRole("dialog")).toBeNull()
     })
 
@@ -208,7 +211,7 @@ describe("ChatView", () => {
       )
 
       unmount()
-      pressHistoryShortcut({ metaKey: true })
+      sendHistoryShortcut({ metaKey: true })
 
       expect(useConversationHistoryStore.getState().visibility.status).toBe(
         "closed"
@@ -218,7 +221,7 @@ describe("ChatView", () => {
 
   describe("transcript position", () => {
     it("keeps the latest messages in view while pinned", async () => {
-      const scrollTo = installScrollTo()
+      const scrollTo = startScrollRecorder()
       const { useChatViewStore, ChatView } = await loadFreshChatView()
       act(() => {
         useChatViewStore.setState({
@@ -248,7 +251,7 @@ describe("ChatView", () => {
     })
 
     it("leaves the position alone while the reader is away from the latest messages", async () => {
-      const scrollTo = installScrollTo()
+      const scrollTo = startScrollRecorder()
       const { useChatViewStore, ChatView } = await loadFreshChatView()
       act(() => {
         useChatViewStore.setState({
@@ -262,7 +265,7 @@ describe("ChatView", () => {
     })
 
     it("does not scroll an empty conversation", async () => {
-      const scrollTo = installScrollTo()
+      const scrollTo = startScrollRecorder()
       const { ChatView } = await loadFreshChatView()
 
       render(<ChatView atBottom onScrollPositionChange={vi.fn()} />)
@@ -295,7 +298,7 @@ describe("ChatView", () => {
     )
 
     it("jumps smoothly to the latest messages and pins the transcript", async () => {
-      const scrollTo = installScrollTo()
+      const scrollTo = startScrollRecorder()
       const onScrollPositionChange = vi.fn()
       const { useChatViewStore, ChatView } = await loadFreshChatView()
       act(() => {
@@ -334,12 +337,12 @@ describe("ChatView", () => {
           onScrollPositionChange={onScrollPositionChange}
         />
       )
-      pressHistoryShortcut({ metaKey: true })
-      await settle()
+      sendHistoryShortcut({ metaKey: true })
+      await waitForRenderedWork()
       const user = userEvent.setup()
 
       await user.click(screen.getByRole("button", { name: /^Trip/ }))
-      await settle()
+      await waitForRenderedWork()
 
       expect(useConversationHistoryStore.getState().visibility.status).toBe(
         "closed"
@@ -362,8 +365,8 @@ describe("ChatView", () => {
       render(
         <ChatView atBottom onScrollPositionChange={onScrollPositionChange} />
       )
-      pressHistoryShortcut({ ctrlKey: true })
-      await settle()
+      sendHistoryShortcut({ ctrlKey: true })
+      await waitForRenderedWork()
       const user = userEvent.setup()
 
       await user.click(screen.getByRole("button", { name: "Start a new one" }))
@@ -386,7 +389,7 @@ describe("ChatView", () => {
       const region = screen.getByRole("region", { name: "Conversation" })
 
       await user.click(screen.getByRole("button", { name: STARTER_PROMPTS[0] }))
-      await settle()
+      await waitForRenderedWork()
 
       expect(backend.requests.at(-1)?.body).toMatchObject({
         message: STARTER_PROMPTS[0]
@@ -415,14 +418,14 @@ describe("ChatView", () => {
       act(() => {
         void useChatViewStore.getState().openConversation(STORED.id)
       })
-      await settle()
+      await waitForRenderedWork()
 
       const region = screen.getByRole("region", { name: "Conversation" })
       expect(screen.getByText("Opening conversation")).toBeInTheDocument()
       expect(region).toHaveAttribute("aria-busy", "true")
 
       stored.resolve(buildJsonResponse(200, STORED))
-      await settle()
+      await waitForRenderedWork()
 
       expect(region).toHaveAttribute("aria-busy", "false")
       expect(screen.getByText("Start with the route.")).toBeInTheDocument()

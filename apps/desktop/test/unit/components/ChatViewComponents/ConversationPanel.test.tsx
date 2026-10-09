@@ -110,13 +110,13 @@ describe("ConversationPanel", () => {
       />
     )
     const host = controls.transcriptRef.current
+    if (host === null) throw new Error("The transcript host is not attached")
 
-    expect(host).toBeInstanceOf(HTMLDivElement)
     expect(
       screen.getByRole("region", { name: "Conversation" })
     ).toContainElement(host)
 
-    fireEvent.scroll(host as HTMLDivElement)
+    fireEvent.scroll(host)
 
     expect(controls.onTranscriptScroll).toHaveBeenCalledOnce()
   })

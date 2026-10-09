@@ -10,7 +10,7 @@ import { waitForMicrotasks } from "../../support/settlement"
  * @returns The element the pointer rests on: the trigger wrapper, because
  * a disabled control receives no pointer events.
  */
-function renderTooltip(): HTMLElement {
+function startTooltip(): HTMLElement {
   render(
     <>
       <Tooltip description="LM Studio is not reachable.">
@@ -29,7 +29,7 @@ function renderTooltip(): HTMLElement {
 describe("Tooltip", () => {
   it("shows its description only after the pointer has rested on the trigger", async () => {
     const user = userEvent.setup()
-    const trigger = renderTooltip()
+    const trigger = startTooltip()
 
     await user.hover(trigger)
     expect(screen.queryByText("LM Studio is not reachable.")).toBeNull()
@@ -41,7 +41,7 @@ describe("Tooltip", () => {
 
   it("closes when the pointer leaves the trigger", async () => {
     const user = userEvent.setup()
-    const trigger = renderTooltip()
+    const trigger = startTooltip()
     await user.hover(trigger)
     await screen.findByText("LM Studio is not reachable.")
 
@@ -55,7 +55,7 @@ describe("Tooltip", () => {
 
   it("adds no focus stop of its own", async () => {
     const user = userEvent.setup()
-    renderTooltip()
+    startTooltip()
 
     await user.tab()
 

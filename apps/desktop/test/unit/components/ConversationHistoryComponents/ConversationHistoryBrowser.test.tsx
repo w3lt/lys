@@ -148,7 +148,7 @@ function BrowserHarness({
  * @param props - List and the facts a case varies.
  * @returns The action spies.
  */
-function renderBrowser(
+function startBrowser(
   props: Omit<BrowserHarnessProps, "actions"> = {
     list: buildThreeConversationList()
   }
@@ -198,7 +198,7 @@ function getResultRegion(): HTMLElement {
  * @remarks jsdom lays nothing out, so the region's measurements are set to
  * the values a scrolled list would report.
  */
-function scrollResults(region: HTMLElement, remainingPx: number): void {
+function sendResultScroll(region: HTMLElement, remainingPx: number): void {
   Object.defineProperty(region, "scrollHeight", {
     configurable: true,
     value: 1000
@@ -217,7 +217,7 @@ function scrollResults(region: HTMLElement, remainingPx: number): void {
 describe("ConversationHistoryBrowser", () => {
   describe("listing", () => {
     it("groups the rows by day in list order", () => {
-      renderBrowser()
+      startBrowser()
 
       const today = screen.getByRole("group", { name: "Today" })
       const yesterday = screen.getByRole("group", { name: "Yesterday" })
@@ -266,7 +266,7 @@ describe("ConversationHistoryBrowser", () => {
         "Nothing matches that."
       ]
     ])("shows a notice instead of rows %s", (_case, list, message) => {
-      renderBrowser({ list })
+      startBrowser({ list })
 
       expect(screen.getByText(message)).toBeInTheDocument()
       expect(screen.queryByRole("listitem")).toBeNull()
@@ -274,7 +274,7 @@ describe("ConversationHistoryBrowser", () => {
     })
 
     it("shows a failed read and retries it on request", async () => {
-      const actions = renderBrowser({
+      const actions = startBrowser({
         list: {
           status: "failed",
           error: "Past conversations could not be read."
@@ -306,7 +306,7 @@ describe("ConversationHistoryBrowser", () => {
     })
 
     it("marks the region busy while its rows are being replaced", () => {
-      renderBrowser({
+      startBrowser({
         list: buildThreeConversationList("", { status: "refreshing" })
       })
 
@@ -332,14 +332,14 @@ describe("ConversationHistoryBrowser", () => {
     ])(
       "announces older entries %s after the rows",
       (_case, activity, message) => {
-        renderBrowser({ list: buildThreeConversationList("", activity) })
+        startBrowser({ list: buildThreeConversationList("", activity) })
 
         expect(screen.getByText(message)).toHaveAttribute("role", "status")
       }
     )
 
     it("marks the conversation the chat view presents and the changes still pending", () => {
-      renderBrowser({
+      startBrowser({
         list: buildThreeConversationList(),
         openConversationId: MIDDLE_ID,
         pendingMutations: [{ conversationId: OLDEST_ID, operation: "delete" }]
@@ -353,7 +353,7 @@ describe("ConversationHistoryBrowser", () => {
 
   describe("opening", () => {
     it("opens the pressed conversation", async () => {
-      const actions = renderBrowser()
+      const actions = startBrowser()
       const user = userEvent.setup()
 
       await user.click(getOpenButton("Untitled"))
@@ -364,7 +364,7 @@ describe("ConversationHistoryBrowser", () => {
     })
 
     it("opens the first conversation for the search on Enter in it", () => {
-      const actions = renderBrowser()
+      const actions = startBrowser()
 
       fireEvent.keyDown(getSearchBox(), { key: "Enter" })
 
@@ -372,7 +372,7 @@ describe("ConversationHistoryBrowser", () => {
     })
 
     it("opens a row reached with Arrow Down on Enter", async () => {
-      const actions = renderBrowser()
+      const actions = startBrowser()
       const user = userEvent.setup()
       getSearchBox().focus()
 
@@ -387,7 +387,7 @@ describe("ConversationHistoryBrowser", () => {
 
   describe("keyboard movement", () => {
     it("moves down the rows from the search and back up to it", async () => {
-      renderBrowser()
+      startBrowser()
       const user = userEvent.setup()
       getSearchBox().focus()
 
@@ -399,7 +399,7 @@ describe("ConversationHistoryBrowser", () => {
     })
 
     it("asks for older conversations on Arrow Down from the last row", async () => {
-      const actions = renderBrowser()
+      const actions = startBrowser()
       const user = userEvent.setup()
       getOpenButton("Context window").focus()
 
@@ -410,7 +410,7 @@ describe("ConversationHistoryBrowser", () => {
     })
 
     it("skips a row whose deletion is pending", async () => {
-      renderBrowser({
+      startBrowser({
         list: buildThreeConversationList(),
         pendingMutations: [{ conversationId: MIDDLE_ID, operation: "delete" }]
       })
@@ -427,19 +427,19 @@ describe("ConversationHistoryBrowser", () => {
 
   describe("scrolling", () => {
     it("asks for older conversations each time a scroll ends near the list end", () => {
-      const actions = renderBrowser()
+      const actions = startBrowser()
       const region = getResultRegion()
 
-      scrollResults(region, 300)
+      sendResultScroll(region, 300)
       expect(actions.onLoadOlderConversations).not.toHaveBeenCalled()
 
-      scrollResults(region, 40)
-      scrollResults(region, 10)
+      sendResultScroll(region, 40)
+      sendResultScroll(region, 10)
       expect(actions.onLoadOlderConversations).toHaveBeenCalledTimes(2)
     })
 
     it("after an older read failed, retries only on arriving at the end again", () => {
-      const actions = renderBrowser({
+      const actions = startBrowser({
         list: buildThreeConversationList("", {
           status: "older-failed",
           error: "Older conversations could not be read."
@@ -447,19 +447,19 @@ describe("ConversationHistoryBrowser", () => {
       })
       const region = getResultRegion()
 
-      scrollResults(region, 10)
-      scrollResults(region, 5)
+      sendResultScroll(region, 10)
+      sendResultScroll(region, 5)
       expect(actions.onLoadOlderConversations).toHaveBeenCalledOnce()
 
-      scrollResults(region, 300)
-      scrollResults(region, 10)
+      sendResultScroll(region, 300)
+      sendResultScroll(region, 10)
       expect(actions.onLoadOlderConversations).toHaveBeenCalledTimes(2)
     })
   })
 
   describe("renaming", () => {
     it("edits the title in place and saves a changed one, returning focus to the row", async () => {
-      const actions = renderBrowser()
+      const actions = startBrowser()
       const user = userEvent.setup()
 
       await user.click(
@@ -483,7 +483,7 @@ describe("ConversationHistoryBrowser", () => {
     })
 
     it("starts an untitled conversation's edit empty", async () => {
-      renderBrowser()
+      startBrowser()
       const user = userEvent.setup()
 
       await user.click(screen.getByRole("button", { name: "Rename Untitled" }))
@@ -497,7 +497,7 @@ describe("ConversationHistoryBrowser", () => {
       ["an unchanged", "Streaming pipeline"],
       ["a blank", "   "]
     ])("does not save %s title", async (_case, typed) => {
-      const actions = renderBrowser()
+      const actions = startBrowser()
       const user = userEvent.setup()
       await user.click(
         screen.getByRole("button", { name: "Rename Streaming pipeline" })
@@ -512,7 +512,7 @@ describe("ConversationHistoryBrowser", () => {
     })
 
     it("cancels on Escape, returning focus to the row without saving", async () => {
-      const actions = renderBrowser()
+      const actions = startBrowser()
       const user = userEvent.setup()
       await user.click(
         screen.getByRole("button", { name: "Rename Streaming pipeline" })
@@ -529,7 +529,7 @@ describe("ConversationHistoryBrowser", () => {
     })
 
     it("saves a changed title when focus moves elsewhere", async () => {
-      const actions = renderBrowser()
+      const actions = startBrowser()
       const user = userEvent.setup()
       await user.click(
         screen.getByRole("button", { name: "Rename Streaming pipeline" })
@@ -549,7 +549,7 @@ describe("ConversationHistoryBrowser", () => {
     })
 
     it("starts renaming the focused row on F2", async () => {
-      renderBrowser()
+      startBrowser()
       const user = userEvent.setup()
       getOpenButton("Context window").focus()
 
@@ -563,7 +563,7 @@ describe("ConversationHistoryBrowser", () => {
 
   describe("deleting", () => {
     it("asks first, then deletes and moves focus to the next row", async () => {
-      const actions = renderBrowser()
+      const actions = startBrowser()
       const user = userEvent.setup()
 
       await user.click(
@@ -579,7 +579,7 @@ describe("ConversationHistoryBrowser", () => {
     })
 
     it("prefers the next row over the previous one", async () => {
-      renderBrowser()
+      startBrowser()
       const user = userEvent.setup()
 
       await user.click(screen.getByRole("button", { name: "Delete Untitled" }))
@@ -589,7 +589,7 @@ describe("ConversationHistoryBrowser", () => {
     })
 
     it("moves focus to the previous row after deleting the last one", async () => {
-      renderBrowser()
+      startBrowser()
       const user = userEvent.setup()
 
       await user.click(
@@ -601,7 +601,7 @@ describe("ConversationHistoryBrowser", () => {
     })
 
     it("moves focus to the search after deleting the only row", async () => {
-      renderBrowser({
+      startBrowser({
         list: {
           status: "loaded",
           page: buildConversationHistoryPage(
@@ -622,7 +622,7 @@ describe("ConversationHistoryBrowser", () => {
     })
 
     it("keeps the conversation and returns focus to its row", async () => {
-      const actions = renderBrowser()
+      const actions = startBrowser()
       const user = userEvent.setup()
       await user.click(screen.getByRole("button", { name: "Delete Untitled" }))
 

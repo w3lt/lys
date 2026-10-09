@@ -1,4 +1,4 @@
-import { createRef } from "react"
+import { createRef, type FormEvent } from "react"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
@@ -49,10 +49,12 @@ describe("Button", () => {
   })
 
   it("submits its form when it is a submit button", async () => {
-    const onSubmit = vi.fn((event: SubmitEvent) => event.preventDefault())
+    const onSubmit = vi.fn((event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault()
+    })
     const user = userEvent.setup()
     render(
-      <form onSubmit={(event) => onSubmit(event.nativeEvent as SubmitEvent)}>
+      <form onSubmit={onSubmit}>
         <Button type="submit">Create</Button>
       </form>
     )

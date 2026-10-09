@@ -42,7 +42,7 @@ const NOTHING_LOADED: RuntimeArrangement = {
  * @param routes - Backend routes the case needs besides the inventory read.
  * @returns The application store and the backend observation handle.
  */
-async function renderRuntimePane(
+async function startRuntimePane(
   runtime: RuntimeArrangement = READY_RUNTIME,
   routes: BackendRoutes = {}
 ) {
@@ -56,14 +56,14 @@ async function renderRuntimePane(
   )
   render(<SettingsView onDone={vi.fn()} />)
   await screen.findByRole("switch", { name: "Start it when Lys opens" })
-  await settle()
+  await waitForRenderedWork()
   return { useLysStore, backend }
 }
 
 /**
  * Lets pending requests and store updates settle inside a React update scope.
  */
-async function settle(): Promise<void> {
+async function waitForRenderedWork(): Promise<void> {
   await act(async () => {
     await waitForMicrotasks()
   })
@@ -96,7 +96,7 @@ describe("RuntimePaneContent", () => {
 
       render(<SettingsView onDone={vi.fn()} />)
       await screen.findByRole("switch", { name: "Start it when Lys opens" })
-      await settle()
+      await waitForRenderedWork()
 
       expect(
         screen.getByRole("heading", { name: "Backend running" })
@@ -114,7 +114,7 @@ describe("RuntimePaneContent", () => {
     ])(
       "names a %s backend and offers only the commands that apply",
       async (backendStatus, heading, canStart, canStop) => {
-        await renderRuntimePane(buildUnreachableRuntime(backendStatus))
+        await startRuntimePane(buildUnreachableRuntime(backendStatus))
 
         expect(
           screen.getByRole("heading", { name: heading })
@@ -136,11 +136,11 @@ describe("RuntimePaneContent", () => {
         get_backend_status: () => ({ running: false }),
         start_backend: () => start.promise
       })
-      await renderRuntimePane(buildUnreachableRuntime("stopped"))
+      await startRuntimePane(buildUnreachableRuntime("stopped"))
       const user = userEvent.setup()
 
       await user.click(screen.getByRole("button", { name: "Start" }))
-      await settle()
+      await waitForRenderedWork()
 
       expect(
         screen.getByRole("heading", { name: "Backend starting" })
@@ -151,7 +151,7 @@ describe("RuntimePaneContent", () => {
       ])
 
       start.resolve({ running: false })
-      await settle()
+      await waitForRenderedWork()
       expect(
         screen.getByRole("heading", { name: "Backend stopped" })
       ).toBeInTheDocument()
@@ -162,11 +162,11 @@ describe("RuntimePaneContent", () => {
         get_backend_status: () => ({ running: true, pid: 4242 }),
         stop_backend: () => ({ running: false })
       })
-      await renderRuntimePane()
+      await startRuntimePane()
       const user = userEvent.setup()
 
       await user.click(screen.getByRole("button", { name: "Stop" }))
-      await settle()
+      await waitForRenderedWork()
 
       expect(host.commands.map((invoked) => invoked.command)).toEqual([
         "get_backend_status",
@@ -178,7 +178,7 @@ describe("RuntimePaneContent", () => {
     })
 
     it("switches whether the backend starts when Lys opens", async () => {
-      const { useLysStore } = await renderRuntimePane()
+      const { useLysStore } = await startRuntimePane()
       const user = userEvent.setup()
       const autoStart = screen.getByRole("switch", {
         name: "Start it when Lys opens"
@@ -205,13 +205,13 @@ describe("RuntimePaneContent", () => {
           saves.push(args)
         }
       })
-      await renderRuntimePane()
+      await startRuntimePane()
       const user = userEvent.setup()
 
       await user.click(
         screen.getByRole("switch", { name: "Start it when Lys opens" })
       )
-      await settle()
+      await waitForRenderedWork()
 
       expect(saves).toContainEqual({
         newSettings: expect.objectContaining({
@@ -224,7 +224,7 @@ describe("RuntimePaneContent", () => {
   describe("LM Studio", () => {
     it("asks the backend to reconnect and shows the result", async () => {
       const runtime = buildUnreachableRuntime("running", "unreachable")
-      const { backend } = await renderRuntimePane(runtime, {
+      const { backend } = await startRuntimePane(runtime, {
         "POST /api/v1/llm/runtime/connect": () =>
           buildJsonResponse(200, { status: "connected" })
       })
@@ -234,7 +234,7 @@ describe("RuntimePaneContent", () => {
       ).toBeInTheDocument()
 
       await user.click(screen.getByRole("button", { name: "Refresh" }))
-      await settle()
+      await waitForRenderedWork()
 
       expect(
         screen.getByRole("heading", { name: "LM Studio connected" })
@@ -248,7 +248,7 @@ describe("RuntimePaneContent", () => {
 
   describe("model residency", () => {
     it("shows loaded weights and unloads them", async () => {
-      const { backend } = await renderRuntimePane(READY_RUNTIME, {
+      const { backend } = await startRuntimePane(READY_RUNTIME, {
         "PATCH /api/v1/llm/unload": () => new Response(null, { status: 204 })
       })
       const user = userEvent.setup()
@@ -262,7 +262,7 @@ describe("RuntimePaneContent", () => {
       expect(screen.getByRole("button", { name: "Load" })).toBeDisabled()
 
       await user.click(screen.getByRole("button", { name: "Unload" }))
-      await settle()
+      await waitForRenderedWork()
 
       const unload = backend.requests.find(
         (request) => request.method === "PATCH"
@@ -272,7 +272,7 @@ describe("RuntimePaneContent", () => {
 
     it("loads the chosen default while nothing is loaded, showing progress meanwhile", async () => {
       const load = createControlledPromise<Response>()
-      const { backend } = await renderRuntimePane(NOTHING_LOADED, {
+      const { backend } = await startRuntimePane(NOTHING_LOADED, {
         "POST /api/v1/llm/load": () => load.promise
       })
       const user = userEvent.setup()
@@ -282,7 +282,7 @@ describe("RuntimePaneContent", () => {
       expect(screen.getByRole("button", { name: "Unload" })).toBeDisabled()
 
       await user.click(screen.getByRole("button", { name: "Load" }))
-      await settle()
+      await waitForRenderedWork()
 
       const progress = screen.getByRole("progressbar", {
         name: "Loading weights"
@@ -297,18 +297,18 @@ describe("RuntimePaneContent", () => {
       load.resolve(
         buildJsonResponse(200, buildLlmInfo("qwen3-8b", { loaded: true }))
       )
-      await settle()
+      await waitForRenderedWork()
       expect(screen.queryByRole("progressbar")).toBeNull()
     })
 
     it("cannot load without a chosen default", async () => {
-      await renderRuntimePane({ ...NOTHING_LOADED, defaultModel: null })
+      await startRuntimePane({ ...NOTHING_LOADED, defaultModel: null })
 
       expect(screen.getByRole("button", { name: "Load" })).toBeDisabled()
     })
 
     it("offers no model command while LM Studio is not reachable", async () => {
-      await renderRuntimePane(buildUnreachableRuntime("running", "unreachable"))
+      await startRuntimePane(buildUnreachableRuntime("running", "unreachable"))
 
       expect(screen.getByRole("button", { name: "Load" })).toBeDisabled()
       expect(screen.getByRole("button", { name: "Unload" })).toBeDisabled()

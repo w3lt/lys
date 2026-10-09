@@ -28,7 +28,7 @@ import {
 import { buildLlmInfo } from "../support/modelFixtures"
 import { startNativeHostFake } from "../support/nativeHostFake"
 import {
-  arrangeRuntime,
+  updateStoreRuntime,
   buildUnreachableRuntime,
   READY_RUNTIME,
   type RuntimeArrangement
@@ -73,7 +73,7 @@ async function loadFreshComposer(runtime: RuntimeArrangement = READY_RUNTIME) {
   const { useConversationHistoryStore } =
     await import("@/lib/store/conversation-history")
   const { Composer } = await import("@/components/Composer")
-  arrangeRuntime(useLysStore, runtime)
+  updateStoreRuntime(useLysStore, runtime)
   return {
     useLysStore,
     useChatViewStore,
@@ -129,7 +129,7 @@ function listRouteKeys(backend: ReturnType<typeof startBackendFake>) {
 /**
  * Lets pending requests and store updates settle inside a React update scope.
  */
-async function settle(): Promise<void> {
+async function waitForRenderedWork(): Promise<void> {
   await act(async () => {
     await waitForMicrotasks()
   })
@@ -198,7 +198,7 @@ function listStagedNames(): string[] {
  * read the files only while the event is dispatched; afterwards the event's
  * file list is empty. The event built here does the same.
  */
-function dropFiles(target: Element, files: readonly File[]): void {
+function sendFileDrop(target: Element, files: readonly File[]): void {
   const drop = createEvent.drop(target)
   Object.defineProperty(drop, "dataTransfer", {
     value: {
@@ -262,7 +262,7 @@ describe("Composer", () => {
       render(<Composer messageFieldRef={createRef()} />)
 
       await user.type(getMessageField(), "Hello{Enter}")
-      await settle()
+      await waitForRenderedWork()
 
       expect(listChatBodies(backend)).toEqual([
         {
@@ -282,7 +282,7 @@ describe("Composer", () => {
       render(<Composer messageFieldRef={createRef()} />)
 
       await user.type(getMessageField(), "Hello{Shift>}{Enter}{/Shift}there")
-      await settle()
+      await waitForRenderedWork()
 
       expect(getMessageField()).toHaveValue("Hello\nthere")
       expect(backend.requests).toEqual([])
@@ -295,7 +295,7 @@ describe("Composer", () => {
       render(<Composer messageFieldRef={createRef()} />)
 
       await user.type(getMessageField(), "  {Enter}")
-      await settle()
+      await waitForRenderedWork()
 
       expect(getMessageField()).toHaveValue("  ")
       expect(backend.requests).toEqual([])
@@ -309,7 +309,7 @@ describe("Composer", () => {
       await user.type(getMessageField(), "Hello")
 
       await user.click(screen.getByRole("button", { name: "Send" }))
-      await settle()
+      await waitForRenderedWork()
 
       expect(listChatBodies(backend)).toHaveLength(1)
       streams[0]?.close()
@@ -339,7 +339,7 @@ describe("Composer", () => {
 
       await user.paste(longText)
       await user.keyboard("{Enter}")
-      await settle()
+      await waitForRenderedWork()
 
       expect(listChatBodies(backend)).toEqual([
         expect.objectContaining({ message: longText.trim() })
@@ -357,12 +357,12 @@ describe("Composer", () => {
       const user = userEvent.setup()
       render(<Composer messageFieldRef={createRef()} />)
       await user.type(getMessageField(), "Hello{Enter}")
-      await settle()
+      await waitForRenderedWork()
 
       expect(screen.queryByRole("button", { name: "Send" })).toBeNull()
       expect(screen.getByText("Generating…")).toBeInTheDocument()
       await user.click(screen.getByRole("button", { name: "Stop reply" }))
-      await settle()
+      await waitForRenderedWork()
       expect(listRouteKeys(backend)).toEqual([CHAT_ROUTE])
 
       await sendStreamEvents(streams[0], NEW_TURN_EVENT)
@@ -379,7 +379,7 @@ describe("Composer", () => {
       const user = userEvent.setup()
       render(<Composer messageFieldRef={createRef()} />)
       await user.type(getMessageField(), "Hello{Enter}")
-      await settle()
+      await waitForRenderedWork()
       await sendStreamEvents(streams[0], NEW_TURN_EVENT, {
         type: "delta",
         content: "Hi"
@@ -388,7 +388,7 @@ describe("Composer", () => {
 
       await user.type(getMessageField(), "Next question")
       await user.click(screen.getByRole("button", { name: "Stop reply" }))
-      await settle()
+      await waitForRenderedWork()
       await sendStreamEvents(streams[0], { type: "interrupted" })
 
       expect(listRouteKeys(backend)).toEqual([CHAT_ROUTE, STOP_REPLY_ROUTE])
@@ -403,7 +403,7 @@ describe("Composer", () => {
       const user = userEvent.setup()
       render(<Composer messageFieldRef={createRef()} />)
       await user.type(getMessageField(), "Hello{Enter}")
-      await settle()
+      await waitForRenderedWork()
 
       await sendStreamEvents(
         streams[0],
@@ -472,7 +472,7 @@ describe("Composer", () => {
       ).toBeNull()
 
       await user.click(screen.getByRole("button", { name: "Start backend" }))
-      await settle()
+      await waitForRenderedWork()
 
       expect(host.commands.map((invoked) => invoked.command)).toEqual([
         "get_backend_status",
@@ -484,7 +484,7 @@ describe("Composer", () => {
       expect(screen.getByRole("button", { name: "Working" })).toBeDisabled()
 
       start.resolve({ running: false })
-      await settle()
+      await waitForRenderedWork()
     })
 
     it.each([
@@ -560,7 +560,7 @@ describe("Composer", () => {
         "menu"
       )
       await user.type(getMessageField(), "Hello{Enter}")
-      await settle()
+      await waitForRenderedWork()
 
       expect(listChatBodies(backend)).toEqual([
         expect.objectContaining({ model: "gemma-3" })
@@ -581,7 +581,7 @@ describe("Composer", () => {
       )
       await user.click(screen.getByRole("menuitemradio", { name: /^qwen3-8b/ }))
       await user.type(getMessageField(), "Hello{Enter}")
-      await settle()
+      await waitForRenderedWork()
 
       expect(
         screen.getByRole("button", { name: "qwen3-8b" })
@@ -608,7 +608,7 @@ describe("Composer", () => {
       )
       await user.click(screen.getByRole("menuitemradio", { name: /^llama-4/ }))
       await user.type(getMessageField(), "Hello{Enter}")
-      await settle()
+      await waitForRenderedWork()
 
       expect(
         screen.getByRole("button", { name: "qwen3-8b" })
@@ -637,7 +637,7 @@ describe("Composer", () => {
       expect(history).toHaveAttribute("aria-keyshortcuts", "Meta+K Control+K")
 
       await user.click(history)
-      await settle()
+      await waitForRenderedWork()
 
       expect(history).toHaveAttribute("aria-expanded", "true")
       expect(useConversationHistoryStore.getState().visibility.status).toBe(
@@ -748,7 +748,7 @@ describe("Composer", () => {
       fireEvent.dragOver(field, { dataTransfer: { files: [] } })
       expect(screen.getByText("release to add to context")).toBeInTheDocument()
 
-      dropFiles(field, [new File(["x"], "dropped.txt")])
+      sendFileDrop(field, [new File(["x"], "dropped.txt")])
 
       expect(screen.queryByText("release to add to context")).toBeNull()
       expect(listStagedNames()).toEqual(["dropped.txt"])
@@ -774,7 +774,7 @@ describe("Composer", () => {
 
       fireEvent.dragOver(field, { dataTransfer: { files: [] } })
       expect(screen.queryByText("release to add to context")).toBeNull()
-      dropFiles(field, [new File(["x"], "dropped.txt")])
+      sendFileDrop(field, [new File(["x"], "dropped.txt")])
 
       expect(listStagedNames()).toEqual([])
     })
@@ -791,7 +791,7 @@ describe("Composer", () => {
         new File(["x".repeat(130_000)], "export.csv")
       )
       await user.type(getMessageField(), "{Enter}")
-      await settle()
+      await waitForRenderedWork()
 
       expect(backend.requests).toEqual([])
       expect(getMessageField()).toHaveValue("Summarize this")

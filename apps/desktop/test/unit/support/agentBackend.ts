@@ -1,4 +1,8 @@
-import type { Agent } from "@lys/share"
+import {
+  agentChangesSchema,
+  agentDefinitionSchema,
+  type Agent
+} from "@lys/share"
 import {
   buildJsonResponse,
   startBackendFake,
@@ -12,14 +16,6 @@ import {
   buildAgentListPage,
   buildAgentNotFoundProblem
 } from "./agentFixtures"
-
-/** Agent fields a create or update request carries. */
-type AgentRequestFields = Readonly<{
-  code?: string
-  name?: string
-  bio?: string
-  systemPrompt?: string
-}>
 
 /** Options of {@link startAgentBackend}. */
 export type AgentBackendOptions = Readonly<{
@@ -56,7 +52,9 @@ export type AgentBackend = Readonly<{
  * @param initialAgents - Agents stored when the case starts, oldest first.
  * @param options - Derived code, created codes, and replacement routes.
  * @returns The observation handle and a reader of the stored agents.
- * @remarks Reads list every stored agent on one final page. Creating stores
+ * @remarks Request bodies are parsed with the shared agent schemas, so a
+ * body the backend would reject fails the case. Reads list every stored
+ * agent on one final page. Creating stores
  * the request's fields under its code, or under the derived code when it has
  * none, and answers 409 when that code is taken. Updating merges the
  * request's fields into the stored agent. Deleting removes it and answers
@@ -72,7 +70,7 @@ export function startAgentBackend(
   const notFound = () => buildJsonResponse(404, buildAgentNotFoundProblem())
 
   const create: BackendRoute = (request) => {
-    const fields = request.body as AgentRequestFields
+    const fields = agentDefinitionSchema.parse(request.body)
     const code = fields.code ?? options.derivedCode
     if (code === undefined) throw new Error("No code to store the agent under")
     if (findAgent(code) !== undefined) {
@@ -95,7 +93,7 @@ export function startAgentBackend(
     [`PATCH /api/v1/agents/${code}`]: (request) => {
       const agent = findAgent(code)
       if (agent === undefined) return notFound()
-      const fields = request.body as AgentRequestFields
+      const fields = agentChangesSchema.parse(request.body)
       const changed = buildAgent(code, {
         name: fields.name ?? agent.name,
         bio: fields.bio ?? agent.bio,

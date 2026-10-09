@@ -14,7 +14,7 @@ const TYPESCRIPT_BLOCK = "```ts\nconst a = 1\nconst b = 2\n```\n"
  * @remarks jsdom has no clipboard, as a host that denies access has none
  * either; the property is removed when the case finishes.
  */
-function installClipboard(
+function startClipboardFake(
   writeText: (text: string) => Promise<void> = () => Promise.resolve()
 ) {
   const write = vi.fn(writeText)
@@ -34,7 +34,7 @@ function installClipboard(
  * @param text - Markdown containing one fenced code block.
  * @returns The copy button of that block and the tree's unmount function.
  */
-async function renderCodeBlock(text: string) {
+async function startCodeBlock(text: string) {
   const { unmount } = render(<MarkdownMessage streaming={false} text={text} />)
   const copyButton = await screen.findByRole("button", { name: "Copy code" })
   return { copyButton, unmount }
@@ -105,8 +105,8 @@ describe("MarkdownMessage", () => {
   })
 
   it("labels a code block with its language and copies its plain text", async () => {
-    const writeText = installClipboard()
-    const { copyButton } = await renderCodeBlock(TYPESCRIPT_BLOCK)
+    const writeText = startClipboardFake()
+    const { copyButton } = await startCodeBlock(TYPESCRIPT_BLOCK)
 
     expect(screen.getByText("Ts")).toBeInTheDocument()
 
@@ -120,8 +120,8 @@ describe("MarkdownMessage", () => {
   })
 
   it("labels a code block without a language as Text and copies it without the final newline", async () => {
-    const writeText = installClipboard()
-    const { copyButton } = await renderCodeBlock("```\nplain words\n```\n")
+    const writeText = startClipboardFake()
+    const { copyButton } = await startCodeBlock("```\nplain words\n```\n")
 
     expect(screen.getByText("Text")).toBeInTheDocument()
     expect(screen.getByText("plain words")).toBeInTheDocument()
@@ -133,14 +133,14 @@ describe("MarkdownMessage", () => {
   })
 
   it("shows code in a language it cannot highlight as plain text", async () => {
-    await renderCodeBlock("```notalanguage\nkeep me\n```\n")
+    await startCodeBlock("```notalanguage\nkeep me\n```\n")
 
     expect(screen.getByText("keep me")).toBeInTheDocument()
   })
 
   it("returns the copy label 1.4 seconds after the latest copy", async () => {
-    installClipboard()
-    const { copyButton } = await renderCodeBlock(TYPESCRIPT_BLOCK)
+    startClipboardFake()
+    const { copyButton } = await startCodeBlock(TYPESCRIPT_BLOCK)
     vi.useFakeTimers()
 
     fireEvent.click(copyButton)
@@ -158,8 +158,8 @@ describe("MarkdownMessage", () => {
   })
 
   it("leaves no reset pending once the message is removed", async () => {
-    installClipboard()
-    const { copyButton, unmount } = await renderCodeBlock(TYPESCRIPT_BLOCK)
+    startClipboardFake()
+    const { copyButton, unmount } = await startCodeBlock(TYPESCRIPT_BLOCK)
     vi.useFakeTimers()
     fireEvent.click(copyButton)
     await vi.advanceTimersByTimeAsync(0)
@@ -171,10 +171,10 @@ describe("MarkdownMessage", () => {
   })
 
   it("keeps the copy label when the clipboard refuses the write", async () => {
-    const writeText = installClipboard(() =>
+    const writeText = startClipboardFake(() =>
       Promise.reject(new DOMException("Denied", "NotAllowedError"))
     )
-    const { copyButton } = await renderCodeBlock(TYPESCRIPT_BLOCK)
+    const { copyButton } = await startCodeBlock(TYPESCRIPT_BLOCK)
 
     fireEvent.click(copyButton)
     await waitForMicrotasks()

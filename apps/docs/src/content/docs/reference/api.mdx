@@ -123,8 +123,7 @@ A request can offer the model the client's tools for this turn:
           }
         ]
       }
-    ],
-    "maxCalls": 8
+    ]
   }
 }
 ```
@@ -132,10 +131,10 @@ A request can offer the model the client's tools for this turn:
 `definitions` lists at least one tool definition, each name once, in the shape
 `toolDefinitionSchema` from `@lys/share` validates. It lists only the client's
 switched-on tools; tools the backend runs itself are added by the backend.
-`maxCalls` is the number of tool calls the reply may make before it has to
-answer, from `1` through `16`. Without `tools`, the turn is one round with no
-tools. The desktop sends `tools` only to a model whose `trainedForToolUse` is
-true.
+Without `tools`, the turn is one round with no tools. The desktop sends `tools`
+only to a model whose `trainedForToolUse` is true; the backend does not check
+this itself ([#135](https://github.com/w3lt/lys/issues/135)). A reply can make any number of tool calls
+([#136](https://github.com/w3lt/lys/issues/136)).
 
 ## Chat response shape
 
@@ -191,8 +190,9 @@ reply's loop continues. A call that is unknown, already answered, or whose
 reply ended returns `409` with `urn:lys:problem:chat:tool-call-not-pending`
 and changes nothing, so repeating a request whose response was lost is
 harmless. The backend sets no time limit on a pending call. It waits until
-the call is answered, the reply is stopped, a newer turn starts in the
-conversation, the conversation is deleted, or the backend shuts down.
+the call is answered, the reply is stopped, or the backend shuts down. A newer
+turn in the conversation or deleting the conversation does not end the wait yet
+([#137](https://github.com/w3lt/lys/issues/137)).
 
 ## Conversation history
 
@@ -380,7 +380,9 @@ can keep the query and shutdown pending.
 
 Chat inference is cancelled only by the reply-stop route or by backend
 shutdown; closing a chat stream does not cancel it. A newer turn or a deletion
-also ends a reply's inference, once the model sends its next content. See the
+also ends a reply's inference, once the model sends its next content. A reply
+waiting for a tool result writes nothing, so it is not ended this way
+([#137](https://github.com/w3lt/lys/issues/137)). See the
 [provider cancellation policy](/architecture/providers/#cancellation-policy).
 
 ## Model health responses

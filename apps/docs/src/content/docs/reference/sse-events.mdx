@@ -124,8 +124,9 @@ model reads the error.
 The client answers the call with the
 [tool-result route](/reference/api/#tool-results). The calls of one model
 round arrive in the model's order, and the next round starts once every one
-has an answer. The event is live only: nothing stores it, and a client that
-was not following when it was sent finds the call in the next
+has an answer. The model's text in a round that calls tools is streamed and
+stored like any other text. The event is live only: nothing stores it, and a
+client that was not following when it was sent finds the call in the next
 `reply-snapshot`'s `pendingToolCalls`.
 
 ### `reply-snapshot`
@@ -151,8 +152,6 @@ as failed locally. Title-generation failures never produce `error` events.
 - No `session_id`
 - No `emitted_at`
 - No replay marker such as `stream.resumed`
-- No intermediate round text: when the model calls tools, only the final
-  round's text is sent as `delta`
 - No tool results, and no record of which tools ran
 
 ## Event ordering today
@@ -161,10 +160,11 @@ Every valid chat stream begins with one turn-start event. After that:
 
 1. `start-new-conversation-turn` or `start-existing-conversation-turn`
 2. for a titled existing conversation, its stored `title` event arrives next
-3. zero or more `tool-call` events while the model calls tools, each round's
-   calls in the model's order
-4. zero or more `delta` events carrying the final round's text, then exactly
-   one of `done`, `interrupted`, or `error`
+3. zero or more rounds: each round's text as `delta` events, then, when the
+   round calls tools, its `tool-call` events in the model's order. When an
+   earlier round sent text, a later round's first `delta` starts with a blank
+   line (`\n\n`)
+4. exactly one of `done`, `interrupted`, or `error`
 5. for a conversation without a stored title, a generated `title` may arrive
    before, during, or after the chat events
 
@@ -186,8 +186,8 @@ returns the stored state.
 
 - Replay of missed events (following a reply today starts from a fresh
   snapshot instead)
-- Streamed and stored reply parts: thoughts, intermediate text, tool calls,
-  and tool results
+- Streamed and stored reply parts: thoughts, each round's text, tool calls,
+  and tool results, kept apart instead of one text
 - Stronger protocol versioning around additive event growth
 
 ## Related pages

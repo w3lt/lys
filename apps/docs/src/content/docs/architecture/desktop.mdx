@@ -35,7 +35,7 @@ The desktop currently has six separate state systems:
 | Chat Zustand store      | Active conversation, request and open tokens, local abort controllers, streamed assistant deltas, inline error text            |
 | History Zustand store   | Dialog visibility, search query, displayed conversation pages, the row being renamed or confirmed, pending renames and deletes |
 | Agent Zustand store     | Every listed agent, the open editor and its draft, the save attempt, the pending save or delete, the most recently saved agent |
-| Tool Zustand store      | The client tool list read from the desktop, tool calls on or off, calls per reply, each tool's switch and approval             |
+| Tool Zustand store      | The client tool list read from the desktop, tool calls on or off, each tool's switch and approval                              |
 | Tool-call Zustand store | Every tool call held until the backend takes its answer, and the reply follows that deliver them                               |
 | Shell Zustand store     | Active top-level view, loaded runtime settings, backend process status, startup progress                                       |
 
@@ -255,24 +255,22 @@ time, shows the tool's arguments with their type and whether they are required;
 an enum argument shows `enum · N` and its accepted values. It also shows where
 the tool runs and whether Lys asks before it runs.
 
-The tool-calls card holds the master switch, a status line, and calls per reply
-(4, 8, or 16). The status line names the loaded model and how many tools are
-offered with their summed estimate. When the loaded model's `trainedForToolUse`
-is false, Lys offers it no tools: a card says the model isn't trained for tool
-calls, and every control below it recedes and is disabled. An expanded row
-closes while the controls are locked and opens again when they unlock.
+The tool-calls card holds the master switch and a status line. The status line
+names the loaded model and how many tools are offered with their summed
+estimate. When the loaded model's `trainedForToolUse` is false, Lys offers it
+no tools: a card says the model isn't trained for tool calls, and every control
+below it recedes and is disabled. An expanded row closes while the controls are
+locked and opens again when they unlock.
 
 Every choice on the pane applies to the next chat request or tool call: tool
-calls on or off, calls per reply, each tool's switch, and Ask me or Just run.
-Every tool starts on Ask me. The choices last for the session only; nothing is
-saved.
+calls on or off, each tool's switch, and Ask me or Just run. Every tool starts
+on Ask me. The choices last for the session only; nothing is saved.
 
 ## Tool calls
 
-A chat request offers the switched-on tools, with calls per reply as
-`maxCalls`, when tool calls are on and the loaded model's `trainedForToolUse`
-is true. If the tool list cannot be read, the request fails with an inline
-error and nothing is sent.
+A chat request offers the switched-on tools when tool calls are on and the
+loaded model's `trainedForToolUse` is true. If the tool list cannot be read, the
+request fails with an inline error and nothing is sent.
 
 The tool-call store follows every reply the chat store starts or follows on
 its own reply-events connection, so tool calls keep moving while another
@@ -299,9 +297,11 @@ A read sends the file's text, a search sends its report as JSON, and a
 declared tool failure sends the failure as JSON. Each answer goes to the
 [tool-result route](/reference/api/#tool-results). When an answer cannot be
 sent, the card says so and Try again sends the same answer without running the
-tool again. When the reply ends, by finishing, Stop, a newer turn, or
-deletion, its waiting calls disappear. A call still waiting when the app
-quits is found again through the reply's snapshot when its conversation is
+tool again. When the reply ends, by finishing, Stop, or backend shutdown, its
+waiting calls disappear. A newer turn in the conversation or deleting the
+conversation does not end a waiting reply yet
+([#137](https://github.com/w3lt/lys/issues/137)). A call still waiting when the
+app quits is found again through the reply's snapshot when its conversation is
 opened.
 
 ## Current limitations

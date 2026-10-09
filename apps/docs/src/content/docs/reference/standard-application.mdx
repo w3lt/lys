@@ -159,41 +159,35 @@ the maintainer on 2026-10-07 for
   [API-015](https://github.com/w3lt/lys/blob/main/docs/code_standards/API.md)
   requires. This exception is removed with that change.
 
-## Backend tool class exception
+## Tool call limit exception
 
-The backend's `AgentTool` and `ToolArgument` classes have an approved exception
-to [CLASS-005](https://github.com/w3lt/lys/blob/main/docs/code_standards/CLASS.md)
-and
-[MODULE-008](https://github.com/w3lt/lys/blob/main/docs/code_standards/MODULE.md):
-they, their public members, and the `buildToolArgumentFormat` export of
-`@lys/share` have no production consumer yet. The exception was approved by
-the maintainer on 2026-10-08 for [PR #124](https://github.com/w3lt/lys/pull/124)
-only, following review finding I-3.
+Chat turns that offer tools have an approved exception to
+[API-019](https://github.com/w3lt/lys/blob/main/docs/code_standards/API.md): a
+reply can make any number of tool calls. The exception was approved by the
+maintainer on 2026-10-09 for [PR #128](https://github.com/w3lt/lys/pull/128).
 
-- **Scope:**
-  [`AgentTool`](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/tool/tool.ts),
-  [`ToolArgument`](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/tool/argument/index.ts),
-  and
-  [`buildToolArgumentFormat`](https://github.com/w3lt/lys/blob/main/packages/share/src/models/tool.ts),
-  which `@lys/share` exports only for `ToolArgument`, as PR #124 leaves them.
-  A later change that adds public surface to them before #89 follows these
-  rules or needs its own approval. Every other class and export still follows
-  CLASS-005 and MODULE-008.
-- **Constraint:** the maintainer asked to keep both classes for the agent loop
-  of [issue #89](https://github.com/w3lt/lys/issues/89), which will offer tools
-  to a model through them. Until that loop exists, the backend unit tests are
-  their only callers.
-- **Alternatives considered:** removing `ToolArgument` and the
-  `buildToolArgumentFormat` export until #89 needs them, as the review offered,
-  was not taken because the maintainer asked to keep the classes.
-- **Risk and control:** public surface without a consumer can drift from what
-  #89 needs. The classes own only a frozen, validated definition and have no
-  side effects, no production code reaches them, and the backend unit tests
-  cover their whole public surface, so the cost is limited to maintaining
-  them.
-- **Removal condition:** the #89 loop builds the tools it offers through these
-  classes. That change removes this exception, and whatever is still unused is
-  deleted.
+- **Scope:** the tool loop of `Agent.createReply` and the `tools` offer of
+  `POST /api/v1/chat`. Every other API still follows API-019.
+- **Constraint:** the maintainer removed the per-reply limit until its design
+  is decided in [#136](https://github.com/w3lt/lys/issues/136): which calls
+  run when a round asks for more than remain, and how the reply then has to
+  answer.
+- **Alternatives considered:** keeping the earlier 1–16 `maxCalls` limit, or a
+  fixed backend cap, was not taken because the maintainer chose to decide the
+  limit in its own issue.
+- **Risk and control:** a model that keeps calling tools never ends on its
+  own. The person's approval controls only the calls the desktop runs: on Ask
+  me, each of those waits for Allow; on Just run, they run at once. Every
+  other call is answered without the person and the model is asked again at
+  once, whatever the approval setting: calls the backend answers itself (an
+  unknown tool or arguments that don't match) and calls the desktop answers
+  itself (tool calls or that tool switched off, or a tool it cannot run). Such
+  calls repeat until the person presses Stop. Each round sends the growing
+  context to LM Studio again, which refuses a request beyond the model's
+  context length unless its context overflow setting truncates the context
+  instead.
+- **Removal condition:** [#136](https://github.com/w3lt/lys/issues/136) adds
+  the limit back.
 
 ## API boundaries
 

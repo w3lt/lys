@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type ReactNode } from "react"
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ComponentProps,
+  type ReactNode
+} from "react"
 import ReactMarkdown, {
   type ExtraProps,
   MarkdownHooks,
@@ -175,18 +181,37 @@ function MarkdownPre({
 }
 
 /**
- * Markdown renderer mappings used by every {@link MarkdownMessage}.
+ * Adapts react-markdown links to open in a new tab without a referrer.
  *
- * @remarks Links open in a new tab and omit the referrer; fenced code routes
- * through {@link MarkdownPre} for language labels and copying. These mappings
- * are presentation configuration, not application state.
+ * @remarks Only the destination and title a Markdown link can carry are
+ * rendered, so the source node the renderer supplies never becomes a DOM
+ * attribute.
+ * @param props - Renderer-provided link children, destination, title, and
+ * the hast node they were rendered from.
+ * @returns The external link.
  */
-const markdownComponents: Components = {
-  a: ({ children, ...props }) => (
-    <a {...props} rel="noreferrer" target="_blank">
+function MarkdownLink({
+  children,
+  href,
+  title
+}: ComponentProps<"a"> & ExtraProps) {
+  return (
+    <a href={href} rel="noreferrer" target="_blank" title={title}>
       {children}
     </a>
-  ),
+  )
+}
+
+/**
+ * Markdown renderer mappings used by every {@link MarkdownMessage}.
+ *
+ * @remarks Links route through {@link MarkdownLink} and open in a new tab
+ * without the referrer; fenced code routes through {@link MarkdownPre} for
+ * language labels and copying. These mappings are presentation
+ * configuration, not application state.
+ */
+const markdownComponents: Components = {
+  a: MarkdownLink,
   pre: MarkdownPre
 }
 

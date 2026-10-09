@@ -1,7 +1,9 @@
-import type { ChatGenerationEvent } from "@lys/protocol"
+import type { ChatGenerationEvent, ChatToolCall } from "@lys/protocol"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import ReplyEventSubscription from "../../../../src/modules/chat/replyEventSubscription"
-import ReplyGeneration from "../../../../src/modules/chat/replyGeneration"
+import ReplyGeneration, {
+  type ReplyTaskContext
+} from "../../../../src/modules/chat/replyGeneration"
 import ControlledReplyTask from "../../support/controlledReplyTask"
 import { waitForMicrotasks } from "../../support/microtasks"
 import { createSettlementReader } from "../../support/settlement"
@@ -36,6 +38,13 @@ const QUEUED_EVENT = Object.freeze({
   title: "Stored title"
 } satisfies ChatGenerationEvent)
 
+/** Tool call a reply task sends. */
+const TOOL_CALL = Object.freeze({
+  id: "01900000-0000-7000-8000-00000000000a",
+  toolName: "read_text_file",
+  arguments: Object.freeze({ path: "/notes/todo.md" })
+} satisfies ChatToolCall)
+
 /**
  * Creates a follower whose connection accepts every write at once.
  *
@@ -62,7 +71,7 @@ function createRecordingFollower() {
  * generation outlives its case.
  */
 function startControlledGeneration() {
-  const replyTask = new ControlledReplyTask()
+  const replyTask = new ControlledReplyTask<ReplyTaskContext>()
   const titleTask = new ControlledReplyTask()
   const reportedFailures: unknown[] = []
   const generation = ReplyGeneration.start({
@@ -420,6 +429,76 @@ describe("ReplyGeneration", () => {
       await waitForMicrotasks()
       expect(disposal()).toBe("fulfilled")
       expect(follower.subscription.handleStreamEvent(FIRST_DELTA)).toBe(false)
+    })
+  })
+  describe("tool calls", () => {
+    it("sends a reply task's call to every open follower and lists it until it is answered", async () => {
+      const { generation, replyTask, titleTask } = startControlledGeneration()
+      const follower = createRecordingFollower()
+      generation.openSubscription(follower.subscription)
+      await waitForMicrotasks()
+
+      const answer = replyTask.context.sendToolCall(TOOL_CALL)
+      expect(generation.pendingToolCalls).toEqual([TOOL_CALL])
+      expect(
+        generation.resolveToolCall(TOOL_CALL.id, {
+          status: "succeeded",
+          content: "Buy milk"
+        })
+      ).toBe(true)
+
+      expect(await answer).toEqual({ status: "succeeded", content: "Buy milk" })
+      expect(generation.pendingToolCalls).toEqual([])
+      replyTask.resolve()
+      titleTask.resolve()
+      await generation.settled
+      await follower.subscription.closed
+      expect(follower.written).toEqual([{ type: "tool-call", call: TOOL_CALL }])
+    })
+
+    it("ends a waiting call without an answer when the reply is stopped", async () => {
+      const { generation, replyTask } = startControlledGeneration()
+      await waitForMicrotasks()
+      const answer = replyTask.context.sendToolCall(TOOL_CALL)
+
+      const stop = generation.stopReply()
+
+      expect(await answer).toBeUndefined()
+      expect(replyTask.context.abortSignal.aborted).toBe(true)
+      expect(generation.pendingToolCalls).toEqual([])
+      replyTask.resolve()
+      await stop
+    })
+
+    it("ends a waiting call without an answer when the generation is disposed", async () => {
+      const { generation, replyTask, titleTask } = startControlledGeneration()
+      await waitForMicrotasks()
+      const answer = replyTask.context.sendToolCall(TOOL_CALL)
+
+      const disposal = generation[Symbol.asyncDispose]()
+
+      expect(await answer).toBeUndefined()
+      replyTask.resolve()
+      titleTask.resolve()
+      await disposal
+    })
+
+    it("ends a call still waiting when the reply task settles, and refuses a later answer", async () => {
+      const { generation, replyTask, titleTask } = startControlledGeneration()
+      await waitForMicrotasks()
+      const answer = replyTask.context.sendToolCall(TOOL_CALL)
+      replyTask.resolve()
+      titleTask.resolve()
+      await generation.settled
+
+      expect(await answer).toBeUndefined()
+      expect(generation.pendingToolCalls).toEqual([])
+      expect(
+        generation.resolveToolCall(TOOL_CALL.id, {
+          status: "succeeded",
+          content: "late"
+        })
+      ).toBe(false)
     })
   })
 })

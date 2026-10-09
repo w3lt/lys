@@ -320,10 +320,12 @@ describe("AgentService", () => {
         userMessageContent: "Hello",
         model: "qwen/qwen3-8b",
         generationOptions: { temperature: 0.4 },
+        tools: [],
         abortSignal: new AbortController().signal,
         updateAssistantMessageContent: () => true,
         updateAssistantMessageState: () => true,
         sendEvent: vi.fn(),
+        sendToolCall: vi.fn(),
         reportReplyCancellation: vi.fn(),
         reportReplyFailure: vi.fn()
       })

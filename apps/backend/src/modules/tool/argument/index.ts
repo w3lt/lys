@@ -1,15 +1,22 @@
 import {
-  buildToolArgumentFormat,
   toolArgumentDefinitionSchema,
-  type JsonSchemaProperty,
   type ToolArgumentDefinition,
-  type ToolArgumentDefinitionCandidate,
-  type ToolArgumentType
+  type ToolArgumentDefinitionCandidate
 } from "@lys/share"
+import * as z from "zod"
+
+/** Value a model may send for one tool argument. */
+export type ToolArgumentValue = string | number | boolean
 
 /**
- * Owns one validated tool argument to provide the JSON Schema a model
- * receives for it.
+ * Checks the value a model sends for one argument. An argument that is not
+ * required also accepts absence.
+ */
+export type ToolArgumentValueSchema = z.ZodType<ToolArgumentValue | undefined>
+
+/**
+ * Owns one validated tool argument to provide the schema that checks the
+ * value a model sends for it.
  *
  * @remarks The definition is validated when the argument is created and never
  * changes afterwards. Concurrency model: reentrant; the argument owns no
@@ -32,7 +39,7 @@ export default class ToolArgument {
   }
 
   /**
-   * Returns the argument's key in the tool's parameters object.
+   * Returns the argument's key in the tool's arguments object.
    *
    * @returns The validated argument name.
    */
@@ -41,40 +48,38 @@ export default class ToolArgument {
   }
 
   /**
-   * Returns the text that tells the model what the argument means.
+   * Builds the schema that checks the value a model sends for this argument.
    *
-   * @returns The validated, non-empty description.
+   * @returns A schema that accepts a string, a finite number, a whole number
+   * for `integer`, a Boolean, or one of the listed values for `enum`, as the
+   * argument's type says. It also accepts absence when the argument is not
+   * required, and rejects every other value.
    */
-  public get description(): string {
-    return this.#definition.description
+  public buildValueSchema(): ToolArgumentValueSchema {
+    const valueSchema = buildRequiredValueSchema(this.#definition)
+    return this.#definition.required ? valueSchema : valueSchema.optional()
   }
+}
 
-  /**
-   * Returns the type of the value a model supplies.
-   *
-   * @returns The argument type; `enum` limits the value to listed strings.
-   */
-  public get type(): ToolArgumentType {
-    return this.#definition.type
-  }
-
-  /**
-   * Returns whether a model must supply the argument.
-   *
-   * @returns True for a required argument, including one whose definition
-   * omitted `required`.
-   */
-  public get required(): boolean {
-    return this.#definition.required
-  }
-
-  /**
-   * Builds the JSON Schema a model receives for this argument.
-   *
-   * @returns A frozen schema; an enum argument becomes a string limited to
-   * its values.
-   */
-  public buildAgentFormat(): JsonSchemaProperty {
-    return buildToolArgumentFormat(this.#definition)
+/**
+ * Builds the schema of a value that must be present for one argument.
+ *
+ * @param definition - Validated argument definition.
+ * @returns A schema accepting exactly the values of the argument's type.
+ */
+function buildRequiredValueSchema(
+  definition: ToolArgumentDefinition
+): z.ZodType<ToolArgumentValue> {
+  switch (definition.type) {
+    case "string":
+      return z.string()
+    case "number":
+      return z.number()
+    case "integer":
+      return z.int()
+    case "boolean":
+      return z.boolean()
+    case "enum":
+      return z.enum(definition.values)
   }
 }

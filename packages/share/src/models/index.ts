@@ -15,16 +15,17 @@ export {
 } from "./agent"
 export * from "./conversation"
 export {
-  buildToolArgumentFormat,
   buildToolFunctionFormat,
+  hasDistinctToolNames,
   toolArgumentDefinitionSchema,
+  toolArgumentNameSchema,
   toolDefinitionSchema,
+  toolNameSchema,
   type JsonSchemaProperty,
   type OpenAIFunctionTool,
   type ToolAccess,
   type ToolArgumentDefinition,
   type ToolArgumentDefinitionCandidate,
-  type ToolArgumentType,
   type ToolDefinition,
   type ToolDefinitionCandidate,
   type ToolGroup

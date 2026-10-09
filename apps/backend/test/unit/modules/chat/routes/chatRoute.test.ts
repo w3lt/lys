@@ -22,6 +22,10 @@ import {
   createFixtureUuidV7
 } from "../../../support/conversationFixtures"
 import { createChatCompletionChunk } from "../../../support/openAiEndpointFake"
+import {
+  READ_TEXT_FILE_FORMAT,
+  READ_TEXT_FILE_TOOL
+} from "../../../support/toolFixtures"
 
 /** Settings applied by the chat route in every case. */
 const CHAT_ROUTE_OPTIONS = Object.freeze({
@@ -162,7 +166,18 @@ describe("updateFastifyWithChatRoute", () => {
         model: "qwen/qwen3-8b"
       }
     ],
-    ["an unknown field", { ...NEW_CONVERSATION_REQUEST, stream: true }]
+    ["an unknown field", { ...NEW_CONVERSATION_REQUEST, stream: true }],
+    [
+      "a tool offer without tools",
+      { ...NEW_CONVERSATION_REQUEST, tools: { definitions: [] } }
+    ],
+    [
+      "a tool offer that names one tool twice",
+      {
+        ...NEW_CONVERSATION_REQUEST,
+        tools: { definitions: [READ_TEXT_FILE_TOOL, READ_TEXT_FILE_TOOL] }
+      }
+    ]
   ])("rejects %s before storing a turn", async (_label, payload) => {
     const testApp = await createChatRouteTestApp()
     updateFastifyWithChatRoute(testApp.app, {
@@ -252,6 +267,39 @@ describe("updateFastifyWithChatRoute", () => {
       { event: "delta", data: { type: "delta", content: "Hi" } },
       { event: "done", data: { type: "done", finishReason: "stop" } }
     ])
+  })
+
+  it.each([
+    [
+      "offers the request's client tools to the model",
+      { definitions: [READ_TEXT_FILE_TOOL] },
+      [READ_TEXT_FILE_FORMAT]
+    ],
+    ["offers no tools when the request offers none", undefined, []]
+  ] as const)("%s", async (_label, tools, offeredTools) => {
+    const testApp = await createChatRouteTestApp()
+    testApp.createConversationTurn.mockRestore()
+    testApp.completeChatStream.mockImplementation(async () =>
+      (async function* () {
+        yield createChatCompletionChunk({ content: "Hi", finishReason: "stop" })
+      })()
+    )
+    testApp.generateTitle.mockResolvedValue("Trip plan")
+    updateFastifyWithChatRoute(testApp.app, {
+      ...CHAT_ROUTE_OPTIONS,
+      generations: testApp.generations
+    })
+
+    await sendChatRequest(
+      testApp.app,
+      tools === undefined
+        ? NEW_CONVERSATION_REQUEST
+        : { ...NEW_CONVERSATION_REQUEST, tools }
+    )
+
+    expect(testApp.completeChatStream).toHaveBeenCalledWith(
+      expect.objectContaining({ tools: offeredTools })
+    )
   })
 
   it("fails the stored reply with a server error, without contacting the model, when the conversation's agent is not available", async () => {

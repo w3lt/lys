@@ -14,12 +14,14 @@ import { Textarea } from "@/components/ui/textarea"
 import { useLysStore } from "@/lib/store"
 import { useChatViewStore } from "@/lib/store/chat-view"
 import { useConversationHistoryStore } from "@/lib/store/conversation-history"
+import { findShownToolCall, useToolCallStore } from "@/lib/store/tool-calls"
 
 import ComposerAttachmentTray from "./ComposerComponents/ComposerAttachmentTray"
 import ComposerContextMeter from "./ComposerComponents/ComposerContextMeter"
 import ComposerModelMenu from "./ComposerComponents/ComposerModelMenu"
 import ComposerOfflineBanner from "./ComposerComponents/ComposerOfflineBanner"
 import ComposerPlusMenu from "./ComposerComponents/ComposerPlusMenu"
+import ComposerToolCallPrompt from "./ComposerComponents/ComposerToolCallPrompt"
 import {
   PASTED_TEXT_ATTACHMENT_THRESHOLD,
   removeComposerAttachment,
@@ -113,6 +115,15 @@ function findLargestAttachment(
  * repeated stop requests, which the backend treats idempotently. Moving to
  * another conversation stops following a reply without stopping it.
  *
+ * Above the field, the tool-call prompt shows the first tool call of the
+ * shown conversation that waits for the person or whose answer failed to
+ * send, and announces each call that starts waiting; the tool-call store owns
+ * the calls and their answers. While a call waits, Escape in the field
+ * rejects it with the draft as the reason, and Enter without Shift allows it
+ * once when the draft is empty or rejects it with the draft as the reason
+ * otherwise. A rejection, from the field or the card, clears the draft; Allow
+ * anyway keeps it.
+ *
  * Two affordances are staged ahead of the capability behind them and are
  * deliberately inert: attachments are held in the renderer and never sent
  * because the chat protocol carries no attachment field; and selecting weights
@@ -170,7 +181,6 @@ export function Composer({ messageFieldRef }: ComposerProps): ReactElement {
   const isUnavailable = connection !== "ready"
   const activity = calculateComposerActivity(request, conversationOpen)
   const activityLabel = formatComposerActivity(activity)
-  const isReplyAwaited = activity === "awaiting-reply"
 
   const turns: readonly ContextTurn[] = (conversation?.messages ?? []).map(
     (message) => ({ id: message.id, text: message.content })
@@ -188,11 +198,55 @@ export function Composer({ messageFieldRef }: ComposerProps): ReactElement {
   const isSendDisabled = activity !== "idle" || isUnavailable || !canSubmitDraft
 
   /**
-   * Sends the current draft when Enter is pressed without a Shift modifier.
+   * Rejects the waiting tool call with the draft as the person's reason, and
+   * clears the draft.
+   *
+   * @param callId - Call that waits for the person.
+   */
+  function rejectShownToolCall(callId: string): void {
+    void useToolCallStore.getState().rejectToolCall(callId, inputDraft)
+    setInputDraft("")
+  }
+
+  /**
+   * Answers the tool call of the shown conversation that waits for the
+   * person from the keyboard: Escape rejects it with the draft as the reason,
+   * and Enter without Shift allows it when the draft is empty or rejects it
+   * with the draft otherwise.
+   *
+   * @param event - Keyboard event emitted by the composer textarea.
+   * @returns Whether the key answered a waiting call; false when no call
+   * waits or the key is neither.
+   */
+  function handleToolCallKeyDown(
+    event: KeyboardEvent<HTMLTextAreaElement>
+  ): boolean {
+    const toolCalls = useToolCallStore.getState()
+    const shownToolCall = findShownToolCall(toolCalls, conversation?.id)
+    if (shownToolCall?.answer.status !== "awaiting-person") return false
+
+    const callId = shownToolCall.call.id
+    if (event.key === "Escape") {
+      event.preventDefault()
+      rejectShownToolCall(callId)
+      return true
+    }
+    if (event.key !== "Enter" || event.shiftKey) return false
+
+    event.preventDefault()
+    if (inputDraft.trim().length > 0) rejectShownToolCall(callId)
+    else void toolCalls.resolveToolCall(callId)
+    return true
+  }
+
+  /**
+   * Answers a waiting tool call from the keyboard, or otherwise sends the
+   * current draft when Enter is pressed without a Shift modifier.
    *
    * @param event - Keyboard event emitted by the composer textarea.
    */
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
+    if (handleToolCallKeyDown(event)) return
     if (event.key !== "Enter" || event.shiftKey) return
 
     event.preventDefault()
@@ -335,6 +389,8 @@ export function Composer({ messageFieldRef }: ComposerProps): ReactElement {
       ) : null}
 
       <div className="composer__inner">
+        <ComposerToolCallPrompt onRejectToolCall={rejectShownToolCall} />
+
         <div
           className="composer__field"
           data-dropping={isDropping && !isUnavailable ? "" : undefined}
@@ -387,7 +443,7 @@ export function Composer({ messageFieldRef }: ComposerProps): ReactElement {
               value={inputDraft}
             />
 
-            {isReplyAwaited ? (
+            {activity === "awaiting-reply" ? (
               <Button
                 aria-label="Stop reply"
                 className="composer__send"

@@ -1,20 +1,7 @@
-import type { ListToolsResult } from "@lys/protocol"
+import type { ChatToolOffer, ListToolsResult } from "@lys/protocol"
 import { create, type StoreApi, type UseBoundStore } from "zustand"
 
 import { listTools } from "@/lib/apis/tauri/tools"
-
-/** Every number of calls per reply the Tools pane offers, smallest first. */
-export const CALLS_PER_REPLY_OPTIONS = Object.freeze([4, 8, 16] as const)
-
-/**
- * Number of tool calls a reply may make before it has to answer.
- *
- * @remarks The Tools pane mocks the choice: nothing enforces it yet.
- */
-export type CallsPerReply = (typeof CALLS_PER_REPLY_OPTIONS)[number]
-
-/** Calls per reply until the person picks another number in this session. */
-const DEFAULT_CALLS_PER_REPLY: CallsPerReply = 8
 
 /** Every approval the Tools pane offers for a tool, in display order. */
 export const TOOL_APPROVALS = Object.freeze(["ask", "run"] as const)
@@ -23,8 +10,7 @@ export const TOOL_APPROVALS = Object.freeze(["ask", "run"] as const)
  * When a tool runs once the model asks for it: `ask` waits for the person to
  * say yes, and `run` runs it at once.
  *
- * @remarks The Tools pane mocks the choice: nothing asks before a tool runs
- * yet.
+ * @remarks The tool-call store applies it when each call arrives.
  */
 export type ToolApproval = (typeof TOOL_APPROVALS)[number]
 
@@ -37,15 +23,17 @@ export type ToolChoice = {
 }
 
 /**
- * Choice of a tool the person has not changed in this session: on, and run
- * at once.
+ * Choice of a tool the person has not changed in this session: on, and
+ * asking before each call.
  *
  * @remarks Every current tool only reads data on this machine, and such
  * tools start on; a tool that sends data off the machine would start off.
+ * Every tool asks first until the person picks Just run, which lasts for this
+ * session only.
  */
 const DEFAULT_TOOL_CHOICE: ToolChoice = Object.freeze({
   isOn: true,
-  approval: "run"
+  approval: "ask"
 })
 
 /** Lifecycle of the list of client tools read from the desktop. */
@@ -77,8 +65,6 @@ type ToolStoreState = {
   readonly list: ToolListState
   /** Whether agents may call tools at all; on until switched off. */
   readonly areToolCallsOn: boolean
-  /** Number of tool calls a reply may make before it has to answer. */
-  readonly callsPerReply: CallsPerReply
   /**
    * Choices the person changed, keyed by tool name. A tool without an entry
    * uses the default choice that {@link getToolChoice} returns.
@@ -104,12 +90,6 @@ type ToolStoreActions = {
    * @param areToolCallsOn - Whether agents may call tools.
    */
   updateToolCallsOn: (areToolCallsOn: boolean) => void
-  /**
-   * Replaces the number of tool calls a reply may make.
-   *
-   * @param callsPerReply - One of {@link CALLS_PER_REPLY_OPTIONS}.
-   */
-  updateCallsPerReply: (callsPerReply: CallsPerReply) => void
   /**
    * Switches one tool on or off, keeping its approval.
    *
@@ -144,14 +124,90 @@ const LOADING_TOOL_LIST: ToolListState = Object.freeze({ status: "loading" })
  * @param toolChoices - Choices the person changed in this session, keyed by
  * tool name.
  * @param toolName - Name of the tool.
- * @returns The tool's changed choice, or the default choice, on and run at
- * once, when the person has not changed it.
+ * @returns The tool's changed choice, or the default choice, on and asking
+ * first, when the person has not changed it.
  */
 export function getToolChoice(
   toolChoices: ReadonlyMap<string, ToolChoice>,
   toolName: string
 ): ToolChoice {
   return toolChoices.get(toolName) ?? DEFAULT_TOOL_CHOICE
+}
+
+/**
+ * Whether the next chat request offers tools, and which.
+ *
+ * @remarks `unavailable` means the request would offer tools but the tool
+ * list cannot be read; the request then fails instead of being sent without
+ * them.
+ */
+export type ChatToolOfferResult =
+  | {
+      /** The request offers these tools. */
+      readonly status: "offered"
+      /** Switched-on tools the request offers. */
+      readonly offer: ChatToolOffer
+    }
+  | {
+      /** The request offers no tools; the reply answers in one round. */
+      readonly status: "not-offered"
+    }
+  | {
+      /** The request would offer tools, but the list could not be read. */
+      readonly status: "unavailable"
+      /** User-presentable reason with the action that resolves it. */
+      readonly error: string
+    }
+
+/** Shared outcome of a request that offers no tools. */
+export const NO_CHAT_TOOL_OFFER: ChatToolOfferResult = Object.freeze({
+  status: "not-offered"
+})
+
+/** Tool settings a chat request's offer is built from. */
+export type BuildChatToolOfferInput = {
+  /** Lifecycle of the client tool list, read before building. */
+  readonly list: ToolListState
+  /** Choices the person changed, keyed by tool name. */
+  readonly toolChoices: ReadonlyMap<string, ToolChoice>
+}
+
+/** Action that lets the person chat when the tool list cannot be read. */
+const TOOL_LIST_RECOVERY_ACTION =
+  "Turn tool calls off in Settings → Tools to chat without them."
+
+/**
+ * Builds the tool offer of one chat request from a read tool list.
+ *
+ * @param input - Tool list and the person's choices. The caller has already
+ * checked that tool calls are on and that the loaded model was trained for
+ * tool use.
+ * @returns `offered` with every switched-on tool in list order,
+ * `not-offered` when no tool is on, or `unavailable` when the list was not
+ * read.
+ */
+export function buildChatToolOffer({
+  list,
+  toolChoices
+}: BuildChatToolOfferInput): ChatToolOfferResult {
+  if (list.status !== "loaded") {
+    const reason =
+      list.status === "failed" ? list.error : "Lys couldn't read its tool list."
+
+    return Object.freeze({
+      status: "unavailable",
+      error: `${reason} ${TOOL_LIST_RECOVERY_ACTION}`
+    })
+  }
+
+  const definitions = Object.freeze(
+    list.tools.filter((tool) => getToolChoice(toolChoices, tool.name).isOn)
+  )
+  if (definitions.length === 0) return NO_CHAT_TOOL_OFFER
+
+  const offer = Object.freeze({ definitions } satisfies ChatToolOffer)
+
+  return Object.freeze({ status: "offered", offer })
 }
 
 /**
@@ -284,11 +340,9 @@ function createToolStore(
     return {
       list: Object.freeze({ status: "idle" }),
       areToolCallsOn: true,
-      callsPerReply: DEFAULT_CALLS_PER_REPLY,
       toolChoices: new Map(),
       loadTools,
       updateToolCallsOn: (areToolCallsOn) => set({ areToolCallsOn }),
-      updateCallsPerReply: (callsPerReply) => set({ callsPerReply }),
       updateToolOn,
       updateToolApproval
     }
@@ -298,12 +352,14 @@ function createToolStore(
 }
 
 /**
- * Tool store used by the Tools settings pane.
+ * Tool store used by the Tools settings pane, the chat view, and the
+ * tool-call store.
  *
  * @remarks This singleton owns the list of client tools read from the desktop
- * and the choices the pane mocks: tool calls on or off, calls per reply, and
- * each tool's switch and approval. The choices last for the session only;
- * nothing is saved, and nothing reaches the backend or a model.
+ * and the person's choices: tool calls on or off and each tool's switch and
+ * approval. The chat view offers the switched-on tools to a model trained for
+ * tool use, and the tool-call store applies each tool's approval. The choices
+ * last for the session only; nothing is saved.
  */
 export const useToolStore: UseBoundStore<StoreApi<ToolStore>> = createToolStore(
   { listTools }

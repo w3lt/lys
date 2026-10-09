@@ -99,6 +99,32 @@ If the next message reaches the backend before the stopped reply is finalized,
 creating the new turn interrupts that reply first, so its partial text is part
 of the new turn's context.
 
+## Answer a tool call
+
+1. The desktop sends `POST /api/v1/chat` with `tools`: the switched-on client
+   tools, offered only to a model trained for tool use.
+2. The backend offers the tools to the model in every round. Each round's text
+   streams as `delta` events and is stored. When a round ends with tool calls,
+   the backend checks each call's arguments against its definition and sends
+   one `tool-call` event per valid call, in the model's order. A call to an
+   unknown tool or with invalid arguments is answered by the backend itself.
+3. The desktop's tool-call store, which follows the reply on its own
+   connection, decides each call by the Tools pane: declined when tool calls
+   or the tool are off, `runFailed` when the desktop cannot run it, run at once
+   on Just run, or shown above the composer on Ask me.
+4. The store runs the Tauri command and sends the answer with
+   `POST /api/v1/chat/:conversationId/replies/:assistantMessageId/tool-results/:callId`.
+   The backend answers `204`, or `409` when the call is no longer pending.
+5. Once every call of the round has an answer, the backend asks the model
+   again with the results. The loop ends with the first round that makes no
+   tool calls, even one that writes no text, then `done`.
+
+The backend sets no time limit on a pending call. It waits until the call is
+answered, the reply is stopped, or the backend shuts down; a newer turn or a
+deletion does not end it yet ([#137](https://github.com/w3lt/lys/issues/137)).
+A client that was not following when a call was sent finds it in the next
+`reply-snapshot`'s `pendingToolCalls`.
+
 ## Open a past conversation
 
 1. The user opens history from the composer or with Command+K or Control+K.

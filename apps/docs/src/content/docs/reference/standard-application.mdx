@@ -144,12 +144,14 @@ the maintainer on 2026-10-07 for
     gateway, and it would still run with the full access of the person's
     account.
 - **Risk and control:** any renderer code can read or list every file that the
-  operating-system user running Lys can read. No part of the app invokes the
-  commands yet, and the renderer's Markdown pipeline does not render raw HTML,
-  so review found no path for injected script to reach them. The window has no
-  content security policy, so this control depends on the renderer running
-  only its own code. The commands must not be offered to a model before the
-  gateway exists.
+  operating-system user running Lys can read. The desktop runs the commands
+  only for tool calls that pass the Ask me or Just run gateway in the Tools
+  pane: each tool asks the person before each call unless they chose Just run
+  for the session, and tools are offered only to models trained for tool use.
+  The renderer's Markdown pipeline does not render raw HTML, so review found no
+  path for injected script to reach the commands. The window has no content
+  security policy, so this control depends on the renderer running only its
+  own code. The commands must not be offered to a model without that gateway.
 - **Removal condition:** [issue #122](https://github.com/w3lt/lys/issues/122)
   runs Lys's file access as a dedicated, less-privileged operating-system user,
   so the operating system limits the commands to the paths that user is
@@ -157,41 +159,67 @@ the maintainer on 2026-10-07 for
   [API-015](https://github.com/w3lt/lys/blob/main/docs/code_standards/API.md)
   requires. This exception is removed with that change.
 
-## Backend tool class exception
+## Tool call limit exception
 
-The backend's `AgentTool` and `ToolArgument` classes have an approved exception
-to [CLASS-005](https://github.com/w3lt/lys/blob/main/docs/code_standards/CLASS.md)
-and
-[MODULE-008](https://github.com/w3lt/lys/blob/main/docs/code_standards/MODULE.md):
-they, their public members, and the `buildToolArgumentFormat` export of
-`@lys/share` have no production consumer yet. The exception was approved by
-the maintainer on 2026-10-08 for [PR #124](https://github.com/w3lt/lys/pull/124)
-only, following review finding I-3.
+Chat turns that offer tools have an approved exception to
+[API-019](https://github.com/w3lt/lys/blob/main/docs/code_standards/API.md): a
+reply can make any number of tool calls. The exception was approved by the
+maintainer on 2026-10-09 for [PR #128](https://github.com/w3lt/lys/pull/128).
 
-- **Scope:**
-  [`AgentTool`](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/tool/tool.ts),
-  [`ToolArgument`](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/tool/argument/index.ts),
-  and
-  [`buildToolArgumentFormat`](https://github.com/w3lt/lys/blob/main/packages/share/src/models/tool.ts),
-  which `@lys/share` exports only for `ToolArgument`, as PR #124 leaves them.
-  A later change that adds public surface to them before #89 follows these
-  rules or needs its own approval. Every other class and export still follows
-  CLASS-005 and MODULE-008.
-- **Constraint:** the maintainer asked to keep both classes for the agent loop
-  of [issue #89](https://github.com/w3lt/lys/issues/89), which will offer tools
-  to a model through them. Until that loop exists, the backend unit tests are
-  their only callers.
-- **Alternatives considered:** removing `ToolArgument` and the
-  `buildToolArgumentFormat` export until #89 needs them, as the review offered,
-  was not taken because the maintainer asked to keep the classes.
-- **Risk and control:** public surface without a consumer can drift from what
-  #89 needs. The classes own only a frozen, validated definition and have no
-  side effects, no production code reaches them, and the backend unit tests
-  cover their whole public surface, so the cost is limited to maintaining
-  them.
-- **Removal condition:** the #89 loop builds the tools it offers through these
-  classes. That change removes this exception, and whatever is still unused is
-  deleted.
+- **Scope:** the tool loop of `Agent.createReply` and the `tools` offer of
+  `POST /api/v1/chat`. Every other API still follows API-019.
+- **Constraint:** the maintainer removed the per-reply limit until its design
+  is decided in [#136](https://github.com/w3lt/lys/issues/136): which calls
+  run when a round asks for more than remain, and how the reply then has to
+  answer.
+- **Alternatives considered:** keeping the earlier 1–16 `maxCalls` limit, or a
+  fixed backend cap, was not taken because the maintainer chose to decide the
+  limit in its own issue.
+- **Risk and control:** a model that keeps calling tools never ends on its
+  own. The person's approval controls only the calls the desktop runs: on Ask
+  me, each of those waits for Allow; on Just run, they run at once. Every
+  other call is answered without the person and the model is asked again at
+  once, whatever the approval setting: calls the backend answers itself (an
+  unknown tool or arguments that don't match) and calls the desktop answers
+  itself (tool calls or that tool switched off, or a tool it cannot run). Such
+  calls repeat until the person presses Stop. Each round sends the growing
+  context to LM Studio again, which refuses a request beyond the model's
+  context length unless its context overflow setting truncates the context
+  instead.
+- **Removal condition:** [#136](https://github.com/w3lt/lys/issues/136) adds
+  the limit back.
+
+## Tool call wait exception
+
+Chat turns that offer tools have a second approved exception to
+[API-019](https://github.com/w3lt/lys/blob/main/docs/code_standards/API.md): a
+reply that waits for the client's answer to a tool call has no time limit, and
+only some events end the wait. The exception was approved by the maintainer on
+2026-10-09 for [PR #128](https://github.com/w3lt/lys/pull/128) only.
+
+- **Scope:** the wait for a client tool result in the reply's generation, its
+  pending calls, and the reply-events connections that follow it while it
+  waits. Every other API still follows API-019.
+- **Constraint:** on Ask me the person may take any time to allow or reject a
+  call, so the backend sets no timer on the wait. The answer, Stop, or backend
+  shutdown ends it. A newer turn in the conversation or deleting the
+  conversation does not end it yet: the delete route cannot reach the running
+  generations, and a waiting reply writes nothing that would notice either
+  change ([#137](https://github.com/w3lt/lys/issues/137)).
+- **Alternatives considered:** a timer that answers a call after a fixed time
+  was not taken, because it would answer for the person. Ending the wait on a
+  newer turn or a deletion was deferred to
+  [#137](https://github.com/w3lt/lys/issues/137) to keep this pull request's
+  scope.
+- **Risk and control:** a waiting reply keeps its generation, its pending
+  calls, and every reply-events connection that follows it until the wait
+  ends. After a deletion the desktop can no longer reach Stop, so the wait
+  lasts until the backend shuts down, which quitting the app does. After a
+  newer turn, the old reply keeps waiting, and a later round that only calls
+  tools can keep asking for calls until Stop.
+- **Removal condition:** [#137](https://github.com/w3lt/lys/issues/137) ends
+  the wait on a newer turn or a deletion. The missing timer stays by design:
+  the person's answer or Stop bounds the wait.
 
 ## API boundaries
 

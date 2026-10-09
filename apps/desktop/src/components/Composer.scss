@@ -695,3 +695,187 @@
     display: none;
   }
 }
+
+/*
+ * A tool call waiting for the person sits above the field it is answered
+ * from: Escape and Enter in the field reach it, and typing a reason there
+ * turns Enter into a rejection. The card is a fieldset, so the browser's
+ * fieldset margin, padding, and min-content width are reset; its sections
+ * stack as ordinary blocks.
+ */
+.composer__approval {
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--app-border-interactive);
+  border-radius: var(--radius-surface);
+  background: var(--app-surface-panel);
+  box-shadow: var(--shadow-primary);
+}
+
+.composer__approval[data-failed] {
+  border-color: var(--app-border-danger);
+  box-shadow: none;
+}
+
+.composer__approval-header,
+.composer__approval-tool {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px 0;
+}
+
+.composer__approval-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: var(--radius-capsule);
+  background: var(--app-status-pending);
+  box-shadow: var(--app-status-pending-ring);
+}
+
+.composer__approval[data-failed] .composer__approval-dot {
+  background: var(--app-status-danger);
+}
+
+.composer__approval-label {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--app-text-link);
+}
+
+.composer__approval-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-detail);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--app-text-muted);
+  cursor: pointer;
+}
+
+.composer__approval-toggle:hover {
+  background: var(--app-surface-hover);
+  color: var(--app-text-strong);
+}
+
+.composer__approval-toggle svg {
+  width: 11px;
+  height: 11px;
+  transition: transform var(--duration-standard) var(--ease-standard);
+}
+
+.composer__approval-toggle[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer__approval-toggle svg {
+    transition: none;
+  }
+}
+
+.composer__approval-tool svg {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  color: var(--app-text-muted);
+}
+
+.composer__approval-tool-name {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--app-text-strong);
+}
+
+.composer__approval-badge {
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+  background: color-mix(in oklch, var(--app-text-muted) 14%, transparent);
+}
+
+.composer__approval-badge[data-badge="origin"] {
+  color: var(--app-text-link);
+  background: color-mix(in oklch, var(--app-text-link) 13%, transparent);
+}
+
+.composer__approval-summary {
+  margin: 0;
+  padding: 8px 14px 12px;
+  font-size: 14px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  color: var(--app-text);
+}
+
+.composer__approval-arguments {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 14px 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--app-surface-field);
+}
+
+.composer__approval-arguments > div {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.composer__approval-arguments dt {
+  color: var(--app-text-muted);
+}
+
+.composer__approval-arguments dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--app-text-strong);
+}
+
+.composer__approval-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--app-border-subtle);
+  background: var(--app-surface-chrome);
+}
+
+.composer__approval-hint {
+  flex: 1;
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.composer__approval-footer kbd {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  opacity: 0.72;
+}

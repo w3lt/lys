@@ -1,6 +1,7 @@
 import type { ChatCompletionChunk } from "openai/resources/index.mjs"
 import { describe, expect, it, vi } from "vitest"
 import type {
+  ModelToolCall,
   ReplyStreamEvent,
   ReplyStreamRequest
 } from "../../../../src/modules/agent/replyModel"
@@ -30,6 +31,7 @@ const REPLY_REQUEST = Object.freeze({
     { role: "system", content: "You are Lys." },
     { role: "user", content: "Hello" }
   ],
+  tools: [],
   model: "qwen/qwen3-8b",
   generationOptions: { temperature: 0.4, replyCeiling: 128 },
   abortSignal: new AbortController().signal
@@ -69,6 +71,40 @@ async function listReplyStreamEvents(completeChatStream: CompleteChatStream) {
 }
 
 /**
+ * Builds the chunks that stream one tool call: its name in the first
+ * fragment, then its argument text split across two more.
+ *
+ * @param toolCall - Call the model makes.
+ * @param index - Position of the call in its round.
+ * @returns Three chunks carrying the call's fragments.
+ */
+function buildToolCallChunks(
+  toolCall: ModelToolCall,
+  index: number
+): ChatCompletionChunk[] {
+  const half = Math.floor(toolCall.argumentText.length / 2)
+  const nameFragment = {
+    index,
+    id: `call_${index}`,
+    type: "function" as const,
+    function: { name: toolCall.toolName, arguments: "" }
+  }
+  const firstArguments = {
+    index,
+    function: { arguments: toolCall.argumentText.slice(0, half) }
+  }
+  const lastArguments = {
+    index,
+    function: { arguments: toolCall.argumentText.slice(half) }
+  }
+  return [
+    createChatCompletionChunk({ toolCalls: [nameFragment] }),
+    createChatCompletionChunk({ toolCalls: [firstArguments] }),
+    createChatCompletionChunk({ toolCalls: [lastArguments] })
+  ]
+}
+
+/**
  * Creates the endpoint response that carries out a reply model script.
  *
  * @param script - What the model does with the request.
@@ -92,8 +128,16 @@ function createScriptedResponse(
           finishReason:
             script.kind === "finished-reply"
               ? script.finishReason
-              : "tool_calls"
+              : "content_filter"
         })
+      ])
+    case "tool-call-round":
+      return createChatCompletionStreamResponse([
+        ...script.texts.map((content) =>
+          createChatCompletionChunk({ content })
+        ),
+        ...script.toolCalls.flatMap(buildToolCallChunks),
+        createChatCompletionChunk({ finishReason: "tool_calls" })
       ])
     case "open-reply":
       return createOpenChatCompletionStreamResponse(
@@ -157,10 +201,160 @@ describe("OpenAiReplyModel", () => {
         { role: "system", content: "You are Lys." },
         { role: "user", content: "Hello" }
       ],
+      tools: [],
       model: REPLY_REQUEST.model,
       generationOptions: REPLY_REQUEST.generationOptions,
       signal: REPLY_REQUEST.abortSignal
     })
+  })
+
+  it("sends the offered tools and every context message kind to the chat completion", async () => {
+    const completeChatStream = createChunkStream()
+    const toolCall = {
+      id: "01900000-0000-7000-8000-00000000000a",
+      toolName: "read_text_file",
+      argumentText: '{"path":"/notes/todo.md"}'
+    }
+    const readTextFile = {
+      type: "function",
+      function: {
+        name: "read_text_file",
+        description: "Read one text file.",
+        parameters: {
+          type: "object",
+          properties: { path: { type: "string", description: "Path." } },
+          required: ["path"],
+          additionalProperties: false
+        }
+      }
+    } as const
+
+    await new OpenAiReplyModel(completeChatStream).openReplyStream({
+      ...REPLY_REQUEST,
+      tools: [readTextFile],
+      messages: [
+        { role: "system", content: "You are Lys." },
+        { role: "user", content: "What is on my list?" },
+        { role: "assistant", content: "Let me look.", toolCalls: [toolCall] },
+        { role: "tool", toolCallId: toolCall.id, content: "Buy milk" },
+        { role: "assistant", content: "Earlier answer", toolCalls: [] }
+      ]
+    })
+
+    expect(completeChatStream).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tools: [readTextFile],
+        messages: [
+          { role: "system", content: "You are Lys." },
+          { role: "user", content: "What is on my list?" },
+          {
+            role: "assistant",
+            content: "Let me look.",
+            tool_calls: [
+              {
+                id: toolCall.id,
+                type: "function",
+                function: {
+                  name: "read_text_file",
+                  arguments: '{"path":"/notes/todo.md"}'
+                }
+              }
+            ]
+          },
+          { role: "tool", tool_call_id: toolCall.id, content: "Buy milk" },
+          { role: "assistant", content: "Earlier answer" }
+        ]
+      })
+    )
+  })
+
+  it("builds each call from fragments that interleave and split its name, in index order", async () => {
+    const run = await listReplyStreamEvents(
+      createChunkStream(
+        createChatCompletionChunk({
+          toolCalls: [
+            { index: 1, function: { name: "search_", arguments: "" } }
+          ]
+        }),
+        createChatCompletionChunk({
+          toolCalls: [{ index: 0, function: { name: "read_text_file" } }]
+        }),
+        createChatCompletionChunk({
+          toolCalls: [
+            { index: 1, function: { name: "files", arguments: "{}" } }
+          ]
+        }),
+        createChatCompletionChunk({
+          toolCalls: [{ index: 0, function: { arguments: '{"path":"/a"}' } }]
+        }),
+        createChatCompletionChunk({ finishReason: "tool_calls" })
+      )
+    )
+
+    expect(run.events).toEqual([
+      {
+        type: "tool-calls",
+        toolCalls: [
+          { toolName: "read_text_file", argumentText: '{"path":"/a"}' },
+          { toolName: "search_files", argumentText: "{}" }
+        ]
+      }
+    ])
+  })
+
+  it("ends the round with its tool calls when the model reports stop after sending them", async () => {
+    const run = await listReplyStreamEvents(
+      createChunkStream(
+        createChatCompletionChunk({
+          toolCalls: [
+            { index: 0, function: { name: "read_text_file", arguments: "{}" } }
+          ]
+        }),
+        createChatCompletionChunk({ finishReason: "stop" })
+      )
+    )
+
+    expect(run.events).toEqual([
+      {
+        type: "tool-calls",
+        toolCalls: [{ toolName: "read_text_file", argumentText: "{}" }]
+      }
+    ])
+  })
+
+  it("drops a call cut off by the length limit and finishes the reply with length", async () => {
+    const run = await listReplyStreamEvents(
+      createChunkStream(
+        createChatCompletionChunk({ content: "Let me" }),
+        createChatCompletionChunk({
+          toolCalls: [
+            {
+              index: 0,
+              function: { name: "read_text_file", arguments: '{"pa' }
+            }
+          ]
+        }),
+        createChatCompletionChunk({ finishReason: "length" })
+      )
+    )
+
+    expect(run.events).toEqual([
+      { type: "text", content: "Let me" },
+      { type: "finish", finishReason: "length" }
+    ])
+  })
+
+  it("fails when the model reports tool calls without sending any", async () => {
+    const run = await listReplyStreamEvents(
+      createChunkStream(
+        createChatCompletionChunk({ finishReason: "tool_calls" })
+      )
+    )
+
+    expect(run.events).toEqual([])
+    expect(run.failure).toEqual(
+      new Error("Model asked for tool calls without sending any")
+    )
   })
 
   it("yields text before the finish reason carried by the same chunk", async () => {
@@ -197,7 +391,7 @@ describe("OpenAiReplyModel", () => {
     const run = await listReplyStreamEvents(
       createChunkStream(
         createChatCompletionChunk({ content: "Hi" }),
-        createChatCompletionChunk({ finishReason: "tool_calls" })
+        createChatCompletionChunk({ finishReason: "content_filter" })
       )
     )
 

@@ -11,8 +11,10 @@ export {
 export {
   chatReplyNotFoundProblemSchema,
   chatReplyNotGeneratingProblemSchema,
+  chatToolCallNotPendingProblemSchema,
   type ChatReplyNotFoundProblem,
-  type ChatReplyNotGeneratingProblem
+  type ChatReplyNotGeneratingProblem,
+  type ChatToolCallNotPendingProblem
 } from "./chat"
 export {
   agentCodeTakenProblemSchema,

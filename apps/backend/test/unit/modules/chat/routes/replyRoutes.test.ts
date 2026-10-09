@@ -3,12 +3,19 @@ import {
   chatReplyEventsApi,
   chatReplyNotFoundProblemSchema,
   chatReplyNotGeneratingProblemSchema,
+  chatToolCallNotPendingProblemSchema,
   conversationNotFoundProblemSchema,
-  stopChatReplyApi
+  MAXIMUM_TOOL_RESULT_BODY_BYTES,
+  sendChatToolResultApi,
+  stopChatReplyApi,
+  type ChatToolCall,
+  type ChatToolResult
 } from "@lys/protocol"
 import type { Conversation } from "@lys/share"
+import type { FastifyInstance } from "fastify"
 import { describe, expect, it, onTestFinished, vi, type Mock } from "vitest"
 import { updateFastifyWithHttpTransport } from "../../../../../src/http"
+import type { ReplyTaskContext } from "../../../../../src/modules/chat/replyGeneration"
 import ReplyGenerationRegistry, {
   type ReplyTarget
 } from "../../../../../src/modules/chat/replyGenerationRegistry"
@@ -56,13 +63,14 @@ const CONVERSATION = Object.freeze({
 const REPLY_SNAPSHOT_EVENT = Object.freeze({
   type: "reply-snapshot",
   conversationTitle: "Trip plan",
-  assistantMessage: ASSISTANT_MESSAGE
+  assistantMessage: ASSISTANT_MESSAGE,
+  pendingToolCalls: []
 })
 
 /** Generation running for one reply, with both of its controlled tasks. */
 type ControlledGeneration = Readonly<{
   /** Reply task; its signal is aborted by a stop or by disposal. */
-  replyTask: ControlledReplyTask
+  replyTask: ControlledReplyTask<ReplyTaskContext>
   /** Title task; its signal is aborted only by disposal. */
   titleTask: ControlledReplyTask
   /** Records each task rejection the generation reports. */
@@ -121,7 +129,7 @@ function startControlledGeneration(
   generations: ReplyGenerationRegistry,
   target: ReplyTarget
 ): ControlledGeneration {
-  const replyTask = new ControlledReplyTask()
+  const replyTask = new ControlledReplyTask<ReplyTaskContext>()
   const titleTask = new ControlledReplyTask()
   const reportTaskFailure = vi.fn<(error: unknown) => void>()
   generations.startReplyGeneration(target, {
@@ -167,6 +175,54 @@ const STOP_REPLY_URL = createReplyUrl(
   REPLY_TARGET.conversationId,
   REPLY_TARGET.assistantMessageId
 )
+
+/** Call the controlled reply waits on. */
+const TOOL_CALL = Object.freeze({
+  id: createFixtureUuidV7(10),
+  toolName: "read_text_file",
+  arguments: Object.freeze({ path: "/notes/todo.md" })
+} satisfies ChatToolCall)
+
+/** Answer a client gives to {@link TOOL_CALL}. */
+const SUCCEEDED_RESULT = Object.freeze({
+  status: "succeeded",
+  content: "Buy milk"
+} satisfies ChatToolResult)
+
+/**
+ * Builds the tool-result URL of one call of {@link REPLY_TARGET}.
+ *
+ * @param callId - Raw call identifier, possibly malformed.
+ * @returns The request URL.
+ */
+function createToolResultUrl(callId: string): string {
+  return createReplyUrl(
+    sendChatToolResultApi.path,
+    REPLY_TARGET.conversationId,
+    REPLY_TARGET.assistantMessageId
+  ).replace(":callId", callId)
+}
+
+/**
+ * Sends one tool result for {@link REPLY_TARGET}.
+ *
+ * @param app - Application with the reply routes registered.
+ * @param callId - Raw call identifier.
+ * @param payload - Raw request body, serialized as JSON.
+ * @returns The completed response.
+ */
+async function sendToolResult(
+  app: FastifyInstance,
+  callId: string,
+  payload: unknown
+) {
+  return await app.inject({
+    method: "POST",
+    url: createToolResultUrl(callId),
+    headers: { "content-type": "application/json" },
+    payload: JSON.stringify(payload)
+  })
+}
 
 /**
  * Creates a promise that settles when a signal aborts.
@@ -351,6 +407,279 @@ describe("updateFastifyWithChatReplyRoutes", () => {
       expect(
         otherConversationGeneration.replyTask.context.abortSignal.aborted
       ).toBe(false)
+    })
+  })
+
+  describe("GET reply events with tool calls", () => {
+    it("lists a call the reply waits on in the snapshot and does not send it again", async () => {
+      const { app, generations, getConversation } = await createReplyRouteApp()
+      const generation = startControlledGeneration(generations, REPLY_TARGET)
+      await waitForMicrotasks()
+      void generation.replyTask.context.sendToolCall(TOOL_CALL)
+      const snapshotRead = Promise.withResolvers<void>()
+      getConversation.mockImplementation(() => {
+        snapshotRead.resolve()
+        return CONVERSATION
+      })
+
+      const responsePromise = app.inject({
+        method: "GET",
+        url: REPLY_EVENTS_URL
+      })
+      // The generation must still run when the route reads its snapshot.
+      await snapshotRead.promise
+      generation.replyTask.resolve()
+      generation.titleTask.resolve()
+      const response = await responsePromise
+
+      expect(parseSseEvents(response.body)).toEqual([
+        {
+          event: "reply-snapshot",
+          data: { ...REPLY_SNAPSHOT_EVENT, pendingToolCalls: [TOOL_CALL] }
+        }
+      ])
+    })
+
+    it("sends a call made after following began as a tool-call event", async () => {
+      const { app, generations, getConversation } = await createReplyRouteApp()
+      const generation = startControlledGeneration(generations, REPLY_TARGET)
+      const snapshotRead = Promise.withResolvers<void>()
+      getConversation.mockImplementation(() => {
+        snapshotRead.resolve()
+        return CONVERSATION
+      })
+
+      const responsePromise = app.inject({
+        method: "GET",
+        url: REPLY_EVENTS_URL
+      })
+      await snapshotRead.promise
+      void generation.replyTask.context.sendToolCall(TOOL_CALL)
+      generation.replyTask.resolve()
+      generation.titleTask.resolve()
+      const response = await responsePromise
+
+      expect(parseSseEvents(response.body)).toEqual([
+        { event: "reply-snapshot", data: REPLY_SNAPSHOT_EVENT },
+        { event: "tool-call", data: { type: "tool-call", call: TOOL_CALL } }
+      ])
+    })
+  })
+
+  describe("POST tool result", () => {
+    it("answers 204 and resumes the reply with the answer", async () => {
+      const { app, generations } = await createReplyRouteApp()
+      const generation = startControlledGeneration(generations, REPLY_TARGET)
+      await waitForMicrotasks()
+      const answer = generation.replyTask.context.sendToolCall(TOOL_CALL)
+
+      const response = await sendToolResult(app, TOOL_CALL.id, SUCCEEDED_RESULT)
+
+      expect(response.statusCode).toBe(204)
+      expect(response.body).toBe("")
+      expect(await answer).toEqual(SUCCEEDED_RESULT)
+    })
+
+    it("answers 409 to a second answer for the same call", async () => {
+      const { app, generations } = await createReplyRouteApp()
+      const generation = startControlledGeneration(generations, REPLY_TARGET)
+      await waitForMicrotasks()
+      void generation.replyTask.context.sendToolCall(TOOL_CALL)
+      await sendToolResult(app, TOOL_CALL.id, SUCCEEDED_RESULT)
+
+      const response = await sendToolResult(app, TOOL_CALL.id, SUCCEEDED_RESULT)
+
+      expect(response.statusCode).toBe(409)
+      expect(response.headers["content-type"]).toMatch(
+        /^application\/problem\+json/
+      )
+      const problem: unknown = response.json()
+      expect(
+        chatToolCallNotPendingProblemSchema.safeParse(problem).success
+      ).toBe(true)
+      expect(problem).toMatchObject({
+        instance: createToolResultUrl(TOOL_CALL.id)
+      })
+    })
+
+    it.each([
+      ["no generation runs for the reply", false, TOOL_CALL.id],
+      [
+        "the reply waits on no call with that identifier",
+        true,
+        createFixtureUuidV7(404)
+      ]
+    ])("answers 409 when %s", async (_label, isGenerating, callId) => {
+      const { app, generations } = await createReplyRouteApp()
+      if (isGenerating) startControlledGeneration(generations, REPLY_TARGET)
+
+      const response = await sendToolResult(app, callId, SUCCEEDED_RESULT)
+
+      expect(response.statusCode).toBe(409)
+    })
+
+    it("answers 409 once the reply was stopped while the call waited", async () => {
+      const { app, generations } = await createReplyRouteApp()
+      const generation = startControlledGeneration(generations, REPLY_TARGET)
+      await waitForMicrotasks()
+      const answer = generation.replyTask.context.sendToolCall(TOOL_CALL)
+      const stop = app.inject({ method: "POST", url: STOP_REPLY_URL })
+      await waitForAbort(generation.replyTask.context.abortSignal)
+
+      const response = await sendToolResult(app, TOOL_CALL.id, SUCCEEDED_RESULT)
+
+      expect(response.statusCode).toBe(409)
+      expect(await answer).toBeUndefined()
+      generation.replyTask.resolve()
+      expect((await stop).statusCode).toBe(204)
+    })
+
+    it.each([
+      [
+        "a failed answer without content",
+        { status: "failed", reason: "declined", content: "" }
+      ],
+      ["an unknown status", { status: "skipped", content: "x" }],
+      [
+        "a succeeded answer with an unknown field",
+        { status: "succeeded", content: "x", note: "y" }
+      ],
+      [
+        "a failed answer with an unknown field",
+        { status: "failed", reason: "declined", content: "x", note: "y" }
+      ],
+      [
+        "a failed answer with an unknown reason",
+        { status: "failed", reason: "timedOut", content: "x" }
+      ]
+    ])(
+      "rejects %s with 400 and leaves the call waiting",
+      async (_label, payload) => {
+        const { app, generations } = await createReplyRouteApp()
+        const generation = startControlledGeneration(generations, REPLY_TARGET)
+        await waitForMicrotasks()
+        void generation.replyTask.context.sendToolCall(TOOL_CALL)
+
+        const response = await sendToolResult(app, TOOL_CALL.id, payload)
+
+        expect(response.statusCode).toBe(400)
+        expect(
+          generations.findReplyGeneration(REPLY_TARGET)?.pendingToolCalls
+        ).toEqual([TOOL_CALL])
+      }
+    )
+
+    it("accepts an answer larger than the default body limit of other routes", async () => {
+      const { app, generations } = await createReplyRouteApp()
+      const generation = startControlledGeneration(generations, REPLY_TARGET)
+      await waitForMicrotasks()
+      const answer = generation.replyTask.context.sendToolCall(TOOL_CALL)
+      const content = "x".repeat(2 * 1024 * 1024)
+
+      const response = await sendToolResult(app, TOOL_CALL.id, {
+        status: "succeeded",
+        content
+      })
+
+      expect(response.statusCode).toBe(204)
+      expect(await answer).toEqual({ status: "succeeded", content })
+    })
+
+    it("rejects an answer larger than the body limit with 413 and leaves the call waiting", async () => {
+      const { app, generations } = await createReplyRouteApp()
+      const generation = startControlledGeneration(generations, REPLY_TARGET)
+      await waitForMicrotasks()
+      void generation.replyTask.context.sendToolCall(TOOL_CALL)
+
+      const response = await sendToolResult(app, TOOL_CALL.id, {
+        status: "succeeded",
+        content: "x".repeat(MAXIMUM_TOOL_RESULT_BODY_BYTES)
+      })
+
+      expect(response.statusCode).toBe(413)
+      expect(
+        generations.findReplyGeneration(REPLY_TARGET)?.pendingToolCalls
+      ).toEqual([TOOL_CALL])
+    })
+
+    it.each([
+      [
+        "a conversation identifier that is not a UUID",
+        "conversation-1",
+        REPLY_TARGET.assistantMessageId,
+        TOOL_CALL.id
+      ],
+      [
+        "a reply identifier that is a UUIDv4",
+        REPLY_TARGET.conversationId,
+        "0b0e9f3e-5a4c-4f7e-9d4a-2c1b3a4d5e6f",
+        TOOL_CALL.id
+      ],
+      [
+        "a call identifier the model wrote",
+        REPLY_TARGET.conversationId,
+        REPLY_TARGET.assistantMessageId,
+        "call_0"
+      ]
+    ])(
+      "rejects %s with 400 and leaves the call waiting",
+      async (_label, conversationId, assistantMessageId, callId) => {
+        const { app, generations } = await createReplyRouteApp()
+        const generation = startControlledGeneration(generations, REPLY_TARGET)
+        await waitForMicrotasks()
+        void generation.replyTask.context.sendToolCall(TOOL_CALL)
+        const url = createReplyUrl(
+          sendChatToolResultApi.path,
+          conversationId,
+          assistantMessageId
+        ).replace(":callId", callId)
+
+        const response = await app.inject({
+          method: "POST",
+          url,
+          headers: { "content-type": "application/json" },
+          payload: JSON.stringify(SUCCEEDED_RESULT)
+        })
+
+        expect(response.statusCode).toBe(400)
+        expect(
+          generations.findReplyGeneration(REPLY_TARGET)?.pendingToolCalls
+        ).toEqual([TOOL_CALL])
+      }
+    )
+
+    it("fails with a server error once the registry is closed for shutdown", async () => {
+      const { app, generations, logs } = await createReplyRouteApp()
+      await generations[Symbol.asyncDispose]()
+
+      const response = await sendToolResult(app, TOOL_CALL.id, SUCCEEDED_RESULT)
+
+      expect(response.statusCode).toBe(500)
+      expect(response.headers["content-type"]).toMatch(/^application\/json/)
+      expect(logs).toContainEqual(
+        expect.objectContaining({ level: "error", err: expect.any(Object) })
+      )
+    })
+
+    it("logs why the client could not answer, at debug level", async () => {
+      const { app, generations, logs } = await createReplyRouteApp()
+      const generation = startControlledGeneration(generations, REPLY_TARGET)
+      await waitForMicrotasks()
+      void generation.replyTask.context.sendToolCall(TOOL_CALL)
+
+      await sendToolResult(app, TOOL_CALL.id, {
+        status: "failed",
+        reason: "declined",
+        content: "The person declined this call."
+      })
+
+      expect(logs).toContainEqual(
+        expect.objectContaining({
+          level: "debug",
+          toolCallId: TOOL_CALL.id,
+          reason: "declined"
+        })
+      )
     })
   })
 

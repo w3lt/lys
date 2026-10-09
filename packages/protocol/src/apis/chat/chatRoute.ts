@@ -4,14 +4,17 @@ import {
   agentCodeSchema,
   conversationAssistantMessageSchema,
   conversationMetadataSchema,
-  conversationUserMessageSchema
+  conversationUserMessageSchema,
+  hasDistinctToolNames,
+  toolDefinitionSchema
 } from "@lys/share"
 import {
   chatDeltaEventSchema,
   chatDoneEventSchema,
   chatErrorEventSchema,
   chatInterruptedEventSchema,
-  chatTitleEventSchema
+  chatTitleEventSchema,
+  chatToolCallEventSchema
 } from "./_share"
 
 /** Inclusive maximum sampling temperature accepted by chat requests and their UI. */
@@ -47,6 +50,25 @@ const chatConversationTargetSchema = z.discriminatedUnion("kind", [
   })
 ])
 
+/**
+ * Validates the client tools a chat request offers to the model.
+ *
+ * @remarks Lists only the client's switched-on tools; tools the backend runs
+ * itself are added by the backend. Offered only to a model trained for tool
+ * use.
+ */
+const chatToolOfferSchema = z.strictObject({
+  /** Definitions of the switched-on client tools, each name once. */
+  definitions: z
+    .array(toolDefinitionSchema)
+    .min(1)
+    .refine(hasDistinctToolNames, "A request offers each tool name once.")
+    .readonly()
+})
+
+/** Client tools one chat request offers to the model. */
+export type ChatToolOffer = z.infer<typeof chatToolOfferSchema>
+
 /** Validates a chat request for a new or an existing conversation. */
 export const chatApiRequestBodySchema = z.strictObject({
   /** Conversation the turn starts or continues. */
@@ -56,7 +78,12 @@ export const chatApiRequestBodySchema = z.strictObject({
   /** Non-empty model identifier resolved by the backend runtime. */
   model: z.string().min(1),
   /** Required generation controls; absence is not represented by this contract. */
-  generationOptions: messageGenerationOptionsSchema
+  generationOptions: messageGenerationOptionsSchema,
+  /**
+   * Client tools offered for this turn; absence means one round without
+   * tools.
+   */
+  tools: chatToolOfferSchema.optional()
 })
 
 /**
@@ -71,9 +98,10 @@ export const chatApiRequestBodySchema = z.strictObject({
  * persisted title. A generated title may arrive before, between, or after the
  * reply events because its task runs concurrently. The stream closes after
  * both tasks settle; like every generation stream (see
- * `ChatGenerationEvent`), it can close without a final reply event. The
- * `type` discriminant is the compatibility boundary used by desktop
- * consumers.
+ * `ChatGenerationEvent`), it can close without a final reply event.
+ * `tool-call` events ask the client to answer a call; see the tool-result
+ * endpoint. The `type` discriminant is the compatibility boundary used by
+ * desktop consumers.
  */
 export const chatApiStreamEventSchema = z.discriminatedUnion("type", [
   z.strictObject({
@@ -98,7 +126,8 @@ export const chatApiStreamEventSchema = z.discriminatedUnion("type", [
   chatDeltaEventSchema,
   chatDoneEventSchema,
   chatInterruptedEventSchema,
-  chatErrorEventSchema
+  chatErrorEventSchema,
+  chatToolCallEventSchema
 ])
 
 /**

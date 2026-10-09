@@ -4,6 +4,7 @@ import type {
   ChatGenerationEvent,
   ChatReplyEvent,
   ChatReplyPathParams,
+  ChatToolOffer,
   MessageGenerationOptions
 } from "@lys/protocol"
 import {
@@ -24,7 +25,15 @@ import {
   type GetConversationResult
 } from "@/lib/apis/http/conversations"
 import { findEligibleChatModel } from "@/lib/models/model-residency"
+import { calculateToolModelSupport } from "@/lib/models/tool-model-support"
 import { useLysStore } from "@/lib/store"
+import { useToolCallStore } from "@/lib/store/tool-calls"
+import {
+  buildChatToolOffer,
+  NO_CHAT_TOOL_OFFER,
+  useToolStore,
+  type ChatToolOfferResult
+} from "@/lib/store/tools"
 
 import {
   type ChatViewConversation,
@@ -101,7 +110,8 @@ export type StoredConversationReader = (
  *
  * @remarks The store owns request and open tokens and their abort controllers;
  * these dependencies provide only transport, stored-conversation reads, reply
- * stops, timestamps, model-selection, and generation-settings capabilities.
+ * stops, timestamps, model-selection, generation-settings, and tool-offer
+ * capabilities, and hand replies to the tool-call store.
  * Aborting a store-owned signal ends only the store's observation; the
  * backend keeps generating. The store does not share lifecycle state with
  * another store instance, and does not own the settings it reads.
@@ -131,6 +141,21 @@ export type ChatViewStoreDependencies = {
    * owned by {@link ChatViewActions.sendMessage}.
    */
   readonly readGenerationOptions: () => MessageGenerationOptions
+  /**
+   * Gets the tools the next request offers.
+   *
+   * @returns The offer current at call time: offered tools, none, or
+   * `unavailable` when the tool list cannot be read. Sampling is owned by
+   * {@link ChatViewActions.sendMessage}.
+   */
+  readonly getToolOffer: () => Promise<ChatToolOfferResult>
+  /**
+   * Starts answering the tool calls of a reply this store starts or follows.
+   *
+   * @remarks The receiver follows the reply on its own and ignores a reply it
+   * already follows, so this store does not stop it.
+   */
+  readonly startReplyToolCallFollow: (target: ChatReplyPathParams) => void
 }
 
 /**
@@ -247,7 +272,10 @@ export type ChatViewActions = {
    * sending stops following its stream, which may still carry a title; the
    * backend keeps generating and saving that title.
    * The eligible model and generation controls are sampled once before request
-   * ownership begins; later edits affect only later requests.
+   * ownership begins; later edits affect only later requests. The offered tools
+   * are sampled once after ownership begins, before the stream opens. A tool
+   * list that cannot be read fails the request with an inline error, and
+   * nothing is sent.
    */
   sendMessage: (explicitPrompt?: string) => Promise<void>
   /**
@@ -481,16 +509,21 @@ function createChatRequestResource(token: number): ChatRequestResource {
  *
  * @param input - Model, prompt, conversation, and generation values sampled for
  * this request.
+ * @param toolOffer - Tools the request offers; omission sends none, so the
+ * reply answers in one round.
  * @returns The complete payload. Without a conversation it starts a new one
  * that Lys answers; with one it continues it with the agent it was started
  * with.
  */
-function createChatRequestPayload({
-  conversationId,
-  submittedPrompt,
-  model,
-  generationOptions
-}: CreateChatRequestPayloadInput): ChatApiRequestBody {
+function createChatRequestPayload(
+  {
+    conversationId,
+    submittedPrompt,
+    model,
+    generationOptions
+  }: CreateChatRequestPayloadInput,
+  toolOffer: ChatToolOffer | undefined
+): ChatApiRequestBody {
   return {
     conversation:
       conversationId === undefined
@@ -498,8 +531,37 @@ function createChatRequestPayload({
         : { kind: "existing", id: conversationId },
     message: submittedPrompt,
     model,
-    generationOptions
+    generationOptions,
+    ...(toolOffer === undefined ? {} : { tools: toolOffer })
   }
+}
+
+/**
+ * Opens the chat stream for one owned request with the tools it offers.
+ *
+ * @param requestInput - Prompt, conversation, model, and generation controls
+ * sampled before the request took ownership.
+ * @param signal - Store-owned signal of the request.
+ * @param dependencies - Tool-offer reader and chat transport of the store.
+ * @returns An async generator yielding the chat events; it completes when the
+ * chat stream closes.
+ * @throws If the request would offer tools that cannot be read; the request
+ * then fails without opening the stream.
+ */
+async function* openChatStreamWithToolOffer(
+  requestInput: CreateChatRequestPayloadInput,
+  signal: AbortSignal,
+  dependencies: Pick<ChatViewStoreDependencies, "getToolOffer" | "streamChat">
+): AsyncGenerator<ChatApiStreamEvent, void, unknown> {
+  const toolOffer = await dependencies.getToolOffer()
+  if (toolOffer.status === "unavailable") throw new Error(toolOffer.error)
+
+  const offeredTools =
+    toolOffer.status === "offered" ? toolOffer.offer : undefined
+  yield* dependencies.streamChat(
+    createChatRequestPayload(requestInput, offeredTools),
+    { signal }
+  )
 }
 
 /**
@@ -659,7 +721,8 @@ export function createChatViewStore(
     }
 
     /**
-     * Starts a backend-owned conversation turn for an awaiting request.
+     * Starts a backend-owned conversation turn for an awaiting request and
+     * hands its reply to the tool-call store.
      *
      * @param event - Complete turn emitted by the backend stream.
      * @param token - Token expected to own the awaiting request.
@@ -710,6 +773,11 @@ export function createChatViewStore(
         inputDraft,
         request: streamingRequest
       })
+      const replyTarget = Object.freeze({
+        conversationId: conversation.id,
+        assistantMessageId: event.assistantMessage.id
+      } satisfies ChatReplyPathParams)
+      dependencies.startReplyToolCallFollow(replyTarget)
     }
 
     /**
@@ -893,7 +961,8 @@ export function createChatViewStore(
     /**
      * Applies one generation event shared by chat and followed-reply streams.
      *
-     * @param event - Title, delta, final, or error event of the reply.
+     * @param event - Title, delta, tool-call, final, or error event of the
+     * reply.
      * @param token - Token whose ownership authorizes event side effects.
      * @throws If an in-order handler detects an invariant violation.
      * @remarks Exactly one of `done`, `interrupted`, or `error` ends the
@@ -918,6 +987,9 @@ export function createChatViewStore(
           return
         case "error":
           handleChatErrorEvent(event, token)
+          return
+        case "tool-call":
+          // The tool-call store follows this reply itself and owns its calls.
           return
       }
     }
@@ -947,6 +1019,7 @@ export function createChatViewStore(
         case "done":
         case "interrupted":
         case "error":
+        case "tool-call":
           handleChatGenerationEvent(event, token)
           return
       }
@@ -972,6 +1045,7 @@ export function createChatViewStore(
         case "done":
         case "interrupted":
         case "error":
+        case "tool-call":
           handleChatGenerationEvent(event, token)
           return
       }
@@ -1110,12 +1184,12 @@ export function createChatViewStore(
       nextRequestToken += 1
       const request = createAwaitingTurnRequest(token, submittedComposerDraft)
       const resource = createChatRequestResource(token)
-      const payload = createChatRequestPayload({
+      const requestInput = {
         conversationId: get().conversation?.id,
         submittedPrompt,
         model,
         generationOptions: dependencies.readGenerationOptions()
-      })
+      } satisfies CreateChatRequestPayloadInput
 
       const supersededRequest = activeRequestResource
       activeRequestResource = resource
@@ -1125,7 +1199,8 @@ export function createChatViewStore(
       })
       supersededRequest?.abortController.abort()
       await readChatStream(token, {
-        openEvents: (signal) => dependencies.streamChat(payload, { signal }),
+        openEvents: (signal) =>
+          openChatStreamWithToolOffer(requestInput, signal, dependencies),
         handleEvent: async (event) => {
           handleChatStreamEvent(event, token)
           await stopRequestedChatReply(token)
@@ -1349,7 +1424,8 @@ export function createChatViewStore(
      * @remarks Runs in the same synchronous step that ended the open, whether
      * it showed the opened conversation or kept the previous one, so no
      * request can start in between. The request enters `reply-streaming` at
-     * once, which keeps the composer from sending.
+     * once, which keeps the composer from sending. The reply is also handed
+     * to the tool-call store, which answers its tool calls.
      */
     function startStoredReplyFollowing(): StoredReplyFollow | undefined {
       const conversation = get().conversation
@@ -1369,10 +1445,11 @@ export function createChatViewStore(
         assistantMessageId: followedReply.id
       } satisfies ChatRequestState
       set({ request: followingRequest })
-      const target = {
+      const target = Object.freeze({
         conversationId: conversation.id,
         assistantMessageId: followedReply.id
-      }
+      } satisfies ChatReplyPathParams)
+      dependencies.startReplyToolCallFollow(target)
       return { token, target }
     }
 
@@ -1530,6 +1607,27 @@ function getStoredConversation(
 }
 
 /**
+ * Gets the tools the next chat request offers.
+ *
+ * @returns A promise that resolves with `not-offered` when tool calls are off
+ * or the loaded model is not known to be trained for tool use, and otherwise
+ * with the offer built from the tool list, which is read first when it has
+ * not been. It never rejects.
+ */
+async function getChatToolOffer(): Promise<ChatToolOfferResult> {
+  const { modelRuntime, modelInventory } = useLysStore.getState()
+  const support = calculateToolModelSupport(modelRuntime, modelInventory)
+  const { areToolCallsOn, list, loadTools } = useToolStore.getState()
+  if (!areToolCallsOn || support.status !== "trained") {
+    return NO_CHAT_TOOL_OFFER
+  }
+  if (list.status !== "loaded") await loadTools()
+
+  const { list: currentList, toolChoices } = useToolStore.getState()
+  return buildChatToolOffer({ list: currentList, toolChoices })
+}
+
+/**
  * Chat-view store used by the desktop React tree.
  *
  * @remarks This singleton owns the live browser request and open lifecycles.
@@ -1540,7 +1638,9 @@ function getStoredConversation(
  * explicitly because the request contract rejects unknown fields. A saved zero
  * ceiling is omitted so the backend receives no explicit completion-token limit.
  * The backend origin for following and stopping a reply is sampled when each
- * request starts.
+ * request starts. Tool offers read the Tools pane and the loaded model when
+ * each request takes ownership, and every reply the store starts or follows
+ * is handed to the tool-call store.
  */
 export const useChatViewStore: UseBoundStore<StoreApi<ChatViewStore>> =
   createChatViewStore({
@@ -1566,5 +1666,9 @@ export const useChatViewStore: UseBoundStore<StoreApi<ChatViewStore>> =
       return replyCeiling === 0
         ? { temperature }
         : { temperature, replyCeiling }
+    },
+    getToolOffer: getChatToolOffer,
+    startReplyToolCallFollow: (target) => {
+      useToolCallStore.getState().startReplyToolCallFollow(target)
     }
   })

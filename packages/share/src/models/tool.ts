@@ -27,13 +27,15 @@ function hasDistinctValues(values: readonly string[]): boolean {
 }
 
 /** Validates the name a model calls a tool by. */
-const toolNameSchema = z.string().regex(TOOL_NAME_PATTERN)
+export const toolNameSchema = z.string().regex(TOOL_NAME_PATTERN)
 
 /** Validates text that tells the model what a tool or an argument does. */
 const toolDescriptionSchema = z.string().min(1)
 
 /** Validates the key of one argument in a tool's parameters object. */
-const toolArgumentNameSchema = z.string().regex(TOOL_ARGUMENT_NAME_PATTERN)
+export const toolArgumentNameSchema = z
+  .string()
+  .regex(TOOL_ARGUMENT_NAME_PATTERN)
 
 /** Validates whether a model must supply an argument; omission means `true`. */
 const toolArgumentRequiredSchema = z.boolean().default(true)
@@ -107,9 +109,6 @@ export type ToolArgumentDefinitionCandidate = z.input<
 export type ToolArgumentDefinition = z.infer<
   typeof toolArgumentDefinitionSchema
 >
-
-/** Type of the value a model supplies for one argument. */
-export type ToolArgumentType = ToolArgumentDefinition["type"]
 
 /**
  * Validates the group a tool is listed under in Settings.
@@ -188,6 +187,18 @@ export type ToolDefinitionCandidate = z.input<typeof toolDefinitionSchema>
 export type ToolDefinition = z.infer<typeof toolDefinitionSchema>
 
 /**
+ * Answers whether no two tools share a name.
+ *
+ * @param tools - Validated tool definitions in list order.
+ * @returns True when every tool name appears once.
+ */
+export function hasDistinctToolNames(
+  tools: readonly ToolDefinition[]
+): boolean {
+  return hasDistinctValues(tools.map((tool) => tool.name))
+}
+
+/**
  * JSON Schema of one parameter in the OpenAI function-tool format.
  *
  * @remarks This is the external shape a model receives. JSON Schema allows
@@ -243,7 +254,7 @@ export type OpenAIFunctionTool = {
  * @returns A frozen schema. An enum argument becomes a string limited to its
  * values; any other argument keeps its own type.
  */
-export function buildToolArgumentFormat(
+function buildToolArgumentFormat(
   argument: ToolArgumentDefinition
 ): JsonSchemaProperty {
   switch (argument.type) {

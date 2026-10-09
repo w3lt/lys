@@ -14,12 +14,12 @@ const TOOLS = [
 ]
 
 /**
- * Imports a fresh tool store, so no list or choice of another case reaches
+ * Loads a fresh tool store, so no list or choice of another case reaches
  * this one.
  *
  * @returns The store hook of a newly evaluated store module.
  */
-async function importFreshToolStore() {
+async function loadFreshToolStore() {
   vi.resetModules()
   const { useToolStore } = await import("@/lib/store/tools")
   return useToolStore
@@ -44,7 +44,7 @@ describe("getToolChoice", () => {
 
 describe("useToolStore", () => {
   it("starts with no list, tool calls on, eight calls per reply, and no changed choice", async () => {
-    const useToolStore = await importFreshToolStore()
+    const useToolStore = await loadFreshToolStore()
 
     expect(useToolStore.getState()).toMatchObject({
       list: { status: "idle" },
@@ -58,7 +58,7 @@ describe("useToolStore", () => {
     it("shows loading while the desktop reads the list, then the list", async () => {
       const list = createControlledPromise<unknown>()
       startNativeHostFake({ list_tools: () => list.promise })
-      const useToolStore = await importFreshToolStore()
+      const useToolStore = await loadFreshToolStore()
 
       const load = useToolStore.getState().loadTools()
       const whileReading = useToolStore.getState().list
@@ -75,7 +75,7 @@ describe("useToolStore", () => {
     it("joins a read already in flight", async () => {
       const list = createControlledPromise<unknown>()
       const host = startNativeHostFake({ list_tools: () => list.promise })
-      const useToolStore = await importFreshToolStore()
+      const useToolStore = await loadFreshToolStore()
 
       const first = useToolStore.getState().loadTools()
       const second = useToolStore.getState().loadTools()
@@ -87,7 +87,7 @@ describe("useToolStore", () => {
 
     it("starts a new read once the previous one settled", async () => {
       const host = startNativeHostFake({ list_tools: () => TOOLS })
-      const useToolStore = await importFreshToolStore()
+      const useToolStore = await loadFreshToolStore()
       await useToolStore.getState().loadTools()
 
       await useToolStore.getState().loadTools()
@@ -99,7 +99,7 @@ describe("useToolStore", () => {
       startNativeHostFake({
         list_tools: () => Promise.reject("command list_tools not found")
       })
-      const useToolStore = await importFreshToolStore()
+      const useToolStore = await loadFreshToolStore()
 
       await expect(useToolStore.getState().loadTools()).resolves.toBeUndefined()
 
@@ -111,7 +111,7 @@ describe("useToolStore", () => {
 
     it("names the reason when the read fails with one", async () => {
       startNativeHostFake({ list_tools: () => [{ name: "bad name!" }] })
-      const useToolStore = await importFreshToolStore()
+      const useToolStore = await loadFreshToolStore()
 
       await useToolStore.getState().loadTools()
 
@@ -123,7 +123,7 @@ describe("useToolStore", () => {
   })
 
   it("switches tool calls off and changes the calls per reply", async () => {
-    const useToolStore = await importFreshToolStore()
+    const useToolStore = await loadFreshToolStore()
 
     useToolStore.getState().updateToolCallsOn(false)
     useToolStore.getState().updateCallsPerReply(16)
@@ -135,7 +135,7 @@ describe("useToolStore", () => {
   })
 
   it("switches one tool off and keeps its approval", async () => {
-    const useToolStore = await importFreshToolStore()
+    const useToolStore = await loadFreshToolStore()
     useToolStore.getState().updateToolApproval("find_files", "ask")
 
     useToolStore.getState().updateToolOn("find_files", false)
@@ -146,7 +146,7 @@ describe("useToolStore", () => {
   })
 
   it("changes one tool's approval and keeps whether it is on", async () => {
-    const useToolStore = await importFreshToolStore()
+    const useToolStore = await loadFreshToolStore()
     useToolStore.getState().updateToolOn("find_files", false)
 
     useToolStore.getState().updateToolApproval("find_files", "ask")
@@ -157,7 +157,7 @@ describe("useToolStore", () => {
   })
 
   it("leaves other tools and earlier choice snapshots unchanged", async () => {
-    const useToolStore = await importFreshToolStore()
+    const useToolStore = await loadFreshToolStore()
     const before = useToolStore.getState().toolChoices
 
     useToolStore.getState().updateToolOn("find_files", false)

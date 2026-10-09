@@ -65,7 +65,7 @@ function createModelStore(defaultModel: string | null = null) {
       }
     })
   )
-  return { store, connection, countFailureReactions: () => failureReactions }
+  return { store, connection, getFailureReactionCount: () => failureReactions }
 }
 
 /**
@@ -74,7 +74,7 @@ function createModelStore(defaultModel: string | null = null) {
  * @param models - Listed models.
  * @returns The route.
  */
-function answerInventory(models: readonly unknown[]): BackendRoute {
+function buildInventoryRoute(models: readonly unknown[]): BackendRoute {
   return () => buildJsonResponse(200, { llms: models })
 }
 
@@ -106,7 +106,7 @@ describe("createModelSlice", () => {
 
   describe("updateModelInventory", () => {
     it("publishes the listing request, then the inventory and the preferred resident model", async () => {
-      startModelBackend({ [LIST_ROUTE]: answerInventory(INVENTORY) })
+      startModelBackend({ [LIST_ROUTE]: buildInventoryRoute(INVENTORY) })
       const { store } = createModelStore()
 
       const update = store.getState().updateModelInventory()
@@ -152,7 +152,7 @@ describe("createModelSlice", () => {
       startModelBackend({
         [LIST_ROUTE]: () => buildJsonResponse(500, { detail: "boom" })
       })
-      const { store, countFailureReactions } = createModelStore()
+      const { store, getFailureReactionCount } = createModelStore()
 
       await store.getState().updateModelInventory()
 
@@ -161,7 +161,7 @@ describe("createModelSlice", () => {
         modelRuntime: { status: "unknown" },
         modelError: expect.stringContaining("500")
       })
-      expect(countFailureReactions()).toBe(1)
+      expect(getFailureReactionCount()).toBe(1)
     })
 
     it("leaves a missing runtime to the LM Studio status instead of showing a model error", async () => {
@@ -172,7 +172,7 @@ describe("createModelSlice", () => {
             createLlmRuntimeUnavailableProblem("LM Studio is not connected.")
           )
       })
-      const { store, countFailureReactions } = createModelStore()
+      const { store, getFailureReactionCount } = createModelStore()
 
       await store.getState().updateModelInventory()
 
@@ -181,7 +181,7 @@ describe("createModelSlice", () => {
         modelRuntime: { status: "none" },
         modelError: null
       })
-      expect(countFailureReactions()).toBe(1)
+      expect(getFailureReactionCount()).toBe(1)
     })
   })
 
@@ -190,9 +190,9 @@ describe("createModelSlice", () => {
       const requests = startModelBackend({
         [LOAD_ROUTE]: () =>
           buildJsonResponse(200, buildLlmInfo("on-disk", { loaded: true })),
-        [LIST_ROUTE]: answerInventory(INVENTORY_AFTER_LOAD)
+        [LIST_ROUTE]: buildInventoryRoute(INVENTORY_AFTER_LOAD)
       })
-      const { store, countFailureReactions } = createModelStore("on-disk")
+      const { store, getFailureReactionCount } = createModelStore("on-disk")
 
       const load = store.getState().loadModel("on-disk")
       const whileLoading = store.getState().modelRuntime
@@ -206,16 +206,16 @@ describe("createModelSlice", () => {
         modelRequest: { status: "idle" },
         modelError: null
       })
-      expect(countFailureReactions()).toBe(0)
+      expect(getFailureReactionCount()).toBe(0)
     })
 
     it("shows a refused load and still reconciles the inventory", async () => {
       const busy = createLlmServiceBusyProblem()
       const requests = startModelBackend({
         [LOAD_ROUTE]: () => buildJsonResponse(503, busy),
-        [LIST_ROUTE]: answerInventory(INVENTORY)
+        [LIST_ROUTE]: buildInventoryRoute(INVENTORY)
       })
-      const { store, countFailureReactions } = createModelStore()
+      const { store, getFailureReactionCount } = createModelStore()
 
       await store.getState().loadModel("on-disk")
 
@@ -224,7 +224,7 @@ describe("createModelSlice", () => {
         modelInventory: { status: "ready", models: INVENTORY },
         modelError: busy.detail
       })
-      expect(countFailureReactions()).toBe(1)
+      expect(getFailureReactionCount()).toBe(1)
     })
 
     it("names both failures when the reconciling read also fails", async () => {
@@ -245,7 +245,7 @@ describe("createModelSlice", () => {
     it("never retries a load", async () => {
       const requests = startModelBackend({
         [LOAD_ROUTE]: () => Promise.reject(new TypeError("fetch failed")),
-        [LIST_ROUTE]: answerInventory(INVENTORY)
+        [LIST_ROUTE]: buildInventoryRoute(INVENTORY)
       })
       const { store } = createModelStore()
 
@@ -259,7 +259,7 @@ describe("createModelSlice", () => {
     it("publishes the unloading transition, unloads, then reconciles the inventory", async () => {
       const requests = startModelBackend({
         [UNLOAD_ROUTE]: () => new Response(null, { status: 204 }),
-        [LIST_ROUTE]: answerInventory([buildLlmInfo("resident")])
+        [LIST_ROUTE]: buildInventoryRoute([buildLlmInfo("resident")])
       })
       const { store } = createModelStore()
 
@@ -278,7 +278,7 @@ describe("createModelSlice", () => {
     it("reconciles the inventory after a failed unload", async () => {
       const requests = startModelBackend({
         [UNLOAD_ROUTE]: () => buildJsonResponse(500, {}),
-        [LIST_ROUTE]: answerInventory(INVENTORY)
+        [LIST_ROUTE]: buildInventoryRoute(INVENTORY)
       })
       const { store } = createModelStore()
 
@@ -297,14 +297,14 @@ describe("createModelSlice", () => {
       const health = { modelId: "resident", status: "ready", latencyMs: 7 }
       startModelBackend({
         "GET /api/v1/llm/resident/health": () => buildJsonResponse(200, health),
-        [LIST_ROUTE]: answerInventory(INVENTORY)
+        [LIST_ROUTE]: buildInventoryRoute(INVENTORY)
       })
-      const { store, countFailureReactions } = createModelStore()
+      const { store, getFailureReactionCount } = createModelStore()
 
       await store.getState().testModel("resident")
 
       expect(store.getState().modelHealth).toEqual(health)
-      expect(countFailureReactions()).toBe(0)
+      expect(getFailureReactionCount()).toBe(0)
     })
 
     it.each([
@@ -321,13 +321,13 @@ describe("createModelSlice", () => {
               reason,
               latencyMs: 2
             }),
-          [LIST_ROUTE]: answerInventory(INVENTORY)
+          [LIST_ROUTE]: buildInventoryRoute(INVENTORY)
         })
-        const { store, countFailureReactions } = createModelStore()
+        const { store, getFailureReactionCount } = createModelStore()
 
         await store.getState().testModel("resident")
 
-        expect(countFailureReactions()).toBe(reactions)
+        expect(getFailureReactionCount()).toBe(reactions)
       }
     )
 
@@ -339,7 +339,7 @@ describe("createModelSlice", () => {
             status: "ready",
             latencyMs: 7
           }),
-        [LIST_ROUTE]: answerInventory(INVENTORY)
+        [LIST_ROUTE]: buildInventoryRoute(INVENTORY)
       })
       const { store } = createModelStore()
       await store.getState().testModel("resident")
@@ -367,15 +367,15 @@ describe("createModelSlice", () => {
         })
       )
 
-      const readSettlement = createSettlementReader(
+      const getSettlement = createSettlementReader(
         store.getState().updateModelInventory()
       )
       await waitForMicrotasks()
-      const beforeReaction = readSettlement()
+      const beforeReaction = getSettlement()
       reaction.resolve()
       await waitForMicrotasks()
 
-      expect([beforeReaction, readSettlement()]).toEqual([
+      expect([beforeReaction, getSettlement()]).toEqual([
         "pending",
         "fulfilled"
       ])

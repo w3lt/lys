@@ -57,13 +57,13 @@ describe("saveSettings", () => {
     const write = createControlledPromise<null>()
     startNativeHostFake({ save_settings: () => write.promise })
 
-    const readSettlement = createSettlementReader(saveSettings(STORED_SETTINGS))
+    const getSettlement = createSettlementReader(saveSettings(STORED_SETTINGS))
     await waitForMicrotasks()
-    const beforeWrite = readSettlement()
+    const beforeWrite = getSettlement()
     write.resolve(null)
     await waitForMicrotasks()
 
-    expect([beforeWrite, readSettlement()]).toEqual(["pending", "fulfilled"])
+    expect([beforeWrite, getSettlement()]).toEqual(["pending", "fulfilled"])
   })
 
   it("rejects with the host's rejection", async () => {

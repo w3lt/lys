@@ -57,7 +57,7 @@ function createStatusStore() {
  * @param status - Status the backend reports.
  * @returns The route.
  */
-function answerStatus(status: string): BackendRoute {
+function buildStatusRoute(status: string): BackendRoute {
   return () => buildJsonResponse(200, { status })
 }
 
@@ -84,7 +84,7 @@ describe("createLmStudioStatusSlice", () => {
   describe("updateLmStudioStatus", () => {
     it("publishes the status the backend reports and notifies the change once", async () => {
       const backend = startBackendFake({
-        [STATUS_ROUTE]: answerStatus("connected")
+        [STATUS_ROUTE]: buildStatusRoute("connected")
       })
       const { store, changes } = createStatusStore()
 
@@ -98,8 +98,8 @@ describe("createLmStudioStatusSlice", () => {
 
     it("follows a connecting status with the backend's settled attempt", async () => {
       startBackendFake({
-        [STATUS_ROUTE]: answerStatus("connecting"),
-        [CONNECT_ROUTE]: answerStatus("unreachable")
+        [STATUS_ROUTE]: buildStatusRoute("connecting"),
+        [CONNECT_ROUTE]: buildStatusRoute("unreachable")
       })
       const { store, changes } = createStatusStore()
 
@@ -139,7 +139,7 @@ describe("createLmStudioStatusSlice", () => {
     })
 
     it("publishes only the latest of overlapping reads and abandons the older one", async () => {
-      startBackendFake({ [STATUS_ROUTE]: answerStatus("connected") })
+      startBackendFake({ [STATUS_ROUTE]: buildStatusRoute("connected") })
       const { store, changes } = createStatusStore()
       await store.getState().updateLmStudioStatus()
       const status = createControlledRoute()
@@ -219,12 +219,12 @@ describe("createLmStudioStatusSlice", () => {
 
   describe("resetLmStudioStatus", () => {
     it("publishes unknown and never publishes the abandoned request's answer", async () => {
-      startBackendFake({ [STATUS_ROUTE]: answerStatus("connected") })
+      startBackendFake({ [STATUS_ROUTE]: buildStatusRoute("connected") })
       const pending = createControlledRoute()
       const { store, changes } = createStatusStore()
       await store.getState().updateLmStudioStatus()
       startBackendFake({ [STATUS_ROUTE]: pending.route })
-      const readSettlement = createSettlementReader(
+      const getSettlement = createSettlementReader(
         store.getState().updateLmStudioStatus()
       )
       await waitForMicrotasks()
@@ -236,7 +236,7 @@ describe("createLmStudioStatusSlice", () => {
       await waitForMicrotasks()
 
       expect(changes).toEqual(["connected", "unknown"])
-      expect(readSettlement()).toBe("fulfilled")
+      expect(getSettlement()).toBe("fulfilled")
     })
 
     it("does not notify when the status is already unknown", () => {

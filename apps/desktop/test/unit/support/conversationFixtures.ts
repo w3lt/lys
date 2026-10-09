@@ -82,7 +82,7 @@ type AssistantMessageFixture<
  * @param message - Fixture whose literal type records its lifecycle.
  * @returns The same fixture, frozen, keeping its precise type.
  */
-function freezeAssistantMessage<T extends ConversationAssistantMessage>(
+function buildValidatedAssistantMessage<T extends ConversationAssistantMessage>(
   message: T
 ): Readonly<T> {
   conversationAssistantMessageSchema.parse(message)
@@ -118,7 +118,7 @@ export function buildStreamingAssistantMessage(
   sequence: number,
   content: string
 ): AssistantMessageFixture<"streaming", null> {
-  return freezeAssistantMessage({
+  return buildValidatedAssistantMessage({
     ...buildAssistantMessageBase(sequence, content),
     status: "streaming" as const,
     finishReason: null
@@ -138,7 +138,7 @@ export function buildCompletedAssistantMessage(
   content: string,
   finishReason: "stop" | "length" = "stop"
 ): AssistantMessageFixture<"completed", "stop" | "length"> {
-  return freezeAssistantMessage({
+  return buildValidatedAssistantMessage({
     ...buildAssistantMessageBase(sequence, content),
     status: "completed" as const,
     finishReason
@@ -158,7 +158,7 @@ export function buildEndedAssistantMessage(
   content: string,
   status: "interrupted" | "failed"
 ): AssistantMessageFixture<"interrupted" | "failed", null> {
-  return freezeAssistantMessage({
+  return buildValidatedAssistantMessage({
     ...buildAssistantMessageBase(sequence, content),
     status,
     finishReason: null

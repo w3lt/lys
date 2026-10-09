@@ -586,7 +586,7 @@ const GENERATING_EVENTS_ROUTE = `GET /api/v1/chat/${GENERATING_ID}/replies/${GEN
  * @param conversation - Stored conversation the backend returns.
  * @returns The route key and the route.
  */
-function answerStoredConversation(conversation: {
+function buildStoredConversationRoutes(conversation: {
   readonly id: string
 }): BackendRoutes {
   return {
@@ -666,7 +666,7 @@ describe("openConversation", () => {
 
   it("ignores opening the conversation already shown", async () => {
     const backend = startBackendFake(
-      answerStoredConversation(STORED_CONVERSATION)
+      buildStoredConversationRoutes(STORED_CONVERSATION)
     )
     const { store } = createChatHarness()
     await store.getState().openConversation(STORED_ID)
@@ -678,7 +678,7 @@ describe("openConversation", () => {
 
   it("stops following the active reply without stopping it on the backend", async () => {
     const { store, backend, streams } = await startStreamingReply(
-      answerStoredConversation(STORED_CONVERSATION)
+      buildStoredConversationRoutes(STORED_CONVERSATION)
     )
 
     await store.getState().openConversation(STORED_ID)
@@ -727,7 +727,7 @@ describe("openConversation", () => {
     const olderRead = createControlledPromise<Response>()
     const backend = startBackendFake({
       [`GET /api/v1/conversations/${GENERATING_ID}`]: () => olderRead.promise,
-      ...answerStoredConversation(STORED_CONVERSATION)
+      ...buildStoredConversationRoutes(STORED_CONVERSATION)
     })
     const { store } = createChatHarness()
     const older = store.getState().openConversation(GENERATING_ID)
@@ -779,7 +779,7 @@ describe("openConversation", () => {
 describe("following a stored reply", () => {
   it("follows a reply still generating from its snapshot to its end", async () => {
     const { replyStreams } = startFollowBackend(
-      answerStoredConversation(GENERATING_CONVERSATION)
+      buildStoredConversationRoutes(GENERATING_CONVERSATION)
     )
     const { store } = createChatHarness()
     const open = store.getState().openConversation(GENERATING_ID)
@@ -816,7 +816,7 @@ describe("following a stored reply", () => {
 
   it("shows the reply interrupted when its stream does not start with a snapshot", async () => {
     const { replyStreams } = startFollowBackend(
-      answerStoredConversation(GENERATING_CONVERSATION)
+      buildStoredConversationRoutes(GENERATING_CONVERSATION)
     )
     const { store } = createChatHarness()
     const open = store.getState().openConversation(GENERATING_ID)
@@ -836,7 +836,7 @@ describe("following a stored reply", () => {
 
   it("shows the reply interrupted when its stream ends before the reply is final", async () => {
     const { replyStreams } = startFollowBackend(
-      answerStoredConversation(GENERATING_CONVERSATION)
+      buildStoredConversationRoutes(GENERATING_CONVERSATION)
     )
     const { store } = createChatHarness()
     const open = store.getState().openConversation(GENERATING_ID)
@@ -857,7 +857,7 @@ describe("following a stored reply", () => {
 
   it("reports a followed reply the backend no longer stores", async () => {
     startBackendFake({
-      ...answerStoredConversation(GENERATING_CONVERSATION),
+      ...buildStoredConversationRoutes(GENERATING_CONVERSATION),
       [GENERATING_EVENTS_ROUTE]: () =>
         buildJsonResponse(404, buildConversationNotFoundProblem())
     })
@@ -874,7 +874,7 @@ describe("following a stored reply", () => {
   it("asks the backend to stop a followed reply", async () => {
     const stopRoute = `POST /api/v1/chat/${GENERATING_ID}/replies/${GENERATING_REPLY.id}/stop`
     const { backend, replyStreams } = startFollowBackend({
-      ...answerStoredConversation(GENERATING_CONVERSATION),
+      ...buildStoredConversationRoutes(GENERATING_CONVERSATION),
       [stopRoute]: () => new Response(null, { status: 204 })
     })
     const { store } = createChatHarness()
@@ -895,7 +895,7 @@ describe("following a stored reply", () => {
 
   it("follows the shown reply again from a fresh snapshot after a failed open", async () => {
     const { replyStreams } = startFollowBackend({
-      ...answerStoredConversation(GENERATING_CONVERSATION),
+      ...buildStoredConversationRoutes(GENERATING_CONVERSATION),
       [`GET /api/v1/conversations/${STORED_ID}`]: () =>
         buildJsonResponse(500, {})
     })
@@ -930,7 +930,7 @@ describe("following a stored reply", () => {
 
 describe("closeConversation", () => {
   it("resets the view when it shows the closed conversation", async () => {
-    startBackendFake(answerStoredConversation(STORED_CONVERSATION))
+    startBackendFake(buildStoredConversationRoutes(STORED_CONVERSATION))
     const { store } = createChatHarness()
     await store.getState().openConversation(STORED_ID)
     store.getState().setInputDraft("draft")
@@ -962,7 +962,7 @@ describe("closeConversation", () => {
   })
 
   it("changes nothing for a conversation the view does not present", async () => {
-    startBackendFake(answerStoredConversation(STORED_CONVERSATION))
+    startBackendFake(buildStoredConversationRoutes(STORED_CONVERSATION))
     const { store } = createChatHarness()
     await store.getState().openConversation(STORED_ID)
     const before = store.getState()
@@ -975,7 +975,7 @@ describe("closeConversation", () => {
   it("keeps the shown conversation open while another one opens to replace it", async () => {
     const read = createControlledPromise<Response>()
     startBackendFake({
-      ...answerStoredConversation(STORED_CONVERSATION),
+      ...buildStoredConversationRoutes(STORED_CONVERSATION),
       [`GET /api/v1/conversations/${GENERATING_ID}`]: () => read.promise
     })
     const { store } = createChatHarness()
@@ -999,13 +999,13 @@ describe("closeConversation", () => {
 
 describe("useChatViewStore", () => {
   /**
-   * Imports fresh application and chat-view stores, with a running backend
+   * Loads fresh application and chat-view stores, with a running backend
    * at {@link BACKEND_URL} that has loaded `resident` weights.
    *
    * @param replyCeiling - Saved reply ceiling; zero means no limit.
    * @returns Both store hooks.
    */
-  async function importFreshChatViewStore(replyCeiling: number) {
+  async function loadFreshChatViewStore(replyCeiling: number) {
     vi.resetModules()
     const { useLysStore } = await import("@/lib/store")
     const { useChatViewStore } = await import("@/lib/store/chat-view")
@@ -1029,7 +1029,7 @@ describe("useChatViewStore", () => {
     "sends with the loaded model and a saved ceiling of %d as %o",
     async (replyCeiling, generationOptions) => {
       const { backend, streams } = startChatBackend()
-      const { useChatViewStore } = await importFreshChatViewStore(replyCeiling)
+      const { useChatViewStore } = await loadFreshChatViewStore(replyCeiling)
 
       void useChatViewStore.getState().sendMessage("Hello")
       await waitForMicrotasks()
@@ -1046,7 +1046,7 @@ describe("useChatViewStore", () => {
 
   it("refuses to send while the backend is not running", async () => {
     const { backend } = startChatBackend()
-    const { useLysStore, useChatViewStore } = await importFreshChatViewStore(0)
+    const { useLysStore, useChatViewStore } = await loadFreshChatViewStore(0)
     useLysStore.setState({ backendServerInfo: { status: "stopping" } })
 
     await useChatViewStore.getState().sendMessage("Hello")
@@ -1057,9 +1057,9 @@ describe("useChatViewStore", () => {
 
   it("reads stored conversations and follows replies at the application store's backend", async () => {
     const { backend, replyStreams } = startFollowBackend(
-      answerStoredConversation(GENERATING_CONVERSATION)
+      buildStoredConversationRoutes(GENERATING_CONVERSATION)
     )
-    const { useChatViewStore } = await importFreshChatViewStore(0)
+    const { useChatViewStore } = await loadFreshChatViewStore(0)
 
     const open = useChatViewStore.getState().openConversation(GENERATING_ID)
     await waitForMicrotasks()

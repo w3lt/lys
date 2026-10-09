@@ -69,7 +69,7 @@ function createHistoryStore() {
  * @param conversations - Listed conversations, newest first.
  * @returns The route.
  */
-function answerList(
+function buildListRoute(
   conversations: readonly ConversationSummary[]
 ): BackendRoute {
   return () => buildJsonResponse(200, buildConversationListPage(conversations))
@@ -115,7 +115,7 @@ async function openLoadedHistory(
   routes: BackendRoutes = {}
 ) {
   const backend = startBackendFake({
-    [LIST_ROUTE]: answerList(conversations),
+    [LIST_ROUTE]: buildListRoute(conversations),
     ...routes
   })
   const harness = createHistoryStore()
@@ -283,7 +283,7 @@ describe("createConversationHistoryStore", () => {
 
     it("keeps the typed query while closed and searches it only on opening", async () => {
       vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
-      const backend = startBackendFake({ [LIST_ROUTE]: answerList([TRIP]) })
+      const backend = startBackendFake({ [LIST_ROUTE]: buildListRoute([TRIP]) })
       const { store } = createHistoryStore()
 
       store.getState().updateConversationHistoryQuery("trip")
@@ -331,7 +331,7 @@ describe("createConversationHistoryStore", () => {
       vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
       const { store, backend } = await openLoadedHistory([TRIP, RECIPE])
       store.getState().updateConversationHistoryQuery("recipe")
-      startBackendFake({ [LIST_ROUTE]: answerList([RECIPE]) })
+      startBackendFake({ [LIST_ROUTE]: buildListRoute([RECIPE]) })
 
       await expect(store.getState().loadFirstConversationId()).resolves.toBe(
         RECIPE.id
@@ -494,7 +494,7 @@ const DELETE_TRIP_ROUTE = `DELETE /api/v1/conversations/${TRIP.id}`
  * @param title - Title the backend persisted.
  * @returns The route.
  */
-function answerRename(title: string): BackendRoute {
+function buildRenameRoute(title: string): BackendRoute {
   return () => buildJsonResponse(200, buildConversationMetadata(TRIP.id, title))
 }
 
@@ -634,7 +634,7 @@ describe("conversation history changes", () => {
 
   it("saves a changed title still being edited when history closes, and the rename continues", async () => {
     const { store, backend } = await openLoadedHistory([TRIP], {
-      [RENAME_TRIP_ROUTE]: answerRename("Tour")
+      [RENAME_TRIP_ROUTE]: buildRenameRoute("Tour")
     })
     store.getState().updateConversationRowInteraction({
       kind: "editing-title",

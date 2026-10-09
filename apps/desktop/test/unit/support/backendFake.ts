@@ -1,5 +1,5 @@
 import { expect, onTestFinished, vi } from "vitest"
-import { createControlledPromise } from "./settlement"
+import { createControlledPromise, waitForMicrotasks } from "./settlement"
 
 /** One HTTP request received by the in-process backend double. */
 export type ObservedBackendRequest = Readonly<{
@@ -216,8 +216,10 @@ export type BackendEventStream = Readonly<{
  *
  * @returns The response and the controls a case uses to write it.
  * @remarks The stream stays open until the case closes it or the client
- * cancels it. Writes after the client cancelled are dropped, as a server's
- * writes to a closed connection are.
+ * cancels it. Writes after either are dropped, as a server's writes to a
+ * closed connection are. When the case finishes, a stream still open is
+ * closed and its reader is given a turn to settle, so no read the case
+ * started outlives it.
  */
 export function startBackendEventStream(): BackendEventStream {
   const encoder = new TextEncoder()
@@ -233,21 +235,30 @@ export function startBackendEventStream(): BackendEventStream {
       isStreamCancelled = true
     }
   })
-  const write = (text: string) => {
-    if (!isStreamCancelled) streamController.enqueue(encoder.encode(text))
+  let isStreamClosed = false
+  const sendText = (text: string) => {
+    if (isStreamCancelled || isStreamClosed) return
+    streamController.enqueue(encoder.encode(text))
   }
+  const close = () => {
+    if (isStreamCancelled || isStreamClosed) return
+    isStreamClosed = true
+    streamController.close()
+  }
+  onTestFinished(async () => {
+    close()
+    await waitForMicrotasks()
+  })
   return Object.freeze({
     response: new Response(body, {
       status: 200,
       headers: { "Content-Type": "text/event-stream" }
     }),
     sendEvent: (data: unknown) => {
-      write(`data: ${JSON.stringify(data)}\n\n`)
+      sendText(`data: ${JSON.stringify(data)}\n\n`)
     },
-    sendText: write,
-    close: () => {
-      if (!isStreamCancelled) streamController.close()
-    },
+    sendText,
+    close,
     isCancelled: () => isStreamCancelled
   })
 }

@@ -50,7 +50,7 @@ describe("getBackendReadiness", () => {
     const backend = startBackendAnsweringFrom(3)
     startNativeHostFake({ get_backend_status: () => ({ running: true }) })
 
-    const readSettlement = createSettlementReader(
+    const getSettlement = createSettlementReader(
       getBackendReadiness(BACKEND_URL)
     )
     await vi.advanceTimersByTimeAsync(249)
@@ -59,7 +59,7 @@ describe("getBackendReadiness", () => {
 
     expect(checksBeforeInterval).toBe(1)
     expect(backend.requests).toHaveLength(3)
-    expect(readSettlement()).toBe("fulfilled")
+    expect(getSettlement()).toBe("fulfilled")
   })
 
   it("reports exited when the process stops before answering", async () => {
@@ -74,9 +74,9 @@ describe("getBackendReadiness", () => {
     startNativeHostFake({ get_backend_status: () => ({ running: true }) })
 
     const readiness = getBackendReadiness(BACKEND_URL)
-    const readSettlement = createSettlementReader(readiness)
+    const getSettlement = createSettlementReader(readiness)
     await vi.advanceTimersByTimeAsync(29_999)
-    const beforeDeadline = readSettlement()
+    const beforeDeadline = getSettlement()
     await vi.advanceTimersByTimeAsync(1)
 
     expect(beforeDeadline).toBe("pending")

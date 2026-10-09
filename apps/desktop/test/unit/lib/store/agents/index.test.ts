@@ -29,7 +29,7 @@ const WRITER = buildAgent("writer", { name: "Writer" })
 const LIST_ROUTE = "GET /api/v1/agents"
 
 /**
- * Imports a fresh agent store and the application store it reads the
+ * Loads a fresh agent store and the application store it reads the
  * backend from, so no state or pending work of another case reaches this
  * one.
  *
@@ -37,7 +37,7 @@ const LIST_ROUTE = "GET /api/v1/agents"
  * backend; its origin is always {@link BACKEND_URL}.
  * @returns The fresh agent store hook.
  */
-async function importFreshAgentStore(isBackendRunning = true) {
+async function loadFreshAgentStore(isBackendRunning = true) {
   vi.resetModules()
   const { useLysStore } = await import("@/lib/store")
   const { useAgentStore } = await import("@/lib/store/agents")
@@ -54,26 +54,26 @@ async function importFreshAgentStore(isBackendRunning = true) {
  * @param agents - Stored agents, oldest first.
  * @returns The route.
  */
-function answerAgentList(agents: readonly Agent[]): BackendRoute {
+function buildAgentListRoute(agents: readonly Agent[]): BackendRoute {
   return () => buildJsonResponse(200, buildAgentListPage(agents))
 }
 
 /**
- * Imports a fresh agent store whose list shows the given agents.
+ * Loads a fresh agent store whose list shows the given agents.
  *
  * @param agents - Stored agents, oldest first.
  * @param routes - Routes the case needs after the list is read.
  * @returns The store hook and the backend observation handle.
  */
-async function importLoadedAgentStore(
+async function loadAgentStoreWithList(
   agents: readonly Agent[],
   routes: BackendRoutes = {}
 ) {
   const backend = startBackendFake({
-    [LIST_ROUTE]: answerAgentList(agents),
+    [LIST_ROUTE]: buildAgentListRoute(agents),
     ...routes
   })
-  const useAgentStore = await importFreshAgentStore()
+  const useAgentStore = await loadFreshAgentStore()
   await useAgentStore.getState().loadAgents()
   return { useAgentStore, backend }
 }
@@ -92,7 +92,7 @@ function listRouteKeys(backend: ReturnType<typeof startBackendFake>) {
 
 describe("useAgentStore", () => {
   it("starts with no list and a closed editor", async () => {
-    const useAgentStore = await importFreshAgentStore()
+    const useAgentStore = await loadFreshAgentStore()
 
     expect(useAgentStore.getState()).toMatchObject({
       list: { status: "idle" },
@@ -115,7 +115,7 @@ describe("useAgentStore", () => {
                 })
               )
       })
-      const useAgentStore = await importFreshAgentStore()
+      const useAgentStore = await loadFreshAgentStore()
 
       await useAgentStore.getState().loadAgents()
 
@@ -141,7 +141,7 @@ describe("useAgentStore", () => {
             : reread.promise
         }
       })
-      const useAgentStore = await importFreshAgentStore()
+      const useAgentStore = await loadFreshAgentStore()
       const firstRead = useAgentStore.getState().loadAgents()
       const whileFirstRead = useAgentStore.getState().list
       await firstRead
@@ -161,7 +161,7 @@ describe("useAgentStore", () => {
 
     it("fails without a request while the backend is stopped", async () => {
       const backend = startBackendFake({})
-      const useAgentStore = await importFreshAgentStore(false)
+      const useAgentStore = await loadFreshAgentStore(false)
 
       await useAgentStore.getState().loadAgents()
 
@@ -174,7 +174,7 @@ describe("useAgentStore", () => {
 
     it("shows why the list could not be read", async () => {
       startBackendFake({ [LIST_ROUTE]: () => buildJsonResponse(500, {}) })
-      const useAgentStore = await importFreshAgentStore()
+      const useAgentStore = await loadFreshAgentStore()
 
       await useAgentStore.getState().loadAgents()
 
@@ -207,7 +207,7 @@ describe("useAgentStore", () => {
       startBackendFake({
         [LIST_ROUTE]: () => buildJsonResponse(200, pages[pageIndex++])
       })
-      const useAgentStore = await importFreshAgentStore()
+      const useAgentStore = await loadFreshAgentStore()
 
       await useAgentStore.getState().loadAgents()
 
@@ -233,7 +233,7 @@ describe("useAgentStore", () => {
           )
         }
       })
-      const useAgentStore = await importFreshAgentStore()
+      const useAgentStore = await loadFreshAgentStore()
 
       await useAgentStore.getState().loadAgents()
 
@@ -254,7 +254,7 @@ describe("useAgentStore", () => {
             : buildJsonResponse(200, buildAgentListPage([WRITER]))
         }
       })
-      const useAgentStore = await importFreshAgentStore()
+      const useAgentStore = await loadFreshAgentStore()
       const older = useAgentStore.getState().loadAgents()
 
       await useAgentStore.getState().loadAgents()
@@ -272,7 +272,7 @@ describe("useAgentStore", () => {
 
   describe("openAgent", () => {
     it("shows the agent being read, then its editor holding the stored text", async () => {
-      const { useAgentStore } = await importLoadedAgentStore([RESEARCHER], {
+      const { useAgentStore } = await loadAgentStoreWithList([RESEARCHER], {
         "GET /api/v1/agents/researcher": () =>
           buildJsonResponse(200, RESEARCHER)
       })
@@ -299,7 +299,7 @@ describe("useAgentStore", () => {
     })
 
     it("reports an agent that no longer exists and removes its row", async () => {
-      const { useAgentStore } = await importLoadedAgentStore(
+      const { useAgentStore } = await loadAgentStoreWithList(
         [RESEARCHER, WRITER],
         {
           "GET /api/v1/agents/researcher": () =>
@@ -320,7 +320,7 @@ describe("useAgentStore", () => {
     })
 
     it("reports why the agent could not be read", async () => {
-      const { useAgentStore } = await importLoadedAgentStore([RESEARCHER], {
+      const { useAgentStore } = await loadAgentStoreWithList([RESEARCHER], {
         "GET /api/v1/agents/researcher": () => buildJsonResponse(500, {})
       })
 
@@ -334,7 +334,7 @@ describe("useAgentStore", () => {
 
     it("reports a stopped backend without a request", async () => {
       const backend = startBackendFake({})
-      const useAgentStore = await importFreshAgentStore(false)
+      const useAgentStore = await loadFreshAgentStore(false)
 
       await useAgentStore.getState().openAgent("researcher")
 
@@ -348,7 +348,7 @@ describe("useAgentStore", () => {
 
     it("abandons a read when the editor is closed before it answers", async () => {
       const read = createControlledPromise<Response>()
-      const { useAgentStore, backend } = await importLoadedAgentStore(
+      const { useAgentStore, backend } = await loadAgentStoreWithList(
         [RESEARCHER],
         { "GET /api/v1/agents/researcher": () => read.promise }
       )
@@ -365,7 +365,7 @@ describe("useAgentStore", () => {
 
     it("lets a newer open replace a pending one", async () => {
       const olderRead = createControlledPromise<Response>()
-      const { useAgentStore } = await importLoadedAgentStore(
+      const { useAgentStore } = await loadAgentStoreWithList(
         [RESEARCHER, WRITER],
         {
           "GET /api/v1/agents/researcher": () => olderRead.promise,
@@ -387,7 +387,7 @@ describe("useAgentStore", () => {
 
   describe("openNewAgent and openAgentCopy", () => {
     it("opens an empty editor for a new agent", async () => {
-      const useAgentStore = await importFreshAgentStore()
+      const useAgentStore = await loadFreshAgentStore()
 
       useAgentStore.getState().openNewAgent()
 
@@ -401,7 +401,7 @@ describe("useAgentStore", () => {
     })
 
     it("copies the edited agent into a new agent under a free name and an empty code", async () => {
-      const { useAgentStore } = await importLoadedAgentStore(
+      const { useAgentStore } = await loadAgentStoreWithList(
         [RESEARCHER, buildAgent("copy", { name: "Researcher copy" })],
         {
           "GET /api/v1/agents/researcher": () =>
@@ -426,7 +426,7 @@ describe("useAgentStore", () => {
     })
 
     it("ignores a copy request without a stored agent being edited", async () => {
-      const useAgentStore = await importFreshAgentStore()
+      const useAgentStore = await loadFreshAgentStore()
       useAgentStore.getState().openNewAgent()
       const before = useAgentStore.getState().editor
 
@@ -438,7 +438,7 @@ describe("useAgentStore", () => {
 
   describe("draft edits", () => {
     it("replaces the draft being written", async () => {
-      const useAgentStore = await importFreshAgentStore()
+      const useAgentStore = await loadFreshAgentStore()
       useAgentStore.getState().openNewAgent()
       const draft = { name: "Scout", bio: "", systemPrompt: "" }
 
@@ -448,7 +448,7 @@ describe("useAgentStore", () => {
     })
 
     it("ignores a draft while no editor is open", async () => {
-      const useAgentStore = await importFreshAgentStore()
+      const useAgentStore = await loadFreshAgentStore()
 
       useAgentStore
         .getState()
@@ -458,7 +458,7 @@ describe("useAgentStore", () => {
     })
 
     it("keeps the code form of what is typed for a new agent", async () => {
-      const useAgentStore = await importFreshAgentStore()
+      const useAgentStore = await loadFreshAgentStore()
       useAgentStore.getState().openNewAgent()
 
       useAgentStore.getState().updateNewAgentCode("Web Scout!")
@@ -469,7 +469,7 @@ describe("useAgentStore", () => {
     })
 
     it("ignores a code for a stored agent, whose code never changes", async () => {
-      const { useAgentStore } = await importLoadedAgentStore([RESEARCHER], {
+      const { useAgentStore } = await loadAgentStoreWithList([RESEARCHER], {
         "GET /api/v1/agents/researcher": () =>
           buildJsonResponse(200, RESEARCHER)
       })
@@ -494,32 +494,32 @@ const SCOUT_DRAFT = Object.freeze({
 const SCOUT = buildAgent("scout", SCOUT_DRAFT)
 
 /**
- * Imports a store whose list shows the given agents and whose editor holds
- * {@link SCOUT_DRAFT} for a new agent.
+ * Opens a new-agent editor holding {@link SCOUT_DRAFT} on a fresh store whose
+ * list shows the given agents.
  *
  * @param agents - Listed agents.
  * @param routes - Routes the save needs.
  * @returns The store hook and the backend observation handle.
  */
-async function importNewAgentEditor(
+async function openNewAgentEditor(
   agents: readonly Agent[],
   routes: BackendRoutes
 ) {
-  const loaded = await importLoadedAgentStore(agents, routes)
+  const loaded = await loadAgentStoreWithList(agents, routes)
   loaded.useAgentStore.getState().openNewAgent()
   loaded.useAgentStore.getState().updateAgentDraft(SCOUT_DRAFT)
   return loaded
 }
 
 /**
- * Imports a store whose list shows {@link RESEARCHER} and {@link WRITER} and
- * whose editor holds the researcher as stored.
+ * Opens the editor of {@link RESEARCHER}, holding it as stored, on a fresh
+ * store whose list shows {@link RESEARCHER} and {@link WRITER}.
  *
  * @param routes - Routes the change needs.
  * @returns The store hook and the backend observation handle.
  */
-async function importResearcherEditor(routes: BackendRoutes) {
-  const loaded = await importLoadedAgentStore([RESEARCHER, WRITER], {
+async function openResearcherEditor(routes: BackendRoutes) {
+  const loaded = await loadAgentStoreWithList([RESEARCHER, WRITER], {
     "GET /api/v1/agents/researcher": () => buildJsonResponse(200, RESEARCHER),
     ...routes
   })
@@ -529,12 +529,9 @@ async function importResearcherEditor(routes: BackendRoutes) {
 
 describe("useAgentStore saves", () => {
   it("stores a new agent, closes the editor, lists it last, and marks it saved", async () => {
-    const { useAgentStore, backend } = await importNewAgentEditor(
-      [RESEARCHER],
-      {
-        "POST /api/v1/agents": () => buildJsonResponse(201, SCOUT)
-      }
-    )
+    const { useAgentStore, backend } = await openNewAgentEditor([RESEARCHER], {
+      "POST /api/v1/agents": () => buildJsonResponse(201, SCOUT)
+    })
 
     await useAgentStore.getState().saveAgentDraft()
 
@@ -549,7 +546,7 @@ describe("useAgentStore saves", () => {
   })
 
   it("sends the typed code with a new agent", async () => {
-    const { useAgentStore, backend } = await importNewAgentEditor([], {
+    const { useAgentStore, backend } = await openNewAgentEditor([], {
       "POST /api/v1/agents": () => buildJsonResponse(201, SCOUT)
     })
     useAgentStore.getState().updateNewAgentCode("scout")
@@ -563,7 +560,7 @@ describe("useAgentStore saves", () => {
   })
 
   it("does not send a draft with a problem and counts the attempt so the problem shows", async () => {
-    const { useAgentStore, backend } = await importNewAgentEditor(
+    const { useAgentStore, backend } = await openNewAgentEditor(
       [RESEARCHER],
       {}
     )
@@ -582,7 +579,7 @@ describe("useAgentStore saves", () => {
   })
 
   it("reports a taken code and keeps the draft", async () => {
-    const { useAgentStore } = await importNewAgentEditor([], {
+    const { useAgentStore } = await openNewAgentEditor([], {
       "POST /api/v1/agents": () =>
         buildJsonResponse(409, buildAgentCodeTakenProblem())
     })
@@ -602,7 +599,7 @@ describe("useAgentStore saves", () => {
 
   it("reports an unconfirmed creation and reads the list again in case it was stored", async () => {
     let reads = 0
-    const { useAgentStore } = await importNewAgentEditor([], {
+    const { useAgentStore } = await openNewAgentEditor([], {
       [LIST_ROUTE]: () => {
         reads += 1
         return buildJsonResponse(
@@ -629,7 +626,7 @@ describe("useAgentStore saves", () => {
 
   it("changes a stored agent with the draft and replaces its row", async () => {
     const renamed = buildAgent("researcher", { name: "Scout" })
-    const { useAgentStore, backend } = await importResearcherEditor({
+    const { useAgentStore, backend } = await openResearcherEditor({
       "PATCH /api/v1/agents/researcher": () => buildJsonResponse(200, renamed)
     })
     const draft = {
@@ -650,7 +647,7 @@ describe("useAgentStore saves", () => {
   })
 
   it("keeps the draft of an agent that no longer exists and removes its row", async () => {
-    const { useAgentStore } = await importResearcherEditor({
+    const { useAgentStore } = await openResearcherEditor({
       "PATCH /api/v1/agents/researcher": () =>
         buildJsonResponse(404, buildAgentNotFoundProblem())
     })
@@ -670,7 +667,7 @@ describe("useAgentStore saves", () => {
   })
 
   it("reports a failed change and keeps the draft", async () => {
-    const { useAgentStore } = await importResearcherEditor({
+    const { useAgentStore } = await openResearcherEditor({
       "PATCH /api/v1/agents/researcher": () => buildJsonResponse(500, {})
     })
 
@@ -686,7 +683,7 @@ describe("useAgentStore saves", () => {
   })
 
   it("reports a stopped backend without a request and counts the attempt", async () => {
-    const { useAgentStore, backend } = await importNewAgentEditor([], {})
+    const { useAgentStore, backend } = await openNewAgentEditor([], {})
     const { useLysStore } = await import("@/lib/store")
     useLysStore.setState({ backendServerInfo: { status: "stopped" } })
 
@@ -705,7 +702,7 @@ describe("useAgentStore saves", () => {
   it("does not save while the list is being read again", async () => {
     const reread = createControlledPromise<Response>()
     let reads = 0
-    const { useAgentStore, backend } = await importNewAgentEditor([], {
+    const { useAgentStore, backend } = await openNewAgentEditor([], {
       [LIST_ROUTE]: () => {
         reads += 1
         return reads === 1
@@ -727,7 +724,7 @@ describe("useAgentStore saves", () => {
 
   it("keeps the editor open and unchanged while a save is pending", async () => {
     const creation = createControlledPromise<Response>()
-    const { useAgentStore } = await importNewAgentEditor([], {
+    const { useAgentStore } = await openNewAgentEditor([], {
       "POST /api/v1/agents": () => creation.promise
     })
     const save = useAgentStore.getState().saveAgentDraft()
@@ -747,7 +744,7 @@ describe("useAgentStore saves", () => {
   it("replaces a list read pending when a save settles, so the old answer cannot undo the save", async () => {
     const staleRead = createControlledPromise<Response>()
     let reads = 0
-    const { useAgentStore, backend } = await importNewAgentEditor([], {
+    const { useAgentStore, backend } = await openNewAgentEditor([], {
       [LIST_ROUTE]: () => {
         reads += 1
         if (reads === 2) return staleRead.promise
@@ -779,7 +776,7 @@ describe("useAgentStore saves", () => {
 
 describe("useAgentStore deletions", () => {
   it("asks for confirmation before deleting", async () => {
-    const { useAgentStore, backend } = await importResearcherEditor({})
+    const { useAgentStore, backend } = await openResearcherEditor({})
 
     await useAgentStore.getState().deleteAgent()
     useAgentStore.getState().openAgentDeleteConfirmation()
@@ -793,7 +790,7 @@ describe("useAgentStore deletions", () => {
   })
 
   it("keeps the agent when the confirmation is closed", async () => {
-    const { useAgentStore } = await importResearcherEditor({})
+    const { useAgentStore } = await openResearcherEditor({})
     useAgentStore.getState().openAgentDeleteConfirmation()
 
     useAgentStore.getState().closeAgentDeleteConfirmation()
@@ -811,7 +808,7 @@ describe("useAgentStore deletions", () => {
       () => buildJsonResponse(404, buildAgentNotFoundProblem())
     ]
   ])("closes the editor and removes the row when %s", async (_label, route) => {
-    const { useAgentStore } = await importResearcherEditor({
+    const { useAgentStore } = await openResearcherEditor({
       "DELETE /api/v1/agents/researcher": route
     })
     useAgentStore.getState().openAgentDeleteConfirmation()
@@ -828,7 +825,7 @@ describe("useAgentStore deletions", () => {
   })
 
   it("reports a failed deletion and keeps the editor", async () => {
-    const { useAgentStore } = await importResearcherEditor({
+    const { useAgentStore } = await openResearcherEditor({
       "DELETE /api/v1/agents/researcher": () => buildJsonResponse(500, {})
     })
     useAgentStore.getState().openAgentDeleteConfirmation()
@@ -850,7 +847,7 @@ describe("useAgentStore deletions", () => {
   })
 
   it("reports a stopped backend without a request", async () => {
-    const { useAgentStore, backend } = await importResearcherEditor({})
+    const { useAgentStore, backend } = await openResearcherEditor({})
     useAgentStore.getState().openAgentDeleteConfirmation()
     const { useLysStore } = await import("@/lib/store")
     useLysStore.setState({ backendServerInfo: { status: "stopped" } })

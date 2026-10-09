@@ -166,7 +166,18 @@ describe("updateFastifyWithChatRoute", () => {
         model: "qwen/qwen3-8b"
       }
     ],
-    ["an unknown field", { ...NEW_CONVERSATION_REQUEST, stream: true }]
+    ["an unknown field", { ...NEW_CONVERSATION_REQUEST, stream: true }],
+    [
+      "a tool offer without tools",
+      { ...NEW_CONVERSATION_REQUEST, tools: { definitions: [] } }
+    ],
+    [
+      "a tool offer that names one tool twice",
+      {
+        ...NEW_CONVERSATION_REQUEST,
+        tools: { definitions: [READ_TEXT_FILE_TOOL, READ_TEXT_FILE_TOOL] }
+      }
+    ]
   ])("rejects %s before storing a turn", async (_label, payload) => {
     const testApp = await createChatRouteTestApp()
     updateFastifyWithChatRoute(testApp.app, {

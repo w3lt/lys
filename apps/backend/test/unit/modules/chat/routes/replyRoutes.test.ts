@@ -539,7 +539,19 @@ describe("updateFastifyWithChatReplyRoutes", () => {
         "a failed answer without content",
         { status: "failed", reason: "declined", content: "" }
       ],
-      ["an unknown status", { status: "skipped", content: "x" }]
+      ["an unknown status", { status: "skipped", content: "x" }],
+      [
+        "a succeeded answer with an unknown field",
+        { status: "succeeded", content: "x", note: "y" }
+      ],
+      [
+        "a failed answer with an unknown field",
+        { status: "failed", reason: "declined", content: "x", note: "y" }
+      ],
+      [
+        "a failed answer with an unknown reason",
+        { status: "failed", reason: "timedOut", content: "x" }
+      ]
     ])(
       "rejects %s with 400 and leaves the call waiting",
       async (_label, payload) => {

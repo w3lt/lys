@@ -72,7 +72,7 @@ export default function updateFastifyWithChatReplyRoutes(
       params: sendChatToolResultApi.params,
       body: sendChatToolResultApi.body
     },
-    handler: async (request, reply) =>
+    handler: (request, reply) =>
       handleSendChatToolResultRequest(request, reply, generations)
   })
 }
@@ -176,17 +176,17 @@ async function handleStopChatReplyRequest(
  * @param request - Validated call identifiers and answer.
  * @param reply - HTTP response owner.
  * @param generations - Borrowed registry.
- * @returns Settlement after the 204 or the not-pending problem is sent.
  * @throws If the registry is closed because shutdown began; nothing is
  * answered.
- * @remarks Only the answer's content reaches the model; the reason of a
- * failed answer is logged at debug level.
+ * @remarks Sends the 204 or the not-pending problem before returning. Only
+ * the answer's content reaches the model; the reason of a failed answer is
+ * logged at debug level.
  */
-async function handleSendChatToolResultRequest(
+function handleSendChatToolResultRequest(
   request: FastifyRequest<SendChatToolResultApiRoute>,
   reply: FastifyReply<SendChatToolResultApiRoute>,
   generations: ReplyGenerationRegistry
-): Promise<void> {
+): void {
   const { callId } = request.params
   const generation = generations.findReplyGeneration(request.params)
   const isAnswered = generation?.resolveToolCall(callId, request.body) ?? false

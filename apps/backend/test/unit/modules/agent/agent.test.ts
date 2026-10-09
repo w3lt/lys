@@ -813,6 +813,38 @@ describe("Agent", () => {
       ])
     })
 
+    it("separates a later round's text from text an earlier round wrote before a round with only tool calls", async () => {
+      const run = await getAgentReplyOutcome({
+        openReplyStream: createRoundStreams(
+          [
+            { type: "text", content: "Let me look." },
+            {
+              type: "tool-calls",
+              toolCalls: [
+                { toolName: "read_text_file", argumentText: '{"path":"/a"}' }
+              ]
+            }
+          ],
+          [
+            {
+              type: "tool-calls",
+              toolCalls: [
+                { toolName: "read_text_file", argumentText: '{"path":"/b"}' }
+              ]
+            }
+          ],
+          [
+            { type: "text", content: "Found it." },
+            { type: "finish", finishReason: "stop" }
+          ]
+        ),
+        tools: [READ_TEXT_FILE_TOOL],
+        sendToolCall: async () => ({ status: "succeeded", content: "Buy milk" })
+      })
+
+      expect(run.persistedDeltas).toEqual(["Let me look.", "\n\nFound it."])
+    })
+
     it("starts a later round's text without a separator when no earlier round wrote text", async () => {
       const run = await getAgentReplyOutcome({
         openReplyStream: createRoundStreams(

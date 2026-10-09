@@ -230,7 +230,7 @@ export default class Agent {
       turn.userMessageContent
     )
     let hasStoredText = false
-    let round = await this.#streamReplyRound(turn, {
+    let round = await this.#createReplyRound(turn, {
       messages,
       tools: offeredTools,
       textPrefix: ""
@@ -245,7 +245,7 @@ export default class Agent {
       messages = [...messages, ...roundMessages]
       hasStoredText ||= round.text !== ""
       const textPrefix = hasStoredText ? ROUND_TEXT_SEPARATOR : ""
-      round = await this.#streamReplyRound(turn, {
+      round = await this.#createReplyRound(turn, {
         messages,
         tools: offeredTools,
         textPrefix
@@ -255,7 +255,8 @@ export default class Agent {
   }
 
   /**
-   * Streams one model round, storing every text before sending it.
+   * Creates one model round: streams it, storing every text before sending
+   * it.
    *
    * @param turn - Turn context, reply storage, and cancellation.
    * @param input - The round's context, offered tools, and text prefix.
@@ -267,7 +268,7 @@ export default class Agent {
    * follower that reads a snapshot in its own step sees either both or
    * neither. Leaving the stream early releases the model request.
    */
-  async #streamReplyRound(
+  async #createReplyRound(
     turn: AgentTurn,
     input: ReplyRoundInput
   ): Promise<ReplyRound> {

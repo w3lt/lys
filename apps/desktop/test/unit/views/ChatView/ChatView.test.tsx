@@ -9,7 +9,7 @@ import {
   startBackendFake,
   type BackendEventStream,
   type BackendRoutes
-} from "../support/backendFake"
+} from "../../support/backendFake"
 import {
   buildCompletedAssistantMessage,
   buildConversation,
@@ -20,12 +20,12 @@ import {
   buildUserMessage,
   createFixtureUuidV7,
   FIXTURE_CONVERSATION_ID
-} from "../support/conversationFixtures"
-import { arrangeRuntime, READY_RUNTIME } from "../support/runtimeFixtures"
+} from "../../support/conversationFixtures"
+import { arrangeRuntime, READY_RUNTIME } from "../../support/runtimeFixtures"
 import {
   createControlledPromise,
   waitForMicrotasks
-} from "../support/settlement"
+} from "../../support/settlement"
 
 /** Route key of the chat request. */
 const CHAT_ROUTE = "POST /api/v1/chat"

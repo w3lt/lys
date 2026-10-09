@@ -29,6 +29,7 @@ import { buildLlmInfo } from "../support/modelFixtures"
 import { startNativeHostFake } from "../support/nativeHostFake"
 import {
   arrangeRuntime,
+  buildUnreachableRuntime,
   READY_RUNTIME,
   type RuntimeArrangement
 } from "../support/runtimeFixtures"
@@ -448,10 +449,9 @@ describe("Composer", () => {
         get_backend_status: () => ({ running: false }),
         start_backend: () => start.promise
       })
-      const { useLysStore, Composer } = await loadFreshComposer({
-        ...READY_RUNTIME,
-        backendStatus: "stopped"
-      })
+      const { useLysStore, Composer } = await loadFreshComposer(
+        buildUnreachableRuntime("stopped")
+      )
       const { backendAddress } = useLysStore.getState().settings.runtime
       const user = userEvent.setup()
       render(<Composer messageFieldRef={createRef()} />)
@@ -490,7 +490,7 @@ describe("Composer", () => {
     it.each([
       [
         "LM Studio is not reachable",
-        { ...READY_RUNTIME, lmStudioStatus: "unreachable" },
+        buildUnreachableRuntime("running", "unreachable"),
         "Check LM Studio",
         "runtime"
       ],
@@ -766,10 +766,9 @@ describe("Composer", () => {
     })
 
     it("ignores files dropped while generation is unavailable", async () => {
-      const { Composer } = await loadFreshComposer({
-        ...READY_RUNTIME,
-        backendStatus: "stopped"
-      })
+      const { Composer } = await loadFreshComposer(
+        buildUnreachableRuntime("stopped")
+      )
       render(<Composer messageFieldRef={createRef()} />)
       const field = getMessageField()
 

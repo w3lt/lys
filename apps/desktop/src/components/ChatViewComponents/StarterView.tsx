@@ -44,7 +44,8 @@ function StarterPortrait(): ReactElement {
  * @remarks The parent owns prompt
  * submission and request lifecycle; this component owns no state, effects, or
  * resources. Each prompt is rendered as an accessible button in source order,
- * and `onSendStarterPrompt` fires once per click with that button's prompt.
+ * inside a group named Starter prompts, and `onSendStarterPrompt` fires once
+ * per click with that button's prompt.
  * The framed portrait and the gem divider are decorative and hidden from
  * assistive technology. The view plays one entrance sequence when it mounts;
  * a reduced-motion preference removes it.
@@ -63,7 +64,11 @@ export default function StarterView({
         One model, one conversation at a time. The transcripts stay on this
         machine.
       </p>
-      <div className="chat-view__starters" aria-label="Starter prompts">
+      <div
+        aria-label="Starter prompts"
+        className="chat-view__starters"
+        role="group"
+      >
         {STARTER_PROMPTS.map((prompt) => (
           <Button
             className="chat-view__starter lys-wingline"

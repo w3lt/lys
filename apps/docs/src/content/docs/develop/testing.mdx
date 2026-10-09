@@ -52,14 +52,16 @@ contracts, schemas, or behavior that crosses package boundaries.
   `pnpm --filter @lys/backend test`, or rerun it on every change with
   `pnpm --filter @lys/backend run test:watch`. It needs no LM Studio server,
   network access, or `LYS_HOME`.
-- `apps/desktop/test/unit` contains a Vitest unit suite for the renderer's
-  `src/lib` and `src/app` code: the HTTP and Tauri API wrappers, the stores, and
-  their pure logic. Run it once with `pnpm --filter @lys/desktop test`, or rerun
+- `apps/desktop/test/unit` contains a Vitest unit suite for the renderer: the
+  HTTP and Tauri API wrappers, the stores and their pure logic, and the
+  components, renderer hooks, and views, rendered with Testing Library in
+  jsdom. Run it once with `pnpm --filter @lys/desktop test`, or rerun
   it on every change with `pnpm --filter @lys/desktop run test:watch`.
   `pnpm --filter @lys/desktop exec tsc` typechecks the renderer and the suite.
   The suite needs no LM Studio server, running backend, Tauri runtime, or
   personal settings: it substitutes the backend behind `fetch` and the native
-  host behind Tauri's `mockIPC`. Its
+  host behind Tauri's `mockIPC`. Known defects stay in the suite as expected
+  failures that name the defect and fail the run once it is fixed. Its
   [coverage inventory](https://github.com/w3lt/lys/blob/main/apps/desktop/test/unit/COVERAGE.md)
   lists what each test file covers and what it cannot prove.
 - The `Desktop unit tests` workflow runs that typecheck and the desktop suite on
@@ -75,9 +77,9 @@ contracts, schemas, or behavior that crosses package boundaries.
 Backend coverage is unit-level only: the backend integration and end-to-end
 suites are tracked in [issue #44](https://github.com/w3lt/lys/issues/44) and
 [issue #45](https://github.com/w3lt/lys/issues/45), and no CI workflow runs the
-backend unit suite yet. The desktop unit suite does not yet cover components,
-renderer hooks, or views; they are the next part of
-[issue #132](https://github.com/w3lt/lys/issues/132). Native Tauri tests and
+backend unit suite yet. The desktop unit suite runs in jsdom, so layout,
+scrolling, real pointer and drag behavior, and assistive-technology output
+belong to the end-to-end suite. Native Tauri tests and
 end-to-end desktop tests are tracked in
 [issue #133](https://github.com/w3lt/lys/issues/133) and
 [issue #134](https://github.com/w3lt/lys/issues/134). Shared-package automated

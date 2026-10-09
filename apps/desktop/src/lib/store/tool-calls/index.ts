@@ -32,7 +32,7 @@ export type { ClientToolInput } from "./client-tools"
  * Where one held call's answer stands.
  *
  * @remarks Only `awaiting-person` and `send-failed` need the person, so only
- * they are shown.
+ * they are shown. `answered` is final.
  */
 export type HeldToolCallAnswer =
   | {
@@ -61,10 +61,18 @@ export type HeldToolCallAnswer =
       /** User-presentable reason. */
       readonly error: string
     }
+  | {
+      /**
+       * The backend took the answer, or no longer waits for it. The call stays
+       * held so a snapshot built before the answer arrived does not bring it
+       * back.
+       */
+      readonly status: "answered"
+    }
 
 /**
- * One tool call the desktop holds until the backend no longer waits for its
- * answer.
+ * One tool call of a followed reply, held until the store stops following
+ * that reply.
  */
 export type HeldToolCall = {
   /** Call, reply, and conversation the answer is sent to. */
@@ -93,7 +101,7 @@ type ToolCallState = {
 /** Actions of the tool-call store. */
 type ToolCallActions = {
   /**
-   * Starts answering the tool calls of one reply.
+   * Starts following one reply to answer its tool calls.
    *
    * @param target - Reply that is generating, and its conversation.
    * @remarks The store follows the reply on its own connection, independent
@@ -102,16 +110,17 @@ type ToolCallActions = {
    * order. When the following ends, every call of the reply still held is
    * dropped.
    */
-  watchReplyToolCalls: (target: ChatReplyPathParams) => void
+  startReplyToolCallFollow: (target: ChatReplyPathParams) => void
   /**
-   * Allows one call that waits for the person, runs it, and sends its answer.
+   * Resolves one call that waits for the person: allows it, runs it, and
+   * sends its answer.
    *
    * @param callId - Identifier of a held call.
    * @returns A promise that settles once the answer was sent or failed to
    * send; it never rejects. A call that does not wait for the person is
    * ignored, so a repeated press runs the tool once.
    */
-  allowToolCall: (callId: string) => Promise<void>
+  resolveToolCall: (callId: string) => Promise<void>
   /**
    * Rejects one call that waits for the person and sends the rejection.
    *
@@ -130,7 +139,7 @@ type ToolCallActions = {
    * it never rejects. The tool does not run again. A call whose answer did
    * not fail is ignored.
    */
-  retryToolResult: (callId: string) => Promise<void>
+  sendUnsentToolResult: (callId: string) => Promise<void>
 }
 
 /** Complete contract of the tool-call store. */
@@ -159,8 +168,8 @@ type ToolCallStoreDependencies = {
     target: ChatToolResultPathParams,
     result: ChatToolResult
   ) => Promise<SendChatToolResultResult>
-  /** Reads the tool list and the person's choices; never rejects. */
-  readonly readToolCallSettings: () => Promise<ToolCallSettings>
+  /** Gets the tool list and the person's choices; never rejects. */
+  readonly getToolCallSettings: () => Promise<ToolCallSettings>
   /** Runs one validated call; never rejects. */
   readonly runClientTool: (input: ClientToolInput) => Promise<ChatToolResult>
 }
@@ -184,6 +193,11 @@ const REPLY_STREAM_ORDER_MESSAGE = "Reply stream did not start with a snapshot."
 /** Shared running answer; it carries no per-call data. */
 const RUNNING_ANSWER: HeldToolCallAnswer = Object.freeze({ status: "running" })
 
+/** Shared answered state; it carries no per-call data. */
+const ANSWERED_ANSWER: HeldToolCallAnswer = Object.freeze({
+  status: "answered"
+})
+
 /** Empty held-call list of a store that holds no call. */
 const NO_HELD_CALLS: readonly HeldToolCall[] = Object.freeze([])
 
@@ -201,7 +215,7 @@ function isShownToolCall(heldCall: HeldToolCall): heldCall is ShownToolCall {
 }
 
 /**
- * Selects the first call of a conversation that needs the person.
+ * Finds the first call of a conversation that needs the person.
  *
  * @param state - Tool-call store state.
  * @param conversationId - Conversation the chat view shows, if any.
@@ -209,7 +223,7 @@ function isShownToolCall(heldCall: HeldToolCall): heldCall is ShownToolCall {
  * person or whose answer failed to send, or undefined. An unchanged state
  * returns the same call object.
  */
-export function selectShownToolCall(
+export function findShownToolCall(
   state: ToolCallState,
   conversationId: string | undefined
 ): ShownToolCall | undefined {
@@ -340,27 +354,14 @@ function createToolCallStore(
     }
 
     /**
-     * Removes one held call.
+     * Stops the following of one reply and drops its held calls, answered or
+     * not.
      *
-     * @param callId - Identifier of the call; nothing changes when it is no
-     * longer held.
-     */
-    function removeHeldToolCall(callId: string): void {
-      set((state) => ({
-        heldCalls: Object.freeze(
-          state.heldCalls.filter((heldCall) => heldCall.call.id !== callId)
-        )
-      }))
-    }
-
-    /**
-     * Ends the following of one reply and drops its held calls.
-     *
-     * @param assistantMessageId - Reply whose following ends.
-     * @param abortController - Controller of the follow that ends; a newer
+     * @param assistantMessageId - Reply whose following stops.
+     * @param abortController - Controller of the follow that stops; a newer
      * follow of the same reply is left alone.
      */
-    function endReplyToolCalls(
+    function stopReplyToolCallFollow(
       assistantMessageId: string,
       abortController: AbortController
     ): void {
@@ -383,14 +384,15 @@ function createToolCallStore(
     }
 
     /**
-     * Sends one held call's answer and releases the call once the backend no
-     * longer waits for it.
+     * Sends one held call's answer and marks the call answered once the
+     * backend no longer waits for it.
      *
      * @param callId - Identifier of the call.
      * @param result - Answer to send.
      * @returns A promise that settles after the send; it never rejects. An
-     * accepted or not-pending answer releases the call; a failed send keeps
-     * it as `send-failed` with the answer, unless the reply ended meanwhile.
+     * accepted or not-pending answer marks the call `answered`; a failed send
+     * keeps it as `send-failed` with the answer, unless the reply's follow
+     * stopped or the call was answered meanwhile.
      */
     async function sendHeldToolResult(
       callId: string,
@@ -406,9 +408,9 @@ function createToolCallStore(
       updateHeldToolCallAnswer(callId, sending)
       try {
         await dependencies.sendChatToolResult(heldCall.target, result)
-        removeHeldToolCall(callId)
+        updateHeldToolCallAnswer(callId, ANSWERED_ANSWER)
       } catch (error) {
-        if (findHeldToolCall(callId) === undefined) return
+        if (findHeldToolCall(callId)?.answer.status !== "sending") return
         const sendFailure = Object.freeze({
           status: "send-failed",
           result,
@@ -424,8 +426,9 @@ function createToolCallStore(
      * @param callId - Identifier of the call.
      * @param input - Validated input to run with.
      * @returns A promise that settles after the answer was sent or failed to
-     * send; it never rejects. A call no longer held when the tool finishes,
-     * because its reply ended, is not answered.
+     * send; it never rejects. A call that is no longer running when the tool
+     * finishes is not answered: its reply's follow stopped, or an earlier
+     * answer to the same call reached the backend.
      */
     async function runHeldToolCall(
       callId: string,
@@ -433,7 +436,7 @@ function createToolCallStore(
     ): Promise<void> {
       updateHeldToolCallAnswer(callId, RUNNING_ANSWER)
       const result = await dependencies.runClientTool(input)
-      if (findHeldToolCall(callId) === undefined) return
+      if (findHeldToolCall(callId)?.answer.status !== "running") return
 
       await sendHeldToolResult(callId, result)
     }
@@ -444,19 +447,16 @@ function createToolCallStore(
      *
      * @param target - Reply that made the call, and its conversation.
      * @param call - Call the backend sent.
-     * @returns A promise that settles once the call is held; running and
-     * sending continue on their own and never reject. A call already held,
-     * or one whose reply stopped being followed while the settings were
-     * read, is ignored.
+     * @param settings - Tool list and choices read when the call arrived.
+     * @remarks A call already held, including an answered one, is ignored.
+     * Running and sending continue on their own and never reject.
      */
-    async function takeToolCall(
+    function startToolCallAnswer(
       target: ChatReplyPathParams,
-      call: ChatToolCall
-    ): Promise<void> {
+      call: ChatToolCall,
+      settings: ToolCallSettings
+    ): void {
       if (findHeldToolCall(call.id) !== undefined) return
-      const settings = await dependencies.readToolCallSettings()
-      if (findHeldToolCall(call.id) !== undefined) return
-      if (!replyFollows.has(target.assistantMessageId)) return
 
       const resultTarget = buildToolResultTarget(target, call.id)
       const gate = calculateToolCallGate(call, settings)
@@ -495,14 +495,41 @@ function createToolCallStore(
     }
 
     /**
-     * Applies one event of a followed reply.
+     * Holds the calls that arrived for a followed reply and starts answering
+     * each one as the Tools pane decides.
+     *
+     * @param target - Reply that made the calls, and its conversation.
+     * @param calls - Calls in arrival order: one live call, or the calls a
+     * snapshot lists as waiting.
+     * @returns A promise that settles once the calls are held. Calls already
+     * held, including answered ones, are ignored; when the reply stopped
+     * being followed while the settings were read, every call is.
+     */
+    async function handleToolCallArrival(
+      target: ChatReplyPathParams,
+      calls: readonly ChatToolCall[]
+    ): Promise<void> {
+      const arrivedCalls = calls.filter(
+        (call) => findHeldToolCall(call.id) === undefined
+      )
+      if (arrivedCalls.length === 0) return
+      const settings = await dependencies.getToolCallSettings()
+      if (!replyFollows.has(target.assistantMessageId)) return
+
+      for (const call of arrivedCalls) {
+        startToolCallAnswer(target, call, settings)
+      }
+    }
+
+    /**
+     * Handles one event of a followed reply.
      *
      * @param target - Followed reply and its conversation.
      * @param event - Validated reply event.
      * @returns Whether the reply still generates. A snapshot of a reply that
      * is not generating, and a final event, end it.
      */
-    async function applyReplyToolCallEvent(
+    async function handleFollowedReplyEvent(
       target: ChatReplyPathParams,
       event: ChatReplyEvent
     ): Promise<ReplyEventEffect> {
@@ -511,12 +538,10 @@ function createToolCallStore(
           if (event.assistantMessage.status !== "streaming") {
             return "reply-ended"
           }
-          for (const call of event.pendingToolCalls) {
-            await takeToolCall(target, call)
-          }
+          await handleToolCallArrival(target, event.pendingToolCalls)
           return "reply-continues"
         case "tool-call":
-          await takeToolCall(target, event.call)
+          await handleToolCallArrival(target, [event.call])
           return "reply-continues"
         case "title":
         case "delta":
@@ -548,7 +573,7 @@ function createToolCallStore(
         if ((event.type === "reply-snapshot") === hasReadSnapshot) {
           throw new Error(REPLY_STREAM_ORDER_MESSAGE)
         }
-        const effect = await applyReplyToolCallEvent(target, event)
+        const effect = await handleFollowedReplyEvent(target, event)
         if (effect === "reply-ended") return "reply-ended"
         if (hasReadSnapshot) hasLiveEvent = true
         hasReadSnapshot = true
@@ -588,18 +613,19 @@ function createToolCallStore(
         }
       } catch {
         // The chat view follows the same reply and reports stream failures;
-        // here a failed follow only ends the watch.
+        // here a failed follow only stops this follow.
       } finally {
-        endReplyToolCalls(target.assistantMessageId, abortController)
+        stopReplyToolCallFollow(target.assistantMessageId, abortController)
       }
     }
 
     /**
-     * Implements {@link ToolCallActions.watchReplyToolCalls} for this store.
+     * Implements {@link ToolCallActions.startReplyToolCallFollow} for this
+     * store.
      *
      * @param target - Reply that is generating, and its conversation.
      */
-    function watchReplyToolCalls(target: ChatReplyPathParams): void {
+    function startReplyToolCallFollow(target: ChatReplyPathParams): void {
       if (replyFollows.has(target.assistantMessageId)) return
 
       const abortController = new AbortController()
@@ -608,17 +634,18 @@ function createToolCallStore(
         target.assistantMessageId,
         abortController
       )
-      // Following never rejects and ends its own watch.
+      // Following never rejects and stops its own follow.
       void followReplyToolCalls(target, abortController)
     }
 
     /**
-     * Implements {@link ToolCallActions.allowToolCall} for this store.
+     * Implements {@link ToolCallActions.resolveToolCall} for this store.
      *
      * @param callId - Identifier of a held call.
-     * @returns The settlement defined by {@link ToolCallActions.allowToolCall}.
+     * @returns The settlement defined by
+     * {@link ToolCallActions.resolveToolCall}.
      */
-    function allowToolCall(callId: string): Promise<void> {
+    function resolveToolCall(callId: string): Promise<void> {
       const answer = findHeldToolCall(callId)?.answer
       if (answer?.status !== "awaiting-person") return Promise.resolve()
 
@@ -641,12 +668,13 @@ function createToolCallStore(
     }
 
     /**
-     * Implements {@link ToolCallActions.retryToolResult} for this store.
+     * Implements {@link ToolCallActions.sendUnsentToolResult} for this store.
      *
      * @param callId - Identifier of a held call.
-     * @returns The settlement defined by {@link ToolCallActions.retryToolResult}.
+     * @returns The settlement defined by
+     * {@link ToolCallActions.sendUnsentToolResult}.
      */
-    function retryToolResult(callId: string): Promise<void> {
+    function sendUnsentToolResult(callId: string): Promise<void> {
       const answer = findHeldToolCall(callId)?.answer
       if (answer?.status !== "send-failed") return Promise.resolve()
 
@@ -655,10 +683,10 @@ function createToolCallStore(
 
     return {
       heldCalls: NO_HELD_CALLS,
-      watchReplyToolCalls,
-      allowToolCall,
+      startReplyToolCallFollow,
+      resolveToolCall,
       rejectToolCall,
-      retryToolResult
+      sendUnsentToolResult
     }
   }
 
@@ -672,13 +700,13 @@ const CLIENT_TOOL_COMMANDS: ClientToolCommands = Object.freeze({
 })
 
 /**
- * Reads the tool settings a call is decided by, loading the tool list when
- * it has not been read.
+ * Gets the tool settings a call is decided by, loading the tool list when it
+ * has not been read.
  *
  * @returns A promise that resolves with the list and the person's choices;
  * it never rejects, because a failed list read is part of the list state.
  */
-async function readToolCallSettings(): Promise<ToolCallSettings> {
+async function getToolCallSettings(): Promise<ToolCallSettings> {
   if (useToolStore.getState().list.status !== "loaded") {
     await useToolStore.getState().loadTools()
   }
@@ -695,8 +723,11 @@ async function readToolCallSettings(): Promise<ToolCallSettings> {
  * call by the Tools pane's choices at the moment the call arrives, runs
  * client tools through Tauri, and sends their answers to the backend origin
  * the application store names when each request starts. It holds nothing
- * across app restarts; a reply still waiting is found again through its
- * snapshot when its conversation is opened.
+ * across a renderer reload: a call still waiting is found again through its
+ * reply's snapshot when the reply is followed again, as when its
+ * conversation is shown after the reload. Quitting the app stops the
+ * backend, which drops every waiting call; the reply is marked interrupted
+ * when the backend next starts.
  */
 export const useToolCallStore: UseBoundStore<StoreApi<ToolCallStore>> =
   createToolCallStore({
@@ -709,6 +740,6 @@ export const useToolCallStore: UseBoundStore<StoreApi<ToolCallStore>> =
       sendChatToolResult(target, result, {
         backendUrl: useLysStore.getState().backendUrl
       }),
-    readToolCallSettings,
+    getToolCallSettings,
     runClientTool: (input) => runClientTool(input, CLIENT_TOOL_COMMANDS)
   })

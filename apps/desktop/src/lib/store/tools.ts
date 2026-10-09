@@ -145,7 +145,7 @@ export type ChatToolOfferResult =
   | {
       /** The request offers these tools. */
       readonly status: "offered"
-      /** Switched-on tools and the calls the reply may make. */
+      /** Switched-on tools the request offers. */
       readonly offer: ChatToolOffer
     }
   | {

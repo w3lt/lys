@@ -699,11 +699,14 @@
 /*
  * A tool call waiting for the person sits above the field it is answered
  * from: Escape and Enter in the field reach it, and typing a reason there
- * turns Enter into a rejection.
+ * turns Enter into a rejection. The card is a fieldset, so the browser's
+ * fieldset margin, padding, and min-content width are reset; its sections
+ * stack as ordinary blocks.
  */
 .composer__approval {
-  display: flex;
-  flex-direction: column;
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
   overflow: hidden;
   border: 1px solid var(--app-border-interactive);
   border-radius: var(--radius-surface);

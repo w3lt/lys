@@ -1,4 +1,5 @@
 import type { ChatToolCall } from "@lys/protocol"
+import type { ToolAccess } from "@lys/share"
 import { useId, useState, type ReactElement } from "react"
 import { ChevronRight, Lock } from "lucide-react"
 
@@ -40,6 +41,32 @@ type ComposerToolCallRequestProps = {
   readonly onRejectToolCall: () => void
 }
 
+/** Properties accepted by {@link ComposerCalledTool}. */
+type ComposerCalledToolProps = {
+  /** Name of the called tool, as the backend sent it. */
+  readonly toolName: string
+  /** What the tool does with the machine, from its definition. */
+  readonly access: ToolAccess
+}
+
+/** Properties accepted by {@link ComposerToolCallArguments}. */
+type ComposerToolCallArgumentsProps = {
+  /** Identifier the arguments toggle points at through `aria-controls`. */
+  readonly listId: string
+  /** Arguments of the call, by name, as the backend sent them. */
+  readonly callArguments: ChatToolCall["arguments"]
+}
+
+/** Properties accepted by {@link ComposerToolCallFooter}. */
+type ComposerToolCallFooterProps = {
+  /** Whether the composer holds text, which turns Allow once into Allow anyway. */
+  readonly hasDraft: boolean
+  /** Requests that the parent allow the call once. */
+  readonly onAllowToolCall: () => void
+  /** Requests that the parent reject the call, with the draft as reason. */
+  readonly onRejectToolCall: () => void
+}
+
 /** Properties accepted by {@link ComposerToolResultFailure}. */
 type ComposerToolResultFailureProps = {
   /** Name of the tool whose answer failed to send. */
@@ -51,15 +78,121 @@ type ComposerToolResultFailureProps = {
 }
 
 /**
+ * Presents the called tool: its name, what it does with the machine, and
+ * that it runs inside Lys.
+ *
+ * @remarks The lock icon is decorative. The component owns no state.
+ * @param props - Tool name and access level.
+ * @returns The tool line of a waiting call's card.
+ */
+function ComposerCalledTool({
+  toolName,
+  access
+}: ComposerCalledToolProps): ReactElement {
+  return (
+    <div className="composer__approval-tool">
+      <Lock aria-hidden="true" />
+      <span className="composer__approval-tool-name">{toolName}</span>
+      <span className="composer__approval-badge" data-badge="access">
+        {formatToolAccessLabel(access)}
+      </span>
+      <span
+        className="composer__approval-badge"
+        data-badge="origin"
+        title="Runs inside the Lys app"
+      >
+        in Lys
+      </span>
+    </div>
+  )
+}
+
+/**
+ * Presents a waiting call's arguments as a name and value list.
+ *
+ * @remarks Values are shown as text in the order the call lists them. The
+ * component owns no state.
+ * @param props - List identifier and the call's arguments.
+ * @returns The argument list.
+ */
+function ComposerToolCallArguments({
+  listId,
+  callArguments
+}: ComposerToolCallArgumentsProps): ReactElement {
+  return (
+    <dl className="composer__approval-arguments" id={listId}>
+      {Object.entries(callArguments).map(([argumentName, argumentValue]) => (
+        <div key={argumentName}>
+          <dt>{argumentName}</dt>
+          <dd>{String(argumentValue)}</dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
+/**
+ * Presents the answers to a waiting call: a hint, Reject, and Allow.
+ *
+ * @remarks Without a draft, Allow once is the primary action and announces
+ * Enter as its shortcut; with one, Allow anyway allows the call and keeps
+ * the draft, and the hint says Enter sends the draft as a rejection. Reject
+ * announces Escape. The parent routes both keys from the composer field. The
+ * component owns no state.
+ * @param props - Whether a draft exists, and the answers.
+ * @returns The footer of a waiting call's card.
+ */
+function ComposerToolCallFooter({
+  hasDraft,
+  onAllowToolCall,
+  onRejectToolCall
+}: ComposerToolCallFooterProps): ReactElement {
+  return (
+    <div className="composer__approval-footer">
+      <span className="composer__approval-hint">
+        {hasDraft ? DRAFT_APPROVAL_HINT : EMPTY_DRAFT_APPROVAL_HINT}
+      </span>
+      <Button
+        aria-keyshortcuts="Escape"
+        onClick={onRejectToolCall}
+        size="sm"
+        type="button"
+        variant="outline"
+      >
+        Reject <kbd aria-hidden="true">esc</kbd>
+      </Button>
+      {hasDraft ? (
+        <Button
+          onClick={onAllowToolCall}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          Allow anyway
+        </Button>
+      ) : (
+        <Button
+          aria-keyshortcuts="Enter"
+          onClick={onAllowToolCall}
+          size="sm"
+          type="button"
+        >
+          Allow once <kbd aria-hidden="true">↵</kbd>
+        </Button>
+      )}
+    </div>
+  )
+}
+
+/**
  * Presents one call that waits for the person: what it will do, its
  * arguments on request, and the Reject and Allow buttons.
  *
  * @remarks The component owns only whether the arguments are shown, which
  * starts hidden; the parent keys it by call, so each call starts hidden. The
  * parent owns the call, the draft, and every answer, including Esc and Enter
- * in the composer field. Reject uses the draft as the reason. Without a
- * draft, Allow once is the primary action; with one, Allow anyway allows the
- * call and keeps the draft. The arguments toggle exposes its state through
+ * in the composer field. Reject uses the draft as the reason. The card is a
+ * named group, and the arguments toggle exposes its state through
  * `aria-expanded`.
  * @param props - Waiting call, whether a draft exists, and the answers.
  * @returns The waiting call's card.
@@ -73,18 +206,17 @@ function ComposerToolCallRequest({
 }: ComposerToolCallRequestProps): ReactElement {
   const [isArgumentsExpanded, setIsArgumentsExpanded] = useState(false)
   const argumentsId = useId()
-  const toolArguments = Object.entries(call.arguments)
+  const hasArguments = Object.keys(call.arguments).length > 0
 
   return (
-    <div
+    <fieldset
       aria-label="Tool call waiting for your answer"
       className="composer__approval"
-      role="group"
     >
       <div className="composer__approval-header">
         <span aria-hidden="true" className="composer__approval-dot" />
         <span className="composer__approval-label">She’s paused for you</span>
-        {toolArguments.length > 0 ? (
+        {hasArguments ? (
           <button
             aria-controls={isArgumentsExpanded ? argumentsId : undefined}
             aria-expanded={isArgumentsExpanded}
@@ -98,70 +230,28 @@ function ComposerToolCallRequest({
         ) : null}
       </div>
 
-      <div className="composer__approval-tool">
-        <Lock aria-hidden="true" />
-        <span className="composer__approval-tool-name">{call.toolName}</span>
-        <span className="composer__approval-badge" data-badge="access">
-          {formatToolAccessLabel(answer.definition.access)}
-        </span>
-        <span
-          className="composer__approval-badge"
-          data-badge="origin"
-          title="Runs inside the Lys app"
-        >
-          in Lys
-        </span>
-      </div>
+      <ComposerCalledTool
+        access={answer.definition.access}
+        toolName={call.toolName}
+      />
 
       <p className="composer__approval-summary">
         {formatToolCallSummary(answer.input)}
       </p>
 
       {isArgumentsExpanded ? (
-        <dl className="composer__approval-arguments" id={argumentsId}>
-          {toolArguments.map(([argumentName, argumentValue]) => (
-            <div key={argumentName}>
-              <dt>{argumentName}</dt>
-              <dd>{String(argumentValue)}</dd>
-            </div>
-          ))}
-        </dl>
+        <ComposerToolCallArguments
+          callArguments={call.arguments}
+          listId={argumentsId}
+        />
       ) : null}
 
-      <div className="composer__approval-footer">
-        <span className="composer__approval-hint">
-          {hasDraft ? DRAFT_APPROVAL_HINT : EMPTY_DRAFT_APPROVAL_HINT}
-        </span>
-        <Button
-          aria-keyshortcuts="Escape"
-          onClick={onRejectToolCall}
-          size="sm"
-          type="button"
-          variant="outline"
-        >
-          Reject <kbd aria-hidden="true">esc</kbd>
-        </Button>
-        {hasDraft ? (
-          <Button
-            onClick={onAllowToolCall}
-            size="sm"
-            type="button"
-            variant="outline"
-          >
-            Allow anyway
-          </Button>
-        ) : (
-          <Button
-            aria-keyshortcuts="Enter"
-            onClick={onAllowToolCall}
-            size="sm"
-            type="button"
-          >
-            Allow once <kbd aria-hidden="true">↵</kbd>
-          </Button>
-        )}
-      </div>
-    </div>
+      <ComposerToolCallFooter
+        hasDraft={hasDraft}
+        onAllowToolCall={onAllowToolCall}
+        onRejectToolCall={onRejectToolCall}
+      />
+    </fieldset>
   )
 }
 
@@ -169,10 +259,10 @@ function ComposerToolCallRequest({
  * Presents one call whose answer failed to send, with the reason and Try
  * again.
  *
- * @remarks The reason is announced as an alert because the reply waits until
- * the answer is sent. Try again sends the same answer without running the
- * tool again; the parent owns the retry and its outcome. The component owns
- * no state.
+ * @remarks The card is a named group. The reason is announced as an alert
+ * because the reply waits until the answer is sent. Try again sends the same
+ * answer without running the tool again; the parent owns the retry and its
+ * outcome. The component owns no state.
  * @param props - Tool, reason, and the retry action.
  * @returns The failed answer's card.
  */
@@ -182,11 +272,10 @@ function ComposerToolResultFailure({
   onRetryToolResult
 }: ComposerToolResultFailureProps): ReactElement {
   return (
-    <div
+    <fieldset
       aria-label="Tool answer not sent"
       className="composer__approval"
       data-failed=""
-      role="group"
     >
       <div className="composer__approval-header">
         <span aria-hidden="true" className="composer__approval-dot" />
@@ -206,7 +295,7 @@ function ComposerToolResultFailure({
           Try again
         </Button>
       </div>
-    </div>
+    </fieldset>
   )
 }
 

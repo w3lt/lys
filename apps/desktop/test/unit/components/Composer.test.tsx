@@ -9,13 +9,7 @@ import {
 } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
-import type { BackendServerStatus } from "@/lib/store"
 import { createStoredChatViewConversation } from "@/lib/store/chat-view/conversation-transitions"
-import type { LmStudioStatus } from "@/lib/store/lm-studio-status"
-import {
-  buildModelRuntime,
-  type ModelInventoryState
-} from "@/lib/store/model-runtime"
 import {
   buildJsonResponse,
   startBackendEventStream,
@@ -33,6 +27,11 @@ import {
 } from "../support/conversationFixtures"
 import { buildLlmInfo } from "../support/modelFixtures"
 import { startNativeHostFake } from "../support/nativeHostFake"
+import {
+  arrangeRuntime,
+  READY_RUNTIME,
+  type RuntimeArrangement
+} from "../support/runtimeFixtures"
 import {
   createControlledPromise,
   waitForMicrotasks
@@ -58,25 +57,6 @@ const NEW_TURN_EVENT = Object.freeze({
   assistantMessage: REPLY
 })
 
-/** Runtime facts a case arranges in the application store. */
-type RuntimeArrangement = Readonly<{
-  backendStatus: BackendServerStatus
-  lmStudioStatus: LmStudioStatus
-  modelInventory: ModelInventoryState
-  defaultModel: string | null
-}>
-
-/** Backend running, LM Studio connected, one model loaded and chosen. */
-const READY: RuntimeArrangement = {
-  backendStatus: "running",
-  lmStudioStatus: "connected",
-  modelInventory: {
-    status: "ready",
-    models: [buildLlmInfo("qwen3-8b", { loaded: true })]
-  },
-  defaultModel: "qwen3-8b"
-}
-
 /**
  * Loads fresh application, chat-view, and history stores with the composer
  * that reads them, and arranges the runtime the case needs.
@@ -85,28 +65,14 @@ const READY: RuntimeArrangement = {
  * derived from them as the application store derives it.
  * @returns The stores and the composer component.
  */
-async function loadFreshComposer(runtime: RuntimeArrangement = READY) {
+async function loadFreshComposer(runtime: RuntimeArrangement = READY_RUNTIME) {
   vi.resetModules()
   const { useLysStore } = await import("@/lib/store")
   const { useChatViewStore } = await import("@/lib/store/chat-view")
   const { useConversationHistoryStore } =
     await import("@/lib/store/conversation-history")
   const { Composer } = await import("@/components/Composer")
-  const { settings } = useLysStore.getState()
-  useLysStore.setState({
-    backendServerInfo: { status: runtime.backendStatus },
-    lmStudioStatus: runtime.lmStudioStatus,
-    modelInventory: runtime.modelInventory,
-    modelRuntime: buildModelRuntime(
-      runtime.modelInventory,
-      { status: "idle" },
-      runtime.defaultModel
-    ),
-    settings: {
-      ...settings,
-      runtime: { ...settings.runtime, defaultModel: runtime.defaultModel }
-    }
-  })
+  arrangeRuntime(useLysStore, runtime)
   return {
     useLysStore,
     useChatViewStore,
@@ -483,7 +449,7 @@ describe("Composer", () => {
         start_backend: () => start.promise
       })
       const { useLysStore, Composer } = await loadFreshComposer({
-        ...READY,
+        ...READY_RUNTIME,
         backendStatus: "stopped"
       })
       const { backendAddress } = useLysStore.getState().settings.runtime
@@ -524,14 +490,14 @@ describe("Composer", () => {
     it.each([
       [
         "LM Studio is not reachable",
-        { ...READY, lmStudioStatus: "unreachable" },
+        { ...READY_RUNTIME, lmStudioStatus: "unreachable" },
         "Check LM Studio",
         "runtime"
       ],
       [
         "no model is loaded",
         {
-          ...READY,
+          ...READY_RUNTIME,
           defaultModel: null,
           modelInventory: {
             status: "ready",
@@ -543,7 +509,7 @@ describe("Composer", () => {
       ],
       [
         "the model state is unknown",
-        { ...READY, modelInventory: { status: "failed" } },
+        { ...READY_RUNTIME, modelInventory: { status: "failed" } },
         "Check models",
         "model"
       ]
@@ -571,7 +537,7 @@ describe("Composer", () => {
   describe("model selection", () => {
     /** Two loaded models; the chosen default is the second. */
     const TWO_LOADED: RuntimeArrangement = {
-      ...READY,
+      ...READY_RUNTIME,
       modelInventory: {
         status: "ready",
         models: [
@@ -801,7 +767,7 @@ describe("Composer", () => {
 
     it("ignores files dropped while generation is unavailable", async () => {
       const { Composer } = await loadFreshComposer({
-        ...READY,
+        ...READY_RUNTIME,
         backendStatus: "stopped"
       })
       render(<Composer messageFieldRef={createRef()} />)

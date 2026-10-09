@@ -15,7 +15,6 @@ export {
 } from "./agent"
 export * from "./conversation"
 export {
-  buildToolArgumentFormat,
   buildToolFunctionFormat,
   hasDistinctToolNames,
   toolArgumentDefinitionSchema,
@@ -27,7 +26,6 @@ export {
   type ToolAccess,
   type ToolArgumentDefinition,
   type ToolArgumentDefinitionCandidate,
-  type ToolArgumentType,
   type ToolDefinition,
   type ToolDefinitionCandidate,
   type ToolGroup

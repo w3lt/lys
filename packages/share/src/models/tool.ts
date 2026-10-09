@@ -110,9 +110,6 @@ export type ToolArgumentDefinition = z.infer<
   typeof toolArgumentDefinitionSchema
 >
 
-/** Type of the value a model supplies for one argument. */
-export type ToolArgumentType = ToolArgumentDefinition["type"]
-
 /**
  * Validates the group a tool is listed under in Settings.
  *
@@ -257,7 +254,7 @@ export type OpenAIFunctionTool = {
  * @returns A frozen schema. An enum argument becomes a string limited to its
  * values; any other argument keeps its own type.
  */
-export function buildToolArgumentFormat(
+function buildToolArgumentFormat(
   argument: ToolArgumentDefinition
 ): JsonSchemaProperty {
   switch (argument.type) {

@@ -189,6 +189,38 @@ maintainer on 2026-10-09 for [PR #128](https://github.com/w3lt/lys/pull/128).
 - **Removal condition:** [#136](https://github.com/w3lt/lys/issues/136) adds
   the limit back.
 
+## Tool call wait exception
+
+Chat turns that offer tools have a second approved exception to
+[API-019](https://github.com/w3lt/lys/blob/main/docs/code_standards/API.md): a
+reply that waits for the client's answer to a tool call has no time limit, and
+only some events end the wait. The exception was approved by the maintainer on
+2026-10-09 for [PR #128](https://github.com/w3lt/lys/pull/128) only.
+
+- **Scope:** the wait for a client tool result in the reply's generation, its
+  pending calls, and the reply-events connections that follow it while it
+  waits. Every other API still follows API-019.
+- **Constraint:** on Ask me the person may take any time to allow or reject a
+  call, so the backend sets no timer on the wait. The answer, Stop, or backend
+  shutdown ends it. A newer turn in the conversation or deleting the
+  conversation does not end it yet: the delete route cannot reach the running
+  generations, and a waiting reply writes nothing that would notice either
+  change ([#137](https://github.com/w3lt/lys/issues/137)).
+- **Alternatives considered:** a timer that answers a call after a fixed time
+  was not taken, because it would answer for the person. Ending the wait on a
+  newer turn or a deletion was deferred to
+  [#137](https://github.com/w3lt/lys/issues/137) to keep this pull request's
+  scope.
+- **Risk and control:** a waiting reply keeps its generation, its pending
+  calls, and every reply-events connection that follows it until the wait
+  ends. After a deletion the desktop can no longer reach Stop, so the wait
+  lasts until the backend shuts down, which quitting the app does. After a
+  newer turn, the old reply keeps waiting, and a later round that only calls
+  tools can keep asking for calls until Stop.
+- **Removal condition:** [#137](https://github.com/w3lt/lys/issues/137) ends
+  the wait on a newer turn or a deletion. The missing timer stays by design:
+  the person's answer or Stop bounds the wait.
+
 ## API boundaries
 
 Canonical rules: [API-004, API-020, API-034](https://github.com/w3lt/lys/blob/main/docs/code_standards/API.md).

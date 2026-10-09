@@ -276,7 +276,8 @@ The tool-call store follows every reply the chat store starts or follows on
 its own reply-events connection, so tool calls keep moving while another
 conversation is shown. It takes each call from a `tool-call` event or from the
 snapshot's `pendingToolCalls`, once, and decides it by the Tools pane at that
-moment:
+moment. An answered call stays held while the store follows its reply, so a
+snapshot built before the answer arrived does not bring the call back:
 
 1. A tool the desktop does not list, or arguments that do not match its
    command, is answered as `runFailed`.
@@ -300,9 +301,10 @@ sent, the card says so and Try again sends the same answer without running the
 tool again. When the reply ends, by finishing, Stop, or backend shutdown, its
 waiting calls disappear. A newer turn in the conversation or deleting the
 conversation does not end a waiting reply yet
-([#137](https://github.com/w3lt/lys/issues/137)). A call still waiting when the
-app quits is found again through the reply's snapshot when its conversation is
-opened.
+([#137](https://github.com/w3lt/lys/issues/137)). After a renderer reload, a
+call still waiting is found again through the reply's snapshot when its
+conversation is shown. Quitting the app stops the backend, so its waiting calls
+are gone and the reply is marked interrupted when the backend next starts.
 
 ## Current limitations
 

@@ -89,6 +89,7 @@ describe("ChatService", () => {
             { role: "system", content: "You are Lys." },
             { role: "user", content: "Hello" }
           ],
+          tools: [],
           model: "qwen/qwen3-8b",
           generationOptions: { temperature: 0.4, replyCeiling: 256 }
         })
@@ -119,6 +120,7 @@ describe("ChatService", () => {
       await listChunks(
         await service.completeChatStream({
           messages: [{ role: "user", content: "Hello" }],
+          tools: [],
           model: "qwen/qwen3-8b",
           generationOptions: { temperature: 0 }
         })
@@ -128,6 +130,50 @@ describe("ChatService", () => {
         temperature: 0,
         max_completion_tokens: null
       })
+    })
+
+    it("sends the offered tools as function tools", async () => {
+      const { service, endpoint } = createServiceWithEndpoint(() =>
+        createChatCompletionStreamResponse([])
+      )
+      const readTextFile = {
+        type: "function",
+        function: {
+          name: "read_text_file",
+          description: "Read one text file.",
+          parameters: { type: "object", properties: {}, required: [] }
+        }
+      } as const
+
+      await listChunks(
+        await service.completeChatStream({
+          messages: [{ role: "user", content: "Hello" }],
+          tools: [readTextFile],
+          model: "qwen/qwen3-8b",
+          generationOptions: { temperature: 0.4 }
+        })
+      )
+
+      expect(endpoint.requests[0]?.body).toMatchObject({
+        tools: [readTextFile]
+      })
+    })
+
+    it("sends no tools field when no tools are offered", async () => {
+      const { service, endpoint } = createServiceWithEndpoint(() =>
+        createChatCompletionStreamResponse([])
+      )
+
+      await listChunks(
+        await service.completeChatStream({
+          messages: [{ role: "user", content: "Hello" }],
+          tools: [],
+          model: "qwen/qwen3-8b",
+          generationOptions: { temperature: 0.4 }
+        })
+      )
+
+      expect(endpoint.requests[0]?.body).not.toHaveProperty("tools")
     })
 
     it("yields the endpoint's chunks in stream order", async () => {
@@ -143,6 +189,7 @@ describe("ChatService", () => {
       const received = await listChunks(
         await service.completeChatStream({
           messages: [{ role: "user", content: "Hello" }],
+          tools: [],
           model: "qwen/qwen3-8b",
           generationOptions: { temperature: 0.4 }
         })
@@ -161,6 +208,7 @@ describe("ChatService", () => {
         await listChunks(
           await client.completeChatStream({
             messages: [{ role: "user", content: "Hello" }],
+            tools: [],
             model: "qwen/qwen3-8b",
             generationOptions: { temperature: 0.4 }
           })
@@ -184,6 +232,7 @@ describe("ChatService", () => {
       const failure = await service
         .completeChatStream({
           messages: [{ role: "user", content: "Hello" }],
+          tools: [],
           model: "qwen/qwen3-8b",
           signal: cancellation.signal,
           generationOptions: { temperature: 0.4 }
@@ -202,6 +251,7 @@ describe("ChatService", () => {
       await expect(
         service.completeChatStream({
           messages: [{ role: "user", content: "Hello" }],
+          tools: [],
           model: "qwen/qwen3-8b",
           signal: AbortSignal.abort(),
           generationOptions: { temperature: 0.4 }
@@ -218,6 +268,7 @@ describe("ChatService", () => {
       const failure = await service
         .completeChatStream({
           messages: [{ role: "user", content: "Hello" }],
+          tools: [],
           model: "qwen/qwen3-8b",
           generationOptions: { temperature: 0.4 }
         })

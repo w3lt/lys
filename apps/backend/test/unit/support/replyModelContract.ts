@@ -1,6 +1,7 @@
 import type { ConversationAssistantMessageFinishReason } from "@lys/share"
 import { describe, expect, it } from "vitest"
 import type {
+  ModelToolCall,
   ReplyModel,
   ReplyStreamEvent,
   ReplyStreamRequest
@@ -20,11 +21,19 @@ export type ReplyModelScript =
   | Readonly<{
       /**
        * The model writes `texts` in order, then ends the reply for a reason a
-       * reply cannot be stored with, such as a tool call.
+       * reply cannot be stored with, such as a content filter.
        */
       kind: "unsupported-finish"
       /** Nonempty texts of the reply, in order. */
       texts: readonly string[]
+    }>
+  | Readonly<{
+      /** The model writes `texts` in order, then ends the round by calling tools. */
+      kind: "tool-call-round"
+      /** Nonempty texts written before the calls, in order. */
+      texts: readonly string[]
+      /** Calls that end the round, in the model's order; at least one. */
+      toolCalls: readonly ModelToolCall[]
     }>
   | Readonly<{
       /**
@@ -96,6 +105,7 @@ function createReplyStreamRequest(
       { role: "system", content: "You are Lys." },
       { role: "user", content: "Hello" }
     ],
+    tools: [],
     model: "qwen/qwen3-8b",
     generationOptions: { temperature: 0.4, replyCeiling: 128 },
     abortSignal
@@ -177,6 +187,30 @@ export function registerReplyModelContractSuite(
         })
       }
     )
+
+    it("yields each text in order, then the tool calls that end the round", async () => {
+      const toolCalls = [
+        { toolName: "read_text_file", argumentText: '{"path":"/notes/a.md"}' },
+        { toolName: "read_text_file", argumentText: '{"path":"/notes/b.md"}' }
+      ]
+      const { replyModel } = createHarness({
+        kind: "tool-call-round",
+        texts: ["Let me look."],
+        toolCalls
+      })
+
+      const stream = await replyModel.openReplyStream(
+        createReplyStreamRequest(new AbortController().signal)
+      )
+
+      expect(await readReplyStream(stream)).toEqual({
+        events: [
+          { type: "text", content: "Let me look." },
+          { type: "tool-calls", toolCalls }
+        ],
+        failure: undefined
+      })
+    })
 
     it.each([
       ["the reply ends for an unsupported reason", "unsupported-finish"],

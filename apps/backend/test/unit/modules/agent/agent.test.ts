@@ -1,5 +1,9 @@
-import type { ChatGenerationEvent } from "@lys/protocol"
-import type { ConversationMessage } from "@lys/share"
+import type {
+  ChatGenerationEvent,
+  ChatToolCall,
+  ChatToolResult
+} from "@lys/protocol"
+import type { ConversationMessage, ToolDefinition } from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
 import Agent, {
   type AgentTurn,
@@ -14,6 +18,10 @@ import {
   createAssistantMessage,
   createUserMessage
 } from "../../support/conversationFixtures"
+import {
+  READ_TEXT_FILE_FORMAT,
+  READ_TEXT_FILE_TOOL
+} from "../../support/toolFixtures"
 
 /** Opens one reply stream for the agent under test. */
 type OpenReplyStream = ReplyModel["openReplyStream"]
@@ -55,6 +63,10 @@ type AgentReplyScenario = Readonly<{
   updateAssistantMessageContent?: AgentTurn["updateAssistantMessageContent"]
   /** Final-state storage result; stores every transition by default. */
   updateAssistantMessageState?: AgentTurn["updateAssistantMessageState"]
+  /** Offered tools; none by default. */
+  tools?: readonly ToolDefinition[]
+  /** Client answers; any call fails the case by default. */
+  sendToolCall?: AgentTurn["sendToolCall"]
 }>
 
 /**
@@ -70,6 +82,36 @@ function createEventStream(...events: ReplyStreamEvent[]) {
     })()
   )
 }
+
+/**
+ * Fails a tool call that the current case did not arrange.
+ *
+ * @throws Always.
+ */
+function handleUnexpectedToolCall(): never {
+  throw new Error("Unexpected tool call")
+}
+
+/**
+ * Creates a model that answers each request with the next round's events.
+ *
+ * @param rounds - Events of each round, in request order.
+ * @returns A stream opener recording its requests.
+ */
+function createRoundStreams(...rounds: (readonly ReplyStreamEvent[])[]) {
+  const openReplyStream = vi.fn<OpenReplyStream>()
+  for (const events of rounds)
+    openReplyStream.mockImplementationOnce(async () =>
+      (async function* () {
+        yield* events
+      })()
+    )
+  return openReplyStream
+}
+
+/** Matches a UUIDv7 the agent gave a call. */
+const UUID_V7_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 
 /**
  * Has one agent answer one turn to settlement and records the effects.
@@ -97,6 +139,8 @@ async function getAgentReplyOutcome(scenario: AgentReplyScenario) {
     .createReply({
       ...TURN_REQUEST,
       history: scenario.history ?? [],
+      tools: scenario.tools ?? [],
+      sendToolCall: scenario.sendToolCall ?? handleUnexpectedToolCall,
       abortSignal: scenario.abortSignal ?? new AbortController().signal,
       sendEvent: (event) => {
         events.push(event)
@@ -167,9 +211,10 @@ describe("Agent", () => {
       messages: [
         { role: "system", content: "You are Lys." },
         { role: "user", content: "Earlier question" },
-        { role: "assistant", content: "Earlier answer" },
+        { role: "assistant", content: "Earlier answer", toolCalls: [] },
         { role: "user", content: "Hello" }
       ],
+      tools: [],
       model: TURN_REQUEST.model,
       generationOptions: TURN_REQUEST.generationOptions,
       abortSignal
@@ -432,6 +477,21 @@ describe("Agent", () => {
     ])
   })
 
+  it("fails, as before tools existed, when the model calls a tool although none was offered", async () => {
+    const run = await getAgentReplyOutcome({
+      openReplyStream: createEventStream({
+        type: "tool-calls",
+        toolCalls: [{ toolName: "read_text_file", argumentText: "{}" }]
+      })
+    })
+
+    expect(run.persistedStates).toEqual([{ status: "failed" }])
+    expect(run.events).toEqual([CHAT_FAILURE_EVENT])
+    expect(run.reportedFailures).toEqual([
+      new Error("The model called a tool although none was offered")
+    ])
+  })
+
   it("fails without sending text that cannot be stored", async () => {
     const run = await getAgentReplyOutcome({
       openReplyStream: createEventStream({ type: "text", content: "Hi" }),
@@ -541,6 +601,8 @@ describe("Agent", () => {
     ): AgentTurn => ({
       ...TURN_REQUEST,
       history: [],
+      tools: [],
+      sendToolCall: handleUnexpectedToolCall,
       userMessageContent,
       abortSignal: new AbortController().signal,
       updateAssistantMessageContent: () => true,
@@ -566,5 +628,272 @@ describe("Agent", () => {
       { type: "delta", content: "Re: Second" },
       { type: "done", finishReason: "stop" }
     ])
+  })
+  describe("tool calls", () => {
+    it("offers the turn's tools, sends each checked call in the model's order, and asks the model again with the results", async () => {
+      const sentCalls: ChatToolCall[] = []
+      const openReplyStream = createRoundStreams(
+        [
+          {
+            type: "tool-calls",
+            toolCalls: [
+              { toolName: "read_text_file", argumentText: '{"path":"/a"}' },
+              { toolName: "read_text_file", argumentText: '{"path":"/b"}' }
+            ]
+          }
+        ],
+        [
+          { type: "text", content: "Both read." },
+          { type: "finish", finishReason: "stop" }
+        ]
+      )
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream,
+        tools: [READ_TEXT_FILE_TOOL],
+        sendToolCall: async (toolCall) => {
+          sentCalls.push(toolCall)
+          return {
+            status: "succeeded",
+            content: `text of ${String(toolCall.arguments.path)}`
+          }
+        }
+      })
+
+      expect(sentCalls).toEqual([
+        {
+          id: expect.stringMatching(UUID_V7_PATTERN),
+          toolName: "read_text_file",
+          arguments: { path: "/a" }
+        },
+        {
+          id: expect.stringMatching(UUID_V7_PATTERN),
+          toolName: "read_text_file",
+          arguments: { path: "/b" }
+        }
+      ])
+      const [firstCall, secondCall] = sentCalls
+      expect(openReplyStream.mock.calls[0]?.[0].tools).toEqual([
+        READ_TEXT_FILE_FORMAT
+      ])
+      expect(openReplyStream.mock.calls[1]?.[0].messages.slice(-3)).toEqual([
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [
+            {
+              id: firstCall?.id,
+              toolName: "read_text_file",
+              argumentText: '{"path":"/a"}'
+            },
+            {
+              id: secondCall?.id,
+              toolName: "read_text_file",
+              argumentText: '{"path":"/b"}'
+            }
+          ]
+        },
+        { role: "tool", toolCallId: firstCall?.id, content: "text of /a" },
+        { role: "tool", toolCallId: secondCall?.id, content: "text of /b" }
+      ])
+      expect(run.events).toEqual([
+        { type: "delta", content: "Both read." },
+        { type: "done", finishReason: "stop" }
+      ])
+    })
+
+    it("keeps the model's order when the client answers the second call first", async () => {
+      const answers = new Map<
+        string,
+        PromiseWithResolvers<ChatToolResult | undefined>
+      >()
+      const openReplyStream = createRoundStreams(
+        [
+          {
+            type: "tool-calls",
+            toolCalls: [
+              { toolName: "read_text_file", argumentText: '{"path":"/a"}' },
+              { toolName: "read_text_file", argumentText: '{"path":"/b"}' }
+            ]
+          }
+        ],
+        [{ type: "finish", finishReason: "stop" }]
+      )
+      const sendToolCall = vi.fn<AgentTurn["sendToolCall"]>((toolCall) => {
+        const answer = Promise.withResolvers<ChatToolResult | undefined>()
+        answers.set(String(toolCall.arguments.path), answer)
+        return answer.promise
+      })
+
+      const outcome = getAgentReplyOutcome({
+        openReplyStream,
+        tools: [READ_TEXT_FILE_TOOL],
+        sendToolCall
+      })
+      await vi.waitFor(() => {
+        expect(answers.size).toBe(2)
+      })
+      answers.get("/b")?.resolve({ status: "succeeded", content: "B" })
+      answers.get("/a")?.resolve({ status: "succeeded", content: "A" })
+      await outcome
+
+      const contents = openReplyStream.mock.calls[1]?.[0].messages
+        .filter((message) => message.role === "tool")
+        .map((message) => message.content)
+      expect(contents).toEqual(["A", "B"])
+    })
+
+    it("answers an unknown tool and invalid arguments itself, without sending them", async () => {
+      const openReplyStream = createRoundStreams(
+        [
+          {
+            type: "tool-calls",
+            toolCalls: [
+              { toolName: "delete_everything", argumentText: "{}" },
+              { toolName: "read_text_file", argumentText: '{"path":1}' }
+            ]
+          }
+        ],
+        [{ type: "finish", finishReason: "stop" }]
+      )
+      const sendToolCall = vi.fn<AgentTurn["sendToolCall"]>()
+
+      await getAgentReplyOutcome({
+        openReplyStream,
+        tools: [READ_TEXT_FILE_TOOL],
+        sendToolCall
+      })
+
+      expect(sendToolCall).not.toHaveBeenCalled()
+      const toolMessages = openReplyStream.mock.calls[1]?.[0].messages.filter(
+        (message) => message.role === "tool"
+      )
+      expect(toolMessages).toEqual([
+        expect.objectContaining({
+          content: expect.stringContaining("delete_everything")
+        }),
+        expect.objectContaining({
+          content: expect.stringContaining("read_text_file")
+        })
+      ])
+    })
+
+    it("streams each round's text and separates rounds by a blank line", async () => {
+      const run = await getAgentReplyOutcome({
+        openReplyStream: createRoundStreams(
+          [
+            { type: "text", content: "Let me look." },
+            {
+              type: "tool-calls",
+              toolCalls: [
+                { toolName: "read_text_file", argumentText: '{"path":"/a"}' }
+              ]
+            }
+          ],
+          [
+            { type: "text", content: "Found it." },
+            { type: "text", content: " Buy milk." },
+            { type: "finish", finishReason: "stop" }
+          ]
+        ),
+        tools: [READ_TEXT_FILE_TOOL],
+        sendToolCall: async () => ({ status: "succeeded", content: "Buy milk" })
+      })
+
+      expect(run.persistedDeltas).toEqual([
+        "Let me look.",
+        "\n\nFound it.",
+        " Buy milk."
+      ])
+      expect(run.events).toEqual([
+        { type: "delta", content: "Let me look." },
+        { type: "delta", content: "\n\nFound it." },
+        { type: "delta", content: " Buy milk." },
+        { type: "done", finishReason: "stop" }
+      ])
+    })
+
+    it("starts a later round's text without a separator when no earlier round wrote text", async () => {
+      const run = await getAgentReplyOutcome({
+        openReplyStream: createRoundStreams(
+          [
+            {
+              type: "tool-calls",
+              toolCalls: [
+                { toolName: "read_text_file", argumentText: '{"path":"/a"}' }
+              ]
+            }
+          ],
+          [
+            { type: "text", content: "Found it." },
+            { type: "finish", finishReason: "stop" }
+          ]
+        ),
+        tools: [READ_TEXT_FILE_TOOL],
+        sendToolCall: async () => ({ status: "succeeded", content: "Buy milk" })
+      })
+
+      expect(run.persistedDeltas).toEqual(["Found it."])
+    })
+
+    it("hands the model a failed answer's content", async () => {
+      const openReplyStream = createRoundStreams(
+        [
+          {
+            type: "tool-calls",
+            toolCalls: [
+              { toolName: "read_text_file", argumentText: '{"path":"/a"}' }
+            ]
+          }
+        ],
+        [{ type: "finish", finishReason: "stop" }]
+      )
+
+      await getAgentReplyOutcome({
+        openReplyStream,
+        tools: [READ_TEXT_FILE_TOOL],
+        sendToolCall: async () => ({
+          status: "failed",
+          reason: "declined",
+          content: "The person declined this call."
+        })
+      })
+
+      expect(openReplyStream.mock.calls[1]?.[0].messages.at(-1)).toMatchObject({
+        role: "tool",
+        content: "The person declined this call."
+      })
+    })
+
+    it("interrupts without another round when the reply is stopped while a call waits", async () => {
+      const cancellation = new AbortController()
+      const openReplyStream = createRoundStreams([
+        { type: "text", content: "Let me look." },
+        {
+          type: "tool-calls",
+          toolCalls: [
+            { toolName: "read_text_file", argumentText: '{"path":"/a"}' }
+          ]
+        }
+      ])
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream,
+        abortSignal: cancellation.signal,
+        tools: [READ_TEXT_FILE_TOOL],
+        sendToolCall: async () => {
+          cancellation.abort()
+          return undefined
+        }
+      })
+
+      expect(openReplyStream).toHaveBeenCalledOnce()
+      expect(run.persistedDeltas).toEqual(["Let me look."])
+      expect(run.persistedStates).toEqual([{ status: "interrupted" }])
+      expect(run.events).toEqual([
+        { type: "delta", content: "Let me look." },
+        INTERRUPTED_EVENT
+      ])
+    })
   })
 })

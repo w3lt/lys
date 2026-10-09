@@ -2,6 +2,7 @@ import { APIUserAbortError, OpenAI } from "openai"
 import type {
   ChatCompletion,
   ChatCompletionChunk,
+  ChatCompletionFunctionTool,
   ChatCompletionMessageParam,
   ResponseFormatJSONSchema
 } from "openai/resources/index.mjs"
@@ -39,6 +40,8 @@ export type ChatServiceCreationOptions = {
 export type CompleteChatOptions = {
   /** Ordered conversation messages sent to the configured model. */
   messages: ChatCompletionMessageParam[]
+  /** Tools the model may call, in offer order; empty sends no `tools` field. */
+  tools: readonly ChatCompletionFunctionTool[]
   /** Identifier of the model that should generate the completion. */
   model: string
   /**
@@ -139,7 +142,8 @@ export default class ChatService {
   /**
    * Starts a streamed chat completion against the configured endpoint.
    *
-   * @param options - Messages, model selection, and optional cancellation signal for the request.
+   * @param options - Messages, offered tools, model selection, and optional
+   * cancellation signal for the request.
    * @returns A promise that resolves to the asynchronous stream of chat completion chunks after the request is established.
    * @throws {@link ChatCompletionCancelledError} If the SDK reports that
    * request creation was cancelled; the SDK failure is kept as the cause.
@@ -148,11 +152,13 @@ export default class ChatService {
    */
   public async completeChatStream({
     messages,
+    tools,
     model,
     signal,
     generationOptions
   }: CompleteChatOptions): Promise<AsyncIterable<ChatCompletionChunk>> {
     const { temperature, replyCeiling } = generationOptions
+    const toolOffer = tools.length === 0 ? {} : { tools: [...tools] }
     try {
       return await this.#openaiClient.chat.completions.create(
         {
@@ -160,7 +166,8 @@ export default class ChatService {
           model,
           stream: true,
           temperature,
-          max_completion_tokens: replyCeiling ?? null
+          max_completion_tokens: replyCeiling ?? null,
+          ...toolOffer
         },
         { signal }
       )

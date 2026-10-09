@@ -38,6 +38,8 @@ export type ChatCompletionChunkFixture = Readonly<{
   finishReason?: ChatCompletionChunk.Choice["finish_reason"]
   /** Choice index; defaults to 0, the only choice the backend consumes. */
   index?: number
+  /** Tool-call fragments the chunk carries; omitted for a chunk without any. */
+  toolCalls?: readonly ChatCompletionChunk.Choice.Delta.ToolCall[]
 }>
 
 /**
@@ -261,8 +263,7 @@ export function createOpenAiErrorResponse(
 export function createChatCompletionChunk(
   fixture: ChatCompletionChunkFixture
 ): ChatCompletionChunk {
-  const delta: ChatCompletionChunk.Choice.Delta =
-    fixture.content === undefined ? {} : { content: fixture.content }
+  const delta = buildChunkDelta(fixture)
   return {
     id: "chatcmpl-fixture",
     object: "chat.completion.chunk",
@@ -276,6 +277,23 @@ export function createChatCompletionChunk(
       }
     ]
   }
+}
+
+/**
+ * Builds the delta of one fixture chunk.
+ *
+ * @param fixture - Delta content and tool-call fragments.
+ * @returns A delta carrying exactly the fixture's content and fragments.
+ */
+function buildChunkDelta(
+  fixture: ChatCompletionChunkFixture
+): ChatCompletionChunk.Choice.Delta {
+  if (fixture.toolCalls === undefined)
+    return fixture.content === undefined ? {} : { content: fixture.content }
+  const toolCalls = [...fixture.toolCalls]
+  return fixture.content === undefined
+    ? { tool_calls: toolCalls }
+    : { content: fixture.content, tool_calls: toolCalls }
 }
 
 /**

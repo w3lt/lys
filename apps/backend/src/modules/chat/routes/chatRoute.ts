@@ -4,9 +4,11 @@ import {
   type ChatApiStreamEvent,
   type MessageGenerationOptions
 } from "@lys/protocol"
+import type { ToolDefinition } from "@lys/share"
 import type { FastifyBaseLogger, FastifyInstance } from "fastify"
 import type { BackendConfig } from "../../../config"
 import type Agent from "../../agent/agent"
+import type { AgentTurn } from "../../agent/agent"
 import { createChatAgentNotFoundProblem } from "../../agent/routes/agentProblems"
 import type { TitleGenerationOptions } from "../chatService"
 import { ConversationNotFoundError } from "../../../utils/errors"
@@ -18,7 +20,10 @@ import type {
 } from "../persistence"
 import ReplyEventSubscription from "../replyEventSubscription"
 import type ReplyGeneration from "../replyGeneration"
-import type { ReplyGenerationTaskContext } from "../replyGeneration"
+import type {
+  ReplyGenerationTaskContext,
+  ReplyTaskContext
+} from "../replyGeneration"
 import type ReplyGenerationRegistry from "../replyGenerationRegistry"
 import {
   createEventSender,
@@ -57,6 +62,9 @@ type ChatRouteDependencies = Readonly<{
   generations: ReplyGenerationRegistry
 }>
 
+/** Tools of a request that offered none. */
+const NO_REQUESTED_TOOLS: readonly ToolDefinition[] = Object.freeze([])
+
 /** Values one turn's tasks keep after the request that started them ended. */
 type TurnGenerationInput = Readonly<{
   /** Stored turn and prior transcript snapshot. */
@@ -67,6 +75,8 @@ type TurnGenerationInput = Readonly<{
   model: string
   /** Sampling and reply length controls sent with the request. */
   generationOptions: MessageGenerationOptions
+  /** Client tools the request offered, each name once; empty when it offered none. */
+  tools: readonly ToolDefinition[]
   /** Logger of the request that started the turn. */
   logger: FastifyBaseLogger
   /** Route capabilities borrowed for the route lifetime. */
@@ -137,6 +147,7 @@ async function handleChatRequest(
     agent,
     model: request.body.model,
     generationOptions: request.body.generationOptions,
+    tools: request.body.tools?.definitions ?? NO_REQUESTED_TOOLS,
     logger: request.log,
     dependencies
   })
@@ -268,7 +279,8 @@ function startTurnGeneration(input: TurnGenerationInput): ReplyGeneration {
  *
  * @param input - Stored turn, its agent, and the request values the reply
  * keeps.
- * @param context - Generation-owned cancellation and event sender.
+ * @param context - Generation-owned cancellation, event sender, and tool call
+ * sender.
  * @returns Settlement after the reply is final.
  * @throws The agent's failure after the fallback finalization; an
  * `AggregateError` of the agent's failure and the fallback's failure when the
@@ -279,35 +291,13 @@ function startTurnGeneration(input: TurnGenerationInput): ReplyGeneration {
  */
 async function createTurnReplyTask(
   input: TurnGenerationInput,
-  { abortSignal, sendEvent }: ReplyGenerationTaskContext
+  context: ReplyTaskContext
 ): Promise<void> {
   const { turn, dependencies } = input
+  const { abortSignal } = context
   const assistantMessageId = turn.assistantMessage.id
   try {
-    await input.agent.createReply({
-      history: turn.conversation.messages,
-      userMessageContent: turn.userMessage.content,
-      model: input.model,
-      generationOptions: input.generationOptions,
-      abortSignal,
-      updateAssistantMessageContent: (content) =>
-        dependencies.turns.updateAssistantMessageContent(
-          assistantMessageId,
-          content
-        ),
-      updateAssistantMessageState: (completion) =>
-        dependencies.turns.updateAssistantMessageState(
-          assistantMessageId,
-          completion
-        ),
-      sendEvent,
-      reportReplyCancellation: (failure) => {
-        input.logger.debug({ err: failure }, "Chat completion was cancelled")
-      },
-      reportReplyFailure: (failure) => {
-        input.logger.error({ err: failure }, "Chat completion stream failed")
-      }
-    })
+    await input.agent.createReply(buildAgentTurn(input, context))
   } catch (taskError) {
     try {
       updateUnfinishedReplyState(
@@ -329,6 +319,49 @@ async function createTurnReplyTask(
     assistantMessageId,
     abortSignal
   )
+}
+
+/**
+ * Builds the turn the agent answers for one stored turn.
+ *
+ * @param input - Stored turn, its tools, and the request values the reply
+ * keeps.
+ * @param context - Generation-owned cancellation, event sender, and tool call
+ * sender.
+ * @returns The agent turn, whose writes go to the stored reply.
+ */
+function buildAgentTurn(
+  input: TurnGenerationInput,
+  { abortSignal, sendEvent, sendToolCall }: ReplyTaskContext
+): AgentTurn {
+  const { turn, dependencies } = input
+  const assistantMessageId = turn.assistantMessage.id
+  return {
+    history: turn.conversation.messages,
+    userMessageContent: turn.userMessage.content,
+    model: input.model,
+    generationOptions: input.generationOptions,
+    tools: input.tools,
+    abortSignal,
+    updateAssistantMessageContent: (content) =>
+      dependencies.turns.updateAssistantMessageContent(
+        assistantMessageId,
+        content
+      ),
+    updateAssistantMessageState: (completion) =>
+      dependencies.turns.updateAssistantMessageState(
+        assistantMessageId,
+        completion
+      ),
+    sendEvent,
+    sendToolCall,
+    reportReplyCancellation: (failure) => {
+      input.logger.debug({ err: failure }, "Chat completion was cancelled")
+    },
+    reportReplyFailure: (failure) => {
+      input.logger.error({ err: failure }, "Chat completion stream failed")
+    }
+  }
 }
 
 /**

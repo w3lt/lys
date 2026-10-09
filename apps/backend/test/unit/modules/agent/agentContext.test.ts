@@ -34,11 +34,11 @@ describe("buildAgentContext", () => {
     ).toEqual([
       { role: "system", content: "You are Lys." },
       { role: "user", content: "First question" },
-      { role: "assistant", content: "Completed answer" },
+      { role: "assistant", content: "Completed answer", toolCalls: [] },
       { role: "user", content: "Second question" },
-      { role: "assistant", content: "Truncated answer" },
+      { role: "assistant", content: "Truncated answer", toolCalls: [] },
       { role: "user", content: "Third question" },
-      { role: "assistant", content: "Partial answer" },
+      { role: "assistant", content: "Partial answer", toolCalls: [] },
       { role: "user", content: "Current question" }
     ])
   })
@@ -77,7 +77,7 @@ describe("buildAgentContext", () => {
     ])
   })
 
-  it("sends only the role and content of each stored message", () => {
+  it("sends only the role and text of each stored message, and no tool calls for a reply", () => {
     const history = [
       createAssistantMessage(2, "Answer", {
         status: "completed",
@@ -85,8 +85,10 @@ describe("buildAgentContext", () => {
       })
     ]
 
-    for (const message of buildAgentContext("You are Lys.", history, "Next")) {
-      expect(Object.keys(message).toSorted()).toEqual(["content", "role"])
-    }
+    expect(buildAgentContext("You are Lys.", history, "Next")).toStrictEqual([
+      { role: "system", content: "You are Lys." },
+      { role: "assistant", content: "Answer", toolCalls: [] },
+      { role: "user", content: "Next" }
+    ])
   })
 })

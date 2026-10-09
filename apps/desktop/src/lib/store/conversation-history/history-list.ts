@@ -206,6 +206,8 @@ export function updateConversationHistoryEntryTitle(
   title: string | null
 ): ConversationHistoryListState {
   if (list.status !== "loaded") return list
+  if (!list.page.entries.some((entry) => entry.id === conversationId))
+    return list
 
   const entries = Object.freeze(
     list.page.entries.map((entry) =>

@@ -296,6 +296,28 @@ describe("ComposerContextMeter", () => {
     expect(trigger).toHaveAttribute("aria-expanded", "false")
   })
 
+  it("stops listening for Escape once its panel is closed", async () => {
+    const user = userEvent.setup()
+    render(
+      <>
+        <ComposerContextMeter
+          attachments={[]}
+          onChangeWindow={vi.fn()}
+          usage={FITTING_USAGE}
+        />
+        <button type="button">Elsewhere</button>
+      </>
+    )
+    const { trigger } = await openMeterPanel(user)
+    await user.click(trigger)
+    const elsewhere = screen.getByRole("button", { name: "Elsewhere" })
+    elsewhere.focus()
+
+    await user.keyboard("{Escape}")
+
+    expect(elsewhere).toHaveFocus()
+  })
+
   it("closes when its trigger is pressed again", async () => {
     const user = userEvent.setup()
     render(

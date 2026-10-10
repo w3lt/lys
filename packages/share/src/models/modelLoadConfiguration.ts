@@ -25,13 +25,20 @@ const modelLoadCountSchema = z
  * Validates the settings LM Studio applies when it loads one model.
  *
  * @remarks Every setting is optional; LM Studio decides a setting that is
- * absent. An explicit `null` and an unknown setting are rejected. The schema
- * does not know the model, so it does not compare the context length with the
- * model's own maximum; the runtime that loads the model does.
+ * absent. A set context length has one further effect: the LM Studio SDK then
+ * sends auto-fit as off for that load. Auto-fit is LM Studio's own choice of
+ * context length and model placement from the available resources, and the
+ * SDK refuses it together with a context length. An explicit `null` and an
+ * unknown setting are rejected. The schema does not know the model, so it does
+ * not compare the context length with the model's own maximum; the runtime
+ * that loads the model does.
  */
 export const modelLoadConfigurationSchema = z
   .strictObject({
-    /** Context window the model is loaded with, in tokens. */
+    /**
+     * Context window the model is loaded with, in tokens. Setting it also
+     * turns LM Studio's auto-fit off for the load.
+     */
     contextLength: modelLoadCountSchema.optional(),
     /** Prompt tokens evaluated together in one batch. */
     evalBatchSize: modelLoadCountSchema.optional(),

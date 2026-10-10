@@ -330,6 +330,68 @@ describe("LmStudioRuntime", () => {
       expect(Object.keys(options?.config ?? {})).toEqual(["contextLength"])
     })
 
+    it.each([
+      {
+        absentSetting: "contextLength",
+        loadConfiguration: {
+          evalBatchSize: 1024,
+          flashAttention: false,
+          offloadKVCacheToGpu: true,
+          numExperts: 4
+        }
+      },
+      {
+        absentSetting: "evalBatchSize",
+        loadConfiguration: {
+          contextLength: 16_384,
+          flashAttention: false,
+          offloadKVCacheToGpu: true,
+          numExperts: 4
+        }
+      },
+      {
+        absentSetting: "flashAttention",
+        loadConfiguration: {
+          contextLength: 16_384,
+          evalBatchSize: 1024,
+          offloadKVCacheToGpu: true,
+          numExperts: 4
+        }
+      },
+      {
+        absentSetting: "offloadKVCacheToGpu",
+        loadConfiguration: {
+          contextLength: 16_384,
+          evalBatchSize: 1024,
+          flashAttention: false,
+          numExperts: 4
+        }
+      },
+      {
+        absentSetting: "numExperts",
+        loadConfiguration: {
+          contextLength: 16_384,
+          evalBatchSize: 1024,
+          flashAttention: false,
+          offloadKVCacheToGpu: true
+        }
+      }
+    ])(
+      "sends the other four settings and no $absentSetting when only that one is not set",
+      async ({ absentSetting, loadConfiguration }) => {
+        const runtime = await createOwnedRuntime()
+        const load = vi.fn(fakeLmStudio.operations.load)
+        load.mockResolvedValue({ modelKey: "qwen", identifier: "qwen" })
+        fakeLmStudio.operations = { ...fakeLmStudio.operations, load }
+
+        await runtime.loadLlmModel("qwen", loadConfiguration)
+
+        const [, options] = load.mock.calls[0] ?? []
+        expect(options?.config).toEqual(loadConfiguration)
+        expect(Object.keys(options?.config ?? {})).not.toContain(absentSetting)
+      }
+    )
+
     it("translates a failed load and keeps the SDK failure as its cause", async () => {
       const runtime = await createOwnedRuntime()
 

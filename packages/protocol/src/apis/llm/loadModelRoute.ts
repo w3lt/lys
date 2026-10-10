@@ -18,14 +18,18 @@ import { apiLlmLoadModelRoute } from "./routes"
  * uses LM Studio's canonical `modelKey` in the response and inventory match.
  *
  * @remarks A request without `configuration` is valid and means the same as an
- * empty one: LM Studio decides every load setting. An explicit `null` is
- * rejected.
+ * empty one: LM Studio decides every load setting. A configuration that sets
+ * `contextLength` also turns LM Studio's auto-fit off for that load, as the
+ * shared configuration schema describes. An explicit `null` is rejected.
  */
 export const llmLoadModelApiRequestBodySchema = z
   .strictObject({
     /** Model key or alias that LM Studio resolves during loading. */
     modelId: z.string().min(1),
-    /** Load settings for this load; LM Studio decides each setting left out. */
+    /**
+     * Load settings for this load. LM Studio decides each setting left out; a
+     * set context length also turns its auto-fit off.
+     */
     configuration: modelLoadConfigurationSchema.optional()
   })
   .readonly()

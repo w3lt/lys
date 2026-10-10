@@ -36,7 +36,9 @@ import {
  * Most digits a typed context length keeps: the digit count of the largest
  * value a load setting accepts.
  */
-const MAXIMUM_TYPED_CONTEXT_LENGTH_DIGITS = 10
+const MAXIMUM_TYPED_CONTEXT_LENGTH_DIGITS = String(
+  MAXIMUM_MODEL_LOAD_SETTING_VALUE
+).length
 
 /** Properties accepted by {@link LoadSettingRow}. */
 type LoadSettingRowProps = {
@@ -401,7 +403,7 @@ type LoadSwitchFieldProps = {
    *
    * @param isEnabled - Proposed state.
    */
-  readonly onEnabledChange: (isEnabled: boolean) => void
+  readonly onIsEnabledChange: (isEnabled: boolean) => void
 }
 
 /**
@@ -418,7 +420,7 @@ function LoadSwitchField({
   note,
   isEnabled,
   loadedValue,
-  onEnabledChange
+  onIsEnabledChange
 }: LoadSwitchFieldProps): ReactElement {
   const titleId = useId()
   const noteId = useId()
@@ -436,7 +438,7 @@ function LoadSwitchField({
           aria-describedby={noteId}
           aria-labelledby={titleId}
           checked={isEnabled}
-          onCheckedChange={onEnabledChange}
+          onCheckedChange={onIsEnabledChange}
           size="lg"
         />
       </div>
@@ -609,7 +611,7 @@ export default function ModelLoadSettingFields({
         isEnabled={configuration.flashAttention}
         loadedValue={findLoadedSettingValue(reloadPrompt, "flashAttention")}
         note="Leaner attention math. Usually less memory and faster replies."
-        onEnabledChange={(flashAttention) =>
+        onIsEnabledChange={(flashAttention) =>
           onAssignModelLoadSettings(modelKey, { flashAttention })
         }
         title="Flash attention"
@@ -621,7 +623,7 @@ export default function ModelLoadSettingFields({
           "offloadKVCacheToGpu"
         )}
         note={formatKvCacheNote(configuration.offloadKVCacheToGpu)}
-        onEnabledChange={(offloadKVCacheToGpu) =>
+        onIsEnabledChange={(offloadKVCacheToGpu) =>
           onAssignModelLoadSettings(modelKey, { offloadKVCacheToGpu })
         }
         title="KV cache on GPU"

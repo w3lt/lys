@@ -45,17 +45,29 @@ export async function saveGenerationSettings(
 }
 
 /**
- * Persists load settings while preserving other groups already on disk.
- * @param loadConfiguration - Default and per-model load settings sampled by the application autosave owner.
+ * Persists the per-model load settings while preserving everything else
+ * already on disk.
+ * @param loadConfiguration - Load settings sampled by the application autosave
+ * owner. Only its per-model settings are written; its default is not.
  * @returns Resolves after the merged settings document is written by Tauri.
  * @throws The native load or save rejection; no replacement is written if loading fails.
- * @remarks The application store serializes this read-modify-write operation
- * with the other settings-group saves, so that overlapping saves cannot write
- * back each other's stale group.
+ * @remarks The stored default is kept as it is on disk, like the other groups.
+ * Only a hand edit of the settings file changes it, and the store's copy was
+ * read at startup, so writing that copy would undo an edit made since. The
+ * application store serializes this read-modify-write operation with the
+ * other settings-group saves, so that overlapping saves cannot write back
+ * each other's stale group.
  */
 export async function saveLoadConfigurationSettings(
   loadConfiguration: LoadConfigurationSettings
 ): Promise<void> {
   const persistedSettings = await loadSettings()
-  await saveSettings({ ...persistedSettings, loadConfiguration })
+  const savedLoadConfiguration: LoadConfigurationSettings = {
+    default: persistedSettings.loadConfiguration.default,
+    models: loadConfiguration.models
+  }
+  await saveSettings({
+    ...persistedSettings,
+    loadConfiguration: savedLoadConfiguration
+  })
 }

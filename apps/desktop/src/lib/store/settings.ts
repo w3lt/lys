@@ -110,6 +110,27 @@ export type LysSettings = {
 }
 
 /**
+ * Stored default of a settings file that sets no load setting, so the
+ * committed default supplies every one.
+ */
+const UNSET_STORED_DEFAULT_LOAD_CONFIGURATION: ModelLoadConfiguration =
+  Object.freeze({})
+
+/** Per-model load settings of a settings file in which no model has its own. */
+const NO_OWN_MODEL_LOAD_CONFIGURATIONS: LoadConfigurationSettings["models"] =
+  Object.freeze({})
+
+/**
+ * Load settings shown before Tauri initialization completes: none stored, as
+ * in a first-run settings file.
+ */
+const INITIAL_LOAD_CONFIGURATION_SETTINGS: LoadConfigurationSettings =
+  Object.freeze({
+    default: UNSET_STORED_DEFAULT_LOAD_CONFIGURATION,
+    models: NO_OWN_MODEL_LOAD_CONFIGURATIONS
+  })
+
+/**
  * Renderer-side fallback settings used before Tauri initialization completes.
  *
  * @remarks Values match the Rust `Default` implementations so the pre-load
@@ -128,8 +149,5 @@ export const initialSettingsState: LysSettings = {
     temperature: 0.7,
     replyCeiling: 2048
   },
-  loadConfiguration: {
-    default: {},
-    models: {}
-  }
+  loadConfiguration: INITIAL_LOAD_CONFIGURATION_SETTINGS
 }

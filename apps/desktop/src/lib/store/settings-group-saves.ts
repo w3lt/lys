@@ -21,10 +21,11 @@ export type SettingsGroupSaves = {
     generation: GenerationSettings
   ) => Promise<void>
   /**
-   * Saves the load configuration group after every save sent earlier has
-   * settled.
+   * Saves the per-model settings of the load configuration group after every
+   * save sent earlier has settled.
    *
-   * @param loadConfiguration - Default and per-model load settings to persist.
+   * @param loadConfiguration - Load settings whose per-model settings are
+   * persisted. The stored default is not written; the file keeps its own.
    * @returns Resolves after the settings file is written, and rejects with
    * the native load or save rejection.
    */
@@ -52,14 +53,15 @@ export type SettingsGroupSaveOutcome = "saved" | "failed"
  *
  * @returns Save operations that each start after every save sent earlier
  * through the same owner has settled, in the order they were sent.
- * @remarks Each save reads the whole settings document, replaces one group,
- * and writes the document back. Two overlapping saves would each write back
- * the other group as it was before, so one of them would be lost; running
- * them in order prevents that for saves sent through one owner. A failed save
- * rejects only its own caller, and later saves still run. Native writes are
- * not cancellable. The application store creates one owner and gives each
- * group's autosave its save operation; an autosave sends its next save only
- * after its previous one settled, so at most one save per group waits.
+ * @remarks Each save reads the whole settings document, replaces the part it
+ * owns, and writes the document back. Two overlapping saves would each write
+ * back the other's part as it was before, so one of them would be lost;
+ * running them in order prevents that for saves sent through one owner. A
+ * failed save rejects only its own caller, and later saves still run. Native
+ * writes are not cancellable. The application store creates one owner and
+ * gives each group's autosave its save operation; an autosave sends its next
+ * save only after its previous one settled, so at most one save per group
+ * waits.
  */
 export function createSettingsGroupSaves(): SettingsGroupSaves {
   let previousSaveSettlement: Promise<void> = Promise.resolve()

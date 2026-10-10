@@ -299,13 +299,24 @@ function buildSetModelLoadConfiguration(
     offloadKVCacheToGpu,
     numExperts
   } = settings
-  return {
-    ...(contextLength === undefined ? {} : { contextLength }),
-    ...(evalBatchSize === undefined ? {} : { evalBatchSize }),
-    ...(flashAttention === undefined ? {} : { flashAttention }),
-    ...(offloadKVCacheToGpu === undefined ? {} : { offloadKVCacheToGpu }),
-    ...(numExperts === undefined ? {} : { numExperts })
-  }
+  // One setting is added per step, so that an unset setting stays absent.
+  const configurationWithContextLength: ModelLoadConfiguration =
+    contextLength === undefined ? {} : { contextLength }
+  const configurationWithEvalBatchSize: ModelLoadConfiguration =
+    evalBatchSize === undefined
+      ? configurationWithContextLength
+      : { ...configurationWithContextLength, evalBatchSize }
+  const configurationWithFlashAttention: ModelLoadConfiguration =
+    flashAttention === undefined
+      ? configurationWithEvalBatchSize
+      : { ...configurationWithEvalBatchSize, flashAttention }
+  const configurationWithKvCachePlacement: ModelLoadConfiguration =
+    offloadKVCacheToGpu === undefined
+      ? configurationWithFlashAttention
+      : { ...configurationWithFlashAttention, offloadKVCacheToGpu }
+  return numExperts === undefined
+    ? configurationWithKvCachePlacement
+    : { ...configurationWithKvCachePlacement, numExperts }
 }
 
 /**

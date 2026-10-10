@@ -10,7 +10,6 @@ import {
 } from "@/lib/models/model-load-configuration"
 import { useLysStore } from "@/lib/store"
 import type { LoadConfigurationSaveState } from "@/lib/store/load-configuration-settings"
-import { findLoadedModelConfiguration } from "@/lib/store/model-runtime"
 
 import ModelLoadSettingFields from "./ModelLoadSettingFields"
 import {
@@ -173,7 +172,7 @@ function ModelLoadConfigurationEditor({
   const reloadPrompt = isModelResidencyChanging(modelRequest, model.modelKey)
     ? null
     : buildModelReloadPrompt(
-        findLoadedModelConfiguration(loadedModelConfigurations, model.modelKey),
+        loadedModelConfigurations.get(model.modelKey),
         configuration
       )
   return (

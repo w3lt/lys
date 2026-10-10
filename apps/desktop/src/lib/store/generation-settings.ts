@@ -77,7 +77,8 @@ export function createGenerationSettingsSlice(
       isEqual: isGenerationSettingsEqual,
       save: dependencies.saveGenerationSettings
     })
-    set({ generationSave: { status } })
+    const settledSave: GenerationSaveState = { status }
+    set({ generationSave: settledSave })
   }
 
   return { generationSave: { status: "idle" }, saveGenerationSettings }

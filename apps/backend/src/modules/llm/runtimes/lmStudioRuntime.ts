@@ -334,6 +334,11 @@ export default class LmStudioRuntime implements LlmRuntime {
  * @returns A newly owned config holding each set setting under the SDK's name
  * for it, and no entry for a setting that is absent, so that LM Studio decides
  * that setting.
+ * @remarks `@lmstudio/sdk` 2.0.0 derives one more setting from this config.
+ * When the config sets a context length, the SDK also sends `autoFit: false`,
+ * so LM Studio's auto-fit, which would choose the context length and the model
+ * placement from the available resources, is off for that load. The SDK
+ * rejects `autoFit: true` together with a context length.
  */
 function buildLmStudioLoadConfig(
   loadConfiguration: ModelLoadConfiguration
@@ -345,11 +350,23 @@ function buildLmStudioLoadConfig(
     offloadKVCacheToGpu,
     numExperts
   } = loadConfiguration
-  return {
-    ...(contextLength === undefined ? {} : { contextLength }),
-    ...(evalBatchSize === undefined ? {} : { evalBatchSize }),
-    ...(flashAttention === undefined ? {} : { flashAttention }),
-    ...(offloadKVCacheToGpu === undefined ? {} : { offloadKVCacheToGpu }),
-    ...(numExperts === undefined ? {} : { numExperts })
-  }
+  // One setting is added per step, because an absent setting must stay absent:
+  // the SDK's config type does not accept `undefined` for it.
+  const configWithContextLength: LLMLoadModelConfig =
+    contextLength === undefined ? {} : { contextLength }
+  const configWithEvalBatchSize: LLMLoadModelConfig =
+    evalBatchSize === undefined
+      ? configWithContextLength
+      : { ...configWithContextLength, evalBatchSize }
+  const configWithFlashAttention: LLMLoadModelConfig =
+    flashAttention === undefined
+      ? configWithEvalBatchSize
+      : { ...configWithEvalBatchSize, flashAttention }
+  const configWithKvCachePlacement: LLMLoadModelConfig =
+    offloadKVCacheToGpu === undefined
+      ? configWithFlashAttention
+      : { ...configWithFlashAttention, offloadKVCacheToGpu }
+  return numExperts === undefined
+    ? configWithKvCachePlacement
+    : { ...configWithKvCachePlacement, numExperts }
 }

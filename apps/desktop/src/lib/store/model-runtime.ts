@@ -53,10 +53,19 @@ export type LoadedModelConfiguration = {
   readonly configuration: CompleteModelLoadConfiguration
 }
 
-/** Known load configurations of the loaded models, keyed by model key. */
-export type LoadedModelConfigurations = Readonly<
-  Record<string, LoadedModelConfiguration>
+/**
+ * Known load configurations of the loaded models, keyed by model key.
+ *
+ * @remarks Session state that is never serialized. A model that is not
+ * observed as loaded has no entry, so a read by its key gives undefined.
+ */
+export type LoadedModelConfigurations = ReadonlyMap<
+  string,
+  LoadedModelConfiguration
 >
+
+/** Records of a session in which no model has been observed as loaded. */
+const NO_LOADED_MODEL_CONFIGURATIONS: LoadedModelConfigurations = new Map()
 
 /** Observable model state atomically replaced by the application store. */
 export type ModelState = {
@@ -84,7 +93,7 @@ export const initialModelState: ModelState = Object.freeze({
   modelRuntime: Object.freeze({ status: "none" }),
   modelError: null,
   modelHealth: null,
-  loadedModelConfigurations: Object.freeze({})
+  loadedModelConfigurations: NO_LOADED_MODEL_CONFIGURATIONS
 })
 
 /**
@@ -127,21 +136,6 @@ export function isModelTransitionInFlight(
 }
 
 /**
- * Finds what is known about one loaded model's configuration.
- *
- * @param known - Known configurations of the loaded models.
- * @param modelKey - Key of the model.
- * @returns The model's entry, or undefined when it has none. Members of the
- * object prototype are never returned for a key such as `constructor`.
- */
-export function findLoadedModelConfiguration(
-  known: LoadedModelConfigurations,
-  modelKey: string
-): LoadedModelConfiguration | undefined {
-  return Object.hasOwn(known, modelKey) ? known[modelKey] : undefined
-}
-
-/**
  * Adds the configuration a completed load was sent with.
  *
  * @param known - Known configurations of the loaded models; not modified.
@@ -155,11 +149,13 @@ export function addSentModelConfiguration(
   modelKey: string,
   configuration: CompleteModelLoadConfiguration
 ): LoadedModelConfigurations {
-  const otherEntries = Object.entries(known).filter(
-    ([knownModelKey]) => knownModelKey !== modelKey
-  )
-  const sentEntry = [modelKey, { origin: "sent", configuration }] as const
-  return Object.fromEntries([...otherEntries, sentEntry])
+  const sentConfiguration: LoadedModelConfiguration = {
+    origin: "sent",
+    configuration
+  }
+  const records = new Map(known)
+  records.set(modelKey, sentConfiguration)
+  return records
 }
 
 /**
@@ -173,11 +169,9 @@ export function removeLoadedModelConfiguration(
   known: LoadedModelConfigurations,
   modelKey: string
 ): LoadedModelConfigurations {
-  return Object.fromEntries(
-    Object.entries(known).filter(
-      ([knownModelKey]) => knownModelKey !== modelKey
-    )
-  )
+  const records = new Map(known)
+  records.delete(modelKey)
+  return records
 }
 
 /**
@@ -198,12 +192,12 @@ export function buildLoadedModelConfigurations(
   settings: LoadConfigurationSettings
 ): LoadedModelConfigurations {
   if (inventory.status !== "ready") return known
-  return Object.fromEntries(
+  return new Map(
     inventory.models
       .filter((model) => model.loaded)
       .map((model) => [
         model.modelKey,
-        findLoadedModelConfiguration(known, model.modelKey) ?? {
+        known.get(model.modelKey) ?? {
           origin: "assumed",
           configuration: buildModelLoadConfiguration(settings, model)
         }

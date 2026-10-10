@@ -20,7 +20,8 @@ export type LoadConfigurationSettingsSlice = {
   /** Latest save outcome, retained across settings-pane unmounts. */
   readonly loadConfigurationSave: LoadConfigurationSaveState
   /**
-   * Persists current load settings, preserving other groups on disk.
+   * Persists the current per-model load settings, preserving the stored
+   * default and the other groups on disk.
    * @returns Resolves after the latest edit is saved or fails. Calls during a
    * save return immediately; the active owner also saves any newer edits.
    */
@@ -59,17 +60,17 @@ export function createLoadConfigurationSettingsSlice(
    */
   async function saveLoadConfigurationSettings(): Promise<void> {
     if (get().loadConfigurationSave.status === "saving") return
-    set({ loadConfigurationSave: { status: "saving" } })
+    const activeSave: LoadConfigurationSaveState = { status: "saving" }
+    set({ loadConfigurationSave: activeSave })
     const status = await saveLatestSettingsGroup({
       getCurrent: () => get().settings.loadConfiguration,
       isEqual: isLoadConfigurationSettingsEqual,
       save: dependencies.saveLoadConfigurationSettings
     })
-    set({ loadConfigurationSave: { status } })
+    const settledSave: LoadConfigurationSaveState = { status }
+    set({ loadConfigurationSave: settledSave })
   }
 
-  return {
-    loadConfigurationSave: { status: "idle" },
-    saveLoadConfigurationSettings
-  }
+  const idleSave: LoadConfigurationSaveState = { status: "idle" }
+  return { loadConfigurationSave: idleSave, saveLoadConfigurationSettings }
 }

@@ -9,7 +9,10 @@ import {
   unloadModel,
   type ModelApiConnection
 } from "@/lib/apis/http/models"
-import { buildModelLoadConfiguration } from "@/lib/models/model-load-configuration"
+import {
+  buildModelLoadConfiguration,
+  type ModelLoadTarget
+} from "@/lib/models/model-load-configuration"
 
 import {
   addSentModelConfiguration,
@@ -341,14 +344,12 @@ export function createModelSlice(
       inventory.status === "ready"
         ? inventory.models.find((model) => model.modelKey === modelKey)
         : undefined
-    return {
-      kind: "load",
-      modelKey,
-      configuration: buildModelLoadConfiguration(
-        dependencies.getLoadConfigurationSettings(),
-        listedModel ?? { modelKey, maxContextLength: null }
-      )
-    }
+    const unlistedModel: ModelLoadTarget = { modelKey, maxContextLength: null }
+    const configuration = buildModelLoadConfiguration(
+      dependencies.getLoadConfigurationSettings(),
+      listedModel ?? unlistedModel
+    )
+    return { kind: "load", modelKey, configuration }
   }
 
   /**

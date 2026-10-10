@@ -259,6 +259,42 @@ format before interpreting it. The exception was approved by the maintainer on
   the version and refuses unknown versions, and this exception is removed with
   it.
 
+## Settings view size exception
+
+`SettingsView` has an approved exception to the size limit of
+[FUNC-013](https://github.com/w3lt/lys/blob/main/docs/code_standards/FUNCTION.md):
+its body has about 100 lines with code, and the limit is 40 executable lines.
+The exception was approved by the maintainer on 2026-10-10 for
+[PR #143](https://github.com/w3lt/lys/pull/143), following review finding I-3.
+
+- **Scope:** only the `SettingsView` function in
+  [SettingsView.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/views/SettingsView/SettingsView.tsx),
+  and only its line count. Its other FUNC-013 limits are met, and every other
+  function still follows FUNC-013, including the ones PR #143 added.
+- **Constraint:** the function had about 80 such lines before PR #143, which
+  added the load configuration values and two callbacks to the context value
+  it builds. Bringing it under the limit is not one extraction:
+  - One hook holding the store selections and the context value would itself
+    hold about 80 lines.
+  - A split that complies also moves the three older patch callbacks for the
+    runtime, model, and generation groups. Moved code has to follow
+    [OBJECT-019, OBJECT-024, and OBJECT-056](https://github.com/w3lt/lys/blob/main/docs/code_standards/OBJECT.md),
+    and their nested two-spread literals do not, so each patch needs a named
+    operation that builds its result property by property.
+- **Alternatives considered:**
+  - Doing the split in PR #143 was not taken. It changes how runtime, model,
+    and generation edits are applied, which is outside that pull request's
+    purpose.
+  - Moving only the PR's additions into a hook was not taken. The function
+    would still hold about 80 lines, and the hook would exist only to move
+    lines.
+- **Risk and control:** a long function is harder to review and to change
+  safely. This one selects store values, builds one context value, and renders
+  the rail and panes; it has two decision points. The two callbacks PR #143
+  added to it delegate to a named function.
+- **Removal condition:** [#147](https://github.com/w3lt/lys/issues/147) splits
+  the view, and this exception is removed with it.
+
 ## API boundaries
 
 Canonical rules: [API-004, API-020, API-034](https://github.com/w3lt/lys/blob/main/docs/code_standards/API.md).

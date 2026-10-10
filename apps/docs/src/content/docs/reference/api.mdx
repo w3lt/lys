@@ -374,6 +374,11 @@ LM Studio loads it with:
 - `configuration` and each setting in it are optional. LM Studio decides every
   setting the request leaves out, so a request with only `modelId` loads the
   model with LM Studio's own settings.
+- A request that sets `contextLength` also turns LM Studio's auto-fit off for
+  that load. Auto-fit is LM Studio's own choice of context length and model
+  placement from the available resources. The LM Studio SDK (2.0.0) sends it
+  as off whenever a context length is set, and refuses the two together. The
+  desktop sets a context length on every load it starts.
 - Each integer is a whole number from 1 to 4,294,967,295.
 - The backend answers `400` before starting a load when `configuration` is
   `null` or not an object, holds a setting other than the five above, or holds

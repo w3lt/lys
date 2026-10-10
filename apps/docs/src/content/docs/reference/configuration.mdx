@@ -168,7 +168,10 @@ setting.
 
 - Every setting is optional, in `default` and in a `models` entry.
 - `default` holds only what you write into it by hand; the Model pane edits
-  only `models` entries.
+  only `models` entries, and its saves leave `default` as it is in the file.
+- Lys reads `settings.json` when it starts. A hand edit made while Lys runs
+  takes effect the next time Lys starts. Until then a save from the Model pane
+  keeps an edited `default`, and replaces `models` with the entries Lys holds.
 - When Lys loads a model, each setting comes from the first of these that sets
   it: the model's own entry, then `default`, then the committed default below.
   `numExperts` is not sent when none of them sets it. The context length is
@@ -203,9 +206,11 @@ Saves are serialized and newer edits are saved after the active write settles.
 Save failure leaves the current values usable and exposes a retry action.
 
 Load configuration edits in the Model pane are saved the same way, replacing
-only the `loadConfiguration` group. They apply to the next load of the model
-they belong to. The desktop runs the two kinds of save one at a time, so neither
-writes back an older copy of the other group.
+only the `models` part of the `loadConfiguration` group. The save keeps the
+`default` that is in the file, because only a hand edit changes it. The edits
+apply to the next load of the model they belong to. The desktop runs the two
+kinds of save one at a time, so neither writes back an older copy of the other
+group.
 
 Runtime edits, including auto-start and default-model selection, remain in memory
 for the current session. Edits to `model.contextSize` also remain session-only.

@@ -171,8 +171,9 @@ selected default model. With no default model selected it edits nothing, even
 while a model is loaded, and asks to choose one; the selection lasts for the
 session, so after a restart the section waits for a choice. It has five rows: context length, eval batch size, flash attention, KV cache on
 GPU, and active experts. An edit is stored for that model only, applies to its
-next load, and is saved automatically to the `loadConfiguration` group of
-`settings.json`. Active experts reads "auto" until it is set, because LM Studio
+next load, and is saved automatically to the `models` part of the
+`loadConfiguration` group of `settings.json`; the save keeps the `default` that
+is in the file. Active experts reads "auto" until it is set, because LM Studio
 reports no expert counts ([#144](https://github.com/w3lt/lys/issues/144)).
 
 The backend does not report the settings a loaded model runs with

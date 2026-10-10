@@ -11,20 +11,20 @@ presentation state, not durable conversation storage.
 
 ## Main responsibilities
 
-| Area                | Current implementation                                                                                                                          |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| App shell           | `App.tsx` swaps between chat and settings views and runs startup initialization.                                                                |
-| Chat UI             | `ChatView` renders the transcript, composer, jump-to-latest controls, and the past-conversations dialog.                                        |
-| Message rendering   | `MarkdownMessage` renders assistant replies as Markdown with KaTeX math and highlighted, copyable code blocks.                                  |
-| Chat state          | `src/lib/store/chat-view` owns the active conversation, request lifecycle, conversation opening, and error presentation.                        |
-| History state       | `src/lib/store/conversation-history` owns the past-conversations dialog, its search and pages, and rename and delete calls.                     |
-| Agent state         | `src/lib/store/agents` owns the Agents pane's list, its editor and draft, and the agent create, update, and delete calls.                       |
-| Tool state          | `src/lib/store/tools.ts` owns the Tools pane's list of client tools and the session-only choices that gate tool calls.                          |
-| Tool calls          | `src/lib/store/tool-calls` follows each running reply's tool calls, decides each by the Tools pane, runs client tools, and sends their answers. |
-| Shell/runtime state | `src/lib/store/index.ts` tracks which view is open, whether the backend is running, and settings loaded from Tauri.                             |
-| Model lifecycle     | `src/lib/store/model-actions.ts` owns real inventory, load, unload, and health requests shared by settings and the composer.                    |
-| SSE consumption     | `src/lib/apis/http/chat.ts` opens chat and reply-events SSE streams, validates events with Zod, and sends reply stops and tool results.         |
-| Theme               | `src/app/theme.ts` applies light or dark mode and stores the choice as `lys.theme` in WebView `localStorage`.                                   |
+| Area                | Current implementation                                                                                                                                                  |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| App shell           | `App.tsx` swaps between chat and settings views and runs startup initialization.                                                                                        |
+| Chat UI             | `ChatView` renders the transcript, composer, jump-to-latest controls, and the past-conversations dialog.                                                                |
+| Message rendering   | `MarkdownMessage` renders assistant replies as Markdown with KaTeX math and highlighted, copyable code blocks.                                                          |
+| Chat state          | `src/lib/store/chat-view` owns the active conversation, request lifecycle, conversation opening, and error presentation.                                                |
+| History state       | `src/lib/store/conversation-history` owns the past-conversations dialog, its search and pages, and rename and delete calls.                                             |
+| Agent state         | `src/lib/store/agents` owns the Agents pane's list, its editor and draft, and the agent create, update, and delete calls.                                               |
+| Tool state          | `src/lib/store/tools.ts` owns the Tools pane's list of every tool, the app's and the backend's, and the session-only choices that gate tool calls.                      |
+| Tool calls          | `src/lib/store/tool-calls` follows each running reply's tool calls, decides each by the Tools pane, runs client tools or allows backend tools, and sends their answers. |
+| Shell/runtime state | `src/lib/store/index.ts` tracks which view is open, whether the backend is running, and settings loaded from Tauri.                                                     |
+| Model lifecycle     | `src/lib/store/model-actions.ts` owns real inventory, load, unload, and health requests shared by settings and the composer.                                            |
+| SSE consumption     | `src/lib/apis/http/chat.ts` opens chat and reply-events SSE streams, validates events with Zod, and sends reply stops and tool results.                                 |
+| Theme               | `src/app/theme.ts` applies light or dark mode and stores the choice as `lys.theme` in WebView `localStorage`.                                                           |
 
 ## Chat state split
 
@@ -35,7 +35,7 @@ The desktop currently has six separate state systems:
 | Chat Zustand store      | Active conversation, request and open tokens, local abort controllers, streamed assistant deltas, inline error text            |
 | History Zustand store   | Dialog visibility, search query, displayed conversation pages, the row being renamed or confirmed, pending renames and deletes |
 | Agent Zustand store     | Every listed agent, the open editor and its draft, the save attempt, the pending save or delete, the most recently saved agent |
-| Tool Zustand store      | The client tool list read from the desktop, tool calls on or off, each tool's switch and approval                              |
+| Tool Zustand store      | The tool list read from the desktop and the backend, tool calls on or off, each tool's switch and approval                     |
 | Tool-call Zustand store | Every tool call held until the backend takes its answer, and the reply follows that deliver them                               |
 | Shell Zustand store     | Active top-level view, loaded runtime settings, backend process status, startup progress                                       |
 
@@ -280,16 +280,20 @@ Agents are not used by chats yet.
 
 ## Tool settings
 
-The Tools pane lists Lys's client tools: the tools that run in the desktop app
-and work with files on the user's machine. The tool store reads them from the
-[`list_tools` command](/architecture/host/#client-tool-list) when the pane first
-appears; they do not depend on the backend. A failed read shows the failure
-above the pane with Retry. Tools are grouped by their `group`, and each group
-says how many of its tools are on.
+The Tools pane lists Lys's tools. Client tools run in the desktop app and work
+with files on the user's machine; the tool store reads them from the
+[`list_tools` command](/architecture/host/#client-tool-list). Backend tools run
+in the backend and reach the web; the store reads them from
+[`GET /api/v1/tools`](/reference/api/#tool-list). Both lists are read when the pane
+first appears, client tools first; a failed read of either list, or a name both
+lists share, shows the failure above the pane with Retry. Tools are grouped by
+their `group` (`files`, `web`), and each group says how many of its tools are
+on.
 
-Each row shows the tool's name, what it does with the machine (`reads`), that it
-runs in Lys, its description, an estimate of the tokens it adds to each request,
-and a switch. The estimate measures the function tool a model receives, built
+Each row shows the tool's name, what it does with the machine (`reads` or
+`network`), where it runs (`in Lys` for a client tool, `via runtime` for a
+backend tool), its description, an estimate of the tokens it adds to each
+request, and a switch. The estimate measures the function tool a model receives, built
 by `buildToolFunctionFormat` from `@lys/share`, with the composer's text
 estimator, so it varies with the model's tokenizer. Expanding a row, one at a
 time, shows the tool's arguments with their type and whether they are required;
@@ -305,13 +309,16 @@ locked and opens again when they unlock.
 
 Every choice on the pane applies to the next chat request or tool call: tool
 calls on or off, each tool's switch, and Ask me or Just run. Every tool starts
-on Ask me. The choices last for the session only; nothing is saved.
+on Ask me. A tool that only reads this machine starts on; a tool that sends
+requests off the machine (`network`) starts off. The choices last for the
+session only; nothing is saved.
 
 ## Tool calls
 
 A chat request offers the switched-on tools when tool calls are on and the
-loaded model's `trainedForToolUse` is true. If the tool list cannot be read, the
-request fails with an inline error and nothing is sent.
+loaded model's `trainedForToolUse` is true: client tools by their definitions,
+backend tools by name in `backendToolNames`. If the tool list cannot be read,
+the request fails with an inline error and nothing is sent.
 
 The tool-call store follows every reply the chat store starts or follows on
 its own reply-events connection, so tool calls keep moving while another
@@ -321,22 +328,28 @@ moment. An answered call stays held while the store follows its reply, so a
 snapshot built before the answer arrived does not bring the call back:
 
 1. A tool the desktop does not list, or arguments that do not match its
-   command, is answered as `runFailed`.
+   command, is answered as `runFailed`. A backend tool's call is checked too,
+   so the card never describes a URL the backend would not read.
 2. With tool calls off, or the tool switched off, the call is answered as
    `declined`.
-3. On Just run, the tool runs at once and nothing is shown.
+3. On Just run, a client tool runs at once and a backend tool's call is
+   answered `allowed` at once; nothing is shown.
 4. On Ask me, the call waits for the person.
 
 A waiting call shows a card above the composer field: the tool, what it does
-with the machine, that it runs in Lys, a plain sentence such as "Read
-/Users/me/notes/todo.md. Nothing is changed.", and its arguments on request.
-Reject sends the composer's text as the reason; Allow once runs the call, and
-Allow anyway does too while keeping the text. In the field, Escape rejects,
+with the machine, where it runs, a plain sentence such as "Read
+/Users/me/notes/todo.md. Nothing is changed." or "Read
+https://example.com/page. Sends a request to example.com.", with the full URL,
+and its arguments on request. Reject sends the composer's text as the reason;
+Allow once runs a client tool, or answers a backend tool's call `allowed` so
+the backend runs it; Allow anyway does the same while keeping the text. In the field, Escape rejects,
 Enter with an empty draft allows, and Enter with text rejects with that text.
 Several calls wait in the model's order, one card at a time.
 
 A read sends the file's text, a search sends its report as JSON, and a
-declared tool failure sends the failure as JSON. Each answer goes to the
+declared tool failure sends the failure as JSON. A backend tool's result goes
+from the backend to the model; the desktop never sees it. Each answer goes to
+the
 [tool-result route](/reference/api/#tool-results). When an answer cannot be
 sent, the card says so and Try again sends the same answer without running the
 tool again. When the reply ends, by finishing, Stop, or backend shutdown, its
@@ -366,11 +379,13 @@ are gone and the reply is marked interrupted when the backend next starts.
   context estimate only. The chat protocol has no attachment field, so staged
   attachments are never sent.
 - The Tools pane's choices last for the session only; every tool starts on Ask
-  me again after a restart.
+  me again after a restart ([#110](https://github.com/w3lt/lys/issues/110)).
+  Whether Just run stays and how approval is enforced is decided in
+  [#156](https://github.com/w3lt/lys/issues/156).
 - There is no "Allow for this chat": each call on Ask me is asked about.
 - Tool calls leave no trace in the transcript: a call on Just run shows
-  nothing, and an answered call's card disappears. Streamed and stored reply
-  parts are planned next.
+  nothing, and an answered call's card disappears. Steps and saved citations
+  are planned in [#154](https://github.com/w3lt/lys/issues/154).
 
 ## Related pages
 

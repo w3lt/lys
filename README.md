@@ -54,6 +54,9 @@ it. What she keeps is a SQLite database in your home directory,
 settings file — all of them yours to read, move, or delete, as long as the
 [three database files travel together](https://lys.negentropy.studio/operate/data/).
 Set `LYS_HOME` to an absolute path and she keeps them there instead.
+The one way out is a web page you let her read: the `read_page` tool starts
+off, she asks before every page, and her own backend fetches it, with no
+service in between.
 
 That closeness is the design goal rather than a finished guarantee. Local
 ownership is how the system is built, but the handbook is candid about
@@ -71,8 +74,9 @@ deleted, or reopened and continued where they stopped. Model settings can list,
 load, unload, and check local models; chat answers with a loaded model,
 preferring the default you choose, though that choice lasts only for the
 session. Generation controls shape future replies and save automatically.
-Memory, tools, and continuity are directions Lys is growing toward, not
-capabilities she already has.
+She can use tools when you let her: read and search files on your machine, or
+read a public web page, asking before each call. Memory and continuity are
+directions Lys is growing toward, not capabilities she already has.
 
 [See what exists today and what remains unfinished →](https://lys.negentropy.studio/overview/status/)
 

@@ -48,6 +48,9 @@ The backend itself depends on:
   database owner uses `DatabaseSync.setAuthorizer`)
 - an LM Studio instance reachable at `127.0.0.1:1234` for model features;
   startup does not require it
+- outbound HTTP and HTTPS access and a working name resolver for the
+  `read_page` tool only; nothing else needs the network, and a read that
+  cannot connect becomes the tool call's result
 
 The backend's chat and model services are both wired to that LM Studio address.
 The backend opens its HTTP listener at `127.0.0.1:12345` without waiting for LM

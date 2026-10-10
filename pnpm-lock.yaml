@@ -56,8 +56,8 @@ importers:
         specifier: ^0.6.0
         version: 0.6.0(fastify@5.12.5)
       "@lmstudio/sdk":
-        specifier: ^1.5.0
-        version: 1.5.0
+        specifier: ^2.0.0
+        version: 2.0.0
       "@lys/protocol":
         specifier: workspace:*
         version: link:../../packages/protocol
@@ -1786,16 +1786,16 @@ packages:
         integrity: sha512-dXn3FZhPv0US+7dtJsIi2R+c7qWYiReoEh5zUntWCf4oSpMNib8FDhSoed6m3QyZdx5hK7iLFkYk3rNxwt8vTA==
       }
 
-  "@lmstudio/lms-isomorphic@0.4.6":
+  "@lmstudio/lms-isomorphic@0.5.0":
     resolution:
       {
-        integrity: sha512-v0LIjXKnDe3Ff3XZO5eQjlVxTjleUHXaom14MV7QU9bvwaoo3l5p71+xJ3mmSaqZq370CQ6pTKCn1Bb7Jf+VwQ==
+        integrity: sha512-PunyIQL0vsiOlNHiLJUEcNnwOKqUmCFcNrTk7GwH0v2NCzKR6PctFpTtviHLFQyrXyS4D6aLThzqbC4YCBiuQg==
       }
 
-  "@lmstudio/sdk@1.5.0":
+  "@lmstudio/sdk@2.0.0":
     resolution:
       {
-        integrity: sha512-fdY12x4hb14PEjYijh7YeCqT1ZDY5Ok6VR4l4+E/dI+F6NW8oB+P83Sxed5vqE4XgTzbgyPuSR2ZbMNxxF+6jA==
+        integrity: sha512-h0DY+OQVdv0oJ1hebV97Z6eRPS8I7Hjo5QaCOp3XNnucfyNRga/smu8miigYp294HgMESvFJO69vhdpcnRD5vQ==
       }
 
   "@napi-rs/wasm-runtime@1.2.4":
@@ -7615,16 +7615,16 @@ snapshots:
 
   "@keyv/serialize@1.1.1": {}
 
-  "@lmstudio/lms-isomorphic@0.4.6":
+  "@lmstudio/lms-isomorphic@0.5.0":
     dependencies:
       ws: 8.22.0
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
 
-  "@lmstudio/sdk@1.5.0":
+  "@lmstudio/sdk@2.0.0":
     dependencies:
-      "@lmstudio/lms-isomorphic": 0.4.6
+      "@lmstudio/lms-isomorphic": 0.5.0
       chalk: 4.1.2
       jsonschema: 1.5.0
       zod: 3.25.76

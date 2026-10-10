@@ -17,7 +17,7 @@ React UI.
 | `start_backend`      | Starts the backend for the current build mode with the Lys home and stores the child handle. |
 | `stop_backend`       | Kills the backend process group and waits for shutdown.                                      |
 | `get_backend_status` | Reports whether the stored child process is still running.                                   |
-| `load_settings`      | Reads `$LYS_HOME/settings.json`, creating a default file if needed.                          |
+| `load_settings`      | Reads `$LYS_HOME/settings.json`, creating a default file or adding its load configuration.   |
 | `save_settings`      | Writes a new settings JSON document to `$LYS_HOME/settings.json`.                            |
 | `read_text_file`     | Returns the complete text of one UTF-8 file of at most 1 MiB.                                |
 | `find_files`         | Searches a directory tree for regular files by name or by text content.                      |
@@ -130,6 +130,15 @@ The host creates the following defaults when the settings file is missing:
   "generation": {
     "temperature": 0.7,
     "replyCeiling": 2048
+  },
+  "loadConfiguration": {
+    "default": {
+      "contextLength": 8192,
+      "evalBatchSize": 512,
+      "flashAttention": true,
+      "offloadKVCacheToGpu": true
+    },
+    "models": {}
   }
 }
 ```
@@ -137,11 +146,20 @@ The host creates the following defaults when the settings file is missing:
 Only the Rust host reads and writes this file directly. The React UI reaches it
 through Tauri `invoke` calls.
 
+The `loadConfiguration` default comes from the committed file
+`apps/desktop/src-tauri/default_model_load_configuration.json`, which the host
+embeds when it is built. A settings file written before load configurations
+existed has no such group; `load_settings` adds the initial group to it and
+writes the file once, keeping its other groups. `save_settings` requires the
+group.
+
 The desktop automatically saves generation edits by reading this document,
-replacing its generation group, and saving the complete document. Runtime and
-model edits in the UI remain session-only; generation saves preserve those
-groups as already stored on disk. The local context size supports composer
-estimates and does not configure LM Studio's load-time context.
+replacing its generation group, and saving the complete document. Load
+configuration edits are saved the same way. Runtime edits and
+`model.contextSize` edits in the UI remain session-only; the automatic saves
+preserve those groups as already stored on disk. The local context size
+supports composer estimates and is separate from the context length a model is
+loaded with.
 
 ## What the host does not currently do
 

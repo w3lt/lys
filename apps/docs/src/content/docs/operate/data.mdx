@@ -25,14 +25,15 @@ unless the `LYS_HOME` environment variable selects another directory.
 The desktop host owns a JSON settings file at `$LYS_HOME/settings.json`.
 
 - created automatically when the file is missing
-- stores the `runtime`, `model`, and `generation` groups described in
-  [Configuration](/operate/configuration/)
+- stores the `runtime`, `model`, `generation`, and `loadConfiguration` groups
+  described in [Configuration](/operate/configuration/)
 - parsed as JSON on load and rewritten as pretty-printed JSON when the Tauri
   `save_settings` command is called
 
-The desktop loads this file at initialization and autosaves generation edits.
-That save path preserves the runtime and model groups already on disk; runtime
-and model edits in the UI remain session-only.
+The desktop loads this file at initialization and autosaves generation and
+load configuration edits. Each save replaces only its own group and preserves
+the others already on disk; runtime edits and `model.contextSize` edits in the
+UI remain session-only.
 
 ## `$LYS_HOME/lys_db.sqlite`
 

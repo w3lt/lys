@@ -149,12 +149,45 @@ pane explains how to recover. A manual Refresh action picks up changes made in
 LM Studio. Inventory metadata and each model's `loaded` flag drive the model
 rows and composer menu; several models may be loaded at once.
 
-Load sends `{ modelId }` to `POST /api/v1/llm/load`. Unload sends the same body
-to `PATCH /api/v1/llm/unload` and accepts its bodyless `204` response. Both
-operations reconcile the inventory afterward, including when the command
-fails, because a lost acknowledgement does not establish whether weights
+Load sends `{ modelId, configuration }` to `POST /api/v1/llm/load`. Unload sends
+`{ modelId }` to `PATCH /api/v1/llm/unload` and accepts its bodyless `204`
+response. Both operations reconcile the inventory afterward, including when the
+command fails, because a lost acknowledgement does not establish whether weights
 changed. Requests are serialized locally and mutations are never retried
 automatically.
+
+### Load configuration
+
+Every load the desktop starts, from the Runtime pane or from a model row, sends
+that model's load configuration. The store builds it when the load is admitted:
+each setting is the model's own stored value when it has one and the stored
+default's value otherwise, and the context length is lowered to the model's
+`maxContextLength` from the inventory. Edits made while the load is in flight
+do not change what it sent. The composer's "Load model" action opens the Model
+pane and starts no load.
+
+The Model pane's "load configuration" section edits the configuration of the
+selected default model, or of the loaded model when no default model is listed.
+It has five rows: context length, eval batch size, flash attention, KV cache on
+GPU, and active experts. An edit is stored for that model only, applies to its
+next load, and is saved automatically to the `loadConfiguration` group of
+`settings.json`. Active experts reads "auto" until it is set, because LM Studio
+reports no expert counts.
+
+The runtime does not report the settings a loaded model runs with, so the store
+keeps its own record for each model it observes as loaded:
+
+- For a model Lys loaded in this session, the record is the configuration that
+  load sent. When the stored settings differ from it, each changed row shows
+  the loaded value, and a line under the rows lists what a reload would apply.
+- For a model found already loaded, the record is the configuration stored
+  when it was first observed. It only shows whether the settings changed since.
+  The pane then says that changes apply on the next load.
+
+"Reload now" unloads the model and loads it again with its stored configuration,
+as one operation. If the unload fails, no load starts. If the load fails after
+the unload, the model stays unloaded and the failure is shown. Stopping the
+backend or losing LM Studio discards the records.
 
 Test calls `GET /api/v1/llm/:modelId/health` with the canonical key encoded as
 one path segment. Its result reports a fresh loaded-state observation and query
@@ -308,11 +341,14 @@ are gone and the reply is marked interrupted when the backend next starts.
 
 ## Current limitations
 
-- Runtime and model edits remain session-only. Generation settings save
-  automatically; a failed save leaves the edits available for the current session.
-- The load API accepts only `modelId`. Model settings explain that LM Studio
-  controls the load-time context size. The retained local context budget is
-  used for composer estimates and is not a confirmed runtime configuration.
+- Runtime edits and `model.contextSize` edits remain session-only. Generation
+  settings and load configurations save automatically; a failed save leaves the
+  edits available for the current session.
+- The retained local context budget, `model.contextSize`, is still used for
+  composer estimates. It is separate from the context length in a model's load
+  configuration and does not follow it.
+- The KV cache load setting has no effect with the installed LM Studio SDK; see
+  the [load request](/reference/api/#model-load-request).
 - Model observations refresh on LM Studio connection, entry into settings,
   manual refresh, and model operations. The LM Studio status changes only on
   backend start, Refresh, and failed model requests; it is not polled. Changes

@@ -16,7 +16,7 @@ route definitions.
 | `GET`    | `/api/v1/heath`                                                                 | none                                                                               | `{ ok: true }`                                             |
 | `GET`    | `/api/v1/llm/list`                                                              | none                                                                               | `{ llms: LlmInfo[] }`                                      |
 | `GET`    | `/api/v1/llm/:modelId/health`                                                   | none                                                                               | Loaded-state health observation                            |
-| `POST`   | `/api/v1/llm/load`                                                              | `{ modelId: string }`                                                              | `LlmInfo`                                                  |
+| `POST`   | `/api/v1/llm/load`                                                              | `{ modelId: string, configuration?: ModelLoadConfiguration }`                      | `LlmInfo`                                                  |
 | `PATCH`  | `/api/v1/llm/unload`                                                            | `{ modelId: string }`                                                              | `204` or typed Problem Details                             |
 | `GET`    | `/api/v1/llm/runtime`                                                           | none                                                                               | `{ status: "connecting" \| "connected" \| "unreachable" }` |
 | `POST`   | `/api/v1/llm/runtime/connect`                                                   | none                                                                               | Settled `{ status }`, or service-busy Problem Details      |
@@ -343,6 +343,50 @@ A taken code returns `409` with the same media type, `type`
 - `loaded`
 
 `GET /api/v1/llm/list` returns `llms` ordered by `modelKey`, then by `path`.
+
+## Model load request
+
+`POST /api/v1/llm/load` takes the model to load and, optionally, the settings
+LM Studio loads it with:
+
+```json
+{
+  "modelId": "google/gemma-4-12b-qat",
+  "configuration": {
+    "contextLength": 16384,
+    "evalBatchSize": 512,
+    "flashAttention": true,
+    "offloadKVCacheToGpu": true,
+    "numExperts": 4
+  }
+}
+```
+
+| Field                               | Type    | Meaning                                                           |
+| ----------------------------------- | ------- | ----------------------------------------------------------------- |
+| `modelId`                           | string  | Non-empty model key or alias that LM Studio resolves              |
+| `configuration.contextLength`       | integer | Context window the model is loaded with, in tokens                |
+| `configuration.evalBatchSize`       | integer | Prompt tokens evaluated together in one batch                     |
+| `configuration.flashAttention`      | boolean | Whether the model is loaded with flash attention                  |
+| `configuration.offloadKVCacheToGpu` | boolean | Whether the KV cache is kept in GPU memory rather than in RAM     |
+| `configuration.numExperts`          | integer | Experts active per token; only mixture-of-experts models use this |
+
+- `configuration` and each setting in it are optional. LM Studio decides every
+  setting the request leaves out, so a request with only `modelId` loads the
+  model with LM Studio's own settings.
+- Each integer is a whole number from 1 to 4,294,967,295.
+- The backend answers `400` before starting a load when `configuration` is
+  `null` or not an object, holds a setting other than the five above, or holds
+  a value of the wrong type or outside the range.
+- The backend does not compare `contextLength` with the model's
+  `maxContextLength`. LM Studio decides what happens with a value the model
+  cannot use.
+- The settings apply to this load only. The backend does not store them.
+
+The backend passes the settings to the LM Studio SDK's load call. With the
+installed `@lmstudio/sdk` 1.5.0, the SDK accepts `offloadKVCacheToGpu` but does
+not send it to LM Studio, so LM Studio keeps its own choice for the KV cache.
+SDK 2.0.0 sends it.
 
 ## Model operation admission
 

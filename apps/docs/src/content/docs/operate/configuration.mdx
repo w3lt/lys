@@ -30,20 +30,29 @@ the Dock does not see a `LYS_HOME` exported in a shell profile.
 The Tauri desktop host reads and writes one JSON settings file at
 `$LYS_HOME/settings.json`.
 
-The current schema contains `runtime`, `model`, and `generation` groups. Rust
+The current schema contains `runtime`, `model`, `generation`, and
+`loadConfiguration` groups. Rust
 and the TypeScript settings projection use the same camelCase field names. See
 the [configuration reference](/reference/configuration/) for the complete field
 list, defaults, and accepted values.
 
 The stored `model.contextSize` is a local token budget used by the composer and
-generation controls. It does not override LM Studio's model-load context size.
+generation controls. It is separate from the context length a model is loaded
+with, which belongs to that model's load configuration.
 
-Missing groups and fields receive their Rust defaults. Invalid JSON or invalid
-typed values fail loading; for example, Rust rejects temperatures outside
-`[0, 1]` and token counts outside the unsigned 32-bit integer range.
+The `loadConfiguration` group holds the settings Lys sends when it loads a
+model: one default, and the values changed for each model. They are edited in
+the Model settings pane.
+
+A missing `runtime`, `model`, or `generation` group, and missing fields in
+them, receive their Rust defaults. Invalid JSON or invalid typed values fail
+loading; for example, Rust rejects temperatures outside `[0, 1]` and token
+counts outside the unsigned 32-bit integer range.
 
 When the file does not exist yet, the desktop host creates the Lys home
-directory if needed and writes the default structure on first load.
+directory if needed and writes the default structure on first load. When an
+existing file has no `loadConfiguration` group, the host adds the initial one
+and rewrites the file once.
 
 ## Current UI wiring
 
@@ -54,8 +63,13 @@ runtime and model groups. Save status is retained across pane changes, and the
 generation pane offers a retry action. A failed save keeps the current
 in-memory edits usable.
 
-Runtime and model edits remain session-only. Changing those controls does not
-persist them, and a later generation save does not save their in-memory values.
+Load configuration edits in the Model pane autosave the same way, replacing
+only the `loadConfiguration` group, and the Model pane offers the same retry
+action.
+
+Runtime edits and `model.contextSize` edits remain session-only. Changing those
+controls does not persist them, and a later automatic save does not save their
+in-memory values.
 
 ## Fixed runtime addresses
 

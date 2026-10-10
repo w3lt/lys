@@ -14,7 +14,7 @@ definitions, a small JSON settings file, and one desktop theme preference.
 | Artifact         | Owner           | Location                                | Purpose                                                                        |
 | ---------------- | --------------- | --------------------------------------- | ------------------------------------------------------------------------------ |
 | Backend database | Fastify backend | `$LYS_HOME/lys_db.sqlite`               | Stores conversation metadata, conversation messages, and agent definitions.    |
-| Settings JSON    | Tauri host      | `$LYS_HOME/settings.json`               | Stores runtime, model, and generation settings.                                |
+| Settings JSON    | Tauri host      | `$LYS_HOME/settings.json`               | Stores runtime, model, generation, and load configuration settings.            |
 | Theme preference | Desktop UI      | WebView `localStorage`, key `lys.theme` | Stores `dark` or `light`; invalid or unavailable storage falls back to `dark`. |
 
 ## SQLite ownership
@@ -109,10 +109,11 @@ its first use and reused; each delta runs in one write transaction.
 The settings JSON is a separate host-managed artifact. The backend does not read
 it directly. The desktop reaches it through Tauri commands.
 
-Generation edits are saved automatically. Each save reads the document already
-on disk and replaces only its `generation` group, preserving the persisted
-runtime and model groups. Runtime edits, including auto-start and default-model
-selection, and model settings edits remain session-only in the desktop.
+Generation and load configuration edits are saved automatically. Each save
+reads the document already on disk and replaces only its own group, preserving
+the other persisted groups. Runtime edits, including auto-start and
+default-model selection, and `model.contextSize` edits remain session-only in
+the desktop.
 See the [configuration reference](/reference/configuration/#persisted-settings-json)
 for the current shape and defaults.
 

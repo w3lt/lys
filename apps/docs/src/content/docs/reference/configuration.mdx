@@ -122,6 +122,15 @@ defaults:
   "generation": {
     "temperature": 0.7,
     "replyCeiling": 2048
+  },
+  "loadConfiguration": {
+    "default": {
+      "contextLength": 8192,
+      "evalBatchSize": 512,
+      "flashAttention": true,
+      "offloadKVCacheToGpu": true
+    },
+    "models": {}
   }
 }
 ```
@@ -134,10 +143,53 @@ defaults:
 | `model.contextSize`        | unsigned 32-bit integer | Context-size estimate displayed in the Model pane; not forwarded by the load API                   |
 | `generation.temperature`   | number in `[0, 1]`      | Sampling temperature sent with each new chat request                                               |
 | `generation.replyCeiling`  | unsigned 32-bit integer | Maximum reply tokens; the desktop omits the request limit when this is `0`                         |
+| `loadConfiguration`        | object                  | Settings sent with each model load; see [Load configuration](#load-configuration)                  |
 
-Missing groups or fields use the host defaults. Invalid JSON or invalid field
-values, including a temperature outside `[0, 1]`, cause loading to fail. Loading
-a missing file creates the parent directory and writes the default document.
+A missing `runtime`, `model`, or `generation` group, or a missing field in one
+of them, uses the host defaults. Invalid JSON or invalid field values, including
+a temperature outside `[0, 1]`, cause loading to fail, and the file is left as
+it is. Loading a missing file creates the parent directory and writes the
+default document.
+
+### Load configuration
+
+The `loadConfiguration` group holds the settings Lys sends when it loads a
+model. The [load request](/reference/api/#model-load-request) defines each
+setting.
+
+| Key                         | Type                        | Meaning                                                                    |
+| --------------------------- | --------------------------- | -------------------------------------------------------------------------- |
+| `loadConfiguration.default` | object                      | Settings for a model that has none of its own                              |
+| `loadConfiguration.models`  | object keyed by model key   | Settings each model has of its own; an entry holds only the changed values |
+| `contextLength`             | integer, 1 to 4,294,967,295 | Context window, in tokens                                                  |
+| `evalBatchSize`             | integer, 1 to 4,294,967,295 | Prompt tokens evaluated in one batch                                       |
+| `flashAttention`            | boolean                     | Whether flash attention is on                                              |
+| `offloadKVCacheToGpu`       | boolean                     | Whether the KV cache is kept in GPU memory                                 |
+| `numExperts`                | integer, 1 to 4,294,967,295 | Experts active per token                                                   |
+
+- `default` must hold `contextLength`, `evalBatchSize`, `flashAttention`, and
+  `offloadKVCacheToGpu`. `numExperts` is optional in it.
+- Every setting is optional in a `models` entry.
+- When Lys loads a model, each setting is the model's own value when it has
+  one and the default's value otherwise. `numExperts` is not sent when neither
+  has it. The context length is lowered to the model's `maxContextLength` when
+  the configured value is larger.
+- When the group is present, both `default` and `models` are required. An
+  unknown setting, `null`, a fraction, or a value outside the range makes
+  loading the settings fail.
+
+The initial default is the committed file
+`apps/desktop/src-tauri/default_model_load_configuration.json`, which the host
+embeds when it is built. The host writes it into `settings.json`, with an empty
+`models` object, in two cases: when it creates the file, and when it loads an
+existing file that has no `loadConfiguration` group. In the second case the
+other groups are kept and the file is rewritten once. Editing the committed
+file changes what later settings files are given. A `settings.json` that
+already has the group keeps its stored default.
+
+An older Lys build does not know the group. It ignores it and removes it the
+next time it saves settings, so going back to an older build loses the stored
+load configurations.
 
 ## Settings updates
 
@@ -148,13 +200,18 @@ through the application store. Agents are stored by the backend, not in
 
 Generation edits apply to future messages immediately and are saved
 automatically through Tauri. The save reloads the persisted document and replaces
-only its `generation` group, preserving runtime and model values already on disk.
+only its `generation` group, preserving the other values already on disk.
 Saves are serialized and newer edits are saved after the active write settles.
 Save failure leaves the current values usable and exposes a retry action.
 
+Load configuration edits in the Model pane are saved the same way, replacing
+only the `loadConfiguration` group. They apply to the next load of the model
+they belong to. The desktop runs the two kinds of save one at a time, so neither
+writes back an older copy of the other group.
+
 Runtime edits, including auto-start and default-model selection, remain in memory
-for the current session. Model settings edits also remain session-only. A
-generation save does not persist those unsaved groups.
+for the current session. Edits to `model.contextSize` also remain session-only.
+A generation or load configuration save does not persist those unsaved groups.
 
 ## Desktop theme preference
 
@@ -166,13 +223,16 @@ the value is missing, invalid, or unavailable.
 
 - The React shell loads runtime settings from Tauri, but runtime and model edits,
   including `runtime.defaultModel`, are not persisted back through `save_settings`.
-- Model context size is controlled by LM Studio at load time; the current Lys
-  load request carries only the model identifier.
+- `model.contextSize` is still a separate local estimate. The composer's
+  context meter uses it and does not follow the context length a model is
+  loaded with.
+- LM Studio applies its own settings when it loads a model by itself, for
+  example when a chat request names a model that is not loaded. The load
+  configuration applies only to loads Lys starts.
 
 ## Coming soon
 
 - Persisting runtime and model edits back to `settings.json`
-- Configuring model load-time context size through the backend
 - Release-mode configuration beyond the current loopback defaults
 
 ## Related pages

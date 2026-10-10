@@ -6,7 +6,10 @@ import {
   conversationMetadataSchema,
   conversationUserMessageSchema,
   hasDistinctToolNames,
-  toolDefinitionSchema
+  isEveryToolRunBy,
+  toolDefinitionSchema,
+  toolNameSchema,
+  type ToolDefinition
 } from "@lys/share"
 import {
   chatDeltaEventSchema,
@@ -51,22 +54,96 @@ const chatConversationTargetSchema = z.discriminatedUnion("kind", [
 ])
 
 /**
- * Validates the client tools a chat request offers to the model.
+ * Answers whether every offered definition is a tool the client runs.
  *
- * @remarks Lists only the client's switched-on tools; tools the backend runs
- * itself are added by the backend. Offered only to a model trained for tool
- * use.
+ * @param definitions - Validated definitions of the offered client tools.
+ * @returns True when every definition's runner is `client`.
  */
-const chatToolOfferSchema = z.strictObject({
-  /** Definitions of the switched-on client tools, each name once. */
-  definitions: z
-    .array(toolDefinitionSchema)
-    .min(1)
-    .refine(hasDistinctToolNames, "A request offers each tool name once.")
-    .readonly()
-})
+function hasOnlyClientTools(definitions: readonly ToolDefinition[]): boolean {
+  return isEveryToolRunBy(definitions, "client")
+}
 
-/** Client tools one chat request offers to the model. */
+/**
+ * Answers whether no backend tool name is offered twice.
+ *
+ * @param toolNames - Offered backend tool names in offer order.
+ * @returns True when every name appears once.
+ */
+function hasDistinctBackendToolNames(toolNames: readonly string[]): boolean {
+  return new Set(toolNames).size === toolNames.length
+}
+
+/** Client and backend tools of one chat offer, before their combined checks. */
+type ChatToolOfferCandidate = Readonly<{
+  /** Offered client tool definitions. */
+  definitions: readonly ToolDefinition[]
+  /** Offered backend tool names; undefined when the offer names none. */
+  backendToolNames?: readonly string[] | undefined
+}>
+
+/**
+ * Answers whether an offer names at least one tool.
+ *
+ * @param offer - Offered client definitions and backend tool names.
+ * @returns True when either list holds a tool.
+ */
+function hasOfferedTool(offer: ChatToolOfferCandidate): boolean {
+  return (
+    offer.definitions.length > 0 || (offer.backendToolNames ?? []).length > 0
+  )
+}
+
+/**
+ * Answers whether no name is offered both as a client and as a backend tool.
+ *
+ * @param offer - Offered client definitions and backend tool names.
+ * @returns True when the two lists share no name.
+ */
+function hasDistinctOfferedToolNames(offer: ChatToolOfferCandidate): boolean {
+  const clientToolNames = new Set(offer.definitions.map((tool) => tool.name))
+  return (offer.backendToolNames ?? []).every(
+    (toolName) => !clientToolNames.has(toolName)
+  )
+}
+
+/**
+ * Validates the tools a chat request offers to the model.
+ *
+ * @remarks Lists the client's switched-on tools as complete definitions,
+ * because the backend does not know them, and the switched-on tools the
+ * backend runs by name, because the backend owns their definitions. At least
+ * one tool is offered, and no name is offered twice across the two lists.
+ * The backend rejects a backend tool name it does not run. Offered only to a
+ * model trained for tool use.
+ */
+const chatToolOfferSchema = z
+  .strictObject({
+    /** Definitions of the switched-on client tools, each name once; may be empty. */
+    definitions: z
+      .array(toolDefinitionSchema)
+      .refine(hasDistinctToolNames, "A request offers each tool name once.")
+      .refine(hasOnlyClientTools, "Offered definitions are client tools.")
+      .readonly(),
+    /**
+     * Names of the switched-on backend tools, each name once. Absence means
+     * the request offers no backend tool.
+     */
+    backendToolNames: z
+      .array(toolNameSchema)
+      .refine(
+        hasDistinctBackendToolNames,
+        "A request offers each backend tool name once."
+      )
+      .readonly()
+      .optional()
+  })
+  .refine(hasOfferedTool, "A tool offer names at least one tool.")
+  .refine(
+    hasDistinctOfferedToolNames,
+    "A request offers each tool name once across client and backend tools."
+  )
+
+/** Client and backend tools one chat request offers to the model. */
 export type ChatToolOffer = z.infer<typeof chatToolOfferSchema>
 
 /** Validates a chat request for a new or an existing conversation. */
@@ -80,8 +157,7 @@ export const chatApiRequestBodySchema = z.strictObject({
   /** Required generation controls; absence is not represented by this contract. */
   generationOptions: messageGenerationOptionsSchema,
   /**
-   * Client tools offered for this turn; absence means one round without
-   * tools.
+   * Tools offered for this turn; absence means one round without tools.
    */
   tools: chatToolOfferSchema.optional()
 })

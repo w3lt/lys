@@ -60,8 +60,8 @@ export type SettingsContextValue = ModelState & {
     settings: ModelLoadConfiguration
   ) => void
   /**
-   * Requests that one model's own expert count be removed, so the stored
-   * default applies to it.
+   * Requests that one model's own expert count be removed, so the default's
+   * count, or none, applies to it.
    *
    * @param modelKey - Key of the model whose own expert count is removed.
    */

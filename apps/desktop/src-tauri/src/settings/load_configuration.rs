@@ -1,21 +1,15 @@
 //! Load settings stored under the `loadConfiguration` settings group.
 //!
 //! The group holds one default and, per model key, the settings a person
-//! changed for that model. The desktop renderer resolves the settings of one
-//! load from both and sends them with the load request; this module only
-//! stores them. The accepted values match the load request's contract: whole
-//! numbers from 1 to 4,294,967,295, and booleans.
+//! changed for that model. Both hold only the settings written to the
+//! settings file. The desktop renderer resolves the settings of one load from
+//! them and from the committed default, and sends them with the load request;
+//! this module only stores them. The accepted values match the load request's
+//! contract: whole numbers from 1 to 4,294,967,295, and booleans.
 
 use std::{collections::BTreeMap, num::NonZeroU32};
 
 use serde::{Deserialize, Deserializer, Serialize};
-
-/// Committed default load configuration, embedded when the host is built.
-///
-/// It is the default of a settings file that has no load configuration yet.
-/// Editing the file changes what such files are given; a settings file that
-/// already has the group keeps its stored default.
-const COMMITTED_DEFAULT_JSON: &str = include_str!("../../default_model_load_configuration.json");
 
 /// Deserializes a setting that is present in the input.
 ///
@@ -27,7 +21,7 @@ const COMMITTED_DEFAULT_JSON: &str = include_str!("../../default_model_load_conf
 ///
 /// Returns the deserializer's error when the input, including `null`, is not a
 /// valid value of the setting's type.
-pub(super) fn parse_present_setting<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+fn parse_present_setting<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
 where
     D: Deserializer<'de>,
     T: Deserialize<'de>,
@@ -37,11 +31,12 @@ where
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "camelCase")]
-/// Load settings one model has of its own.
+/// Load settings written to the settings file, for one model or as the
+/// default for every model.
 ///
-/// Every setting is optional. A setting that is absent is supplied by the
-/// stored default when the model is loaded, and is left out of the serialized
-/// object. Unknown settings and `null` are rejected.
+/// Every setting is optional. A setting that is absent is left out of the
+/// serialized object, and the renderer supplies it from the next layer when a
+/// model is loaded. Unknown settings and `null` are rejected.
 pub struct ModelLoadConfiguration {
     /// Context window the model is loaded with, in tokens.
     #[serde(
@@ -79,102 +74,33 @@ pub struct ModelLoadConfiguration {
     num_experts: Option<NonZeroU32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-/// Load settings used for a model that has none of its own.
-///
-/// The context length, eval batch size, flash attention, and KV cache settings
-/// are required, so a load Lys starts always sends them. The expert count is
-/// optional and is left out of the serialized object when absent. Unknown
-/// settings and `null` are rejected.
-pub struct DefaultModelLoadConfiguration {
-    /// Context window a model is loaded with, in tokens.
-    context_length: NonZeroU32,
-    /// Prompt tokens evaluated together in one batch.
-    eval_batch_size: NonZeroU32,
-    /// Whether a model is loaded with flash attention.
-    flash_attention: bool,
-    /// Whether the KV cache is kept in GPU memory rather than in RAM.
-    ///
-    /// The wire name keeps LM Studio's capitalization, which camelCase
-    /// renaming would not produce.
-    #[serde(rename = "offloadKVCacheToGpu")]
-    offload_kv_cache_to_gpu: bool,
-    /// Experts active per token; only mixture-of-experts models use it.
-    #[serde(
-        default,
-        deserialize_with = "parse_present_setting",
-        skip_serializing_if = "Option::is_none"
-    )]
-    num_experts: Option<NonZeroU32>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 /// Load settings persisted under the `loadConfiguration` JSON object.
 ///
-/// Both parts are required when the group is present. Model keys are stored
-/// in ascending order, so that saving unchanged settings rewrites the same
-/// text.
+/// A missing part is empty, and so is a missing group, which a settings file
+/// written before load settings existed lacks. Neither part may be `null`.
+/// Model keys are stored in ascending order, so that saving unchanged
+/// settings rewrites the same text.
 pub struct LoadConfigurationSettings {
-    /// Settings used for a model that has none of its own, in the `default`
-    /// object.
+    /// Settings for every model that has none of its own, in the `default`
+    /// object. Empty unless a person writes settings into it; the committed
+    /// default is never copied here.
     #[serde(rename = "default")]
-    default_configuration: DefaultModelLoadConfiguration,
+    default_configuration: ModelLoadConfiguration,
     /// Settings each model has of its own, keyed by the model's key.
     models: BTreeMap<String, ModelLoadConfiguration>,
-}
-
-impl LoadConfigurationSettings {
-    /// Creates the load settings of a settings file that has none yet: the
-    /// committed default and no model settings.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the committed default file is not a valid default
-    /// configuration.
-    pub fn create_initial() -> Result<Self, String> {
-        let default_configuration =
-            serde_json::from_str(COMMITTED_DEFAULT_JSON).map_err(|err| {
-                format!("Failed to parse the committed default load configuration: {err}")
-            })?;
-
-        Ok(Self {
-            default_configuration,
-            models: BTreeMap::new(),
-        })
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use serde_json::{json, Value};
 
-    use super::{DefaultModelLoadConfiguration, LoadConfigurationSettings, ModelLoadConfiguration};
+    use super::{LoadConfigurationSettings, ModelLoadConfiguration};
 
-    /// Returns the JSON form of the settings a settings file without the group
-    /// is given.
-    fn get_initial_settings_json() -> Value {
-        let settings =
-            LoadConfigurationSettings::create_initial().expect("a valid committed default");
-
+    /// Returns the JSON form of `settings`.
+    fn get_settings_json(settings: &LoadConfigurationSettings) -> Value {
         serde_json::to_value(settings).expect("settings that serialize")
-    }
-
-    #[test]
-    fn initial_settings_hold_the_committed_default_and_no_model() {
-        assert_eq!(
-            get_initial_settings_json(),
-            json!({
-                "default": {
-                    "contextLength": 8192,
-                    "evalBatchSize": 512,
-                    "flashAttention": true,
-                    "offloadKVCacheToGpu": true
-                },
-                "models": {}
-            })
-        );
     }
 
     #[test]
@@ -264,87 +190,64 @@ mod tests {
     }
 
     #[test]
-    fn default_settings_keep_an_expert_count_that_is_set() {
-        let stored = json!({
-            "contextLength": 4096,
-            "evalBatchSize": 256,
-            "flashAttention": false,
-            "offloadKVCacheToGpu": false,
-            "numExperts": 2
-        });
+    fn group_reads_a_missing_part_as_empty() {
+        let read_groups = [
+            (json!({}), json!({ "default": {}, "models": {} })),
+            (
+                json!({ "models": { "a/model": { "contextLength": 4096 } } }),
+                json!({ "default": {}, "models": { "a/model": { "contextLength": 4096 } } }),
+            ),
+            (
+                json!({ "default": { "flashAttention": false } }),
+                json!({ "default": { "flashAttention": false }, "models": {} }),
+            ),
+        ];
 
-        let configuration: DefaultModelLoadConfiguration =
-            serde_json::from_value(stored.clone()).expect("valid default settings");
+        for (stored, expected) in read_groups {
+            let settings: LoadConfigurationSettings =
+                serde_json::from_value(stored.clone()).expect("a valid group");
 
+            assert_eq!(get_settings_json(&settings), expected, "read {stored}");
+        }
+    }
+
+    #[test]
+    fn empty_group_is_the_group_default() {
         assert_eq!(
-            serde_json::to_value(configuration).expect("settings that serialize"),
-            stored
+            get_settings_json(&LoadConfigurationSettings::default()),
+            json!({ "default": {}, "models": {} })
         );
     }
 
     #[test]
-    fn default_settings_reject_a_missing_required_setting() {
-        for missing_setting in [
-            "contextLength",
-            "evalBatchSize",
-            "flashAttention",
-            "offloadKVCacheToGpu",
-        ] {
-            let mut stored = json!({
-                "contextLength": 8192,
-                "evalBatchSize": 512,
-                "flashAttention": true,
-                "offloadKVCacheToGpu": true
-            });
-            stored
-                .as_object_mut()
-                .expect("a JSON object")
-                .remove(missing_setting);
-
-            let configuration: Result<DefaultModelLoadConfiguration, _> =
-                serde_json::from_value(stored);
-
-            assert!(
-                configuration.is_err(),
-                "accepted a default without {missing_setting}"
-            );
-        }
-    }
-
-    #[test]
-    fn default_settings_reject_an_unknown_or_null_setting() {
-        for (setting, stored_setting) in [("seed", json!(1)), ("numExperts", Value::Null)] {
-            let mut stored = json!({
-                "contextLength": 8192,
-                "evalBatchSize": 512,
-                "flashAttention": true,
-                "offloadKVCacheToGpu": true
-            });
-            stored
-                .as_object_mut()
-                .expect("a JSON object")
-                .insert(setting.to_owned(), stored_setting);
-
-            let configuration: Result<DefaultModelLoadConfiguration, _> =
-                serde_json::from_value(stored);
-
-            assert!(configuration.is_err(), "accepted a default with {setting}");
-        }
-    }
-
-    #[test]
-    fn group_rejects_a_missing_part_or_an_unknown_one() {
-        let default_configuration = json!({
-            "contextLength": 8192,
-            "evalBatchSize": 512,
-            "flashAttention": true,
-            "offloadKVCacheToGpu": true
+    fn group_keeps_every_setting_of_the_default() {
+        let stored = json!({
+            "default": {
+                "contextLength": 4096,
+                "evalBatchSize": 256,
+                "flashAttention": false,
+                "offloadKVCacheToGpu": false,
+                "numExperts": 2
+            },
+            "models": {}
         });
+
+        let settings: LoadConfigurationSettings =
+            serde_json::from_value(stored.clone()).expect("a valid group");
+
+        assert_eq!(get_settings_json(&settings), stored);
+    }
+
+    #[test]
+    fn group_rejects_an_unknown_or_null_part_or_setting() {
         let rejected_groups = [
-            json!({ "models": {} }),
-            json!({ "default": default_configuration }),
-            json!({ "default": default_configuration, "models": {}, "extra": true }),
-            json!({ "default": default_configuration, "models": { "a/model": null } }),
+            json!({ "extra": true }),
+            json!({ "default": null }),
+            json!({ "models": null }),
+            json!({ "models": { "a/model": null } }),
+            json!({ "default": { "seed": 1 } }),
+            json!({ "default": { "numExperts": null } }),
+            json!({ "default": { "contextLength": 0 } }),
         ];
 
         for stored in rejected_groups {
@@ -358,12 +261,7 @@ mod tests {
     #[test]
     fn group_stores_models_in_key_order() {
         let settings: LoadConfigurationSettings = serde_json::from_value(json!({
-            "default": {
-                "contextLength": 8192,
-                "evalBatchSize": 512,
-                "flashAttention": true,
-                "offloadKVCacheToGpu": true
-            },
+            "default": {},
             "models": {
                 "zeta/model": { "contextLength": 4096 },
                 "alpha/model": { "numExperts": 2 }

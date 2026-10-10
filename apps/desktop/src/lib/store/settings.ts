@@ -1,7 +1,5 @@
 import type { ModelLoadConfiguration } from "@lys/share"
 
-import committedDefaultModelLoadConfiguration from "../../../src-tauri/default_model_load_configuration.json"
-
 /**
  * Runtime process settings persisted under the `runtime` JSON object.
  *
@@ -55,10 +53,10 @@ export type GenerationSettings = {
  * A load configuration whose context length, eval batch size, flash attention,
  * and KV cache settings are all set; only the expert count may be absent.
  *
- * @remarks The stored default has this shape, mirroring Rust's
- * `DefaultModelLoadConfiguration`, and so does the configuration resolved for
- * one model, because the default supplies every setting the model does not
- * have of its own. An absent expert count is left to LM Studio.
+ * @remarks The committed default has this shape, and so does the
+ * configuration resolved for one load, because the committed default supplies
+ * every setting that neither the model's own settings nor the stored default
+ * set. An absent expert count is left to LM Studio.
  */
 export type CompleteModelLoadConfiguration = Required<
   Pick<
@@ -72,15 +70,23 @@ export type CompleteModelLoadConfiguration = Required<
  * Load settings persisted under the `loadConfiguration` JSON object.
  *
  * @remarks Mirrors Rust's `LoadConfigurationSettings`, which validates the
- * stored values. Edits apply to the next load of the model they belong to and
- * are saved automatically.
+ * stored values and reads a missing group or part as empty. Both parts hold
+ * only settings written to the settings file; the committed default is never
+ * copied into them. Edits apply to the next load of the model they belong to
+ * and are saved automatically.
  */
 export type LoadConfigurationSettings = {
-  /** Settings used for a model that has none of its own. */
-  readonly default: CompleteModelLoadConfiguration
+  /**
+   * Settings for every model, each one used when the model has none of its
+   * own. Empty unless a person writes settings into the settings file; the
+   * Model pane does not edit it, and the committed default supplies every
+   * setting it leaves out.
+   */
+  readonly default: ModelLoadConfiguration
   /**
    * Settings each model has of its own, keyed by model key. An entry holds
-   * only the settings changed for that model; the default supplies the rest.
+   * only the settings changed for that model; the stored default, then the
+   * committed default, supply the rest.
    */
   readonly models: Readonly<Record<string, ModelLoadConfiguration>>
 }
@@ -108,8 +114,6 @@ export type LysSettings = {
  *
  * @remarks Values match the Rust `Default` implementations so the pre-load
  * render shows the same settings the backend would create for a first run.
- * The load configuration default is read from the committed default file that
- * the native host embeds, so the two cannot differ.
  */
 export const initialSettingsState: LysSettings = {
   runtime: {
@@ -125,7 +129,7 @@ export const initialSettingsState: LysSettings = {
     replyCeiling: 2048
   },
   loadConfiguration: {
-    default: committedDefaultModelLoadConfiguration,
+    default: {},
     models: {}
   }
 }

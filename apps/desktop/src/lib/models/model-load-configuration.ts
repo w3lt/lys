@@ -1,6 +1,7 @@
 import type { LlmInfo } from "@lys/protocol"
 import {
   MAXIMUM_MODEL_LOAD_SETTING_VALUE,
+  modelLoadConfigurationSchema,
   type ModelLoadConfiguration
 } from "@lys/share"
 
@@ -8,6 +9,8 @@ import type {
   CompleteModelLoadConfiguration,
   LoadConfigurationSettings
 } from "@/lib/store/settings"
+
+import committedDefaultModelLoadConfigurationFile from "./default_model_load_configuration.json"
 
 /**
  * Eval batch sizes the Model pane offers, in tokens and ascending order.
@@ -67,7 +70,7 @@ export type ModelLoadConfigurationChange =
       readonly settings: ModelLoadConfiguration
     }
   | {
-      /** Removes the model's own expert count, so the stored default applies. */
+      /** Removes the model's own expert count, so the default's count applies. */
       readonly kind: "expert-count-removal"
       /** Key of the model whose own expert count is removed. */
       readonly modelKey: string
@@ -95,6 +98,64 @@ const MODEL_LOAD_SETTING_NAMES: readonly ModelLoadSettingName[] = Object.freeze(
     "numExperts"
   ]
 )
+
+/**
+ * Answers whether a load configuration sets every setting a complete one
+ * requires.
+ *
+ * @param configuration - Validated load configuration.
+ * @returns True when the context length, eval batch size, flash attention,
+ * and KV cache settings are all set; the expert count is not required.
+ */
+function isCompleteModelLoadConfiguration(
+  configuration: ModelLoadConfiguration
+): configuration is CompleteModelLoadConfiguration {
+  const { contextLength, evalBatchSize, flashAttention, offloadKVCacheToGpu } =
+    configuration
+  return [
+    contextLength,
+    evalBatchSize,
+    flashAttention,
+    offloadKVCacheToGpu
+  ].every((setting) => setting !== undefined)
+}
+
+/**
+ * Validates a complete load configuration read from a committed file.
+ *
+ * @param candidate - Content of the file, not yet validated.
+ * @returns The validated configuration, frozen by the shared schema.
+ * @throws The shared schema's validation error for an unknown setting, a
+ * `null`, or a value the load request does not accept; otherwise an `Error`
+ * when one of the four required settings is missing.
+ */
+function parseCompleteModelLoadConfiguration(
+  candidate: unknown
+): CompleteModelLoadConfiguration {
+  const configuration = modelLoadConfigurationSchema.parse(candidate)
+  if (!isCompleteModelLoadConfiguration(configuration)) {
+    throw new Error(
+      "A complete load configuration sets contextLength, evalBatchSize, flashAttention, and offloadKVCacheToGpu."
+    )
+  }
+  return configuration
+}
+
+/**
+ * Load configuration that supplies every setting neither a model's own
+ * settings nor the stored default set.
+ *
+ * @remarks Read from the committed `default_model_load_configuration.json`,
+ * which the renderer bundle embeds when it is built: editing the file changes
+ * the default only after a rebuild, and the default is never written to the
+ * settings file. Evaluating this module validates the file, so an invalid
+ * committed default stops the renderer at startup instead of reaching a load
+ * request.
+ */
+const COMMITTED_DEFAULT_MODEL_LOAD_CONFIGURATION: CompleteModelLoadConfiguration =
+  parseCompleteModelLoadConfiguration(
+    committedDefaultModelLoadConfigurationFile
+  )
 
 /**
  * Answers whether a reported maximum context length can bound a setting.
@@ -149,30 +210,56 @@ function calculateLoadedContextLength(
 }
 
 /**
+ * Builds the load configuration used for a model that has no settings of its
+ * own.
+ *
+ * @param settings - Stored default and per-model load settings.
+ * @returns A newly owned configuration. Each setting is the stored default's
+ * value when the settings file sets one and the committed default's value
+ * otherwise; the expert count is absent when neither sets one.
+ */
+export function buildDefaultModelLoadConfiguration(
+  settings: LoadConfigurationSettings
+): CompleteModelLoadConfiguration {
+  const stored = settings.default
+  const committed = COMMITTED_DEFAULT_MODEL_LOAD_CONFIGURATION
+  const numExperts = stored.numExperts ?? committed.numExperts
+  return {
+    contextLength: stored.contextLength ?? committed.contextLength,
+    evalBatchSize: stored.evalBatchSize ?? committed.evalBatchSize,
+    flashAttention: stored.flashAttention ?? committed.flashAttention,
+    offloadKVCacheToGpu:
+      stored.offloadKVCacheToGpu ?? committed.offloadKVCacheToGpu,
+    ...(numExperts === undefined ? {} : { numExperts })
+  }
+}
+
+/**
  * Builds the load configuration one model is loaded with.
  *
  * @param settings - Stored default and per-model load settings.
  * @param model - Key of the model and its maximum context length, if known.
  * @returns A newly owned configuration. Each setting is the model's own value
- * when it has one and the stored default's value otherwise; the expert count
- * is absent when neither has one. The context length never exceeds the
- * model's maximum when the runtime reports a usable one.
+ * when it has one, then the stored default's, then the committed default's;
+ * the expert count is absent when none of them sets one. The context length
+ * never exceeds the model's maximum when the runtime reports a usable one.
  */
 export function buildModelLoadConfiguration(
   settings: LoadConfigurationSettings,
   model: ModelLoadTarget
 ): CompleteModelLoadConfiguration {
   const own = findOwnModelLoadConfiguration(settings, model.modelKey)
-  const numExperts = own?.numExperts ?? settings.default.numExperts
+  const defaultConfiguration = buildDefaultModelLoadConfiguration(settings)
+  const numExperts = own?.numExperts ?? defaultConfiguration.numExperts
   return {
     contextLength: calculateLoadedContextLength(
-      own?.contextLength ?? settings.default.contextLength,
+      own?.contextLength ?? defaultConfiguration.contextLength,
       model.maxContextLength
     ),
-    evalBatchSize: own?.evalBatchSize ?? settings.default.evalBatchSize,
-    flashAttention: own?.flashAttention ?? settings.default.flashAttention,
+    evalBatchSize: own?.evalBatchSize ?? defaultConfiguration.evalBatchSize,
+    flashAttention: own?.flashAttention ?? defaultConfiguration.flashAttention,
     offloadKVCacheToGpu:
-      own?.offloadKVCacheToGpu ?? settings.default.offloadKVCacheToGpu,
+      own?.offloadKVCacheToGpu ?? defaultConfiguration.offloadKVCacheToGpu,
     ...(numExperts === undefined ? {} : { numExperts })
   }
 }
@@ -493,18 +580,13 @@ export function formatModelReloadNote(
  * @typeParam TModel - Inventory entry type; the found entry is returned as is.
  * @param models - Downloaded models the runtime lists.
  * @param defaultModel - Key of the selected default model, or null for none.
- * @param loadedModelKey - Key of the model the runtime summary names as
- * loaded, or null for none.
- * @returns The default model's entry when it is listed, otherwise the loaded
- * model's entry, otherwise undefined.
+ * @returns The selected default model's entry when the inventory lists it,
+ * otherwise undefined. Without a selected default model nothing is edited,
+ * even while a model is loaded.
  */
 export function findLoadConfigurationTarget<TModel extends ModelLoadTarget>(
   models: readonly TModel[],
-  defaultModel: string | null,
-  loadedModelKey: string | null
+  defaultModel: string | null
 ): TModel | undefined {
-  return (
-    models.find((model) => model.modelKey === defaultModel) ??
-    models.find((model) => model.modelKey === loadedModelKey)
-  )
+  return models.find((model) => model.modelKey === defaultModel)
 }

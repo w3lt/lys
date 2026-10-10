@@ -3,8 +3,7 @@
 //! Settings are stored as pretty-printed JSON in the settings file of the Lys
 //! home that the host resolved at startup (`LysHome::settings_path`). Loading
 //! a missing file creates the Lys home directory when needed and writes the
-//! defaults; loading a file that has no load configuration group adds the
-//! initial one and writes the file. Saving never creates the directory.
+//! defaults; saving never creates it.
 
 pub mod commands;
 pub mod generation;
@@ -13,7 +12,7 @@ pub mod model;
 pub mod runtime;
 
 use generation::GenerationSettings;
-use load_configuration::{parse_present_setting, LoadConfigurationSettings};
+use load_configuration::LoadConfigurationSettings;
 use model::ModelSettings;
 use runtime::RunTimeSettings;
 
@@ -23,50 +22,23 @@ use serde::{Deserialize, Serialize};
 
 use crate::utils::lys_home::LysHome;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-/// Complete Lys settings value exchanged with the renderer and written to the
-/// settings file.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+/// Complete persisted Lys settings value.
 ///
 /// The private fields group runtime, model, generation, and load configuration
 /// settings in the serialized JSON representation while keeping those groups
-/// behind the settings module's API boundary. A missing runtime, model, or
-/// generation group takes that group's defaults. The load configuration group
-/// is required here; only a stored file may lack it, and loading adds it.
+/// behind the settings module's API boundary. A missing group takes that
+/// group's defaults; the load configuration group's default is empty.
 pub struct LysSettings {
     /// Process settings and default-model selection in the `runtime` object.
-    #[serde(default)]
     runtime: RunTimeSettings,
     /// Local context estimate in the serialized `model` object.
-    #[serde(default)]
     model: ModelSettings,
     /// Generation parameters in the serialized `generation` object.
-    #[serde(default)]
     generation: GenerationSettings,
     /// Default and per-model load settings in the `loadConfiguration` object.
     load_configuration: LoadConfigurationSettings,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-/// Settings as a settings file stores them, where the load configuration
-/// group may be absent.
-///
-/// A file written before load settings existed has no such group. An explicit
-/// `null` is rejected rather than read as an absent group.
-struct StoredLysSettings {
-    /// Stored `runtime` object, or its defaults when absent.
-    #[serde(default)]
-    runtime: RunTimeSettings,
-    /// Stored `model` object, or its defaults when absent.
-    #[serde(default)]
-    model: ModelSettings,
-    /// Stored `generation` object, or its defaults when absent.
-    #[serde(default)]
-    generation: GenerationSettings,
-    /// Stored `loadConfiguration` object, or `None` when the file has none.
-    #[serde(default, deserialize_with = "parse_present_setting")]
-    load_configuration: Option<LoadConfigurationSettings>,
 }
 
 impl LysSettings {
@@ -74,18 +46,16 @@ impl LysSettings {
     /// saving defaults when the file is absent.
     ///
     /// Existing files are read as UTF-8 JSON and deserialized with the serde
-    /// defaults and validation described by the settings types. A missing file
-    /// causes `create_parent_dir` to create the Lys home directory if needed,
-    /// then writes a default settings document before returning those
-    /// defaults. An existing file without a load configuration group is given
-    /// the initial one, and the file is written with it before returning.
+    /// defaults and validation described by the settings types; they are not
+    /// rewritten, including when a group is missing. A missing file causes
+    /// `create_parent_dir` to create the Lys home directory if needed, then
+    /// writes a default settings document before returning those defaults.
     ///
     /// # Errors
     ///
     /// Returns an error when the file cannot be read, JSON cannot be parsed,
-    /// the Lys home directory cannot be created, the committed default load
-    /// configuration is invalid, or the settings cannot be written. A file that
-    /// cannot be read or parsed is left as it is.
+    /// the Lys home directory cannot be created, or default settings cannot be
+    /// written. A file that cannot be read or parsed is left as it is.
     pub fn load_settings(lys_home: &LysHome) -> Result<Self, String> {
         load_settings_file(&lys_home.settings_path())
     }
@@ -110,10 +80,11 @@ impl LysSettings {
 /// # Errors
 ///
 /// Returns an error when the file cannot be read or parsed, or when creating
-/// it or adding its load configuration group fails.
+/// it fails. Nothing is written when reading or parsing fails.
 fn load_settings_file(path: &Path) -> Result<LysSettings, String> {
     match fs::read_to_string(path) {
-        Ok(contents) => load_stored_settings(&contents, path),
+        Ok(contents) => serde_json::from_str(&contents)
+            .map_err(|err| format!("Failed to parse {}: {err}", path.display())),
 
         Err(err) if err.kind() == ErrorKind::NotFound => create_settings_file(path),
 
@@ -121,67 +92,20 @@ fn load_settings_file(path: &Path) -> Result<LysSettings, String> {
     }
 }
 
-/// Creates the settings file at `path` with every default and the initial
-/// load configuration, and returns those settings.
+/// Creates the settings file at `path` with every default, and returns those
+/// settings.
 ///
 /// The parent directory is created first, because the Lys home directory
 /// might not exist yet.
 ///
 /// # Errors
 ///
-/// Returns an error when the parent directory cannot be created, the committed
-/// default load configuration is invalid, or the file cannot be written.
+/// Returns an error when the parent directory cannot be created or the file
+/// cannot be written.
 fn create_settings_file(path: &Path) -> Result<LysSettings, String> {
     create_parent_dir(path)?;
 
-    let settings = LysSettings {
-        runtime: RunTimeSettings::default(),
-        model: ModelSettings::default(),
-        generation: GenerationSettings::default(),
-        load_configuration: LoadConfigurationSettings::create_initial()?,
-    };
-    save_settings_file(&settings, path)?;
-
-    Ok(settings)
-}
-
-/// Parses the `contents` read from the settings file at `path`.
-///
-/// Contents without a load configuration group are completed with the initial
-/// one, and the completed settings are written to `path` before they are
-/// returned. Contents that already have the group are returned without
-/// writing.
-///
-/// # Errors
-///
-/// Returns an error when the contents are not valid settings JSON, the
-/// committed default load configuration is invalid, or the completed settings
-/// cannot be written. Nothing is written when parsing fails.
-fn load_stored_settings(contents: &str, path: &Path) -> Result<LysSettings, String> {
-    let stored: StoredLysSettings = serde_json::from_str(contents)
-        .map_err(|err| format!("Failed to parse {}: {err}", path.display()))?;
-    let StoredLysSettings {
-        runtime,
-        model,
-        generation,
-        load_configuration,
-    } = stored;
-
-    if let Some(load_configuration) = load_configuration {
-        return Ok(LysSettings {
-            runtime,
-            model,
-            generation,
-            load_configuration,
-        });
-    }
-
-    let settings = LysSettings {
-        runtime,
-        model,
-        generation,
-        load_configuration: LoadConfigurationSettings::create_initial()?,
-    };
+    let settings = LysSettings::default();
     save_settings_file(&settings, path)?;
 
     Ok(settings)
@@ -245,31 +169,17 @@ mod tests {
         })
     }
 
-    /// Load configuration group a settings file without one is given.
-    fn get_initial_load_configuration() -> Value {
-        json!({
-            "default": {
-                "contextLength": 8192,
-                "evalBatchSize": 512,
-                "flashAttention": true,
-                "offloadKVCacheToGpu": true
-            },
-            "models": {}
-        })
+    /// Load configuration group of a settings file that sets no load setting.
+    fn get_empty_load_configuration() -> Value {
+        json!({ "default": {}, "models": {} })
     }
 
-    /// Stored settings with a load configuration that differs from the initial
-    /// one and has one model's settings.
+    /// Stored settings whose load configuration has a hand-written default
+    /// and one model's settings.
     fn get_complete_settings() -> Value {
         let mut settings = get_settings_without_load_configuration();
         settings["loadConfiguration"] = json!({
-            "default": {
-                "contextLength": 4096,
-                "evalBatchSize": 256,
-                "flashAttention": false,
-                "offloadKVCacheToGpu": false,
-                "numExperts": 2
-            },
+            "default": { "contextLength": 4096, "numExperts": 2 },
             "models": { "qwen/qwen3-8b": { "contextLength": 16384 } }
         });
 
@@ -289,7 +199,7 @@ mod tests {
     }
 
     #[test]
-    fn creates_a_missing_file_with_the_initial_load_configuration() {
+    fn creates_a_missing_file_with_an_empty_load_configuration() {
         let directory = TestDirectory::create("settings-create");
         let path = directory.path().join("settings.json");
 
@@ -297,10 +207,7 @@ mod tests {
 
         let stored = read_settings_json(&path);
         assert_eq!(stored, get_settings_json(&settings));
-        assert_eq!(
-            stored["loadConfiguration"],
-            get_initial_load_configuration()
-        );
+        assert_eq!(stored["loadConfiguration"], get_empty_load_configuration());
     }
 
     #[test]
@@ -308,28 +215,26 @@ mod tests {
         let directory = TestDirectory::create("settings-create-home");
         let path = directory.path().join("lys-home").join("settings.json");
 
-        load_settings_file(&path).expect("settings for a missing Lys home");
+        let settings = load_settings_file(&path).expect("settings for a missing Lys home");
 
-        assert_eq!(
-            read_settings_json(&path)["loadConfiguration"],
-            get_initial_load_configuration()
-        );
+        assert_eq!(read_settings_json(&path), get_settings_json(&settings));
     }
 
     #[test]
-    fn adds_the_initial_load_configuration_to_a_file_without_one() {
-        let directory = TestDirectory::create("settings-add-group");
-        let path = directory.create_file(
-            "settings.json",
-            get_settings_without_load_configuration().to_string(),
-        );
+    fn reads_a_file_without_a_load_configuration_without_rewriting_it() {
+        let directory = TestDirectory::create("settings-without-group");
+        let stored_text = get_settings_without_load_configuration().to_string();
+        let path = directory.create_file("settings.json", &stored_text);
 
         let settings = load_settings_file(&path).expect("settings for a file without the group");
 
         let mut expected = get_settings_without_load_configuration();
-        expected["loadConfiguration"] = get_initial_load_configuration();
-        assert_eq!(read_settings_json(&path), expected);
+        expected["loadConfiguration"] = get_empty_load_configuration();
         assert_eq!(get_settings_json(&settings), expected);
+        assert_eq!(
+            fs::read_to_string(&path).expect("read the settings file"),
+            stored_text
+        );
     }
 
     #[test]
@@ -353,12 +258,12 @@ mod tests {
         invalid_group["loadConfiguration"]["default"]["contextLength"] = json!(0);
         let mut null_group = get_settings_without_load_configuration();
         null_group["loadConfiguration"] = Value::Null;
-        let mut partial_group = get_settings_without_load_configuration();
-        partial_group["loadConfiguration"] = json!({ "models": {} });
+        let mut null_default = get_settings_without_load_configuration();
+        null_default["loadConfiguration"] = json!({ "default": null });
         let unusable_files = [
             invalid_group.to_string(),
             null_group.to_string(),
-            partial_group.to_string(),
+            null_default.to_string(),
             String::from("{ not json"),
         ];
 
@@ -410,18 +315,5 @@ mod tests {
 
         assert!(failure.starts_with("Failed to write "), "{failure}");
         assert!(!saved_path.exists());
-    }
-
-    #[test]
-    fn settings_from_the_renderer_require_the_load_configuration() {
-        let without_group: Result<LysSettings, _> =
-            serde_json::from_value(get_settings_without_load_configuration());
-        let complete: Result<LysSettings, _> = serde_json::from_value(get_complete_settings());
-
-        assert!(without_group.is_err());
-        assert_eq!(
-            get_settings_json(&complete.expect("complete settings")),
-            get_complete_settings()
-        );
     }
 }

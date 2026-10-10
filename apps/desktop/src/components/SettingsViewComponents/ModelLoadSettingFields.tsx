@@ -450,8 +450,9 @@ type ExpertCountFieldProps = {
   readonly expertCount: number | null
   /**
    * Whether stepping below one expert leaves the count to the model. False
-   * when the stored default sets a count, because removing the model's own
-   * count would then apply that default instead.
+   * when the default sets a count, in the settings file or in the committed
+   * default, because removing the model's own count would then apply that
+   * count instead.
    */
   readonly isAutomaticCountAvailable: boolean
   /** Loaded expert count when it is known and differs; null otherwise. */

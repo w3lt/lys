@@ -4,10 +4,10 @@ import type { LlmInfo } from "@lys/protocol"
 import { Button } from "@/components/ui/button"
 import { calculateModelRuntimeAvailability } from "@/lib/models/lm-studio-connection"
 import {
+  buildDefaultModelLoadConfiguration,
   buildModelLoadConfiguration,
   findLoadConfigurationTarget
 } from "@/lib/models/model-load-configuration"
-import { readLoadedModelKey } from "@/lib/models/model-residency"
 import { useLysStore } from "@/lib/store"
 import type { LoadConfigurationSaveState } from "@/lib/store/load-configuration-settings"
 import { findLoadedModelConfiguration } from "@/lib/store/model-runtime"
@@ -181,7 +181,8 @@ function ModelLoadConfigurationEditor({
       <ModelLoadSettingFields
         configuration={configuration}
         isAutomaticExpertCountAvailable={
-          settings.loadConfiguration.default.numExperts === undefined
+          buildDefaultModelLoadConfiguration(settings.loadConfiguration)
+            .numExperts === undefined
         }
         maxContextLength={model.maxContextLength}
         modelKey={model.modelKey}
@@ -204,18 +205,17 @@ function ModelLoadConfigurationEditor({
  * settings, or one line explaining why no model can be edited, and the save
  * feedback.
  * @remarks Requires SettingsContext. The edited model is the selected default
- * model when the inventory lists it, otherwise the loaded model the runtime
- * summary names. Choosing another model starts a new editor, so text being
- * typed for the previous model is discarded. Without an editable model the
- * section says to choose a default model, or that the model list is needed
- * while the inventory is not ready.
+ * model when the inventory lists it; a loaded model that is not the default is
+ * not edited. Choosing another model starts a new editor, so text being typed
+ * for the previous model is discarded. Without an editable model the section
+ * says to choose a default model, or that the model list is needed while the
+ * inventory is not ready.
  */
 export default function ModelLoadConfigurationPanel(): ReactElement {
-  const { settings, modelInventory, modelRuntime } = useSettingsContext()
+  const { settings, modelInventory } = useSettingsContext()
   const model = findLoadConfigurationTarget(
     modelInventory.status === "ready" ? modelInventory.models : [],
-    settings.runtime.defaultModel,
-    readLoadedModelKey(modelRuntime)
+    settings.runtime.defaultModel
   )
   return (
     <section className="settings-view__section">

@@ -1,4 +1,8 @@
-import { toolDefinitionSchema, type ToolDefinitionCandidate } from "@lys/share"
+import {
+  isEveryToolRunBy,
+  toolDefinitionSchema,
+  type ToolDefinitionCandidate
+} from "@lys/share"
 import { describe, expect, it } from "vitest"
 import * as z from "zod"
 
@@ -11,6 +15,7 @@ describe("AgentTool", () => {
       description: "Find files under a directory.",
       group: "files",
       access: "reads",
+      runner: "client",
       arguments: [
         {
           type: "string",
@@ -76,6 +81,7 @@ describe("AgentTool", () => {
       description: "Read one text file.",
       group: "files",
       access: "reads",
+      runner: "client",
       arguments: [
         { type: "string", name: "path", description: "Absolute path." }
       ]
@@ -92,6 +98,7 @@ describe("AgentTool", () => {
       description: "Return the current time.",
       group: "files",
       access: "reads",
+      runner: "client",
       arguments: []
     })
 
@@ -109,6 +116,7 @@ describe("AgentTool", () => {
       description: "Find files.",
       group: "files",
       access: "reads",
+      runner: "client",
       arguments: [
         {
           type: "enum",
@@ -140,6 +148,7 @@ describe("AgentTool", () => {
         description: "Find files.",
         group: "files",
         access: "reads",
+        runner: "client",
         arguments: [
           {
             type: "enum",
@@ -157,6 +166,7 @@ describe("AgentTool", () => {
         description: "Find files.",
         group: "files",
         access: "reads",
+        runner: "client",
         arguments: [
           {
             type: "enum",
@@ -174,6 +184,7 @@ describe("AgentTool", () => {
         description: "Find files.",
         group: "files",
         access: "reads",
+        runner: "client",
         arguments: [
           { type: "string", name: "root", description: "Directory." },
           { type: "string", name: "root", description: "Another directory." }
@@ -187,6 +198,7 @@ describe("AgentTool", () => {
         description: "Find files.",
         group: "files",
         access: "reads",
+        runner: "client",
         arguments: []
       }
     },
@@ -197,6 +209,7 @@ describe("AgentTool", () => {
         description: "",
         group: "files",
         access: "reads",
+        runner: "client",
         arguments: []
       }
     },
@@ -207,6 +220,7 @@ describe("AgentTool", () => {
         description: "Find files.",
         group: "files",
         access: "reads",
+        runner: "client",
         arguments: [
           { type: "string", name: "__proto__", description: "Prototype." }
         ]
@@ -222,6 +236,7 @@ describe("AgentTool", () => {
       description: "Find files under a directory.",
       group: "files",
       access: "reads",
+      runner: "client",
       arguments: [
         { type: "string", name: "root", description: "Directory." },
         { type: "string", name: "query", description: "Text to find." },
@@ -289,6 +304,7 @@ describe("AgentTool", () => {
           description: "Return the current time.",
           group: "files",
           access: "reads",
+          runner: "client",
           arguments: []
         })
 
@@ -355,6 +371,7 @@ describe("toolDefinitionSchema", () => {
     description: "Find files under a directory.",
     group: "files",
     access: "reads",
+    runner: "client",
     arguments: [rootArgument]
   }
 
@@ -408,8 +425,18 @@ describe("toolDefinitionSchema", () => {
     },
     {
       problem: "a group Settings does not list",
-      input: { ...searchFilesDefinition, group: "network" },
+      input: { ...searchFilesDefinition, group: "system" },
       issue: { code: "invalid_value", path: ["group"] }
+    },
+    {
+      problem: "a runner that is neither the client nor the backend",
+      input: { ...searchFilesDefinition, runner: "desktop" },
+      issue: { code: "invalid_value", path: ["runner"] }
+    },
+    {
+      problem: "a definition without a runner",
+      input: { ...searchFilesDefinition, runner: undefined },
+      issue: { code: "invalid_value", path: ["runner"] }
     },
     {
       problem: "an access level no tool has",
@@ -459,5 +486,35 @@ describe("toolDefinitionSchema", () => {
     expect(
       result.error?.issues.map(({ code, path }) => ({ code, path }))
     ).toEqual([issue])
+  })
+})
+
+describe("isEveryToolRunBy", () => {
+  const clientTool = toolDefinitionSchema.parse({
+    name: "read_text_file",
+    description: "Read one text file.",
+    group: "files",
+    access: "reads",
+    runner: "client",
+    arguments: []
+  })
+  const backendTool = toolDefinitionSchema.parse({
+    name: "read_page",
+    description: "Read one web page.",
+    group: "network",
+    access: "network",
+    runner: "backend",
+    arguments: []
+  })
+
+  it("answers whether one side runs every listed tool", () => {
+    expect(isEveryToolRunBy([clientTool], "client")).toBe(true)
+    expect(isEveryToolRunBy([backendTool], "backend")).toBe(true)
+    expect(isEveryToolRunBy([clientTool, backendTool], "client")).toBe(false)
+  })
+
+  it("accepts an empty list for either side", () => {
+    expect(isEveryToolRunBy([], "client")).toBe(true)
+    expect(isEveryToolRunBy([], "backend")).toBe(true)
   })
 })

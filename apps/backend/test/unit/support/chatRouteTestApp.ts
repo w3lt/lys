@@ -10,6 +10,7 @@ import ReplyGenerationRegistry from "../../../src/modules/chat/replyGenerationRe
 import { createChatSseTestApp } from "./chatSseRoute"
 import { openConversationTestServices } from "./conversationDatabase"
 import type { TestFastify } from "./fastifyTestApp"
+import { LOOK_UP_WORD_TOOL, ScriptedBuiltInTool } from "./scriptedBuiltInTool"
 
 /** Published path of the chat route. */
 const CHAT_PATH = "/api/v1/chat"
@@ -55,7 +56,8 @@ export type ChatRouteTestApp = TestFastify &
  * written and no HTTP request leaves the process. The decorated agent service
  * keeps its records on the same in-memory database and builds Lys with
  * {@link TEST_LYS_SYSTEM_PROMPT}; Lys's model calls go through the
- * `completeChatStream` spy. When the test finishes, the registry is disposed
+ * `completeChatStream` spy. The only backend tool is the scripted
+ * `look_up_word` tool. When the test finishes, the registry is disposed
  * first, so every generation it holds has stored its final state before the
  * in-memory conversation database is closed.
  */
@@ -95,6 +97,15 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
   testFastify.app.decorate("conversationTurns", turns)
   testFastify.app.decorate("chatService", chatService)
   testFastify.app.decorate("agentService", agentService)
+  testFastify.app.decorate(
+    "builtInTools",
+    Object.freeze([
+      Object.freeze({
+        definition: LOOK_UP_WORD_TOOL,
+        tool: new ScriptedBuiltInTool()
+      })
+    ])
+  )
   return Object.freeze({
     ...testFastify,
     createConversationTurn,

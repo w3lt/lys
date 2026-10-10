@@ -41,7 +41,8 @@ package.
 - Entry point: `src/index.ts`
 - Framework: Fastify
 - Important runtime dependencies: `@fastify/sse`, `@lmstudio/sdk`, `openai`,
-  `fastify-type-provider-zod`
+  `fastify-type-provider-zod`, and `@mozilla/readability` with `linkedom`,
+  which extract a web page's main text for `read_page`
 - `build` (root `pnpm backend:build`) bundles `src/index.ts` with esbuild into
   `dist/backend.mjs` and copies the two prompt files beside it; `build.sh`
   installs that output as the release backend.

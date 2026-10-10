@@ -11,9 +11,11 @@ export {
 export {
   chatReplyNotFoundProblemSchema,
   chatReplyNotGeneratingProblemSchema,
+  chatToolCallAnswerMismatchProblemSchema,
   chatToolCallNotPendingProblemSchema,
   type ChatReplyNotFoundProblem,
   type ChatReplyNotGeneratingProblem,
+  type ChatToolCallAnswerMismatchProblem,
   type ChatToolCallNotPendingProblem
 } from "./chat"
 export {

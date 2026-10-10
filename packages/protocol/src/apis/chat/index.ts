@@ -29,8 +29,11 @@ export {
 } from "./stopReplyRoute"
 export {
   MAXIMUM_TOOL_RESULT_BODY_BYTES,
+  chatToolAnswerSchema,
   chatToolResultSchema,
   sendChatToolResultApi,
+  type BackendToolCallAnswer,
+  type ChatToolAnswer,
   type ChatToolResult,
   type ChatToolResultPathParams,
   type SendChatToolResultApiReply,

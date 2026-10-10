@@ -114,26 +114,44 @@ export type ToolArgumentDefinition = z.infer<
  * Validates the group a tool is listed under in Settings.
  *
  * @remarks Only groups that a current tool uses exist. A tool that needs a
- * new group adds it here and to the desktop's own copy of the definition;
- * consumers that branch on the group exhaustively must handle it.
+ * new group adds it here, and to the desktop's own copy of the definition
+ * when a client tool uses it; consumers that branch on the group
+ * exhaustively must handle it.
  */
-const toolGroupSchema = z.enum(["files"])
+const toolGroupSchema = z.enum(["files", "network"])
 
-/** Group a tool is listed under in Settings: `files` holds the file tools. */
+/**
+ * Group a tool is listed under in Settings: `files` holds the file tools and
+ * `network` the tools that reach past this machine.
+ */
 export type ToolGroup = z.infer<typeof toolGroupSchema>
 
 /**
  * Validates what a tool does with the machine it runs on.
  *
- * @remarks `reads` reads data on that machine and sends nothing off it. Only
- * access levels that a current tool uses exist; a tool that sends data off
- * the machine adds its own level here and to the desktop's copy, and starts
- * switched off.
+ * @remarks `reads` reads data on that machine and sends nothing off it.
+ * `network` sends requests off that machine and reads what comes back; a
+ * tool with this access starts switched off. Only access levels that a
+ * current tool uses exist; a new level is added here, and to the desktop's
+ * copy when a client tool uses it.
  */
-const toolAccessSchema = z.enum(["reads"])
+const toolAccessSchema = z.enum(["reads", "network"])
 
 /** What a tool does with the machine it runs on. */
 export type ToolAccess = z.infer<typeof toolAccessSchema>
+
+/**
+ * Validates which side of Lys runs a tool.
+ *
+ * @remarks `client` tools run in the desktop app, which lists them through
+ * its `list_tools` command and runs each call itself. `backend` tools run in
+ * the backend, which lists them through its tool-list endpoint; the desktop
+ * only approves their calls.
+ */
+const toolRunnerSchema = z.enum(["client", "backend"])
+
+/** Which side of Lys runs a tool: the desktop app or the backend. */
+export type ToolRunner = z.infer<typeof toolRunnerSchema>
 
 /**
  * Answers whether no two arguments of a tool share a name.
@@ -148,13 +166,14 @@ function hasDistinctArgumentNames(
 }
 
 /**
- * Validates one tool: what a model is offered, plus how Settings groups it
- * and what it does with the machine. The output is frozen; unknown fields
- * are rejected.
+ * Validates one tool: what a model is offered, plus how Settings groups it,
+ * what it does with the machine, and which side of Lys runs it. The output is
+ * frozen; unknown fields are rejected.
  *
- * @remarks The backend builds an `AgentTool` from it, and the desktop lists
- * its client tools in this shape. The model never receives `group` or
- * `access`; {@link buildToolFunctionFormat} leaves them out.
+ * @remarks The backend builds an `AgentTool` from it, and both the desktop
+ * and the backend list their tools in this shape. The model never receives
+ * `group`, `access`, or `runner`; {@link buildToolFunctionFormat} leaves them
+ * out.
  */
 export const toolDefinitionSchema = z
   .strictObject({
@@ -166,6 +185,8 @@ export const toolDefinitionSchema = z
     group: toolGroupSchema,
     /** What the tool does with the machine it runs on. */
     access: toolAccessSchema,
+    /** Which side of Lys runs the tool. */
+    runner: toolRunnerSchema,
     /** Arguments in declaration order, each name once; may be empty. */
     arguments: z
       .array(toolArgumentDefinitionSchema)
@@ -196,6 +217,20 @@ export function hasDistinctToolNames(
   tools: readonly ToolDefinition[]
 ): boolean {
   return hasDistinctValues(tools.map((tool) => tool.name))
+}
+
+/**
+ * Answers whether one side of Lys runs every tool of a list.
+ *
+ * @param tools - Validated tool definitions; an empty list qualifies.
+ * @param runner - Side every tool must name as its runner.
+ * @returns True when no tool names another runner.
+ */
+export function isEveryToolRunBy(
+  tools: readonly ToolDefinition[],
+  runner: ToolRunner
+): boolean {
+  return tools.every((tool) => tool.runner === runner)
 }
 
 /**
@@ -312,9 +347,9 @@ function buildToolParameters(
  * Builds the function tool a model is offered for one tool definition.
  *
  * @param definition - Validated tool definition.
- * @returns A deeply frozen OpenAI function tool. `group` and `access` are left
- * out, because they describe the tool to the person using Lys, not to the
- * model.
+ * @returns A deeply frozen OpenAI function tool. `group`, `access`, and
+ * `runner` are left out, because they describe the tool to the person using
+ * Lys and route its calls, not to the model.
  */
 export function buildToolFunctionFormat(
   definition: ToolDefinition

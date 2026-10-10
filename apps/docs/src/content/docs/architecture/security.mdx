@@ -1,6 +1,6 @@
 ---
 title: Security and trust boundaries
-description: "The current local trust boundary: loopback services, schema validation, and file-backed settings without credential management."
+description: "The current local trust boundary: loopback services, schema validation, approved web reads, and file-backed settings without credential management."
 docType: architecture
 sidebar:
   order: 8
@@ -8,7 +8,9 @@ sidebar:
 
 The current security posture is intentionally simple and local. The backend and
 LM Studio both run on loopback, request and event payloads are validated with
-Zod, and there is no credential-management subsystem yet.
+Zod, and there is no credential-management subsystem yet. The one outbound
+connection is the `read_page` tool, which reads a public web page after the
+person allows the call.
 
 ## Current trust boundaries
 
@@ -20,6 +22,7 @@ Zod, and there is no credential-management subsystem yet.
 | Backend -> SQLite file       | Local filesystem access to `$LYS_HOME/lys_db.sqlite`.                 |
 | Tauri host -> settings file  | Local filesystem access to `$LYS_HOME/settings.json`.                 |
 | Tauri host -> user files     | File tools read any path the OS user running Lys can read.            |
+| Backend -> public web        | `read_page` requests one model-chosen URL per allowed call.           |
 
 ## Current controls
 
@@ -29,6 +32,9 @@ Zod, and there is no credential-management subsystem yet.
 | CORS policy                | Fastify admits only the `http://localhost:1420` and `http://127.0.0.1:1420` development origins and the `tauri://localhost` app origin. |
 | Zod validation             | Backend validates route bodies, parameters, and query strings; desktop validates SSE payloads and HTTP responses.                       |
 | Route-local abort handling | Closing the SSE connection aborts the backend chat task.                                                                                |
+| Approval of web reads      | A `read_page` call runs only after the desktop answers `allowed`; the card shows the full URL and its host. The tool starts off.        |
+| Address rule               | `read_page` never connects to loopback, private, link-local, shared, documentation, benchmarking, multicast, or reserved addresses.     |
+| Untrusted page framing     | Page text reaches the model between content delimiters it cannot forge, with a notice to never follow instructions it contains.         |
 
 ## Candid limits
 
@@ -40,6 +46,36 @@ Zod, and there is no credential-management subsystem yet.
 - The backend currently uses a dummy API key value when talking to local
   OpenAI-compatible LM Studio endpoints that expect an API key field.
 - Runtime settings and conversation data live on disk in user-space files.
+
+## Web reads
+
+`read_page` reads any public URL the model chooses: there is no allow list,
+because the person approves each call. The protections are about where a read
+may connect and what reaches the model:
+
+- **Arguments.** A URL that is not absolute `http` or `https`, is longer than
+  2,048 characters, carries a username or password, or names `localhost` or a
+  blocked IP address is answered without asking. The WHATWG URL parser
+  normalizes odd spellings of an address, such as `http://2130706433/`, first.
+- **Connections.** The check runs inside the lookup the connection itself
+  uses: every address the host name resolves to must pass, so the name cannot
+  resolve differently between the check and the connection. The connected
+  socket's address is checked again. Redirects are followed by hand, at most
+  five, and each target passes the URL and address checks. IPv4-mapped IPv6
+  addresses are matched against the IPv4 rules.
+- **Requests.** No cookie, credential, or `Referer` is sent, and nothing is
+  stored. The request names Lys in its `User-Agent`.
+- **Bounds.** One read takes at most 15 seconds and 4 MiB of body, and a page
+  with more than 40,000 elements or a nesting depth sum above 400,000 is
+  refused before extraction, so a hostile page cannot stall the backend.
+- **Prompt injection.** The model is told that page content is untrusted and
+  must never be followed. This lowers the risk but cannot remove it: a page can
+  still try to steer the reply. Each further tool call still needs the
+  person's approval.
+
+The backend makes the request, so a backend that runs on another machine
+reads from that machine's network position. Today the backend runs on the
+same machine as the desktop.
 
 ## Practical implication
 

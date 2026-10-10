@@ -29,10 +29,11 @@ route definitions.
 | `GET`    | `/api/v1/agents/:agentCode`                                                     | none                                                                               | Agent with its system prompt                               |
 | `PATCH`  | `/api/v1/agents/:agentCode`                                                     | at least one of `{ name, bio, systemPrompt }`                                      | Changed agent                                              |
 | `DELETE` | `/api/v1/agents/:agentCode`                                                     | none                                                                               | Bodyless `204`                                             |
+| `GET`    | `/api/v1/tools`                                                                 | none                                                                               | `{ tools: ToolDefinition[] }`                              |
 | `POST`   | `/api/v1/chat`                                                                  | `conversation`, `message`, `model`, required `generationOptions`, optional `tools` | `text/event-stream`                                        |
 | `GET`    | `/api/v1/chat/:conversationId/replies/:assistantMessageId/events`               | none                                                                               | `text/event-stream` (reply snapshot, then live events)     |
 | `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/stop`                 | none                                                                               | Bodyless `204`, or `409` Problem Details                   |
-| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/tool-results/:callId` | `{ status, reason?, content }`                                                     | Bodyless `204`, or `409` Problem Details                   |
+| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/tool-results/:callId` | `{ status, reason?, content? }`                                                    | Bodyless `204`, or `409` Problem Details                   |
 
 `/api/v1/heath` is the current spelling in both the shared protocol package and
 the Fastify route registration.
@@ -103,7 +104,8 @@ controls affect chat completion; title generation uses a separate request.
 
 ### Tools
 
-A request can offer the model the client's tools for this turn:
+A request can offer the model the client's tools and the backend's tools for
+this turn:
 
 ```json
 {
@@ -114,6 +116,7 @@ A request can offer the model the client's tools for this turn:
         "description": "Read one UTF-8 text file and return its complete text.",
         "group": "files",
         "access": "reads",
+        "runner": "client",
         "arguments": [
           {
             "type": "string",
@@ -123,15 +126,21 @@ A request can offer the model the client's tools for this turn:
           }
         ]
       }
-    ]
+    ],
+    "backendToolNames": ["read_page"]
   }
 }
 ```
 
-`definitions` lists at least one tool definition, each name once, in the shape
-`toolDefinitionSchema` from `@lys/share` validates. It lists only the client's
-switched-on tools; tools the backend runs itself are added by the backend.
-Without `tools`, the turn is one round with no tools. The desktop sends `tools`
+`definitions` lists the client's switched-on tools, each name once, in the
+shape `toolDefinitionSchema` from `@lys/share` validates, each with `runner`
+`client`; it may be empty. `backendToolNames` names switched-on tools the
+backend runs, each once, as [`GET /api/v1/tools`](#tool-list) lists them; it is
+optional. Together they offer at least one tool, and no name appears in both.
+A request that breaks these rules, or names a backend tool the backend does
+not run, returns `400` before anything is stored. The model is offered client
+tools first, then backend tools, each in request order. Without `tools`, the
+turn is one round with no tools. The desktop sends `tools`
 only to a model whose `trainedForToolUse` is true; the backend does not check
 this itself ([#135](https://github.com/w3lt/lys/issues/135)). A reply can make any number of tool calls
 ([#136](https://github.com/w3lt/lys/issues/136)).
@@ -159,10 +168,17 @@ title; live events follow while the generation runs. A missing conversation
 returns the conversation-not-found problem and a missing reply returns `404`
 with `urn:lys:problem:chat:reply-not-found`.
 
+## Tool list
+
+`GET /api/v1/tools` lists every tool the backend runs, each name once, in the
+order Settings shows them, as `{ "tools": ToolDefinition[] }`. Every
+definition has `runner` `backend`. The list is fixed for one backend build;
+today it holds `read_page`, which reads one public web page (group and access
+`network`). The list does not contact anything.
+
 ## Tool results
 
-While a reply waits on a tool call, the client that runs the tool answers it
-with
+While a reply waits on a tool call, the client answers it with
 `POST /api/v1/chat/:conversationId/replies/:assistantMessageId/tool-results/:callId`,
 where `callId` is the `id` of the call's `tool-call` event or of its entry in
 `reply-snapshot.pendingToolCalls`. One request answers one call.
@@ -185,11 +201,23 @@ failed and is not shown to the model: `declined` when the person said no or
 switched the tool or tool calls off, `toolFailed` when the tool ran and
 reported a failure, and `runFailed` when the client could not run it.
 
+A call of a backend tool is answered `failed` the same way, or allowed:
+
+```json
+{ "status": "allowed" }
+```
+
+The backend then runs the tool and hands its result to the model; the client
+never receives it. A client tool's call takes `succeeded` or `failed`, and a
+backend tool's call takes `allowed` or `failed`.
+
 The route answers a bodyless `204` once the answer is accepted, and the
 reply's loop continues. A call that is unknown, already answered, or whose
 reply ended returns `409` with `urn:lys:problem:chat:tool-call-not-pending`
 and changes nothing, so repeating a request whose response was lost is
-harmless. The backend sets no time limit on a pending call. It waits until
+harmless. An answer that does not fit the call, such as `allowed` for a
+client tool's call, returns `409` with
+`urn:lys:problem:chat:tool-call-answer-mismatch`; the call keeps waiting. The backend sets no time limit on a pending call. It waits until
 the call is answered, the reply is stopped, or the backend shuts down. A newer
 turn in the conversation or deleting the conversation does not end the wait yet
 ([#137](https://github.com/w3lt/lys/issues/137)).

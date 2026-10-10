@@ -3,13 +3,15 @@ import {
   chatApiStreamEventSchema,
   chatReplyEventSchema,
   chatReplyEventsApi,
+  chatToolCallAnswerMismatchProblemSchema,
+  chatToolCallNotPendingProblemSchema,
   sendChatToolResultApi,
   stopChatReplyApi,
   type ChatApiRequestBody,
   type ChatApiStreamEvent,
   type ChatReplyEvent,
   type ChatReplyPathParams,
-  type ChatToolResult,
+  type ChatToolAnswer,
   type ChatToolResultPathParams
 } from "@lys/protocol"
 import { EventSourceParserStream } from "eventsource-parser/stream"
@@ -217,19 +219,21 @@ export async function stopChatReply(
  * Sends the answer to one tool call of a running reply.
  *
  * @param target - Call and the reply and conversation that hold it.
- * @param result - Validated answer whose `content` the model reads.
+ * @param toolAnswer - Validated answer: a desktop tool's result or a
+ * declined call, whose `content` the model reads, or `allowed`, which lets
+ * the backend run its tool.
  * @param connection - Backend origin. The request is deliberately not
  * cancellable, so an answer the person gave still reaches the backend.
  * @returns `accepted` after the backend took the answer, or `not-pending`
  * when the call was already answered or its reply ended. Sending the same
  * answer again is therefore safe: a repeat after a lost response returns
  * `not-pending`.
- * @throws A caller-safe error when the backend cannot be reached or answers
- * with an undeclared response.
+ * @throws A caller-safe error when the backend cannot be reached, says the
+ * answer does not fit the call, or answers with an undeclared response.
  */
 export async function sendChatToolResult(
   target: ChatToolResultPathParams,
-  result: ChatToolResult,
+  toolAnswer: ChatToolAnswer,
   connection: Pick<ChatReplyConnection, "backendUrl">
 ): Promise<SendChatToolResultResult> {
   const response = await getChatReplyActionResponse(
@@ -237,20 +241,24 @@ export async function sendChatToolResult(
     {
       method: sendChatToolResultApi.method,
       headers: JSON_REQUEST_HEADERS,
-      body: JSON.stringify(result),
+      body: JSON.stringify(toolAnswer),
       cache: "no-store"
     }
   )
   if (response.status === 204) return ACCEPTED_RESULT
-  if (
-    response.status === 409 &&
-    isToolCallNotPendingProblem(await readFailureBody(response))
-  ) {
+  if (response.status !== 409) {
+    throw new Error(
+      `The backend did not accept the tool result (HTTP ${response.status}).`
+    )
+  }
+  const body = await readFailureBody(response)
+  if (chatToolCallNotPendingProblemSchema.safeParse(body).success) {
     return NOT_PENDING_RESULT
   }
-  throw new Error(
-    `The backend did not accept the tool result (HTTP ${response.status}).`
-  )
+  if (chatToolCallAnswerMismatchProblemSchema.safeParse(body).success) {
+    throw new Error("The backend said this answer does not fit the tool call.")
+  }
+  throw new Error("The backend did not accept the tool result (HTTP 409).")
 }
 
 /**
@@ -338,17 +346,6 @@ function isChatReplyAbsenceProblem(body: unknown): boolean {
  */
 function isReplyNotGeneratingProblem(body: unknown): boolean {
   return stopChatReplyApi.responses[409].safeParse(body).success
-}
-
-/**
- * Determines whether a decoded body declares that the tool call is not
- * pending.
- *
- * @param body - Untrusted body of a failed tool-result response.
- * @returns Whether it validates as the declared not-pending problem.
- */
-function isToolCallNotPendingProblem(body: unknown): boolean {
-  return sendChatToolResultApi.responses[409].safeParse(body).success
 }
 
 /**

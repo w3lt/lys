@@ -119,10 +119,12 @@ request offered, and `arguments` holds the model's values by argument name:
 strings, numbers, or Booleans, already checked against the tool's definition.
 An optional argument the model left out is absent. A call whose arguments do
 not match never reaches the client; the backend answers it itself, and the
-model reads the error.
+model reads the error. A call of a backend tool, such as `read_page`, has the
+same shape; its arguments have also passed the tool's own checks.
 
 The client answers the call with the
-[tool-result route](/reference/api/#tool-results). The calls of one model
+[tool-result route](/reference/api/#tool-results): with its result for a
+client tool, or `allowed` or `failed` for a backend tool. The calls of one model
 round arrive in the model's order, and the next round starts once every one
 has an answer. The model's text in a round that calls tools is streamed and
 stored like any other text. The event is live only: nothing stores it, and a

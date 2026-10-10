@@ -1,9 +1,11 @@
 import {
   chatReplyNotFoundProblemSchema,
   chatReplyNotGeneratingProblemSchema,
+  chatToolCallAnswerMismatchProblemSchema,
   chatToolCallNotPendingProblemSchema,
   type ChatReplyNotFoundProblem,
   type ChatReplyNotGeneratingProblem,
+  type ChatToolCallAnswerMismatchProblem,
   type ChatToolCallNotPendingProblem
 } from "@lys/protocol"
 
@@ -68,6 +70,28 @@ export function createChatToolCallNotPendingProblem(
     title: shape.title.value,
     status: shape.status.value,
     detail: `Tool call ${callId} is not waiting for an answer.`,
+    instance
+  }
+}
+
+/**
+ * Creates the caller-safe response for answering a waiting tool call with an
+ * answer that does not fit it.
+ *
+ * @param callId - Validated UUIDv7 of the waiting call.
+ * @param instance - Request path identifying this occurrence.
+ * @returns The strict problem accepted by tool-result consumers.
+ */
+export function createChatToolCallAnswerMismatchProblem(
+  callId: string,
+  instance: string
+): ChatToolCallAnswerMismatchProblem {
+  const { shape } = chatToolCallAnswerMismatchProblemSchema.unwrap()
+  return {
+    type: shape.type.value,
+    title: shape.title.value,
+    status: shape.status.value,
+    detail: `Tool call ${callId} cannot take this answer: a client tool's call takes its result, and a backend tool's call takes allowed or failed.`,
     instance
   }
 }

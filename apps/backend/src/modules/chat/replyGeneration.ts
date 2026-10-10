@@ -1,9 +1,13 @@
 import type {
+  BackendToolCallAnswer,
   ChatGenerationEvent,
+  ChatToolAnswer,
   ChatToolCall,
   ChatToolResult
 } from "@lys/protocol"
-import PendingToolCalls from "./pendingToolCalls"
+import PendingToolCalls, {
+  type ToolCallAnswerOutcome
+} from "./pendingToolCalls"
 import type ReplyEventSubscription from "./replyEventSubscription"
 
 /** Capabilities a generation lends to one of its tasks. */
@@ -18,15 +22,26 @@ export type ReplyGenerationTaskContext = Readonly<{
 export type ReplyTaskContext = ReplyGenerationTaskContext &
   Readonly<{
     /**
-     * Lists one checked tool call and sends it to every follower, then waits
-     * for its answer. Resolves with the client's answer, or with undefined
-     * once the reply was stopped, the generation disposed, or the reply task
-     * settled; never rejects.
+     * Lists one checked call of a client tool and sends it to every follower,
+     * then waits for its result. Resolves with the client's result, or with
+     * undefined once the reply was stopped, the generation disposed, or the
+     * reply task settled; never rejects.
      * Throws if a call with the same identifier is already waiting.
      */
-    sendToolCall: (
+    sendClientToolCall: (
       toolCall: ChatToolCall
     ) => Promise<ChatToolResult | undefined>
+    /**
+     * Lists one checked call of a backend tool and sends it to every
+     * follower, then waits for the client to allow it or answer it as
+     * failed. Resolves with that answer, or with undefined once the reply was
+     * stopped, the generation disposed, or the reply task settled; never
+     * rejects.
+     * Throws if a call with the same identifier is already waiting.
+     */
+    sendBuiltInToolCall: (
+      toolCall: ChatToolCall
+    ) => Promise<BackendToolCallAnswer | undefined>
   }>
 
 /** Work and failure reporting for one generation. */
@@ -214,28 +229,36 @@ export default class ReplyGeneration implements AsyncDisposable {
    * Resumes the reply with the client's answer to one waiting call.
    *
    * @param toolCallId - Identifier of the call's `tool-call` event.
-   * @param result - Validated answer, handed to the reply unchanged.
-   * @returns True when the call was waiting; false when it is unknown,
-   * already answered, or ended with its reply, which changes nothing. Calls
-   * still waiting when the reply task settles end without an answer.
+   * @param answer - Validated answer, handed to the reply unchanged.
+   * @returns `accepted` when the call was waiting and the answer fits it;
+   * `not-pending` when it is unknown, already answered, or ended with its
+   * reply; `mismatched` when the answer does not fit the call. Only
+   * `accepted` changes anything. Calls still waiting when the reply task
+   * settles end without an answer.
    */
-  public resolveToolCall(toolCallId: string, result: ChatToolResult): boolean {
-    return this.#pendingToolCalls.resolveToolCall(toolCallId, result)
+  public resolveToolCall(
+    toolCallId: string,
+    answer: ChatToolAnswer
+  ): ToolCallAnswerOutcome {
+    return this.#pendingToolCalls.resolveToolCall(toolCallId, answer)
   }
 
   /**
    * Creates the context lent to the reply task.
    *
-   * @returns The reply's signal, a non-blocking event sender, and the tool
-   * call sender.
+   * @returns The reply's signal, a non-blocking event sender, and the two
+   * tool call senders.
    */
   #createReplyTaskContext(): ReplyTaskContext {
+    const sendEvent = (event: ChatGenerationEvent) => {
+      this.#handleTaskEvent(event)
+    }
     return {
       ...this.#createTaskContext(this.#replyController.signal),
-      sendToolCall: (toolCall) =>
-        this.#pendingToolCalls.sendToolCall(toolCall, (event) => {
-          this.#handleTaskEvent(event)
-        })
+      sendClientToolCall: (toolCall) =>
+        this.#pendingToolCalls.sendClientToolCall(toolCall, sendEvent),
+      sendBuiltInToolCall: (toolCall) =>
+        this.#pendingToolCalls.sendBuiltInToolCall(toolCall, sendEvent)
     }
   }
 

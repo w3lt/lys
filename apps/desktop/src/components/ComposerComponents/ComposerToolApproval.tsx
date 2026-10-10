@@ -1,9 +1,12 @@
 import type { ChatToolCall } from "@lys/protocol"
-import type { ToolAccess } from "@lys/share"
+import type { ToolAccess, ToolRunner } from "@lys/share"
 import { useId, useState, type ReactElement } from "react"
 import { ChevronRight, Lock } from "lucide-react"
 
-import { formatToolAccessLabel } from "@/components/SettingsViewComponents/tool-presentation"
+import {
+  formatToolAccessLabel,
+  getToolRunnerPresentation
+} from "@/components/SettingsViewComponents/tool-presentation"
 import { Button } from "@/components/ui/button"
 import type { HeldToolCallAnswer, ShownToolCall } from "@/lib/store/tool-calls"
 
@@ -47,6 +50,8 @@ type ComposerCalledToolProps = {
   readonly toolName: string
   /** What the tool does with the machine, from its definition. */
   readonly access: ToolAccess
+  /** Side that runs the tool, from its definition. */
+  readonly runner: ToolRunner
 }
 
 /** Properties accepted by {@link ComposerToolCallArguments}. */
@@ -79,16 +84,19 @@ type ComposerToolResultFailureProps = {
 
 /**
  * Presents the called tool: its name, what it does with the machine, and
- * that it runs inside Lys.
+ * where it runs.
  *
  * @remarks The lock icon is decorative. The component owns no state.
- * @param props - Tool name and access level.
+ * @param props - Tool name, access level, and runner.
  * @returns The tool line of a waiting call's card.
  */
 function ComposerCalledTool({
   toolName,
-  access
+  access,
+  runner
 }: ComposerCalledToolProps): ReactElement {
+  const runnerPresentation = getToolRunnerPresentation(runner)
+
   return (
     <div className="composer__approval-tool">
       <Lock aria-hidden="true" />
@@ -99,9 +107,9 @@ function ComposerCalledTool({
       <span
         className="composer__approval-badge"
         data-badge="origin"
-        title="Runs inside the Lys app"
+        title={runnerPresentation.title}
       >
-        in Lys
+        {runnerPresentation.label}
       </span>
     </div>
   )
@@ -232,6 +240,7 @@ function ComposerToolCallRequest({
 
       <ComposerCalledTool
         access={answer.definition.access}
+        runner={answer.definition.runner}
         toolName={call.toolName}
       />
 

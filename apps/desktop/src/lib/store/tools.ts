@@ -1,7 +1,10 @@
-import type { ChatToolOffer, ListToolsResult } from "@lys/protocol"
+import type { ChatToolOffer } from "@lys/protocol"
+import type { ToolAccess, ToolDefinition } from "@lys/share"
 import { create, type StoreApi, type UseBoundStore } from "zustand"
 
+import { listBackendTools } from "@/lib/apis/http/tools"
 import { listTools } from "@/lib/apis/tauri/tools"
+import { useLysStore } from "@/lib/store"
 
 /** Every approval the Tools pane offers for a tool, in display order. */
 export const TOOL_APPROVALS = Object.freeze(["ask", "run"] as const)
@@ -23,20 +26,19 @@ export type ToolChoice = {
 }
 
 /**
- * Choice of a tool the person has not changed in this session: on, and
- * asking before each call.
+ * Choice of a tool the person has not changed in this session, by what the
+ * tool does with the machine.
  *
- * @remarks Every current tool only reads data on this machine, and such
- * tools start on; a tool that sends data off the machine would start off.
- * Every tool asks first until the person picks Just run, which lasts for this
- * session only.
+ * @remarks A tool that only reads data on this machine starts on; a tool
+ * that sends requests off the machine starts off. Every tool asks first until
+ * the person picks Just run, which lasts for this session only.
  */
-const DEFAULT_TOOL_CHOICE: ToolChoice = Object.freeze({
-  isOn: true,
-  approval: "ask"
-})
+const DEFAULT_TOOL_CHOICES = Object.freeze({
+  reads: Object.freeze({ isOn: true, approval: "ask" }),
+  network: Object.freeze({ isOn: false, approval: "ask" })
+} satisfies Readonly<Record<ToolAccess, ToolChoice>>)
 
-/** Lifecycle of the list of client tools read from the desktop. */
+/** Lifecycle of the list of every tool: the desktop's and the backend's. */
 export type ToolListState =
   | {
       /** No read has started. */
@@ -47,13 +49,16 @@ export type ToolListState =
       readonly status: "loading"
     }
   | {
-      /** The list was read. */
+      /** Both lists were read. */
       readonly status: "loaded"
-      /** Every client tool, in the order Settings lists them. */
-      readonly tools: ListToolsResult
+      /**
+       * Every tool, each name once: the desktop's tools, then the backend's,
+       * each in the order its source lists them.
+       */
+      readonly tools: readonly ToolDefinition[]
     }
   | {
-      /** The latest read failed. */
+      /** The latest read of either list failed. */
       readonly status: "failed"
       /** User-presentable reason. */
       readonly error: string
@@ -61,7 +66,7 @@ export type ToolListState =
 
 /** Observable state of the Tools pane, kept for the session only. */
 type ToolStoreState = {
-  /** Lifecycle of the list of client tools. */
+  /** Lifecycle of the list of every tool. */
   readonly list: ToolListState
   /** Whether agents may call tools at all; on until switched off. */
   readonly areToolCallsOn: boolean
@@ -75,7 +80,7 @@ type ToolStoreState = {
 /** Actions of the Tools pane store. */
 type ToolStoreActions = {
   /**
-   * Reads the client tools from the desktop.
+   * Reads the desktop's tools and the backend's tools.
    *
    * @returns A promise that resolves after the list or the failure is
    * committed; it never rejects.
@@ -93,26 +98,28 @@ type ToolStoreActions = {
   /**
    * Switches one tool on or off, keeping its approval.
    *
-   * @param toolName - Name of a listed tool.
+   * @param tool - Definition of a listed tool.
    * @param isOn - Whether the tool is offered to the model.
    */
-  updateToolOn: (toolName: string, isOn: boolean) => void
+  updateToolOn: (tool: ToolDefinition, isOn: boolean) => void
   /**
    * Replaces when one tool runs, keeping whether it is on.
    *
-   * @param toolName - Name of a listed tool.
+   * @param tool - Definition of a listed tool.
    * @param approval - When the tool runs once the model asks for it.
    */
-  updateToolApproval: (toolName: string, approval: ToolApproval) => void
+  updateToolApproval: (tool: ToolDefinition, approval: ToolApproval) => void
 }
 
 /** Complete contract of the Tools pane store. */
 type ToolStore = ToolStoreState & ToolStoreActions
 
-/** Runtime dependency of one tool store. */
+/** Runtime dependencies of one tool store. */
 type ToolStoreDependencies = {
-  /** Lists every client tool; rejects when the list cannot be read. */
-  readonly listTools: () => Promise<ListToolsResult>
+  /** Lists the desktop's tools; rejects when the list cannot be read. */
+  readonly listClientTools: () => Promise<readonly ToolDefinition[]>
+  /** Lists the backend's tools; rejects when the list cannot be read. */
+  readonly listBackendTools: () => Promise<readonly ToolDefinition[]>
 }
 
 /** List state while a read is pending. */
@@ -123,15 +130,16 @@ const LOADING_TOOL_LIST: ToolListState = Object.freeze({ status: "loading" })
  *
  * @param toolChoices - Choices the person changed in this session, keyed by
  * tool name.
- * @param toolName - Name of the tool.
- * @returns The tool's changed choice, or the default choice, on and asking
- * first, when the person has not changed it.
+ * @param tool - Name and access of the tool.
+ * @returns The tool's changed choice, or, when the person has not changed
+ * it, the default for its access: asking first, and on unless the tool sends
+ * requests off this machine.
  */
 export function getToolChoice(
   toolChoices: ReadonlyMap<string, ToolChoice>,
-  toolName: string
+  tool: Pick<ToolDefinition, "name" | "access">
 ): ToolChoice {
-  return toolChoices.get(toolName) ?? DEFAULT_TOOL_CHOICE
+  return toolChoices.get(tool.name) ?? DEFAULT_TOOL_CHOICES[tool.access]
 }
 
 /**
@@ -166,7 +174,7 @@ export const NO_CHAT_TOOL_OFFER: ChatToolOfferResult = Object.freeze({
 
 /** Tool settings a chat request's offer is built from. */
 export type BuildChatToolOfferInput = {
-  /** Lifecycle of the client tool list, read before building. */
+  /** Lifecycle of the tool list, read before building. */
   readonly list: ToolListState
   /** Choices the person changed, keyed by tool name. */
   readonly toolChoices: ReadonlyMap<string, ToolChoice>
@@ -182,8 +190,9 @@ const TOOL_LIST_RECOVERY_ACTION =
  * @param input - Tool list and the person's choices. The caller has already
  * checked that tool calls are on and that the loaded model was trained for
  * tool use.
- * @returns `offered` with every switched-on tool in list order,
- * `not-offered` when no tool is on, or `unavailable` when the list was not
+ * @returns `offered` with the definitions of the switched-on desktop tools
+ * and the names of the switched-on backend tools, each in list order;
+ * `not-offered` when no tool is on; or `unavailable` when the list was not
  * read.
  */
 export function buildChatToolOffer({
@@ -200,12 +209,22 @@ export function buildChatToolOffer({
     })
   }
 
-  const definitions = Object.freeze(
-    list.tools.filter((tool) => getToolChoice(toolChoices, tool.name).isOn)
+  const onTools = list.tools.filter(
+    (tool) => getToolChoice(toolChoices, tool).isOn
   )
-  if (definitions.length === 0) return NO_CHAT_TOOL_OFFER
+  if (onTools.length === 0) return NO_CHAT_TOOL_OFFER
 
-  const offer = Object.freeze({ definitions } satisfies ChatToolOffer)
+  const definitions = Object.freeze(
+    onTools.filter((tool) => tool.runner === "client")
+  )
+  const backendToolNames = onTools
+    .filter((tool) => tool.runner === "backend")
+    .map((tool) => tool.name)
+  const offer: ChatToolOffer = Object.freeze(
+    backendToolNames.length === 0
+      ? { definitions }
+      : { definitions, backendToolNames: Object.freeze(backendToolNames) }
+  )
 
   return Object.freeze({ status: "offered", offer })
 }
@@ -230,9 +249,35 @@ function buildToolChoices(
 }
 
 /**
- * Formats why the client tools could not be read.
+ * Builds the list of every tool from the desktop's and the backend's lists.
  *
- * @param error - Value the list read rejected with.
+ * @param clientTools - The desktop's tools, each name once.
+ * @param backendTools - The backend's tools, each name once.
+ * @returns A frozen list: the desktop's tools, then the backend's.
+ * @throws If a desktop tool and a backend tool share a name, because a chat
+ * request could not offer both.
+ */
+function buildToolList(
+  clientTools: readonly ToolDefinition[],
+  backendTools: readonly ToolDefinition[]
+): readonly ToolDefinition[] {
+  const clientToolNames = new Set(clientTools.map((tool) => tool.name))
+  const sharedName = backendTools.find((tool) =>
+    clientToolNames.has(tool.name)
+  )?.name
+  if (sharedName !== undefined) {
+    throw new Error(
+      `the app and the backend both have a tool named ${sharedName}.`
+    )
+  }
+
+  return Object.freeze([...clientTools, ...backendTools])
+}
+
+/**
+ * Formats why the tools could not be read.
+ *
+ * @param error - Value either list read rejected with.
  * @returns A sentence for the pane's status line, with the reason when the
  * rejection carries one.
  */
@@ -245,7 +290,8 @@ function formatToolListError(error: unknown): string {
 /**
  * Creates one independently owned tool store.
  *
- * @param dependencies - Reader of the client tool list.
+ * @param dependencies - Readers of the desktop's and the backend's tool
+ * lists.
  * @returns A Zustand hook and store API owning the Tools pane's list and its
  * session-only choices.
  */
@@ -273,14 +319,18 @@ function createToolStore(
     set: StoreApi<ToolStore>["setState"]
   ): ToolStore {
     /**
-     * Reads the client tools and commits the list or the failure.
+     * Reads both tool lists and commits the merged list or the failure.
      *
      * @returns A promise that resolves after the outcome is committed.
      */
     async function readToolList(): Promise<void> {
       set({ list: LOADING_TOOL_LIST })
       try {
-        const tools = await dependencies.listTools()
+        const [clientTools, backendTools] = await Promise.all([
+          dependencies.listClientTools(),
+          dependencies.listBackendTools()
+        ])
+        const tools = buildToolList(clientTools, backendTools)
         set({ list: Object.freeze({ status: "loaded", tools }) })
       } catch (error) {
         const message = formatToolListError(error)
@@ -289,7 +339,7 @@ function createToolStore(
     }
 
     /**
-     * Reads the client tools, joining a read already in flight.
+     * Reads both tool lists, joining a read already in flight.
      *
      * @returns A promise that resolves after the list or the failure is
      * committed.
@@ -303,16 +353,16 @@ function createToolStore(
     /**
      * Switches one tool on or off, keeping its approval.
      *
-     * @param toolName - Name of a listed tool.
+     * @param tool - Definition of a listed tool.
      * @param isOn - Whether the tool is offered to the model.
      */
-    function updateToolOn(toolName: string, isOn: boolean): void {
+    function updateToolOn(tool: ToolDefinition, isOn: boolean): void {
       set((state) => {
-        const { approval } = getToolChoice(state.toolChoices, toolName)
+        const { approval } = getToolChoice(state.toolChoices, tool)
         const choice = Object.freeze({ isOn, approval } satisfies ToolChoice)
 
         return {
-          toolChoices: buildToolChoices(state.toolChoices, toolName, choice)
+          toolChoices: buildToolChoices(state.toolChoices, tool.name, choice)
         }
       })
     }
@@ -320,19 +370,19 @@ function createToolStore(
     /**
      * Replaces when one tool runs, keeping whether it is on.
      *
-     * @param toolName - Name of a listed tool.
+     * @param tool - Definition of a listed tool.
      * @param approval - When the tool runs once the model asks for it.
      */
     function updateToolApproval(
-      toolName: string,
+      tool: ToolDefinition,
       approval: ToolApproval
     ): void {
       set((state) => {
-        const { isOn } = getToolChoice(state.toolChoices, toolName)
+        const { isOn } = getToolChoice(state.toolChoices, tool)
         const choice = Object.freeze({ isOn, approval } satisfies ToolChoice)
 
         return {
-          toolChoices: buildToolChoices(state.toolChoices, toolName, choice)
+          toolChoices: buildToolChoices(state.toolChoices, tool.name, choice)
         }
       })
     }
@@ -355,12 +405,17 @@ function createToolStore(
  * Tool store used by the Tools settings pane, the chat view, and the
  * tool-call store.
  *
- * @remarks This singleton owns the list of client tools read from the desktop
- * and the person's choices: tool calls on or off and each tool's switch and
- * approval. The chat view offers the switched-on tools to a model trained for
- * tool use, and the tool-call store applies each tool's approval. The choices
- * last for the session only; nothing is saved.
+ * @remarks This singleton owns the list of every tool, read from the desktop
+ * and from the backend origin the application store names when each read
+ * starts, and the person's choices: tool calls on or off and each tool's
+ * switch and approval. The chat view offers the switched-on tools to a model
+ * trained for tool use, and the tool-call store applies each tool's approval.
+ * The choices last for the session only; nothing is saved.
  */
 export const useToolStore: UseBoundStore<StoreApi<ToolStore>> = createToolStore(
-  { listTools }
+  {
+    listClientTools: listTools,
+    listBackendTools: () =>
+      listBackendTools({ backendUrl: useLysStore.getState().backendUrl })
+  }
 )

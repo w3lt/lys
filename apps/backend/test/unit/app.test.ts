@@ -104,6 +104,10 @@ describe("buildApp", () => {
     expect(response.json()).toMatchObject({ storedCount: 0 })
     expect(agentsResponse.statusCode).toBe(200)
     expect(agentsResponse.json()).toEqual({
+      builtInAgents: [
+        { code: "caliginia", name: "Caliginia", bio: "Lys's dark side." },
+        { code: "lysiptera", name: "Lysiptera", bio: "Lys's light side." }
+      ],
       agents: [],
       storedCount: 0,
       nextCursor: null

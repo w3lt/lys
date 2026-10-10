@@ -72,7 +72,8 @@ not find a runtime that `build.sh` installed under another directory.
 | LM Studio HTTP base URL        | `http://${LMSTUDIO_HOST}:${LMSTUDIO_PORT}/v1`                                         |
 | LM Studio WebSocket base URL   | `ws://${LMSTUDIO_HOST}:${LMSTUDIO_PORT}`                                              |
 | SQLite path                    | `$LYS_HOME/lys_db.sqlite`; see [Lys home directory](#lys-home-directory)              |
-| Lys system prompt              | `src/utils/prompts/lys.txt`, as `lysSystemPrompt`                                     |
+| Caliginia system prompt        | `src/utils/prompts/caliginia.txt`, as `caliginiaSystemPrompt`                         |
+| Lysiptera system prompt        | `src/utils/prompts/lysiptera.txt`, as `lysipteraSystemPrompt`                         |
 | Title-generation prompt        | `src/utils/prompts/title-generation.txt`, as `titleGenerationPrompt`                  |
 | Title-generation attempt limit | `3`, from `titleGenerationMaxAttempts` in `src/config.ts`; must be a positive integer |
 | Generated title length limit   | `100`, from `generatedTitleMaxLength` in `src/config.ts`; must be a positive integer  |
@@ -90,14 +91,14 @@ The backend validates the complete configuration with `backendConfigSchema` in
 application or any service. Every key is required, unknown keys are rejected,
 and no defaults are applied.
 
-| Key                                                     | Accepted values                                                                               |
-| ------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `backendHost`                                           | An IPv4 loopback address (`127.x.x.x`); the backend does not authenticate non-browser callers |
-| `backendPort`, `lmstudioPort`                           | An integer from 1 to 65535                                                                    |
-| `lmstudioHost`                                          | A host name or IPv4 address, used unbracketed in the `http://` and `ws://` URLs               |
-| `databaseFilePath`                                      | An absolute path                                                                              |
-| `lysSystemPrompt`, `titleGenerationPrompt`              | Non-empty text without leading or trailing whitespace                                         |
-| `titleGenerationMaxAttempts`, `generatedTitleMaxLength` | A positive integer                                                                            |
+| Key                                                                       | Accepted values                                                                               |
+| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `backendHost`                                                             | An IPv4 loopback address (`127.x.x.x`); the backend does not authenticate non-browser callers |
+| `backendPort`, `lmstudioPort`                                             | An integer from 1 to 65535                                                                    |
+| `lmstudioHost`                                                            | A host name or IPv4 address, used unbracketed in the `http://` and `ws://` URLs               |
+| `databaseFilePath`                                                        | An absolute path                                                                              |
+| `caliginiaSystemPrompt`, `lysipteraSystemPrompt`, `titleGenerationPrompt` | Non-empty text without leading or trailing whitespace                                         |
+| `titleGenerationMaxAttempts`, `generatedTitleMaxLength`                   | A positive integer                                                                            |
 
 A value outside these rules stops the backend at startup with a `ZodError`
 whose issues name each failing key. The shared constants, the `LYS_HOME`
@@ -196,8 +197,10 @@ load configurations.
 
 The settings view provides Runtime, Model, Generation, and Agents panes. Model
 inventory, load, unload, and loaded-state health controls call the backend
-through the application store. Agents are stored by the backend, not in
-`settings.json`. There is no Conversation pane.
+through the application store. The user's agents are stored by the backend,
+not in `settings.json`, and the built-in agents ship with the backend and are
+not stored at all. The agent selected for a new conversation is kept only
+until the app quits. There is no Conversation pane.
 
 Generation edits apply to future messages immediately and are saved
 automatically through Tauri. The save reloads the persisted document and replaces

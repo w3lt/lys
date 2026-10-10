@@ -103,6 +103,14 @@ const NOT_PENDING_RESULT: SendChatToolResultResult = Object.freeze({
 const MISSING_REPLY_MESSAGE = "The reply is no longer stored."
 
 /**
+ * Sentence shown for a conversation whose agent was deleted: the failure of a
+ * chat request the backend refuses for that reason, and the notice the
+ * composer shows once the agent list says so.
+ */
+export const DELETED_CONVERSATION_AGENT_MESSAGE =
+  "This conversation's agent was deleted. Start a new one to keep talking."
+
+/**
  * Opens and reads one validated backend chat event stream.
  *
  * @remarks Ending iteration before the backend closes the stream cancels the
@@ -114,7 +122,10 @@ const MISSING_REPLY_MESSAGE = "The reply is no longer stored."
  * continues.
  * @param options - Optional transport cancellation settings.
  * @returns An async generator yielding validated chat protocol events.
- * @throws If the request, stream read, JSON parse, or event validation fails.
+ * @throws If the request, stream read, JSON parse, or event validation fails;
+ * with {@link DELETED_CONVERSATION_AGENT_MESSAGE} when the backend reports
+ * that the continued conversation's agent no longer exists, which stored
+ * nothing.
  */
 export async function* readChatEvents(
   payload: ChatApiRequestBody,
@@ -128,6 +139,12 @@ export async function* readChatEvents(
     signal
   })
 
+  if (
+    response.status === 409 &&
+    isConversationAgentMissingProblem(await readFailureBody(response))
+  ) {
+    throw new Error(DELETED_CONVERSATION_AGENT_MESSAGE)
+  }
   if (!response.ok || !response.body) {
     throw new Error(`Chat request failed: ${response.status}`)
   }
@@ -315,6 +332,18 @@ async function* readServerSentEvents<TStreamEvent>(
       reader.releaseLock()
     }
   }
+}
+
+/**
+ * Determines whether a decoded body declares that a continued conversation's
+ * agent no longer exists.
+ *
+ * @param body - Untrusted body of a failed chat response.
+ * @returns Whether it validates as the declared missing conversation agent
+ * problem.
+ */
+function isConversationAgentMissingProblem(body: unknown): boolean {
+  return chatApi.responses[409].safeParse(body).success
 }
 
 /**

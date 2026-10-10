@@ -96,20 +96,21 @@ export function registerAgentCreatorContractSuite(
       expect(readStoredAgents()).toEqual([first, second, created])
     })
 
-    it("skips Lys's code when the name gives it", () => {
+    it("skips a built-in agent's code when the name gives it", () => {
       const { agentCreator, readStoredAgents } = createHarness()
 
       const created = agentCreator.createAgent({
         ...RESEARCHER_NAME_ONLY_DEFINITION,
-        name: "Lys"
+        name: "Caliginia"
       })
 
-      expect(created).toMatchObject({ code: "lys-2", name: "Lys" })
+      expect(created).toMatchObject({ code: "caliginia-2", name: "Caliginia" })
       expect(readStoredAgents()).toEqual([created])
     })
 
     it.each([
-      ["Lys's code", "lys"],
+      ["Caliginia's code", "caliginia"],
+      ["Lysiptera's code", "lysiptera"],
       ["a stored agent's code", "researcher"]
     ])("returns undefined and stores nothing for %s", (_label, code) => {
       const { agentCreator, readStoredAgents } = createHarness()

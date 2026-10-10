@@ -9,6 +9,10 @@ import {
 } from "@/components/ChatViewComponents/conversation-presentation"
 import ConversationHistoryPanel from "@/components/ConversationHistoryComponents/ConversationHistoryPanel"
 import { Composer } from "@/components/Composer"
+import { useAnsweringAgent } from "@/lib/hooks/answeringAgent"
+import { useLysStore } from "@/lib/store"
+import { useAgentStore } from "@/lib/store/agents"
+import { formatConversationAgentName } from "@/lib/store/agents/conversation-agent"
 import {
   type ChatRequestState,
   type ConversationOpenState,
@@ -117,7 +121,10 @@ function useConversationHistoryShortcut(
  * @remarks The chat-view store owns
  * conversation, request, and open state; the history store owns whether past
  * conversations are shown; the surrounding shell owns whether the transcript
- * is pinned to its latest content. The component owns the transcript host ref
+ * is pinned to its latest content. The agent store owns the agent list, which
+ * the view reads when it appears and whenever the backend starts running, so
+ * the transcript and the composer can name the agent that answers and tell
+ * when it was deleted; leaving the view cancels nothing. The component owns the transcript host ref
  * and the message-field ref. It synchronizes the transcript's scroll position
  * only while the parent says it is pinned and messages exist, forwards starter
  * submission to the store, and politely announces a pending reply or
@@ -153,6 +160,9 @@ export default function ChatView({
   const closeConversationHistory = useConversationHistoryStore(
     (state) => state.closeConversationHistory
   )
+  const backendStatus = useLysStore((state) => state.backendServerInfo.status)
+  const loadAgents = useAgentStore((state) => state.loadAgents)
+  const agentName = formatConversationAgentName(useAnsweringAgent())
   const messages = conversation?.messages ?? EMPTY_CONVERSATION_MESSAGES
   const presentation = createConversationPresentation(messages)
   const transcriptRef = useRef<HTMLDivElement>(null)
@@ -163,6 +173,10 @@ export default function ChatView({
     openConversationHistory,
     closeConversationHistory
   )
+
+  useEffect(() => {
+    if (backendStatus === "running") void loadAgents()
+  }, [backendStatus, loadAgents])
 
   useEffect(() => {
     const element = transcriptRef.current
@@ -216,6 +230,7 @@ export default function ChatView({
       <ConversationPanel
         {...presentation}
         activity={activity}
+        agentName={agentName}
         error={error}
         isAtBottom={atBottom}
         onJumpToLatest={handleJumpToLatest}

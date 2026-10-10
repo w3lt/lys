@@ -8,7 +8,7 @@ import type {
   MessageGenerationOptions
 } from "@lys/protocol"
 import {
-  LYS_AGENT_CODE,
+  CALIGINIA_AGENT_CODE,
   type ConversationAssistantMessageStatus
 } from "@lys/share"
 import { create, type StoreApi, type UseBoundStore } from "zustand"
@@ -27,6 +27,8 @@ import {
 import { findEligibleChatModel } from "@/lib/models/model-residency"
 import { calculateToolModelSupport } from "@/lib/models/tool-model-support"
 import { useLysStore } from "@/lib/store"
+import { useAgentStore } from "@/lib/store/agents"
+import { calculateNewConversationAgentCode } from "@/lib/store/agents/conversation-agent"
 import { useToolCallStore } from "@/lib/store/tool-calls"
 import {
   buildChatToolOffer,
@@ -142,6 +144,15 @@ export type ChatViewStoreDependencies = {
    */
   readonly readGenerationOptions: () => MessageGenerationOptions
   /**
+   * Reads the code of the agent a new conversation is started with.
+   *
+   * @param selectedAgentCode - Code of the agent the user selected.
+   * @returns The selected code, or Caliginia's when the agent list current
+   * at call time no longer holds the selected agent. Sampling is owned by
+   * {@link ChatViewActions.sendMessage}.
+   */
+  readonly readNewConversationAgentCode: (selectedAgentCode: string) => string
+  /**
    * Gets the tools the next request offers.
    *
    * @returns The offer current at call time: offered tools, none, or
@@ -225,8 +236,8 @@ export type ConversationOpenState =
 /**
  * Observable state rendered by the chat view.
  *
- * @remarks The store owns the draft, conversation snapshot, request phase,
- * conversation-open phase, and latest error. Conversation and message values
+ * @remarks The store owns the draft, conversation snapshot, selected agent,
+ * request phase, conversation-open phase, and latest error. Conversation and message values
  * are replaced immutably; the UI may read them but cannot mutate the store's
  * authoritative values.
  */
@@ -235,6 +246,14 @@ export type ChatViewState = {
   readonly inputDraft: string
   /** Active conversation, or undefined before a conversation starts. */
   readonly conversation?: ChatViewConversation
+  /**
+   * Code of the agent the user selected to answer the next new conversation.
+   *
+   * @remarks It starts as Caliginia's, survives a reset, and is not saved
+   * across restarts. A shown conversation keeps the agent it was started
+   * with, whatever this holds.
+   */
+  readonly selectedAgentCode: string
   /** Single authoritative observable request lifecycle state. */
   readonly request: ChatRequestState
   /** Whether a stored conversation is being opened to replace the shown one. */
@@ -257,6 +276,12 @@ export type ChatViewActions = {
   /** Replaces the composer draft with user-entered text. */
   setInputDraft: (draft: string) => void
   /**
+   * Selects the agent that answers the next new conversation.
+   *
+   * @param agentCode - Code of a listed agent.
+   */
+  selectAgent: (agentCode: string) => void
+  /**
    * Submits an explicit starter prompt or current composer draft when a loaded
    * model is eligible.
    *
@@ -271,8 +296,10 @@ export type ChatViewActions = {
    * conversation, or an empty prompt is ignored. After the reply completed,
    * sending stops following its stream, which may still carry a title; the
    * backend keeps generating and saving that title.
-   * The eligible model and generation controls are sampled once before request
-   * ownership begins; later edits affect only later requests. The offered tools
+   * The eligible model, the generation controls, and, for a new conversation,
+   * its agent are sampled once before request ownership begins; later edits
+   * affect only later requests. A selected agent that is no longer listed is
+   * replaced by Caliginia. The offered tools
    * are sampled once after ownership begins, before the stream opens. A tool
    * list that cannot be read fails the request with an inline error, and
    * nothing is sent.
@@ -294,7 +321,10 @@ export type ChatViewActions = {
    * idempotently.
    */
   stopStreaming: () => Promise<void>
-  /** Stops following active work and restores initial chat state. */
+  /**
+   * Stops following active work and restores initial chat state, keeping the
+   * selected agent.
+   */
   resetConversation: () => void
   /**
    * Opens a stored conversation, replacing the shown one once it is read, and
@@ -333,12 +363,13 @@ const IDLE_CONVERSATION_OPEN: ConversationOpenState = Object.freeze({
  * Initial observable state used as a fresh value by independent stores.
  *
  * @remarks The outer, request, and open objects are frozen to prevent
- * accidental mutation; reset reuses this immutable snapshot and aborts the
- * prior owners.
+ * accidental mutation; reset reuses this immutable snapshot, except for the
+ * selected agent, and aborts the prior owners.
  */
 const INITIAL_CHAT_VIEW_STATE: Readonly<ChatViewState> = Object.freeze({
   inputDraft: "",
   conversation: undefined,
+  selectedAgentCode: CALIGINIA_AGENT_CODE,
   request: IDLE_CHAT_REQUEST,
   conversationOpen: IDLE_CONVERSATION_OPEN,
   error: undefined
@@ -393,8 +424,11 @@ type StreamingChatReplyState = Extract<
 
 /** Inputs sampled to create one immutable chat request payload. */
 type CreateChatRequestPayloadInput = {
-  /** Existing conversation identifier, when continuing a conversation. */
-  readonly conversationId: string | undefined
+  /**
+   * Conversation the request starts, with the agent that answers it, or
+   * continues.
+   */
+  readonly conversation: ChatApiRequestBody["conversation"]
   /** Trimmed prompt prepared for this turn. */
   readonly submittedPrompt: string
   /** Loaded model selected for this request. */
@@ -511,13 +545,12 @@ function createChatRequestResource(token: number): ChatRequestResource {
  * this request.
  * @param toolOffer - Tools the request offers; omission sends none, so the
  * reply answers in one round.
- * @returns The complete payload. Without a conversation it starts a new one
- * that Lys answers; with one it continues it with the agent it was started
- * with.
+ * @returns The complete payload, which starts a conversation the sampled
+ * agent answers or continues one with the agent it was started with.
  */
 function createChatRequestPayload(
   {
-    conversationId,
+    conversation,
     submittedPrompt,
     model,
     generationOptions
@@ -525,10 +558,7 @@ function createChatRequestPayload(
   toolOffer: ChatToolOffer | undefined
 ): ChatApiRequestBody {
   return {
-    conversation:
-      conversationId === undefined
-        ? { kind: "new", agentCode: LYS_AGENT_CODE }
-        : { kind: "existing", id: conversationId },
+    conversation,
     message: submittedPrompt,
     model,
     generationOptions,
@@ -1136,6 +1166,16 @@ export function createChatViewStore(
     }
 
     /**
+     * Implements {@link ChatViewActions.selectAgent} for this store.
+     *
+     * @param agentCode - Code of the agent the next new conversation starts
+     * with.
+     */
+    function selectAgent(agentCode: string): void {
+      set({ selectedAgentCode: agentCode })
+    }
+
+    /**
      * Reports whether a new chat request may take ownership of the lifecycle.
      *
      * @returns Whether no conversation is opening and no reply is awaited:
@@ -1184,8 +1224,16 @@ export function createChatViewStore(
       nextRequestToken += 1
       const request = createAwaitingTurnRequest(token, submittedComposerDraft)
       const resource = createChatRequestResource(token)
+      const { conversation, selectedAgentCode } = get()
       const requestInput = {
-        conversationId: get().conversation?.id,
+        conversation:
+          conversation === undefined
+            ? {
+                kind: "new",
+                agentCode:
+                  dependencies.readNewConversationAgentCode(selectedAgentCode)
+              }
+            : { kind: "existing", id: conversation.id },
         submittedPrompt,
         model,
         generationOptions: dependencies.readGenerationOptions()
@@ -1322,15 +1370,19 @@ export function createChatViewStore(
      *
      * @remarks Reset invalidates the request and open tokens before aborting
      * the local transports, clears draft, conversation, request, open, and
-     * error together, and reports no error. The backend keeps generating a
-     * reply that was streaming.
+     * error together, and reports no error. The selected agent stays, so the
+     * next conversation starts with it. The backend keeps generating a reply
+     * that was streaming.
      */
     function resetConversation(): void {
       const requestResource = activeRequestResource
       const openResource = activeOpenResource
       activeRequestResource = undefined
       activeOpenResource = undefined
-      set(INITIAL_CHAT_VIEW_STATE)
+      set({
+        ...INITIAL_CHAT_VIEW_STATE,
+        selectedAgentCode: get().selectedAgentCode
+      })
       requestResource?.abortController.abort()
       openResource?.abortController.abort()
     }
@@ -1577,6 +1629,7 @@ export function createChatViewStore(
     return {
       ...INITIAL_CHAT_VIEW_STATE,
       setInputDraft,
+      selectAgent,
       sendMessage,
       stopStreaming,
       resetConversation,
@@ -1638,9 +1691,10 @@ async function getChatToolOffer(): Promise<ChatToolOfferResult> {
  * explicitly because the request contract rejects unknown fields. A saved zero
  * ceiling is omitted so the backend receives no explicit completion-token limit.
  * The backend origin for following and stopping a reply is sampled when each
- * request starts. Tool offers read the Tools pane and the loaded model when
- * each request takes ownership, and every reply the store starts or follows
- * is handed to the tool-call store.
+ * request starts. A new conversation's agent is checked against the agent
+ * store's list when the request is sent. Tool offers read the Tools pane and
+ * the loaded model when each request takes ownership, and every reply the
+ * store starts or follows is handed to the tool-call store.
  */
 export const useChatViewStore: UseBoundStore<StoreApi<ChatViewStore>> =
   createChatViewStore({
@@ -1667,6 +1721,11 @@ export const useChatViewStore: UseBoundStore<StoreApi<ChatViewStore>> =
         ? { temperature }
         : { temperature, replyCeiling }
     },
+    readNewConversationAgentCode: (selectedAgentCode) =>
+      calculateNewConversationAgentCode(
+        selectedAgentCode,
+        useAgentStore.getState().list
+      ),
     getToolOffer: getChatToolOffer,
     startReplyToolCallFollow: (target) => {
       useToolCallStore.getState().startReplyToolCallFollow(target)

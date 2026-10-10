@@ -3,7 +3,7 @@ import { describe, expect, it, onTestFinished } from "vitest"
 import { migrateDatabase } from "../../../../src/infrastructure/database/migrations"
 
 /** Schema version produced by the current migration list. */
-const CURRENT_SCHEMA_VERSION = 7
+const CURRENT_SCHEMA_VERSION = 8
 
 /**
  * Opens an empty in-memory database owned by the current test.
@@ -82,6 +82,20 @@ function createVersion6Database(): DatabaseSync {
   return database
 }
 
+/**
+ * Creates a database with the version-7 schema.
+ *
+ * @returns A connection at `user_version` 7, closed when the test finishes.
+ * @remarks Migrates to the current version and resets the version marker:
+ * migration 8 changes only rows, and an empty database has none to change.
+ */
+function createVersion7Database(): DatabaseSync {
+  const database = openEmptyDatabase()
+  migrateDatabase(database)
+  database.exec("PRAGMA user_version = 7")
+  return database
+}
+
 describe("migrateDatabase", () => {
   it("creates the current schema in an empty database", () => {
     const database = openEmptyDatabase()
@@ -147,7 +161,7 @@ describe("migrateDatabase", () => {
     ).toEqual([{ id: "kept", title: "Title" }])
   })
 
-  it("upgrades a version-6 database by recording Lys as every conversation's agent and dropping the stored prompts", () => {
+  it("upgrades a version-6 database by recording Caliginia as every conversation's agent and dropping the stored prompts", () => {
     const database = createVersion6Database()
     database
       .prepare(
@@ -170,7 +184,7 @@ describe("migrateDatabase", () => {
 
     migrateDatabase(database)
 
-    expect(readUserVersion(database)).toBe(7)
+    expect(readUserVersion(database)).toBe(CURRENT_SCHEMA_VERSION)
     expect(listColumns(database, "conversations")).toEqual([
       "id",
       "title",
@@ -187,10 +201,60 @@ describe("migrateDatabase", () => {
       database
         .prepare("SELECT agent_code AS agentCode FROM conversations")
         .all()
-    ).toEqual([{ agentCode: "lys" }])
+    ).toEqual([{ agentCode: "caliginia" }])
     expect(
       database.prepare("SELECT * FROM conversation_messages").all()
     ).toEqual(messagesBefore)
+  })
+
+  it("upgrades a version-7 database by moving every conversation Lys answered to Caliginia and changing nothing else", () => {
+    const database = createVersion7Database()
+    database.exec(`
+      INSERT INTO conversations (id, title, agent_code, created_at, updated_at)
+      VALUES
+        ('first', 'Title', 'lys', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'),
+        ('second', NULL, 'lys', '2026-01-03T00:00:00.000Z', '2026-01-03T00:00:00.000Z'),
+        ('other', NULL, 'web-researcher', '2026-01-05T00:00:00.000Z', '2026-01-05T00:00:00.000Z');
+      INSERT INTO conversation_messages (id, conversation_id, role, content, created_at)
+      VALUES ('question', 'first', 'user', 'Hello', '2026-01-02T00:00:00.000Z');
+      INSERT INTO agents (code, name, bio, system_prompt, created_at, updated_at)
+      VALUES ('lys', 'Mine', 'My own agent.', 'You are mine.', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')
+    `)
+    const conversationsBefore = database
+      .prepare(
+        "SELECT id, title, created_at, updated_at FROM conversations ORDER BY id"
+      )
+      .all()
+    const messagesBefore = database
+      .prepare("SELECT * FROM conversation_messages")
+      .all()
+    const agentsBefore = database.prepare("SELECT * FROM agents").all()
+
+    migrateDatabase(database)
+
+    expect(readUserVersion(database)).toBe(8)
+    expect(
+      database
+        .prepare(
+          "SELECT id, agent_code AS agentCode FROM conversations ORDER BY id"
+        )
+        .all()
+    ).toEqual([
+      { id: "first", agentCode: "caliginia" },
+      { id: "other", agentCode: "web-researcher" },
+      { id: "second", agentCode: "caliginia" }
+    ])
+    expect(
+      database
+        .prepare(
+          "SELECT id, title, created_at, updated_at FROM conversations ORDER BY id"
+        )
+        .all()
+    ).toEqual(conversationsBefore)
+    expect(
+      database.prepare("SELECT * FROM conversation_messages").all()
+    ).toEqual(messagesBefore)
+    expect(database.prepare("SELECT * FROM agents").all()).toEqual(agentsBefore)
   })
 
   it("refuses a conversation row with an empty agent code", () => {

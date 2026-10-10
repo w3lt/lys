@@ -1,4 +1,4 @@
-import type { AgentSummary } from "@lys/protocol"
+import type { AgentSummary, BuiltInAgentSummary } from "@lys/protocol"
 import { ChevronRight, Plus } from "lucide-react"
 import { useId, useLayoutEffect, useRef, type ReactElement } from "react"
 
@@ -48,8 +48,8 @@ function isDocumentFocusLost(): boolean {
 
 /** Properties accepted by {@link AgentListItem}. */
 type AgentListItemProps = {
-  /** Listed agent shown by the row. */
-  readonly agent: AgentSummary
+  /** Listed built-in or stored agent shown by the row. */
+  readonly agent: BuiltInAgentSummary | AgentSummary
   /** Whether the agent was the one saved most recently. */
   readonly isRecentlySaved: boolean
   /** Whether the row takes focus when it is attached. */
@@ -59,7 +59,7 @@ type AgentListItemProps = {
 }
 
 /**
- * Presents one stored agent as a button that opens its editor.
+ * Presents one listed agent as a button that opens it.
  *
  * @remarks The list owner supplies the key
  * and decides which row takes focus; the row owns no state or effects. The
@@ -114,6 +114,58 @@ function AgentListItem({
         />
       </button>
     </li>
+  )
+}
+
+/** Properties accepted by {@link BuiltInAgentSection}. */
+export type BuiltInAgentSectionProps = {
+  /** Every built-in agent, in the order the backend ships them. */
+  readonly agents: readonly BuiltInAgentSummary[]
+  /** Control that takes focus when the section is attached. */
+  readonly focusTarget: AgentListFocusTarget
+  /** Requests that the parent open one agent's read-only view. */
+  readonly onOpenAgent: (agentCode: string) => void
+}
+
+/**
+ * Presents the agents that ship with Lys, which can be read and duplicated
+ * but not changed or deleted.
+ *
+ * @remarks The parent owns the agents, the focus target, and the open
+ * action; the section owns no state or effects. Agents keep the given order
+ * and are keyed by code. A built-in agent is never saved, so no row is marked
+ * as saved. The section is named by its heading, and the list is named
+ * Built-in agents.
+ * @param props - Agents, focus target, and the parent-owned open action.
+ * @returns The section of the built-in agents.
+ */
+export function BuiltInAgentSection({
+  agents,
+  focusTarget,
+  onOpenAgent
+}: BuiltInAgentSectionProps): ReactElement {
+  const headingId = useId()
+  const focusedAgentCode =
+    focusTarget.kind === "agent" ? focusTarget.agentCode : null
+
+  return (
+    <section aria-labelledby={headingId} className="settings-view__section">
+      <div className="settings-view__section-heading">
+        <h2 id={headingId}>built-in</h2>
+        <span>ship with Lys · not editable</span>
+      </div>
+      <ul aria-label="Built-in agents" className="settings-view__agent-list">
+        {agents.map((agent) => (
+          <AgentListItem
+            agent={agent}
+            isFocusedOnAttach={agent.code === focusedAgentCode}
+            isRecentlySaved={false}
+            key={agent.code}
+            onOpenAgent={onOpenAgent}
+          />
+        ))}
+      </ul>
+    </section>
   )
 }
 
@@ -196,7 +248,8 @@ export function CustomAgentSection({
       </div>
       {agents.length === 0 ? (
         <p className="settings-view__note">
-          None of your own yet. Start one with New agent.
+          None of your own yet. Start blank, or duplicate a built-in and change
+          what you need.
         </p>
       ) : (
         <ul aria-label="Your agents" className="settings-view__agent-list">

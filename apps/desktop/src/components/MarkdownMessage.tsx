@@ -20,6 +20,8 @@ type MarkdownMessageProps = {
   readonly text: string
   /** Whether generation remains active and needs a polite caret status. */
   readonly streaming: boolean
+  /** Status the caret announces while generation remains active. */
+  readonly generatingLabel: string
 }
 
 /** Properties react-markdown supplies to the `code` element inside a `pre`. */
@@ -198,7 +200,7 @@ const markdownComponents: Components = {
  * resource. Markdown links receive the configured external-navigation
  * attributes, `$…$` and `$$…$$` math renders through KaTeX, code blocks
  * receive the copy interaction, and the streaming caret is a polite status
- * announcement only while `streaming` is true.
+ * announcement, worded by the parent, only while `streaming` is true.
  * Shiki highlights fenced code with CSS `light-dark()` token colors from the
  * GitHub Light and GitHub Dark themes, so highlighted code follows the
  * inherited `color-scheme` without being highlighted again. Each language's
@@ -209,10 +211,15 @@ const markdownComponents: Components = {
  * resolves, it renders as plain Markdown without the link, math, and
  * code-block handling. Later passes keep the previous output visible until the
  * new text is processed.
- * @param props - Markdown source and current streaming presentation state.
+ * @param props - Markdown source, current streaming presentation state, and
+ * the caret's announcement.
  * @returns The rendered Markdown body and optional generation caret.
  */
-export function MarkdownMessage({ text, streaming }: MarkdownMessageProps) {
+export function MarkdownMessage({
+  text,
+  streaming,
+  generatingLabel
+}: MarkdownMessageProps) {
   return (
     <div className="markdown-message">
       <MarkdownHooks
@@ -243,7 +250,7 @@ export function MarkdownMessage({ text, streaming }: MarkdownMessageProps) {
       </MarkdownHooks>
       {streaming && (
         <span
-          aria-label="Lys is generating"
+          aria-label={generatingLabel}
           aria-live="polite"
           className="markdown-message__caret"
           data-testid="streaming-caret"

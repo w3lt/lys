@@ -68,13 +68,21 @@ export const backendConfigSchema = z
       .string()
       .refine(isAbsolute, "Database file path must be absolute."),
     /**
-     * System prompt of the Lys agent, sent first in the context of every reply
-     * Lys writes.
+     * System prompt of Caliginia, the built-in agent that is Lys's dark side,
+     * sent first in the context of every reply she writes.
      *
-     * @remarks Read once from the maintained `lys.txt` prompt file, with
+     * @remarks Read once from the maintained `caliginia.txt` prompt file, with
      * surrounding whitespace trimmed, when the configuration is loaded.
      */
-    lysSystemPrompt: promptTextSchema,
+    caliginiaSystemPrompt: promptTextSchema,
+    /**
+     * System prompt of Lysiptera, the built-in agent that is Lys's light
+     * side, sent first in the context of every reply she writes.
+     *
+     * @remarks Read once from the maintained `lysiptera.txt` prompt file, with
+     * surrounding whitespace trimmed, when the configuration is loaded.
+     */
+    lysipteraSystemPrompt: promptTextSchema,
     /**
      * System prompt sent with every title-generation request.
      *
@@ -130,7 +138,8 @@ export function loadBackendConfig(): BackendConfig {
     lmstudioHost: LMSTUDIO_HOST,
     lmstudioPort: LMSTUDIO_PORT,
     databaseFilePath: join(lysHome, "lys_db.sqlite"),
-    lysSystemPrompt: readPrompt("lys-system"),
+    caliginiaSystemPrompt: readPrompt("caliginia-system"),
+    lysipteraSystemPrompt: readPrompt("lysiptera-system"),
     titleGenerationPrompt: readPrompt("title-generation"),
     titleGenerationMaxAttempts: TITLE_GENERATION_MAX_ATTEMPTS,
     generatedTitleMaxLength: GENERATED_TITLE_MAX_LENGTH

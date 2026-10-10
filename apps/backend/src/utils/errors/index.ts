@@ -2,9 +2,11 @@
  * Domain failure raised when a requested conversation cannot be resolved.
  *
  * @remarks The subclass preserves the
- * native `Error` contract while giving route boundaries a stable domain
+ * native `Error` contract while giving callers a stable domain
  * discriminator. It owns no mutable state and is safe to construct per
- * failure; callers translate it to the chat route's not-found response.
+ * failure. Turn creation raises it for a continued conversation that is not
+ * stored. The chat route answers a missing conversation before it creates
+ * the turn, so this failure reaching the route is unexpected there.
  */
 export class ConversationNotFoundError extends Error {
   /**

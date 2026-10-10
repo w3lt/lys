@@ -8,6 +8,8 @@ import { formatToolCallAnnouncement } from "./tool-approval-presentation"
 
 /** Properties accepted by {@link ComposerToolCallPrompt}. */
 type ComposerToolCallPromptProps = {
+  /** Name of the agent answering the shown conversation. */
+  readonly agentName: string
   /**
    * Requests that the parent reject the waiting call with the draft as the
    * reason, and clear the draft.
@@ -27,11 +29,13 @@ type ComposerToolCallPromptProps = {
  * belongs to the parent, because it also clears the draft. The polite status
  * line is always rendered, so it exists before a call starts waiting; it is
  * empty while no call waits. The card is keyed by call, so each call starts
- * with its arguments hidden.
- * @param props - Parent-owned rejection.
+ * with its arguments hidden. The announcement names the agent the parent
+ * supplies.
+ * @param props - Answering agent's name and the parent-owned rejection.
  * @returns The status line and, while a call needs the person, its card.
  */
 export default function ComposerToolCallPrompt({
+  agentName,
   onRejectToolCall
 }: ComposerToolCallPromptProps): ReactElement {
   const conversationId = useChatViewStore((state) => state.conversation?.id)
@@ -49,7 +53,7 @@ export default function ComposerToolCallPrompt({
   return (
     <>
       <output className="sr-only">
-        {formatToolCallAnnouncement(shownToolCall)}
+        {formatToolCallAnnouncement(shownToolCall, agentName)}
       </output>
 
       {shownToolCall === undefined ? null : (

@@ -1,5 +1,5 @@
 import * as z from "zod"
-import { listAgentsApi } from "@lys/protocol"
+import { agentSummarySchema } from "@lys/protocol"
 import { agentSchema, type Agent } from "@lys/share"
 import type {
   AgentPage,
@@ -17,6 +17,9 @@ import type {
 const agentCountSchema = z.strictObject({
   storedCount: z.int().nonnegative()
 })
+
+/** Validates the listed rows of one page, freezing the page. */
+const agentSummaryRowsSchema = z.array(agentSummarySchema).readonly()
 
 /**
  * Reads the agent count and one page of summaries inside the caller's read
@@ -46,14 +49,9 @@ function listAgents(
       code: input.after?.code ?? null,
       limit: input.limit + 1
     })
-  const page = listAgentsApi.response.parse({
-    agents: rows.slice(0, input.limit),
-    storedCount,
-    nextCursor: null
-  })
   return {
-    agents: page.agents,
-    storedCount: page.storedCount,
+    agents: agentSummaryRowsSchema.parse(rows.slice(0, input.limit)),
+    storedCount,
     hasMore: rows.length > input.limit
   }
 }

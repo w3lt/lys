@@ -35,15 +35,28 @@ export const MAXIMUM_AGENT_NAME_LENGTH = 64
 export const MAXIMUM_AGENT_BIO_LENGTH = 128
 
 /**
- * Code of Lys, the agent the backend ships with.
+ * Code of Caliginia, Lys's dark side and one of the two agents the backend
+ * ships with.
  *
- * @remarks Clients send it to start a conversation that Lys answers, and the
- * backend reserves it, so no stored agent can be created under it. The
- * backend stores it on the conversations Lys answers; its schema version 7
- * recorded it on every earlier conversation. Changing it orphans those
+ * @remarks Clients send it to start a conversation that Caliginia answers,
+ * and preselect it for a new conversation. The backend reserves it, so no
+ * stored agent can be created under it, and stores it on the conversations
+ * Caliginia answers; its schema version 8 moved to it every conversation
+ * recorded under `lys`, the code of the one agent shipped before. Changing it
+ * orphans those conversations, so it stays fixed across releases.
+ */
+export const CALIGINIA_AGENT_CODE = "caliginia"
+
+/**
+ * Code of Lysiptera, Lys's light side and one of the two agents the backend
+ * ships with.
+ *
+ * @remarks Clients send it to start a conversation that Lysiptera answers.
+ * The backend reserves it, so no stored agent can be created under it, and
+ * stores it on the conversations Lysiptera answers. Changing it orphans those
  * conversations, so it stays fixed across releases.
  */
-export const LYS_AGENT_CODE = "lys"
+export const LYSIPTERA_AGENT_CODE = "lysiptera"
 
 /**
  * Lowercase ASCII letters and digits in hyphen-separated groups, with no
@@ -56,11 +69,11 @@ const agentTimestampSchema = z.iso.datetime({ precision: 3 })
 
 /**
  * Validates an agent code, the agent's immutable identity: a lowercase slug
- * such as `lys` or `web-researcher`. Codes are compared exactly and never
- * trimmed or case-folded.
+ * such as `caliginia` or `web-researcher`. Codes are compared exactly and
+ * never trimmed or case-folded.
  *
- * @remarks Shared by stored agents, new agent definitions, and the path
- * parameter of the agent endpoints.
+ * @remarks Shared by built-in and stored agents, new agent definitions, and
+ * the path parameter of the agent endpoints.
  */
 export const agentCodeSchema = z
   .string()
@@ -202,6 +215,32 @@ export const agentSchema = z
  * equals it until the first update and then holds the time of the latest one.
  */
 export type Agent = z.infer<typeof agentSchema>
+
+/**
+ * Validates a built-in agent: one the backend ships with. It is never
+ * stored, changed, or deleted, so it carries no times. Its text is checked
+ * as it is, never trimmed. The output is frozen; unknown fields are rejected.
+ */
+export const builtInAgentSchema = z
+  .strictObject({
+    /** Immutable identity of the agent, which no stored agent can take. */
+    code: agentCodeSchema,
+    /** Display name. */
+    name: storedAgentNameSchema,
+    /** Short description of what the agent does. */
+    bio: storedAgentBioSchema,
+    /** System prompt that defines the agent's behavior. */
+    systemPrompt: storedAgentSystemPromptSchema
+  })
+  .readonly()
+
+/**
+ * Agent the backend ships with.
+ *
+ * @remarks Its name, bio, and system prompt belong to the release: they
+ * change only when the backend is replaced, never through the API.
+ */
+export type BuiltInAgent = z.infer<typeof builtInAgentSchema>
 
 /**
  * Validates a change to one stored agent. Each field present replaces the

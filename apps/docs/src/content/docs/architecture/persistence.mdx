@@ -57,8 +57,9 @@ records it declares in `records.ts`. Unlike the conversation records, the
 agent records are one interface: the service is their only consumer and uses
 all five operations, while the routes receive narrow capabilities of the
 service instead. The service is not a database service: it also owns the
-built-in Lys, which is never stored, and refuses to store another agent under
-Lys's code `lys`. It is decorated as `app.agentService`; the agent routes in
+built-in agents Caliginia and Lysiptera, which are never stored, and refuses
+to store another agent under their codes `caliginia` and `lysiptera`. It is
+decorated as `app.agentService`; the agent routes in
 `src/modules/agent/routes/` and the chat route call it.
 Every borrowed operation fails once the database closes,
 and the database remains open until every reply generation has stored its final
@@ -72,7 +73,7 @@ On startup the database owner:
 1. Opens the SQLite file with foreign keys enabled.
 2. Acquires a write transaction and reads `PRAGMA user_version`.
 3. Rejects unsupported future versions or applies each missing migration in order.
-4. Records version 7 and commits; a migration failure rolls back all pending work.
+4. Records version 8 and commits; a migration failure rolls back all pending work.
 5. Switches to write-ahead logging with `synchronous = NORMAL`. A database from
    a newer version was refused in step 3, before anything changed its file.
 6. Turns on write protection, which only a write transaction lifts.

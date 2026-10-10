@@ -56,7 +56,8 @@ JSON schema for runtime, model, and generation settings.
 - Conversation rows must have a non-empty `agent_code`; SQLite checks only
   that, and the shared conversation schema checks its agent code format on
   every row the backend writes and reads. A row added without the column gets
-  `lys`.
+  `lys`, the default version 7 declared; the backend always writes the code,
+  so that default is never used.
 - Agent rows must have every column, and a non-empty `code`, `name`, `bio`,
   and `system_prompt`. SQLite checks only that, comparing each of the four with
   `''`, so text that starts with a NUL character still counts as non-empty;
@@ -91,8 +92,14 @@ no existing row; builds that support only version 5 refuse to open a version-6
 database. Version 7 adds `conversations.agent_code`, set to `lys` for every
 existing conversation because Lys answered every earlier chat, and drops
 `conversations.system_prompt`; the dropped prompts cannot be recovered, and
-builds that support only version 6 refuse a version-7 database. Versions 1–3
-are unchanged. Missing migrations
+builds that support only version 6 refuse a version-7 database. Version 8
+changes rows only: every conversation stored under `lys` moves to
+`caliginia`, because Lys, the one agent shipped until then, is now shipped as
+the built-in agents Caliginia and Lysiptera, and Caliginia is the one new
+conversations start with. Titles, times, and messages stay, a conversation
+under any other code keeps it, and an agent stored under `lys` stays the
+user's own. Builds that support only version 7 refuse a version-8 database.
+Versions 1–3 are unchanged. Missing migrations
 and the version marker commit together. At startup, streaming assistant rows
 become interrupted with a refreshed message `updated_at`; content, conversation
 `updated_at`, and history order are preserved.

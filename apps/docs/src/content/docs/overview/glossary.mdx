@@ -35,17 +35,22 @@ Terms that mean something specific inside Lys.
 - **Conversation**: the stored chat unit with metadata such as ID, title, the
   code of the agent that answers it, and timestamps. A new conversation names
   its agent; a continued one keeps it.
-- **Lys**: the agent built into the backend, under the code `lys`. It is never
-  stored, no stored agent can take its code, and it is the only agent that
-  answers chats today.
+- **Built-in agent**: an agent that ships with the backend: Caliginia
+  (`caliginia`), Lys's dark side, and Lysiptera (`lysiptera`), her light side.
+  A built-in agent is never stored, changed, or deleted, and no stored agent
+  can take its code. A new conversation starts with Caliginia unless another
+  agent is selected.
+- **Stored agent**: an agent the user created, kept in the backend database.
+  It answers chats with the system prompt it has when each turn starts.
 - **User message**: a persisted message with role `user` and non-empty content.
 - **Assistant message**: a persisted message with role `assistant`, a model
   name, lifecycle status, and an optional finish reason.
 - **Finish reason**: the terminal model reason currently supported by the
   protocol: `stop` or `length`.
 - **System prompt**: the instructions an agent sends first in the context of
-  every reply. Lys's comes from the backend's `lys.txt` prompt file; it is not
-  stored with conversations.
+  every reply. A built-in agent's comes from its backend prompt file
+  (`caliginia.txt`, `lysiptera.txt`) and a stored agent's from its record; it
+  is not stored with conversations.
 
 ## Streaming terms
 

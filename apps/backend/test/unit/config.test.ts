@@ -13,7 +13,8 @@ vi.mock("../../src/utils/prompts", () => ({ readPrompt: vi.fn() }))
 
 /** Trimmed, non-empty prompt text the substituted reader returns per prompt. */
 const FIXTURE_PROMPTS = Object.freeze({
-  "lys-system": "Fixture system prompt",
+  "caliginia-system": "Fixture Caliginia prompt",
+  "lysiptera-system": "Fixture Lysiptera prompt",
   "title-generation": "Fixture title prompt"
 } satisfies Record<PromptType, string>)
 
@@ -27,7 +28,8 @@ const VALID_RAW_CONFIG = Object.freeze({
   lmstudioHost: LMSTUDIO_HOST,
   lmstudioPort: LMSTUDIO_PORT,
   databaseFilePath: "/test-home/lys/lys_db.sqlite",
-  lysSystemPrompt: "Fixture system prompt",
+  caliginiaSystemPrompt: "Fixture Caliginia prompt",
+  lysipteraSystemPrompt: "Fixture Lysiptera prompt",
   titleGenerationPrompt: "Fixture title prompt",
   titleGenerationMaxAttempts: 3,
   generatedTitleMaxLength: 100
@@ -102,14 +104,15 @@ describe("loadBackendConfig", () => {
     vi.mocked(readPrompt).mockImplementation((type) => FIXTURE_PROMPTS[type])
   })
 
-  it("resolves the shared endpoints, the Lys home database path, both prompts, and the fixed title limits", () => {
+  it("resolves the shared endpoints, the Lys home database path, every prompt, and the fixed title limits", () => {
     expect(loadBackendConfig()).toEqual({
       backendHost: BACKEND_HOST,
       backendPort: BACKEND_PORT,
       lmstudioHost: LMSTUDIO_HOST,
       lmstudioPort: LMSTUDIO_PORT,
       databaseFilePath: "/test-home/lys/lys_db.sqlite",
-      lysSystemPrompt: "Fixture system prompt",
+      caliginiaSystemPrompt: "Fixture Caliginia prompt",
+      lysipteraSystemPrompt: "Fixture Lysiptera prompt",
       titleGenerationPrompt: "Fixture title prompt",
       titleGenerationMaxAttempts: 3,
       generatedTitleMaxLength: 100
@@ -140,7 +143,11 @@ describe("loadBackendConfig", () => {
     )
 
     expect(listIssueKeys(listConfigLoadIssues())).toEqual(
-      new Set(["lysSystemPrompt", "titleGenerationPrompt"])
+      new Set([
+        "caliginiaSystemPrompt",
+        "lysipteraSystemPrompt",
+        "titleGenerationPrompt"
+      ])
     )
   })
 
@@ -262,14 +269,30 @@ describe("backendConfigSchema", () => {
       "databaseFilePath"
     ],
     [
-      "a system prompt with leading whitespace",
-      { ...VALID_RAW_CONFIG, lysSystemPrompt: " Fixture system prompt" },
-      "lysSystemPrompt"
+      "a Caliginia prompt with leading whitespace",
+      {
+        ...VALID_RAW_CONFIG,
+        caliginiaSystemPrompt: " Fixture Caliginia prompt"
+      },
+      "caliginiaSystemPrompt"
     ],
     [
-      "an empty system prompt",
-      { ...VALID_RAW_CONFIG, lysSystemPrompt: "" },
-      "lysSystemPrompt"
+      "an empty Caliginia prompt",
+      { ...VALID_RAW_CONFIG, caliginiaSystemPrompt: "" },
+      "caliginiaSystemPrompt"
+    ],
+    [
+      "a Lysiptera prompt with trailing whitespace",
+      {
+        ...VALID_RAW_CONFIG,
+        lysipteraSystemPrompt: "Fixture Lysiptera prompt\n"
+      },
+      "lysipteraSystemPrompt"
+    ],
+    [
+      "an empty Lysiptera prompt",
+      { ...VALID_RAW_CONFIG, lysipteraSystemPrompt: "" },
+      "lysipteraSystemPrompt"
     ],
     [
       "a title prompt with trailing whitespace",

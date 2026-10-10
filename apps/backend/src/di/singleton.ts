@@ -3,6 +3,7 @@ import SqliteAgentRecordStore from "../infrastructure/database/agents/sqliteAgen
 import SqliteDatabase from "../infrastructure/database/sqliteDatabase"
 import LmStudioRuntime from "../modules/llm/runtimes/lmStudioRuntime"
 import AgentService from "../modules/agent/agentService"
+import { buildBuiltInAgents } from "../modules/agent/builtInAgents"
 import ChatService, {
   type ChatServiceCreationOptions
 } from "../modules/chat/chatService"
@@ -74,8 +75,9 @@ export type SingletonServices = Readonly<{
   /** History editing over the shared database; it owns nothing to release. */
   conversationHistoryEditor: StoredConversationHistoryEditor
   /**
-   * Agent definitions over agent records on the shared database, and Lys over
-   * the chat service; it owns nothing to release.
+   * The built-in agents and agent definitions over agent records on the
+   * shared database, answering over the chat service; it owns nothing to
+   * release.
    */
   agentService: AgentService
   /** Module-private cleanup capability for the complete owned service lifetime. */
@@ -95,7 +97,8 @@ type DatabaseServices = Pick<
  *
  * @param config - LM Studio host and port used to derive local service endpoints,
  * the title-generation prompt and title length limit given to the chat
- * service, and the Lys system prompt given to the agent service.
+ * service, and the built-in agents' system prompts given to the agent
+ * service.
  * @param llmRuntimeFailureReporters - Receive the LLM runtime failures that no
  * caller observes, for logging.
  * @param factories - Service factories owned by the composition root.
@@ -140,7 +143,10 @@ export async function createSingletonServices(
     const databaseServices = createDatabaseServices(databaseAcquisition.service)
     const agentService = new AgentService({
       recordStore: new SqliteAgentRecordStore(databaseAcquisition.service),
-      lysSystemPrompt: config.lysSystemPrompt,
+      builtInAgents: buildBuiltInAgents({
+        caliginia: config.caliginiaSystemPrompt,
+        lysiptera: config.lysipteraSystemPrompt
+      }),
       replyModel: new OpenAiReplyModel((options) =>
         chatService.completeChatStream(options)
       )

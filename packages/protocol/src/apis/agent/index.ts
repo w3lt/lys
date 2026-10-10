@@ -1,7 +1,9 @@
 export {
+  agentSummarySchema,
   listAgentsApi,
   MAXIMUM_AGENT_LIST_PAGE_SIZE,
   type AgentSummary,
+  type BuiltInAgentSummary,
   type ListAgentsApiQuery,
   type ListAgentsApiReply,
   type ListAgentsApiResponse,

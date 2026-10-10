@@ -3,6 +3,7 @@ import {
   chatReplyEventsApi,
   chatReplyNotFoundProblemSchema,
   chatReplyNotGeneratingProblemSchema,
+  chatToolCallAnswerMismatchProblemSchema,
   chatToolCallNotPendingProblemSchema,
   conversationNotFoundProblemSchema,
   MAXIMUM_TOOL_RESULT_BODY_BYTES,
@@ -181,6 +182,13 @@ const TOOL_CALL = Object.freeze({
   id: createFixtureUuidV7(10),
   toolName: "read_text_file",
   arguments: Object.freeze({ path: "/notes/todo.md" })
+} satisfies ChatToolCall)
+
+/** Call of a backend tool the controlled reply waits on to be allowed. */
+const BACKEND_TOOL_CALL = Object.freeze({
+  id: createFixtureUuidV7(11),
+  toolName: "read_page",
+  arguments: Object.freeze({ url: "https://example.com/" })
 } satisfies ChatToolCall)
 
 /** Answer a client gives to {@link TOOL_CALL}. */
@@ -415,7 +423,7 @@ describe("updateFastifyWithChatReplyRoutes", () => {
       const { app, generations, getConversation } = await createReplyRouteApp()
       const generation = startControlledGeneration(generations, REPLY_TARGET)
       await waitForMicrotasks()
-      void generation.replyTask.context.sendToolCall(TOOL_CALL)
+      void generation.replyTask.context.sendClientToolCall(TOOL_CALL)
       const snapshotRead = Promise.withResolvers<void>()
       getConversation.mockImplementation(() => {
         snapshotRead.resolve()
@@ -454,7 +462,7 @@ describe("updateFastifyWithChatReplyRoutes", () => {
         url: REPLY_EVENTS_URL
       })
       await snapshotRead.promise
-      void generation.replyTask.context.sendToolCall(TOOL_CALL)
+      void generation.replyTask.context.sendClientToolCall(TOOL_CALL)
       generation.replyTask.resolve()
       generation.titleTask.resolve()
       const response = await responsePromise
@@ -471,7 +479,7 @@ describe("updateFastifyWithChatReplyRoutes", () => {
       const { app, generations } = await createReplyRouteApp()
       const generation = startControlledGeneration(generations, REPLY_TARGET)
       await waitForMicrotasks()
-      const answer = generation.replyTask.context.sendToolCall(TOOL_CALL)
+      const answer = generation.replyTask.context.sendClientToolCall(TOOL_CALL)
 
       const response = await sendToolResult(app, TOOL_CALL.id, SUCCEEDED_RESULT)
 
@@ -480,11 +488,64 @@ describe("updateFastifyWithChatReplyRoutes", () => {
       expect(await answer).toEqual(SUCCEEDED_RESULT)
     })
 
+    it("answers 204 and resumes a backend call once it is allowed", async () => {
+      const { app, generations } = await createReplyRouteApp()
+      const generation = startControlledGeneration(generations, REPLY_TARGET)
+      await waitForMicrotasks()
+      const answer =
+        generation.replyTask.context.sendBuiltInToolCall(BACKEND_TOOL_CALL)
+
+      const response = await sendToolResult(app, BACKEND_TOOL_CALL.id, {
+        status: "allowed"
+      })
+
+      expect(response.statusCode).toBe(204)
+      expect(await answer).toEqual({ status: "allowed" })
+    })
+
+    it.each([
+      ["allowed for a client call", "client", TOOL_CALL, { status: "allowed" }],
+      [
+        "succeeded for a backend call",
+        "backend",
+        BACKEND_TOOL_CALL,
+        SUCCEEDED_RESULT
+      ]
+    ] as const)(
+      "answers 409 with the mismatch problem to %s and leaves the call waiting",
+      async (_label, runner, toolCall, payload) => {
+        const { app, generations } = await createReplyRouteApp()
+        const generation = startControlledGeneration(generations, REPLY_TARGET)
+        await waitForMicrotasks()
+        const { context } = generation.replyTask
+        void (runner === "client"
+          ? context.sendClientToolCall(toolCall)
+          : context.sendBuiltInToolCall(toolCall))
+
+        const response = await sendToolResult(app, toolCall.id, payload)
+
+        expect(response.statusCode).toBe(409)
+        expect(response.headers["content-type"]).toMatch(
+          /^application\/problem\+json/
+        )
+        const problem: unknown = response.json()
+        expect(
+          chatToolCallAnswerMismatchProblemSchema.safeParse(problem).success
+        ).toBe(true)
+        expect(problem).toMatchObject({
+          instance: createToolResultUrl(toolCall.id)
+        })
+        expect(
+          generations.findReplyGeneration(REPLY_TARGET)?.pendingToolCalls
+        ).toEqual([toolCall])
+      }
+    )
+
     it("answers 409 to a second answer for the same call", async () => {
       const { app, generations } = await createReplyRouteApp()
       const generation = startControlledGeneration(generations, REPLY_TARGET)
       await waitForMicrotasks()
-      void generation.replyTask.context.sendToolCall(TOOL_CALL)
+      void generation.replyTask.context.sendClientToolCall(TOOL_CALL)
       await sendToolResult(app, TOOL_CALL.id, SUCCEEDED_RESULT)
 
       const response = await sendToolResult(app, TOOL_CALL.id, SUCCEEDED_RESULT)
@@ -522,7 +583,7 @@ describe("updateFastifyWithChatReplyRoutes", () => {
       const { app, generations } = await createReplyRouteApp()
       const generation = startControlledGeneration(generations, REPLY_TARGET)
       await waitForMicrotasks()
-      const answer = generation.replyTask.context.sendToolCall(TOOL_CALL)
+      const answer = generation.replyTask.context.sendClientToolCall(TOOL_CALL)
       const stop = app.inject({ method: "POST", url: STOP_REPLY_URL })
       await waitForAbort(generation.replyTask.context.abortSignal)
 
@@ -558,7 +619,7 @@ describe("updateFastifyWithChatReplyRoutes", () => {
         const { app, generations } = await createReplyRouteApp()
         const generation = startControlledGeneration(generations, REPLY_TARGET)
         await waitForMicrotasks()
-        void generation.replyTask.context.sendToolCall(TOOL_CALL)
+        void generation.replyTask.context.sendClientToolCall(TOOL_CALL)
 
         const response = await sendToolResult(app, TOOL_CALL.id, payload)
 
@@ -573,7 +634,7 @@ describe("updateFastifyWithChatReplyRoutes", () => {
       const { app, generations } = await createReplyRouteApp()
       const generation = startControlledGeneration(generations, REPLY_TARGET)
       await waitForMicrotasks()
-      const answer = generation.replyTask.context.sendToolCall(TOOL_CALL)
+      const answer = generation.replyTask.context.sendClientToolCall(TOOL_CALL)
       const content = "x".repeat(2 * 1024 * 1024)
 
       const response = await sendToolResult(app, TOOL_CALL.id, {
@@ -589,7 +650,7 @@ describe("updateFastifyWithChatReplyRoutes", () => {
       const { app, generations } = await createReplyRouteApp()
       const generation = startControlledGeneration(generations, REPLY_TARGET)
       await waitForMicrotasks()
-      void generation.replyTask.context.sendToolCall(TOOL_CALL)
+      void generation.replyTask.context.sendClientToolCall(TOOL_CALL)
 
       const response = await sendToolResult(app, TOOL_CALL.id, {
         status: "succeeded",
@@ -627,7 +688,7 @@ describe("updateFastifyWithChatReplyRoutes", () => {
         const { app, generations } = await createReplyRouteApp()
         const generation = startControlledGeneration(generations, REPLY_TARGET)
         await waitForMicrotasks()
-        void generation.replyTask.context.sendToolCall(TOOL_CALL)
+        void generation.replyTask.context.sendClientToolCall(TOOL_CALL)
         const url = createReplyUrl(
           sendChatToolResultApi.path,
           conversationId,
@@ -665,7 +726,7 @@ describe("updateFastifyWithChatReplyRoutes", () => {
       const { app, generations, logs } = await createReplyRouteApp()
       const generation = startControlledGeneration(generations, REPLY_TARGET)
       await waitForMicrotasks()
-      void generation.replyTask.context.sendToolCall(TOOL_CALL)
+      void generation.replyTask.context.sendClientToolCall(TOOL_CALL)
 
       await sendToolResult(app, TOOL_CALL.id, {
         status: "failed",

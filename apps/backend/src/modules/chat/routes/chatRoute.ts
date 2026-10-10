@@ -10,6 +10,8 @@ import type { BackendConfig } from "../../../config"
 import type Agent from "../../agent/agent"
 import type { AgentTurn } from "../../agent/agent"
 import { createChatAgentNotFoundProblem } from "../../agent/routes/agentProblems"
+import type { BuiltInToolEntry } from "../../tool/builtIn/builtInTool"
+import { findBuiltInTools } from "../../tool/builtIn/builtInTools"
 import type { TitleGenerationOptions } from "../chatService"
 import { ConversationNotFoundError } from "../../../utils/errors"
 import { createConversationNotFoundProblem } from "../../conversation/routes/notFound"
@@ -60,10 +62,42 @@ type ChatRouteDependencies = Readonly<{
   titleGenerationMaxAttempts: number
   /** Registry that owns every generation this route starts. */
   generations: ReplyGenerationRegistry
+  /** Every tool the backend runs, which a request may offer by name. */
+  builtInTools: readonly BuiltInToolEntry[]
 }>
 
-/** Tools of a request that offered none. */
+/** Client tools of a request that offered none. */
 const NO_REQUESTED_TOOLS: readonly ToolDefinition[] = Object.freeze([])
+
+/**
+ * Chat request naming a backend tool the backend does not run, mapped by
+ * Fastify to a caller-safe HTTP 400.
+ *
+ * @remarks The subclass preserves the native `Error` contract and always
+ * reports status 400. It owns no mutable state and is constructed once per
+ * rejected request.
+ */
+class UnknownBackendToolError extends Error {
+  /**
+   * Creates the error for one request.
+   *
+   * @param toolNames - Offered names that belong to no backend tool.
+   */
+  public constructor(toolNames: readonly string[]) {
+    super(
+      `The request offers backend tools the backend does not run: ${toolNames.join(", ")}`
+    )
+  }
+
+  /**
+   * HTTP status consumed by Fastify's error boundary.
+   *
+   * @returns The invalid-input status.
+   */
+  public get statusCode(): number {
+    return 400
+  }
+}
 
 /** Values one turn's tasks keep after the request that started them ended. */
 type TurnGenerationInput = Readonly<{
@@ -76,7 +110,9 @@ type TurnGenerationInput = Readonly<{
   /** Sampling and reply length controls sent with the request. */
   generationOptions: MessageGenerationOptions
   /** Client tools the request offered, each name once; empty when it offered none. */
-  tools: readonly ToolDefinition[]
+  clientTools: readonly ToolDefinition[]
+  /** Backend tools the request offered, each name once; empty when it offered none. */
+  builtInTools: readonly BuiltInToolEntry[]
   /** Logger of the request that started the turn. */
   logger: FastifyBaseLogger
   /** Route capabilities borrowed for the route lifetime. */
@@ -104,7 +140,8 @@ export default function updateFastifyWithChatRoute(
     generateTitle: (options: TitleGenerationOptions) =>
       app.chatService.generateTitle(options),
     titleGenerationMaxAttempts,
-    generations
+    generations,
+    builtInTools: app.builtInTools
   }
   app.route<ChatApiRoute>({
     method: chatApi.method,
@@ -124,8 +161,10 @@ export default function updateFastifyWithChatRoute(
  * @param reply - SSE or pre-stream error response owner.
  * @param dependencies - Borrowed persistence, agents, and registry.
  * @returns Settlement after the stream ends, or after a not-found response.
- * @throws Unexpected failures before the stream starts, for Fastify's HTTP
- * error boundary.
+ * @throws An {@link UnknownBackendToolError}, before anything is stored,
+ * when the request offers a backend tool the backend does not run; and
+ * unexpected failures before the stream starts, for Fastify's HTTP error
+ * boundary.
  * @remarks Closing this stream does not cancel the generation. The turn, the
  * generation, and this follower are created in one synchronous step, so the
  * follower receives the start event before any generation event. The agent
@@ -137,6 +176,7 @@ async function handleChatRequest(
   reply: ChatRouteReply,
   dependencies: ChatRouteDependencies
 ): Promise<void> {
+  const builtInTools = findRequestedBuiltInTools(request, dependencies)
   const turn = createRequestedTurn(request, reply, dependencies)
   if (turn === undefined) return
   const agent = dependencies.findChatAgent(turn.conversation.agentCode)
@@ -147,7 +187,8 @@ async function handleChatRequest(
     agent,
     model: request.body.model,
     generationOptions: request.body.generationOptions,
-    tools: request.body.tools?.definitions ?? NO_REQUESTED_TOOLS,
+    clientTools: request.body.tools?.definitions ?? NO_REQUESTED_TOOLS,
+    builtInTools,
     logger: request.log,
     dependencies
   })
@@ -158,6 +199,32 @@ async function handleChatRequest(
     subscription.handleStreamEvent(event)
   generation.openSubscription(subscription)
   await openReplyEventStream(reply.sse, subscription)
+}
+
+/**
+ * Finds the backend tools a request offers.
+ *
+ * @param request - Validated chat input.
+ * @param dependencies - Every tool the backend runs.
+ * @returns The offered backend tools in offer order; empty when the request
+ * offers none.
+ * @throws An {@link UnknownBackendToolError} naming every offered name that
+ * belongs to no backend tool.
+ */
+function findRequestedBuiltInTools(
+  request: ChatRouteRequest,
+  dependencies: ChatRouteDependencies
+): readonly BuiltInToolEntry[] {
+  const selection = findBuiltInTools(
+    dependencies.builtInTools,
+    request.body.tools?.backendToolNames
+  )
+  switch (selection.status) {
+    case "found":
+      return selection.entries
+    case "unknown":
+      throw new UnknownBackendToolError(selection.toolNames)
+  }
 }
 
 /**
@@ -327,12 +394,17 @@ async function createTurnReplyTask(
  * @param input - Stored turn, its tools, and the request values the reply
  * keeps.
  * @param context - Generation-owned cancellation, event sender, and tool call
- * sender.
+ * senders.
  * @returns The agent turn, whose writes go to the stored reply.
  */
 function buildAgentTurn(
   input: TurnGenerationInput,
-  { abortSignal, sendEvent, sendToolCall }: ReplyTaskContext
+  {
+    abortSignal,
+    sendEvent,
+    sendClientToolCall,
+    sendBuiltInToolCall
+  }: ReplyTaskContext
 ): AgentTurn {
   const { turn, dependencies } = input
   const assistantMessageId = turn.assistantMessage.id
@@ -341,7 +413,8 @@ function buildAgentTurn(
     userMessageContent: turn.userMessage.content,
     model: input.model,
     generationOptions: input.generationOptions,
-    tools: input.tools,
+    clientTools: input.clientTools,
+    builtInTools: input.builtInTools,
     abortSignal,
     updateAssistantMessageContent: (content) =>
       dependencies.turns.updateAssistantMessageContent(
@@ -354,7 +427,8 @@ function buildAgentTurn(
         completion
       ),
     sendEvent,
-    sendToolCall,
+    sendClientToolCall,
+    sendBuiltInToolCall,
     reportReplyCancellation: (failure) => {
       input.logger.debug({ err: failure }, "Chat completion was cancelled")
     },

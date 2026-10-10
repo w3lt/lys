@@ -22,6 +22,7 @@ import {
   createFixtureUuidV7
 } from "../../../support/conversationFixtures"
 import { createChatCompletionChunk } from "../../../support/openAiEndpointFake"
+import { LOOK_UP_WORD_FORMAT } from "../../../support/scriptedBuiltInTool"
 import {
   READ_TEXT_FILE_FORMAT,
   READ_TEXT_FILE_TOOL
@@ -177,6 +178,47 @@ describe("updateFastifyWithChatRoute", () => {
         ...NEW_CONVERSATION_REQUEST,
         tools: { definitions: [READ_TEXT_FILE_TOOL, READ_TEXT_FILE_TOOL] }
       }
+    ],
+    [
+      "a tool offer with empty client and backend tools",
+      {
+        ...NEW_CONVERSATION_REQUEST,
+        tools: { definitions: [], backendToolNames: [] }
+      }
+    ],
+    [
+      "a client tool definition that the backend runs",
+      {
+        ...NEW_CONVERSATION_REQUEST,
+        tools: { definitions: [{ ...READ_TEXT_FILE_TOOL, runner: "backend" }] }
+      }
+    ],
+    [
+      "a backend tool named twice",
+      {
+        ...NEW_CONVERSATION_REQUEST,
+        tools: {
+          definitions: [],
+          backendToolNames: ["look_up_word", "look_up_word"]
+        }
+      }
+    ],
+    [
+      "one name offered as both a client and a backend tool",
+      {
+        ...NEW_CONVERSATION_REQUEST,
+        tools: {
+          definitions: [READ_TEXT_FILE_TOOL],
+          backendToolNames: ["read_text_file"]
+        }
+      }
+    ],
+    [
+      "a backend tool name that is not a tool name",
+      {
+        ...NEW_CONVERSATION_REQUEST,
+        tools: { definitions: [], backendToolNames: ["Look Up"] }
+      }
     ]
   ])("rejects %s before storing a turn", async (_label, payload) => {
     const testApp = await createChatRouteTestApp()
@@ -269,11 +311,48 @@ describe("updateFastifyWithChatRoute", () => {
     ])
   })
 
+  it("rejects a backend tool the backend does not run before storing a turn, naming it", async () => {
+    const testApp = await createChatRouteTestApp()
+    updateFastifyWithChatRoute(testApp.app, {
+      ...CHAT_ROUTE_OPTIONS,
+      generations: testApp.generations
+    })
+
+    const response = await sendChatRequest(testApp.app, {
+      ...NEW_CONVERSATION_REQUEST,
+      tools: {
+        definitions: [],
+        backendToolNames: ["look_up_word", "web_search"]
+      }
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toMatchObject({
+      message:
+        "The request offers backend tools the backend does not run: web_search"
+    })
+    expect(testApp.createConversationTurn).not.toHaveBeenCalled()
+    expect(testApp.completeChatStream).not.toHaveBeenCalled()
+  })
+
   it.each([
     [
       "offers the request's client tools to the model",
       { definitions: [READ_TEXT_FILE_TOOL] },
       [READ_TEXT_FILE_FORMAT]
+    ],
+    [
+      "offers the request's backend tools after its client tools",
+      {
+        definitions: [READ_TEXT_FILE_TOOL],
+        backendToolNames: ["look_up_word"]
+      },
+      [READ_TEXT_FILE_FORMAT, LOOK_UP_WORD_FORMAT]
+    ],
+    [
+      "offers only backend tools when the request offers no client tool",
+      { definitions: [], backendToolNames: ["look_up_word"] },
+      [LOOK_UP_WORD_FORMAT]
     ],
     ["offers no tools when the request offers none", undefined, []]
   ] as const)("%s", async (_label, tools, offeredTools) => {

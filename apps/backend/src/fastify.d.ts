@@ -7,6 +7,7 @@ import type StoredConversationHistoryReader from "./modules/conversation/history
 import type StoredConversationTurns from "./modules/conversation/turns"
 import type LlmRuntimeService from "./modules/llm/llmRuntimeService"
 import type LlmService from "./modules/llm/llmService"
+import type { BuiltInToolEntry } from "./modules/tool/builtIn/builtInTool"
 
 declare module "fastify" {
   /** Fastify application services installed by the singleton-services plugin. */
@@ -25,5 +26,7 @@ declare module "fastify" {
     conversationHistoryEditor: StoredConversationHistoryEditor
     /** Application-scoped agent definitions and the agents that answer chats. */
     agentService: AgentService
+    /** Every tool the backend runs, in the order Settings lists them. */
+    builtInTools: readonly BuiltInToolEntry[]
   }
 }

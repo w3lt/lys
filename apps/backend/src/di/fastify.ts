@@ -57,6 +57,7 @@ const singletonPlugin: FastifyPluginAsync<
     singletonServices.conversationHistoryEditor
   )
   app.decorate("agentService", singletonServices.agentService)
+  app.decorate("builtInTools", singletonServices.builtInTools)
 }
 
 /** Fastify plugin that installs application-scoped singleton services. */

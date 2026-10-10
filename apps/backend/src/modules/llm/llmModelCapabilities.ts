@@ -1,4 +1,5 @@
 import type { LlmInfo, LlmLoadModelApiResponse } from "@lys/protocol"
+import type { ModelLoadConfiguration } from "@lys/share"
 import type { LlmModelHealthOutcome } from "./getLlmModelHealth"
 import type { StopLlmModelsByKeyOutcome } from "./stopLlmModelsByKey"
 
@@ -89,6 +90,9 @@ export interface LlmModelLoader {
    * Loads one model key or alias and returns its canonical inventory metadata.
    *
    * @param modelKeyOrAlias - Model key or alias for the selected provider to resolve.
+   * @param loadConfiguration - Validated load settings applied to this load only.
+   * The provider decides each setting that is absent, and the settings are not
+   * retained after the load.
    * @returns A promise resolving only after the model is loaded and its
    * immutable canonical metadata has been validated.
    * @throws If the provider cannot load or describe the model, the model is
@@ -105,7 +109,10 @@ export interface LlmModelLoader {
    * loaded instance, and an inventory or validation failure after loading may
    * leave the model loaded.
    */
-  loadLlmModel(modelKeyOrAlias: string): Promise<LlmLoadModelApiResponse>
+  loadLlmModel(
+    modelKeyOrAlias: string,
+    loadConfiguration: ModelLoadConfiguration
+  ): Promise<LlmLoadModelApiResponse>
 }
 
 /**

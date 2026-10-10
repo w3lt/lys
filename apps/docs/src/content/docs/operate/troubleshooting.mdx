@@ -65,9 +65,10 @@ setting edits. If runtime preferences do not survive a restart:
 - if the file exists but does not reflect a recent UI change, that matches the
   current implementation gap: save wiring exists in Tauri, but not in the UI
 
-This limitation applies to runtime and model controls. Generation controls
-autosave separately and expose a save failure with a retry action; a generation
-save preserves the runtime and model values already on disk.
+This limitation applies to runtime controls and the default-model selection.
+Generation controls and load configurations autosave separately and expose a
+save failure with a retry action; those saves preserve the runtime and model
+values already on disk.
 
 ## Startup fails after a schema change
 

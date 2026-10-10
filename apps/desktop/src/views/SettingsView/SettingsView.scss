@@ -902,7 +902,8 @@
   color: var(--app-text);
 }
 
-.settings-view__tool-segment {
+.settings-view__tool-segment,
+.settings-view__load-segment {
   font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.06em;
@@ -1273,6 +1274,100 @@
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--app-text-link);
+}
+
+/* Load configuration */
+
+/* The edited model's key is an identifier, so it keeps its own case. */
+.settings-view__section-heading .settings-view__load-target {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  text-transform: none;
+  white-space: nowrap;
+  color: var(--app-text-muted);
+}
+
+.settings-view__load-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+/* The value the model runs with, where the stored one now differs. */
+.settings-view__load-changed {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--app-status-pending);
+}
+
+.settings-view__load-control {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.settings-view__load-control [data-slot="slider"] {
+  width: 148px;
+}
+
+.settings-view__load-box[data-slot="input"] {
+  width: 84px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-align: right;
+}
+
+.settings-view__load-max {
+  min-width: 56px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  color: var(--app-text-muted);
+}
+
+.settings-view__load-stepper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-view__load-stepper output {
+  min-width: 36px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-align: center;
+  color: var(--app-text);
+}
+
+.settings-view__load-reload {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.settings-view__load-reload p {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  letter-spacing: 0.04em;
+  color: var(--app-status-pending);
+}
+
+/* Without a note the region holds no text and takes no room. */
+.settings-view__load-reload p:not(:empty) {
+  padding-top: 15px;
+}
+
+.settings-view__load-reload [data-slot="button"] {
+  flex: none;
+  margin-top: 15px;
 }
 
 /* Segmented and slider controls */

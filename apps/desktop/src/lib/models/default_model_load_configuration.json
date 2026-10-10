@@ -1,0 +1,6 @@
+{
+  "contextLength": 8192,
+  "evalBatchSize": 512,
+  "flashAttention": true,
+  "offloadKVCacheToGpu": true
+}

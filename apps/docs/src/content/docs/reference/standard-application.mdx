@@ -221,6 +221,80 @@ only some events end the wait. The exception was approved by the maintainer on
   the wait on a newer turn or a deletion. The missing timer stays by design:
   the person's answer or Stop bounds the wait.
 
+## Settings file version exception
+
+The desktop settings file has an approved exception to
+[OBJECT-045](https://github.com/w3lt/lys/blob/main/docs/code_standards/OBJECT.md)
+and [CONFIG-038](https://github.com/w3lt/lys/blob/main/docs/code_standards/CONFIGURATION.md):
+`$LYS_HOME/settings.json` carries no version, so a reader cannot identify its
+format before interpreting it. The exception was approved by the maintainer on
+2026-10-10 for [PR #143](https://github.com/w3lt/lys/pull/143), which adds the
+`loadConfiguration` group to the file.
+
+- **Scope:** only `$LYS_HOME/settings.json`, which the
+  [native settings module](https://github.com/w3lt/lys/blob/main/apps/desktop/src-tauri/src/settings.rs)
+  reads and writes. A missing group, such as `loadConfiguration` in a file
+  written before PR #143, is read as that group's defaults like any other
+  missing optional field; no format is inferred from it, and the file is not
+  rewritten on load. Every other long-lived serialized format still follows
+  OBJECT-045.
+- **Constraint:** the file has carried no version since it was introduced. The
+  maintainer chose to add versioning and migration in their own change,
+  [#146](https://github.com/w3lt/lys/issues/146), instead of in PR #143.
+- **Alternatives considered:**
+  - A top-level `version`, read as today's format when absent, with an unknown
+    version refused on load and before a save. Deferred to #146 by the
+    maintainer.
+  - Treating a file without the group as not yet initialised and writing the
+    committed default into it, as PR #143 first did. Dropped: it told an old
+    file apart by a missing group, and it copied the committed default into
+    every settings file.
+- **Risk and control:** a build that does not know a group or field drops it
+  on its next save. A build from before PR #143 drops `loadConfiguration`, and
+  every per-model load setting with it, and nothing stops an older build from
+  rewriting a newer file. The current build rejects an unknown setting inside
+  `loadConfiguration`, but it ignores an unknown group and an unknown field in
+  the other groups. A file that fails to load is never rewritten.
+- **Removal condition:** [#146](https://github.com/w3lt/lys/issues/146) adds
+  the version and refuses unknown versions, and this exception is removed with
+  it.
+
+## Settings view size exception
+
+`SettingsView` has an approved exception to the size limit of
+[FUNC-013](https://github.com/w3lt/lys/blob/main/docs/code_standards/FUNCTION.md):
+its body has about 100 lines with code, and the limit is 40 executable lines.
+The exception was approved by the maintainer on 2026-10-10 for
+[PR #143](https://github.com/w3lt/lys/pull/143), following review finding I-3.
+
+- **Scope:** only the `SettingsView` function in
+  [SettingsView.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/views/SettingsView/SettingsView.tsx),
+  and only its line count. Its other FUNC-013 limits are met, and every other
+  function still follows FUNC-013, including the ones PR #143 added.
+- **Constraint:** the function had about 80 such lines before PR #143, which
+  added the load configuration values and two callbacks to the context value
+  it builds. Bringing it under the limit is not one extraction:
+  - One hook holding the store selections and the context value would itself
+    hold about 80 lines.
+  - A split that complies also moves the three older patch callbacks for the
+    runtime, model, and generation groups. Moved code has to follow
+    [OBJECT-019, OBJECT-024, and OBJECT-056](https://github.com/w3lt/lys/blob/main/docs/code_standards/OBJECT.md),
+    and their nested two-spread literals do not, so each patch needs a named
+    operation that builds its result property by property.
+- **Alternatives considered:**
+  - Doing the split in PR #143 was not taken. It changes how runtime, model,
+    and generation edits are applied, which is outside that pull request's
+    purpose.
+  - Moving only the PR's additions into a hook was not taken. The function
+    would still hold about 80 lines, and the hook would exist only to move
+    lines.
+- **Risk and control:** a long function is harder to review and to change
+  safely. This one selects store values, builds one context value, and renders
+  the rail and panes; it has two decision points. The two callbacks PR #143
+  added to it delegate to a named function.
+- **Removal condition:** [#147](https://github.com/w3lt/lys/issues/147) splits
+  the view, and this exception is removed with it.
+
 ## API boundaries
 
 Canonical rules: [API-004, API-020, API-034](https://github.com/w3lt/lys/blob/main/docs/code_standards/API.md).
@@ -303,8 +377,8 @@ These examples identify boundaries in the current source; they do not certify th
 | ----------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Backend composition uses a configuration object assembled from protocol constants and a database path under the `LYS_HOME` environment variable | A startup check that rejects an unset, empty, or relative value does not verify that the directory exists or is usable; the desktop host also checks that its Lys home is absolute before passing it to the backend. |
 | Native settings loading parses an existing document and creates defaults only when the file is missing                                          | Absence, decoding failure, and initial persistence are separate outcomes.                                                                                                                                            |
-| Renderer and native settings both represent runtime, model, and generation groups                                                               | Matching field names alone do not prove matching domains, defaults, or validation.                                                                                                                                   |
-| The renderer applies settings in memory and automatically saves generation edits through the native command                                     | Runtime and model edits remain session-only. The adapter sends `{ newSettings: settings }`, matching Rust's `new_settings` parameter; write failure remains distinct from local application.                         |
+| Renderer and native settings both represent runtime, model, generation, and load configuration groups                                           | Matching field names alone do not prove matching domains, defaults, or validation. The renderer holds the per-model load settings as a map; its adapter converts them from and to the document's object.             |
+| The renderer applies settings in memory and automatically saves generation and load configuration edits through the native command              | Runtime and model edits remain session-only. The adapter sends the settings document as `newSettings`, matching Rust's `new_settings` parameter; write failure remains distinct from local application.              |
 | A chat request reads temperature and reply ceiling once from a narrow settings projection                                                       | The request has a concrete sampling point; a later edit can affect a subsequent request without changing the admitted request.                                                                                       |
 | A backend-address setting exists while the chat transport uses a fixed address                                                                  | Storing or displaying a setting does not prove that its intended consumer applies it.                                                                                                                                |
 | Theme application and its browser-storage write have separate failure behavior                                                                  | A locally applied appearance is distinct from an acknowledged saved preference. This does not authorize silent recovery from invalid required configuration.                                                         |

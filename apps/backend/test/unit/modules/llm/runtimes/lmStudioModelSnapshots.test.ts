@@ -33,16 +33,13 @@ describe("createDownloadedLlmModelSnapshot", () => {
   })
 
   it("removes vendor fields the application does not consume", () => {
-    const record = {
-      ...createLmStudioLlmRecord({ modelKey: "qwen/qwen3-8b" }),
-      publisher: "qwen",
-      indexedModelIdentifier: "qwen/qwen3-8b@q4"
-    }
+    const record = createLmStudioLlmRecord({ modelKey: "qwen/qwen3-8b" })
 
     const snapshot = createDownloadedLlmModelSnapshot(record)
 
     expect(snapshot).not.toHaveProperty("publisher")
     expect(snapshot).not.toHaveProperty("indexedModelIdentifier")
+    expect(snapshot).not.toHaveProperty("deviceIdentifier")
   })
 
   it("omits optional metadata the runtime did not report", () => {

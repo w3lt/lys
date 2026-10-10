@@ -1,3 +1,4 @@
+import type { ModelLoadConfiguration } from "@lys/share"
 import type { LlmEngine } from "./llmEngine"
 import type {
   DownloadedLlmModel,
@@ -71,14 +72,17 @@ export default class FailureRecordingLlmEngine implements LlmEngine {
    * Implements {@link LlmEngine.loadLlmModel} by forwarding.
    *
    * @param modelKeyOrAlias - Interface-defined engine model selection.
+   * @param loadConfiguration - Interface-defined load settings, forwarded unchanged.
    * @returns The interface-defined identity from the borrowed engine.
    * @throws The borrowed engine's failure, after recording it.
    */
   public async loadLlmModel(
-    modelKeyOrAlias: string
+    modelKeyOrAlias: string,
+    loadConfiguration: ModelLoadConfiguration
   ): Promise<LoadedLlmModelInstance> {
     return await this.#handleLlmEngineCall(
-      async () => await this.#llmEngine.loadLlmModel(modelKeyOrAlias)
+      async () =>
+        await this.#llmEngine.loadLlmModel(modelKeyOrAlias, loadConfiguration)
     )
   }
 

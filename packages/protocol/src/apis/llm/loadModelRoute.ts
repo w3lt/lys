@@ -1,3 +1,4 @@
+import { modelLoadConfigurationSchema } from "@lys/share"
 import * as z from "zod"
 import {
   llmServiceBusyProblemSchema,
@@ -11,15 +12,25 @@ import { llmInfoSchema } from "./_share"
 import { apiLlmLoadModelRoute } from "./routes"
 
 /**
- * Validates the non-empty model identifier requested for loading.
+ * Validates the model requested for loading and the settings it is loaded with.
  *
- * The value is passed to LM Studio as a model key or alias; the backend uses
- * LM Studio's canonical `modelKey` in the response and inventory match.
+ * The identifier is passed to LM Studio as a model key or alias; the backend
+ * uses LM Studio's canonical `modelKey` in the response and inventory match.
+ *
+ * @remarks A request without `configuration` is valid and means the same as an
+ * empty one: LM Studio decides every load setting. A configuration that sets
+ * `contextLength` also turns LM Studio's auto-fit off for that load, as the
+ * shared configuration schema describes. An explicit `null` is rejected.
  */
 export const llmLoadModelApiRequestBodySchema = z
   .strictObject({
     /** Model key or alias that LM Studio resolves during loading. */
-    modelId: z.string().min(1)
+    modelId: z.string().min(1),
+    /**
+     * Load settings for this load. LM Studio decides each setting left out; a
+     * set context length also turns its auto-fit off.
+     */
+    configuration: modelLoadConfigurationSchema.optional()
   })
   .readonly()
 
@@ -49,7 +60,9 @@ const llmLoadModelApiResponseSchemas = Object.freeze({
  *
  * @remarks This shared descriptor is imported by the backend route consumer;
  * changing its method, path, body, or response schema changes the transmitted
- * compatibility contract and requires coordinated consumers. Service-busy
+ * compatibility contract and requires coordinated consumers. The body's load
+ * settings are passed to the runtime for this load only; the backend does not
+ * store them. Service-busy
  * responses mean the load was refused before queue acceptance. Accepted loads
  * continue under the service owner even if the requesting client disconnects.
  * Runtime-unavailable responses mean the backend has no connected LLM runtime;
@@ -79,7 +92,7 @@ export type LlmLoadModelApiReply = {
 
 /** Fastify route type for the model-load request and response. */
 export type LlmLoadModelApiRoute = {
-  /** Validated model identifier supplied to the backend handler. */
+  /** Validated model identifier and load settings supplied to the backend handler. */
   readonly Body: LlmLoadModelApiRequestBody
   /** Status-specific model metadata and service-unavailable payloads. */
   readonly Reply: LlmLoadModelApiReply

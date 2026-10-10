@@ -14,6 +14,7 @@ import type {
   ModelRequestState
 } from "@/lib/store/model-runtime"
 
+import ModelLoadConfigurationPanel from "./ModelLoadConfigurationPanel"
 import ModelRow from "./ModelRow"
 import ModelRequestFeedback from "./ModelRequestFeedback"
 import { useSettingsContext } from "./SettingsContext"
@@ -152,38 +153,9 @@ function ModelInventoryPanel(): ReactElement {
 }
 
 /**
- * Explains the current backend limit on context configuration.
- * @returns The retained local context budget and its application boundary.
- * @remarks Requires SettingsContext. The
- * current load API accepts only modelId, so no load-time control is offered.
- */
-function ModelLoadConfiguration(): ReactElement {
-  const { settings } = useSettingsContext()
-  return (
-    <section className="settings-view__section">
-      <div className="settings-view__section-heading">
-        <h2>load configuration</h2>
-        <span>managed by LM Studio</span>
-      </div>
-      <div className="settings-view__row">
-        <div className="settings-view__identity-lines">
-          <h3>Context size</h3>
-          <p>
-            The backend uses LM Studio's load defaults. Context-size overrides
-            are not supported yet.
-          </p>
-        </div>
-        <span>
-          {settings.model.contextSize.toLocaleString()} tokens · local estimate
-        </span>
-      </div>
-    </section>
-  )
-}
-
-/**
- * Composes the backend-backed model inventory and load-configuration boundary.
- * @returns Model settings with real operations and truthful capability limits.
+ * Composes the backend-backed model inventory and the load configuration of
+ * the model being edited.
+ * @returns The model list with its operations, then the load configuration.
  * @remarks Children share SettingsContext;
  * the application store owns request lifetime and handles asynchronous failures.
  */
@@ -191,7 +163,7 @@ export default function ModelPaneContent(): ReactElement {
   return (
     <div className="settings-view__stack">
       <ModelInventoryPanel />
-      <ModelLoadConfiguration />
+      <ModelLoadConfigurationPanel />
     </div>
   )
 }

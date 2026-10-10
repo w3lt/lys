@@ -14,10 +14,21 @@ Lys currently integrates with one local model runtime: LM Studio.
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Model inventory  | `LlmService.listLlmModels()` lists downloaded models and annotates which model keys have loaded instances.                                               |
 | Model health     | `LlmService.getLlmModelHealth()` checks one fresh loaded-inventory snapshot for the requested key without generating text.                               |
-| Model loading    | `POST /api/v1/llm/load` uses the application service to load one model and return its metadata.                                                          |
+| Model loading    | `POST /api/v1/llm/load` uses the application service to load one model with the request's load settings and return its metadata.                         |
 | Model unloading  | `PATCH /api/v1/llm/unload` stops every observed loaded instance matching one key, then reconciles the loaded-instance inventory.                         |
 | Chat generation  | `ChatService.completeChatStream()` uses the `openai` SDK against LM Studio's OpenAI-compatible `/v1` HTTP endpoint.                                      |
 | Title generation | `ChatService.generateTitle()` calls the same endpoint with a separate prompt and a length-limited JSON-schema response format, then validates the reply. |
+
+A load request may carry a `configuration`: context length, eval batch size,
+flash attention, KV cache placement, and active experts. The service hands it to
+the runtime adapter unchanged, and `LmStudioRuntime` gives the SDK's load call a
+`config` that holds only the settings the request set, so LM Studio decides the
+rest. One setting has a further effect: when the config sets a context length,
+`@lmstudio/sdk` 2.0.0 also sends LM Studio's auto-fit as off, so LM Studio does
+not choose the context length and the model placement automatically for that
+load. This has not been checked against a running LM Studio. The backend keeps
+no load settings; the desktop stores them and sends them with each load. See the [load request](/reference/api/#model-load-request)
+for the fields.
 
 Generation temperature and reply-ceiling edits are saved automatically and
 applied to future chat requests. The [API reference](/reference/api/#chat-request-body)
@@ -88,7 +99,7 @@ after the snapshot. Responses are not cached. The
 latency fields.
 
 Acquisition and accepted availability checks are owned until settlement. SDK
-1.5.0 has no public RPC cancellation or forced client shutdown; its cleanup
+2.0.0 has no public RPC cancellation or forced client shutdown; its cleanup
 waits for pending communication. These queries therefore have no completion
 deadline, and a nonresponding engine can keep a connection attempt, a check, or
 shutdown pending. The SDK also ignores invalid version payloads without settling
@@ -154,8 +165,10 @@ policy.
 - Default-model selection lasts for the current session and does not load weights.
   The [desktop model settings](/architecture/desktop/#model-settings) describe how
   the observed loaded model reaches chat requests.
-- Model context size is displayed as an estimate; the load endpoint does not
-  accept a context-size option.
+- The backend does not report the settings a loaded model runs with. SDK
+  2.0.0 exposes them through `LLMDynamicHandle.getLoadConfig()`, which Lys
+  does not call yet ([#145](https://github.com/w3lt/lys/issues/145)). The
+  desktop knows them only for loads it started in the current session.
 
 ## Coming soon
 

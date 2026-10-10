@@ -99,10 +99,18 @@ become interrupted with a refreshed message `updated_at`; content, conversation
 
 ## Settings JSON
 
-The Tauri host stores `runtime`, `model`, and `generation` groups in
-`$LYS_HOME/settings.json`. See the [configuration reference](/reference/configuration/#persisted-settings-json)
-for the current fields, defaults, and validation. Generation edits are saved
-automatically; runtime and model edits in the desktop remain session-only.
+The Tauri host stores `runtime`, `model`, `generation`, and
+`loadConfiguration` groups in `$LYS_HOME/settings.json`. See the
+[configuration reference](/reference/configuration/#persisted-settings-json)
+for the current fields, defaults, and validation. Generation and load
+configuration edits are saved automatically; runtime edits and
+`model.contextSize` edits in the desktop remain session-only.
+
+The file carries no version marker, and loading converts nothing. A file
+without a `loadConfiguration` group reads it as empty and is not rewritten. The
+missing marker is an approved exception until
+[#146](https://github.com/w3lt/lys/issues/146); see the
+[settings file version exception](/reference/standard-application/#settings-file-version-exception).
 
 ## Coming soon
 

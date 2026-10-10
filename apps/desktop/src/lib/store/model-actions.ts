@@ -10,12 +10,25 @@ import {
   type ModelApiConnection
 } from "@/lib/apis/http/models"
 import {
+  buildModelLoadConfiguration,
+  type ModelLoadTarget
+} from "@/lib/models/model-load-configuration"
+
+import {
+  addSentModelConfiguration,
+  buildLoadedModelConfigurations,
   buildModelRuntime,
   initialModelState,
+  removeLoadedModelConfiguration,
+  type LoadedModelConfigurations,
   type ModelInventoryState,
   type ModelRequestState,
   type ModelState
 } from "./model-runtime"
+import type {
+  CompleteModelLoadConfiguration,
+  LoadConfigurationSettings
+} from "./settings"
 
 /** Connection and selection sampled from the owning application store. */
 export type ModelConnectionState = {
@@ -38,6 +51,14 @@ export type ModelSliceDependencies = {
    * @remarks Resolves after the status settles and never rejects.
    */
   readonly handleModelRequestFailure: () => Promise<void>
+  /**
+   * Reads the stored default and per-model load settings.
+   *
+   * @remarks Sampled when a load is admitted, so later edits do not change
+   * the settings that load sends, and when an inventory observation finds a
+   * model already loaded.
+   */
+  readonly getLoadConfigurationSettings: () => LoadConfigurationSettings
 }
 
 /**
@@ -48,8 +69,20 @@ export type ModelSliceDependencies = {
 export type ModelActions = {
   /** Queries inventory; resolves after settlement or invalidation, retaining failure in state. */
   updateModelInventory: () => Promise<void>
-  /** Loads a key and reconciles inventory; backend work can outlive local observation. */
+  /**
+   * Loads a key with its stored load configuration and reconciles inventory;
+   * backend work can outlive local observation.
+   */
   loadModel: (modelKey: string) => Promise<void>
+  /**
+   * Applies the stored load configuration to a loaded model: unloads every
+   * instance of the key, then loads it again, and reconciles inventory.
+   *
+   * @remarks The published request is `unloading`, then `loading`. A failed
+   * unload starts no load. A load that fails after the unload leaves the
+   * model unloaded, with the failure in modelError.
+   */
+  updateLoadedModelConfiguration: (modelKey: string) => Promise<void>
   /** Unloads all instances of a key and reconciles inventory, including after failure. */
   unloadModel: (modelKey: string) => Promise<void>
   /** Queries loaded-state health without performing inference. */
@@ -64,28 +97,115 @@ export type ModelSlice = ModelState & ModelActions
 /** An admitted request, excluding the idle marker. */
 type ActiveModelRequest = Exclude<ModelRequestState, { status: "idle" }>
 
+/** Model operation a caller asks the slice to perform. */
+type ModelOperation =
+  | {
+      /** Reads the inventory without changing the runtime. */
+      readonly kind: "inventory-read"
+    }
+  | {
+      /** Loads, unloads, reads the health of, or reloads one model. */
+      readonly kind: "load" | "unload" | "health-read" | "reload"
+      /** Key of the model the operation addresses. */
+      readonly modelKey: string
+    }
+
+/** One backend request of an admitted model operation. */
+type ModelOperationStep =
+  | {
+      /** Sends nothing; the inventory read that follows every operation is the work. */
+      readonly kind: "inventory-read"
+    }
+  | {
+      /** Loads one model. */
+      readonly kind: "load"
+      /** Key of the model to load. */
+      readonly modelKey: string
+      /** Load configuration sampled when the operation was admitted. */
+      readonly configuration: CompleteModelLoadConfiguration
+    }
+  | {
+      /** Unloads every instance of one model, or reads its health. */
+      readonly kind: "unload" | "health-read"
+      /** Key of the model the step addresses. */
+      readonly modelKey: string
+    }
+
+/** What the steps of one operation have established so far. */
+type ModelOperationProgress = {
+  /** Health observation of a health-read step, otherwise null. */
+  readonly modelHealth: LlmTestModelApiResponse | null
+  /** Failure of the step that ended the operation, otherwise null. */
+  readonly modelError: string | null
+  /** Known load configurations after the completed steps. */
+  readonly loadedModelConfigurations: LoadedModelConfigurations
+}
+
 /**
- * Performs the action before inventory reconciliation.
- * @param request - Admitted action or inventory-only query.
- * @param connection - Origin and cancellation owned by this request.
- * @returns A health observation for testing, otherwise null after completion.
- * @throws The adapter failure for the requested operation.
+ * Builds the request state published while one step runs.
+ * @param step - Step about to be sent.
+ * @returns The listing, loading, unloading, or testing request for the step.
  */
-async function updateModelOperation(
-  request: ActiveModelRequest,
-  connection: ModelApiConnection
-): Promise<LlmTestModelApiResponse | null> {
-  switch (request.status) {
-    case "listing":
-      return null
-    case "loading":
-      await loadModel(request.modelKey, connection)
-      return null
-    case "unloading":
-      await unloadModel(request.modelKey, connection)
-      return null
-    case "testing":
-      return await getModelHealth(request.modelKey, connection)
+function buildModelRequest(step: ModelOperationStep): ActiveModelRequest {
+  switch (step.kind) {
+    case "inventory-read":
+      return { status: "listing" }
+    case "load":
+      return { status: "loading", modelKey: step.modelKey }
+    case "unload":
+      return { status: "unloading", modelKey: step.modelKey }
+    case "health-read":
+      return { status: "testing", modelKey: step.modelKey }
+  }
+}
+
+/**
+ * Sends one step to the backend and records what it established.
+ * @param step - Step to send.
+ * @param connection - Origin and cancellation owned by the operation.
+ * @param progress - What the earlier steps established; not modified.
+ * @returns New progress: a completed load records the configuration it was
+ * sent with under the canonical key the backend reports, a completed unload
+ * removes the model's record, and a health read records its observation.
+ * @throws The adapter failure for the step; the progress is then unchanged.
+ */
+async function sendModelOperationStep(
+  step: ModelOperationStep,
+  connection: ModelApiConnection,
+  progress: ModelOperationProgress
+): Promise<ModelOperationProgress> {
+  switch (step.kind) {
+    case "inventory-read":
+      return progress
+    case "load": {
+      const loaded = await loadModel(
+        step.modelKey,
+        step.configuration,
+        connection
+      )
+      return {
+        ...progress,
+        loadedModelConfigurations: addSentModelConfiguration(
+          progress.loadedModelConfigurations,
+          loaded.modelKey,
+          step.configuration
+        )
+      }
+    }
+    case "unload":
+      await unloadModel(step.modelKey, connection)
+      return {
+        ...progress,
+        loadedModelConfigurations: removeLoadedModelConfiguration(
+          progress.loadedModelConfigurations,
+          step.modelKey
+        )
+      }
+    case "health-read":
+      return {
+        ...progress,
+        modelHealth: await getModelHealth(step.modelKey, connection)
+      }
   }
 }
 
@@ -179,6 +299,9 @@ function hasModelRequestFailed(
  * Release invalidates publication before aborting local transport. Accepted
  * backend work can continue after disconnect. Mutations are never retried;
  * their outcomes, including failures, are followed by a fresh inventory query.
+ * A load sends the model's stored load configuration as sampled at admission,
+ * and the slice remembers what it sent for as long as the model stays
+ * observed as loaded; release discards those records.
  * A settled request that failed, or whose health reported an unavailable
  * runtime, awaits the store's LM Studio status refresh before resolving.
  */
@@ -209,13 +332,111 @@ export function createModelSlice(
   }
 
   /**
-   * Owns one admitted action through acknowledgement and reconciliation.
-   * @param request - Operation performed without automatically retrying effects.
+   * Builds the load step of one model with its current stored configuration.
+   * @param modelKey - Key of the model to load.
+   * @returns A load step whose configuration is resolved now. The context
+   * length is capped at the model's maximum when the inventory lists the
+   * model; for an unlisted model no maximum is known and none is applied.
+   */
+  function buildModelLoadStep(modelKey: string): ModelOperationStep {
+    const inventory = get().modelInventory
+    const listedModel =
+      inventory.status === "ready"
+        ? inventory.models.find((model) => model.modelKey === modelKey)
+        : undefined
+    const unlistedModel: ModelLoadTarget = { modelKey, maxContextLength: null }
+    const configuration = buildModelLoadConfiguration(
+      dependencies.getLoadConfigurationSettings(),
+      listedModel ?? unlistedModel
+    )
+    return { kind: "load", modelKey, configuration }
+  }
+
+  /**
+   * Lists the backend requests one operation consists of, in order.
+   * @param operation - Operation being admitted.
+   * @returns One step for a read, load, or unload; an unload followed by a
+   * load for a reload. Load configurations are sampled here.
+   */
+  function listModelOperationSteps(
+    operation: ModelOperation
+  ): readonly ModelOperationStep[] {
+    switch (operation.kind) {
+      case "inventory-read":
+        return [{ kind: "inventory-read" }]
+      case "unload":
+        return [{ kind: "unload", modelKey: operation.modelKey }]
+      case "health-read":
+        return [{ kind: "health-read", modelKey: operation.modelKey }]
+      case "load":
+        return [buildModelLoadStep(operation.modelKey)]
+      case "reload":
+        return [
+          { kind: "unload", modelKey: operation.modelKey },
+          buildModelLoadStep(operation.modelKey)
+        ]
+    }
+  }
+
+  /**
+   * Publishes the request of the step about to run and clears the previous
+   * operation's failure and health observation.
+   * @param step - Step about to be sent.
+   */
+  function handleModelOperationStepStart(step: ModelOperationStep): void {
+    const modelRequest = buildModelRequest(step)
+    set({
+      modelRequest,
+      modelRuntime: buildModelRuntime(
+        get().modelInventory,
+        modelRequest,
+        dependencies.getConnection().defaultModel
+      ),
+      modelError: null,
+      modelHealth: null
+    })
+  }
+
+  /**
+   * Sends the steps of one admitted operation in order, stopping at the first
+   * failure.
+   * @param steps - Steps sampled at admission.
+   * @param controller - Identity of the admitted operation.
+   * @param connection - Origin and cancellation owned by the operation.
+   * @returns What the completed steps established, with the failure of the
+   * step that ended them, if any; or null when the operation lost its
+   * authority to publish and nothing more may be written.
+   */
+  async function sendModelOperationSteps(
+    steps: readonly ModelOperationStep[],
+    controller: AbortController,
+    connection: ModelApiConnection
+  ): Promise<ModelOperationProgress | null> {
+    let progress: ModelOperationProgress = {
+      modelHealth: null,
+      modelError: null,
+      loadedModelConfigurations: get().loadedModelConfigurations
+    }
+    for (const step of steps) {
+      handleModelOperationStepStart(step)
+      if (!isCurrentRequest(controller, connection.backendUrl)) return null
+      try {
+        progress = await sendModelOperationStep(step, connection, progress)
+      } catch (error) {
+        progress = { ...progress, modelError: formatModelFailure(error) }
+      }
+      if (!isCurrentRequest(controller, connection.backendUrl)) return null
+      if (progress.modelError !== null) return progress
+    }
+    return progress
+  }
+
+  /**
+   * Owns one admitted operation through acknowledgement and reconciliation.
+   * @param operation - Operation performed without automatically retrying effects.
    * @returns Resolves after settlement, failure presentation, or invalidation.
    */
-  async function startModelOperation(
-    request: ActiveModelRequest
-  ): Promise<void> {
+  async function startModelOperation(operation: ModelOperation): Promise<void> {
     const current = dependencies.getConnection()
     if (!current.isModelRuntimeAvailable || activeRequest !== null) return
     const controller = new AbortController()
@@ -224,41 +445,32 @@ export function createModelSlice(
       signal: controller.signal
     }
     activeRequest = controller
-    const modelRuntime = buildModelRuntime(
-      get().modelInventory,
-      request,
-      current.defaultModel
+    const progress = await sendModelOperationSteps(
+      listModelOperationSteps(operation),
+      controller,
+      connection
     )
-    set({
-      modelRequest: request,
-      modelRuntime,
-      modelError: null,
-      modelHealth: null
-    })
-    if (!isCurrentRequest(controller, current.backendUrl)) return
-    let modelHealth: LlmTestModelApiResponse | null = null
-    let modelError: string | null = null
-    try {
-      modelHealth = await updateModelOperation(request, connection)
-    } catch (error) {
-      modelError = formatModelFailure(error)
-    }
-    if (!isCurrentRequest(controller, current.backendUrl)) return
-    const result = await readInventoryOutcome(connection, modelError)
+    if (progress === null) return
+    const result = await readInventoryOutcome(connection, progress.modelError)
     if (!isCurrentRequest(controller, current.backendUrl)) return
     activeRequest = null
     set({
       modelInventory: result.modelInventory,
       modelError: result.modelError,
-      modelHealth,
+      modelHealth: progress.modelHealth,
       modelRequest: { status: "idle" },
       modelRuntime: buildModelRuntime(
         result.modelInventory,
         { status: "idle" },
         dependencies.getConnection().defaultModel
+      ),
+      loadedModelConfigurations: buildLoadedModelConfigurations(
+        progress.loadedModelConfigurations,
+        result.modelInventory,
+        dependencies.getLoadConfigurationSettings()
       )
     })
-    if (hasModelRequestFailed(result, modelHealth)) {
+    if (hasModelRequestFailed(result, progress.modelHealth)) {
       await dependencies.handleModelRequestFailure()
     }
   }
@@ -273,13 +485,14 @@ export function createModelSlice(
 
   return {
     ...initialModelState,
-    updateModelInventory: () => startModelOperation({ status: "listing" }),
-    loadModel: (modelKey) =>
-      startModelOperation({ status: "loading", modelKey }),
+    updateModelInventory: () => startModelOperation({ kind: "inventory-read" }),
+    loadModel: (modelKey) => startModelOperation({ kind: "load", modelKey }),
+    updateLoadedModelConfiguration: (modelKey) =>
+      startModelOperation({ kind: "reload", modelKey }),
     unloadModel: (modelKey) =>
-      startModelOperation({ status: "unloading", modelKey }),
+      startModelOperation({ kind: "unload", modelKey }),
     testModel: (modelKey) =>
-      startModelOperation({ status: "testing", modelKey }),
+      startModelOperation({ kind: "health-read", modelKey }),
     releaseModelRuntime
   }
 }

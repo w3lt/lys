@@ -52,14 +52,18 @@ describe("FailureRecordingLlmEngine", () => {
       expect(recorder.hasRecordedFailure).toBe(false)
     })
 
-    it("forwards the model selection and the loaded identity unchanged", async () => {
+    it("forwards the model selection, the load settings, and the loaded identity unchanged", async () => {
       const { recorder, engine } = createRecordingEngine()
+      const loadConfiguration = Object.freeze({ contextLength: 16_384 })
       engine.loadLlmModel.mockResolvedValue(LOADED_INSTANCE)
 
-      await expect(recorder.loadLlmModel("qwen3")).resolves.toBe(
-        LOADED_INSTANCE
+      await expect(
+        recorder.loadLlmModel("qwen3", loadConfiguration)
+      ).resolves.toBe(LOADED_INSTANCE)
+      expect(engine.loadLlmModel).toHaveBeenCalledExactlyOnceWith(
+        "qwen3",
+        loadConfiguration
       )
-      expect(engine.loadLlmModel).toHaveBeenCalledExactlyOnceWith("qwen3")
       expect(recorder.hasRecordedFailure).toBe(false)
     })
 
@@ -91,7 +95,8 @@ describe("FailureRecordingLlmEngine", () => {
       ],
       [
         "loadLlmModel",
-        (recorder: FailureRecordingLlmEngine) => recorder.loadLlmModel("qwen3")
+        (recorder: FailureRecordingLlmEngine) =>
+          recorder.loadLlmModel("qwen3", {})
       ],
       [
         "stopLoadedLlmModelInstance",
@@ -130,7 +135,7 @@ describe("FailureRecordingLlmEngine", () => {
       engine.loadLlmModel.mockRejectedValueOnce(failure)
       engine.listLoadedLlmModelInstances.mockResolvedValue([LOADED_INSTANCE])
 
-      await expect(recorder.loadLlmModel("qwen3")).rejects.toBe(failure)
+      await expect(recorder.loadLlmModel("qwen3", {})).rejects.toBe(failure)
       await expect(recorder.listLoadedLlmModelInstances()).resolves.toEqual([
         LOADED_INSTANCE
       ])

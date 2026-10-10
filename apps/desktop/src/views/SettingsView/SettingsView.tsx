@@ -10,9 +10,14 @@ import {
 } from "@/components/SettingsViewComponents/SettingsContext"
 import SettingsPaneFrame from "@/components/SettingsViewComponents/SettingsPaneFrame"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
+import {
+  buildLoadConfigurationSettings,
+  type ModelLoadConfigurationChange
+} from "@/lib/models/model-load-configuration"
 import { type BackendServerStatus, useLysStore } from "@/lib/store"
 import type { LmStudioStatus } from "@/lib/store/lm-studio-status"
 import type { ModelRuntimeState } from "@/lib/store/model-runtime"
+import type { LysSettings } from "@/lib/store/settings"
 
 import "./SettingsView.scss"
 
@@ -104,7 +109,7 @@ const SETTINGS_PANES: readonly SettingsPaneDescriptor[] = [
     ordinal: "02",
     note: "Every model on disk, which one is default, and what it is loaded with.",
     footNote:
-      "Model operations use the backend. Load-time context size is managed by LM Studio; default selection lasts for this session.",
+      "Model operations use the backend. A load configuration is saved for each model and applies when that model is loaded, not per request. The composer's context meter uses its own estimate, not the context length set here. Default selection lasts for this session.",
     contentComponent: ModelPaneContent
   },
   {
@@ -214,6 +219,25 @@ function formatRailStatus(
   }
 }
 
+/**
+ * Builds the settings after one change to a model's own load settings.
+ *
+ * @param settings - Current settings; they are not modified.
+ * @param change - Model and settings to assign, or the expert count to remove.
+ * @returns Newly owned settings whose load configuration has the change
+ * applied. Every other group is the value it was before.
+ */
+function buildSettingsWithLoadConfigurationChange(
+  settings: LysSettings,
+  change: ModelLoadConfigurationChange
+): LysSettings {
+  const loadConfiguration = buildLoadConfigurationSettings(
+    settings.loadConfiguration,
+    change
+  )
+  return { ...settings, loadConfiguration }
+}
+
 /** Properties accepted by {@link SettingsView}. */
 export type SettingsViewProps = {
   /** Called when the user completes settings and requests a return to chat. */
@@ -227,10 +251,10 @@ export type SettingsViewProps = {
  * selected pane and the settings value; this view provides `SettingsContext` so
  * the runtime, model, and generation panes read one authority and propose
  * patches back through it. Patches
- * apply in memory immediately. Generation edits are saved automatically;
- * runtime and model edits remain session-only.
+ * apply in memory immediately. Generation and load configuration edits are
+ * saved automatically; runtime and model edits remain session-only.
  *
- * Inventory, load, unload, and health requests belong to the application store.
+ * Inventory, load, unload, reload, and health requests belong to the application store.
  * Entering settings refreshes inventory; leaving the view does not cancel work.
  * Request errors and loaded-state health observations are rendered by the panes.
  * Agents are managed through the agent store, which the Agents pane reads
@@ -264,6 +288,12 @@ export default function SettingsView({
   const modelRequest = useLysStore((state) => state.modelRequest)
   const modelError = useLysStore((state) => state.modelError)
   const modelHealth = useLysStore((state) => state.modelHealth)
+  const loadedModelConfigurations = useLysStore(
+    (state) => state.loadedModelConfigurations
+  )
+  const updateLoadedModelConfiguration = useLysStore(
+    (state) => state.updateLoadedModelConfiguration
+  )
   const testModel = useLysStore((state) => state.testModel)
   const updateModelInventory = useLysStore(
     (state) => state.updateModelInventory
@@ -281,6 +311,7 @@ export default function SettingsView({
       modelRequest,
       modelError,
       modelHealth,
+      loadedModelConfigurations,
       onRuntimeChange: (patch) =>
         setSettings({
           ...settings,
@@ -293,8 +324,24 @@ export default function SettingsView({
           ...settings,
           generation: { ...settings.generation, ...patch }
         }),
+      onAssignModelLoadSettings: (modelKey, assignedSettings) => {
+        const change: ModelLoadConfigurationChange = {
+          kind: "assignment",
+          modelKey,
+          settings: assignedSettings
+        }
+        setSettings(buildSettingsWithLoadConfigurationChange(settings, change))
+      },
+      onRemoveModelExpertCount: (modelKey) => {
+        const change: ModelLoadConfigurationChange = {
+          kind: "expert-count-removal",
+          modelKey
+        }
+        setSettings(buildSettingsWithLoadConfigurationChange(settings, change))
+      },
       onLoadModel: loadModel,
       onUnloadModel: unloadModel,
+      onReloadModel: updateLoadedModelConfiguration,
       onTestModel: testModel,
       onRefreshModels: updateModelInventory
     }),
@@ -305,9 +352,11 @@ export default function SettingsView({
       modelRequest,
       modelError,
       modelHealth,
+      loadedModelConfigurations,
       setSettings,
       loadModel,
       unloadModel,
+      updateLoadedModelConfiguration,
       testModel,
       updateModelInventory
     ]

@@ -35,8 +35,10 @@ export function createDownloadedLlmModel(
  * Creates the vendor record LM Studio reports for one downloaded LLM.
  *
  * @param identity - Key and optional path distinguishing the model.
- * @returns A complete SDK `LLMInfo` value, including the vendor `type`
- * discriminator and every optional metadata field.
+ * @returns A complete SDK `LLMInfo` value for a model on this machine: the
+ * vendor `type` discriminator, the vendor fields the application does not
+ * consume, and the optional parameter, architecture, and quantization
+ * metadata. The optional variant fields are absent.
  */
 export function createLmStudioLlmRecord(
   identity: LlmModelFixtureIdentity
@@ -44,6 +46,9 @@ export function createLmStudioLlmRecord(
   return {
     ...createDownloadedLlmModel(identity),
     type: "llm",
+    publisher: "fixture-publisher",
+    indexedModelIdentifier: `fixture-publisher/${identity.modelKey}`,
+    deviceIdentifier: null,
     paramsString: "7B",
     architecture: "llama",
     quantization: { name: "Q4_K_M", bits: 4 }

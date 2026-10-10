@@ -130,6 +130,10 @@ The host creates the following defaults when the settings file is missing:
   "generation": {
     "temperature": 0.7,
     "replyCeiling": 2048
+  },
+  "loadConfiguration": {
+    "default": {},
+    "models": {}
   }
 }
 ```
@@ -137,11 +141,19 @@ The host creates the following defaults when the settings file is missing:
 Only the Rust host reads and writes this file directly. The React UI reaches it
 through Tauri `invoke` calls.
 
+The host only stores the `loadConfiguration` group. A settings file written
+before load configurations existed has no such group; `load_settings` reads it
+as empty and does not rewrite the file. The committed default load
+configuration belongs to the renderer, which applies it when it resolves a load
+(see the [configuration reference](/reference/configuration/#load-configuration)).
+
 The desktop automatically saves generation edits by reading this document,
-replacing its generation group, and saving the complete document. Runtime and
-model edits in the UI remain session-only; generation saves preserve those
-groups as already stored on disk. The local context size supports composer
-estimates and does not configure LM Studio's load-time context.
+replacing its generation group, and saving the complete document. Load
+configuration edits are saved the same way. Runtime edits and
+`model.contextSize` edits in the UI remain session-only; the automatic saves
+preserve those groups as already stored on disk. The local context size
+supports composer estimates and is separate from the context length a model is
+loaded with.
 
 ## What the host does not currently do
 

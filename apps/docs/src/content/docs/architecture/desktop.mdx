@@ -176,6 +176,11 @@ next load, and is saved automatically to the `models` part of the
 is in the file. Active experts reads "auto" until it is set, because LM Studio
 reports no expert counts ([#144](https://github.com/w3lt/lys/issues/144)).
 
+The store holds the per-model settings as a map keyed by model key. The file
+keeps them as one `models` object, and only the Tauri settings adapter handles
+that object: it builds the map when it loads the document and the object when
+it saves it.
+
 The backend does not report the settings a loaded model runs with
 ([#145](https://github.com/w3lt/lys/issues/145)), so the store keeps its own
 record for each model it observes as loaded:

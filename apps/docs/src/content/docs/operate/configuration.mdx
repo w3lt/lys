@@ -47,7 +47,9 @@ takes each setting from the model's own values, then from `default`, then from
 the committed default file, which is never copied into `settings.json`.
 
 Lys reads the file when it starts, so a hand edit takes effect the next time
-Lys starts. Saves from the Model pane leave `default` as it is in the file.
+Lys starts. There is one exception: a save from the Model pane replaces
+`models` with the entries Lys holds, so a hand edit of `models` made while Lys
+runs is lost. Such a save leaves `default` as it is in the file.
 
 Missing groups and fields receive their Rust defaults; the `loadConfiguration`
 default is empty. Invalid JSON or invalid typed values fail loading; for

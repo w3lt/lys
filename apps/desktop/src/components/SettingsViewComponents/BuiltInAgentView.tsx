@@ -36,7 +36,8 @@ export type BuiltInAgentViewProps = {
  * state. It reads the context size from the application store to measure the
  * prompt against the window. Each text is a read-only field, so it can be
  * selected and copied but not typed into. Focus starts on the back button
- * when the view appears, and Escape returns to the list. A built-in agent
+ * when the view appears, and Escape pressed on any of the view's fields or
+ * buttons returns to the list. A built-in agent
  * offers no save and no delete: Duplicate is how the user gets a version
  * they can change.
  * @param props - Agent and the parent-owned actions.
@@ -59,11 +60,12 @@ export default function BuiltInAgentView({
   }, [])
 
   /**
-   * Returns to the agent list when Escape is pressed anywhere in the view.
+   * Returns to the agent list when Escape is pressed on a control of the
+   * view.
    *
-   * @param event - Key press bubbling from a control of the view.
+   * @param event - Key press on one of the view's fields or buttons.
    */
-  function handleViewKeyDown(event: KeyboardEvent<HTMLElement>): void {
+  function handleControlKeyDown(event: KeyboardEvent<HTMLElement>): void {
     if (event.key !== "Escape" || event.nativeEvent.isComposing) return
 
     event.preventDefault()
@@ -71,16 +73,13 @@ export default function BuiltInAgentView({
   }
 
   return (
-    <section
-      aria-label={agent.name}
-      className="settings-view__agent-editor"
-      onKeyDown={handleViewKeyDown}
-    >
+    <section aria-label={agent.name} className="settings-view__agent-editor">
       <div className="settings-view__agent-editor-top">
         <Button
           aria-label="agents list"
           className="settings-view__agent-back"
           onClick={onCloseAgentView}
+          onKeyDown={handleControlKeyDown}
           ref={backButtonRef}
           size="sm"
           type="button"
@@ -98,13 +97,25 @@ export default function BuiltInAgentView({
         <div className="settings-view__agent-field-top">
           <label htmlFor={nameId}>name</label>
         </div>
-        <Input id={nameId} readOnly type="text" value={agent.name} />
+        <Input
+          id={nameId}
+          onKeyDown={handleControlKeyDown}
+          readOnly
+          type="text"
+          value={agent.name}
+        />
       </div>
       <div className="settings-view__agent-field">
         <div className="settings-view__agent-field-top">
           <label htmlFor={bioId}>bio</label>
         </div>
-        <Input id={bioId} readOnly type="text" value={agent.bio} />
+        <Input
+          id={bioId}
+          onKeyDown={handleControlKeyDown}
+          readOnly
+          type="text"
+          value={agent.bio}
+        />
       </div>
       <div className="settings-view__agent-field">
         <div className="settings-view__agent-field-top">
@@ -115,6 +126,7 @@ export default function BuiltInAgentView({
           aria-describedby={measureId}
           className="settings-view__agent-prompt"
           id={systemPromptId}
+          onKeyDown={handleControlKeyDown}
           readOnly
           spellCheck={false}
           value={agent.systemPrompt}
@@ -129,6 +141,7 @@ export default function BuiltInAgentView({
         <div className="settings-view__agent-actions">
           <Button
             onClick={onDuplicateAgent}
+            onKeyDown={handleControlKeyDown}
             size="sm"
             title="Open a copy as a new agent of your own"
             type="button"
@@ -143,6 +156,7 @@ export default function BuiltInAgentView({
         <div className="settings-view__agent-actions settings-view__agent-actions--commit">
           <Button
             onClick={onCloseAgentView}
+            onKeyDown={handleControlKeyDown}
             size="sm"
             type="button"
             variant="outline"

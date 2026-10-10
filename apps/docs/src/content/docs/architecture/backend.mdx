@@ -16,44 +16,50 @@ Each module in `src/modules/` keeps its HTTP routes in `routes/` and its
 services, contracts, and domain logic at the module root. `src/di/` only wires
 the services together.
 
-| Layer                 | Implementation                    | Responsibility                                                                                                                                                                                                        |
-| --------------------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| App bootstrap         | `src/app.ts`                      | Registers CORS, SSE support, singleton services, and all routes.                                                                                                                                                      |
-| Runtime config        | `src/config.ts`                   | Loads loopback host and port values, the SQLite path under `LYS_HOME`, the system and title prompts, and title limits.                                                                                                |
-| Singleton services    | `src/di/singleton.ts`             | Opens the shared database and creates the chat service, conversation services and the agent service over SQLite records, and LLM services without contacting LM Studio.                                               |
-| Conversation services | `src/modules/conversation`        | Keep the conversation decisions (identities, timestamps, validation, superseding, cursors) over records declared in `records.ts`; contain no SQL.                                                                     |
-| Agent service         | `src/modules/agent`               | Lists agents in pages, validates agent definitions and changes, derives a code from the name when none is given, and stamps each change with the current time over records declared in `records.ts`; contains no SQL. |
-| Database              | `src/infrastructure/database`     | Owns the shared SQLite connection and its migrations, holds the contracts through which stores borrow its transactions, and runs every conversation query in `conversations/` and every agent query in `agents/`.     |
-| Chat routes           | `src/modules/chat/routes`         | Accepts chat requests, persists turn data, streams SSE responses, and updates conversation titles.                                                                                                                    |
-| Conversation routes   | `src/modules/conversation/routes` | Lists, searches, retrieves, renames, and deletes stored conversations.                                                                                                                                                |
-| Agent routes          | `src/modules/agent/routes`        | Lists, creates, retrieves, changes, and deletes stored agents.                                                                                                                                                        |
-| LLM routes            | `src/modules/llm/routes`          | Lists LM Studio models, checks loaded-model health, loads or unloads a model, and reports or refreshes the LM Studio connection.                                                                                      |
-| Health route          | `src/modules/health/routes`       | Returns a simple `{ ok: true }` response.                                                                                                                                                                             |
+| Layer                 | Implementation                    | Responsibility                                                                                                                                                                                                                                                                                            |
+| --------------------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| App bootstrap         | `src/app.ts`                      | Registers CORS, SSE support, singleton services, and all routes.                                                                                                                                                                                                                                          |
+| Runtime config        | `src/config.ts`                   | Loads loopback host and port values, the SQLite path under `LYS_HOME`, the system and title prompts, and title limits.                                                                                                                                                                                    |
+| Singleton services    | `src/di/singleton.ts`             | Opens the shared database and creates the chat service, conversation services and the agent service over SQLite records, and LLM services without contacting LM Studio.                                                                                                                                   |
+| Conversation services | `src/modules/conversation`        | Keep the conversation decisions (identities, timestamps, validation, superseding, cursors) over records declared in `records.ts`; contain no SQL.                                                                                                                                                         |
+| Agent service         | `src/modules/agent`               | Owns the built-in agents, lists them with each page of stored agents, validates agent definitions and changes, derives a code from the name when none is given, stamps each change with the current time over records declared in `records.ts`, and finds the agent that answers a chat; contains no SQL. |
+| Database              | `src/infrastructure/database`     | Owns the shared SQLite connection and its migrations, holds the contracts through which stores borrow its transactions, and runs every conversation query in `conversations/` and every agent query in `agents/`.                                                                                         |
+| Chat routes           | `src/modules/chat/routes`         | Accepts chat requests, persists turn data, streams SSE responses, and updates conversation titles.                                                                                                                                                                                                        |
+| Conversation routes   | `src/modules/conversation/routes` | Lists, searches, retrieves, renames, and deletes stored conversations.                                                                                                                                                                                                                                    |
+| Agent routes          | `src/modules/agent/routes`        | Lists the built-in and stored agents, retrieves one, and creates, changes, and deletes stored agents; changing or deleting a built-in agent is refused.                                                                                                                                                   |
+| LLM routes            | `src/modules/llm/routes`          | Lists LM Studio models, checks loaded-model health, loads or unloads a model, and reports or refreshes the LM Studio connection.                                                                                                                                                                          |
+| Health route          | `src/modules/health/routes`       | Returns a simple `{ ok: true }` response.                                                                                                                                                                                                                                                                 |
 
 ## Chat request flow
 
 1. `POST /api/v1/chat` validates the request body with the shared Zod schema.
-2. For a new conversation, the route first asks the agent service
-   (`app.agentService`) whether the requested agent can answer chats; if not,
-   it answers `404` with the agent-not-found problem and stores nothing.
+2. The route finds the agent that answers before it stores anything. For a
+   new conversation it asks the agent service (`app.agentService`) for the
+   requested agent, built-in or stored; if no agent has that code, it answers
+   `404` with the agent-not-found problem. For an existing conversation it
+   reads the conversation's agent code through the history reader, answers
+   `404` with the conversation-not-found problem when the conversation is not
+   stored, and answers `409` with the conversation agent missing problem when
+   no agent has that code any more, as after the agent was deleted. In each
+   of those cases nothing is stored.
    `StoredConversationTurns` then creates the conversation with that agent or
    loads the existing one, interrupts a reply still streaming in it, and
    stores the user message and empty streaming assistant message, all in one
-   write transaction of the SQLite turn records.
+   write transaction of the SQLite turn records. The lookup and the write run
+   in one synchronous step, so no agent or conversation changes in between.
 3. The route immediately emits either `start-new-conversation-turn` or
    `start-existing-conversation-turn`.
 4. For an existing conversation with a stored title, the route emits that title
    to reconcile desktop metadata from an earlier missed delivery.
-5. The route asks the agent service for the agent stored with the conversation,
-   which is Lys for every conversation today. The agent's `createReply` opens an
+5. The agent found in step 2 answers with the system prompt it has when the
+   turn starts: a built-in agent's shipped prompt, or a stored agent's current
+   one. The agent's `createReply` opens an
    OpenAI-compatible streaming completion against LM Studio through
    `OpenAiReplyModel`, offers the request's tools, and runs rounds while the
    model calls them: each call is checked by `AgentTool`, sent to the desktop as
    a `tool-call` event, and answered through the tool-result route before the
    next round. It persists each delta before sending it to every stream
-   following the reply, and stores completion before emitting `done`. A stored
-   conversation whose agent cannot answer chats fails its request with HTTP 500
-   before streaming, and its reply is stored as failed.
+   following the reply, and stores completion before emitting `done`.
 6. When the conversation has no stored title, `createTitleGenerationTask` runs
    in parallel and emits a `title` event only after a conditional write wins the
    first assignment.
@@ -134,29 +140,35 @@ and hold every conversation query. The history-reading, history-editing, and
 turn services wrap those records, and each is its own application service.
 The agent service `AgentService` (`src/modules/agent/agentService.ts`) owns
 agent management. It uses the SQLite agent records in `agents/` for stored
-agents, but it is not one of the database services: it also owns Lys, built
-into the backend from the Lys system prompt under the code `lys` and never
-stored, and it refuses to store another agent under that code. The
-composition root creates it after the conversation services, over the agent
-records and the chat service.
+agents, but it is not one of the database services: it also owns the built-in
+agents, Caliginia (`caliginia`) and Lysiptera (`lysiptera`), which
+`buildBuiltInAgents` (`src/modules/agent/builtInAgents.ts`) builds from the
+two configured system prompts. A built-in agent is never stored: the service
+lists it with every page, reads it with `kind: "built-in"`, refuses to change
+or delete it, and refuses to store another agent under its code. The
+composition root creates the service after the conversation services, over
+the agent records and the chat service.
 
 `Agent` (`src/modules/agent/agent.ts`) answers turns with its own system prompt
 through a `ReplyModel`. `AgentService.findChatAgent` returns the agent that
-answers chats under a code: today only Lys, since stored agents cannot answer
-chats yet. The chat module's `OpenAiReplyModel` implements `ReplyModel`
+answers chats under a code: a built-in agent, or a new `Agent` built from the
+stored agent's current record, so an edited prompt is sent from the
+conversation's next turn. The chat module's `OpenAiReplyModel` implements `ReplyModel`
 over `ChatService`'s streaming completion, using only choice 0 and refusing
 finish reasons other than `stop` and `length`. The chat route passes the agent
 the turn's history, its reply writes, its event sender, its Stop signal, and
 two reporters that log a cancelled reply at debug level and a failed one at
-error level with the request's logger. A new conversation must name an agent
-that can answer chats, or the chat route answers `404` before storing anything.
-When a stored conversation names an agent that is not available, the chat
-route stores the reply as failed and answers with a server error.
+error level with the request's logger. A new conversation must name a
+built-in or stored agent, or the chat route answers `404` before storing
+anything. When a stored conversation's agent no longer exists, the chat route
+answers `409` and stores nothing, so the conversation stays readable and
+accepts messages again once an agent has that code.
 Version 4 preserves activity
 timestamps on rename, version 5 preserves them on status-only message updates,
 version 6 adds the `agents` table, version 7 replaces the stored system prompt
-with the conversation's agent code, and turn persistence's startup recovers
-streaming assistants without reordering history.
+with the conversation's agent code, version 8 moves every conversation stored
+under the former built-in code `lys` to `caliginia`, and turn persistence's
+startup recovers streaming assistants without reordering history.
 Two triggers keep `conversations.updated_at` in sync with message inserts and
 message text updates.
 

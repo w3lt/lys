@@ -39,6 +39,7 @@ Fastify backend -> SQLite
 | Chat request lifecycle in the current window | Desktop UI              | Held in the chat Zustand store while one request is active.                                   |
 | Past-conversations dialog                    | Desktop UI              | Held in the history Zustand store; listed conversations are read from the backend.            |
 | Agents pane list and editor                  | Desktop UI              | Held in the agent Zustand store; agents are read from the backend.                            |
+| Agent selected for a new conversation        | Desktop UI              | Held in the chat Zustand store until the app quits; a started conversation keeps its agent.   |
 | Backend process status                       | Desktop UI + Tauri host | The host owns the process; the UI queries status during initialization and lifecycle actions. |
 | Runtime settings JSON                        | Tauri host              | Stored in `$LYS_HOME/settings.json`.                                                          |
 | Theme preference                             | Desktop UI              | Stored as `lys.theme` in WebView `localStorage`.                                              |

@@ -24,11 +24,11 @@ route definitions.
 | `GET`    | `/api/v1/conversations/:conversationId`                                         | none                                                                               | Conversation with ordered messages                         |
 | `PATCH`  | `/api/v1/conversations/:conversationId`                                         | `{ title: string }`                                                                | Conversation metadata                                      |
 | `DELETE` | `/api/v1/conversations/:conversationId`                                         | none                                                                               | Bodyless `204`                                             |
-| `GET`    | `/api/v1/agents`                                                                | none; optional `cursor`, `limit` query parameters                                  | Agent list page                                            |
+| `GET`    | `/api/v1/agents`                                                                | none; optional `cursor`, `limit` query parameters                                  | Built-in agents and a page of stored agents                |
 | `POST`   | `/api/v1/agents`                                                                | `{ code?, name, bio, systemPrompt }`                                               | `201` agent with `Location`, or `409` Problem Details      |
 | `GET`    | `/api/v1/agents/:agentCode`                                                     | none                                                                               | Agent with its system prompt                               |
-| `PATCH`  | `/api/v1/agents/:agentCode`                                                     | at least one of `{ name, bio, systemPrompt }`                                      | Changed agent                                              |
-| `DELETE` | `/api/v1/agents/:agentCode`                                                     | none                                                                               | Bodyless `204`                                             |
+| `PATCH`  | `/api/v1/agents/:agentCode`                                                     | at least one of `{ name, bio, systemPrompt }`                                      | Changed agent, or `409` for a built-in agent               |
+| `DELETE` | `/api/v1/agents/:agentCode`                                                     | none                                                                               | Bodyless `204`, or `409` for a built-in agent              |
 | `POST`   | `/api/v1/chat`                                                                  | `conversation`, `message`, `model`, required `generationOptions`, optional `tools` | `text/event-stream`                                        |
 | `GET`    | `/api/v1/chat/:conversationId/replies/:assistantMessageId/events`               | none                                                                               | `text/event-stream` (reply snapshot, then live events)     |
 | `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/stop`                 | none                                                                               | Bodyless `204`, or `409` Problem Details                   |
@@ -69,16 +69,22 @@ changed. The response is Fastify's JSON error body, with
 `conversation` names the conversation the turn starts or continues; its `kind`
 selects one of two forms:
 
-- `{ "kind": "new", "agentCode": "lys" }` starts a new conversation, created
-  before the first stream event, that the named agent answers. Only Lys
-  (`lys`) can answer chats today. Any other valid code, including a stored
-  agent's, returns the agent-not-found Problem Details response below with
+- `{ "kind": "new", "agentCode": "caliginia" }` starts a new conversation,
+  created before the first stream event, that the named agent answers: a
+  built-in agent (`caliginia`, `lysiptera`) or a stored one. A valid code that
+  no agent has returns the agent-not-found Problem Details response below with
   `404`, and nothing is stored.
 - `{ "kind": "existing", "id": "<UUIDv7>" }` continues a stored conversation
   with the agent it was started with, so it names no agent. An unknown
   identifier returns the conversation-not-found Problem Details response below.
+  A stored conversation whose agent no longer exists, as after that agent was
+  deleted, returns `409` with `urn:lys:problem:conversation:agent-missing`,
+  and nothing is stored; see
+  [a conversation whose agent was deleted](#a-conversation-whose-agent-was-deleted).
 
-`message` and `model` must be non-empty strings. Continuation
+`message` and `model` must be non-empty strings. Every turn sends the system
+prompt its agent has when the turn starts, so editing a stored agent changes
+its conversations from their next message. Continuation
 uses the system prompt of the conversation's agent, prior user messages, non-empty completed or
 interrupted assistant messages, then the current user message exactly once.
 Failed and empty assistant messages are excluded from context. A reply still
@@ -138,9 +144,10 @@ this itself ([#135](https://github.com/w3lt/lys/issues/135)). A reply can make a
 
 ## Chat response shape
 
-Accepted chat turns respond as SSE. A missing conversation, or a new
-conversation's agent that cannot answer chats, returns JSON Problem Details
-before the stream starts, and nothing is stored. Each event payload must match one of
+Accepted chat turns respond as SSE. A missing conversation, a new
+conversation naming a code no agent has, or a stored conversation whose agent
+no longer exists returns JSON Problem Details before the stream starts, and
+nothing is stored: no message, and no failed reply. Each event payload must match one of
 the eight variants documented in [SSE events](/reference/sse-events/).
 
 Closing a chat stream stops only that client's observation. The backend keeps
@@ -217,8 +224,9 @@ the latest non-empty message for a title-only match. Unfiltered lists select the
 latest non-empty message; conversations without one have `preview: null`.
 
 `GET` by identifier returns conversation metadata, including `agentCode`, the
-code of the agent that answers it (`lys` for every conversation today), and
-messages ordered by creation time then identifier. `PATCH` accepts
+code of the agent that answers it, and
+messages ordered by creation time then identifier. The code stays after its
+agent is deleted, so it may name no agent. `PATCH` accepts
 only `title`, trims it to 1–120 UTF-16 code units, and returns updated metadata. Repeating
 a rename is idempotent; renaming never changes activity time or list position.
 `DELETE` cascades to messages and returns `204` without a body. Late generation
@@ -249,7 +257,10 @@ timestamps; conversation activity time and history order do not change.
 
 ## Agents
 
-An agent is a stored definition: a `code`, a `name`, a `bio`, a
+There are two kinds of agent. A built-in agent ships with the backend:
+Caliginia (`caliginia`) and Lysiptera (`lysiptera`). It has a `code`, a `name`,
+a `bio`, and a `systemPrompt`, belongs to the release, and can be neither
+changed nor deleted. A stored agent is a definition the user created: a `code`, a `name`, a `bio`, a
 `systemPrompt`, and the `createdAt` and `updatedAt` timestamps. The code is the
 agent's identity and never changes: a lowercase slug of 1–64 characters made of
 `a`–`z` and `0`–`9` in hyphen-separated groups, compared exactly. A malformed
@@ -260,17 +271,22 @@ surrogate, which UTF-8 cannot carry unchanged, is rejected. The system prompt
 has no length limit of its own; only the 1 MiB request body limit above bounds
 it. Invalid bodies return `400` and change nothing.
 
-List responses have exactly `agents`, `storedCount`, and `nextCursor`. Each
-summary contains `code`, `name`, `bio`, `createdAt`, and `updatedAt`; it does
-not expose `systemPrompt`, which `GET` by code returns.
+List responses have exactly `builtInAgents`, `agents`, `storedCount`, and
+`nextCursor`. `builtInAgents` holds every built-in agent's `code`, `name`, and
+`bio`, in the order the backend ships them, and is the same on every page.
+`agents` holds one page of stored agents: each
+summary contains `code`, `name`, `bio`, `createdAt`, and `updatedAt`. Neither
+exposes `systemPrompt`, which `GET` by code returns. `GET` by code returns the
+agent with a `kind`: `"built-in"`, without timestamps, or `"custom"` for a
+stored agent, with them.
 
 | Parameter | Contract                                                                                                  |
 | --------- | --------------------------------------------------------------------------------------------------------- |
 | `limit`   | Integer from 1–50; defaults to 30.                                                                        |
 | `cursor`  | Opaque, at most 2048 characters, taken from the previous page. Malformed or foreign cursors return `400`. |
 
-Agents are ordered by `createdAt ASC, code ASC`, with keyset pagination, and
-`storedCount` counts every stored agent. Neither key changes after creation,
+Stored agents are ordered by `createdAt ASC, code ASC`, with keyset pagination, and
+`storedCount` counts every stored agent, never the built-in ones. Neither key changes after creation,
 so an update never moves an agent between pages. Each response reads the count
 and the page from one snapshot; later pages reflect later changes. The next
 cursor is `null` on the last page.
@@ -280,8 +296,8 @@ cursor is `null` on the last page.
 browser client on another origin, such as the desktop app, uses the returned
 `code` instead. `code` is optional:
 
-- A given code is stored exactly. If another agent already has it, Lys's
-  `lys` included, the request returns `409` with
+- A given code is stored exactly. If another agent already has it, a built-in
+  agent's included, the request returns `409` with
   `urn:lys:problem:agent:code-taken` and stores nothing.
 - Without a code, the backend derives one from the name: it decomposes the
   name with Unicode compatibility decomposition (NFKD), which removes accents
@@ -290,8 +306,9 @@ browser client on another origin, such as the desktop app, uses the returned
   to fit 64 characters. `Web Researcher` becomes `web-researcher` and `Trợ lý`
   becomes `tro-ly`. A letter without an ASCII form, such as `đ`, acts as a
   separator. A name in which no letter or digit has an ASCII form, such as
-  `日本語`, gives `agent`. When the code is taken or is `lys`, `-2`, `-3`, and
-  so on are added, so the name `Lys` gives `lys-2`.
+  `日本語`, gives `agent`. When the code is taken, by a stored or a built-in
+  agent, `-2`, `-3`, and so on are added, so the name `Caliginia` gives
+  `caliginia-2`.
 
 Creating an agent is not idempotent: repeating a request without a code creates
 another agent. After a lost response, list the agents to find out whether it
@@ -300,7 +317,22 @@ was created. Names need not be unique.
 `PATCH` replaces only the given fields, trimmed, and stores the time of the
 change as `updatedAt`, even when the values are unchanged. The body cannot
 contain `code`, and an empty body returns `400`. `DELETE` removes the agent
-permanently and returns `204` without a body.
+permanently and returns `204` without a body. A conversation the deleted agent
+answered keeps its messages and its agent code; see
+[a conversation whose agent was deleted](#a-conversation-whose-agent-was-deleted).
+
+`PATCH` or `DELETE` on a built-in agent changes nothing and returns `409` with
+`Content-Type: application/problem+json`:
+
+```json
+{
+  "type": "urn:lys:problem:agent:built-in",
+  "title": "Built-in agent cannot be changed",
+  "status": 409,
+  "detail": "Agent caliginia is built in and cannot be changed or deleted.",
+  "instance": "/api/v1/agents/caliginia"
+}
+```
 
 A missing agent on GET, PATCH, or DELETE returns `404` with
 `Content-Type: application/problem+json`:
@@ -315,17 +347,34 @@ A missing agent on GET, PATCH, or DELETE returns `404` with
 }
 ```
 
-The chat endpoint returns the same problem type, with `instance`
-`/api/v1/chat`, when a new conversation names a code that no agent able to
-answer chats has. A stored agent may still have that code, so the `detail`
-says only that, for example
-`No agent that can answer chats has the code web-researcher.` Lys is built
-into the backend and not stored, so the agent endpoints neither list Lys nor
-find, change, or delete `lys`.
+The chat endpoint returns the same problem, with `instance` `/api/v1/chat`,
+when a new conversation names a code that no built-in or stored agent has.
 
 A taken code returns `409` with the same media type, `type`
 `urn:lys:problem:agent:code-taken`, `title` `Agent code taken`, and `instance`
 `/api/v1/agents`.
+
+### A conversation whose agent was deleted
+
+A conversation keeps the code of the agent it was started with. When that
+agent is deleted, the conversation stays stored and readable, but it accepts
+no new message: the chat endpoint answers `409` with
+`Content-Type: application/problem+json` before it stores anything, so the
+conversation gains no message and no failed reply.
+
+```json
+{
+  "type": "urn:lys:problem:conversation:agent-missing",
+  "title": "Conversation agent missing",
+  "status": 409,
+  "detail": "The agent web-researcher that answers this conversation no longer exists.",
+  "instance": "/api/v1/chat"
+}
+```
+
+The conversation accepts messages again once an agent is stored under that
+code, and that agent then answers it. Built-in agents cannot be deleted, so a
+conversation a built-in agent answers never reaches this state.
 
 ## LLM metadata shape
 

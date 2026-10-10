@@ -11,33 +11,33 @@ presentation state, not durable conversation storage.
 
 ## Main responsibilities
 
-| Area                | Current implementation                                                                                                                          |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| App shell           | `App.tsx` swaps between chat and settings views and runs startup initialization.                                                                |
-| Chat UI             | `ChatView` renders the transcript, composer, jump-to-latest controls, and the past-conversations dialog.                                        |
-| Message rendering   | `MarkdownMessage` renders assistant replies as Markdown with KaTeX math and highlighted, copyable code blocks.                                  |
-| Chat state          | `src/lib/store/chat-view` owns the active conversation, request lifecycle, conversation opening, and error presentation.                        |
-| History state       | `src/lib/store/conversation-history` owns the past-conversations dialog, its search and pages, and rename and delete calls.                     |
-| Agent state         | `src/lib/store/agents` owns the Agents pane's list, its editor and draft, and the agent create, update, and delete calls.                       |
-| Tool state          | `src/lib/store/tools.ts` owns the Tools pane's list of client tools and the session-only choices that gate tool calls.                          |
-| Tool calls          | `src/lib/store/tool-calls` follows each running reply's tool calls, decides each by the Tools pane, runs client tools, and sends their answers. |
-| Shell/runtime state | `src/lib/store/index.ts` tracks which view is open, whether the backend is running, and settings loaded from Tauri.                             |
-| Model lifecycle     | `src/lib/store/model-actions.ts` owns real inventory, load, unload, and health requests shared by settings and the composer.                    |
-| SSE consumption     | `src/lib/apis/http/chat.ts` opens chat and reply-events SSE streams, validates events with Zod, and sends reply stops and tool results.         |
-| Theme               | `src/app/theme.ts` applies light or dark mode and stores the choice as `lys.theme` in WebView `localStorage`.                                   |
+| Area                | Current implementation                                                                                                                                     |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| App shell           | `App.tsx` swaps between chat and settings views and runs startup initialization.                                                                           |
+| Chat UI             | `ChatView` renders the transcript, composer, jump-to-latest controls, and the past-conversations dialog.                                                   |
+| Message rendering   | `MarkdownMessage` renders assistant replies as Markdown with KaTeX math and highlighted, copyable code blocks.                                             |
+| Chat state          | `src/lib/store/chat-view` owns the active conversation, the agent selected for a new one, request lifecycle, conversation opening, and error presentation. |
+| History state       | `src/lib/store/conversation-history` owns the past-conversations dialog, its search and pages, and rename and delete calls.                                |
+| Agent state         | `src/lib/store/agents` owns the list of built-in and stored agents, the Agents pane's editor and draft, and the agent create, update, and delete calls.    |
+| Tool state          | `src/lib/store/tools.ts` owns the Tools pane's list of client tools and the session-only choices that gate tool calls.                                     |
+| Tool calls          | `src/lib/store/tool-calls` follows each running reply's tool calls, decides each by the Tools pane, runs client tools, and sends their answers.            |
+| Shell/runtime state | `src/lib/store/index.ts` tracks which view is open, whether the backend is running, and settings loaded from Tauri.                                        |
+| Model lifecycle     | `src/lib/store/model-actions.ts` owns real inventory, load, unload, and health requests shared by settings and the composer.                               |
+| SSE consumption     | `src/lib/apis/http/chat.ts` opens chat and reply-events SSE streams, validates events with Zod, and sends reply stops and tool results.                    |
+| Theme               | `src/app/theme.ts` applies light or dark mode and stores the choice as `lys.theme` in WebView `localStorage`.                                              |
 
 ## Chat state split
 
 The desktop currently has six separate state systems:
 
-| Store                   | Owns                                                                                                                           |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| Chat Zustand store      | Active conversation, request and open tokens, local abort controllers, streamed assistant deltas, inline error text            |
-| History Zustand store   | Dialog visibility, search query, displayed conversation pages, the row being renamed or confirmed, pending renames and deletes |
-| Agent Zustand store     | Every listed agent, the open editor and its draft, the save attempt, the pending save or delete, the most recently saved agent |
-| Tool Zustand store      | The client tool list read from the desktop, tool calls on or off, each tool's switch and approval                              |
-| Tool-call Zustand store | Every tool call held until the backend takes its answer, and the reply follows that deliver them                               |
-| Shell Zustand store     | Active top-level view, loaded runtime settings, backend process status, startup progress                                       |
+| Store                   | Owns                                                                                                                                                                 |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Chat Zustand store      | Active conversation, the agent selected for a new conversation, request and open tokens, local abort controllers, streamed assistant deltas, inline error text       |
+| History Zustand store   | Dialog visibility, search query, displayed conversation pages, the row being renamed or confirmed, pending renames and deletes                                       |
+| Agent Zustand store     | Every listed built-in and stored agent, the open editor or read-only view and its draft, the save attempt, the pending save or delete, the most recently saved agent |
+| Tool Zustand store      | The client tool list read from the desktop, tool calls on or off, each tool's switch and approval                                                                    |
+| Tool-call Zustand store | Every tool call held until the backend takes its answer, and the reply follows that deliver them                                                                     |
+| Shell Zustand store     | Active top-level view, loaded runtime settings, backend process status, startup progress                                                                             |
 
 The transcript shown in the window is built from backend events for the current
 request, or from the stored transcript read when a past conversation is opened.
@@ -240,19 +240,25 @@ does not coordinate with external editors of the settings file.
 
 ## Agent settings
 
-The Agents pane manages the agents stored by the backend through the
-[agent API](/reference/api/#agents). It reads every stored agent when it
-appears and whenever the backend starts running, one page of 50 after another,
+The Agents pane shows the built-in agents and manages the agents stored by the
+backend through the
+[agent API](/reference/api/#agents). It reads every built-in and stored agent
+when it appears and whenever the backend starts running, the stored ones one
+page of 50 after another,
 because names are checked for uniqueness against all of them; a read stops
-with a failure past 1,000 agents. A displayed list stays on screen while it is
+with a failure past 1,000 agents. The chat view reads the same list when it
+appears and whenever the backend starts running. A displayed list stays on screen while it is
 read again. A status line above the agents says why they are not shown: the
 backend is not running, or a read failed, which offers Retry. When the status
 appears because the control holding focus disappeared with the list or an
 editor, focus moves to Retry or to the status line.
 
-The pane lists the user's agents oldest first with their name, code, and bio.
-Built-in agents are not available yet, so the pane has no section for them.
-Opening an agent reads it with its system prompt into an editor; New agent opens
+The pane lists the built-in agents first, in their own section, then the
+user's agents oldest first, each with its name, code, and bio. A built-in
+agent ships with Lys and cannot be changed or deleted: opening one shows its
+name, bio, and system prompt read-only, with Duplicate, which opens a copy as
+a new agent of the user's own.
+Opening one of the user's agents reads it with its system prompt into an editor; New agent opens
 an empty one. The editor edits the name, bio, and system prompt, and for a new
 agent an optional code. The name, bio, and prompt are marked required, and the
 code field states the format it accepts. Typed codes keep only lowercase
@@ -261,7 +267,8 @@ and an empty code lets the backend derive one. Limits come from `@lys/share`,
 and the counters measure the trimmed text, as it is saved. Saving checks the
 draft first: a blank name, bio, or prompt, a name or bio over its limit once
 trimmed, a name another agent has (ignoring case), or a malformed or listed
-code is shown and nothing is sent. Once the field is marked invalid, focus moves
+code is shown and nothing is sent; built-in agents count among the listed
+names and codes. Once the field is marked invalid, focus moves
 to it. Names need not be unique to the backend, so a stored agent that keeps
 its own name can be saved even when another agent shares it. The backend still
 refuses a code taken since the list was read. Duplicate opens a copy as a new
@@ -276,7 +283,34 @@ lost may still have stored the agent, so the editor says the save could not be
 confirmed and the list is read again; an agent that was stored then appears,
 and its name and code count as taken. Saving is unavailable while the list is
 read again, so a draft is never checked against a list that read may change.
-Agents are not used by chats yet.
+Editing an agent changes its conversations from their next message, because
+every turn sends the agent's current system prompt.
+
+### Choosing a conversation's agent
+
+The composer's agent menu, left of the weights menu, names the agent that
+answers. Before the first message it lists the built-in agents, then the
+user's own, each with its bio and tagged `selected` or `built-in`; choosing
+one selects the agent of the new conversation, and Edit agents opens the
+Agents pane. The chat store keeps the selection, which starts on Caliginia,
+survives starting another conversation, and is not saved across restarts. A
+selected agent that is no longer listed when the message is sent is replaced
+by Caliginia.
+
+Once a conversation is shown, or its first reply is awaited, its agent is
+fixed: the menu shows a lock, says the agent stays for the whole conversation,
+and offers Start a new one, which starts a new conversation and leaves the
+menu open on the choices. The transcript tags every reply with the name of
+the conversation's agent, and the message field, its placeholder, the
+generating status, and the tool-call announcement name it too.
+
+When the agent list has been read and no agent has the conversation's code,
+its agent was deleted. The conversation stays readable, replies are tagged
+with the code, the message field and Send are disabled, and a notice above
+the field offers a new conversation. While the list is unread the desktop
+does not claim a deletion: sending stays possible, and the backend's refusal
+is shown as the same sentence. A conversation accepts messages again once an
+agent is stored under its code.
 
 ## Tool settings
 

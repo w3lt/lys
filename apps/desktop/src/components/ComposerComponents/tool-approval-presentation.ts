@@ -1,6 +1,6 @@
 import type { SearchFilesFilter } from "@lys/protocol"
 
-import type { ClientToolInput, ShownToolCall } from "@/lib/store/tool-calls"
+import type { ShownToolCall, ToolCallInput } from "@/lib/store/tool-calls"
 
 /** Phrase naming what a search compares with its query, by target. */
 const SEARCH_TARGET_PHRASES = Object.freeze({
@@ -17,18 +17,21 @@ export const EMPTY_DRAFT_APPROVAL_HINT =
 export const DRAFT_APPROVAL_HINT = "↵ sends your message as her answer"
 
 /**
- * Formats the plain sentence that says what a call will do.
+ * Formats the plain sentences that say what a call will do.
  *
  * @param input - Validated input of the call.
- * @returns One sentence naming the action and its target; every current tool
- * only reads, so each sentence says that nothing is changed.
+ * @returns The action and its target, then its effect: a tool that reads
+ * this machine changes nothing, and a tool that reads the web names the host
+ * it sends a request to, under the full URL.
  */
-export function formatToolCallSummary(input: ClientToolInput): string {
+export function formatToolCallSummary(input: ToolCallInput): string {
   switch (input.toolName) {
     case "read_text_file":
       return `Read ${input.input.path}. Nothing is changed.`
     case "search_files":
       return `Search ${SEARCH_TARGET_PHRASES[input.filter.target]} under ${input.filter.root} for “${input.filter.query}”. Nothing is changed.`
+    case "read_page":
+      return `Read ${input.url}. Sends a request to ${input.host}.`
   }
 }
 

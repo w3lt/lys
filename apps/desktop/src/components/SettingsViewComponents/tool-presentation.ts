@@ -3,7 +3,8 @@ import {
   type ToolAccess,
   type ToolArgumentDefinition,
   type ToolDefinition,
-  type ToolGroup
+  type ToolGroup,
+  type ToolRunner
 } from "@lys/share"
 
 import {
@@ -49,15 +50,45 @@ export type OfferedToolTotals = {
   readonly offeredTokenCount: number
 }
 
+/** Where a tool runs, as Settings and the approval card present it. */
+export type ToolRunnerPresentation = {
+  /** Lowercase badge text. */
+  readonly label: string
+  /** Tooltip of the badge. */
+  readonly title: string
+  /** Heading of the detail row in Settings. */
+  readonly heading: string
+  /** What the detail row says about where the tool runs. */
+  readonly note: string
+}
+
 /** Lowercase heading text of every tool group; a new group must add one. */
 const TOOL_GROUP_LABELS = Object.freeze({
-  files: "files"
+  files: "files",
+  network: "web"
 } satisfies Readonly<Record<ToolGroup, string>>)
 
 /** Lowercase badge text of every access level; a new level must add one. */
 const TOOL_ACCESS_LABELS = Object.freeze({
-  reads: "reads"
+  reads: "reads",
+  network: "network"
 } satisfies Readonly<Record<ToolAccess, string>>)
+
+/** Presentation of every runner; a new runner must add one. */
+const TOOL_RUNNER_PRESENTATIONS = Object.freeze({
+  client: Object.freeze({
+    label: "in Lys",
+    title: "Runs inside the Lys app",
+    heading: "Runs in Lys",
+    note: "Handled by the Lys app on this machine. Works whichever runtime you point Lys at, and stops when you close Lys."
+  }),
+  backend: Object.freeze({
+    label: "via runtime",
+    title: "Runs in Lys’s backend",
+    heading: "Runs via runtime",
+    note: "Handled by Lys’s backend, which sends the request from wherever it runs. Works while the backend runs."
+  })
+} satisfies Readonly<Record<ToolRunner, ToolRunnerPresentation>>)
 
 /**
  * Calculates an estimate of the tokens a tool adds to each request it is
@@ -83,7 +114,7 @@ export function calculateOfferedToolTotals(
   toolChoices: ReadonlyMap<string, ToolChoice>
 ): OfferedToolTotals {
   const offeredTools = tools.filter(
-    (tool) => getToolChoice(toolChoices, tool.name).isOn
+    (tool) => getToolChoice(toolChoices, tool).isOn
   )
   const offeredTokenCount = offeredTools.reduce(
     (tokenCount, tool) => tokenCount + calculateToolTokenEstimate(tool),
@@ -203,6 +234,18 @@ export function formatToolGroupCount(
  */
 export function formatToolAccessLabel(access: ToolAccess): string {
   return TOOL_ACCESS_LABELS[access]
+}
+
+/**
+ * Gets how Settings and the approval card present where a tool runs.
+ *
+ * @param runner - Side that runs the tool.
+ * @returns The badge text and tooltip, and the detail row's heading and note.
+ */
+export function getToolRunnerPresentation(
+  runner: ToolRunner
+): ToolRunnerPresentation {
+  return TOOL_RUNNER_PRESENTATIONS[runner]
 }
 
 /**

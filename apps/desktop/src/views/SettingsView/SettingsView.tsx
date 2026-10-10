@@ -261,8 +261,8 @@ export type SettingsViewProps = {
  * directly rather than through `SettingsContext`; its prompt measure reads the
  * context-window estimate from the application store, and it proposes no
  * settings patch. The Tools pane likewise reads the tool store directly; it
- * lists the client tools the desktop reports, and its choices are mocked for
- * the session and never saved.
+ * lists the tools the desktop and the backend report, and its choices are
+ * mocked for the session and never saved.
  *
  * Each pane body is a stable lazy component behind a `Suspense` fallback; a
  * pending body renders a separate busy frame, so its heading and Done action

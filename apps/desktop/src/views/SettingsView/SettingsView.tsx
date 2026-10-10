@@ -10,6 +10,7 @@ import {
 } from "@/components/SettingsViewComponents/SettingsContext"
 import SettingsPaneFrame from "@/components/SettingsViewComponents/SettingsPaneFrame"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
+import { buildLoadConfigurationSettings } from "@/lib/models/model-load-configuration"
 import { type BackendServerStatus, useLysStore } from "@/lib/store"
 import type { LmStudioStatus } from "@/lib/store/lm-studio-status"
 import type { ModelRuntimeState } from "@/lib/store/model-runtime"
@@ -104,7 +105,7 @@ const SETTINGS_PANES: readonly SettingsPaneDescriptor[] = [
     ordinal: "02",
     note: "Every model on disk, which one is default, and what it is loaded with.",
     footNote:
-      "Model operations use the backend. Load-time context size is managed by LM Studio; default selection lasts for this session.",
+      "Model operations use the backend. A load configuration is saved for each model and applies when that model is loaded, not per request. The composer's context meter uses its own estimate, not the context length set here. Default selection lasts for this session.",
     contentComponent: ModelPaneContent
   },
   {
@@ -227,10 +228,10 @@ export type SettingsViewProps = {
  * selected pane and the settings value; this view provides `SettingsContext` so
  * the runtime, model, and generation panes read one authority and propose
  * patches back through it. Patches
- * apply in memory immediately. Generation edits are saved automatically;
- * runtime and model edits remain session-only.
+ * apply in memory immediately. Generation and load configuration edits are
+ * saved automatically; runtime and model edits remain session-only.
  *
- * Inventory, load, unload, and health requests belong to the application store.
+ * Inventory, load, unload, reload, and health requests belong to the application store.
  * Entering settings refreshes inventory; leaving the view does not cancel work.
  * Request errors and loaded-state health observations are rendered by the panes.
  * Agents are managed through the agent store, which the Agents pane reads
@@ -264,6 +265,12 @@ export default function SettingsView({
   const modelRequest = useLysStore((state) => state.modelRequest)
   const modelError = useLysStore((state) => state.modelError)
   const modelHealth = useLysStore((state) => state.modelHealth)
+  const loadedModelConfigurations = useLysStore(
+    (state) => state.loadedModelConfigurations
+  )
+  const updateLoadedModelConfiguration = useLysStore(
+    (state) => state.updateLoadedModelConfiguration
+  )
   const testModel = useLysStore((state) => state.testModel)
   const updateModelInventory = useLysStore(
     (state) => state.updateModelInventory
@@ -281,6 +288,7 @@ export default function SettingsView({
       modelRequest,
       modelError,
       modelHealth,
+      loadedModelConfigurations,
       onRuntimeChange: (patch) =>
         setSettings({
           ...settings,
@@ -293,8 +301,25 @@ export default function SettingsView({
           ...settings,
           generation: { ...settings.generation, ...patch }
         }),
+      onAssignModelLoadSettings: (modelKey, assignedSettings) =>
+        setSettings({
+          ...settings,
+          loadConfiguration: buildLoadConfigurationSettings(
+            settings.loadConfiguration,
+            { kind: "assignment", modelKey, settings: assignedSettings }
+          )
+        }),
+      onRemoveModelExpertCount: (modelKey) =>
+        setSettings({
+          ...settings,
+          loadConfiguration: buildLoadConfigurationSettings(
+            settings.loadConfiguration,
+            { kind: "expert-count-removal", modelKey }
+          )
+        }),
       onLoadModel: loadModel,
       onUnloadModel: unloadModel,
+      onReloadModel: updateLoadedModelConfiguration,
       onTestModel: testModel,
       onRefreshModels: updateModelInventory
     }),
@@ -305,9 +330,11 @@ export default function SettingsView({
       modelRequest,
       modelError,
       modelHealth,
+      loadedModelConfigurations,
       setSettings,
       loadModel,
       unloadModel,
+      updateLoadedModelConfiguration,
       testModel,
       updateModelInventory
     ]

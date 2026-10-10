@@ -1,5 +1,12 @@
 import type { LlmInfo, LlmTestModelApiResponse } from "@lys/protocol"
 
+import { buildModelLoadConfiguration } from "@/lib/models/model-load-configuration"
+
+import type {
+  CompleteModelLoadConfiguration,
+  LoadConfigurationSettings
+} from "./settings"
+
 /** Inventory observation; failed and unavailable states never imply an empty runtime. */
 export type ModelInventoryState =
   | { readonly status: "unavailable" }
@@ -28,6 +35,29 @@ export type ModelRuntimeState =
       readonly modelKey: string
     }
 
+/**
+ * What Lys knows about the load configuration a loaded model runs with.
+ *
+ * @remarks The runtime does not report the configuration of a loaded model,
+ * so this is Lys's own record, kept while the model stays observed as loaded.
+ */
+export type LoadedModelConfiguration = {
+  /**
+   * `sent` when Lys loaded the model with this configuration in this session.
+   * `assumed` when the model was found already loaded: the configuration is
+   * then the one stored when it was first observed, and it only shows whether
+   * the stored settings changed since.
+   */
+  readonly origin: "sent" | "assumed"
+  /** Configuration sent with the load, or stored at the first observation. */
+  readonly configuration: CompleteModelLoadConfiguration
+}
+
+/** Known load configurations of the loaded models, keyed by model key. */
+export type LoadedModelConfigurations = Readonly<
+  Record<string, LoadedModelConfiguration>
+>
+
 /** Observable model state atomically replaced by the application store. */
 export type ModelState = {
   /** Latest complete inventory observation. */
@@ -40,6 +70,11 @@ export type ModelState = {
   readonly modelError: string | null
   /** Latest health observation, cleared by the next operation. */
   readonly modelHealth: LlmTestModelApiResponse | null
+  /**
+   * Load configuration known for each model observed as loaded; a model that
+   * is not loaded has no entry.
+   */
+  readonly loadedModelConfigurations: LoadedModelConfigurations
 }
 
 /** Initial model state before a backend inventory observation. */
@@ -48,7 +83,8 @@ export const initialModelState: ModelState = Object.freeze({
   modelRequest: Object.freeze({ status: "idle" }),
   modelRuntime: Object.freeze({ status: "none" }),
   modelError: null,
-  modelHealth: null
+  modelHealth: null,
+  loadedModelConfigurations: Object.freeze({})
 })
 
 /**
@@ -87,5 +123,90 @@ export function isModelTransitionInFlight(
 ): boolean {
   return (
     modelRuntime.status === "loading" || modelRuntime.status === "unloading"
+  )
+}
+
+/**
+ * Finds what is known about one loaded model's configuration.
+ *
+ * @param known - Known configurations of the loaded models.
+ * @param modelKey - Key of the model.
+ * @returns The model's entry, or undefined when it has none. Members of the
+ * object prototype are never returned for a key such as `constructor`.
+ */
+export function findLoadedModelConfiguration(
+  known: LoadedModelConfigurations,
+  modelKey: string
+): LoadedModelConfiguration | undefined {
+  return Object.hasOwn(known, modelKey) ? known[modelKey] : undefined
+}
+
+/**
+ * Adds the configuration a completed load was sent with.
+ *
+ * @param known - Known configurations of the loaded models; not modified.
+ * @param modelKey - Canonical key of the model the load reported as loaded.
+ * @param configuration - Configuration sent with that load.
+ * @returns Newly owned records in which the model's entry is the sent
+ * configuration, replacing any earlier entry.
+ */
+export function addSentModelConfiguration(
+  known: LoadedModelConfigurations,
+  modelKey: string,
+  configuration: CompleteModelLoadConfiguration
+): LoadedModelConfigurations {
+  const otherEntries = Object.entries(known).filter(
+    ([knownModelKey]) => knownModelKey !== modelKey
+  )
+  const sentEntry = [modelKey, { origin: "sent", configuration }] as const
+  return Object.fromEntries([...otherEntries, sentEntry])
+}
+
+/**
+ * Removes what is known about one model's configuration.
+ *
+ * @param known - Known configurations of the loaded models; not modified.
+ * @param modelKey - Key of the model whose instances were unloaded.
+ * @returns Newly owned records without an entry for the model.
+ */
+export function removeLoadedModelConfiguration(
+  known: LoadedModelConfigurations,
+  modelKey: string
+): LoadedModelConfigurations {
+  return Object.fromEntries(
+    Object.entries(known).filter(
+      ([knownModelKey]) => knownModelKey !== modelKey
+    )
+  )
+}
+
+/**
+ * Builds the known configurations of the loaded models after an inventory
+ * observation.
+ *
+ * @param known - Records held before the observation; not modified.
+ * @param inventory - Inventory observation being published.
+ * @param settings - Load settings stored at the time of the observation.
+ * @returns Records for exactly the models the inventory lists as loaded. A
+ * model that already has a record keeps it; a model without one is assumed to
+ * run with the configuration stored now. An inventory that is not ready
+ * establishes nothing, so the earlier records are returned unchanged.
+ */
+export function buildLoadedModelConfigurations(
+  known: LoadedModelConfigurations,
+  inventory: ModelInventoryState,
+  settings: LoadConfigurationSettings
+): LoadedModelConfigurations {
+  if (inventory.status !== "ready") return known
+  return Object.fromEntries(
+    inventory.models
+      .filter((model) => model.loaded)
+      .map((model) => [
+        model.modelKey,
+        findLoadedModelConfiguration(known, model.modelKey) ?? {
+          origin: "assumed",
+          configuration: buildModelLoadConfiguration(settings, model)
+        }
+      ])
   )
 }

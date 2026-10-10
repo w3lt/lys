@@ -90,7 +90,7 @@ async function sendLlmServiceRequest(
     case "listLlmModels":
       return await service.listLlmModels()
     case "loadLlmModel":
-      return await service.loadLlmModel("a/model")
+      return await service.loadLlmModel("a/model", {})
     case "getLlmModelHealth":
       return await service.getLlmModelHealth("a/model")
     case "stopLlmModelsByKey":
@@ -158,8 +158,12 @@ describe("LlmService", () => {
   })
 
   describe("loadLlmModel", () => {
-    it("loads the selection and returns the canonical model's metadata as loaded", async () => {
+    it("loads the selection with the given settings and returns the canonical model's metadata as loaded", async () => {
       const { service, engine } = createServiceWithEngine()
+      const loadConfiguration = Object.freeze({
+        contextLength: 16_384,
+        flashAttention: false
+      })
       engine.loadLlmModel.mockResolvedValue(
         Object.freeze({
           modelKey: "qwen/qwen3-8b",
@@ -171,9 +175,12 @@ describe("LlmService", () => {
         createDownloadedLlmModel({ modelKey: "qwen/qwen3-8b" })
       ])
 
-      const model = await service.loadLlmModel("qwen3")
+      const model = await service.loadLlmModel("qwen3", loadConfiguration)
 
-      expect(engine.loadLlmModel).toHaveBeenCalledWith("qwen3")
+      expect(engine.loadLlmModel).toHaveBeenCalledExactlyOnceWith(
+        "qwen3",
+        loadConfiguration
+      )
       expect(model).toEqual({
         ...createDownloadedLlmModel({ modelKey: "qwen/qwen3-8b" }),
         loaded: true
@@ -187,7 +194,7 @@ describe("LlmService", () => {
       )
       engine.listDownloadedLlmModels.mockResolvedValue([])
 
-      await expect(service.loadLlmModel("qwen/qwen3-8b")).rejects.toThrow(
+      await expect(service.loadLlmModel("qwen/qwen3-8b", {})).rejects.toThrow(
         'Loaded model "qwen/qwen3-8b" was not found in the downloaded LLM inventory'
       )
     })
@@ -197,7 +204,9 @@ describe("LlmService", () => {
       const failure = new Error("The LLM runtime could not load the model.")
       engine.loadLlmModel.mockRejectedValue(failure)
 
-      await expect(service.loadLlmModel("qwen/qwen3-8b")).rejects.toBe(failure)
+      await expect(service.loadLlmModel("qwen/qwen3-8b", {})).rejects.toBe(
+        failure
+      )
       expect(engine.listDownloadedLlmModels).not.toHaveBeenCalled()
     })
   })

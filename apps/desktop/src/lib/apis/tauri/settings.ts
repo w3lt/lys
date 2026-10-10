@@ -1,4 +1,8 @@
-import type { GenerationSettings, LysSettings } from "@/lib/store/settings"
+import type {
+  GenerationSettings,
+  LoadConfigurationSettings,
+  LysSettings
+} from "@/lib/store/settings"
 import { invoke } from "@tauri-apps/api/core"
 
 /**
@@ -29,11 +33,29 @@ export async function saveSettings(settings: LysSettings): Promise<void> {
  * @param generation - Accepted controls sampled by the application autosave owner.
  * @returns Resolves after the merged settings document is written by Tauri.
  * @throws The native load or save rejection; no replacement is written if loading fails.
- * @remarks The application store serializes this read-modify-write operation.
+ * @remarks The application store serializes this read-modify-write operation
+ * with the other settings-group saves, so that overlapping saves cannot write
+ * back each other's stale group.
  */
 export async function saveGenerationSettings(
   generation: GenerationSettings
 ): Promise<void> {
   const persistedSettings = await loadSettings()
   await saveSettings({ ...persistedSettings, generation })
+}
+
+/**
+ * Persists load settings while preserving other groups already on disk.
+ * @param loadConfiguration - Default and per-model load settings sampled by the application autosave owner.
+ * @returns Resolves after the merged settings document is written by Tauri.
+ * @throws The native load or save rejection; no replacement is written if loading fails.
+ * @remarks The application store serializes this read-modify-write operation
+ * with the other settings-group saves, so that overlapping saves cannot write
+ * back each other's stale group.
+ */
+export async function saveLoadConfigurationSettings(
+  loadConfiguration: LoadConfigurationSettings
+): Promise<void> {
+  const persistedSettings = await loadSettings()
+  await saveSettings({ ...persistedSettings, loadConfiguration })
 }

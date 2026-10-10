@@ -1,4 +1,5 @@
-import { LMStudioClient } from "@lmstudio/sdk"
+import { LMStudioClient, type LLMLoadModelConfig } from "@lmstudio/sdk"
+import type { ModelLoadConfiguration } from "@lys/share"
 import type { LlmRuntime } from "../llmRuntime"
 import type {
   DownloadedLlmModel,
@@ -195,16 +196,21 @@ export default class LmStudioRuntime implements LlmRuntime {
    * Implements {@link LlmRuntime.loadLlmModel} with a completion-only SDK load.
    *
    * @param modelKeyOrAlias - Interface-defined engine model selection.
+   * @param loadConfiguration - Interface-defined load settings, given to the SDK
+   * as its load config.
    * @returns The interface-defined canonical identity after the SDK load completes.
    * @throws The interface-defined admission, load, or identity failure.
    */
   public async loadLlmModel(
-    modelKeyOrAlias: string
+    modelKeyOrAlias: string,
+    loadConfiguration: ModelLoadConfiguration
   ): Promise<LoadedLlmModelInstance> {
     const operation = this.#startRuntimeOperation()
     try {
       const loadedModel = await this.#client.llm
-        .load(modelKeyOrAlias)
+        .load(modelKeyOrAlias, {
+          config: buildLmStudioLoadConfig(loadConfiguration)
+        })
         .catch((cause: unknown) => {
           throw new Error("The LLM runtime could not load the model.", {
             cause
@@ -318,5 +324,38 @@ export default class LmStudioRuntime implements LlmRuntime {
         cause
       })
     }
+  }
+}
+
+/**
+ * Builds the SDK load config for one load from validated load settings.
+ *
+ * @param loadConfiguration - Load settings to give the SDK.
+ * @returns A newly owned config holding each set setting under the SDK's name
+ * for it, and no entry for a setting that is absent, so that LM Studio decides
+ * that setting.
+ */
+function buildLmStudioLoadConfig(
+  loadConfiguration: ModelLoadConfiguration
+): LLMLoadModelConfig {
+  const {
+    contextLength,
+    evalBatchSize,
+    flashAttention,
+    offloadKVCacheToGpu,
+    numExperts
+  } = loadConfiguration
+  return {
+    ...(contextLength === undefined ? {} : { contextLength }),
+    ...(evalBatchSize === undefined ? {} : { evalBatchSize }),
+    ...(flashAttention === undefined ? {} : { flashAttention }),
+    /*
+     * @lmstudio/sdk 1.5.0 validates this setting but does not copy it into
+     * the configuration it sends, so LM Studio keeps its own choice for the KV
+     * cache. SDK 2.0.0 sends it. The setting is passed on unchanged, so it
+     * takes effect when the SDK is upgraded.
+     */
+    ...(offloadKVCacheToGpu === undefined ? {} : { offloadKVCacheToGpu }),
+    ...(numExperts === undefined ? {} : { numExperts })
   }
 }

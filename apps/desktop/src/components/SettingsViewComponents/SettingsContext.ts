@@ -1,5 +1,7 @@
 import { createContext, use } from "react"
 
+import type { ModelLoadConfiguration } from "@lys/share"
+
 import type { ModelState } from "@/lib/store/model-runtime"
 import type {
   GenerationSettings,
@@ -13,14 +15,16 @@ import type {
  *
  * @remarks The provider owns the settings value and applies every patch. The
  * change callbacks are synchronous proposals against in-memory state. Accepted
- * generation edits also start application-owned autosave; generationSave reports
- * its eventual outcome. Consumers must render below the provider and must not
- * retain or mutate the settings object.
+ * generation and load configuration edits also start application-owned
+ * autosave; generationSave and loadConfigurationSave report its eventual
+ * outcome. Consumers must render below the provider and must not retain or
+ * mutate the settings object.
  *
- * The model callbacks describe weight-lifecycle intent. `onLoadModel` and
- * `onUnloadModel` await backend acknowledgement and inventory reconciliation.
- * `onTestModel` observes loaded state without inference. The application store
- * owns request completion and exposes errors and health results to the panes.
+ * The model callbacks describe weight-lifecycle intent. `onLoadModel`,
+ * `onUnloadModel`, and `onReloadModel` await backend acknowledgement and
+ * inventory reconciliation. `onTestModel` observes loaded state without
+ * inference. The application store owns request completion and exposes errors
+ * and health results to the panes.
  */
 export type SettingsContextValue = ModelState & {
   /** Complete settings value currently shown by the panes. */
@@ -44,6 +48,25 @@ export type SettingsContextValue = ModelState & {
    */
   onGenerationChange: (patch: Partial<GenerationSettings>) => void
   /**
+   * Requests that load settings be assigned to one model.
+   *
+   * @param modelKey - Key of the model whose own load settings change.
+   * @param settings - Settings to assign; the model's other settings keep
+   * their values. The provider applies them in memory at once, and the next
+   * load of that model uses the result.
+   */
+  onAssignModelLoadSettings: (
+    modelKey: string,
+    settings: ModelLoadConfiguration
+  ) => void
+  /**
+   * Requests that one model's own expert count be removed, so the stored
+   * default applies to it.
+   *
+   * @param modelKey - Key of the model whose own expert count is removed.
+   */
+  onRemoveModelExpertCount: (modelKey: string) => void
+  /**
    * Requests that the named weights be loaded into memory.
    *
    * @param modelKey - Model identifier to load.
@@ -59,6 +82,16 @@ export type SettingsContextValue = ModelState & {
    * missing LLM runtime remain in modelError.
    */
   onUnloadModel: (modelKey: string) => Promise<void>
+  /**
+   * Requests that the named loaded weights be released and loaded again with
+   * their stored load configuration.
+   *
+   * @param modelKey - Model identifier to reload.
+   * @returns Resolves after settlement or cancellation; failures other than a
+   * missing LLM runtime remain in modelError. A load that fails after the
+   * unload leaves the weights released.
+   */
+  onReloadModel: (modelKey: string) => Promise<void>
   /**
    * Observes whether the named weights are currently loaded.
    *

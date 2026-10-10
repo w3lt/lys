@@ -1,3 +1,7 @@
+import type { ModelLoadConfiguration } from "@lys/share"
+
+import committedDefaultModelLoadConfiguration from "../../../src-tauri/default_model_load_configuration.json"
+
 /**
  * Runtime process settings persisted under the `runtime` JSON object.
  *
@@ -23,7 +27,8 @@ export type RuntimeSettings = {
  * Local model context estimate persisted under the `model` JSON object.
  *
  * @remarks Mirrors Rust's `ModelSettings`. The context budget supports composer
- * estimates and generation controls; LM Studio owns load-time context size.
+ * estimates and generation controls. It is separate from the context length a
+ * model is loaded with, which belongs to the load configuration.
  * Model edits in the desktop UI remain session-only.
  */
 export type ModelSettings = {
@@ -47,9 +52,43 @@ export type GenerationSettings = {
 }
 
 /**
+ * A load configuration whose context length, eval batch size, flash attention,
+ * and KV cache settings are all set; only the expert count may be absent.
+ *
+ * @remarks The stored default has this shape, mirroring Rust's
+ * `DefaultModelLoadConfiguration`, and so does the configuration resolved for
+ * one model, because the default supplies every setting the model does not
+ * have of its own. An absent expert count is left to LM Studio.
+ */
+export type CompleteModelLoadConfiguration = Required<
+  Pick<
+    ModelLoadConfiguration,
+    "contextLength" | "evalBatchSize" | "flashAttention" | "offloadKVCacheToGpu"
+  >
+> &
+  Pick<ModelLoadConfiguration, "numExperts">
+
+/**
+ * Load settings persisted under the `loadConfiguration` JSON object.
+ *
+ * @remarks Mirrors Rust's `LoadConfigurationSettings`, which validates the
+ * stored values. Edits apply to the next load of the model they belong to and
+ * are saved automatically.
+ */
+export type LoadConfigurationSettings = {
+  /** Settings used for a model that has none of its own. */
+  readonly default: CompleteModelLoadConfiguration
+  /**
+   * Settings each model has of its own, keyed by model key. An entry holds
+   * only the settings changed for that model; the default supplies the rest.
+   */
+  readonly models: Readonly<Record<string, ModelLoadConfiguration>>
+}
+
+/**
  * Renderer projection of the complete Tauri-persisted settings document.
  *
- * @remarks The three groups match Rust's `LysSettings` field for field, so
+ * @remarks The four groups match Rust's `LysSettings` field for field, so
  * `load_settings` deserializes into this type without transformation and a
  * saved value cannot silently drop a persisted group.
  */
@@ -60,6 +99,8 @@ export type LysSettings = {
   model: ModelSettings
   /** Sampling settings applied to the next request. */
   generation: GenerationSettings
+  /** Default and per-model settings sent with each model load. */
+  loadConfiguration: LoadConfigurationSettings
 }
 
 /**
@@ -67,6 +108,8 @@ export type LysSettings = {
  *
  * @remarks Values match the Rust `Default` implementations so the pre-load
  * render shows the same settings the backend would create for a first run.
+ * The load configuration default is read from the committed default file that
+ * the native host embeds, so the two cannot differ.
  */
 export const initialSettingsState: LysSettings = {
   runtime: {
@@ -80,5 +123,9 @@ export const initialSettingsState: LysSettings = {
   generation: {
     temperature: 0.7,
     replyCeiling: 2048
+  },
+  loadConfiguration: {
+    default: committedDefaultModelLoadConfiguration,
+    models: {}
   }
 }

@@ -1,7 +1,10 @@
 import type { StoreApi } from "zustand"
 
-import { saveGenerationSettings as persistGenerationSettings } from "@/lib/apis/tauri/settings"
 import type { GenerationSettings, LysSettings } from "./settings"
+import {
+  saveLatestSettingsGroup,
+  type SettingsGroupSaves
+} from "./settings-group-saves"
 
 /** Application-owned generation-save lifecycle; edits remain usable after failure. */
 export type GenerationSaveState =
@@ -48,6 +51,8 @@ export function isGenerationSettingsEqual(
  * Creates the application-owned generation autosave command and initial state.
  * @param set - Owning store's atomic state updater.
  * @param get - Reads the current settings and save lifecycle.
+ * @param dependencies - Save operation that the application serializes with
+ * the other settings-group saves.
  * @returns A slice that serializes writes and coalesces pending edits to the latest value.
  * @remarks Native writes are not cancellable. Pane unmount does not cancel work;
  * completion never overwrites edits made after the save began. A newer edit is
@@ -57,7 +62,8 @@ export function isGenerationSettingsEqual(
  */
 export function createGenerationSettingsSlice(
   set: StoreApi<GenerationSettingsStore>["setState"],
-  get: StoreApi<GenerationSettingsStore>["getState"]
+  get: StoreApi<GenerationSettingsStore>["getState"],
+  dependencies: Pick<SettingsGroupSaves, "saveGenerationSettings">
 ): GenerationSettingsSlice {
   /**
    * Saves successive current snapshots until the latest edit is persisted or fails.
@@ -66,22 +72,12 @@ export function createGenerationSettingsSlice(
   async function saveGenerationSettings(): Promise<void> {
     if (get().generationSave.status === "saving") return
     set({ generationSave: { status: "saving" } })
-    while (true) {
-      const generation = { ...get().settings.generation }
-      try {
-        await persistGenerationSettings(generation)
-      } catch {
-        if (!isGenerationSettingsEqual(generation, get().settings.generation)) {
-          continue
-        }
-        set({ generationSave: { status: "failed" } })
-        return
-      }
-      if (isGenerationSettingsEqual(generation, get().settings.generation)) {
-        set({ generationSave: { status: "saved" } })
-        return
-      }
-    }
+    const status = await saveLatestSettingsGroup({
+      getCurrent: () => ({ ...get().settings.generation }),
+      isEqual: isGenerationSettingsEqual,
+      save: dependencies.saveGenerationSettings
+    })
+    set({ generationSave: { status } })
   }
 
   return { generationSave: { status: "idle" }, saveGenerationSettings }

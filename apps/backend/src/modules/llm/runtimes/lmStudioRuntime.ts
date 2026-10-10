@@ -349,12 +349,6 @@ function buildLmStudioLoadConfig(
     ...(contextLength === undefined ? {} : { contextLength }),
     ...(evalBatchSize === undefined ? {} : { evalBatchSize }),
     ...(flashAttention === undefined ? {} : { flashAttention }),
-    /*
-     * @lmstudio/sdk 1.5.0 validates this setting but does not copy it into
-     * the configuration it sends, so LM Studio keeps its own choice for the KV
-     * cache. SDK 2.0.0 sends it. The setting is passed on unchanged, so it
-     * takes effect when the SDK is upgraded.
-     */
     ...(offloadKVCacheToGpu === undefined ? {} : { offloadKVCacheToGpu }),
     ...(numExperts === undefined ? {} : { numExperts })
   }

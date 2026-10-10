@@ -1,7 +1,7 @@
 import { API_PREFIX_V1 } from "../../constant"
 
 /**
- * Versioned path for listing stored agents and creating new ones.
+ * Versioned path for listing agents and creating new stored ones.
  *
  * @remarks This path is transmitted in HTTP requests and is not persisted. The
  * list and create endpoints share it and are distinguished by HTTP method.
@@ -11,7 +11,7 @@ import { API_PREFIX_V1 } from "../../constant"
 export const apiAgentsRoute = `${API_PREFIX_V1}/agents`
 
 /**
- * Versioned path addressing one stored agent by its code.
+ * Versioned path addressing one built-in or stored agent by its code.
  *
  * @remarks The get, update, and delete endpoints share this path and are
  * distinguished by HTTP method. Consumers substitute the agent code for

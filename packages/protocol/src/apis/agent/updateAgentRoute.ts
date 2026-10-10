@@ -1,7 +1,9 @@
 import { agentChangesSchema, agentSchema } from "@lys/share"
 import type * as z from "zod"
 import {
+  agentBuiltInProblemSchema,
   agentNotFoundProblemSchema,
+  type AgentBuiltInProblem,
   type AgentNotFoundProblem
 } from "../../http/errors/agent"
 import { agentPathParamsSchema, type AgentPathParams } from "./_share"
@@ -9,7 +11,8 @@ import { apiAgentRoute } from "./routes"
 
 /** Selects the update-agent failure validator by HTTP status. */
 const updateAgentApiResponseSchemas = Object.freeze({
-  404: agentNotFoundProblemSchema
+  404: agentNotFoundProblemSchema,
+  409: agentBuiltInProblemSchema
 })
 
 /**
@@ -22,8 +25,9 @@ const updateAgentApiResponseSchemas = Object.freeze({
  * as `updatedAt` before responding with the changed agent, even when the
  * given values equal the stored ones; repeating a request stores the same
  * values. A missing agent returns the agent-not-found problem with HTTP 404
- * and changes nothing. Changing the method, path, or schemas requires
- * coordinated consumers.
+ * and a built-in agent the built-in agent problem with HTTP 409; both change
+ * nothing. Changing the method, path, or schemas requires coordinated
+ * consumers.
  */
 export const updateAgentApi = Object.freeze({
   method: "PATCH",
@@ -46,6 +50,8 @@ export type UpdateAgentApiReply = {
   readonly 200: UpdateAgentApiResponse
   /** No agent is stored under the addressed code. */
   readonly 404: AgentNotFoundProblem
+  /** The addressed agent is built in; nothing was changed. */
+  readonly 409: AgentBuiltInProblem
 }
 
 /** Fastify route type for the update-agent endpoint. */

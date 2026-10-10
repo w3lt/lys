@@ -8,26 +8,36 @@ import type {
 
 import SpeakerAvatar from "./SpeakerAvatar"
 
+/** Properties every {@link LysMessage} variant accepts. */
+type LysMessageCommonProps = {
+  /** Name of the agent that answers the conversation, shown as the speaker. */
+  readonly speakerName: string
+}
+
 /** Properties accepted by {@link LysMessage}. */
-export type LysMessageProps =
-  | {
-      /** Selects one terminal assistant whose lifecycle has ended. */
-      readonly kind: "terminal"
-      /** Assistant message whose lifecycle has ended. */
-      readonly message: TerminalConversationAssistantMessage
-    }
-  | {
-      /** Selects one assistant still accepting streamed content. */
-      readonly kind: "streaming"
-      /** Assistant message currently accepting streamed content. */
-      readonly message: StreamingConversationAssistantMessage
-    }
+export type LysMessageProps = LysMessageCommonProps &
+  (
+    | {
+        /** Selects one terminal assistant whose lifecycle has ended. */
+        readonly kind: "terminal"
+        /** Assistant message whose lifecycle has ended. */
+        readonly message: TerminalConversationAssistantMessage
+      }
+    | {
+        /** Selects one assistant still accepting streamed content. */
+        readonly kind: "streaming"
+        /** Assistant message currently accepting streamed content. */
+        readonly message: StreamingConversationAssistantMessage
+      }
+  )
 
 /**
  * Renders one assistant message and its lifecycle outcome.
  *
- * @remarks The parent owns the message and
- * its lifecycle; the variant selects only whether content is still arriving.
+ * @remarks The parent owns the message, its lifecycle, and the speaker's
+ * name; the variant selects only whether content is still arriving. The
+ * speaker is the agent that answers the conversation now, which names every
+ * reply of the conversation.
  * This component exposes no interruption capability: cancellation is reachable
  * while a reply is awaited or streams, including while the turn is awaited and
  * no assistant message exists, so the composer owns the single Stop control.
@@ -38,15 +48,16 @@ export type LysMessageProps =
  * @returns The rendered assistant transcript message.
  */
 export default function LysMessage(props: LysMessageProps): ReactElement {
-  const { message } = props
+  const { message, speakerName } = props
 
   return (
     <article className="chat-view__message chat-view__message--lys">
       <div className="chat-view__speaker-identity">
         <SpeakerAvatar speaker="lys" />
-        <p className="chat-view__speaker">lys</p>
+        <p className="chat-view__speaker">{speakerName}</p>
       </div>
       <MarkdownMessage
+        generatingLabel={`${speakerName} is generating`}
         streaming={props.kind === "streaming"}
         text={message.content}
       />

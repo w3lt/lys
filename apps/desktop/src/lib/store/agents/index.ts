@@ -1,10 +1,12 @@
 import {
   MAXIMUM_AGENT_LIST_PAGE_SIZE,
   type AgentSummary,
+  type BuiltInAgentSummary,
+  type GetAgentApiResponse,
   type ListAgentsApiQuery,
   type ListAgentsApiResponse
 } from "@lys/protocol"
-import type { Agent, AgentDefinitionCandidate } from "@lys/share"
+import type { Agent, AgentDefinitionCandidate, BuiltInAgent } from "@lys/share"
 import { create, type StoreApi, type UseBoundStore } from "zustand"
 
 import * as agentApi from "@/lib/apis/http/agents"
@@ -25,7 +27,8 @@ import {
   EMPTY_AGENT_DRAFT,
   findAgentDraftProblem,
   type AgentDraft,
-  type AgentDraftSubject
+  type AgentDraftSubject,
+  type ListedAgentIdentity
 } from "./agent-draft"
 
 export {
@@ -37,7 +40,8 @@ export {
   type AgentDraft,
   type AgentDraftField,
   type AgentDraftProblem,
-  type AgentDraftSubject
+  type AgentDraftSubject,
+  type ListedAgentIdentity
 } from "./agent-draft"
 
 /** Backend origin and availability sampled when an agent request starts. */
@@ -86,10 +90,11 @@ type AgentStoreDependencies = {
 }
 
 /**
- * Lifecycle of the list of every stored agent.
+ * Lifecycle of the list of every built-in and stored agent.
  *
- * @remarks The list holds every stored agent, oldest first, because names
- * are checked for uniqueness against all of them.
+ * @remarks The list holds every built-in agent and every stored agent,
+ * oldest first, because names are checked for uniqueness against all of
+ * them and a conversation can be answered by any of them.
  */
 export type AgentListState =
   | {
@@ -101,9 +106,11 @@ export type AgentListState =
       readonly status: "loading"
     }
   | {
-      /** Every stored agent was read. */
+      /** Every built-in and stored agent was read. */
       readonly status: "loaded"
-      /** Agents oldest first, each code once. */
+      /** Built-in agents in the order the backend ships them, each code once. */
+      readonly builtInAgents: readonly BuiltInAgentSummary[]
+      /** Stored agents oldest first, each code once. */
       readonly agents: readonly AgentSummary[]
       /** Whether a replacement read is pending while these stay displayed. */
       readonly isRefreshing: boolean
@@ -156,18 +163,24 @@ export type AgentEditorState =
       readonly status: "closed"
     }
   | {
-      /** A stored agent is being read so it can be edited. */
+      /** An agent is being read so it can be shown or edited. */
       readonly status: "opening"
       /** Code of the agent being read. */
       readonly agentCode: string
     }
   | {
-      /** A stored agent could not be read. */
+      /** An agent could not be read. */
       readonly status: "unavailable"
       /** Code of the agent that could not be read. */
       readonly agentCode: string
       /** User-presentable reason. */
       readonly error: string
+    }
+  | {
+      /** A built-in agent is shown; it cannot be changed or deleted. */
+      readonly status: "viewing"
+      /** Agent as read when it was opened. */
+      readonly agent: BuiltInAgent
     }
   | {
       /** A new agent is being written. */
@@ -202,7 +215,7 @@ export type AgentEditorState =
 
 /** Observable state of agent management. */
 export type AgentState = {
-  /** Lifecycle of the list of every stored agent. */
+  /** Lifecycle of the list of every built-in and stored agent. */
   readonly list: AgentListState
   /** What the agent editor shows. */
   readonly editor: AgentEditorState
@@ -223,15 +236,21 @@ export type AgentState = {
  */
 export type AgentActions = {
   /**
-   * Reads every stored agent, replacing any pending list read; a displayed
-   * list stays displayed while it is read again.
+   * Reads every built-in and stored agent, replacing any pending list read;
+   * a displayed list stays displayed while it is read again.
    */
   readonly loadAgents: () => Promise<void>
   /** Opens an empty editor for a new agent. */
   readonly openNewAgent: () => void
-  /** Reads one stored agent and opens its editor. */
+  /**
+   * Reads one agent and opens the editor of a stored agent, or the read-only
+   * view of a built-in one.
+   */
   readonly openAgent: (agentCode: string) => Promise<void>
-  /** Opens an editor for a new agent holding a copy of the edited one. */
+  /**
+   * Opens an editor for a new agent holding a copy of the edited agent's
+   * draft, or of the viewed built-in agent.
+   */
   readonly openAgentCopy: () => void
   /** Closes the editor and discards its draft. */
   readonly closeAgentEditor: () => void
@@ -285,13 +304,21 @@ type AgentReadResource = {
   readonly abortController: AbortController
 }
 
+/** Every agent one complete list read returned. */
+type ListedAgents = {
+  /** Built-in agents in the order the backend ships them. */
+  readonly builtInAgents: readonly BuiltInAgentSummary[]
+  /** Stored agents, oldest first, each code once. */
+  readonly agents: readonly AgentSummary[]
+}
+
 /** Settled outcome of reading one agent for the editor. */
 type AgentOpenOutcome =
   | {
       /** The agent was read. */
       readonly status: "found"
-      /** Agent as stored. */
-      readonly agent: Agent
+      /** Agent as read, tagged built-in or custom. */
+      readonly agent: GetAgentApiResponse
     }
   | {
       /** The agent is no longer stored. */
@@ -364,6 +391,10 @@ const BACKEND_STOPPED_READ_MESSAGE =
 const BACKEND_STOPPED_MUTATION_MESSAGE =
   "The backend is not running, so the change was not made."
 
+/** Failure shown when the backend refuses to change or delete a built-in agent. */
+const BUILT_IN_AGENT_CHANGE_MESSAGE =
+  "Built-in agents cannot be changed or deleted."
+
 /** Shared closed editor; it carries no data. */
 const CLOSED_AGENT_EDITOR: AgentEditorState = Object.freeze({
   status: "closed"
@@ -422,15 +453,21 @@ function buildAgentSummary(agent: Agent): AgentSummary {
 /**
  * Builds a displayed list.
  *
- * @param agents - Every stored agent, oldest first.
+ * @param listedAgents - Every built-in agent and every stored agent, oldest
+ * first.
  * @param isRefreshing - Whether a replacement read is pending.
  * @returns A frozen loaded list.
  */
 function buildLoadedAgentList(
-  agents: readonly AgentSummary[],
+  listedAgents: ListedAgents,
   isRefreshing: boolean
 ): AgentListState {
-  return Object.freeze({ status: "loaded", agents, isRefreshing })
+  return Object.freeze({
+    status: "loaded",
+    builtInAgents: listedAgents.builtInAgents,
+    agents: listedAgents.agents,
+    isRefreshing
+  })
 }
 
 /**
@@ -452,7 +489,7 @@ function buildFailedAgentList(error: string): AgentListState {
  */
 function calculatePendingAgentList(list: AgentListState): AgentListState {
   return list.status === "loaded"
-    ? buildLoadedAgentList(list.agents, true)
+    ? buildLoadedAgentList(list, true)
     : Object.freeze({ status: "loading" })
 }
 
@@ -478,7 +515,10 @@ function calculateListWithSavedAgent(
       )
     : [...list.agents, summary]
 
-  return buildLoadedAgentList(Object.freeze(agents), list.isRefreshing)
+  return buildLoadedAgentList(
+    { builtInAgents: list.builtInAgents, agents: Object.freeze(agents) },
+    list.isRefreshing
+  )
 }
 
 /**
@@ -495,7 +535,47 @@ function calculateListWithoutAgent(
   if (list.status !== "loaded") return list
 
   const agents = list.agents.filter((agent) => agent.code !== agentCode)
-  return buildLoadedAgentList(Object.freeze(agents), list.isRefreshing)
+  return buildLoadedAgentList(
+    { builtInAgents: list.builtInAgents, agents: Object.freeze(agents) },
+    list.isRefreshing
+  )
+}
+
+/**
+ * Builds every listed agent's identity, for checking a draft's name and code.
+ *
+ * @param list - Current list.
+ * @returns The built-in agents followed by the stored agents of a displayed
+ * list; nothing for any other list.
+ */
+export function buildListedAgentIdentities(
+  list: AgentListState
+): readonly ListedAgentIdentity[] {
+  return list.status === "loaded" ? [...list.builtInAgents, ...list.agents] : []
+}
+
+/**
+ * Builds the read-only view of a built-in agent that was just read.
+ *
+ * @param agent - Built-in agent as read.
+ * @returns A frozen viewing editor.
+ */
+function buildViewedAgentEditor(agent: BuiltInAgent): AgentEditorState {
+  return Object.freeze({ status: "viewing", agent })
+}
+
+/**
+ * Finds the text an editor offers for copying into a new agent.
+ *
+ * @param editor - Editor the store has open.
+ * @returns The viewed built-in agent's text, or the draft of a stored agent
+ * whose editor has nothing pending; undefined for any other editor.
+ */
+function findAgentCopySource(editor: AgentEditorState): AgentDraft | undefined {
+  if (editor.status === "viewing") return editor.agent
+  return editor.status === "editing" && editor.activity.status === "idle"
+    ? editor.draft
+    : undefined
 }
 
 /**
@@ -758,20 +838,22 @@ function createAgentStore(
   }
 
   /**
-   * Lists every stored agent while the read remains owned.
+   * Lists every built-in and stored agent while the read remains owned.
    *
    * @param backendUrl - Backend origin sampled when the read started.
    * @param resource - Resource owned by this read.
-   * @returns Every agent oldest first, or undefined when the read was
-   * superseded; pages are read one after another.
+   * @returns The built-in agents as the first page lists them and every
+   * stored agent oldest first, or undefined when the read was superseded;
+   * pages are read one after another.
    * @throws The failure of a read that is still owned, including a page
    * rejected by {@link parseAgentListWithPage}.
    */
   async function listOwnedAgents(
     backendUrl: string,
     resource: AgentReadResource
-  ): Promise<readonly AgentSummary[] | undefined> {
-    let listedAgents: readonly AgentSummary[] = Object.freeze([])
+  ): Promise<ListedAgents | undefined> {
+    let builtInAgents: readonly BuiltInAgentSummary[] = Object.freeze([])
+    let agents: readonly AgentSummary[] = Object.freeze([])
     let cursor: string | undefined
     do {
       const page = await listOwnedAgentPage(
@@ -780,11 +862,12 @@ function createAgentStore(
         resource
       )
       if (page === undefined) return undefined
-      listedAgents = parseAgentListWithPage(listedAgents, page)
+      if (cursor === undefined) builtInAgents = page.builtInAgents
+      agents = parseAgentListWithPage(agents, page)
       cursor = page.nextCursor ?? undefined
     } while (cursor !== undefined)
 
-    return listedAgents
+    return Object.freeze({ builtInAgents, agents })
   }
 
   /**
@@ -858,7 +941,8 @@ function createAgentStore(
    *
    * @param editor - Editor of the stored agent, its draft free of problems.
    * @param backendUrl - Backend origin sampled when the save started.
-   * @returns The outcome; failures are returned rather than thrown.
+   * @returns The outcome; failures are returned rather than thrown. A change
+   * the backend refuses because the agent is built in is reported as refused.
    */
   async function updateStoredAgent(
     editor: StoredAgentEditor,
@@ -869,9 +953,14 @@ function createAgentStore(
         { agentCode: editor.agent.code, changes: editor.draft },
         { backendUrl }
       )
-      return result.status === "updated"
-        ? { status: "saved", agent: result.agent }
-        : { status: "missing", agentCode: editor.agent.code }
+      switch (result.status) {
+        case "updated":
+          return { status: "saved", agent: result.agent }
+        case "not-found":
+          return { status: "missing", agentCode: editor.agent.code }
+        case "built-in":
+          return { status: "refused", error: BUILT_IN_AGENT_CHANGE_MESSAGE }
+      }
     } catch (error) {
       return {
         status: "failed",
@@ -885,7 +974,9 @@ function createAgentStore(
    *
    * @param agentCode - Code of the agent to delete.
    * @param backendUrl - Backend origin sampled when the deletion started.
-   * @returns The outcome; failures are returned rather than thrown.
+   * @returns The outcome; failures are returned rather than thrown. A
+   * deletion the backend refuses because the agent is built in is reported as
+   * failed.
    * @remarks The missing-agent problem also establishes removal.
    */
   async function deleteStoredAgent(
@@ -893,8 +984,10 @@ function createAgentStore(
     backendUrl: string
   ): Promise<AgentDeletionOutcome> {
     try {
-      await dependencies.deleteAgent(agentCode, { backendUrl })
-      return { status: "removed" }
+      const result = await dependencies.deleteAgent(agentCode, { backendUrl })
+      return result.status === "built-in"
+        ? { status: "failed", error: BUILT_IN_AGENT_CHANGE_MESSAGE }
+        : { status: "removed" }
     } catch (error) {
       return {
         status: "failed",
@@ -933,10 +1026,10 @@ function createAgentStore(
 
       set({ list: calculatePendingAgentList(get().list) })
       try {
-        const agents = await listOwnedAgents(backend.backendUrl, resource)
-        if (agents === undefined) return
+        const listedAgents = await listOwnedAgents(backend.backendUrl, resource)
+        if (listedAgents === undefined) return
         activeListRead = undefined
-        set({ list: buildLoadedAgentList(agents, false) })
+        set({ list: buildLoadedAgentList(listedAgents, false) })
       } catch (error) {
         activeListRead = undefined
         const message = formatAgentReadError(error, "Agents could not be read.")
@@ -1020,7 +1113,12 @@ function createAgentStore(
     ): void {
       switch (outcome.status) {
         case "found":
-          set({ editor: buildStoredAgentEditor(outcome.agent) })
+          set({
+            editor:
+              outcome.agent.kind === "built-in"
+                ? buildViewedAgentEditor(outcome.agent)
+                : buildStoredAgentEditor(outcome.agent)
+          })
           return
         case "missing": {
           const editor = buildUnavailableAgentEditor(
@@ -1046,15 +1144,16 @@ function createAgentStore(
      */
     function openAgentCopy(): void {
       const { editor, list } = get()
-      if (editor.status !== "editing" || editor.activity.status !== "idle") {
-        return
-      }
+      const source = findAgentCopySource(editor)
+      if (source === undefined) return
 
-      const listedAgents = list.status === "loaded" ? list.agents : []
       const draft: AgentDraft = Object.freeze({
-        name: calculateDuplicateAgentName(editor.draft.name, listedAgents),
-        bio: editor.draft.bio,
-        systemPrompt: editor.draft.systemPrompt
+        name: calculateDuplicateAgentName(
+          source.name,
+          buildListedAgentIdentities(list)
+        ),
+        bio: source.bio,
+        systemPrompt: source.systemPrompt
       })
       set({ editor: buildNewAgentEditor(draft), savedAgentCode: null })
     }
@@ -1158,7 +1257,7 @@ function createAgentStore(
      */
     function startAgentSave(
       editor: DraftingAgentEditor,
-      agents: readonly AgentSummary[]
+      agents: readonly ListedAgentIdentity[]
     ): string | undefined {
       const subject: AgentDraftSubject =
         editor.status === "creating"
@@ -1249,7 +1348,10 @@ function createAgentStore(
       if (!isDraftEditable(editor)) return
       if (editor.activity.status !== "idle") return
 
-      const backendUrl = startAgentSave(editor, list.agents)
+      const backendUrl = startAgentSave(
+        editor,
+        buildListedAgentIdentities(list)
+      )
       if (backendUrl === undefined) return
 
       const outcome =

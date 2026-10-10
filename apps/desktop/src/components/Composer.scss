@@ -11,7 +11,8 @@
  * composer stays where it was, and the reason it cannot be used sits directly
  * over it with the one action that resolves it.
  */
-.composer__offline {
+.composer__offline,
+.composer__notice {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -29,12 +30,14 @@
   box-shadow: var(--app-status-pending-ring);
 }
 
-.composer__offline-message {
+.composer__offline-message,
+.composer__notice-message {
   font-size: 14px;
   color: var(--app-text-muted);
 }
 
-.composer__offline-action {
+.composer__offline-action,
+.composer__notice-action {
   margin-left: auto;
 }
 
@@ -419,6 +422,18 @@
   width: 306px;
 }
 
+.composer__menu--agents {
+  width: 320px;
+}
+
+/* Names the menu on the left and states its one rule on the right. */
+.composer__menu-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .composer__menu-eyebrow,
 .composer__eyebrow {
   font-family: var(--font-mono);
@@ -487,6 +502,84 @@
   font-size: 10px;
   letter-spacing: 0.06em;
   white-space: nowrap;
+  color: var(--app-text-muted);
+}
+
+/* Agent menu */
+
+.composer__agent-name {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The initial stands in for a portrait; the name beside it carries the text. */
+.composer__agent-initial {
+  display: flex;
+  width: 15px;
+  height: 15px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--app-border-strong);
+  border-radius: var(--radius-capsule);
+  font-family: var(--font-sans);
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--app-text-muted);
+}
+
+.composer__agent-option .composer__agent-initial,
+.composer__agent-fixed .composer__agent-initial {
+  width: 22px;
+  height: 22px;
+  font-size: 10px;
+}
+
+.composer__agent-lock {
+  width: 10px;
+  height: 10px;
+  color: var(--app-text-faint);
+}
+
+.composer__agent-option {
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+}
+
+.composer__agent-bio {
+  overflow: hidden;
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--app-text-faint);
+}
+
+.composer__agent-fixed {
+  display: grid;
+  align-items: center;
+  gap: 10px;
+  grid-template-columns: 22px minmax(0, 1fr);
+  padding: 9px 10px;
+}
+
+.composer__agent-fixed .composer__agent-bio {
+  white-space: normal;
+}
+
+.composer__agent-note {
+  padding: 0 10px 9px;
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--app-text-faint);
+  text-wrap: pretty;
+}
+
+.composer__agent-action {
+  justify-content: space-between;
+  padding: 8px 10px;
+  font-size: 12px;
   color: var(--app-text-muted);
 }
 
@@ -686,11 +779,13 @@
     padding-inline: 16px;
   }
 
-  .composer__offline {
+  .composer__offline,
+  .composer__notice {
     padding-inline: 16px;
   }
 
   .composer__activity,
+  .composer__agent-name,
   .composer__model-label {
     display: none;
   }

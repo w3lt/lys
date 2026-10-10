@@ -168,7 +168,7 @@ describe("createSingletonServices", () => {
     onTestFinished(async () => await closeSingletonServices(services))
 
     const turn = services.conversationTurns.createConversationTurn({
-      conversation: { kind: "new", agentCode: "lys" },
+      conversation: { kind: "new", agentCode: "caliginia" },
       userMessageContent: "Hello",
       model: "qwen/qwen3-8b"
     })
@@ -211,42 +211,48 @@ describe("createSingletonServices", () => {
     )
   })
 
-  it("builds Lys from the configured prompt over the acquired chat service", async () => {
-    const { factories, acquisitions } = createRecordedFactories()
-    const services = await createSingletonServices(
-      TEST_BACKEND_CONFIG,
-      createFailureReporters(),
-      factories
-    )
-    onTestFinished(async () => await closeSingletonServices(services))
-    const completeChatStream = vi
-      .spyOn(acquisitions.chat.service, "completeChatStream")
-      .mockRejectedValue(new Error("model not loaded"))
+  it.each([
+    ["caliginia", TEST_BACKEND_CONFIG.caliginiaSystemPrompt],
+    ["lysiptera", TEST_BACKEND_CONFIG.lysipteraSystemPrompt]
+  ])(
+    "builds the built-in agent %s from its configured prompt over the acquired chat service",
+    async (agentCode, systemPrompt) => {
+      const { factories, acquisitions } = createRecordedFactories()
+      const services = await createSingletonServices(
+        TEST_BACKEND_CONFIG,
+        createFailureReporters(),
+        factories
+      )
+      onTestFinished(async () => await closeSingletonServices(services))
+      const completeChatStream = vi
+        .spyOn(acquisitions.chat.service, "completeChatStream")
+        .mockRejectedValue(new Error("model not loaded"))
 
-    await services.agentService.findChatAgent("lys")?.createReply({
-      history: [],
-      userMessageContent: "Hello",
-      model: "qwen/qwen3-8b",
-      generationOptions: { temperature: 0.4 },
-      tools: [],
-      abortSignal: new AbortController().signal,
-      updateAssistantMessageContent: () => true,
-      updateAssistantMessageState: () => true,
-      sendEvent: vi.fn(),
-      sendToolCall: vi.fn(),
-      reportReplyCancellation: vi.fn(),
-      reportReplyFailure: vi.fn()
-    })
-
-    expect(completeChatStream).toHaveBeenCalledWith(
-      expect.objectContaining({
-        messages: [
-          { role: "system", content: TEST_BACKEND_CONFIG.lysSystemPrompt },
-          { role: "user", content: "Hello" }
-        ]
+      await services.agentService.findChatAgent(agentCode)?.createReply({
+        history: [],
+        userMessageContent: "Hello",
+        model: "qwen/qwen3-8b",
+        generationOptions: { temperature: 0.4 },
+        tools: [],
+        abortSignal: new AbortController().signal,
+        updateAssistantMessageContent: () => true,
+        updateAssistantMessageState: () => true,
+        sendEvent: vi.fn(),
+        sendToolCall: vi.fn(),
+        reportReplyCancellation: vi.fn(),
+        reportReplyFailure: vi.fn()
       })
-    )
-  })
+
+      expect(completeChatStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: "Hello" }
+          ]
+        })
+      )
+    }
+  )
 
   it("serves the LLM service through the runtime service's operation queue", async () => {
     const { factories, acquisitions } = createRecordedFactories()
@@ -357,7 +363,7 @@ describe("createSingletonServices", () => {
     onTestFinished(async () => await closeSingletonServices(services))
     const history = services.conversationHistoryReader
     const turn = services.conversationTurns.createConversationTurn({
-      conversation: { kind: "new", agentCode: "lys" },
+      conversation: { kind: "new", agentCode: "caliginia" },
       userMessageContent: "Hello",
       model: "qwen/qwen3-8b"
     })

@@ -1,5 +1,5 @@
 import * as z from "zod"
-import { agentSchema } from "@lys/share"
+import { agentSchema, builtInAgentSchema } from "@lys/share"
 import { apiAgentsRoute } from "./routes"
 
 /**
@@ -10,6 +10,15 @@ import { apiAgentsRoute } from "./routes"
  * compatible change for clients; lowering it can reject existing requests.
  */
 export const MAXIMUM_AGENT_LIST_PAGE_SIZE = 50
+
+/**
+ * Inclusive maximum number of built-in agents one list page may carry.
+ *
+ * @remarks Enforced on the response collection, which bounds what a client
+ * accepts. It is not persisted. A release that ships more built-in agents
+ * raises it, which clients built with the old value reject.
+ */
+const MAXIMUM_BUILT_IN_AGENT_COUNT = 16
 
 /** Inclusive maximum length of the opaque continuation cursor in either direction. */
 const MAXIMUM_AGENT_LIST_CURSOR_LENGTH = 2048
@@ -38,12 +47,24 @@ const listAgentsApiQuerySchema = z
   .readonly()
 
 /**
- * Validates one listed agent without its system prompt.
+ * Validates one listed stored agent without its system prompt.
  *
  * @remarks This read projection derives every field from the stored agent
  * contract. Clients read the system prompt through the get-agent endpoint.
+ * The backend's Sqlite agent records validate each listed row with it.
  */
-const agentSummarySchema = agentSchema
+export const agentSummarySchema = agentSchema
+  .unwrap()
+  .omit({ systemPrompt: true })
+  .readonly()
+
+/**
+ * Validates one listed built-in agent without its system prompt.
+ *
+ * @remarks This read projection derives every field from the built-in agent
+ * contract. Clients read the system prompt through the get-agent endpoint.
+ */
+const builtInAgentSummarySchema = builtInAgentSchema
   .unwrap()
   .omit({ systemPrompt: true })
   .readonly()
@@ -51,17 +72,27 @@ const agentSummarySchema = agentSchema
 /**
  * Validates one page of listed agents and its continuation state.
  *
- * @remarks Agents are ordered by `createdAt` ascending, then by `code`
+ * @remarks Stored agents are ordered by `createdAt` ascending, then by `code`
  * ascending, and appear at most once per page. Neither key changes after an
  * agent is created, so an update never moves an agent. Each page observes
  * the store when it is read: an agent deleted after an earlier page was read
  * is absent from later pages, and an agent created since then appears on a
  * later page unless its (`createdAt`, `code`) pair sorts before the cursor's.
- * `nextCursor` is null on the final page.
+ * `nextCursor` is null on the final page. Built-in agents are not paged:
+ * every page carries all of them, and they never appear among the stored
+ * agents.
  */
 const listAgentsApiResponseSchema = z
   .strictObject({
-    /** Page of listed agents in the documented order. */
+    /**
+     * Every built-in agent, each code once, in the order the release ships
+     * them; the same on every page.
+     */
+    builtInAgents: z
+      .array(builtInAgentSummarySchema)
+      .max(MAXIMUM_BUILT_IN_AGENT_COUNT)
+      .readonly(),
+    /** Page of listed stored agents in the documented order. */
     agents: z
       .array(agentSummarySchema)
       .max(MAXIMUM_AGENT_LIST_PAGE_SIZE)
@@ -81,14 +112,13 @@ const listAgentsApiResponseSchema = z
   .readonly()
 
 /**
- * Describes the GET endpoint that lists stored agents, oldest first.
+ * Describes the GET endpoint that lists the built-in agents and the stored
+ * agents, the stored ones paged oldest first.
  *
- * @remarks The endpoint observes stored data and changes nothing. The shared
+ * @remarks The endpoint observes the agents and changes nothing. The shared
  * descriptor is imported by the backend registrar and by the desktop agent
- * adapter, and its response schema by the backend's Sqlite agent records,
- * which validate each page with it. Changing its method, path, query, or
- * response schema changes the transmitted contract and requires coordinated
- * consumers.
+ * adapter. Changing its method, path, query, or response schema changes the
+ * transmitted contract and requires coordinated consumers.
  */
 export const listAgentsApi = Object.freeze({
   method: "GET",
@@ -100,10 +130,13 @@ export const listAgentsApi = Object.freeze({
 /** Validated query parameters accepted by the agent list endpoint. */
 export type ListAgentsApiQuery = z.infer<typeof listAgentsApi.querystring>
 
-/** One listed agent without its system prompt. */
+/** One listed stored agent without its system prompt. */
 export type AgentSummary = z.infer<typeof agentSummarySchema>
 
-/** One page of listed agents and its continuation state. */
+/** One listed built-in agent without its system prompt. */
+export type BuiltInAgentSummary = z.infer<typeof builtInAgentSummarySchema>
+
+/** The built-in agents with one page of stored agents and its continuation state. */
 export type ListAgentsApiResponse = z.infer<typeof listAgentsApi.response>
 
 /** Status-specific payloads returned by the agent list endpoint. */

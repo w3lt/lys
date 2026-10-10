@@ -15,7 +15,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify"
 import { serializerCompiler } from "fastify-type-provider-zod"
 import {
   createAgentCodeTakenProblem,
-  createAgentNotFoundProblem
+  createAgentNotFoundProblem,
+  createBuiltInAgentProblem
 } from "./agentProblems"
 import type {
   AgentCreator,
@@ -121,7 +122,8 @@ function registerSingleAgentRoutes(
 
 /**
  * Stores a new agent and sends it with a 201 and its `Location`, or sends the
- * 409 code-taken problem when its given code is Lys's or already stored.
+ * 409 code-taken problem when its given code is a built-in agent's or already
+ * stored.
  * @param request - Validated, trimmed definition.
  * @param reply - HTTP response owner.
  * @param agents - Borrowed agent creation.
@@ -145,7 +147,7 @@ function handleCreateAgent(
 }
 
 /**
- * Reads one agent or sends the missing-agent problem.
+ * Reads one built-in or stored agent or sends the missing-agent problem.
  * @param request - Validated agent code.
  * @param reply - HTTP response owner.
  * @param agents - Borrowed agent lookup.
@@ -168,7 +170,8 @@ function handleGetAgent(
 }
 
 /**
- * Applies a change to one agent or sends the missing-agent problem.
+ * Applies a change to one stored agent, or sends the missing-agent problem,
+ * or the built-in agent problem when the code is a built-in agent's.
  * @param request - Validated agent code and trimmed fields to replace.
  * @param reply - HTTP response owner.
  * @param agents - Borrowed agent change.
@@ -179,20 +182,31 @@ function handleUpdateAgent(
   reply: FastifyReply<UpdateAgentApiRoute>,
   agents: AgentEditor
 ): void {
-  const agent = agents.updateAgent(request.params.agentCode, request.body)
-  if (agent === undefined) {
-    reply
-      .type("application/problem+json")
-      .code(404)
-      .send(createAgentNotFoundProblem(request.params.agentCode, request.url))
-    return
+  const { agentCode } = request.params
+  const outcome = agents.updateAgent(agentCode, request.body)
+  switch (outcome.status) {
+    case "updated":
+      reply.code(200).send(outcome.agent)
+      return
+    case "missing":
+      reply
+        .type("application/problem+json")
+        .code(404)
+        .send(createAgentNotFoundProblem(agentCode, request.url))
+      return
+    case "built-in":
+      reply
+        .type("application/problem+json")
+        .code(409)
+        .send(createBuiltInAgentProblem(agentCode, request.url))
+      return
   }
-  reply.code(200).send(agent)
 }
 
 /**
- * Deletes one agent before sending a bodyless success, or sends the
- * missing-agent problem.
+ * Deletes one stored agent before sending a bodyless success, or sends the
+ * missing-agent problem, or the built-in agent problem when the code is a
+ * built-in agent's.
  * @param request - Validated agent code.
  * @param reply - HTTP response owner.
  * @param agents - Borrowed agent deletion.
@@ -203,12 +217,22 @@ function handleDeleteAgent(
   reply: FastifyReply<DeleteAgentApiRoute>,
   agents: AgentDeleter
 ): void {
-  if (!agents.deleteAgent(request.params.agentCode)) {
-    reply
-      .type("application/problem+json")
-      .code(404)
-      .send(createAgentNotFoundProblem(request.params.agentCode, request.url))
-    return
+  const { agentCode } = request.params
+  switch (agents.deleteAgent(agentCode)) {
+    case "deleted":
+      reply.code(204).send()
+      return
+    case "missing":
+      reply
+        .type("application/problem+json")
+        .code(404)
+        .send(createAgentNotFoundProblem(agentCode, request.url))
+      return
+    case "built-in":
+      reply
+        .type("application/problem+json")
+        .code(409)
+        .send(createBuiltInAgentProblem(agentCode, request.url))
+      return
   }
-  reply.code(204).send()
 }

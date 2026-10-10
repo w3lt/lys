@@ -1,16 +1,20 @@
 import {
+  agentBuiltInProblemSchema,
   agentCodeTakenProblemSchema,
   agentNotFoundProblemSchema,
+  conversationAgentMissingProblemSchema,
+  type AgentBuiltInProblem,
   type AgentCodeTakenProblem,
-  type AgentNotFoundProblem
+  type AgentNotFoundProblem,
+  type ConversationAgentMissingProblem
 } from "@lys/protocol"
 
 /**
  * Creates the caller-safe missing-agent response.
  *
- * @param agentCode - Validated code that no stored agent has.
+ * @param agentCode - Validated code that no built-in or stored agent has.
  * @param instance - Request path identifying this occurrence.
- * @returns The strict problem accepted by agent endpoint consumers.
+ * @returns The strict problem accepted by agent and chat endpoint consumers.
  */
 export function createAgentNotFoundProblem(
   agentCode: string,
@@ -27,25 +31,46 @@ export function createAgentNotFoundProblem(
 }
 
 /**
- * Creates the caller-safe response for a new conversation naming an agent
- * that cannot answer chats.
+ * Creates the caller-safe response for a request to change or delete a
+ * built-in agent.
  *
- * @param agentCode - Validated code that no agent able to answer chats has; a
- * stored agent may have it.
+ * @param agentCode - Validated code of the built-in agent.
  * @param instance - Request path identifying this occurrence.
- * @returns The strict problem accepted by chat endpoint consumers. Its detail
- * does not claim that no agent has the code.
+ * @returns The strict problem accepted by update and delete agent consumers.
  */
-export function createChatAgentNotFoundProblem(
+export function createBuiltInAgentProblem(
   agentCode: string,
   instance: string
-): AgentNotFoundProblem {
-  const { shape } = agentNotFoundProblemSchema.unwrap()
+): AgentBuiltInProblem {
+  const { shape } = agentBuiltInProblemSchema.unwrap()
   return {
     type: shape.type.value,
     title: shape.title.value,
     status: shape.status.value,
-    detail: `No agent that can answer chats has the code ${agentCode}.`,
+    detail: `Agent ${agentCode} is built in and cannot be changed or deleted.`,
+    instance
+  }
+}
+
+/**
+ * Creates the caller-safe response for a turn in a stored conversation whose
+ * agent no longer exists.
+ *
+ * @param agentCode - Valid code stored with the conversation, which no
+ * built-in or stored agent has.
+ * @param instance - Request path identifying this occurrence.
+ * @returns The strict problem accepted by chat endpoint consumers.
+ */
+export function createConversationAgentMissingProblem(
+  agentCode: string,
+  instance: string
+): ConversationAgentMissingProblem {
+  const { shape } = conversationAgentMissingProblemSchema.unwrap()
+  return {
+    type: shape.type.value,
+    title: shape.title.value,
+    status: shape.status.value,
+    detail: `The agent ${agentCode} that answers this conversation no longer exists.`,
     instance
   }
 }

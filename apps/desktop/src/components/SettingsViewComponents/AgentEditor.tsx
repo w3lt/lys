@@ -1,4 +1,3 @@
-import type { AgentSummary } from "@lys/protocol"
 import {
   MAXIMUM_AGENT_BIO_LENGTH,
   MAXIMUM_AGENT_CODE_LENGTH,
@@ -32,6 +31,7 @@ import {
   type AgentDraftProblem,
   type AgentDraftSubject,
   type AgentEditorState,
+  type ListedAgentIdentity,
   type StoredAgentActivity
 } from "@/lib/store/agents"
 
@@ -786,7 +786,7 @@ export type AgentEditorProps = {
   /** Editor whose draft is written, owned by the agent store. */
   readonly editor: DraftingAgentEditor
   /** Every listed agent, against which names and codes are checked. */
-  readonly agents: readonly AgentSummary[]
+  readonly agents: readonly ListedAgentIdentity[]
 }
 
 /**
@@ -814,7 +814,7 @@ function buildAgentDraftSubject(
  */
 function findShownAgentDraftProblem(
   editor: DraftingAgentEditor,
-  agents: readonly AgentSummary[]
+  agents: readonly ListedAgentIdentity[]
 ): AgentDraftProblem | undefined {
   if (editor.saveAttemptCount === 0) return undefined
 

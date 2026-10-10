@@ -1,4 +1,3 @@
-import type { AgentSummary } from "@lys/protocol"
 import {
   agentCodeSchema,
   MAXIMUM_AGENT_BIO_LENGTH,
@@ -6,6 +5,17 @@ import {
   MAXIMUM_AGENT_NAME_LENGTH,
   type Agent
 } from "@lys/share"
+
+/**
+ * Identity of one listed agent, built-in or the user's own, against which a
+ * draft's name and code are checked.
+ */
+export type ListedAgentIdentity = {
+  /** Code of the listed agent. */
+  readonly code: string
+  /** Display name of the listed agent. */
+  readonly name: string
+}
 
 /**
  * Editable text of one agent, exactly as typed.
@@ -112,7 +122,7 @@ function calculateComparableAgentName(name: string): string {
  * @returns Whether the draft edits that listed agent; never for a new agent.
  */
 function isDraftSubject(
-  agent: AgentSummary,
+  agent: ListedAgentIdentity,
   subject: AgentDraftSubject
 ): boolean {
   return subject.kind === "stored" && agent.code === subject.code
@@ -149,7 +159,7 @@ function isStoredAgentNameKept(
 function findAgentNameProblem(
   name: string,
   subject: AgentDraftSubject,
-  agents: readonly AgentSummary[]
+  agents: readonly ListedAgentIdentity[]
 ): AgentDraftProblem | undefined {
   const trimmedName = name.trim()
   if (trimmedName === "") return { kind: "name-missing" }
@@ -177,7 +187,7 @@ function findAgentNameProblem(
  */
 function findAgentCodeProblem(
   subject: AgentDraftSubject,
-  agents: readonly AgentSummary[]
+  agents: readonly ListedAgentIdentity[]
 ): AgentDraftProblem | undefined {
   if (subject.kind === "stored" || subject.code === "") return undefined
   if (!agentCodeSchema.safeParse(subject.code).success) {
@@ -220,7 +230,7 @@ function findAgentBioProblem(bio: string): AgentDraftProblem | undefined {
 export function findAgentDraftProblem(
   draft: AgentDraft,
   subject: AgentDraftSubject,
-  agents: readonly AgentSummary[]
+  agents: readonly ListedAgentIdentity[]
 ): AgentDraftProblem | undefined {
   const problem =
     findAgentNameProblem(draft.name, subject, agents) ??
@@ -329,7 +339,7 @@ function buildAgentCopyName(name: string, copyNumber: number): string {
  */
 export function calculateDuplicateAgentName(
   name: string,
-  agents: readonly AgentSummary[]
+  agents: readonly ListedAgentIdentity[]
 ): string {
   const takenNames = new Set(
     agents.map((agent) => calculateComparableAgentName(agent.name))

@@ -175,23 +175,6 @@ export function isUsableContextLimit(
 }
 
 /**
- * Finds the load settings a model has of its own.
- *
- * @param settings - Stored load settings.
- * @param modelKey - Key of the model.
- * @returns The model's own entry, or undefined when it has none. Members of
- * the object prototype are never returned for a key such as `constructor`.
- */
-function findOwnModelLoadConfiguration(
-  settings: LoadConfigurationSettings,
-  modelKey: string
-): ModelLoadConfiguration | undefined {
-  return Object.hasOwn(settings.models, modelKey)
-    ? settings.models[modelKey]
-    : undefined
-}
-
-/**
  * Calculates the context length a model is loaded with.
  *
  * @param contextLength - Configured context length, in tokens.
@@ -248,7 +231,7 @@ export function buildModelLoadConfiguration(
   settings: LoadConfigurationSettings,
   model: ModelLoadTarget
 ): CompleteModelLoadConfiguration {
-  const own = findOwnModelLoadConfiguration(settings, model.modelKey)
+  const own = settings.models.get(model.modelKey)
   const defaultConfiguration = buildDefaultModelLoadConfiguration(settings)
   const numExperts = own?.numExperts ?? defaultConfiguration.numExperts
   return {
@@ -363,17 +346,16 @@ export function buildLoadConfigurationSettings(
   change: ModelLoadConfigurationChange
 ): LoadConfigurationSettings {
   const own = buildOwnModelLoadConfiguration(
-    findOwnModelLoadConfiguration(settings, change.modelKey),
+    settings.models.get(change.modelKey),
     change
   )
-  const otherEntries = Object.entries(settings.models).filter(
-    ([modelKey]) => modelKey !== change.modelKey
-  )
-  const entries =
-    Object.keys(own).length === 0
-      ? otherEntries
-      : [...otherEntries, [change.modelKey, own] as const]
-  return { default: settings.default, models: Object.fromEntries(entries) }
+  const models = new Map(settings.models)
+  if (Object.keys(own).length === 0) {
+    models.delete(change.modelKey)
+  } else {
+    models.set(change.modelKey, own)
+  }
+  return { default: settings.default, models }
 }
 
 /**
@@ -404,16 +386,15 @@ export function isLoadConfigurationSettingsEqual(
   first: LoadConfigurationSettings,
   second: LoadConfigurationSettings
 ): boolean {
-  const firstModelKeys = Object.keys(first.models)
-  if (firstModelKeys.length !== Object.keys(second.models).length) return false
+  if (first.models.size !== second.models.size) return false
   if (!isModelLoadConfigurationEqual(first.default, second.default)) {
     return false
   }
-  return firstModelKeys.every((modelKey) => {
-    const secondOwn = findOwnModelLoadConfiguration(second, modelKey)
+  return [...first.models].every(([modelKey, firstOwn]) => {
+    const secondOwn = second.models.get(modelKey)
     return (
       secondOwn !== undefined &&
-      isModelLoadConfigurationEqual(first.models[modelKey], secondOwn)
+      isModelLoadConfigurationEqual(firstOwn, secondOwn)
     )
   })
 }

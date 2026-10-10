@@ -69,9 +69,11 @@ export type CompleteModelLoadConfiguration = Required<
 /**
  * Load settings persisted under the `loadConfiguration` JSON object.
  *
- * @remarks Mirrors Rust's `LoadConfigurationSettings`, which validates the
- * stored values and reads a missing group or part as empty. Both parts hold
- * only settings written to the settings file; the committed default is never
+ * @remarks Holds what Rust's `LoadConfigurationSettings` holds; Rust validates
+ * the stored values and reads a missing group or part as empty. The settings
+ * file keeps the per-model settings as one object, which the Tauri settings
+ * adapter converts to and from the map held here. Both parts hold only
+ * settings written to the settings file; the committed default is never
  * copied into them. Edits apply to the next load of the model they belong to
  * and are saved automatically.
  */
@@ -86,17 +88,21 @@ export type LoadConfigurationSettings = {
   /**
    * Settings each model has of its own, keyed by model key. An entry holds
    * only the settings changed for that model; the stored default, then the
-   * committed default, supply the rest.
+   * committed default, supply the rest. A model with no settings of its own
+   * has no entry, so a read by its key gives undefined.
    */
-  readonly models: Readonly<Record<string, ModelLoadConfiguration>>
+  readonly models: ReadonlyMap<string, ModelLoadConfiguration>
 }
 
 /**
  * Renderer projection of the complete Tauri-persisted settings document.
  *
- * @remarks The four groups match Rust's `LysSettings` field for field, so
- * `load_settings` deserializes into this type without transformation and a
- * saved value cannot silently drop a persisted group.
+ * @remarks Holds the four groups of Rust's `LysSettings` under the same
+ * names, so a saved value cannot silently drop a persisted group. The
+ * runtime, model, and generation groups match Rust field for field. The load
+ * configuration group differs only in its per-model settings, a map here and
+ * one object in the document; the Tauri settings adapter converts between
+ * the two.
  */
 export type LysSettings = {
   /** Backend process and default-model settings. */
@@ -118,7 +124,7 @@ const UNSET_STORED_DEFAULT_LOAD_CONFIGURATION: ModelLoadConfiguration =
 
 /** Per-model load settings of a settings file in which no model has its own. */
 const NO_OWN_MODEL_LOAD_CONFIGURATIONS: LoadConfigurationSettings["models"] =
-  Object.freeze({})
+  new Map()
 
 /**
  * Load settings shown before Tauri initialization completes: none stored, as

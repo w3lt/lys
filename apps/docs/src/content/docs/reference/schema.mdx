@@ -106,8 +106,11 @@ for the current fields, defaults, and validation. Generation and load
 configuration edits are saved automatically; runtime edits and
 `model.contextSize` edits in the desktop remain session-only.
 
-The file carries no version marker. A file without a `loadConfiguration` group
-is given the initial group when it is loaded; nothing else in it is converted.
+The file carries no version marker, and loading converts nothing. A file
+without a `loadConfiguration` group reads it as empty and is not rewritten. The
+missing marker is an approved exception until
+[#146](https://github.com/w3lt/lys/issues/146); see the
+[settings file version exception](/reference/standard-application/#settings-file-version-exception).
 
 ## Coming soon
 

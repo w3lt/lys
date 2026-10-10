@@ -55,8 +55,8 @@ repository today; it is not a promise of unreleased work.
   generation, and load configuration groups. Runtime edits remain session-only.
 - Every model load Lys starts sends that model's load configuration: context
   length, eval batch size, flash attention, KV cache placement, and active
-  experts. The Model pane edits it per model and saves it automatically. The
-  KV cache setting has no effect with the installed LM Studio SDK 1.5.0.
+  experts. The Model pane edits it for the selected default model and saves it
+  automatically.
 - The Composer label, send eligibility, and each chat request use the loaded
   runtime projection described in [desktop model settings](/architecture/desktop/#model-settings).
 - On macOS, `build.sh` builds the desktop app from a source checkout, installs

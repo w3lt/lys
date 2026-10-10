@@ -25,7 +25,7 @@ the runtime adapter unchanged, and `LmStudioRuntime` gives the SDK's load call a
 `config` that holds only the settings the request set, so LM Studio decides the
 rest. The backend keeps no load settings; the desktop stores them and sends
 them with each load. See the [load request](/reference/api/#model-load-request)
-for the fields and the SDK 1.5.0 limit on the KV cache setting.
+for the fields.
 
 Generation temperature and reply-ceiling edits are saved automatically and
 applied to future chat requests. The [API reference](/reference/api/#chat-request-body)
@@ -96,7 +96,7 @@ after the snapshot. Responses are not cached. The
 latency fields.
 
 Acquisition and accepted availability checks are owned until settlement. SDK
-1.5.0 has no public RPC cancellation or forced client shutdown; its cleanup
+2.0.0 has no public RPC cancellation or forced client shutdown; its cleanup
 waits for pending communication. These queries therefore have no completion
 deadline, and a nonresponding engine can keep a connection attempt, a check, or
 shutdown pending. The SDK also ignores invalid version payloads without settling
@@ -162,11 +162,10 @@ policy.
 - Default-model selection lasts for the current session and does not load weights.
   The [desktop model settings](/architecture/desktop/#model-settings) describe how
   the observed loaded model reaches chat requests.
-- With `@lmstudio/sdk` 1.5.0 the SDK does not send `offloadKVCacheToGpu` to LM
-  Studio, so that load setting has no effect until the SDK is upgraded.
-- The backend does not report the settings a loaded model runs with, because
-  the SDK does not expose them. The desktop knows them only for loads it
-  started in the current session.
+- The backend does not report the settings a loaded model runs with. SDK
+  2.0.0 exposes them through `LLMDynamicHandle.getLoadConfig()`, which Lys
+  does not call yet ([#145](https://github.com/w3lt/lys/issues/145)). The
+  desktop knows them only for loads it started in the current session.
 
 ## Coming soon
 

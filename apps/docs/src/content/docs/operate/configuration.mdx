@@ -40,19 +40,20 @@ The stored `model.contextSize` is a local token budget used by the composer and
 generation controls. It is separate from the context length a model is loaded
 with, which belongs to that model's load configuration.
 
-The `loadConfiguration` group holds the settings Lys sends when it loads a
-model: one default, and the values changed for each model. They are edited in
-the Model settings pane.
+The `loadConfiguration` group holds the load settings written to the file: a
+`default` for every model, which starts empty and is edited only by hand, and
+the values changed for each model, which the Model settings pane edits. A load
+takes each setting from the model's own values, then from `default`, then from
+the committed default file, which is never copied into `settings.json`.
 
-A missing `runtime`, `model`, or `generation` group, and missing fields in
-them, receive their Rust defaults. Invalid JSON or invalid typed values fail
-loading; for example, Rust rejects temperatures outside `[0, 1]` and token
-counts outside the unsigned 32-bit integer range.
+Missing groups and fields receive their Rust defaults; the `loadConfiguration`
+default is empty. Invalid JSON or invalid typed values fail loading; for
+example, Rust rejects temperatures outside `[0, 1]` and token counts outside
+the unsigned 32-bit integer range.
 
 When the file does not exist yet, the desktop host creates the Lys home
-directory if needed and writes the default structure on first load. When an
-existing file has no `loadConfiguration` group, the host adds the initial one
-and rewrites the file once.
+directory if needed and writes the default structure on first load. Loading
+never rewrites an existing file.
 
 ## Current UI wiring
 

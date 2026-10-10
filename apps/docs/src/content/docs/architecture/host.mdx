@@ -17,7 +17,7 @@ React UI.
 | `start_backend`      | Starts the backend for the current build mode with the Lys home and stores the child handle. |
 | `stop_backend`       | Kills the backend process group and waits for shutdown.                                      |
 | `get_backend_status` | Reports whether the stored child process is still running.                                   |
-| `load_settings`      | Reads `$LYS_HOME/settings.json`, creating a default file or adding its load configuration.   |
+| `load_settings`      | Reads `$LYS_HOME/settings.json`, creating a default file if needed.                          |
 | `save_settings`      | Writes a new settings JSON document to `$LYS_HOME/settings.json`.                            |
 | `read_text_file`     | Returns the complete text of one UTF-8 file of at most 1 MiB.                                |
 | `find_files`         | Searches a directory tree for regular files by name or by text content.                      |
@@ -132,12 +132,7 @@ The host creates the following defaults when the settings file is missing:
     "replyCeiling": 2048
   },
   "loadConfiguration": {
-    "default": {
-      "contextLength": 8192,
-      "evalBatchSize": 512,
-      "flashAttention": true,
-      "offloadKVCacheToGpu": true
-    },
+    "default": {},
     "models": {}
   }
 }
@@ -146,12 +141,11 @@ The host creates the following defaults when the settings file is missing:
 Only the Rust host reads and writes this file directly. The React UI reaches it
 through Tauri `invoke` calls.
 
-The `loadConfiguration` default comes from the committed file
-`apps/desktop/src-tauri/default_model_load_configuration.json`, which the host
-embeds when it is built. A settings file written before load configurations
-existed has no such group; `load_settings` adds the initial group to it and
-writes the file once, keeping its other groups. `save_settings` requires the
-group.
+The host only stores the `loadConfiguration` group. A settings file written
+before load configurations existed has no such group; `load_settings` reads it
+as empty and does not rewrite the file. The committed default load
+configuration belongs to the renderer, which applies it when it resolves a load
+(see the [configuration reference](/reference/configuration/#load-configuration)).
 
 The desktop automatically saves generation edits by reading this document,
 replacing its generation group, and saving the complete document. Load

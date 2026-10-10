@@ -160,22 +160,24 @@ automatically.
 
 Every load the desktop starts, from the Runtime pane or from a model row, sends
 that model's load configuration. The store builds it when the load is admitted:
-each setting is the model's own stored value when it has one and the stored
-default's value otherwise, and the context length is lowered to the model's
-`maxContextLength` from the inventory. Edits made while the load is in flight
+each setting is the model's own stored value when it has one, then the stored
+default's, then the committed default's, and the context length is lowered to
+the model's `maxContextLength` from the inventory. Edits made while the load is in flight
 do not change what it sent. The composer's "Load model" action opens the Model
 pane and starts no load.
 
 The Model pane's "load configuration" section edits the configuration of the
-selected default model, or of the loaded model when no default model is listed.
-It has five rows: context length, eval batch size, flash attention, KV cache on
+selected default model. With no default model selected it edits nothing, even
+while a model is loaded, and asks to choose one; the selection lasts for the
+session, so after a restart the section waits for a choice. It has five rows: context length, eval batch size, flash attention, KV cache on
 GPU, and active experts. An edit is stored for that model only, applies to its
 next load, and is saved automatically to the `loadConfiguration` group of
 `settings.json`. Active experts reads "auto" until it is set, because LM Studio
-reports no expert counts.
+reports no expert counts ([#144](https://github.com/w3lt/lys/issues/144)).
 
-The runtime does not report the settings a loaded model runs with, so the store
-keeps its own record for each model it observes as loaded:
+The backend does not report the settings a loaded model runs with
+([#145](https://github.com/w3lt/lys/issues/145)), so the store keeps its own
+record for each model it observes as loaded:
 
 - For a model Lys loaded in this session, the record is the configuration that
   load sent. When the stored settings differ from it, each changed row shows

@@ -9,6 +9,7 @@ import {
 } from "@/lib/apis/http/agents"
 import {
   buildJsonResponse,
+  createTransportFailure,
   startBackendFake
 } from "../../../support/backendFake"
 import {
@@ -150,7 +151,7 @@ describe("listAgents", () => {
   })
 
   it("rejects an unreachable backend and keeps the transport failure as its cause", async () => {
-    const transportFailure = new TypeError("fetch failed")
+    const transportFailure = createTransportFailure()
     startBackendFake({
       "GET /api/v1/agents": () => Promise.reject(transportFailure)
     })

@@ -17,7 +17,7 @@ The `Desktop unit tests` workflow (`.github/workflows/desktop-unit-tests.yml`) r
 ## Environment and substitution
 
 - Tests run in Vitest with jsdom. They need no LM Studio, no running backend, no Tauri runtime, and no developer settings or database.
-- **Backend:** `support/backendFake.ts` replaces the global `fetch` with an in-process backend that answers only the routes a case declares. Any other request fails the case. Abort follows the platform `fetch`: an aborted signal rejects before the route runs, a later abort rejects the pending response or errors its body, and the route's body is cancelled. Success bodies come from fixtures validated by the `@lys/protocol` and `@lys/share` schemas. Malformed bodies appear only in cases that test their rejection.
+- **Backend:** `support/backendFake.ts` replaces the global `fetch` with an in-process backend that answers only the routes a case declares. Any other request fails the case. Abort follows the platform `fetch`: an aborted signal rejects before the route runs, a later abort rejects the pending response or errors its body, and the route's body is cancelled. Success bodies come from fixtures validated by the `@lys/protocol` and `@lys/share` schemas. Malformed bodies appear only in cases that test their rejection. A case makes a request fail as an unreachable backend does only with `createTransportFailure()`; any other exception a route raises fails the case.
 - **Native host:** `support/nativeHostFake.ts` answers Tauri IPC through Tauri's `mockIPC` seam. Any undeclared command fails the case. `test/unit/setup.ts` removes the IPC double and unmounts rendered trees after every case.
 - **Stores:**
   - Factories that take their dependencies (`createChatViewStore`, `createConversationHistoryStore`, and the slice factories) receive the real HTTP wrappers over the fake backend, plus in-test providers (backend availability, clock, model, and generation controls).
@@ -30,17 +30,17 @@ The `Desktop unit tests` workflow (`.github/workflows/desktop-unit-tests.yml`) r
 
 ## Harness
 
-| Module                            | Contract                                                                                                                                           |
-| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `setup.ts`                        | jest-dom matchers. After each case: Testing Library cleanup and Tauri `clearMocks`.                                                                |
-| `support/backendFake.ts`          | Fake backend over `fetch`, JSON responses, and server-sent event streams a case writes.                                                            |
-| `support/nativeHostFake.ts`       | Fake Tauri host over `mockIPC`. Records commands and rejects undeclared ones.                                                                      |
-| `support/settlement.ts`           | `waitForMicrotasks`, `createSettlementReader`, and `createControlledPromise`.                                                                      |
-| `support/modelFixtures.ts`        | Schema-valid downloaded models with narrow variation.                                                                                              |
-| `support/conversationFixtures.ts` | UUIDv7 identities, messages by lifecycle, conversations, list pages, and problem bodies.                                                           |
-| `support/agentFixtures.ts`        | Schema-valid stored and built-in agents, tagged agent reads, list pages, and problem bodies.                                                       |
-| `support/toolFixtures.ts`         | Schema-valid client tool definitions and tool calls.                                                                                               |
-| `support/settingsFixtures.ts`     | One settings document as Tauri exchanges it, and the same settings as the renderer holds them (per-model load settings as an object and as a map). |
+| Module                            | Contract                                                                                                                                                                             |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `setup.ts`                        | jest-dom matchers. After each case: Testing Library cleanup and Tauri `clearMocks`.                                                                                                  |
+| `support/backendFake.ts`          | Fake backend over `fetch`, JSON responses, server-sent event streams a case writes, and deliberate transport failures. Fails a case on an unexpected request or a route that throws. |
+| `support/nativeHostFake.ts`       | Fake Tauri host over `mockIPC`. Records commands and rejects undeclared ones.                                                                                                        |
+| `support/settlement.ts`           | `waitForMicrotasks`, `createSettlementReader`, and `createControlledPromise`.                                                                                                        |
+| `support/modelFixtures.ts`        | Schema-valid downloaded models with narrow variation.                                                                                                                                |
+| `support/conversationFixtures.ts` | UUIDv7 identities, messages by lifecycle, conversations, list pages, and problem bodies.                                                                                             |
+| `support/agentFixtures.ts`        | Schema-valid stored and built-in agents, tagged agent reads, list pages, and problem bodies.                                                                                         |
+| `support/toolFixtures.ts`         | Schema-valid client tool definitions and tool calls.                                                                                                                                 |
+| `support/settingsFixtures.ts`     | One settings document as Tauri exchanges it, and the same settings as the renderer holds them (per-model load settings as an object and as a map).                                   |
 
 ## Inventory
 

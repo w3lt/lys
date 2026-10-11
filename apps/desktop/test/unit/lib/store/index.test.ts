@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type { LysSettings, RuntimeSettings } from "@/lib/store/settings"
 import {
   buildJsonResponse,
+  createTransportFailure,
   startBackendFake,
   type BackendRoutes
 } from "../../support/backendFake"
@@ -472,8 +473,7 @@ describe("useLysStore", () => {
           buildJsonResponse(200, {
             status: isConnected ? "connected" : "unreachable"
           }),
-        "POST /api/v1/llm/load": () =>
-          Promise.reject(new TypeError("fetch failed"))
+        "POST /api/v1/llm/load": () => Promise.reject(createTransportFailure())
       })
       startDesktopHost(DISK_SETTINGS_DOCUMENT)
       const useLysStore = await loadFreshLysStore()

@@ -6,6 +6,7 @@ import {
 import { describe, expect, it, vi } from "vitest"
 import {
   buildJsonResponse,
+  createTransportFailure,
   startBackendFake,
   type BackendRoute,
   type BackendRoutes
@@ -742,7 +743,7 @@ describe("useAgentStore saves", () => {
           buildAgentListPage(reads === 1 ? [] : [SCOUT])
         )
       },
-      "POST /api/v1/agents": () => Promise.reject(new TypeError("fetch failed"))
+      "POST /api/v1/agents": () => Promise.reject(createTransportFailure())
     })
 
     await useAgentStore.getState().saveAgentDraft()

@@ -14,6 +14,7 @@ import type { ModelRequestState } from "@/lib/store/model-runtime"
 import type { LoadConfigurationSettings } from "@/lib/store/settings"
 import {
   buildJsonResponse,
+  createTransportFailure,
   startBackendFake,
   type BackendFake,
   type BackendRoute,
@@ -356,7 +357,7 @@ describe("createModelSlice", () => {
 
     it("never retries a load", async () => {
       const requests = startModelBackend({
-        [LOAD_ROUTE]: () => Promise.reject(new TypeError("fetch failed")),
+        [LOAD_ROUTE]: () => Promise.reject(createTransportFailure()),
         [LIST_ROUTE]: buildInventoryRoute(INVENTORY)
       })
       const { store } = createModelStore()

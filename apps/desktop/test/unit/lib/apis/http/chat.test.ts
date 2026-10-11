@@ -15,6 +15,7 @@ import {
 import { DELETED_CONVERSATION_AGENT_MESSAGE } from "@/lib/conversation-agent-messages"
 import {
   buildJsonResponse,
+  createTransportFailure,
   startBackendEventStream,
   startBackendFake,
   type BackendEventStream
@@ -454,7 +455,7 @@ describe("stopChatReply", () => {
   })
 
   it("rejects when the backend cannot be reached and keeps the transport failure as its cause", async () => {
-    const transportFailure = new TypeError("fetch failed")
+    const transportFailure = createTransportFailure()
     startBackendFake({
       [REPLY_STOP_ROUTE]: () => Promise.reject(transportFailure)
     })
@@ -522,7 +523,7 @@ describe("sendChatToolResult", () => {
   })
 
   it("rejects when the backend cannot be reached and keeps the transport failure as its cause", async () => {
-    const transportFailure = new TypeError("fetch failed")
+    const transportFailure = createTransportFailure()
     startBackendFake({
       [TOOL_RESULT_ROUTE]: () => Promise.reject(transportFailure)
     })

@@ -7,6 +7,7 @@ import {
 } from "@/lib/apis/http/conversations"
 import {
   buildJsonResponse,
+  createTransportFailure,
   startBackendFake,
   type BackendRoute
 } from "../../../support/backendFake"
@@ -146,7 +147,7 @@ describe("listConversations", () => {
   })
 
   it("rejects an unreachable backend and keeps the transport failure as its cause", async () => {
-    const transportFailure = new TypeError("fetch failed")
+    const transportFailure = createTransportFailure()
     startListBackend(() => Promise.reject(transportFailure))
 
     await expect(

@@ -29,29 +29,21 @@ describe("decodePageText", () => {
     ).toBe("café")
   })
 
-  it("uses a <meta> charset of an HTML page when the header names none", () => {
-    const bytes = buildBytes(
-      '<html><head><meta charset="windows-1252"></head><body>',
-      CAFE_IN_WINDOWS_1252
-    )
-
-    expect(decodePageText(bytes, undefined, "text/html")).toContain("café")
-  })
-
-  it("uses a <meta http-equiv> charset", () => {
-    const bytes = buildBytes(
-      '<meta http-equiv="Content-Type" content="text/html; charset=ISO-8859-1"><p>',
-      CAFE_IN_WINDOWS_1252
-    )
-
-    expect(decodePageText(bytes, undefined, "text/html")).toContain("café")
-  })
-
-  it("uses the first <meta> element that declares a charset", () => {
-    const bytes = buildBytes(
-      '<meta name="viewport" content="width=device-width"><meta charset="windows-1252"><meta charset="utf-8"><p>',
-      CAFE_IN_WINDOWS_1252
-    )
+  it.each([
+    [
+      "a <meta charset>",
+      '<html><head><meta charset="windows-1252"></head><body>'
+    ],
+    [
+      "a <meta http-equiv> charset",
+      '<meta http-equiv="Content-Type" content="text/html; charset=ISO-8859-1"><p>'
+    ],
+    [
+      "the first <meta> element that declares a charset",
+      '<meta name="viewport" content="width=device-width"><meta charset="windows-1252"><meta charset="utf-8"><p>'
+    ]
+  ])("uses %s of an HTML page when the header names none", (_label, html) => {
+    const bytes = buildBytes(html, CAFE_IN_WINDOWS_1252)
 
     expect(decodePageText(bytes, undefined, "text/html")).toContain("café")
   })

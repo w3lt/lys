@@ -46,9 +46,9 @@ function StarterPortrait(): ReactElement {
  * resources. Each prompt is rendered as an accessible button in source order,
  * inside a group named Starter prompts, and `onSendStarterPrompt` fires once
  * per click with that button's prompt.
- * The framed portrait and the gem divider are decorative and hidden from
- * assistive technology. The view plays one entrance sequence when it mounts;
- * a reduced-motion preference removes it.
+ * The framed portrait is decorative and hidden from assistive technology.
+ * The view plays one entrance sequence when it mounts; a reduced-motion
+ * preference removes it.
  * @param props - Parent callback receiving the selected prompt text.
  * @returns The empty-session portrait, heading, explanation, and starter controls.
  */

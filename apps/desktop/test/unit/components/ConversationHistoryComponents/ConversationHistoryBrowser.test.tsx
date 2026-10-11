@@ -184,10 +184,7 @@ function getSearchBox(): HTMLElement {
  * @returns The region holding the rows.
  */
 function getResultRegion(): HTMLElement {
-  const region =
-    getOpenButton("Streaming pipeline").closest<HTMLElement>("div[aria-busy]")
-  if (region === null) throw new Error("The rows are outside a result region")
-  return region
+  return screen.getByRole("region", { name: "Conversations" })
 }
 
 /**

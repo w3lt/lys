@@ -9,7 +9,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@fastify/cors": "^11.3.0",
+    "@fastify/cors": "^11.3.1",
     "@fastify/sse": "^0.6.0",
     "@lmstudio/sdk": "^2.0.0",
     "@lys/protocol": "workspace:*",

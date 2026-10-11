@@ -273,7 +273,7 @@ describe("LmStudioRuntime", () => {
       }
       const runtime = await createOwnedRuntime()
 
-      await expect(runtime.loadLlmModel("qwen/qwen3-8b")).resolves.toEqual({
+      await expect(runtime.loadLlmModel("qwen/qwen3-8b", {})).resolves.toEqual({
         modelKey: "qwen/qwen3-8b",
         modelIdentifier: "qwen/qwen3-8b"
       })
@@ -282,17 +282,127 @@ describe("LmStudioRuntime", () => {
       ])
     })
 
+    it("sends every set load setting to the SDK as its load config", async () => {
+      const runtime = await createOwnedRuntime()
+      const load = vi.fn(fakeLmStudio.operations.load)
+      load.mockResolvedValue({ modelKey: "qwen", identifier: "qwen" })
+      fakeLmStudio.operations = { ...fakeLmStudio.operations, load }
+
+      await runtime.loadLlmModel("qwen", {
+        contextLength: 16_384,
+        evalBatchSize: 1024,
+        flashAttention: false,
+        offloadKVCacheToGpu: true,
+        numExperts: 4
+      })
+
+      expect(load).toHaveBeenCalledExactlyOnceWith("qwen", {
+        config: {
+          contextLength: 16_384,
+          evalBatchSize: 1024,
+          flashAttention: false,
+          offloadKVCacheToGpu: true,
+          numExperts: 4
+        }
+      })
+    })
+
+    it("sends an empty load config when no setting is set", async () => {
+      const runtime = await createOwnedRuntime()
+      const load = vi.fn(fakeLmStudio.operations.load)
+      load.mockResolvedValue({ modelKey: "qwen", identifier: "qwen" })
+      fakeLmStudio.operations = { ...fakeLmStudio.operations, load }
+
+      await runtime.loadLlmModel("qwen", {})
+
+      expect(load).toHaveBeenCalledExactlyOnceWith("qwen", { config: {} })
+    })
+
+    it("leaves a setting that is not set out of the load config", async () => {
+      const runtime = await createOwnedRuntime()
+      const load = vi.fn(fakeLmStudio.operations.load)
+      load.mockResolvedValue({ modelKey: "qwen", identifier: "qwen" })
+      fakeLmStudio.operations = { ...fakeLmStudio.operations, load }
+
+      await runtime.loadLlmModel("qwen", { contextLength: 8192 })
+
+      const [, options] = load.mock.calls[0] ?? []
+      expect(Object.keys(options?.config ?? {})).toEqual(["contextLength"])
+    })
+
+    it.each([
+      {
+        absentSetting: "contextLength",
+        loadConfiguration: {
+          evalBatchSize: 1024,
+          flashAttention: false,
+          offloadKVCacheToGpu: true,
+          numExperts: 4
+        }
+      },
+      {
+        absentSetting: "evalBatchSize",
+        loadConfiguration: {
+          contextLength: 16_384,
+          flashAttention: false,
+          offloadKVCacheToGpu: true,
+          numExperts: 4
+        }
+      },
+      {
+        absentSetting: "flashAttention",
+        loadConfiguration: {
+          contextLength: 16_384,
+          evalBatchSize: 1024,
+          offloadKVCacheToGpu: true,
+          numExperts: 4
+        }
+      },
+      {
+        absentSetting: "offloadKVCacheToGpu",
+        loadConfiguration: {
+          contextLength: 16_384,
+          evalBatchSize: 1024,
+          flashAttention: false,
+          numExperts: 4
+        }
+      },
+      {
+        absentSetting: "numExperts",
+        loadConfiguration: {
+          contextLength: 16_384,
+          evalBatchSize: 1024,
+          flashAttention: false,
+          offloadKVCacheToGpu: true
+        }
+      }
+    ])(
+      "sends the other four settings and no $absentSetting when only that one is not set",
+      async ({ absentSetting, loadConfiguration }) => {
+        const runtime = await createOwnedRuntime()
+        const load = vi.fn(fakeLmStudio.operations.load)
+        load.mockResolvedValue({ modelKey: "qwen", identifier: "qwen" })
+        fakeLmStudio.operations = { ...fakeLmStudio.operations, load }
+
+        await runtime.loadLlmModel("qwen", loadConfiguration)
+
+        const [, options] = load.mock.calls[0] ?? []
+        expect(options?.config).toEqual(loadConfiguration)
+        expect(Object.keys(options?.config ?? {})).not.toContain(absentSetting)
+      }
+    )
+
     it("translates a failed load and keeps the SDK failure as its cause", async () => {
       const runtime = await createOwnedRuntime()
 
-      await expect(runtime.loadLlmModel("missing/model")).rejects.toMatchObject(
-        {
-          message: "The LLM runtime could not load the model.",
-          cause: expect.objectContaining({
-            message: 'Model "missing/model" is not downloaded.'
-          })
-        }
-      )
+      await expect(
+        runtime.loadLlmModel("missing/model", {})
+      ).rejects.toMatchObject({
+        message: "The LLM runtime could not load the model.",
+        cause: expect.objectContaining({
+          message: 'Model "missing/model" is not downloaded.'
+        })
+      })
       expect(runtime.lifecycleStatus).toBe("ready")
     })
 
@@ -303,7 +413,7 @@ describe("LmStudioRuntime", () => {
         load: async () => ({ modelKey: "qwen" })
       }
 
-      await expect(runtime.loadLlmModel("qwen")).rejects.toThrow(
+      await expect(runtime.loadLlmModel("qwen", {})).rejects.toThrow(
         "The LLM runtime returned an invalid model instance."
       )
     })
@@ -370,7 +480,7 @@ describe("LmStudioRuntime", () => {
       }
       const active = runtime.listLoadedLlmModelInstances()
 
-      await expect(runtime.loadLlmModel("qwen")).rejects.toThrow(
+      await expect(runtime.loadLlmModel("qwen", {})).rejects.toThrow(
         "The LLM runtime already has an active operation."
       )
       await expect(runtime.getRuntimeAvailability()).rejects.toThrow(

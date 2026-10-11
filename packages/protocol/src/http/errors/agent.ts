@@ -13,8 +13,8 @@ const AGENT_NOT_FOUND_PROBLEM_TITLE = "Agent not found"
 const AGENT_NOT_FOUND_PROBLEM_STATUS = 404
 
 /**
- * Stable problem category for creating an agent under a code that Lys or a
- * stored agent has.
+ * Stable problem category for creating an agent under a code that a built-in
+ * or stored agent has.
  */
 const AGENT_CODE_TAKEN_PROBLEM_TYPE = "urn:lys:problem:agent:code-taken"
 
@@ -25,19 +25,29 @@ const AGENT_CODE_TAKEN_PROBLEM_TITLE = "Agent code taken"
 const AGENT_CODE_TAKEN_PROBLEM_STATUS = 409
 
 /**
+ * Stable problem category for a request to change or delete a built-in
+ * agent.
+ */
+const AGENT_BUILT_IN_PROBLEM_TYPE = "urn:lys:problem:agent:built-in"
+
+/** Client-facing summary shared by every refused built-in change. */
+const AGENT_BUILT_IN_PROBLEM_TITLE = "Built-in agent cannot be changed"
+
+/** HTTP status accompanying a built-in agent problem body. */
+const AGENT_BUILT_IN_PROBLEM_STATUS = 409
+
+/**
  * Validates the RFC 9457 body returned when a request names a code that no
  * agent available to that request has.
  *
  * @remarks The get, update, and delete agent endpoints transmit this contract
- * with HTTP 404 when no stored agent has the code. The chat endpoint
- * transmits it with HTTP 404 when a new conversation names a code that no
- * agent able to answer chats has, even if a stored agent has it; for now only
- * Lys can answer chats. Either way the request changed nothing. The `type`
- * literal is the machine-readable discriminator; consumers branch on it and
- * never on `detail`, which is occurrence-specific, caller-safe text. A 404
- * response without this body, such as an unregistered route, is not evidence
- * that an agent is absent. Changing any fixed field requires coordinated
- * consumers.
+ * with HTTP 404 when no built-in or stored agent has the code. The chat
+ * endpoint transmits it with HTTP 404 when a new conversation names such a
+ * code. Either way the request changed nothing. The `type` literal is the
+ * machine-readable discriminator; consumers branch on it and never on
+ * `detail`, which is occurrence-specific, caller-safe text. A 404 response
+ * without this body, such as an unregistered route, is not evidence that an
+ * agent is absent. Changing any fixed field requires coordinated consumers.
  */
 export const agentNotFoundProblemSchema = z
   .strictObject({
@@ -59,11 +69,11 @@ export type AgentNotFoundProblem = z.infer<typeof agentNotFoundProblemSchema>
 
 /**
  * Validates the RFC 9457 body returned when a create request names a code
- * that Lys or another stored agent already has.
+ * that a built-in agent or another stored agent already has.
  *
  * @remarks The create-agent endpoint transmits this contract with HTTP 409
- * when the request carries a code that Lys or another stored agent has; every
- * agent is left unchanged and nothing is created. A request without a code
+ * when the request carries a code that a built-in agent or another stored
+ * agent has; every agent is left unchanged and nothing is created. A request without a code
  * never receives it. The `type` literal is the machine-readable
  * discriminator; `detail` is caller-safe text. Changing any fixed field
  * requires coordinated consumers.
@@ -85,3 +95,32 @@ export const agentCodeTakenProblemSchema = z
 
 /** Taken-code Problem Details body inferred from its schema. */
 export type AgentCodeTakenProblem = z.infer<typeof agentCodeTakenProblemSchema>
+
+/**
+ * Validates the RFC 9457 body returned when a request asks to change or
+ * delete a built-in agent.
+ *
+ * @remarks The update and delete agent endpoints transmit this contract with
+ * HTTP 409 when the addressed code is a built-in agent's. Built-in agents
+ * belong to the release, so the request changed nothing and repeating it
+ * cannot succeed. The `type` literal is the machine-readable discriminator;
+ * `detail` is caller-safe text. Changing any fixed field requires coordinated
+ * consumers.
+ */
+export const agentBuiltInProblemSchema = z
+  .strictObject({
+    /** Stable discriminator separating a built-in agent from other failures. */
+    type: z.literal(AGENT_BUILT_IN_PROBLEM_TYPE),
+    /** Human-readable category summary shared across occurrences. */
+    title: z.literal(AGENT_BUILT_IN_PROBLEM_TITLE),
+    /** HTTP status accompanying this problem body. */
+    status: z.literal(AGENT_BUILT_IN_PROBLEM_STATUS),
+    /** Caller-safe explanation of this occurrence. */
+    detail: z.string().min(1),
+    /** Optional identifier of this problem occurrence. */
+    instance: z.string().min(1).optional()
+  })
+  .readonly()
+
+/** Built-in agent Problem Details body inferred from its schema. */
+export type AgentBuiltInProblem = z.infer<typeof agentBuiltInProblemSchema>

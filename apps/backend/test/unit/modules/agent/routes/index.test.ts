@@ -1,9 +1,12 @@
 import {
+  agentBuiltInProblemSchema,
   agentCodeTakenProblemSchema,
   agentNotFoundProblemSchema
 } from "@lys/protocol"
+import type { BuiltInAgent } from "@lys/share"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import AgentService from "../../../../../src/modules/agent/agentService"
+import { buildBuiltInAgents } from "../../../../../src/modules/agent/builtInAgents"
 import type { ReplyModel } from "../../../../../src/modules/agent/replyModel"
 import { updateFastifyWithHttpTransport } from "../../../../../src/http"
 import SqliteAgentRecordStore from "../../../../../src/infrastructure/database/agents/sqliteAgentRecordStore"
@@ -34,7 +37,19 @@ const STORED_RESEARCHER = Object.freeze({
   updatedAt: NOW
 })
 
-/** Model access Lys borrows; the agent routes never ask Lys for a reply. */
+/** Built-in agents of the service in every case that passes no others. */
+const SHIPPED_BUILT_IN_AGENTS = buildBuiltInAgents({
+  caliginia: "You are Caliginia.",
+  lysiptera: "You are Lysiptera."
+})
+
+/** Summaries every list page carries for {@link SHIPPED_BUILT_IN_AGENTS}. */
+const BUILT_IN_AGENT_SUMMARIES = [
+  { code: "caliginia", name: "Caliginia", bio: "Lys's dark side." },
+  { code: "lysiptera", name: "Lysiptera", bio: "Lys's light side." }
+]
+
+/** Model access agents borrow; the agent routes never ask an agent for a reply. */
 const UNUSED_REPLY_MODEL = Object.freeze({
   openReplyStream: () =>
     Promise.reject(new Error("Unexpected model call from an agent route"))
@@ -57,17 +72,37 @@ function createPaddedAgentListCursor(code: string, length: number): string {
 }
 
 /**
+ * Creates built-in agents that differ only by their number, for cases that
+ * count the built-in agents a list page carries.
+ *
+ * @param count - Number of agents to create.
+ * @returns The agents, with the codes `built-in-1` to `built-in-<count>`.
+ */
+function createNumberedBuiltInAgents(count: number): BuiltInAgent[] {
+  return Array.from({ length: count }, (_agent, index) => ({
+    code: `built-in-${index + 1}`,
+    name: `Built-in ${index + 1}`,
+    bio: "Ships with Lys.",
+    systemPrompt: "You ship with Lys."
+  }))
+}
+
+/**
  * Creates an application with the HTTP transport and the agent routes over
  * the real agent service and an in-memory database owned by the current test.
  *
+ * @param builtInAgents - Built-in agents the service ships; by default
+ * {@link SHIPPED_BUILT_IN_AGENTS}.
  * @returns The application and the decorated service, on which a case may
  * spy; the routes read the service at registration.
  */
-async function createAgentRouteApp() {
+async function createAgentRouteApp(
+  builtInAgents: readonly BuiltInAgent[] = SHIPPED_BUILT_IN_AGENTS
+) {
   const { app } = createTestFastify()
   const agents = new AgentService({
     recordStore: new SqliteAgentRecordStore(openTestDatabase()),
-    lysSystemPrompt: "You are Lys.",
+    builtInAgents,
     replyModel: UNUSED_REPLY_MODEL
   })
   await updateFastifyWithHttpTransport(app)
@@ -107,6 +142,7 @@ describe("updateFastifyWithAgentRoutes", () => {
 
       expect(response.statusCode).toBe(200)
       expect(response.json()).toEqual({
+        builtInAgents: BUILT_IN_AGENT_SUMMARIES,
         agents: [],
         storedCount: 0,
         nextCursor: null
@@ -156,6 +192,8 @@ describe("updateFastifyWithAgentRoutes", () => {
         storedCount: 3,
         nextCursor: null
       })
+      expect(firstPage.builtInAgents).toEqual(BUILT_IN_AGENT_SUMMARIES)
+      expect(second.json().builtInAgents).toEqual(BUILT_IN_AGENT_SUMMARIES)
     })
 
     it.each([
@@ -177,6 +215,32 @@ describe("updateFastifyWithAgentRoutes", () => {
       expect(response.json()).toMatchObject({
         storedCount: 51,
         nextCursor: expect.any(String)
+      })
+    })
+
+    it("serves a page that carries 16 built-in agents, the most a page may carry", async () => {
+      const { app } = await createAgentRouteApp(createNumberedBuiltInAgents(16))
+
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/v1/agents"
+      })
+
+      expect(response.statusCode).toBe(200)
+      expect(response.json().builtInAgents).toHaveLength(16)
+    })
+
+    it("fails rather than serve a page that carries 17 built-in agents", async () => {
+      const { app } = await createAgentRouteApp(createNumberedBuiltInAgents(17))
+
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/v1/agents"
+      })
+
+      expect(response.statusCode).toBe(500)
+      expect(response.json()).toMatchObject({
+        code: "FST_ERR_RESPONSE_SERIALIZATION"
       })
     })
 
@@ -269,7 +333,7 @@ describe("updateFastifyWithAgentRoutes", () => {
         method: "GET",
         url: "/api/v1/agents/researcher"
       })
-      expect(stored.json()).toEqual(STORED_RESEARCHER)
+      expect(stored.json()).toEqual({ kind: "custom", ...STORED_RESEARCHER })
     })
 
     it("derives the code from the name when none is given", async () => {
@@ -374,27 +438,36 @@ describe("updateFastifyWithAgentRoutes", () => {
       expect(agentCodeTakenProblemSchema.parse(response.json())).toMatchObject({
         instance: "/api/v1/agents"
       })
-      expect(agents.findAgent("researcher")).toEqual(STORED_RESEARCHER)
+      expect(agents.findAgent("researcher")).toEqual({
+        kind: "custom",
+        ...STORED_RESEARCHER
+      })
     })
 
-    it("responds with the code-taken problem for Lys's code and stores nothing", async () => {
-      const { app, agents } = await createAgentRouteApp()
+    it.each(["caliginia", "lysiptera"])(
+      "responds with the code-taken problem for the built-in code %s and stores nothing",
+      async (code) => {
+        const { app, agents } = await createAgentRouteApp()
 
-      const response = await app.inject({
-        method: "POST",
-        url: "/api/v1/agents",
-        payload: { ...RESEARCHER_DEFINITION, code: "lys" }
-      })
+        const response = await app.inject({
+          method: "POST",
+          url: "/api/v1/agents",
+          payload: { ...RESEARCHER_DEFINITION, code }
+        })
 
-      expect(response.statusCode).toBe(409)
-      expect(response.headers["content-type"]).toMatch(
-        /^application\/problem\+json/
-      )
-      expect(agentCodeTakenProblemSchema.parse(response.json())).toMatchObject({
-        instance: "/api/v1/agents"
-      })
-      expect(agents.findAgent("lys")).toBeUndefined()
-    })
+        expect(response.statusCode).toBe(409)
+        expect(response.headers["content-type"]).toMatch(
+          /^application\/problem\+json/
+        )
+        expect(
+          agentCodeTakenProblemSchema.parse(response.json())
+        ).toMatchObject({ instance: "/api/v1/agents" })
+        expect(agents.findAgent(code)).toMatchObject({ kind: "built-in" })
+        expect(
+          agents.listAgents({ cursor: undefined, limit: 30 }).storedCount
+        ).toBe(0)
+      }
+    )
 
     it.each([
       ["an empty code", { code: "" }],
@@ -458,7 +531,25 @@ describe("updateFastifyWithAgentRoutes", () => {
       })
 
       expect(response.statusCode).toBe(200)
-      expect(response.json()).toEqual(STORED_RESEARCHER)
+      expect(response.json()).toEqual({ kind: "custom", ...STORED_RESEARCHER })
+    })
+
+    it("responds with a built-in agent, its system prompt, and no times", async () => {
+      const { app } = await createAgentRouteApp()
+
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/v1/agents/lysiptera"
+      })
+
+      expect(response.statusCode).toBe(200)
+      expect(response.json()).toEqual({
+        kind: "built-in",
+        code: "lysiptera",
+        name: "Lysiptera",
+        bio: "Lys's light side.",
+        systemPrompt: "You are Lysiptera."
+      })
     })
 
     it("responds with the missing-agent problem", async () => {
@@ -526,7 +617,10 @@ describe("updateFastifyWithAgentRoutes", () => {
 
       expect(response.statusCode).toBe(200)
       expect(response.json()).toEqual(expected)
-      expect(agents.findAgent("researcher")).toEqual(expected)
+      expect(agents.findAgent("researcher")).toEqual({
+        kind: "custom",
+        ...expected
+      })
     })
 
     it("stores the time of a change that keeps every value", async () => {
@@ -543,7 +637,10 @@ describe("updateFastifyWithAgentRoutes", () => {
 
       expect(response.statusCode).toBe(200)
       expect(response.json()).toEqual(expected)
-      expect(agents.findAgent("researcher")).toEqual(expected)
+      expect(agents.findAgent("researcher")).toEqual({
+        kind: "custom",
+        ...expected
+      })
     })
 
     it("stores a change that starts with a NUL character", async () => {
@@ -592,6 +689,27 @@ describe("updateFastifyWithAgentRoutes", () => {
       })
     })
 
+    it("responds with the built-in agent problem and changes nothing", async () => {
+      const { app, agents } = await createAgentRouteApp()
+      const shipped = agents.findAgent("caliginia")
+
+      const response = await app.inject({
+        method: "PATCH",
+        url: "/api/v1/agents/caliginia",
+        payload: { systemPrompt: "You are someone else." }
+      })
+
+      expect(response.statusCode).toBe(409)
+      expect(response.headers["content-type"]).toMatch(
+        /^application\/problem\+json/
+      )
+      expect(agentBuiltInProblemSchema.parse(response.json())).toMatchObject({
+        detail: "Agent caliginia is built in and cannot be changed or deleted.",
+        instance: "/api/v1/agents/caliginia"
+      })
+      expect(agents.findAgent("caliginia")).toEqual(shipped)
+    })
+
     it.each([
       ["no field", {}],
       ["a code", { code: "other" }],
@@ -615,7 +733,10 @@ describe("updateFastifyWithAgentRoutes", () => {
 
         expect(response.statusCode).toBe(400)
         expect(updateAgent).not.toHaveBeenCalled()
-        expect(agents.findAgent("researcher")).toEqual(STORED_RESEARCHER)
+        expect(agents.findAgent("researcher")).toEqual({
+          kind: "custom",
+          ...STORED_RESEARCHER
+        })
       }
     )
 
@@ -665,6 +786,24 @@ describe("updateFastifyWithAgentRoutes", () => {
       expect(agentNotFoundProblemSchema.parse(response.json())).toMatchObject({
         instance: "/api/v1/agents/researcher"
       })
+    })
+
+    it("responds with the built-in agent problem and deletes nothing", async () => {
+      const { app, agents } = await createAgentRouteApp()
+
+      const response = await app.inject({
+        method: "DELETE",
+        url: "/api/v1/agents/lysiptera"
+      })
+
+      expect(response.statusCode).toBe(409)
+      expect(response.headers["content-type"]).toMatch(
+        /^application\/problem\+json/
+      )
+      expect(agentBuiltInProblemSchema.parse(response.json())).toMatchObject({
+        instance: "/api/v1/agents/lysiptera"
+      })
+      expect(agents.findAgent("lysiptera")).toMatchObject({ kind: "built-in" })
     })
 
     it("rejects a code that is not a slug without deleting anything", async () => {

@@ -1,15 +1,5 @@
-import { toolDefinitionSchema, type ToolDefinition } from "@lys/share"
+import { hasDistinctToolNames, toolDefinitionSchema } from "@lys/share"
 import * as z from "zod"
-
-/**
- * Answers whether no two tools share a name.
- *
- * @param tools - Validated tool definitions in list order.
- * @returns True when every tool name appears once.
- */
-function hasDistinctToolNames(tools: readonly ToolDefinition[]): boolean {
-  return new Set(tools.map((tool) => tool.name)).size === tools.length
-}
 
 /**
  * Validates the list that the desktop `list_tools` command returns: every

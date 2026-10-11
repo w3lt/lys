@@ -11,31 +11,33 @@ presentation state, not durable conversation storage.
 
 ## Main responsibilities
 
-| Area                | Current implementation                                                                                                       |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| App shell           | `App.tsx` swaps between chat and settings views and runs startup initialization.                                             |
-| Chat UI             | `ChatView` renders the transcript, composer, jump-to-latest controls, and the past-conversations dialog.                     |
-| Message rendering   | `MarkdownMessage` renders assistant replies as Markdown with KaTeX math and highlighted, copyable code blocks.               |
-| Chat state          | `src/lib/store/chat-view` owns the active conversation, request lifecycle, conversation opening, and error presentation.     |
-| History state       | `src/lib/store/conversation-history` owns the past-conversations dialog, its search and pages, and rename and delete calls.  |
-| Agent state         | `src/lib/store/agents` owns the Agents pane's list, its editor and draft, and the agent create, update, and delete calls.    |
-| Tool state          | `src/lib/store/tools.ts` owns the Tools pane's list of client tools and its session-only, mocked choices.                    |
-| Shell/runtime state | `src/lib/store/index.ts` tracks which view is open, whether the backend is running, and settings loaded from Tauri.          |
-| Model lifecycle     | `src/lib/store/model-actions.ts` owns real inventory, load, unload, and health requests shared by settings and the composer. |
-| SSE consumption     | `src/lib/apis/http/chat.ts` opens chat and reply-events SSE streams, validates events with Zod, and sends reply stops.       |
-| Theme               | `src/app/theme.ts` applies light or dark mode and stores the choice as `lys.theme` in WebView `localStorage`.                |
+| Area                | Current implementation                                                                                                                                     |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| App shell           | `App.tsx` swaps between chat and settings views and runs startup initialization.                                                                           |
+| Chat UI             | `ChatView` renders the transcript, composer, jump-to-latest controls, and the past-conversations dialog.                                                   |
+| Message rendering   | `MarkdownMessage` renders assistant replies as Markdown with KaTeX math and highlighted, copyable code blocks.                                             |
+| Chat state          | `src/lib/store/chat-view` owns the active conversation, the agent selected for a new one, request lifecycle, conversation opening, and error presentation. |
+| History state       | `src/lib/store/conversation-history` owns the past-conversations dialog, its search and pages, and rename and delete calls.                                |
+| Agent state         | `src/lib/store/agents` owns the list of built-in and stored agents, the Agents pane's editor and draft, and the agent create, update, and delete calls.    |
+| Tool state          | `src/lib/store/tools.ts` owns the Tools pane's list of client tools and the session-only choices that gate tool calls.                                     |
+| Tool calls          | `src/lib/store/tool-calls` follows each running reply's tool calls, decides each by the Tools pane, runs client tools, and sends their answers.            |
+| Shell/runtime state | `src/lib/store/index.ts` tracks which view is open, whether the backend is running, and settings loaded from Tauri.                                        |
+| Model lifecycle     | `src/lib/store/model-actions.ts` owns real inventory, load, unload, and health requests shared by settings and the composer.                               |
+| SSE consumption     | `src/lib/apis/http/chat.ts` opens chat and reply-events SSE streams, validates events with Zod, and sends reply stops and tool results.                    |
+| Theme               | `src/app/theme.ts` applies light or dark mode and stores the choice as `lys.theme` in WebView `localStorage`.                                              |
 
 ## Chat state split
 
-The desktop currently has five separate state systems:
+The desktop currently has six separate state systems:
 
-| Store                 | Owns                                                                                                                           |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| Chat Zustand store    | Active conversation, request and open tokens, local abort controllers, streamed assistant deltas, inline error text            |
-| History Zustand store | Dialog visibility, search query, displayed conversation pages, the row being renamed or confirmed, pending renames and deletes |
-| Agent Zustand store   | Every listed agent, the open editor and its draft, the save attempt, the pending save or delete, the most recently saved agent |
-| Tool Zustand store    | The client tool list read from the desktop, tool calls on or off, calls per reply, each tool's switch and approval             |
-| Shell Zustand store   | Active top-level view, loaded runtime settings, backend process status, startup progress                                       |
+| Store                   | Owns                                                                                                                                                                 |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Chat Zustand store      | Active conversation, the agent selected for a new conversation, request and open tokens, local abort controllers, streamed assistant deltas, inline error text       |
+| History Zustand store   | Dialog visibility, search query, displayed conversation pages, the row being renamed or confirmed, pending renames and deletes                                       |
+| Agent Zustand store     | Every listed built-in and stored agent, the open editor or read-only view and its draft, the save attempt, the pending save or delete, the most recently saved agent |
+| Tool Zustand store      | The client tool list read from the desktop, tool calls on or off, each tool's switch and approval                                                                    |
+| Tool-call Zustand store | Every tool call held until the backend takes its answer, and the reply follows that deliver them                                                                     |
+| Shell Zustand store     | Active top-level view, loaded runtime settings, backend process status, startup progress                                                                             |
 
 The transcript shown in the window is built from backend events for the current
 request, or from the stored transcript read when a past conversation is opened.
@@ -44,11 +46,14 @@ Shell state such as backend status is managed independently.
 ## Streaming path
 
 1. The composer calls `sendMessage`.
-2. The chat store opens `POST /api/v1/chat`.
+2. The chat store opens `POST /api/v1/chat`. The request offers the
+   switched-on tools when tool calls are on and the loaded model was trained
+   for tool use.
 3. The desktop parses SSE frames with `EventSourceParserStream`.
 4. Each payload is validated against `chatApiStreamEventSchema`.
 5. The store applies `start-*`, `delta`, `done`, `interrupted`, `title`, or
-   `error` events to local immutable conversation state.
+   `error` events to local immutable conversation state, and hands the reply
+   to the tool-call store, which answers its `tool-call` events.
 
 The composer shows Stop while the turn is awaited or the reply streams, and
 Send otherwise. After `done`, `interrupted`, or `error`, the stream can stay
@@ -144,12 +149,53 @@ pane explains how to recover. A manual Refresh action picks up changes made in
 LM Studio. Inventory metadata and each model's `loaded` flag drive the model
 rows and composer menu; several models may be loaded at once.
 
-Load sends `{ modelId }` to `POST /api/v1/llm/load`. Unload sends the same body
-to `PATCH /api/v1/llm/unload` and accepts its bodyless `204` response. Both
-operations reconcile the inventory afterward, including when the command
-fails, because a lost acknowledgement does not establish whether weights
+Load sends `{ modelId, configuration }` to `POST /api/v1/llm/load`. Unload sends
+`{ modelId }` to `PATCH /api/v1/llm/unload` and accepts its bodyless `204`
+response. Both operations reconcile the inventory afterward, including when the
+command fails, because a lost acknowledgement does not establish whether weights
 changed. Requests are serialized locally and mutations are never retried
 automatically.
+
+### Load configuration
+
+Every load the desktop starts, from the Runtime pane or from a model row, sends
+that model's load configuration. The store builds it when the load is admitted:
+each setting is the model's own stored value when it has one, then the stored
+default's, then the committed default's, and the context length is lowered to
+the model's `maxContextLength` from the inventory. Edits made while the load is in flight
+do not change what it sent. The composer's "Load model" action opens the Model
+pane and starts no load.
+
+The Model pane's "load configuration" section edits the configuration of the
+selected default model. With no default model selected it edits nothing, even
+while a model is loaded, and asks to choose one; the selection lasts for the
+session, so after a restart the section waits for a choice. It has five rows: context length, eval batch size, flash attention, KV cache on
+GPU, and active experts. An edit is stored for that model only, applies to its
+next load, and is saved automatically to the `models` part of the
+`loadConfiguration` group of `settings.json`; the save keeps the `default` that
+is in the file. Active experts reads "auto" until it is set, because LM Studio
+reports no expert counts ([#144](https://github.com/w3lt/lys/issues/144)).
+
+The store holds the per-model settings as a map keyed by model key. The file
+keeps them as one `models` object, and only the Tauri settings adapter handles
+that object: it builds the map when it loads the document and the object when
+it saves it.
+
+The backend does not report the settings a loaded model runs with
+([#145](https://github.com/w3lt/lys/issues/145)), so the store keeps its own
+record for each model it observes as loaded:
+
+- For a model Lys loaded in this session, the record is the configuration that
+  load sent. When the stored settings differ from it, each changed row shows
+  the loaded value, and a line under the rows lists what a reload would apply.
+- For a model found already loaded, the record is the configuration stored
+  when it was first observed. It only shows whether the settings changed since.
+  The pane then says that changes apply on the next load.
+
+"Reload now" unloads the model and loads it again with its stored configuration,
+as one operation. If the unload fails, no load starts. If the load fails after
+the unload, the model stays unloaded and the failure is shown. Stopping the
+backend or losing LM Studio discards the records.
 
 Test calls `GET /api/v1/llm/:modelId/health` with the canonical key encoded as
 one path segment. Its result reports a fresh loaded-state observation and query
@@ -194,19 +240,25 @@ does not coordinate with external editors of the settings file.
 
 ## Agent settings
 
-The Agents pane manages the agents stored by the backend through the
-[agent API](/reference/api/#agents). It reads every stored agent when it
-appears and whenever the backend starts running, one page of 50 after another,
+The Agents pane shows the built-in agents and manages the agents stored by the
+backend through the
+[agent API](/reference/api/#agents). It reads every built-in and stored agent
+when it appears and whenever the backend starts running, the stored ones one
+page of 50 after another,
 because names are checked for uniqueness against all of them; a read stops
-with a failure past 1,000 agents. A displayed list stays on screen while it is
+with a failure past 1,000 agents. The chat view reads the same list when it
+appears and whenever the backend starts running. A displayed list stays on screen while it is
 read again. A status line above the agents says why they are not shown: the
 backend is not running, or a read failed, which offers Retry. When the status
 appears because the control holding focus disappeared with the list or an
 editor, focus moves to Retry or to the status line.
 
-The pane lists the user's agents oldest first with their name, code, and bio.
-Built-in agents are not available yet, so the pane has no section for them.
-Opening an agent reads it with its system prompt into an editor; New agent opens
+The pane lists the built-in agents first, in their own section, then the
+user's agents oldest first, each with its name, code, and bio. A built-in
+agent ships with Lys and cannot be changed or deleted: opening one shows its
+name, bio, and system prompt read-only, with Duplicate, which opens a copy as
+a new agent of the user's own.
+Opening one of the user's agents reads it with its system prompt into an editor; New agent opens
 an empty one. The editor edits the name, bio, and system prompt, and for a new
 agent an optional code. The name, bio, and prompt are marked required, and the
 code field states the format it accepts. Typed codes keep only lowercase
@@ -215,7 +267,8 @@ and an empty code lets the backend derive one. Limits come from `@lys/share`,
 and the counters measure the trimmed text, as it is saved. Saving checks the
 draft first: a blank name, bio, or prompt, a name or bio over its limit once
 trimmed, a name another agent has (ignoring case), or a malformed or listed
-code is shown and nothing is sent. Once the field is marked invalid, focus moves
+code is shown and nothing is sent; built-in agents count among the listed
+names and codes. Once the field is marked invalid, focus moves
 to it. Names need not be unique to the backend, so a stored agent that keeps
 its own name can be saved even when another agent shares it. The backend still
 refuses a code taken since the list was read. Duplicate opens a copy as a new
@@ -230,7 +283,39 @@ lost may still have stored the agent, so the editor says the save could not be
 confirmed and the list is read again; an agent that was stored then appears,
 and its name and code count as taken. Saving is unavailable while the list is
 read again, so a draft is never checked against a list that read may change.
-Agents are not used by chats yet.
+Editing an agent changes its conversations from their next message, because
+every turn sends the agent's current system prompt.
+
+### Choosing a conversation's agent
+
+The composer's agent menu, left of the weights menu, names the agent that
+answers. Before the first message it lists the built-in agents, then the
+user's own, each with its bio and tagged `selected` or `built-in`; choosing
+one selects the agent of the new conversation, and Edit agents opens the
+Agents pane. The chat store keeps the selection, which starts on Caliginia,
+survives starting another conversation, and is not saved across restarts. A
+selected agent that is no longer listed when the message is sent is replaced
+by Caliginia.
+
+Once a conversation is shown, or its first reply is awaited, its agent is
+fixed: the menu shows a lock, says the agent stays for the whole conversation,
+and offers Start a new one, which starts a new conversation and leaves the
+menu open on the choices. The transcript tags every reply with the name of
+the conversation's agent, and the message field, its placeholder, the
+generating status, and the tool-call announcement name it too.
+
+When the agent list has been read and no agent has the conversation's code,
+its agent was deleted. The conversation stays readable, replies are tagged
+with the code, the message field and Send are disabled, and a notice above
+the field offers a new conversation. The notice's status line stays in the
+page while it is empty, so the sentence is announced when it appears, and
+focus stays where it is. New conversation in the notice starts a conversation
+and moves focus to the message field once that conversation is shown, when
+the field can take focus again. Start a new one in past conversations moves
+focus the same way. While the list is unread the desktop does not claim a
+deletion: sending stays possible, and the backend's refusal is shown as the
+same sentence. A conversation accepts messages again once an agent is stored
+under its code.
 
 ## Tool settings
 
@@ -250,24 +335,67 @@ time, shows the tool's arguments with their type and whether they are required;
 an enum argument shows `enum · N` and its accepted values. It also shows where
 the tool runs and whether Lys asks before it runs.
 
-The tool-calls card holds the master switch, a status line, and calls per reply
-(4, 8, or 16). The status line names the loaded model and how many tools are
-offered with their summed estimate. When the loaded model's `trainedForToolUse`
-is false, Lys offers it no tools: a card says the model isn't trained for tool
-calls, and every control below it recedes and is disabled. An expanded row
-closes while the controls are locked and opens again when they unlock.
+The tool-calls card holds the master switch and a status line. The status line
+names the loaded model and how many tools are offered with their summed
+estimate. When the loaded model's `trainedForToolUse` is false, Lys offers it
+no tools: a card says the model isn't trained for tool calls, and every control
+below it recedes and is disabled. An expanded row closes while the controls are
+locked and opens again when they unlock.
 
-Every choice on the pane is a mock kept in the tool store for the session: tool
-calls on or off, calls per reply, each tool's switch, and Ask me or Just run.
-Nothing is saved, and nothing reaches the backend or a model yet.
+Every choice on the pane applies to the next chat request or tool call: tool
+calls on or off, each tool's switch, and Ask me or Just run. Every tool starts
+on Ask me. The choices last for the session only; nothing is saved.
+
+## Tool calls
+
+A chat request offers the switched-on tools when tool calls are on and the
+loaded model's `trainedForToolUse` is true. If the tool list cannot be read, the
+request fails with an inline error and nothing is sent.
+
+The tool-call store follows every reply the chat store starts or follows on
+its own reply-events connection, so tool calls keep moving while another
+conversation is shown. It takes each call from a `tool-call` event or from the
+snapshot's `pendingToolCalls`, once, and decides it by the Tools pane at that
+moment. An answered call stays held while the store follows its reply, so a
+snapshot built before the answer arrived does not bring the call back:
+
+1. A tool the desktop does not list, or arguments that do not match its
+   command, is answered as `runFailed`.
+2. With tool calls off, or the tool switched off, the call is answered as
+   `declined`.
+3. On Just run, the tool runs at once and nothing is shown.
+4. On Ask me, the call waits for the person.
+
+A waiting call shows a card above the composer field: the tool, what it does
+with the machine, that it runs in Lys, a plain sentence such as "Read
+/Users/me/notes/todo.md. Nothing is changed.", and its arguments on request.
+Reject sends the composer's text as the reason; Allow once runs the call, and
+Allow anyway does too while keeping the text. In the field, Escape rejects,
+Enter with an empty draft allows, and Enter with text rejects with that text.
+Several calls wait in the model's order, one card at a time.
+
+A read sends the file's text, a search sends its report as JSON, and a
+declared tool failure sends the failure as JSON. Each answer goes to the
+[tool-result route](/reference/api/#tool-results). When an answer cannot be
+sent, the card says so and Try again sends the same answer without running the
+tool again. When the reply ends, by finishing, Stop, or backend shutdown, its
+waiting calls disappear. A newer turn in the conversation or deleting the
+conversation does not end a waiting reply yet
+([#137](https://github.com/w3lt/lys/issues/137)). After a renderer reload, a
+call still waiting is found again through the reply's snapshot when its
+conversation is shown. Quitting the app stops the backend, so its waiting calls
+are gone and the reply is marked interrupted when the backend next starts.
 
 ## Current limitations
 
-- Runtime and model edits remain session-only. Generation settings save
-  automatically; a failed save leaves the edits available for the current session.
-- The load API accepts only `modelId`. Model settings explain that LM Studio
-  controls the load-time context size. The retained local context budget is
-  used for composer estimates and is not a confirmed runtime configuration.
+- Runtime edits and `model.contextSize` edits remain session-only. Generation
+  settings and load configurations save automatically; a failed save leaves the
+  edits available for the current session.
+- The retained local context budget, `model.contextSize`, is still used for
+  composer estimates. It is separate from the context length in a model's load
+  configuration and does not follow it.
+- The KV cache load setting has no effect with the installed LM Studio SDK; see
+  the [load request](/reference/api/#model-load-request).
 - Model observations refresh on LM Studio connection, entry into settings,
   manual refresh, and model operations. The LM Studio status changes only on
   backend start, Refresh, and failed model requests; it is not polled. Changes
@@ -276,8 +404,12 @@ Nothing is saved, and nothing reaches the backend or a model yet.
 - The composer's attachment tray stages files and long pastes for its local
   context estimate only. The chat protocol has no attachment field, so staged
   attachments are never sent.
-- The Tools pane's choices are session-only mocks. No conversation offers tools
-  to a model yet, so they change nothing a chat does.
+- The Tools pane's choices last for the session only; every tool starts on Ask
+  me again after a restart.
+- There is no "Allow for this chat": each call on Ask me is asked about.
+- Tool calls leave no trace in the transcript: a call on Just run shows
+  nothing, and an answered call's card disappears. Streamed and stored reply
+  parts are planned next.
 
 ## Related pages
 

@@ -1,8 +1,10 @@
 import {
   chatReplyNotFoundProblemSchema,
   chatReplyNotGeneratingProblemSchema,
+  chatToolCallNotPendingProblemSchema,
   type ChatReplyNotFoundProblem,
-  type ChatReplyNotGeneratingProblem
+  type ChatReplyNotGeneratingProblem,
+  type ChatToolCallNotPendingProblem
 } from "@lys/protocol"
 
 /**
@@ -43,6 +45,29 @@ export function createChatReplyNotGeneratingProblem(
     title: shape.title.value,
     status: shape.status.value,
     detail: `Reply ${assistantMessageId} is not generating.`,
+    instance
+  }
+}
+
+/**
+ * Creates the caller-safe response for answering a tool call that is not
+ * waiting for an answer.
+ *
+ * @param callId - Validated UUIDv7 of a call that is unknown, already
+ * answered, or whose reply ended.
+ * @param instance - Request path identifying this occurrence.
+ * @returns The strict problem accepted by tool-result consumers.
+ */
+export function createChatToolCallNotPendingProblem(
+  callId: string,
+  instance: string
+): ChatToolCallNotPendingProblem {
+  const { shape } = chatToolCallNotPendingProblemSchema.unwrap()
+  return {
+    type: shape.type.value,
+    title: shape.title.value,
+    status: shape.status.value,
+    detail: `Tool call ${callId} is not waiting for an answer.`,
     instance
   }
 }

@@ -1,4 +1,9 @@
-import type { ChatGenerationEvent } from "@lys/protocol"
+import type {
+  ChatGenerationEvent,
+  ChatToolCall,
+  ChatToolResult
+} from "@lys/protocol"
+import PendingToolCalls from "./pendingToolCalls"
 import type ReplyEventSubscription from "./replyEventSubscription"
 
 /** Capabilities a generation lends to one of its tasks. */
@@ -9,10 +14,25 @@ export type ReplyGenerationTaskContext = Readonly<{
   sendEvent: (event: ChatGenerationEvent) => void
 }>
 
+/** Capabilities a generation lends to its reply task. */
+export type ReplyTaskContext = ReplyGenerationTaskContext &
+  Readonly<{
+    /**
+     * Lists one checked tool call and sends it to every follower, then waits
+     * for its answer. Resolves with the client's answer, or with undefined
+     * once the reply was stopped, the generation disposed, or the reply task
+     * settled; never rejects.
+     * Throws if a call with the same identifier is already waiting.
+     */
+    sendToolCall: (
+      toolCall: ChatToolCall
+    ) => Promise<ChatToolResult | undefined>
+  }>
+
 /** Work and failure reporting for one generation. */
 export type StartReplyGenerationOptions = Readonly<{
   /** Runs the reply task; its signal is aborted by `stopReply` and disposal. */
-  startReplyTask: (context: ReplyGenerationTaskContext) => Promise<void>
+  startReplyTask: (context: ReplyTaskContext) => Promise<void>
   /**
    * Runs the title task, or is absent when no title task is requested. Its
    * signal is aborted only by disposal.
@@ -42,7 +62,10 @@ export type StartReplyGenerationOptions = Readonly<{
  * {@link ReplyGeneration.settled}; a settled generation still accepts
  * `openSubscription` (closing the follower at once) and `stopReply`
  * (resolving at once), because a follower or stop request can race the
- * settlement. Concurrency model: single-owner, on the backend's event loop.
+ * settlement. Tool calls the reply task sends are listed until they are
+ * answered, the reply is stopped or disposed, or the reply task settles;
+ * there is no timer.
+ * Concurrency model: single-owner, on the backend's event loop.
  */
 export default class ReplyGeneration implements AsyncDisposable {
   /** Cancels the reply task for stop and shutdown. */
@@ -59,6 +82,8 @@ export default class ReplyGeneration implements AsyncDisposable {
   readonly #settlement: Promise<void>
   /** Whether both tasks have settled and every follower was closed. */
   #isSettled = false
+  /** Tool calls the reply task waits on. */
+  readonly #pendingToolCalls = new PendingToolCalls()
 
   /**
    * Creates a generation whose tasks have not started.
@@ -89,9 +114,7 @@ export default class ReplyGeneration implements AsyncDisposable {
       replySettlement.promise,
       settlement.promise
     )
-    const replyContext = generation.#createTaskContext(
-      generation.#replyController.signal
-    )
+    const replyContext = generation.#createReplyTaskContext()
     const replyTask = Promise.resolve().then(() =>
       options.startReplyTask(replyContext)
     )
@@ -104,10 +127,11 @@ export default class ReplyGeneration implements AsyncDisposable {
       tasks.push(Promise.resolve().then(() => startTitleTask(titleContext)))
     }
 
-    void replyTask.then(
-      () => replySettlement.resolve(),
-      () => replySettlement.resolve()
-    )
+    const settleReply = () => {
+      generation.#pendingToolCalls.cancelToolCalls()
+      replySettlement.resolve()
+    }
+    void replyTask.then(settleReply, settleReply)
     void Promise.allSettled(tasks).then((outcomes) => {
       try {
         generation.#handleTasksSettled(outcomes, options.reportTaskFailure)
@@ -153,22 +177,66 @@ export default class ReplyGeneration implements AsyncDisposable {
    * @returns A promise that settles after the reply task settled, so the
    * reply's final state is stored: `interrupted`, or `completed` or `failed`
    * when the reply ended before the stop; it never rejects.
-   * @remarks Idempotent. Title generation continues.
+   * @remarks Idempotent. Title generation continues. Every tool call the
+   * reply waits on ends without an answer.
    */
   public stopReply(): Promise<void> {
     this.#replyController.abort()
+    this.#pendingToolCalls.cancelToolCalls()
     return this.#replySettlement
   }
 
   /**
-   * Cancels both tasks and waits for the generation to settle.
+   * Cancels both tasks, ends every tool call the reply waits on without an
+   * answer, and waits for the generation to settle.
    *
    * @returns The shared settlement; repeated calls return the same promise.
    */
   public [Symbol.asyncDispose](): Promise<void> {
     this.#replyController.abort()
+    this.#pendingToolCalls.cancelToolCalls()
     this.#titleController.abort()
     return this.#settlement
+  }
+
+  /**
+   * Lists the tool calls the reply waits on.
+   *
+   * @returns Calls sent and not yet answered, in send order; empty once the
+   * reply was stopped, the generation disposed, the reply task settled, or
+   * every call answered.
+   */
+  public get pendingToolCalls(): readonly ChatToolCall[] {
+    return this.#pendingToolCalls.toolCalls
+  }
+
+  /**
+   * Resumes the reply with the client's answer to one waiting call.
+   *
+   * @param toolCallId - Identifier of the call's `tool-call` event.
+   * @param result - Validated answer, handed to the reply unchanged.
+   * @returns True when the call was waiting; false when it is unknown,
+   * already answered, or ended with its reply, which changes nothing. Calls
+   * still waiting when the reply task settles end without an answer.
+   */
+  public resolveToolCall(toolCallId: string, result: ChatToolResult): boolean {
+    return this.#pendingToolCalls.resolveToolCall(toolCallId, result)
+  }
+
+  /**
+   * Creates the context lent to the reply task.
+   *
+   * @returns The reply's signal, a non-blocking event sender, and the tool
+   * call sender.
+   */
+  #createReplyTaskContext(): ReplyTaskContext {
+    return {
+      ...this.#createTaskContext(this.#replyController.signal),
+      sendToolCall: (toolCall) =>
+        this.#pendingToolCalls.sendToolCall(toolCall, (event) => {
+          this.#handleTaskEvent(event)
+        })
+    }
   }
 
   /**

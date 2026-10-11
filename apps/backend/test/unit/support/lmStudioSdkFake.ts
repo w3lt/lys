@@ -1,9 +1,15 @@
-import type { LLMInfo } from "@lmstudio/sdk"
+import type { LLMInfo, LLMLoadModelConfig } from "@lmstudio/sdk"
 
 /** Constructor options the backend passes to the SDK client. */
 type FakeLmStudioClientOptions = Readonly<{
   /** WebSocket endpoint of the LM Studio server. */
   baseUrl?: string
+}>
+
+/** Load options the backend passes to `llm.load`. */
+export type FakeLmStudioLoadOptions = Readonly<{
+  /** Load settings the SDK sends to LM Studio. */
+  config?: LLMLoadModelConfig
 }>
 
 /** Loaded-model handle fields exposed by the fake engine. */
@@ -32,8 +38,11 @@ export type FakeLmStudioOperations = Readonly<{
   listDownloadedModels: (domain: string) => Promise<readonly unknown[]>
   /** Lists loaded model handles. */
   listLoaded: () => Promise<readonly unknown[]>
-  /** Loads one model and resolves to its handle. */
-  load: (modelKey: string) => Promise<unknown>
+  /** Loads one model with the given options and resolves to its handle. */
+  load: (
+    modelKey: string,
+    options?: FakeLmStudioLoadOptions
+  ) => Promise<unknown>
   /** Unloads one instance by identifier. */
   unload: (identifier: string) => Promise<void>
   /** Releases the resources of one client. */
@@ -66,8 +75,9 @@ const EMPTY_LM_STUDIO_INVENTORY: FakeLmStudioInventory = Object.freeze({
  * @remarks Replaces the external LM Studio server for unit tests that install
  * `vi.mock("@lmstudio/sdk", () => import("../support/lmStudioSdkFake"))`.
  * Default operations keep the inventory in memory: `load` accepts only an
- * exact downloaded key and adds a handle whose identifier is the key, suffixed
- * `:<n>` for later instances; `unload` rejects an unknown identifier. Client
+ * exact downloaded key, ignores its options, and adds a handle whose
+ * identifier is the key, suffixed `:<n>` for later instances; `unload` rejects
+ * an unknown identifier. Client
  * construction and disposal have no default effect, so a case that observes
  * them replaces those operations with spies. Invariant: the inventory, frozen
  * together with every record and handle it holds, and the operations are each
@@ -286,8 +296,8 @@ export class LMStudioClient {
   /** Frozen LLM namespace forwarding to the engine. */
   readonly #llm: FakeLmStudioLlmNamespace = Object.freeze({
     listLoaded: async () => await fakeLmStudio.operations.listLoaded(),
-    load: async (modelKey: string) =>
-      await fakeLmStudio.operations.load(modelKey),
+    load: async (modelKey: string, options?: FakeLmStudioLoadOptions) =>
+      await fakeLmStudio.operations.load(modelKey, options),
     unload: async (identifier: string) =>
       await fakeLmStudio.operations.unload(identifier)
   })

@@ -1,8 +1,15 @@
 import { llmLoadModelApi, type LlmLoadModelApiRoute } from "@lys/protocol"
+import type { ModelLoadConfiguration } from "@lys/share"
 import type { FastifyInstance, FastifyRequest } from "fastify"
 import * as z from "zod"
 import type { LlmModelLoader } from "../llmModelCapabilities"
 import handleLlmServiceRequestFailure from "./handleLlmServiceRequestFailure"
+
+/**
+ * Load settings of a request that names none, so the runtime decides every
+ * setting. The route applies it when the request body has no `configuration`.
+ */
+const UNSET_MODEL_LOAD_CONFIGURATION: ModelLoadConfiguration = Object.freeze({})
 
 /**
  * Adds the LLM load endpoint with protocol validation to a Fastify application.
@@ -61,7 +68,8 @@ function registerLlmModelLoadRoute(app: FastifyInstance): void {
 /**
  * Delegates one validated model load to the application-owned LLM service.
  *
- * @param request - Validated Fastify request containing the model identifier or alias to load.
+ * @param request - Validated Fastify request containing the model identifier
+ * or alias to load and, optionally, the load settings for this load.
  * @param llmModelLoader - Application capability that performs the model load.
  * @returns A promise resolving to validated metadata for the canonical loaded model.
  * @throws If the service cannot load or enumerate models, the canonical model
@@ -74,5 +82,8 @@ async function handleLlmModelLoadRequest(
   request: FastifyRequest<LlmLoadModelApiRoute>,
   llmModelLoader: LlmModelLoader
 ): Promise<LlmLoadModelApiRoute["Reply"][200]> {
-  return await llmModelLoader.loadLlmModel(request.body.modelId)
+  return await llmModelLoader.loadLlmModel(
+    request.body.modelId,
+    request.body.configuration ?? UNSET_MODEL_LOAD_CONFIGURATION
+  )
 }

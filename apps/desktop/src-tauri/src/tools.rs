@@ -22,6 +22,7 @@ pub mod search_files;
 /// Reads regular UTF-8 text files for both tools.
 mod text_file;
 
-/// Creates and deletes the temporary directory trees used by the tool tests.
+/// Creates and deletes the temporary directory trees used by the tool tests
+/// and by other tests in this crate that need files.
 #[cfg(test)]
-mod test_directory;
+pub(crate) mod test_directory;

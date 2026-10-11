@@ -5,6 +5,7 @@ import {
   type LlmInfo,
   type LlmLoadModelApiResponse
 } from "@lys/protocol"
+import type { ModelLoadConfiguration } from "@lys/share"
 import {
   getLlmModelHealth,
   type LlmModelHealthOutcome
@@ -21,7 +22,10 @@ import type {
   LlmModelStopper
 } from "./llmModelCapabilities"
 import type { LlmEngine } from "./llmEngine"
-import type { DownloadedLlmModel } from "./llmRuntimeTypes"
+import type {
+  DownloadedLlmModel,
+  LoadedLlmModelInstance
+} from "./llmRuntimeTypes"
 
 /**
  * One model operation performed against the connected engine.
@@ -139,6 +143,8 @@ export default class LlmService
    * Implements {@link LlmModelLoader.loadLlmModel} through the queue.
    *
    * @param modelKeyOrAlias - Model key or alias for the connected runtime to resolve.
+   * @param loadConfiguration - Interface-defined load settings, passed to the
+   * connected runtime unchanged.
    * @returns A promise resolving to a validated immutable model snapshot after
    * the runtime loads the model and its canonical key is found in inventory.
    * @throws If loading or inventory fails, response validation fails, or the
@@ -148,13 +154,14 @@ export default class LlmService
    * absent from inventory after loading.
    */
   public async loadLlmModel(
-    modelKeyOrAlias: string
+    modelKeyOrAlias: string,
+    loadConfiguration: ModelLoadConfiguration
   ): Promise<LlmLoadModelApiResponse> {
     return await this.#llmEngineOperationQueue.handleLlmEngineOperationRequest(
       async (llmEngine) =>
         await loadRuntimeLlmModel(
-          modelKeyOrAlias,
-          async (selection) => await llmEngine.loadLlmModel(selection),
+          async () =>
+            await llmEngine.loadLlmModel(modelKeyOrAlias, loadConfiguration),
           async () => await llmEngine.listDownloadedLlmModels()
         )
     )
@@ -232,19 +239,18 @@ async function listLlmModels(
 /**
  * Loads a model and resolves its canonical downloaded-model metadata.
  *
- * @param modelKeyOrAlias - Model key or alias passed to the attached runtime.
- * @param loadLlmModel - Command returning the loaded model's validated identity.
+ * @param loadSelectedLlmModel - Command that loads the requested selection with
+ * its load settings and returns the loaded model's validated identity.
  * @param listDownloadedLlmModels - Query for normalized immutable runtime metadata.
  * @returns A promise resolving to a validated immutable loaded-model snapshot.
  * @throws If loading or inventory fails, metadata is invalid, or the canonical
  * model is absent from downloaded inventory.
  */
 async function loadRuntimeLlmModel(
-  modelKeyOrAlias: string,
-  loadLlmModel: LlmEngine["loadLlmModel"],
+  loadSelectedLlmModel: () => Promise<LoadedLlmModelInstance>,
   listDownloadedLlmModels: LlmEngine["listDownloadedLlmModels"]
 ): Promise<LlmLoadModelApiResponse> {
-  const loadedModelInstance = await loadLlmModel(modelKeyOrAlias)
+  const loadedModelInstance = await loadSelectedLlmModel()
   const downloadedLlmModels = await listDownloadedLlmModels()
   const downloadedLlmModel = downloadedLlmModels.find(
     ({ modelKey }) => modelKey === loadedModelInstance.modelKey

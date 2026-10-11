@@ -25,20 +25,29 @@ type ConversationPanelCommonProps = {
   readonly activity: ConversationActivity
   /** Whether the transcript already displays its latest content. */
   readonly isAtBottom: boolean
+  /**
+   * Name of the agent that answers the conversation, shown on every reply
+   * and named in the pending-work status.
+   */
+  readonly agentName: string
 }
 
 /**
  * Formats the polite status announced for the region's pending work.
  *
  * @param activity - Work the region is waiting on.
+ * @param agentName - Name of the agent that answers the conversation.
  * @returns The announcement, or empty text when nothing is pending.
  */
-function formatConversationActivity(activity: ConversationActivity): string {
+function formatConversationActivity(
+  activity: ConversationActivity,
+  agentName: string
+): string {
   switch (activity) {
     case "idle":
       return ""
     case "generating-reply":
-      return "Lys is generating a reply"
+      return `${agentName} is generating a reply`
     case "opening-conversation":
       return "Opening conversation"
   }
@@ -52,7 +61,8 @@ export type ConversationPanelProps = ConversationPanelCommonProps &
  * Presents the conversation transcript and its navigation affordances.
  *
  * @remarks The parent owns conversation
- * state, transcript position, scrolling, and submission. The panel exposes no
+ * state, transcript position, scrolling, submission, and the name of the
+ * agent that answers. The panel exposes no
  * interruption control, because cancellation must stay reachable in active
  * phases that have no assistant message and is therefore owned by the
  * composer. Starter clicks call `onSendMessage` once and intentionally discard
@@ -75,7 +85,8 @@ export default function ConversationPanel(
     error,
     onSendMessage,
     isAtBottom,
-    activity
+    activity,
+    agentName
   } = props
   const isEmptyConversation =
     props.kind === "completed-only" &&
@@ -87,6 +98,7 @@ export default function ConversationPanel(
         kind="streaming-tail"
         completedMessages={props.completedMessages}
         error={error}
+        speakerName={agentName}
         streamingMessage={props.streamingMessage}
       />
     ) : (
@@ -94,6 +106,7 @@ export default function ConversationPanel(
         kind="completed-only"
         completedMessages={props.completedMessages}
         error={error}
+        speakerName={agentName}
       />
     )
   const conversationBody = isEmptyConversation ? (
@@ -130,7 +143,7 @@ export default function ConversationPanel(
       )}
 
       <span aria-live="polite" className="sr-only" role="status">
-        {formatConversationActivity(activity)}
+        {formatConversationActivity(activity, agentName)}
       </span>
     </section>
   )

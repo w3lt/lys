@@ -8,13 +8,17 @@ import type { ReplyGenerationTaskContext } from "../../../src/modules/chat/reply
  * task stays pending until the case calls {@link ControlledReplyTask.resolve}
  * or {@link ControlledReplyTask.reject}; it does not observe its abort signal
  * unless the case does. A generation starts a task at most once, so a second
- * start rejects. Concurrency model: single-owner, on the test's event loop.
+ * start rejects. `TContext` is the context its generation lends, a reply
+ * task's when the case sends tool calls. Concurrency model: single-owner, on
+ * the test's event loop.
  */
-export default class ControlledReplyTask {
+export default class ControlledReplyTask<
+  TContext extends ReplyGenerationTaskContext = ReplyGenerationTaskContext
+> {
   /** Settlement returned to the generation that started the task. */
   readonly #settlement = Promise.withResolvers<void>()
   /** Context lent by the generation, or undefined before the task started. */
-  #context: ReplyGenerationTaskContext | undefined
+  #context: TContext | undefined
 
   /**
    * Starts the task for the generation that launches it as its reply or title
@@ -26,7 +30,7 @@ export default class ControlledReplyTask {
    * @remarks A case hands the generation a launcher that calls this method,
    * such as `(context) => task.start(context)`.
    */
-  public async start(context: ReplyGenerationTaskContext): Promise<void> {
+  public async start(context: TContext): Promise<void> {
     if (this.#context !== undefined)
       throw new Error("Controlled reply task started twice")
     this.#context = context
@@ -49,7 +53,7 @@ export default class ControlledReplyTask {
    * @throws If the task has not started, so a case that expected a start
    * fails at the point of use.
    */
-  public get context(): ReplyGenerationTaskContext {
+  public get context(): TContext {
     if (this.#context === undefined)
       throw new Error("Controlled reply task has not started")
     return this.#context

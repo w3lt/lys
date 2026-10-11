@@ -1,5 +1,5 @@
-import { useEffect, useRef } from "react"
-import type { ReactElement } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
+import type { ReactElement, RefObject } from "react"
 
 import "./ChatView.scss"
 import ConversationPanel from "@/components/ChatViewComponents/ConversationPanel"
@@ -9,6 +9,10 @@ import {
 } from "@/components/ChatViewComponents/conversation-presentation"
 import ConversationHistoryPanel from "@/components/ConversationHistoryComponents/ConversationHistoryPanel"
 import { Composer } from "@/components/Composer"
+import { useAnsweringAgent } from "@/lib/hooks/answeringAgent"
+import { useLysStore } from "@/lib/store"
+import { useAgentStore } from "@/lib/store/agents"
+import { formatConversationAgentName } from "@/lib/store/agents/conversation-agent"
 import {
   type ChatRequestState,
   type ConversationOpenState,
@@ -111,22 +115,58 @@ function useConversationHistoryShortcut(
 }
 
 /**
+ * Owns the host of the composer's message field and moves focus to it once a
+ * conversation the person started is shown.
+ *
+ * @param startedConversationCount - Reactive count of the conversations the
+ * person started from the chat view; each new value is one start the view
+ * recorded.
+ * @returns The message field host for the caller to attach. The ref keeps its
+ * identity for the view's lifetime, and React sets it while the field is
+ * rendered.
+ * @remarks Focus moves in the layout phase of the commit that shows a started
+ * conversation, not when the start is requested: a conversation whose agent
+ * was deleted disables the field, which can take focus only once the new
+ * conversation is committed. A field that is still disabled then, as while
+ * generation is unavailable, or that is not attached, takes no focus. The
+ * first render moves no focus.
+ */
+function useMessageFieldFocus(
+  startedConversationCount: number
+): RefObject<HTMLTextAreaElement | null> {
+  const messageFieldRef = useRef<HTMLTextAreaElement>(null)
+
+  useLayoutEffect(() => {
+    if (startedConversationCount > 0) messageFieldRef.current?.focus()
+  }, [startedConversationCount])
+
+  return messageFieldRef
+}
+
+/**
  * Presents the conversation transcript, lifecycle feedback, past
  * conversations, and composer.
  *
  * @remarks The chat-view store owns
  * conversation, request, and open state; the history store owns whether past
  * conversations are shown; the surrounding shell owns whether the transcript
- * is pinned to its latest content. The component owns the transcript host ref
- * and the message-field ref. It synchronizes the transcript's scroll position
- * only while the parent says it is pinned and messages exist, forwards starter
- * submission to the store, and politely announces a pending reply or
- * conversation open; request cancellation is owned by the composer, which
- * stays mounted in every request phase. Command+K or Control+K toggles past
- * conversations, which then dim the workspace behind a dialog docked above
- * the composer. Opening a conversation or starting one from that dialog closes
- * it, pins the transcript to its latest content, and moves focus to the
- * message field; the open itself continues in the store. The history dialog is
+ * is pinned to its latest content. The agent store owns the agent list, which
+ * the view reads when it appears and whenever the backend starts running, so
+ * the transcript and the composer can name the agent that answers and tell
+ * when it was deleted; leaving the view cancels nothing. The component owns
+ * the transcript host ref, the message-field ref, and the count of
+ * conversations the person started from it. It synchronizes the transcript's
+ * scroll position only while the parent says it is pinned and messages exist,
+ * forwards starter submission to the store, and politely announces a pending
+ * reply or conversation open; request cancellation is owned by the composer,
+ * which stays mounted in every request phase. Command+K or Control+K toggles
+ * past conversations, which then dim the workspace behind a dialog docked
+ * above the composer. Opening a conversation from that dialog closes it, pins
+ * the transcript to its latest content, and moves focus to the message field;
+ * the open itself continues in the store. Starting a conversation, from that
+ * dialog or from the composer's deleted-agent notice, closes the dialog, pins
+ * the transcript, and moves focus to the message field once the new
+ * conversation is shown, when the field can take it. The history dialog is
  * loaded eagerly because it is small and opening it must not wait on a module
  * load. The initial empty conversation is a valid state and renders through
  * the starter view rather than a loading placeholder.
@@ -153,16 +193,24 @@ export default function ChatView({
   const closeConversationHistory = useConversationHistoryStore(
     (state) => state.closeConversationHistory
   )
+  const backendStatus = useLysStore((state) => state.backendServerInfo.status)
+  const loadAgents = useAgentStore((state) => state.loadAgents)
+  const agentName = formatConversationAgentName(useAnsweringAgent())
   const messages = conversation?.messages ?? EMPTY_CONVERSATION_MESSAGES
   const presentation = createConversationPresentation(messages)
   const transcriptRef = useRef<HTMLDivElement>(null)
-  const messageFieldRef = useRef<HTMLTextAreaElement>(null)
+  const [startedConversationCount, setStartedConversationCount] = useState(0)
+  const messageFieldRef = useMessageFieldFocus(startedConversationCount)
   const activity = calculateConversationActivity(request, conversationOpen)
   useConversationHistoryShortcut(
     historyVisibility.status === "open",
     openConversationHistory,
     closeConversationHistory
   )
+
+  useEffect(() => {
+    if (backendStatus === "running") void loadAgents()
+  }, [backendStatus, loadAgents])
 
   useEffect(() => {
     const element = transcriptRef.current
@@ -203,12 +251,15 @@ export default function ChatView({
     void openConversation(conversationId)
   }
 
-  /** Closes history and starts a new, empty conversation. */
+  /**
+   * Closes history, starts a new, empty conversation, and records the start,
+   * which moves focus to the message field once the conversation is shown.
+   */
   function handleStartConversation(): void {
     closeConversationHistory()
     resetConversation()
     onScrollPositionChange(true)
-    messageFieldRef.current?.focus()
+    setStartedConversationCount((count) => count + 1)
   }
 
   return (
@@ -216,6 +267,7 @@ export default function ChatView({
       <ConversationPanel
         {...presentation}
         activity={activity}
+        agentName={agentName}
         error={error}
         isAtBottom={atBottom}
         onJumpToLatest={handleJumpToLatest}
@@ -235,7 +287,10 @@ export default function ChatView({
           </div>
         </>
       ) : null}
-      <Composer messageFieldRef={messageFieldRef} />
+      <Composer
+        messageFieldRef={messageFieldRef}
+        onStartConversation={handleStartConversation}
+      />
     </main>
   )
 }

@@ -14,7 +14,7 @@ definitions, a small JSON settings file, and one desktop theme preference.
 | Artifact         | Owner           | Location                                | Purpose                                                                        |
 | ---------------- | --------------- | --------------------------------------- | ------------------------------------------------------------------------------ |
 | Backend database | Fastify backend | `$LYS_HOME/lys_db.sqlite`               | Stores conversation metadata, conversation messages, and agent definitions.    |
-| Settings JSON    | Tauri host      | `$LYS_HOME/settings.json`               | Stores runtime, model, and generation settings.                                |
+| Settings JSON    | Tauri host      | `$LYS_HOME/settings.json`               | Stores runtime, model, generation, and load configuration settings.            |
 | Theme preference | Desktop UI      | WebView `localStorage`, key `lys.theme` | Stores `dark` or `light`; invalid or unavailable storage falls back to `dark`. |
 
 ## SQLite ownership
@@ -57,8 +57,9 @@ records it declares in `records.ts`. Unlike the conversation records, the
 agent records are one interface: the service is their only consumer and uses
 all five operations, while the routes receive narrow capabilities of the
 service instead. The service is not a database service: it also owns the
-built-in Lys, which is never stored, and refuses to store another agent under
-Lys's code `lys`. It is decorated as `app.agentService`; the agent routes in
+built-in agents Caliginia and Lysiptera, which are never stored, and refuses
+to store another agent under their codes `caliginia` and `lysiptera`. It is
+decorated as `app.agentService`; the agent routes in
 `src/modules/agent/routes/` and the chat route call it.
 Every borrowed operation fails once the database closes,
 and the database remains open until every reply generation has stored its final
@@ -72,7 +73,7 @@ On startup the database owner:
 1. Opens the SQLite file with foreign keys enabled.
 2. Acquires a write transaction and reads `PRAGMA user_version`.
 3. Rejects unsupported future versions or applies each missing migration in order.
-4. Records version 7 and commits; a migration failure rolls back all pending work.
+4. Records version 8 and commits; a migration failure rolls back all pending work.
 5. Switches to write-ahead logging with `synchronous = NORMAL`. A database from
    a newer version was refused in step 3, before anything changed its file.
 6. Turns on write protection, which only a write transaction lifts.
@@ -109,10 +110,13 @@ its first use and reused; each delta runs in one write transaction.
 The settings JSON is a separate host-managed artifact. The backend does not read
 it directly. The desktop reaches it through Tauri commands.
 
-Generation edits are saved automatically. Each save reads the document already
-on disk and replaces only its `generation` group, preserving the persisted
-runtime and model groups. Runtime edits, including auto-start and default-model
-selection, and model settings edits remain session-only in the desktop.
+Generation and load configuration edits are saved automatically. Each save
+reads the document already on disk and replaces only its own part, preserving
+the rest: a generation save replaces the `generation` group, and a load
+configuration save replaces `loadConfiguration.models` and keeps
+`loadConfiguration.default`, which only a hand edit changes. Runtime edits, including auto-start and
+default-model selection, and `model.contextSize` edits remain session-only in
+the desktop.
 See the [configuration reference](/reference/configuration/#persisted-settings-json)
 for the current shape and defaults.
 

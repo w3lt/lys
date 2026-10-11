@@ -1,5 +1,8 @@
 import type { ConversationMessage } from "@lys/share"
-import type { ReplyContextMessage } from "./replyModel"
+import type { ContextToolCall, ReplyContextMessage } from "./replyModel"
+
+/** Tool calls of a stored reply, which never carries any. */
+const NO_CONTEXT_TOOL_CALLS: readonly ContextToolCall[] = Object.freeze([])
 
 /**
  * Selects stored messages that can supply conversation context.
@@ -13,6 +16,26 @@ function shouldIncludeContextMessage(message: ConversationMessage): boolean {
 }
 
 /**
+ * Builds the context message of one stored message.
+ * @param message - Stored user message or assistant reply.
+ * @returns Its role and text; a reply carries no tool calls.
+ */
+function buildStoredContextMessage(
+  message: ConversationMessage
+): ReplyContextMessage {
+  switch (message.role) {
+    case "user":
+      return { role: "user", content: message.content }
+    case "assistant":
+      return {
+        role: "assistant",
+        content: message.content,
+        toolCalls: NO_CONTEXT_TOOL_CALLS
+      }
+  }
+}
+
+/**
  * Builds the context an agent sends to its model for one turn.
  * @param systemPrompt - The agent's own instructions, sent first.
  * @param history - Stored transcript before the turn, in conversation order.
@@ -20,7 +43,7 @@ function shouldIncludeContextMessage(message: ConversationMessage): boolean {
  * @returns The system prompt, the history's user messages, completed replies,
  * and nonempty interrupted replies in order, then the new message once. Failed,
  * streaming, and empty replies are left out; each message keeps only its role
- * and text.
+ * and text, and a reply carries no tool calls.
  */
 export function buildAgentContext(
   systemPrompt: string,
@@ -31,7 +54,7 @@ export function buildAgentContext(
     { role: "system", content: systemPrompt },
     ...history
       .filter(shouldIncludeContextMessage)
-      .map(({ role, content }) => ({ role, content })),
+      .map(buildStoredContextMessage),
     { role: "user", content: userMessageContent }
   ]
 }

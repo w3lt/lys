@@ -273,11 +273,29 @@ function calculatePassageScores(
 }
 
 /**
+ * Calculates how much one passage adds to the selected text.
+ *
+ * @param passage - Passage being added.
+ * @param selectedCount - Number of passages already selected.
+ * @returns The passage's length, plus the separator before it unless it is
+ * the first.
+ */
+function calculateAddedPassageLength(
+  passage: PagePassage,
+  selectedCount: number
+): number {
+  return (
+    passage.text.length + (selectedCount === 0 ? 0 : BLOCK_SEPARATOR.length)
+  )
+}
+
+/**
  * Selects passages in a given priority order until the length limit.
  *
  * @param passages - Passages in priority order.
  * @returns The passages that fit {@link MAXIMUM_SELECTED_PASSAGE_LENGTH},
- * separators included, in page order.
+ * separators included, in page order. A passage that does not fit is
+ * skipped, and a later one that fits is still selected.
  */
 function selectFittingPassages(
   passages: readonly PagePassage[]
@@ -285,8 +303,7 @@ function selectFittingPassages(
   const selected: PagePassage[] = []
   let selectedLength = 0
   for (const passage of passages) {
-    const addedLength =
-      passage.text.length + (selected.length === 0 ? 0 : BLOCK_SEPARATOR.length)
+    const addedLength = calculateAddedPassageLength(passage, selected.length)
     if (selectedLength + addedLength > MAXIMUM_SELECTED_PASSAGE_LENGTH) continue
     selected.push(passage)
     selectedLength += addedLength
@@ -294,6 +311,29 @@ function selectFittingPassages(
   return Object.freeze(
     selected.toSorted((first, second) => first.index - second.index)
   )
+}
+
+/**
+ * Selects the passages at the start of a page until the length limit.
+ *
+ * @param passages - Passages of the page in page order.
+ * @returns The first passages that fit
+ * {@link MAXIMUM_SELECTED_PASSAGE_LENGTH} together, separators included,
+ * ending before the first passage that does not, so no passage before the
+ * last one selected is left out.
+ */
+function selectLeadingPassages(
+  passages: readonly PagePassage[]
+): readonly PagePassage[] {
+  const selected: PagePassage[] = []
+  let selectedLength = 0
+  for (const passage of passages) {
+    const addedLength = calculateAddedPassageLength(passage, selected.length)
+    if (selectedLength + addedLength > MAXIMUM_SELECTED_PASSAGE_LENGTH) break
+    selected.push(passage)
+    selectedLength += addedLength
+  }
+  return Object.freeze(selected)
 }
 
 /**
@@ -329,7 +369,7 @@ function buildBeginningSelection(
   })
   return Object.freeze({
     coverage,
-    passages: selectFittingPassages(passages),
+    passages: selectLeadingPassages(passages),
     passageCount: passages.length
   })
 }

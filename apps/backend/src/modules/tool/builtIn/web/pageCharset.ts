@@ -16,6 +16,20 @@ const META_ELEMENT_PATTERN = /<meta[^>]*/gi
 /** Finds the charset label declared in the text of one `<meta>` element. */
 const META_CHARSET_PATTERN = /charset\s*=\s*(?:["']\s*)?([\w.:-]+)/i
 
+/**
+ * Encodings a `<meta>` element names but cannot be in force, each mapped to
+ * the encoding browsers decode with instead.
+ *
+ * @remarks Markup whose `<meta>` element reads as ASCII is not UTF-16, and
+ * `x-user-defined` is not meant for pages. The HTML encoding prescan maps
+ * these the same way.
+ */
+const META_CHARSET_REPLACEMENTS: ReadonlyMap<string, string> = new Map([
+  ["utf-16le", "utf-8"],
+  ["utf-16be", "utf-8"],
+  ["x-user-defined", "windows-1252"]
+])
+
 /** Byte order marks and the encoding each one names, checked in order. */
 const BYTE_ORDER_MARKS: readonly (readonly [
   marker: readonly number[],
@@ -63,17 +77,33 @@ function findMetaCharset(bytes: Uint8Array): string | undefined {
  * Creates a decoder for an encoding label.
  *
  * @param label - Encoding label from a header, a `<meta>` element, or a byte
- * order mark.
- * @returns A non-fatal decoder, or undefined when the label names no
- * encoding the runtime supports.
+ * order mark; undefined when the source names none.
+ * @returns A non-fatal decoder, or undefined when there is no label or it
+ * names no encoding the runtime supports.
  */
-function createPageDecoder(label: string): TextDecoder | undefined {
+function createPageDecoder(label: string | undefined): TextDecoder | undefined {
+  if (label === undefined) return undefined
   try {
     return new TextDecoder(label)
   } catch (error) {
     if (error instanceof RangeError) return undefined
     throw error
   }
+}
+
+/**
+ * Creates a decoder for the charset an HTML body's `<meta>` element names.
+ *
+ * @param bytes - HTML body bytes.
+ * @returns A non-fatal decoder for the named encoding, or for the encoding
+ * {@link META_CHARSET_REPLACEMENTS} uses instead; undefined when no
+ * `<meta>` element names a charset the runtime supports.
+ */
+function createMetaCharsetDecoder(bytes: Uint8Array): TextDecoder | undefined {
+  const decoder = createPageDecoder(findMetaCharset(bytes))
+  if (decoder === undefined) return undefined
+  const replacement = META_CHARSET_REPLACEMENTS.get(decoder.encoding)
+  return replacement === undefined ? decoder : new TextDecoder(replacement)
 }
 
 /**
@@ -86,24 +116,20 @@ function createPageDecoder(label: string): TextDecoder | undefined {
  * `<meta>` charset.
  * @returns The text. The encoding is chosen as browsers do: a byte order
  * mark first, then the header's charset, then, for HTML, a `<meta>` charset
- * in the first 1,024 bytes, and UTF-8 otherwise. An unsupported label falls
- * through to the next source. Invalid bytes become replacement characters.
+ * in the first 1,024 bytes, and UTF-8 otherwise. A `<meta>` charset of
+ * UTF-16 decodes as UTF-8, and one of `x-user-defined` as windows-1252. An
+ * unsupported label falls through to the next source. Invalid bytes become
+ * replacement characters.
  */
 export function decodePageText(
   bytes: Uint8Array,
   headerCharset: string | undefined,
   mediaType: PageMediaType
 ): string {
-  const metaCharset =
-    mediaType === "text/html" ? findMetaCharset(bytes) : undefined
-  const declaredLabels = [
-    findByteOrderMarkEncoding(bytes),
-    headerCharset,
-    metaCharset
-  ]
-  for (const label of declaredLabels) {
-    const decoder = label === undefined ? undefined : createPageDecoder(label)
-    if (decoder !== undefined) return decoder.decode(bytes)
-  }
-  return new TextDecoder(DEFAULT_PAGE_ENCODING).decode(bytes)
+  const decoder =
+    createPageDecoder(findByteOrderMarkEncoding(bytes)) ??
+    createPageDecoder(headerCharset) ??
+    (mediaType === "text/html" ? createMetaCharsetDecoder(bytes) : undefined) ??
+    new TextDecoder(DEFAULT_PAGE_ENCODING)
+  return decoder.decode(bytes)
 }

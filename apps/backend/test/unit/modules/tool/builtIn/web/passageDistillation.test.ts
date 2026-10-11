@@ -145,6 +145,25 @@ describe("selectPagePassages", () => {
     expect(selection.passageCount).toBe(30)
   })
 
+  it("stops reading the beginning at the first passage that does not fit", () => {
+    const longPassages = buildFillerPassages(11)
+    const shortPassage: PagePassage = { index: 11, text: "Moths rest." }
+    const passages = [...longPassages, shortPassage]
+
+    const selection = selectPagePassages(passages, undefined)
+
+    expect(calculateShownLength(longPassages.slice(0, 10))).toBeLessThanOrEqual(
+      MAXIMUM_SELECTED_PASSAGE_LENGTH
+    )
+    expect(
+      calculateShownLength([...longPassages.slice(0, 10), shortPassage])
+    ).toBeLessThanOrEqual(MAXIMUM_SELECTED_PASSAGE_LENGTH)
+    expect(calculateShownLength(longPassages)).toBeGreaterThan(
+      MAXIMUM_SELECTED_PASSAGE_LENGTH
+    )
+    expect(selection.passages).toEqual(longPassages.slice(0, 10))
+  })
+
   it("selects the passages that best match the focus, in page order", () => {
     const passages = buildFillerPassages(30, {
       7: "Caterpillars eat leaves; caterpillars grow fast.",

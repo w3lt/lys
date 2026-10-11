@@ -20,6 +20,12 @@ const PAGE_CONTENT_START = "<<<page content>>>"
 /** Line that closes the page content. */
 const PAGE_CONTENT_END = "<<<end of page content>>>"
 
+/**
+ * Finds each run of three or more `<`, or of three or more `>`: the brackets
+ * that open and close both content delimiters.
+ */
+const DELIMITER_BRACKET_RUN_PATTERN = /<{3,}|>{3,}/g
+
 /** Line that stands between passages that are not next to each other. */
 const PASSAGE_GAP = "[…]"
 
@@ -49,30 +55,30 @@ const SHORT_PAGE_NOTE =
   "Note: the page has little text. If it should show more, it may need JavaScript, which Lys cannot run."
 
 /**
- * Removes the content delimiters from page text, so a page cannot close its
- * own content early and speak outside it.
+ * Formats page text so that it cannot hold a content delimiter, so a page
+ * cannot close its own content early and speak outside it.
  *
  * @param text - Untrusted page text.
- * @returns The text without either delimiter.
+ * @returns The text with every run of three or more `<` or `>` shortened to
+ * two brackets. No delimiter can remain in any spelling, nested, spaced, or
+ * in another case, and shortening a run never joins two others.
  */
-function removeContentDelimiters(text: string): string {
-  return text
-    .replaceAll(PAGE_CONTENT_START, "")
-    .replaceAll(PAGE_CONTENT_END, "")
+function formatDelimiterFreeText(text: string): string {
+  return text.replace(DELIMITER_BRACKET_RUN_PATTERN, (run) => run.slice(0, 2))
 }
 
 /**
  * Formats one field shown on a single line.
  *
  * @param text - Untrusted title, site name, or date.
- * @returns The text on one line, without delimiters, cut to
+ * @returns The text on one line, unable to hold a delimiter, cut to
  * {@link MAXIMUM_PAGE_FIELD_LENGTH} code units.
  */
 function formatPageField(text: string): string {
-  return removeContentDelimiters(text)
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, MAXIMUM_PAGE_FIELD_LENGTH)
+  return formatDelimiterFreeText(text.replace(/\s+/g, " ").trim()).slice(
+    0,
+    MAXIMUM_PAGE_FIELD_LENGTH
+  )
 }
 
 /**
@@ -129,7 +135,7 @@ function formatPassageText(selection: PassageSelection): string {
   let nextIndex = 0
   for (const passage of selection.passages) {
     if (passage.index > nextIndex) parts.push(PASSAGE_GAP)
-    parts.push(removeContentDelimiters(passage.text))
+    parts.push(formatDelimiterFreeText(passage.text))
     nextIndex = passage.index + 1
   }
   if (nextIndex < selection.passageCount) parts.push(PASSAGE_GAP)
@@ -137,40 +143,64 @@ function formatPassageText(selection: PassageSelection): string {
 }
 
 /**
- * Formats the text the model reads after reading one page.
+ * Formats the lines Lys writes about a page it read.
  *
  * @param input - Page URL, article, selected passages, and truncation.
- * @returns The page's title, URL, site, and date; how much of it was read,
- * with a note when the page was cut or has little text; the passages between
- * delimiters that mark them as untrusted page content; and how to cite the
- * page.
- * @remarks Page text is untrusted: the delimiters are removed from it, and
- * single-line fields are flattened and cut, so the page cannot end its
- * content early or add lines of its own outside it.
+ * @returns The page's URL, how much of it was read, and a note when the page
+ * was cut or has little text, one per line.
  */
-export function formatPageEvidence(input: PageEvidenceInput): string {
+function formatReadLines(input: PageEvidenceInput): string {
   const { article, selection } = input
-  const lines = [`Page: ${formatPageField(article.title)}`, `URL: ${input.url}`]
+  const lines = [
+    `URL: ${input.url}`,
+    formatCoverageLine(
+      selection.coverage,
+      selection.passages.length,
+      selection.passageCount
+    )
+  ]
+  if (input.isTruncated) lines.push(TRUNCATION_NOTE)
+  if (isShortPage(article)) lines.push(SHORT_PAGE_NOTE)
+  return lines.join("\n")
+}
+
+/**
+ * Formats the lines that give what the page says about itself.
+ *
+ * @param article - Article whose title, site, and date the page stated.
+ * @returns The title, and the site and date when the page states them, one
+ * per line, each flattened and cut by {@link formatPageField}.
+ */
+function formatPageFieldLines(article: PageArticle): string {
+  const lines = [`Page: ${formatPageField(article.title)}`]
   if (article.siteName !== undefined) {
     lines.push(`Site: ${formatPageField(article.siteName)}`)
   }
   if (article.publishedTime !== undefined) {
     lines.push(`Published: ${formatPageField(article.publishedTime)}`)
   }
-  lines.push(
-    formatCoverageLine(
-      selection.coverage,
-      selection.passages.length,
-      selection.passageCount
-    )
-  )
-  if (input.isTruncated) lines.push(TRUNCATION_NOTE)
-  if (isShortPage(article)) lines.push(SHORT_PAGE_NOTE)
+  return lines.join("\n")
+}
+
+/**
+ * Formats the text the model reads after reading one page.
+ *
+ * @param input - Page URL, article, selected passages, and truncation.
+ * @returns The page's URL and how much of it was read, with a note when the
+ * page was cut or has little text; then, between delimiters that mark them
+ * as untrusted page content, the page's title, site, and date and the
+ * passages; and how to cite the page.
+ * @remarks Everything the page wrote, its title, site, and date included,
+ * sits between the delimiters, and none of it can hold a delimiter, so the
+ * page cannot end its content early and speak outside it.
+ */
+export function formatPageEvidence(input: PageEvidenceInput): string {
   return [
-    lines.join("\n"),
+    formatReadLines(input),
     UNTRUSTED_CONTENT_NOTICE,
     PAGE_CONTENT_START,
-    formatPassageText(selection),
+    formatPageFieldLines(input.article),
+    formatPassageText(input.selection),
     PAGE_CONTENT_END,
     CITATION_INSTRUCTION
   ].join("\n\n")

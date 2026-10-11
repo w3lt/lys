@@ -3,16 +3,14 @@ import { brotliCompressSync, deflateSync, gzipSync } from "node:zlib"
 import { describe, expect, it } from "vitest"
 import {
   getWebPage,
-  MAXIMUM_PAGE_BODY_BYTES,
-  MAXIMUM_PAGE_REDIRECTS
+  MAXIMUM_PAGE_BODY_BYTES
 } from "../../../../../../src/modules/tool/builtIn/web/pageRequest"
 import { isBlockedAddress } from "../../../../../../src/modules/tool/builtIn/web/webAddresses"
 import {
   answerWithBody,
   buildTestPageUrl,
   PAGE_SERVER_DEPENDENCIES,
-  startPageServer,
-  type PageRoute
+  startPageServer
 } from "../../../../support/pageServer"
 
 /**
@@ -26,24 +24,6 @@ async function findClosedLoopbackPort(): Promise<number> {
   const { port } = server.address() as AddressInfo
   await new Promise<void>((resolve) => server.close(() => resolve()))
   return port
-}
-
-/**
- * Builds a route that redirects `/n` to `/n+1` a given number of times
- * before answering.
- *
- * @param redirectCount - Redirects before the page answers, starting at `/0`.
- * @returns The route.
- */
-function answerAfterRedirects(redirectCount: number): PageRoute {
-  return (request, response) => {
-    const hop = Number(request.url?.slice(1))
-    if (hop < redirectCount) {
-      response.writeHead(302, { location: `/${hop + 1}` }).end()
-      return
-    }
-    answerWithBody("text/plain", "arrived")(request, response)
-  }
 }
 
 describe("getWebPage", () => {
@@ -87,7 +67,7 @@ describe("getWebPage", () => {
     })
   })
 
-  it("names Lys and accepts compressed bodies, sending no cookie", async () => {
+  it("names Lys and accepts gzip and Brotli bodies, sending no cookie", async () => {
     const server = await startPageServer(answerWithBody("text/plain", "ok"))
 
     await getWebPage(
@@ -99,7 +79,7 @@ describe("getWebPage", () => {
     expect(server.receivedHeaders[0]).toMatchObject({
       "user-agent":
         "Mozilla/5.0 (compatible; Lys; +https://github.com/w3lt/lys)",
-      "accept-encoding": "gzip, deflate, br"
+      "accept-encoding": "gzip, br"
     })
     expect(server.receivedHeaders[0]).not.toHaveProperty("cookie")
   })
@@ -107,7 +87,6 @@ describe("getWebPage", () => {
   it.each([
     ["gzip", gzipSync("compressed page")],
     ["x-gzip", gzipSync("compressed page")],
-    ["deflate", deflateSync("compressed page")],
     ["br", brotliCompressSync("compressed page")]
   ])("decompresses a %s body", async (encoding, body) => {
     const server = await startPageServer(
@@ -126,22 +105,28 @@ describe("getWebPage", () => {
     })
   })
 
-  it("reports a compression Lys does not decode", async () => {
-    const server = await startPageServer(
-      answerWithBody("text/plain", "x", { "content-encoding": "compress" })
-    )
+  it.each([
+    ["compress", Buffer.from("x")],
+    ["deflate", deflateSync("compressed page")]
+  ])(
+    "reports a %s body as a compression Lys does not decode",
+    async (encoding, body) => {
+      const server = await startPageServer(
+        answerWithBody("text/plain", body, { "content-encoding": encoding })
+      )
 
-    const result = await getWebPage(
-      buildTestPageUrl(server.port, "/"),
-      new AbortController().signal,
-      PAGE_SERVER_DEPENDENCIES
-    )
+      const result = await getWebPage(
+        buildTestPageUrl(server.port, "/"),
+        new AbortController().signal,
+        PAGE_SERVER_DEPENDENCIES
+      )
 
-    expect(result).toEqual({
-      status: "failed",
-      failure: { kind: "unsupported-encoding", encoding: "compress" }
-    })
-  })
+      expect(result).toEqual({
+        status: "failed",
+        failure: { kind: "unsupported-encoding", encoding }
+      })
+    }
+  )
 
   it("reports a body that cannot be decompressed as a failed transfer", async () => {
     const server = await startPageServer(
@@ -196,54 +181,62 @@ describe("getWebPage", () => {
     )
   })
 
-  it("follows a relative redirect and reports the final URL", async () => {
-    const server = await startPageServer((request, response) => {
-      if (request.url === "/old") {
-        response.writeHead(301, { location: "/new" }).end()
-        return
-      }
-      answerWithBody("text/plain", `at ${request.url}`)(request, response)
+  it.each([301, 302, 303, 307, 308])(
+    "reports where a %i redirect points, resolved against the page, without requesting it",
+    async (status) => {
+      const server = await startPageServer((request, response) => {
+        if (request.url === "/old") {
+          response.writeHead(status, { location: "/new" }).end()
+          return
+        }
+        answerWithBody("text/plain", `at ${request.url}`)(request, response)
+      })
+
+      const result = await getWebPage(
+        buildTestPageUrl(server.port, "/old"),
+        new AbortController().signal,
+        PAGE_SERVER_DEPENDENCIES
+      )
+
+      expect(result).toEqual({
+        status: "failed",
+        failure: {
+          kind: "redirected",
+          location: buildTestPageUrl(server.port, "/new")
+        }
+      })
+      expect(server.receivedHeaders).toHaveLength(1)
+    }
+  )
+
+  it("reports a redirect to another host without requesting it", async () => {
+    const server = await startPageServer((_request, response) => {
+      response
+        .writeHead(302, { location: "https://elsewhere.example/page?id=1" })
+        .end()
     })
+    const lookedUpHosts: string[] = []
 
     const result = await getWebPage(
-      buildTestPageUrl(server.port, "/old"),
+      buildTestPageUrl(server.port, "/"),
       new AbortController().signal,
-      PAGE_SERVER_DEPENDENCIES
+      {
+        ...PAGE_SERVER_DEPENDENCIES,
+        lookupHostAddresses: (hostname) => {
+          lookedUpHosts.push(hostname)
+          return PAGE_SERVER_DEPENDENCIES.lookupHostAddresses(hostname)
+        }
+      }
     )
 
-    expect(result).toMatchObject({
-      status: "succeeded",
-      page: { url: buildTestPageUrl(server.port, "/new"), text: "at /new" }
-    })
-  })
-
-  it("follows the maximum number of redirects and refuses one more", async () => {
-    const withinLimitServer = await startPageServer(
-      answerAfterRedirects(MAXIMUM_PAGE_REDIRECTS)
-    )
-    const pastLimitServer = await startPageServer(
-      answerAfterRedirects(MAXIMUM_PAGE_REDIRECTS + 1)
-    )
-
-    const withinLimit = await getWebPage(
-      buildTestPageUrl(withinLimitServer.port, "/0"),
-      new AbortController().signal,
-      PAGE_SERVER_DEPENDENCIES
-    )
-    const pastLimit = await getWebPage(
-      buildTestPageUrl(pastLimitServer.port, "/0"),
-      new AbortController().signal,
-      PAGE_SERVER_DEPENDENCIES
-    )
-
-    expect(withinLimit).toMatchObject({
-      status: "succeeded",
-      page: { text: "arrived" }
-    })
-    expect(pastLimit).toEqual({
+    expect(result).toEqual({
       status: "failed",
-      failure: { kind: "too-many-redirects" }
+      failure: {
+        kind: "redirected",
+        location: "https://elsewhere.example/page?id=1"
+      }
     })
+    expect(lookedUpHosts).not.toContain("elsewhere.example")
   })
 
   it.each([

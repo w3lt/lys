@@ -110,9 +110,9 @@ describe("extractPageArticle", () => {
     expect(text).not.toContain("noscript text")
   })
 
-  it("keeps the line breaks of preformatted text", () => {
+  it("keeps the line breaks of preformatted text, <br> included", () => {
     const html = buildArticleHtml(
-      `<p>${ARTICLE_PARAGRAPH}</p><pre>first line   \nsecond line</pre>`
+      `<p>${ARTICLE_PARAGRAPH}</p><pre>first line   \nsecond line<br>third line</pre>`
     )
 
     const result = extractPageArticle(buildPage("text/html", html))
@@ -121,8 +121,23 @@ describe("extractPageArticle", () => {
       result.status === "extracted" && result.article.blocks
     ).toContainEqual({
       kind: "text",
-      text: "first line\nsecond line"
+      text: "first line\nsecond line\nthird line"
     })
+  })
+
+  it("keeps the words around a <br> and a nested block apart", () => {
+    const html = buildArticleHtml(
+      `<p>${ARTICLE_PARAGRAPH}</p><p>Call us<br>Mon to Fri<br>9 to 5</p><ul><li>Parent<ul><li>Child</li></ul></li><li>Other</li></ul>`
+    )
+
+    const result = extractPageArticle(buildPage("text/html", html))
+
+    expect(result.status === "extracted" && result.article.blocks).toEqual([
+      { kind: "text", text: ARTICLE_PARAGRAPH },
+      { kind: "text", text: "Call us Mon to Fri 9 to 5" },
+      { kind: "text", text: "- Parent Child" },
+      { kind: "text", text: "- Other" }
+    ])
   })
 
   it("makes loose text between elements a block of its own", () => {
@@ -232,6 +247,26 @@ describe("extractPageArticle", () => {
           }
         ]
       }
+    })
+  })
+
+  it("reads markup with exactly as many start tags as the element limit", () => {
+    const openingTags = "<html><head></head><body>"
+    const paragraphCount = MAXIMUM_PAGE_ELEMENTS - 3
+    const html = `<!doctype html>${openingTags}${`<p>${ARTICLE_SENTENCE}</p>`.repeat(paragraphCount)}</body></html>`
+
+    expect(extractPageArticle(buildPage("text/html", html)).status).toBe(
+      "extracted"
+    )
+  })
+
+  it("refuses deeply nested markup past the element limit before parsing it", () => {
+    // Parsing this many unclosed elements takes tens of seconds, so the
+    // test's time limit fails it if the markup is parsed.
+    const html = `<!doctype html><html><body>${"<div>".repeat(320_000)}${ARTICLE_PARAGRAPH}</body></html>`
+
+    expect(extractPageArticle(buildPage("text/html", html))).toEqual({
+      status: "too-complex"
     })
   })
 

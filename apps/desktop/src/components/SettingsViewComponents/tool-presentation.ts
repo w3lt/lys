@@ -83,9 +83,9 @@ const TOOL_RUNNER_PRESENTATIONS = Object.freeze({
     note: "Handled by the Lys app on this machine. Works whichever runtime you point Lys at, and stops when you close Lys."
   }),
   backend: Object.freeze({
-    label: "via runtime",
+    label: "in backend",
     title: "Runs in Lys’s backend",
-    heading: "Runs via runtime",
+    heading: "Runs in Lys’s backend",
     note: "Handled by Lys’s backend, which sends the request from wherever it runs. Works while the backend runs."
   })
 } satisfies Readonly<Record<ToolRunner, ToolRunnerPresentation>>)

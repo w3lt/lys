@@ -8,7 +8,7 @@ import {
 import { request as requestHttps } from "node:https"
 import type { LookupFunction, Socket } from "node:net"
 import type { Readable, Transform } from "node:stream"
-import { createBrotliDecompress, createGunzip, createInflate } from "node:zlib"
+import { createBrotliDecompress, createGunzip } from "node:zlib"
 import { decodePageText, type PageMediaType } from "./pageCharset"
 import {
   parsePageUrl,
@@ -58,7 +58,7 @@ export type PageRequestDependencies = Readonly<{
   /** Answers whether Lys must not connect to an address. */
   isBlockedAddress: (address: string) => boolean
   /**
-   * Most milliseconds the whole request may take, redirects and body
+   * Most milliseconds the whole request may take, connection and body
    * included; a positive integer.
    */
   requestTimeoutMs: number
@@ -66,7 +66,7 @@ export type PageRequestDependencies = Readonly<{
 
 /** A page body Lys read. */
 export type PageResponse = Readonly<{
-  /** URL the body came from, after every redirect. */
+  /** URL the body came from, which is the URL requested. */
   url: PageUrl
   /** Media type of the body. */
   mediaType: PageMediaType
@@ -90,14 +90,19 @@ export type PageRequestFailure =
       kind: "unresolvable-host"
     }>
   | Readonly<{
-      /** A redirect pointed somewhere Lys may not request. */
+      /**
+       * The page redirects to a URL that passes the page URL rules. Lys
+       * follows no redirect, so the target is not requested.
+       */
+      kind: "redirected"
+      /** Where the page redirects to. */
+      location: PageUrl
+    }>
+  | Readonly<{
+      /** The page redirects somewhere Lys may not request. */
       kind: "invalid-redirect"
       /** Why the redirect target may not be requested. */
       problem: PageUrlProblem
-    }>
-  | Readonly<{
-      /** The page redirected more than {@link MAXIMUM_PAGE_REDIRECTS} times. */
-      kind: "too-many-redirects"
     }>
   | Readonly<{
       /** The request took longer than its time limit. */
@@ -146,13 +151,10 @@ export type PageRequestResult =
       failure: PageRequestFailure
     }>
 
-/** Most redirects one request follows, inclusive. */
-export const MAXIMUM_PAGE_REDIRECTS = 5
-
 /** Most decompressed body bytes read from one page, inclusive. */
 export const MAXIMUM_PAGE_BODY_BYTES = 4 * 1024 * 1024
 
-/** Status codes whose `Location` header Lys follows. */
+/** Status codes that redirect to the URL their `Location` header names. */
 const REDIRECT_STATUSES: ReadonlySet<number> = new Set([
   301, 302, 303, 307, 308
 ])
@@ -168,13 +170,14 @@ const PAGE_MEDIA_TYPES: ReadonlyMap<string, PageMediaType> = new Map([
  * Headers sent with every page request.
  *
  * @remarks The user agent names Lys and links to its source, in the form
- * sites already expect from automated readers. No cookie or credential is
- * ever sent.
+ * sites already expect from automated readers. Only gzip and Brotli are
+ * accepted, because servers send `deflate` in two incompatible forms. No
+ * cookie or credential is ever sent.
  */
 const PAGE_REQUEST_HEADERS = Object.freeze({
   "user-agent": "Mozilla/5.0 (compatible; Lys; +https://github.com/w3lt/lys)",
   accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.1",
-  "accept-encoding": "gzip, deflate, br"
+  "accept-encoding": "gzip, br"
 })
 
 /** A request failure Lys recognizes, carried through Node's error channels. */
@@ -500,8 +503,6 @@ function openDecodedBody(
     case "gzip":
     case "x-gzip":
       return pipeDecompressedBody(response, createGunzip())
-    case "deflate":
-      return pipeDecompressedBody(response, createInflate())
     case "br":
       return pipeDecompressedBody(response, createBrotliDecompress())
     default:
@@ -602,38 +603,52 @@ async function readPageResponse(
 }
 
 /**
- * Requests a page, following redirects that pass the page URL rules.
+ * Builds the outcome of a response that redirects.
  *
- * @param url - Checked page URL.
- * @param signal - Aborts the request on Stop or when its time is up.
- * @param dependencies - Lookup and address rule.
- * @returns The page, or why it cannot be read.
- * @throws A request or body failure, including a
- * {@link PageRequestFailureError}.
+ * @param location - `Location` header text, possibly relative.
+ * @param baseUrl - URL of the response that redirected.
+ * @returns A failed result: `redirected` with the target when it passes the
+ * page URL rules, and `invalid-redirect` with the problem otherwise.
  */
-async function followPageRedirects(
-  url: PageUrl,
-  signal: AbortSignal,
-  dependencies: PageRequestDependencies
-): Promise<PageRequestResult> {
-  let currentUrl = url
-  for (let redirectCount = 0; ; redirectCount += 1) {
-    const response = await openPageResponse(currentUrl, signal, dependencies)
-    const location = findRedirectLocation(response)
-    if (location === undefined) return readPageResponse(currentUrl, response)
-    response.destroy()
-    if (redirectCount === MAXIMUM_PAGE_REDIRECTS) {
-      return buildFailedPageResult({ kind: "too-many-redirects" })
-    }
-    const redirect = parseRedirectUrl(location, currentUrl)
-    if (redirect.status === "invalid") {
+function buildRedirectResult(
+  location: string,
+  baseUrl: PageUrl
+): PageRequestResult {
+  const redirect = parseRedirectUrl(location, baseUrl)
+  switch (redirect.status) {
+    case "valid":
+      return buildFailedPageResult({
+        kind: "redirected",
+        location: redirect.url
+      })
+    case "invalid":
       return buildFailedPageResult({
         kind: "invalid-redirect",
         problem: redirect.problem
       })
-    }
-    currentUrl = redirect.url
   }
+}
+
+/**
+ * Sends one page request, without following a redirect.
+ *
+ * @param url - Checked page URL.
+ * @param signal - Aborts the request on Stop or when its time is up.
+ * @param dependencies - Lookup and address rule.
+ * @returns The page, where it redirects to, or why it cannot be read.
+ * @throws A request or body failure, including a
+ * {@link PageRequestFailureError}.
+ */
+async function sendPageRequest(
+  url: PageUrl,
+  signal: AbortSignal,
+  dependencies: PageRequestDependencies
+): Promise<PageRequestResult> {
+  const response = await openPageResponse(url, signal, dependencies)
+  const location = findRedirectLocation(response)
+  if (location === undefined) return readPageResponse(url, response)
+  response.destroy()
+  return buildRedirectResult(location, url)
 }
 
 /**
@@ -669,26 +684,24 @@ function findPageRequestFailure(
 }
 
 /**
- * Gets one web page: requests it, follows redirects that pass the page URL
- * rules, and reads its body as text.
+ * Gets one web page: requests it and reads its body as text.
  *
  * @param url - Checked page URL.
  * @param abortSignal - Stops the request; borrowed for the call.
  * @param dependencies - Lookup, address rule, and time limit.
  * @returns The page, or why it cannot be read: a blocked or missing address,
- * a redirect Lys may not follow or too many redirects, a timeout, a failed
- * connection or a body that cannot be decompressed, a status other than
- * 2xx, or a body that is not HTML or plain text or uses an unsupported
- * compression.
+ * a redirect, which names its target when that passes the page URL rules, a
+ * timeout, a failed connection or a body that cannot be decompressed, a
+ * status other than 2xx, or a body that is not HTML or plain text or uses
+ * an unsupported compression.
  * @throws The abort reason once `abortSignal` aborts, and any failure Lys
  * does not recognize unchanged.
  * @remarks Every connection goes to an address that passed the address
- * rule, checked again on the connected socket. At most
- * {@link MAXIMUM_PAGE_REDIRECTS} redirects are followed, each target checked
- * like the first URL. The body is decompressed and read up to
- * {@link MAXIMUM_PAGE_BODY_BYTES}. The time limit covers the whole request.
- * No cookie is kept between requests, and every request opens its own
- * connections.
+ * rule, checked again on the connected socket. No redirect is followed, so
+ * the one request goes only to the URL's host. The body is decompressed and
+ * read up to {@link MAXIMUM_PAGE_BODY_BYTES}. The time limit covers the
+ * whole request. No cookie is kept between requests, and every request
+ * opens its own connections.
  */
 export async function getWebPage(
   url: PageUrl,
@@ -698,7 +711,7 @@ export async function getWebPage(
   const timeoutSignal = AbortSignal.timeout(dependencies.requestTimeoutMs)
   const requestSignal = AbortSignal.any([abortSignal, timeoutSignal])
   try {
-    return await followPageRedirects(url, requestSignal, dependencies)
+    return await sendPageRequest(url, requestSignal, dependencies)
   } catch (error) {
     if (abortSignal.aborted) throw abortSignal.reason
     if (timeoutSignal.aborted) {

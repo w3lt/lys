@@ -9,7 +9,6 @@ import { formatPageEvidence } from "./pageEvidence"
 import { extractPageArticle, type PageExtractionResult } from "./pageExtraction"
 import {
   getWebPage,
-  MAXIMUM_PAGE_REDIRECTS,
   type PageRequestDependencies,
   type PageRequestFailure,
   type PageResponse
@@ -33,7 +32,7 @@ export const READ_PAGE_TOOL_NAME = "read_page"
 export const MAXIMUM_PAGE_FOCUS_LENGTH = 200
 
 /**
- * Milliseconds one read may take in production, redirects and body
+ * Milliseconds one read may take in production, connection and body
  * included.
  */
 export const PAGE_READ_TIMEOUT_MS = 15_000
@@ -74,7 +73,7 @@ export function buildReadPageDefinition(): ToolDefinition {
   const timeoutSeconds = PAGE_READ_TIMEOUT_MS / MILLISECONDS_PER_SECOND
   return toolDefinitionSchema.parse({
     name: READ_PAGE_TOOL_NAME,
-    description: `Read one public web page and return its title, URL, and main text, to answer from and cite. Reads http and https pages that serve HTML or plain text, within ${timeoutSeconds} seconds and ${MAXIMUM_PAGE_REDIRECTS} redirects. Pages that need JavaScript, PDFs, and addresses on this machine or a private network cannot be read. A page longer than ${MAXIMUM_SELECTED_PASSAGE_LENGTH} characters is cut to the passages that best match focus, or to its beginning.`,
+    description: `Read one public web page and return its title, URL, and main text, to answer from and cite. Reads http and https pages that serve HTML or plain text, within ${timeoutSeconds} seconds. Redirects are not followed: a page that redirects returns the URL it points to, which you can read with another call. Pages that need JavaScript, PDFs, and addresses on this machine or a private network cannot be read. A page longer than ${MAXIMUM_SELECTED_PASSAGE_LENGTH} characters is cut to the passages that best match focus, or to its beginning.`,
     group: "network",
     access: "network",
     runner: "backend",
@@ -124,10 +123,10 @@ function formatPageRequestFailure(
       return "its address belongs to this machine or a private network, which Lys never reads."
     case "unresolvable-host":
       return "its host name could not be found."
+    case "redirected":
+      return `it redirects to ${failure.location}. Lys does not follow redirects; call ${READ_PAGE_TOOL_NAME} with that URL to read it.`
     case "invalid-redirect":
-      return `it redirected to an address Lys may not read. ${formatPageUrlProblem(failure.problem)}`
-    case "too-many-redirects":
-      return `it redirected more than ${MAXIMUM_PAGE_REDIRECTS} times.`
+      return `it redirects to an address Lys may not read. ${formatPageUrlProblem(failure.problem)}`
     case "timed-out":
       return `it did not load within ${requestTimeoutMs / MILLISECONDS_PER_SECOND} seconds.`
     case "transfer-failed":
@@ -292,9 +291,9 @@ function parsePageReadInput(
  * private network.
  *
  * @remarks Implements {@link BuiltInTool}. Parsing checks the URL by the
- * page URL rules before the person is asked; a run requests the page,
- * following checked redirects, extracts its main text, keeps the passages
- * that fit, and frames them as untrusted page content. Every failure the
+ * page URL rules before the person is asked; a run requests that URL alone,
+ * following no redirect, extracts its main text, keeps the passages that
+ * fit, and frames them as untrusted page content. Every failure the
  * model can act on becomes its result; only a defect rejects. Owns no
  * resource; each run opens and closes its own connections. Concurrency
  * model: reentrant.

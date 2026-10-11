@@ -78,13 +78,33 @@ function hasDistinctBackendToolNames(toolNames: readonly string[]): boolean {
   return new Set(toolNames).size === toolNames.length
 }
 
+/**
+ * Validates each list of a chat tool offer on its own, before the checks
+ * across both lists.
+ */
+const chatToolOfferListsSchema = z.strictObject({
+  /** Definitions of the switched-on client tools, each name once; may be empty. */
+  definitions: z
+    .array(toolDefinitionSchema)
+    .refine(hasDistinctToolNames, "A request offers each tool name once.")
+    .refine(hasOnlyClientTools, "Offered definitions are client tools.")
+    .readonly(),
+  /**
+   * Names of the switched-on backend tools, each name once. Absence means
+   * the request offers no backend tool.
+   */
+  backendToolNames: z
+    .array(toolNameSchema)
+    .refine(
+      hasDistinctBackendToolNames,
+      "A request offers each backend tool name once."
+    )
+    .readonly()
+    .optional()
+})
+
 /** Client and backend tools of one chat offer, before their combined checks. */
-type ChatToolOfferCandidate = Readonly<{
-  /** Offered client tool definitions. */
-  definitions: readonly ToolDefinition[]
-  /** Offered backend tool names; undefined when the offer names none. */
-  backendToolNames?: readonly string[] | undefined
-}>
+type ChatToolOfferCandidate = z.infer<typeof chatToolOfferListsSchema>
 
 /**
  * Answers whether an offer names at least one tool.
@@ -121,27 +141,7 @@ function hasDistinctOfferedToolNames(offer: ChatToolOfferCandidate): boolean {
  * The backend rejects a backend tool name it does not run. Offered only to a
  * model trained for tool use.
  */
-const chatToolOfferSchema = z
-  .strictObject({
-    /** Definitions of the switched-on client tools, each name once; may be empty. */
-    definitions: z
-      .array(toolDefinitionSchema)
-      .refine(hasDistinctToolNames, "A request offers each tool name once.")
-      .refine(hasOnlyClientTools, "Offered definitions are client tools.")
-      .readonly(),
-    /**
-     * Names of the switched-on backend tools, each name once. Absence means
-     * the request offers no backend tool.
-     */
-    backendToolNames: z
-      .array(toolNameSchema)
-      .refine(
-        hasDistinctBackendToolNames,
-        "A request offers each backend tool name once."
-      )
-      .readonly()
-      .optional()
-  })
+const chatToolOfferSchema = chatToolOfferListsSchema
   .refine(hasOfferedTool, "A tool offer names at least one tool.")
   .refine(
     hasDistinctOfferedToolNames,

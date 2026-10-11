@@ -48,6 +48,22 @@ describe("decodePageText", () => {
     expect(decodePageText(bytes, undefined, "text/html")).toContain("café")
   })
 
+  it.each([
+    ["utf-16", CAFE_IN_UTF_8],
+    ["UTF-16BE", CAFE_IN_UTF_8],
+    ["utf-16le", CAFE_IN_UTF_8],
+    ["x-user-defined", CAFE_IN_WINDOWS_1252]
+  ])(
+    "decodes a page whose <meta> names %s as browsers do",
+    (label, cafeBytes) => {
+      const bytes = buildBytes(`<meta charset="${label}"><p>`, cafeBytes)
+
+      expect(decodePageText(bytes, undefined, "text/html")).toBe(
+        `<meta charset="${label}"><p>café`
+      )
+    }
+  )
+
   it("prefers the header charset over a <meta> charset", () => {
     const bytes = buildBytes('<meta charset="utf-8"><p>', CAFE_IN_WINDOWS_1252)
 

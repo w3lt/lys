@@ -90,7 +90,10 @@ describe("buildReadPageDefinition", () => {
   it("states the limits a read has to the model", () => {
     const { description } = buildReadPageDefinition()
 
-    expect(description).toContain("within 15 seconds and 5 redirects")
+    expect(description).toContain("within 15 seconds.")
+    expect(description).toContain(
+      "Redirects are not followed: a page that redirects returns the URL it points to, which you can read with another call."
+    )
     expect(description).toContain(
       "Pages that need JavaScript, PDFs, and addresses on this machine or a private network cannot be read."
     )
@@ -175,9 +178,10 @@ describe("ReadPageTool", () => {
       expect(result).toEqual({
         status: "succeeded",
         content: [
-          `Page: pages.test:${server.port}\nURL: ${url}\nRead: the whole page.`,
+          `URL: ${url}\nRead: the whole page.`,
           EVIDENCE_FRAME.notice,
           "<<<page content>>>",
+          `Page: pages.test:${server.port}`,
           PAGE_PARAGRAPH,
           "<<<end of page content>>>",
           EVIDENCE_FRAME.citation
@@ -198,7 +202,7 @@ describe("ReadPageTool", () => {
       })
 
       expect(result.status).toBe("succeeded")
-      expect(result.content).toMatch(/^Page: Moths\n/)
+      expect(result.content).toContain("<<<page content>>>\n\nPage: Moths\n")
       expect(result.content).toContain(PAGE_PARAGRAPH)
       expect(result.content).toContain(FEEDING_PARAGRAPH)
       expect(result.content).not.toContain("Home · Shop")
@@ -275,6 +279,21 @@ describe("ReadPageTool", () => {
       })
     })
 
+    it("gives the URL a page redirects to, so the model can ask to read it", async () => {
+      const server = await startPageServer((_request, response) => {
+        response.writeHead(301, { location: "/moved" }).end()
+      })
+      const url = buildTestPageUrl(server.port, "/page")
+
+      const result = await runReadPage({ url })
+
+      expect(result).toEqual({
+        status: "failed",
+        content: `Lys could not read ${url}: it redirects to ${buildTestPageUrl(server.port, "/moved")}. Lys does not follow redirects; call read_page with that URL to read it.`
+      })
+      expect(server.receivedHeaders).toHaveLength(1)
+    })
+
     it("explains a redirect to an address Lys may not read", async () => {
       const server = await startPageServer((_request, response) => {
         response.writeHead(302, { location: "file:///etc/hosts" }).end()
@@ -285,7 +304,7 @@ describe("ReadPageTool", () => {
 
       expect(result).toEqual({
         status: "failed",
-        content: `Lys could not read ${url}: it redirected to an address Lys may not read. Only http and https URLs can be read.`
+        content: `Lys could not read ${url}: it redirects to an address Lys may not read. Only http and https URLs can be read.`
       })
     })
 

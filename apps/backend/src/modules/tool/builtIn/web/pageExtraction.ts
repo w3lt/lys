@@ -42,14 +42,21 @@ export type PageExtractionResult =
     }>
   | Readonly<{
       /**
-       * The page has more elements than {@link MAXIMUM_PAGE_ELEMENTS}, or
-       * nests them deeper than {@link MAXIMUM_PAGE_DEPTH_SUM} allows, so
-       * selecting its main text would take too long.
+       * The page's markup holds more start tags, or the page more elements,
+       * than {@link MAXIMUM_PAGE_ELEMENTS}, or the page nests its elements
+       * deeper than {@link MAXIMUM_PAGE_DEPTH_SUM} allows, so reading it
+       * would take too long.
        */
       status: "too-complex"
     }>
 
-/** Most elements an HTML page may have to be read, inclusive. */
+/**
+ * Most elements an HTML page may have to be read, inclusive.
+ *
+ * @remarks Also bounds the start tags of its markup before it is parsed,
+ * because parsing deeply nested markup takes time that grows faster than its
+ * length. A large encyclopedia article has about 22,000 of each.
+ */
 export const MAXIMUM_PAGE_ELEMENTS = 40_000
 
 /**
@@ -71,6 +78,20 @@ const TEXT_NODE = 3
 
 /** DOM node type of a document. */
 const DOCUMENT_NODE = 9
+
+/**
+ * Finds the start of each start tag in markup: `<` followed by a letter.
+ *
+ * @remarks Matches inside scripts, styles, and comments too, so its match
+ * count is never below the number of elements the markup's own tags create.
+ */
+const START_TAG_PATTERN = /<[a-z]/gi
+
+/** Text that stands for a `<br>` element in the text of a block. */
+const LINE_BREAK_TEXT = "\n"
+
+/** Text between a block's own text and the text of a block nested in it. */
+const NESTED_BLOCK_SEPARATOR = " "
 
 /**
  * Elements removed before the page is read: code, styles, and inert
@@ -302,13 +323,80 @@ function normalizePreformattedText(text: string): string {
 }
 
 /**
+ * Answers whether an element's start and end separate the words around
+ * them.
+ *
+ * @param localName - Lowercase tag name.
+ * @returns True for heading, text, and separating elements.
+ */
+function isWordSeparatingElement(localName: string): boolean {
+  return (
+    HEADING_ELEMENTS.has(localName) ||
+    TEXT_BLOCK_ELEMENTS.has(localName) ||
+    SEPARATING_ELEMENTS.has(localName)
+  )
+}
+
+/** One step of the walk over a block's nodes: a node, or text to add. */
+type BlockTextStep = LinkedomNode | string
+
+/**
+ * Lists what the walk over a block's text does next for one element, in
+ * reverse order, for a stack.
+ *
+ * @param element - Element inside the block.
+ * @returns {@link LINE_BREAK_TEXT} for a `<br>`; otherwise the element's
+ * children, last first, between two {@link NESTED_BLOCK_SEPARATOR} when the
+ * element separates words.
+ */
+function listBlockTextStepsInReverse(
+  element: LinkedomElement
+): BlockTextStep[] {
+  if (element.localName === "br") return [LINE_BREAK_TEXT]
+  const childSteps = listChildNodesInReverse(element)
+  if (!isWordSeparatingElement(element.localName)) return childSteps
+  return [NESTED_BLOCK_SEPARATOR, ...childSteps, NESTED_BLOCK_SEPARATOR]
+}
+
+/**
+ * Builds the text of one heading or text element.
+ *
+ * @param element - Heading or text element.
+ * @returns Its text, with a line break for each `<br>` and a space around
+ * each nested element that separates words, so words on either side never
+ * run together; whitespace is not yet collapsed.
+ * @remarks The walk uses its own stack, so deeply nested text cannot
+ * exhaust the call stack.
+ */
+function buildBlockText(element: LinkedomElement): string {
+  const parts: string[] = []
+  const pendingSteps: BlockTextStep[] = listChildNodesInReverse(element)
+  for (
+    let step = pendingSteps.pop();
+    step !== undefined;
+    step = pendingSteps.pop()
+  ) {
+    if (typeof step === "string") {
+      parts.push(step)
+    } else if (isLinkedomElement(step)) {
+      for (const nextStep of listBlockTextStepsInReverse(step)) {
+        pendingSteps.push(nextStep)
+      }
+    } else if (step.nodeType === TEXT_NODE) {
+      parts.push(step.textContent ?? "")
+    }
+  }
+  return parts.join("")
+}
+
+/**
  * Builds the block for one heading or text element.
  *
  * @param element - Heading or text element.
  * @returns The block, or undefined when the element has no text.
  */
 function buildElementBlock(element: LinkedomElement): PageBlock | undefined {
-  const rawText = element.textContent ?? ""
+  const rawText = buildBlockText(element)
   const text =
     element.localName === "pre"
       ? normalizePreformattedText(rawText)
@@ -351,9 +439,9 @@ const SEPARATION_TOKEN: ArticleToken = Object.freeze({ kind: "separation" })
  * Lists a node's children in reverse document order, for a stack.
  *
  * @param node - Node whose children are walked next.
- * @returns The children, last first.
+ * @returns A new array of the children, last first.
  */
-function listChildStepsInReverse(node: LinkedomNode): ArticleWalkStep[] {
+function listChildNodesInReverse(node: LinkedomNode): LinkedomNode[] {
   return [...node.childNodes].reverse()
 }
 
@@ -370,7 +458,7 @@ function listChildStepsInReverse(node: LinkedomNode): ArticleWalkStep[] {
 function* listArticleTokens(
   article: LinkedomElement
 ): Generator<ArticleToken, void, undefined> {
-  const pendingSteps = listChildStepsInReverse(article)
+  const pendingSteps: ArticleWalkStep[] = listChildNodesInReverse(article)
   for (
     let step = pendingSteps.pop();
     step !== undefined;
@@ -391,7 +479,7 @@ function* listArticleTokens(
         yield SEPARATION_TOKEN
         pendingSteps.push(SEPARATION_MARKER)
       }
-      pendingSteps.push(...listChildStepsInReverse(step))
+      pendingSteps.push(...listChildNodesInReverse(step))
     } else if (step.nodeType === TEXT_NODE) {
       yield Object.freeze({ kind: "loose-text", text: step.textContent ?? "" })
     }
@@ -521,6 +609,24 @@ function isPageStructureReadable(document: LinkedomDocument): boolean {
 }
 
 /**
+ * Answers whether markup holds more start tags than a page may have
+ * elements, without parsing it.
+ *
+ * @param html - Page markup.
+ * @returns True when {@link START_TAG_PATTERN} matches more than
+ * {@link MAXIMUM_PAGE_ELEMENTS} times.
+ * @remarks Stops at the first match past the limit, so measuring a hostile
+ * page is cheap.
+ */
+function hasMoreStartTagsThanElementLimit(html: string): boolean {
+  const startTags = html.matchAll(START_TAG_PATTERN)
+  for (let count = 0; count <= MAXIMUM_PAGE_ELEMENTS; count += 1) {
+    if (startTags.next().done === true) return false
+  }
+  return true
+}
+
+/**
  * Extracts the main text of an HTML page.
  *
  * @param page - HTML page Lys read.
@@ -528,6 +634,9 @@ function isPageStructureReadable(document: LinkedomDocument): boolean {
  * @throws When linkedom or Readability fail on the markup.
  */
 function extractHtmlArticle(page: PageResponse): PageExtractionResult {
+  if (hasMoreStartTagsThanElementLimit(page.text)) {
+    return Object.freeze({ status: "too-complex" })
+  }
   const document = parsePageDocument(page.text)
   for (const element of document.querySelectorAll(NON_CONTENT_SELECTOR)) {
     element.remove()
@@ -580,12 +689,14 @@ function buildPlainTextBlocks(text: string): readonly PageBlock[] {
  * {@link MAXIMUM_PAGE_DEPTH_SUM}.
  * @throws When the markup makes linkedom or Readability fail; the page is
  * then not read.
- * @remarks For HTML, scripts, styles, `<noscript>`, and `<template>`
- * elements are removed first, the page's size is checked, then Readability
- * selects the main content. No script on the page ever runs. The work is
- * synchronous; the size limits keep it under about a second. Markup that
- * puts its text outside `<body>` reads as having no text. A plain-text page
- * is titled by its host.
+ * @remarks For HTML, markup with more start tags than
+ * {@link MAXIMUM_PAGE_ELEMENTS} is refused before it is parsed. Then
+ * scripts, styles, `<noscript>`, and `<template>` elements are removed, the
+ * parsed page's size is checked, and Readability selects the main content.
+ * No script on the page ever runs. The work is synchronous; the limits keep
+ * it to about a second on current hardware, deeply nested markup included.
+ * Markup that puts its text outside `<body>` reads as having no text. A
+ * plain-text page is titled by its host.
  */
 export function extractPageArticle(page: PageResponse): PageExtractionResult {
   switch (page.mediaType) {

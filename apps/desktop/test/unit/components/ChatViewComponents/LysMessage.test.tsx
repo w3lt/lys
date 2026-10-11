@@ -6,6 +6,7 @@ import {
   buildEndedAssistantMessage,
   buildStreamingAssistantMessage
 } from "../../support/conversationFixtures"
+import { startDecodedImageHost } from "../../support/imageHostFake"
 
 describe("LysMessage", () => {
   it("renders a completed reply as Markdown under the lys label, with no status", async () => {
@@ -61,13 +62,16 @@ describe("LysMessage", () => {
   })
 
   it("keeps the decorative portraits out of the accessibility tree", () => {
-    render(
+    startDecodedImageHost()
+    const { container } = render(
       <LysMessage
         kind="terminal"
         message={buildCompletedAssistantMessage(2, "Hi")}
       />
     )
 
+    // Both theme portraits are rendered, so their absence below is meaningful.
+    expect(container.querySelectorAll("img")).toHaveLength(2)
     expect(screen.queryByRole("img")).not.toBeInTheDocument()
   })
 })

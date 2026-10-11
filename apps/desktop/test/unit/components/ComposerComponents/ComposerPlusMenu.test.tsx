@@ -2,20 +2,7 @@ import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import ComposerPlusMenu from "@/components/ComposerComponents/ComposerPlusMenu"
-
-/**
- * Opens the menu from its focused trigger with the keyboard.
- *
- * @param user - User-event session of the case.
- * @remarks Base UI opens menus on a pointer press that jsdom does not
- * reproduce; Enter is the supported keyboard path to the same open state.
- */
-async function openPlusMenu(
-  user: ReturnType<typeof userEvent.setup>
-): Promise<void> {
-  screen.getByRole("button", { name: /^Add to this message/ }).focus()
-  await user.keyboard("{Enter}")
-}
+import { openMenuWithKeyboard } from "../../support/rendering"
 
 describe("ComposerPlusMenu", () => {
   it("says on its trigger whether files are attached", () => {
@@ -56,7 +43,10 @@ describe("ComposerPlusMenu", () => {
         onAttachFile={onAttachFile}
       />
     )
-    await openPlusMenu(user)
+    await openMenuWithKeyboard(
+      user,
+      screen.getByRole("button", { name: /^Add to this message/ })
+    )
 
     await user.click(screen.getByRole("menuitem", { name: "Attach a file" }))
 
@@ -72,7 +62,10 @@ describe("ComposerPlusMenu", () => {
         onAttachFile={vi.fn()}
       />
     )
-    await openPlusMenu(user)
+    await openMenuWithKeyboard(
+      user,
+      screen.getByRole("button", { name: /^Add to this message/ })
+    )
 
     for (const label of ["Connect an app", "Plugins", "Saved prompts"]) {
       const action = screen.getByRole("menuitem", { name: `${label}soon` })
@@ -92,7 +85,10 @@ describe("ComposerPlusMenu", () => {
 
     const trigger = screen.getByRole("button", { name: "Add to this message" })
     await user.click(trigger)
-    await openPlusMenu(user)
+    await openMenuWithKeyboard(
+      user,
+      screen.getByRole("button", { name: /^Add to this message/ })
+    )
 
     expect(trigger).toBeDisabled()
     expect(screen.queryByRole("menu")).not.toBeInTheDocument()

@@ -17,11 +17,9 @@ import {
   INVENTORY_ROUTE,
   loadFreshSettingsView
 } from "../../support/settingsViewFixtures"
-import {
-  createControlledPromise,
-  waitForMicrotasks
-} from "../../support/settlement"
+import { createControlledPromise } from "../../support/settlement"
 import { buildToolDefinition } from "../../support/toolFixtures"
+import { waitForRenderedWork } from "../../support/rendering"
 
 /** Tools the desktop lists, in Settings order. */
 const TOOLS = [
@@ -81,15 +79,6 @@ async function startToolPane(runtime: RuntimeArrangement = TRAINED_RUNTIME) {
   await screen.findByText(/^Tools come from Lys itself/)
   await waitForRenderedWork()
   return useLysStore
-}
-
-/**
- * Lets pending commands and store updates settle inside a React update scope.
- */
-async function waitForRenderedWork(): Promise<void> {
-  await act(async () => {
-    await waitForMicrotasks()
-  })
 }
 
 describe("ToolPaneContent", () => {

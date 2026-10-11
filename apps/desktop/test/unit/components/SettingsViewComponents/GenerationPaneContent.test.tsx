@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import type { GenerationSettings } from "@/lib/store/settings"
@@ -10,7 +10,7 @@ import {
   INVENTORY_ROUTE,
   loadFreshSettingsView
 } from "../../support/settingsViewFixtures"
-import { waitForMicrotasks } from "../../support/settlement"
+import { waitForRenderedWork } from "../../support/rendering"
 
 /**
  * Starts a native host that keeps the settings document it is given and
@@ -59,15 +59,6 @@ async function startGenerationPane(
   await screen.findByRole("switch", { name: "Reply ceiling" })
   await waitForRenderedWork()
   return useLysStore
-}
-
-/**
- * Lets pending commands and store updates settle inside a React update scope.
- */
-async function waitForRenderedWork(): Promise<void> {
-  await act(async () => {
-    await waitForMicrotasks()
-  })
 }
 
 /**

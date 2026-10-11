@@ -57,6 +57,43 @@ function startToolGroup(
 }
 
 /**
+ * Gets the list item of one tool's row: the item holding the tool's switch.
+ *
+ * @param toolName - Tool whose row is wanted.
+ * @returns The row.
+ * @throws When no listed item holds that tool's switch.
+ */
+function getToolRow(toolName: string): HTMLElement {
+  const row = screen
+    .getAllByRole("listitem")
+    .find((item) =>
+      within(item).queryByRole("switch", { name: `Use ${toolName}` })
+    )
+  if (row === undefined) throw new Error(`No row holds ${toolName}'s switch`)
+  return row
+}
+
+/**
+ * Gets the list item of one argument: the item whose visible text begins
+ * with the argument's name.
+ *
+ * @param argumentsSection - Region listing a tool's arguments.
+ * @param argumentName - Argument whose item is wanted.
+ * @returns The argument's item.
+ * @throws When no item in the region begins with that name.
+ */
+function getArgumentItem(
+  argumentsSection: HTMLElement,
+  argumentName: string
+): HTMLElement {
+  const item = within(argumentsSection)
+    .getAllByRole("listitem")
+    .find((listItem) => listItem.textContent?.startsWith(argumentName))
+  if (item === undefined) throw new Error(`No item lists ${argumentName}`)
+  return item
+}
+
+/**
  * Gets the button that expands a tool's row.
  *
  * @param toolName - Name of the tool.
@@ -91,8 +128,7 @@ describe("ToolGroupSection", () => {
     expect(toggle).toHaveAccessibleDescription(
       "reads in Lys Runs read_text_file."
     )
-    const row = toggle.closest("li")
-    if (row === null) throw new Error("The tool row is not a list item")
+    const row = getToolRow("read_text_file")
     expect(row).toHaveTextContent(
       `~${calculateToolTokenEstimate(READ_TEXT_FILE)} tok`
     )
@@ -154,12 +190,12 @@ describe("ToolGroupSection", () => {
     expect(argumentsSection).toHaveTextContent(
       "arguments1 required · 1 optional"
     )
-    expect(
-      within(argumentsSection).getByText("path").closest("li")
-    ).toHaveTextContent(/^pathstringrequiredAbsolute file path\.$/)
-    expect(
-      within(argumentsSection).getByText("encoding").closest("li")
-    ).toHaveTextContent(/^encodingenum · 2optionalText encoding\.utf-8latin1$/)
+    expect(getArgumentItem(argumentsSection, "path")).toHaveTextContent(
+      /^pathstringrequiredAbsolute file path\.$/
+    )
+    expect(getArgumentItem(argumentsSection, "encoding")).toHaveTextContent(
+      /^encodingenum · 2optionalText encoding\.utf-8latin1$/
+    )
     expect(
       within(
         within(argumentsSection).getByRole("list", { name: "Accepted values" })

@@ -1,6 +1,6 @@
-import { act, render, screen } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { LM_STUDIO_ADDRESS } from "@/lib/models/lm-studio-connection"
 import type { BackendServerStatus } from "@/lib/store"
 import { initialSettingsState } from "@/lib/store/settings"
@@ -21,13 +21,14 @@ import {
   INVENTORY_ROUTE,
   loadFreshSettingsView
 } from "../../support/settingsViewFixtures"
-import {
-  createControlledPromise,
-  waitForMicrotasks
-} from "../../support/settlement"
+import { createControlledPromise } from "../../support/settlement"
+import { waitForRenderedWork } from "../../support/rendering"
 
 /** Backend origin the settings name. */
 const BACKEND_ADDRESS = initialSettingsState.runtime.backendAddress
+
+/** Wall-clock time at which the uptime case reads the backend's uptime. */
+const UPTIME_READ_AT_MS = Date.UTC(2026, 9, 9, 12, 0, 0)
 
 /** LM Studio connected, the chosen default on disk and nothing loaded. */
 const NOTHING_LOADED: RuntimeArrangement = {
@@ -61,15 +62,6 @@ async function startRuntimePane(
 }
 
 /**
- * Lets pending requests and store updates settle inside a React update scope.
- */
-async function waitForRenderedWork(): Promise<void> {
-  await act(async () => {
-    await waitForMicrotasks()
-  })
-}
-
-/**
  * Lists the route keys of the requests a backend received, in order.
  *
  * @param backend - Backend observation handle.
@@ -84,13 +76,19 @@ function listRouteKeys(backend: ReturnType<typeof startBackendFake>) {
 describe("RuntimePaneContent", () => {
   describe("backend", () => {
     it("shows the running backend's address and uptime", async () => {
+      // Uptime is read from the wall clock whenever the lazy pane mounts, so
+      // only that clock is fixed; rendering and waiting keep real timers.
+      vi.useFakeTimers({ now: UPTIME_READ_AT_MS, toFake: ["Date"] })
+      onTestFinished(() => {
+        vi.useRealTimers()
+      })
       startBackendFake({ [INVENTORY_ROUTE]: buildInventoryRoute() })
       const { useLysStore, SettingsView } =
         await loadFreshSettingsView("runtime")
       useLysStore.setState({
         backendServerInfo: {
           status: "running",
-          startedAt: new Date(Date.now() - 65_500)
+          startedAt: new Date(UPTIME_READ_AT_MS - 65_500)
         }
       })
 
@@ -226,7 +224,9 @@ describe("RuntimePaneContent", () => {
       const runtime = buildUnreachableRuntime("running", "unreachable")
       const { backend } = await startRuntimePane(runtime, {
         "POST /api/v1/llm/runtime/connect": () =>
-          buildJsonResponse(200, { status: "connected" })
+          buildJsonResponse(200, { status: "connected" }),
+        // Once reconnected, the backend lists the models again.
+        [INVENTORY_ROUTE]: buildInventoryRoute(NOTHING_LOADED)
       })
       const user = userEvent.setup()
       expect(

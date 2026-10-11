@@ -29,6 +29,7 @@ import {
   createControlledPromise,
   waitForMicrotasks
 } from "../../support/settlement"
+import { waitForRenderedWork } from "../../support/rendering"
 
 /** Route key of the chat request. */
 const CHAT_ROUTE = "POST /api/v1/chat"
@@ -123,15 +124,6 @@ function startScrollRecorder() {
  */
 function getTranscriptHost(): HTMLElement {
   return screen.getByTestId("transcript")
-}
-
-/**
- * Lets pending requests and store updates settle inside a React update scope.
- */
-async function waitForRenderedWork(): Promise<void> {
-  await act(async () => {
-    await waitForMicrotasks()
-  })
 }
 
 /**

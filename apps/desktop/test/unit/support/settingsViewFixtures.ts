@@ -1,4 +1,4 @@
-import type { LlmInfo } from "@lys/protocol"
+import { createLlmRuntimeUnavailableProblem } from "@lys/protocol"
 import { vi } from "vitest"
 import type { SettingsPane } from "@/app/types"
 import { buildJsonResponse, type BackendRoute } from "./backendFake"
@@ -12,20 +12,30 @@ import {
 export const INVENTORY_ROUTE = "GET /api/v1/llm/list"
 
 /**
- * Builds an inventory route that lists the arranged models.
+ * Builds an inventory route that answers as the backend does for the arranged
+ * inventory.
  *
- * @param runtime - Runtime whose ready inventory the backend reports; an
- * inventory that is not ready is reported as empty.
- * @returns The route.
+ * @param runtime - Runtime whose inventory the backend reports.
+ * @returns The route: the listed models for a ready inventory, a server
+ * failure for a failed one, and the declared runtime-unavailable refusal
+ * while LM Studio cannot be reached.
  */
 export function buildInventoryRoute(
   runtime: RuntimeArrangement = READY_RUNTIME
 ): BackendRoute {
-  const llms: readonly LlmInfo[] =
-    runtime.modelInventory.status === "ready"
-      ? runtime.modelInventory.models
-      : []
-  return () => buildJsonResponse(200, { llms })
+  const inventory = runtime.modelInventory
+  switch (inventory.status) {
+    case "ready":
+      return () => buildJsonResponse(200, { llms: inventory.models })
+    case "failed":
+      return () => new Response(null, { status: 500 })
+    case "unavailable":
+      return () =>
+        buildJsonResponse(
+          503,
+          createLlmRuntimeUnavailableProblem("LM Studio is not connected.")
+        )
+  }
 }
 
 /**

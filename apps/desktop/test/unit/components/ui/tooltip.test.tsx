@@ -1,8 +1,33 @@
 import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { Tooltip } from "@/components/ui/tooltip"
-import { waitForMicrotasks } from "../../support/settlement"
+import { startHover, stopHover } from "../../support/rendering"
+
+/** Hover time after which the description opens, in milliseconds. */
+const OPEN_DELAY_MS = 600
+
+/**
+ * Puts the case's timers under a fake clock until the case finishes, so the
+ * hover delay passes only when the case advances it.
+ */
+function startFakeTimers(): void {
+  vi.useFakeTimers()
+  onTestFinished(() => {
+    vi.useRealTimers()
+  })
+}
+
+/**
+ * Advances the fake clock inside a React update scope.
+ *
+ * @param milliseconds - Time to advance.
+ */
+function updateFakeClock(milliseconds: number): void {
+  act(() => {
+    vi.advanceTimersByTime(milliseconds)
+  })
+}
 
 /**
  * Renders a disabled button described by a tooltip, beside another button.
@@ -27,28 +52,28 @@ function startTooltip(): HTMLElement {
 }
 
 describe("Tooltip", () => {
-  it("shows its description only after the pointer has rested on the trigger", async () => {
-    const user = userEvent.setup()
+  it("shows its description only after the pointer has rested on the trigger for 600 ms", () => {
+    startFakeTimers()
     const trigger = startTooltip()
 
-    await user.hover(trigger)
-    expect(screen.queryByText("LM Studio is not reachable.")).toBeNull()
+    startHover(trigger)
+    updateFakeClock(OPEN_DELAY_MS - 1)
+    const beforeDelay = screen.queryByText("LM Studio is not reachable.")
+    updateFakeClock(1)
 
-    expect(
-      await screen.findByText("LM Studio is not reachable.")
-    ).toBeInTheDocument()
+    expect(beforeDelay).toBeNull()
+    expect(screen.getByText("LM Studio is not reachable.")).toBeInTheDocument()
   })
 
-  it("closes when the pointer leaves the trigger", async () => {
-    const user = userEvent.setup()
+  it("closes when the pointer leaves the trigger", () => {
+    startFakeTimers()
     const trigger = startTooltip()
-    await user.hover(trigger)
-    await screen.findByText("LM Studio is not reachable.")
+    startHover(trigger)
+    updateFakeClock(OPEN_DELAY_MS)
+    screen.getByText("LM Studio is not reachable.")
 
-    await user.unhover(trigger)
-    await act(async () => {
-      await waitForMicrotasks()
-    })
+    stopHover(trigger)
+    updateFakeClock(0)
 
     expect(screen.queryByText("LM Studio is not reachable.")).toBeNull()
   })

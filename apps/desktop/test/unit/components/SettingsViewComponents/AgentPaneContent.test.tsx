@@ -14,10 +14,8 @@ import {
   INVENTORY_ROUTE,
   loadFreshSettingsView
 } from "../../support/settingsViewFixtures"
-import {
-  createControlledPromise,
-  waitForMicrotasks
-} from "../../support/settlement"
+import { createControlledPromise } from "../../support/settlement"
+import { waitForRenderedWork } from "../../support/rendering"
 
 /** Stored agent the cases open. */
 const RESEARCHER = buildAgent("researcher", {
@@ -43,15 +41,6 @@ async function startAgentPane(runtime: RuntimeArrangement = READY_RUNTIME) {
   // The closing note is withheld until the lazily loaded pane body is shown.
   await screen.findByText(/^Saved by the backend in Lys's database/)
   return useLysStore
-}
-
-/**
- * Lets pending requests and store updates settle inside a React update scope.
- */
-async function waitForRenderedWork(): Promise<void> {
-  await act(async () => {
-    await waitForMicrotasks()
-  })
 }
 
 /**

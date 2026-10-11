@@ -19,6 +19,7 @@ import {
   createFixtureUuidV7
 } from "../../support/conversationFixtures"
 import { waitForMicrotasks } from "../../support/settlement"
+import { waitForRenderedWork } from "../../support/rendering"
 
 /** Route key of the conversation list. */
 const LIST_ROUTE = "GET /api/v1/conversations"
@@ -172,15 +173,6 @@ async function openHistoryPanel(
   const parent = startHistoryParent(modules)
   await openHistoryFromOpener(modules)
   return { ...modules, ...parent, backend }
-}
-
-/**
- * Lets pending requests and store updates settle inside a React update scope.
- */
-async function waitForRenderedWork(): Promise<void> {
-  await act(async () => {
-    await waitForMicrotasks()
-  })
 }
 
 /**

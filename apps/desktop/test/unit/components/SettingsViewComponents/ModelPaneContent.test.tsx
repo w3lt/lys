@@ -1,6 +1,6 @@
 import { act, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { LM_STUDIO_UNREACHABLE_MESSAGE } from "@/lib/models/lm-studio-connection"
 import {
   buildJsonResponse,
@@ -19,10 +19,8 @@ import {
   INVENTORY_ROUTE,
   loadFreshSettingsView
 } from "../../support/settingsViewFixtures"
-import {
-  createControlledPromise,
-  waitForMicrotasks
-} from "../../support/settlement"
+import { createControlledPromise } from "../../support/settlement"
+import { startHover, waitForRenderedWork } from "../../support/rendering"
 
 /** One resident model chosen as default, and one on disk. */
 const TWO_MODELS: RuntimeArrangement = {
@@ -59,15 +57,6 @@ async function startModelPane(
   await screen.findByRole("heading", { name: "load configuration" })
   await waitForRenderedWork()
   return { useLysStore, backend }
-}
-
-/**
- * Lets pending requests and store updates settle inside a React update scope.
- */
-async function waitForRenderedWork(): Promise<void> {
-  await act(async () => {
-    await waitForMicrotasks()
-  })
 }
 
 /**
@@ -235,16 +224,26 @@ describe("ModelPaneContent", () => {
     expect(screen.getByText(LM_STUDIO_UNREACHABLE_MESSAGE)).toBeInTheDocument()
   })
 
-  it("repeats why Refresh is disabled in a tooltip on hover", async () => {
+  it("repeats why Refresh is disabled in a tooltip after 600 ms of hover", async () => {
     await startModelPane(buildUnreachableRuntime("running", "unreachable"))
-    const user = userEvent.setup()
-
-    await user.hover(getRefreshButton().parentElement ?? getRefreshButton())
-
-    // The description opens after 600 ms of hover, within the wait's bound.
-    await vi.waitFor(() => {
-      expect(screen.getAllByText(LM_STUDIO_UNREACHABLE_MESSAGE)).toHaveLength(2)
+    vi.useFakeTimers()
+    onTestFinished(() => {
+      vi.useRealTimers()
     })
+
+    // A disabled button receives no pointer events; its tooltip trigger
+    // wraps it.
+    startHover(getRefreshButton().parentElement ?? getRefreshButton())
+    act(() => {
+      vi.advanceTimersByTime(599)
+    })
+    const beforeDelay = screen.getAllByText(LM_STUDIO_UNREACHABLE_MESSAGE)
+    act(() => {
+      vi.advanceTimersByTime(1)
+    })
+
+    expect(beforeDelay).toHaveLength(1)
+    expect(screen.getAllByText(LM_STUDIO_UNREACHABLE_MESSAGE)).toHaveLength(2)
   })
 
   it("describes Refresh only while LM Studio is not reachable", async () => {

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import {
@@ -12,10 +12,8 @@ import {
   INVENTORY_ROUTE,
   loadFreshSettingsView
 } from "../../support/settingsViewFixtures"
-import {
-  createControlledPromise,
-  waitForMicrotasks
-} from "../../support/settlement"
+import { createControlledPromise } from "../../support/settlement"
+import { waitForRenderedWork } from "../../support/rendering"
 
 /** Stored agent the cases edit. */
 const RESEARCHER = buildAgent("researcher", {
@@ -40,15 +38,6 @@ async function startAgentPane(options: AgentBackendOptions = {}) {
   await screen.findByText(/^Saved by the backend in Lys's database/)
   await waitForRenderedWork()
   return agentBackend
-}
-
-/**
- * Lets pending requests and store updates settle inside a React update scope.
- */
-async function waitForRenderedWork(): Promise<void> {
-  await act(async () => {
-    await waitForMicrotasks()
-  })
 }
 
 /**

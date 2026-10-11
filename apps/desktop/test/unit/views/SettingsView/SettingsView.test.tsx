@@ -1,10 +1,10 @@
-import { act, render, screen, within } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import type { BackendServerStatus } from "@/lib/store"
 import type { LmStudioStatus } from "@/lib/store/lm-studio-status"
 import type { ModelInventoryState } from "@/lib/store/model-runtime"
-import { startBackendFake } from "../../support/backendFake"
+import { buildJsonResponse, startBackendFake } from "../../support/backendFake"
 import { buildLlmInfo } from "../../support/modelFixtures"
 import {
   buildUnreachableRuntime,
@@ -15,7 +15,7 @@ import {
   INVENTORY_ROUTE,
   loadFreshSettingsView
 } from "../../support/settingsViewFixtures"
-import { waitForMicrotasks } from "../../support/settlement"
+import { waitForRenderedWork } from "../../support/rendering"
 
 /** Rail entries as their tabs are named, in order. */
 const RAIL_TABS = [
@@ -38,15 +38,6 @@ const RAIL_TABS = [
 function getRailTab(label: string, ordinal: string): HTMLElement {
   return screen.getByRole("tab", {
     name: new RegExp(`^${label}\\s*${ordinal}$`)
-  })
-}
-
-/**
- * Lets pending requests and store updates settle inside a React update scope.
- */
-async function waitForRenderedWork(): Promise<void> {
-  await act(async () => {
-    await waitForMicrotasks()
   })
 }
 
@@ -218,18 +209,23 @@ describe("SettingsView", () => {
         lmStudioStatus,
         modelInventory
       }
-      startBackendFake({ [INVENTORY_ROUTE]: buildInventoryRoute(runtime) })
+      startBackendFake({
+        [INVENTORY_ROUTE]: buildInventoryRoute(runtime),
+        // A failed inventory read is followed by a re-read of LM Studio.
+        "GET /api/v1/llm/runtime": () =>
+          buildJsonResponse(200, { status: lmStudioStatus })
+      })
       const { SettingsView } = await loadFreshSettingsView(
         "generation",
         runtime
       )
 
       render(<SettingsView onDone={vi.fn()} />)
+      await waitForRenderedWork()
 
       expect(
         screen.getByRole("tablist", { name: "Settings sections" })
       ).toHaveTextContent(new RegExp(`${summary}$`))
-      await waitForRenderedWork()
     }
   )
 

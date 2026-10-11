@@ -37,6 +37,7 @@ import {
   createControlledPromise,
   waitForMicrotasks
 } from "../support/settlement"
+import { openMenuWithKeyboard, waitForRenderedWork } from "../support/rendering"
 
 /** Route key of the chat request. */
 const CHAT_ROUTE = "POST /api/v1/chat"
@@ -127,15 +128,6 @@ function listRouteKeys(backend: ReturnType<typeof startBackendFake>) {
 }
 
 /**
- * Lets pending requests and store updates settle inside a React update scope.
- */
-async function waitForRenderedWork(): Promise<void> {
-  await act(async () => {
-    await waitForMicrotasks()
-  })
-}
-
-/**
  * Sends events on a stream and waits until the composer shows their effect.
  *
  * @param stream - Stream the backend writes.
@@ -208,22 +200,6 @@ function sendFileDrop(target: Element, files: readonly File[]): void {
     }
   })
   fireEvent(target, drop)
-}
-
-/**
- * Opens a menu from its focused trigger with the keyboard.
- *
- * @param user - User-event session of the case.
- * @param trigger - Menu trigger.
- * @remarks Base UI opens menus on a pointer press that jsdom does not
- * reproduce; Enter is the supported keyboard path to the same open state.
- */
-async function openMenuWithKeyboard(
-  user: ReturnType<typeof userEvent.setup>,
-  trigger: HTMLElement
-): Promise<void> {
-  trigger.focus()
-  await user.keyboard("{Enter}")
 }
 
 describe("Composer", () => {

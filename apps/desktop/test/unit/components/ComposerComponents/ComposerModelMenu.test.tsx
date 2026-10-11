@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import type { ModelInventoryState } from "@/lib/store/model-runtime"
 import { buildLlmInfo } from "../../support/modelFixtures"
+import { openMenuWithKeyboard } from "../../support/rendering"
 
 /** Inventory with one resident model and one on disk. */
 const INVENTORY: ModelInventoryState = {
@@ -24,22 +25,6 @@ async function loadFreshModelMenu(modelInventory: ModelInventoryState) {
     await import("@/components/ComposerComponents/ComposerModelMenu")
   useLysStore.setState({ modelInventory })
   return ComposerModelMenu
-}
-
-/**
- * Opens a menu from its focused trigger with the keyboard.
- *
- * @param user - User-event session of the case.
- * @param trigger - Menu trigger.
- * @remarks Base UI opens menus on a pointer press that jsdom does not
- * reproduce; Enter is the supported keyboard path to the same open state.
- */
-async function openMenuWithKeyboard(
-  user: ReturnType<typeof userEvent.setup>,
-  trigger: HTMLElement
-): Promise<void> {
-  trigger.focus()
-  await user.keyboard("{Enter}")
 }
 
 describe("ComposerModelMenu", () => {

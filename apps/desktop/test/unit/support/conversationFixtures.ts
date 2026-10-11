@@ -11,6 +11,7 @@ import {
   type ListConversationsApiResponse
 } from "@lys/protocol"
 import {
+  CALIGINIA_AGENT_CODE,
   conversationAssistantMessageSchema,
   conversationMetadataSchema,
   conversationSchema,
@@ -166,7 +167,8 @@ export function buildEndedAssistantMessage(
 }
 
 /**
- * Builds stored conversation metadata answered by the `lys` agent.
+ * Builds stored conversation metadata answered by Caliginia, the built-in
+ * agent a new conversation starts with.
  *
  * @param id - Conversation identity.
  * @param title - Stored title, or null before title generation saves one.
@@ -180,7 +182,7 @@ export function buildConversationMetadata(
     conversationMetadataSchema.parse({
       id,
       title,
-      agentCode: "lys",
+      agentCode: CALIGINIA_AGENT_CODE,
       createdAt: FIXTURE_TIMESTAMP,
       updatedAt: FIXTURE_TIMESTAMP
     })

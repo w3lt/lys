@@ -1,3 +1,4 @@
+import { CALIGINIA_AGENT_CODE } from "@lys/share"
 import { describe, expect, it } from "vitest"
 import {
   createAgent,
@@ -12,10 +13,14 @@ import {
 } from "../../../support/backendFake"
 import {
   buildAgent,
+  buildAgentBuiltInProblem,
   buildAgentCodeTakenProblem,
   buildAgentListPage,
   buildAgentNotFoundProblem,
-  buildAgentSummary
+  buildAgentSummary,
+  buildBuiltInAgent,
+  buildBuiltInAgentResponse,
+  buildCustomAgentResponse
 } from "../../../support/agentFixtures"
 
 /** Backend origin the cases pass; it differs from the production default. */
@@ -31,9 +36,18 @@ const RESEARCHER = buildAgent("researcher", {
   systemPrompt: "You research the web."
 })
 
+/** Built-in agent the cases list and read; the backend ships it. */
+const CALIGINIA = buildBuiltInAgent(CALIGINIA_AGENT_CODE, {
+  name: "Caliginia",
+  bio: "Lys's dark side.",
+  systemPrompt: "You are Caliginia."
+})
+
 describe("listAgents", () => {
-  it("requests the first page without a query string and returns it", async () => {
-    const page = buildAgentListPage([RESEARCHER])
+  it("requests the first page without a query string and returns the built-in agents with it", async () => {
+    const page = buildAgentListPage([RESEARCHER], {
+      builtInAgents: [CALIGINIA]
+    })
     const backend = startBackendFake({
       "GET /api/v1/agents": () => buildJsonResponse(200, page)
     })
@@ -72,15 +86,23 @@ describe("listAgents", () => {
     expect(backend.requests).toEqual([])
   })
 
-  it("rejects a page that lists an agent twice", async () => {
-    const summary = buildAgentSummary(RESEARCHER)
+  // Each page is valid under the shared list schema, which leaves
+  // uniqueness across the page to its consumers.
+  it.each([
+    ["a stored agent twice", buildAgentListPage([RESEARCHER, RESEARCHER])],
+    [
+      "a built-in agent twice",
+      buildAgentListPage([], { builtInAgents: [CALIGINIA, CALIGINIA] })
+    ],
+    [
+      "a stored agent under a built-in agent's code",
+      buildAgentListPage([buildAgent(CALIGINIA_AGENT_CODE)], {
+        builtInAgents: [CALIGINIA]
+      })
+    ]
+  ])("rejects a page that lists %s", async (_label, page) => {
     startBackendFake({
-      "GET /api/v1/agents": () =>
-        buildJsonResponse(200, {
-          agents: [summary, summary],
-          storedCount: 2,
-          nextCursor: null
-        })
+      "GET /api/v1/agents": () => buildJsonResponse(200, page)
     })
 
     await expect(listAgents({}, CONNECTION)).rejects.toThrow(Error)
@@ -90,8 +112,22 @@ describe("listAgents", () => {
     startBackendFake({
       "GET /api/v1/agents": () =>
         buildJsonResponse(200, {
+          ...buildAgentListPage([RESEARCHER]),
+          storedCount: 0
+        })
+    })
+
+    await expect(listAgents({}, CONNECTION)).rejects.toMatchObject({
+      cause: expect.objectContaining({ name: "ZodError" })
+    })
+  })
+
+  it("rejects a page without the built-in agents", async () => {
+    startBackendFake({
+      "GET /api/v1/agents": () =>
+        buildJsonResponse(200, {
           agents: [buildAgentSummary(RESEARCHER)],
-          storedCount: 0,
+          storedCount: 1,
           nextCursor: null
         })
     })
@@ -141,18 +177,41 @@ describe("listAgents", () => {
 })
 
 describe("getAgent", () => {
-  it("returns the stored agent", async () => {
+  it("returns a stored agent tagged custom", async () => {
     const backend = startBackendFake({
-      "GET /api/v1/agents/researcher": () => buildJsonResponse(200, RESEARCHER)
+      "GET /api/v1/agents/researcher": () =>
+        buildJsonResponse(200, buildCustomAgentResponse(RESEARCHER))
     })
 
     await expect(getAgent("researcher", CONNECTION)).resolves.toEqual({
       status: "found",
-      agent: RESEARCHER
+      agent: { kind: "custom", ...RESEARCHER }
     })
     expect(backend.requests[0]?.url).toBe(
       `${BACKEND_URL}/api/v1/agents/researcher`
     )
+  })
+
+  it("returns a built-in agent tagged built-in", async () => {
+    startBackendFake({
+      "GET /api/v1/agents/caliginia": () =>
+        buildJsonResponse(200, buildBuiltInAgentResponse(CALIGINIA))
+    })
+
+    await expect(getAgent("caliginia", CONNECTION)).resolves.toEqual({
+      status: "found",
+      agent: { kind: "built-in", ...CALIGINIA }
+    })
+  })
+
+  it("rejects an agent that does not say whether it is built in", async () => {
+    startBackendFake({
+      "GET /api/v1/agents/researcher": () => buildJsonResponse(200, RESEARCHER)
+    })
+
+    await expect(getAgent("researcher", CONNECTION)).rejects.toMatchObject({
+      cause: expect.objectContaining({ name: "ZodError" })
+    })
   })
 
   it("reports the declared missing agent as not found", async () => {
@@ -178,7 +237,7 @@ describe("getAgent", () => {
   it("rejects a different agent than the one requested", async () => {
     startBackendFake({
       "GET /api/v1/agents/researcher": () =>
-        buildJsonResponse(200, buildAgent("writer"))
+        buildJsonResponse(200, buildCustomAgentResponse(buildAgent("writer")))
     })
 
     await expect(getAgent("researcher", CONNECTION)).rejects.toThrow(Error)
@@ -330,6 +389,33 @@ describe("updateAgent", () => {
     ).resolves.toEqual({ status: "not-found" })
   })
 
+  it("reports the declared built-in agent as built in", async () => {
+    startBackendFake({
+      "PATCH /api/v1/agents/caliginia": () =>
+        buildJsonResponse(409, buildAgentBuiltInProblem())
+    })
+
+    await expect(
+      updateAgent({ agentCode: "caliginia", changes: { bio: "B" } }, CONNECTION)
+    ).resolves.toEqual({ status: "built-in" })
+  })
+
+  it.each([
+    ["without a problem body", { message: "conflict" }],
+    ["carrying the undeclared taken-code problem", buildAgentCodeTakenProblem()]
+  ])("rejects a conflict %s", async (_label, body) => {
+    startBackendFake({
+      "PATCH /api/v1/agents/researcher": () => buildJsonResponse(409, body)
+    })
+
+    await expect(
+      updateAgent(
+        { agentCode: "researcher", changes: { bio: "B" } },
+        CONNECTION
+      )
+    ).rejects.toThrow("409")
+  })
+
   it("rejects a different agent than the one changed", async () => {
     startBackendFake({
       "PATCH /api/v1/agents/researcher": () =>
@@ -367,6 +453,26 @@ describe("deleteAgent", () => {
     await expect(deleteAgent("researcher", CONNECTION)).resolves.toEqual({
       status: "not-found"
     })
+  })
+
+  it("reports the declared built-in agent as built in", async () => {
+    startBackendFake({
+      "DELETE /api/v1/agents/caliginia": () =>
+        buildJsonResponse(409, buildAgentBuiltInProblem())
+    })
+
+    await expect(deleteAgent("caliginia", CONNECTION)).resolves.toEqual({
+      status: "built-in"
+    })
+  })
+
+  it("rejects a conflict without the declared built-in agent problem", async () => {
+    startBackendFake({
+      "DELETE /api/v1/agents/researcher": () =>
+        buildJsonResponse(409, { message: "conflict" })
+    })
+
+    await expect(deleteAgent("researcher", CONNECTION)).rejects.toThrow("409")
   })
 
   it.each([

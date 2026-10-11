@@ -1,10 +1,18 @@
-import type { ChatApiRequestBody } from "@lys/protocol"
+import {
+  chatApiRequestBodySchema,
+  chatToolCallNotPendingProblemSchema,
+  chatToolResultSchema,
+  conversationAgentMissingProblemSchema
+} from "@lys/protocol"
+import { CALIGINIA_AGENT_CODE } from "@lys/share"
 import { describe, expect, it } from "vitest"
 import {
   readChatEvents,
   readChatReplyEvents,
+  sendChatToolResult,
   stopChatReply
 } from "@/lib/apis/http/chat"
+import { DELETED_CONVERSATION_AGENT_MESSAGE } from "@/lib/conversation-agent-messages"
 import {
   buildJsonResponse,
   startBackendEventStream,
@@ -21,6 +29,10 @@ import {
   createFixtureUuidV7,
   FIXTURE_CONVERSATION_ID
 } from "../../../support/conversationFixtures"
+import {
+  buildToolCall,
+  buildToolDefinition
+} from "../../../support/toolFixtures"
 
 /** Backend origin the reply cases pass; it differs from the production default. */
 const BACKEND_URL = "http://backend.test:4100"
@@ -37,13 +49,65 @@ const REPLY_EVENTS_ROUTE = `GET /api/v1/chat/${REPLY_TARGET.conversationId}/repl
 /** Route key of the reply-stop endpoint for {@link REPLY_TARGET}. */
 const REPLY_STOP_ROUTE = `POST /api/v1/chat/${REPLY_TARGET.conversationId}/replies/${REPLY_TARGET.assistantMessageId}/stop`
 
-/** Request that starts a new conversation. */
-const NEW_CONVERSATION_REQUEST = Object.freeze<ChatApiRequestBody>({
-  conversation: { kind: "new", agentCode: "lys" },
-  message: "Hello",
-  model: "qwen3-8b",
-  generationOptions: { temperature: 0.7 }
+/** Route key of the chat endpoint. */
+const CHAT_ROUTE = "POST /api/v1/chat"
+
+/** Request that starts a new conversation Caliginia answers, without tools. */
+const NEW_CONVERSATION_REQUEST = Object.freeze(
+  chatApiRequestBodySchema.parse({
+    conversation: { kind: "new", agentCode: CALIGINIA_AGENT_CODE },
+    message: "Hello",
+    model: "qwen3-8b",
+    generationOptions: { temperature: 0.7 }
+  })
+)
+
+/** Request that continues the fixture conversation and offers one tool. */
+const CONTINUED_CONVERSATION_REQUEST = Object.freeze(
+  chatApiRequestBodySchema.parse({
+    conversation: { kind: "existing", id: FIXTURE_CONVERSATION_ID },
+    message: "Read my notes",
+    model: "qwen3-8b",
+    generationOptions: { temperature: 0.2, replyCeiling: 512 },
+    tools: { definitions: [buildToolDefinition("read_text_file")] }
+  })
+)
+
+/** Call the backend asks the desktop to answer while the reply runs. */
+const TOOL_CALL = buildToolCall(4, "read_text_file")
+
+/** One tool call of {@link REPLY_TARGET} that the tool-result cases answer. */
+const TOOL_CALL_TARGET = Object.freeze({
+  ...REPLY_TARGET,
+  callId: TOOL_CALL.id
 })
+
+/** Route key of the tool-result endpoint for {@link TOOL_CALL_TARGET}. */
+const TOOL_RESULT_ROUTE = `POST /api/v1/chat/${REPLY_TARGET.conversationId}/replies/${REPLY_TARGET.assistantMessageId}/tool-results/${TOOL_CALL.id}`
+
+/** Answer of a tool that ran and returned its output. */
+const SUCCEEDED_TOOL_RESULT = Object.freeze(
+  chatToolResultSchema.parse({ status: "succeeded", content: "Buy milk." })
+)
+
+/** Problem the backend sends when a continued conversation's agent is gone. */
+const CONVERSATION_AGENT_MISSING_PROBLEM =
+  conversationAgentMissingProblemSchema.parse({
+    type: "urn:lys:problem:conversation:agent-missing",
+    title: "Conversation agent missing",
+    status: 409,
+    detail: "No agent has the code this conversation was started with."
+  })
+
+/** Problem the backend sends for an answer to a call that is not waiting. */
+const TOOL_CALL_NOT_PENDING_PROBLEM = chatToolCallNotPendingProblemSchema.parse(
+  {
+    type: "urn:lys:problem:chat:tool-call-not-pending",
+    title: "Tool call not pending",
+    status: 409,
+    detail: "No tool call is waiting under this identifier."
+  }
+)
 
 /** Start event the backend sends for {@link NEW_CONVERSATION_REQUEST}. */
 const NEW_CONVERSATION_START_EVENT = Object.freeze({
@@ -96,32 +160,45 @@ function sendStreamEvents(
 }
 
 describe("readChatEvents", () => {
-  it("posts the request to the local backend's chat endpoint", async () => {
+  it.each([
+    ["a new conversation's request", NEW_CONVERSATION_REQUEST],
+    [
+      "a continued conversation's request that offers tools",
+      CONTINUED_CONVERSATION_REQUEST
+    ]
+  ])(
+    "posts %s to the local backend's chat endpoint",
+    async (_label, request) => {
+      const stream = startBackendEventStream()
+      const backend = startBackendFake({ [CHAT_ROUTE]: () => stream.response })
+      const signal = new AbortController().signal
+      stream.close()
+
+      await listStreamEvents(readChatEvents(request, { signal }))
+
+      expect(backend.requests).toHaveLength(1)
+      expect(backend.requests[0]?.url).toBe(
+        "http://127.0.0.1:12345/api/v1/chat"
+      )
+      expect(backend.requests[0]?.body).toEqual(request)
+      expect(backend.requests[0]?.headers.get("Content-Type")).toBe(
+        "application/json"
+      )
+      expect(backend.requests[0]?.headers.get("Accept")).toBe(
+        "text/event-stream"
+      )
+      expect(backend.requests[0]?.signal).toBe(signal)
+    }
+  )
+
+  it("yields each event in order, tool calls included, until the backend ends the stream", async () => {
     const stream = startBackendEventStream()
-    const backend = startBackendFake({
-      "POST /api/v1/chat": () => stream.response
-    })
-    const signal = new AbortController().signal
-    stream.close()
-
-    await listStreamEvents(readChatEvents(NEW_CONVERSATION_REQUEST, { signal }))
-
-    expect(backend.requests).toHaveLength(1)
-    expect(backend.requests[0]?.url).toBe("http://127.0.0.1:12345/api/v1/chat")
-    expect(backend.requests[0]?.body).toEqual(NEW_CONVERSATION_REQUEST)
-    expect(backend.requests[0]?.headers.get("Content-Type")).toBe(
-      "application/json"
-    )
-    expect(backend.requests[0]?.headers.get("Accept")).toBe("text/event-stream")
-    expect(backend.requests[0]?.signal).toBe(signal)
-  })
-
-  it("yields each event in order until the backend ends the stream", async () => {
-    const stream = startBackendEventStream()
-    startBackendFake({ "POST /api/v1/chat": () => stream.response })
+    startBackendFake({ [CHAT_ROUTE]: () => stream.response })
     const events = [
       NEW_CONVERSATION_START_EVENT,
-      { type: "delta", content: "Hi" },
+      { type: "delta", content: "Let me look." },
+      { type: "tool-call", call: TOOL_CALL },
+      { type: "delta", content: "\n\nHi" },
       { type: "title", title: "Greeting" },
       { type: "done", finishReason: "stop" }
     ]
@@ -134,7 +211,7 @@ describe("readChatEvents", () => {
 
   it("rejects a failed request before yielding events", async () => {
     startBackendFake({
-      "POST /api/v1/chat": () => buildJsonResponse(500, { detail: "boom" })
+      [CHAT_ROUTE]: () => buildJsonResponse(500, { detail: "boom" })
     })
 
     await expect(
@@ -142,10 +219,40 @@ describe("readChatEvents", () => {
     ).rejects.toThrow("500")
   })
 
-  it("rejects an event that breaks the stream contract", async () => {
+  it("reports a continued conversation whose agent was deleted", async () => {
+    startBackendFake({
+      [CHAT_ROUTE]: () =>
+        buildJsonResponse(409, CONVERSATION_AGENT_MISSING_PROBLEM)
+    })
+
+    await expect(
+      listStreamEvents(readChatEvents(CONTINUED_CONVERSATION_REQUEST))
+    ).rejects.toThrow(DELETED_CONVERSATION_AGENT_MESSAGE)
+  })
+
+  it("does not report an undeclared conflict as a deleted agent", async () => {
+    startBackendFake({
+      [CHAT_ROUTE]: () => buildJsonResponse(409, { message: "conflict" })
+    })
+
+    const events = listStreamEvents(
+      readChatEvents(CONTINUED_CONVERSATION_REQUEST)
+    )
+
+    await expect(events).rejects.toThrow("409")
+    await expect(events).rejects.not.toThrow(DELETED_CONVERSATION_AGENT_MESSAGE)
+  })
+
+  it.each([
+    ["an empty delta", { type: "delta", content: "" }],
+    [
+      "a tool call whose identifier is not a UUIDv7",
+      { type: "tool-call", call: { ...TOOL_CALL, id: "call-1" } }
+    ]
+  ])("rejects %s, which breaks the stream contract", async (_label, event) => {
     const stream = startBackendEventStream()
-    startBackendFake({ "POST /api/v1/chat": () => stream.response })
-    sendStreamEvents(stream, [{ type: "delta", content: "" }])
+    startBackendFake({ [CHAT_ROUTE]: () => stream.response })
+    sendStreamEvents(stream, [event])
 
     await expect(
       listStreamEvents(readChatEvents(NEW_CONVERSATION_REQUEST))
@@ -154,7 +261,7 @@ describe("readChatEvents", () => {
 
   it("rejects an event whose data is not JSON", async () => {
     const stream = startBackendEventStream()
-    startBackendFake({ "POST /api/v1/chat": () => stream.response })
+    startBackendFake({ [CHAT_ROUTE]: () => stream.response })
     stream.sendText("data: {not json\n\n")
     stream.close()
 
@@ -165,7 +272,7 @@ describe("readChatEvents", () => {
 
   it("cancels the response body when the consumer stops reading early", async () => {
     const stream = startBackendEventStream()
-    startBackendFake({ "POST /api/v1/chat": () => stream.response })
+    startBackendFake({ [CHAT_ROUTE]: () => stream.response })
     stream.sendEvent(NEW_CONVERSATION_START_EVENT)
 
     await expect(
@@ -176,7 +283,7 @@ describe("readChatEvents", () => {
 
   it("ends observation with the abort reason when the signal aborts mid-stream", async () => {
     const stream = startBackendEventStream()
-    startBackendFake({ "POST /api/v1/chat": () => stream.response })
+    startBackendFake({ [CHAT_ROUTE]: () => stream.response })
     const controller = new AbortController()
     stream.sendEvent(NEW_CONVERSATION_START_EVENT)
     const events = readChatEvents(NEW_CONVERSATION_REQUEST, {
@@ -212,15 +319,17 @@ describe("readChatReplyEvents", () => {
     expect(backend.requests[0]?.signal).toBe(signal)
   })
 
-  it("yields the snapshot and the live events in order", async () => {
+  it("yields the snapshot with its pending tool calls and the live events in order", async () => {
     const stream = startBackendEventStream()
     startBackendFake({ [REPLY_EVENTS_ROUTE]: () => stream.response })
     const events = [
       {
         type: "reply-snapshot",
         conversationTitle: null,
-        assistantMessage: buildStreamingAssistantMessage(3, "Hi")
+        assistantMessage: buildStreamingAssistantMessage(3, "Hi"),
+        pendingToolCalls: [TOOL_CALL]
       },
+      { type: "tool-call", call: buildToolCall(5, "find_files") },
       { type: "delta", content: " there" },
       { type: "done", finishReason: "length" }
     ]
@@ -265,17 +374,30 @@ describe("readChatReplyEvents", () => {
     await expect(events).rejects.not.toThrow("no longer stored")
   })
 
-  it("rejects an event that breaks the reply-event contract", async () => {
-    const stream = startBackendEventStream()
-    startBackendFake({ [REPLY_EVENTS_ROUTE]: () => stream.response })
-    sendStreamEvents(stream, [{ type: "start-new-conversation-turn" }])
+  it.each([
+    ["a chat stream's start event", NEW_CONVERSATION_START_EVENT],
+    [
+      "a snapshot without its pending tool calls",
+      {
+        type: "reply-snapshot",
+        conversationTitle: null,
+        assistantMessage: buildStreamingAssistantMessage(3, "Hi")
+      }
+    ]
+  ])(
+    "rejects %s, which breaks the reply-event contract",
+    async (_label, event) => {
+      const stream = startBackendEventStream()
+      startBackendFake({ [REPLY_EVENTS_ROUTE]: () => stream.response })
+      sendStreamEvents(stream, [event])
 
-    await expect(
-      listStreamEvents(
-        readChatReplyEvents(REPLY_TARGET, { backendUrl: BACKEND_URL })
-      )
-    ).rejects.toMatchObject({ name: "ZodError" })
-  })
+      await expect(
+        listStreamEvents(
+          readChatReplyEvents(REPLY_TARGET, { backendUrl: BACKEND_URL })
+        )
+      ).rejects.toMatchObject({ name: "ZodError" })
+    }
+  )
 
   it("cancels the response body when the consumer stops reading early", async () => {
     const stream = startBackendEventStream()
@@ -339,6 +461,76 @@ describe("stopChatReply", () => {
 
     await expect(
       stopChatReply(REPLY_TARGET, { backendUrl: BACKEND_URL })
+    ).rejects.toMatchObject({ cause: transportFailure })
+  })
+})
+
+describe("sendChatToolResult", () => {
+  it("sends the answer to the call's route and reports it accepted, without a cancellation signal", async () => {
+    const backend = startBackendFake({
+      [TOOL_RESULT_ROUTE]: () => new Response(null, { status: 204 })
+    })
+
+    await expect(
+      sendChatToolResult(TOOL_CALL_TARGET, SUCCEEDED_TOOL_RESULT, {
+        backendUrl: BACKEND_URL
+      })
+    ).resolves.toEqual({ status: "accepted" })
+    expect(backend.requests).toHaveLength(1)
+    expect(backend.requests[0]?.url).toBe(
+      `${BACKEND_URL}/api/v1/chat/${REPLY_TARGET.conversationId}/replies/${REPLY_TARGET.assistantMessageId}/tool-results/${TOOL_CALL.id}`
+    )
+    expect(backend.requests[0]?.body).toEqual(SUCCEEDED_TOOL_RESULT)
+    expect(backend.requests[0]?.headers.get("Content-Type")).toBe(
+      "application/json"
+    )
+    expect(backend.requests[0]?.signal).toBeUndefined()
+  })
+
+  it("reports not pending for the declared conflict", async () => {
+    startBackendFake({
+      [TOOL_RESULT_ROUTE]: () =>
+        buildJsonResponse(409, TOOL_CALL_NOT_PENDING_PROBLEM)
+    })
+
+    await expect(
+      sendChatToolResult(TOOL_CALL_TARGET, SUCCEEDED_TOOL_RESULT, {
+        backendUrl: BACKEND_URL
+      })
+    ).resolves.toEqual({ status: "not-pending" })
+  })
+
+  it.each([
+    ["an undeclared success", 200, { status: "accepted" }],
+    [
+      "another route's declared conflict",
+      409,
+      buildReplyNotGeneratingProblem()
+    ],
+    ["a body over the limit", 413, { message: "Request body is too large" }],
+    ["a server failure", 500, { detail: "boom" }]
+  ])("rejects %s with its status", async (_label, status, body) => {
+    startBackendFake({
+      [TOOL_RESULT_ROUTE]: () => buildJsonResponse(status, body)
+    })
+
+    await expect(
+      sendChatToolResult(TOOL_CALL_TARGET, SUCCEEDED_TOOL_RESULT, {
+        backendUrl: BACKEND_URL
+      })
+    ).rejects.toThrow(String(status))
+  })
+
+  it("rejects when the backend cannot be reached and keeps the transport failure as its cause", async () => {
+    const transportFailure = new TypeError("fetch failed")
+    startBackendFake({
+      [TOOL_RESULT_ROUTE]: () => Promise.reject(transportFailure)
+    })
+
+    await expect(
+      sendChatToolResult(TOOL_CALL_TARGET, SUCCEEDED_TOOL_RESULT, {
+        backendUrl: BACKEND_URL
+      })
     ).rejects.toMatchObject({ cause: transportFailure })
   })
 })

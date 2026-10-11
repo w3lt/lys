@@ -2,6 +2,7 @@ import {
   createLlmRuntimeUnavailableProblem,
   createLlmServiceBusyProblem
 } from "@lys/protocol"
+import { modelLoadConfigurationSchema } from "@lys/share"
 import { describe, expect, it } from "vitest"
 import { createStore } from "zustand/vanilla"
 import {
@@ -9,11 +10,15 @@ import {
   type ModelConnectionState,
   type ModelSlice
 } from "@/lib/store/model-actions"
+import type { ModelRequestState } from "@/lib/store/model-runtime"
+import type { LoadConfigurationSettings } from "@/lib/store/settings"
 import {
   buildJsonResponse,
   startBackendFake,
+  type BackendFake,
   type BackendRoute,
-  type BackendRoutes
+  type BackendRoutes,
+  type ObservedBackendRequest
 } from "../../support/backendFake"
 import { buildLlmInfo } from "../../support/modelFixtures"
 import {
@@ -43,15 +48,70 @@ const INVENTORY_AFTER_LOAD = [
 ]
 
 /**
- * Creates a store owning one model slice over a connection the case controls.
+ * Stored default load settings. It sets every setting a load needs, each to a
+ * value the committed default does not have, so every sent value shows which
+ * stored part supplied it.
+ */
+const STORED_DEFAULT_LOAD_CONFIGURATION = modelLoadConfigurationSchema.parse({
+  contextLength: 4096,
+  evalBatchSize: 256,
+  flashAttention: false,
+  offloadKVCacheToGpu: false
+})
+
+/** Load settings `on-disk` has of its own; the stored default supplies the rest. */
+const ON_DISK_OWN_LOAD_CONFIGURATION = modelLoadConfigurationSchema.parse({
+  contextLength: 6144,
+  flashAttention: true
+})
+
+/** Stored load settings in which only `on-disk` has settings of its own. */
+const LOAD_CONFIGURATION_SETTINGS: LoadConfigurationSettings = Object.freeze({
+  default: STORED_DEFAULT_LOAD_CONFIGURATION,
+  models: new Map([["on-disk", ON_DISK_OWN_LOAD_CONFIGURATION]])
+})
+
+/** Stored load settings with the same default in which no model has its own. */
+const DEFAULT_ONLY_LOAD_CONFIGURATION_SETTINGS: LoadConfigurationSettings =
+  Object.freeze({
+    default: STORED_DEFAULT_LOAD_CONFIGURATION,
+    models: new Map()
+  })
+
+/** Configuration a model without settings of its own is loaded with. */
+const RESOLVED_DEFAULT_CONFIGURATION = Object.freeze({
+  contextLength: 4096,
+  evalBatchSize: 256,
+  flashAttention: false,
+  offloadKVCacheToGpu: false
+})
+
+/**
+ * Configuration `on-disk` is loaded with while the inventory does not list
+ * it: its own context length and flash attention, the stored default's batch
+ * size and KV cache placement.
+ */
+const RESOLVED_ON_DISK_CONFIGURATION = Object.freeze({
+  contextLength: 6144,
+  evalBatchSize: 256,
+  flashAttention: true,
+  offloadKVCacheToGpu: false
+})
+
+/**
+ * Creates a store owning one model slice over a connection and stored load
+ * settings the case controls.
  *
  * @param defaultModel - Default model the summary prefers.
  * @returns The store, a switch for whether the model runtime is available
- * (it starts available), and a reader of how many times the slice asked the
- * store to re-read the LM Studio status.
+ * (it starts available), the stored load settings the slice reads (they
+ * start as {@link LOAD_CONFIGURATION_SETTINGS}; a case may replace them), and
+ * a reader of how many times the slice asked the store to re-read the LM
+ * Studio status.
  */
 function createModelStore(defaultModel: string | null = null) {
   const connection = { isModelRuntimeAvailable: true }
+  const storedSettings = { loadConfiguration: LOAD_CONFIGURATION_SETTINGS }
   let failureReactions = 0
   const store = createStore<ModelSlice>()((set, get) =>
     createModelSlice(set, get, {
@@ -62,10 +122,16 @@ function createModelStore(defaultModel: string | null = null) {
       }),
       handleModelRequestFailure: async () => {
         failureReactions += 1
-      }
+      },
+      getLoadConfigurationSettings: () => storedSettings.loadConfiguration
     })
   )
-  return { store, connection, getFailureReactionCount: () => failureReactions }
+  return {
+    store,
+    connection,
+    storedSettings,
+    getFailureReactionCount: () => failureReactions
+  }
 }
 
 /**
@@ -79,6 +145,26 @@ function buildInventoryRoute(models: readonly unknown[]): BackendRoute {
 }
 
 /**
+ * Builds a route confirming that one model was loaded.
+ *
+ * @param modelKey - Key the backend reports as loaded.
+ * @returns The route.
+ */
+function buildLoadRoute(modelKey: string): BackendRoute {
+  return () => buildJsonResponse(200, buildLlmInfo(modelKey, { loaded: true }))
+}
+
+/**
+ * Builds the route key of one received request.
+ *
+ * @param request - Request the backend double received.
+ * @returns The `"<METHOD> <path>"` key the routes are declared under.
+ */
+function buildRouteKey(request: ObservedBackendRequest): string {
+  return `${request.method} ${new URL(request.url).pathname}`
+}
+
+/**
  * Starts a backend with the given routes and returns the requests' route
  * keys in arrival order.
  *
@@ -87,10 +173,19 @@ function buildInventoryRoute(models: readonly unknown[]): BackendRoute {
  */
 function startModelBackend(routes: BackendRoutes): () => string[] {
   const backend = startBackendFake(routes)
-  return () =>
-    backend.requests.map(
-      (request) => `${request.method} ${new URL(request.url).pathname}`
-    )
+  return () => backend.requests.map(buildRouteKey)
+}
+
+/**
+ * Lists the bodies of the load requests a backend double received.
+ *
+ * @param backend - Backend double the case started.
+ * @returns Each load request's decoded body, in arrival order.
+ */
+function listLoadRequestBodies(backend: BackendFake): unknown[] {
+  return backend.requests
+    .filter((request) => buildRouteKey(request) === LOAD_ROUTE)
+    .map((request) => request.body)
 }
 
 describe("createModelSlice", () => {
@@ -100,7 +195,8 @@ describe("createModelSlice", () => {
       modelRequest: { status: "idle" },
       modelRuntime: { status: "none" },
       modelError: null,
-      modelHealth: null
+      modelHealth: null,
+      loadedModelConfigurations: new Map()
     })
   })
 
@@ -120,6 +216,22 @@ describe("createModelSlice", () => {
         modelRuntime: { status: "loaded", modelKey: "resident" },
         modelError: null
       })
+    })
+
+    it("assumes the stored configuration for each model it finds already loaded", async () => {
+      startModelBackend({ [LIST_ROUTE]: buildInventoryRoute(INVENTORY) })
+      const { store } = createModelStore()
+
+      await store.getState().updateModelInventory()
+
+      expect(store.getState().loadedModelConfigurations).toEqual(
+        new Map([
+          [
+            "resident",
+            { origin: "assumed", configuration: RESOLVED_DEFAULT_CONFIGURATION }
+          ]
+        ])
+      )
     })
 
     it("asks nothing while the model runtime is unavailable", async () => {
@@ -253,6 +365,190 @@ describe("createModelSlice", () => {
 
       expect(requests().filter((route) => route === LOAD_ROUTE)).toHaveLength(1)
     })
+
+    it("sends the model's own load settings, completed by the stored default", async () => {
+      const backend = startBackendFake({
+        [LOAD_ROUTE]: buildLoadRoute("on-disk"),
+        [LIST_ROUTE]: buildInventoryRoute(INVENTORY_AFTER_LOAD)
+      })
+      const { store } = createModelStore()
+
+      await store.getState().loadModel("on-disk")
+
+      expect(listLoadRequestBodies(backend)).toEqual([
+        { modelId: "on-disk", configuration: RESOLVED_ON_DISK_CONFIGURATION }
+      ])
+    })
+
+    it("sends the stored default for a model without settings of its own", async () => {
+      const backend = startBackendFake({
+        [LOAD_ROUTE]: buildLoadRoute("on-disk"),
+        [LIST_ROUTE]: buildInventoryRoute(INVENTORY_AFTER_LOAD)
+      })
+      const { store, storedSettings } = createModelStore()
+      storedSettings.loadConfiguration =
+        DEFAULT_ONLY_LOAD_CONFIGURATION_SETTINGS
+
+      await store.getState().loadModel("on-disk")
+
+      expect(listLoadRequestBodies(backend)).toEqual([
+        { modelId: "on-disk", configuration: RESOLVED_DEFAULT_CONFIGURATION }
+      ])
+    })
+
+    it("caps the sent context length at the maximum the inventory lists for the model", async () => {
+      const backend = startBackendFake({
+        [LIST_ROUTE]: buildInventoryRoute([
+          buildLlmInfo("on-disk", { maxContextLength: 5000 })
+        ]),
+        [LOAD_ROUTE]: buildLoadRoute("on-disk")
+      })
+      const { store } = createModelStore()
+      await store.getState().updateModelInventory()
+
+      await store.getState().loadModel("on-disk")
+
+      expect(listLoadRequestBodies(backend)).toEqual([
+        {
+          modelId: "on-disk",
+          configuration: {
+            ...RESOLVED_ON_DISK_CONFIGURATION,
+            contextLength: 5000
+          }
+        }
+      ])
+    })
+
+    it("remembers the configuration it sent while the model is loaded", async () => {
+      startModelBackend({
+        [LOAD_ROUTE]: buildLoadRoute("on-disk"),
+        [LIST_ROUTE]: buildInventoryRoute(INVENTORY_AFTER_LOAD)
+      })
+      const { store } = createModelStore()
+
+      await store.getState().loadModel("on-disk")
+
+      expect(store.getState().loadedModelConfigurations.get("on-disk")).toEqual(
+        { origin: "sent", configuration: RESOLVED_ON_DISK_CONFIGURATION }
+      )
+    })
+  })
+
+  describe("updateLoadedModelConfiguration", () => {
+    it("publishes unloading, then loading, while it unloads and loads the model again", async () => {
+      const requests = startModelBackend({
+        [UNLOAD_ROUTE]: () => new Response(null, { status: 204 }),
+        [LOAD_ROUTE]: buildLoadRoute("resident"),
+        [LIST_ROUTE]: buildInventoryRoute(INVENTORY)
+      })
+      const { store } = createModelStore()
+      const publishedRequests: ModelRequestState[] = []
+      store.subscribe((state) => {
+        publishedRequests.push(state.modelRequest)
+      })
+
+      await store.getState().updateLoadedModelConfiguration("resident")
+
+      expect(requests()).toEqual([UNLOAD_ROUTE, LOAD_ROUTE, LIST_ROUTE])
+      expect(publishedRequests).toEqual([
+        { status: "unloading", modelKey: "resident" },
+        { status: "loading", modelKey: "resident" },
+        { status: "idle" }
+      ])
+      expect(store.getState()).toMatchObject({
+        modelRuntime: { status: "loaded", modelKey: "resident" },
+        modelError: null
+      })
+    })
+
+    it("loads the model with its stored configuration and remembers it as sent", async () => {
+      const backend = startBackendFake({
+        [UNLOAD_ROUTE]: () => new Response(null, { status: 204 }),
+        [LOAD_ROUTE]: buildLoadRoute("resident"),
+        [LIST_ROUTE]: buildInventoryRoute(INVENTORY)
+      })
+      const { store } = createModelStore()
+
+      await store.getState().updateLoadedModelConfiguration("resident")
+
+      expect(listLoadRequestBodies(backend)).toEqual([
+        { modelId: "resident", configuration: RESOLVED_DEFAULT_CONFIGURATION }
+      ])
+      expect(
+        store.getState().loadedModelConfigurations.get("resident")
+      ).toEqual({
+        origin: "sent",
+        configuration: RESOLVED_DEFAULT_CONFIGURATION
+      })
+    })
+
+    it("sends the configuration stored at admission, not one edited during the unload", async () => {
+      const unload = createControlledPromise<Response>()
+      const backend = startBackendFake({
+        [UNLOAD_ROUTE]: () => unload.promise,
+        [LOAD_ROUTE]: buildLoadRoute("resident"),
+        [LIST_ROUTE]: buildInventoryRoute(INVENTORY)
+      })
+      const { store, storedSettings } = createModelStore()
+      const editedSettings: LoadConfigurationSettings = {
+        default: STORED_DEFAULT_LOAD_CONFIGURATION,
+        models: new Map([
+          [
+            "resident",
+            modelLoadConfigurationSchema.parse({ contextLength: 2048 })
+          ]
+        ])
+      }
+      const reload = store.getState().updateLoadedModelConfiguration("resident")
+
+      storedSettings.loadConfiguration = editedSettings
+      unload.resolve(new Response(null, { status: 204 }))
+      await reload
+
+      expect(listLoadRequestBodies(backend)).toEqual([
+        { modelId: "resident", configuration: RESOLVED_DEFAULT_CONFIGURATION }
+      ])
+    })
+
+    it("starts no load when the unload fails", async () => {
+      const requests = startModelBackend({
+        [UNLOAD_ROUTE]: () => buildJsonResponse(500, {}),
+        [LIST_ROUTE]: buildInventoryRoute(INVENTORY)
+      })
+      const { store, getFailureReactionCount } = createModelStore()
+
+      await store.getState().updateLoadedModelConfiguration("resident")
+
+      expect(requests()).toEqual([UNLOAD_ROUTE, LIST_ROUTE])
+      expect(store.getState()).toMatchObject({
+        modelRuntime: { status: "loaded", modelKey: "resident" },
+        modelError: expect.stringContaining("500")
+      })
+      expect(getFailureReactionCount()).toBe(1)
+    })
+
+    it("leaves the model unloaded and shows the failure when the load after the unload fails", async () => {
+      const busy = createLlmServiceBusyProblem()
+      const requests = startModelBackend({
+        [UNLOAD_ROUTE]: () => new Response(null, { status: 204 }),
+        [LOAD_ROUTE]: () => buildJsonResponse(503, busy),
+        [LIST_ROUTE]: buildInventoryRoute([
+          buildLlmInfo("resident"),
+          buildLlmInfo("on-disk")
+        ])
+      })
+      const { store, getFailureReactionCount } = createModelStore()
+
+      await store.getState().updateLoadedModelConfiguration("resident")
+
+      expect(requests()).toEqual([UNLOAD_ROUTE, LOAD_ROUTE, LIST_ROUTE])
+      expect(store.getState()).toMatchObject({
+        modelRuntime: { status: "none" },
+        modelRequest: { status: "idle" },
+        modelError: busy.detail
+      })
+      expect(getFailureReactionCount()).toBe(1)
+    })
   })
 
   describe("unloadModel", () => {
@@ -363,7 +659,8 @@ describe("createModelSlice", () => {
             isModelRuntimeAvailable: true,
             defaultModel: null
           }),
-          handleModelRequestFailure: () => reaction.promise
+          handleModelRequestFailure: () => reaction.promise,
+          getLoadConfigurationSettings: () => LOAD_CONFIGURATION_SETTINGS
         })
       )
 
@@ -402,6 +699,21 @@ describe("createModelSlice", () => {
         modelRequest: { status: "idle" },
         modelRuntime: { status: "none" }
       })
+    })
+
+    it("forgets the configurations of the loaded models", async () => {
+      startModelBackend({ [LIST_ROUTE]: buildInventoryRoute(INVENTORY) })
+      const { store } = createModelStore()
+      await store.getState().updateModelInventory()
+      const recordsBeforeRelease =
+        store.getState().loadedModelConfigurations.size
+
+      store.getState().releaseModelRuntime()
+
+      expect([
+        recordsBeforeRelease,
+        store.getState().loadedModelConfigurations.size
+      ]).toEqual([1, 0])
     })
 
     it("admits a new request after release", async () => {

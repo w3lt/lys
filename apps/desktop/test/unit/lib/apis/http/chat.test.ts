@@ -1,5 +1,6 @@
 import {
   chatApiRequestBodySchema,
+  chatToolCallAnswerMismatchProblemSchema,
   chatToolCallNotPendingProblemSchema,
   chatToolResultSchema,
   conversationAgentMissingProblemSchema
@@ -109,6 +110,15 @@ const TOOL_CALL_NOT_PENDING_PROBLEM = chatToolCallNotPendingProblemSchema.parse(
     detail: "No tool call is waiting under this identifier."
   }
 )
+
+/** Problem the backend sends for an answer that does not fit its tool call. */
+const TOOL_CALL_ANSWER_MISMATCH_PROBLEM =
+  chatToolCallAnswerMismatchProblemSchema.parse({
+    type: "urn:lys:problem:chat:tool-call-answer-mismatch",
+    title: "Tool call answer does not fit the call",
+    status: 409,
+    detail: "A client tool's call cannot be answered as allowed."
+  })
 
 /** Start event the backend sends for {@link NEW_CONVERSATION_REQUEST}. */
 const NEW_CONVERSATION_START_EVENT = Object.freeze({
@@ -499,6 +509,21 @@ describe("sendChatToolResult", () => {
         backendUrl: BACKEND_URL
       })
     ).resolves.toEqual({ status: "not-pending" })
+  })
+
+  it("rejects an answer the backend says does not fit the call, without its detail", async () => {
+    startBackendFake({
+      [TOOL_RESULT_ROUTE]: () =>
+        buildJsonResponse(409, TOOL_CALL_ANSWER_MISMATCH_PROBLEM)
+    })
+
+    await expect(
+      sendChatToolResult(TOOL_CALL_TARGET, SUCCEEDED_TOOL_RESULT, {
+        backendUrl: BACKEND_URL
+      })
+    ).rejects.toThrow(
+      /^The backend said this answer does not fit the tool call\.$/
+    )
   })
 
   it.each([

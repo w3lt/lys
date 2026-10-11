@@ -16,6 +16,8 @@ import {
 } from "@lys/protocol"
 import { EventSourceParserStream } from "eventsource-parser/stream"
 
+import { DELETED_CONVERSATION_AGENT_MESSAGE } from "@/lib/conversation-agent-messages"
+
 /** Transport options for reading one backend chat event stream. */
 export type ChatApiOptions = {
   /**
@@ -116,7 +118,10 @@ const MISSING_REPLY_MESSAGE = "The reply is no longer stored."
  * continues.
  * @param options - Optional transport cancellation settings.
  * @returns An async generator yielding validated chat protocol events.
- * @throws If the request, stream read, JSON parse, or event validation fails.
+ * @throws If the request, stream read, JSON parse, or event validation fails;
+ * with {@link DELETED_CONVERSATION_AGENT_MESSAGE} when the backend reports
+ * that the continued conversation's agent no longer exists, which stored
+ * nothing.
  */
 export async function* readChatEvents(
   payload: ChatApiRequestBody,
@@ -130,6 +135,12 @@ export async function* readChatEvents(
     signal
   })
 
+  if (
+    response.status === 409 &&
+    isConversationAgentMissingProblem(await readFailureBody(response))
+  ) {
+    throw new Error(DELETED_CONVERSATION_AGENT_MESSAGE)
+  }
   if (!response.ok || !response.body) {
     throw new Error(`Chat request failed: ${response.status}`)
   }
@@ -323,6 +334,18 @@ async function* readServerSentEvents<TStreamEvent>(
       reader.releaseLock()
     }
   }
+}
+
+/**
+ * Determines whether a decoded body declares that a continued conversation's
+ * agent no longer exists.
+ *
+ * @param body - Untrusted body of a failed chat response.
+ * @returns Whether it validates as the declared missing conversation agent
+ * problem.
+ */
+function isConversationAgentMissingProblem(body: unknown): boolean {
+  return chatApi.responses[409].safeParse(body).success
 }
 
 /**

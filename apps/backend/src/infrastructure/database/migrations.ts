@@ -167,6 +167,17 @@ const databaseMigrations = [
     ALTER TABLE conversations
       ADD COLUMN agent_code TEXT NOT NULL DEFAULT 'lys' CHECK (agent_code <> '');
     ALTER TABLE conversations DROP COLUMN system_prompt;
+  `,
+  // Moves every conversation answered by Lys to Caliginia. Lys, under the
+  // code `lys`, was the one built-in agent and the only agent chats could
+  // use, so each of those conversations was hers; she is now shipped as two
+  // built-in agents, and Caliginia is the one new conversations start with.
+  // Nothing else changes: titles, times, and messages stay, a conversation
+  // under any other code keeps it, and an agent stored under `lys` is the
+  // person's own and stays theirs. The column default of version 7 still
+  // reads `lys`; the backend always writes the code, so it is never used.
+  `
+    UPDATE conversations SET agent_code = 'caliginia' WHERE agent_code = 'lys';
   `
 ] as const
 

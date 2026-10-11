@@ -5,7 +5,9 @@ export {
   type LlmServiceBusyProblem
 } from "./llmServiceBusy"
 export {
+  conversationAgentMissingProblemSchema,
   conversationNotFoundProblemSchema,
+  type ConversationAgentMissingProblem,
   type ConversationNotFoundProblem
 } from "./conversation"
 export {
@@ -19,8 +21,10 @@ export {
   type ChatToolCallNotPendingProblem
 } from "./chat"
 export {
+  agentBuiltInProblemSchema,
   agentCodeTakenProblemSchema,
   agentNotFoundProblemSchema,
+  type AgentBuiltInProblem,
   type AgentCodeTakenProblem,
   type AgentNotFoundProblem
 } from "./agent"

@@ -49,12 +49,16 @@ A manual Start follows steps 4–8.
    only its own observation of the stream.
 3. The desktop sends `POST /api/v1/chat` with `conversation`, `message`,
    `model`, and required `generationOptions`. `conversation` is
-   `{ kind: "new", agentCode: "lys" }` for a new conversation and
-   `{ kind: "existing", id }` to continue one. Generation options contain
+   `{ kind: "new", agentCode }` for a new conversation, naming the agent
+   selected in the composer (`caliginia` until another is selected), and
+   `{ kind: "existing", id }` to continue one, which keeps its agent. Generation options contain
    the current temperature and an optional reply ceiling; a local zero ceiling
    is omitted from the request.
-4. The backend creates or reuses the conversation, inserts the user message, and
-   inserts an empty streaming assistant message.
+4. The backend finds the agent that answers, then creates or reuses the
+   conversation, inserts the user message, and inserts an empty streaming
+   assistant message. When no agent has the requested code, the conversation
+   is not stored, or its agent was deleted, the backend answers with a
+   problem instead and stores nothing.
 5. The backend emits a `start-new-conversation-turn` or
    `start-existing-conversation-turn` event.
 6. The backend streams zero or more `delta` events, then a `done` event when the

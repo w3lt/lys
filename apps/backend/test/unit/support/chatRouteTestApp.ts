@@ -3,6 +3,7 @@ import { validatorCompiler } from "fastify-type-provider-zod"
 import { onTestFinished, vi, type MockInstance } from "vitest"
 import SqliteAgentRecordStore from "../../../src/infrastructure/database/agents/sqliteAgentRecordStore"
 import AgentService from "../../../src/modules/agent/agentService"
+import { buildBuiltInAgents } from "../../../src/modules/agent/builtInAgents"
 import ChatService from "../../../src/modules/chat/chatService"
 import OpenAiReplyModel from "../../../src/modules/chat/openAiReplyModel"
 import type StoredConversationTurns from "../../../src/modules/conversation/turns"
@@ -16,10 +17,14 @@ import { LOOK_UP_WORD_TOOL, ScriptedBuiltInTool } from "./scriptedBuiltInTool"
 const CHAT_PATH = "/api/v1/chat"
 
 /**
- * System prompt of the Lys agent in the chat route test app; it differs from
- * every stored prompt so a case can tell which one the model received.
+ * System prompts of the built-in agents in the chat route test app; each
+ * differs from the other and from every stored prompt, so a case can tell
+ * which one the model received.
  */
-export const TEST_LYS_SYSTEM_PROMPT = "You are the test Lys."
+export const TEST_BUILT_IN_AGENT_PROMPTS = Object.freeze({
+  caliginia: "You are the test Caliginia.",
+  lysiptera: "You are the test Lysiptera."
+})
 
 /** Test application decorated with the services the chat route borrows. */
 export type ChatRouteTestApp = TestFastify &
@@ -54,16 +59,17 @@ export type ChatRouteTestApp = TestFastify &
  * reject with `Unexpected chat route call: <name>`, so a case that reaches
  * persistence or the model without arranging it fails. No database row is
  * written and no HTTP request leaves the process. The decorated agent service
- * keeps its records on the same in-memory database and builds Lys with
- * {@link TEST_LYS_SYSTEM_PROMPT}; Lys's model calls go through the
- * `completeChatStream` spy. The only backend tool is the scripted
- * `look_up_word` tool. When the test finishes, the registry is disposed
+ * keeps its records on the same in-memory database and builds the built-in
+ * agents with {@link TEST_BUILT_IN_AGENT_PROMPTS}; every agent's model calls
+ * go through the `completeChatStream` spy. The decorated history reader reads
+ * the same database. The only backend tool is the scripted `look_up_word`
+ * tool. When the test finishes, the registry is disposed
  * first, so every generation it holds has stored its final state before the
  * in-memory conversation database is closed.
  */
 export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
   const testFastify = await createChatSseTestApp()
-  const { database, turns } = openConversationTestServices()
+  const { database, turns, history } = openConversationTestServices()
   const createConversationTurn = vi
     .spyOn(turns, "createConversationTurn")
     .mockImplementation(() => handleUnexpectedCall("createConversationTurn"))
@@ -84,7 +90,7 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
     )
   const agentService = new AgentService({
     recordStore: new SqliteAgentRecordStore(database),
-    lysSystemPrompt: TEST_LYS_SYSTEM_PROMPT,
+    builtInAgents: buildBuiltInAgents(TEST_BUILT_IN_AGENT_PROMPTS),
     replyModel: new OpenAiReplyModel((options) =>
       chatService.completeChatStream(options)
     )
@@ -95,6 +101,7 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
   })
   testFastify.app.setValidatorCompiler(validatorCompiler)
   testFastify.app.decorate("conversationTurns", turns)
+  testFastify.app.decorate("conversationHistoryReader", history)
   testFastify.app.decorate("chatService", chatService)
   testFastify.app.decorate("agentService", agentService)
   testFastify.app.decorate(

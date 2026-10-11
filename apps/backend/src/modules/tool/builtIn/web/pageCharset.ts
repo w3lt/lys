@@ -7,8 +7,14 @@ const DEFAULT_PAGE_ENCODING = "utf-8"
 /** Bytes at the start of an HTML body searched for a `<meta>` charset. */
 const META_CHARSET_PRESCAN_BYTES = 1_024
 
-/** Finds a charset declared by an HTML `<meta>` element. */
-const META_CHARSET_PATTERN = /<meta[^>]+charset\s*=\s*["']?\s*([\w.:-]+)/i
+/**
+ * Finds the text of each HTML `<meta>` element, up to its closing `>` or the
+ * end of the searched text.
+ */
+const META_ELEMENT_PATTERN = /<meta[^>]*/gi
+
+/** Finds the charset label declared in the text of one `<meta>` element. */
+const META_CHARSET_PATTERN = /charset\s*=\s*(?:["']\s*)?([\w.:-]+)/i
 
 /** Byte order marks and the encoding each one names, checked in order. */
 const BYTE_ORDER_MARKS: readonly (readonly [
@@ -38,14 +44,19 @@ function findByteOrderMarkEncoding(bytes: Uint8Array): string | undefined {
  * start.
  *
  * @param bytes - HTML body bytes.
- * @returns The declared label, or undefined when none is found in the first
+ * @returns The label the first declaring `<meta>` element names, or
+ * undefined when none is found in the first
  * {@link META_CHARSET_PRESCAN_BYTES} bytes.
  */
 function findMetaCharset(bytes: Uint8Array): string | undefined {
   const head = new TextDecoder("latin1").decode(
     bytes.subarray(0, META_CHARSET_PRESCAN_BYTES)
   )
-  return META_CHARSET_PATTERN.exec(head)?.[1]
+  for (const [element] of head.matchAll(META_ELEMENT_PATTERN)) {
+    const label = META_CHARSET_PATTERN.exec(element)?.[1]
+    if (label !== undefined) return label
+  }
+  return undefined
 }
 
 /**

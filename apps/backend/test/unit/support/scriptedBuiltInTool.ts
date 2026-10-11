@@ -50,12 +50,15 @@ export const LOOK_UP_WORD_FORMAT = Object.freeze({
  * Run script that answers at once with the word it looked up.
  *
  * @param word - Word the call asked about.
- * @returns A succeeded result naming the word.
+ * @returns A settled promise of a succeeded result naming the word.
  */
-export async function answerWithWordDefinition(
+export function answerWithWordDefinition(
   word: string
 ): Promise<BuiltInToolResult> {
-  return { status: "succeeded", content: `${word}: a definition` }
+  return Promise.resolve({
+    status: "succeeded",
+    content: `${word}: a definition`
+  })
 }
 
 /**

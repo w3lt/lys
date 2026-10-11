@@ -97,12 +97,8 @@ function parseReadPageInput(call: ChatToolCall): BackendToolInputResult {
 export function parseBackendToolInput(
   call: ChatToolCall
 ): BackendToolInputResult {
-  switch (call.toolName) {
-    case "read_page":
-      return parseReadPageInput(call)
-    default:
-      return buildRejectedInput(
-        `The desktop cannot describe the backend tool "${call.toolName}", so it was not run.`
-      )
-  }
+  if (call.toolName === "read_page") return parseReadPageInput(call)
+  return buildRejectedInput(
+    `The desktop cannot describe the backend tool "${call.toolName}", so it was not run.`
+  )
 }

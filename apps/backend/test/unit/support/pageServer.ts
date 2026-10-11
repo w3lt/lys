@@ -30,9 +30,8 @@ export type PageServer = Readonly<{
 }>
 
 /** Lookup that sends every host name to the loopback address. */
-const lookupLoopback: HostAddressLookup = async () => [
-  { address: "127.0.0.1", family: 4 }
-]
+const lookupLoopback: HostAddressLookup = () =>
+  Promise.resolve([{ address: "127.0.0.1", family: 4 }])
 
 /**
  * Dependencies of a request to a test page server: every host name reaches

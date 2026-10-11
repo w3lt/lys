@@ -290,11 +290,15 @@ function normalizeBlockText(text: string): string {
  * Normalizes preformatted text, keeping its line breaks.
  *
  * @param text - Text of a `<pre>` element.
- * @returns The text with trailing spaces removed from each line and the ends
- * trimmed.
+ * @returns The text with trailing whitespace removed from each line and the
+ * ends trimmed.
  */
 function normalizePreformattedText(text: string): string {
-  return text.replace(/[ \t]+\n/g, "\n").trim()
+  return text
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .join("\n")
+    .trim()
 }
 
 /**

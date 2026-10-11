@@ -75,7 +75,7 @@ function ToolListStatus({
 
 /** Properties accepted by {@link ToolGroupList}. */
 type ToolGroupListProps = {
-  /** Every client tool, in the order Settings lists them. */
+  /** Every tool, the app's then the backend's, in the order Settings lists them. */
   readonly tools: readonly ToolDefinition[]
   /** Name of the tool whose details are shown, or null when none is. */
   readonly expandedToolName: string | null
@@ -136,7 +136,7 @@ function ToolGroupList({
 
 /** Properties accepted by {@link ToolWorkspace}. */
 type ToolWorkspaceProps = {
-  /** Every client tool, in the order Settings lists them. */
+  /** Every tool, the app's then the backend's, in the order Settings lists them. */
   readonly tools: readonly ToolDefinition[]
 }
 
@@ -199,7 +199,7 @@ function ToolWorkspace({ tools }: ToolWorkspaceProps): ReactElement {
 
 /** Properties accepted by {@link ToolListBody}. */
 type ToolListBodyProps = {
-  /** Lifecycle of the list of client tools, owned by the tool store. */
+  /** Lifecycle of the list of every tool, owned by the tool store. */
   readonly list: ToolListState
 }
 
@@ -226,13 +226,14 @@ function ToolListBody({ list }: ToolListBodyProps): ReactElement | null {
 }
 
 /**
- * Presents the Tools pane: Lys's client tools and the choices about them.
+ * Presents the Tools pane: Lys's tools, in the app and in the backend, and
+ * the choices about them.
  *
  * @remarks The tool store owns the list and the choices. The pane reads the
- * tools from the desktop when it appears and none were read yet; the read
- * belongs to the store and continues if the pane is left. A status line stays
- * mounted above the tools and, after a failed read, shows the failure and
- * offers Retry. The tools do not depend on the backend. The pane accepts no
+ * tools from the desktop and the backend when it appears and none were read
+ * yet; the read belongs to the store and continues if the pane is left. A
+ * status line stays mounted above the tools and, after a failed read of
+ * either list, shows the failure and offers Retry. The pane accepts no
  * props and is loaded lazily by the settings view.
  * @returns The tools pane body.
  */

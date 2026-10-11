@@ -25,6 +25,7 @@ export {
 export {
   buildToolFunctionFormat,
   hasDistinctToolNames,
+  isEveryToolRunBy,
   toolArgumentDefinitionSchema,
   toolArgumentNameSchema,
   toolDefinitionSchema,
@@ -36,5 +37,6 @@ export {
   type ToolArgumentDefinitionCandidate,
   type ToolDefinition,
   type ToolDefinitionCandidate,
-  type ToolGroup
+  type ToolGroup,
+  type ToolRunner
 } from "./tool"

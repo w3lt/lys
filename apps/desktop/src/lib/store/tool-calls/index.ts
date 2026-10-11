@@ -1,6 +1,7 @@
 import type {
   ChatReplyEvent,
   ChatReplyPathParams,
+  ChatToolAnswer,
   ChatToolCall,
   ChatToolResult,
   ChatToolResultPathParams
@@ -17,6 +18,7 @@ import { findFiles, readTextFile } from "@/lib/apis/tauri/tools"
 import { useLysStore } from "@/lib/store"
 import { useToolStore } from "@/lib/store/tools"
 
+import { ALLOWED_TOOL_ANSWER } from "./backend-tools"
 import {
   buildDeclinedToolResult,
   formatRejectedToolCallContent,
@@ -24,9 +26,13 @@ import {
   type ClientToolCommands,
   type ClientToolInput
 } from "./client-tools"
-import { calculateToolCallGate, type ToolCallSettings } from "./tool-call-gate"
+import {
+  calculateToolCallGate,
+  type ToolCallInput,
+  type ToolCallSettings
+} from "./tool-call-gate"
 
-export type { ClientToolInput } from "./client-tools"
+export type { ToolCallInput } from "./tool-call-gate"
 
 /**
  * Where one held call's answer stands.
@@ -38,26 +44,29 @@ export type HeldToolCallAnswer =
   | {
       /** The person must allow or reject the call. */
       readonly status: "awaiting-person"
-      /** Definition of the called tool, for its access tag. */
+      /** Definition of the called tool, for its access and runner tags. */
       readonly definition: ToolDefinition
-      /** Validated input the call runs with when allowed. */
-      readonly input: ClientToolInput
+      /**
+       * Validated input: a desktop tool runs with it when allowed, and a
+       * backend tool's card describes it.
+       */
+      readonly input: ToolCallInput
     }
   | {
-      /** The tool is running; its answer is not built yet. */
+      /** The desktop tool is running; its answer is not built yet. */
       readonly status: "running"
     }
   | {
       /** The answer is being sent to the backend. */
       readonly status: "sending"
       /** Answer being sent. */
-      readonly result: ChatToolResult
+      readonly toolAnswer: ChatToolAnswer
     }
   | {
       /** Sending the answer failed; the person can send it again. */
       readonly status: "send-failed"
       /** Answer that was not sent, kept so a retry does not run the tool again. */
-      readonly result: ChatToolResult
+      readonly toolAnswer: ChatToolAnswer
       /** User-presentable reason. */
       readonly error: string
     }
@@ -106,19 +115,20 @@ type ToolCallActions = {
    * @param target - Reply that is generating, and its conversation.
    * @remarks The store follows the reply on its own connection, independent
    * of the chat view, until the reply ends; a reply it already follows is
-   * ignored. Calls on Run run at once, and calls on Ask wait in arrival
-   * order. When the following ends, every call of the reply still held is
-   * dropped.
+   * ignored. Calls on Run run at once, or are allowed at once when the
+   * backend runs the tool, and calls on Ask wait in arrival order. When the
+   * following ends, every call of the reply still held is dropped.
    */
   startReplyToolCallFollow: (target: ChatReplyPathParams) => void
   /**
-   * Resolves one call that waits for the person: allows it, runs it, and
-   * sends its answer.
+   * Resolves one call that waits for the person: allows it, and either runs
+   * the desktop tool and sends its result, or sends the answer that lets the
+   * backend run its tool.
    *
    * @param callId - Identifier of a held call.
    * @returns A promise that settles once the answer was sent or failed to
    * send; it never rejects. A call that does not wait for the person is
-   * ignored, so a repeated press runs the tool once.
+   * ignored, so a repeated press runs or allows the tool once.
    */
   resolveToolCall: (callId: string) => Promise<void>
   /**
@@ -166,7 +176,7 @@ type ToolCallStoreDependencies = {
   /** Sends one answer; throws when the backend cannot take it. */
   readonly sendChatToolResult: (
     target: ChatToolResultPathParams,
-    result: ChatToolResult
+    toolAnswer: ChatToolAnswer
   ) => Promise<SendChatToolResultResult>
   /** Gets the tool list and the person's choices; never rejects. */
   readonly getToolCallSettings: () => Promise<ToolCallSettings>
@@ -388,32 +398,32 @@ function createToolCallStore(
      * backend no longer waits for it.
      *
      * @param callId - Identifier of the call.
-     * @param result - Answer to send.
+     * @param toolAnswer - Answer to send.
      * @returns A promise that settles after the send; it never rejects. An
      * accepted or not-pending answer marks the call `answered`; a failed send
      * keeps it as `send-failed` with the answer, unless the reply's follow
      * stopped or the call was answered meanwhile.
      */
-    async function sendHeldToolResult(
+    async function sendHeldToolAnswer(
       callId: string,
-      result: ChatToolResult
+      toolAnswer: ChatToolAnswer
     ): Promise<void> {
       const heldCall = findHeldToolCall(callId)
       if (heldCall === undefined) return
 
       const sending = Object.freeze({
         status: "sending",
-        result
+        toolAnswer
       } satisfies HeldToolCallAnswer)
       updateHeldToolCallAnswer(callId, sending)
       try {
-        await dependencies.sendChatToolResult(heldCall.target, result)
+        await dependencies.sendChatToolResult(heldCall.target, toolAnswer)
         updateHeldToolCallAnswer(callId, ANSWERED_ANSWER)
       } catch (error) {
         if (findHeldToolCall(callId)?.answer.status !== "sending") return
         const sendFailure = Object.freeze({
           status: "send-failed",
-          result,
+          toolAnswer,
           error: formatToolResultSendError(error)
         } satisfies HeldToolCallAnswer)
         updateHeldToolCallAnswer(callId, sendFailure)
@@ -421,7 +431,7 @@ function createToolCallStore(
     }
 
     /**
-     * Runs one held call and sends its answer.
+     * Runs one held call of a desktop tool and sends its answer.
      *
      * @param callId - Identifier of the call.
      * @param input - Validated input to run with.
@@ -438,7 +448,7 @@ function createToolCallStore(
       const result = await dependencies.runClientTool(input)
       if (findHeldToolCall(callId)?.answer.status !== "running") return
 
-      await sendHeldToolResult(callId, result)
+      await sendHeldToolAnswer(callId, result)
     }
 
     /**
@@ -464,11 +474,11 @@ function createToolCallStore(
         case "answered": {
           const answer = Object.freeze({
             status: "sending",
-            result: gate.result
+            toolAnswer: gate.toolAnswer
           } satisfies HeldToolCallAnswer)
           addHeldToolCall(Object.freeze({ target: resultTarget, call, answer }))
           // Sending never rejects; it records its outcome in the held call.
-          void sendHeldToolResult(call.id, gate.result)
+          void sendHeldToolAnswer(call.id, gate.toolAnswer)
           return
         }
         case "run":
@@ -649,7 +659,12 @@ function createToolCallStore(
       const answer = findHeldToolCall(callId)?.answer
       if (answer?.status !== "awaiting-person") return Promise.resolve()
 
-      return runHeldToolCall(callId, answer.input)
+      switch (answer.input.runner) {
+        case "client":
+          return runHeldToolCall(callId, answer.input)
+        case "backend":
+          return sendHeldToolAnswer(callId, ALLOWED_TOOL_ANSWER)
+      }
     }
 
     /**
@@ -664,7 +679,7 @@ function createToolCallStore(
       if (answer?.status !== "awaiting-person") return Promise.resolve()
 
       const content = formatRejectedToolCallContent(note)
-      return sendHeldToolResult(callId, buildDeclinedToolResult(content))
+      return sendHeldToolAnswer(callId, buildDeclinedToolResult(content))
     }
 
     /**
@@ -678,7 +693,7 @@ function createToolCallStore(
       const answer = findHeldToolCall(callId)?.answer
       if (answer?.status !== "send-failed") return Promise.resolve()
 
-      return sendHeldToolResult(callId, answer.result)
+      return sendHeldToolAnswer(callId, answer.toolAnswer)
     }
 
     return {
@@ -721,8 +736,9 @@ async function getToolCallSettings(): Promise<ToolCallSettings> {
  * @remarks This singleton follows every reply the chat view starts or
  * follows, independent of which conversation is shown. It answers each tool
  * call by the Tools pane's choices at the moment the call arrives, runs
- * client tools through Tauri, and sends their answers to the backend origin
- * the application store names when each request starts. It holds nothing
+ * client tools through Tauri, allows the backend's tools, and sends every
+ * answer to the backend origin the application store names when each request
+ * starts. It holds nothing
  * across a renderer reload: a call still waiting is found again through its
  * reply's snapshot when the reply is followed again, as when its
  * conversation is shown after the reload. Quitting the app stops the
@@ -736,8 +752,8 @@ export const useToolCallStore: UseBoundStore<StoreApi<ToolCallStore>> =
         backendUrl: useLysStore.getState().backendUrl,
         signal
       }),
-    sendChatToolResult: (target, result) =>
-      sendChatToolResult(target, result, {
+    sendChatToolResult: (target, toolAnswer) =>
+      sendChatToolResult(target, toolAnswer, {
         backendUrl: useLysStore.getState().backendUrl
       }),
     getToolCallSettings,

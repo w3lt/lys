@@ -59,10 +59,12 @@ unregistered command, is thrown by the TypeScript wrappers as an error.
 `list_tools` returns `CLIENT_TOOLS` from `src-tauri/src/tools/client_tools.rs`:
 the definition of every client tool, in the order Settings lists them. A
 definition holds what a model is offered for the tool, its name, description,
-and arguments, plus the `group` and `access` that Settings shows. It mirrors
+and arguments, plus the `group` and `access` that Settings shows and the
+`runner`, which is `client` for every tool here. It mirrors
 `toolDefinitionSchema` in `@lys/share`, which the backend's `AgentTool` also
 uses, and the renderer's `listTools` validates the list with
-`listToolsResultSchema` from `@lys/protocol`.
+`listToolsResultSchema` from `@lys/protocol`, which also requires every
+`runner` to be `client`.
 
 Each tool builds its own definition next to the limits it enforces, so a
 description states the current limits. The tools are named `read_text_file`

@@ -16,7 +16,9 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use super::{
-    definition::{ToolAccess, ToolArgumentDefinition, ToolArgumentType, ToolDefinition, ToolGroup},
+    definition::{
+        ToolAccess, ToolArgumentDefinition, ToolArgumentType, ToolDefinition, ToolGroup, ToolRunner,
+    },
     text_file::{read_regular_text_file, TextFileReadError},
 };
 
@@ -783,6 +785,7 @@ pub(super) fn build_search_files_definition() -> ToolDefinition {
         ),
         group: ToolGroup::Files,
         access: ToolAccess::Reads,
+        runner: ToolRunner::Client,
         arguments: build_search_files_arguments(),
     }
 }

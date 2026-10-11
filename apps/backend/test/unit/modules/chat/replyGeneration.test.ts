@@ -45,6 +45,13 @@ const TOOL_CALL = Object.freeze({
   arguments: Object.freeze({ path: "/notes/todo.md" })
 } satisfies ChatToolCall)
 
+/** Call of a tool the backend runs, which the reply task sends for approval. */
+const BACKEND_TOOL_CALL = Object.freeze({
+  id: "01900000-0000-7000-8000-00000000000b",
+  toolName: "read_page",
+  arguments: Object.freeze({ url: "https://example.com/" })
+} satisfies ChatToolCall)
+
 /**
  * Creates a follower whose connection accepts every write at once.
  *
@@ -438,14 +445,14 @@ describe("ReplyGeneration", () => {
       generation.openSubscription(follower.subscription)
       await waitForMicrotasks()
 
-      const answer = replyTask.context.sendToolCall(TOOL_CALL)
+      const answer = replyTask.context.sendClientToolCall(TOOL_CALL)
       expect(generation.pendingToolCalls).toEqual([TOOL_CALL])
       expect(
         generation.resolveToolCall(TOOL_CALL.id, {
           status: "succeeded",
           content: "Buy milk"
         })
-      ).toBe(true)
+      ).toBe("accepted")
 
       expect(await answer).toEqual({ status: "succeeded", content: "Buy milk" })
       expect(generation.pendingToolCalls).toEqual([])
@@ -456,10 +463,38 @@ describe("ReplyGeneration", () => {
       expect(follower.written).toEqual([{ type: "tool-call", call: TOOL_CALL }])
     })
 
+    it("sends a backend call to followers and resumes it once allowed, refusing a result", async () => {
+      const { generation, replyTask, titleTask } = startControlledGeneration()
+      const follower = createRecordingFollower()
+      generation.openSubscription(follower.subscription)
+      await waitForMicrotasks()
+
+      const answer = replyTask.context.sendBuiltInToolCall(BACKEND_TOOL_CALL)
+      expect(generation.pendingToolCalls).toEqual([BACKEND_TOOL_CALL])
+      expect(
+        generation.resolveToolCall(BACKEND_TOOL_CALL.id, {
+          status: "succeeded",
+          content: "a page"
+        })
+      ).toBe("mismatched")
+      expect(
+        generation.resolveToolCall(BACKEND_TOOL_CALL.id, { status: "allowed" })
+      ).toBe("accepted")
+
+      expect(await answer).toEqual({ status: "allowed" })
+      replyTask.resolve()
+      titleTask.resolve()
+      await generation.settled
+      await follower.subscription.closed
+      expect(follower.written).toEqual([
+        { type: "tool-call", call: BACKEND_TOOL_CALL }
+      ])
+    })
+
     it("ends a waiting call without an answer when the reply is stopped", async () => {
       const { generation, replyTask } = startControlledGeneration()
       await waitForMicrotasks()
-      const answer = replyTask.context.sendToolCall(TOOL_CALL)
+      const answer = replyTask.context.sendClientToolCall(TOOL_CALL)
 
       const stop = generation.stopReply()
 
@@ -473,7 +508,7 @@ describe("ReplyGeneration", () => {
     it("ends a waiting call without an answer when the generation is disposed", async () => {
       const { generation, replyTask, titleTask } = startControlledGeneration()
       await waitForMicrotasks()
-      const answer = replyTask.context.sendToolCall(TOOL_CALL)
+      const answer = replyTask.context.sendClientToolCall(TOOL_CALL)
 
       const disposal = generation[Symbol.asyncDispose]()
 
@@ -486,7 +521,7 @@ describe("ReplyGeneration", () => {
     it("ends a call still waiting when the reply task settles, and refuses a later answer", async () => {
       const { generation, replyTask, titleTask } = startControlledGeneration()
       await waitForMicrotasks()
-      const answer = replyTask.context.sendToolCall(TOOL_CALL)
+      const answer = replyTask.context.sendClientToolCall(TOOL_CALL)
       replyTask.resolve()
       titleTask.resolve()
       await generation.settled
@@ -498,7 +533,7 @@ describe("ReplyGeneration", () => {
           status: "succeeded",
           content: "late"
         })
-      ).toBe(false)
+      ).toBe("not-pending")
     })
   })
 })

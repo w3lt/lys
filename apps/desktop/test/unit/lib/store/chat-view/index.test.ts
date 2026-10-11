@@ -39,6 +39,7 @@ import {
   waitForMicrotasks
 } from "../../../support/settlement"
 import {
+  buildBackendToolDefinition,
   buildToolCall,
   buildToolDefinition
 } from "../../../support/toolFixtures"
@@ -1325,9 +1326,15 @@ describe("useChatViewStore", () => {
     }
   )
 
-  it("reads the tool list and offers every tool to a loaded model trained for tool use", async () => {
+  it("reads both tool lists and offers the tools that start on to a loaded model trained for tool use", async () => {
     startNativeHostFake({ list_tools: () => TOOLS })
-    const { backend, streams } = startChatBackend()
+    // The backend's tool sends requests off this machine, so it starts off.
+    const { backend, streams } = startChatBackend({
+      "GET /api/v1/tools": () =>
+        buildJsonResponse(200, {
+          tools: [buildBackendToolDefinition("read_page")]
+        })
+    })
     const { useLysStore, useChatViewStore } = await loadFreshChatViewStore(0)
     useLysStore.setState({
       modelInventory: {
@@ -1343,9 +1350,10 @@ describe("useChatViewStore", () => {
     streams[0]?.close()
     await send
 
-    expect(backend.requests[0]?.body).toHaveProperty("tools", {
-      definitions: TOOLS
-    })
+    const chatRequest = backend.requests.find(
+      (request) => request.method === "POST"
+    )
+    expect(chatRequest?.body).toHaveProperty("tools", { definitions: TOOLS })
   })
 
   it("refuses to send while the backend is not running", async () => {

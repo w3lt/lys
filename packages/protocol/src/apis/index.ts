@@ -3,6 +3,13 @@ export * from "./llm"
 export * from "./chat"
 export * from "./agent"
 export {
+  listBackendToolsApi,
+  listBackendToolsApiResponseSchema,
+  type ListBackendToolsApiReply,
+  type ListBackendToolsApiResponse,
+  type ListBackendToolsApiRoute
+} from "./tool"
+export {
   deleteConversationApi,
   getConversationApi,
   listConversationsApi,

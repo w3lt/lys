@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest"
 import { findFiles, listTools, readTextFile } from "@/lib/apis/tauri/tools"
 import { startNativeHostFake } from "../../../support/nativeHostFake"
-import { buildToolDefinition } from "../../../support/toolFixtures"
+import {
+  buildBackendToolDefinition,
+  buildToolDefinition
+} from "../../../support/toolFixtures"
 
 /** Search the desktop runs in the find-files cases. */
 const SEARCH_FILTER = Object.freeze({
@@ -157,6 +160,17 @@ describe("listTools", () => {
   it("rejects a list that names a tool twice", async () => {
     const tool = buildToolDefinition("read_text_file")
     startNativeHostFake({ list_tools: () => [tool, tool] })
+
+    await expect(listTools()).rejects.toMatchObject({ name: "ZodError" })
+  })
+
+  it("rejects a list that holds a tool the backend runs", async () => {
+    startNativeHostFake({
+      list_tools: () => [
+        buildToolDefinition("read_text_file"),
+        buildBackendToolDefinition("read_page")
+      ]
+    })
 
     await expect(listTools()).rejects.toMatchObject({ name: "ZodError" })
   })

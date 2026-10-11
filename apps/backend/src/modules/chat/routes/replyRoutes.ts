@@ -17,6 +17,7 @@ import type ReplyGenerationRegistry from "../replyGenerationRegistry"
 import {
   createChatReplyNotFoundProblem,
   createChatReplyNotGeneratingProblem,
+  createChatToolCallAnswerMismatchProblem,
   createChatToolCallNotPendingProblem
 } from "./replyProblems"
 import { createEventSender, openReplyEventStream } from "./share"
@@ -178,9 +179,10 @@ async function handleStopChatReplyRequest(
  * @param generations - Borrowed registry.
  * @throws If the registry is closed because shutdown began; nothing is
  * answered.
- * @remarks Sends the 204 or the not-pending problem before returning. Only
- * the answer's content reaches the model; the reason of a failed answer is
- * logged at debug level.
+ * @remarks Sends the 204, the not-pending problem, or the answer-mismatch
+ * problem before returning. Only a failed answer's content reaches the
+ * model; its reason is logged at debug level. After `allowed`, the reply
+ * runs the backend tool itself.
  */
 function handleSendChatToolResultRequest(
   request: FastifyRequest<SendChatToolResultApiRoute>,
@@ -189,19 +191,27 @@ function handleSendChatToolResultRequest(
 ): void {
   const { callId } = request.params
   const generation = generations.findReplyGeneration(request.params)
-  const isAnswered = generation?.resolveToolCall(callId, request.body) ?? false
-  if (!isAnswered) {
-    reply
-      .type("application/problem+json")
-      .code(409)
-      .send(createChatToolCallNotPendingProblem(callId, request.url))
-    return
+  const outcome =
+    generation?.resolveToolCall(callId, request.body) ?? "not-pending"
+  switch (outcome) {
+    case "not-pending":
+      reply
+        .type("application/problem+json")
+        .code(409)
+        .send(createChatToolCallNotPendingProblem(callId, request.url))
+      return
+    case "mismatched":
+      reply
+        .type("application/problem+json")
+        .code(409)
+        .send(createChatToolCallAnswerMismatchProblem(callId, request.url))
+      return
+    case "accepted":
+      if (request.body.status === "failed")
+        request.log.debug(
+          { toolCallId: callId, reason: request.body.reason },
+          "Tool call was answered as failed"
+        )
+      reply.code(204).send()
   }
-
-  if (request.body.status === "failed")
-    request.log.debug(
-      { toolCallId: callId, reason: request.body.reason },
-      "Tool call was answered as failed"
-    )
-  reply.code(204).send()
 }

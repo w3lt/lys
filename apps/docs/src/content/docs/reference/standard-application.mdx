@@ -295,6 +295,50 @@ The exception was approved by the maintainer on 2026-10-10 for
 - **Removal condition:** [#147](https://github.com/w3lt/lys/issues/147) splits
   the view, and this exception is removed with it.
 
+## Composer and chat view size exception
+
+`Composer` and `ChatView` have an approved exception to the size limit of
+[FUNC-013](https://github.com/w3lt/lys/blob/main/docs/code_standards/FUNCTION.md),
+which is 40 executable lines. `Composer` has about 220 and `ChatView` has 59.
+Both were over the limit before
+[PR #152](https://github.com/w3lt/lys/pull/152), and that pull request made
+them longer. The exception was approved by the maintainer on 2026-10-11 for
+PR #152, following review finding I-7.
+
+- **Scope:** only the `Composer` function in
+  [Composer.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/Composer.tsx)
+  and the `ChatView` function in
+  [ChatView.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/views/ChatView/ChatView.tsx),
+  and only their line counts. Their other FUNC-013 limits are not excepted,
+  and every other function PR #152 added or changed follows FUNC-013.
+- **Constraint:** `Composer` had about 197 such lines and `ChatView` had 49
+  before PR #152. The pull request added 24 lines to `Composer` and 10 to
+  `ChatView`:
+  - `Composer` reads the answering agent, names the message field after it,
+    disables the field when the agent was deleted, and renders the agent menu
+    and the deleted-agent notice.
+  - `ChatView` reads the agent list when the backend starts running, passes
+    the agent's name to the transcript, and moves focus to the message field
+    after a new conversation is started.
+- **Alternatives considered:**
+  - Moving the agent wiring into a child component or a hook, so that neither
+    function grows, was not taken. `Composer` still needs the agent's name and
+    the deleted flag for the message field, so its count would not return to
+    the earlier value unless older code moved out as well. The child would
+    exist to keep a count flat, not because it has a responsibility of its
+    own.
+  - Splitting both functions to within the limit in PR #152 was not taken. It
+    moves the composer's draft, attachment, and runtime wiring, which is
+    outside that pull request's purpose.
+- **Risk and control:** a long function is harder to review and to change
+  safely. The lines PR #152 added select store values, derive two values from
+  the answering agent, and render two child components. The agent selection
+  rules are in `conversation-agent.ts`, the agent lookup is in the
+  `useAnsweringAgent` hook, and the focus move is in the `useMessageFieldFocus`
+  hook, so the two functions hold no agent logic of their own.
+- **Removal condition:** a change that splits `Composer` and `ChatView` to
+  within the limit removes this exception. No issue tracks that split.
+
 ## API boundaries
 
 Canonical rules: [API-004, API-020, API-034](https://github.com/w3lt/lys/blob/main/docs/code_standards/API.md).

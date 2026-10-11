@@ -307,10 +307,15 @@ generating status, and the tool-call announcement name it too.
 When the agent list has been read and no agent has the conversation's code,
 its agent was deleted. The conversation stays readable, replies are tagged
 with the code, the message field and Send are disabled, and a notice above
-the field offers a new conversation. While the list is unread the desktop
-does not claim a deletion: sending stays possible, and the backend's refusal
-is shown as the same sentence. A conversation accepts messages again once an
-agent is stored under its code.
+the field offers a new conversation. The notice's status line stays in the
+page while it is empty, so the sentence is announced when it appears, and
+focus stays where it is. New conversation in the notice starts a conversation
+and moves focus to the message field once that conversation is shown, when
+the field can take focus again. Start a new one in past conversations moves
+focus the same way. While the list is unread the desktop does not claim a
+deletion: sending stays possible, and the backend's refusal is shown as the
+same sentence. A conversation accepts messages again once an agent is stored
+under its code.
 
 ## Tool settings
 

@@ -79,7 +79,9 @@ suites are tracked in [issue #44](https://github.com/w3lt/lys/issues/44) and
 [issue #45](https://github.com/w3lt/lys/issues/45), and no CI workflow runs the
 backend unit suite yet. The desktop unit suite runs in jsdom, so layout,
 scrolling, real pointer and drag behavior, and assistive-technology output
-belong to the end-to-end suite. Native Tauri tests and
+belong to the end-to-end suite. The renderer code that tool calls, per-model
+load settings, and built-in agents added has no tests of its own yet; the
+coverage inventory lists those modules and components. Native Tauri tests and
 end-to-end desktop tests are tracked in
 [issue #133](https://github.com/w3lt/lys/issues/133) and
 [issue #134](https://github.com/w3lt/lys/issues/134). Shared-package automated

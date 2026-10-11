@@ -16,14 +16,20 @@ const QUESTION = buildUserMessage(1, "What is Lys?")
 /** Completed reply to {@link QUESTION}. */
 const ANSWER = buildCompletedAssistantMessage(2, "A local chat app.")
 
+/** Name of the agent that answers, which the parent supplies. */
+const AGENT_NAME = "Caliginia"
+
 /**
- * Builds the parent-owned controls of an idle, pinned panel.
+ * Builds the parent-owned controls of an idle, pinned panel answered by
+ * {@link AGENT_NAME}.
  *
- * @returns Fresh callback spies, the transcript ref, and idle state.
+ * @returns Fresh callback spies, the transcript ref, the agent's name, and
+ * idle state.
  */
 function buildPanelControls() {
   return {
     activity: "idle" as const,
+    agentName: AGENT_NAME,
     isAtBottom: true,
     onJumpToLatest: vi.fn(),
     onSendMessage: vi.fn(() => Promise.resolve()),
@@ -33,7 +39,7 @@ function buildPanelControls() {
 }
 
 describe("ConversationPanel", () => {
-  it("is a region named Conversation holding the transcript", () => {
+  it("is a region named Conversation holding the transcript, whose replies carry the agent's name", () => {
     render(
       <ConversationPanel
         {...buildPanelControls()}
@@ -43,7 +49,10 @@ describe("ConversationPanel", () => {
     )
 
     const region = screen.getByRole("region", { name: "Conversation" })
-    expect(within(region).getAllByRole("article")).toHaveLength(2)
+    const messages = within(region).getAllByRole("article")
+    expect(messages).toHaveLength(2)
+    expect(messages[0]).toHaveTextContent(/^you/)
+    expect(messages[1]).toHaveTextContent(/^Caliginia/)
     expect(
       within(region).queryByRole("group", { name: "Starter prompts" })
     ).not.toBeInTheDocument()
@@ -94,9 +103,11 @@ describe("ConversationPanel", () => {
       />
     )
 
-    expect(screen.getAllByRole("article").at(-1)).toHaveTextContent("A local")
+    expect(screen.getAllByRole("article").at(-1)).toHaveTextContent(
+      /^CaliginiaA local$/
+    )
     expect(
-      screen.getByRole("status", { name: "Lys is generating" })
+      screen.getByRole("status", { name: "Caliginia is generating" })
     ).toBeInTheDocument()
   })
 
@@ -152,7 +163,7 @@ describe("ConversationPanel", () => {
   })
 
   it.each([
-    ["generating-reply", "Lys is generating a reply"],
+    ["generating-reply", "Caliginia is generating a reply"],
     ["opening-conversation", "Opening conversation"]
   ] as const)(
     "announces %s work in the status it keeps mounted",

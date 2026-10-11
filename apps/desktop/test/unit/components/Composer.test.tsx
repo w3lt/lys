@@ -8,8 +8,17 @@ import {
   within
 } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { chatReplyEventSchema } from "@lys/protocol"
+import {
+  CALIGINIA_AGENT_CODE,
+  conversationSchema,
+  LYSIPTERA_AGENT_CODE,
+  type Conversation
+} from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
+import { DELETED_CONVERSATION_AGENT_MESSAGE } from "@/lib/conversation-agent-messages"
 import { createStoredChatViewConversation } from "@/lib/store/chat-view/conversation-transitions"
+import { buildAgentListPage, buildBuiltInAgent } from "../support/agentFixtures"
 import {
   buildJsonResponse,
   startBackendEventStream,
@@ -51,6 +60,20 @@ const REPLY = buildStreamingAssistantMessage(3, "")
 /** Route key of the stop request for {@link REPLY}. */
 const STOP_REPLY_ROUTE = `POST /api/v1/chat/${FIXTURE_CONVERSATION_ID}/replies/${REPLY.id}/stop`
 
+/** Route key of following {@link REPLY}, which the tool-call store does. */
+const REPLY_EVENTS_ROUTE = `GET /api/v1/chat/${FIXTURE_CONVERSATION_ID}/replies/${REPLY.id}/events`
+
+/**
+ * First event of a follow of {@link REPLY} that opens right after its turn
+ * started: the reply streams, has no text yet, and no tool call waits.
+ */
+const REPLY_SNAPSHOT = chatReplyEventSchema.parse({
+  type: "reply-snapshot",
+  conversationTitle: null,
+  assistantMessage: REPLY,
+  pendingToolCalls: []
+})
+
 /** Start event of a turn that creates the fixture conversation. */
 const NEW_TURN_EVENT = Object.freeze({
   type: "start-new-conversation-turn",
@@ -60,12 +83,42 @@ const NEW_TURN_EVENT = Object.freeze({
 })
 
 /**
- * Loads fresh application, chat-view, and history stores with the composer
- * that reads them, and arranges the runtime the case needs.
+ * Agent list page of a backend that ships Caliginia and Lysiptera and stores
+ * none of the user's own agents.
+ */
+const BUILT_IN_AGENT_PAGE = buildAgentListPage([], {
+  builtInAgents: [
+    buildBuiltInAgent(CALIGINIA_AGENT_CODE, { name: "Caliginia" }),
+    buildBuiltInAgent(LYSIPTERA_AGENT_CODE, { name: "Lysiptera" })
+  ]
+})
+
+/** Code of a stored agent the user deleted after talking to it. */
+const DELETED_AGENT_CODE = "web-researcher"
+
+/**
+ * Pasted passage of 1,319 characters, long enough for the composer to divert
+ * it from the draft (1,200 or more). It has no whitespace at either end and
+ * no character JSON escapes, so a request carrying it contains it verbatim.
+ */
+const LONG_PASTE = Array.from(
+  { length: 60 },
+  () => "a long pasted passage"
+).join(" ")
+
+/** Content of a file the user attaches; no character in it is escaped. */
+const NOTES_CONTENT = "Renew the passport before March."
+
+/**
+ * Loads fresh application, chat-view, history, and agent stores with the
+ * composer that reads them, and arranges the runtime the case needs.
  *
  * @param runtime - Backend, LM Studio, and model facts; the residency is
  * derived from them as the application store derives it.
  * @returns The stores and the composer component.
+ * @remarks The agent list holds {@link BUILT_IN_AGENT_PAGE}, as the chat
+ * view's read leaves it once the backend runs; the composer reads the list
+ * but never starts a read itself.
  */
 async function loadFreshComposer(runtime: RuntimeArrangement = READY_RUNTIME) {
   vi.resetModules()
@@ -73,8 +126,17 @@ async function loadFreshComposer(runtime: RuntimeArrangement = READY_RUNTIME) {
   const { useChatViewStore } = await import("@/lib/store/chat-view")
   const { useConversationHistoryStore } =
     await import("@/lib/store/conversation-history")
+  const { useAgentStore } = await import("@/lib/store/agents")
   const { Composer } = await import("@/components/Composer")
   updateStoreRuntime(useLysStore, runtime)
+  useAgentStore.setState({
+    list: {
+      status: "loaded",
+      builtInAgents: BUILT_IN_AGENT_PAGE.builtInAgents,
+      agents: BUILT_IN_AGENT_PAGE.agents,
+      isRefreshing: false
+    }
+  })
   return {
     useLysStore,
     useChatViewStore,
@@ -84,22 +146,58 @@ async function loadFreshComposer(runtime: RuntimeArrangement = READY_RUNTIME) {
 }
 
 /**
- * Starts a backend whose chat route opens a new event stream per request.
+ * Builds a stored conversation answered by {@link DELETED_AGENT_CODE}, which
+ * {@link BUILT_IN_AGENT_PAGE} no longer lists.
+ *
+ * @returns A frozen conversation validated by the shared schema.
+ */
+function buildDeletedAgentConversation(): Conversation {
+  return Object.freeze(
+    conversationSchema.parse({
+      ...buildConversation(FIXTURE_CONVERSATION_ID, "Research", [
+        buildUserMessage(2, "Hello")
+      ]),
+      agentCode: DELETED_AGENT_CODE
+    })
+  )
+}
+
+/** Streams a chat backend opened, by the connection that reads them. */
+type ChatBackendStreams = Readonly<{
+  /** Stream of each chat request, in order. */
+  streams: readonly BackendEventStream[]
+  /** Stream of each follow of {@link REPLY}, in order. */
+  replyFollows: readonly BackendEventStream[]
+}>
+
+/**
+ * Starts a backend whose chat route opens a new event stream per request,
+ * and whose reply-events route answers the tool-call store's follow of
+ * {@link REPLY}.
  *
  * @param routes - Other routes the case needs.
  * @returns The backend observation handle and the opened streams in order.
+ * @remarks Each follow opens with {@link REPLY_SNAPSHOT} and stays open; a
+ * case sends the reply's later events to it with {@link sendReplyEvents}.
  */
 function startChatBackend(routes: BackendRoutes = {}) {
   const streams: BackendEventStream[] = []
+  const replyFollows: BackendEventStream[] = []
   const backend = startBackendFake({
     [CHAT_ROUTE]: () => {
       const stream = startBackendEventStream()
       streams.push(stream)
       return stream.response
     },
+    [REPLY_EVENTS_ROUTE]: () => {
+      const follow = startBackendEventStream()
+      follow.sendEvent(REPLY_SNAPSHOT)
+      replyFollows.push(follow)
+      return follow.response
+    },
     ...routes
   })
-  return { backend, streams }
+  return { backend, streams, replyFollows }
 }
 
 /**
@@ -116,15 +214,34 @@ function listChatBodies(backend: ReturnType<typeof startBackendFake>) {
 }
 
 /**
- * Lists the route keys of the requests a backend received, in order.
+ * Tells whether a chat request body carries a text.
+ *
+ * @param body - JSON-decoded chat request body.
+ * @param text - Text without characters JSON escapes, such as
+ * {@link LONG_PASTE} or {@link NOTES_CONTENT}.
+ * @returns Whether the serialized body contains the text as written or
+ * base64-encoded, the two forms in which a JSON body can carry a file's
+ * content; the request contract does not fix which one an attachment uses.
+ */
+function isTextInChatBody(body: unknown, text: string): boolean {
+  const serializedBody = JSON.stringify(body)
+  return serializedBody.includes(text) || serializedBody.includes(btoa(text))
+}
+
+/**
+ * Lists the route keys of the requests a backend received, in order, other
+ * than the tool-call store's follows of {@link REPLY}.
  *
  * @param backend - Backend observation handle.
- * @returns `<METHOD> <path>` of each request.
+ * @returns `<METHOD> <path>` of each request except a follow, which runs on
+ * its own connection in no order the composer fixes.
  */
-function listRouteKeys(backend: ReturnType<typeof startBackendFake>) {
-  return backend.requests.map(
-    (request) => `${request.method} ${new URL(request.url).pathname}`
-  )
+function listRouteKeysWithoutReplyFollows(
+  backend: ReturnType<typeof startBackendFake>
+) {
+  return backend.requests
+    .map((request) => `${request.method} ${new URL(request.url).pathname}`)
+    .filter((routeKey) => routeKey !== REPLY_EVENTS_ROUTE)
 }
 
 /**
@@ -144,12 +261,50 @@ async function sendStreamEvents(
 }
 
 /**
- * Gets the message field.
+ * Sends live events of {@link REPLY} on every chat stream and every follow,
+ * as the backend sends a reply's events to each connection that reads it,
+ * and waits until the composer shows their effect.
  *
- * @returns The composer's textarea.
+ * @param chatStreams - Streams of the chat backend of the case.
+ * @param events - Live reply events in sending order.
+ * @throws When the tool-call store follows no reply yet; the events would
+ * then never end its follow.
+ */
+async function sendReplyEvents(
+  chatStreams: ChatBackendStreams,
+  ...events: unknown[]
+): Promise<void> {
+  if (chatStreams.replyFollows.length === 0) {
+    throw new Error("The tool-call store follows no reply")
+  }
+  await act(async () => {
+    const readers = [...chatStreams.streams, ...chatStreams.replyFollows]
+    events.forEach((event) =>
+      readers.forEach((reader) => reader.sendEvent(event))
+    )
+    await waitForMicrotasks()
+  })
+}
+
+/**
+ * Gets the message field of a composer whose answering agent is Caliginia,
+ * the agent a new conversation starts with.
+ *
+ * @returns The composer's textarea, named after the agent.
+ * @throws When no single field is named after Caliginia.
  */
 function getMessageField(): HTMLElement {
-  return screen.getByRole("textbox", { name: "Message Lys" })
+  return screen.getByRole("textbox", { name: "Message Caliginia" })
+}
+
+/**
+ * Lists the text of every status region the composer renders.
+ *
+ * @returns Each region's text in document order; an empty region, which
+ * waits for an announcement, gives an empty string.
+ */
+function listStatusTexts(): string[] {
+  return screen.getAllByRole("status").map((status) => status.textContent ?? "")
 }
 
 /**
@@ -166,19 +321,33 @@ function getFileInput(container: HTMLElement): HTMLInputElement {
 }
 
 /**
- * Lists the names staged in the attachment tray.
+ * Finds which of the given file names a staged chip shows.
  *
- * @returns The chip names in order, or none when no tray is shown.
+ * @param chip - List item of one staged file.
+ * @param fileNames - Names the case staged.
+ * @returns The first of `fileNames` the chip shows as its whole name text,
+ * or `undefined` when it shows none of them.
  */
-function listStagedNames(): string[] {
+function findChipName(
+  chip: HTMLElement,
+  fileNames: readonly string[]
+): string | undefined {
+  return fileNames.find((name) => within(chip).queryByText(name) !== null)
+}
+
+/**
+ * Lists the staged chips by the file name each one shows.
+ *
+ * @param fileNames - Names the case staged.
+ * @returns For each chip in tray order, the name it shows, or `undefined`
+ * for a chip that shows none of `fileNames`; empty while no tray is shown.
+ */
+function listStagedNames(fileNames: readonly string[]): (string | undefined)[] {
   const tray = screen.queryByRole("list", { name: "Attached to this message" })
   if (tray === null) return []
   return within(tray)
     .getAllByRole("listitem")
-    .map(
-      (item) => item.querySelector("button")?.getAttribute("aria-label") ?? ""
-    )
-    .map((label) => label.replace(/^Remove (.+?) from context.*$/, "$1"))
+    .map((chip) => findChipName(chip, fileNames))
 }
 
 /**
@@ -207,10 +376,12 @@ describe("Composer", () => {
     it("keeps Send disabled until the draft has text, which the chat store owns", async () => {
       const { useChatViewStore, Composer } = await loadFreshComposer()
       const user = userEvent.setup()
-      render(<Composer messageFieldRef={createRef()} />)
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
 
       const field = getMessageField()
-      expect(field).toHaveAttribute("placeholder", "Say something to Lys")
+      expect(field).toHaveAttribute("placeholder", "Say something to Caliginia")
       expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
 
       await user.type(field, "   ")
@@ -225,7 +396,12 @@ describe("Composer", () => {
       const { Composer } = await loadFreshComposer()
       const messageFieldRef = createRef<HTMLTextAreaElement>()
 
-      render(<Composer messageFieldRef={messageFieldRef} />)
+      render(
+        <Composer
+          messageFieldRef={messageFieldRef}
+          onStartConversation={vi.fn()}
+        />
+      )
 
       expect(messageFieldRef.current).toBe(getMessageField())
     })
@@ -235,14 +411,16 @@ describe("Composer", () => {
       const { useLysStore, Composer } = await loadFreshComposer()
       const { generation } = useLysStore.getState().settings
       const user = userEvent.setup()
-      render(<Composer messageFieldRef={createRef()} />)
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
 
       await user.type(getMessageField(), "Hello{Enter}")
       await waitForRenderedWork()
 
       expect(listChatBodies(backend)).toEqual([
         {
-          conversation: { kind: "new", agentCode: "lys" },
+          conversation: { kind: "new", agentCode: CALIGINIA_AGENT_CODE },
           message: "Hello",
           model: "qwen3-8b",
           generationOptions: generation
@@ -255,7 +433,9 @@ describe("Composer", () => {
       const { backend } = startChatBackend()
       const { Composer } = await loadFreshComposer()
       const user = userEvent.setup()
-      render(<Composer messageFieldRef={createRef()} />)
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
 
       await user.type(getMessageField(), "Hello{Shift>}{Enter}{/Shift}there")
       await waitForRenderedWork()
@@ -268,7 +448,9 @@ describe("Composer", () => {
       const { backend } = startChatBackend()
       const { Composer } = await loadFreshComposer()
       const user = userEvent.setup()
-      render(<Composer messageFieldRef={createRef()} />)
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
 
       await user.type(getMessageField(), "  {Enter}")
       await waitForRenderedWork()
@@ -281,7 +463,9 @@ describe("Composer", () => {
       const { backend, streams } = startChatBackend()
       const { Composer } = await loadFreshComposer()
       const user = userEvent.setup()
-      render(<Composer messageFieldRef={createRef()} />)
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
       await user.type(getMessageField(), "Hello")
 
       await user.click(screen.getByRole("button", { name: "Send" }))
@@ -294,44 +478,62 @@ describe("Composer", () => {
     it("keeps a short paste in the draft", async () => {
       const { Composer } = await loadFreshComposer()
       const user = userEvent.setup()
-      render(<Composer messageFieldRef={createRef()} />)
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
       await user.click(getMessageField())
 
       await user.paste("short pasted text")
 
       expect(getMessageField()).toHaveValue("short pasted text")
-      expect(listStagedNames()).toEqual([])
+      expect(
+        screen.queryByRole("list", { name: "Attached to this message" })
+      ).toBeNull()
     })
 
-    // Known defect, tracked by #27: a paste of 1,200 characters or more is
-    // moved out of the draft into a tray entry whose text is never sent.
-    it.fails("keeps a long paste in the draft and sends it (#27)", async () => {
-      const { backend, streams } = startChatBackend()
-      const { Composer } = await loadFreshComposer()
-      const longText = "a long pasted passage ".repeat(60)
-      const user = userEvent.setup()
-      render(<Composer messageFieldRef={createRef()} />)
-      await user.click(getMessageField())
+    // Known defect, tracked by #27 and #105: a paste of 1,200 characters or
+    // more leaves the draft for a tray entry that keeps only its length, so
+    // the chat request carries none of the pasted text. Either fix sends it:
+    // #27 keeps it in the draft, #105 sends it as an attachment.
+    it.fails(
+      "sends the text of a long paste with the message (#27, #105)",
+      async () => {
+        const { backend, streams } = startChatBackend()
+        const { Composer } = await loadFreshComposer()
+        const user = userEvent.setup()
+        render(
+          <Composer
+            messageFieldRef={createRef()}
+            onStartConversation={vi.fn()}
+          />
+        )
+        await user.type(getMessageField(), "Summarize this: ")
 
-      await user.paste(longText)
-      await user.keyboard("{Enter}")
-      await waitForRenderedWork()
+        await user.paste(LONG_PASTE)
+        await user.keyboard("{Enter}")
+        await waitForRenderedWork()
 
-      expect(listChatBodies(backend)).toEqual([
-        expect.objectContaining({ message: longText.trim() })
-      ])
-      streams[0]?.close()
-    })
+        expect(
+          listChatBodies(backend).map((body) =>
+            isTextInChatBody(body, LONG_PASTE)
+          ),
+          "whether each chat request carries the pasted text"
+        ).toEqual([true])
+        streams[0]?.close()
+      }
+    )
   })
 
   describe("request phases", () => {
     it("offers Stop while the turn is awaited, and stops the reply once it is known", async () => {
-      const { backend, streams } = startChatBackend({
+      const { backend, streams, replyFollows } = startChatBackend({
         [STOP_REPLY_ROUTE]: () => new Response(null, { status: 204 })
       })
       const { Composer } = await loadFreshComposer()
       const user = userEvent.setup()
-      render(<Composer messageFieldRef={createRef()} />)
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
       await user.type(getMessageField(), "Hello{Enter}")
       await waitForRenderedWork()
 
@@ -339,51 +541,63 @@ describe("Composer", () => {
       expect(screen.getByText("Generating…")).toBeInTheDocument()
       await user.click(screen.getByRole("button", { name: "Stop reply" }))
       await waitForRenderedWork()
-      expect(listRouteKeys(backend)).toEqual([CHAT_ROUTE])
+      expect(listRouteKeysWithoutReplyFollows(backend)).toEqual([CHAT_ROUTE])
 
       await sendStreamEvents(streams[0], NEW_TURN_EVENT)
 
-      expect(listRouteKeys(backend)).toEqual([CHAT_ROUTE, STOP_REPLY_ROUTE])
+      expect(listRouteKeysWithoutReplyFollows(backend)).toEqual([
+        CHAT_ROUTE,
+        STOP_REPLY_ROUTE
+      ])
+      await sendReplyEvents({ streams, replyFollows }, { type: "interrupted" })
       streams[0]?.close()
     })
 
     it("asks the backend to stop a streaming reply and keeps the draft typed meanwhile", async () => {
-      const { backend, streams } = startChatBackend({
+      const { backend, streams, replyFollows } = startChatBackend({
         [STOP_REPLY_ROUTE]: () => new Response(null, { status: 204 })
       })
       const { Composer } = await loadFreshComposer()
       const user = userEvent.setup()
-      render(<Composer messageFieldRef={createRef()} />)
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
       await user.type(getMessageField(), "Hello{Enter}")
       await waitForRenderedWork()
-      await sendStreamEvents(streams[0], NEW_TURN_EVENT, {
-        type: "delta",
-        content: "Hi"
-      })
+      await sendStreamEvents(streams[0], NEW_TURN_EVENT)
+      await sendReplyEvents(
+        { streams, replyFollows },
+        { type: "delta", content: "Hi" }
+      )
       expect(getMessageField()).toHaveValue("")
 
       await user.type(getMessageField(), "Next question")
       await user.click(screen.getByRole("button", { name: "Stop reply" }))
       await waitForRenderedWork()
-      await sendStreamEvents(streams[0], { type: "interrupted" })
+      await sendReplyEvents({ streams, replyFollows }, { type: "interrupted" })
 
-      expect(listRouteKeys(backend)).toEqual([CHAT_ROUTE, STOP_REPLY_ROUTE])
+      expect(listRouteKeysWithoutReplyFollows(backend)).toEqual([
+        CHAT_ROUTE,
+        STOP_REPLY_ROUTE
+      ])
       expect(getMessageField()).toHaveValue("Next question")
       expect(screen.getByRole("button", { name: "Send" })).toBeEnabled()
       streams[0]?.close()
     })
 
     it("offers Send once the reply is final, while its stream may still carry a title", async () => {
-      const { streams } = startChatBackend()
+      const { streams, replyFollows } = startChatBackend()
       const { Composer } = await loadFreshComposer()
       const user = userEvent.setup()
-      render(<Composer messageFieldRef={createRef()} />)
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
       await user.type(getMessageField(), "Hello{Enter}")
       await waitForRenderedWork()
 
-      await sendStreamEvents(
-        streams[0],
-        NEW_TURN_EVENT,
+      await sendStreamEvents(streams[0], NEW_TURN_EVENT)
+      await sendReplyEvents(
+        { streams, replyFollows },
         { type: "delta", content: "Hi" },
         { type: "done", finishReason: "stop" }
       )
@@ -406,7 +620,9 @@ describe("Composer", () => {
         }
       })
       const user = userEvent.setup()
-      render(<Composer messageFieldRef={createRef()} />)
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
 
       expect(getMessageField()).toHaveAttribute(
         "placeholder",
@@ -430,10 +646,14 @@ describe("Composer", () => {
       )
       const { backendAddress } = useLysStore.getState().settings.runtime
       const user = userEvent.setup()
-      render(<Composer messageFieldRef={createRef()} />)
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
 
-      expect(screen.getByRole("status")).toHaveTextContent(
-        `The backend is not running on ${backendAddress}.`
+      expect(listStatusTexts()).toContainEqual(
+        expect.stringContaining(
+          `The backend is not running on ${backendAddress}.`
+        )
       )
       expect(getMessageField()).toBeDisabled()
       expect(getMessageField()).toHaveAttribute(
@@ -454,8 +674,8 @@ describe("Composer", () => {
         "get_backend_status",
         "start_backend"
       ])
-      expect(screen.getByRole("status")).toHaveTextContent(
-        `Starting the backend on ${backendAddress}…`
+      expect(listStatusTexts()).toContainEqual(
+        expect.stringContaining(`Starting the backend on ${backendAddress}…`)
       )
       expect(screen.getByRole("button", { name: "Working" })).toBeDisabled()
 
@@ -494,7 +714,12 @@ describe("Composer", () => {
       async (_case, runtime, actionLabel, pane) => {
         const { useLysStore, Composer } = await loadFreshComposer(runtime)
         const user = userEvent.setup()
-        render(<Composer messageFieldRef={createRef()} />)
+        render(
+          <Composer
+            messageFieldRef={createRef()}
+            onStartConversation={vi.fn()}
+          />
+        )
 
         expect(getMessageField()).toHaveAttribute(
           "placeholder",
@@ -529,7 +754,9 @@ describe("Composer", () => {
       const { backend, streams } = startChatBackend()
       const { Composer } = await loadFreshComposer(TWO_LOADED)
       const user = userEvent.setup()
-      render(<Composer messageFieldRef={createRef()} />)
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
 
       expect(screen.getByRole("button", { name: "gemma-3" })).toHaveAttribute(
         "aria-haspopup",
@@ -549,7 +776,9 @@ describe("Composer", () => {
       const { backend, streams } = startChatBackend()
       const { useLysStore, Composer } = await loadFreshComposer(TWO_LOADED)
       const user = userEvent.setup()
-      render(<Composer messageFieldRef={createRef()} />)
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
 
       await openMenuWithKeyboard(
         user,
@@ -576,7 +805,9 @@ describe("Composer", () => {
       const { backend, streams } = startChatBackend()
       const { Composer } = await loadFreshComposer(TWO_LOADED)
       const user = userEvent.setup()
-      render(<Composer messageFieldRef={createRef()} />)
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
 
       await openMenuWithKeyboard(
         user,
@@ -596,6 +827,107 @@ describe("Composer", () => {
     })
   })
 
+  describe("answering agent", () => {
+    it("names the field after the agent chosen before the first message and starts the conversation with it", async () => {
+      const { backend, streams } = startChatBackend()
+      const { Composer } = await loadFreshComposer()
+      const user = userEvent.setup()
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
+
+      await openMenuWithKeyboard(
+        user,
+        screen.getByRole("button", { name: "Caliginia" })
+      )
+      await user.click(
+        screen.getByRole("menuitemradio", { name: /^Lysiptera/ })
+      )
+      const field = screen.getByRole("textbox", { name: "Message Lysiptera" })
+      expect(field).toHaveAttribute("placeholder", "Say something to Lysiptera")
+      await user.type(field, "Hello{Enter}")
+      await waitForRenderedWork()
+
+      expect(listChatBodies(backend)).toEqual([
+        expect.objectContaining({
+          conversation: { kind: "new", agentCode: LYSIPTERA_AGENT_CODE }
+        })
+      ])
+      streams[0]?.close()
+    })
+
+    it("keeps a conversation whose agent was deleted readable but closed, and asks the parent for a new one", async () => {
+      const { backend } = startChatBackend()
+      const { useChatViewStore, Composer } = await loadFreshComposer()
+      useChatViewStore.setState({
+        conversation: createStoredChatViewConversation(
+          buildDeletedAgentConversation()
+        ),
+        inputDraft: "Are you still there?"
+      })
+      const onStartConversation = vi.fn()
+      const user = userEvent.setup()
+      render(
+        <Composer
+          messageFieldRef={createRef()}
+          onStartConversation={onStartConversation}
+        />
+      )
+
+      const field = screen.getByRole("textbox", {
+        name: `Message ${DELETED_AGENT_CODE}`
+      })
+      expect(field).toBeDisabled()
+      expect(field).toHaveAttribute(
+        "placeholder",
+        "This conversation is read-only."
+      )
+      expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
+      expect(listStatusTexts()).toContain(DELETED_CONVERSATION_AGENT_MESSAGE)
+
+      // The notice sits above the field, so its button precedes the session
+      // controls' New conversation.
+      const newConversationButtons = screen.getAllByRole("button", {
+        name: "New conversation"
+      })
+      expect(newConversationButtons).toHaveLength(2)
+      await user.click(newConversationButtons[0])
+      await waitForRenderedWork()
+
+      expect(onStartConversation).toHaveBeenCalledOnce()
+      expect(useChatViewStore.getState().conversation?.id).toBe(
+        FIXTURE_CONVERSATION_ID
+      )
+      expect(backend.requests).toEqual([])
+    })
+
+    it("lets the unavailable banner stand in for the deleted-agent notice", async () => {
+      const { useChatViewStore, Composer } = await loadFreshComposer(
+        buildUnreachableRuntime("stopped")
+      )
+      useChatViewStore.setState({
+        conversation: createStoredChatViewConversation(
+          buildDeletedAgentConversation()
+        )
+      })
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
+
+      const statusTexts = listStatusTexts()
+      expect(statusTexts).toContainEqual(
+        expect.stringContaining("The backend is not running on")
+      )
+      expect(statusTexts).not.toContain(DELETED_CONVERSATION_AGENT_MESSAGE)
+      expect(
+        screen.getAllByRole("button", { name: "New conversation" })
+      ).toHaveLength(1)
+      expect(
+        screen.getByRole("textbox", { name: `Message ${DELETED_AGENT_CODE}` })
+      ).toHaveAttribute("placeholder", "Waiting on the backend…")
+    })
+  })
+
   describe("session controls", () => {
     it("opens past conversations and closes them again, stating which", async () => {
       startBackendFake({
@@ -605,7 +937,9 @@ describe("Composer", () => {
       const { useConversationHistoryStore, Composer } =
         await loadFreshComposer()
       const user = userEvent.setup()
-      render(<Composer messageFieldRef={createRef()} />)
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
       const history = screen.getByRole("button", { name: "Past conversations" })
 
       expect(history).toHaveAttribute("aria-expanded", "false")
@@ -639,7 +973,9 @@ describe("Composer", () => {
         inputDraft: "Unsent"
       })
       const user = userEvent.setup()
-      render(<Composer messageFieldRef={createRef()} />)
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
 
       await user.click(screen.getByRole("button", { name: "New conversation" }))
 
@@ -650,7 +986,9 @@ describe("Composer", () => {
     it("opens Settings", async () => {
       const { useLysStore, Composer } = await loadFreshComposer()
       const user = userEvent.setup()
-      render(<Composer messageFieldRef={createRef()} />)
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
 
       await user.click(screen.getByRole("button", { name: "Settings" }))
 
@@ -660,7 +998,9 @@ describe("Composer", () => {
     it("opens Model settings to change the context window", async () => {
       const { useLysStore, Composer } = await loadFreshComposer()
       const user = userEvent.setup()
-      render(<Composer messageFieldRef={createRef()} />)
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
 
       await user.click(screen.getByRole("button", { name: /^Context window/ }))
       await user.click(
@@ -678,14 +1018,19 @@ describe("Composer", () => {
     it("stages chosen files, marks the add action, and removes a file on request", async () => {
       const { Composer } = await loadFreshComposer()
       const user = userEvent.setup()
-      const { container } = render(<Composer messageFieldRef={createRef()} />)
+      const { container } = render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
 
       await user.upload(getFileInput(container), [
         new File(["# Notes"], "notes.md"),
         new File(["a,b"], "table.csv")
       ])
 
-      expect(listStagedNames()).toEqual(["notes.md", "table.csv"])
+      expect(listStagedNames(["notes.md", "table.csv"])).toEqual([
+        "notes.md",
+        "table.csv"
+      ])
       expect(
         screen.getByRole("button", {
           name: "Add to this message; files are attached"
@@ -696,7 +1041,7 @@ describe("Composer", () => {
         screen.getByRole("button", { name: "Remove notes.md from context" })
       )
 
-      expect(listStagedNames()).toEqual(["table.csv"])
+      expect(listStagedNames(["notes.md", "table.csv"])).toEqual(["table.csv"])
     })
 
     it("stages the same file again and survives a cancelled selection under StrictMode", async () => {
@@ -704,7 +1049,10 @@ describe("Composer", () => {
       const user = userEvent.setup()
       const { container } = render(
         <StrictMode>
-          <Composer messageFieldRef={createRef()} />
+          <Composer
+            messageFieldRef={createRef()}
+            onStartConversation={vi.fn()}
+          />
         </StrictMode>
       )
       const notes = new File(["# Notes"], "notes.md")
@@ -713,12 +1061,14 @@ describe("Composer", () => {
       await user.upload(getFileInput(container), notes)
       fireEvent.change(getFileInput(container), { target: { files: [] } })
 
-      expect(listStagedNames()).toEqual(["notes.md", "notes.md"])
+      expect(listStagedNames(["notes.md"])).toEqual(["notes.md", "notes.md"])
     })
 
     it("stages dropped files and shows the drop hint only while dragging", async () => {
       const { Composer } = await loadFreshComposer()
-      render(<Composer messageFieldRef={createRef()} />)
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
       const field = getMessageField()
 
       fireEvent.dragOver(field, { dataTransfer: { files: [] } })
@@ -727,12 +1077,14 @@ describe("Composer", () => {
       sendFileDrop(field, [new File(["x"], "dropped.txt")])
 
       expect(screen.queryByText("release to add to context")).toBeNull()
-      expect(listStagedNames()).toEqual(["dropped.txt"])
+      expect(listStagedNames(["dropped.txt"])).toEqual(["dropped.txt"])
     })
 
     it("hides the drop hint when the drag leaves the field", async () => {
       const { Composer } = await loadFreshComposer()
-      render(<Composer messageFieldRef={createRef()} />)
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
       const field = getMessageField()
       fireEvent.dragOver(field, { dataTransfer: { files: [] } })
 
@@ -745,21 +1097,25 @@ describe("Composer", () => {
       const { Composer } = await loadFreshComposer(
         buildUnreachableRuntime("stopped")
       )
-      render(<Composer messageFieldRef={createRef()} />)
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
       const field = getMessageField()
 
       fireEvent.dragOver(field, { dataTransfer: { files: [] } })
       expect(screen.queryByText("release to add to context")).toBeNull()
       sendFileDrop(field, [new File(["x"], "dropped.txt")])
 
-      expect(listStagedNames()).toEqual([])
+      expect(listStagedNames(["dropped.txt"])).toEqual([])
     })
 
     it("refuses to send while a staged file overflows the window, until it is removed", async () => {
       const { backend } = startChatBackend()
       const { Composer } = await loadFreshComposer()
       const user = userEvent.setup()
-      const { container } = render(<Composer messageFieldRef={createRef()} />)
+      const { container } = render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
       await user.type(getMessageField(), "Summarize this")
 
       await user.upload(
@@ -785,26 +1141,41 @@ describe("Composer", () => {
       expect(screen.getByRole("button", { name: "Send" })).toBeEnabled()
     })
 
-    // Known defect, tracked by #27: the composer offers to attach files and
-    // lists them as attached to the message, but the chat request carries no
-    // attachment, so nothing of the file is sent.
+    // Known defect, tracked by #27 and #105: the composer lists a chosen file
+    // as attached to the message, but the chat request has no attachment
+    // field, so none of the file's content is sent. The expectation holds
+    // under either fix: #105 sends the content of every listed file, and
+    // #27 lists no file while sending files is unsupported.
     it.fails(
-      "offers no file attachment the chat request cannot carry (#27)",
+      "sends the content of every file it lists as attached to the message (#27, #105)",
       async () => {
+        const { backend, streams } = startChatBackend()
         const { Composer } = await loadFreshComposer()
         const user = userEvent.setup()
-        render(<Composer messageFieldRef={createRef()} />)
-
-        await openMenuWithKeyboard(
-          user,
-          screen.getByRole("button", { name: "Add to this message" })
+        const { container } = render(
+          <Composer
+            messageFieldRef={createRef()}
+            onStartConversation={vi.fn()}
+          />
+        )
+        await user.upload(
+          getFileInput(container),
+          new File([NOTES_CONTENT], "notes.md")
+        )
+        const isListedAsAttached = listStagedNames(["notes.md"]).includes(
+          "notes.md"
         )
 
-        const enabledActions = screen
-          .getAllByRole("menuitem")
-          .filter((item) => item.getAttribute("aria-disabled") !== "true")
-          .map((item) => item.textContent)
-        expect(enabledActions).not.toContain("Attach a file")
+        await user.type(getMessageField(), "Summarize the notes{Enter}")
+        await waitForRenderedWork()
+
+        expect(
+          listChatBodies(backend).map((body) =>
+            isTextInChatBody(body, NOTES_CONTENT)
+          ),
+          "whether each chat request carries the file listed as attached"
+        ).toEqual([isListedAsAttached])
+        streams[0]?.close()
       }
     )
   })

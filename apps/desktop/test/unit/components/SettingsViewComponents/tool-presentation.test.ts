@@ -4,9 +4,7 @@ import {
   buildToolGroups,
   calculateOfferedToolTotals,
   calculateToolCallsTone,
-  calculateToolModelSupport,
   calculateToolTokenEstimate,
-  findCallsPerReply,
   findToolApproval,
   formatToolAccessLabel,
   formatToolApprovalLabel,
@@ -19,18 +17,7 @@ import {
   formatToolGroupLabel,
   formatToolTokenEstimate
 } from "@/components/SettingsViewComponents/tool-presentation"
-import type { ModelInventoryState } from "@/lib/store/model-runtime"
-import { buildLlmInfo } from "../../support/modelFixtures"
 import { buildToolDefinition } from "../../support/toolFixtures"
-
-/** Inventory listing one model trained for tools and one that is not. */
-const INVENTORY: ModelInventoryState = {
-  status: "ready",
-  models: [
-    buildLlmInfo("trained", { loaded: true, trainedForToolUse: true }),
-    buildLlmInfo("untrained", { loaded: true, trainedForToolUse: false })
-  ]
-}
 
 /** Tools listed in Settings order. */
 const READ_TEXT_FILE = buildToolDefinition("read_text_file")
@@ -47,51 +34,6 @@ function buildArguments(
 ) {
   return buildToolDefinition("probe", candidates).arguments
 }
-
-describe("calculateToolModelSupport", () => {
-  it("says whether the loaded model was trained for tools", () => {
-    expect(
-      calculateToolModelSupport(
-        { status: "loaded", modelKey: "trained" },
-        INVENTORY
-      )
-    ).toEqual({ status: "trained", modelKey: "trained" })
-    expect(
-      calculateToolModelSupport(
-        { status: "loaded", modelKey: "untrained" },
-        INVENTORY
-      )
-    ).toEqual({ status: "untrained", modelKey: "untrained" })
-  })
-
-  it.each([
-    ["no model is loaded", { status: "none" }, INVENTORY],
-    [
-      "a model is still loading",
-      { status: "loading", modelKey: "trained" },
-      INVENTORY
-    ],
-    [
-      "the inventory was not read",
-      { status: "loaded", modelKey: "trained" },
-      { status: "unavailable" }
-    ],
-    [
-      "the inventory failed",
-      { status: "loaded", modelKey: "trained" },
-      { status: "failed" }
-    ],
-    [
-      "the inventory does not list the loaded model",
-      { status: "loaded", modelKey: "other" },
-      INVENTORY
-    ]
-  ] as const)("is unknown when %s", (_case, modelRuntime, inventory) => {
-    expect(calculateToolModelSupport(modelRuntime, inventory)).toEqual({
-      status: "unknown"
-    })
-  })
-})
 
 describe("calculateToolTokenEstimate", () => {
   it("grows with what the model is told about the tool", () => {
@@ -273,18 +215,6 @@ describe("tool labels", () => {
     expect(formatToolApprovalNote("run")).toBe(
       "Runs the moment the model asks for it."
     )
-  })
-})
-
-describe("findCallsPerReply", () => {
-  it("finds the offered number a toggle group reports", () => {
-    expect(findCallsPerReply(["16"])).toBe(16)
-    expect(findCallsPerReply(["4"])).toBe(4)
-  })
-
-  it("finds nothing when the group reports no offered number", () => {
-    expect(findCallsPerReply([])).toBeUndefined()
-    expect(findCallsPerReply(["5"])).toBeUndefined()
   })
 })
 

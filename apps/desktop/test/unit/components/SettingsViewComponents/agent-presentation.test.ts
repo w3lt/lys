@@ -8,7 +8,12 @@ import {
   formatCustomAgentCount
 } from "@/components/SettingsViewComponents/agent-presentation"
 import type { AgentDraftProblem } from "@/lib/store/agents"
-import { buildAgent, buildAgentSummary } from "../../support/agentFixtures"
+import {
+  buildAgent,
+  buildAgentSummary,
+  buildBuiltInAgent,
+  buildBuiltInAgentSummary
+} from "../../support/agentFixtures"
 
 describe("formatAgentDraftProblem", () => {
   it.each<[AgentDraftProblem, string]>([
@@ -65,6 +70,9 @@ describe("formatAgentListStatus", () => {
     expect(
       formatAgentListStatus(true, {
         status: "loaded",
+        builtInAgents: [
+          buildBuiltInAgentSummary(buildBuiltInAgent("caliginia"))
+        ],
         agents: [buildAgentSummary(buildAgent("reviewer"))],
         isRefreshing: true
       })

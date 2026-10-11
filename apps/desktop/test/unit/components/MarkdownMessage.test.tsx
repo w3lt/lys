@@ -7,6 +7,12 @@ import { waitForMicrotasks } from "../support/settlement"
 const TYPESCRIPT_BLOCK = "```ts\nconst a = 1\nconst b = 2\n```\n"
 
 /**
+ * Status the parent words for the caret, naming the agent that answers; the
+ * message announces it only while the reply streams.
+ */
+const GENERATING_LABEL = "Caliginia is generating"
+
+/**
  * Installs a clipboard on the navigator for one case.
  *
  * @param writeText - Clipboard write the case observes or fails.
@@ -35,7 +41,13 @@ function startClipboardFake(
  * @returns The copy button of that block and the tree's unmount function.
  */
 async function startCodeBlock(text: string) {
-  const { unmount } = render(<MarkdownMessage streaming={false} text={text} />)
+  const { unmount } = render(
+    <MarkdownMessage
+      generatingLabel={GENERATING_LABEL}
+      streaming={false}
+      text={text}
+    />
+  )
   const copyButton = await screen.findByRole("button", { name: "Copy code" })
   return { copyButton, unmount }
 }
@@ -48,6 +60,7 @@ describe("MarkdownMessage", () => {
   it("renders Markdown structure", async () => {
     render(
       <MarkdownMessage
+        generatingLabel={GENERATING_LABEL}
         streaming={false}
         text={"# Plan\n\n- one\n- **two**\n\nDone."}
       />
@@ -64,6 +77,7 @@ describe("MarkdownMessage", () => {
   it("opens links in a new tab without sending the referrer", async () => {
     render(
       <MarkdownMessage
+        generatingLabel={GENERATING_LABEL}
         streaming={false}
         text={'See [the docs](https://example.com/docs "Lys docs").'}
       />
@@ -91,17 +105,18 @@ describe("MarkdownMessage", () => {
   })
 
   it("renders inline and display math", async () => {
-    const { container } = render(
+    render(
       <MarkdownMessage
+        generatingLabel={GENERATING_LABEL}
         streaming={false}
         text={"Area $a^2$ and\n\n$$\nE = mc^2\n$$\n"}
       />
     )
 
     await vi.waitFor(() => {
-      expect(container.querySelectorAll("math")).toHaveLength(2)
+      expect(screen.getAllByRole("math")).toHaveLength(2)
     })
-    expect(container.querySelector("code")).toBeNull()
+    expect(screen.queryByRole("code")).not.toBeInTheDocument()
   })
 
   it("labels a code block with its language and copies its plain text", async () => {
@@ -183,23 +198,47 @@ describe("MarkdownMessage", () => {
     expect(copyButton).toHaveAccessibleName("Copy code")
   })
 
-  it("announces generation only while the reply streams", () => {
-    const { rerender } = render(<MarkdownMessage streaming text="Partial" />)
+  it("announces the parent's generating status only while the reply streams", () => {
+    const { rerender } = render(
+      <MarkdownMessage
+        generatingLabel={GENERATING_LABEL}
+        streaming
+        text="Partial"
+      />
+    )
 
     expect(
-      screen.getByRole("status", { name: "Lys is generating" })
+      screen.getByRole("status", { name: GENERATING_LABEL })
     ).toHaveAttribute("aria-live", "polite")
 
-    rerender(<MarkdownMessage streaming={false} text="Partial answer" />)
+    rerender(
+      <MarkdownMessage
+        generatingLabel={GENERATING_LABEL}
+        streaming={false}
+        text="Partial answer"
+      />
+    )
 
     expect(screen.queryByRole("status")).not.toBeInTheDocument()
   })
 
   it("shows the newest text after an update", async () => {
-    const { rerender } = render(<MarkdownMessage streaming text="First" />)
+    const { rerender } = render(
+      <MarkdownMessage
+        generatingLabel={GENERATING_LABEL}
+        streaming
+        text="First"
+      />
+    )
     await screen.findByText("First")
 
-    rerender(<MarkdownMessage streaming text="First and second" />)
+    rerender(
+      <MarkdownMessage
+        generatingLabel={GENERATING_LABEL}
+        streaming
+        text="First and second"
+      />
+    )
 
     expect(await screen.findByText("First and second")).toBeInTheDocument()
   })

@@ -4,10 +4,16 @@ import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import {
   AgentListStatus,
+  BuiltInAgentSection,
   CustomAgentSection,
   type AgentListFocusTarget
 } from "@/components/SettingsViewComponents/AgentList"
-import { buildAgent, buildAgentSummary } from "../../support/agentFixtures"
+import {
+  buildAgent,
+  buildAgentSummary,
+  buildBuiltInAgent,
+  buildBuiltInAgentSummary
+} from "../../support/agentFixtures"
 
 /** Listed agents, oldest first. */
 const AGENTS = [
@@ -89,7 +95,9 @@ describe("CustomAgentSection", () => {
     startAgentSection({ agents: [] })
 
     expect(
-      screen.getByText("None of your own yet. Start one with New agent.")
+      screen.getByText(
+        "None of your own yet. Start blank, or duplicate a built-in and change what you need."
+      )
     ).toBeInTheDocument()
     expect(screen.queryByRole("list")).toBeNull()
     expect(screen.getByRole("region", { name: "yours" })).toHaveTextContent(
@@ -113,6 +121,92 @@ describe("CustomAgentSection", () => {
   })
 })
 
+/** Listed built-in agents, in shipped order. */
+const BUILT_IN_AGENTS = [
+  buildBuiltInAgentSummary(
+    buildBuiltInAgent("caliginia", {
+      name: "Caliginia",
+      bio: "Lys's dark side."
+    })
+  ),
+  buildBuiltInAgentSummary(
+    buildBuiltInAgent("lysiptera", {
+      name: "Lysiptera",
+      bio: "Lys's light side."
+    })
+  )
+]
+
+/**
+ * Renders the section of the built-in agents with a spy for opening one.
+ *
+ * @param focusTarget - Control that takes focus when the section appears.
+ * @returns The open-agent spy.
+ */
+function startBuiltInAgentSection(
+  focusTarget: AgentListFocusTarget = { kind: "none" }
+) {
+  const onOpenAgent = vi.fn()
+  render(
+    <BuiltInAgentSection
+      agents={BUILT_IN_AGENTS}
+      focusTarget={focusTarget}
+      onOpenAgent={onOpenAgent}
+    />
+  )
+  return onOpenAgent
+}
+
+describe("BuiltInAgentSection", () => {
+  it("lists the agents in shipped order as not editable, each named by name and code and described by its bio", () => {
+    startBuiltInAgentSection()
+
+    const section = screen.getByRole("region", { name: "built-in" })
+    expect(section).toHaveTextContent("ship with Lys · not editable")
+    const rows = within(
+      within(section).getByRole("list", { name: "Built-in agents" })
+    ).getAllByRole("button")
+    expect(rows.map((row) => row.textContent)).toEqual([
+      "CaliginiacaliginiaLys's dark side.",
+      "LysipteralysipteraLys's light side."
+    ])
+    expect(rows[1]).toHaveAccessibleName("Lysiptera lysiptera")
+    expect(rows[1]).toHaveAccessibleDescription("Lys's light side.")
+    expect(
+      within(section).queryByRole("button", { name: "New agent" })
+    ).toBeNull()
+  })
+
+  it("opens the pressed agent", async () => {
+    const onOpenAgent = startBuiltInAgentSection()
+    const user = userEvent.setup()
+
+    await user.click(
+      screen.getByRole("button", { name: "Lysiptera lysiptera" })
+    )
+
+    expect(onOpenAgent).toHaveBeenCalledExactlyOnceWith("lysiptera")
+  })
+
+  it("focuses its targeted agent's row when it appears", () => {
+    startBuiltInAgentSection({ kind: "agent", agentCode: "lysiptera" })
+
+    expect(
+      screen.getByRole("button", { name: "Lysiptera lysiptera" })
+    ).toHaveFocus()
+  })
+
+  it.each<AgentListFocusTarget>([
+    { kind: "none" },
+    { kind: "new-agent" },
+    { kind: "agent", agentCode: "writer" }
+  ])("leaves focus alone for the target %o it does not show", (target) => {
+    startBuiltInAgentSection(target)
+
+    expect(document.body).toHaveFocus()
+  })
+})
+
 /**
  * Renders the status beside a button the case can remove, as the pane
  * removes the list or editor that held focus.
@@ -121,7 +215,7 @@ describe("CustomAgentSection", () => {
  * @returns A function that removes the focused button and shows a message.
  */
 function startStatusBesideRemovableControl(onRetryAgents?: () => void) {
-  let showFailure: () => void = () => undefined
+  let updateFailureMessage: () => void = () => undefined
 
   /**
    * Shows the status and a control until a failure replaces the control.
@@ -130,7 +224,7 @@ function startStatusBesideRemovableControl(onRetryAgents?: () => void) {
    */
   function PaneWithStatus() {
     const [message, setMessage] = useState("")
-    showFailure = () => setMessage("Lys couldn't read the agents.")
+    updateFailureMessage = () => setMessage("Lys couldn't read the agents.")
     return (
       <>
         <AgentListStatus message={message} onRetryAgents={onRetryAgents} />
@@ -142,7 +236,7 @@ function startStatusBesideRemovableControl(onRetryAgents?: () => void) {
   render(<PaneWithStatus />)
   return () => {
     act(() => {
-      showFailure()
+      updateFailureMessage()
     })
   }
 }
@@ -158,10 +252,10 @@ describe("AgentListStatus", () => {
   })
 
   it("moves focus to Retry when a failure replaces the focused control", () => {
-    const showFailure = startStatusBesideRemovableControl(vi.fn())
+    const updateFailureMessage = startStatusBesideRemovableControl(vi.fn())
     screen.getByRole("button", { name: "Agent row" }).focus()
 
-    showFailure()
+    updateFailureMessage()
 
     expect(screen.getByRole("status")).toHaveTextContent(
       "Lys couldn't read the agents."
@@ -170,10 +264,10 @@ describe("AgentListStatus", () => {
   })
 
   it("moves focus to the message when no retry is offered", () => {
-    const showFailure = startStatusBesideRemovableControl()
+    const updateFailureMessage = startStatusBesideRemovableControl()
     screen.getByRole("button", { name: "Agent row" }).focus()
 
-    showFailure()
+    updateFailureMessage()
 
     expect(screen.getByRole("status")).toHaveFocus()
   })

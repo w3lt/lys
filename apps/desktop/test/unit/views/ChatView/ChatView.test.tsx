@@ -1,14 +1,35 @@
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  within,
+  type RenderResult
+} from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import {
+  CALIGINIA_AGENT_CODE,
+  conversationSchema,
+  LYSIPTERA_AGENT_CODE,
+  type Conversation
+} from "@lys/share"
+import type { ComponentType } from "react"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { STARTER_PROMPTS } from "@/app/content"
 import { createStoredChatViewConversation } from "@/lib/store/chat-view/conversation-transitions"
+import type { ChatViewProps } from "@/views/ChatView/ChatView"
+import {
+  buildAgentListPage,
+  buildBuiltInAgent
+} from "../../support/agentFixtures"
 import {
   buildJsonResponse,
   startBackendEventStream,
   startBackendFake,
   type BackendEventStream,
-  type BackendRoutes
+  type BackendFake,
+  type BackendRoutes,
+  type ObservedBackendRequest
 } from "../../support/backendFake"
 import {
   buildCompletedAssistantMessage,
@@ -22,8 +43,10 @@ import {
   FIXTURE_CONVERSATION_ID
 } from "../../support/conversationFixtures"
 import {
+  buildUnreachableRuntime,
   updateStoreRuntime,
-  READY_RUNTIME
+  READY_RUNTIME,
+  type RuntimeArrangement
 } from "../../support/runtimeFixtures"
 import {
   createControlledPromise,
@@ -37,6 +60,24 @@ const CHAT_ROUTE = "POST /api/v1/chat"
 /** Route key of the history list read. */
 const HISTORY_ROUTE = "GET /api/v1/conversations"
 
+/** Path of the agent list the view reads. */
+const AGENTS_PATH = "/api/v1/agents"
+
+/**
+ * Built-in agents, as the backend ships them: listed on every page of the
+ * agent list, Caliginia first.
+ */
+const BUILT_IN_AGENTS = Object.freeze([
+  buildBuiltInAgent(CALIGINIA_AGENT_CODE, {
+    name: "Caliginia",
+    bio: "Lys's dark side."
+  }),
+  buildBuiltInAgent(LYSIPTERA_AGENT_CODE, {
+    name: "Lysiptera",
+    bio: "Lys's light side."
+  })
+])
+
 /** A stored conversation listed in history. */
 const STORED = buildConversation(createFixtureUuidV7(10), "Trip", [
   buildUserMessage(11, "Plan a trip"),
@@ -46,6 +87,17 @@ const STORED = buildConversation(createFixtureUuidV7(10), "Trip", [
 /** Route key of reading {@link STORED}. */
 const STORED_ROUTE = `GET /api/v1/conversations/${STORED.id}`
 
+/**
+ * Builds {@link STORED} as answered by another agent.
+ *
+ * @param agentCode - Code stored with the conversation.
+ * @returns The conversation with that code, frozen and validated by the
+ * shared schema.
+ */
+function buildStoredConversationOf(agentCode: string): Conversation {
+  return Object.freeze(conversationSchema.parse({ ...STORED, agentCode }))
+}
+
 /** Start event of a turn that creates the fixture conversation. */
 const NEW_TURN_EVENT = Object.freeze({
   type: "start-new-conversation-turn",
@@ -54,25 +106,55 @@ const NEW_TURN_EVENT = Object.freeze({
   assistantMessage: buildStreamingAssistantMessage(3, "")
 })
 
+/** Route key of following the reply that {@link NEW_TURN_EVENT} starts. */
+const NEW_TURN_REPLY_EVENTS_ROUTE = `GET /api/v1/chat/${FIXTURE_CONVERSATION_ID}/replies/${NEW_TURN_EVENT.assistantMessage.id}/events`
+
 /**
- * Loads fresh stores and the chat view, with a ready runtime.
+ * Answers a follow of the reply {@link NEW_TURN_EVENT} starts as the backend
+ * does once that reply completed as `I am Lys.`: a snapshot of the completed
+ * reply, then the end of the stream.
  *
+ * @returns The reply-events response.
+ */
+function buildCompletedNewTurnReplyEvents(): Response {
+  const stream = startBackendEventStream()
+  stream.sendEvent({
+    type: "reply-snapshot",
+    conversationTitle: null,
+    assistantMessage: buildCompletedAssistantMessage(3, "I am Lys."),
+    pendingToolCalls: []
+  })
+  stream.close()
+  return stream.response
+}
+
+/**
+ * Loads fresh stores and the chat view, with an arranged runtime.
+ *
+ * @param runtime - Runtime facts arranged in the application store; defaults
+ * to a ready runtime, whose running backend makes the view read the agent
+ * list when it appears.
  * @returns The stores and the view component.
  */
-async function loadFreshChatView() {
+async function loadFreshChatView(runtime: RuntimeArrangement = READY_RUNTIME) {
   vi.resetModules()
   const { useLysStore } = await import("@/lib/store")
   const { useChatViewStore } = await import("@/lib/store/chat-view")
   const { useConversationHistoryStore } =
     await import("@/lib/store/conversation-history")
   const { default: ChatView } = await import("@/views/ChatView/ChatView")
-  updateStoreRuntime(useLysStore, READY_RUNTIME)
-  return { useChatViewStore, useConversationHistoryStore, ChatView }
+  updateStoreRuntime(useLysStore, runtime)
+  return {
+    useLysStore,
+    useChatViewStore,
+    useConversationHistoryStore,
+    ChatView
+  }
 }
 
 /**
- * Starts a backend that lists {@link STORED}, serves it, and opens a new
- * event stream per chat request.
+ * Starts a backend that lists the built-in agents and {@link STORED}, serves
+ * {@link STORED}, and opens a new event stream per chat request.
  *
  * @param routes - Routes replacing or adding to those.
  * @returns The backend observation handle and the opened streams.
@@ -80,6 +162,11 @@ async function loadFreshChatView() {
 function startChatViewBackend(routes: BackendRoutes = {}) {
   const streams: BackendEventStream[] = []
   const backend = startBackendFake({
+    [`GET ${AGENTS_PATH}`]: () =>
+      buildJsonResponse(
+        200,
+        buildAgentListPage([], { builtInAgents: BUILT_IN_AGENTS })
+      ),
     [HISTORY_ROUTE]: () =>
       buildJsonResponse(
         200,
@@ -96,6 +183,39 @@ function startChatViewBackend(routes: BackendRoutes = {}) {
     ...routes
   })
   return { backend, streams }
+}
+
+/**
+ * Lists the agent-list reads the backend received.
+ *
+ * @param backend - Observation handle of the case's backend.
+ * @returns The reads, in arrival order.
+ */
+function listAgentListRequests(
+  backend: BackendFake
+): readonly ObservedBackendRequest[] {
+  return backend.requests.filter(
+    (request) => new URL(request.url).pathname === AGENTS_PATH
+  )
+}
+
+/**
+ * Renders the chat view and lets the agent-list read it starts when it
+ * appears settle, so the view names the agent that answers.
+ *
+ * @param ChatView - Chat view of the case's fresh module graph.
+ * @param props - Parent-owned transcript position and its change callback.
+ * @returns The rendered tree.
+ * @remarks The case's backend must answer the agent list. Cases about the
+ * read itself render the view directly.
+ */
+async function startChatView(
+  ChatView: ComponentType<ChatViewProps>,
+  props: ChatViewProps
+): Promise<RenderResult> {
+  const rendered = render(<ChatView {...props} />)
+  await waitForRenderedWork()
+  return rendered
 }
 
 /**
@@ -141,18 +261,90 @@ function sendHistoryShortcut(init: KeyboardEventInit): boolean {
 }
 
 describe("ChatView", () => {
-  it("shows the conversation and the composer, and no history while it is closed", async () => {
+  it("shows the conversation and the composer named after the agent that answers, and no history while it is closed", async () => {
+    const { backend } = startChatViewBackend()
     const { ChatView } = await loadFreshChatView()
 
     render(<ChatView atBottom onScrollPositionChange={vi.fn()} />)
 
+    // Until the agent list is read, only the selected agent's code is known.
+    expect(
+      screen.getByRole("textbox", { name: `Message ${CALIGINIA_AGENT_CODE}` })
+    ).toBeInTheDocument()
+
+    await waitForRenderedWork()
+
+    expect(listAgentListRequests(backend)).toHaveLength(1)
     expect(
       screen.getByRole("region", { name: "Conversation" })
     ).toBeInTheDocument()
     expect(
-      screen.getByRole("textbox", { name: "Message Lys" })
-    ).toBeInTheDocument()
+      screen.getByRole("textbox", { name: "Message Caliginia" })
+    ).toBeEnabled()
     expect(screen.queryByRole("dialog")).toBeNull()
+  })
+
+  it("names the agent that answers the shown conversation on its replies and the message field", async () => {
+    startChatViewBackend()
+    const { useChatViewStore, ChatView } = await loadFreshChatView()
+    act(() => {
+      useChatViewStore.setState({
+        conversation: createStoredChatViewConversation(
+          buildStoredConversationOf(LYSIPTERA_AGENT_CODE)
+        )
+      })
+    })
+
+    await startChatView(ChatView, {
+      atBottom: true,
+      onScrollPositionChange: vi.fn()
+    })
+
+    const region = screen.getByRole("region", { name: "Conversation" })
+    expect(within(region).getAllByRole("article").at(-1)).toHaveTextContent(
+      /^LysipteraStart with the route\.$/
+    )
+    expect(
+      screen.getByRole("textbox", { name: "Message Lysiptera" })
+    ).toBeEnabled()
+  })
+
+  it("reads the agent list whenever the backend starts running, and only then", async () => {
+    const { backend } = startChatViewBackend()
+    const { useLysStore, ChatView } = await loadFreshChatView(
+      buildUnreachableRuntime("stopped")
+    )
+    render(<ChatView atBottom onScrollPositionChange={vi.fn()} />)
+    await waitForRenderedWork()
+    expect(listAgentListRequests(backend)).toHaveLength(0)
+
+    act(() => {
+      updateStoreRuntime(useLysStore, READY_RUNTIME)
+    })
+    await waitForRenderedWork()
+
+    expect(listAgentListRequests(backend)).toHaveLength(1)
+    expect(
+      screen.getByRole("textbox", { name: "Message Caliginia" })
+    ).toBeInTheDocument()
+
+    act(() => {
+      updateStoreRuntime(useLysStore, buildUnreachableRuntime("stopped"))
+    })
+    await waitForRenderedWork()
+
+    // The list read while the backend ran stays shown while it is stopped.
+    expect(listAgentListRequests(backend)).toHaveLength(1)
+    expect(
+      screen.getByRole("textbox", { name: "Message Caliginia" })
+    ).toBeInTheDocument()
+
+    act(() => {
+      updateStoreRuntime(useLysStore, READY_RUNTIME)
+    })
+    await waitForRenderedWork()
+
+    expect(listAgentListRequests(backend)).toHaveLength(2)
   })
 
   describe("the history shortcut", () => {
@@ -165,7 +357,10 @@ describe("ChatView", () => {
         startChatViewBackend()
         const { useConversationHistoryStore, ChatView } =
           await loadFreshChatView()
-        render(<ChatView atBottom onScrollPositionChange={vi.fn()} />)
+        await startChatView(ChatView, {
+          atBottom: true,
+          onScrollPositionChange: vi.fn()
+        })
 
         expect(sendHistoryShortcut(modifier)).toBe(false)
         await waitForRenderedWork()
@@ -188,19 +383,25 @@ describe("ChatView", () => {
       ["while text is composed", { metaKey: true, isComposing: true }],
       ["without a command modifier", {}]
     ])("ignores K %s", async (_case, init) => {
+      startChatViewBackend()
       const { ChatView } = await loadFreshChatView()
-      render(<ChatView atBottom onScrollPositionChange={vi.fn()} />)
+      await startChatView(ChatView, {
+        atBottom: true,
+        onScrollPositionChange: vi.fn()
+      })
 
       expect(sendHistoryShortcut(init)).toBe(true)
       expect(screen.queryByRole("dialog")).toBeNull()
     })
 
     it("stops listening once the view is removed", async () => {
+      startChatViewBackend()
       const { useConversationHistoryStore, ChatView } =
         await loadFreshChatView()
-      const { unmount } = render(
-        <ChatView atBottom onScrollPositionChange={vi.fn()} />
-      )
+      const { unmount } = await startChatView(ChatView, {
+        atBottom: true,
+        onScrollPositionChange: vi.fn()
+      })
 
       unmount()
       sendHistoryShortcut({ metaKey: true })
@@ -213,6 +414,7 @@ describe("ChatView", () => {
 
   describe("transcript position", () => {
     it("keeps the latest messages in view while pinned", async () => {
+      startChatViewBackend()
       const scrollTo = startScrollRecorder()
       const { useChatViewStore, ChatView } = await loadFreshChatView()
       act(() => {
@@ -220,7 +422,10 @@ describe("ChatView", () => {
           conversation: createStoredChatViewConversation(STORED)
         })
       })
-      render(<ChatView atBottom onScrollPositionChange={vi.fn()} />)
+      await startChatView(ChatView, {
+        atBottom: true,
+        onScrollPositionChange: vi.fn()
+      })
       const host = getTranscriptHost()
       Object.defineProperty(host, "scrollHeight", {
         configurable: true,
@@ -243,6 +448,7 @@ describe("ChatView", () => {
     })
 
     it("leaves the position alone while the reader is away from the latest messages", async () => {
+      startChatViewBackend()
       const scrollTo = startScrollRecorder()
       const { useChatViewStore, ChatView } = await loadFreshChatView()
       act(() => {
@@ -251,16 +457,23 @@ describe("ChatView", () => {
         })
       })
 
-      render(<ChatView atBottom={false} onScrollPositionChange={vi.fn()} />)
+      await startChatView(ChatView, {
+        atBottom: false,
+        onScrollPositionChange: vi.fn()
+      })
 
       expect(scrollTo).not.toHaveBeenCalled()
     })
 
     it("does not scroll an empty conversation", async () => {
+      startChatViewBackend()
       const scrollTo = startScrollRecorder()
       const { ChatView } = await loadFreshChatView()
 
-      render(<ChatView atBottom onScrollPositionChange={vi.fn()} />)
+      await startChatView(ChatView, {
+        atBottom: true,
+        onScrollPositionChange: vi.fn()
+      })
 
       expect(scrollTo).not.toHaveBeenCalled()
     })
@@ -271,11 +484,13 @@ describe("ChatView", () => {
     ])(
       "reports whether a scroll leaving %dpx below stays near the bottom",
       async (remainingPx, isNearBottom) => {
+        startChatViewBackend()
         const onScrollPositionChange = vi.fn()
         const { ChatView } = await loadFreshChatView()
-        render(
-          <ChatView atBottom onScrollPositionChange={onScrollPositionChange} />
-        )
+        await startChatView(ChatView, {
+          atBottom: true,
+          onScrollPositionChange
+        })
         const host = getTranscriptHost()
         Object.defineProperty(host, "scrollHeight", { value: 1000 })
         Object.defineProperty(host, "clientHeight", { value: 400 })
@@ -290,6 +505,7 @@ describe("ChatView", () => {
     )
 
     it("jumps smoothly to the latest messages and pins the transcript", async () => {
+      startChatViewBackend()
       const scrollTo = startScrollRecorder()
       const onScrollPositionChange = vi.fn()
       const { useChatViewStore, ChatView } = await loadFreshChatView()
@@ -298,12 +514,10 @@ describe("ChatView", () => {
           conversation: createStoredChatViewConversation(STORED)
         })
       })
-      render(
-        <ChatView
-          atBottom={false}
-          onScrollPositionChange={onScrollPositionChange}
-        />
-      )
+      await startChatView(ChatView, {
+        atBottom: false,
+        onScrollPositionChange
+      })
       Object.defineProperty(getTranscriptHost(), "scrollHeight", { value: 900 })
       const user = userEvent.setup()
 
@@ -323,12 +537,10 @@ describe("ChatView", () => {
       const onScrollPositionChange = vi.fn()
       const { useConversationHistoryStore, ChatView } =
         await loadFreshChatView()
-      render(
-        <ChatView
-          atBottom={false}
-          onScrollPositionChange={onScrollPositionChange}
-        />
-      )
+      await startChatView(ChatView, {
+        atBottom: false,
+        onScrollPositionChange
+      })
       sendHistoryShortcut({ metaKey: true })
       await waitForRenderedWork()
       const user = userEvent.setup()
@@ -340,7 +552,9 @@ describe("ChatView", () => {
         "closed"
       )
       expect(onScrollPositionChange).toHaveBeenCalledWith(true)
-      expect(screen.getByRole("textbox", { name: "Message Lys" })).toHaveFocus()
+      expect(
+        screen.getByRole("textbox", { name: "Message Caliginia" })
+      ).toHaveFocus()
       expect(backend.requests.at(-1)?.url).toContain(STORED.id)
       expect(screen.getByText("Start with the route.")).toBeInTheDocument()
     })
@@ -354,9 +568,10 @@ describe("ChatView", () => {
           conversation: createStoredChatViewConversation(STORED)
         })
       })
-      render(
-        <ChatView atBottom onScrollPositionChange={onScrollPositionChange} />
-      )
+      await startChatView(ChatView, {
+        atBottom: true,
+        onScrollPositionChange
+      })
       sendHistoryShortcut({ ctrlKey: true })
       await waitForRenderedWork()
       const user = userEvent.setup()
@@ -368,15 +583,68 @@ describe("ChatView", () => {
         screen.getByRole("group", { name: "Starter prompts" })
       ).toBeInTheDocument()
       expect(onScrollPositionChange).toHaveBeenCalledWith(true)
-      expect(screen.getByRole("textbox", { name: "Message Lys" })).toHaveFocus()
+      expect(
+        screen.getByRole("textbox", { name: "Message Caliginia" })
+      ).toHaveFocus()
+    })
+
+    it("starts a new conversation from the deleted-agent notice: clears the shown one, pins, and focuses the field once it is enabled", async () => {
+      startChatViewBackend()
+      const onScrollPositionChange = vi.fn()
+      const { useChatViewStore, ChatView } = await loadFreshChatView()
+      act(() => {
+        useChatViewStore.setState({
+          conversation: createStoredChatViewConversation(
+            buildStoredConversationOf("scout")
+          )
+        })
+      })
+      render(
+        <ChatView atBottom onScrollPositionChange={onScrollPositionChange} />
+      )
+      // The composer always offers its own New conversation; once the agent
+      // list says the agent was deleted, the notice adds a second one.
+      const [composerButton] = screen.getAllByRole("button", {
+        name: "New conversation"
+      })
+      await waitForRenderedWork()
+      const noticeButton = screen
+        .getAllByRole("button", { name: "New conversation" })
+        .find((button) => button !== composerButton)
+      if (noticeButton === undefined) {
+        throw new Error("The deleted-agent notice offers no new conversation")
+      }
+      // A deleted agent is known only by the code stored with its replies.
+      expect(screen.getAllByRole("article").at(-1)).toHaveTextContent(
+        /^scoutStart with the route\.$/
+      )
+      expect(
+        screen.getByRole("textbox", { name: "Message scout" })
+      ).toBeDisabled()
+      const user = userEvent.setup()
+
+      await user.click(noticeButton)
+
+      expect(
+        screen.getByRole("group", { name: "Starter prompts" })
+      ).toBeInTheDocument()
+      expect(onScrollPositionChange).toHaveBeenCalledWith(true)
+      expect(
+        screen.getByRole("textbox", { name: "Message Caliginia" })
+      ).toHaveFocus()
     })
   })
 
   describe("requests", () => {
-    it("sends a starter prompt and announces the reply until it is final", async () => {
-      const { backend, streams } = startChatViewBackend()
+    it("sends a starter prompt to the agent that answers and announces the reply until it is final", async () => {
+      const { backend, streams } = startChatViewBackend({
+        [NEW_TURN_REPLY_EVENTS_ROUTE]: buildCompletedNewTurnReplyEvents
+      })
       const { ChatView } = await loadFreshChatView()
-      render(<ChatView atBottom onScrollPositionChange={vi.fn()} />)
+      await startChatView(ChatView, {
+        atBottom: true,
+        onScrollPositionChange: vi.fn()
+      })
       const user = userEvent.setup()
       const region = screen.getByRole("region", { name: "Conversation" })
 
@@ -384,9 +652,12 @@ describe("ChatView", () => {
       await waitForRenderedWork()
 
       expect(backend.requests.at(-1)?.body).toMatchObject({
+        conversation: { kind: "new", agentCode: CALIGINIA_AGENT_CODE },
         message: STARTER_PROMPTS[0]
       })
-      expect(screen.getByText("Lys is generating a reply")).toBeInTheDocument()
+      expect(
+        within(region).getByText("Caliginia is generating a reply")
+      ).toBeInTheDocument()
       expect(region).toHaveAttribute("aria-busy", "false")
 
       await act(async () => {
@@ -397,7 +668,7 @@ describe("ChatView", () => {
       })
 
       expect(screen.getByText("I am Lys.")).toBeInTheDocument()
-      expect(screen.queryByText("Lys is generating a reply")).toBeNull()
+      expect(screen.queryByText("Caliginia is generating a reply")).toBeNull()
       streams[0]?.close()
     })
 
@@ -405,7 +676,10 @@ describe("ChatView", () => {
       const stored = createControlledPromise<Response>()
       startChatViewBackend({ [STORED_ROUTE]: () => stored.promise })
       const { useChatViewStore, ChatView } = await loadFreshChatView()
-      render(<ChatView atBottom onScrollPositionChange={vi.fn()} />)
+      await startChatView(ChatView, {
+        atBottom: true,
+        onScrollPositionChange: vi.fn()
+      })
 
       act(() => {
         void useChatViewStore.getState().openConversation(STORED.id)
@@ -424,12 +698,16 @@ describe("ChatView", () => {
     })
 
     it("shows a chat failure in the transcript", async () => {
+      startChatViewBackend()
       const { useChatViewStore, ChatView } = await loadFreshChatView()
       act(() => {
         useChatViewStore.setState({ error: "Chat is unavailable." })
       })
 
-      render(<ChatView atBottom onScrollPositionChange={vi.fn()} />)
+      await startChatView(ChatView, {
+        atBottom: true,
+        onScrollPositionChange: vi.fn()
+      })
 
       expect(screen.getByText("Chat is unavailable.")).toBeInTheDocument()
     })

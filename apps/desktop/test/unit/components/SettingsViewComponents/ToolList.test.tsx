@@ -125,8 +125,9 @@ describe("ToolGroupSection", () => {
 
     const toggle = getToolToggle("read_text_file")
     expect(toggle).toHaveAttribute("aria-expanded", "false")
+    // A tool the person has not changed is on and asks before each call.
     expect(toggle).toHaveAccessibleDescription(
-      "reads in Lys Runs read_text_file."
+      "reads in Lys Runs read_text_file. asks before it runs"
     )
     const row = getToolRow("read_text_file")
     expect(row).toHaveTextContent(
@@ -137,21 +138,32 @@ describe("ToolGroupSection", () => {
     ).toBeChecked()
   })
 
-  it("notes a tool that is on and asks before it runs", () => {
-    startToolGroup({
-      toolChoices: new Map<string, ToolChoice>([
-        ["read_text_file", { isOn: true, approval: "ask" }],
-        ["list_roots", { isOn: false, approval: "ask" }]
-      ])
-    })
-
-    expect(getToolToggle("read_text_file")).toHaveAccessibleDescription(
+  it.each<[string, ToolChoice, string]>([
+    [
+      "on and asks first",
+      { isOn: true, approval: "ask" },
       "reads in Lys Runs read_text_file. asks before it runs"
-    )
-    expect(getToolToggle("list_roots")).toHaveAccessibleDescription(
-      "reads in Lys Runs list_roots."
-    )
-  })
+    ],
+    [
+      "on and runs at once",
+      { isOn: true, approval: "run" },
+      "reads in Lys Runs read_text_file."
+    ],
+    [
+      "off, though it would ask first",
+      { isOn: false, approval: "ask" },
+      "reads in Lys Runs read_text_file."
+    ]
+  ])(
+    "notes that a tool asks before it runs only while it is on and asks: %s",
+    (_case, choice, description) => {
+      startToolGroup({ toolChoices: new Map([["read_text_file", choice]]) })
+
+      expect(getToolToggle("read_text_file")).toHaveAccessibleDescription(
+        description
+      )
+    }
+  )
 
   it("proposes expanding a collapsed row", async () => {
     const collapsed = startToolGroup()
@@ -208,11 +220,14 @@ describe("ToolGroupSection", () => {
       name: "Before it runs"
     })
     expect(approval).toHaveAccessibleDescription(
-      "Runs the moment the model asks for it."
+      "You see the call and its arguments. Nothing happens until you say yes."
     )
     expect(
-      within(approval).getByRole("button", { name: "Just run" })
+      within(approval).getByRole("button", { name: "Ask me" })
     ).toHaveAttribute("aria-pressed", "true")
+    expect(
+      within(approval).getByRole("button", { name: "Just run" })
+    ).toHaveAttribute("aria-pressed", "false")
     expect(getToolToggle("list_roots")).not.toHaveAttribute("aria-controls")
   })
 
@@ -238,7 +253,7 @@ describe("ToolGroupSection", () => {
     )
     expect(proposals.onToolApprovalChange).toHaveBeenCalledExactlyOnceWith(
       "read_text_file",
-      "ask"
+      "run"
     )
   })
 
@@ -251,7 +266,9 @@ describe("ToolGroupSection", () => {
 
     await user.click(getToolToggle("read_text_file"))
     await user.click(screen.getByRole("switch", { name: "Use read_text_file" }))
-    await user.click(screen.getByRole("button", { name: "Ask me" }))
+    // Just run is the approval the tool does not have, so only the lock can
+    // keep it from being proposed.
+    await user.click(screen.getByRole("button", { name: "Just run" }))
 
     expect(getToolToggle("read_text_file")).toBeDisabled()
     expect(proposals.onExpandedToolNameChange).not.toHaveBeenCalled()

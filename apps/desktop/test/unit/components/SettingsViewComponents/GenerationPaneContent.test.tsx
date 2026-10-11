@@ -5,6 +5,7 @@ import type { GenerationSettings } from "@/lib/store/settings"
 import { initialSettingsState } from "@/lib/store/settings"
 import { startBackendFake } from "../../support/backendFake"
 import { startNativeHostFake } from "../../support/nativeHostFake"
+import { STORED_SETTINGS_DOCUMENT } from "../../support/settingsFixtures"
 import {
   buildInventoryRoute,
   INVENTORY_ROUTE,
@@ -13,8 +14,8 @@ import {
 import { waitForRenderedWork } from "../../support/rendering"
 
 /**
- * Starts a native host that keeps the settings document it is given and
- * records every successful save.
+ * Starts a native host whose settings file holds
+ * {@link STORED_SETTINGS_DOCUMENT} and that records every successful save.
  *
  * @param save - Result of each save; throwing fails it.
  * @returns The arguments of each successful save, in order.
@@ -22,7 +23,7 @@ import { waitForRenderedWork } from "../../support/rendering"
 function startSettingsHost(save: () => void = () => undefined) {
   const saves: unknown[] = []
   startNativeHostFake({
-    load_settings: () => initialSettingsState,
+    load_settings: () => STORED_SETTINGS_DOCUMENT,
     save_settings: (args) => {
       save()
       saves.push(args)

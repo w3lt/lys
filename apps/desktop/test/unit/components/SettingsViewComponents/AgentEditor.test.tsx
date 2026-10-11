@@ -22,8 +22,12 @@ const RESEARCHER = buildAgent("researcher", {
   systemPrompt: "You are researcher."
 })
 
+/** Time a case's held save reports as the researcher's latest change. */
+const RESEARCHER_SAVED_AT = "2026-02-03T04:05:07.789Z"
+
 /**
- * Renders the Agents pane over a backend storing the given agents.
+ * Renders the Agents pane over a backend that ships the built-in agents and
+ * stores the researcher.
  *
  * @param options - Backend options; the inventory read is always answered.
  * @returns The agent backend.
@@ -183,6 +187,55 @@ describe("AgentEditor", () => {
           "Another agent already goes by researcher. Pick another name."
         )
       ).toBeInTheDocument()
+    })
+
+    it("refuses the name of the built-in Caliginia without a request", async () => {
+      const { backend } = await startAgentPane()
+      const user = userEvent.setup()
+      await openNewAgentEditor(user)
+      await updateNewAgentFields(user, {
+        name: "Caliginia",
+        bio: "Another one.",
+        prompt: "You brood."
+      })
+
+      await user.click(screen.getByRole("button", { name: "Create" }))
+
+      expect(getField("name")).toHaveFocus()
+      expect(getField("name")).toBeInvalid()
+      expect(
+        screen.getByText(
+          "Another agent already goes by Caliginia. Pick another name."
+        )
+      ).toBeInTheDocument()
+      expect(
+        backend.requests.filter((request) => request.method === "POST")
+      ).toEqual([])
+    })
+
+    it("refuses the code of the built-in Lysiptera without a request", async () => {
+      const { backend } = await startAgentPane()
+      const user = userEvent.setup()
+      await openNewAgentEditor(user)
+      await updateNewAgentFields(user, {
+        name: "Daylight",
+        bio: "Keeps it light.",
+        prompt: "You shine."
+      })
+      await user.type(getField("code"), "lysiptera")
+
+      await user.click(screen.getByRole("button", { name: "Create" }))
+
+      expect(getField("code")).toHaveFocus()
+      expect(getField("code")).toBeInvalid()
+      expect(
+        screen.getByText(
+          "Another agent already uses the code lysiptera. Pick another code, or leave it empty."
+        )
+      ).toBeInTheDocument()
+      expect(
+        backend.requests.filter((request) => request.method === "POST")
+      ).toEqual([])
     })
 
     it("creates the agent and returns to the list with its row focused and marked saved", async () => {
@@ -376,7 +429,8 @@ describe("AgentEditor", () => {
           buildAgent("researcher", {
             name: "Researcher",
             bio: "Finds sources.!",
-            systemPrompt: "You are researcher."
+            systemPrompt: "You are researcher.",
+            updatedAt: RESEARCHER_SAVED_AT
           })
         )
       )

@@ -1,9 +1,16 @@
-import { act, render, screen } from "@testing-library/react"
+import { act, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import { buildJsonResponse, type BackendRoute } from "../../support/backendFake"
-import { startAgentBackend } from "../../support/agentBackend"
-import { buildAgent, buildAgentListPage } from "../../support/agentFixtures"
+import {
+  SHIPPED_BUILT_IN_AGENTS,
+  startAgentBackend
+} from "../../support/agentBackend"
+import {
+  buildAgent,
+  buildAgentListPage,
+  buildCustomAgentResponse
+} from "../../support/agentFixtures"
 import {
   buildUnreachableRuntime,
   READY_RUNTIME,
@@ -61,11 +68,12 @@ describe("AgentPaneContent", () => {
     expect(screen.getByRole("status")).toHaveTextContent(
       "Start the backend to manage agents."
     )
+    expect(screen.queryByRole("region", { name: "built-in" })).toBeNull()
     expect(screen.queryByRole("region", { name: "yours" })).toBeNull()
     expect(backend.requests).toEqual([])
   })
 
-  it("shows a placeholder while the agents are first read, then lists them", async () => {
+  it("shows a placeholder while the agents are first read, then lists the built-in agents above the user's", async () => {
     const list = createControlledPromise<Response>()
     startAgentBackend([RESEARCHER, WRITER], {
       routes: {
@@ -81,10 +89,30 @@ describe("AgentPaneContent", () => {
     ).toEqual(["", "Reading agents settings"])
 
     list.resolve(
-      buildJsonResponse(200, buildAgentListPage([RESEARCHER, WRITER]))
+      buildJsonResponse(
+        200,
+        buildAgentListPage([RESEARCHER, WRITER], {
+          builtInAgents: SHIPPED_BUILT_IN_AGENTS
+        })
+      )
     )
     await waitForRenderedWork()
 
+    const sections = screen.getAllByRole("region", {
+      name: /^(built-in|yours)$/
+    })
+    expect(
+      sections.map(
+        (section) => within(section).getByRole("heading").textContent
+      )
+    ).toEqual(["built-in", "yours"])
+    const builtInRows = within(
+      screen.getByRole("list", { name: "Built-in agents" })
+    ).getAllByRole("button")
+    expect(builtInRows.map((row) => row.textContent)).toEqual([
+      "CaliginiacaliginiaLys's dark side.",
+      "LysipteralysipteraLys's light side."
+    ])
     expect(
       screen.getByRole("button", { name: "Researcher researcher" })
     ).toBeInTheDocument()
@@ -96,7 +124,12 @@ describe("AgentPaneContent", () => {
     const failingThenWorking: BackendRoute = () =>
       isListFailing
         ? new Response(null, { status: 500 })
-        : buildJsonResponse(200, buildAgentListPage([RESEARCHER]))
+        : buildJsonResponse(
+            200,
+            buildAgentListPage([RESEARCHER], {
+              builtInAgents: SHIPPED_BUILT_IN_AGENTS
+            })
+          )
     startAgentBackend([RESEARCHER], {
       routes: {
         ...buildInventoryRoutes(),
@@ -161,7 +194,7 @@ describe("AgentPaneContent", () => {
     )
     expect(screen.getByRole("button", { name: "agents list" })).toHaveFocus()
 
-    read.resolve(buildJsonResponse(200, RESEARCHER))
+    read.resolve(buildJsonResponse(200, buildCustomAgentResponse(RESEARCHER)))
     await waitForRenderedWork()
 
     expect(screen.getByRole("form", { name: "Researcher" })).toBeInTheDocument()
@@ -192,7 +225,7 @@ describe("AgentPaneContent", () => {
     expect(screen.getByText("Reading researcher…")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "agents list" })).toHaveFocus()
 
-    retry.resolve(buildJsonResponse(200, RESEARCHER))
+    retry.resolve(buildJsonResponse(200, buildCustomAgentResponse(RESEARCHER)))
     await waitForRenderedWork()
     expect(screen.getByRole("form", { name: "Researcher" })).toBeInTheDocument()
   })
@@ -208,6 +241,27 @@ describe("AgentPaneContent", () => {
     await user.click(screen.getByRole("button", { name: "Close" }))
 
     expect(screen.getByRole("button", { name: "Writer writer" })).toHaveFocus()
+  })
+
+  it("opens a built-in agent read-only, not in an editor, and returns focus to its row when it closes", async () => {
+    startAgentBackend([RESEARCHER], { routes: buildInventoryRoutes() })
+    await startAgentPane()
+    await waitForRenderedWork()
+    const user = userEvent.setup()
+
+    await user.click(
+      screen.getByRole("button", { name: "Lysiptera lysiptera" })
+    )
+    await waitForRenderedWork()
+
+    expect(
+      screen.getByRole("region", { name: "Lysiptera" })
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("form")).toBeNull()
+    await user.click(screen.getByRole("button", { name: "Close" }))
+    expect(
+      screen.getByRole("button", { name: "Lysiptera lysiptera" })
+    ).toHaveFocus()
   })
 
   it("returns focus to New agent when a new agent's editor closes", async () => {
@@ -246,6 +300,33 @@ describe("AgentPaneContent", () => {
     await user.click(screen.getByRole("button", { name: "Close" }))
     expect(
       screen.getByRole("button", { name: "Researcher researcher" })
+    ).toHaveFocus()
+  })
+
+  it("returns to the built-in agent that was open when the pane appears again", async () => {
+    startAgentBackend([RESEARCHER], { routes: buildInventoryRoutes() })
+    const useLysStore = await startAgentPane()
+    await waitForRenderedWork()
+    const user = userEvent.setup()
+    await user.click(
+      screen.getByRole("button", { name: "Caliginia caliginia" })
+    )
+    await waitForRenderedWork()
+
+    act(() => {
+      useLysStore.setState({ settingsPane: "runtime" })
+    })
+    act(() => {
+      useLysStore.setState({ settingsPane: "agents" })
+    })
+    await waitForRenderedWork()
+
+    expect(
+      await screen.findByRole("region", { name: "Caliginia" })
+    ).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Close" }))
+    expect(
+      screen.getByRole("button", { name: "Caliginia caliginia" })
     ).toHaveFocus()
   })
 })

@@ -8,17 +8,21 @@ import {
 } from "../../support/conversationFixtures"
 import { startDecodedImageHost } from "../../support/imageHostFake"
 
+/** Name of the agent that answers, which the parent shows on every reply. */
+const SPEAKER_NAME = "Caliginia"
+
 describe("LysMessage", () => {
-  it("renders a completed reply as Markdown under the lys label, with no status", async () => {
+  it("renders a completed reply as Markdown under the answering agent's name, with no status", async () => {
     render(
       <LysMessage
         kind="terminal"
         message={buildCompletedAssistantMessage(2, "A **local** chat app.")}
+        speakerName={SPEAKER_NAME}
       />
     )
 
     const message = screen.getByRole("article")
-    expect(message).toHaveTextContent(/^lys/)
+    expect(message).toHaveTextContent(/^Caliginia/)
     expect(await within(message).findByText("local")).toBeInstanceOf(
       HTMLElement
     )
@@ -36,6 +40,7 @@ describe("LysMessage", () => {
         <LysMessage
           kind="terminal"
           message={buildEndedAssistantMessage(2, "Partial answer", status)}
+          speakerName={SPEAKER_NAME}
         />
       )
 
@@ -46,16 +51,17 @@ describe("LysMessage", () => {
     }
   )
 
-  it("shows the generating caret while the reply streams, and no outcome", () => {
+  it("shows the generating caret, naming the answering agent, while the reply streams, and no outcome", () => {
     render(
       <LysMessage
         kind="streaming"
         message={buildStreamingAssistantMessage(2, "Thinking")}
+        speakerName={SPEAKER_NAME}
       />
     )
 
     expect(
-      screen.getByRole("status", { name: "Lys is generating" })
+      screen.getByRole("status", { name: "Caliginia is generating" })
     ).toBeInTheDocument()
     expect(screen.queryByText("Stopped")).not.toBeInTheDocument()
     expect(screen.queryByText("Failed")).not.toBeInTheDocument()
@@ -67,6 +73,7 @@ describe("LysMessage", () => {
       <LysMessage
         kind="terminal"
         message={buildCompletedAssistantMessage(2, "Hi")}
+        speakerName={SPEAKER_NAME}
       />
     )
 

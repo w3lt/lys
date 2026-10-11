@@ -25,8 +25,11 @@ function buildSettingsContext(
     onRuntimeChange: vi.fn(),
     onModelChange: vi.fn(),
     onGenerationChange: vi.fn(),
+    onAssignModelLoadSettings: vi.fn(),
+    onRemoveModelExpertCount: vi.fn(),
     onLoadModel: vi.fn(() => Promise.resolve()),
     onUnloadModel: vi.fn(() => Promise.resolve()),
+    onReloadModel: vi.fn(() => Promise.resolve()),
     onTestModel: vi.fn(() => Promise.resolve()),
     onRefreshModels: vi.fn(() => Promise.resolve())
   }

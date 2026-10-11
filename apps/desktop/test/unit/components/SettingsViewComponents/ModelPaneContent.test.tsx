@@ -21,6 +21,7 @@ import {
 } from "../../support/settingsViewFixtures"
 import { createControlledPromise } from "../../support/settlement"
 import { startHover, waitForRenderedWork } from "../../support/rendering"
+import { FIRST_RUN_LOAD_CONFIGURATION } from "../../support/settingsFixtures"
 
 /** One resident model chosen as default, and one on disk. */
 const TWO_MODELS: RuntimeArrangement = {
@@ -128,7 +129,10 @@ describe("ModelPaneContent", () => {
         .filter((request) => request.method !== "GET")
         .map((request) => [request.method, request.body])
     ).toEqual([
-      ["POST", { modelId: "gemma-3" }],
+      [
+        "POST",
+        { modelId: "gemma-3", configuration: FIRST_RUN_LOAD_CONFIGURATION }
+      ],
       ["PATCH", { modelId: "qwen3-8b" }]
     ])
   })
@@ -253,12 +257,13 @@ describe("ModelPaneContent", () => {
     expect(getRefreshButton()).not.toHaveAttribute("aria-describedby")
   })
 
-  it("states the local context estimate and that LM Studio manages loading", async () => {
+  it("states that a load configuration is saved per model and applies at load, apart from the composer's estimate", async () => {
     await startModelPane()
 
-    expect(screen.getByText("managed by LM Studio")).toBeInTheDocument()
     expect(
-      screen.getByText(/^32.768 tokens · local estimate$/)
+      screen.getByText(
+        "Model operations use the backend. A load configuration is saved for each model and applies when that model is loaded, not per request. The composer's context meter uses its own estimate, not the context length set here. Default selection lasts for this session."
+      )
     ).toBeInTheDocument()
   })
 })

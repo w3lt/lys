@@ -12,6 +12,10 @@ import {
 import { buildLlmInfo } from "../../support/modelFixtures"
 import { startNativeHostFake } from "../../support/nativeHostFake"
 import {
+  FIRST_RUN_LOAD_CONFIGURATION,
+  type SettingsDocument
+} from "../../support/settingsFixtures"
+import {
   buildUnreachableRuntime,
   READY_RUNTIME,
   type RuntimeArrangement
@@ -35,6 +39,18 @@ const NOTHING_LOADED: RuntimeArrangement = {
   ...READY_RUNTIME,
   modelInventory: { status: "ready", models: [buildLlmInfo("qwen3-8b")] }
 }
+
+/**
+ * Settings document of a first run: every group at its default, no load
+ * setting stored. Its backend starts when Lys opens, so a saved `false` can
+ * only come from the switch.
+ */
+const FIRST_RUN_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
+  runtime: initialSettingsState.runtime,
+  model: initialSettingsState.model,
+  generation: initialSettingsState.generation,
+  loadConfiguration: Object.freeze({ default: {}, models: {} })
+})
 
 /**
  * Renders the settings view on the Runtime pane and waits for the pane.
@@ -198,7 +214,7 @@ describe("RuntimePaneContent", () => {
     it.fails("keeps the choice for the next time Lys opens", async () => {
       const saves: unknown[] = []
       startNativeHostFake({
-        load_settings: () => initialSettingsState,
+        load_settings: () => FIRST_RUN_SETTINGS_DOCUMENT,
         save_settings: (args) => {
           saves.push(args)
         }
@@ -287,12 +303,21 @@ describe("RuntimePaneContent", () => {
       const progress = screen.getByRole("progressbar", {
         name: "Loading weights"
       })
-      expect(progress.closest("section")).toHaveAttribute("aria-busy", "true")
+      // The model card is the one part of the pane marked busy meanwhile.
+      const busyParts = document.querySelectorAll('[aria-busy="true"]')
+      expect(busyParts).toHaveLength(1)
+      expect(busyParts[0]).toContainElement(progress)
+      expect(busyParts[0]).toContainElement(
+        screen.getByRole("heading", { name: "Loading weights" })
+      )
       expect(screen.getByRole("button", { name: "Load" })).toBeDisabled()
       expect(screen.getByText("loading qwen3-8b…")).toBeInTheDocument()
       expect(
         backend.requests.find((request) => request.method === "POST")?.body
-      ).toEqual({ modelId: "qwen3-8b" })
+      ).toEqual({
+        modelId: "qwen3-8b",
+        configuration: FIRST_RUN_LOAD_CONFIGURATION
+      })
 
       load.resolve(
         buildJsonResponse(200, buildLlmInfo("qwen3-8b", { loaded: true }))

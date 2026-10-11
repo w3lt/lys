@@ -29,6 +29,19 @@ export type SettingsDocument = Readonly<
   }
 >
 
+/**
+ * Load configuration a model whose maximum context is 8,192 tokens is loaded
+ * with while no load setting is stored: the committed default's values,
+ * written out so that a load-body expectation does not reuse the code under
+ * test.
+ */
+export const FIRST_RUN_LOAD_CONFIGURATION = Object.freeze({
+  contextLength: 8192,
+  evalBatchSize: 512,
+  flashAttention: true,
+  offloadKVCacheToGpu: true
+})
+
 /** Runtime group on disk, distinct from every default. */
 const STORED_RUNTIME_SETTINGS: RuntimeSettings = Object.freeze({
   autoStartBackend: false,

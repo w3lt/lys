@@ -1,3 +1,4 @@
+import { CALIGINIA_AGENT_CODE, LYSIPTERA_AGENT_CODE } from "@lys/share"
 import { describe, expect, it } from "vitest"
 import {
   calculateComposerActivity,
@@ -10,6 +11,7 @@ import {
 } from "@/components/ComposerComponents/composer-presentation"
 import { LM_STUDIO_ADDRESS } from "@/lib/models/lm-studio-connection"
 import type { BackendServerStatus } from "@/lib/store"
+import type { ConversationAgent } from "@/lib/store/agents/conversation-agent"
 import type { ChatRequestState } from "@/lib/store/chat-view"
 import type { LmStudioStatus } from "@/lib/store/lm-studio-status"
 import type { ModelRuntimeState } from "@/lib/store/model-runtime"
@@ -70,6 +72,29 @@ const OPENING = {
   conversationId: "conversation",
   replacedComposerDraft: ""
 } as const
+
+/** Lysiptera as the read agent list lists her. */
+const LYSIPTERA: ConversationAgent = {
+  status: "listed",
+  agent: {
+    code: LYSIPTERA_AGENT_CODE,
+    name: "Lysiptera",
+    bio: "Lys's light side.",
+    kind: "built-in"
+  }
+}
+
+/** Caliginia while the agent list is unread, known only by her code. */
+const UNREAD_AGENT: ConversationAgent = {
+  status: "unread",
+  code: CALIGINIA_AGENT_CODE
+}
+
+/** A stored agent the read agent list no longer holds. */
+const DELETED_AGENT: ConversationAgent = {
+  status: "deleted",
+  code: "web-researcher"
+}
 
 describe("calculateLocalRuntimeConnection", () => {
   it.each(NOT_RUNNING)(
@@ -223,12 +248,46 @@ describe("formatComposerPlaceholder", () => {
     ["offline", "idle", "Waiting on the backend…"],
     ["provider-unavailable", "idle", "Waiting on LM Studio…"],
     ["no-model", "idle", "Waiting on LM Studio…"],
-    ["ready", "idle", "Say something to Lys"],
-    ["ready", "awaiting-reply", "Keep typing — Send unlocks when she stops."],
+    ["ready", "idle", "Say something to Lysiptera"],
+    [
+      "ready",
+      "awaiting-reply",
+      "Keep typing — Send unlocks when the reply ends."
+    ],
     ["ready", "opening-conversation", "Opening a past conversation…"]
-  ] as const)("reads %s/%s as %j", (connection, activity, placeholder) => {
-    expect(formatComposerPlaceholder(connection, activity)).toBe(placeholder)
+  ] as const)(
+    "reads %s/%s with a listed agent as %j",
+    (connection, activity, placeholder) => {
+      expect(formatComposerPlaceholder(connection, activity, LYSIPTERA)).toBe(
+        placeholder
+      )
+    }
+  )
+
+  it("invites the agent by its code while the agent list is unread", () => {
+    expect(formatComposerPlaceholder("ready", "idle", UNREAD_AGENT)).toBe(
+      "Say something to caliginia"
+    )
   })
+
+  it("says a conversation whose agent was deleted is read-only", () => {
+    expect(formatComposerPlaceholder("ready", "idle", DELETED_AGENT)).toBe(
+      "This conversation is read-only."
+    )
+  })
+
+  it.each([
+    ["offline", "Waiting on the backend…"],
+    ["provider-unavailable", "Waiting on LM Studio…"],
+    ["no-model", "Waiting on LM Studio…"]
+  ] as const)(
+    "names what it waits on while %s, before a deleted agent",
+    (connection, placeholder) => {
+      expect(formatComposerPlaceholder(connection, "idle", DELETED_AGENT)).toBe(
+        placeholder
+      )
+    }
+  )
 })
 
 describe("formatComposerActivity", () => {

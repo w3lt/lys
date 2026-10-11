@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react"
+import { CALIGINIA_AGENT_CODE } from "@lys/share"
 import { describe, expect, it } from "vitest"
 import ConversationTranscript from "@/components/ChatViewComponents/ConversationTranscript"
 import {
@@ -16,10 +17,15 @@ const ANSWER = buildCompletedAssistantMessage(2, "A local chat app.")
 /** Follow-up user message. */
 const FOLLOW_UP = buildUserMessage(3, "Does it work offline?")
 
+/** Name of the agent that answers, which the parent shows on every reply. */
+const SPEAKER_NAME = "Caliginia"
+
 /**
- * Lists the speaker label and text of every rendered message, in order.
+ * Lists the text of every rendered message, in order.
  *
- * @returns One `speaker: text` line per message article.
+ * @returns The text content of each message article: its speaker label
+ * immediately followed by the message text, with nothing between them, such
+ * as `youWhat is Lys?`.
  */
 function listRenderedMessages(): string[] {
   return screen
@@ -33,12 +39,13 @@ describe("ConversationTranscript", () => {
       <ConversationTranscript
         completedMessages={[QUESTION, ANSWER, FOLLOW_UP]}
         kind="completed-only"
+        speakerName={SPEAKER_NAME}
       />
     )
 
     expect(listRenderedMessages()).toEqual([
       "youWhat is Lys?",
-      "lysA local chat app.",
+      "CaliginiaA local chat app.",
       "youDoes it work offline?"
     ])
     expect(screen.queryByRole("status")).not.toBeInTheDocument()
@@ -49,13 +56,45 @@ describe("ConversationTranscript", () => {
       <ConversationTranscript
         completedMessages={[QUESTION, ANSWER, FOLLOW_UP]}
         kind="streaming-tail"
+        speakerName={SPEAKER_NAME}
         streamingMessage={buildStreamingAssistantMessage(4, "Yes, it")}
       />
     )
 
-    expect(listRenderedMessages().at(-1)).toBe("lysYes, it")
+    expect(listRenderedMessages().at(-1)).toBe("CaliginiaYes, it")
     expect(
-      screen.getByRole("status", { name: "Lys is generating" })
+      screen.getByRole("status", { name: "Caliginia is generating" })
+    ).toBeInTheDocument()
+  })
+
+  it("shows every reply under the answering agent's name when that name changes", () => {
+    const { rerender } = render(
+      <ConversationTranscript
+        completedMessages={[QUESTION, ANSWER, FOLLOW_UP]}
+        kind="streaming-tail"
+        speakerName={CALIGINIA_AGENT_CODE}
+        streamingMessage={buildStreamingAssistantMessage(4, "Yes, it")}
+      />
+    )
+    expect(listRenderedMessages()[1]).toBe("caliginiaA local chat app.")
+
+    rerender(
+      <ConversationTranscript
+        completedMessages={[QUESTION, ANSWER, FOLLOW_UP]}
+        kind="streaming-tail"
+        speakerName={SPEAKER_NAME}
+        streamingMessage={buildStreamingAssistantMessage(4, "Yes, it")}
+      />
+    )
+
+    expect(listRenderedMessages()).toEqual([
+      "youWhat is Lys?",
+      "CaliginiaA local chat app.",
+      "youDoes it work offline?",
+      "CaliginiaYes, it"
+    ])
+    expect(
+      screen.getByRole("status", { name: "Caliginia is generating" })
     ).toBeInTheDocument()
   })
 
@@ -65,6 +104,7 @@ describe("ConversationTranscript", () => {
         completedMessages={[QUESTION]}
         error="The backend stopped before the reply finished."
         kind="completed-only"
+        speakerName={SPEAKER_NAME}
       />
     )
 
@@ -84,6 +124,7 @@ describe("ConversationTranscript", () => {
       <ConversationTranscript
         completedMessages={[QUESTION]}
         kind="streaming-tail"
+        speakerName={SPEAKER_NAME}
         streamingMessage={buildStreamingAssistantMessage(2, "A local")}
       />
     )
@@ -93,6 +134,7 @@ describe("ConversationTranscript", () => {
       <ConversationTranscript
         completedMessages={[QUESTION, ANSWER, FOLLOW_UP]}
         kind="completed-only"
+        speakerName={SPEAKER_NAME}
       />
     )
 
@@ -104,6 +146,7 @@ describe("ConversationTranscript", () => {
       <ConversationTranscript
         completedMessages={[QUESTION, ANSWER]}
         kind="completed-only"
+        speakerName={SPEAKER_NAME}
       />
     )
     const [question] = screen.getAllByRole("article")
@@ -115,6 +158,7 @@ describe("ConversationTranscript", () => {
           buildCompletedAssistantMessage(12, "Another reply")
         ]}
         kind="completed-only"
+        speakerName={SPEAKER_NAME}
       />
     )
 

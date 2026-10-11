@@ -6,6 +6,7 @@ import {
   type GenerationSettingsSlice
 } from "@/lib/store/generation-settings"
 import type { GenerationSettings, LysSettings } from "@/lib/store/settings"
+import { createSettingsGroupSaves } from "@/lib/store/settings-group-saves"
 import { startNativeHostFake } from "../../support/nativeHostFake"
 import {
   createControlledPromise,
@@ -13,31 +14,27 @@ import {
   waitForMicrotasks,
   type ControlledPromise
 } from "../../support/settlement"
-
-/** Settings document on disk; its runtime and model groups must survive saves. */
-const DISK_SETTINGS: LysSettings = Object.freeze({
-  runtime: Object.freeze({
-    autoStartBackend: false,
-    defaultModel: "qwen3-8b",
-    backendAddress: "http://127.0.0.1:23456"
-  }),
-  model: Object.freeze({ contextSize: 4096 }),
-  generation: Object.freeze({ temperature: 0.2, replyCeiling: 512 })
-})
+import {
+  STORED_SETTINGS,
+  STORED_SETTINGS_DOCUMENT
+} from "../../support/settingsFixtures"
 
 /** Store state the slice borrows: the current settings and the slice. */
 type GenerationStore = GenerationSettingsSlice & { settings: LysSettings }
 
 /**
- * Creates a store holding settings with the given generation controls.
+ * Creates a store holding the stored settings with the given generation
+ * controls.
  *
  * @param generation - Generation controls currently in memory.
- * @returns A store owning one generation settings slice.
+ * @returns A store owning one generation settings slice, whose saves run
+ * through the application's settings-group saves over the native host.
  */
 function createGenerationStore(generation: GenerationSettings) {
+  const settingsGroupSaves = createSettingsGroupSaves()
   return createStore<GenerationStore>()((set, get) => ({
-    settings: { ...DISK_SETTINGS, generation },
-    ...createGenerationSettingsSlice(set, get)
+    settings: { ...STORED_SETTINGS, generation },
+    ...createGenerationSettingsSlice(set, get, settingsGroupSaves)
   }))
 }
 
@@ -56,15 +53,16 @@ function updateGeneration(
 }
 
 /**
- * Starts a native host whose settings writes stay pending until the case
- * settles them, one controlled promise per write.
+ * Starts a native host that loads the stored settings document and whose
+ * settings writes stay pending until the case settles them, one controlled
+ * promise per write.
  *
  * @returns The host observation handle and the pending writes in order.
  */
 function startControlledSettingsHost() {
   const writes: ControlledPromise<null>[] = []
   const host = startNativeHostFake({
-    load_settings: () => DISK_SETTINGS,
+    load_settings: () => STORED_SETTINGS_DOCUMENT,
     save_settings: () => {
       const write = createControlledPromise<null>()
       writes.push(write)
@@ -90,13 +88,14 @@ function listSettingsWrites(
 
 /**
  * Builds the arguments of a write that replaces only the generation group of
- * the document on disk.
+ * the document on disk, keeping its runtime, model, and load configuration
+ * groups.
  *
  * @param generation - Generation controls the write must carry.
  * @returns The expected `save_settings` arguments.
  */
 function buildSettingsWrite(generation: GenerationSettings) {
-  return { newSettings: { ...DISK_SETTINGS, generation } }
+  return { newSettings: { ...STORED_SETTINGS_DOCUMENT, generation } }
 }
 
 describe("isGenerationSettingsEqual", () => {
@@ -121,7 +120,7 @@ describe("isGenerationSettingsEqual", () => {
 
 describe("createGenerationSettingsSlice", () => {
   it("starts idle", () => {
-    const store = createGenerationStore(DISK_SETTINGS.generation)
+    const store = createGenerationStore(STORED_SETTINGS.generation)
 
     expect(store.getState().generationSave).toEqual({ status: "idle" })
   })
@@ -145,7 +144,7 @@ describe("createGenerationSettingsSlice", () => {
 
   it("reports a failed write without its native detail and keeps the edit", async () => {
     startNativeHostFake({
-      load_settings: () => DISK_SETTINGS,
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
       save_settings: () => Promise.reject("EACCES: /Users/secret/settings.json")
     })
     const store = createGenerationStore({ temperature: 0.9, replyCeiling: 0 })
@@ -162,7 +161,7 @@ describe("createGenerationSettingsSlice", () => {
   it("saves again when retried after a failure", async () => {
     let attempt = 0
     const host = startNativeHostFake({
-      load_settings: () => DISK_SETTINGS,
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
       save_settings: () => {
         attempt += 1
         return attempt === 1 ? Promise.reject("Disk full") : null

@@ -3,13 +3,18 @@ import {
   chatApiStreamEventSchema,
   chatReplyEventSchema,
   chatReplyEventsApi,
+  sendChatToolResultApi,
   stopChatReplyApi,
   type ChatApiRequestBody,
   type ChatApiStreamEvent,
   type ChatReplyEvent,
-  type ChatReplyPathParams
+  type ChatReplyPathParams,
+  type ChatToolResult,
+  type ChatToolResultPathParams
 } from "@lys/protocol"
 import { EventSourceParserStream } from "eventsource-parser/stream"
+
+import { DELETED_CONVERSATION_AGENT_MESSAGE } from "@/lib/conversation-agent-messages"
 
 /** Transport options for reading one backend chat event stream. */
 export type ChatApiOptions = {
@@ -58,12 +63,42 @@ const ACCEPT_JSON_HEADERS: Readonly<Record<string, string>> = Object.freeze({
   Accept: "application/json"
 })
 
+/** Headers for a JSON request that expects JSON or no content. */
+const JSON_REQUEST_HEADERS: Readonly<Record<string, string>> = Object.freeze({
+  "Content-Type": "application/json",
+  Accept: "application/json"
+})
+
 /** Shared stopped outcome; it carries no per-occurrence data. */
 const STOPPED_RESULT: StopChatReplyResult = Object.freeze({ status: "stopped" })
 
 /** Shared not-generating outcome; it carries no per-occurrence data. */
 const NOT_GENERATING_RESULT: StopChatReplyResult = Object.freeze({
   status: "not-generating"
+})
+
+/** Outcome of sending one tool call's answer to the backend. */
+export type SendChatToolResultResult =
+  | {
+      /** The backend accepted the answer; the reply's loop continues. */
+      readonly status: "accepted"
+    }
+  | {
+      /**
+       * The call was not waiting for an answer: it was already answered, or
+       * its reply ended. Nothing changed.
+       */
+      readonly status: "not-pending"
+    }
+
+/** Shared accepted outcome; it carries no per-occurrence data. */
+const ACCEPTED_RESULT: SendChatToolResultResult = Object.freeze({
+  status: "accepted"
+})
+
+/** Shared not-pending outcome; it carries no per-occurrence data. */
+const NOT_PENDING_RESULT: SendChatToolResultResult = Object.freeze({
+  status: "not-pending"
 })
 
 /** Caller-safe message for a followed reply the backend no longer stores. */
@@ -81,7 +116,10 @@ const MISSING_REPLY_MESSAGE = "The reply is no longer stored."
  * continues.
  * @param options - Optional transport cancellation settings.
  * @returns An async generator yielding validated chat protocol events.
- * @throws If the request, stream read, JSON parse, or event validation fails.
+ * @throws If the request, stream read, JSON parse, or event validation fails;
+ * with {@link DELETED_CONVERSATION_AGENT_MESSAGE} when the backend reports
+ * that the continued conversation's agent no longer exists, which stored
+ * nothing.
  */
 export async function* readChatEvents(
   payload: ChatApiRequestBody,
@@ -95,6 +133,12 @@ export async function* readChatEvents(
     signal
   })
 
+  if (
+    response.status === 409 &&
+    isConversationAgentMissingProblem(await readFailureBody(response))
+  ) {
+    throw new Error(DELETED_CONVERSATION_AGENT_MESSAGE)
+  }
   if (!response.ok || !response.body) {
     throw new Error(`Chat request failed: ${response.status}`)
   }
@@ -160,8 +204,13 @@ export async function stopChatReply(
   target: ChatReplyPathParams,
   connection: Pick<ChatReplyConnection, "backendUrl">
 ): Promise<StopChatReplyResult> {
-  const response = await getStopChatReplyResponse(
-    `${connection.backendUrl}${buildChatReplyPath(stopChatReplyApi.path, target)}`
+  const response = await getChatReplyActionResponse(
+    `${connection.backendUrl}${buildChatReplyPath(stopChatReplyApi.path, target)}`,
+    {
+      method: stopChatReplyApi.method,
+      headers: ACCEPT_JSON_HEADERS,
+      cache: "no-store"
+    }
   )
   if (response.status === 204) return STOPPED_RESULT
   if (
@@ -176,19 +225,61 @@ export async function stopChatReply(
 }
 
 /**
- * Gets the response to one stop request in any HTTP status.
+ * Sends the answer to one tool call of a running reply.
  *
- * @param url - Absolute reply-stop URL.
+ * @param target - Call and the reply and conversation that hold it.
+ * @param result - Validated answer whose `content` the model reads.
+ * @param connection - Backend origin. The request is deliberately not
+ * cancellable, so an answer the person gave still reaches the backend.
+ * @returns `accepted` after the backend took the answer, or `not-pending`
+ * when the call was already answered or its reply ended. Sending the same
+ * answer again is therefore safe: a repeat after a lost response returns
+ * `not-pending`.
+ * @throws A caller-safe error when the backend cannot be reached or answers
+ * with an undeclared response.
+ */
+export async function sendChatToolResult(
+  target: ChatToolResultPathParams,
+  result: ChatToolResult,
+  connection: Pick<ChatReplyConnection, "backendUrl">
+): Promise<SendChatToolResultResult> {
+  const response = await getChatReplyActionResponse(
+    `${connection.backendUrl}${buildChatToolResultPath(target)}`,
+    {
+      method: sendChatToolResultApi.method,
+      headers: JSON_REQUEST_HEADERS,
+      body: JSON.stringify(result),
+      cache: "no-store"
+    }
+  )
+  if (response.status === 204) return ACCEPTED_RESULT
+  if (
+    response.status === 409 &&
+    isToolCallNotPendingProblem(await readFailureBody(response))
+  ) {
+    return NOT_PENDING_RESULT
+  }
+  throw new Error(
+    `The backend did not accept the tool result (HTTP ${response.status}).`
+  )
+}
+
+/**
+ * Gets the response to one reply action request, such as a stop or a tool
+ * result, in any HTTP status.
+ *
+ * @param url - Absolute URL of the reply action.
+ * @param init - Method, headers, and body of the request; it carries no
+ * abort signal, so the request reaches the backend once sent.
  * @returns The response whose body remains owned by the caller.
  * @throws A caller-safe error retaining the transport failure as its cause.
  */
-async function getStopChatReplyResponse(url: string): Promise<Response> {
+async function getChatReplyActionResponse(
+  url: string,
+  init: RequestInit
+): Promise<Response> {
   try {
-    return await fetch(url, {
-      method: stopChatReplyApi.method,
-      headers: ACCEPT_JSON_HEADERS,
-      cache: "no-store"
-    })
+    return await fetch(url, init)
   } catch (cause) {
     throw new Error("The backend could not be reached.", { cause })
   }
@@ -238,6 +329,18 @@ async function* readServerSentEvents<TStreamEvent>(
 }
 
 /**
+ * Determines whether a decoded body declares that a continued conversation's
+ * agent no longer exists.
+ *
+ * @param body - Untrusted body of a failed chat response.
+ * @returns Whether it validates as the declared missing conversation agent
+ * problem.
+ */
+function isConversationAgentMissingProblem(body: unknown): boolean {
+  return chatApi.responses[409].safeParse(body).success
+}
+
+/**
  * Determines whether a decoded body declares the followed reply or its
  * conversation absent.
  *
@@ -258,6 +361,17 @@ function isChatReplyAbsenceProblem(body: unknown): boolean {
  */
 function isReplyNotGeneratingProblem(body: unknown): boolean {
   return stopChatReplyApi.responses[409].safeParse(body).success
+}
+
+/**
+ * Determines whether a decoded body declares that the tool call is not
+ * pending.
+ *
+ * @param body - Untrusted body of a failed tool-result response.
+ * @returns Whether it validates as the declared not-pending problem.
+ */
+function isToolCallNotPendingProblem(body: unknown): boolean {
+  return sendChatToolResultApi.responses[409].safeParse(body).success
 }
 
 /**
@@ -293,4 +407,17 @@ function buildChatReplyPath(
       ":assistantMessageId",
       encodeURIComponent(target.assistantMessageId)
     )
+}
+
+/**
+ * Builds the path addressing one tool call of a reply.
+ *
+ * @param target - Validated identifiers substituted after encoding.
+ * @returns The tool-result route with every identifier percent-encoded.
+ */
+function buildChatToolResultPath(target: ChatToolResultPathParams): string {
+  return buildChatReplyPath(sendChatToolResultApi.path, target).replace(
+    ":callId",
+    encodeURIComponent(target.callId)
+  )
 }

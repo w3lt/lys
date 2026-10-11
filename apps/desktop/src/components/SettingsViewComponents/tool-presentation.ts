@@ -10,37 +10,13 @@ import {
   estimateTextTokens,
   formatTokenCount
 } from "@/components/ComposerComponents/composer-context"
-import type {
-  ModelInventoryState,
-  ModelRuntimeState
-} from "@/lib/store/model-runtime"
+import type { ToolModelSupport } from "@/lib/models/tool-model-support"
 import {
-  CALLS_PER_REPLY_OPTIONS,
   TOOL_APPROVALS,
   getToolChoice,
-  type CallsPerReply,
   type ToolApproval,
   type ToolChoice
 } from "@/lib/store/tools"
-
-/** Whether the loaded model can be offered tools. */
-export type ToolModelSupport =
-  | {
-      /** No model is loaded, or the inventory cannot say how it was trained. */
-      readonly status: "unknown"
-    }
-  | {
-      /** The loaded model was trained to call tools. */
-      readonly status: "trained"
-      /** Key of the loaded model. */
-      readonly modelKey: string
-    }
-  | {
-      /** The loaded model was not trained to call tools; it is offered none. */
-      readonly status: "untrained"
-      /** Key of the loaded model. */
-      readonly modelKey: string
-    }
 
 /** Tone of the tool-calls status dot. */
 export type ToolCallsTone = "neutral" | "active" | "warning"
@@ -73,11 +49,6 @@ export type OfferedToolTotals = {
   readonly offeredTokenCount: number
 }
 
-/** Support of a model whose training is not known. */
-const UNKNOWN_TOOL_MODEL_SUPPORT: ToolModelSupport = Object.freeze({
-  status: "unknown"
-})
-
 /** Lowercase heading text of every tool group; a new group must add one. */
 const TOOL_GROUP_LABELS = Object.freeze({
   files: "files"
@@ -87,34 +58,6 @@ const TOOL_GROUP_LABELS = Object.freeze({
 const TOOL_ACCESS_LABELS = Object.freeze({
   reads: "reads"
 } satisfies Readonly<Record<ToolAccess, string>>)
-
-/**
- * Calculates whether the loaded model can be offered tools.
- *
- * @param modelRuntime - Residency summary; only a loaded model counts.
- * @param modelInventory - Latest inventory, which says how each model was
- * trained.
- * @returns `trained` or `untrained` for a loaded model listed in a ready
- * inventory, and `unknown` otherwise.
- */
-export function calculateToolModelSupport(
-  modelRuntime: ModelRuntimeState,
-  modelInventory: ModelInventoryState
-): ToolModelSupport {
-  if (modelRuntime.status !== "loaded" || modelInventory.status !== "ready") {
-    return UNKNOWN_TOOL_MODEL_SUPPORT
-  }
-
-  const loadedModel = modelInventory.models.find(
-    (model) => model.modelKey === modelRuntime.modelKey
-  )
-  if (loadedModel === undefined) return UNKNOWN_TOOL_MODEL_SUPPORT
-
-  return Object.freeze({
-    status: loadedModel.trainedForToolUse ? "trained" : "untrained",
-    modelKey: loadedModel.modelKey
-  } satisfies ToolModelSupport)
-}
 
 /**
  * Calculates an estimate of the tokens a tool adds to each request it is
@@ -343,21 +286,6 @@ export function formatToolApprovalNote(approval: ToolApproval): string {
     case "run":
       return "Runs the moment the model asks for it."
   }
-}
-
-/**
- * Finds the number of calls per reply a toggle group selected.
- *
- * @param groupValue - Pressed item values the toggle group reports.
- * @returns The selected number, or `undefined` when the group reports no
- * offered number, as when the pressed item is pressed again.
- */
-export function findCallsPerReply(
-  groupValue: readonly string[]
-): CallsPerReply | undefined {
-  return CALLS_PER_REPLY_OPTIONS.find((option) =>
-    groupValue.includes(String(option))
-  )
 }
 
 /**

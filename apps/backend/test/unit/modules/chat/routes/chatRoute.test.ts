@@ -1,42 +1,43 @@
 import {
   agentNotFoundProblemSchema,
   chatApi,
+  chatApiStreamEventSchema,
+  conversationAgentMissingProblemSchema,
   conversationNotFoundProblemSchema
 } from "@lys/protocol"
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it } from "vitest"
 import updateFastifyWithChatRoute, {
   type ChatRouteOptions
 } from "../../../../../src/modules/chat/routes/chatRoute"
-import {
-  ChatCompletionCancelledError,
-  ConversationNotFoundError
-} from "../../../../../src/utils/errors"
+import { ChatCompletionCancelledError } from "../../../../../src/utils/errors"
 import {
   createChatRouteTestApp,
   sendChatRequest,
-  TEST_LYS_SYSTEM_PROMPT
+  TEST_BUILT_IN_AGENT_PROMPTS,
+  type ChatRouteTestApp
 } from "../../../support/chatRouteTestApp"
 import { parseSseEvents } from "../../../support/chatSseRoute"
-import {
-  createConversationTurn as createConversationTurnFixture,
-  createFixtureUuidV7
-} from "../../../support/conversationFixtures"
+import { createFixtureUuidV7 } from "../../../support/conversationFixtures"
 import { createChatCompletionChunk } from "../../../support/openAiEndpointFake"
+import {
+  READ_TEXT_FILE_FORMAT,
+  READ_TEXT_FILE_TOOL
+} from "../../../support/toolFixtures"
 
 /** Settings applied by the chat route in every case. */
 const CHAT_ROUTE_OPTIONS = Object.freeze({
   titleGenerationMaxAttempts: 2
 } satisfies ChatRouteOptions)
 
-/** Valid request body starting a new conversation that Lys answers. */
+/** Valid request body starting a new conversation that Caliginia answers. */
 const NEW_CONVERSATION_REQUEST = Object.freeze({
-  conversation: { kind: "new", agentCode: "lys" },
+  conversation: { kind: "new", agentCode: "caliginia" },
   message: "Plan my trip",
   model: "qwen/qwen3-8b",
   generationOptions: { temperature: 0.4 }
 })
 
-/** Definition of a stored agent, which cannot answer chats yet. */
+/** Definition of the stored agent that answers some cases' conversations. */
 const WEB_RESEARCHER_DEFINITION = Object.freeze({
   code: "web-researcher",
   name: "Web Researcher",
@@ -44,12 +45,57 @@ const WEB_RESEARCHER_DEFINITION = Object.freeze({
   systemPrompt: "You research the web."
 })
 
+/** Valid request body starting a conversation the stored agent answers. */
+const WEB_RESEARCHER_REQUEST = Object.freeze({
+  ...NEW_CONVERSATION_REQUEST,
+  conversation: { kind: "new", agentCode: "web-researcher" }
+})
+
+/**
+ * Registers the chat route on a test application whose turns are stored for
+ * real, with a model that answers `Hi` and a title generator that answers
+ * `Trip plan`.
+ *
+ * @param testApp - Test application without the chat route.
+ */
+function registerStoringChatRoute(testApp: ChatRouteTestApp): void {
+  testApp.createConversationTurn.mockRestore()
+  testApp.completeChatStream.mockImplementation(async () =>
+    (async function* () {
+      yield createChatCompletionChunk({ content: "Hi", finishReason: "stop" })
+    })()
+  )
+  testApp.generateTitle.mockResolvedValue("Trip plan")
+  updateFastifyWithChatRoute(testApp.app, {
+    ...CHAT_ROUTE_OPTIONS,
+    generations: testApp.generations
+  })
+}
+
+/**
+ * Starts a conversation the stored web researcher answers and waits for its
+ * first reply.
+ *
+ * @param testApp - Test application registered by
+ * {@link registerStoringChatRoute}.
+ * @returns UUIDv7 of the stored conversation.
+ */
+async function startWebResearcherConversation(
+  testApp: ChatRouteTestApp
+): Promise<string> {
+  testApp.app.agentService.createAgent(WEB_RESEARCHER_DEFINITION)
+  const response = await sendChatRequest(testApp.app, WEB_RESEARCHER_REQUEST)
+  const start = chatApiStreamEventSchema.parse(
+    parseSseEvents(response.body)[0]?.data
+  )
+  if (start.type !== "start-new-conversation-turn")
+    throw new Error("The chat route did not start a new conversation")
+  return start.conversation.id
+}
+
 describe("updateFastifyWithChatRoute", () => {
-  it("responds with the missing-conversation problem before contacting the model", async () => {
+  it("responds with the missing-conversation problem before storing a turn or contacting the model", async () => {
     const testApp = await createChatRouteTestApp()
-    testApp.createConversationTurn.mockImplementation(() => {
-      throw new ConversationNotFoundError()
-    })
     updateFastifyWithChatRoute(testApp.app, {
       ...CHAT_ROUTE_OPTIONS,
       generations: testApp.generations
@@ -70,11 +116,7 @@ describe("updateFastifyWithChatRoute", () => {
       true
     )
     expect(problem).toMatchObject({ instance: chatApi.path })
-    expect(testApp.createConversationTurn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        conversation: { kind: "existing", id: conversationId }
-      })
-    )
+    expect(testApp.createConversationTurn).not.toHaveBeenCalled()
     expect(testApp.completeChatStream).not.toHaveBeenCalled()
     expect(testApp.generateTitle).not.toHaveBeenCalled()
   })
@@ -119,7 +161,7 @@ describe("updateFastifyWithChatRoute", () => {
       "an agent code that is not a valid code",
       {
         ...NEW_CONVERSATION_REQUEST,
-        conversation: { kind: "new", agentCode: "Lys" }
+        conversation: { kind: "new", agentCode: "Caliginia" }
       }
     ],
     [
@@ -129,7 +171,7 @@ describe("updateFastifyWithChatRoute", () => {
         conversation: {
           kind: "existing",
           id: createFixtureUuidV7(1),
-          agentCode: "lys"
+          agentCode: "caliginia"
         }
       }
     ],
@@ -157,12 +199,23 @@ describe("updateFastifyWithChatRoute", () => {
     [
       "missing generation options",
       {
-        conversation: { kind: "new", agentCode: "lys" },
+        conversation: { kind: "new", agentCode: "caliginia" },
         message: "Plan my trip",
         model: "qwen/qwen3-8b"
       }
     ],
-    ["an unknown field", { ...NEW_CONVERSATION_REQUEST, stream: true }]
+    ["an unknown field", { ...NEW_CONVERSATION_REQUEST, stream: true }],
+    [
+      "a tool offer without tools",
+      { ...NEW_CONVERSATION_REQUEST, tools: { definitions: [] } }
+    ],
+    [
+      "a tool offer that names one tool twice",
+      {
+        ...NEW_CONVERSATION_REQUEST,
+        tools: { definitions: [READ_TEXT_FILE_TOOL, READ_TEXT_FILE_TOOL] }
+      }
+    ]
   ])("rejects %s before storing a turn", async (_label, payload) => {
     const testApp = await createChatRouteTestApp()
     updateFastifyWithChatRoute(testApp.app, {
@@ -178,15 +231,10 @@ describe("updateFastifyWithChatRoute", () => {
     expect(testApp.generateTitle).not.toHaveBeenCalled()
   })
 
-  it.each([
-    ["no agent has", []],
-    ["only a stored agent has", [WEB_RESEARCHER_DEFINITION]]
-  ])(
-    "responds with the missing-agent problem before storing a turn when a new conversation names a code %s",
-    async (_label, storedDefinitions) => {
+  it.each(["web-researcher", "lys"])(
+    "responds with the missing-agent problem before storing a turn when a new conversation names the code %s, which no agent has",
+    async (agentCode) => {
       const testApp = await createChatRouteTestApp()
-      for (const definition of storedDefinitions)
-        testApp.app.agentService.createAgent(definition)
       updateFastifyWithChatRoute(testApp.app, {
         ...CHAT_ROUTE_OPTIONS,
         generations: testApp.generations
@@ -194,7 +242,7 @@ describe("updateFastifyWithChatRoute", () => {
 
       const response = await sendChatRequest(testApp.app, {
         ...NEW_CONVERSATION_REQUEST,
-        conversation: { kind: "new", agentCode: "web-researcher" }
+        conversation: { kind: "new", agentCode }
       })
 
       expect(response.statusCode).toBe(404)
@@ -202,7 +250,7 @@ describe("updateFastifyWithChatRoute", () => {
         /^application\/problem\+json/
       )
       expect(agentNotFoundProblemSchema.parse(response.json())).toMatchObject({
-        detail: "No agent that can answer chats has the code web-researcher.",
+        detail: `Agent ${agentCode} was not found.`,
         instance: chatApi.path
       })
       expect(testApp.createConversationTurn).not.toHaveBeenCalled()
@@ -211,9 +259,155 @@ describe("updateFastifyWithChatRoute", () => {
     }
   )
 
-  it("has the Lys agent answer with her own system prompt and streams the stored reply", async () => {
+  it.each(["caliginia", "lysiptera"] as const)(
+    "has the built-in agent %s answer with her own system prompt and streams the stored reply",
+    async (agentCode) => {
+      const testApp = await createChatRouteTestApp()
+      registerStoringChatRoute(testApp)
+
+      const response = await sendChatRequest(testApp.app, {
+        ...NEW_CONVERSATION_REQUEST,
+        conversation: { kind: "new", agentCode }
+      })
+
+      expect(response.statusCode).toBe(200)
+      expect(parseSseEvents(response.body)[0]).toMatchObject({
+        event: "start-new-conversation-turn",
+        data: { conversation: { agentCode } }
+      })
+      expect(testApp.completeChatStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          messages: [
+            { role: "system", content: TEST_BUILT_IN_AGENT_PROMPTS[agentCode] },
+            { role: "user", content: NEW_CONVERSATION_REQUEST.message }
+          ],
+          model: NEW_CONVERSATION_REQUEST.model
+        })
+      )
+      const replyEvents = parseSseEvents(response.body).filter(
+        ({ event }) => event === "delta" || event === "done"
+      )
+      expect(replyEvents).toEqual([
+        { event: "delta", data: { type: "delta", content: "Hi" } },
+        { event: "done", data: { type: "done", finishReason: "stop" } }
+      ])
+    }
+  )
+
+  it("has a stored agent answer a new conversation with its stored system prompt", async () => {
     const testApp = await createChatRouteTestApp()
-    // Store the turn for real, so the reply's writes reach a stored message.
+    registerStoringChatRoute(testApp)
+
+    const conversationId = await startWebResearcherConversation(testApp)
+
+    expect(
+      testApp.app.conversationHistoryReader.getConversation(conversationId)
+    ).toMatchObject({ agentCode: "web-researcher" })
+    expect(testApp.completeChatStream).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages: [
+          { role: "system", content: "You research the web." },
+          { role: "user", content: WEB_RESEARCHER_REQUEST.message }
+        ]
+      })
+    )
+  })
+
+  it("sends a stored agent's changed system prompt on the conversation's next turn", async () => {
+    const testApp = await createChatRouteTestApp()
+    registerStoringChatRoute(testApp)
+    const conversationId = await startWebResearcherConversation(testApp)
+    testApp.app.agentService.updateAgent("web-researcher", {
+      systemPrompt: "You cite every source."
+    })
+
+    const response = await sendChatRequest(testApp.app, {
+      ...NEW_CONVERSATION_REQUEST,
+      conversation: { kind: "existing", id: conversationId },
+      message: "And the budget?"
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(testApp.completeChatStream).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        messages: [
+          { role: "system", content: "You cite every source." },
+          { role: "user", content: WEB_RESEARCHER_REQUEST.message },
+          { role: "assistant", content: "Hi" },
+          { role: "user", content: "And the budget?" }
+        ]
+      })
+    )
+  })
+
+  it("refuses a turn in a conversation whose agent was deleted, storing nothing and contacting no model", async () => {
+    const testApp = await createChatRouteTestApp()
+    registerStoringChatRoute(testApp)
+    const conversationId = await startWebResearcherConversation(testApp)
+    const history = testApp.app.conversationHistoryReader
+    const storedConversation = history.getConversation(conversationId)
+    testApp.app.agentService.deleteAgent("web-researcher")
+    testApp.completeChatStream.mockClear()
+    testApp.generateTitle.mockClear()
+
+    const response = await sendChatRequest(testApp.app, {
+      ...NEW_CONVERSATION_REQUEST,
+      conversation: { kind: "existing", id: conversationId },
+      message: "And the budget?"
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.headers["content-type"]).toMatch(
+      /^application\/problem\+json/
+    )
+    expect(
+      conversationAgentMissingProblemSchema.parse(response.json())
+    ).toMatchObject({
+      detail:
+        "The agent web-researcher that answers this conversation no longer exists.",
+      instance: chatApi.path
+    })
+    expect(storedConversation?.messages).toHaveLength(2)
+    expect(history.getConversation(conversationId)).toEqual(storedConversation)
+    expect(testApp.completeChatStream).not.toHaveBeenCalled()
+    expect(testApp.generateTitle).not.toHaveBeenCalled()
+  })
+
+  it("answers a conversation again once an agent is stored under its deleted agent's code", async () => {
+    const testApp = await createChatRouteTestApp()
+    registerStoringChatRoute(testApp)
+    const conversationId = await startWebResearcherConversation(testApp)
+    testApp.app.agentService.deleteAgent("web-researcher")
+    testApp.app.agentService.createAgent({
+      ...WEB_RESEARCHER_DEFINITION,
+      systemPrompt: "You are the second researcher."
+    })
+
+    const response = await sendChatRequest(testApp.app, {
+      ...NEW_CONVERSATION_REQUEST,
+      conversation: { kind: "existing", id: conversationId },
+      message: "And the budget?"
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(testApp.completeChatStream).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        messages: expect.arrayContaining([
+          { role: "system", content: "You are the second researcher." }
+        ])
+      })
+    )
+  })
+
+  it.each([
+    [
+      "offers the request's client tools to the model",
+      { definitions: [READ_TEXT_FILE_TOOL] },
+      [READ_TEXT_FILE_FORMAT]
+    ],
+    ["offers no tools when the request offers none", undefined, []]
+  ] as const)("%s", async (_label, tools, offeredTools) => {
+    const testApp = await createChatRouteTestApp()
     testApp.createConversationTurn.mockRestore()
     testApp.completeChatStream.mockImplementation(async () =>
       (async function* () {
@@ -226,113 +420,16 @@ describe("updateFastifyWithChatRoute", () => {
       generations: testApp.generations
     })
 
-    const response = await sendChatRequest(
+    await sendChatRequest(
       testApp.app,
-      NEW_CONVERSATION_REQUEST
+      tools === undefined
+        ? NEW_CONVERSATION_REQUEST
+        : { ...NEW_CONVERSATION_REQUEST, tools }
     )
 
-    expect(response.statusCode).toBe(200)
-    expect(parseSseEvents(response.body)[0]).toMatchObject({
-      event: "start-new-conversation-turn",
-      data: { conversation: { agentCode: "lys" } }
-    })
     expect(testApp.completeChatStream).toHaveBeenCalledWith(
-      expect.objectContaining({
-        messages: [
-          { role: "system", content: TEST_LYS_SYSTEM_PROMPT },
-          { role: "user", content: NEW_CONVERSATION_REQUEST.message }
-        ],
-        model: NEW_CONVERSATION_REQUEST.model
-      })
+      expect.objectContaining({ tools: offeredTools })
     )
-    const replyEvents = parseSseEvents(response.body).filter(
-      ({ event }) => event === "delta" || event === "done"
-    )
-    expect(replyEvents).toEqual([
-      { event: "delta", data: { type: "delta", content: "Hi" } },
-      { event: "done", data: { type: "done", finishReason: "stop" } }
-    ])
-  })
-
-  it("fails the stored reply with a server error, without contacting the model, when the conversation's agent is not available", async () => {
-    const testApp = await createChatRouteTestApp()
-    const turn = createConversationTurnFixture({
-      agentCode: "retired-agent",
-      earlierMessages: [],
-      userMessageContent: "Plan my trip"
-    })
-    testApp.createConversationTurn.mockReturnValue(turn)
-    const updateAssistantMessageState = vi.spyOn(
-      testApp.app.conversationTurns,
-      "updateAssistantMessageState"
-    )
-    updateFastifyWithChatRoute(testApp.app, {
-      ...CHAT_ROUTE_OPTIONS,
-      generations: testApp.generations
-    })
-
-    const response = await sendChatRequest(testApp.app, {
-      ...NEW_CONVERSATION_REQUEST,
-      conversation: { kind: "existing", id: turn.conversation.id }
-    })
-
-    expect(response.statusCode).toBe(500)
-    expect(updateAssistantMessageState).toHaveBeenCalledWith(
-      turn.assistantMessage.id,
-      { status: "failed" }
-    )
-    expect(testApp.logs).toContainEqual(
-      expect.objectContaining({
-        level: "error",
-        err: expect.objectContaining({
-          message: "Conversation agent retired-agent is not available"
-        })
-      })
-    )
-    expect(testApp.completeChatStream).not.toHaveBeenCalled()
-    expect(testApp.generateTitle).not.toHaveBeenCalled()
-  })
-
-  it("keeps the missing-agent failure observable when the failed reply cannot be stored", async () => {
-    const testApp = await createChatRouteTestApp()
-    const turn = createConversationTurnFixture({
-      agentCode: "retired-agent",
-      earlierMessages: [],
-      userMessageContent: "Plan my trip"
-    })
-    testApp.createConversationTurn.mockReturnValue(turn)
-    vi.spyOn(
-      testApp.app.conversationTurns,
-      "updateAssistantMessageState"
-    ).mockImplementation(() => {
-      throw new Error("database is locked")
-    })
-    updateFastifyWithChatRoute(testApp.app, {
-      ...CHAT_ROUTE_OPTIONS,
-      generations: testApp.generations
-    })
-
-    const response = await sendChatRequest(testApp.app, {
-      ...NEW_CONVERSATION_REQUEST,
-      conversation: { kind: "existing", id: turn.conversation.id }
-    })
-
-    expect(response.statusCode).toBe(500)
-    expect(testApp.logs).toContainEqual(
-      expect.objectContaining({
-        level: "error",
-        err: expect.objectContaining({
-          type: "AggregateError",
-          aggregateErrors: [
-            expect.objectContaining({
-              message: "Conversation agent retired-agent is not available"
-            }),
-            expect.objectContaining({ message: "database is locked" })
-          ]
-        })
-      })
-    )
-    expect(testApp.completeChatStream).not.toHaveBeenCalled()
   })
 
   it.each([

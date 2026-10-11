@@ -11,15 +11,25 @@ import { Menu, Plus, Settings } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
+import { useAnsweringAgent } from "@/lib/hooks/answeringAgent"
 import { useLysStore } from "@/lib/store"
+import { useAgentStore } from "@/lib/store/agents"
+import {
+  buildAgentChoices,
+  formatConversationAgentName
+} from "@/lib/store/agents/conversation-agent"
 import { useChatViewStore } from "@/lib/store/chat-view"
 import { useConversationHistoryStore } from "@/lib/store/conversation-history"
+import { findShownToolCall, useToolCallStore } from "@/lib/store/tool-calls"
 
+import ComposerAgentMenu from "./ComposerComponents/ComposerAgentMenu"
 import ComposerAttachmentTray from "./ComposerComponents/ComposerAttachmentTray"
 import ComposerContextMeter from "./ComposerComponents/ComposerContextMeter"
+import ComposerDeletedAgentNotice from "./ComposerComponents/ComposerDeletedAgentNotice"
 import ComposerModelMenu from "./ComposerComponents/ComposerModelMenu"
 import ComposerOfflineBanner from "./ComposerComponents/ComposerOfflineBanner"
 import ComposerPlusMenu from "./ComposerComponents/ComposerPlusMenu"
+import ComposerToolCallPrompt from "./ComposerComponents/ComposerToolCallPrompt"
 import {
   PASTED_TEXT_ATTACHMENT_THRESHOLD,
   removeComposerAttachment,
@@ -50,9 +60,14 @@ export type ComposerProps = {
    * Parent-owned ref attached to the message field.
    *
    * @remarks The parent uses it only to move focus into the field after the
-   * user opens or starts a conversation from past conversations.
+   * user opens or starts a conversation.
    */
   readonly messageFieldRef: RefObject<HTMLTextAreaElement | null>
+  /**
+   * Requests that the parent start a new conversation and move focus to the
+   * message field once that conversation is shown.
+   */
+  readonly onStartConversation: () => void
 }
 
 /** Empty tray used as the initial value and while nothing is staged. */
@@ -113,6 +128,27 @@ function findLargestAttachment(
  * repeated stop requests, which the backend treats idempotently. Moving to
  * another conversation stops following a reply without stopping it.
  *
+ * The agent menu names the agent that answers: before the first message it
+ * selects the agent of the new conversation from the agent store's list, and
+ * once a conversation is shown or its first reply is awaited that agent is
+ * fixed. The field is named after the agent. When the shown conversation's
+ * agent was deleted, the field and Send are disabled and a notice above the
+ * field offers a new conversation; the conversation stays readable. The
+ * notice's status line stays rendered while it is empty, and its New
+ * conversation button asks the parent for the conversation, because the
+ * button leaves with the notice and the parent moves focus to the field. The
+ * menu's Start a new one resets the conversation in the store instead and
+ * keeps the menu open, so the agent can be chosen at once.
+ *
+ * Above the field, the tool-call prompt shows the first tool call of the
+ * shown conversation that waits for the person or whose answer failed to
+ * send, and announces each call that starts waiting; the tool-call store owns
+ * the calls and their answers. While a call waits, Escape in the field
+ * rejects it with the draft as the reason, and Enter without Shift allows it
+ * once when the draft is empty or rejects it with the draft as the reason
+ * otherwise. A rejection, from the field or the card, clears the draft; Allow
+ * anyway keeps it.
+ *
  * Two affordances are staged ahead of the capability behind them and are
  * deliberately inert: attachments are held in the renderer and never sent
  * because the chat protocol carries no attachment field; and selecting weights
@@ -120,10 +156,14 @@ function findLargestAttachment(
  * Context figures are client-side estimates throughout, marked `~` wherever
  * they appear.
  *
- * @param props - Parent-owned ref for the message field.
+ * @param props - Parent-owned ref for the message field and the request
+ * for a new conversation.
  * @returns The rendered conversation composer.
  */
-export function Composer({ messageFieldRef }: ComposerProps): ReactElement {
+export function Composer({
+  messageFieldRef,
+  onStartConversation
+}: ComposerProps): ReactElement {
   const backendServerInfo = useLysStore((state) => state.backendServerInfo)
   const modelRuntime = useLysStore((state) => state.modelRuntime)
   const lmStudioStatus = useLysStore((state) => state.lmStudioStatus)
@@ -138,9 +178,15 @@ export function Composer({ messageFieldRef }: ComposerProps): ReactElement {
   const inputDraft = useChatViewStore((state) => state.inputDraft)
   const request = useChatViewStore((state) => state.request)
   const resetConversation = useChatViewStore((state) => state.resetConversation)
+  const selectAgent = useChatViewStore((state) => state.selectAgent)
   const sendMessage = useChatViewStore((state) => state.sendMessage)
   const setInputDraft = useChatViewStore((state) => state.setInputDraft)
   const stopStreaming = useChatViewStore((state) => state.stopStreaming)
+
+  const agentList = useAgentStore((state) => state.list)
+  const answeringAgent = useAnsweringAgent()
+  const agentName = formatConversationAgentName(answeringAgent)
+  const isAgentDeleted = answeringAgent.status === "deleted"
 
   const isHistoryOpen = useConversationHistoryStore(
     (state) => state.visibility.status === "open"
@@ -170,7 +216,6 @@ export function Composer({ messageFieldRef }: ComposerProps): ReactElement {
   const isUnavailable = connection !== "ready"
   const activity = calculateComposerActivity(request, conversationOpen)
   const activityLabel = formatComposerActivity(activity)
-  const isReplyAwaited = activity === "awaiting-reply"
 
   const turns: readonly ContextTurn[] = (conversation?.messages ?? []).map(
     (message) => ({ id: message.id, text: message.content })
@@ -185,14 +230,60 @@ export function Composer({ messageFieldRef }: ComposerProps): ReactElement {
   const isOverWindow = contextUsage.overflowTokens > 0
 
   const canSubmitDraft = inputDraft.trim().length > 0 && !isOverWindow
-  const isSendDisabled = activity !== "idle" || isUnavailable || !canSubmitDraft
+  const isFieldDisabled = isUnavailable || isAgentDeleted
+  const isSendDisabled =
+    activity !== "idle" || isFieldDisabled || !canSubmitDraft
 
   /**
-   * Sends the current draft when Enter is pressed without a Shift modifier.
+   * Rejects the waiting tool call with the draft as the person's reason, and
+   * clears the draft.
+   *
+   * @param callId - Call that waits for the person.
+   */
+  function rejectShownToolCall(callId: string): void {
+    void useToolCallStore.getState().rejectToolCall(callId, inputDraft)
+    setInputDraft("")
+  }
+
+  /**
+   * Answers the tool call of the shown conversation that waits for the
+   * person from the keyboard: Escape rejects it with the draft as the reason,
+   * and Enter without Shift allows it when the draft is empty or rejects it
+   * with the draft otherwise.
+   *
+   * @param event - Keyboard event emitted by the composer textarea.
+   * @returns Whether the key answered a waiting call; false when no call
+   * waits or the key is neither.
+   */
+  function handleToolCallKeyDown(
+    event: KeyboardEvent<HTMLTextAreaElement>
+  ): boolean {
+    const toolCalls = useToolCallStore.getState()
+    const shownToolCall = findShownToolCall(toolCalls, conversation?.id)
+    if (shownToolCall?.answer.status !== "awaiting-person") return false
+
+    const callId = shownToolCall.call.id
+    if (event.key === "Escape") {
+      event.preventDefault()
+      rejectShownToolCall(callId)
+      return true
+    }
+    if (event.key !== "Enter" || event.shiftKey) return false
+
+    event.preventDefault()
+    if (inputDraft.trim().length > 0) rejectShownToolCall(callId)
+    else void toolCalls.resolveToolCall(callId)
+    return true
+  }
+
+  /**
+   * Answers a waiting tool call from the keyboard, or otherwise sends the
+   * current draft when Enter is pressed without a Shift modifier.
    *
    * @param event - Keyboard event emitted by the composer textarea.
    */
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
+    if (handleToolCallKeyDown(event)) return
     if (event.key !== "Enter" || event.shiftKey) return
 
     event.preventDefault()
@@ -319,6 +410,12 @@ export function Composer({ messageFieldRef }: ComposerProps): ReactElement {
     setActiveView("settings")
   }
 
+  /** Opens the settings pane that owns the agents. */
+  function handleOpenAgentSettings(): void {
+    setSettingsPane("agents")
+    setActiveView("settings")
+  }
+
   return (
     <footer className="composer">
       {isUnavailable ? (
@@ -337,8 +434,17 @@ export function Composer({ messageFieldRef }: ComposerProps): ReactElement {
           onReconnect={handleReconnect}
         />
       ) : null}
+      <ComposerDeletedAgentNotice
+        isShown={isAgentDeleted && !isUnavailable}
+        onStartConversation={onStartConversation}
+      />
 
       <div className="composer__inner">
+        <ComposerToolCallPrompt
+          agentName={agentName}
+          onRejectToolCall={rejectShownToolCall}
+        />
+
         <div
           className="composer__field"
           data-dropping={isDropping && !isUnavailable ? "" : undefined}
@@ -377,21 +483,25 @@ export function Composer({ messageFieldRef }: ComposerProps): ReactElement {
             />
 
             <Textarea
-              aria-label="Message Lys"
+              aria-label={`Message ${agentName}`}
               className="composer__textarea"
-              disabled={isUnavailable}
+              disabled={isFieldDisabled}
               onBlur={() => setIsFocused(false)}
               onChange={(event) => setInputDraft(event.currentTarget.value)}
               onFocus={() => setIsFocused(true)}
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
-              placeholder={formatComposerPlaceholder(connection, activity)}
+              placeholder={formatComposerPlaceholder(
+                connection,
+                activity,
+                answeringAgent
+              )}
               ref={messageFieldRef}
               rows={1}
               value={inputDraft}
             />
 
-            {isReplyAwaited ? (
+            {activity === "awaiting-reply" ? (
               <Button
                 aria-label="Stop reply"
                 className="composer__send"
@@ -454,6 +564,19 @@ export function Composer({ messageFieldRef }: ComposerProps): ReactElement {
               <Settings aria-hidden="true" />
               <span className="sr-only">Settings</span>
             </button>
+
+            <span aria-hidden="true" className="composer__divider" />
+
+            <ComposerAgentMenu
+              agent={answeringAgent}
+              choices={buildAgentChoices(agentList)}
+              isConversationStarted={
+                conversation !== undefined || activity === "awaiting-reply"
+              }
+              onOpenAgentSettings={handleOpenAgentSettings}
+              onSelectAgent={selectAgent}
+              onStartConversation={resetConversation}
+            />
 
             <span aria-hidden="true" className="composer__divider" />
 

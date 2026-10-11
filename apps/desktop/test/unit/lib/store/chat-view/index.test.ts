@@ -1,4 +1,9 @@
-import type { MessageGenerationOptions } from "@lys/protocol"
+import type {
+  ChatReplyPathParams,
+  ChatToolOffer,
+  MessageGenerationOptions
+} from "@lys/protocol"
+import { CALIGINIA_AGENT_CODE, LYSIPTERA_AGENT_CODE } from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
 import {
   readChatEvents,
@@ -7,6 +12,7 @@ import {
 } from "@/lib/apis/http/chat"
 import { getConversation } from "@/lib/apis/http/conversations"
 import { createChatViewStore } from "@/lib/store/chat-view"
+import { NO_CHAT_TOOL_OFFER, type ChatToolOfferResult } from "@/lib/store/tools"
 import {
   buildJsonResponse,
   startBackendEventStream,
@@ -26,10 +32,16 @@ import {
   createFixtureUuidV7,
   FIXTURE_CONVERSATION_ID
 } from "../../../support/conversationFixtures"
+import { buildLlmInfo } from "../../../support/modelFixtures"
+import { startNativeHostFake } from "../../../support/nativeHostFake"
 import {
   createControlledPromise,
   waitForMicrotasks
 } from "../../../support/settlement"
+import {
+  buildToolCall,
+  buildToolDefinition
+} from "../../../support/toolFixtures"
 
 /** Backend origin replies and stored conversations are read from. */
 const BACKEND_URL = "http://backend.test:4100"
@@ -54,21 +66,65 @@ const NEW_TURN_EVENT = Object.freeze({
 /** Route key of the stop request for {@link FIRST_REPLY}. */
 const STOP_FIRST_REPLY_ROUTE = `POST /api/v1/chat/${FIXTURE_CONVERSATION_ID}/replies/${FIRST_REPLY.id}/stop`
 
+/** Client tools the desktop lists, in Settings order. */
+const TOOLS = Object.freeze([
+  buildToolDefinition("read_text_file"),
+  buildToolDefinition("find_files")
+])
+
+/** Tools a request offers when a case switches the offer on. */
+const OFFERED_TOOLS: ChatToolOffer = Object.freeze({ definitions: TOOLS })
+
+/** Answers of the providers a chat harness hands its store; a case may change them. */
+type ChatHarnessProviders = {
+  /** Model eligible to answer the next request, or null when none is loaded. */
+  eligibleModel: string | null
+  /** Generation controls the next request samples. */
+  generationOptions: MessageGenerationOptions
+  /**
+   * Codes the agent list holds; a selected agent outside it reads as
+   * Caliginia, as the dependency's contract promises for a deleted agent.
+   */
+  listedAgentCodes: readonly string[]
+  /** Tool offer the next request samples. */
+  toolOffer: ChatToolOfferResult
+}
+
+/**
+ * Calculates the agent code a new conversation starts with, as the agent
+ * list answers for a selection.
+ *
+ * @param selectedAgentCode - Code of the agent the user selected.
+ * @param listedAgentCodes - Codes the agent list holds.
+ * @returns The selected code while the list holds it, otherwise Caliginia's.
+ */
+function calculateListedAgentCode(
+  selectedAgentCode: string,
+  listedAgentCodes: readonly string[]
+): string {
+  return listedAgentCodes.includes(selectedAgentCode)
+    ? selectedAgentCode
+    : CALIGINIA_AGENT_CODE
+}
+
 /**
  * Creates a chat-view store over the real chat and conversation wrappers,
- * with a model and generation controls the case controls.
+ * with the model, generation controls, agent list, and tool offer the case
+ * controls, and a recorder of the replies handed to the tool-call follow.
  *
- * @returns The store and the mutable providers: the eligible model (initially
- * `qwen3-8b`) and the generation controls.
+ * @returns The store; the mutable providers: the eligible model (initially
+ * `qwen3-8b`), the generation controls, the listed agents (initially both
+ * built-in agents), and the tool offer (initially none); and the reply
+ * targets handed to the tool-call follow, in order.
  */
 function createChatHarness() {
-  const providers: {
-    eligibleModel: string | null
-    generationOptions: MessageGenerationOptions
-  } = {
+  const providers: ChatHarnessProviders = {
     eligibleModel: "qwen3-8b",
-    generationOptions: { temperature: 0.4, replyCeiling: 256 }
+    generationOptions: { temperature: 0.4, replyCeiling: 256 },
+    listedAgentCodes: [CALIGINIA_AGENT_CODE, LYSIPTERA_AGENT_CODE],
+    toolOffer: NO_CHAT_TOOL_OFFER
   }
+  const toolCallFollows: ChatReplyPathParams[] = []
   const store = createChatViewStore({
     streamChat: readChatEvents,
     streamChatReply: (target, signal) =>
@@ -79,9 +135,15 @@ function createChatHarness() {
       getConversation(conversationId, { backendUrl: BACKEND_URL, signal }),
     createTimestamp: () => NOW,
     findEligibleChatModel: () => providers.eligibleModel,
-    readGenerationOptions: () => providers.generationOptions
+    readGenerationOptions: () => providers.generationOptions,
+    readNewConversationAgentCode: (selectedAgentCode) =>
+      calculateListedAgentCode(selectedAgentCode, providers.listedAgentCodes),
+    getToolOffer: () => Promise.resolve(providers.toolOffer),
+    startReplyToolCallFollow: (target) => {
+      toolCallFollows.push(target)
+    }
   })
-  return { store, providers }
+  return { store, providers, toolCallFollows }
 }
 
 /**
@@ -144,10 +206,11 @@ function listRouteKeys(backend: ReturnType<typeof startBackendFake>) {
 }
 
 describe("createChatViewStore", () => {
-  it("starts empty and idle", () => {
+  it("starts empty and idle with Caliginia selected", () => {
     expect(createChatHarness().store.getState()).toMatchObject({
       inputDraft: "",
       conversation: undefined,
+      selectedAgentCode: CALIGINIA_AGENT_CODE,
       request: { status: "idle" },
       conversationOpen: { status: "idle" },
       error: undefined
@@ -155,7 +218,7 @@ describe("createChatViewStore", () => {
   })
 
   describe("sendMessage", () => {
-    it("starts a new Lys conversation with the trimmed draft, the eligible model, and the generation controls", async () => {
+    it("starts a new conversation with the selected agent, the trimmed draft, the eligible model, and the generation controls, offering no tools", async () => {
       const { backend, streams } = startChatBackend()
       const { store } = createChatHarness()
       store.getState().setInputDraft("  Hello  ")
@@ -166,12 +229,83 @@ describe("createChatViewStore", () => {
 
       expect(whileAwaiting).toMatchObject({ status: "awaiting-turn" })
       expect(backend.requests[0]?.body).toEqual({
-        conversation: { kind: "new", agentCode: "lys" },
+        conversation: { kind: "new", agentCode: CALIGINIA_AGENT_CODE },
         message: "Hello",
         model: "qwen3-8b",
         generationOptions: { temperature: 0.4, replyCeiling: 256 }
       })
       streams[0]?.close()
+    })
+
+    it("starts the new conversation with the agent the user selected", async () => {
+      const { backend, streams } = startChatBackend()
+      const { store } = createChatHarness()
+      store.getState().selectAgent(LYSIPTERA_AGENT_CODE)
+
+      const send = store.getState().sendMessage("Hello")
+      await waitForMicrotasks()
+      streams[0]?.close()
+      await send
+
+      expect(store.getState().selectedAgentCode).toBe(LYSIPTERA_AGENT_CODE)
+      expect(backend.requests[0]?.body).toHaveProperty("conversation", {
+        kind: "new",
+        agentCode: LYSIPTERA_AGENT_CODE
+      })
+    })
+
+    it("starts the new conversation with Caliginia when the selected agent is no longer listed", async () => {
+      const { backend, streams } = startChatBackend()
+      const { store } = createChatHarness()
+      store.getState().selectAgent("web-researcher")
+
+      const send = store.getState().sendMessage("Hello")
+      await waitForMicrotasks()
+      streams[0]?.close()
+      await send
+
+      expect(backend.requests[0]?.body).toHaveProperty("conversation", {
+        kind: "new",
+        agentCode: CALIGINIA_AGENT_CODE
+      })
+    })
+
+    it("offers the tools sampled for the request", async () => {
+      const { backend, streams } = startChatBackend()
+      const { store, providers } = createChatHarness()
+      providers.toolOffer = Object.freeze({
+        status: "offered",
+        offer: OFFERED_TOOLS
+      })
+
+      const send = store.getState().sendMessage("Read my notes")
+      await waitForMicrotasks()
+      streams[0]?.close()
+      await send
+
+      expect(backend.requests[0]?.body).toHaveProperty("tools", OFFERED_TOOLS)
+    })
+
+    it("fails the request with the tool list's error, keeps the draft, and sends nothing when the offered tools cannot be read", async () => {
+      const { backend } = startChatBackend()
+      const { store, providers } = createChatHarness()
+      const toolListError =
+        "Lys couldn't read its tool list. Turn tool calls off in Settings → Tools to chat without them."
+      providers.toolOffer = Object.freeze({
+        status: "unavailable",
+        error: toolListError
+      })
+      store.getState().setInputDraft("Hello")
+
+      await store.getState().sendMessage()
+
+      expect(store.getState()).toMatchObject({
+        inputDraft: "Hello",
+        conversation: undefined,
+        request: { status: "idle" },
+        error: toolListError
+      })
+      expect(backend.requests).toEqual([])
     })
 
     it("shows the started turn, clears the unchanged draft, and streams the reply", async () => {
@@ -234,8 +368,9 @@ describe("createChatViewStore", () => {
         assistantMessage: secondReply
       })
 
-      expect(backend.requests.at(-1)?.body).toMatchObject({
-        conversation: { kind: "existing", id: FIXTURE_CONVERSATION_ID }
+      expect(backend.requests.at(-1)?.body).toHaveProperty("conversation", {
+        kind: "existing",
+        id: FIXTURE_CONVERSATION_ID
       })
       expect(
         store.getState().conversation?.messages.map((message) => message.id)
@@ -244,6 +379,39 @@ describe("createChatViewStore", () => {
         FIRST_REPLY.id,
         buildUserMessage(4, "More").id,
         secondReply.id
+      ])
+    })
+
+    it("hands the reply of each started turn to the tool-call follow", async () => {
+      const { store, streams, send, toolCallFollows } =
+        await startStreamingReply()
+      const afterFirstTurn = [...toolCallFollows]
+      await sendStreamEvents(streams[0], { type: "done", finishReason: "stop" })
+      streams[0]?.close()
+      await send
+      const secondReply = buildStreamingAssistantMessage(5, "")
+
+      const secondSend = store.getState().sendMessage("More")
+      await waitForMicrotasks()
+      await sendStreamEvents(streams[1], {
+        type: "start-existing-conversation-turn",
+        userMessage: buildUserMessage(4, "More"),
+        assistantMessage: secondReply
+      })
+      streams[1]?.close()
+      await secondSend
+
+      const firstTarget = {
+        conversationId: FIXTURE_CONVERSATION_ID,
+        assistantMessageId: FIRST_REPLY.id
+      }
+      expect(afterFirstTurn).toEqual([firstTarget])
+      expect(toolCallFollows).toEqual([
+        firstTarget,
+        {
+          conversationId: FIXTURE_CONVERSATION_ID,
+          assistantMessageId: secondReply.id
+        }
       ])
     })
 
@@ -338,6 +506,37 @@ describe("createChatViewStore", () => {
       await send
 
       expect(store.getState().conversation?.title).toBe("Greeting")
+    })
+
+    it("leaves a tool call to the tool-call follow and keeps streaming the reply", async () => {
+      const { store, streams, send } = await startStreamingReply()
+
+      await sendStreamEvents(
+        streams[0],
+        { type: "delta", content: "Let me look." },
+        { type: "tool-call", call: buildToolCall(4, "read_text_file") }
+      )
+      const afterToolCall = store.getState()
+      await sendStreamEvents(
+        streams[0],
+        { type: "delta", content: "\n\nFound it." },
+        { type: "done", finishReason: "stop" }
+      )
+      streams[0]?.close()
+      await send
+
+      expect(afterToolCall).toMatchObject({
+        request: { status: "reply-streaming" },
+        error: undefined
+      })
+      expect(afterToolCall.conversation?.messages.at(-1)).toMatchObject({
+        content: "Let me look.",
+        status: "streaming"
+      })
+      expect(store.getState().conversation?.messages.at(-1)).toMatchObject({
+        content: "Let me look.\n\nFound it.",
+        status: "completed"
+      })
     })
 
     it("shows a reply the backend interrupted", async () => {
@@ -542,9 +741,10 @@ describe("createChatViewStore", () => {
   })
 
   describe("resetConversation", () => {
-    it("restores the initial state and stops following without stopping the reply", async () => {
+    it("restores the initial state, keeps the selected agent, and stops following without stopping the reply", async () => {
       const { store, backend, streams, send } = await startStreamingReply()
       store.getState().setInputDraft("draft")
+      store.getState().selectAgent(LYSIPTERA_AGENT_CODE)
 
       store.getState().resetConversation()
       await sendStreamEvents(streams[0], { type: "delta", content: "late" })
@@ -553,6 +753,7 @@ describe("createChatViewStore", () => {
       expect(store.getState()).toMatchObject({
         inputDraft: "",
         conversation: undefined,
+        selectedAgentCode: LYSIPTERA_AGENT_CODE,
         request: { status: "idle" },
         error: undefined
       })
@@ -596,6 +797,23 @@ function buildStoredConversationRoutes(conversation: {
 }
 
 /**
+ * Ends one follow of {@link GENERATING_REPLY} as the backend does once the
+ * reply is no longer generating: a snapshot of the completed reply, then the
+ * end of the stream.
+ *
+ * @param stream - Reply-events stream the backend writes.
+ */
+function sendFinalGeneratingReplySnapshot(stream: BackendEventStream): void {
+  stream.sendEvent({
+    type: "reply-snapshot",
+    conversationTitle: null,
+    assistantMessage: buildCompletedAssistantMessage(32, "Partial answer."),
+    pendingToolCalls: []
+  })
+  stream.close()
+}
+
+/**
  * Starts a backend whose reply-events route for {@link GENERATING_REPLY}
  * opens a new event stream per request.
  *
@@ -619,7 +837,14 @@ function startFollowBackend(routes: BackendRoutes) {
 const GENERATING_SNAPSHOT_EVENT = Object.freeze({
   type: "reply-snapshot",
   conversationTitle: "Named meanwhile",
-  assistantMessage: buildStreamingAssistantMessage(32, "Partial answer")
+  assistantMessage: buildStreamingAssistantMessage(32, "Partial answer"),
+  pendingToolCalls: []
+})
+
+/** Target of {@link GENERATING_REPLY} as the tool-call follow receives it. */
+const GENERATING_REPLY_TARGET = Object.freeze({
+  conversationId: GENERATING_ID,
+  assistantMessageId: GENERATING_REPLY.id
 })
 
 describe("openConversation", () => {
@@ -814,6 +1039,60 @@ describe("following a stored reply", () => {
     })
   })
 
+  it("hands a reply still generating to the tool-call follow as soon as the conversation opens", async () => {
+    const { replyStreams } = startFollowBackend(
+      buildStoredConversationRoutes(GENERATING_CONVERSATION)
+    )
+    const { store, toolCallFollows } = createChatHarness()
+    const open = store.getState().openConversation(GENERATING_ID)
+    await waitForMicrotasks()
+
+    const beforeSnapshot = [...toolCallFollows]
+    await sendStreamEvents(replyStreams[0], GENERATING_SNAPSHOT_EVENT)
+    replyStreams[0]?.close()
+    await open
+
+    expect(beforeSnapshot).toEqual([GENERATING_REPLY_TARGET])
+  })
+
+  it("hands nothing to the tool-call follow when the opened conversation's last reply is final", async () => {
+    startBackendFake(buildStoredConversationRoutes(STORED_CONVERSATION))
+    const { store, toolCallFollows } = createChatHarness()
+
+    await store.getState().openConversation(STORED_ID)
+
+    expect(store.getState().request).toEqual({ status: "idle" })
+    expect(toolCallFollows).toEqual([])
+  })
+
+  it("keeps following a reply through its pending and live tool calls", async () => {
+    const { replyStreams } = startFollowBackend(
+      buildStoredConversationRoutes(GENERATING_CONVERSATION)
+    )
+    const { store } = createChatHarness()
+    const open = store.getState().openConversation(GENERATING_ID)
+    await waitForMicrotasks()
+
+    await sendStreamEvents(
+      replyStreams[0],
+      {
+        ...GENERATING_SNAPSHOT_EVENT,
+        pendingToolCalls: [buildToolCall(40, "read_text_file")]
+      },
+      { type: "tool-call", call: buildToolCall(41, "find_files") },
+      { type: "delta", content: "!" },
+      { type: "done", finishReason: "stop" }
+    )
+    replyStreams[0]?.close()
+    await open
+
+    expect(store.getState().error).toBeUndefined()
+    expect(store.getState().conversation?.messages.at(-1)).toMatchObject({
+      content: "Partial answer!",
+      status: "completed"
+    })
+  })
+
   it("shows the reply interrupted when its stream does not start with a snapshot", async () => {
     const { replyStreams } = startFollowBackend(
       buildStoredConversationRoutes(GENERATING_CONVERSATION)
@@ -1000,7 +1279,9 @@ describe("closeConversation", () => {
 describe("useChatViewStore", () => {
   /**
    * Loads fresh application and chat-view stores, with a running backend
-   * at {@link BACKEND_URL} that has loaded `resident` weights.
+   * at {@link BACKEND_URL} that has loaded `resident` weights. The tool,
+   * agent, and tool-call stores the chat view reads are fresh as well, with
+   * no tool list read, no agent list read, and nothing followed.
    *
    * @param replyCeiling - Saved reply ceiling; zero means no limit.
    * @returns Both store hooks.
@@ -1035,7 +1316,7 @@ describe("useChatViewStore", () => {
       await waitForMicrotasks()
 
       expect(backend.requests[0]?.body).toEqual({
-        conversation: { kind: "new", agentCode: "lys" },
+        conversation: { kind: "new", agentCode: CALIGINIA_AGENT_CODE },
         message: "Hello",
         model: "resident",
         generationOptions
@@ -1043,6 +1324,29 @@ describe("useChatViewStore", () => {
       streams[0]?.close()
     }
   )
+
+  it("reads the tool list and offers every tool to a loaded model trained for tool use", async () => {
+    startNativeHostFake({ list_tools: () => TOOLS })
+    const { backend, streams } = startChatBackend()
+    const { useLysStore, useChatViewStore } = await loadFreshChatViewStore(0)
+    useLysStore.setState({
+      modelInventory: {
+        status: "ready",
+        models: [
+          buildLlmInfo("resident", { loaded: true, trainedForToolUse: true })
+        ]
+      }
+    })
+
+    const send = useChatViewStore.getState().sendMessage("Read my notes")
+    await waitForMicrotasks()
+    streams[0]?.close()
+    await send
+
+    expect(backend.requests[0]?.body).toHaveProperty("tools", {
+      definitions: TOOLS
+    })
+  })
 
   it("refuses to send while the backend is not running", async () => {
     const { backend } = startChatBackend()
@@ -1055,7 +1359,7 @@ describe("useChatViewStore", () => {
     expect(useChatViewStore.getState().error).toContain("Chat is unavailable")
   })
 
-  it("reads stored conversations and follows replies at the application store's backend", async () => {
+  it("reads stored conversations and follows replies, for the view and the tool-call follow, at the application store's backend", async () => {
     const { backend, replyStreams } = startFollowBackend(
       buildStoredConversationRoutes(GENERATING_CONVERSATION)
     )
@@ -1063,11 +1367,16 @@ describe("useChatViewStore", () => {
 
     const open = useChatViewStore.getState().openConversation(GENERATING_ID)
     await waitForMicrotasks()
-    replyStreams[0]?.close()
+    replyStreams.forEach(sendFinalGeneratingReplySnapshot)
     await open
 
     expect(
       backend.requests.map((request) => new URL(request.url).origin)
-    ).toEqual([BACKEND_URL, BACKEND_URL])
+    ).toEqual([BACKEND_URL, BACKEND_URL, BACKEND_URL])
+    expect(listRouteKeys(backend)).toEqual([
+      `GET /api/v1/conversations/${GENERATING_ID}`,
+      GENERATING_EVENTS_ROUTE,
+      GENERATING_EVENTS_ROUTE
+    ])
   })
 })

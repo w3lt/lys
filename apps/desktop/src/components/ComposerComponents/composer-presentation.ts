@@ -4,6 +4,10 @@ import {
 } from "@/lib/models/lm-studio-connection"
 import { findEligibleChatModel } from "@/lib/models/model-residency"
 import type { BackendServerStatus } from "@/lib/store"
+import {
+  formatConversationAgentName,
+  type ConversationAgent
+} from "@/lib/store/agents/conversation-agent"
 import type {
   ChatRequestState,
   ConversationOpenState
@@ -198,20 +202,25 @@ export function calculateComposerActivity(
  *
  * @param connection - Current local generation availability.
  * @param activity - Chat work that keeps the composer from sending.
- * @returns The placeholder shown while the field is empty.
+ * @param agent - Agent that answers the next message.
+ * @returns The placeholder shown while the field is empty: what the composer
+ * waits on, that a conversation whose agent was deleted is read-only, or an
+ * invitation naming the agent.
  */
 export function formatComposerPlaceholder(
   connection: LocalRuntimeConnection,
-  activity: ComposerActivity
+  activity: ComposerActivity,
+  agent: ConversationAgent
 ): string {
   if (connection === "offline") return "Waiting on the backend…"
   if (connection !== "ready") return "Waiting on LM Studio…"
+  if (agent.status === "deleted") return "This conversation is read-only."
 
   switch (activity) {
     case "idle":
-      return "Say something to Lys"
+      return `Say something to ${formatConversationAgentName(agent)}`
     case "awaiting-reply":
-      return "Keep typing — Send unlocks when she stops."
+      return "Keep typing — Send unlocks when the reply ends."
     case "opening-conversation":
       return "Opening a past conversation…"
   }

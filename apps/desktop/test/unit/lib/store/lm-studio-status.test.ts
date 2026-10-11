@@ -8,6 +8,7 @@ import {
 } from "@/lib/store/lm-studio-status"
 import {
   buildJsonResponse,
+  createTransportFailure,
   startBackendFake,
   type BackendRoute
 } from "../../support/backendFake"
@@ -114,7 +115,7 @@ describe("createLmStudioStatusSlice", () => {
         [STATUS_ROUTE]: () =>
           isReachable
             ? buildJsonResponse(200, { status: "connected" })
-            : Promise.reject(new TypeError("fetch failed"))
+            : Promise.reject(createTransportFailure())
       })
       const { store, changes } = createStatusStore()
       await store.getState().updateLmStudioStatus()

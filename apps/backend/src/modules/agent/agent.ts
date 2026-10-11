@@ -4,11 +4,23 @@ import type {
 } from "@lys/protocol"
 import type {
   ConversationAssistantMessageFinishReason,
-  ConversationMessage
+  ConversationMessage,
+  OpenAIFunctionTool,
+  ToolDefinition
 } from "@lys/share"
 import { ChatCompletionCancelledError } from "../../utils/errors"
 import { buildAgentContext } from "./agentContext"
-import type { ReplyModel } from "./replyModel"
+import type { ReplyContextMessage, ReplyModel } from "./replyModel"
+import {
+  buildAgentToolset,
+  buildOfferedTools,
+  handleToolCallRound,
+  type SendToolCall,
+  type ToolCallRound
+} from "./toolCallRound"
+
+/** Text stored before a later round's first text when an earlier round stored text. */
+const ROUND_TEXT_SEPARATOR = "\n\n"
 
 /** What an agent knows about itself to answer turns. */
 export type AgentProfile = Readonly<{
@@ -47,6 +59,8 @@ export type AgentTurn = Readonly<{
   model: string
   /** Caller-provided sampling and reply length controls. */
   generationOptions: MessageGenerationOptions
+  /** Client tools offered for the turn, each name once; empty when none are. */
+  tools: readonly ToolDefinition[]
   /** Generation-owned cancellation, aborted by Stop or shutdown. */
   abortSignal: AbortSignal
   /** Stores one delta before it is sent; false after deletion or finalization. */
@@ -58,6 +72,12 @@ export type AgentTurn = Readonly<{
   /** Queues one event for every stream following the reply; never waits. */
   sendEvent: (event: ChatGenerationEvent) => void
   /**
+   * Sends one checked tool call to every stream following the reply and
+   * waits for the client's answer; resolves with undefined when the reply was
+   * stopped or shut down while the call waited. Never rejects.
+   */
+  sendToolCall: SendToolCall
+  /**
    * Receives the failure that ended a reply cancelled by Stop or shutdown, or
    * reported as cancelled by the model.
    */
@@ -66,13 +86,47 @@ export type AgentTurn = Readonly<{
   reportReplyFailure: (failure: unknown) => void
 }>
 
+/** How one model round of a reply ended. */
+type ReplyRound =
+  | Readonly<{
+      /** The model ended the reply. */
+      status: "finished"
+      /** Supported reason the reply ended. */
+      finishReason: ConversationAssistantMessageFinishReason
+    }>
+  | (ToolCallRound &
+      Readonly<{
+        /** The model ended the round by calling tools. */
+        status: "tool-calls"
+      }>)
+  | Readonly<{
+      /** Cancellation, a newer turn, or a deletion ended the reply. */
+      status: "ended"
+    }>
+
+/** Round outcome after cancellation, supersession, or deletion. */
+const ENDED_REPLY_ROUND = Object.freeze({
+  status: "ended"
+} satisfies ReplyRound)
+
+/** Context and text placement of one round. */
+type ReplyRoundInput = Readonly<{
+  /** Context the model answers, in send order. */
+  messages: readonly ReplyContextMessage[]
+  /** Tools offered in the round; empty when the turn offers none. */
+  tools: readonly OpenAIFunctionTool[]
+  /** Text stored and sent before the round's first text; empty for none. */
+  textPrefix: string
+}>
+
 /**
  * Retains one agent's profile and borrowed model access to answer
  * conversation turns as that agent.
  *
  * @remarks Every context the agent builds starts with its own system prompt,
- * never one stored with the conversation. It keeps no state between or during
- * turns, so one instance answers overlapping turns, each through its own
+ * never one stored with the conversation. It keeps no state between turns; a
+ * turn's rounds and context live only in that turn's `createReply` call, so
+ * one instance answers overlapping turns, each through its own
  * {@link AgentTurn}, as long as the model access permits overlapping streams.
  * Owns no resource: the model's owner releases it. Concurrency model:
  * reentrant.
@@ -108,9 +162,9 @@ export default class Agent {
    * Answers one turn, storing each delta before sending it and the final
    * state before the final event.
    *
-   * @param turn - Context, request settings, cancellation, reply storage,
-   * event sender, and failure reporters, borrowed until the returned promise
-   * settles.
+   * @param turn - Context, request settings, offered tools, cancellation,
+   * reply storage, event and tool call senders, and failure reporters,
+   * borrowed until the returned promise settles.
    * @returns Settlement after completion, cancellation, supersession,
    * deletion, or a reported failure.
    * @throws An `AggregateError` holding the failure that ended the reply
@@ -125,7 +179,9 @@ export default class Agent {
    * in later context; failed replies do not. Each failure is reported once,
    * before its final state is stored: to `reportReplyCancellation` when the
    * turn was cancelled or the model reports a cancellation, and to
-   * `reportReplyFailure` otherwise.
+   * `reportReplyFailure` otherwise. When the turn offers tools, each round
+   * that calls tools has its calls answered and the model is asked again;
+   * every round's text is stored and sent.
    */
   public async createReply(turn: AgentTurn): Promise<void> {
     try {
@@ -150,39 +206,98 @@ export default class Agent {
   }
 
   /**
-   * Streams the model's reply to one turn, storing every text before sending
-   * it.
+   * Runs the model's rounds for one turn until it finishes, storing every
+   * text before sending it.
    *
-   * @param turn - Turn context, reply storage, and cancellation.
+   * @param turn - Turn context, tools, reply storage, and cancellation.
    * @returns The supported finish reason, or undefined after cancellation,
    * supersession, or deletion.
-   * @throws If the model fails, its stream ends without a finish reason, or a
-   * delta cannot be stored.
-   * @remarks Storing and sending happen in one synchronous step, so a follower
-   * that reads a snapshot in its own step sees either both or neither.
-   * Leaving the stream early releases the model request.
+   * @throws If the model fails, a stream ends without ending its round, a
+   * delta cannot be stored, or the model calls a tool although none was
+   * offered.
+   * @remarks A round that ends with tool calls has each call answered, then
+   * the model is asked again with the round and its results. A later round's
+   * first text starts on a new paragraph when an earlier round stored text.
    */
   async #createReplyText(
     turn: AgentTurn
   ): Promise<ConversationAssistantMessageFinishReason | undefined> {
-    if (turn.abortSignal.aborted) return undefined
+    const tools = buildAgentToolset(turn.tools)
+    const offeredTools = buildOfferedTools(tools)
+    let messages = buildAgentContext(
+      this.#systemPrompt,
+      turn.history,
+      turn.userMessageContent
+    )
+    let hasStoredText = false
+    let round = await this.#createReplyRound(turn, {
+      messages,
+      tools: offeredTools,
+      textPrefix: ""
+    })
+    while (round.status === "tool-calls") {
+      const roundMessages = await handleToolCallRound(
+        round,
+        tools,
+        turn.sendToolCall
+      )
+      if (roundMessages === undefined) return undefined
+      messages = [...messages, ...roundMessages]
+      hasStoredText ||= round.text !== ""
+      const textPrefix = hasStoredText ? ROUND_TEXT_SEPARATOR : ""
+      round = await this.#createReplyRound(turn, {
+        messages,
+        tools: offeredTools,
+        textPrefix
+      })
+    }
+    return round.status === "finished" ? round.finishReason : undefined
+  }
+
+  /**
+   * Creates one model round: streams it, storing every text before sending
+   * it.
+   *
+   * @param turn - Turn context, reply storage, and cancellation.
+   * @param input - The round's context, offered tools, and text prefix.
+   * @returns How the round ended: finished, with tool calls and the round's
+   * own text, or ended by cancellation, supersession, or deletion.
+   * @throws If the model fails, its stream ends without ending the round, or a
+   * delta cannot be stored.
+   * @remarks Storing and sending happen in one synchronous step, so a
+   * follower that reads a snapshot in its own step sees either both or
+   * neither. Leaving the stream early releases the model request.
+   */
+  async #createReplyRound(
+    turn: AgentTurn,
+    input: ReplyRoundInput
+  ): Promise<ReplyRound> {
+    if (turn.abortSignal.aborted) return ENDED_REPLY_ROUND
     const stream = await this.#replyModel.openReplyStream({
-      messages: buildAgentContext(
-        this.#systemPrompt,
-        turn.history,
-        turn.userMessageContent
-      ),
+      messages: input.messages,
+      tools: input.tools,
       model: turn.model,
       generationOptions: turn.generationOptions,
       abortSignal: turn.abortSignal
     })
+    let roundText = ""
     for await (const event of stream) {
-      if (turn.abortSignal.aborted) return undefined
-      if (event.type === "finish") return event.finishReason
-      if (!turn.updateAssistantMessageContent(event.content)) return undefined
-      turn.sendEvent({ type: "delta", content: event.content })
+      if (turn.abortSignal.aborted) return ENDED_REPLY_ROUND
+      if (event.type === "finish")
+        return { status: "finished", finishReason: event.finishReason }
+      if (event.type === "tool-calls")
+        return {
+          status: "tool-calls",
+          text: roundText,
+          toolCalls: event.toolCalls
+        }
+      const delta =
+        roundText === "" ? input.textPrefix + event.content : event.content
+      if (!turn.updateAssistantMessageContent(delta)) return ENDED_REPLY_ROUND
+      turn.sendEvent({ type: "delta", content: delta })
+      roundText += event.content
     }
-    if (turn.abortSignal.aborted) return undefined
+    if (turn.abortSignal.aborted) return ENDED_REPLY_ROUND
     throw new Error("Model stream ended without a finish reason")
   }
 }

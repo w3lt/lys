@@ -8,6 +8,11 @@ import {
   createGenerationSettingsSlice,
   type GenerationSettingsSlice
 } from "./generation-settings"
+import {
+  createLoadConfigurationSettingsSlice,
+  type LoadConfigurationSettingsSlice
+} from "./load-configuration-settings"
+import { createSettingsGroupSaves } from "./settings-group-saves"
 import { getBackendReadiness, type BackendReadiness } from "./backend-readiness"
 import {
   createLmStudioStatusSlice,
@@ -17,6 +22,7 @@ import {
 import { create } from "zustand"
 import { BACKEND_HOST, BACKEND_PORT } from "@lys/protocol"
 import { getBackendStatus, startBackend, stopBackend } from "../apis"
+import { isLoadConfigurationSettingsEqual } from "../models/model-load-configuration"
 
 /** Top-level view selected by the application store. */
 export type AppView = "chat" | "settings"
@@ -72,10 +78,12 @@ type LysActions = {
    */
   setSettingsPane: (pane: SettingsPane) => void
   /**
-   * Replaces store-owned settings and automatically persists generation edits.
+   * Replaces store-owned settings and automatically persists generation and
+   * load configuration edits.
    *
    * @param settings - Complete settings value applied in memory immediately.
-   * Runtime and model edits remain session-only; generationSave reports persistence.
+   * Runtime and model edits remain session-only; generationSave and
+   * loadConfigurationSave report persistence.
    */
   setSettings: (settings: LysSettings) => void
   /**
@@ -120,6 +128,7 @@ type LysStore = LysState &
   LysActions &
   ModelSlice &
   GenerationSettingsSlice &
+  LoadConfigurationSettingsSlice &
   LmStudioStatusSlice
 
 /** Initial renderer-side store state before Tauri initialization. */
@@ -142,17 +151,21 @@ const initialState: LysState = {
  *
  * @remarks Initialization and process actions are application-owned
  * asynchronous transitions. Tauri errors propagate from the returned promises;
- * settings are edited in memory by setSettings. The generation slice owns
- * automatic saves and retains their completion or failure state across pane
- * changes.
+ * settings are edited in memory by setSettings. The generation and load
+ * configuration slices own automatic saves and retain their completion or
+ * failure state across pane changes; the store runs their writes one at a
+ * time, so one group's save never writes back the other group's older value.
  *
  * Model requests are owned by the model slice, use the shared HTTP protocol,
  * and are admitted only while the backend runs and LM Studio is connected.
  * An LM Studio status change to `connected` refreshes inventory; any other
  * change releases model observations. A failed model request re-reads the
- * LM Studio status.
+ * LM Studio status. Every load sends the stored load configuration of the
+ * model being loaded.
  */
 export const useLysStore = create<LysStore>()((set, get) => {
+  const settingsGroupSaves = createSettingsGroupSaves()
+
   /**
    * Publishes one readiness outcome unless the start transition was superseded.
    *
@@ -230,7 +243,8 @@ export const useLysStore = create<LysStore>()((set, get) => {
 
   return {
     ...initialState,
-    ...createGenerationSettingsSlice(set, get),
+    ...createGenerationSettingsSlice(set, get, settingsGroupSaves),
+    ...createLoadConfigurationSettingsSlice(set, get, settingsGroupSaves),
     ...createModelSlice(set, get, {
       getConnection: () => ({
         backendUrl: get().backendUrl,
@@ -241,7 +255,8 @@ export const useLysStore = create<LysStore>()((set, get) => {
       }),
       handleModelRequestFailure: async () => {
         await get().updateLmStudioStatus()
-      }
+      },
+      getLoadConfigurationSettings: () => get().settings.loadConfiguration
     }),
     ...createLmStudioStatusSlice(set, get, {
       getBackendConnection: () => ({
@@ -274,8 +289,19 @@ export const useLysStore = create<LysStore>()((set, get) => {
         hasGenerationChanged && get().generationSave.status !== "saving"
           ? { status: "idle" as const }
           : get().generationSave
-      set({ settings, modelRuntime, generationSave })
+      const hasLoadConfigurationChanged = !isLoadConfigurationSettingsEqual(
+        get().settings.loadConfiguration,
+        settings.loadConfiguration
+      )
+      const loadConfigurationSave =
+        hasLoadConfigurationChanged &&
+        get().loadConfigurationSave.status !== "saving"
+          ? { status: "idle" as const }
+          : get().loadConfigurationSave
+      set({ settings, modelRuntime, generationSave, loadConfigurationSave })
       if (hasGenerationChanged) void get().saveGenerationSettings()
+      if (hasLoadConfigurationChanged)
+        void get().saveLoadConfigurationSettings()
     },
 
     startBackend: async () => {

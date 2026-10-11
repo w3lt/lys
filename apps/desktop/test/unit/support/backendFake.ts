@@ -40,6 +40,60 @@ export type BackendFake = Readonly<{
 /** Status the double answers for a request no route expects. */
 const UNEXPECTED_REQUEST_STATUS = 501
 
+/** Transport failures made by {@link createTransportFailure}. */
+const transportFailures = new WeakSet<TypeError>()
+
+/**
+ * Creates the rejection a route returns to fail its request the way the
+ * platform `fetch` fails when the backend cannot be reached.
+ *
+ * @returns A `TypeError`, the type the platform `fetch` rejects with on a
+ * network failure. Return it from a route as `Promise.reject(failure)`.
+ * @remarks Only a rejection made here reaches the client as a transport
+ * failure. Any other exception a route raises fails the case when it
+ * finishes, so a broken route or fixture cannot pass as a handled
+ * transport failure.
+ */
+export function createTransportFailure(): TypeError {
+  const failure = new TypeError("fetch failed")
+  transportFailures.add(failure)
+  return failure
+}
+
+/**
+ * Answers whether a route's rejection is a transport failure the case made on
+ * purpose.
+ *
+ * @param failure - Value the route threw or rejected with.
+ * @returns Whether {@link createTransportFailure} made it.
+ */
+function isTransportFailure(failure: unknown): boolean {
+  return failure instanceof TypeError && transportFailures.has(failure)
+}
+
+/**
+ * Runs the route of one request, recording an exception it raised other
+ * than an intended transport failure.
+ *
+ * @param route - Route the request matched.
+ * @param request - Observed request.
+ * @param recordRouteFailure - Records the unintended exception.
+ * @returns The route's response. Rejects with the route's own rejection, so
+ * the client sees a failed `fetch` either way.
+ */
+async function answerBackendRoute(
+  route: BackendRoute,
+  request: ObservedBackendRequest,
+  recordRouteFailure: (failure: unknown) => void
+): Promise<Response> {
+  try {
+    return await route(request)
+  } catch (failure) {
+    if (!isTransportFailure(failure)) recordRouteFailure(failure)
+    throw failure
+  }
+}
+
 /**
  * Replaces the global `fetch` with an in-process backend that answers only
  * the routes a case declares.
@@ -49,7 +103,9 @@ const UNEXPECTED_REQUEST_STATUS = 501
  * @remarks Vitest removes the substitution after the case
  * (`unstubGlobals`). A request no route matches is answered with HTTP 501 and
  * fails the case when it finishes, so an unexpected request can never pass
- * as a handled transport failure. Like the platform `fetch`, a request whose
+ * as a handled transport failure. For the same reason, a route that throws
+ * or rejects with anything but {@link createTransportFailure}'s failure fails
+ * the case when it finishes. Like the platform `fetch`, a request whose
  * signal is already aborted rejects without reaching a route, a request whose
  * signal aborts before its route answers rejects with the abort reason, and a
  * signal that aborts later errors the response body and cancels the body the
@@ -58,8 +114,10 @@ const UNEXPECTED_REQUEST_STATUS = 501
 export function startBackendFake(routes: BackendRoutes): BackendFake {
   const requests: ObservedBackendRequest[] = []
   const unexpectedRequests: string[] = []
+  const routeFailures: string[] = []
   onTestFinished(() => {
     expect(unexpectedRequests, "requests no route expected").toEqual([])
+    expect(routeFailures, "routes that failed instead of answering").toEqual([])
   })
   vi.stubGlobal(
     "fetch",
@@ -75,7 +133,9 @@ export function startBackendFake(routes: BackendRoutes): BackendFake {
         return new Response(null, { status: UNEXPECTED_REQUEST_STATUS })
       }
       const response = await waitForResponseOrAbort(
-        Promise.resolve(route(request)),
+        answerBackendRoute(route, request, (failure) => {
+          routeFailures.push(`${routeKey}: ${String(failure)}`)
+        }),
         signal
       )
       return signal === undefined

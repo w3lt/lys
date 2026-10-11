@@ -3,6 +3,7 @@ import {
   createLlmServiceBusyProblem,
   createLlmUnloadProblem
 } from "@lys/protocol"
+import { modelLoadConfigurationSchema } from "@lys/share"
 import { describe, expect, it } from "vitest"
 import {
   getModelHealth,
@@ -19,6 +20,15 @@ import { buildLlmInfo } from "../../../support/modelFixtures"
 
 /** Backend origin the cases pass; it differs from the production default. */
 const BACKEND_URL = "http://backend.test:4100"
+
+/**
+ * Load settings a load sends: two of the five settings, so LM Studio decides
+ * the three left out. Frozen and validated by the shared schema.
+ */
+const LOAD_CONFIGURATION = modelLoadConfigurationSchema.parse({
+  contextLength: 16384,
+  flashAttention: false
+})
 
 /**
  * Builds a connection the case does not cancel.
@@ -193,15 +203,20 @@ describe("listModels", () => {
 })
 
 describe("loadModel", () => {
-  it("sends only the model key and returns the loaded model", async () => {
+  it("sends the model key and only the given load settings, and returns the loaded model", async () => {
     const loaded = buildLlmInfo("qwen3-8b", { loaded: true })
     const backend = startBackendFake({
       "POST /api/v1/llm/load": () => buildJsonResponse(200, loaded)
     })
     const connection = createConnection()
 
-    await expect(loadModel("qwen3-8b", connection)).resolves.toEqual(loaded)
-    expect(backend.requests[0]?.body).toEqual({ modelId: "qwen3-8b" })
+    await expect(
+      loadModel("qwen3-8b", LOAD_CONFIGURATION, connection)
+    ).resolves.toEqual(loaded)
+    expect(backend.requests[0]?.body).toEqual({
+      modelId: "qwen3-8b",
+      configuration: { contextLength: 16384, flashAttention: false }
+    })
     expect(backend.requests[0]?.headers.get("Content-Type")).toBe(
       "application/json"
     )
@@ -214,15 +229,26 @@ describe("loadModel", () => {
         buildJsonResponse(200, buildLlmInfo("qwen3-8b", { loaded: false }))
     })
 
-    await expect(loadModel("qwen3-8b", createConnection())).rejects.toThrow(
-      Error
-    )
+    await expect(
+      loadModel("qwen3-8b", LOAD_CONFIGURATION, createConnection())
+    ).rejects.toThrow(Error)
   })
 
   it("rejects an empty model key without contacting the backend", async () => {
     const backend = startBackendFake({})
 
-    await expect(loadModel("", createConnection())).rejects.toThrow()
+    await expect(
+      loadModel("", LOAD_CONFIGURATION, createConnection())
+    ).rejects.toThrow()
+    expect(backend.requests).toEqual([])
+  })
+
+  it("rejects a load setting below its accepted range without contacting the backend", async () => {
+    const backend = startBackendFake({})
+
+    await expect(
+      loadModel("qwen3-8b", { contextLength: 0 }, createConnection())
+    ).rejects.toThrow()
     expect(backend.requests).toEqual([])
   })
 
@@ -235,9 +261,11 @@ describe("loadModel", () => {
         )
     })
 
-    const failure = await loadModel("qwen3-8b", createConnection()).catch(
-      (error: unknown) => error
-    )
+    const failure = await loadModel(
+      "qwen3-8b",
+      LOAD_CONFIGURATION,
+      createConnection()
+    ).catch((error: unknown) => error)
 
     expect(isModelRuntimeUnavailableError(failure)).toBe(true)
   })

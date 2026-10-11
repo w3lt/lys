@@ -8,6 +8,7 @@ import {
   type LlmInfo,
   type LlmTestModelApiResponse
 } from "@lys/protocol"
+import type { ModelLoadConfiguration } from "@lys/share"
 
 /** Private error cause marking a model request refused because no LLM runtime is connected. */
 const MODEL_RUNTIME_UNAVAILABLE_CAUSE = Symbol("model-runtime-unavailable")
@@ -147,18 +148,26 @@ export async function listModels(
 }
 
 /**
- * Loads weights using only the fields accepted by the backend.
+ * Loads weights with the given load settings.
  * @param modelKey - Model key or alias to resolve at the runtime.
+ * @param configuration - Load settings sent with this load; LM Studio decides
+ * each setting that is absent.
  * @param connection - Backend origin and local cancellation signal.
  * @returns Canonical model metadata after the backend confirms loading.
- * @throws On invalid input, transport, HTTP, JSON, or protocol failure.
+ * @throws On invalid input, including a load setting outside its accepted
+ * range, before any request is sent; or on transport, HTTP, JSON, or protocol
+ * failure.
  * @remarks Accepted loads can finish after local cancellation; no automatic retry occurs.
  */
 export async function loadModel(
   modelKey: string,
+  configuration: ModelLoadConfiguration,
   connection: ModelApiConnection
 ): Promise<LlmInfo> {
-  const payload = llmLoadModelApi.body.parse({ modelId: modelKey })
+  const payload = llmLoadModelApi.body.parse({
+    modelId: modelKey,
+    configuration
+  })
   const response = await getModelResponse({
     ...connection,
     path: llmLoadModelApi.path,

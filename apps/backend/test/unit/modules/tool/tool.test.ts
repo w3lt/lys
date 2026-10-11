@@ -215,6 +215,122 @@ describe("AgentTool", () => {
   ])("rejects $problem", ({ definition }) => {
     expect(() => new AgentTool(definition)).toThrow(z.ZodError)
   })
+
+  describe("parseCallArguments", () => {
+    const searchFiles = new AgentTool({
+      name: "search_files",
+      description: "Find files under a directory.",
+      group: "files",
+      access: "reads",
+      arguments: [
+        { type: "string", name: "root", description: "Directory." },
+        { type: "string", name: "query", description: "Text to find." },
+        {
+          type: "enum",
+          name: "target",
+          description: "What is compared.",
+          values: ["name", "content"]
+        },
+        {
+          type: "integer",
+          name: "maxResults",
+          description: "Most files to return.",
+          required: false
+        }
+      ]
+    })
+
+    it("reports the name the model calls the tool by", () => {
+      expect(searchFiles.name).toBe("search_files")
+    })
+
+    it("returns the values of a matching JSON object, leaving out an optional argument the model left out", () => {
+      expect(
+        searchFiles.parseCallArguments(
+          '{"root":"/notes","query":"todo","target":"name"}'
+        )
+      ).toEqual({
+        status: "valid",
+        arguments: { root: "/notes", query: "todo", target: "name" }
+      })
+    })
+
+    it("keeps an optional whole number the model sent", () => {
+      expect(
+        searchFiles.parseCallArguments(
+          '{"root":"/notes","query":"todo","target":"name","maxResults":5}'
+        )
+      ).toEqual({
+        status: "valid",
+        arguments: {
+          root: "/notes",
+          query: "todo",
+          target: "name",
+          maxResults: 5
+        }
+      })
+    })
+
+    it("returns arguments that cannot be changed", () => {
+      const result = searchFiles.parseCallArguments(
+        '{"root":"/notes","query":"todo","target":"name"}'
+      )
+
+      expect(
+        result.status === "valid" && Object.isFrozen(result.arguments)
+      ).toBe(true)
+    })
+
+    it.each(["", "  "])(
+      "reads blank text %j as no arguments for a tool without arguments",
+      (argumentText) => {
+        const tool = new AgentTool({
+          name: "get_time",
+          description: "Return the current time.",
+          group: "files",
+          access: "reads",
+          arguments: []
+        })
+
+        expect(tool.parseCallArguments(argumentText)).toEqual({
+          status: "valid",
+          arguments: {}
+        })
+      }
+    )
+
+    it.each([
+      ["text that is not JSON", '{"root":'],
+      ["a JSON value that is not an object", '["/notes"]'],
+      ["blank text while arguments are required", ""],
+      ["a missing required argument", '{"root":"/notes","target":"name"}'],
+      [
+        "a value of the wrong type",
+        '{"root":1,"query":"todo","target":"name"}'
+      ],
+      [
+        "a fraction for a whole number",
+        '{"root":"/notes","query":"todo","target":"name","maxResults":1.5}'
+      ],
+      [
+        "a value the enum does not list",
+        '{"root":"/notes","query":"todo","target":"path"}'
+      ],
+      [
+        "an argument the tool does not declare",
+        '{"root":"/notes","query":"todo","target":"name","deep":true}'
+      ],
+      [
+        "a __proto__ key",
+        '{"root":"/notes","query":"todo","target":"name","__proto__":{"x":1}}'
+      ]
+    ])("explains %s to the model, naming the tool", (_label, argumentText) => {
+      expect(searchFiles.parseCallArguments(argumentText)).toEqual({
+        status: "invalid",
+        message: expect.stringContaining("search_files")
+      })
+    })
+  })
 })
 
 describe("toolDefinitionSchema", () => {

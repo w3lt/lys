@@ -164,13 +164,7 @@ const PANE_SKELETONS: Record<SettingsPane, PaneSkeletonShape> = {
       {
         id: "tool-calls",
         title: "112px",
-        meta: "236px",
-        row: {
-          id: "calls-per-reply",
-          label: "104px",
-          description: "268px",
-          control: { width: "108px", height: "28px" }
-        }
+        meta: "236px"
       }
     ],
     heading: true,

@@ -1,3 +1,4 @@
+import type { ModelLoadConfiguration } from "@lys/share"
 import type {
   DownloadedLlmModel,
   LoadedLlmModelInstance
@@ -42,6 +43,10 @@ export interface LlmEngine {
    *
    * @param modelKeyOrAlias - Model selection interpreted within the attached engine.
    * Unknown or rejected selections fail; repeated loads may create additional instances.
+   * @param loadConfiguration - Validated load settings applied to this load only.
+   * The engine decides each setting that is absent. How the engine treats a
+   * value the selected model cannot use, such as a context length above the
+   * model's maximum, is engine-defined.
    * @returns A frozen identity after the engine has completed loading and its
    * non-empty canonical key and instance identifier have been validated.
    * @throws The shared closed/busy failures, or
@@ -49,7 +54,10 @@ export interface LlmEngine {
    * `The LLM runtime returned an invalid model instance.` for malformed identity.
    * @remarks Non-idempotent and completion-only. Failure can leave a model loaded.
    */
-  loadLlmModel(modelKeyOrAlias: string): Promise<LoadedLlmModelInstance>
+  loadLlmModel(
+    modelKeyOrAlias: string,
+    loadConfiguration: ModelLoadConfiguration
+  ): Promise<LoadedLlmModelInstance>
 
   /**
    * Stops one addressed model instance to the engine's acknowledgement.

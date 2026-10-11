@@ -1,4 +1,5 @@
-import { LMStudioClient } from "@lmstudio/sdk"
+import { LMStudioClient, type LLMLoadModelConfig } from "@lmstudio/sdk"
+import type { ModelLoadConfiguration } from "@lys/share"
 import type { LlmRuntime } from "../llmRuntime"
 import type {
   DownloadedLlmModel,
@@ -195,16 +196,21 @@ export default class LmStudioRuntime implements LlmRuntime {
    * Implements {@link LlmRuntime.loadLlmModel} with a completion-only SDK load.
    *
    * @param modelKeyOrAlias - Interface-defined engine model selection.
+   * @param loadConfiguration - Interface-defined load settings, given to the SDK
+   * as its load config.
    * @returns The interface-defined canonical identity after the SDK load completes.
    * @throws The interface-defined admission, load, or identity failure.
    */
   public async loadLlmModel(
-    modelKeyOrAlias: string
+    modelKeyOrAlias: string,
+    loadConfiguration: ModelLoadConfiguration
   ): Promise<LoadedLlmModelInstance> {
     const operation = this.#startRuntimeOperation()
     try {
       const loadedModel = await this.#client.llm
-        .load(modelKeyOrAlias)
+        .load(modelKeyOrAlias, {
+          config: buildLmStudioLoadConfig(loadConfiguration)
+        })
         .catch((cause: unknown) => {
           throw new Error("The LLM runtime could not load the model.", {
             cause
@@ -319,4 +325,48 @@ export default class LmStudioRuntime implements LlmRuntime {
       })
     }
   }
+}
+
+/**
+ * Builds the SDK load config for one load from validated load settings.
+ *
+ * @param loadConfiguration - Load settings to give the SDK.
+ * @returns A newly owned config holding each set setting under the SDK's name
+ * for it, and no entry for a setting that is absent, so that LM Studio decides
+ * that setting.
+ * @remarks `@lmstudio/sdk` 2.0.0 derives one more setting from this config.
+ * When the config sets a context length, the SDK also sends `autoFit: false`,
+ * so LM Studio's auto-fit, which would choose the context length and the model
+ * placement from the available resources, is off for that load. The SDK
+ * rejects `autoFit: true` together with a context length.
+ */
+function buildLmStudioLoadConfig(
+  loadConfiguration: ModelLoadConfiguration
+): LLMLoadModelConfig {
+  const {
+    contextLength,
+    evalBatchSize,
+    flashAttention,
+    offloadKVCacheToGpu,
+    numExperts
+  } = loadConfiguration
+  // One setting is added per step, because an absent setting must stay absent:
+  // the SDK's config type does not accept `undefined` for it.
+  const configWithContextLength: LLMLoadModelConfig =
+    contextLength === undefined ? {} : { contextLength }
+  const configWithEvalBatchSize: LLMLoadModelConfig =
+    evalBatchSize === undefined
+      ? configWithContextLength
+      : { ...configWithContextLength, evalBatchSize }
+  const configWithFlashAttention: LLMLoadModelConfig =
+    flashAttention === undefined
+      ? configWithEvalBatchSize
+      : { ...configWithEvalBatchSize, flashAttention }
+  const configWithKvCachePlacement: LLMLoadModelConfig =
+    offloadKVCacheToGpu === undefined
+      ? configWithFlashAttention
+      : { ...configWithFlashAttention, offloadKVCacheToGpu }
+  return numExperts === undefined
+    ? configWithKvCachePlacement
+    : { ...configWithKvCachePlacement, numExperts }
 }

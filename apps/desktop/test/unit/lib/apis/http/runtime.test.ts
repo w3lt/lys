@@ -7,6 +7,7 @@ import {
 } from "@/lib/apis/http/runtime"
 import {
   buildJsonResponse,
+  createTransportFailure,
   startBackendEventStream,
   startBackendFake
 } from "../../../support/backendFake"
@@ -47,7 +48,7 @@ describe("getBackendHealth", () => {
 
   it("reports not answering when the backend cannot be reached", async () => {
     startBackendFake({
-      "GET /api/v1/heath": () => Promise.reject(new TypeError("fetch failed"))
+      "GET /api/v1/heath": () => Promise.reject(createTransportFailure())
     })
 
     await expect(getBackendHealth(BACKEND_URL)).resolves.toBe("not-answering")

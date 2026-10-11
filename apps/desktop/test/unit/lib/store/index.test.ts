@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type { LysSettings } from "@/lib/store/settings"
+import type { LysSettings, RuntimeSettings } from "@/lib/store/settings"
 import {
   buildJsonResponse,
+  createTransportFailure,
   startBackendFake,
   type BackendRoutes
 } from "../../support/backendFake"
@@ -14,25 +15,38 @@ import {
   createControlledPromise,
   waitForMicrotasks
 } from "../../support/settlement"
+import {
+  STORED_SETTINGS,
+  STORED_SETTINGS_DOCUMENT,
+  type SettingsDocument
+} from "../../support/settingsFixtures"
 
 /** Origin the application store uses for the local backend. */
 const BACKEND_URL = "http://127.0.0.1:12345"
 
-/** Settings on disk with autostart off and a default model chosen. */
-const DISK_SETTINGS: LysSettings = Object.freeze({
-  runtime: Object.freeze({
-    autoStartBackend: false,
-    defaultModel: "on-disk",
-    backendAddress: BACKEND_URL
-  }),
-  model: Object.freeze({ contextSize: 4096 }),
-  generation: Object.freeze({ temperature: 0.2, replyCeiling: 512 })
+/** Runtime group on disk with autostart off and a listed default model. */
+const DISK_RUNTIME_SETTINGS: RuntimeSettings = Object.freeze({
+  autoStartBackend: false,
+  defaultModel: "on-disk",
+  backendAddress: BACKEND_URL
 })
 
-/** Settings on disk with autostart on. */
-const AUTOSTART_SETTINGS: LysSettings = Object.freeze({
-  ...DISK_SETTINGS,
-  runtime: Object.freeze({ ...DISK_SETTINGS.runtime, autoStartBackend: true })
+/** Settings document on disk with autostart off and a default model chosen. */
+const DISK_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
+  ...STORED_SETTINGS_DOCUMENT,
+  runtime: DISK_RUNTIME_SETTINGS
+})
+
+/** The store's settings once {@link DISK_SETTINGS_DOCUMENT} is loaded. */
+const DISK_SETTINGS: LysSettings = Object.freeze({
+  ...STORED_SETTINGS,
+  runtime: DISK_RUNTIME_SETTINGS
+})
+
+/** Settings document on disk with autostart on. */
+const AUTOSTART_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
+  ...DISK_SETTINGS_DOCUMENT,
+  runtime: Object.freeze({ ...DISK_RUNTIME_SETTINGS, autoStartBackend: true })
 })
 
 /** Inventory listed once LM Studio is connected. */
@@ -64,17 +78,17 @@ async function loadFreshLysStore() {
 /**
  * Starts a native host whose backend process is stopped until started.
  *
- * @param settings - Settings document `load_settings` returns.
+ * @param settingsDocument - Settings document `load_settings` returns.
  * @param commands - Commands replacing the defaults.
  * @returns The host observation handle.
  */
 function startDesktopHost(
-  settings: LysSettings,
+  settingsDocument: SettingsDocument,
   commands: NativeCommands = {}
 ) {
   let isRunning = false
   return startNativeHostFake({
-    load_settings: () => settings,
+    load_settings: () => settingsDocument,
     get_backend_status: () => ({ running: isRunning }),
     start_backend: () => {
       isRunning = true
@@ -119,6 +133,10 @@ describe("useLysStore", () => {
         generation: { temperature: 0.7, replyCeiling: 2048 }
       }
     })
+    expect(useLysStore.getState().settings.loadConfiguration).toEqual({
+      default: {},
+      models: new Map()
+    })
   })
 
   it("selects the view and the settings pane", async () => {
@@ -135,7 +153,7 @@ describe("useLysStore", () => {
 
   describe("initialize", () => {
     it("shows the shell with the loaded settings and leaves a stopped backend alone without autostart", async () => {
-      const host = startDesktopHost(DISK_SETTINGS)
+      const host = startDesktopHost(DISK_SETTINGS_DOCUMENT)
       const useLysStore = await loadFreshLysStore()
 
       await useLysStore.getState().initialize()
@@ -154,7 +172,7 @@ describe("useLysStore", () => {
     it("starts the backend when autostart is on, showing the shell first", async () => {
       startBackendFake(CONNECTED_BACKEND)
       const start = createControlledPromise<unknown>()
-      startDesktopHost(AUTOSTART_SETTINGS, {
+      startDesktopHost(AUTOSTART_SETTINGS_DOCUMENT, {
         start_backend: () => start.promise
       })
       const useLysStore = await loadFreshLysStore()
@@ -174,7 +192,7 @@ describe("useLysStore", () => {
 
     it("adopts a backend process that already runs, without autostart", async () => {
       startBackendFake(CONNECTED_BACKEND)
-      const host = startDesktopHost(DISK_SETTINGS, {
+      const host = startDesktopHost(DISK_SETTINGS_DOCUMENT, {
         get_backend_status: () => ({ pid: 7, running: true })
       })
       const useLysStore = await loadFreshLysStore()
@@ -186,7 +204,7 @@ describe("useLysStore", () => {
     })
 
     it("stays blank and rejects when the settings cannot be loaded", async () => {
-      startDesktopHost(DISK_SETTINGS, {
+      startDesktopHost(DISK_SETTINGS_DOCUMENT, {
         load_settings: () => Promise.reject("Failed to parse settings.json")
       })
       const useLysStore = await loadFreshLysStore()
@@ -203,7 +221,7 @@ describe("useLysStore", () => {
       vi.useFakeTimers({ toFake: ["Date"] })
       vi.setSystemTime(new Date("2026-05-06T07:08:09.000Z"))
       startBackendFake(CONNECTED_BACKEND)
-      const host = startDesktopHost(DISK_SETTINGS)
+      const host = startDesktopHost(DISK_SETTINGS_DOCUMENT)
       const useLysStore = await loadFreshLysStore()
       await useLysStore.getState().initialize()
 
@@ -226,7 +244,7 @@ describe("useLysStore", () => {
       startBackendFake({
         "GET /api/v1/heath": () => new Response(null, { status: 503 })
       })
-      startDesktopHost(DISK_SETTINGS, {
+      startDesktopHost(DISK_SETTINGS_DOCUMENT, {
         start_backend: () => ({ running: false })
       })
       const useLysStore = await loadFreshLysStore()
@@ -245,7 +263,7 @@ describe("useLysStore", () => {
       startBackendFake({
         "GET /api/v1/heath": () => new Response(null, { status: 503 })
       })
-      startDesktopHost(DISK_SETTINGS, {
+      startDesktopHost(DISK_SETTINGS_DOCUMENT, {
         get_backend_status: () => ({ pid: 7, running: true })
       })
       const useLysStore = await loadFreshLysStore()
@@ -260,7 +278,7 @@ describe("useLysStore", () => {
     })
 
     it("rejects and stays starting when the process cannot be started", async () => {
-      startDesktopHost(DISK_SETTINGS, {
+      startDesktopHost(DISK_SETTINGS_DOCUMENT, {
         start_backend: () => Promise.reject("Failed to spawn the backend")
       })
       const useLysStore = await loadFreshLysStore()
@@ -274,7 +292,7 @@ describe("useLysStore", () => {
     it("does not publish readiness after a stop superseded the start", async () => {
       const health = createControlledPromise<Response>()
       startBackendFake({ "GET /api/v1/heath": () => health.promise })
-      startDesktopHost(DISK_SETTINGS)
+      startDesktopHost(DISK_SETTINGS_DOCUMENT)
       const useLysStore = await loadFreshLysStore()
       const start = useLysStore.getState().startBackend()
       await waitForMicrotasks()
@@ -290,7 +308,7 @@ describe("useLysStore", () => {
   describe("stopBackend", () => {
     it("stops a running backend and releases the LM Studio and model observations", async () => {
       startBackendFake(CONNECTED_BACKEND)
-      const host = startDesktopHost(DISK_SETTINGS)
+      const host = startDesktopHost(DISK_SETTINGS_DOCUMENT)
       const useLysStore = await loadFreshLysStore()
       await useLysStore.getState().startBackend()
       await waitForMicrotasks()
@@ -308,7 +326,7 @@ describe("useLysStore", () => {
 
     it("stays stopping while the process still runs after the stop command", async () => {
       startBackendFake(CONNECTED_BACKEND)
-      startDesktopHost(DISK_SETTINGS, {
+      startDesktopHost(DISK_SETTINGS_DOCUMENT, {
         stop_backend: () => ({ pid: 4242, running: true })
       })
       const useLysStore = await loadFreshLysStore()
@@ -325,7 +343,7 @@ describe("useLysStore", () => {
         "GET /api/v1/heath": () => new Response(null, { status: 503 })
       })
       let isRunning = true
-      const host = startDesktopHost(DISK_SETTINGS, {
+      const host = startDesktopHost(DISK_SETTINGS_DOCUMENT, {
         get_backend_status: () => ({ running: isRunning })
       })
       const useLysStore = await loadFreshLysStore()
@@ -341,7 +359,7 @@ describe("useLysStore", () => {
     })
 
     it("changes nothing when the backend is already stopped", async () => {
-      startDesktopHost(DISK_SETTINGS)
+      startDesktopHost(DISK_SETTINGS_DOCUMENT)
       const useLysStore = await loadFreshLysStore()
       const before = useLysStore.getState().backendServerInfo
 
@@ -356,7 +374,7 @@ describe("useLysStore", () => {
       vi.useFakeTimers({ toFake: ["Date"] })
       vi.setSystemTime(new Date("2026-05-06T07:00:00.000Z"))
       startBackendFake(CONNECTED_BACKEND)
-      startDesktopHost(DISK_SETTINGS)
+      startDesktopHost(DISK_SETTINGS_DOCUMENT)
       const useLysStore = await loadFreshLysStore()
       await useLysStore.getState().startBackend()
 
@@ -378,15 +396,13 @@ describe("useLysStore", () => {
 
   describe("setSettings", () => {
     it("saves a generation edit to disk and reports the save", async () => {
-      const host = startDesktopHost(DISK_SETTINGS, {
+      const host = startDesktopHost(DISK_SETTINGS_DOCUMENT, {
         save_settings: () => null
       })
       const useLysStore = await loadFreshLysStore()
       await useLysStore.getState().initialize()
-      const edited = {
-        ...DISK_SETTINGS,
-        generation: { temperature: 0.9, replyCeiling: 0 }
-      }
+      const generation = { temperature: 0.9, replyCeiling: 0 }
+      const edited = { ...DISK_SETTINGS, generation }
 
       useLysStore.getState().setSettings(edited)
       const applied = useLysStore.getState().settings
@@ -395,19 +411,19 @@ describe("useLysStore", () => {
       expect(applied).toEqual(edited)
       expect(host.commands.at(-1)).toEqual({
         command: "save_settings",
-        args: { newSettings: edited }
+        args: { newSettings: { ...DISK_SETTINGS_DOCUMENT, generation } }
       })
       expect(useLysStore.getState().generationSave).toEqual({ status: "saved" })
     })
 
     it("keeps runtime and model edits in memory without saving them", async () => {
-      const host = startDesktopHost(DISK_SETTINGS)
+      const host = startDesktopHost(DISK_SETTINGS_DOCUMENT)
       const useLysStore = await loadFreshLysStore()
       await useLysStore.getState().initialize()
 
       useLysStore.getState().setSettings({
         ...DISK_SETTINGS,
-        runtime: { ...DISK_SETTINGS.runtime, autoStartBackend: true },
+        runtime: { ...DISK_RUNTIME_SETTINGS, autoStartBackend: true },
         model: { contextSize: 8192 }
       })
       await waitForMicrotasks()
@@ -428,7 +444,7 @@ describe("useLysStore", () => {
             ]
           })
       })
-      startDesktopHost(DISK_SETTINGS)
+      startDesktopHost(DISK_SETTINGS_DOCUMENT)
       const useLysStore = await loadFreshLysStore()
       await useLysStore.getState().initialize()
       await useLysStore.getState().startBackend()
@@ -437,7 +453,7 @@ describe("useLysStore", () => {
 
       useLysStore.getState().setSettings({
         ...useLysStore.getState().settings,
-        runtime: { ...DISK_SETTINGS.runtime, defaultModel: "later" }
+        runtime: { ...DISK_RUNTIME_SETTINGS, defaultModel: "later" }
       })
 
       expect(before).toEqual({ status: "loaded", modelKey: "on-disk" })
@@ -457,10 +473,9 @@ describe("useLysStore", () => {
           buildJsonResponse(200, {
             status: isConnected ? "connected" : "unreachable"
           }),
-        "POST /api/v1/llm/load": () =>
-          Promise.reject(new TypeError("fetch failed"))
+        "POST /api/v1/llm/load": () => Promise.reject(createTransportFailure())
       })
-      startDesktopHost(DISK_SETTINGS)
+      startDesktopHost(DISK_SETTINGS_DOCUMENT)
       const useLysStore = await loadFreshLysStore()
       await useLysStore.getState().startBackend()
       await waitForMicrotasks()

@@ -35,6 +35,16 @@ function buildAttachment(
   return { id: `attachment-${name}`, name, kind: "txt", estimatedTokens }
 }
 
+/**
+ * Statements that turns were, are, or will be compacted into a recap sent in
+ * their place: the claims #29 removes.
+ *
+ * @remarks The oracle is the claim, not the words: corrected copy may still
+ * say that no recap is made or that older turns are left out.
+ */
+const COMPACTION_CLAIM =
+  /compacted into a recap|sent in their place|(?:are|were|will be) compacted|\d+ compacted/i
+
 /** A window that still fits a two-turn conversation (126 of 8,192 tokens). */
 const FITTING_USAGE = calculateContextUsage({
   budget: 8192,
@@ -212,7 +222,7 @@ describe("ComposerContextMeter", () => {
 
       const { panel } = await openMeterPanel(user)
 
-      expect(panel).not.toHaveTextContent(/compact|recap/i)
+      expect(panel).not.toHaveTextContent(COMPACTION_CLAIM)
     }
   )
 
@@ -232,8 +242,8 @@ describe("ComposerContextMeter", () => {
 
       const { trigger, panel } = await openMeterPanel(user)
 
-      expect(trigger).not.toHaveAccessibleName(/compact/i)
-      expect(panel).not.toHaveTextContent(/compact|recap/i)
+      expect(trigger).not.toHaveAccessibleName(COMPACTION_CLAIM)
+      expect(panel).not.toHaveTextContent(COMPACTION_CLAIM)
     }
   )
 

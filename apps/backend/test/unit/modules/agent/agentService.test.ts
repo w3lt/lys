@@ -98,12 +98,14 @@ async function createHelloReply(agent: Agent): Promise<void> {
     userMessageContent: "Hello",
     model: "qwen/qwen3-8b",
     generationOptions: { temperature: 0.4 },
-    tools: [],
+    clientTools: [],
+    builtInTools: [],
     abortSignal: new AbortController().signal,
     updateAssistantMessageContent: () => true,
     updateAssistantMessageState: () => true,
     sendEvent: vi.fn(),
-    sendToolCall: vi.fn(),
+    sendClientToolCall: vi.fn(),
+    sendBuiltInToolCall: vi.fn(),
     reportReplyCancellation: vi.fn(),
     reportReplyFailure: vi.fn()
   })

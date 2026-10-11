@@ -9,6 +9,7 @@ export const READ_TEXT_FILE_TOOL: ToolDefinition = toolDefinitionSchema.parse({
   description: "Read one UTF-8 text file and return its complete text.",
   group: "files",
   access: "reads",
+  runner: "client",
   arguments: [
     { type: "string", name: "path", description: "Absolute path of the file." }
   ]

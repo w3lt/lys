@@ -30,6 +30,18 @@ pub enum ToolAccess {
     Reads,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+/// Which side of Lys runs a tool.
+///
+/// Every tool this list holds runs in the desktop app, so only `Client`
+/// exists here; the shared definition also accepts `backend`, the runner of
+/// the tools the backend lists itself.
+pub enum ToolRunner {
+    /// Runs in the desktop app, which runs each call itself.
+    Client,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 /// Type of the value a model supplies for one argument, serialized as the
@@ -72,8 +84,8 @@ pub struct ToolArgumentDefinition {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-/// One client tool: what a model is offered, how Settings groups it, and what
-/// it does with the machine.
+/// One client tool: what a model is offered, how Settings groups it, what it
+/// does with the machine, and which side of Lys runs it.
 pub struct ToolDefinition {
     /// Name the model calls the tool by; also its identity in Settings.
     pub(super) name: &'static str,
@@ -83,6 +95,8 @@ pub struct ToolDefinition {
     pub(super) group: ToolGroup,
     /// What the tool does with the machine it runs on.
     pub(super) access: ToolAccess,
+    /// Which side of Lys runs the tool.
+    pub(super) runner: ToolRunner,
     /// Arguments in declaration order, each name once.
     pub(super) arguments: Vec<ToolArgumentDefinition>,
 }

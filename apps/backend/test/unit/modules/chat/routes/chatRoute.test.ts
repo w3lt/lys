@@ -1,6 +1,7 @@
 import {
   agentNotFoundProblemSchema,
   chatApi,
+  chatApiStreamEventSchema,
   conversationAgentMissingProblemSchema,
   conversationNotFoundProblemSchema
 } from "@lys/protocol"
@@ -84,19 +85,12 @@ async function startWebResearcherConversation(
 ): Promise<string> {
   testApp.app.agentService.createAgent(WEB_RESEARCHER_DEFINITION)
   const response = await sendChatRequest(testApp.app, WEB_RESEARCHER_REQUEST)
-  const start: unknown = parseSseEvents(response.body)[0]?.data
-  const conversationId =
-    start !== null &&
-    typeof start === "object" &&
-    "conversation" in start &&
-    start.conversation !== null &&
-    typeof start.conversation === "object" &&
-    "id" in start.conversation
-      ? start.conversation.id
-      : undefined
-  if (typeof conversationId !== "string")
+  const start = chatApiStreamEventSchema.parse(
+    parseSseEvents(response.body)[0]?.data
+  )
+  if (start.type !== "start-new-conversation-turn")
     throw new Error("The chat route did not start a new conversation")
-  return conversationId
+  return start.conversation.id
 }
 
 describe("updateFastifyWithChatRoute", () => {

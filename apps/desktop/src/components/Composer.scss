@@ -9,10 +9,12 @@
 /*
  * Runtime availability, stated above the field rather than inside it: the
  * composer stays where it was, and the reason it cannot be used sits directly
- * over it with the one action that resolves it.
+ * over it with the one action that resolves it. The deleted-agent notice keeps
+ * its status line in the page while it has nothing to say, so its box is drawn
+ * only while it is shown.
  */
 .composer__offline,
-.composer__notice {
+.composer__notice[data-shown] {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -780,7 +782,7 @@
   }
 
   .composer__offline,
-  .composer__notice {
+  .composer__notice[data-shown] {
     padding-inline: 16px;
   }
 

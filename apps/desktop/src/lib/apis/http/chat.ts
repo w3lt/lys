@@ -14,6 +14,8 @@ import {
 } from "@lys/protocol"
 import { EventSourceParserStream } from "eventsource-parser/stream"
 
+import { DELETED_CONVERSATION_AGENT_MESSAGE } from "@/lib/conversation-agent-messages"
+
 /** Transport options for reading one backend chat event stream. */
 export type ChatApiOptions = {
   /**
@@ -101,14 +103,6 @@ const NOT_PENDING_RESULT: SendChatToolResultResult = Object.freeze({
 
 /** Caller-safe message for a followed reply the backend no longer stores. */
 const MISSING_REPLY_MESSAGE = "The reply is no longer stored."
-
-/**
- * Sentence shown for a conversation whose agent was deleted: the failure of a
- * chat request the backend refuses for that reason, and the notice the
- * composer shows once the agent list says so.
- */
-export const DELETED_CONVERSATION_AGENT_MESSAGE =
-  "This conversation's agent was deleted. Start a new one to keep talking."
 
 /**
  * Opens and reads one validated backend chat event stream.

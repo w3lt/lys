@@ -42,7 +42,8 @@ export interface AgentLister {
    * @returns The strict page in ascending creation-time and code order; its
    * cursor continues after the last listed agent while more follow. The
    * built-in agents are the same on every page, in shipped order.
-   * @throws If the store is closed or holds an invalid agent.
+   * @throws With `Database is closed` once the store's owner has closed it,
+   * or if the store holds an invalid agent.
    */
   listAgents(options: AgentListOptions): ListAgentsApiResponse
 }
@@ -57,7 +58,8 @@ export interface AgentReader {
    * @param code - Code to look up, compared exactly.
    * @returns The built-in agent with that code, else the stored one, tagged
    * with its kind; undefined when no agent has the code.
-   * @throws If the store is closed or the stored agent is invalid.
+   * @throws With `Database is closed` once the store's owner has closed it
+   * and the code is not a built-in agent's, or if the stored agent is invalid.
    */
   findAgent(code: string): GetAgentApiResponse | undefined
 }
@@ -87,8 +89,10 @@ export interface AgentEditor {
    * storage work.
    * @returns The changed agent; `missing` when no agent has the code and
    * `built-in` when a built-in agent has it, both of which change nothing.
-   * @throws If validation fails, or the store is closed, the write fails, or
-   * the changed agent is invalid; the agent is then unchanged.
+   * @throws If validation fails, before any storage work; with
+   * `Database is closed` once the store's owner has closed it and the code is
+   * not a built-in agent's; or if the write fails or the changed agent is
+   * invalid. The agent is then unchanged.
    */
   updateAgent(code: string, changes: AgentChangesCandidate): AgentUpdateOutcome
 }
@@ -101,7 +105,9 @@ export interface AgentDeleter {
    * @returns `deleted` when it was stored, `missing` when no agent has the
    * code, and `built-in` when a built-in agent has it, which deletes nothing.
    * Repetition does not recreate a deleted agent.
-   * @throws If the store is closed or the deletion fails.
+   * @throws With `Database is closed` once the store's owner has closed it
+   * and the code is not a built-in agent's, or if the deletion fails; the
+   * agent is then still stored.
    */
   deleteAgent(code: string): AgentDeletionOutcome
 }

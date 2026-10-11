@@ -80,6 +80,68 @@ function calculateListFocusTarget(
     : NEW_AGENT_FOCUS_TARGET
 }
 
+/** Editor states in which an agent is open. */
+type OpenAgentEditor = Exclude<AgentEditorState, { readonly status: "closed" }>
+
+/** Properties accepted by {@link OpenAgentView}. */
+type OpenAgentViewProps = {
+  /** Editor the agent store has open. */
+  readonly editor: OpenAgentEditor
+  /**
+   * Every listed agent, built-in or the user's own, against whose names and
+   * codes a draft is checked.
+   */
+  readonly agents: readonly ListedAgentIdentity[]
+}
+
+/**
+ * Presents the agent the agent store has open.
+ *
+ * @remarks The agent store owns the editor and every read and change; the
+ * parent supplies the open editor and the listed agents. An agent being read
+ * shows its read status, with a retry after a failed read. A built-in agent
+ * opens in a read-only view, and a stored or new one in its editor. Each
+ * agent's status, view, or editor is a separate instance, keyed by its code;
+ * the new agent's editor is keyed `:new`, which no code can take because
+ * codes never contain `:`.
+ * @param props - Open editor and the listed agents.
+ * @returns The read status of an agent being opened, its read-only view, or
+ * its editor.
+ */
+function OpenAgentView({ editor, agents }: OpenAgentViewProps): ReactElement {
+  const openAgent = useAgentStore((state) => state.openAgent)
+  const openAgentCopy = useAgentStore((state) => state.openAgentCopy)
+  const closeAgentEditor = useAgentStore((state) => state.closeAgentEditor)
+
+  switch (editor.status) {
+    case "opening":
+    case "unavailable":
+      return (
+        <AgentReadStatus
+          editor={editor}
+          key={editor.agentCode}
+          onCloseAgentEditor={closeAgentEditor}
+          onRetryAgent={() => void openAgent(editor.agentCode)}
+        />
+      )
+    case "viewing":
+      return (
+        <BuiltInAgentView
+          agent={editor.agent}
+          key={editor.agent.code}
+          onCloseAgentView={closeAgentEditor}
+          onDuplicateAgent={openAgentCopy}
+        />
+      )
+    case "creating":
+      return <AgentEditor agents={agents} editor={editor} key=":new" />
+    case "editing":
+      return (
+        <AgentEditor agents={agents} editor={editor} key={editor.agent.code} />
+      )
+  }
+}
+
 /** Properties accepted by {@link AgentWorkspace}. */
 type AgentWorkspaceProps = {
   /** Every built-in agent, in shipped order, as last read. */
@@ -89,22 +151,19 @@ type AgentWorkspaceProps = {
 }
 
 /**
- * Presents the agent list or the editor the agent store has open.
+ * Presents the agent list or the agent the agent store has open.
  *
  * @remarks The agent store owns the editor, the saved marker, and every read
- * and change; the parent supplies the listed agents. A built-in agent opens
- * in a read-only view, and a stored one in its editor; drafts are checked
- * against the names and codes of both kinds. The workspace owns only
- * which list control takes focus when the list returns from an editor: the
- * saved agent's row, the opened agent's row, or the New agent button. It
- * records that control when it opens an editor, and when it appears with an
- * editor already open, as after the pane was left and entered again, it
- * starts from that editor's agent. Each agent's editor is a separate
- * instance, keyed by its code; the new agent's editor is keyed `:new`, which
- * no code can take because codes never contain `:`.
+ * and change; the parent supplies the listed agents. While an editor is open,
+ * the open agent's view stands in for the list; drafts are checked against
+ * the names and codes of both kinds of agent. The workspace owns only which
+ * list control takes focus when the list returns from an editor: the saved
+ * agent's row, the opened agent's row, or the New agent button. It records
+ * that control when it opens an editor, and when it appears with an editor
+ * already open, as after the pane was left and entered again, it starts from
+ * that editor's agent.
  * @param props - Listed agents.
- * @returns The agent list, the read status of an agent being opened, its
- * read-only view, or its editor.
+ * @returns The agent list, or the view of the open agent.
  */
 function AgentWorkspace({
   builtInAgents,
@@ -114,8 +173,6 @@ function AgentWorkspace({
   const savedAgentCode = useAgentStore((state) => state.savedAgentCode)
   const openAgent = useAgentStore((state) => state.openAgent)
   const openNewAgent = useAgentStore((state) => state.openNewAgent)
-  const openAgentCopy = useAgentStore((state) => state.openAgentCopy)
-  const closeAgentEditor = useAgentStore((state) => state.closeAgentEditor)
   const [returnTarget, setReturnTarget] = useState(() =>
     calculateEditorReturnTarget(editor)
   )
@@ -140,61 +197,31 @@ function AgentWorkspace({
     openNewAgent()
   }
 
-  switch (editor.status) {
-    case "closed": {
-      const focusTarget = calculateListFocusTarget(
-        returnTarget,
-        savedAgentCode,
-        listedAgents
-      )
+  if (editor.status !== "closed")
+    return <OpenAgentView agents={listedAgents} editor={editor} />
 
-      return (
-        <div className="settings-view__stack">
-          <BuiltInAgentSection
-            agents={builtInAgents}
-            focusTarget={focusTarget}
-            onOpenAgent={handleOpenAgent}
-          />
-          <CustomAgentSection
-            agents={agents}
-            focusTarget={focusTarget}
-            onOpenAgent={handleOpenAgent}
-            onOpenNewAgent={handleOpenNewAgent}
-            savedAgentCode={savedAgentCode}
-          />
-        </div>
-      )
-    }
-    case "opening":
-    case "unavailable":
-      return (
-        <AgentReadStatus
-          editor={editor}
-          key={editor.agentCode}
-          onCloseAgentEditor={closeAgentEditor}
-          onRetryAgent={() => void openAgent(editor.agentCode)}
-        />
-      )
-    case "viewing":
-      return (
-        <BuiltInAgentView
-          agent={editor.agent}
-          key={editor.agent.code}
-          onCloseAgentView={closeAgentEditor}
-          onDuplicateAgent={openAgentCopy}
-        />
-      )
-    case "creating":
-      return <AgentEditor agents={listedAgents} editor={editor} key=":new" />
-    case "editing":
-      return (
-        <AgentEditor
-          agents={listedAgents}
-          editor={editor}
-          key={editor.agent.code}
-        />
-      )
-  }
+  const focusTarget = calculateListFocusTarget(
+    returnTarget,
+    savedAgentCode,
+    listedAgents
+  )
+
+  return (
+    <div className="settings-view__stack">
+      <BuiltInAgentSection
+        agents={builtInAgents}
+        focusTarget={focusTarget}
+        onOpenAgent={handleOpenAgent}
+      />
+      <CustomAgentSection
+        agents={agents}
+        focusTarget={focusTarget}
+        onOpenAgent={handleOpenAgent}
+        onOpenNewAgent={handleOpenNewAgent}
+        savedAgentCode={savedAgentCode}
+      />
+    </div>
+  )
 }
 
 /** Properties accepted by {@link AgentListBody}. */

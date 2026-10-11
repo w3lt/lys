@@ -60,9 +60,14 @@ export type ComposerProps = {
    * Parent-owned ref attached to the message field.
    *
    * @remarks The parent uses it only to move focus into the field after the
-   * user opens or starts a conversation from past conversations.
+   * user opens or starts a conversation.
    */
   readonly messageFieldRef: RefObject<HTMLTextAreaElement | null>
+  /**
+   * Requests that the parent start a new conversation and move focus to the
+   * message field once that conversation is shown.
+   */
+  readonly onStartConversation: () => void
 }
 
 /** Empty tray used as the initial value and while nothing is staged. */
@@ -128,7 +133,12 @@ function findLargestAttachment(
  * once a conversation is shown or its first reply is awaited that agent is
  * fixed. The field is named after the agent. When the shown conversation's
  * agent was deleted, the field and Send are disabled and a notice above the
- * field offers a new conversation; the conversation stays readable.
+ * field offers a new conversation; the conversation stays readable. The
+ * notice's status line stays rendered while it is empty, and its New
+ * conversation button asks the parent for the conversation, because the
+ * button leaves with the notice and the parent moves focus to the field. The
+ * menu's Start a new one resets the conversation in the store instead and
+ * keeps the menu open, so the agent can be chosen at once.
  *
  * Above the field, the tool-call prompt shows the first tool call of the
  * shown conversation that waits for the person or whose answer failed to
@@ -146,10 +156,14 @@ function findLargestAttachment(
  * Context figures are client-side estimates throughout, marked `~` wherever
  * they appear.
  *
- * @param props - Parent-owned ref for the message field.
+ * @param props - Parent-owned ref for the message field and the request
+ * for a new conversation.
  * @returns The rendered conversation composer.
  */
-export function Composer({ messageFieldRef }: ComposerProps): ReactElement {
+export function Composer({
+  messageFieldRef,
+  onStartConversation
+}: ComposerProps): ReactElement {
   const backendServerInfo = useLysStore((state) => state.backendServerInfo)
   const modelRuntime = useLysStore((state) => state.modelRuntime)
   const lmStudioStatus = useLysStore((state) => state.lmStudioStatus)
@@ -416,9 +430,10 @@ export function Composer({ messageFieldRef }: ComposerProps): ReactElement {
           onReconnect={handleReconnect}
         />
       ) : null}
-      {isAgentDeleted && !isUnavailable ? (
-        <ComposerDeletedAgentNotice onStartConversation={resetConversation} />
-      ) : null}
+      <ComposerDeletedAgentNotice
+        isShown={isAgentDeleted && !isUnavailable}
+        onStartConversation={onStartConversation}
+      />
 
       <div className="composer__inner">
         <ComposerToolCallPrompt

@@ -1,19 +1,31 @@
 import {
   agentSchema,
   CALIGINIA_AGENT_CODE,
-  LYSIPTERA_AGENT_CODE
+  LYSIPTERA_AGENT_CODE,
+  type Agent as StoredAgent
 } from "@lys/share"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import * as z from "zod"
+import type {
+  DatabaseReader,
+  DatabaseWriter
+} from "../../../../src/infrastructure/database/databaseTransactions"
 import type Agent from "../../../../src/modules/agent/agent"
 import AgentService from "../../../../src/modules/agent/agentService"
 import { buildBuiltInAgents } from "../../../../src/modules/agent/builtInAgents"
+import type { AgentRecordStore } from "../../../../src/modules/agent/records"
 import type {
   ReplyModel,
   ReplyStreamEvent
 } from "../../../../src/modules/agent/replyModel"
 import SqliteAgentRecordStore from "../../../../src/infrastructure/database/agents/sqliteAgentRecordStore"
-import { parseAgentListOptions } from "../../../../src/modules/agent/listOptions"
+import {
+  registerAgentDeleterContractSuite,
+  registerAgentEditorContractSuite,
+  registerAgentListerContractSuite,
+  registerAgentReaderContractSuite,
+  type AgentCapabilitiesHarness
+} from "../../support/agentCapabilitiesContract"
 import { openSqliteAgentRecordStore } from "../../support/agentDatabase"
 import {
   registerAgentCreatorContractSuite,
@@ -32,12 +44,6 @@ const BUILT_IN_AGENTS = buildBuiltInAgents({
   caliginia: "You are Caliginia.",
   lysiptera: "You are Lysiptera."
 })
-
-/** Summaries every list page carries for {@link BUILT_IN_AGENTS}. */
-const BUILT_IN_AGENT_SUMMARIES = [
-  { code: "caliginia", name: "Caliginia", bio: "Lys's dark side." },
-  { code: "lysiptera", name: "Lysiptera", bio: "Lys's light side." }
-]
 
 /** Definition of the agent most cases store. */
 const RESEARCHER_DEFINITION = {
@@ -119,49 +125,131 @@ function buildHelloReplyRequest(systemPrompt: string): unknown {
 }
 
 /**
- * Creates the agent service over Sqlite records on an in-memory database
- * owned by the current test, for the `AgentCreator` contract suite.
- *
- * @returns The service, a direct read of the stored agent rows, a write
- * failure raised by a temporary trigger on agent inserts, and the database's
- * close.
+ * Agent service over its own database, with the controls of every agent
+ * contract suite.
  */
-function createAgentCreatorHarness(): AgentCreatorHarness {
-  const { database, recordStore, closeRecords } = openSqliteAgentRecordStore()
-  return {
-    agentCreator: new AgentService({
-      recordStore,
-      builtInAgents: BUILT_IN_AGENTS,
-      replyModel: createFinishingReplyModel()
-    }),
-    readStoredAgents: () =>
-      z.array(agentSchema).parse(
-        database.handleDatabaseReadRequest((statements) =>
-          statements
-            .getStatement(
-              `SELECT code, name, bio, system_prompt AS systemPrompt,
-                created_at AS createdAt, updated_at AS updatedAt
-              FROM agents ORDER BY code`
-            )
-            .all()
+type AgentServiceHarness = AgentCreatorHarness & AgentCapabilitiesHarness
+
+/** Statements whose failure a case induces on the agents table. */
+const AGENT_WRITE_OPERATIONS: readonly string[] = Object.freeze([
+  "INSERT",
+  "UPDATE",
+  "DELETE"
+])
+
+/**
+ * Stores one agent through the records, bypassing the agent service.
+ *
+ * @param recordStore - Records over a migrated test database.
+ * @param agent - Valid agent to store exactly as given.
+ * @throws If an agent with the same code is already stored.
+ */
+function saveStoredAgent(
+  recordStore: AgentRecordStore,
+  agent: StoredAgent
+): void {
+  if (!recordStore.createAgent(agent))
+    throw new Error(`Agent ${agent.code} is already stored`)
+}
+
+/**
+ * Inserts one agent row whose creation time is not an agent timestamp,
+ * bypassing the agent schemas.
+ *
+ * @param database - Write access to a migrated test database.
+ * @param code - Code of the row.
+ */
+function saveInvalidAgentRow(database: DatabaseWriter, code: string): void {
+  database.handleDatabaseWriteRequest((statements) => {
+    statements
+      .getStatement(
+        `INSERT INTO agents (code, name, bio, system_prompt, created_at, updated_at)
+        VALUES (?, 'Damaged', 'Has no valid time.', 'You are damaged.', 'never', 'never')`
+      )
+      .run(code)
+  })
+}
+
+/**
+ * Reads every stored agent row in code order, bypassing the agent service.
+ *
+ * @param database - Read access to a migrated test database.
+ * @returns The stored agents.
+ * @throws If a row violates the agent schema.
+ */
+function readStoredAgents(database: DatabaseReader): readonly StoredAgent[] {
+  return z.array(agentSchema).parse(
+    database.handleDatabaseReadRequest((statements) =>
+      statements
+        .getStatement(
+          `SELECT code, name, bio, system_prompt AS systemPrompt,
+            created_at AS createdAt, updated_at AS updatedAt
+          FROM agents ORDER BY code`
         )
-      ),
-    failAgentWrites: (message) => {
-      database.handleDatabaseWriteRequest((statements) => {
-        statements
-          .getStatement(
-            `CREATE TEMP TRIGGER fail_agent_writes BEFORE INSERT ON agents
-            BEGIN SELECT RAISE(ABORT, '${message.replaceAll("'", "''")}'); END`
-          )
-          .run()
-      })
-    },
+        .all()
+    )
+  )
+}
+
+/**
+ * Makes every later insert, update, and delete of an agent row fail, through
+ * temporary triggers that last until the database closes.
+ *
+ * @param database - Write access to a migrated test database.
+ * @param message - Message of the failure each write raises.
+ */
+function startAgentWriteFailures(
+  database: DatabaseWriter,
+  message: string
+): void {
+  const quotedMessage = message.replaceAll("'", "''")
+  database.handleDatabaseWriteRequest((statements) => {
+    for (const operation of AGENT_WRITE_OPERATIONS)
+      statements
+        .getStatement(
+          `CREATE TEMP TRIGGER fail_agent_${operation} BEFORE ${operation} ON agents
+          BEGIN SELECT RAISE(ABORT, '${quotedMessage}'); END`
+        )
+        .run()
+  })
+}
+
+/**
+ * Creates the agent service over Sqlite records on an in-memory database
+ * owned by the current test, for the agent contract suites.
+ *
+ * @returns The service as each capability under test, its built-in agents,
+ * direct writes and reads of the stored agent rows, a write failure raised by
+ * temporary triggers on the agents table, and the database's close.
+ */
+function createAgentServiceHarness(): AgentServiceHarness {
+  const { database, recordStore, closeRecords } = openSqliteAgentRecordStore()
+  const agentService = new AgentService({
+    recordStore,
+    builtInAgents: BUILT_IN_AGENTS,
+    replyModel: createFinishingReplyModel()
+  })
+  return {
+    agentCreator: agentService,
+    agentLister: agentService,
+    agentReader: agentService,
+    agentEditor: agentService,
+    agentDeleter: agentService,
+    builtInAgents: BUILT_IN_AGENTS,
+    saveAgent: (agent) => saveStoredAgent(recordStore, agent),
+    saveInvalidAgent: (code) => saveInvalidAgentRow(database, code),
+    readStoredAgents: () => readStoredAgents(database),
+    failAgentWrites: (message) => startAgentWriteFailures(database, message),
     closeStore: closeRecords
   }
 }
 
 describe("AgentService", () => {
-  registerAgentCreatorContractSuite(createAgentCreatorHarness)
+  registerAgentCreatorContractSuite(createAgentServiceHarness)
+  registerAgentListerContractSuite(createAgentServiceHarness)
+  registerAgentReaderContractSuite(createAgentServiceHarness)
+  registerAgentEditorContractSuite(createAgentServiceHarness)
+  registerAgentDeleterContractSuite(createAgentServiceHarness)
 
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["Date"] })
@@ -236,39 +324,24 @@ describe("AgentService", () => {
   })
 
   describe("findAgent", () => {
-    it.each(["Not A Slug", "lys", "researcher"])(
-      "returns undefined for the code %s, which no agent has",
+    it.each([CALIGINIA_AGENT_CODE, LYSIPTERA_AGENT_CODE])(
+      "returns the built-in agent %s frozen and without times",
       (code) => {
-        const agents = createAgentService()
-
-        expect(agents.findAgent(code)).toBeUndefined()
-      }
-    )
-
-    it.each([
-      [CALIGINIA_AGENT_CODE, "You are Caliginia."],
-      [LYSIPTERA_AGENT_CODE, "You are Lysiptera."]
-    ])(
-      "finds the built-in agent %s with its shipped prompt and no times",
-      (code, systemPrompt) => {
         const found = createAgentService().findAgent(code)
 
-        expect(found).toEqual({
-          kind: "built-in",
-          ...BUILT_IN_AGENT_SUMMARIES.find((agent) => agent.code === code),
-          systemPrompt
-        })
+        expect(found).toMatchObject({ kind: "built-in", code })
+        expect(found).not.toHaveProperty("createdAt")
         expect(Object.isFrozen(found)).toBe(true)
       }
     )
 
-    it("finds a stored agent as a frozen custom agent", () => {
+    it("returns a stored agent frozen", () => {
       const agents = createAgentService()
-      const created = agents.createAgent(RESEARCHER_DEFINITION)
+      agents.createAgent(RESEARCHER_DEFINITION)
 
       const found = agents.findAgent("researcher")
 
-      expect(found).toEqual({ kind: "custom", ...created })
+      expect(found).toMatchObject({ kind: "custom", code: "researcher" })
       expect(Object.isFrozen(found)).toBe(true)
     })
   })
@@ -294,143 +367,15 @@ describe("AgentService", () => {
         ...expected
       })
     })
-
-    it.each(["researcher", "lys", "Not A Slug"])(
-      "reports the code %s as missing when no agent has it",
-      (code) => {
-        const agents = createAgentService()
-
-        expect(agents.updateAgent(code, { name: "Renamed" })).toEqual({
-          status: "missing"
-        })
-        expect(agents.findAgent(code)).toBeUndefined()
-      }
-    )
-
-    it.each([CALIGINIA_AGENT_CODE, LYSIPTERA_AGENT_CODE])(
-      "refuses to change the built-in agent %s and stores nothing",
-      (code) => {
-        const agents = createAgentService()
-        const shipped = agents.findAgent(code)
-
-        expect(agents.updateAgent(code, { name: "Renamed" })).toEqual({
-          status: "built-in"
-        })
-
-        expect(agents.findAgent(code)).toEqual(shipped)
-        expect(
-          agents.listAgents({ cursor: undefined, limit: 30 })
-        ).toMatchObject({ agents: [], storedCount: 0 })
-      }
-    )
-
-    it.each([
-      ["no field", {}],
-      ["only undefined fields", { name: undefined }]
-    ])(
-      "rejects a change with %s without touching the agent",
-      (_label, changes) => {
-        const agents = createAgentService()
-        const created = agents.createAgent(RESEARCHER_DEFINITION)
-        vi.setSystemTime(new Date(LATER))
-
-        expect(() => agents.updateAgent("researcher", changes)).toThrow(
-          z.ZodError
-        )
-
-        expect(agents.findAgent("researcher")).toEqual({
-          kind: "custom",
-          ...created
-        })
-      }
-    )
-  })
-
-  describe("listAgents", () => {
-    it("pages through agents oldest first and ends with a null cursor", () => {
-      const agents = createAgentService()
-      agents.createAgent({ ...RESEARCHER_DEFINITION, code: "b" })
-      vi.setSystemTime(new Date(LATER))
-      agents.createAgent({ ...RESEARCHER_DEFINITION, code: "a" })
-      agents.createAgent({ ...RESEARCHER_DEFINITION, code: "c" })
-
-      const first = agents.listAgents({ cursor: undefined, limit: 2 })
-      expect(first.agents.map((agent) => agent.code)).toEqual(["b", "a"])
-      expect(first).toMatchObject({
-        storedCount: 3,
-        nextCursor: expect.any(String)
-      })
-
-      const second = agents.listAgents(
-        parseAgentListOptions({ cursor: first.nextCursor ?? "", limit: 2 })
-      )
-      expect(second.agents.map((agent) => agent.code)).toEqual(["c"])
-      expect(second).toMatchObject({ storedCount: 3, nextCursor: null })
-    })
-
-    it("carries every built-in agent on every page, Caliginia first and without prompts", () => {
-      const agents = createAgentService()
-      for (const code of ["a", "b"])
-        agents.createAgent({ ...RESEARCHER_DEFINITION, code })
-
-      const first = agents.listAgents({ cursor: undefined, limit: 1 })
-      const second = agents.listAgents(
-        parseAgentListOptions({ cursor: first.nextCursor ?? "", limit: 1 })
-      )
-
-      expect(first.builtInAgents).toEqual(BUILT_IN_AGENT_SUMMARIES)
-      expect(second.builtInAgents).toEqual(BUILT_IN_AGENT_SUMMARIES)
-    })
-
-    it("lists each agent created in the same millisecond exactly once", () => {
-      const agents = createAgentService()
-      for (const code of ["c", "a", "b"])
-        agents.createAgent({ ...RESEARCHER_DEFINITION, code })
-
-      const first = agents.listAgents({ cursor: undefined, limit: 1 })
-      const second = agents.listAgents(
-        parseAgentListOptions({ cursor: first.nextCursor ?? "", limit: 1 })
-      )
-      const third = agents.listAgents(
-        parseAgentListOptions({ cursor: second.nextCursor ?? "", limit: 1 })
-      )
-
-      expect(
-        [first, second, third].flatMap((page) =>
-          page.agents.map((agent) => agent.code)
-        )
-      ).toEqual(["a", "b", "c"])
-      expect(third.nextCursor).toBeNull()
-    })
-
-    it("returns an empty final page when no agent is stored", () => {
-      const agents = createAgentService()
-
-      expect(agents.listAgents({ cursor: undefined, limit: 30 })).toEqual({
-        builtInAgents: BUILT_IN_AGENT_SUMMARIES,
-        agents: [],
-        storedCount: 0,
-        nextCursor: null
-      })
-    })
   })
 
   describe("deleteAgent", () => {
-    it("deletes a stored agent once", () => {
-      const agents = createAgentService()
-      agents.createAgent(RESEARCHER_DEFINITION)
-
-      expect(agents.deleteAgent("researcher")).toBe("deleted")
-      expect(agents.findAgent("researcher")).toBeUndefined()
-      expect(agents.deleteAgent("researcher")).toBe("missing")
-    })
-
     it.each([CALIGINIA_AGENT_CODE, LYSIPTERA_AGENT_CODE])(
-      "refuses to delete the built-in agent %s, which still answers chats",
+      "leaves the built-in agent %s answering chats after refusing to delete it",
       (code) => {
         const agents = createAgentService()
 
-        expect(agents.deleteAgent(code)).toBe("built-in")
+        agents.deleteAgent(code)
 
         expect(agents.findAgent(code)).toMatchObject({ kind: "built-in" })
         expect(agents.findChatAgent(code)?.code).toBe(code)

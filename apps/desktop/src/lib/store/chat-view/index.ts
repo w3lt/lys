@@ -1197,6 +1197,24 @@ export function createChatViewStore(
     }
 
     /**
+     * Builds the conversation the next chat request starts or continues.
+     *
+     * @returns The shown conversation as the one to continue; without one, a
+     * new conversation answered by the agent the selected code gives when
+     * the agent list is sampled now.
+     */
+    function buildRequestConversation(): ChatApiRequestBody["conversation"] {
+      const { conversation, selectedAgentCode } = get()
+      if (conversation !== undefined)
+        return { kind: "existing", id: conversation.id }
+
+      return {
+        kind: "new",
+        agentCode: dependencies.readNewConversationAgentCode(selectedAgentCode)
+      }
+    }
+
+    /**
      * Implements {@link ChatViewActions.sendMessage} for this store.
      *
      * @param explicitPrompt - Optional starter prompt supplied outside composer.
@@ -1224,16 +1242,9 @@ export function createChatViewStore(
       nextRequestToken += 1
       const request = createAwaitingTurnRequest(token, submittedComposerDraft)
       const resource = createChatRequestResource(token)
-      const { conversation, selectedAgentCode } = get()
+      const conversation = buildRequestConversation()
       const requestInput = {
-        conversation:
-          conversation === undefined
-            ? {
-                kind: "new",
-                agentCode:
-                  dependencies.readNewConversationAgentCode(selectedAgentCode)
-              }
-            : { kind: "existing", id: conversation.id },
+        conversation,
         submittedPrompt,
         model,
         generationOptions: dependencies.readGenerationOptions()

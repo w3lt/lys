@@ -548,7 +548,7 @@ function calculateListWithoutAgent(
  * @returns The built-in agents followed by the stored agents of a displayed
  * list; nothing for any other list.
  */
-export function buildListedAgentIdentities(
+function buildListedAgentIdentities(
   list: AgentListState
 ): readonly ListedAgentIdentity[] {
   return list.status === "loaded" ? [...list.builtInAgents, ...list.agents] : []

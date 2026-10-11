@@ -3,6 +3,7 @@ import {
   agentCodeTakenProblemSchema,
   agentNotFoundProblemSchema
 } from "@lys/protocol"
+import type { BuiltInAgent } from "@lys/share"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import AgentService from "../../../../../src/modules/agent/agentService"
 import { buildBuiltInAgents } from "../../../../../src/modules/agent/builtInAgents"
@@ -36,7 +37,13 @@ const STORED_RESEARCHER = Object.freeze({
   updatedAt: NOW
 })
 
-/** Summaries every list page carries for the built-in agents of each case. */
+/** Built-in agents of the service in every case that passes no others. */
+const SHIPPED_BUILT_IN_AGENTS = buildBuiltInAgents({
+  caliginia: "You are Caliginia.",
+  lysiptera: "You are Lysiptera."
+})
+
+/** Summaries every list page carries for {@link SHIPPED_BUILT_IN_AGENTS}. */
 const BUILT_IN_AGENT_SUMMARIES = [
   { code: "caliginia", name: "Caliginia", bio: "Lys's dark side." },
   { code: "lysiptera", name: "Lysiptera", bio: "Lys's light side." }
@@ -65,20 +72,37 @@ function createPaddedAgentListCursor(code: string, length: number): string {
 }
 
 /**
+ * Creates built-in agents that differ only by their number, for cases that
+ * count the built-in agents a list page carries.
+ *
+ * @param count - Number of agents to create.
+ * @returns The agents, with the codes `built-in-1` to `built-in-<count>`.
+ */
+function createNumberedBuiltInAgents(count: number): BuiltInAgent[] {
+  return Array.from({ length: count }, (_agent, index) => ({
+    code: `built-in-${index + 1}`,
+    name: `Built-in ${index + 1}`,
+    bio: "Ships with Lys.",
+    systemPrompt: "You ship with Lys."
+  }))
+}
+
+/**
  * Creates an application with the HTTP transport and the agent routes over
  * the real agent service and an in-memory database owned by the current test.
  *
+ * @param builtInAgents - Built-in agents the service ships; by default
+ * {@link SHIPPED_BUILT_IN_AGENTS}.
  * @returns The application and the decorated service, on which a case may
  * spy; the routes read the service at registration.
  */
-async function createAgentRouteApp() {
+async function createAgentRouteApp(
+  builtInAgents: readonly BuiltInAgent[] = SHIPPED_BUILT_IN_AGENTS
+) {
   const { app } = createTestFastify()
   const agents = new AgentService({
     recordStore: new SqliteAgentRecordStore(openTestDatabase()),
-    builtInAgents: buildBuiltInAgents({
-      caliginia: "You are Caliginia.",
-      lysiptera: "You are Lysiptera."
-    }),
+    builtInAgents,
     replyModel: UNUSED_REPLY_MODEL
   })
   await updateFastifyWithHttpTransport(app)
@@ -191,6 +215,32 @@ describe("updateFastifyWithAgentRoutes", () => {
       expect(response.json()).toMatchObject({
         storedCount: 51,
         nextCursor: expect.any(String)
+      })
+    })
+
+    it("serves a page that carries 16 built-in agents, the most a page may carry", async () => {
+      const { app } = await createAgentRouteApp(createNumberedBuiltInAgents(16))
+
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/v1/agents"
+      })
+
+      expect(response.statusCode).toBe(200)
+      expect(response.json().builtInAgents).toHaveLength(16)
+    })
+
+    it("fails rather than serve a page that carries 17 built-in agents", async () => {
+      const { app } = await createAgentRouteApp(createNumberedBuiltInAgents(17))
+
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/v1/agents"
+      })
+
+      expect(response.statusCode).toBe(500)
+      expect(response.json()).toMatchObject({
+        code: "FST_ERR_RESPONSE_SERIALIZATION"
       })
     })
 

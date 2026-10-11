@@ -47,6 +47,7 @@ mod tests {
                     "description": "Read one UTF-8 text file and return its complete text. A file over 1 MiB or one that is not UTF-8 text is refused, never truncated.",
                     "group": "files",
                     "access": "reads",
+                    "runner": "client",
                     "arguments": [
                         {
                             "name": "path",
@@ -61,6 +62,7 @@ mod tests {
                     "description": "Find files under a directory whose name or content contains the query, ignoring case. Returns each matching file's absolute path and, for content matches, its first matching lines with their line numbers.",
                     "group": "files",
                     "access": "reads",
+                    "runner": "client",
                     "arguments": [
                         {
                             "name": "root",

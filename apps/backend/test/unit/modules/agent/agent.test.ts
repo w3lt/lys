@@ -13,11 +13,18 @@ import type {
   ReplyModel,
   ReplyStreamEvent
 } from "../../../../src/modules/agent/replyModel"
+import type { BuiltInToolEntry } from "../../../../src/modules/tool/builtIn/builtInTool"
 import { ChatCompletionCancelledError } from "../../../../src/utils/errors"
 import {
   createAssistantMessage,
   createUserMessage
 } from "../../support/conversationFixtures"
+import {
+  LOOK_UP_WORD_FORMAT,
+  LOOK_UP_WORD_TOOL,
+  ScriptedBuiltInTool,
+  type BuiltInToolRunScript
+} from "../../support/scriptedBuiltInTool"
 import {
   READ_TEXT_FILE_FORMAT,
   READ_TEXT_FILE_TOOL
@@ -63,10 +70,14 @@ type AgentReplyScenario = Readonly<{
   updateAssistantMessageContent?: AgentTurn["updateAssistantMessageContent"]
   /** Final-state storage result; stores every transition by default. */
   updateAssistantMessageState?: AgentTurn["updateAssistantMessageState"]
-  /** Offered tools; none by default. */
-  tools?: readonly ToolDefinition[]
-  /** Client answers; any call fails the case by default. */
-  sendToolCall?: AgentTurn["sendToolCall"]
+  /** Offered client tools; none by default. */
+  clientTools?: readonly ToolDefinition[]
+  /** Offered backend tools; none by default. */
+  builtInTools?: readonly BuiltInToolEntry[]
+  /** Client results; any client tool call fails the case by default. */
+  sendClientToolCall?: AgentTurn["sendClientToolCall"]
+  /** Client approvals; any backend tool call fails the case by default. */
+  sendBuiltInToolCall?: AgentTurn["sendBuiltInToolCall"]
 }>
 
 /**
@@ -109,6 +120,31 @@ function createRoundStreams(...rounds: (readonly ReplyStreamEvent[])[]) {
   return openReplyStream
 }
 
+/** Round in which the model looks up the word `moth`. */
+const LOOK_UP_MOTH_ROUND: readonly ReplyStreamEvent[] = Object.freeze([
+  {
+    type: "tool-calls",
+    toolCalls: [{ toolName: "look_up_word", argumentText: '{"word":"moth"}' }]
+  }
+])
+
+/** Round that ends the reply without text. */
+const FINISH_ROUND: readonly ReplyStreamEvent[] = Object.freeze([
+  { type: "finish", finishReason: "stop" }
+])
+
+/**
+ * Builds the backend look-up tool offered for one case.
+ *
+ * @param runScript - Work every run does; answers at once by default.
+ * @returns The tool and its entry.
+ */
+function createLookUpWordTool(runScript?: BuiltInToolRunScript) {
+  const tool = new ScriptedBuiltInTool(runScript)
+  const entry: BuiltInToolEntry = { definition: LOOK_UP_WORD_TOOL, tool }
+  return { tool, entry }
+}
+
 /** Matches a UUIDv7 the agent gave a call. */
 const UUID_V7_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
@@ -139,8 +175,12 @@ async function getAgentReplyOutcome(scenario: AgentReplyScenario) {
     .createReply({
       ...TURN_REQUEST,
       history: scenario.history ?? [],
-      tools: scenario.tools ?? [],
-      sendToolCall: scenario.sendToolCall ?? handleUnexpectedToolCall,
+      clientTools: scenario.clientTools ?? [],
+      builtInTools: scenario.builtInTools ?? [],
+      sendClientToolCall:
+        scenario.sendClientToolCall ?? handleUnexpectedToolCall,
+      sendBuiltInToolCall:
+        scenario.sendBuiltInToolCall ?? handleUnexpectedToolCall,
       abortSignal: scenario.abortSignal ?? new AbortController().signal,
       sendEvent: (event) => {
         events.push(event)
@@ -601,8 +641,10 @@ describe("Agent", () => {
     ): AgentTurn => ({
       ...TURN_REQUEST,
       history: [],
-      tools: [],
-      sendToolCall: handleUnexpectedToolCall,
+      clientTools: [],
+      builtInTools: [],
+      sendClientToolCall: handleUnexpectedToolCall,
+      sendBuiltInToolCall: handleUnexpectedToolCall,
       userMessageContent,
       abortSignal: new AbortController().signal,
       updateAssistantMessageContent: () => true,
@@ -650,8 +692,8 @@ describe("Agent", () => {
 
       const run = await getAgentReplyOutcome({
         openReplyStream,
-        tools: [READ_TEXT_FILE_TOOL],
-        sendToolCall: async (toolCall) => {
+        clientTools: [READ_TEXT_FILE_TOOL],
+        sendClientToolCall: async (toolCall) => {
           sentCalls.push(toolCall)
           return {
             status: "succeeded",
@@ -719,16 +761,18 @@ describe("Agent", () => {
         ],
         [{ type: "finish", finishReason: "stop" }]
       )
-      const sendToolCall = vi.fn<AgentTurn["sendToolCall"]>((toolCall) => {
-        const answer = Promise.withResolvers<ChatToolResult | undefined>()
-        answers.set(String(toolCall.arguments.path), answer)
-        return answer.promise
-      })
+      const sendClientToolCall = vi.fn<AgentTurn["sendClientToolCall"]>(
+        (toolCall) => {
+          const answer = Promise.withResolvers<ChatToolResult | undefined>()
+          answers.set(String(toolCall.arguments.path), answer)
+          return answer.promise
+        }
+      )
 
       const outcome = getAgentReplyOutcome({
         openReplyStream,
-        tools: [READ_TEXT_FILE_TOOL],
-        sendToolCall
+        clientTools: [READ_TEXT_FILE_TOOL],
+        sendClientToolCall
       })
       await vi.waitFor(() => {
         expect(answers.size).toBe(2)
@@ -756,15 +800,15 @@ describe("Agent", () => {
         ],
         [{ type: "finish", finishReason: "stop" }]
       )
-      const sendToolCall = vi.fn<AgentTurn["sendToolCall"]>()
+      const sendClientToolCall = vi.fn<AgentTurn["sendClientToolCall"]>()
 
       await getAgentReplyOutcome({
         openReplyStream,
-        tools: [READ_TEXT_FILE_TOOL],
-        sendToolCall
+        clientTools: [READ_TEXT_FILE_TOOL],
+        sendClientToolCall
       })
 
-      expect(sendToolCall).not.toHaveBeenCalled()
+      expect(sendClientToolCall).not.toHaveBeenCalled()
       const toolMessages = openReplyStream.mock.calls[1]?.[0].messages.filter(
         (message) => message.role === "tool"
       )
@@ -796,8 +840,11 @@ describe("Agent", () => {
             { type: "finish", finishReason: "stop" }
           ]
         ),
-        tools: [READ_TEXT_FILE_TOOL],
-        sendToolCall: async () => ({ status: "succeeded", content: "Buy milk" })
+        clientTools: [READ_TEXT_FILE_TOOL],
+        sendClientToolCall: async () => ({
+          status: "succeeded",
+          content: "Buy milk"
+        })
       })
 
       expect(run.persistedDeltas).toEqual([
@@ -838,8 +885,11 @@ describe("Agent", () => {
             { type: "finish", finishReason: "stop" }
           ]
         ),
-        tools: [READ_TEXT_FILE_TOOL],
-        sendToolCall: async () => ({ status: "succeeded", content: "Buy milk" })
+        clientTools: [READ_TEXT_FILE_TOOL],
+        sendClientToolCall: async () => ({
+          status: "succeeded",
+          content: "Buy milk"
+        })
       })
 
       expect(run.persistedDeltas).toEqual(["Let me look.", "\n\nFound it."])
@@ -861,8 +911,11 @@ describe("Agent", () => {
             { type: "finish", finishReason: "stop" }
           ]
         ),
-        tools: [READ_TEXT_FILE_TOOL],
-        sendToolCall: async () => ({ status: "succeeded", content: "Buy milk" })
+        clientTools: [READ_TEXT_FILE_TOOL],
+        sendClientToolCall: async () => ({
+          status: "succeeded",
+          content: "Buy milk"
+        })
       })
 
       expect(run.persistedDeltas).toEqual(["Found it."])
@@ -883,8 +936,8 @@ describe("Agent", () => {
 
       await getAgentReplyOutcome({
         openReplyStream,
-        tools: [READ_TEXT_FILE_TOOL],
-        sendToolCall: async () => ({
+        clientTools: [READ_TEXT_FILE_TOOL],
+        sendClientToolCall: async () => ({
           status: "failed",
           reason: "declined",
           content: "The person declined this call."
@@ -912,8 +965,8 @@ describe("Agent", () => {
       const run = await getAgentReplyOutcome({
         openReplyStream,
         abortSignal: cancellation.signal,
-        tools: [READ_TEXT_FILE_TOOL],
-        sendToolCall: async () => {
+        clientTools: [READ_TEXT_FILE_TOOL],
+        sendClientToolCall: async () => {
           cancellation.abort()
           return undefined
         }
@@ -926,6 +979,171 @@ describe("Agent", () => {
         { type: "delta", content: "Let me look." },
         INTERRUPTED_EVENT
       ])
+    })
+  })
+
+  describe("backend tool calls", () => {
+    it("offers client tools before backend tools and runs an allowed call under the turn's signal", async () => {
+      const cancellation = new AbortController()
+      const runSignals: AbortSignal[] = []
+      const { entry } = createLookUpWordTool(async (word, abortSignal) => {
+        runSignals.push(abortSignal)
+        return { status: "succeeded", content: `${word}: a night insect` }
+      })
+      const sendBuiltInToolCall = vi.fn<AgentTurn["sendBuiltInToolCall"]>(
+        async () => ({ status: "allowed" })
+      )
+      const openReplyStream = createRoundStreams(LOOK_UP_MOTH_ROUND, [
+        { type: "text", content: "A moth is a night insect." },
+        { type: "finish", finishReason: "stop" }
+      ])
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream,
+        abortSignal: cancellation.signal,
+        clientTools: [READ_TEXT_FILE_TOOL],
+        builtInTools: [entry],
+        sendBuiltInToolCall
+      })
+
+      expect(openReplyStream.mock.calls[0]?.[0].tools).toEqual([
+        READ_TEXT_FILE_FORMAT,
+        LOOK_UP_WORD_FORMAT
+      ])
+      expect(sendBuiltInToolCall.mock.calls).toEqual([
+        [
+          {
+            id: expect.stringMatching(UUID_V7_PATTERN),
+            toolName: "look_up_word",
+            arguments: { word: "moth" }
+          }
+        ]
+      ])
+      expect(runSignals).toEqual([cancellation.signal])
+      const sentCallId = sendBuiltInToolCall.mock.calls[0]?.[0].id
+      expect(openReplyStream.mock.calls[1]?.[0].messages.at(-1)).toEqual({
+        role: "tool",
+        toolCallId: sentCallId,
+        content: "moth: a night insect"
+      })
+      expect(run.events).toEqual([
+        { type: "delta", content: "A moth is a night insect." },
+        { type: "done", finishReason: "stop" }
+      ])
+    })
+
+    it("answers arguments the tool cannot run without asking the client", async () => {
+      const { tool, entry } = createLookUpWordTool()
+      const sendBuiltInToolCall = vi.fn<AgentTurn["sendBuiltInToolCall"]>()
+      const openReplyStream = createRoundStreams(
+        [
+          {
+            type: "tool-calls",
+            toolCalls: [
+              { toolName: "look_up_word", argumentText: '{"word":"unknown"}' }
+            ]
+          }
+        ],
+        FINISH_ROUND
+      )
+
+      await getAgentReplyOutcome({
+        openReplyStream,
+        builtInTools: [entry],
+        sendBuiltInToolCall
+      })
+
+      expect(sendBuiltInToolCall).not.toHaveBeenCalled()
+      expect(tool.startedWords).toEqual([])
+      expect(openReplyStream.mock.calls[1]?.[0].messages.at(-1)).toMatchObject({
+        role: "tool",
+        content: "Cannot look up unknown."
+      })
+    })
+
+    it("hands the model the client's failed answer without running the tool", async () => {
+      const { tool, entry } = createLookUpWordTool()
+      const openReplyStream = createRoundStreams(
+        LOOK_UP_MOTH_ROUND,
+        FINISH_ROUND
+      )
+
+      await getAgentReplyOutcome({
+        openReplyStream,
+        builtInTools: [entry],
+        sendBuiltInToolCall: async () => ({
+          status: "failed",
+          reason: "declined",
+          content: "The person declined this call."
+        })
+      })
+
+      expect(tool.startedWords).toEqual([])
+      expect(openReplyStream.mock.calls[1]?.[0].messages.at(-1)).toMatchObject({
+        role: "tool",
+        content: "The person declined this call."
+      })
+    })
+
+    it("interrupts without running the tool when the reply is stopped while the call waits", async () => {
+      const cancellation = new AbortController()
+      const { tool, entry } = createLookUpWordTool()
+      const openReplyStream = createRoundStreams(LOOK_UP_MOTH_ROUND)
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream,
+        abortSignal: cancellation.signal,
+        builtInTools: [entry],
+        sendBuiltInToolCall: async () => {
+          cancellation.abort()
+          return undefined
+        }
+      })
+
+      expect(tool.startedWords).toEqual([])
+      expect(openReplyStream).toHaveBeenCalledOnce()
+      expect(run.persistedStates).toEqual([{ status: "interrupted" }])
+      expect(run.events).toEqual([INTERRUPTED_EVENT])
+    })
+
+    it("interrupts without another round when the reply is stopped while the tool runs", async () => {
+      const cancellation = new AbortController()
+      const { entry } = createLookUpWordTool(async (_word, abortSignal) => {
+        cancellation.abort()
+        abortSignal.throwIfAborted()
+        return { status: "succeeded", content: "too late" }
+      })
+      const openReplyStream = createRoundStreams(LOOK_UP_MOTH_ROUND)
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream,
+        abortSignal: cancellation.signal,
+        builtInTools: [entry],
+        sendBuiltInToolCall: async () => ({ status: "allowed" })
+      })
+
+      expect(openReplyStream).toHaveBeenCalledOnce()
+      expect(run.persistedStates).toEqual([{ status: "interrupted" }])
+      expect(run.events).toEqual([INTERRUPTED_EVENT])
+      expect(run.reportedFailures).toEqual([])
+      expect(run.reportedCancellations).toEqual([])
+    })
+
+    it("fails the reply when the tool's run rejects although the reply was not stopped", async () => {
+      const defect = new Error("tool defect")
+      const { entry } = createLookUpWordTool(async () => {
+        throw defect
+      })
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream: createRoundStreams(LOOK_UP_MOTH_ROUND),
+        builtInTools: [entry],
+        sendBuiltInToolCall: async () => ({ status: "allowed" })
+      })
+
+      expect(run.persistedStates).toEqual([{ status: "failed" }])
+      expect(run.events).toEqual([CHAT_FAILURE_EVENT])
+      expect(run.reportedFailures).toEqual([defect])
     })
   })
 })

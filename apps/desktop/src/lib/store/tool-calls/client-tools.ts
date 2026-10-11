@@ -15,12 +15,16 @@ import type {
 /** Validated input of one call to a client tool the desktop can run. */
 export type ClientToolInput =
   | {
+      /** The desktop runs the tool. */
+      readonly runner: "client"
       /** The read-text-file tool. */
       readonly toolName: "read_text_file"
       /** File the call reads. */
       readonly input: ReadTextFileInput
     }
   | {
+      /** The desktop runs the tool. */
+      readonly runner: "client"
       /** The search-files tool. */
       readonly toolName: "search_files"
       /** Root, query, target, and limits of the search. */
@@ -134,6 +138,7 @@ function parseReadTextFileInput(call: ChatToolCall): ClientToolInputResult {
   }
 
   const input: ClientToolInput = Object.freeze({
+    runner: "client",
     toolName: "read_text_file",
     input: parsed.data
   })
@@ -156,6 +161,7 @@ function parseSearchFilesInput(call: ChatToolCall): ClientToolInputResult {
   }
 
   const input: ClientToolInput = Object.freeze({
+    runner: "client",
     toolName: "search_files",
     filter: parsed.data
   })

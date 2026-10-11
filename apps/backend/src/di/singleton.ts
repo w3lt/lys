@@ -18,6 +18,8 @@ import LlmRuntimeService, {
   type LlmRuntimeFailureReporters
 } from "../modules/llm/llmRuntimeService"
 import LlmService from "../modules/llm/llmService"
+import type { BuiltInToolEntry } from "../modules/tool/builtIn/builtInTool"
+import { createBuiltInTools } from "../modules/tool/builtIn/builtInTools"
 
 /** Private close operation owned by one returned singleton-service bundle. */
 const CLOSE_SINGLETON_SERVICES = Symbol("close-singleton-services")
@@ -80,6 +82,11 @@ export type SingletonServices = Readonly<{
    * release.
    */
   agentService: AgentService
+  /**
+   * Every tool the backend runs, in the order Settings lists them; they own
+   * nothing to release.
+   */
+  builtInTools: readonly BuiltInToolEntry[]
   /** Module-private cleanup capability for the complete owned service lifetime. */
   [CLOSE_SINGLETON_SERVICES]: CloseSingletonServices
 }>
@@ -116,6 +123,8 @@ type DatabaseServices = Pick<
  * persistence first, so its startup recovery runs before any history is
  * read. The agent service is created next, over its Sqlite records and the
  * chat service; it reads nothing at creation and owns nothing to release.
+ * The built-in tools are created last; they contact nothing at creation and
+ * own nothing to release.
  * Creation stops at the first failure. The database is not part of the
  * returned bundle: the bundle's cleanup closes it after the LLM runtime
  * service and before the chat service.
@@ -174,6 +183,7 @@ export async function createSingletonServices(
       llmRuntimeService: llmRuntimeServiceAcquisition.service,
       ...databaseServices,
       agentService,
+      builtInTools: createBuiltInTools(),
       [CLOSE_SINGLETON_SERVICES]: closeOwnedSingletonServices
     })
   } catch (creationError) {

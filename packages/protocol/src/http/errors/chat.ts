@@ -118,3 +118,45 @@ export const chatToolCallNotPendingProblemSchema = z
 export type ChatToolCallNotPendingProblem = z.infer<
   typeof chatToolCallNotPendingProblemSchema
 >
+
+/** Stable problem category for an answer that does not fit its tool call. */
+const CHAT_TOOL_CALL_ANSWER_MISMATCH_PROBLEM_TYPE =
+  "urn:lys:problem:chat:tool-call-answer-mismatch"
+
+/** Client-facing summary shared by every answer-mismatch occurrence. */
+const CHAT_TOOL_CALL_ANSWER_MISMATCH_PROBLEM_TITLE =
+  "Tool call answer does not fit the call"
+
+/** HTTP status accompanying an answer-mismatch problem body. */
+const CHAT_TOOL_CALL_ANSWER_MISMATCH_PROBLEM_STATUS = 409
+
+/**
+ * Validates the RFC 9457 body returned when a tool result answers a waiting
+ * call with an answer that does not fit it.
+ *
+ * @remarks The tool-result endpoint transmits this contract with HTTP 409
+ * when a client tool's call is answered `allowed`, or a backend tool's call
+ * is answered `succeeded`. The request changed nothing, and the call keeps
+ * waiting for a fitting answer. The `type` literal is the machine-readable
+ * discriminator; `detail` is occurrence-specific, caller-safe text. Changing
+ * any fixed field requires coordinated consumers.
+ */
+export const chatToolCallAnswerMismatchProblemSchema = z
+  .strictObject({
+    /** Stable discriminator separating a mismatched answer from other failures. */
+    type: z.literal(CHAT_TOOL_CALL_ANSWER_MISMATCH_PROBLEM_TYPE),
+    /** Human-readable category summary shared across occurrences. */
+    title: z.literal(CHAT_TOOL_CALL_ANSWER_MISMATCH_PROBLEM_TITLE),
+    /** HTTP status accompanying this problem body. */
+    status: z.literal(CHAT_TOOL_CALL_ANSWER_MISMATCH_PROBLEM_STATUS),
+    /** Caller-safe explanation of this occurrence. */
+    detail: z.string().min(1),
+    /** Optional identifier of this problem occurrence. */
+    instance: z.string().min(1).optional()
+  })
+  .readonly()
+
+/** Tool-call-answer-mismatch Problem Details body inferred from its schema. */
+export type ChatToolCallAnswerMismatchProblem = z.infer<
+  typeof chatToolCallAnswerMismatchProblemSchema
+>

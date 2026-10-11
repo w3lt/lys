@@ -1,6 +1,8 @@
 import * as z from "zod"
 import {
+  chatToolCallAnswerMismatchProblemSchema,
   chatToolCallNotPendingProblemSchema,
+  type ChatToolCallAnswerMismatchProblem,
   type ChatToolCallNotPendingProblem
 } from "../../http/errors/chat"
 import { apiChatReplyToolResultRoute } from "./routes"
@@ -40,50 +42,103 @@ export type ChatToolResultPathParams = z.infer<
   typeof chatToolResultPathParamsSchema
 >
 
+/** Validates the answer of a client tool that ran and returned its output. */
+const succeededChatToolResultSchema = z.strictObject({
+  /** The tool ran and returned its output. */
+  status: z.literal("succeeded"),
+  /** Output the model reads; empty when the tool returned nothing, such as an empty file. */
+  content: z.string()
+})
+
+/**
+ * Validates the answer of a call that produced no output.
+ *
+ * @remarks `reason` tells the backend why the call failed and is not shown
+ * to the model: `declined` when the person said no or switched the tool or
+ * tool calls off, `toolFailed` when the tool ran and reported a failure, and
+ * `runFailed` when the client could not run or approve the tool.
+ */
+const failedChatToolResultSchema = z.strictObject({
+  /** The call produced no output. */
+  status: z.literal("failed"),
+  /** Why the call failed. */
+  reason: z.enum(["declined", "toolFailed", "runFailed"]),
+  /** Non-empty explanation the model reads. */
+  content: z.string().min(1)
+})
+
+/** Validates the answer that lets the backend run one of its own tools. */
+const allowedChatToolCallSchema = z.strictObject({
+  /** The person, or the tool's approval choice, allowed the backend to run the call. */
+  status: z.literal("allowed")
+})
+
+/**
+ * Validates what a client tool's call returned after the client ran it, or
+ * why it produced no output.
+ *
+ * @remarks `content` is the exact text the model reads.
+ */
+export const chatToolResultSchema = z.discriminatedUnion("status", [
+  succeededChatToolResultSchema,
+  failedChatToolResultSchema
+])
+
+/** What a client tool's call returned, or why it produced no output. */
+export type ChatToolResult = z.infer<typeof chatToolResultSchema>
+
 /**
  * Validates the answer a client gives to one tool call.
  *
- * @remarks `content` is the exact text the model reads. `reason` tells the
- * backend why a call failed and is not shown to the model: `declined` when
- * the person said no or switched the tool or tool calls off, `toolFailed`
- * when the tool ran and reported a failure, and `runFailed` when the client
- * could not run the tool.
+ * @remarks Which answers fit depends on which side runs the called tool. A
+ * call of a client tool is answered with its result: `succeeded` or
+ * `failed`. A call of a backend tool is answered with `allowed`, after which
+ * the backend runs it, or `failed`, whose `content` the model reads instead.
+ * The tool-result endpoint rejects an answer that does not fit its call.
  */
-export const chatToolResultSchema = z.discriminatedUnion("status", [
-  z.strictObject({
-    /** The tool ran and returned its output. */
-    status: z.literal("succeeded"),
-    /** Output the model reads; empty when the tool returned nothing, such as an empty file. */
-    content: z.string()
-  }),
-  z.strictObject({
-    /** The call produced no output. */
-    status: z.literal("failed"),
-    /** Why the call failed. */
-    reason: z.enum(["declined", "toolFailed", "runFailed"]),
-    /** Non-empty explanation the model reads. */
-    content: z.string().min(1)
-  })
+export const chatToolAnswerSchema = z.discriminatedUnion("status", [
+  succeededChatToolResultSchema,
+  failedChatToolResultSchema,
+  allowedChatToolCallSchema
 ])
 
 /** Answer a client gives to one tool call. */
-export type ChatToolResult = z.infer<typeof chatToolResultSchema>
+export type ChatToolAnswer = z.infer<typeof chatToolAnswerSchema>
+
+/**
+ * Answer that fits a call of a backend tool: `allowed`, after which the
+ * backend runs it, or `failed`, whose `content` the model reads instead.
+ */
+export type BackendToolCallAnswer = Extract<
+  ChatToolAnswer,
+  { status: "allowed" | "failed" }
+>
+
+/** Validates the tool-result conflicts, which share HTTP 409. */
+const sendChatToolResultApiConflictSchema = z.union([
+  chatToolCallNotPendingProblemSchema,
+  chatToolCallAnswerMismatchProblemSchema
+])
 
 /** Selects the tool-result failure validator by HTTP status. */
 const sendChatToolResultApiResponseSchemas = Object.freeze({
-  409: chatToolCallNotPendingProblemSchema
+  409: sendChatToolResultApiConflictSchema
 })
 
 /**
  * Describes the POST endpoint that answers one tool call of a running reply.
  *
  * @remarks Success is a bodyless 204 sent once the answer is accepted; the
- * reply's loop then continues. A call that is unknown, already answered, or
- * whose reply ended returns the tool-call-not-pending problem with HTTP 409
- * and changes nothing, so a repeated request is harmless. The body is limited
- * to {@link MAXIMUM_TOOL_RESULT_BODY_BYTES}. The backend sets no time limit
- * on a pending call: it waits until this request, Stop, or backend shutdown.
- * A newer turn in the conversation or deleting the conversation does not end
+ * reply's loop then continues, and after `allowed` the backend runs its own
+ * tool. A call that is unknown, already answered, or whose reply ended
+ * returns the tool-call-not-pending problem with HTTP 409 and changes
+ * nothing, so a repeated request is harmless. An answer that does not fit
+ * the call, such as `allowed` for a client tool, returns the
+ * tool-call-answer-mismatch problem with HTTP 409 and changes nothing; the
+ * call keeps waiting. The body is limited to
+ * {@link MAXIMUM_TOOL_RESULT_BODY_BYTES}. The backend sets no time limit on
+ * a pending call: it waits until this request, Stop, or backend shutdown. A
+ * newer turn in the conversation or deleting the conversation does not end
  * the wait yet. Changing the method, path, or schemas requires coordinated
  * consumers.
  */
@@ -91,7 +146,7 @@ export const sendChatToolResultApi = Object.freeze({
   method: "POST",
   path: apiChatReplyToolResultRoute,
   params: chatToolResultPathParamsSchema,
-  body: chatToolResultSchema,
+  body: chatToolAnswerSchema,
   bodyLimitBytes: MAXIMUM_TOOL_RESULT_BODY_BYTES,
   responses: sendChatToolResultApiResponseSchemas
 })
@@ -100,8 +155,12 @@ export const sendChatToolResultApi = Object.freeze({
 export type SendChatToolResultApiReply = {
   /** The answer was accepted and the reply's loop continues. */
   readonly 204: undefined
-  /** The call is not waiting for an answer; nothing changed. */
-  readonly 409: ChatToolCallNotPendingProblem
+  /**
+   * The call is not waiting for an answer, or the answer does not fit the
+   * call; nothing changed.
+   */
+  readonly 409:
+    ChatToolCallNotPendingProblem | ChatToolCallAnswerMismatchProblem
 }
 
 /** Fastify route type for the tool-result endpoint. */
@@ -109,7 +168,7 @@ export type SendChatToolResultApiRoute = {
   /** Validated identifiers of the call being answered. */
   readonly Params: ChatToolResultPathParams
   /** Validated answer. */
-  readonly Body: ChatToolResult
+  readonly Body: ChatToolAnswer
   /** Status-specific empty success and Problem Details payloads. */
   readonly Reply: SendChatToolResultApiReply
 }

@@ -8,6 +8,7 @@ import type {
   OpenAIFunctionTool,
   ToolDefinition
 } from "@lys/share"
+import type { BuiltInToolEntry } from "../tool/builtIn/builtInTool"
 import { ChatCompletionCancelledError } from "../../utils/errors"
 import { buildAgentContext } from "./agentContext"
 import type { ReplyContextMessage, ReplyModel } from "./replyModel"
@@ -15,7 +16,8 @@ import {
   buildAgentToolset,
   buildOfferedTools,
   handleToolCallRound,
-  type SendToolCall,
+  type SendBuiltInToolCall,
+  type SendClientToolCall,
   type ToolCallRound
 } from "./toolCallRound"
 
@@ -60,7 +62,12 @@ export type AgentTurn = Readonly<{
   /** Caller-provided sampling and reply length controls. */
   generationOptions: MessageGenerationOptions
   /** Client tools offered for the turn, each name once; empty when none are. */
-  tools: readonly ToolDefinition[]
+  clientTools: readonly ToolDefinition[]
+  /**
+   * Backend tools offered for the turn, each name once and none named like a
+   * client tool; empty when none are.
+   */
+  builtInTools: readonly BuiltInToolEntry[]
   /** Generation-owned cancellation, aborted by Stop or shutdown. */
   abortSignal: AbortSignal
   /** Stores one delta before it is sent; false after deletion or finalization. */
@@ -72,11 +79,18 @@ export type AgentTurn = Readonly<{
   /** Queues one event for every stream following the reply; never waits. */
   sendEvent: (event: ChatGenerationEvent) => void
   /**
-   * Sends one checked tool call to every stream following the reply and
-   * waits for the client's answer; resolves with undefined when the reply was
-   * stopped or shut down while the call waited. Never rejects.
+   * Sends one checked call of a client tool to every stream following the
+   * reply and waits for the client's result; resolves with undefined when the
+   * reply was stopped or shut down while the call waited. Never rejects.
    */
-  sendToolCall: SendToolCall
+  sendClientToolCall: SendClientToolCall
+  /**
+   * Sends one checked call of a backend tool to every stream following the
+   * reply and waits for the client to allow it or answer it as failed;
+   * resolves with undefined when the reply was stopped or shut down while
+   * the call waited. Never rejects.
+   */
+  sendBuiltInToolCall: SendBuiltInToolCall
   /**
    * Receives the failure that ended a reply cancelled by Stop or shutdown, or
    * reported as cancelled by the model.
@@ -181,7 +195,9 @@ export default class Agent {
    * turn was cancelled or the model reports a cancellation, and to
    * `reportReplyFailure` otherwise. When the turn offers tools, each round
    * that calls tools has its calls answered and the model is asked again;
-   * every round's text is stored and sent.
+   * every round's text is stored and sent. A client tool's call is answered
+   * by the client; a backend tool's call runs here once the client allows
+   * it, under the turn's cancellation.
    */
   public async createReply(turn: AgentTurn): Promise<void> {
     try {
@@ -213,8 +229,8 @@ export default class Agent {
    * @returns The supported finish reason, or undefined after cancellation,
    * supersession, or deletion.
    * @throws If the model fails, a stream ends without ending its round, a
-   * delta cannot be stored, or the model calls a tool although none was
-   * offered.
+   * delta cannot be stored, the model calls a tool although none was
+   * offered, or a backend tool's run fails for a reason other than Stop.
    * @remarks A round that ends with tool calls has each call answered, then
    * the model is asked again with the round and its results. A later round's
    * first text starts on a new paragraph when an earlier round stored text.
@@ -222,7 +238,7 @@ export default class Agent {
   async #createReplyText(
     turn: AgentTurn
   ): Promise<ConversationAssistantMessageFinishReason | undefined> {
-    const tools = buildAgentToolset(turn.tools)
+    const tools = buildAgentToolset(turn.clientTools, turn.builtInTools)
     const offeredTools = buildOfferedTools(tools)
     let messages = buildAgentContext(
       this.#systemPrompt,
@@ -236,11 +252,12 @@ export default class Agent {
       textPrefix: ""
     })
     while (round.status === "tool-calls") {
-      const roundMessages = await handleToolCallRound(
-        round,
+      const roundMessages = await handleToolCallRound(round, {
         tools,
-        turn.sendToolCall
-      )
+        sendClientToolCall: turn.sendClientToolCall,
+        sendBuiltInToolCall: turn.sendBuiltInToolCall,
+        abortSignal: turn.abortSignal
+      })
       if (roundMessages === undefined) return undefined
       messages = [...messages, ...roundMessages]
       hasStoredText ||= round.text !== ""

@@ -23,6 +23,7 @@ import {
   formatToolGroupCount,
   formatToolGroupLabel,
   formatToolTokenEstimate,
+  getToolRunnerPresentation,
   type ToolGroupListing
 } from "./tool-presentation"
 
@@ -173,6 +174,7 @@ function ToolDetails({
   onApprovalChange
 }: ToolDetailsProps): ReactElement {
   const argumentsHeadingId = useId()
+  const runner = getToolRunnerPresentation(tool.runner)
 
   return (
     <div className="settings-view__tool-details" id={detailsId}>
@@ -197,13 +199,10 @@ function ToolDetails({
 
       <div className="settings-view__tool-detail-row">
         <div className="settings-view__identity-lines">
-          <h3>Runs in Lys</h3>
-          <p>
-            Handled by the Lys app on this machine. Works whichever runtime you
-            point Lys at, and stops when you close Lys.
-          </p>
+          <h3>{runner.heading}</h3>
+          <p>{runner.note}</p>
         </div>
-        <span className="settings-view__tool-origin">in Lys</span>
+        <span className="settings-view__tool-origin">{runner.label}</span>
       </div>
 
       <ToolApprovalRow
@@ -252,6 +251,8 @@ function ToolSummary({
   descriptionId,
   asksId
 }: ToolSummaryProps): ReactElement {
+  const runner = getToolRunnerPresentation(tool.runner)
+
   return (
     <span className="settings-view__tool-lines">
       <span className="settings-view__tool-title">
@@ -277,9 +278,9 @@ function ToolSummary({
           className="settings-view__tool-badge"
           data-badge="origin"
           id={originId}
-          title="Runs inside the Lys app"
+          title={runner.title}
         >
-          in Lys
+          {runner.label}
         </span>
       </span>
       <span className="settings-view__tool-description" id={descriptionId}>
@@ -455,10 +456,10 @@ export type ToolGroupSectionProps = {
   /** Proposes showing one tool's details, or none with null. */
   readonly onExpandedToolNameChange: (toolName: string | null) => void
   /** Proposes switching one tool on or off. */
-  readonly onToolOnChange: (toolName: string, isOn: boolean) => void
+  readonly onToolOnChange: (tool: ToolDefinition, isOn: boolean) => void
   /** Proposes another approval for one tool. */
   readonly onToolApprovalChange: (
-    toolName: string,
+    tool: ToolDefinition,
     approval: ToolApproval
   ) => void
 }
@@ -486,7 +487,7 @@ export function ToolGroupSection({
 }: ToolGroupSectionProps): ReactElement {
   const headingId = useId()
   const onToolCount = listing.tools.filter(
-    (tool) => getToolChoice(toolChoices, tool.name).isOn
+    (tool) => getToolChoice(toolChoices, tool).isOn
   ).length
 
   /**
@@ -498,17 +499,15 @@ export function ToolGroupSection({
   function buildToolRow(tool: ToolDefinition): ReactElement {
     return (
       <ToolRow
-        choice={getToolChoice(toolChoices, tool.name)}
+        choice={getToolChoice(toolChoices, tool)}
         isExpanded={tool.name === expandedToolName}
         isLocked={isLocked}
         key={tool.name}
-        onApprovalChange={(approval) =>
-          onToolApprovalChange(tool.name, approval)
-        }
+        onApprovalChange={(approval) => onToolApprovalChange(tool, approval)}
         onIsExpandedChange={(isExpanded) =>
           onExpandedToolNameChange(isExpanded ? tool.name : null)
         }
-        onIsOnChange={(isOn) => onToolOnChange(tool.name, isOn)}
+        onIsOnChange={(isOn) => onToolOnChange(tool, isOn)}
         tool={tool}
       />
     )

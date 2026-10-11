@@ -143,23 +143,29 @@ IP address is answered at once. Once allowed, a read:
 
 1. requests the page with Node's `http`/`https` client; every address a host
    name resolves to, and every connected socket, must pass the address rule in
-   `webAddresses.ts`, and each of at most five redirects is checked again as a
-   new URL;
+   `webAddresses.ts`. No redirect is followed: a redirect's target is checked
+   as a new URL and given to the model, which can call `read_page` with it;
 2. accepts only `text/html`, `application/xhtml+xml`, and `text/plain`,
-   decompresses gzip, deflate, and Brotli, reads at most 4 MiB, and decodes the
-   charset from the byte order mark, the header, or a `<meta>` tag;
+   asks for and decompresses gzip and Brotli (a `deflate` body is refused,
+   because servers send it in two incompatible forms), reads at most 4 MiB,
+   and decodes the charset from the byte order mark, the header, or a
+   `<meta>` tag, where a UTF-16 label means UTF-8 and `x-user-defined` means
+   windows-1252, as in browsers;
 3. extracts the main text with Mozilla Readability over a linkedom document,
-   refusing pages with more than 40,000 elements or a nesting depth sum above
-   400,000;
+   refusing markup with more than 40,000 start tags before parsing it, and a
+   parsed page with more than 40,000 elements or a nesting depth sum above
+   400,000. A `<br>` or a nested block keeps the words around it apart;
 4. splits the text into passages of at most 1,200 characters and keeps at most
    12,000 characters: the whole page, the passages that best match `focus` by
    BM25, or the beginning;
-5. frames the passages between `<<<page content>>>` delimiters with a notice
-   that the content is untrusted and an instruction to cite the page, and
-   notes a page with less than 200 characters of main text, which may need
-   JavaScript.
+5. frames the page's title, site, and date and the passages between
+   `<<<page content>>>` delimiters, with a notice that the content is
+   untrusted and an instruction to cite the page, and notes a page with less
+   than 200 characters of main text, which may need JavaScript. Every run of
+   three or more `<` or `>` in page text is shortened to two, so no page can
+   write a delimiter.
 
-The whole read, redirects included, must finish within 15 seconds. Failures
+The whole read must finish within 15 seconds. Failures
 the model can act on, such as an HTTP error status, a non-HTML body, or a page
 without any main text, become the call's result. Pages that need JavaScript
 cannot be read.

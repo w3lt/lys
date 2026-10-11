@@ -165,16 +165,25 @@ Chat turns that offer tools have an approved exception to
 [API-019](https://github.com/w3lt/lys/blob/main/docs/code_standards/API.md): a
 reply can make any number of tool calls. The exception was approved by the
 maintainer on 2026-10-09 for [PR #128](https://github.com/w3lt/lys/pull/128).
+On 2026-10-11 the maintainer extended it, for
+[PR #157](https://github.com/w3lt/lys/pull/157), to the backend's own tools:
+the allowed calls of one round run in the backend in parallel, with no limit
+on how many run at once.
 
-- **Scope:** the tool loop of `Agent.createReply` and the `tools` offer of
-  `POST /api/v1/chat`. Every other API still follows API-019.
+- **Scope:** the tool loop of `Agent.createReply`, including the backend tool
+  runs of one round, and the `tools` offer of `POST /api/v1/chat`. Every
+  other API still follows API-019.
 - **Constraint:** the maintainer removed the per-reply limit until its design
   is decided in [#136](https://github.com/w3lt/lys/issues/136): which calls
   run when a round asks for more than remain, and how the reply then has to
-  answer.
+  answer. A model that makes several calls in one round treats them as
+  independent, so the maintainer chose to run them in parallel and
+  independently; the per-reply limit will also bound how many run at once.
 - **Alternatives considered:** keeping the earlier 1–16 `maxCalls` limit, or a
   fixed backend cap, was not taken because the maintainer chose to decide the
-  limit in its own issue.
+  limit in its own issue. Running one or two backend tool calls at a time per
+  reply was not taken either: the calls are independent, and the limit from
+  #136 will bound them.
 - **Risk and control:** a model that keeps calling tools never ends on its
   own. The person's approval controls only the calls a tool runs, in the
   desktop or in the backend: on Ask me, each of those waits for Allow; on Just
@@ -186,9 +195,13 @@ maintainer on 2026-10-09 for [PR #128](https://github.com/w3lt/lys/pull/128).
   calls repeat until the person presses Stop. Each round sends the growing
   context to LM Studio again, which refuses a request beyond the model's
   context length unless its context overflow setting truncates the context
-  instead.
+  instead. On Just run, a round of N `read_page` calls opens N connections at
+  once and holds up to N × 4 MiB of page bodies; each read ends within 15
+  seconds, and their extractions run one after another on the backend's
+  thread, about a second each at most.
 - **Removal condition:** [#136](https://github.com/w3lt/lys/issues/136) adds
-  the limit back.
+  the limit back, which also bounds how many backend tool calls of a round
+  run at once.
 
 ## Tool call wait exception
 
@@ -196,11 +209,14 @@ Chat turns that offer tools have a second approved exception to
 [API-019](https://github.com/w3lt/lys/blob/main/docs/code_standards/API.md): a
 reply that waits for the client's answer to a tool call has no time limit, and
 only some events end the wait. The exception was approved by the maintainer on
-2026-10-09 for [PR #128](https://github.com/w3lt/lys/pull/128) only.
+2026-10-09 for [PR #128](https://github.com/w3lt/lys/pull/128), and widened by
+the maintainer on 2026-10-11 for [PR #157](https://github.com/w3lt/lys/pull/157)
+to the wait for the answer to a backend tool's call.
 
-- **Scope:** the wait for a client tool result in the reply's generation, its
-  pending calls, and the reply-events connections that follow it while it
-  waits. Every other API still follows API-019.
+- **Scope:** the wait for the client's answer to a tool call in the reply's
+  generation, which is a client tool's result, or `allowed` or `failed` for a
+  backend tool's call; its pending calls; and the reply-events connections
+  that follow it while it waits. Every other API still follows API-019.
 - **Constraint:** on Ask me the person may take any time to allow or reject a
   call, so the backend sets no timer on the wait. The answer, Stop, or backend
   shutdown ends it. A newer turn in the conversation or deleting the
@@ -221,6 +237,41 @@ only some events end the wait. The exception was approved by the maintainer on
 - **Removal condition:** [#137](https://github.com/w3lt/lys/issues/137) ends
   the wait on a newer turn or a deletion. The missing timer stays by design:
   the person's answer or Stop bounds the wait.
+
+## Tool run failure exception
+
+Chat turns that offer backend tools have an approved exception to
+[ASYNC-010](https://github.com/w3lt/lys/blob/main/docs/code_standards/ASYNC.md)
+and [ERROR-029](https://github.com/w3lt/lys/blob/main/docs/code_standards/ERROR.md):
+when one backend tool's run rejects, the reply fails while the round's other
+calls keep going. The exception was approved by the maintainer on 2026-10-11
+for [PR #157](https://github.com/w3lt/lys/pull/157), following review findings
+I-3 and I-8.
+
+- **Scope:** `handleToolCallRound` and `handleBuiltInToolCall` in
+  `apps/backend/src/modules/agent/toolCallRound.ts`, and only a run that
+  rejects for a reason other than Stop. A failure a tool reports as its
+  result, such as an HTTP error status or a timeout of `read_page`, is that
+  call's result and keeps the reply going.
+- **Constraint:** the calls of one round run in parallel and independently
+  (see the [tool call limit exception](#tool-call-limit-exception)). A run
+  rejects only on a defect in Lys or in a library. Stopping the round's other
+  calls then needs a round-scoped cancellation that also reaches the waits
+  for the person, which is outside PR #157's purpose.
+- **Alternatives considered:** a round-scoped `AbortController`, combined
+  with the reply's signal and aborted when a run rejects, with the waits
+  observing it too, was deferred to
+  [#159](https://github.com/w3lt/lys/issues/159). Turning the rejection into
+  that call's failed result, so that the reply goes on, was not taken,
+  because it would hide a defect from the person.
+- **Risk and control:** the round rejects as soon as one run rejects, and the
+  reply is stored as failed. The round's other backend runs keep going until
+  they end, for `read_page` a request of at most 15 seconds and 4 MiB plus an
+  extraction of about a second, and their results are discarded: nothing
+  they produce is stored or shown. Calls still waiting for the person end
+  when the failed reply task settles.
+- **Removal condition:** [#159](https://github.com/w3lt/lys/issues/159) stops
+  the round's other calls before the reply fails.
 
 ## Settings file version exception
 

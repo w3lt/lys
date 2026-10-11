@@ -55,8 +55,8 @@ settings file — all of them yours to read, move, or delete, as long as the
 [three database files travel together](https://lys.negentropy.studio/operate/data/).
 Set `LYS_HOME` to an absolute path and she keeps them there instead.
 The one way out is a web page you let her read: the `read_page` tool starts
-off, she asks before every page, and her own backend fetches it, with no
-service in between.
+off, she asks before every page unless you choose Just run for the session,
+and her own backend fetches it, with no service in between.
 
 That closeness is the design goal rather than a finished guarantee. Local
 ownership is how the system is built, but the handbook is candid about

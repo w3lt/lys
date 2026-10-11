@@ -10,7 +10,8 @@ The current security posture is intentionally simple and local. The backend and
 LM Studio both run on loopback, request and event payloads are validated with
 Zod, and there is no credential-management subsystem yet. The one outbound
 connection is the `read_page` tool, which reads a public web page after the
-person allows the call.
+person allows the call, or at once when the person chose Just run for the
+session.
 
 ## Current trust boundaries
 
@@ -32,9 +33,9 @@ person allows the call.
 | CORS policy                | Fastify admits only the `http://localhost:1420` and `http://127.0.0.1:1420` development origins and the `tauri://localhost` app origin. |
 | Zod validation             | Backend validates route bodies, parameters, and query strings; desktop validates SSE payloads and HTTP responses.                       |
 | Route-local abort handling | Closing the SSE connection aborts the backend chat task.                                                                                |
-| Approval of web reads      | A `read_page` call runs only after the desktop answers `allowed`; the card shows the full URL and its host. The tool starts off.        |
+| Approval of web reads      | `read_page` runs only once the desktop answers `allowed`, from the card (full URL and host) or at once on Just run. It starts off.      |
 | Address rule               | `read_page` never connects to loopback, private, link-local, shared, documentation, benchmarking, multicast, or reserved addresses.     |
-| Untrusted page framing     | Page text reaches the model between content delimiters it cannot forge, with a notice to never follow instructions it contains.         |
+| Untrusted page framing     | Page text and the page's title, site, and date reach the model between delimiters it cannot forge, with a notice never to obey them.    |
 
 ## Candid limits
 
@@ -50,8 +51,9 @@ person allows the call.
 ## Web reads
 
 `read_page` reads any public URL the model chooses: there is no allow list,
-because the person approves each call. The protections are about where a read
-may connect and what reaches the model:
+because the person approves the calls, each one on Ask me or all of them for
+the session on Just run. The protections are about where a read may connect
+and what reaches the model:
 
 - **Arguments.** A URL that is not absolute `http` or `https`, is longer than
   2,048 characters, carries a username or password, or names `localhost` or a
@@ -60,18 +62,29 @@ may connect and what reaches the model:
 - **Connections.** The check runs inside the lookup the connection itself
   uses: every address the host name resolves to must pass, so the name cannot
   resolve differently between the check and the connection. The connected
-  socket's address is checked again. Redirects are followed by hand, at most
-  five, and each target passes the URL and address checks. IPv4-mapped IPv6
-  addresses are matched against the IPv4 rules.
+  socket's address is checked again. IPv4-mapped IPv6 addresses are matched
+  against the IPv4 rules.
+- **Redirects.** No redirect is followed, so a read only ever requests the
+  URL the call names, on the host the card shows. When a page redirects, the
+  model gets the target URL and has to call `read_page` again to read it,
+  which asks again on Ask me. A target that fails the URL checks is reported
+  without its URL. [#158](https://github.com/w3lt/lys/issues/158) decides
+  whether some redirects should be followed.
 - **Requests.** No cookie, credential, or `Referer` is sent, and nothing is
   stored. The request names Lys in its `User-Agent`.
-- **Bounds.** One read takes at most 15 seconds and 4 MiB of body, and a page
-  with more than 40,000 elements or a nesting depth sum above 400,000 is
-  refused before extraction, so a hostile page cannot stall the backend.
+- **Bounds.** One read takes at most 15 seconds and 4 MiB of body. Markup
+  with more than 40,000 start tags is refused before it is parsed, and a
+  parsed page with more than 40,000 elements or a nesting depth sum above
+  400,000 is refused before Readability runs. Extraction still runs on the
+  backend's only thread, but these limits keep it to about a second on
+  current hardware, deeply nested hostile markup included.
 - **Prompt injection.** The model is told that page content is untrusted and
   must never be followed. This lowers the risk but cannot remove it: a page can
-  still try to steer the reply. Each further tool call still needs the
-  person's approval.
+  still try to steer the reply. On Ask me, each further tool call still needs
+  the person's approval. On Just run it does not: with `read_page` and a file
+  tool both on Just run, a page's instructions can lead the model to read a
+  file and send its content in the URL of a second `read_page` call, with no
+  card shown.
 
 The backend makes the request, so a backend that runs on another machine
 reads from that machine's network position. Today the backend runs on the

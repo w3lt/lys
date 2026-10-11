@@ -1,11 +1,12 @@
 import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import type { ToolDefinition } from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
 import {
   calculateToolTokenEstimate,
   formatToolTokenEstimate
 } from "@/components/SettingsViewComponents/tool-presentation"
-import { startBackendFake } from "../../support/backendFake"
+import { buildJsonResponse, startBackendFake } from "../../support/backendFake"
 import { buildLlmInfo } from "../../support/modelFixtures"
 import { startNativeHostFake } from "../../support/nativeHostFake"
 import {
@@ -18,7 +19,10 @@ import {
   loadFreshSettingsView
 } from "../../support/settingsViewFixtures"
 import { createControlledPromise } from "../../support/settlement"
-import { buildToolDefinition } from "../../support/toolFixtures"
+import {
+  buildBackendToolDefinition,
+  buildToolDefinition
+} from "../../support/toolFixtures"
 import { waitForRenderedWork } from "../../support/rendering"
 
 /** Tools the desktop lists, in Settings order. */
@@ -26,6 +30,9 @@ const TOOLS = [
   buildToolDefinition("read_text_file"),
   buildToolDefinition("find_files")
 ]
+
+/** Tool the backend lists; it sends requests off this machine. */
+const READ_PAGE = buildBackendToolDefinition("read_page")
 
 /** A loaded model trained for tool use. */
 const TRAINED_RUNTIME: RuntimeArrangement = {
@@ -49,12 +56,12 @@ const UNTRAINED_RUNTIME: RuntimeArrangement = {
 }
 
 /**
- * Formats the offer the status line states for some of {@link TOOLS}.
+ * Formats the offer the status line states for some listed tools.
  *
  * @param tools - Tools switched on.
  * @returns The offer, such as `2 offered · ~216 tok per request`.
  */
-function formatOffer(tools: typeof TOOLS): string {
+function formatOffer(tools: readonly ToolDefinition[]): string {
   const tokens = tools.reduce(
     (total, tool) => total + calculateToolTokenEstimate(tool),
     0
@@ -63,13 +70,17 @@ function formatOffer(tools: typeof TOOLS): string {
 }
 
 /**
- * Renders the settings view on the Tools pane and waits for the pane body.
+ * Renders the settings view on the Tools pane, with the backend listing
+ * {@link READ_PAGE}, and waits for the pane body.
  *
  * @param runtime - Backend, LM Studio, and model facts.
  * @returns The application store.
  */
 async function startToolPane(runtime: RuntimeArrangement = TRAINED_RUNTIME) {
-  startBackendFake({ [INVENTORY_ROUTE]: buildInventoryRoute(runtime) })
+  startBackendFake({
+    [INVENTORY_ROUTE]: buildInventoryRoute(runtime),
+    "GET /api/v1/tools": () => buildJsonResponse(200, { tools: [READ_PAGE] })
+  })
   const { useLysStore, SettingsView } = await loadFreshSettingsView(
     "tools",
     runtime
@@ -95,6 +106,7 @@ describe("ToolPaneContent", () => {
     await waitForRenderedWork()
 
     expect(screen.getByRole("region", { name: "files" })).toBeInTheDocument()
+    expect(screen.getByRole("region", { name: "web" })).toBeInTheDocument()
     expect(
       screen.getByRole("switch", { name: "Tool calls" })
     ).toBeInTheDocument()
@@ -152,6 +164,25 @@ describe("ToolPaneContent", () => {
     )
     expect(screen.getByRole("region", { name: "files" })).toHaveTextContent(
       /^files1 of 2 on/
+    )
+  })
+
+  it("leaves the backend's tool out of the offer until it is switched on", async () => {
+    startNativeHostFake({ list_tools: () => TOOLS })
+    await startToolPane()
+    const user = userEvent.setup()
+    const toolCalls = screen.getByRole("switch", { name: "Tool calls" })
+    expect(toolCalls).toHaveAccessibleDescription(
+      `qwen3-8b · ${formatOffer(TOOLS)}`
+    )
+
+    await user.click(screen.getByRole("switch", { name: "Use read_page" }))
+
+    expect(toolCalls).toHaveAccessibleDescription(
+      `qwen3-8b · ${formatOffer([...TOOLS, READ_PAGE])}`
+    )
+    expect(screen.getByRole("region", { name: "web" })).toHaveTextContent(
+      /^web1 of 1 on/
     )
   })
 

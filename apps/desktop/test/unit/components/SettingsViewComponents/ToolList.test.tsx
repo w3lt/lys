@@ -8,7 +8,10 @@ import {
   calculateToolTokenEstimate
 } from "@/components/SettingsViewComponents/tool-presentation"
 import type { ToolChoice } from "@/lib/store/tools"
-import { buildToolDefinition } from "../../support/toolFixtures"
+import {
+  buildBackendToolDefinition,
+  buildToolDefinition
+} from "../../support/toolFixtures"
 
 /** Tool with one required path and an optional enum. */
 const READ_TEXT_FILE = buildToolDefinition("read_text_file", [
@@ -27,6 +30,12 @@ const LIST_ROOTS = buildToolDefinition("list_roots", [])
 
 /** The files group listing both tools. */
 const [FILES_GROUP] = buildToolGroups([READ_TEXT_FILE, LIST_ROOTS])
+
+/** Tool the backend runs; it sends requests off this machine. */
+const READ_PAGE = buildBackendToolDefinition("read_page")
+
+/** The web group listing the backend's tool. */
+const [WEB_GROUP] = buildToolGroups([READ_PAGE])
 
 /**
  * Renders the group with spies for every proposal.
@@ -231,6 +240,25 @@ describe("ToolGroupSection", () => {
     expect(getToolToggle("list_roots")).not.toHaveAttribute("aria-controls")
   })
 
+  it("shows a backend tool as running in the backend, off until switched on", () => {
+    startToolGroup({ listing: WEB_GROUP, expandedToolName: "read_page" })
+
+    const toggle = getToolToggle("read_page")
+    expect(toggle).toHaveAccessibleDescription(
+      "network in backend Runs read_page in the backend."
+    )
+    expect(
+      screen.getByRole("switch", { name: "Use read_page" })
+    ).not.toBeChecked()
+    const details = document.getElementById(
+      toggle.getAttribute("aria-controls") ?? ""
+    )
+    expect(details).toHaveTextContent("Runs in Lys’s backend")
+    expect(details).toHaveTextContent(
+      "Handled by Lys’s backend, which sends the request from wherever it runs."
+    )
+  })
+
   it("says when an expanded tool takes no arguments", () => {
     startToolGroup({ expandedToolName: "list_roots" })
 
@@ -248,11 +276,11 @@ describe("ToolGroupSection", () => {
     await user.click(screen.getByRole("button", { name: "Ask me" }))
 
     expect(proposals.onToolOnChange).toHaveBeenCalledExactlyOnceWith(
-      "read_text_file",
+      READ_TEXT_FILE,
       false
     )
     expect(proposals.onToolApprovalChange).toHaveBeenCalledExactlyOnceWith(
-      "read_text_file",
+      READ_TEXT_FILE,
       "run"
     )
   })

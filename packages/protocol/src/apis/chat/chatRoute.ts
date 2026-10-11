@@ -8,6 +8,11 @@ import {
   hasDistinctToolNames,
   toolDefinitionSchema
 } from "@lys/share"
+import { agentNotFoundProblemSchema } from "../../http/errors/agent"
+import {
+  conversationAgentMissingProblemSchema,
+  conversationNotFoundProblemSchema
+} from "../../http/errors/conversation"
 import {
   chatDeltaEventSchema,
   chatDoneEventSchema,
@@ -31,15 +36,15 @@ export const messageGenerationOptionsSchema = z.strictObject({
 /**
  * Validates the conversation a chat turn starts or continues.
  *
- * @remarks `kind` selects the variant. A new conversation names the agent
- * that answers it; a continued conversation keeps the agent it was started
- * with, so it names none.
+ * @remarks `kind` selects the variant. A new conversation names the built-in
+ * or stored agent that answers it; a continued conversation keeps the agent
+ * it was started with, so it names none.
  */
 const chatConversationTargetSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     /** The turn starts a new conversation. */
     kind: z.literal("new"),
-    /** Code of the agent that answers the new conversation, such as `lys`. */
+    /** Code of the agent that answers the new conversation, such as `caliginia`. */
     agentCode: agentCodeSchema
   }),
   z.strictObject({
@@ -131,11 +136,29 @@ export const chatApiStreamEventSchema = z.discriminatedUnion("type", [
 ])
 
 /**
+ * Selects the validator of a chat failure sent before the stream starts, by
+ * HTTP status.
+ *
+ * @remarks A 404 is the agent-not-found problem when a new conversation
+ * names a code no agent has, and the conversation-not-found problem when a
+ * continued conversation is not stored. A 409 is the conversation agent
+ * missing problem: the continued conversation is stored, but its agent no
+ * longer exists.
+ */
+const chatApiResponseSchemas = Object.freeze({
+  404: z.union([agentNotFoundProblemSchema, conversationNotFoundProblemSchema]),
+  409: conversationAgentMissingProblemSchema
+})
+
+/**
  * Describes the POST chat endpoint and its text/event-stream response contract.
  *
  * @remarks Strict request and event schemas reject unknown fields. The required
  * generation options have no protocol-level default; an omitted
  * `replyCeiling` remains absent and is translated by the backend runtime.
+ * The agent that answers is resolved before anything is stored, so a request
+ * answered with one of the declared problems stored no message and started
+ * no reply. Every turn sends the agent's current system prompt.
  * Closing the response stream ends only this client's observation: the
  * backend keeps generating and storing the reply and its title. The
  * reply-stop endpoint stops a reply, and the reply-events endpoint follows it
@@ -151,7 +174,8 @@ export const chatApi = {
     status: 200,
     contentType: "text/event-stream",
     eventSchema: chatApiStreamEventSchema
-  }
+  },
+  responses: chatApiResponseSchemas
 }
 
 /** Request body accepted by the chat route after schema validation. */

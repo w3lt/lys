@@ -127,7 +127,7 @@ const SETTINGS_PANES: readonly SettingsPaneDescriptor[] = [
     ordinal: "04",
     note: "Who she is before you say anything. A name, a line for you, and the system prompt the model is given.",
     footNote:
-      "Saved by the backend in Lys's database. Conversations do not use agents yet; editing one changes no chat.",
+      "Saved by the backend in Lys's database. Editing an agent changes its conversations from their next message.",
     contentComponent: AgentPane
   },
   {

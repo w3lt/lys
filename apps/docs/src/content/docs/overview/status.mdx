@@ -26,6 +26,10 @@ repository today; it is not a promise of unreleased work.
   history routes.
 - A chat turn creates or continues a conversation, inserts user and assistant
   rows in SQLite, and streams typed SSE events back to the desktop.
+- A new conversation is answered by the agent chosen in the composer: a
+  built-in agent, Caliginia unless another is chosen, or one of the user's
+  own. A conversation keeps its agent for every turn, and one whose agent was
+  deleted stays readable but accepts no new message.
 - Conversation history supports search, cursor pagination, transcript retrieval,
   rename, and deletion. Assistant deltas are persisted before publication;
   continuation uses the current prompt of the conversation's agent and eligible
@@ -45,9 +49,10 @@ repository today; it is not a promise of unreleased work.
 - Interrupted streaming rows are recovered on backend startup.
 - Runtime, Model, Generation, Agents, and Tools settings panes are available.
   Model controls refresh inventory, load and unload weights, and check
-  loaded-state health. The Agents pane creates, edits, duplicates, and deletes
-  the user's agents through the backend. Chats are answered by Lys, a built-in
-  agent defined in the backend; it is not listed in the Agents pane. The Tools
+  loaded-state health. The Agents pane lists the built-in agents, Caliginia
+  and Lysiptera, which can be read and duplicated but not changed or deleted,
+  and creates, edits, duplicates, and deletes the user's agents through the
+  backend. The Tools
   pane lists the desktop's client tools; its switches are session-only mocks,
   and no chat offers tools yet.
 - Generation controls apply to future chat requests and save automatically
@@ -70,8 +75,6 @@ The current repository does not yet provide:
 - sending composer attachments; the composer stages files and long pastes only
   for its local context estimate
 - a Conversation settings pane
-- chats that use one of the user's agents, and built-in agents listed in the
-  Agents pane
 - replay or reconnect semantics for chat streams
 - tool-call stream events, and tool choices that are saved and applied to chats
 - a production desktop release workflow

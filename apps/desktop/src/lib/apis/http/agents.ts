@@ -1,4 +1,5 @@
 import {
+  agentBuiltInProblemSchema,
   agentCodeTakenProblemSchema,
   agentNotFoundProblemSchema,
   createAgentApi,
@@ -6,6 +7,7 @@ import {
   getAgentApi,
   listAgentsApi,
   updateAgentApi,
+  type GetAgentApiResponse,
   type ListAgentsApiQuery,
   type ListAgentsApiResponse
 } from "@lys/protocol"
@@ -37,19 +39,25 @@ export type AgentUpdate = {
   readonly changes: AgentChangesCandidate
 }
 
-/** Outcome for an addressed agent the backend reports as not stored. */
+/** Outcome for an addressed code the backend reports no agent has. */
 type AgentNotFoundResult = {
   /** The backend returned the declared missing-agent problem. */
   readonly status: "not-found"
 }
 
-/** Outcome of reading one stored agent. */
+/** Outcome for a change the backend refuses because the agent is built in. */
+type AgentBuiltInResult = {
+  /** The backend returned the declared built-in agent problem. */
+  readonly status: "built-in"
+}
+
+/** Outcome of reading one built-in or stored agent. */
 export type GetAgentResult =
   | {
       /** The agent exists and was read with its system prompt. */
       readonly status: "found"
-      /** Validated stored agent. */
-      readonly agent: Agent
+      /** Validated agent, tagged built-in or custom. */
+      readonly agent: GetAgentApiResponse
     }
   | AgentNotFoundResult
 
@@ -62,7 +70,7 @@ export type CreateAgentResult =
       readonly agent: Agent
     }
   | {
-      /** Another stored agent already has the requested code. */
+      /** A built-in or stored agent already has the requested code. */
       readonly status: "code-taken"
     }
 
@@ -75,6 +83,7 @@ export type UpdateAgentResult =
       readonly agent: Agent
     }
   | AgentNotFoundResult
+  | AgentBuiltInResult
 
 /** Outcome of permanently deleting one stored agent. */
 export type DeleteAgentResult =
@@ -83,6 +92,7 @@ export type DeleteAgentResult =
       readonly status: "deleted"
     }
   | AgentNotFoundResult
+  | AgentBuiltInResult
 
 /** Complete HTTP request assembled by one agent endpoint adapter. */
 type AgentHttpRequest = AgentApiConnection & {
@@ -177,6 +187,28 @@ async function parseAgentFailure(
 }
 
 /**
+ * Parses a failed response for a change to an addressed agent into its
+ * outcome.
+ *
+ * @param response - Failed response whose body is consumed here.
+ * @returns The built-in outcome for the declared built-in agent problem, or
+ * the absence outcome for the declared missing-agent problem.
+ * @throws A caller-safe error naming the HTTP status for every other failure,
+ * including a 409 or 404 without its declared body.
+ */
+async function parseAgentChangeFailure(
+  response: Response
+): Promise<AgentNotFoundResult | AgentBuiltInResult> {
+  if (response.status !== 409) return await parseAgentFailure(response)
+
+  const body = await readAgentFailureBody(response)
+  if (!agentBuiltInProblemSchema.safeParse(body).success) {
+    throw createAgentResponseError(response.status)
+  }
+  return Object.freeze({ status: "built-in" })
+}
+
+/**
  * Decodes a successful JSON response without exposing malformed payloads.
  *
  * @typeParam TPayload - Validated endpoint response type.
@@ -238,15 +270,16 @@ function buildAgentListPath(query: ListAgentsApiQuery): string {
  * Determines whether one page lists any agent more than once.
  *
  * @param page - Schema-validated list page.
- * @returns Whether two listed agents share a code.
+ * @returns Whether two listed agents, built-in or stored, share a code.
  */
 function hasDuplicateAgent(page: ListAgentsApiResponse): boolean {
-  const agentCodes = new Set(page.agents.map((agent) => agent.code))
-  return agentCodes.size !== page.agents.length
+  const listedAgents = [...page.builtInAgents, ...page.agents]
+  const agentCodes = new Set(listedAgents.map((agent) => agent.code))
+  return agentCodes.size !== listedAgents.length
 }
 
 /**
- * Lists one page of stored agents, oldest first.
+ * Lists every built-in agent with one page of stored agents, oldest first.
  *
  * @param query - Continuation and page-size parameters.
  * @param connection - Backend origin and local cancellation signal.
@@ -279,12 +312,12 @@ export async function listAgents(
 }
 
 /**
- * Reads one stored agent with its system prompt.
+ * Reads one built-in or stored agent with its system prompt.
  *
  * @param agentCode - Code of the agent to read.
  * @param connection - Backend origin and local cancellation signal.
- * @returns The agent, or the absence outcome when the backend reports the
- * declared missing-agent problem.
+ * @returns The agent, tagged built-in or custom, or the absence outcome when
+ * the backend reports the declared missing-agent problem.
  * @throws On an invalid code, cancellation, transport failure, any other
  * failed status, a malformed agent, or a mismatched identity.
  */
@@ -319,7 +352,8 @@ export async function getAgent(
  * the name by the backend.
  * @param connection - Backend origin and local cancellation signal.
  * @returns The stored agent, or the taken-code outcome when the backend
- * reports the declared agent-code-taken problem; nothing is stored then.
+ * reports the declared agent-code-taken problem, as for a built-in agent's
+ * code; nothing is stored then.
  * @throws On an invalid definition, cancellation, transport failure, any
  * other failed status, a malformed agent, or a code other than the one given.
  * @remarks Creation is not idempotent. Aborting after the backend accepted
@@ -362,8 +396,9 @@ export async function createAgent(
  *
  * @param update - Agent code and candidate replacement fields.
  * @param connection - Backend origin and local cancellation signal.
- * @returns The changed agent, or the absence outcome when the backend reports
- * the declared missing-agent problem.
+ * @returns The changed agent, the absence outcome when the backend reports
+ * the declared missing-agent problem, or the built-in outcome when it reports
+ * the declared built-in agent problem; neither changes anything.
  * @throws On an invalid code or change, cancellation, transport failure, any
  * other failed status, a malformed agent, or a mismatched identity.
  * @remarks Aborting after the backend accepted the request can leave the
@@ -381,7 +416,7 @@ export async function updateAgent(
     path: buildAgentPath(updateAgentApi.path, params.agentCode),
     body: JSON.stringify(body)
   })
-  if (!response.ok) return await parseAgentFailure(response)
+  if (!response.ok) return await parseAgentChangeFailure(response)
 
   const agent = await parseAgentPayload(
     response,
@@ -402,7 +437,8 @@ export async function updateAgent(
  * @param connection - Backend origin and local cancellation signal.
  * @returns The deletion outcome, or the absence outcome when the backend
  * reports the declared missing-agent problem; both establish that the agent
- * is no longer stored.
+ * is no longer stored. The built-in outcome, when the backend reports the
+ * declared built-in agent problem, establishes that the agent stays.
  * @throws On an invalid code, cancellation, transport failure, any other
  * failed status, or an unexpected success status.
  * @remarks Aborting after the backend accepted the request can still delete
@@ -419,7 +455,7 @@ export async function deleteAgent(
     path: buildAgentPath(deleteAgentApi.path, params.agentCode)
   })
   if (response.status === 204) return Object.freeze({ status: "deleted" })
-  if (!response.ok) return await parseAgentFailure(response)
+  if (!response.ok) return await parseAgentChangeFailure(response)
 
   throw new Error("The backend returned an unexpected delete response.")
 }

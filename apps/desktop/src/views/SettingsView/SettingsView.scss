@@ -832,6 +832,15 @@
   margin-left: auto;
 }
 
+/* Says why a built-in agent has no save or delete beside its Duplicate. */
+.settings-view__agent-fixed {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  color: var(--app-text-faint);
+}
+
 .settings-view__agent-confirm {
   display: flex;
   min-width: 0;

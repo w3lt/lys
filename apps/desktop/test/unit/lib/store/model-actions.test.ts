@@ -246,6 +246,23 @@ describe("createModelSlice", () => {
       expect(store.getState().modelRequest).toEqual({ status: "idle" })
     })
 
+    it("never publishes an answer that arrives after the model runtime became unavailable", async () => {
+      const inventory = createControlledPromise<Response>()
+      startModelBackend({ [LIST_ROUTE]: () => inventory.promise })
+      const { store, connection } = createModelStore()
+      const update = store.getState().updateModelInventory()
+      await waitForMicrotasks()
+
+      connection.isModelRuntimeAvailable = false
+      inventory.resolve(buildJsonResponse(200, { llms: INVENTORY }))
+      await update
+
+      expect(store.getState()).toMatchObject({
+        modelInventory: { status: "unavailable" },
+        modelRuntime: { status: "unavailable" }
+      })
+    })
+
     it("admits one request at a time", async () => {
       const inventory = createControlledPromise<Response>()
       const requests = startModelBackend({

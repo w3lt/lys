@@ -6,7 +6,8 @@ import {
   buildJsonResponse,
   startBackendFake,
   type BackendRoute,
-  type BackendRoutes
+  type BackendRoutes,
+  type ObservedBackendRequest
 } from "../../../support/backendFake"
 import {
   buildConversationListPage,
@@ -88,6 +89,48 @@ function createControlledListRoute() {
     return response.promise
   }
   return { route, responses }
+}
+
+/** First page listing {@link TRIP}, with {@link RECIPE} left on an older page. */
+const FIRST_OF_TWO_PAGES = buildConversationListPage([TRIP], {
+  storedCount: 2,
+  matchCount: 2,
+  nextCursor: "older"
+})
+
+/** Older page that lists {@link RECIPE} and ends the list. */
+const LAST_OF_TWO_PAGES = buildConversationListPage([RECIPE], {
+  storedCount: 2
+})
+
+/**
+ * Opens history over a backend whose first read answers
+ * {@link FIRST_OF_TWO_PAGES}, and waits for that page.
+ *
+ * @param answerOlderRead - Answers every read after the first.
+ * @returns The opened store harness and the backend observation handle.
+ */
+async function openTwoPageHistory(answerOlderRead: BackendRoute) {
+  let reads = 0
+
+  /**
+   * Answers one list read.
+   *
+   * @param request - Observed list request.
+   * @returns The first page, or the case's answer to a later read.
+   */
+  function answerListRead(request: ObservedBackendRequest) {
+    reads += 1
+    return reads === 1
+      ? buildJsonResponse(200, FIRST_OF_TWO_PAGES)
+      : answerOlderRead(request)
+  }
+
+  const backend = startBackendFake({ [LIST_ROUTE]: answerListRead })
+  const harness = createHistoryStore()
+  harness.store.getState().openConversationHistory()
+  await waitForMicrotasks()
+  return { ...harness, backend }
 }
 
 /**
@@ -406,25 +449,9 @@ describe("createConversationHistoryStore", () => {
 
   describe("loadOlderConversations", () => {
     it("reads the next page of the displayed query and appends it", async () => {
-      let reads = 0
-      const backend = startBackendFake({
-        [LIST_ROUTE]: () => {
-          reads += 1
-          return buildJsonResponse(
-            200,
-            reads === 1
-              ? buildConversationListPage([TRIP], {
-                  storedCount: 2,
-                  matchCount: 2,
-                  nextCursor: "older"
-                })
-              : buildConversationListPage([RECIPE], { storedCount: 2 })
-          )
-        }
-      })
-      const { store } = createHistoryStore()
-      store.getState().openConversationHistory()
-      await waitForMicrotasks()
+      const { store, backend } = await openTwoPageHistory(() =>
+        buildJsonResponse(200, LAST_OF_TWO_PAGES)
+      )
 
       const older = store.getState().loadOlderConversations()
       const whileReading = store.getState().list
@@ -445,25 +472,9 @@ describe("createConversationHistoryStore", () => {
     })
 
     it("keeps the displayed entries when the older page fails", async () => {
-      let reads = 0
-      startBackendFake({
-        [LIST_ROUTE]: () => {
-          reads += 1
-          return reads === 1
-            ? buildJsonResponse(
-                200,
-                buildConversationListPage([TRIP], {
-                  storedCount: 2,
-                  matchCount: 2,
-                  nextCursor: "older"
-                })
-              )
-            : buildJsonResponse(500, {})
-        }
-      })
-      const { store } = createHistoryStore()
-      store.getState().openConversationHistory()
-      await waitForMicrotasks()
+      const { store } = await openTwoPageHistory(() =>
+        buildJsonResponse(500, {})
+      )
 
       await store.getState().loadOlderConversations()
 
@@ -472,6 +483,43 @@ describe("createConversationHistoryStore", () => {
         activity: {
           status: "older-failed",
           error: expect.stringContaining("500")
+        }
+      })
+    })
+
+    it("reads the older page once while it is already being read", async () => {
+      const olderPage = createControlledPromise<Response>()
+      const { store, backend } = await openTwoPageHistory(
+        () => olderPage.promise
+      )
+      const older = store.getState().loadOlderConversations()
+
+      await store.getState().loadOlderConversations()
+      olderPage.resolve(buildJsonResponse(200, LAST_OF_TWO_PAGES))
+      await older
+
+      expect(listListQueries(backend)).toEqual([
+        { limit: "30" },
+        { cursor: "older", limit: "30" }
+      ])
+      expect(listDisplayedIds(store)).toEqual([TRIP.id, RECIPE.id])
+    })
+
+    it("reports a stopped backend without reading the older page", async () => {
+      const { store, backend, backendAvailability } = await openTwoPageHistory(
+        () => buildJsonResponse(200, LAST_OF_TWO_PAGES)
+      )
+      backendAvailability.isRunning = false
+
+      await store.getState().loadOlderConversations()
+
+      expect(listListQueries(backend)).toEqual([{ limit: "30" }])
+      expect(listDisplayedIds(store)).toEqual([TRIP.id])
+      expect(store.getState().list).toMatchObject({
+        activity: {
+          status: "older-failed",
+          error:
+            "The backend is not running, so past conversations cannot be read."
         }
       })
     })

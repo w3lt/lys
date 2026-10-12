@@ -102,6 +102,73 @@ function startDesktopHost(
   })
 }
 
+/** Reason a failed spawn of the backend process rejects with. */
+const SPAWN_FAILURE = "Failed to spawn the backend"
+
+/** Reason a failed read of the backend process status rejects with. */
+const STATUS_FAILURE = "Failed to inspect backend process: Resource busy"
+
+/** Reason a failed stop of the backend process rejects with. */
+const STOP_FAILURE =
+  "Failed to terminate backend process group 4242: Operation not permitted"
+
+/**
+ * Statuses from which the Runtime pane offers Start (`stopped`) or Stop
+ * (`running`, `unresponsive`).
+ */
+const ACTIONABLE_BACKEND_STATUSES = ["stopped", "running", "unresponsive"]
+
+/** Starts a native host whose backend process cannot be spawned. */
+function startHostFailingSpawn(): void {
+  startDesktopHost(DISK_SETTINGS_DOCUMENT, {
+    start_backend: () => Promise.reject(SPAWN_FAILURE)
+  })
+}
+
+/**
+ * Starts a native host whose backend process spawns but whose status cannot
+ * be read while the start waits for the health route, which does not answer.
+ */
+function startHostFailingStatusAfterSpawn(): void {
+  let isSpawned = false
+  startBackendFake({
+    "GET /api/v1/heath": () => new Response(null, { status: 503 })
+  })
+  startDesktopHost(DISK_SETTINGS_DOCUMENT, {
+    get_backend_status: () =>
+      isSpawned ? Promise.reject(STATUS_FAILURE) : { running: false },
+    start_backend: () => {
+      isSpawned = true
+      return { pid: 4242, running: true }
+    }
+  })
+}
+
+/** Native failures during a start, with the reason the start rejects with. */
+const START_FAILURES = [
+  ["the process cannot be spawned", startHostFailingSpawn, SPAWN_FAILURE],
+  [
+    "the process status cannot be read while waiting for an answer",
+    startHostFailingStatusAfterSpawn,
+    STATUS_FAILURE
+  ]
+] as const
+
+/**
+ * Starts a running backend whose process then cannot be stopped.
+ *
+ * @returns The store, with the backend running.
+ */
+async function startBackendFailingStop() {
+  startBackendFake(CONNECTED_BACKEND)
+  startDesktopHost(DISK_SETTINGS_DOCUMENT, {
+    stop_backend: () => Promise.reject(STOP_FAILURE)
+  })
+  const useLysStore = await loadFreshLysStore()
+  await useLysStore.getState().startBackend()
+  return useLysStore
+}
+
 /**
  * Lists the native commands the host received, in order.
  *
@@ -203,7 +270,9 @@ describe("useLysStore", () => {
       expect(listCommandNames(host)).not.toContain("start_backend")
     })
 
-    it("stays blank and rejects when the settings cannot be loaded", async () => {
+    // #163 asks for an error screen in this case instead of a blank window;
+    // the state the shell reads to show it may change with that.
+    it("rejects and stays initializing when the settings cannot be loaded", async () => {
       startDesktopHost(DISK_SETTINGS_DOCUMENT, {
         load_settings: () => Promise.reject("Failed to parse settings.json")
       })
@@ -277,17 +346,32 @@ describe("useLysStore", () => {
       )
     })
 
-    it("rejects and stays starting when the process cannot be started", async () => {
-      startDesktopHost(DISK_SETTINGS_DOCUMENT, {
-        start_backend: () => Promise.reject("Failed to spawn the backend")
-      })
-      const useLysStore = await loadFreshLysStore()
+    it.each(START_FAILURES)(
+      "rejects with the native reason when %s",
+      async (_failure, startHost, reason) => {
+        startHost()
+        const useLysStore = await loadFreshLysStore()
 
-      await expect(useLysStore.getState().startBackend()).rejects.toBe(
-        "Failed to spawn the backend"
-      )
-      expect(useLysStore.getState().backendServerInfo.status).toBe("starting")
-    })
+        await expect(useLysStore.getState().startBackend()).rejects.toBe(reason)
+      }
+    )
+
+    // Known defect (#162): the status stays `starting`, from which the
+    // Runtime pane offers neither Start nor Stop, so only restarting the app
+    // leaves it.
+    it.fails.each(START_FAILURES)(
+      "leaves a status the Runtime pane can start or stop from when %s",
+      async (_failure, startHost) => {
+        startHost()
+        const useLysStore = await loadFreshLysStore()
+
+        await Promise.allSettled([useLysStore.getState().startBackend()])
+
+        expect(ACTIONABLE_BACKEND_STATUSES).toContain(
+          useLysStore.getState().backendServerInfo.status
+        )
+      }
+    )
 
     it("does not publish readiness after a stop superseded the start", async () => {
       const health = createControlledPromise<Response>()
@@ -324,18 +408,29 @@ describe("useLysStore", () => {
       })
     })
 
-    it("stays stopping while the process still runs after the stop command", async () => {
-      startBackendFake(CONNECTED_BACKEND)
-      startDesktopHost(DISK_SETTINGS_DOCUMENT, {
-        stop_backend: () => ({ pid: 4242, running: true })
-      })
-      const useLysStore = await loadFreshLysStore()
-      await useLysStore.getState().startBackend()
+    it("rejects with the native reason when the process cannot be stopped", async () => {
+      const useLysStore = await startBackendFailingStop()
 
-      await useLysStore.getState().stopBackend()
-
-      expect(useLysStore.getState().backendServerInfo.status).toBe("stopping")
+      await expect(useLysStore.getState().stopBackend()).rejects.toBe(
+        STOP_FAILURE
+      )
     })
+
+    // Known defect (#162): the status stays `stopping`, from which the
+    // Runtime pane offers neither Start nor Stop, so only restarting the app
+    // leaves it.
+    it.fails(
+      "leaves a status the Runtime pane can start or stop from when the process cannot be stopped",
+      async () => {
+        const useLysStore = await startBackendFailingStop()
+
+        await Promise.allSettled([useLysStore.getState().stopBackend()])
+
+        expect(ACTIONABLE_BACKEND_STATUSES).toContain(
+          useLysStore.getState().backendServerInfo.status
+        )
+      }
+    )
 
     it("publishes stopped for an unresponsive backend whose process already exited", async () => {
       vi.useFakeTimers()

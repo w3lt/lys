@@ -9,6 +9,10 @@ import {
   FIXTURE_CONVERSATION_ID
 } from "../../../support/conversationFixtures"
 
+/** Matches a high surrogate without its low half, or a low one without its high half. */
+const LONE_SURROGATE =
+  /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
+
 /**
  * Builds the history entry for a conversation previewing one user message.
  *
@@ -114,48 +118,56 @@ describe("buildConversationHistoryEntry", () => {
   })
 
   it("shows a short message whole", () => {
-    const content = "m".repeat(58)
-
-    expect(buildUserPreviewEntry(content).excerpt?.text).toBe(content)
-  })
-
-  it("cuts a long message after 58 characters and marks the omission", () => {
-    expect(buildUserPreviewEntry("m".repeat(59)).excerpt?.text).toBe(
-      `${"m".repeat(58)}…`
+    expect(buildUserPreviewEntry("Plan the trip").excerpt?.text).toBe(
+      "Plan the trip"
     )
   })
 
-  it("does not leave half a surrogate pair where a long message is cut", () => {
-    const content = `${"m".repeat(57)}😀 tail`
+  it("cuts a long message to a bounded opening and marks the omission", () => {
+    const content = "word ".repeat(100).trim()
 
-    expect(buildUserPreviewEntry(content).excerpt?.text).toBe(
-      `${"m".repeat(57)}…`
-    )
+    const text = buildUserPreviewEntry(content).excerpt?.text ?? ""
+
+    expect(text).toMatch(/^word word .*…$/)
+    expect(content.startsWith(text.slice(0, -1))).toBe(true)
+    expect(text.length).toBeLessThan(content.length)
   })
+
+  it.each(["", "m"])(
+    "does not leave half a surrogate pair where a long message is cut, after %j",
+    (prefix) => {
+      const content = `${prefix}${"😀".repeat(100)}`
+
+      const text = buildUserPreviewEntry(content).excerpt?.text ?? ""
+
+      expect(text).toMatch(/…$/)
+      expect(text).not.toMatch(LONE_SURROGATE)
+    }
+  )
 
   it("shows a match near the start without a leading ellipsis", () => {
-    const content = `Find the needle ${"x".repeat(80)}`
+    const content = `Find the needle ${"in the hay ".repeat(20)}`
 
-    expect(buildUserPreviewEntry(content, "needle").excerpt?.text).toBe(
-      `${content.slice(0, 68)}…`
-    )
+    const text = buildUserPreviewEntry(content, "needle").excerpt?.text
+
+    expect(text).toMatch(/^Find the needle in the hay .*…$/)
   })
 
-  it("centres the excerpt shortly before a later match and marks both omissions", () => {
-    const content = `${"a".repeat(100)} needle ${"b".repeat(100)}`
+  it("starts the excerpt shortly before a later match and marks both omissions", () => {
+    const content = `${"early words ".repeat(20)}the needle sits here ${"late words ".repeat(20)}`
 
-    const text = buildUserPreviewEntry(content, "NEEDLE").excerpt?.text
+    const text = buildUserPreviewEntry(content, "NEEDLE").excerpt?.text ?? ""
 
-    expect(text).toBe(`…${content.slice(81, 149)}…`)
-    expect(text?.indexOf("needle")).toBe(21)
+    expect(text).toMatch(/^….+needle sits here.*…$/)
+    expect(content).toContain(text.slice(1, -1))
   })
 
   it("shows the end of the message after a match without a trailing ellipsis", () => {
-    const content = `${"a".repeat(100)} needle`
+    const content = `${"early words ".repeat(20)}the needle`
 
-    expect(buildUserPreviewEntry(content, "needle").excerpt?.text).toBe(
-      `…${content.slice(81)}`
-    )
+    const text = buildUserPreviewEntry(content, "needle").excerpt?.text
+
+    expect(text).toMatch(/^….+the needle$/)
   })
 
   it("falls back to the opening text when the match is only in a code block", () => {

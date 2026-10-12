@@ -78,15 +78,18 @@ describe.each([
   {
     operation: "getLlmRuntimeConnectionStatus",
     readStatus: getLlmRuntimeConnectionStatus,
-    route: "GET /api/v1/llm/runtime"
+    route: "GET /api/v1/llm/runtime",
+    reportedStatuses: ["connecting", "connected", "unreachable"] as const
   },
   {
+    // A connect response carries the settled status only.
     operation: "connectLlmRuntime",
     readStatus: connectLlmRuntime,
-    route: "POST /api/v1/llm/runtime/connect"
+    route: "POST /api/v1/llm/runtime/connect",
+    reportedStatuses: ["connected", "unreachable"] as const
   }
-])("$operation", ({ readStatus, route }) => {
-  it.each(["connecting", "connected", "unreachable"] as const)(
+])("$operation", ({ readStatus, route, reportedStatuses }) => {
+  it.each(reportedStatuses)(
     "returns the %s status the backend reports",
     async (status) => {
       const backend = startBackendFake({

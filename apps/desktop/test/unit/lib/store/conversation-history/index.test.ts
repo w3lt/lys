@@ -329,14 +329,18 @@ describe("createConversationHistoryStore", () => {
   describe("loadFirstConversationId", () => {
     it("reads a waiting search at once and finds its first conversation", async () => {
       vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
-      const { store, backend } = await openLoadedHistory([TRIP, RECIPE])
+      const { store } = await openLoadedHistory([TRIP, RECIPE])
       store.getState().updateConversationHistoryQuery("recipe")
-      startBackendFake({ [LIST_ROUTE]: buildListRoute([RECIPE]) })
+      const searchBackend = startBackendFake({
+        [LIST_ROUTE]: buildListRoute([RECIPE])
+      })
 
       await expect(store.getState().loadFirstConversationId()).resolves.toBe(
         RECIPE.id
       )
-      expect(listListQueries(backend)).toHaveLength(1)
+      expect(listListQueries(searchBackend)).toEqual([
+        { query: "recipe", limit: "30" }
+      ])
     })
 
     it("finds nothing when the query changes while its read is pending", async () => {

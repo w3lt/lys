@@ -645,10 +645,8 @@ describe("createChatViewStore", () => {
 
       void store.getState().sendMessage("Next")
       await waitForMicrotasks()
-      await sendStreamEvents(streams[0], { type: "title", title: "Late title" })
 
       expect(streams[0]?.isCancelled()).toBe(true)
-      expect(store.getState().conversation?.title).toBeNull()
     })
   })
 

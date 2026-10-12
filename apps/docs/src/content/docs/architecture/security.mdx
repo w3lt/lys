@@ -137,8 +137,11 @@ key is saved in Settings → Secrets.
   shown ([#156](https://github.com/w3lt/lys/issues/156)). A query is at most
   400 characters.
 - **Local callers.** The loopback backend has no authentication, so any local
-  process can ask it to check the key; the answer says only whether the key
-  works and never contains it.
+  process, including one run by another user account on the machine, can ask
+  it to check the key, or send a chat request that offers `web_search` and
+  answer its calls with `allowed`, which runs searches with the saved key and
+  spends the person's Tavily credits. No answer contains the key: the key
+  check says only whether it works, and searches return only results.
 
 ## Practical implication
 

@@ -135,16 +135,16 @@ returns the text the model reads, or rejects only with the Stop reason or a
 defect.
 
 Each entry of the registry pairs a definition with a `BuiltInToolProvider`,
-whose `prepareTool()` gives the tool for one turn or says why it cannot run
+whose `findTurnTool()` gives the tool for one turn or says why it cannot run
 now (`api-key-missing`, `api-key-invalid`, or `settings-unreadable`).
 `createBuiltInTools()` builds the list once at startup: `read_page`, always
-ready through `ReadyBuiltInToolProvider`, then `web_search`, prepared by
+ready through `ReadyBuiltInToolProvider`, then `web_search`, found by
 `WebSearchToolProvider`. `GET /api/v1/tools` returns every definition and
-prepares every tool again to list the ones that cannot run now; the desktop
-offers the switched-on, available ones by name. The chat route prepares every
+looks up every tool again to list the ones that cannot run now; the desktop
+offers the switched-on, available ones by name. The chat route looks up every
 offered backend tool before it looks up the agent and stores the turn, and
 answers 409 `backend-tool-unavailable`, storing nothing, when one cannot run.
-The turn keeps the tools it was prepared with.
+The turn keeps the tools it found then.
 
 The address-checked connection (`web/webConnection.ts`: the checked lookup,
 the connected-socket check, and Lys's user agent) and the formatting of

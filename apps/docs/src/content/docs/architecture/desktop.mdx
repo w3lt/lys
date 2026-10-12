@@ -354,11 +354,14 @@ session only; nothing is saved.
 
 A backend tool that cannot run now, such as `web_search` without a saved
 Tavily API key, keeps its row: its switch is disabled and shows off, a note
-under the row says why ("Needs a Tavily API key. Add one in Settings →
-Secrets.", or that the saved key isn't valid, or that the settings file could
-not be read), and Open Secrets selects the Secrets pane. The person's choice is
-kept and applies again once the tool can run; group counts and the offered
-totals count only tools that are on and can run.
+under the row says why and what to do. For a missing key it says "Needs a
+Tavily API key. Add one in Settings → Secrets." and Open Secrets selects the
+Secrets pane. For a key in `settings.json` that isn't valid, or a settings file
+that cannot be read, it says to fix `secrets.tavilyApiKey` or the file by hand
+and shows no button: the host cannot load either file at startup, and a save
+from the pane would replace the file with the settings loaded earlier. The
+person's choice is kept and applies again once the tool can run; group counts
+and the offered totals count only tools that are on and can run.
 
 ## Secrets
 

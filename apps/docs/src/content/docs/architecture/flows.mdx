@@ -108,7 +108,7 @@ of the new turn's context.
 1. The desktop sends `POST /api/v1/chat` with `tools`: the definitions of the
    switched-on client tools and the names of the switched-on backend tools
    that can run now, offered only to a model trained for tool use.
-2. Before it stores the turn, the backend prepares every offered backend tool;
+2. Before it stores the turn, the backend looks up every offered backend tool;
    `web_search` reads the Tavily API key from the settings file and keeps it
    for the turn. When an offered tool cannot run, the backend answers `409`
    with the `backend-tool-unavailable` problem and stores nothing; the desktop

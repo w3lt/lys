@@ -1,9 +1,14 @@
 import {
   saveGenerationSettings,
-  saveLoadConfigurationSettings
+  saveLoadConfigurationSettings,
+  saveSecretsSettings
 } from "@/lib/apis/tauri/settings"
 
-import type { GenerationSettings, LoadConfigurationSettings } from "./settings"
+import type {
+  GenerationSettings,
+  LoadConfigurationSettings,
+  SecretsSettings
+} from "./settings"
 
 /**
  * Saves of the persisted settings groups, applied to the settings file one at
@@ -32,6 +37,14 @@ export type SettingsGroupSaves = {
   readonly saveLoadConfigurationSettings: (
     loadConfiguration: LoadConfigurationSettings
   ) => Promise<void>
+  /**
+   * Saves the secrets group after every save sent earlier has settled.
+   *
+   * @param secrets - Secrets to persist.
+   * @returns Resolves after the settings file is written, and rejects with
+   * the native load or save rejection.
+   */
+  readonly saveSecretsSettings: (secrets: SecretsSettings) => Promise<void>
 }
 
 /** One settings group whose latest value is to be saved. */
@@ -85,7 +98,9 @@ export function createSettingsGroupSaves(): SettingsGroupSaves {
     saveLoadConfigurationSettings: (loadConfiguration) =>
       saveSettingsGroupInOrder(() =>
         saveLoadConfigurationSettings(loadConfiguration)
-      )
+      ),
+    saveSecretsSettings: (secrets) =>
+      saveSettingsGroupInOrder(() => saveSecretsSettings(secrets))
   }
 }
 

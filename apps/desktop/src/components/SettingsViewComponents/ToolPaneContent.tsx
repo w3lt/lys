@@ -1,3 +1,4 @@
+import type { BackendToolUnavailableReason } from "@lys/protocol"
 import type { ToolDefinition } from "@lys/share"
 import { useEffect, useRef, useState, type ReactElement } from "react"
 
@@ -85,6 +86,8 @@ type ToolGroupListProps = {
   readonly isDimmed: boolean
   /** Proposes showing one tool's details, or none with null. */
   readonly onExpandedToolNameChange: (toolName: string | null) => void
+  /** Why each tool that cannot run now cannot, keyed by tool name. */
+  readonly unavailableTools: ReadonlyMap<string, BackendToolUnavailableReason>
 }
 
 /**
@@ -92,10 +95,11 @@ type ToolGroupListProps = {
  *
  * @remarks The tool store owns each tool's switch and approval, and the
  * component passes their changes to it. The parent owns which tool is
- * expanded, the lock, and the dimming. Groups keep the order in which the
- * listed tools first name them.
- * @param props - Listed tools, expansion, lock, dimming, and the expansion
- * proposal.
+ * expanded, the lock, the dimming, and the availability. Groups keep the
+ * order in which the listed tools first name them. A tool that cannot run
+ * now offers to open the Secrets pane, which the application store selects.
+ * @param props - Listed tools, expansion, lock, dimming, availability, and
+ * the expansion proposal.
  * @returns One section per tool group.
  */
 function ToolGroupList({
@@ -103,11 +107,13 @@ function ToolGroupList({
   expandedToolName,
   isLocked,
   isDimmed,
-  onExpandedToolNameChange
+  onExpandedToolNameChange,
+  unavailableTools
 }: ToolGroupListProps): ReactElement {
   const toolChoices = useToolStore((state) => state.toolChoices)
   const updateToolOn = useToolStore((state) => state.updateToolOn)
   const updateToolApproval = useToolStore((state) => state.updateToolApproval)
+  const setSettingsPane = useLysStore((state) => state.setSettingsPane)
 
   /**
    * Builds the section of one tool group.
@@ -124,9 +130,11 @@ function ToolGroupList({
         key={listing.group}
         listing={listing}
         onExpandedToolNameChange={onExpandedToolNameChange}
+        onOpenSecrets={() => setSettingsPane("secrets")}
         onToolApprovalChange={updateToolApproval}
         onToolOnChange={updateToolOn}
         toolChoices={toolChoices}
+        unavailableTools={unavailableTools}
       />
     )
   }
@@ -138,6 +146,8 @@ function ToolGroupList({
 type ToolWorkspaceProps = {
   /** Every tool, the app's then the backend's, in the order Settings lists them. */
   readonly tools: readonly ToolDefinition[]
+  /** Why each tool that cannot run now cannot, keyed by tool name. */
+  readonly unavailableTools: ReadonlyMap<string, BackendToolUnavailableReason>
 }
 
 /**
@@ -151,10 +161,13 @@ type ToolWorkspaceProps = {
  * recede and are disabled, and no tool's details are shown; the tool that
  * was expanded opens again once the controls unlock. Every choice lasts for
  * this session only and applies to the next tool call or chat request.
- * @param props - Listed tools.
+ * @param props - Listed tools and which cannot run now.
  * @returns The tool controls.
  */
-function ToolWorkspace({ tools }: ToolWorkspaceProps): ReactElement {
+function ToolWorkspace({
+  tools,
+  unavailableTools
+}: ToolWorkspaceProps): ReactElement {
   const areToolCallsOn = useToolStore((state) => state.areToolCallsOn)
   const toolChoices = useToolStore((state) => state.toolChoices)
   const updateToolCallsOn = useToolStore((state) => state.updateToolCallsOn)
@@ -164,7 +177,11 @@ function ToolWorkspace({ tools }: ToolWorkspaceProps): ReactElement {
   const support = calculateToolModelSupport(modelRuntime, modelInventory)
   const isLocked = support.status === "untrained"
   const shownToolName = isLocked ? null : expandedToolName
-  const totals = calculateOfferedToolTotals(tools, toolChoices)
+  const totals = calculateOfferedToolTotals(
+    tools,
+    toolChoices,
+    unavailableTools
+  )
 
   return (
     <div className="settings-view__stack">
@@ -191,6 +208,7 @@ function ToolWorkspace({ tools }: ToolWorkspaceProps): ReactElement {
           isLocked={isLocked}
           onExpandedToolNameChange={setExpandedToolName}
           tools={tools}
+          unavailableTools={unavailableTools}
         />
       </div>
     </div>
@@ -221,7 +239,12 @@ function ToolListBody({ list }: ToolListBodyProps): ReactElement | null {
     case "failed":
       return null
     case "loaded":
-      return <ToolWorkspace tools={list.tools} />
+      return (
+        <ToolWorkspace
+          tools={list.tools}
+          unavailableTools={list.unavailableTools}
+        />
+      )
   }
 }
 

@@ -1,11 +1,14 @@
+import type { BackendToolUnavailableReason } from "@lys/protocol"
 import type { ToolArgumentDefinition, ToolDefinition } from "@lys/share"
 import { ChevronRight, Lock } from "lucide-react"
 import { useId, type ReactElement } from "react"
 
+import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
   TOOL_APPROVALS,
+  findToolUnavailableReason,
   getToolChoice,
   type ToolApproval,
   type ToolChoice
@@ -23,6 +26,7 @@ import {
   formatToolGroupCount,
   formatToolGroupLabel,
   formatToolTokenEstimate,
+  formatToolUnavailableNote,
   getToolRunnerPresentation,
   type ToolGroupListing
 } from "./tool-presentation"
@@ -378,17 +382,59 @@ type ToolRowProps = {
   readonly onIsOnChange: (isOn: boolean) => void
   /** Proposes another approval for the tool. */
   readonly onApprovalChange: (approval: ToolApproval) => void
+  /** Why the tool cannot run now, or undefined when it can. */
+  readonly unavailableReason: BackendToolUnavailableReason | undefined
+  /** Requests that the parent open the Secrets pane. */
+  readonly onOpenSecrets: () => void
+}
+
+/** Properties accepted by {@link ToolUnavailableNote}. */
+type ToolUnavailableNoteProps = {
+  /** Identifier the row's switch points at through `aria-describedby`. */
+  readonly noteId: string
+  /** Why the tool cannot run now. */
+  readonly reason: BackendToolUnavailableReason
+  /** Requests that the parent open the Secrets pane. */
+  readonly onOpenSecrets: () => void
+}
+
+/**
+ * Presents why a tool cannot run now, with a button that opens the Secrets
+ * pane.
+ *
+ * @remarks The row owns the identifier and the request; the note owns no
+ * state or effects. It describes the row's disabled switch.
+ * @param props - Identifier, reason, and the request.
+ * @returns The note under the row's header.
+ */
+function ToolUnavailableNote({
+  noteId,
+  reason,
+  onOpenSecrets
+}: ToolUnavailableNoteProps): ReactElement {
+  return (
+    <p className="settings-view__tool-unavailable-note" id={noteId}>
+      {formatToolUnavailableNote(reason)}{" "}
+      <Button onClick={onOpenSecrets} size="sm" type="button" variant="link">
+        Open Secrets
+      </Button>
+    </p>
+  )
 }
 
 /**
  * Presents one tool as a row that expands into its details, beside its token
  * estimate and its switch.
  *
- * @remarks The parent owns whether the row is expanded, the choice, and the
- * lock; the row owns no state or effects. The expand button and the switch
- * are sibling controls. The switch is named Use followed by the tool's name.
- * While the controls are locked, both are disabled.
- * @param props - Tool, choice, expansion, lock, and the parent's proposals.
+ * @remarks The parent owns whether the row is expanded, the choice, the
+ * lock, and the tool's availability; the row owns no state or effects. The
+ * expand button and the switch are sibling controls. The switch is named Use
+ * followed by the tool's name. While the controls are locked, both are
+ * disabled. While the tool cannot run now, its switch is disabled and shows
+ * off, the person's choice is kept, and a note under the header says why,
+ * with a button that opens the Secrets pane.
+ * @param props - Tool, choice, expansion, lock, availability, and the
+ * parent's proposals.
  * @returns One list item holding the row and, when expanded, its details.
  */
 function ToolRow({
@@ -398,20 +444,25 @@ function ToolRow({
   isLocked,
   onIsExpandedChange,
   onIsOnChange,
-  onApprovalChange
+  onApprovalChange,
+  unavailableReason,
+  onOpenSecrets
 }: ToolRowProps): ReactElement {
   const detailsId = useId()
+  const noteId = useId()
+  const isAvailable = unavailableReason === undefined
+  const isOffered = choice.isOn && isAvailable
 
   return (
     <li
       className="settings-view__tool-row"
       data-expanded={isExpanded ? "" : undefined}
-      data-off={choice.isOn ? undefined : ""}
+      data-off={isOffered ? undefined : ""}
     >
       <div className="settings-view__tool-header">
         <ToolRowToggle
           detailsId={detailsId}
-          isAskingFirst={choice.isOn && choice.approval === "ask"}
+          isAskingFirst={isOffered && choice.approval === "ask"}
           isExpanded={isExpanded}
           isLocked={isLocked}
           onIsExpandedChange={onIsExpandedChange}
@@ -421,13 +472,21 @@ function ToolRow({
           {formatToolTokenEstimate(calculateToolTokenEstimate(tool))}
         </span>
         <Switch
+          aria-describedby={isAvailable ? undefined : noteId}
           aria-label={`Use ${tool.name}`}
-          checked={choice.isOn}
-          disabled={isLocked}
+          checked={isOffered}
+          disabled={isLocked || !isAvailable}
           onCheckedChange={(checked) => onIsOnChange(checked)}
           size="lg"
         />
       </div>
+      {unavailableReason === undefined ? null : (
+        <ToolUnavailableNote
+          noteId={noteId}
+          onOpenSecrets={onOpenSecrets}
+          reason={unavailableReason}
+        />
+      )}
       {isExpanded ? (
         <ToolDetails
           choice={choice}
@@ -462,17 +521,23 @@ export type ToolGroupSectionProps = {
     tool: ToolDefinition,
     approval: ToolApproval
   ) => void
+  /** Why each tool that cannot run now cannot, keyed by tool name. */
+  readonly unavailableTools: ReadonlyMap<string, BackendToolUnavailableReason>
+  /** Requests that the parent open the Secrets pane. */
+  readonly onOpenSecrets: () => void
 }
 
 /**
  * Presents one group of tools under its heading, with how many are on.
  *
  * @remarks The parent owns the listing, the choices, which tool is expanded,
- * the lock, and every proposal; the section owns no state or effects. Tools
- * keep the listing's order and are keyed by name, and at most one is
- * expanded. Expanding a tool collapses any other. The section is named by its
- * heading. While tool calls are off it recedes but stays operable.
- * @param props - Listing, choices, expansion, lock, dimming, and proposals.
+ * the lock, the availability, and every proposal; the section owns no state
+ * or effects. Tools keep the listing's order and are keyed by name, and at
+ * most one is expanded. Expanding a tool collapses any other. The count
+ * includes only tools that are on and can run now. The section is named by
+ * its heading. While tool calls are off it recedes but stays operable.
+ * @param props - Listing, choices, expansion, lock, dimming, availability,
+ * and proposals.
  * @returns The section of one tool group.
  */
 export function ToolGroupSection({
@@ -483,11 +548,14 @@ export function ToolGroupSection({
   isDimmed,
   onExpandedToolNameChange,
   onToolOnChange,
-  onToolApprovalChange
+  onToolApprovalChange,
+  unavailableTools,
+  onOpenSecrets
 }: ToolGroupSectionProps): ReactElement {
   const headingId = useId()
   const onToolCount = listing.tools.filter(
-    (tool) => getToolChoice(toolChoices, tool).isOn
+    (tool) =>
+      getToolChoice(toolChoices, tool).isOn && !unavailableTools.has(tool.name)
   ).length
 
   /**
@@ -508,7 +576,12 @@ export function ToolGroupSection({
           onExpandedToolNameChange(isExpanded ? tool.name : null)
         }
         onIsOnChange={(isOn) => onToolOnChange(tool, isOn)}
+        onOpenSecrets={onOpenSecrets}
         tool={tool}
+        unavailableReason={findToolUnavailableReason(
+          unavailableTools,
+          tool.name
+        )}
       />
     )
   }

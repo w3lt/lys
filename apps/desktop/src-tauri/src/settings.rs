@@ -10,13 +10,20 @@ pub mod generation;
 pub mod load_configuration;
 pub mod model;
 pub mod runtime;
+pub mod secrets;
 
 use generation::GenerationSettings;
 use load_configuration::LoadConfigurationSettings;
 use model::ModelSettings;
 use runtime::RunTimeSettings;
+use secrets::SecretsSettings;
 
-use std::{fs, io::ErrorKind, path::Path};
+use std::{
+    ffi::OsString,
+    fs,
+    io::{self, ErrorKind, Write},
+    path::{Path, PathBuf},
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -26,10 +33,11 @@ use crate::utils::lys_home::LysHome;
 #[serde(default, rename_all = "camelCase")]
 /// Complete persisted Lys settings value.
 ///
-/// The private fields group runtime, model, generation, and load configuration
-/// settings in the serialized JSON representation while keeping those groups
-/// behind the settings module's API boundary. A missing group takes that
-/// group's defaults; the load configuration group's default is empty.
+/// The private fields group runtime, model, generation, load configuration,
+/// and secrets settings in the serialized JSON representation while keeping
+/// those groups behind the settings module's API boundary. A missing group
+/// takes that group's defaults; the load configuration group's default is
+/// empty, and the secrets group's default holds no key.
 pub struct LysSettings {
     /// Process settings and default-model selection in the `runtime` object.
     runtime: RunTimeSettings,
@@ -39,6 +47,8 @@ pub struct LysSettings {
     generation: GenerationSettings,
     /// Default and per-model load settings in the `loadConfiguration` object.
     load_configuration: LoadConfigurationSettings,
+    /// Secrets, such as the Tavily API key, in the `secrets` object.
+    secrets: SecretsSettings,
 }
 
 impl LysSettings {
@@ -60,8 +70,8 @@ impl LysSettings {
         load_settings_file(&lys_home.settings_path())
     }
 
-    /// Serializes settings as pretty-printed JSON and writes them to the settings
-    /// file under `lys_home`.
+    /// Serializes settings as pretty-printed JSON and replaces the settings file
+    /// under `lys_home` atomically, readable only by its owner.
     ///
     /// A trailing newline is written. This method does not create a missing
     /// Lys home directory; callers that need that behavior must create it first
@@ -111,21 +121,106 @@ fn create_settings_file(path: &Path) -> Result<LysSettings, String> {
     Ok(settings)
 }
 
-/// Writes `settings` to `path` as pretty-printed JSON with a trailing newline.
+/// Writes `settings` to `path` as pretty-printed JSON with a trailing newline,
+/// replacing any file there atomically and readable only by its owner.
 ///
-/// The parent directory is not created.
+/// The parent directory is not created. See
+/// [`write_owner_only_file_atomically`] for the replacement guarantee.
 ///
 /// # Errors
 ///
-/// Returns an error when serde serialization or filesystem writing fails.
+/// Returns an error when serde serialization or filesystem writing fails; the
+/// file at `path` is then left as it was.
 fn save_settings_file(settings: &LysSettings, path: &Path) -> Result<(), String> {
     let settings_json = serde_json::to_string_pretty(settings)
         .map_err(|err| format!("Failed to serialize settings: {err}"))?;
 
-    fs::write(path, format!("{settings_json}\n"))
-        .map_err(|err| format!("Failed to write {}: {err}", path.display()))?;
+    write_owner_only_file_atomically(path, format!("{settings_json}\n").as_bytes())
+        .map_err(|err| format!("Failed to write {}: {err}", path.display()))
+}
 
-    Ok(())
+/// Replaces the file at `path` with `contents`, readable and writable only by
+/// its owner on Unix.
+///
+/// The contents are written to a temporary file beside `path`, flushed to
+/// disk, and renamed over `path`, so another process reading `path` sees
+/// either the previous file or the complete new one, never a partial write.
+/// The directory entry is not synced, so the rename itself is not promised to
+/// survive a power loss. On failure the temporary file this call created is
+/// removed and `path` is unchanged.
+///
+/// # Errors
+///
+/// Returns the first I/O error of creating, writing, syncing, or renaming.
+fn write_owner_only_file_atomically(path: &Path, contents: &[u8]) -> io::Result<()> {
+    let temporary_path = build_temporary_path(path);
+    let written = write_and_replace(&temporary_path, path, contents);
+    if written.is_err() {
+        // The write already failed; a failed removal of the temporary file
+        // must not replace that error, and the next save truncates it anyway.
+        let _ = fs::remove_file(&temporary_path);
+    }
+
+    written
+}
+
+/// Builds the temporary path beside `path`: its file name followed by `.tmp`.
+fn build_temporary_path(path: &Path) -> PathBuf {
+    let mut file_name = path.file_name().map(OsString::from).unwrap_or_default();
+    file_name.push(".tmp");
+
+    path.with_file_name(file_name)
+}
+
+/// Writes `contents` to `temporary_path` owner-only, syncs it, and renames it
+/// over `path`.
+///
+/// # Errors
+///
+/// Returns the first I/O error.
+fn write_and_replace(temporary_path: &Path, path: &Path, contents: &[u8]) -> io::Result<()> {
+    let mut file = open_owner_only_file(temporary_path)?;
+    file.write_all(contents)?;
+    file.sync_all()?;
+    drop(file);
+
+    fs::rename(temporary_path, path)
+}
+
+#[cfg(unix)]
+/// Creates or truncates `path` for writing with mode `0600`, also when the
+/// file already existed with wider permissions.
+///
+/// # Errors
+///
+/// Returns the I/O error of opening the file or setting its permissions.
+fn open_owner_only_file(path: &Path) -> io::Result<fs::File> {
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+    let file = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)?;
+    file.set_permissions(fs::Permissions::from_mode(0o600))?;
+
+    Ok(file)
+}
+
+#[cfg(not(unix))]
+/// Creates or truncates `path` for writing; permissions are left to the
+/// platform.
+///
+/// # Errors
+///
+/// Returns the I/O error of opening the file.
+fn open_owner_only_file(path: &Path) -> io::Result<fs::File> {
+    fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(path)
 }
 
 /// Attempts to create the parent directory returned for a settings path.
@@ -175,15 +270,21 @@ mod tests {
     }
 
     /// Stored settings whose load configuration has a hand-written default
-    /// and one model's settings.
+    /// and one model's settings, with a saved Tavily API key.
     fn get_complete_settings() -> Value {
         let mut settings = get_settings_without_load_configuration();
         settings["loadConfiguration"] = json!({
             "default": { "contextLength": 4096, "numExperts": 2 },
             "models": { "qwen/qwen3-8b": { "contextLength": 16384 } }
         });
+        settings["secrets"] = json!({ "tavilyApiKey": "tvly-synthetic-0123456789" });
 
         settings
+    }
+
+    /// Secrets group of a settings file without a saved key.
+    fn get_empty_secrets() -> Value {
+        json!({ "tavilyApiKey": null })
     }
 
     /// Reads the settings file at `path` as JSON.
@@ -208,6 +309,7 @@ mod tests {
         let stored = read_settings_json(&path);
         assert_eq!(stored, get_settings_json(&settings));
         assert_eq!(stored["loadConfiguration"], get_empty_load_configuration());
+        assert_eq!(stored["secrets"], get_empty_secrets());
     }
 
     #[test]
@@ -230,6 +332,7 @@ mod tests {
 
         let mut expected = get_settings_without_load_configuration();
         expected["loadConfiguration"] = get_empty_load_configuration();
+        expected["secrets"] = get_empty_secrets();
         assert_eq!(get_settings_json(&settings), expected);
         assert_eq!(
             fs::read_to_string(&path).expect("read the settings file"),
@@ -260,10 +363,16 @@ mod tests {
         null_group["loadConfiguration"] = Value::Null;
         let mut null_default = get_settings_without_load_configuration();
         null_default["loadConfiguration"] = json!({ "default": null });
+        let mut spaced_key = get_complete_settings();
+        spaced_key["secrets"]["tavilyApiKey"] = json!("tvly-key with space");
+        let mut null_secrets = get_settings_without_load_configuration();
+        null_secrets["secrets"] = Value::Null;
         let unusable_files = [
             invalid_group.to_string(),
             null_group.to_string(),
             null_default.to_string(),
+            spaced_key.to_string(),
+            null_secrets.to_string(),
             String::from("{ not json"),
         ];
 
@@ -302,6 +411,70 @@ mod tests {
 
         let reloaded = load_settings_file(&saved_path).expect("settings that load back");
         assert_eq!(get_settings_json(&reloaded), get_complete_settings());
+    }
+
+    #[test]
+    fn reads_a_saved_tavily_api_key_and_hides_it_from_debug_output() {
+        let directory = TestDirectory::create("settings-secret");
+        let path = directory.create_file("settings.json", get_complete_settings().to_string());
+
+        let settings = load_settings_file(&path).expect("settings with a key");
+
+        assert_eq!(
+            get_settings_json(&settings)["secrets"]["tavilyApiKey"],
+            json!("tvly-synthetic-0123456789")
+        );
+        assert!(!format!("{settings:?}").contains("tvly-synthetic"));
+    }
+
+    #[test]
+    fn replaces_an_existing_file_and_leaves_no_temporary_file() {
+        let directory = TestDirectory::create("settings-replace");
+        let path = directory.create_file("settings.json", "{}");
+        let source_path = directory.create_file("source.json", get_complete_settings().to_string());
+        let settings = load_settings_file(&source_path).expect("settings for a complete file");
+
+        save_settings_file(&settings, &path).expect("save the settings");
+
+        assert_eq!(read_settings_json(&path), get_complete_settings());
+        assert!(!directory.path().join("settings.json.tmp").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn saved_settings_are_readable_only_by_their_owner() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = TestDirectory::create("settings-permissions");
+        let path = directory.create_file("settings.json", "{}");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).expect("widen the file");
+        let source_path = directory.create_file("source.json", get_complete_settings().to_string());
+        let settings = load_settings_file(&source_path).expect("settings for a complete file");
+
+        save_settings_file(&settings, &path).expect("save the settings");
+
+        let mode = fs::metadata(&path)
+            .expect("read metadata")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_created_settings_file_is_readable_only_by_its_owner() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = TestDirectory::create("settings-created-permissions");
+        let path = directory.path().join("settings.json");
+
+        load_settings_file(&path).expect("settings for a missing file");
+
+        let mode = fs::metadata(&path)
+            .expect("read metadata")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
     }
 
     #[test]

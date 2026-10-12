@@ -2,7 +2,7 @@
 export type View = "chat" | "settings"
 /** Settings pane selected within the settings view. */
 export type SettingsPane =
-  "runtime" | "model" | "generation" | "agents" | "tools"
+  "runtime" | "model" | "generation" | "agents" | "tools" | "secrets"
 /** Backend process lifecycle states represented by the demonstration reducer. */
 export type BackendStatus = "running" | "starting" | "stopping" | "stopped"
 /** Model lifecycle states represented by the demonstration reducer. */

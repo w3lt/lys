@@ -1,16 +1,32 @@
-import type { ChatToolAnswer, ChatToolCall } from "@lys/protocol"
+import {
+  TAVILY_API_HOST,
+  WEB_SEARCH_TOOL_NAME,
+  type ChatToolAnswer,
+  type ChatToolCall
+} from "@lys/protocol"
 
 /** Validated input of one call to a tool the backend runs. */
-export type BackendToolInput = {
-  /** The backend runs the tool once the call is allowed. */
-  readonly runner: "backend"
-  /** The read-page tool. */
-  readonly toolName: "read_page"
-  /** Normalized absolute http or https URL of the page. */
-  readonly url: string
-  /** Host the request goes to, with its port when it has one. */
-  readonly host: string
-}
+export type BackendToolInput =
+  | {
+      /** The backend runs the tool once the call is allowed. */
+      readonly runner: "backend"
+      /** The read-page tool. */
+      readonly toolName: "read_page"
+      /** Normalized absolute http or https URL of the page. */
+      readonly url: string
+      /** Host the request goes to, with its port when it has one. */
+      readonly host: string
+    }
+  | {
+      /** The backend runs the tool once the call is allowed. */
+      readonly runner: "backend"
+      /** The web search tool. */
+      readonly toolName: typeof WEB_SEARCH_TOOL_NAME
+      /** Query exactly as the backend sends it: trimmed, not blank. */
+      readonly query: string
+      /** Host of the search service the query is sent to. */
+      readonly host: string
+    }
 
 /** Outcome of checking one backend call's tool name and arguments. */
 export type BackendToolInputResult =
@@ -87,6 +103,35 @@ function parseReadPageInput(call: ChatToolCall): BackendToolInputResult {
 }
 
 /**
+ * Parses the arguments of a web search call.
+ *
+ * @param call - Call naming the web search tool.
+ * @returns `parsed` with the query trimmed exactly as the backend trims it
+ * and the search service's host, or `rejected` when the query is not text or
+ * is blank.
+ * @remarks The backend checked the query's length before sending the call;
+ * this check keeps the card from describing a query the backend would not
+ * send.
+ */
+function parseWebSearchInput(call: ChatToolCall): BackendToolInputResult {
+  const { query } = call.arguments
+  const trimmed = typeof query === "string" ? query.trim() : ""
+  if (trimmed === "") {
+    return buildRejectedInput(
+      `The arguments do not match ${call.toolName}: query: expected text that is not blank.`
+    )
+  }
+
+  const input: BackendToolInput = Object.freeze({
+    runner: "backend",
+    toolName: WEB_SEARCH_TOOL_NAME,
+    query: trimmed,
+    host: TAVILY_API_HOST
+  })
+  return Object.freeze({ status: "parsed", input })
+}
+
+/**
  * Parses one call into the input of a backend tool the desktop can describe.
  *
  * @param call - Call whose arguments the backend checked against the tool's
@@ -98,6 +143,7 @@ export function parseBackendToolInput(
   call: ChatToolCall
 ): BackendToolInputResult {
   if (call.toolName === "read_page") return parseReadPageInput(call)
+  if (call.toolName === WEB_SEARCH_TOOL_NAME) return parseWebSearchInput(call)
   return buildRejectedInput(
     `The desktop cannot describe the backend tool "${call.toolName}", so it was not run.`
   )

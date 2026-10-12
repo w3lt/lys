@@ -1,4 +1,4 @@
-import type { ModelLoadConfiguration } from "@lys/share"
+import type { ModelLoadConfiguration, TavilyApiKey } from "@lys/share"
 
 /**
  * Runtime process settings persisted under the `runtime` JSON object.
@@ -95,9 +95,23 @@ export type LoadConfigurationSettings = {
 }
 
 /**
+ * Secrets persisted under the `secrets` JSON object.
+ *
+ * @remarks Mirrors Rust's `SecretsSettings`. Rust validates the key on load,
+ * and the Tauri settings adapter parses it again with the shared key schema,
+ * which brands it. The key is saved only by an explicit Save in the Secrets
+ * pane; the backend reads it from the settings file for each turn that offers
+ * `web_search`. The renderer never logs or sends it.
+ */
+export type SecretsSettings = {
+  /** Saved Tavily API key, or null when none is saved; a secret. */
+  readonly tavilyApiKey: TavilyApiKey | null
+}
+
+/**
  * Renderer projection of the complete Tauri-persisted settings document.
  *
- * @remarks Holds the four groups of Rust's `LysSettings` under the same
+ * @remarks Holds the five groups of Rust's `LysSettings` under the same
  * names, so a saved value cannot silently drop a persisted group. The
  * runtime, model, and generation groups match Rust field for field. The load
  * configuration group differs only in its per-model settings, a map here and
@@ -113,6 +127,8 @@ export type LysSettings = {
   generation: GenerationSettings
   /** Default and per-model settings sent with each model load. */
   loadConfiguration: LoadConfigurationSettings
+  /** Keys of the services Lys calls on the person's behalf. */
+  secrets: SecretsSettings
 }
 
 /**
@@ -137,6 +153,14 @@ const INITIAL_LOAD_CONFIGURATION_SETTINGS: LoadConfigurationSettings =
   })
 
 /**
+ * Secrets shown before Tauri initialization completes: no key, as in a
+ * first-run settings file.
+ */
+const INITIAL_SECRETS_SETTINGS: SecretsSettings = Object.freeze({
+  tavilyApiKey: null
+})
+
+/**
  * Renderer-side fallback settings used before Tauri initialization completes.
  *
  * @remarks Values match the Rust `Default` implementations so the pre-load
@@ -155,5 +179,6 @@ export const initialSettingsState: LysSettings = {
     temperature: 0.7,
     replyCeiling: 2048
   },
-  loadConfiguration: INITIAL_LOAD_CONFIGURATION_SETTINGS
+  loadConfiguration: INITIAL_LOAD_CONFIGURATION_SETTINGS,
+  secrets: INITIAL_SECRETS_SETTINGS
 }

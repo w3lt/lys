@@ -3,11 +3,23 @@ export * from "./llm"
 export * from "./chat"
 export * from "./agent"
 export {
+  backendToolUnavailableReasonSchema,
+  checkWebSearchKeyApi,
+  checkWebSearchKeyApiResponseSchema,
   listBackendToolsApi,
   listBackendToolsApiResponseSchema,
+  unavailableBackendToolSchema,
+  WEB_SEARCH_TOOL_NAME,
+  type BackendToolUnavailableReason,
+  type CheckWebSearchKeyApiReply,
+  type CheckWebSearchKeyApiResponse,
+  type CheckWebSearchKeyApiRoute,
   type ListBackendToolsApiReply,
   type ListBackendToolsApiResponse,
-  type ListBackendToolsApiRoute
+  type ListBackendToolsApiRoute,
+  type TavilyCreditUsage,
+  type UnavailableBackendTool,
+  type WebSearchKeyCheckFailure
 } from "./tool"
 export {
   deleteConversationApi,

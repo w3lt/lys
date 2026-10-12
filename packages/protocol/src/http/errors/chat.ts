@@ -1,4 +1,6 @@
+import { toolNameSchema } from "@lys/share"
 import * as z from "zod"
+import { backendToolUnavailableReasonSchema } from "../../apis/tool/backendToolAvailability"
 
 /** Stable problem category for a reply route naming a reply that is not stored. */
 const CHAT_REPLY_NOT_FOUND_PROBLEM_TYPE = "urn:lys:problem:chat:reply-not-found"
@@ -159,4 +161,47 @@ export const chatToolCallAnswerMismatchProblemSchema = z
 /** Tool-call-answer-mismatch Problem Details body inferred from its schema. */
 export type ChatToolCallAnswerMismatchProblem = z.infer<
   typeof chatToolCallAnswerMismatchProblemSchema
+>
+
+/** Stable problem category for offering a backend tool that cannot run now. */
+const CHAT_BACKEND_TOOL_UNAVAILABLE_PROBLEM_TYPE =
+  "urn:lys:problem:chat:backend-tool-unavailable"
+
+/** Client-facing summary shared by every unavailable-tool occurrence. */
+const CHAT_BACKEND_TOOL_UNAVAILABLE_PROBLEM_TITLE = "Backend tool unavailable"
+
+/** HTTP status accompanying an unavailable-tool problem body. */
+const CHAT_BACKEND_TOOL_UNAVAILABLE_PROBLEM_STATUS = 409
+
+/**
+ * Validates the RFC 9457 body returned when a chat request offers a backend
+ * tool that cannot run now.
+ *
+ * @remarks The chat endpoint transmits this contract with HTTP 409 before it
+ * stores anything, for the first offered tool that cannot run. `toolName` and
+ * `reason` are extension members a client branches on; `detail` is
+ * caller-safe text. Changing any fixed field requires coordinated consumers.
+ */
+export const chatBackendToolUnavailableProblemSchema = z
+  .strictObject({
+    /** Stable discriminator separating an unavailable tool from other failures. */
+    type: z.literal(CHAT_BACKEND_TOOL_UNAVAILABLE_PROBLEM_TYPE),
+    /** Human-readable category summary shared across occurrences. */
+    title: z.literal(CHAT_BACKEND_TOOL_UNAVAILABLE_PROBLEM_TITLE),
+    /** HTTP status accompanying this problem body. */
+    status: z.literal(CHAT_BACKEND_TOOL_UNAVAILABLE_PROBLEM_STATUS),
+    /** Caller-safe explanation of this occurrence. */
+    detail: z.string().min(1),
+    /** Optional identifier of this problem occurrence. */
+    instance: z.string().min(1).optional(),
+    /** Name of the offered tool that cannot run. */
+    toolName: toolNameSchema,
+    /** Why it cannot run. */
+    reason: backendToolUnavailableReasonSchema
+  })
+  .readonly()
+
+/** Unavailable-tool Problem Details body inferred from its schema. */
+export type ChatBackendToolUnavailableProblem = z.infer<
+  typeof chatBackendToolUnavailableProblemSchema
 >

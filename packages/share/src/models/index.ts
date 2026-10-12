@@ -22,6 +22,7 @@ export {
   modelLoadConfigurationSchema,
   type ModelLoadConfiguration
 } from "./modelLoadConfiguration"
+export { tavilyApiKeySchema, type TavilyApiKey } from "./secrets"
 export {
   buildToolFunctionFormat,
   hasDistinctToolNames,

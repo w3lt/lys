@@ -1,6 +1,6 @@
 ---
 title: Security and trust boundaries
-description: "The current local trust boundary: loopback services, schema validation, approved web reads, and file-backed settings without credential management."
+description: "The current local trust boundary: loopback services, schema validation, approved web reads and searches, a plain-text search key, and file-backed settings without credential management."
 docType: architecture
 sidebar:
   order: 8
@@ -8,38 +8,48 @@ sidebar:
 
 The current security posture is intentionally simple and local. The backend and
 LM Studio both run on loopback, request and event payloads are validated with
-Zod, and there is no credential-management subsystem yet. The one outbound
-connection is the `read_page` tool, which reads a public web page after the
-person allows the call, or at once when the person chose Just run for the
-session.
+Zod, and there is no credential-management subsystem yet. There are two
+outbound connections, and both start off: the `read_page` tool reads a public
+web page, and the `web_search` tool sends a query and the person's Tavily API
+key to Tavily's search service. Each runs after the person allows the call, or
+at once when the person chose Just run for the session.
 
 ## Current trust boundaries
 
-| Boundary                     | Current state                                                         |
-| ---------------------------- | --------------------------------------------------------------------- |
-| React UI -> Tauri host       | Trusted application boundary using Tauri `invoke` commands.           |
-| React UI -> Fastify backend  | Loopback HTTP and SSE only. No auth layer beyond local binding.       |
-| Fastify backend -> LM Studio | Loopback connections to local LM Studio HTTP and WebSocket endpoints. |
-| Backend -> SQLite file       | Local filesystem access to `$LYS_HOME/lys_db.sqlite`.                 |
-| Tauri host -> settings file  | Local filesystem access to `$LYS_HOME/settings.json`.                 |
-| Tauri host -> user files     | File tools read any path the OS user running Lys can read.            |
-| Backend -> public web        | `read_page` requests one model-chosen URL per allowed call.           |
+| Boundary                     | Current state                                                                               |
+| ---------------------------- | ------------------------------------------------------------------------------------------- |
+| React UI -> Tauri host       | Trusted application boundary using Tauri `invoke` commands.                                 |
+| React UI -> Fastify backend  | Loopback HTTP and SSE only. No auth layer beyond local binding.                             |
+| Fastify backend -> LM Studio | Loopback connections to local LM Studio HTTP and WebSocket endpoints.                       |
+| Backend -> SQLite file       | Local filesystem access to `$LYS_HOME/lys_db.sqlite`.                                       |
+| Tauri host -> settings file  | Local filesystem access to `$LYS_HOME/settings.json`.                                       |
+| Tauri host -> user files     | File tools read any path the OS user running Lys can read.                                  |
+| Backend -> public web        | `read_page` requests one model-chosen URL per allowed call.                                 |
+| Backend -> Tavily            | `web_search` sends one query and the saved API key to `api.tavily.com` per allowed call.    |
+| Backend -> settings file     | Reads the Tavily API key from `$LYS_HOME/settings.json`; the Tauri host is the only writer. |
 
 ## Current controls
 
-| Control                    | What it does                                                                                                                            |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| Loopback host constants    | Backend and LM Studio addresses default to `127.0.0.1`.                                                                                 |
-| CORS policy                | Fastify admits only the `http://localhost:1420` and `http://127.0.0.1:1420` development origins and the `tauri://localhost` app origin. |
-| Zod validation             | Backend validates route bodies, parameters, and query strings; desktop validates SSE payloads and HTTP responses.                       |
-| Route-local abort handling | Closing the SSE connection aborts the backend chat task.                                                                                |
-| Approval of web reads      | `read_page` runs only once the desktop answers `allowed`, from the card (full URL and host) or at once on Just run. It starts off.      |
-| Address rule               | `read_page` never connects to loopback, private, link-local, shared, documentation, benchmarking, multicast, or reserved addresses.     |
-| Untrusted page framing     | Page text and the page's title, site, and date reach the model between delimiters it cannot forge, with a notice never to obey them.    |
+| Control                    | What it does                                                                                                                                                                                    |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Loopback host constants    | Backend and LM Studio addresses default to `127.0.0.1`.                                                                                                                                         |
+| CORS policy                | Fastify admits only the `http://localhost:1420` and `http://127.0.0.1:1420` development origins and the `tauri://localhost` app origin.                                                         |
+| Zod validation             | Backend validates route bodies, parameters, and query strings; desktop validates SSE payloads and HTTP responses.                                                                               |
+| Route-local abort handling | Closing the SSE connection aborts the backend chat task.                                                                                                                                        |
+| Approval of web reads      | `read_page` runs only once the desktop answers `allowed`, from the card (full URL and host) or at once on Just run. It starts off.                                                              |
+| Address rule               | `read_page` never connects to loopback, private, link-local, shared, documentation, benchmarking, multicast, or reserved addresses.                                                             |
+| Untrusted page framing     | Page text and the page's title, site, and date reach the model between delimiters it cannot forge, with a notice never to obey them.                                                            |
+| Approval of searches       | `web_search` runs only once the desktop answers `allowed`, from the card (full query and "Sends the query to Tavily (api.tavily.com)") or at once on Just run. It starts off.                   |
+| Fixed search destination   | Every search goes to `https://api.tavily.com` with certificate verification forced on, TLS 1.2 or later, no redirects, and the address rule on every resolved address and the connected socket. |
+| Search key handling        | The key goes only into the `authorization` header sent to Tavily; it never appears in results, the model's context, events, API answers, logs, or errors.                                       |
+| Owner-only settings file   | `settings.json` is replaced atomically and is readable only by its owner on Unix.                                                                                                               |
+| Untrusted result framing   | Result titles, URLs, and snippets reach the model between delimiters it cannot forge, with a notice never to obey them.                                                                         |
 
 ## Candid limits
 
-- There is no keychain integration.
+- There is no keychain integration. The Tavily API key is stored as plain
+  text in `settings.json`, readable by the person's OS account and by any
+  process running as it.
 - There is no scoped credential-handle layer.
 - There is no auth token or CSRF layer on the loopback backend.
 - The current Tauri configuration sets no Content Security Policy (`csp` is
@@ -90,6 +100,46 @@ The backend makes the request, so a backend that runs on another machine
 reads from that machine's network position. Today the backend runs on the
 same machine as the desktop.
 
+## Web searches
+
+`web_search` sends the query the model wrote to the Tavily Search API with
+the person's API key. It is unavailable, and never offered to a model, until a
+key is saved in Settings → Secrets.
+
+- **What is sent.** The query (at most 400 characters), the key in the
+  `authorization` header, and Lys's `User-Agent`. Nothing else from the
+  conversation leaves the machine unless the model puts it into the query. No
+  cookie, `Referer`, or proxy is used.
+- **Where it goes.** Always `https://api.tavily.com`, a constant the model
+  cannot change. Certificate verification is forced on whatever the
+  environment says, and TLS 1.2 is the minimum. The address rule of
+  `read_page` also applies: if `api.tavily.com` resolved to this machine or a
+  private network, Lys would not connect, so the key never goes there. A
+  redirect is not followed.
+- **What comes back.** At most 5 results with a title (300 characters), URL,
+  and snippet (500 characters), from a body of at most 1 MiB within 15
+  seconds. Results whose URL `read_page` could not read are left out. Titles,
+  URLs, and snippets sit between delimiters the results cannot write, with a
+  notice never to follow them.
+- **The key.** Saved by the Tauri host in `settings.json`, which is replaced
+  atomically and is owner-only on Unix. The backend reads it when it lists the
+  tools, when a chat request offers `web_search`, and when the person presses
+  Test, and never logs it or anything else read from the file; a parse error,
+  which could quote the key, is dropped. A turn keeps the key it started with.
+  Test asks Tavily's usage endpoint, which reports whether the key works and
+  its plan credits.
+- **Tavily sees every query**, tied to the person's account. Tavily's account
+  setting "Allow Use of Query Data" controls whether Tavily uses queries to
+  improve its service; switching it off is recommended.
+- **Prompt injection.** A page read with `read_page`, or a snippet, can try to
+  make Lys put private text, such as a file she read, into a query. On Ask me
+  the card shows the full query before anything is sent; on Just run nothing is
+  shown ([#156](https://github.com/w3lt/lys/issues/156)). A query is at most
+  400 characters.
+- **Local callers.** The loopback backend has no authentication, so any local
+  process can ask it to check the key; the answer says only whether the key
+  works and never contains it.
+
 ## Practical implication
 
 Loopback binding limits network exposure, but this development architecture
@@ -102,7 +152,8 @@ does not yet implement those guarantees.
   removes the
   [file tool path exception](/reference/standard-application/#file-tool-path-exception)
   ([issue #122](https://github.com/w3lt/lys/issues/122))
-- Credential storage and retrieval
+- Credential storage and retrieval, which would replace the plain-text Tavily
+  API key
 - Provider authentication flows
 - More explicit diagnostics and log-redaction policy
 - Security review of release-mode desktop and backend packaging

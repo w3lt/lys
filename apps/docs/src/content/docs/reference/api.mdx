@@ -11,29 +11,30 @@ route definitions.
 
 ## Routes
 
-| Method   | Path                                                                            | Request body                                                                       | Response                                                   |
-| -------- | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| `GET`    | `/api/v1/heath`                                                                 | none                                                                               | `{ ok: true }`                                             |
-| `GET`    | `/api/v1/llm/list`                                                              | none                                                                               | `{ llms: LlmInfo[] }`                                      |
-| `GET`    | `/api/v1/llm/:modelId/health`                                                   | none                                                                               | Loaded-state health observation                            |
-| `POST`   | `/api/v1/llm/load`                                                              | `{ modelId: string, configuration?: ModelLoadConfiguration }`                      | `LlmInfo`                                                  |
-| `PATCH`  | `/api/v1/llm/unload`                                                            | `{ modelId: string }`                                                              | `204` or typed Problem Details                             |
-| `GET`    | `/api/v1/llm/runtime`                                                           | none                                                                               | `{ status: "connecting" \| "connected" \| "unreachable" }` |
-| `POST`   | `/api/v1/llm/runtime/connect`                                                   | none                                                                               | Settled `{ status }`, or service-busy Problem Details      |
-| `GET`    | `/api/v1/conversations`                                                         | none; optional `query`, `cursor`, `limit` query parameters                         | Conversation list page                                     |
-| `GET`    | `/api/v1/conversations/:conversationId`                                         | none                                                                               | Conversation with ordered messages                         |
-| `PATCH`  | `/api/v1/conversations/:conversationId`                                         | `{ title: string }`                                                                | Conversation metadata                                      |
-| `DELETE` | `/api/v1/conversations/:conversationId`                                         | none                                                                               | Bodyless `204`                                             |
-| `GET`    | `/api/v1/agents`                                                                | none; optional `cursor`, `limit` query parameters                                  | Built-in agents and a page of stored agents                |
-| `POST`   | `/api/v1/agents`                                                                | `{ code?, name, bio, systemPrompt }`                                               | `201` agent with `Location`, or `409` Problem Details      |
-| `GET`    | `/api/v1/agents/:agentCode`                                                     | none                                                                               | Agent with its system prompt                               |
-| `PATCH`  | `/api/v1/agents/:agentCode`                                                     | at least one of `{ name, bio, systemPrompt }`                                      | Changed agent, or `409` for a built-in agent               |
-| `DELETE` | `/api/v1/agents/:agentCode`                                                     | none                                                                               | Bodyless `204`, or `409` for a built-in agent              |
-| `GET`    | `/api/v1/tools`                                                                 | none                                                                               | `{ tools: ToolDefinition[] }`                              |
-| `POST`   | `/api/v1/chat`                                                                  | `conversation`, `message`, `model`, required `generationOptions`, optional `tools` | `text/event-stream`                                        |
-| `GET`    | `/api/v1/chat/:conversationId/replies/:assistantMessageId/events`               | none                                                                               | `text/event-stream` (reply snapshot, then live events)     |
-| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/stop`                 | none                                                                               | Bodyless `204`, or `409` Problem Details                   |
-| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/tool-results/:callId` | `{ status, reason?, content? }`                                                    | Bodyless `204`, or `409` Problem Details                   |
+| Method   | Path                                                                            | Request body                                                                       | Response                                                               |
+| -------- | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `GET`    | `/api/v1/heath`                                                                 | none                                                                               | `{ ok: true }`                                                         |
+| `GET`    | `/api/v1/llm/list`                                                              | none                                                                               | `{ llms: LlmInfo[] }`                                                  |
+| `GET`    | `/api/v1/llm/:modelId/health`                                                   | none                                                                               | Loaded-state health observation                                        |
+| `POST`   | `/api/v1/llm/load`                                                              | `{ modelId: string, configuration?: ModelLoadConfiguration }`                      | `LlmInfo`                                                              |
+| `PATCH`  | `/api/v1/llm/unload`                                                            | `{ modelId: string }`                                                              | `204` or typed Problem Details                                         |
+| `GET`    | `/api/v1/llm/runtime`                                                           | none                                                                               | `{ status: "connecting" \| "connected" \| "unreachable" }`             |
+| `POST`   | `/api/v1/llm/runtime/connect`                                                   | none                                                                               | Settled `{ status }`, or service-busy Problem Details                  |
+| `GET`    | `/api/v1/conversations`                                                         | none; optional `query`, `cursor`, `limit` query parameters                         | Conversation list page                                                 |
+| `GET`    | `/api/v1/conversations/:conversationId`                                         | none                                                                               | Conversation with ordered messages                                     |
+| `PATCH`  | `/api/v1/conversations/:conversationId`                                         | `{ title: string }`                                                                | Conversation metadata                                                  |
+| `DELETE` | `/api/v1/conversations/:conversationId`                                         | none                                                                               | Bodyless `204`                                                         |
+| `GET`    | `/api/v1/agents`                                                                | none; optional `cursor`, `limit` query parameters                                  | Built-in agents and a page of stored agents                            |
+| `POST`   | `/api/v1/agents`                                                                | `{ code?, name, bio, systemPrompt }`                                               | `201` agent with `Location`, or `409` Problem Details                  |
+| `GET`    | `/api/v1/agents/:agentCode`                                                     | none                                                                               | Agent with its system prompt                                           |
+| `PATCH`  | `/api/v1/agents/:agentCode`                                                     | at least one of `{ name, bio, systemPrompt }`                                      | Changed agent, or `409` for a built-in agent                           |
+| `DELETE` | `/api/v1/agents/:agentCode`                                                     | none                                                                               | Bodyless `204`, or `409` for a built-in agent                          |
+| `GET`    | `/api/v1/tools`                                                                 | none                                                                               | `{ tools: ToolDefinition[], unavailableTools }`                        |
+| `GET`    | `/api/v1/tools/web_search/key-check`                                            | none                                                                               | `{ status: "accepted" \| "rejected" \| "unavailable" \| "failed", … }` |
+| `POST`   | `/api/v1/chat`                                                                  | `conversation`, `message`, `model`, required `generationOptions`, optional `tools` | `text/event-stream`                                                    |
+| `GET`    | `/api/v1/chat/:conversationId/replies/:assistantMessageId/events`               | none                                                                               | `text/event-stream` (reply snapshot, then live events)                 |
+| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/stop`                 | none                                                                               | Bodyless `204`, or `409` Problem Details                               |
+| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/tool-results/:callId` | `{ status, reason?, content? }`                                                    | Bodyless `204`, or `409` Problem Details                               |
 
 `/api/v1/heath` is the current spelling in both the shared protocol package and
 the Fastify route registration.
@@ -144,7 +145,11 @@ shape `toolDefinitionSchema` from `@lys/share` validates, each with `runner`
 backend runs, each once, as [`GET /api/v1/tools`](#tool-list) lists them; it is
 optional. Together they offer at least one tool, and no name appears in both.
 A request that breaks these rules, or names a backend tool the backend does
-not run, returns `400` before anything is stored. The model is offered client
+not run, returns `400` before anything is stored. A request that offers a
+backend tool that cannot run now, such as `web_search` without a usable
+Tavily API key, returns `409` with
+`urn:lys:problem:chat:backend-tool-unavailable` before anything is stored; see
+[an offered tool that cannot run](#an-offered-tool-that-cannot-run). The model is offered client
 tools first, then backend tools, each in request order. Without `tools`, the
 turn is one round with no tools. The desktop sends `tools`
 only to a model whose `trainedForToolUse` is true; the backend does not check
@@ -154,9 +159,9 @@ this itself ([#135](https://github.com/w3lt/lys/issues/135)). A reply can make a
 ## Chat response shape
 
 Accepted chat turns respond as SSE. A missing conversation, a new
-conversation naming a code no agent has, or a stored conversation whose agent
-no longer exists returns JSON Problem Details before the stream starts, and
-nothing is stored: no message, and no failed reply. Each event payload must match one of
+conversation naming a code no agent has, a stored conversation whose agent no
+longer exists, or an offered backend tool that cannot run now returns JSON
+Problem Details before the stream starts, and nothing is stored: no message, and no failed reply. Each event payload must match one of
 the eight variants documented in [SSE events](/reference/sse-events/).
 
 Closing a chat stream stops only that client's observation. The backend keeps
@@ -178,10 +183,42 @@ with `urn:lys:problem:chat:reply-not-found`.
 ## Tool list
 
 `GET /api/v1/tools` lists every tool the backend runs, each name once, in the
-order Settings shows them, as `{ "tools": ToolDefinition[] }`. Every
-definition has `runner` `backend`. The list is fixed for one backend build;
-today it holds `read_page`, which reads one public web page (group and access
-`network`). The list does not contact anything.
+order Settings shows them, and the listed tools that cannot run now:
+
+```json
+{
+  "tools": [{ "name": "read_page" }, { "name": "web_search" }],
+  "unavailableTools": [{ "name": "web_search", "reason": "api-key-missing" }]
+}
+```
+
+(Definitions shortened.) Every definition has `runner` `backend`. The
+definitions are fixed for one backend build: `read_page`, which reads one
+public web page, and `web_search`, which searches the web through Tavily
+(both group and access `network`). Availability is read again on every
+request. `reason` is `api-key-missing` (no Tavily API key is saved),
+`api-key-invalid` (the saved key fails the key format), or
+`settings-unreadable` (the settings file cannot be read as a settings
+document). Each name in `unavailableTools` is a listed tool, once. The list
+reads the settings file but contacts nothing, and never contains the key.
+
+### Key check
+
+`GET /api/v1/tools/web_search/key-check` reads the saved Tavily API key and
+asks Tavily's usage endpoint about it, through the same client and limits as
+a search; it changes nothing and is not cancelled when the client leaves. It
+answers `200` with one of:
+
+| `status`      | Other fields                                                                                  | Meaning                                        |
+| ------------- | --------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| `accepted`    | `credits`: `{ used, limit }` or `null`                                                        | Tavily accepted the key just now               |
+| `rejected`    | none                                                                                          | Tavily refused the key (HTTP 401 or 403)       |
+| `unavailable` | `reason`, as in the tool list                                                                 | No usable key is saved; nothing was sent       |
+| `failed`      | `reason`: `rate-limited`, `timed-out`, `unreachable`, `provider-error`, or `invalid-response` | The check could not tell whether the key works |
+
+`credits` comes from the account's plan usage and limit when Tavily reports
+them; `limit` is `null` when Tavily reports none. The answer never contains
+the key.
 
 ## Tool results
 
@@ -403,6 +440,27 @@ conversation gains no message and no failed reply.
 The conversation accepts messages again once an agent is stored under that
 code, and that agent then answers it. Built-in agents cannot be deleted, so a
 conversation a built-in agent answers never reaches this state.
+
+### An offered tool that cannot run
+
+A chat request that offers a backend tool that cannot run now stores nothing:
+the chat endpoint answers `409` with `application/problem+json`, for the first
+such tool in offer order. `toolName` and `reason` are extension members.
+
+```json
+{
+  "type": "urn:lys:problem:chat:backend-tool-unavailable",
+  "title": "Backend tool unavailable",
+  "status": 409,
+  "detail": "web_search is unavailable: no Tavily API key is saved.",
+  "instance": "/api/v1/chat",
+  "toolName": "web_search",
+  "reason": "api-key-missing"
+}
+```
+
+The desktop shows the error and reads the tool list again, so its next
+request leaves the tool out.
 
 ## LLM metadata shape
 

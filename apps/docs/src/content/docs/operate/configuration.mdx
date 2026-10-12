@@ -30,8 +30,8 @@ the Dock does not see a `LYS_HOME` exported in a shell profile.
 The Tauri desktop host reads and writes one JSON settings file at
 `$LYS_HOME/settings.json`.
 
-The current schema contains `runtime`, `model`, `generation`, and
-`loadConfiguration` groups. Rust
+The current schema contains `runtime`, `model`, `generation`,
+`loadConfiguration`, and `secrets` groups. Rust
 and the TypeScript settings projection use the same camelCase field names. See
 the [configuration reference](/reference/configuration/) for the complete field
 list, defaults, and accepted values.
@@ -58,7 +58,29 @@ the unsigned 32-bit integer range.
 
 When the file does not exist yet, the desktop host creates the Lys home
 directory if needed and writes the default structure on first load. Loading
-never rewrites an existing file.
+never rewrites an existing file. Every write replaces the file atomically and
+leaves it readable only by your user account on Unix.
+
+### Tavily API key
+
+`web_search` sends queries to Tavily with your own API key, and stays
+unavailable until one is saved.
+
+1. Create a key at [app.tavily.com](https://app.tavily.com). The free plan
+   gives 1,000 credits a month without a card; a basic search costs one
+   credit, also when Lys's 15-second limit ends it after Tavily received it.
+2. In Tavily's account settings, consider switching off "Allow Use of Query
+   Data", so Tavily does not use your queries to improve its service.
+3. Open Settings → Secrets, paste the key into the Tavily card, and press Save
+   or Enter. Surrounding spaces are removed; the key itself is never changed.
+4. Press Test to ask Tavily whether the key works; it shows the plan's credits
+   when Tavily reports them. Remove deletes the saved key.
+
+The key is stored as plain text in the `secrets` group of `settings.json`.
+Lys's backend reads it when it lists the tools, when a message offers
+`web_search`, and when you press Test, so a saved key works from the next
+message without restarting. A hand-edited key must be 1 to 256 visible ASCII
+characters, or the settings file fails to load.
 
 ## Current UI wiring
 
@@ -71,7 +93,8 @@ in-memory edits usable.
 
 Load configuration edits in the Model pane autosave the same way, replacing
 only the `loadConfiguration` group, and the Model pane offers the same retry
-action.
+action. The Secrets pane saves the Tavily API key only on Save or Enter,
+replacing only the `secrets` group.
 
 Runtime edits and `model.contextSize` edits remain session-only. Changing those
 controls does not persist them, and a later automatic save does not save their

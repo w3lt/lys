@@ -198,7 +198,9 @@ on how many run at once.
   instead. On Just run, a round of N `read_page` calls opens N connections at
   once and holds up to N × 4 MiB of page bodies; each read ends within 15
   seconds, and their extractions run one after another on the backend's
-  thread, about a second each at most.
+  thread, about a second each at most. A round of N `web_search` calls sends
+  N queries to Tavily at once, each costing one Tavily credit, each ending
+  within 15 seconds and reading at most 1 MiB.
 - **Removal condition:** [#136](https://github.com/w3lt/lys/issues/136) adds
   the limit back, which also bounds how many backend tool calls of a round
   run at once.
@@ -251,8 +253,8 @@ I-3 and I-8.
 - **Scope:** `handleToolCallRound` and `handleBuiltInToolCall` in
   `apps/backend/src/modules/agent/toolCallRound.ts`, and only a run that
   rejects for a reason other than Stop. A failure a tool reports as its
-  result, such as an HTTP error status or a timeout of `read_page`, is that
-  call's result and keeps the reply going.
+  result, such as an HTTP error status or a timeout of `read_page` or
+  `web_search`, is that call's result and keeps the reply going.
 - **Constraint:** the calls of one round run in parallel and independently
   (see the [tool call limit exception](#tool-call-limit-exception)). A run
   rejects only on a defect in Lys or in a library. Stopping the round's other
@@ -267,7 +269,8 @@ I-3 and I-8.
 - **Risk and control:** the round rejects as soon as one run rejects, and the
   reply is stored as failed. The round's other backend runs keep going until
   they end, for `read_page` a request of at most 15 seconds and 4 MiB plus an
-  extraction of about a second, and their results are discarded: nothing
+  extraction of about a second, for `web_search` a request of at most 15
+  seconds and 1 MiB, and their results are discarded: nothing
   they produce is stored or shown. Calls still waiting for the person end
   when the failed reply task settles.
 - **Removal condition:** [#159](https://github.com/w3lt/lys/issues/159) stops
@@ -285,7 +288,8 @@ format before interpreting it. The exception was approved by the maintainer on
 
 - **Scope:** only `$LYS_HOME/settings.json`, which the
   [native settings module](https://github.com/w3lt/lys/blob/main/apps/desktop/src-tauri/src/settings.rs)
-  reads and writes. A missing group, such as `loadConfiguration` in a file
+  reads and writes, and whose `secrets` group the backend reads for the
+  Tavily API key. A missing group, such as `loadConfiguration` in a file
   written before PR #143, is read as that group's defaults like any other
   missing optional field; no format is inferred from it, and the file is not
   rewritten on load. Every other long-lived serialized format still follows
@@ -303,8 +307,9 @@ format before interpreting it. The exception was approved by the maintainer on
     every settings file.
 - **Risk and control:** a build that does not know a group or field drops it
   on its next save. A build from before PR #143 drops `loadConfiguration`, and
-  every per-model load setting with it, and nothing stops an older build from
-  rewriting a newer file. The current build rejects an unknown setting inside
+  every per-model load setting with it; a build from before `web_search` drops
+  the `secrets` group, and the saved Tavily API key with it. Nothing stops an
+  older build from rewriting a newer file. The current build rejects an unknown setting inside
   `loadConfiguration`, but it ignores an unknown group and an unknown field in
   the other groups. A file that fails to load is never rewritten.
 - **Removal condition:** [#146](https://github.com/w3lt/lys/issues/146) adds

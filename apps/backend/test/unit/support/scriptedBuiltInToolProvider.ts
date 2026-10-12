@@ -1,47 +1,47 @@
 import type {
-  BuiltInToolPreparation,
+  TurnToolLookup,
   BuiltInToolProvider
 } from "../../../src/modules/tool/builtIn/builtInTool"
 
 /**
- * Owns a fixed preparation to stand in for a backend tool's provider in route
+ * Owns a fixed lookup to stand in for a backend tool's provider in route
  * tests, counting how often it is asked.
  *
- * @remarks Implements {@link BuiltInToolProvider}: every preparation resolves
- * with the preparation given at creation. Concurrency model: single-owner, in
+ * @remarks Implements {@link BuiltInToolProvider}: every lookup resolves
+ * with the lookup given at creation. Concurrency model: single-owner, in
  * one test.
  */
 export class ScriptedBuiltInToolProvider implements BuiltInToolProvider {
-  /** Preparation every call gives. */
-  readonly #preparation: BuiltInToolPreparation
-  /** Number of preparations asked for so far. */
-  #preparationCount = 0
+  /** Lookup every call gives. */
+  readonly #lookup: TurnToolLookup
+  /** Number of lookups asked for so far. */
+  #lookupCount = 0
 
   /**
    * Creates the provider.
    *
-   * @param preparation - Preparation every call gives; frozen here.
+   * @param lookup - Lookup every call gives; frozen here.
    */
-  public constructor(preparation: BuiltInToolPreparation) {
-    this.#preparation = Object.freeze(preparation)
+  public constructor(lookup: TurnToolLookup) {
+    this.#lookup = Object.freeze(lookup)
   }
 
   /**
-   * Number of preparations asked for so far.
+   * Number of lookups asked for so far.
    *
    * @returns The count.
    */
-  public get preparationCount(): number {
-    return this.#preparationCount
+  public get lookupCount(): number {
+    return this.#lookupCount
   }
 
   /**
-   * Implements {@link BuiltInToolProvider.prepareTool}.
+   * Implements {@link BuiltInToolProvider.findTurnTool}.
    *
-   * @returns The interface-defined outcome: the fixed preparation.
+   * @returns The interface-defined outcome: the fixed lookup.
    */
-  public prepareTool(): Promise<BuiltInToolPreparation> {
-    this.#preparationCount += 1
-    return Promise.resolve(this.#preparation)
+  public findTurnTool(): Promise<TurnToolLookup> {
+    this.#lookupCount += 1
+    return Promise.resolve(this.#lookup)
   }
 }

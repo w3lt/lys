@@ -151,7 +151,7 @@ export async function sendTavilySearchRequest(
     return Object.freeze({ status: "failed", failure: UNREADABLE_ANSWER })
   }
   const results = Object.freeze(
-    parsed.data.results.slice(0, MAXIMUM_SEARCH_RESULTS).map(freezeResult)
+    parsed.data.results.slice(0, MAXIMUM_SEARCH_RESULTS).map(buildSearchResult)
   )
   return Object.freeze({ status: "succeeded", results })
 }
@@ -162,7 +162,7 @@ export async function sendTavilySearchRequest(
  * @param result - Result the schema accepted.
  * @returns A frozen copy with only its title, URL, and snippet.
  */
-function freezeResult(
+function buildSearchResult(
   result: z.infer<typeof tavilySearchResponseSchema>["results"][number]
 ): TavilySearchResult {
   return Object.freeze({

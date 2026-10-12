@@ -48,7 +48,7 @@ export function formatDelimiterFreeText(text: string): string {
  * @returns The text itself when it fits; otherwise its beginning, one code
  * unit shorter when the cut would end on the first half of a pair.
  */
-function cutText(text: string, maximumLength: number): string {
+function formatCutText(text: string, maximumLength: number): string {
   if (text.length <= maximumLength) return text
   const lastKept = text.charCodeAt(maximumLength - 1)
   const endsInsidePair =
@@ -65,7 +65,7 @@ function cutText(text: string, maximumLength: number): string {
  * characters are removed before the delimiter check, so one placed between
  * brackets cannot hide a delimiter.
  */
-function flattenUntrustedText(text: string): string {
+function formatFlatText(text: string): string {
   const flattened = text
     .replace(WHITESPACE_RUN_PATTERN, " ")
     .replace(CONTROL_CHARACTER_PATTERN, "")
@@ -87,7 +87,7 @@ export function formatSingleLineText(
   text: string,
   maximumLength: number
 ): string {
-  return cutText(flattenUntrustedText(text), maximumLength)
+  return formatCutText(formatFlatText(text), maximumLength)
 }
 
 /**
@@ -102,7 +102,7 @@ export function formatSingleLineText(
  * a character. Empty when the text has no visible content.
  */
 export function formatExcerptText(text: string, maximumLength: number): string {
-  const flattened = flattenUntrustedText(text)
+  const flattened = formatFlatText(text)
   if (flattened.length <= maximumLength) return flattened
-  return cutText(flattened, maximumLength - 1) + EXCERPT_ELLIPSIS
+  return formatCutText(flattened, maximumLength - 1) + EXCERPT_ELLIPSIS
 }

@@ -79,7 +79,7 @@ type ToolResultMessage = Extract<ReplyContextMessage, { role: "tool" }>
  *
  * @param clientTools - Validated definitions of the client tools, each name
  * once.
- * @param builtInTools - Backend tools prepared for the turn, each name once.
+ * @param builtInTools - Backend tools found for the turn, each name once.
  * @returns The tools by name: client tools in offer order, then backend
  * tools in offer order.
  * @throws If a backend tool has the name of a client tool; the chat request

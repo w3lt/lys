@@ -41,12 +41,12 @@ const NO_BUILT_IN_TOOLS: BuiltInToolSelection = Object.freeze({
   entries: Object.freeze([])
 })
 
-/** Outcome of preparing every backend tool a request offers. */
-export type BuiltInToolSetPreparation =
+/** Outcome of looking up every backend tool a request offers. */
+export type TurnToolSetLookup =
   | Readonly<{
       /** Every offered tool can run. */
       status: "ready"
-      /** The prepared tools, in offer order. */
+      /** The tools found, in offer order. */
       tools: readonly TurnBuiltInTool[]
     }>
   | Readonly<{
@@ -131,35 +131,35 @@ export function findBuiltInTools(
 }
 
 /**
- * Prepares every backend tool a request offers for one turn.
+ * Finds the tools that run one turn's calls, one for each offered backend tool.
  *
  * @param entries - Offered tools, in offer order.
- * @returns `ready` with every prepared tool in offer order, or `unavailable`
+ * @returns `ready` with every tool found, in offer order, or `unavailable`
  * naming the first offered tool that cannot run and why. Every provider is
  * asked at once.
  * @throws A provider's defect.
  */
-export async function prepareBuiltInTools(
+export async function findTurnBuiltInTools(
   entries: readonly BuiltInToolEntry[]
-): Promise<BuiltInToolSetPreparation> {
-  const preparations = await Promise.all(
-    entries.map((entry) => entry.provider.prepareTool())
+): Promise<TurnToolSetLookup> {
+  const lookups = await Promise.all(
+    entries.map((entry) => entry.provider.findTurnTool())
   )
   const tools: TurnBuiltInTool[] = []
   for (const [index, entry] of entries.entries()) {
-    const preparation = preparations[index]
-    if (preparation === undefined) {
-      throw new Error("A tool preparation is missing")
+    const lookup = lookups[index]
+    if (lookup === undefined) {
+      throw new Error("A tool lookup is missing")
     }
-    if (preparation.status === "unavailable") {
+    if (lookup.status === "unavailable") {
       return Object.freeze({
         status: "unavailable",
         toolName: entry.definition.name,
-        reason: preparation.reason
+        reason: lookup.reason
       })
     }
     tools.push(
-      Object.freeze({ definition: entry.definition, tool: preparation.tool })
+      Object.freeze({ definition: entry.definition, tool: lookup.tool })
     )
   }
   return Object.freeze({ status: "ready", tools: Object.freeze(tools) })

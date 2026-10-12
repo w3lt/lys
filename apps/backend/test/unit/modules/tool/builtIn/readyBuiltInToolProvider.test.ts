@@ -17,7 +17,7 @@ describe("ReadyBuiltInToolProvider", () => {
     const tool = new ScriptedBuiltInTool()
     const provider = new ReadyBuiltInToolProvider(tool)
 
-    expect(await provider.prepareTool()).toEqual({ status: "ready", tool })
-    expect(await provider.prepareTool()).toEqual({ status: "ready", tool })
+    expect(await provider.findTurnTool()).toEqual({ status: "ready", tool })
+    expect(await provider.findTurnTool()).toEqual({ status: "ready", tool })
   })
 })

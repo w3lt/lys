@@ -71,6 +71,23 @@ describe("formatSearchEvidence", () => {
     expect(content).not.toContain("Title: Bad")
   })
 
+  it("leaves out a result whose address grows past the limit once normalized", () => {
+    const url = `https://zh.wikipedia.org/wiki/${"蛾".repeat(300)}`
+    const content = formatSearchEvidence({
+      query: "moths",
+      results: [
+        { title: "Long", url, content: "x" },
+        { title: "Good", url: "https://moths.example/", content: "y" }
+      ]
+    })
+
+    expect(url.length).toBeLessThan(2_048)
+    expect(content).toContain(
+      "Results: 1. 1 result was left out because Lys cannot read its address."
+    )
+    expect(content).not.toContain("Title: Long")
+  })
+
   it("says that nothing readable was found when every result is left out", () => {
     const content = formatSearchEvidence({
       query: "moths",

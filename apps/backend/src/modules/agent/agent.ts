@@ -64,7 +64,7 @@ export type AgentTurn = Readonly<{
   /** Client tools offered for the turn, each name once; empty when none are. */
   clientTools: readonly ToolDefinition[]
   /**
-   * Backend tools prepared for the turn, each name once and none named like a
+   * Backend tools found for the turn, each name once and none named like a
    * client tool; empty when none are offered.
    */
   builtInTools: readonly TurnBuiltInTool[]

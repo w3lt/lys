@@ -30,7 +30,7 @@ declare module "fastify" {
     /** Every tool the backend runs, in the order Settings lists them. */
     builtInTools: readonly BuiltInToolEntry[]
     /**
-     * Application-scoped preparation of the web search tool and checks of the
+     * Application-scoped lookup of the web search tool and checks of the
      * saved Tavily key.
      */
     webSearchToolProvider: WebSearchToolProvider

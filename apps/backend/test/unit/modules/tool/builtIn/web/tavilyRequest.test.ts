@@ -1,6 +1,6 @@
 import { createServer } from "node:http"
 import type { AddressInfo } from "node:net"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, onTestFinished, vi } from "vitest"
 import {
   MAXIMUM_TAVILY_RESPONSE_BYTES,
   sendTavilyRequest,
@@ -12,6 +12,7 @@ import { isBlockedAddress } from "../../../../../../src/modules/tool/builtIn/web
 import {
   answerWithJson,
   startTavilyServer,
+  startTlsTavilyServer,
   TEST_TAVILY_API_KEY
 } from "../../../../support/tavilyServer"
 
@@ -329,6 +330,44 @@ describe("sendTavilyRequest", () => {
       status: "failed",
       failure: { kind: "unreachable", code: "ECONNREFUSED" }
     })
+  })
+
+  it("refuses an untrusted certificate even when the environment turns verification off", async () => {
+    vi.stubEnv("NODE_TLS_REJECT_UNAUTHORIZED", "0")
+    onTestFinished(() => {
+      vi.unstubAllEnvs()
+    })
+    const server = await startTlsTavilyServer(answerWithJson({ results: [] }))
+
+    const result = await sendUnstoppedRequest(
+      SEARCH_REQUEST,
+      server.dependencies
+    )
+
+    expect(result).toEqual({
+      status: "failed",
+      failure: { kind: "unreachable", code: "DEPTH_ZERO_SELF_SIGNED_CERT" }
+    })
+    expect(server.receivedRequests).toHaveLength(0)
+  })
+
+  it("refuses a server that offers nothing newer than TLS 1.1", async () => {
+    const server = await startTlsTavilyServer(answerWithJson({ results: [] }), {
+      minVersion: "TLSv1",
+      maxVersion: "TLSv1.1",
+      ciphers: "DEFAULT@SECLEVEL=0"
+    })
+
+    const result = await sendUnstoppedRequest(
+      SEARCH_REQUEST,
+      server.dependencies
+    )
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: { kind: "unreachable" }
+    })
+    expect(server.receivedRequests).toHaveLength(0)
   })
 
   it("rejects with a failure it does not recognize", async () => {

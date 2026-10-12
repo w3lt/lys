@@ -4,10 +4,7 @@ import type {
   WebSearchKeyCheckFailure
 } from "@lys/protocol"
 import type { TavilyApiKeyRead } from "../../../../infrastructure/settings/tavilyApiKeyFile"
-import type {
-  BuiltInToolPreparation,
-  BuiltInToolProvider
-} from "../builtInTool"
+import type { TurnToolLookup, BuiltInToolProvider } from "../builtInTool"
 import { sendTavilyUsageRequest, type TavilyUsageOutcome } from "./tavilyApi"
 import type {
   TavilyRequestDependencies,
@@ -112,7 +109,7 @@ function buildUsageKeyCheck(
  * search tool holding the key saved when the turn starts, and to check that
  * key with Tavily.
  *
- * @remarks Implements {@link BuiltInToolProvider}. Every preparation and
+ * @remarks Implements {@link BuiltInToolProvider}. Every lookup and
  * check reads the key again, so a saved or removed key applies to the next
  * turn or check without restarting the backend. Neither result ever holds
  * the key. Owns no resource. Concurrency model: reentrant.
@@ -140,13 +137,13 @@ export default class WebSearchToolProvider implements BuiltInToolProvider {
   }
 
   /**
-   * Implements {@link BuiltInToolProvider.prepareTool} for web searches.
+   * Implements {@link BuiltInToolProvider.findTurnTool} for web searches.
    *
    * @returns The interface-defined outcome: `ready` with a tool holding the
    * key saved now; `unavailable` with `api-key-missing`, `api-key-invalid`,
    * or `settings-unreadable` otherwise.
    */
-  public async prepareTool(): Promise<BuiltInToolPreparation> {
+  public async findTurnTool(): Promise<TurnToolLookup> {
     const keyRead = await this.#readApiKey()
     if (keyRead.status !== "configured") {
       return Object.freeze({
@@ -170,7 +167,7 @@ export default class WebSearchToolProvider implements BuiltInToolProvider {
    * @remarks The check ends within the request time limit; nothing stops it
    * earlier.
    */
-  public async checkApiKey(): Promise<CheckWebSearchKeyApiResponse> {
+  public async sendApiKeyCheck(): Promise<CheckWebSearchKeyApiResponse> {
     const keyRead = await this.#readApiKey()
     if (keyRead.status !== "configured") {
       return Object.freeze({

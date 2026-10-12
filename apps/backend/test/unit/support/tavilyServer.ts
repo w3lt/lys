@@ -2,12 +2,19 @@ import { tavilyApiKeySchema } from "@lys/share"
 import {
   createServer,
   type IncomingHttpHeaders,
+  type IncomingMessage,
+  type Server,
   type ServerResponse
 } from "node:http"
+import {
+  createServer as createTlsServer,
+  type ServerOptions as TlsServerOptions
+} from "node:https"
 import type { AddressInfo } from "node:net"
 import { onTestFinished } from "vitest"
 import type { TavilyRequestDependencies } from "../../../src/modules/tool/builtIn/web/tavilyRequest"
 import type { HostAddressLookup } from "../../../src/modules/tool/builtIn/web/webConnection"
+import { createSelfSignedTlsCredentials } from "./selfSignedCertificate"
 
 /** One request a fake Tavily server received, with its whole body. */
 export type ReceivedTavilyRequest = Readonly<{
@@ -44,19 +51,24 @@ export const TEST_TAVILY_API_KEY = tavilyApiKeySchema.parse(
 const lookupLoopback: HostAddressLookup = () =>
   Promise.resolve([{ address: "127.0.0.1", family: 4 }])
 
+/** TLS settings of a fake Tavily server besides its key and certificate. */
+export type TavilyServerTlsOptions = Pick<
+  TlsServerOptions,
+  "minVersion" | "maxVersion" | "ciphers"
+>
+
 /**
- * Starts a fake Tavily server on a free loopback port, closed with its
- * connections when the current test finishes.
+ * Builds the request listener of a fake Tavily server.
  *
+ * @param receivedRequests - Record every request is appended to.
  * @param route - Answers each request once its body has arrived.
- * @returns Dependencies that reach the server under the host name
- * `tavily.test`, a 5-second time limit, and the received requests.
+ * @returns The listener.
  */
-export async function startTavilyServer(
+function createTavilyRequestListener(
+  receivedRequests: ReceivedTavilyRequest[],
   route: TavilyRoute
-): Promise<TavilyServer> {
-  const receivedRequests: ReceivedTavilyRequest[] = []
-  const server = createServer((request, response) => {
+): (request: IncomingMessage, response: ServerResponse) => void {
+  return (request, response) => {
     const chunks: Buffer[] = []
     request.on("data", (chunk: Buffer) => chunks.push(chunk))
     request.on("end", () => {
@@ -69,19 +81,86 @@ export async function startTavilyServer(
       receivedRequests.push(received)
       route(received, response)
     })
-  })
+  }
+}
+
+/**
+ * Listens on a free loopback port, closing the server with its connections
+ * when the current test finishes.
+ *
+ * @param server - HTTP or HTTPS server.
+ * @returns The port.
+ */
+async function listenOnLoopback(server: Server): Promise<number> {
   onTestFinished(async () => {
     server.closeAllConnections()
     await new Promise<void>((resolve) => server.close(() => resolve()))
   })
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
-  const { port } = server.address() as AddressInfo
-  const dependencies: TavilyRequestDependencies = Object.freeze({
-    origin: `http://tavily.test:${port}`,
+  return (server.address() as AddressInfo).port
+}
+
+/**
+ * Builds request dependencies that reach a fake server on the loopback port.
+ *
+ * @param origin - Origin under the host name `tavily.test`.
+ * @returns Frozen dependencies with a 5-second time limit that block no
+ * address.
+ */
+function buildTestTavilyDependencies(
+  origin: string
+): TavilyRequestDependencies {
+  return Object.freeze({
+    origin,
     lookupHostAddresses: lookupLoopback,
     isBlockedAddress: () => false,
     requestTimeoutMs: 5_000
   })
+}
+
+/**
+ * Starts a fake Tavily server on a free loopback port, closed with its
+ * connections when the current test finishes.
+ *
+ * @param route - Answers each request once its body has arrived.
+ * @returns Dependencies that reach the server under the host name
+ * `tavily.test`, a 5-second time limit, and the received requests.
+ */
+export async function startTavilyServer(
+  route: TavilyRoute
+): Promise<TavilyServer> {
+  const receivedRequests: ReceivedTavilyRequest[] = []
+  const server = createServer(
+    createTavilyRequestListener(receivedRequests, route)
+  )
+  const port = await listenOnLoopback(server)
+  const dependencies = buildTestTavilyDependencies(`http://tavily.test:${port}`)
+  return Object.freeze({ dependencies, receivedRequests })
+}
+
+/**
+ * Starts a fake Tavily server over HTTPS with a fresh self-signed
+ * certificate for `tavily.test`, closed when the current test finishes.
+ *
+ * @param route - Answers each request once its body has arrived.
+ * @param tlsOptions - Protocol versions and ciphers the server accepts;
+ * Node's defaults when omitted.
+ * @returns Dependencies that reach the server over `https:` and the
+ * received requests. No client that verifies certificates trusts it.
+ */
+export async function startTlsTavilyServer(
+  route: TavilyRoute,
+  tlsOptions: TavilyServerTlsOptions = {}
+): Promise<TavilyServer> {
+  const receivedRequests: ReceivedTavilyRequest[] = []
+  const server = createTlsServer(
+    { ...createSelfSignedTlsCredentials("tavily.test"), ...tlsOptions },
+    createTavilyRequestListener(receivedRequests, route)
+  )
+  const port = await listenOnLoopback(server)
+  const dependencies = buildTestTavilyDependencies(
+    `https://tavily.test:${port}`
+  )
   return Object.freeze({ dependencies, receivedRequests })
 }
 

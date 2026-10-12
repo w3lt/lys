@@ -134,7 +134,7 @@ describe("createSingletonServices", () => {
     )
   })
 
-  it("lists read_page, then web_search prepared by the bundle's web search tool provider", async () => {
+  it("lists read_page, then web_search found by the bundle's web search tool provider", async () => {
     const { factories } = createRecordedFactories()
 
     const services = await createSingletonServices(
@@ -150,7 +150,7 @@ describe("createSingletonServices", () => {
     expect(services.builtInTools[1]?.provider).toBe(
       services.webSearchToolProvider
     )
-    expect(await services.webSearchToolProvider.prepareTool()).toEqual({
+    expect(await services.webSearchToolProvider.findTurnTool()).toEqual({
       status: "unavailable",
       reason: "api-key-missing"
     })

@@ -23,8 +23,8 @@ import type {
 } from "../../tool/builtIn/builtInTool"
 import {
   findBuiltInTools,
-  prepareBuiltInTools,
-  type BuiltInToolSetPreparation
+  findTurnBuiltInTools,
+  type TurnToolSetLookup
 } from "../../tool/builtIn/builtInTools"
 import type { TitleGenerationOptions } from "../chatService"
 import { createConversationNotFoundProblem } from "../../conversation/routes/notFound"
@@ -163,7 +163,7 @@ type TurnGenerationInput = Readonly<{
   generationOptions: MessageGenerationOptions
   /** Client tools the request offered, each name once; empty when it offered none. */
   clientTools: readonly ToolDefinition[]
-  /** Backend tools prepared for the turn, each name once; empty when it offered none. */
+  /** Backend tools found for the turn, each name once; empty when it offered none. */
   builtInTools: readonly TurnBuiltInTool[]
   /** Logger of the request that started the turn. */
   logger: FastifyBaseLogger
@@ -226,8 +226,8 @@ export default function updateFastifyWithChatRoute(
  * conversation changes in between and the follower receives the start event
  * before any generation event. The agent stored with the turn's conversation
  * answers it, with the system prompt it has when the turn starts. Every
- * offered backend tool is prepared before the agent is found; the turn keeps
- * those prepared tools, so a key saved or removed while it runs applies from
+ * offered backend tool is looked up before the agent is found; the turn keeps
+ * those tools, so a key saved or removed while it runs applies from
  * the next request.
  */
 async function handleChatRequest(
@@ -236,7 +236,7 @@ async function handleChatRequest(
   dependencies: ChatRouteDependencies
 ): Promise<void> {
   const offeredBuiltInTools = findRequestedBuiltInTools(request, dependencies)
-  const builtInTools = await prepareBuiltInTools(offeredBuiltInTools)
+  const builtInTools = await findTurnBuiltInTools(offeredBuiltInTools)
   if (builtInTools.status === "unavailable") {
     sendBackendToolUnavailableProblem(reply, builtInTools, request.url)
     return
@@ -377,17 +377,17 @@ function sendUnansweredTurnProblem(
  * Sends the problem response for an offered backend tool that cannot run now.
  *
  * @param reply - Response owner; the response has not started.
- * @param preparation - Preparation naming the tool and why it cannot run.
+ * @param lookup - Lookup naming the tool and why it cannot run.
  * @param instance - Request path identifying this occurrence.
  */
 function sendBackendToolUnavailableProblem(
   reply: ChatRouteReply,
-  preparation: Extract<BuiltInToolSetPreparation, { status: "unavailable" }>,
+  lookup: Extract<TurnToolSetLookup, { status: "unavailable" }>,
   instance: string
 ): void {
   const problem = createChatBackendToolUnavailableProblem(
-    preparation.toolName,
-    preparation.reason,
+    lookup.toolName,
+    lookup.reason,
     instance
   )
   reply.type("application/problem+json").code(problem.status).send(problem)

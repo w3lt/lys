@@ -501,7 +501,7 @@ describe("updateFastifyWithChatRoute", () => {
     expect(testApp.completeChatStream).not.toHaveBeenCalled()
   })
 
-  it("still refuses an unknown backend tool before preparing any", async () => {
+  it("still refuses an unknown backend tool before looking any up", async () => {
     const testApp = await createChatRouteTestApp()
     updateFastifyWithChatRoute(testApp.app, {
       ...CHAT_ROUTE_OPTIONS,

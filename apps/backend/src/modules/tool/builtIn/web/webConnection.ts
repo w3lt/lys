@@ -126,7 +126,7 @@ export function parseResponseChunk(chunk: unknown): Uint8Array {
  * or for a lookup failure with a system code; any other lookup failure
  * unchanged.
  */
-async function resolveCheckedHostAddresses(
+async function listCheckedHostAddresses(
   hostname: string,
   rule: ConnectionAddressRule
 ): Promise<readonly HostAddress[]> {
@@ -207,7 +207,7 @@ function deliverHostAddresses(
 /**
  * Converts a lookup failure into the error type Node's lookup callback takes.
  *
- * @param error - Failure from {@link resolveCheckedHostAddresses}.
+ * @param error - Failure from {@link listCheckedHostAddresses}.
  * @returns The same error when it is an `Error`, or a new one wrapping it.
  */
 function toErrnoException(error: unknown): NodeJS.ErrnoException {
@@ -227,7 +227,7 @@ export function createCheckedLookup(
   rule: ConnectionAddressRule
 ): LookupFunction {
   return (hostname, options, callback) => {
-    resolveCheckedHostAddresses(hostname, rule).then(
+    listCheckedHostAddresses(hostname, rule).then(
       (addresses) => deliverHostAddresses(addresses, options, callback),
       (error: unknown) => callback(toErrnoException(error), "")
     )

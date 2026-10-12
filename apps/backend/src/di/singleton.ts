@@ -93,7 +93,7 @@ export type SingletonServices = Readonly<{
    */
   builtInTools: readonly BuiltInToolEntry[]
   /**
-   * Prepares the web search tool for each turn and checks the saved Tavily
+   * Finds the web search tool for each turn and checks the saved Tavily
    * key; it owns nothing to release.
    */
   webSearchToolProvider: WebSearchToolProvider

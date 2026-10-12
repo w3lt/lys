@@ -59,7 +59,7 @@ async function checkKey(
   return createProvider(CONFIGURED_KEY, {
     ...server.dependencies,
     ...overrides
-  }).checkApiKey()
+  }).sendApiKeyCheck()
 }
 
 registerBuiltInToolProviderContractSuite("with a saved key", () =>
@@ -77,12 +77,12 @@ registerBuiltInToolProviderContractSuite("without a key", () =>
 )
 
 describe("WebSearchToolProvider", () => {
-  describe("prepareTool", () => {
+  describe("findTurnTool", () => {
     it("gives a web search tool holding the saved key", async () => {
-      const preparation = await createProvider(CONFIGURED_KEY).prepareTool()
+      const lookup = await createProvider(CONFIGURED_KEY).findTurnTool()
 
-      expect(preparation.status).toBe("ready")
-      expect(preparation.status === "ready" && preparation.tool).toBeInstanceOf(
+      expect(lookup.status).toBe("ready")
+      expect(lookup.status === "ready" && lookup.tool).toBeInstanceOf(
         WebSearchTool
       )
     })
@@ -92,7 +92,7 @@ describe("WebSearchToolProvider", () => {
       [{ status: "invalid" }, "api-key-invalid"],
       [{ status: "unreadable" }, "settings-unreadable"]
     ] as const)("reports %o as %s", async (keyRead, reason) => {
-      expect(await createProvider(keyRead).prepareTool()).toEqual({
+      expect(await createProvider(keyRead).findTurnTool()).toEqual({
         status: "unavailable",
         reason
       })
@@ -107,26 +107,25 @@ describe("WebSearchToolProvider", () => {
         () => readTavilyApiKey(path),
         server.dependencies
       )
-      const preparation = await provider.prepareTool()
-      if (preparation.status !== "ready")
-        throw new Error("Expected a ready tool")
+      const lookup = await provider.findTurnTool()
+      if (lookup.status !== "ready") throw new Error("Expected a ready tool")
 
       await writeFile(path, JSON.stringify({ secrets: { tavilyApiKey: null } }))
-      const parsed = preparation.tool.parseToolCall({ query: "moths" })
+      const parsed = lookup.tool.parseToolCall({ query: "moths" })
       if (parsed.status !== "parsed") throw new Error("Expected a parsed call")
       await parsed.runToolCall(new AbortController().signal)
 
       expect(server.receivedRequests[0]?.headers.authorization).toBe(
         `Bearer ${TEST_TAVILY_API_KEY}`
       )
-      expect(await provider.prepareTool()).toEqual({
+      expect(await provider.findTurnTool()).toEqual({
         status: "unavailable",
         reason: "api-key-missing"
       })
     })
   })
 
-  describe("checkApiKey", () => {
+  describe("sendApiKeyCheck", () => {
     it("reports an accepted key with its plan credits, without the key", async () => {
       const answer = await checkKey(
         answerWithJson({ account: { plan_usage: 37, plan_limit: 1000 } })
@@ -145,7 +144,7 @@ describe("WebSearchToolProvider", () => {
       const answer = await createProvider(
         { status: "invalid" },
         server.dependencies
-      ).checkApiKey()
+      ).sendApiKeyCheck()
 
       expect(answer).toEqual({
         status: "unavailable",

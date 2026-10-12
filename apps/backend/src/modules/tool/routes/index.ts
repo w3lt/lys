@@ -8,10 +8,7 @@ import {
 } from "@lys/protocol"
 import type { FastifyInstance } from "fastify"
 import * as z from "zod"
-import type {
-  BuiltInToolEntry,
-  BuiltInToolPreparation
-} from "../builtIn/builtInTool"
+import type { BuiltInToolEntry, TurnToolLookup } from "../builtIn/builtInTool"
 
 /**
  * Registers the endpoints that list the tools the backend runs and check the
@@ -39,7 +36,7 @@ export default function registerToolRoutes(
  * @param app - Application whose singleton services hold the built-in tools.
  * @throws If Fastify cannot register the route.
  * @remarks The definitions are fixed for the backend's lifetime; each request
- * prepares every tool again to report which cannot run now.
+ * looks up every tool again to report which cannot run now.
  */
 function registerListBackendToolsRoute(app: FastifyInstance): void {
   const entries = app.builtInTools
@@ -76,7 +73,7 @@ function registerCheckWebSearchKeyRoute(app: FastifyInstance): void {
         })
       }
     },
-    handler: () => provider.checkApiKey()
+    handler: () => provider.sendApiKeyCheck()
   })
 }
 
@@ -91,11 +88,11 @@ function registerCheckWebSearchKeyRoute(app: FastifyInstance): void {
 async function buildBackendToolList(
   entries: readonly BuiltInToolEntry[]
 ): Promise<ListBackendToolsApiResponse> {
-  const preparations = await Promise.all(
-    entries.map((entry) => entry.provider.prepareTool())
+  const lookups = await Promise.all(
+    entries.map((entry) => entry.provider.findTurnTool())
   )
   const unavailableTools = entries.flatMap((entry, index) =>
-    findUnavailableTool(entry, preparations[index])
+    findUnavailableTool(entry, lookups[index])
   )
   const tools = Object.freeze(entries.map((entry) => entry.definition))
   return Object.freeze({
@@ -108,19 +105,16 @@ async function buildBackendToolList(
  * Finds whether one tool cannot run now.
  *
  * @param entry - Built-in tool.
- * @param preparation - Its preparation now.
+ * @param lookup - Its lookup now.
  * @returns The tool's name and why it cannot run, or nothing when it is
  * ready.
- * @throws When the preparation is missing, which `Promise.all` rules out.
+ * @throws When the lookup is missing, which `Promise.all` rules out.
  */
 function findUnavailableTool(
   entry: BuiltInToolEntry,
-  preparation: BuiltInToolPreparation | undefined
+  lookup: TurnToolLookup | undefined
 ): readonly UnavailableBackendTool[] {
-  if (preparation === undefined)
-    throw new Error("A tool preparation is missing")
-  if (preparation.status === "ready") return []
-  return [
-    Object.freeze({ name: entry.definition.name, reason: preparation.reason })
-  ]
+  if (lookup === undefined) throw new Error("A tool lookup is missing")
+  if (lookup.status === "ready") return []
+  return [Object.freeze({ name: entry.definition.name, reason: lookup.reason })]
 }

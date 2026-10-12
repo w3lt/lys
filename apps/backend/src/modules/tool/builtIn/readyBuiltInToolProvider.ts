@@ -1,19 +1,19 @@
 import type {
   BuiltInTool,
-  BuiltInToolPreparation,
+  TurnToolLookup,
   BuiltInToolProvider
 } from "./builtInTool"
 
 /**
  * Owns a tool that needs nothing per turn to give it to every turn.
  *
- * @remarks Implements {@link BuiltInToolProvider}: every preparation is
+ * @remarks Implements {@link BuiltInToolProvider}: every lookup is
  * `ready` with the same tool, so the tool must be reentrant. Owns no
  * resource. Concurrency model: reentrant.
  */
 export default class ReadyBuiltInToolProvider implements BuiltInToolProvider {
-  /** Preparation every turn gets. */
-  readonly #preparation: BuiltInToolPreparation
+  /** Lookup every turn gets. */
+  readonly #lookup: TurnToolLookup
 
   /**
    * Creates the provider without contacting anything.
@@ -22,15 +22,15 @@ export default class ReadyBuiltInToolProvider implements BuiltInToolProvider {
    * lifetime.
    */
   public constructor(tool: BuiltInTool) {
-    this.#preparation = Object.freeze({ status: "ready", tool })
+    this.#lookup = Object.freeze({ status: "ready", tool })
   }
 
   /**
-   * Implements {@link BuiltInToolProvider.prepareTool}.
+   * Implements {@link BuiltInToolProvider.findTurnTool}.
    *
    * @returns The interface-defined outcome; always `ready`.
    */
-  public prepareTool(): Promise<BuiltInToolPreparation> {
-    return Promise.resolve(this.#preparation)
+  public findTurnTool(): Promise<TurnToolLookup> {
+    return Promise.resolve(this.#lookup)
   }
 }

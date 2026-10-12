@@ -4,7 +4,7 @@ import {
   buildTavilyRequestDependencies,
   createBuiltInTools,
   findBuiltInTools,
-  prepareBuiltInTools
+  findTurnBuiltInTools
 } from "../../../../../src/modules/tool/builtIn/builtInTools"
 import ReadPageTool, {
   buildReadPageDefinition
@@ -52,14 +52,14 @@ describe("createBuiltInTools", () => {
   it("gives every turn the read-page tool, which refuses this machine", async () => {
     const [readPage] = createBuiltInTools(UNAVAILABLE_PROVIDER)
 
-    const preparation = await readPage?.provider.prepareTool()
+    const lookup = await readPage?.provider.findTurnTool()
 
-    expect(preparation?.status === "ready" && preparation.tool).toBeInstanceOf(
+    expect(lookup?.status === "ready" && lookup.tool).toBeInstanceOf(
       ReadPageTool
     )
     const parsed =
-      preparation?.status === "ready"
-        ? preparation.tool.parseToolCall({ url: "http://[::1]/" })
+      lookup?.status === "ready"
+        ? lookup.tool.parseToolCall({ url: "http://[::1]/" })
         : undefined
     expect(parsed).toMatchObject({ status: "invalid" })
   })
@@ -101,23 +101,23 @@ describe("findBuiltInTools", () => {
   })
 })
 
-describe("prepareBuiltInTools", () => {
-  it("prepares nothing for a request that offers no backend tool", async () => {
-    expect(await prepareBuiltInTools([])).toEqual({
+describe("findTurnBuiltInTools", () => {
+  it("finds nothing for a request that offers no backend tool", async () => {
+    expect(await findTurnBuiltInTools([])).toEqual({
       status: "ready",
       tools: []
     })
   })
 
-  it("prepares every offered tool in offer order", async () => {
+  it("finds every offered tool in offer order", async () => {
     const entries = [ENTRIES[2], ENTRIES[0]].filter(
       (entry) => entry !== undefined
     )
 
-    const preparation = await prepareBuiltInTools(entries)
+    const lookup = await findTurnBuiltInTools(entries)
 
-    expect(preparation.status).toBe("ready")
-    const tools = preparation.status === "ready" ? preparation.tools : []
+    expect(lookup.status).toBe("ready")
+    const tools = lookup.status === "ready" ? lookup.tools : []
     expect(tools.map((tool) => tool.definition.name)).toEqual([
       "look_up_word",
       "read_page"
@@ -126,7 +126,7 @@ describe("prepareBuiltInTools", () => {
   })
 
   it("names the first offered tool that cannot run, with why", async () => {
-    expect(await prepareBuiltInTools(ENTRIES)).toEqual({
+    expect(await findTurnBuiltInTools(ENTRIES)).toEqual({
       status: "unavailable",
       toolName: "web_search",
       reason: "api-key-missing"

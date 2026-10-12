@@ -194,7 +194,7 @@ describe("createModelSlice", () => {
     expect(createModelStore().store.getState()).toMatchObject({
       modelInventory: { status: "unavailable" },
       modelRequest: { status: "idle" },
-      modelRuntime: { status: "none" },
+      modelRuntime: { status: "unavailable" },
       modelError: null,
       modelHealth: null,
       loadedModelConfigurations: new Map()
@@ -291,7 +291,7 @@ describe("createModelSlice", () => {
 
       expect(store.getState()).toMatchObject({
         modelInventory: { status: "unavailable" },
-        modelRuntime: { status: "none" },
+        modelRuntime: { status: "unavailable" },
         modelError: null
       })
       expect(getFailureReactionCount()).toBe(1)
@@ -698,7 +698,7 @@ describe("createModelSlice", () => {
       expect(store.getState()).toMatchObject({
         modelInventory: { status: "unavailable" },
         modelRequest: { status: "idle" },
-        modelRuntime: { status: "none" }
+        modelRuntime: { status: "unavailable" }
       })
     })
 

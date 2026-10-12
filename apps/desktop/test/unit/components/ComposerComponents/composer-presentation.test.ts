@@ -28,6 +28,9 @@ const NONE: ModelRuntimeState = { status: "none" }
 /** Inventory that could not be read. */
 const UNKNOWN: ModelRuntimeState = { status: "unknown" }
 
+/** Inventory that cannot be read yet, as while LM Studio is not connected. */
+const UNAVAILABLE: ModelRuntimeState = { status: "unavailable" }
+
 /** Weights being loaded. */
 const LOADING: ModelRuntimeState = { status: "loading", modelKey: "qwen3-8b" }
 
@@ -143,7 +146,7 @@ describe("formatUnavailableRuntimeMessage", () => {
         backendStatus,
         backendAddress: BACKEND_ADDRESS,
         lmStudioStatus: "unreachable",
-        modelRuntime: NONE
+        modelRuntime: UNAVAILABLE
       })
     ).toBe(message)
   })
@@ -160,7 +163,7 @@ describe("formatUnavailableRuntimeMessage", () => {
           backendStatus: "running",
           backendAddress: BACKEND_ADDRESS,
           lmStudioStatus,
-          modelRuntime: NONE
+          modelRuntime: UNAVAILABLE
         })
       ).toBe(message)
     }
@@ -168,6 +171,7 @@ describe("formatUnavailableRuntimeMessage", () => {
 
   it.each<[ModelRuntimeState, string]>([
     [UNKNOWN, "The backend is up, but model state is unavailable."],
+    [UNAVAILABLE, "The backend is up, but model state is unavailable."],
     [LOADING, "Loading model weights…"],
     [UNLOADING, "Unloading model weights…"],
     [NONE, "The backend is up, but no model is loaded."]
@@ -188,10 +192,11 @@ describe("formatUnavailableRuntimeMessage", () => {
 
 describe("formatReconnectAction", () => {
   it.each<[BackendServerStatus, LmStudioStatus, ModelRuntimeState, string]>([
-    ["stopped", "unknown", NONE, "Start backend"],
-    ["unresponsive", "unknown", NONE, "Check backend"],
-    ["running", "unreachable", NONE, "Check LM Studio"],
+    ["stopped", "unknown", UNAVAILABLE, "Start backend"],
+    ["unresponsive", "unknown", UNAVAILABLE, "Check backend"],
+    ["running", "unreachable", UNAVAILABLE, "Check LM Studio"],
     ["running", "connected", UNKNOWN, "Check models"],
+    ["running", "connected", UNAVAILABLE, "Check models"],
     ["running", "connected", NONE, "Load model"]
   ])(
     "offers %s/%s/%o recovery as %s",
@@ -203,10 +208,10 @@ describe("formatReconnectAction", () => {
   )
 
   it.each<[BackendServerStatus, LmStudioStatus, ModelRuntimeState]>([
-    ["starting", "unknown", NONE],
+    ["starting", "unknown", UNAVAILABLE],
     ["stopping", "connected", LOADED],
-    ["running", "connecting", NONE],
-    ["running", "unknown", NONE],
+    ["running", "connecting", UNAVAILABLE],
+    ["running", "unknown", UNAVAILABLE],
     ["running", "connected", LOADING],
     ["running", "connected", UNLOADING]
   ])(
@@ -334,6 +339,15 @@ describe("formatComposerModelLabel", () => {
   it("names the chosen default while nothing is loaded, or says none is chosen", () => {
     expect(formatComposerModelLabel("running", NONE, "gemma-3")).toBe("gemma-3")
     expect(formatComposerModelLabel("running", NONE, null)).toBe(
+      "no model selected"
+    )
+  })
+
+  it("keeps naming the chosen default while the inventory cannot be read yet", () => {
+    expect(formatComposerModelLabel("running", UNAVAILABLE, "gemma-3")).toBe(
+      "gemma-3"
+    )
+    expect(formatComposerModelLabel("running", UNAVAILABLE, null)).toBe(
       "no model selected"
     )
   })

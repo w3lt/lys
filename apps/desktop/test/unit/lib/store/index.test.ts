@@ -127,7 +127,7 @@ describe("useLysStore", () => {
       initializing: true,
       backendServerInfo: { status: "stopped" },
       lmStudioStatus: "unknown",
-      modelRuntime: { status: "none" },
+      modelRuntime: { status: "unavailable" },
       settings: {
         runtime: { autoStartBackend: true, defaultModel: null },
         generation: { temperature: 0.7, replyCeiling: 2048 }
@@ -320,7 +320,7 @@ describe("useLysStore", () => {
         backendServerInfo: { status: "stopped", stoppedAt: expect.any(Date) },
         lmStudioStatus: "unknown",
         modelInventory: { status: "unavailable" },
-        modelRuntime: { status: "none" }
+        modelRuntime: { status: "unavailable" }
       })
     })
 

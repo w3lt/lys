@@ -70,10 +70,10 @@ describe("buildModelRuntime", () => {
     })
   })
 
-  it("reports no resident weights before any observation", () => {
+  it("reports residency as unavailable, not as empty, while the inventory cannot be read", () => {
     expect(
       buildModelRuntime({ status: "unavailable" }, { status: "idle" }, null)
-    ).toEqual({ status: "none" })
+    ).toEqual({ status: "unavailable" })
   })
 
   it.each(["listing", "testing"] as const)(
@@ -96,7 +96,8 @@ describe("isModelTransitionInFlight", () => {
     [{ status: "unloading", modelKey: "x" }, true],
     [{ status: "loaded", modelKey: "x" }, false],
     [{ status: "none" }, false],
-    [{ status: "unknown" }, false]
+    [{ status: "unknown" }, false],
+    [{ status: "unavailable" }, false]
   ])("answers %o with %s", (modelRuntime, isInFlight) => {
     expect(isModelTransitionInFlight(modelRuntime)).toBe(isInFlight)
   })

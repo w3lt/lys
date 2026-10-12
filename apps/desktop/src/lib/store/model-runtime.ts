@@ -25,11 +25,16 @@ export type ModelRequestState =
 /**
  * Compact residency summary for the runtime card and composer.
  * @remarks Several models may be loaded. The summary prefers the loaded default,
- * then the first loaded inventory entry. Unknown means observation failed.
+ * then the first loaded inventory entry. None means the inventory was read and
+ * holds no loaded model. Unknown means observation failed. Unavailable means
+ * the inventory cannot be read yet, as while the backend is not running or
+ * LM Studio is not connected; it claims nothing about loaded weights, which
+ * LM Studio keeps after the backend stops.
  */
 export type ModelRuntimeState =
   | { readonly status: "none" }
   | { readonly status: "unknown" }
+  | { readonly status: "unavailable" }
   | {
       readonly status: "loading" | "loaded" | "unloading"
       readonly modelKey: string
@@ -90,7 +95,7 @@ export type ModelState = {
 export const initialModelState: ModelState = Object.freeze({
   modelInventory: Object.freeze({ status: "unavailable" }),
   modelRequest: Object.freeze({ status: "idle" }),
-  modelRuntime: Object.freeze({ status: "none" }),
+  modelRuntime: Object.freeze({ status: "unavailable" }),
   modelError: null,
   modelHealth: null,
   loadedModelConfigurations: NO_LOADED_MODEL_CONFIGURATIONS
@@ -101,7 +106,8 @@ export const initialModelState: ModelState = Object.freeze({
  * @param inventory - Latest authoritative inventory observation.
  * @param request - Current renderer operation.
  * @param defaultModel - Preferred model, without claiming it is loaded.
- * @returns The transition, preferred loaded model, confirmed absence, or unknown state.
+ * @returns The transition, preferred loaded model, confirmed absence,
+ * unavailable state while the inventory cannot be read, or unknown state.
  */
 export function buildModelRuntime(
   inventory: ModelInventoryState,
@@ -112,7 +118,7 @@ export function buildModelRuntime(
     return { status: request.status, modelKey: request.modelKey }
   }
   if (inventory.status === "failed") return { status: "unknown" }
-  if (inventory.status === "unavailable") return { status: "none" }
+  if (inventory.status === "unavailable") return { status: "unavailable" }
   const loaded =
     inventory.models.find(
       (model) => model.loaded && model.modelKey === defaultModel

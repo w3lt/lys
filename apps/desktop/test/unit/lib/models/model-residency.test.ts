@@ -24,6 +24,7 @@ const ON_DISK_ROW = buildModelDescriptor(buildLlmInfo("on-disk"))
 /** Residency summaries that name no model. */
 const NONE: ModelRuntimeState = { status: "none" }
 const UNKNOWN: ModelRuntimeState = { status: "unknown" }
+const UNAVAILABLE: ModelRuntimeState = { status: "unavailable" }
 
 describe("readLoadedModelKey", () => {
   it("names the loaded model", () => {
@@ -35,6 +36,7 @@ describe("readLoadedModelKey", () => {
   it.each<ModelRuntimeState>([
     NONE,
     UNKNOWN,
+    UNAVAILABLE,
     { status: "loading", modelKey: "qwen" },
     { status: "unloading", modelKey: "qwen" }
   ])("names no model while the summary is $status", (modelRuntime) => {
@@ -74,7 +76,8 @@ describe("readModelResidencyTone", () => {
     [{ status: "loading", modelKey: "qwen" }, "pending"],
     [{ status: "unloading", modelKey: "qwen" }, "pending"],
     [NONE, "idle"],
-    [UNKNOWN, "idle"]
+    [UNKNOWN, "idle"],
+    [UNAVAILABLE, "idle"]
   ])("shows %o in the %s tone", (modelRuntime, tone) => {
     expect(readModelResidencyTone(modelRuntime)).toBe(tone)
   })
@@ -108,7 +111,8 @@ describe("formatModelResidencyHeading", () => {
     [{ status: "loading", modelKey: "qwen" }, "Loading weights"],
     [{ status: "unloading", modelKey: "qwen" }, "Unloading"],
     [NONE, "No model loaded"],
-    [UNKNOWN, "Model state unavailable"]
+    [UNKNOWN, "Model state unavailable"],
+    [UNAVAILABLE, "Model state unavailable"]
   ])("heads %o with %j", (modelRuntime, heading) => {
     expect(formatModelResidencyHeading(modelRuntime)).toBe(heading)
   })
@@ -136,6 +140,20 @@ describe("formatModelResidencyMeta", () => {
     "explains no resident weights when %s with default %s",
     (availability, defaultModel, meta) => {
       expect(formatModelResidencyMeta(NONE, availability, defaultModel)).toBe(
+        meta
+      )
+    }
+  )
+
+  it.each([
+    ["backend-offline", "start the backend first"],
+    ["lm-studio-connecting", "connecting to LM Studio"],
+    ["lm-studio-unreachable", "LM Studio is not reachable"],
+    ["available", "refresh the model inventory to check loaded weights"]
+  ] as const)(
+    "explains why residency cannot be observed yet when %s, without claiming nothing is loaded",
+    (availability, meta) => {
+      expect(formatModelResidencyMeta(UNAVAILABLE, availability, "qwen")).toBe(
         meta
       )
     }

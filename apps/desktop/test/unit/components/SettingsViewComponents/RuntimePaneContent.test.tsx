@@ -332,6 +332,23 @@ describe("RuntimePaneContent", () => {
       expect(screen.getByRole("button", { name: "Load" })).toBeDisabled()
     })
 
+    it.each([
+      ["the backend is stopped", buildUnreachableRuntime("stopped")],
+      [
+        "LM Studio is not reachable",
+        buildUnreachableRuntime("running", "unreachable")
+      ]
+    ])(
+      "shows the model state as unavailable, not as empty, while %s",
+      async (_case, runtime) => {
+        await startRuntimePane(runtime)
+
+        expect(
+          screen.getByRole("heading", { name: "Model state unavailable" })
+        ).toBeInTheDocument()
+      }
+    )
+
     it("offers no model command while LM Studio is not reachable", async () => {
       await startRuntimePane(buildUnreachableRuntime("running", "unreachable"))
 

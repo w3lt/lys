@@ -67,8 +67,9 @@ export type ToolRunnerPresentation = {
 const TOOL_UNAVAILABLE_NOTES = Object.freeze({
   "api-key-missing": "Needs a Tavily API key. Add one in Settings → Secrets.",
   "api-key-invalid":
-    "The saved Tavily API key isn't valid. Save it again in Settings → Secrets.",
-  "settings-unreadable": "Lys couldn't read its settings file."
+    "The Tavily API key in settings.json isn't valid. Fix or remove secrets.tavilyApiKey in that file.",
+  "settings-unreadable":
+    "Lys couldn't read settings.json. Fix that file by hand."
 } satisfies Readonly<Record<BackendToolUnavailableReason, string>>)
 
 /** Lowercase heading text of every tool group; a new group must add one. */
@@ -368,4 +369,19 @@ export function formatToolUnavailableNote(
   reason: BackendToolUnavailableReason
 ): string {
   return TOOL_UNAVAILABLE_NOTES[reason]
+}
+
+/**
+ * Determines whether the Secrets pane fixes why a tool cannot run.
+ *
+ * @param reason - Why the backend says it cannot run.
+ * @returns True only for a missing key. An invalid key or an unreadable
+ * settings file is fixed in settings.json by hand: the desktop cannot load
+ * either at startup, and a save from the pane would replace the file with the
+ * settings it loaded earlier.
+ */
+export function isFixedInSecretsPane(
+  reason: BackendToolUnavailableReason
+): boolean {
+  return reason === "api-key-missing"
 }

@@ -154,20 +154,6 @@ export function getToolChoice(
 }
 
 /**
- * Finds why a listed tool cannot run now.
- *
- * @param unavailableTools - Reasons of the tools that cannot run, by name.
- * @param toolName - Name of a listed tool.
- * @returns The reason, or undefined when the tool can run.
- */
-export function findToolUnavailableReason(
-  unavailableTools: ReadonlyMap<string, BackendToolUnavailableReason>,
-  toolName: string
-): BackendToolUnavailableReason | undefined {
-  return unavailableTools.get(toolName)
-}
-
-/**
  * Whether the next chat request offers tools, and which.
  *
  * @remarks `unavailable` means the request would offer tools but the tool

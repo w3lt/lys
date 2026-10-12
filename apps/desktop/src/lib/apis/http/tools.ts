@@ -92,7 +92,7 @@ async function getToolListResponse(
  * with another status, media type, or shape; the decoding failure is kept as
  * its cause.
  */
-export async function checkWebSearchKey(
+export async function getWebSearchKeyCheck(
   connection: ToolApiConnection
 ): Promise<CheckWebSearchKeyApiResponse> {
   const response = await getWebSearchKeyCheckResponse(connection)

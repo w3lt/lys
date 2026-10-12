@@ -125,7 +125,7 @@ fn create_settings_file(path: &Path) -> Result<LysSettings, String> {
 /// replacing any file there atomically and readable only by its owner.
 ///
 /// The parent directory is not created. See
-/// [`write_owner_only_file_atomically`] for the replacement guarantee.
+/// [`save_owner_only_file_atomically`] for the replacement guarantee.
 ///
 /// # Errors
 ///
@@ -135,7 +135,7 @@ fn save_settings_file(settings: &LysSettings, path: &Path) -> Result<(), String>
     let settings_json = serde_json::to_string_pretty(settings)
         .map_err(|err| format!("Failed to serialize settings: {err}"))?;
 
-    write_owner_only_file_atomically(path, format!("{settings_json}\n").as_bytes())
+    save_owner_only_file_atomically(path, format!("{settings_json}\n").as_bytes())
         .map_err(|err| format!("Failed to write {}: {err}", path.display()))
 }
 
@@ -152,9 +152,9 @@ fn save_settings_file(settings: &LysSettings, path: &Path) -> Result<(), String>
 /// # Errors
 ///
 /// Returns the first I/O error of creating, writing, syncing, or renaming.
-fn write_owner_only_file_atomically(path: &Path, contents: &[u8]) -> io::Result<()> {
+fn save_owner_only_file_atomically(path: &Path, contents: &[u8]) -> io::Result<()> {
     let temporary_path = build_temporary_path(path);
-    let written = write_and_replace(&temporary_path, path, contents);
+    let written = save_temporary_file_and_rename(&temporary_path, path, contents);
     if written.is_err() {
         // The write already failed; a failed removal of the temporary file
         // must not replace that error, and the next save truncates it anyway.
@@ -178,7 +178,11 @@ fn build_temporary_path(path: &Path) -> PathBuf {
 /// # Errors
 ///
 /// Returns the first I/O error.
-fn write_and_replace(temporary_path: &Path, path: &Path, contents: &[u8]) -> io::Result<()> {
+fn save_temporary_file_and_rename(
+    temporary_path: &Path,
+    path: &Path,
+    contents: &[u8],
+) -> io::Result<()> {
     let mut file = open_owner_only_file(temporary_path)?;
     file.write_all(contents)?;
     file.sync_all()?;

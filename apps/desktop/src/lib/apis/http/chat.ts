@@ -27,8 +27,9 @@ const BACKEND_TOOL_UNAVAILABLE_ADVICE = Object.freeze({
   "api-key-missing":
     "no Tavily API key is saved. Add one in Settings → Secrets",
   "api-key-invalid":
-    "the saved Tavily API key isn't valid. Save it again in Settings → Secrets",
-  "settings-unreadable": "Lys couldn't read its settings file"
+    "the Tavily API key in settings.json isn't valid. Fix or remove secrets.tavilyApiKey in that file",
+  "settings-unreadable":
+    "Lys couldn't read settings.json. Fix that file by hand"
 } satisfies Readonly<Record<BackendToolUnavailableReason, string>>)
 
 /**
@@ -49,16 +50,11 @@ function formatBackendToolUnavailableMessage(
 /**
  * Chat request refused because an offered backend tool cannot run now.
  *
- * @remarks Carries the tool's name and why, from the backend's problem, so
- * the chat view can read the tool list again; its message tells the person
- * what to do. The subclass preserves the native `Error` contract.
+ * @remarks Its type tells the chat view to read the tool list again; its
+ * message, built from the backend's problem, tells the person what to do.
+ * The subclass preserves the native `Error` contract.
  */
 export class BackendToolUnavailableError extends Error {
-  /** Name of the tool that cannot run. */
-  readonly #toolName: string
-  /** Why it cannot run. */
-  readonly #reason: BackendToolUnavailableReason
-
   /**
    * Creates the error for one refused request.
    *
@@ -66,26 +62,6 @@ export class BackendToolUnavailableError extends Error {
    */
   public constructor(problem: ChatBackendToolUnavailableProblem) {
     super(formatBackendToolUnavailableMessage(problem.toolName, problem.reason))
-    this.#toolName = problem.toolName
-    this.#reason = problem.reason
-  }
-
-  /**
-   * Name of the tool that cannot run.
-   *
-   * @returns The name the problem gave.
-   */
-  public get toolName(): string {
-    return this.#toolName
-  }
-
-  /**
-   * Why the tool cannot run.
-   *
-   * @returns The reason the problem gave.
-   */
-  public get reason(): BackendToolUnavailableReason {
-    return this.#reason
   }
 }
 
@@ -208,7 +184,7 @@ export async function* readChatEvents(
   })
 
   if (response.status === 409) {
-    throw findChatConflictError(await readFailureBody(response))
+    throw buildChatConflictError(await readFailureBody(response))
   }
   if (!response.ok || !response.body) {
     throw new Error(`Chat request failed: ${response.status}`)
@@ -418,14 +394,14 @@ function isConversationAgentMissingProblem(body: unknown): boolean {
 }
 
 /**
- * Finds the error of a chat request the backend refused with 409.
+ * Builds the error of a chat request the backend refused with 409.
  *
  * @param body - Untrusted problem body.
  * @returns A {@link BackendToolUnavailableError} for an unavailable tool, the
  * deleted-agent error for a missing conversation agent, or a generic error
  * for any other 409 body.
  */
-function findChatConflictError(body: unknown): Error {
+function buildChatConflictError(body: unknown): Error {
   const toolProblem = chatBackendToolUnavailableProblemSchema.safeParse(body)
   if (toolProblem.success) {
     return new BackendToolUnavailableError(toolProblem.data)

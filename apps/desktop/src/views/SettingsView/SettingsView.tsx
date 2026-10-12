@@ -156,7 +156,7 @@ const SETTINGS_PANES: readonly SettingsPaneDescriptor[] = [
     ordinal: "06",
     note: "Keys for the services Lys calls on your behalf. Each key goes only to its own service and is never sent to the model.",
     footNote:
-      "Saved in plain text in settings.json in Lys's home folder, readable only by your user account. Lys's backend reads it for each web search.",
+      "Saved in plain text in settings.json in Lys's home folder, readable only by your user account. Lys's backend reads it when it lists tools and when a message offers web_search; a reply keeps the key it started with.",
     contentComponent: SecretsPane
   }
 ]

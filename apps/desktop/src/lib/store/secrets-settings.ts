@@ -60,7 +60,7 @@ export type SecretsSettingsSlice = {
    * @returns Resolves after the outcome is committed; it never rejects. A
    * call while a check runs does nothing.
    */
-  readonly checkTavilyApiKey: () => Promise<void>
+  readonly sendTavilyKeyCheck: () => Promise<void>
 }
 
 /** Narrow application state borrowed by the secrets slice. */
@@ -74,7 +74,7 @@ export type SecretsSettingsDependencies = {
   /** Saves the secrets group, serialized with the other group saves. */
   readonly saveSecretsSettings: (secrets: SecretsSettings) => Promise<void>
   /** Asks the backend to check the saved key; rejects on transport failure. */
-  readonly checkWebSearchKey: () => Promise<CheckWebSearchKeyApiResponse>
+  readonly getWebSearchKeyCheck: () => Promise<CheckWebSearchKeyApiResponse>
 }
 
 /** Save state before any save. */
@@ -147,14 +147,14 @@ export function createSecretsSettingsSlice(
     return "saved"
   }
 
-  /** Implements {@link SecretsSettingsSlice.checkTavilyApiKey}. */
-  async function checkTavilyApiKey(): Promise<void> {
+  /** Implements {@link SecretsSettingsSlice.sendTavilyKeyCheck}. */
+  async function sendTavilyKeyCheck(): Promise<void> {
     if (get().tavilyKeyCheck.status === "checking") return
     currentKeyCheckOperation += 1
     const operation = currentKeyCheckOperation
     set({ tavilyKeyCheck: CHECKING })
     try {
-      const outcome = await dependencies.checkWebSearchKey()
+      const outcome = await dependencies.getWebSearchKeyCheck()
       if (operation !== currentKeyCheckOperation) return
       set({ tavilyKeyCheck: Object.freeze({ status: "checked", outcome }) })
     } catch {
@@ -167,6 +167,6 @@ export function createSecretsSettingsSlice(
     secretsSave: IDLE_SAVE,
     tavilyKeyCheck: IDLE_CHECK,
     saveTavilyApiKey,
-    checkTavilyApiKey
+    sendTavilyKeyCheck
   }
 }

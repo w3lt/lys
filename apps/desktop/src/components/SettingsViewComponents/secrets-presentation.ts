@@ -15,7 +15,7 @@ import type {
 export const TAVILY_KEY_PAGE_URL = "https://app.tavily.com"
 
 /** Placeholder of the key field while no key is saved. */
-export const TAVILY_KEY_PLACEHOLDER = "tvly-…"
+const TAVILY_KEY_PLACEHOLDER = "tvly-…"
 
 /** Bullets that stand for the hidden part of a saved key. */
 const KEY_MASK = "••••••••"
@@ -102,8 +102,10 @@ const KEY_CHECK_FAILURE_CLAUSES = Object.freeze({
 /** What an unavailable answer means, by reason. */
 const KEY_UNAVAILABLE_MESSAGES = Object.freeze({
   "api-key-missing": "No key is saved, so nothing was checked.",
-  "api-key-invalid": "The saved key isn't valid · save it again",
-  "settings-unreadable": "Lys couldn't read its settings file"
+  "api-key-invalid":
+    "The key in settings.json isn't valid · fix or remove secrets.tavilyApiKey there",
+  "settings-unreadable":
+    "Lys couldn't read settings.json · fix that file by hand"
 } satisfies Readonly<Record<BackendToolUnavailableReason, string>>)
 
 /** Line shown while no key is saved and nothing is edited. */
@@ -113,16 +115,49 @@ const NO_KEY_MESSAGE: TavilyKeyMessage = Object.freeze({
 })
 
 /**
- * Masks a saved key for display.
+ * Formats a saved key for display, masked.
  *
  * @param apiKey - Saved key.
  * @returns The first 5 and last 4 characters around bullets for a key of 16
  * or more characters; bullets only for a shorter one, which would otherwise
  * be shown almost whole.
  */
-export function maskTavilyApiKey(apiKey: TavilyApiKey): string {
+function formatMaskedTavilyApiKey(apiKey: TavilyApiKey): string {
   if (apiKey.length < MINIMUM_PARTLY_SHOWN_KEY_LENGTH) return KEY_MASK
   return `${apiKey.slice(0, SHOWN_KEY_PREFIX_LENGTH)}${KEY_MASK}${apiKey.slice(-SHOWN_KEY_SUFFIX_LENGTH)}`
+}
+
+/**
+ * Formats the key field's placeholder.
+ *
+ * @param savedApiKey - Saved key, or null.
+ * @returns The masked saved key, or an example of a key's start while none is
+ * saved.
+ */
+export function formatTavilyKeyPlaceholder(
+  savedApiKey: TavilyApiKey | null
+): string {
+  return savedApiKey === null
+    ? TAVILY_KEY_PLACEHOLDER
+    : formatMaskedTavilyApiKey(savedApiKey)
+}
+
+/**
+ * Calculates the text in the key field.
+ *
+ * @param draft - The person's edit.
+ * @param isKeyShown - Whether the person asked to see the key.
+ * @param savedApiKey - Saved key, or null.
+ * @returns The edited text; otherwise the saved key while it is shown; empty
+ * otherwise, so the masked placeholder shows.
+ */
+export function calculateTavilyKeyFieldValue(
+  draft: TavilyKeyDraft,
+  isKeyShown: boolean,
+  savedApiKey: TavilyApiKey | null
+): string {
+  if (draft.status === "edited") return draft.text
+  return isKeyShown && savedApiKey !== null ? savedApiKey : ""
 }
 
 /**
@@ -267,7 +302,7 @@ export function formatTavilyKeyMessage(
   if (checkMessage !== undefined) return checkMessage
   if (input.savedApiKey === null) return NO_KEY_MESSAGE
   return {
-    text: `saved · ${maskTavilyApiKey(input.savedApiKey)}`,
+    text: `saved · ${formatMaskedTavilyApiKey(input.savedApiKey)}`,
     tone: "muted"
   }
 }

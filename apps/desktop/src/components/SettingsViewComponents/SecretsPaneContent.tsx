@@ -25,7 +25,7 @@ export default function SecretsPane(): ReactElement {
   const saveState = useLysStore((state) => state.secretsSave)
   const keyCheck = useLysStore((state) => state.tavilyKeyCheck)
   const saveTavilyApiKey = useLysStore((state) => state.saveTavilyApiKey)
-  const checkTavilyApiKey = useLysStore((state) => state.checkTavilyApiKey)
+  const sendTavilyKeyCheck = useLysStore((state) => state.sendTavilyKeyCheck)
   const loadTools = useToolStore((state) => state.loadTools)
 
   /**
@@ -34,7 +34,7 @@ export default function SecretsPane(): ReactElement {
    * @param apiKey - Key to save, or null to remove.
    * @returns The save outcome, after the tool list read when it saved.
    */
-  async function saveKeyAndReloadTools(
+  async function handleSaveTavilyApiKey(
     apiKey: TavilyApiKey | null
   ): Promise<SecretsSaveOutcome> {
     const outcome = await saveTavilyApiKey(apiKey)
@@ -54,9 +54,9 @@ export default function SecretsPane(): ReactElement {
       </p>
       <TavilyKeyCard
         keyCheck={keyCheck}
-        onCheckTavilyApiKey={checkTavilyApiKey}
-        onRemoveTavilyApiKey={() => saveKeyAndReloadTools(null)}
-        onSaveTavilyApiKey={(apiKey) => saveKeyAndReloadTools(apiKey)}
+        onSendTavilyKeyCheck={sendTavilyKeyCheck}
+        onRemoveTavilyApiKey={() => handleSaveTavilyApiKey(null)}
+        onSaveTavilyApiKey={(apiKey) => handleSaveTavilyApiKey(apiKey)}
         saveState={saveState}
         savedApiKey={savedApiKey}
       />

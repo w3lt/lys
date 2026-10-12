@@ -8,7 +8,6 @@ import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
   TOOL_APPROVALS,
-  findToolUnavailableReason,
   getToolChoice,
   type ToolApproval,
   type ToolChoice
@@ -28,6 +27,7 @@ import {
   formatToolTokenEstimate,
   formatToolUnavailableNote,
   getToolRunnerPresentation,
+  isFixedInSecretsPane,
   type ToolGroupListing
 } from "./tool-presentation"
 
@@ -400,7 +400,7 @@ type ToolUnavailableNoteProps = {
 
 /**
  * Presents why a tool cannot run now, with a button that opens the Secrets
- * pane.
+ * pane when that pane fixes it.
  *
  * @remarks The row owns the identifier and the request; the note owns no
  * state or effects. It describes the row's disabled switch.
@@ -414,10 +414,20 @@ function ToolUnavailableNote({
 }: ToolUnavailableNoteProps): ReactElement {
   return (
     <p className="settings-view__tool-unavailable-note" id={noteId}>
-      {formatToolUnavailableNote(reason)}{" "}
-      <Button onClick={onOpenSecrets} size="sm" type="button" variant="link">
-        Open Secrets
-      </Button>
+      {formatToolUnavailableNote(reason)}
+      {isFixedInSecretsPane(reason) ? (
+        <>
+          {" "}
+          <Button
+            onClick={onOpenSecrets}
+            size="sm"
+            type="button"
+            variant="link"
+          >
+            Open Secrets
+          </Button>
+        </>
+      ) : null}
     </p>
   )
 }
@@ -432,7 +442,7 @@ function ToolUnavailableNote({
  * followed by the tool's name. While the controls are locked, both are
  * disabled. While the tool cannot run now, its switch is disabled and shows
  * off, the person's choice is kept, and a note under the header says why,
- * with a button that opens the Secrets pane.
+ * with a button that opens the Secrets pane when that pane fixes it.
  * @param props - Tool, choice, expansion, lock, availability, and the
  * parent's proposals.
  * @returns One list item holding the row and, when expanded, its details.
@@ -578,10 +588,7 @@ export function ToolGroupSection({
         onIsOnChange={(isOn) => onToolOnChange(tool, isOn)}
         onOpenSecrets={onOpenSecrets}
         tool={tool}
-        unavailableReason={findToolUnavailableReason(
-          unavailableTools,
-          tool.name
-        )}
+        unavailableReason={unavailableTools.get(tool.name)}
       />
     )
   }

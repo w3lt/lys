@@ -1,12 +1,10 @@
-import type { LookupAddress, LookupOptions } from "node:dns"
-import { lookup as lookupDns } from "node:dns/promises"
 import {
   request as requestHttp,
   type IncomingMessage,
   type RequestOptions
 } from "node:http"
 import { request as requestHttps } from "node:https"
-import type { LookupFunction, Socket } from "node:net"
+import type { Socket } from "node:net"
 import type { Readable, Transform } from "node:stream"
 import { createBrotliDecompress, createGunzip } from "node:zlib"
 import { decodePageText, type PageMediaType } from "./pageCharset"
@@ -16,53 +14,25 @@ import {
   type PageUrlProblem,
   type PageUrlResult
 } from "./pageUrl"
-
-/** One address a host name resolves to. */
-export type HostAddress = Readonly<{
-  /** IPv4 or IPv6 address, without brackets. */
-  address: string
-  /** Address family. */
-  family: 4 | 6
-}>
-
-/**
- * Resolves a host name to every address it has, in the resolver's order.
- * Rejects when the name has no address or the lookup fails.
- */
-export type HostAddressLookup = (
-  hostname: string
-) => Promise<readonly HostAddress[]>
-
-/**
- * Resolves a host name through the operating system's resolver.
- *
- * @param hostname - Host name of a page URL.
- * @returns Every address the resolver gives, in its order.
- * @throws The resolver's failure, such as `ENOTFOUND` for an unknown name.
- */
-export async function lookupDnsHostAddresses(
-  hostname: string
-): Promise<readonly HostAddress[]> {
-  const records = await lookupDns(hostname, { all: true, order: "verbatim" })
-  return Object.freeze(
-    records.map(({ address, family }) =>
-      Object.freeze({ address, family: family === 6 ? 6 : 4 })
-    )
-  )
-}
+import {
+  ConnectionAddressError,
+  createCheckedLookup,
+  hasErrorCode,
+  LYS_USER_AGENT,
+  parseResponseChunk,
+  watchConnectedAddress,
+  type ConnectionAddressRule
+} from "./webConnection"
 
 /** What one page request needs from its environment. */
-export type PageRequestDependencies = Readonly<{
-  /** Resolves each host name the request connects to. */
-  lookupHostAddresses: HostAddressLookup
-  /** Answers whether Lys must not connect to an address. */
-  isBlockedAddress: (address: string) => boolean
-  /**
-   * Most milliseconds the whole request may take, connection and body
-   * included; a positive integer.
-   */
-  requestTimeoutMs: number
-}>
+export type PageRequestDependencies = ConnectionAddressRule &
+  Readonly<{
+    /**
+     * Most milliseconds the whole request may take, connection and body
+     * included; a positive integer.
+     */
+    requestTimeoutMs: number
+  }>
 
 /** A page body Lys read. */
 export type PageResponse = Readonly<{
@@ -175,36 +145,10 @@ const PAGE_MEDIA_TYPES: ReadonlyMap<string, PageMediaType> = new Map([
  * cookie or credential is ever sent.
  */
 const PAGE_REQUEST_HEADERS = Object.freeze({
-  "user-agent": "Mozilla/5.0 (compatible; Lys; +https://github.com/w3lt/lys)",
+  "user-agent": LYS_USER_AGENT,
   accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.1",
   "accept-encoding": "gzip, br"
 })
-
-/** A request failure Lys recognizes, carried through Node's error channels. */
-class PageRequestFailureError extends Error {
-  /** Recognized failure this error carries. */
-  readonly #failure: PageRequestFailure
-
-  /**
-   * Creates the error for one failure occurrence.
-   *
-   * @param failure - Recognized failure.
-   * @param cause - Underlying failure, when one exists.
-   */
-  public constructor(failure: PageRequestFailure, cause?: unknown) {
-    super(`Page request failed: ${failure.kind}`, { cause })
-    this.#failure = Object.freeze(failure)
-  }
-
-  /**
-   * Recognized failure this error carries.
-   *
-   * @returns The frozen failure given at creation.
-   */
-  public get failure(): PageRequestFailure {
-    return this.#failure
-  }
-}
 
 /**
  * Builds a failed outcome.
@@ -217,161 +161,6 @@ function buildFailedPageResult(failure: PageRequestFailure): PageRequestResult {
 }
 
 /**
- * Resolves a host name and refuses it when any address is blocked.
- *
- * @param hostname - Host name the connection is for.
- * @param dependencies - Lookup and address rule.
- * @returns Every address, in the resolver's order, when none is blocked.
- * @throws A {@link PageRequestFailureError} for a blocked or missing address,
- * or for a lookup failure with a system code; any other lookup failure
- * unchanged.
- */
-async function resolvePageHostAddresses(
-  hostname: string,
-  dependencies: PageRequestDependencies
-): Promise<readonly HostAddress[]> {
-  const addresses = await dependencies
-    .lookupHostAddresses(hostname)
-    .catch((error: unknown) => {
-      if (!hasErrorCode(error)) throw error
-      throw new PageRequestFailureError({ kind: "unresolvable-host" }, error)
-    })
-  if (addresses.length === 0) {
-    throw new PageRequestFailureError({ kind: "unresolvable-host" })
-  }
-  if (addresses.some(({ address }) => dependencies.isBlockedAddress(address))) {
-    throw new PageRequestFailureError({ kind: "blocked-address" })
-  }
-  return addresses
-}
-
-/**
- * Finds the address family a Node lookup asks for.
- *
- * @param options - Node's lookup options.
- * @returns 4 or 6 when the lookup is limited to that family, and undefined
- * when any family is accepted.
- */
-function findRequestedFamily(options: LookupOptions): 4 | 6 | undefined {
-  switch (options.family) {
-    case 4:
-    case "IPv4":
-      return 4
-    case 6:
-    case "IPv6":
-      return 6
-    default:
-      return undefined
-  }
-}
-
-/**
- * Builds the address entry Node's lookup callback takes.
- *
- * @param hostAddress - Checked address.
- * @returns A new mutable entry, as Node's callback type requires.
- */
-function buildLookupAddress(hostAddress: HostAddress): LookupAddress {
-  return { address: hostAddress.address, family: hostAddress.family }
-}
-
-/**
- * Delivers resolved addresses in the form Node's connection asked for.
- *
- * @param addresses - Checked addresses, at least one.
- * @param options - Node's lookup options; `all` asks for every address and
- * `family` limits them to one family.
- * @param callback - Node's lookup callback.
- */
-function deliverHostAddresses(
-  addresses: readonly HostAddress[],
-  options: LookupOptions,
-  callback: Parameters<LookupFunction>[2]
-): void {
-  const family = findRequestedFamily(options)
-  const eligible = addresses.filter(
-    (address) => family === undefined || address.family === family
-  )
-  const [first] = eligible
-  if (first === undefined) {
-    callback(new PageRequestFailureError({ kind: "unresolvable-host" }), "")
-    return
-  }
-  if (options.all === true) {
-    callback(null, eligible.map(buildLookupAddress))
-    return
-  }
-  callback(null, first.address, first.family)
-}
-
-/**
- * Creates the lookup every page connection uses.
- *
- * @param dependencies - Lookup and address rule.
- * @returns A Node lookup that refuses a host when any of its addresses is
- * blocked, so a connection only ever goes to a checked address.
- */
-function createPageLookup(
-  dependencies: PageRequestDependencies
-): LookupFunction {
-  return (hostname, options, callback) => {
-    resolvePageHostAddresses(hostname, dependencies).then(
-      (addresses) => deliverHostAddresses(addresses, options, callback),
-      (error: unknown) => callback(toErrnoException(error), "")
-    )
-  }
-}
-
-/**
- * Converts a lookup failure into the error type Node's lookup callback takes.
- *
- * @param error - Failure from {@link resolvePageHostAddresses}.
- * @returns The same error when it is an `Error`, or a new one wrapping it.
- */
-function toErrnoException(error: unknown): NodeJS.ErrnoException {
-  return error instanceof Error
-    ? error
-    : new Error("Host lookup failed", { cause: error })
-}
-
-/**
- * Destroys a socket whose connected address is blocked.
- *
- * @param socket - Socket of one page request.
- * @param isBlockedAddress - Address rule.
- * @remarks Checks the address the socket actually reached, which also
- * covers a URL whose host is an IP address and so needs no lookup.
- */
-function checkConnectedAddress(
-  socket: Socket,
-  isBlockedAddress: (address: string) => boolean
-): void {
-  const address = socket.remoteAddress
-  if (address === undefined || isBlockedAddress(address)) {
-    socket.destroy(new PageRequestFailureError({ kind: "blocked-address" }))
-  }
-}
-
-/**
- * Starts checking the address a request's socket connects to.
- *
- * @param socket - Socket Node assigned to the request.
- * @param isBlockedAddress - Address rule.
- */
-function watchConnectedAddress(
-  socket: Socket,
-  isBlockedAddress: (address: string) => boolean
-): void {
-  if (socket.connecting) {
-    socket.once("connect", () =>
-      checkConnectedAddress(socket, isBlockedAddress)
-    )
-    return
-  }
-  checkConnectedAddress(socket, isBlockedAddress)
-}
-
-/**
  * Sends one GET request and waits for its response headers.
  *
  * @param url - Checked page URL.
@@ -379,7 +168,7 @@ function watchConnectedAddress(
  * @param dependencies - Lookup and address rule.
  * @returns The response, whose body the caller owns and must consume or
  * destroy.
- * @throws The request's failure, including a {@link PageRequestFailureError}
+ * @throws The request's failure, including a {@link ConnectionAddressError}
  * for a blocked address.
  */
 function openPageResponse(
@@ -393,7 +182,7 @@ function openPageResponse(
     method: "GET",
     headers: PAGE_REQUEST_HEADERS,
     agent: false,
-    lookup: createPageLookup(dependencies),
+    lookup: createCheckedLookup(dependencies),
     signal
   }
   return new Promise((resolve, reject) => {
@@ -510,19 +299,6 @@ function openDecodedBody(
   }
 }
 
-/**
- * Checks one chunk read from a body stream.
- *
- * @param chunk - Untrusted chunk; body and decompression streams without an
- * encoding yield bytes.
- * @returns The chunk's bytes.
- * @throws A `TypeError` when the stream yielded something else.
- */
-function parseBodyChunk(chunk: unknown): Uint8Array {
-  if (chunk instanceof Uint8Array) return chunk
-  throw new TypeError("A page body stream yielded a chunk that is not bytes")
-}
-
 /** Bytes read from a body and whether reading stopped at the limit. */
 type PageBodyBytes = Readonly<{
   /** Bytes read, at most {@link MAXIMUM_PAGE_BODY_BYTES}. */
@@ -543,7 +319,7 @@ async function readPageBodyBytes(body: Readable): Promise<PageBodyBytes> {
   const chunks: Uint8Array[] = []
   let byteCount = 0
   for await (const chunk of body) {
-    const bytes = parseBodyChunk(chunk)
+    const bytes = parseResponseChunk(chunk)
     const remainingBytes = MAXIMUM_PAGE_BODY_BYTES - byteCount
     chunks.push(bytes.subarray(0, remainingBytes))
     byteCount += Math.min(bytes.length, remainingBytes)
@@ -637,7 +413,7 @@ function buildRedirectResult(
  * @param dependencies - Lookup and address rule.
  * @returns The page, where it redirects to, or why it cannot be read.
  * @throws A request or body failure, including a
- * {@link PageRequestFailureError}.
+ * {@link ConnectionAddressError}.
  */
 async function sendPageRequest(
   url: PageUrl,
@@ -652,21 +428,6 @@ async function sendPageRequest(
 }
 
 /**
- * Answers whether a failure carries a system or TLS error code.
- *
- * @param error - Untrusted failure.
- * @returns True for an `Error` whose `code` is a non-empty string.
- */
-function hasErrorCode(error: unknown): error is Error & { code: string } {
-  return (
-    error instanceof Error &&
-    "code" in error &&
-    typeof error.code === "string" &&
-    error.code !== ""
-  )
-}
-
-/**
  * Finds the recognized failure a request failure stands for.
  *
  * @param error - Failure the request rejected with, while it was neither
@@ -676,7 +437,9 @@ function hasErrorCode(error: unknown): error is Error & { code: string } {
 function findPageRequestFailure(
   error: unknown
 ): PageRequestFailure | undefined {
-  if (error instanceof PageRequestFailureError) return error.failure
+  if (error instanceof ConnectionAddressError) {
+    return Object.freeze({ kind: error.kind })
+  }
   if (hasErrorCode(error)) {
     return Object.freeze({ kind: "transfer-failed", code: error.code })
   }

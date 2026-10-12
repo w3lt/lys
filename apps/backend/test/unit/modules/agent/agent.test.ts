@@ -13,7 +13,7 @@ import type {
   ReplyModel,
   ReplyStreamEvent
 } from "../../../../src/modules/agent/replyModel"
-import type { BuiltInToolEntry } from "../../../../src/modules/tool/builtIn/builtInTool"
+import type { TurnBuiltInTool } from "../../../../src/modules/tool/builtIn/builtInTool"
 import { ChatCompletionCancelledError } from "../../../../src/utils/errors"
 import {
   createAssistantMessage,
@@ -73,7 +73,7 @@ type AgentReplyScenario = Readonly<{
   /** Offered client tools; none by default. */
   clientTools?: readonly ToolDefinition[]
   /** Offered backend tools; none by default. */
-  builtInTools?: readonly BuiltInToolEntry[]
+  builtInTools?: readonly TurnBuiltInTool[]
   /** Client results; any client tool call fails the case by default. */
   sendClientToolCall?: AgentTurn["sendClientToolCall"]
   /** Client approvals; any backend tool call fails the case by default. */
@@ -141,7 +141,7 @@ const FINISH_ROUND: readonly ReplyStreamEvent[] = Object.freeze([
  */
 function createLookUpWordTool(runScript?: BuiltInToolRunScript) {
   const tool = new ScriptedBuiltInTool(runScript)
-  const entry: BuiltInToolEntry = { definition: LOOK_UP_WORD_TOOL, tool }
+  const entry: TurnBuiltInTool = { definition: LOOK_UP_WORD_TOOL, tool }
   return { tool, entry }
 }
 

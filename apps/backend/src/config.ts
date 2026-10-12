@@ -68,6 +68,16 @@ export const backendConfigSchema = z
       .string()
       .refine(isAbsolute, "Database file path must be absolute."),
     /**
+     * Absolute filesystem path of the desktop's settings file, which the
+     * backend reads for the Tavily API key of `web_search`.
+     *
+     * @remarks The desktop host is the file's only writer; the backend only
+     * reads it, on demand, and never caches what it read.
+     */
+    settingsFilePath: z
+      .string()
+      .refine(isAbsolute, "Settings file path must be absolute."),
+    /**
      * System prompt of Caliginia, the built-in agent that is Lys's dark side,
      * sent first in the context of every reply she writes.
      *
@@ -119,8 +129,9 @@ export type BackendConfig = z.infer<typeof backendConfigSchema>
  * shared protocol constants, backend limits, and the maintained prompt files.
  *
  * @returns A frozen configuration snapshot that satisfies the complete backend
- * configuration schema, whose database path is `lys_db.sqlite` in the
- * `LYS_HOME` directory, and whose prompts were read once during this call.
+ * configuration schema, whose database path is `lys_db.sqlite` and whose
+ * settings file path is `settings.json` in the `LYS_HOME` directory, and
+ * whose prompts were read once during this call.
  * @throws If `LYS_HOME` is unset, empty, or not an absolute path, as
  * described by {@link parseLysHome}.
  * @throws If a prompt file cannot be read or its trimmed contents are empty.
@@ -138,6 +149,7 @@ export function loadBackendConfig(): BackendConfig {
     lmstudioHost: LMSTUDIO_HOST,
     lmstudioPort: LMSTUDIO_PORT,
     databaseFilePath: join(lysHome, "lys_db.sqlite"),
+    settingsFilePath: join(lysHome, "settings.json"),
     caliginiaSystemPrompt: readPrompt("caliginia-system"),
     lysipteraSystemPrompt: readPrompt("lysiptera-system"),
     titleGenerationPrompt: readPrompt("title-generation"),

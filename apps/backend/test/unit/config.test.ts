@@ -28,6 +28,7 @@ const VALID_RAW_CONFIG = Object.freeze({
   lmstudioHost: LMSTUDIO_HOST,
   lmstudioPort: LMSTUDIO_PORT,
   databaseFilePath: "/test-home/lys/lys_db.sqlite",
+  settingsFilePath: "/test-home/lys/settings.json",
   caliginiaSystemPrompt: "Fixture Caliginia prompt",
   lysipteraSystemPrompt: "Fixture Lysiptera prompt",
   titleGenerationPrompt: "Fixture title prompt",
@@ -111,6 +112,7 @@ describe("loadBackendConfig", () => {
       lmstudioHost: LMSTUDIO_HOST,
       lmstudioPort: LMSTUDIO_PORT,
       databaseFilePath: "/test-home/lys/lys_db.sqlite",
+      settingsFilePath: "/test-home/lys/settings.json",
       caliginiaSystemPrompt: "Fixture Caliginia prompt",
       lysipteraSystemPrompt: "Fixture Lysiptera prompt",
       titleGenerationPrompt: "Fixture title prompt",
@@ -267,6 +269,11 @@ describe("backendConfigSchema", () => {
       "the SQLite in-memory database name",
       { ...VALID_RAW_CONFIG, databaseFilePath: ":memory:" },
       "databaseFilePath"
+    ],
+    [
+      "a relative settings file path",
+      { ...VALID_RAW_CONFIG, settingsFilePath: "settings.json" },
+      "settingsFilePath"
     ],
     [
       "a Caliginia prompt with leading whitespace",

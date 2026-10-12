@@ -18,8 +18,13 @@ import LlmRuntimeService, {
   type LlmRuntimeFailureReporters
 } from "../modules/llm/llmRuntimeService"
 import LlmService from "../modules/llm/llmService"
+import { readTavilyApiKey } from "../infrastructure/settings/tavilyApiKeyFile"
 import type { BuiltInToolEntry } from "../modules/tool/builtIn/builtInTool"
-import { createBuiltInTools } from "../modules/tool/builtIn/builtInTools"
+import {
+  buildTavilyRequestDependencies,
+  createBuiltInTools
+} from "../modules/tool/builtIn/builtInTools"
+import WebSearchToolProvider from "../modules/tool/builtIn/web/webSearchToolProvider"
 
 /** Private close operation owned by one returned singleton-service bundle. */
 const CLOSE_SINGLETON_SERVICES = Symbol("close-singleton-services")
@@ -87,6 +92,11 @@ export type SingletonServices = Readonly<{
    * nothing to release.
    */
   builtInTools: readonly BuiltInToolEntry[]
+  /**
+   * Prepares the web search tool for each turn and checks the saved Tavily
+   * key; it owns nothing to release.
+   */
+  webSearchToolProvider: WebSearchToolProvider
   /** Module-private cleanup capability for the complete owned service lifetime. */
   [CLOSE_SINGLETON_SERVICES]: CloseSingletonServices
 }>
@@ -123,8 +133,8 @@ type DatabaseServices = Pick<
  * persistence first, so its startup recovery runs before any history is
  * read. The agent service is created next, over its Sqlite records and the
  * chat service; it reads nothing at creation and owns nothing to release.
- * The built-in tools are created last; they contact nothing at creation and
- * own nothing to release.
+ * The web search tool provider and the built-in tools are created last;
+ * they read and contact nothing at creation and own nothing to release.
  * Creation stops at the first failure. The database is not part of the
  * returned bundle: the bundle's cleanup closes it after the LLM runtime
  * service and before the chat service.
@@ -169,6 +179,10 @@ export async function createSingletonServices(
     const llmService = new LlmService({
       llmEngineOperationQueue: llmRuntimeServiceAcquisition.service
     })
+    const webSearchToolProvider = new WebSearchToolProvider(
+      () => readTavilyApiKey(config.settingsFilePath),
+      buildTavilyRequestDependencies()
+    )
     let closeCompletion: Promise<void> | undefined = undefined
 
     /** Joins every close request to one complete service-lifetime disposal. */
@@ -183,7 +197,8 @@ export async function createSingletonServices(
       llmRuntimeService: llmRuntimeServiceAcquisition.service,
       ...databaseServices,
       agentService,
-      builtInTools: createBuiltInTools(),
+      builtInTools: createBuiltInTools(webSearchToolProvider),
+      webSearchToolProvider,
       [CLOSE_SINGLETON_SERVICES]: closeOwnedSingletonServices
     })
   } catch (creationError) {

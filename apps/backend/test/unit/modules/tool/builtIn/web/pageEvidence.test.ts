@@ -226,6 +226,17 @@ describe("formatPageEvidence", () => {
     expect(evidence.match(/>>>/g)).toHaveLength(2)
   })
 
+  it("removes control characters from the page's title", () => {
+    const content = formatPageEvidence({
+      url: PAGE_URL,
+      article: { ...ARTICLE, title: "Moths\u0000\u001b of night" },
+      selection: COMPLETE_SELECTION,
+      isTruncated: false
+    })
+
+    expect(content).toContain("Page: Moths of night")
+  })
+
   it("puts the page's own title, site, and date inside the page content", () => {
     const evidence = formatPageEvidence({
       url: PAGE_URL,

@@ -15,6 +15,7 @@ export const TEST_BACKEND_CONFIG = backendConfigSchema.parse({
   lmstudioHost: "lmstudio.test",
   lmstudioPort: 4321,
   databaseFilePath: "/nonexistent/lys-test/lys_db.sqlite",
+  settingsFilePath: "/nonexistent/lys-test/settings.json",
   caliginiaSystemPrompt: "Configured Caliginia prompt",
   lysipteraSystemPrompt: "Configured Lysiptera prompt",
   titleGenerationPrompt: "Configured title prompt",

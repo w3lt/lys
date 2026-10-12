@@ -8,7 +8,7 @@ import type {
   OpenAIFunctionTool,
   ToolDefinition
 } from "@lys/share"
-import type { BuiltInToolEntry } from "../tool/builtIn/builtInTool"
+import type { TurnBuiltInTool } from "../tool/builtIn/builtInTool"
 import { ChatCompletionCancelledError } from "../../utils/errors"
 import { buildAgentContext } from "./agentContext"
 import type { ReplyContextMessage, ReplyModel } from "./replyModel"
@@ -64,10 +64,10 @@ export type AgentTurn = Readonly<{
   /** Client tools offered for the turn, each name once; empty when none are. */
   clientTools: readonly ToolDefinition[]
   /**
-   * Backend tools offered for the turn, each name once and none named like a
-   * client tool; empty when none are.
+   * Backend tools prepared for the turn, each name once and none named like a
+   * client tool; empty when none are offered.
    */
-  builtInTools: readonly BuiltInToolEntry[]
+  builtInTools: readonly TurnBuiltInTool[]
   /** Generation-owned cancellation, aborted by Stop or shutdown. */
   abortSignal: AbortSignal
   /** Stores one delta before it is sent; false after deletion or finalization. */

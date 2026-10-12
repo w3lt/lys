@@ -17,8 +17,15 @@ import {
   createAgentNotFoundProblem,
   createConversationAgentMissingProblem
 } from "../../agent/routes/agentProblems"
-import type { BuiltInToolEntry } from "../../tool/builtIn/builtInTool"
-import { findBuiltInTools } from "../../tool/builtIn/builtInTools"
+import type {
+  BuiltInToolEntry,
+  TurnBuiltInTool
+} from "../../tool/builtIn/builtInTool"
+import {
+  findBuiltInTools,
+  prepareBuiltInTools,
+  type BuiltInToolSetPreparation
+} from "../../tool/builtIn/builtInTools"
 import type { TitleGenerationOptions } from "../chatService"
 import { createConversationNotFoundProblem } from "../../conversation/routes/notFound"
 import type {
@@ -27,6 +34,7 @@ import type {
   GeneratedConversationTitleWriter
 } from "../persistence"
 import ReplyEventSubscription from "../replyEventSubscription"
+import { createChatBackendToolUnavailableProblem } from "./replyProblems"
 import type ReplyGeneration from "../replyGeneration"
 import type {
   ReplyGenerationTaskContext,
@@ -155,8 +163,8 @@ type TurnGenerationInput = Readonly<{
   generationOptions: MessageGenerationOptions
   /** Client tools the request offered, each name once; empty when it offered none. */
   clientTools: readonly ToolDefinition[]
-  /** Backend tools the request offered, each name once; empty when it offered none. */
-  builtInTools: readonly BuiltInToolEntry[]
+  /** Backend tools prepared for the turn, each name once; empty when it offered none. */
+  builtInTools: readonly TurnBuiltInTool[]
   /** Logger of the request that started the turn. */
   logger: FastifyBaseLogger
   /** Route capabilities borrowed for the route lifetime. */
@@ -210,20 +218,29 @@ export default function updateFastifyWithChatRoute(
  * @throws An {@link UnknownBackendToolError}, before anything is stored,
  * when the request offers a backend tool the backend does not run; and
  * unexpected failures before the stream starts, for Fastify's HTTP error
- * boundary.
+ * boundary. An offered backend tool that cannot run now is answered with a
+ * 409 problem, before anything is stored.
  * @remarks Closing this stream does not cancel the generation. The agent is
  * found before the turn is stored, and the turn, the generation, and this
  * follower are created in the same synchronous step, so no agent, turn, or
  * conversation changes in between and the follower receives the start event
  * before any generation event. The agent stored with the turn's conversation
- * answers it, with the system prompt it has when the turn starts.
+ * answers it, with the system prompt it has when the turn starts. Every
+ * offered backend tool is prepared before the agent is found; the turn keeps
+ * those prepared tools, so a key saved or removed while it runs applies from
+ * the next request.
  */
 async function handleChatRequest(
   request: ChatRouteRequest,
   reply: ChatRouteReply,
   dependencies: ChatRouteDependencies
 ): Promise<void> {
-  const builtInTools = findRequestedBuiltInTools(request, dependencies)
+  const offeredBuiltInTools = findRequestedBuiltInTools(request, dependencies)
+  const builtInTools = await prepareBuiltInTools(offeredBuiltInTools)
+  if (builtInTools.status === "unavailable") {
+    sendBackendToolUnavailableProblem(reply, builtInTools, request.url)
+    return
+  }
   const requestedAgent = findRequestedAgent(
     request.body.conversation,
     dependencies
@@ -244,7 +261,7 @@ async function handleChatRequest(
     model: request.body.model,
     generationOptions: request.body.generationOptions,
     clientTools: request.body.tools?.definitions ?? NO_REQUESTED_TOOLS,
-    builtInTools,
+    builtInTools: builtInTools.tools,
     logger: request.log,
     dependencies
   })
@@ -353,6 +370,26 @@ function sendUnansweredTurnProblem(
   instance: string
 ): void {
   const problem = buildUnansweredTurnProblem(outcome, instance)
+  reply.type("application/problem+json").code(problem.status).send(problem)
+}
+
+/**
+ * Sends the problem response for an offered backend tool that cannot run now.
+ *
+ * @param reply - Response owner; the response has not started.
+ * @param preparation - Preparation naming the tool and why it cannot run.
+ * @param instance - Request path identifying this occurrence.
+ */
+function sendBackendToolUnavailableProblem(
+  reply: ChatRouteReply,
+  preparation: Extract<BuiltInToolSetPreparation, { status: "unavailable" }>,
+  instance: string
+): void {
+  const problem = createChatBackendToolUnavailableProblem(
+    preparation.toolName,
+    preparation.reason,
+    instance
+  )
   reply.type("application/problem+json").code(problem.status).send(problem)
 }
 

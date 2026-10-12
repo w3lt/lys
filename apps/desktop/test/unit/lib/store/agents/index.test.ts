@@ -7,6 +7,8 @@ import { describe, expect, it, vi } from "vitest"
 import {
   buildJsonResponse,
   createTransportFailure,
+  FIXTURE_BACKEND_URL,
+  listRouteKeys,
   startBackendFake,
   type BackendRoute,
   type BackendRoutes
@@ -27,9 +29,6 @@ import {
   createControlledPromise,
   waitForMicrotasks
 } from "../../../support/settlement"
-
-/** Backend origin the application store reports; it differs from the default. */
-const BACKEND_URL = "http://backend.test:4100"
 
 /** Stored agents, oldest first. */
 const RESEARCHER = buildAgent("researcher", { name: "Researcher" })
@@ -60,7 +59,7 @@ const BUILT_IN_AGENT_CHANGE_MESSAGE =
  * one.
  *
  * @param isBackendRunning - Whether the application store reports a running
- * backend; its origin is always {@link BACKEND_URL}.
+ * backend; its origin is always {@link FIXTURE_BACKEND_URL}.
  * @returns The fresh agent store hook.
  */
 async function loadFreshAgentStore(isBackendRunning = true) {
@@ -68,7 +67,7 @@ async function loadFreshAgentStore(isBackendRunning = true) {
   const { useLysStore } = await import("@/lib/store")
   const { useAgentStore } = await import("@/lib/store/agents")
   useLysStore.setState({
-    backendUrl: BACKEND_URL,
+    backendUrl: FIXTURE_BACKEND_URL,
     backendServerInfo: { status: isBackendRunning ? "running" : "stopped" }
   })
   return useAgentStore
@@ -123,18 +122,6 @@ async function openCaliginiaView(agents: readonly Agent[]) {
 }
 
 /**
- * Lists the route keys of the requests a backend received, in order.
- *
- * @param backend - Backend observation handle.
- * @returns `<METHOD> <path>` of each request.
- */
-function listRouteKeys(backend: ReturnType<typeof startBackendFake>) {
-  return backend.requests.map(
-    (request) => `${request.method} ${new URL(request.url).pathname}`
-  )
-}
-
-/**
  * Builds a list route whose second read stays pending until the case answers
  * it, as a read already sent before a change.
  *
@@ -174,10 +161,7 @@ function buildListRouteWithPendingSecondRead(
  * @returns The observed list requests.
  */
 function listListReads(backend: ReturnType<typeof startBackendFake>) {
-  return backend.requests.filter(
-    (request) =>
-      `${request.method} ${new URL(request.url).pathname}` === LIST_ROUTE
-  )
+  return backend.requests.filter((request) => request.routeKey === LIST_ROUTE)
 }
 
 describe("useAgentStore", () => {
@@ -224,7 +208,9 @@ describe("useAgentStore", () => {
       expect(
         backend.requests.map((request) => new URL(request.url).search)
       ).toEqual(["?limit=50", "?cursor=page-2&limit=50"])
-      expect(new URL(backend.requests[0]?.url ?? "").origin).toBe(BACKEND_URL)
+      expect(new URL(backend.requests[0]?.url ?? "").origin).toBe(
+        FIXTURE_BACKEND_URL
+      )
     })
 
     it("shows loading on the first read and keeps a displayed list while reading it again", async () => {

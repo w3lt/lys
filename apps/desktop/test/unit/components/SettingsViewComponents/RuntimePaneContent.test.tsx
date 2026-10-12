@@ -6,6 +6,7 @@ import type { BackendServerStatus } from "@/lib/store"
 import { initialSettingsState } from "@/lib/store/settings"
 import {
   buildJsonResponse,
+  listRouteKeys,
   startBackendFake,
   type BackendRoutes
 } from "../../support/backendFake"
@@ -75,18 +76,6 @@ async function startRuntimePane(
   await screen.findByRole("switch", { name: "Start it when Lys opens" })
   await waitForRenderedWork()
   return { useLysStore, backend }
-}
-
-/**
- * Lists the route keys of the requests a backend received, in order.
- *
- * @param backend - Backend observation handle.
- * @returns `<METHOD> <path>` of each request.
- */
-function listRouteKeys(backend: ReturnType<typeof startBackendFake>) {
-  return backend.requests.map(
-    (request) => `${request.method} ${new URL(request.url).pathname}`
-  )
 }
 
 describe("RuntimePaneContent", () => {

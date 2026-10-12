@@ -8,19 +8,16 @@ import {
 } from "@/lib/store/lm-studio-status"
 import {
   buildJsonResponse,
+  createControlledRoute,
   createTransportFailure,
+  FIXTURE_BACKEND_URL,
   startBackendFake,
   type BackendRoute
 } from "../../support/backendFake"
 import {
-  createControlledPromise,
   createSettlementReader,
-  waitForMicrotasks,
-  type ControlledPromise
+  waitForMicrotasks
 } from "../../support/settlement"
-
-/** Backend origin the store reports; it differs from the production default. */
-const BACKEND_URL = "http://backend.test:4100"
 
 /** Route key of the status read. */
 const STATUS_ROUTE = "GET /api/v1/llm/runtime"
@@ -41,7 +38,7 @@ function createStatusStore() {
   const store = createStore<LmStudioStatusSlice>()((set, get) =>
     createLmStudioStatusSlice(set, get, {
       getBackendConnection: () => ({
-        backendUrl: BACKEND_URL,
+        backendUrl: FIXTURE_BACKEND_URL,
         isBackendRunning: backend.isBackendRunning
       }),
       handleLmStudioStatusChange: (status) => {
@@ -62,21 +59,6 @@ function buildStatusRoute(status: string): BackendRoute {
   return () => buildJsonResponse(200, { status })
 }
 
-/**
- * Builds a route whose responses stay pending until the case settles them.
- *
- * @returns The route and the pending responses in arrival order.
- */
-function createControlledRoute() {
-  const responses: ControlledPromise<Response>[] = []
-  const route: BackendRoute = () => {
-    const response = createControlledPromise<Response>()
-    responses.push(response)
-    return response.promise
-  }
-  return { route, responses }
-}
-
 describe("createLmStudioStatusSlice", () => {
   it("starts with an unknown status", () => {
     expect(createStatusStore().store.getState().lmStudioStatus).toBe("unknown")
@@ -94,7 +76,9 @@ describe("createLmStudioStatusSlice", () => {
 
       expect(store.getState().lmStudioStatus).toBe("connected")
       expect(changes).toEqual(["connected"])
-      expect(backend.requests[0]?.url).toBe(`${BACKEND_URL}/api/v1/llm/runtime`)
+      expect(backend.requests[0]?.url).toBe(
+        `${FIXTURE_BACKEND_URL}/api/v1/llm/runtime`
+      )
     })
 
     it("follows a connecting status with the backend's settled attempt", async () => {

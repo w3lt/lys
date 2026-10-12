@@ -3,6 +3,7 @@ import { listBackendTools } from "@/lib/apis/http/tools"
 import {
   buildJsonResponse,
   createTransportFailure,
+  FIXTURE_BACKEND_URL,
   startBackendFake
 } from "../../../support/backendFake"
 import {
@@ -10,11 +11,8 @@ import {
   buildToolDefinition
 } from "../../../support/toolFixtures"
 
-/** Backend origin the cases pass; it differs from the production default. */
-const BACKEND_URL = "http://backend.test:4100"
-
 /** Connection the cases pass. */
-const CONNECTION = Object.freeze({ backendUrl: BACKEND_URL })
+const CONNECTION = Object.freeze({ backendUrl: FIXTURE_BACKEND_URL })
 
 /** Route key of the backend's tool list. */
 const TOOLS_ROUTE = "GET /api/v1/tools"
@@ -53,7 +51,7 @@ describe("listBackendTools", () => {
 
     expect(tools).toEqual([READ_PAGE, searchWeb])
     expect(Object.isFrozen(tools)).toBe(true)
-    expect(backend.requests[0]?.url).toBe(`${BACKEND_URL}/api/v1/tools`)
+    expect(backend.requests[0]?.url).toBe(`${FIXTURE_BACKEND_URL}/api/v1/tools`)
     expect(backend.requests[0]?.headers.get("accept")).toBe("application/json")
     expect(backend.requests[0]?.cache).toBe("no-store")
   })

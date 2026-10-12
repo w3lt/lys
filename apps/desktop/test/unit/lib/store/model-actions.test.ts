@@ -15,11 +15,12 @@ import type { LoadConfigurationSettings } from "@/lib/store/settings"
 import {
   buildJsonResponse,
   createTransportFailure,
+  FIXTURE_BACKEND_URL,
+  listRouteKeys,
   startBackendFake,
   type BackendFake,
   type BackendRoute,
-  type BackendRoutes,
-  type ObservedBackendRequest
+  type BackendRoutes
 } from "../../support/backendFake"
 import { buildLlmInfo } from "../../support/modelFixtures"
 import {
@@ -27,9 +28,6 @@ import {
   createSettlementReader,
   waitForMicrotasks
 } from "../../support/settlement"
-
-/** Backend origin the store reports; it differs from the production default. */
-const BACKEND_URL = "http://backend.test:4100"
 
 /** Route keys of the model endpoints. */
 const LIST_ROUTE = "GET /api/v1/llm/list"
@@ -117,7 +115,7 @@ function createModelStore(defaultModel: string | null = null) {
   const store = createStore<ModelSlice>()((set, get) =>
     createModelSlice(set, get, {
       getConnection: (): ModelConnectionState => ({
-        backendUrl: BACKEND_URL,
+        backendUrl: FIXTURE_BACKEND_URL,
         isModelRuntimeAvailable: connection.isModelRuntimeAvailable,
         defaultModel
       }),
@@ -156,16 +154,6 @@ function buildLoadRoute(modelKey: string): BackendRoute {
 }
 
 /**
- * Builds the route key of one received request.
- *
- * @param request - Request the backend double received.
- * @returns The `"<METHOD> <path>"` key the routes are declared under.
- */
-function buildRouteKey(request: ObservedBackendRequest): string {
-  return `${request.method} ${new URL(request.url).pathname}`
-}
-
-/**
  * Starts a backend with the given routes and returns the requests' route
  * keys in arrival order.
  *
@@ -174,7 +162,7 @@ function buildRouteKey(request: ObservedBackendRequest): string {
  */
 function startModelBackend(routes: BackendRoutes): () => string[] {
   const backend = startBackendFake(routes)
-  return () => backend.requests.map(buildRouteKey)
+  return () => listRouteKeys(backend)
 }
 
 /**
@@ -185,7 +173,7 @@ function startModelBackend(routes: BackendRoutes): () => string[] {
  */
 function listLoadRequestBodies(backend: BackendFake): unknown[] {
   return backend.requests
-    .filter((request) => buildRouteKey(request) === LOAD_ROUTE)
+    .filter((request) => request.routeKey === LOAD_ROUTE)
     .map((request) => request.body)
 }
 
@@ -673,7 +661,7 @@ describe("createModelSlice", () => {
       const store = createStore<ModelSlice>()((set, get) =>
         createModelSlice(set, get, {
           getConnection: () => ({
-            backendUrl: BACKEND_URL,
+            backendUrl: FIXTURE_BACKEND_URL,
             isModelRuntimeAvailable: true,
             defaultModel: null
           }),

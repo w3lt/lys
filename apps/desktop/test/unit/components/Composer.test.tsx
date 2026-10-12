@@ -21,6 +21,7 @@ import { createStoredChatViewConversation } from "@/lib/store/chat-view/conversa
 import { buildAgentListPage, buildBuiltInAgent } from "../support/agentFixtures"
 import {
   buildJsonResponse,
+  listRouteKeys,
   startBackendEventStream,
   startBackendFake,
   type BackendEventStream,
@@ -239,9 +240,9 @@ function isTextInChatBody(body: unknown, text: string): boolean {
 function listRouteKeysWithoutReplyFollows(
   backend: ReturnType<typeof startBackendFake>
 ) {
-  return backend.requests
-    .map((request) => `${request.method} ${new URL(request.url).pathname}`)
-    .filter((routeKey) => routeKey !== REPLY_EVENTS_ROUTE)
+  return listRouteKeys(backend).filter(
+    (routeKey) => routeKey !== REPLY_EVENTS_ROUTE
+  )
 }
 
 /**

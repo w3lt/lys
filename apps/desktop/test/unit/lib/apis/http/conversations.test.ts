@@ -8,6 +8,7 @@ import {
 import {
   buildJsonResponse,
   createTransportFailure,
+  FIXTURE_BACKEND_URL,
   startBackendFake,
   type BackendRoute
 } from "../../../support/backendFake"
@@ -21,9 +22,6 @@ import {
   createFixtureUuidV7,
   FIXTURE_CONVERSATION_ID
 } from "../../../support/conversationFixtures"
-
-/** Backend origin the cases pass; it differs from the production default. */
-const BACKEND_URL = "http://backend.test:4100"
 
 /** Path of the conversation the single-conversation cases address. */
 const CONVERSATION_PATH = `/api/v1/conversations/${FIXTURE_CONVERSATION_ID}`
@@ -53,9 +51,11 @@ describe("listConversations", () => {
     const signal = new AbortController().signal
 
     await expect(
-      listConversations({}, { backendUrl: BACKEND_URL, signal })
+      listConversations({}, { backendUrl: FIXTURE_BACKEND_URL, signal })
     ).resolves.toEqual(page)
-    expect(backend.requests[0]?.url).toBe(`${BACKEND_URL}/api/v1/conversations`)
+    expect(backend.requests[0]?.url).toBe(
+      `${FIXTURE_BACKEND_URL}/api/v1/conversations`
+    )
     expect(backend.requests[0]?.signal).toBe(signal)
     expect(backend.requests[0]?.cache).toBe("no-store")
     expect(backend.requests[0]?.headers.has("Content-Type")).toBe(false)
@@ -68,7 +68,7 @@ describe("listConversations", () => {
 
     await listConversations(
       { query: "café & tea", cursor: "opaque+cursor", limit: 50 },
-      { backendUrl: BACKEND_URL }
+      { backendUrl: FIXTURE_BACKEND_URL }
     )
 
     const searchParams = new URL(backend.requests[0]?.url ?? "").searchParams
@@ -87,7 +87,7 @@ describe("listConversations", () => {
     const backend = startBackendFake({})
 
     await expect(
-      listConversations(query, { backendUrl: BACKEND_URL })
+      listConversations(query, { backendUrl: FIXTURE_BACKEND_URL })
     ).rejects.toThrow()
     expect(backend.requests).toEqual([])
   })
@@ -104,7 +104,7 @@ describe("listConversations", () => {
     )
 
     await expect(
-      listConversations({}, { backendUrl: BACKEND_URL })
+      listConversations({}, { backendUrl: FIXTURE_BACKEND_URL })
     ).rejects.toThrow(Error)
   })
 
@@ -119,7 +119,7 @@ describe("listConversations", () => {
     )
 
     await expect(
-      listConversations({}, { backendUrl: BACKEND_URL })
+      listConversations({}, { backendUrl: FIXTURE_BACKEND_URL })
     ).rejects.toMatchObject({
       cause: expect.objectContaining({ name: "ZodError" })
     })
@@ -131,7 +131,7 @@ describe("listConversations", () => {
     )
 
     await expect(
-      listConversations({}, { backendUrl: BACKEND_URL })
+      listConversations({}, { backendUrl: FIXTURE_BACKEND_URL })
     ).rejects.toThrow(Error)
   })
 
@@ -140,7 +140,7 @@ describe("listConversations", () => {
       buildJsonResponse(500, { detail: "SQLITE_BUSY at /Users/secret" })
     )
 
-    const page = listConversations({}, { backendUrl: BACKEND_URL })
+    const page = listConversations({}, { backendUrl: FIXTURE_BACKEND_URL })
 
     await expect(page).rejects.toThrow("500")
     await expect(page).rejects.not.toThrow("/Users/secret")
@@ -151,7 +151,7 @@ describe("listConversations", () => {
     startListBackend(() => Promise.reject(transportFailure))
 
     await expect(
-      listConversations({}, { backendUrl: BACKEND_URL })
+      listConversations({}, { backendUrl: FIXTURE_BACKEND_URL })
     ).rejects.toMatchObject({ cause: transportFailure })
   })
 
@@ -161,7 +161,7 @@ describe("listConversations", () => {
 
     const page = listConversations(
       {},
-      { backendUrl: BACKEND_URL, signal: controller.signal }
+      { backendUrl: FIXTURE_BACKEND_URL, signal: controller.signal }
     )
     controller.abort()
 
@@ -179,9 +179,13 @@ describe("getConversation", () => {
     })
 
     await expect(
-      getConversation(FIXTURE_CONVERSATION_ID, { backendUrl: BACKEND_URL })
+      getConversation(FIXTURE_CONVERSATION_ID, {
+        backendUrl: FIXTURE_BACKEND_URL
+      })
     ).resolves.toEqual({ status: "found", conversation })
-    expect(backend.requests[0]?.url).toBe(`${BACKEND_URL}${CONVERSATION_PATH}`)
+    expect(backend.requests[0]?.url).toBe(
+      `${FIXTURE_BACKEND_URL}${CONVERSATION_PATH}`
+    )
   })
 
   it("reports the declared missing conversation as not found", async () => {
@@ -191,7 +195,9 @@ describe("getConversation", () => {
     })
 
     await expect(
-      getConversation(FIXTURE_CONVERSATION_ID, { backendUrl: BACKEND_URL })
+      getConversation(FIXTURE_CONVERSATION_ID, {
+        backendUrl: FIXTURE_BACKEND_URL
+      })
     ).resolves.toEqual({ status: "not-found" })
   })
 
@@ -202,7 +208,9 @@ describe("getConversation", () => {
     })
 
     await expect(
-      getConversation(FIXTURE_CONVERSATION_ID, { backendUrl: BACKEND_URL })
+      getConversation(FIXTURE_CONVERSATION_ID, {
+        backendUrl: FIXTURE_BACKEND_URL
+      })
     ).rejects.toThrow("404")
   })
 
@@ -216,7 +224,9 @@ describe("getConversation", () => {
     })
 
     await expect(
-      getConversation(FIXTURE_CONVERSATION_ID, { backendUrl: BACKEND_URL })
+      getConversation(FIXTURE_CONVERSATION_ID, {
+        backendUrl: FIXTURE_BACKEND_URL
+      })
     ).rejects.toThrow(Error)
   })
 
@@ -227,7 +237,9 @@ describe("getConversation", () => {
     })
 
     await expect(
-      getConversation(FIXTURE_CONVERSATION_ID, { backendUrl: BACKEND_URL })
+      getConversation(FIXTURE_CONVERSATION_ID, {
+        backendUrl: FIXTURE_BACKEND_URL
+      })
     ).rejects.toMatchObject({
       cause: expect.objectContaining({ name: "ZodError" })
     })
@@ -237,7 +249,7 @@ describe("getConversation", () => {
     const backend = startBackendFake({})
 
     await expect(
-      getConversation("../agents", { backendUrl: BACKEND_URL })
+      getConversation("../agents", { backendUrl: FIXTURE_BACKEND_URL })
     ).rejects.toThrow()
     expect(backend.requests).toEqual([])
   })
@@ -253,7 +265,7 @@ describe("updateConversationTitle", () => {
     await expect(
       updateConversationTitle(
         { conversationId: FIXTURE_CONVERSATION_ID, title: "  Trip  " },
-        { backendUrl: BACKEND_URL }
+        { backendUrl: FIXTURE_BACKEND_URL }
       )
     ).resolves.toEqual({ status: "updated", conversation: metadata })
     expect(backend.requests[0]?.body).toEqual({ title: "Trip" })
@@ -271,7 +283,7 @@ describe("updateConversationTitle", () => {
     await expect(
       updateConversationTitle(
         { conversationId: FIXTURE_CONVERSATION_ID, title },
-        { backendUrl: BACKEND_URL }
+        { backendUrl: FIXTURE_BACKEND_URL }
       )
     ).rejects.toThrow()
     expect(backend.requests).toEqual([])
@@ -286,7 +298,7 @@ describe("updateConversationTitle", () => {
     await expect(
       updateConversationTitle(
         { conversationId: FIXTURE_CONVERSATION_ID, title: "Trip" },
-        { backendUrl: BACKEND_URL }
+        { backendUrl: FIXTURE_BACKEND_URL }
       )
     ).resolves.toEqual({ status: "not-found" })
   })
@@ -303,7 +315,7 @@ describe("updateConversationTitle", () => {
     await expect(
       updateConversationTitle(
         { conversationId: FIXTURE_CONVERSATION_ID, title: "Trip" },
-        { backendUrl: BACKEND_URL }
+        { backendUrl: FIXTURE_BACKEND_URL }
       )
     ).rejects.toThrow(Error)
   })
@@ -316,7 +328,9 @@ describe("deleteConversation", () => {
     })
 
     await expect(
-      deleteConversation(FIXTURE_CONVERSATION_ID, { backendUrl: BACKEND_URL })
+      deleteConversation(FIXTURE_CONVERSATION_ID, {
+        backendUrl: FIXTURE_BACKEND_URL
+      })
     ).resolves.toEqual({ status: "deleted" })
     expect(backend.requests[0]?.body).toBeUndefined()
   })
@@ -328,7 +342,9 @@ describe("deleteConversation", () => {
     })
 
     await expect(
-      deleteConversation(FIXTURE_CONVERSATION_ID, { backendUrl: BACKEND_URL })
+      deleteConversation(FIXTURE_CONVERSATION_ID, {
+        backendUrl: FIXTURE_BACKEND_URL
+      })
     ).resolves.toEqual({ status: "not-found" })
   })
 
@@ -341,7 +357,9 @@ describe("deleteConversation", () => {
     })
 
     await expect(
-      deleteConversation(FIXTURE_CONVERSATION_ID, { backendUrl: BACKEND_URL })
+      deleteConversation(FIXTURE_CONVERSATION_ID, {
+        backendUrl: FIXTURE_BACKEND_URL
+      })
     ).rejects.toThrow(Error)
   })
 })

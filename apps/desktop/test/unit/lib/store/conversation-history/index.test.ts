@@ -4,6 +4,8 @@ import * as conversationApi from "@/lib/apis/http/conversations"
 import { createConversationHistoryStore } from "@/lib/store/conversation-history"
 import {
   buildJsonResponse,
+  createControlledRoute,
+  FIXTURE_BACKEND_URL,
   startBackendFake,
   type BackendRoute,
   type BackendRoutes,
@@ -18,12 +20,8 @@ import {
 } from "../../../support/conversationFixtures"
 import {
   createControlledPromise,
-  waitForMicrotasks,
-  type ControlledPromise
+  waitForMicrotasks
 } from "../../../support/settlement"
-
-/** Backend origin the store samples; it differs from the production default. */
-const BACKEND_URL = "http://backend.test:4100"
 
 /** Time the clock reads when history opens, in epoch milliseconds. */
 const OPENED_AT_MS = Date.parse("2026-06-07T08:09:10.000Z")
@@ -53,7 +51,7 @@ function createHistoryStore() {
     updateConversationTitle: conversationApi.updateConversationTitle,
     deleteConversation: conversationApi.deleteConversation,
     getBackend: () => ({
-      backendUrl: BACKEND_URL,
+      backendUrl: FIXTURE_BACKEND_URL,
       isRunning: backendAvailability.isRunning
     }),
     getCurrentTimeMs: () => OPENED_AT_MS,
@@ -74,21 +72,6 @@ function buildListRoute(
   conversations: readonly ConversationSummary[]
 ): BackendRoute {
   return () => buildJsonResponse(200, buildConversationListPage(conversations))
-}
-
-/**
- * Builds a list route whose responses stay pending until the case settles them.
- *
- * @returns The route and the pending responses in arrival order.
- */
-function createControlledListRoute() {
-  const responses: ControlledPromise<Response>[] = []
-  const route: BackendRoute = () => {
-    const response = createControlledPromise<Response>()
-    responses.push(response)
-    return response.promise
-  }
-  return { route, responses }
 }
 
 /** First page listing {@link TRIP}, with {@link RECIPE} left on an older page. */
@@ -209,7 +192,9 @@ describe("createConversationHistoryStore", () => {
       })
       expect(listDisplayedIds(store)).toEqual([TRIP.id, RECIPE.id])
       expect(listListQueries(backend)).toEqual([{ limit: "30" }])
-      expect(new URL(backend.requests[0]?.url ?? "").origin).toBe(BACKEND_URL)
+      expect(new URL(backend.requests[0]?.url ?? "").origin).toBe(
+        FIXTURE_BACKEND_URL
+      )
     })
 
     it("does not read again when opened while open", async () => {
@@ -250,7 +235,7 @@ describe("createConversationHistoryStore", () => {
     })
 
     it("cancels a pending read on closing and never commits its late answer", async () => {
-      const list = createControlledListRoute()
+      const list = createControlledRoute()
       const backend = startBackendFake({ [LIST_ROUTE]: list.route })
       const { store } = createHistoryStore()
       store.getState().openConversationHistory()
@@ -388,7 +373,7 @@ describe("createConversationHistoryStore", () => {
 
     it("finds nothing when the query changes while its read is pending", async () => {
       vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
-      const list = createControlledListRoute()
+      const list = createControlledRoute()
       startBackendFake({ [LIST_ROUTE]: list.route })
       const { store } = createHistoryStore()
       store.getState().updateConversationHistoryQuery("trip")
@@ -430,7 +415,7 @@ describe("createConversationHistoryStore", () => {
     })
 
     it("finds nothing when the displayed page answers another query", async () => {
-      const list = createControlledListRoute()
+      const list = createControlledRoute()
       startBackendFake({ [LIST_ROUTE]: list.route })
       const { store } = createHistoryStore()
       store.getState().openConversationHistory()
@@ -724,7 +709,7 @@ describe("conversation history changes", () => {
   )
 
   it("replaces a first-page read pending when a change settles, so its old answer cannot undo the change", async () => {
-    const list = createControlledListRoute()
+    const list = createControlledRoute()
     const backend = startBackendFake({
       [LIST_ROUTE]: list.route,
       [DELETE_TRIP_ROUTE]: () => new Response(null, { status: 204 })

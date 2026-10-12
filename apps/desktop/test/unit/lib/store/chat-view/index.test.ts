@@ -15,6 +15,8 @@ import { createChatViewStore } from "@/lib/store/chat-view"
 import { NO_CHAT_TOOL_OFFER, type ChatToolOfferResult } from "@/lib/store/tools"
 import {
   buildJsonResponse,
+  FIXTURE_BACKEND_URL,
+  listRouteKeys,
   startBackendEventStream,
   startBackendFake,
   type BackendEventStream,
@@ -43,9 +45,6 @@ import {
   buildToolCall,
   buildToolDefinition
 } from "../../../support/toolFixtures"
-
-/** Backend origin replies and stored conversations are read from. */
-const BACKEND_URL = "http://backend.test:4100"
 
 /** Time every transition stamps on the message it changes. */
 const NOW = "2026-07-08T09:10:11.123Z"
@@ -129,11 +128,14 @@ function createChatHarness() {
   const store = createChatViewStore({
     streamChat: readChatEvents,
     streamChatReply: (target, signal) =>
-      readChatReplyEvents(target, { backendUrl: BACKEND_URL, signal }),
+      readChatReplyEvents(target, { backendUrl: FIXTURE_BACKEND_URL, signal }),
     stopChatReply: (target) =>
-      stopChatReply(target, { backendUrl: BACKEND_URL }),
+      stopChatReply(target, { backendUrl: FIXTURE_BACKEND_URL }),
     getConversation: (conversationId, signal) =>
-      getConversation(conversationId, { backendUrl: BACKEND_URL, signal }),
+      getConversation(conversationId, {
+        backendUrl: FIXTURE_BACKEND_URL,
+        signal
+      }),
     createTimestamp: () => NOW,
     findEligibleChatModel: () => providers.eligibleModel,
     readGenerationOptions: () => providers.generationOptions,
@@ -192,18 +194,6 @@ async function startStreamingReply(routes: BackendRoutes = {}) {
   await waitForMicrotasks()
   await sendStreamEvents(chat.streams[0], NEW_TURN_EVENT)
   return { ...harness, ...chat, send }
-}
-
-/**
- * Lists the route keys of the requests a backend received, in order.
- *
- * @param backend - Backend observation handle.
- * @returns `<METHOD> <path>` of each request.
- */
-function listRouteKeys(backend: ReturnType<typeof startBackendFake>) {
-  return backend.requests.map(
-    (request) => `${request.method} ${new URL(request.url).pathname}`
-  )
 }
 
 describe("createChatViewStore", () => {
@@ -1278,7 +1268,7 @@ describe("closeConversation", () => {
 describe("useChatViewStore", () => {
   /**
    * Loads fresh application and chat-view stores, with a running backend
-   * at {@link BACKEND_URL} that has loaded `resident` weights. The tool,
+   * at {@link FIXTURE_BACKEND_URL} that has loaded `resident` weights. The tool,
    * agent, and tool-call stores the chat view reads are fresh as well, with
    * no tool list read, no agent list read, and nothing followed.
    *
@@ -1291,7 +1281,7 @@ describe("useChatViewStore", () => {
     const { useChatViewStore } = await import("@/lib/store/chat-view")
     const { settings } = useLysStore.getState()
     useLysStore.setState({
-      backendUrl: BACKEND_URL,
+      backendUrl: FIXTURE_BACKEND_URL,
       backendServerInfo: { status: "running" },
       modelRuntime: { status: "loaded", modelKey: "resident" },
       settings: {
@@ -1378,7 +1368,7 @@ describe("useChatViewStore", () => {
 
     expect(
       backend.requests.map((request) => new URL(request.url).origin)
-    ).toEqual([BACKEND_URL, BACKEND_URL, BACKEND_URL])
+    ).toEqual([FIXTURE_BACKEND_URL, FIXTURE_BACKEND_URL, FIXTURE_BACKEND_URL])
     expect(listRouteKeys(backend)).toEqual([
       `GET /api/v1/conversations/${GENERATING_ID}`,
       GENERATING_EVENTS_ROUTE,

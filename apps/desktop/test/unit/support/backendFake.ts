@@ -1,15 +1,30 @@
 import { expect, onTestFinished, vi } from "vitest"
-import { createControlledPromise, waitForMicrotasks } from "./settlement"
+import {
+  createControlledPromise,
+  waitForMicrotasks,
+  type ControlledPromise
+} from "./settlement"
+
+/**
+ * Backend origin the cases pass to the code under test; it differs from the
+ * production default, so an origin taken from anywhere else is noticed.
+ */
+export const FIXTURE_BACKEND_URL = "http://backend.test:4100"
 
 /** One HTTP request received by the in-process backend double. */
 export type ObservedBackendRequest = Readonly<{
   /** Absolute request URL, including any query string. */
   url: string
+  /** `"<METHOD> <path>"` key the request's route is declared under. */
+  routeKey: string
   /** HTTP method. */
   method: string
   /** Request headers as sent. */
   headers: Headers
-  /** JSON-decoded text body, or undefined when no body was sent. */
+  /**
+   * JSON-decoded text body, or undefined when no body was sent or the body
+   * was not JSON text.
+   */
   body: unknown
   /** Requested cache mode, or undefined when the client left the default. */
   cache: RequestCache | undefined
@@ -39,6 +54,12 @@ export type BackendFake = Readonly<{
 
 /** Status the double answers for a request no route expects. */
 const UNEXPECTED_REQUEST_STATUS = 501
+
+/**
+ * Body of one request as the backend reads it: the JSON-decoded value, or
+ * why the backend could not read it.
+ */
+type ObservedBody = Readonly<{ value: unknown }> | Readonly<{ problem: string }>
 
 /** Transport failures made by {@link createTransportFailure}. */
 const transportFailures = new WeakSet<TypeError>()
@@ -101,15 +122,15 @@ async function answerBackendRoute(
  * @param routes - Responses for the requests the case expects.
  * @returns A handle recording every received request.
  * @remarks Vitest removes the substitution after the case
- * (`unstubGlobals`). A request no route matches is answered with HTTP 501 and
- * fails the case when it finishes, so an unexpected request can never pass
- * as a handled transport failure. For the same reason, a route that throws
- * or rejects with anything but {@link createTransportFailure}'s failure fails
- * the case when it finishes. Like the platform `fetch`, a request whose
- * signal is already aborted rejects without reaching a route, a request whose
- * signal aborts before its route answers rejects with the abort reason, and a
- * signal that aborts later errors the response body and cancels the body the
- * route produced.
+ * (`unstubGlobals`). A request no route matches, or whose body is not JSON
+ * text, is answered with HTTP 501 and fails the case when it finishes, so an
+ * unexpected request can never pass as a handled transport failure. For the
+ * same reason, a route that throws or rejects with anything but
+ * {@link createTransportFailure}'s failure fails the case when it finishes.
+ * Like the platform `fetch`, a request whose signal is already aborted
+ * rejects without reaching a route, a request whose signal aborts before its
+ * route answers rejects with the abort reason, and a signal that aborts later
+ * errors the response body and cancels the body the route produced.
  */
 export function startBackendFake(routes: BackendRoutes): BackendFake {
   const requests: ObservedBackendRequest[] = []
@@ -119,31 +140,77 @@ export function startBackendFake(routes: BackendRoutes): BackendFake {
     expect(unexpectedRequests, "requests no route expected").toEqual([])
     expect(routeFailures, "routes that failed instead of answering").toEqual([])
   })
-  vi.stubGlobal(
-    "fetch",
-    async (input: string | URL | Request, init: RequestInit = {}) => {
-      const signal = init.signal ?? undefined
-      signal?.throwIfAborted()
-      const request = buildObservedBackendRequest(input, init, signal)
-      requests.push(request)
-      const routeKey = `${request.method} ${new URL(request.url).pathname}`
-      const route = routes[routeKey]
-      if (route === undefined) {
-        unexpectedRequests.push(routeKey)
-        return new Response(null, { status: UNEXPECTED_REQUEST_STATUS })
-      }
-      const response = await waitForResponseOrAbort(
-        answerBackendRoute(route, request, (failure) => {
-          routeFailures.push(`${routeKey}: ${String(failure)}`)
-        }),
-        signal
-      )
-      return signal === undefined
-        ? response
-        : buildAbortableResponse(response, signal)
+
+  /**
+   * Answers one `fetch` call as the in-process backend.
+   *
+   * @param input - Request target passed to `fetch`.
+   * @param init - Request options passed to `fetch`.
+   * @returns The route's response, or HTTP 501 for an unexpected request.
+   * @throws The abort reason when the signal aborts first, or the route's
+   * rejection.
+   */
+  async function answerFetch(
+    input: string | URL | Request,
+    init: RequestInit = {}
+  ): Promise<Response> {
+    const signal = init.signal ?? undefined
+    signal?.throwIfAborted()
+    const body = parseObservedBody(init.body)
+    const request = buildObservedBackendRequest(input, init, signal, body)
+    requests.push(request)
+    const route = routes[request.routeKey]
+    if (route === undefined || "problem" in body) {
+      unexpectedRequests.push(formatUnexpectedRequest(request, body))
+      return new Response(null, { status: UNEXPECTED_REQUEST_STATUS })
     }
-  )
+    const response = await waitForResponseOrAbort(
+      answerBackendRoute(route, request, (failure) => {
+        routeFailures.push(`${request.routeKey}: ${String(failure)}`)
+      }),
+      signal
+    )
+    return signal === undefined
+      ? response
+      : buildAbortableResponse(response, signal)
+  }
+
+  vi.stubGlobal("fetch", answerFetch)
   return Object.freeze({ requests })
+}
+
+/**
+ * Decodes the body of one request the way the backend reads it.
+ *
+ * @param body - Body passed to `fetch`.
+ * @returns The JSON-decoded text, an undefined value when no body was sent,
+ * or the problem with a body the desktop never sends: one that is not text,
+ * or text that is not JSON.
+ */
+function parseObservedBody(body: RequestInit["body"]): ObservedBody {
+  if (body === undefined || body === null) return { value: undefined }
+  if (typeof body !== "string") return { problem: "a body that is not text" }
+  try {
+    return { value: JSON.parse(body) }
+  } catch {
+    return { problem: "a text body that is not JSON" }
+  }
+}
+
+/**
+ * Formats one unexpected request for the case's failure message.
+ *
+ * @param request - Observed request.
+ * @param body - Its decoded body, or why it could not be read.
+ * @returns The request's route key, with the body problem when it has one.
+ */
+function formatUnexpectedRequest(
+  request: ObservedBackendRequest,
+  body: ObservedBody
+): string {
+  return "problem" in body
+    ? `${request.routeKey} with ${body.problem}`
+    : request.routeKey
 }
 
 /**
@@ -152,23 +219,51 @@ export function startBackendFake(routes: BackendRoutes): BackendFake {
  * @param input - Request target passed to `fetch`.
  * @param init - Request options passed to `fetch`.
  * @param signal - Cancellation signal taken from the options.
- * @returns The observed request with its JSON body decoded.
- * @throws A `SyntaxError` when a text body is not JSON; every backend request
- * the desktop sends carries JSON, so another body fails the case.
+ * @param body - The request's decoded body, or why it could not be read.
+ * @returns The observed request.
  */
 function buildObservedBackendRequest(
   input: string | URL | Request,
   init: RequestInit,
-  signal: AbortSignal | undefined
+  signal: AbortSignal | undefined,
+  body: ObservedBody
 ): ObservedBackendRequest {
+  const url = input instanceof Request ? input.url : String(input)
+  const method = init.method ?? "GET"
   return Object.freeze({
-    url: input instanceof Request ? input.url : String(input),
-    method: init.method ?? "GET",
+    url,
+    routeKey: `${method} ${new URL(url).pathname}`,
+    method,
     headers: new Headers(init.headers),
-    body: typeof init.body === "string" ? JSON.parse(init.body) : undefined,
+    body: "value" in body ? body.value : undefined,
     cache: init.cache,
     signal
   })
+}
+
+/**
+ * Lists the route keys of the requests a backend received, in order.
+ *
+ * @param backend - Backend observation handle.
+ * @returns The `"<METHOD> <path>"` key of each request.
+ */
+export function listRouteKeys(backend: BackendFake): string[] {
+  return backend.requests.map((request) => request.routeKey)
+}
+
+/**
+ * Builds a route whose responses stay pending until the case settles them.
+ *
+ * @returns The route and the pending responses in arrival order.
+ */
+export function createControlledRoute() {
+  const responses: ControlledPromise<Response>[] = []
+  const route: BackendRoute = () => {
+    const response = createControlledPromise<Response>()
+    responses.push(response)
+    return response.promise
+  }
+  return { route, responses }
 }
 
 /**

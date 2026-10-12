@@ -10,6 +10,7 @@ import {
 import {
   buildJsonResponse,
   createTransportFailure,
+  FIXTURE_BACKEND_URL,
   startBackendFake
 } from "../../../support/backendFake"
 import {
@@ -24,11 +25,8 @@ import {
   buildCustomAgentResponse
 } from "../../../support/agentFixtures"
 
-/** Backend origin the cases pass; it differs from the production default. */
-const BACKEND_URL = "http://backend.test:4100"
-
 /** Connection the cases do not cancel. */
-const CONNECTION = Object.freeze({ backendUrl: BACKEND_URL })
+const CONNECTION = Object.freeze({ backendUrl: FIXTURE_BACKEND_URL })
 
 /** Agent the single-agent cases address. */
 const RESEARCHER = buildAgent("researcher", {
@@ -55,9 +53,11 @@ describe("listAgents", () => {
     const signal = new AbortController().signal
 
     await expect(
-      listAgents({}, { backendUrl: BACKEND_URL, signal })
+      listAgents({}, { backendUrl: FIXTURE_BACKEND_URL, signal })
     ).resolves.toEqual(page)
-    expect(backend.requests[0]?.url).toBe(`${BACKEND_URL}/api/v1/agents`)
+    expect(backend.requests[0]?.url).toBe(
+      `${FIXTURE_BACKEND_URL}/api/v1/agents`
+    )
     expect(backend.requests[0]?.signal).toBe(signal)
     expect(backend.requests[0]?.cache).toBe("no-store")
     expect(backend.requests[0]?.headers.has("Content-Type")).toBe(false)
@@ -169,7 +169,7 @@ describe("listAgents", () => {
 
     const page = listAgents(
       {},
-      { backendUrl: BACKEND_URL, signal: controller.signal }
+      { backendUrl: FIXTURE_BACKEND_URL, signal: controller.signal }
     )
     controller.abort()
 
@@ -189,7 +189,7 @@ describe("getAgent", () => {
       agent: { kind: "custom", ...RESEARCHER }
     })
     expect(backend.requests[0]?.url).toBe(
-      `${BACKEND_URL}/api/v1/agents/researcher`
+      `${FIXTURE_BACKEND_URL}/api/v1/agents/researcher`
     )
   })
 

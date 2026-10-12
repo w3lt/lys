@@ -8,12 +8,10 @@ import {
 import {
   buildJsonResponse,
   createTransportFailure,
+  FIXTURE_BACKEND_URL,
   startBackendEventStream,
   startBackendFake
 } from "../../../support/backendFake"
-
-/** Backend origin the cases pass; it differs from the production default. */
-const BACKEND_URL = "http://backend.test:4100"
 
 /** Health timeout the contract promises, in milliseconds. */
 const HEALTH_CHECK_TIMEOUT_MS = 1000
@@ -24,9 +22,11 @@ describe("getBackendHealth", () => {
       "GET /api/v1/heath": () => buildJsonResponse(200, { status: "ok" })
     })
 
-    await expect(getBackendHealth(BACKEND_URL)).resolves.toBe("answering")
+    await expect(getBackendHealth(FIXTURE_BACKEND_URL)).resolves.toBe(
+      "answering"
+    )
     expect(backend.requests).toMatchObject([
-      { url: `${BACKEND_URL}/api/v1/heath`, cache: "no-store" }
+      { url: `${FIXTURE_BACKEND_URL}/api/v1/heath`, cache: "no-store" }
     ])
   })
 
@@ -34,7 +34,9 @@ describe("getBackendHealth", () => {
     const stream = startBackendEventStream()
     startBackendFake({ "GET /api/v1/heath": () => stream.response })
 
-    await expect(getBackendHealth(BACKEND_URL)).resolves.toBe("answering")
+    await expect(getBackendHealth(FIXTURE_BACKEND_URL)).resolves.toBe(
+      "answering"
+    )
     expect(stream.isCancelled()).toBe(true)
   })
 
@@ -43,7 +45,9 @@ describe("getBackendHealth", () => {
       "GET /api/v1/heath": () => new Response(null, { status: 503 })
     })
 
-    await expect(getBackendHealth(BACKEND_URL)).resolves.toBe("not-answering")
+    await expect(getBackendHealth(FIXTURE_BACKEND_URL)).resolves.toBe(
+      "not-answering"
+    )
   })
 
   it("reports not answering when the backend cannot be reached", async () => {
@@ -51,7 +55,9 @@ describe("getBackendHealth", () => {
       "GET /api/v1/heath": () => Promise.reject(createTransportFailure())
     })
 
-    await expect(getBackendHealth(BACKEND_URL)).resolves.toBe("not-answering")
+    await expect(getBackendHealth(FIXTURE_BACKEND_URL)).resolves.toBe(
+      "not-answering"
+    )
   })
 
   it("reports not answering once a pending check reaches its one-second timeout", async () => {
@@ -60,7 +66,9 @@ describe("getBackendHealth", () => {
     })
     const startedAt = performance.now()
 
-    await expect(getBackendHealth(BACKEND_URL)).resolves.toBe("not-answering")
+    await expect(getBackendHealth(FIXTURE_BACKEND_URL)).resolves.toBe(
+      "not-answering"
+    )
 
     // Fake timers do not drive AbortSignal.timeout, so this case waits for the
     // real timeout; only the lower bound is asserted, as an upper bound would
@@ -98,7 +106,7 @@ describe.each([
       const signal = new AbortController().signal
 
       await expect(
-        readStatus({ backendUrl: BACKEND_URL, signal })
+        readStatus({ backendUrl: FIXTURE_BACKEND_URL, signal })
       ).resolves.toBe(status)
       expect(backend.requests).toHaveLength(1)
       expect(backend.requests[0]?.cache).toBe("no-store")
@@ -115,7 +123,7 @@ describe.each([
     })
 
     const status = readStatus({
-      backendUrl: BACKEND_URL,
+      backendUrl: FIXTURE_BACKEND_URL,
       signal: new AbortController().signal
     })
 
@@ -129,7 +137,7 @@ describe.each([
     })
 
     const status = readStatus({
-      backendUrl: BACKEND_URL,
+      backendUrl: FIXTURE_BACKEND_URL,
       signal: new AbortController().signal
     })
 
@@ -150,7 +158,7 @@ describe.each([
 
     await expect(
       readStatus({
-        backendUrl: BACKEND_URL,
+        backendUrl: FIXTURE_BACKEND_URL,
         signal: new AbortController().signal
       })
     ).rejects.toMatchObject({ cause: expect.any(SyntaxError) })
@@ -161,7 +169,7 @@ describe.each([
     const controller = new AbortController()
 
     const status = readStatus({
-      backendUrl: BACKEND_URL,
+      backendUrl: FIXTURE_BACKEND_URL,
       signal: controller.signal
     })
     controller.abort()

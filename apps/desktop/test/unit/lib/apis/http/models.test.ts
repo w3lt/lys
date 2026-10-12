@@ -14,12 +14,10 @@ import {
 } from "@/lib/apis/http/models"
 import {
   buildJsonResponse,
+  FIXTURE_BACKEND_URL,
   startBackendFake
 } from "../../../support/backendFake"
 import { buildLlmInfo } from "../../../support/modelFixtures"
-
-/** Backend origin the cases pass; it differs from the production default. */
-const BACKEND_URL = "http://backend.test:4100"
 
 /**
  * Load settings a load sends: two of the five settings, so LM Studio decides
@@ -36,7 +34,10 @@ const LOAD_CONFIGURATION = modelLoadConfigurationSchema.parse({
  * @returns The connection and its signal, which the request must carry.
  */
 function createConnection() {
-  return { backendUrl: BACKEND_URL, signal: new AbortController().signal }
+  return {
+    backendUrl: FIXTURE_BACKEND_URL,
+    signal: new AbortController().signal
+  }
 }
 
 /**
@@ -63,7 +64,9 @@ describe("listModels", () => {
 
     await expect(listModels(connection)).resolves.toEqual(models)
     expect(backend.requests).toHaveLength(1)
-    expect(backend.requests[0]?.url).toBe(`${BACKEND_URL}/api/v1/llm/list`)
+    expect(backend.requests[0]?.url).toBe(
+      `${FIXTURE_BACKEND_URL}/api/v1/llm/list`
+    )
     expect(backend.requests[0]?.signal).toBe(connection.signal)
     expect(backend.requests[0]?.cache).toBe("no-store")
   })
@@ -193,7 +196,7 @@ describe("listModels", () => {
     const controller = new AbortController()
 
     const models = listModels({
-      backendUrl: BACKEND_URL,
+      backendUrl: FIXTURE_BACKEND_URL,
       signal: controller.signal
     })
     controller.abort()
@@ -386,7 +389,7 @@ describe("getModelHealth", () => {
     await getModelHealth("publisher/model", createConnection())
 
     expect(backend.requests[0]?.url).toBe(
-      `${BACKEND_URL}/api/v1/llm/publisher%2Fmodel/health`
+      `${FIXTURE_BACKEND_URL}/api/v1/llm/publisher%2Fmodel/health`
     )
   })
 

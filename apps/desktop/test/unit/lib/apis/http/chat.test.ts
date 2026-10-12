@@ -17,6 +17,7 @@ import { DELETED_CONVERSATION_AGENT_MESSAGE } from "@/lib/conversation-agent-mes
 import {
   buildJsonResponse,
   createTransportFailure,
+  FIXTURE_BACKEND_URL,
   startBackendEventStream,
   startBackendFake,
   type BackendEventStream
@@ -35,9 +36,6 @@ import {
   buildToolCall,
   buildToolDefinition
 } from "../../../support/toolFixtures"
-
-/** Backend origin the reply cases pass; it differs from the production default. */
-const BACKEND_URL = "http://backend.test:4100"
 
 /** Reply the reply cases follow or stop. */
 const REPLY_TARGET = Object.freeze({
@@ -319,11 +317,14 @@ describe("readChatReplyEvents", () => {
     stream.close()
 
     await listStreamEvents(
-      readChatReplyEvents(REPLY_TARGET, { backendUrl: BACKEND_URL, signal })
+      readChatReplyEvents(REPLY_TARGET, {
+        backendUrl: FIXTURE_BACKEND_URL,
+        signal
+      })
     )
 
     expect(backend.requests[0]?.url).toBe(
-      `${BACKEND_URL}/api/v1/chat/${REPLY_TARGET.conversationId}/replies/${REPLY_TARGET.assistantMessageId}/events`
+      `${FIXTURE_BACKEND_URL}/api/v1/chat/${REPLY_TARGET.conversationId}/replies/${REPLY_TARGET.assistantMessageId}/events`
     )
     expect(backend.requests[0]?.headers.get("Accept")).toBe("text/event-stream")
     expect(backend.requests[0]?.cache).toBe("no-store")
@@ -348,7 +349,7 @@ describe("readChatReplyEvents", () => {
 
     await expect(
       listStreamEvents(
-        readChatReplyEvents(REPLY_TARGET, { backendUrl: BACKEND_URL })
+        readChatReplyEvents(REPLY_TARGET, { backendUrl: FIXTURE_BACKEND_URL })
       )
     ).resolves.toEqual(events)
   })
@@ -365,7 +366,7 @@ describe("readChatReplyEvents", () => {
 
       await expect(
         listStreamEvents(
-          readChatReplyEvents(REPLY_TARGET, { backendUrl: BACKEND_URL })
+          readChatReplyEvents(REPLY_TARGET, { backendUrl: FIXTURE_BACKEND_URL })
         )
       ).rejects.toThrow("no longer stored")
     }
@@ -378,7 +379,7 @@ describe("readChatReplyEvents", () => {
     })
 
     const events = listStreamEvents(
-      readChatReplyEvents(REPLY_TARGET, { backendUrl: BACKEND_URL })
+      readChatReplyEvents(REPLY_TARGET, { backendUrl: FIXTURE_BACKEND_URL })
     )
 
     await expect(events).rejects.toThrow("404")
@@ -404,7 +405,7 @@ describe("readChatReplyEvents", () => {
 
       await expect(
         listStreamEvents(
-          readChatReplyEvents(REPLY_TARGET, { backendUrl: BACKEND_URL })
+          readChatReplyEvents(REPLY_TARGET, { backendUrl: FIXTURE_BACKEND_URL })
         )
       ).rejects.toMatchObject({ name: "ZodError" })
     }
@@ -416,7 +417,7 @@ describe("readChatReplyEvents", () => {
     stream.sendEvent({ type: "delta", content: "Hi" })
 
     await readFirstStreamEvent(
-      readChatReplyEvents(REPLY_TARGET, { backendUrl: BACKEND_URL })
+      readChatReplyEvents(REPLY_TARGET, { backendUrl: FIXTURE_BACKEND_URL })
     )
 
     expect(stream.isCancelled()).toBe(true)
@@ -430,10 +431,10 @@ describe("stopChatReply", () => {
     })
 
     await expect(
-      stopChatReply(REPLY_TARGET, { backendUrl: BACKEND_URL })
+      stopChatReply(REPLY_TARGET, { backendUrl: FIXTURE_BACKEND_URL })
     ).resolves.toEqual({ status: "stopped" })
     expect(backend.requests[0]?.url).toBe(
-      `${BACKEND_URL}/api/v1/chat/${REPLY_TARGET.conversationId}/replies/${REPLY_TARGET.assistantMessageId}/stop`
+      `${FIXTURE_BACKEND_URL}/api/v1/chat/${REPLY_TARGET.conversationId}/replies/${REPLY_TARGET.assistantMessageId}/stop`
     )
     expect(backend.requests[0]?.signal).toBeUndefined()
   })
@@ -445,7 +446,7 @@ describe("stopChatReply", () => {
     })
 
     await expect(
-      stopChatReply(REPLY_TARGET, { backendUrl: BACKEND_URL })
+      stopChatReply(REPLY_TARGET, { backendUrl: FIXTURE_BACKEND_URL })
     ).resolves.toEqual({ status: "not-generating" })
   })
 
@@ -460,7 +461,7 @@ describe("stopChatReply", () => {
     })
 
     await expect(
-      stopChatReply(REPLY_TARGET, { backendUrl: BACKEND_URL })
+      stopChatReply(REPLY_TARGET, { backendUrl: FIXTURE_BACKEND_URL })
     ).rejects.toThrow(String(status))
   })
 
@@ -471,7 +472,7 @@ describe("stopChatReply", () => {
     })
 
     await expect(
-      stopChatReply(REPLY_TARGET, { backendUrl: BACKEND_URL })
+      stopChatReply(REPLY_TARGET, { backendUrl: FIXTURE_BACKEND_URL })
     ).rejects.toMatchObject({ cause: transportFailure })
   })
 })
@@ -484,12 +485,12 @@ describe("sendChatToolResult", () => {
 
     await expect(
       sendChatToolResult(TOOL_CALL_TARGET, SUCCEEDED_TOOL_RESULT, {
-        backendUrl: BACKEND_URL
+        backendUrl: FIXTURE_BACKEND_URL
       })
     ).resolves.toEqual({ status: "accepted" })
     expect(backend.requests).toHaveLength(1)
     expect(backend.requests[0]?.url).toBe(
-      `${BACKEND_URL}/api/v1/chat/${REPLY_TARGET.conversationId}/replies/${REPLY_TARGET.assistantMessageId}/tool-results/${TOOL_CALL.id}`
+      `${FIXTURE_BACKEND_URL}/api/v1/chat/${REPLY_TARGET.conversationId}/replies/${REPLY_TARGET.assistantMessageId}/tool-results/${TOOL_CALL.id}`
     )
     expect(backend.requests[0]?.body).toEqual(SUCCEEDED_TOOL_RESULT)
     expect(backend.requests[0]?.headers.get("Content-Type")).toBe(
@@ -506,7 +507,7 @@ describe("sendChatToolResult", () => {
 
     await expect(
       sendChatToolResult(TOOL_CALL_TARGET, SUCCEEDED_TOOL_RESULT, {
-        backendUrl: BACKEND_URL
+        backendUrl: FIXTURE_BACKEND_URL
       })
     ).resolves.toEqual({ status: "not-pending" })
   })
@@ -519,7 +520,7 @@ describe("sendChatToolResult", () => {
 
     await expect(
       sendChatToolResult(TOOL_CALL_TARGET, SUCCEEDED_TOOL_RESULT, {
-        backendUrl: BACKEND_URL
+        backendUrl: FIXTURE_BACKEND_URL
       })
     ).rejects.toThrow(
       /^The backend said this answer does not fit the tool call\.$/
@@ -542,7 +543,7 @@ describe("sendChatToolResult", () => {
 
     await expect(
       sendChatToolResult(TOOL_CALL_TARGET, SUCCEEDED_TOOL_RESULT, {
-        backendUrl: BACKEND_URL
+        backendUrl: FIXTURE_BACKEND_URL
       })
     ).rejects.toThrow(String(status))
   })
@@ -555,7 +556,7 @@ describe("sendChatToolResult", () => {
 
     await expect(
       sendChatToolResult(TOOL_CALL_TARGET, SUCCEEDED_TOOL_RESULT, {
-        backendUrl: BACKEND_URL
+        backendUrl: FIXTURE_BACKEND_URL
       })
     ).rejects.toMatchObject({ cause: transportFailure })
   })

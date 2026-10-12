@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { getBackendReadiness } from "@/lib/store/backend-readiness"
-import { buildJsonResponse, startBackendFake } from "../../support/backendFake"
+import {
+  buildJsonResponse,
+  FIXTURE_BACKEND_URL,
+  startBackendFake
+} from "../../support/backendFake"
 import { startNativeHostFake } from "../../support/nativeHostFake"
 import { createSettlementReader } from "../../support/settlement"
-
-/** Backend origin the cases check; it differs from the production default. */
-const BACKEND_URL = "http://backend.test:4100"
 
 /** Route key of the health check. */
 const HEALTH_ROUTE = "GET /api/v1/heath"
@@ -42,7 +43,9 @@ describe("getBackendReadiness", () => {
     startBackendAnsweringFrom(1)
     const host = startNativeHostFake({})
 
-    await expect(getBackendReadiness(BACKEND_URL)).resolves.toBe("ready")
+    await expect(getBackendReadiness(FIXTURE_BACKEND_URL)).resolves.toBe(
+      "ready"
+    )
     expect(host.commands).toEqual([])
   })
 
@@ -51,7 +54,7 @@ describe("getBackendReadiness", () => {
     startNativeHostFake({ get_backend_status: () => ({ running: true }) })
 
     const getSettlement = createSettlementReader(
-      getBackendReadiness(BACKEND_URL)
+      getBackendReadiness(FIXTURE_BACKEND_URL)
     )
     await vi.advanceTimersByTimeAsync(249)
     const checksBeforeInterval = backend.requests.length
@@ -66,14 +69,16 @@ describe("getBackendReadiness", () => {
     startBackendAnsweringFrom(Number.POSITIVE_INFINITY)
     startNativeHostFake({ get_backend_status: () => ({ running: false }) })
 
-    await expect(getBackendReadiness(BACKEND_URL)).resolves.toBe("exited")
+    await expect(getBackendReadiness(FIXTURE_BACKEND_URL)).resolves.toBe(
+      "exited"
+    )
   })
 
   it("reports unresponsive once 30 seconds pass without an answer from a live process", async () => {
     startBackendAnsweringFrom(Number.POSITIVE_INFINITY)
     startNativeHostFake({ get_backend_status: () => ({ running: true }) })
 
-    const readiness = getBackendReadiness(BACKEND_URL)
+    const readiness = getBackendReadiness(FIXTURE_BACKEND_URL)
     const getSettlement = createSettlementReader(readiness)
     await vi.advanceTimersByTimeAsync(29_999)
     const beforeDeadline = getSettlement()
@@ -89,7 +94,7 @@ describe("getBackendReadiness", () => {
       get_backend_status: () => Promise.reject("Failed to inspect the process")
     })
 
-    await expect(getBackendReadiness(BACKEND_URL)).rejects.toBe(
+    await expect(getBackendReadiness(FIXTURE_BACKEND_URL)).rejects.toBe(
       "Failed to inspect the process"
     )
   })

@@ -150,7 +150,8 @@ temporary file beside it, opened with mode `0600` on Unix and flushed to disk,
 which is then renamed over the file. A reader therefore sees the previous
 document or the complete new one, and other OS users cannot read the key. The
 rename itself is not synced to the directory, so it is not promised to survive
-a power loss.
+a power loss. When `settings.json` is a symbolic link, the rename replaces the
+link with a regular file, and the file it pointed to stops receiving saves.
 
 The `secrets` group holds the Tavily API key as plain text, validated on load
 (1 to 256 visible ASCII characters); an invalid key makes loading fail. Its

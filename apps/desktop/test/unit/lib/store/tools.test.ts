@@ -245,7 +245,7 @@ describe("useToolStore", () => {
       expect(backend.requests).toHaveLength(2)
     })
 
-    it("shows a general failure when the desktop rejects without a reason", async () => {
+    it("shows a general failure when the desktop rejects with something other than an error", async () => {
       startNativeHostFake({
         list_tools: () => Promise.reject("command list_tools not found")
       })
@@ -260,16 +260,17 @@ describe("useToolStore", () => {
       })
     })
 
-    it("names the reason when the desktop's list fails with one", async () => {
+    it("names the reason in one presentable line when the desktop's list is invalid", async () => {
       startNativeHostFake({ list_tools: () => [{ name: "bad name!" }] })
       startBackendFake({ [BACKEND_TOOLS_ROUTE]: buildBackendToolsRoute() })
       const useToolStore = await loadFreshToolStore()
 
       await useToolStore.getState().loadTools()
 
-      expect(useToolStore.getState().list).toMatchObject({
+      expect(useToolStore.getState().list).toEqual({
         status: "failed",
-        error: expect.stringMatching(/^Lys couldn't read its tool list: .+/)
+        error:
+          "Lys couldn't read its tool list: The app returned an invalid tool list."
       })
     })
 

@@ -170,9 +170,9 @@ export async function findFiles(
  *
  * @returns A promise that resolves with the validated, frozen list once the
  * desktop answers.
- * @throws A Zod error when the desktop returns a list that does not match
- * {@link listToolsResultSchema}, such as a definition that drifted from the
- * shared shape.
+ * @throws A caller-safe error when the desktop returns a list that does not
+ * match {@link listToolsResultSchema}, such as a definition that drifted from
+ * the shared shape; the decoding failure is kept as its cause.
  * @throws The Tauri rejection when the command is not registered.
  * @remarks The desktop builds the list from its own definitions and reads
  * nothing from disk, so the command declares no failure of its own. The read
@@ -181,7 +181,11 @@ export async function findFiles(
 export async function listTools(): Promise<ListToolsResult> {
   const value = await invoke<unknown>(LIST_TOOLS_COMMAND)
 
-  return listToolsResultSchema.parse(value)
+  try {
+    return listToolsResultSchema.parse(value)
+  } catch (cause) {
+    throw new Error("The app returned an invalid tool list.", { cause })
+  }
 }
 
 /**

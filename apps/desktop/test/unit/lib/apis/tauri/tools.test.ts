@@ -157,23 +157,33 @@ describe("listTools", () => {
     ])
   })
 
-  it("rejects a list that names a tool twice", async () => {
-    const tool = buildToolDefinition("read_text_file")
-    startNativeHostFake({ list_tools: () => [tool, tool] })
-
-    await expect(listTools()).rejects.toMatchObject({ name: "ZodError" })
-  })
-
-  it("rejects a list that holds a tool the backend runs", async () => {
-    startNativeHostFake({
-      list_tools: () => [
+  it.each([
+    [
+      "names a tool twice",
+      [
+        buildToolDefinition("read_text_file"),
+        buildToolDefinition("read_text_file")
+      ]
+    ],
+    [
+      "holds a tool the backend runs",
+      [
         buildToolDefinition("read_text_file"),
         buildBackendToolDefinition("read_page")
       ]
-    })
+    ],
+    ["holds a tool without a valid name", [{ name: "bad name!" }]]
+  ])(
+    "rejects a list that %s with a caller-safe error, keeping the decoding failure as its cause",
+    async (_label, tools) => {
+      startNativeHostFake({ list_tools: () => tools })
 
-    await expect(listTools()).rejects.toMatchObject({ name: "ZodError" })
-  })
+      await expect(listTools()).rejects.toMatchObject({
+        message: "The app returned an invalid tool list.",
+        cause: expect.objectContaining({ name: "ZodError" })
+      })
+    }
+  )
 
   it("rejects with the host's rejection", async () => {
     startNativeHostFake({

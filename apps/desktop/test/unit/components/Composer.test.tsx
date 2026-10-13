@@ -542,11 +542,10 @@ describe("Composer", () => {
       ).toBeNull()
     })
 
-    // Known defect, found by this suite and not yet reported as an issue:
-    // the field answers Enter while an input method is still composing text,
-    // so the Enter that confirms a composition sends the unfinished draft.
-    // The other key handlers of the renderer leave such keys to the input
-    // method.
+    // Known defect (#168): the field answers Enter while an input method is
+    // still composing text, so the Enter that confirms a composition sends
+    // the unfinished draft. The other key handlers of the renderer leave such
+    // keys to the input method.
     it.fails(
       "leaves an Enter that belongs to text composition to the input method",
       async () => {
@@ -1173,10 +1172,10 @@ describe("Composer", () => {
       ).toBeInTheDocument()
     })
 
-    // Known defect, the same as for sending: a key pressed while an input
-    // method composes text answers the waiting call. Escape, which cancels a
-    // composition, rejects the call, and Enter, which confirms one, rejects
-    // it with the unfinished draft or allows it.
+    // Known defect (#168), the same as for sending: a key pressed while an
+    // input method composes text answers the waiting call. Escape, which
+    // cancels a composition, rejects the call, and Enter, which confirms one,
+    // rejects it with the unfinished draft or allows it.
     it.fails.each(["Escape", "Enter"])(
       "leaves an %s that belongs to text composition to the input method while a call waits",
       async (key) => {

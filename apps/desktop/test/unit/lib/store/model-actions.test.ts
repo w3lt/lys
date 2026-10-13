@@ -707,6 +707,28 @@ describe("createModelSlice", () => {
       })
     })
 
+    it("sends nothing more of a reload it interrupts during the unload", async () => {
+      const unload = createControlledPromise<Response>()
+      const requests = startModelBackend({
+        [UNLOAD_ROUTE]: () => unload.promise
+      })
+      const { store } = createModelStore()
+      const reload = store.getState().updateLoadedModelConfiguration("resident")
+      await waitForMicrotasks()
+
+      store.getState().releaseModelRuntime()
+      unload.resolve(new Response(null, { status: 204 }))
+      await reload
+      await waitForMicrotasks()
+
+      expect(requests()).toEqual([UNLOAD_ROUTE])
+      expect(store.getState()).toMatchObject({
+        modelRequest: { status: "idle" },
+        modelRuntime: { status: "unavailable" },
+        modelError: null
+      })
+    })
+
     it("forgets the configurations of the loaded models", async () => {
       startModelBackend({ [LIST_ROUTE]: buildInventoryRoute(INVENTORY) })
       const { store } = createModelStore()

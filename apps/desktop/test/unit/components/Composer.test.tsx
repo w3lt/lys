@@ -18,6 +18,7 @@ import {
 import { describe, expect, it, vi } from "vitest"
 import { DELETED_CONVERSATION_AGENT_MESSAGE } from "@/lib/conversation-agent-messages"
 import { createStoredChatViewConversation } from "@/lib/store/chat-view/conversation-transitions"
+import type { HeldToolCall } from "@/lib/store/tool-calls"
 import { buildAgentListPage, buildBuiltInAgent } from "../support/agentFixtures"
 import {
   buildJsonResponse,
@@ -48,6 +49,7 @@ import {
   waitForMicrotasks
 } from "../support/settlement"
 import { openMenuWithKeyboard, waitForRenderedWork } from "../support/rendering"
+import { buildToolCall, buildToolDefinition } from "../support/toolFixtures"
 
 /** Route key of the chat request. */
 const CHAT_ROUTE = "POST /api/v1/chat"
@@ -92,6 +94,31 @@ const BUILT_IN_AGENT_PAGE = buildAgentListPage([], {
     buildBuiltInAgent(CALIGINIA_AGENT_CODE, { name: "Caliginia" }),
     buildBuiltInAgent(LYSIPTERA_AGENT_CODE, { name: "Lysiptera" })
   ]
+})
+
+/** Call of {@link REPLY} that reads the fixture notes. */
+const READ_CALL = buildToolCall(10, "read_text_file")
+
+/** Route key of the tool-result endpoint for {@link READ_CALL}. */
+const READ_RESULT_ROUTE = `POST /api/v1/chat/${FIXTURE_CONVERSATION_ID}/replies/${REPLY.id}/tool-results/${READ_CALL.id}`
+
+/** {@link READ_CALL} as the tool-call store holds it while it asks first. */
+const WAITING_READ: HeldToolCall = Object.freeze({
+  target: Object.freeze({
+    conversationId: FIXTURE_CONVERSATION_ID,
+    assistantMessageId: REPLY.id,
+    callId: READ_CALL.id
+  }),
+  call: READ_CALL,
+  answer: Object.freeze({
+    status: "awaiting-person",
+    definition: buildToolDefinition("read_text_file"),
+    input: Object.freeze({
+      runner: "client",
+      toolName: "read_text_file",
+      input: Object.freeze({ path: "/notes/todo.md" })
+    })
+  })
 })
 
 /** Code of a stored agent the user deleted after talking to it. */
@@ -144,6 +171,29 @@ async function loadFreshComposer(runtime: RuntimeArrangement = READY_RUNTIME) {
     useConversationHistoryStore,
     Composer
   }
+}
+
+/**
+ * Loads a fresh composer whose shown conversation has a reply that waits for
+ * the person to answer {@link READ_CALL}.
+ *
+ * @returns The stores and the composer component of {@link loadFreshComposer}.
+ * @remarks The tool-call store is the one the composer reads, loaded with
+ * it; it holds the call as it does once the reply's follow delivered it.
+ */
+async function loadFreshComposerWithWaitingCall() {
+  const loaded = await loadFreshComposer()
+  const { useToolCallStore } = await import("@/lib/store/tool-calls")
+  loaded.useChatViewStore.setState({
+    conversation: createStoredChatViewConversation(
+      buildConversation(FIXTURE_CONVERSATION_ID, null, [
+        buildUserMessage(2, "Read my notes"),
+        REPLY
+      ])
+    )
+  })
+  useToolCallStore.setState({ heldCalls: [WAITING_READ] })
+  return loaded
 }
 
 /**
@@ -491,6 +541,35 @@ describe("Composer", () => {
         screen.queryByRole("list", { name: "Attached to this message" })
       ).toBeNull()
     })
+
+    // Known defect, found by this suite and not yet reported as an issue:
+    // the field answers Enter while an input method is still composing text,
+    // so the Enter that confirms a composition sends the unfinished draft.
+    // The other key handlers of the renderer leave such keys to the input
+    // method.
+    it.fails(
+      "leaves an Enter that belongs to text composition to the input method",
+      async () => {
+        const { backend, streams } = startChatBackend()
+        const { useChatViewStore, Composer } = await loadFreshComposer()
+        useChatViewStore.setState({ inputDraft: "Konnichi" })
+        render(
+          <Composer
+            messageFieldRef={createRef()}
+            onStartConversation={vi.fn()}
+          />
+        )
+
+        fireEvent.keyDown(getMessageField(), {
+          key: "Enter",
+          isComposing: true
+        })
+        await waitForRenderedWork()
+        streams[0]?.close()
+
+        expect(listChatBodies(backend)).toEqual([])
+      }
+    )
 
     // Known defect, tracked by #27 and #105: a paste of 1,200 characters or
     // more leaves the draft for a tray entry that keeps only its length, so
@@ -929,6 +1008,212 @@ describe("Composer", () => {
     })
   })
 
+  describe("a tool call that waits for the person", () => {
+    it("allows the call on Enter while the draft is empty, instead of sending a message", async () => {
+      const host = startNativeHostFake({ read_text_file: () => "Buy milk." })
+      const backend = startBackendFake({
+        [READ_RESULT_ROUTE]: () => new Response(null, { status: 204 })
+      })
+      const { Composer } = await loadFreshComposerWithWaitingCall()
+      const user = userEvent.setup()
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
+
+      await user.type(getMessageField(), "{Enter}")
+      await waitForRenderedWork()
+
+      expect(host.commands).toEqual([
+        { command: "read_text_file", args: { path: "/notes/todo.md" } }
+      ])
+      expect(listRouteKeys(backend)).toEqual([READ_RESULT_ROUTE])
+      expect(backend.requests[0]?.body).toEqual({
+        status: "succeeded",
+        content: "Buy milk."
+      })
+      expect(
+        screen.queryByRole("group", {
+          name: "Tool call waiting for your answer"
+        })
+      ).not.toBeInTheDocument()
+    })
+
+    it.each([
+      ["Enter", "{Enter}"],
+      ["Escape", "{Escape}"]
+    ])(
+      "rejects the call with the draft as the reason on %s, and clears the draft",
+      async (_key, keys) => {
+        startNativeHostFake({})
+        const backend = startBackendFake({
+          [READ_RESULT_ROUTE]: () => new Response(null, { status: 204 })
+        })
+        const { Composer } = await loadFreshComposerWithWaitingCall()
+        const user = userEvent.setup()
+        render(
+          <Composer
+            messageFieldRef={createRef()}
+            onStartConversation={vi.fn()}
+          />
+        )
+
+        await user.type(getMessageField(), `Not that file${keys}`)
+        await waitForRenderedWork()
+
+        expect(listRouteKeys(backend)).toEqual([READ_RESULT_ROUTE])
+        expect(backend.requests[0]?.body).toEqual({
+          status: "failed",
+          reason: "declined",
+          content: "The person declined this call. They said: Not that file"
+        })
+        expect(getMessageField()).toHaveValue("")
+      }
+    )
+
+    it("rejects the call without a reason on Escape while the draft is empty", async () => {
+      startNativeHostFake({})
+      const backend = startBackendFake({
+        [READ_RESULT_ROUTE]: () => new Response(null, { status: 204 })
+      })
+      const { Composer } = await loadFreshComposerWithWaitingCall()
+      const user = userEvent.setup()
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
+
+      await user.type(getMessageField(), "{Escape}")
+      await waitForRenderedWork()
+
+      expect(backend.requests.map((request) => request.body)).toEqual([
+        {
+          status: "failed",
+          reason: "declined",
+          content: "The person declined this call."
+        }
+      ])
+    })
+
+    it("rejects the call with the draft from the card's Reject button, and clears the draft", async () => {
+      startNativeHostFake({})
+      const backend = startBackendFake({
+        [READ_RESULT_ROUTE]: () => new Response(null, { status: 204 })
+      })
+      const { useChatViewStore, Composer } =
+        await loadFreshComposerWithWaitingCall()
+      useChatViewStore.setState({ inputDraft: "Use the other folder" })
+      const user = userEvent.setup()
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
+
+      await user.click(screen.getByRole("button", { name: "Reject" }))
+      await waitForRenderedWork()
+
+      expect(backend.requests.map((request) => request.body)).toEqual([
+        {
+          status: "failed",
+          reason: "declined",
+          content:
+            "The person declined this call. They said: Use the other folder"
+        }
+      ])
+      expect(getMessageField()).toHaveValue("")
+    })
+
+    it("adds a line on Shift+Enter and leaves the call waiting", async () => {
+      startNativeHostFake({})
+      const backend = startBackendFake({})
+      const { Composer } = await loadFreshComposerWithWaitingCall()
+      const user = userEvent.setup()
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
+
+      await user.type(getMessageField(), "Wait{Shift>}{Enter}{/Shift}")
+      await waitForRenderedWork()
+
+      expect(getMessageField()).toHaveValue("Wait\n")
+      expect(backend.requests).toEqual([])
+      expect(
+        screen.getByRole("group", { name: "Tool call waiting for your answer" })
+      ).toBeInTheDocument()
+    })
+
+    it("leaves Escape to the field while only an answer that failed to send is shown", async () => {
+      startNativeHostFake({})
+      const backend = startBackendFake({})
+      const { useChatViewStore, Composer } =
+        await loadFreshComposerWithWaitingCall()
+      const { useToolCallStore } = await import("@/lib/store/tool-calls")
+      useToolCallStore.setState({
+        heldCalls: [
+          {
+            ...WAITING_READ,
+            answer: {
+              status: "send-failed",
+              toolAnswer: { status: "succeeded", content: "Buy milk." },
+              error: "Couldn't send the answer to Lys."
+            }
+          }
+        ]
+      })
+      useChatViewStore.setState({ inputDraft: "Keep this" })
+      const user = userEvent.setup()
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
+
+      await user.type(getMessageField(), "{Escape}")
+      await waitForRenderedWork()
+
+      expect(getMessageField()).toHaveValue("Keep this")
+      expect(backend.requests).toEqual([])
+      expect(
+        screen.getByRole("group", { name: "Tool answer not sent" })
+      ).toBeInTheDocument()
+    })
+
+    // Known defect, the same as for sending: a key pressed while an input
+    // method composes text answers the waiting call. Escape, which cancels a
+    // composition, rejects the call, and Enter, which confirms one, rejects
+    // it with the unfinished draft or allows it.
+    it.fails.each(["Escape", "Enter"])(
+      "leaves an %s that belongs to text composition to the input method while a call waits",
+      async (key) => {
+        startNativeHostFake({})
+        const backend = startBackendFake({
+          [READ_RESULT_ROUTE]: () => new Response(null, { status: 204 })
+        })
+        const { useChatViewStore, Composer } =
+          await loadFreshComposerWithWaitingCall()
+        useChatViewStore.setState({ inputDraft: "Konnichi" })
+        render(
+          <Composer
+            messageFieldRef={createRef()}
+            onStartConversation={vi.fn()}
+          />
+        )
+
+        fireEvent.keyDown(getMessageField(), { key, isComposing: true })
+        await waitForRenderedWork()
+
+        expect(backend.requests.map((request) => request.body)).toEqual([])
+      }
+    )
+
+    it("announces the waiting call under the answering agent's name", async () => {
+      const { Composer } = await loadFreshComposerWithWaitingCall()
+
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
+
+      expect(listStatusTexts()).toContain(
+        "Caliginia is waiting for you to allow or reject read_text_file: Read /notes/todo.md. Nothing is changed."
+      )
+    })
+  })
+
   describe("session controls", () => {
     it("opens past conversations and closes them again, stating which", async () => {
       startBackendFake({
@@ -994,6 +1279,25 @@ describe("Composer", () => {
       await user.click(screen.getByRole("button", { name: "Settings" }))
 
       expect(useLysStore.getState().activeView).toBe("settings")
+    })
+
+    it("opens Agents settings from the agent menu", async () => {
+      const { useLysStore, Composer } = await loadFreshComposer()
+      const user = userEvent.setup()
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
+
+      await openMenuWithKeyboard(
+        user,
+        screen.getByRole("button", { name: "Caliginia" })
+      )
+      await user.click(screen.getByRole("menuitem", { name: /Edit agents/ }))
+
+      expect(useLysStore.getState()).toMatchObject({
+        activeView: "settings",
+        settingsPane: "agents"
+      })
     })
 
     it("opens Model settings to change the context window", async () => {

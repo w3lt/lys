@@ -478,10 +478,10 @@ describe("createConversationHistoryStore", () => {
         () => olderPage.promise
       )
       const older = store.getState().loadOlderConversations()
+      const repeated = store.getState().loadOlderConversations()
 
-      await store.getState().loadOlderConversations()
       olderPage.resolve(buildJsonResponse(200, LAST_OF_TWO_PAGES))
-      await older
+      await Promise.all([older, repeated])
 
       expect(listListQueries(backend)).toEqual([
         { limit: "30" },

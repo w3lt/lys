@@ -64,8 +64,24 @@ contracts, schemas, or behavior that crosses package boundaries.
   certificate, an oversized or unreadable answer, and other HTTP errors,
   against a local server. Run the live suite when you change how Lys talks to
   Tavily.
-- `apps/desktop` has a `vitest run` script, but no desktop test files are
-  currently tracked.
+- `apps/desktop/test/unit` contains a Vitest unit suite for the renderer: the
+  HTTP and Tauri API wrappers, the stores and their pure logic, and the
+  components, renderer hooks, and views, rendered with Testing Library in
+  jsdom. Run it once with `pnpm --filter @lys/desktop test`, or rerun
+  it on every change with `pnpm --filter @lys/desktop run test:watch`.
+  `pnpm --filter @lys/desktop exec tsc` typechecks the renderer and the suite.
+  The suite needs no LM Studio server, running backend, Tauri runtime, or
+  personal settings: it substitutes the backend behind `fetch` and the native
+  host behind Tauri's `mockIPC`. Known defects stay in the suite as expected
+  failures that name the defect and fail the run once it is fixed. Its
+  [coverage inventory](https://github.com/w3lt/lys/blob/main/apps/desktop/test/unit/COVERAGE.md)
+  lists what each test file covers and what it cannot prove.
+- The `Desktop unit tests` workflow runs that typecheck and the desktop suite on
+  every pull request and on every push to `main`.
+- The `Backend unit tests` workflow runs
+  `pnpm --filter @lys/backend exec tsc --noEmit`, which also typechecks both
+  backend suites, and the backend unit suite on every pull request and on every
+  push to `main`.
 - The shared packages have no package-level test scripts or tracked test suites.
 - `apps/backend` also exposes a TypeScript validation path through
   `pnpm --filter @lys/backend exec tsc --noEmit`.
@@ -76,10 +92,14 @@ contracts, schemas, or behavior that crosses package boundaries.
 
 Apart from the live suite for Tavily, backend coverage is unit-level only: the
 backend integration and end-to-end suites are tracked in [issue #44](https://github.com/w3lt/lys/issues/44) and
-[issue #45](https://github.com/w3lt/lys/issues/45), and no CI workflow runs the
-unit suite yet. Desktop and shared-package automated test coverage is currently
-absent. A command that exits successfully without executing tests does not
-establish coverage. If you are changing behavior, be explicit in your handoff
+[issue #45](https://github.com/w3lt/lys/issues/45). The desktop unit suite runs
+in jsdom, so layout, scrolling, real pointer and drag behavior, and
+assistive-technology output belong to the end-to-end suite. Native Tauri tests
+and end-to-end desktop tests are tracked in
+[issue #133](https://github.com/w3lt/lys/issues/133) and
+[issue #134](https://github.com/w3lt/lys/issues/134). Shared-package automated
+test coverage is currently absent. A command that exits successfully without
+executing tests does not establish coverage. If you are changing behavior, be explicit in your handoff
 about which paths you verified and which still lack dedicated automation.
 
 <RelatedDocuments

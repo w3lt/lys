@@ -1,0 +1,1222 @@
+import {
+  CALIGINIA_AGENT_CODE,
+  LYSIPTERA_AGENT_CODE,
+  type Agent
+} from "@lys/share"
+import { describe, expect, it, vi } from "vitest"
+import {
+  buildJsonResponse,
+  createTransportFailure,
+  FIXTURE_BACKEND_URL,
+  listRouteKeys,
+  startBackendFake,
+  type BackendRoute,
+  type BackendRoutes,
+  type ObservedBackendRequest
+} from "../../../support/backendFake"
+import {
+  buildAgent,
+  buildAgentBuiltInProblem,
+  buildAgentCodeTakenProblem,
+  buildAgentListPage,
+  buildAgentNotFoundProblem,
+  buildAgentSummary,
+  buildBuiltInAgent,
+  buildBuiltInAgentResponse,
+  buildBuiltInAgentSummary,
+  buildCustomAgentResponse
+} from "../../../support/agentFixtures"
+import {
+  createControlledPromise,
+  waitForMicrotasks
+} from "../../../support/settlement"
+
+/** Stored agents, oldest first. */
+const RESEARCHER = buildAgent("researcher", { name: "Researcher" })
+const WRITER = buildAgent("writer", { name: "Writer" })
+
+/** Built-in agents, in the order the backend ships them. */
+const CALIGINIA = buildBuiltInAgent(CALIGINIA_AGENT_CODE, { name: "Caliginia" })
+const LYSIPTERA = buildBuiltInAgent(LYSIPTERA_AGENT_CODE, { name: "Lysiptera" })
+
+/** Built-in agents every list page carries, as the backend sends them. */
+const BUILT_IN_AGENTS = Object.freeze([CALIGINIA, LYSIPTERA])
+
+/** {@link BUILT_IN_AGENTS} as a loaded list holds them. */
+const BUILT_IN_AGENT_SUMMARIES = Object.freeze(
+  BUILT_IN_AGENTS.map(buildBuiltInAgentSummary)
+)
+
+/** Route key of the agent list. */
+const LIST_ROUTE = "GET /api/v1/agents"
+
+/** Message shown when the backend refuses a change to a built-in agent. */
+const BUILT_IN_AGENT_CHANGE_MESSAGE =
+  "Built-in agents cannot be changed or deleted."
+
+/**
+ * Loads a fresh agent store and the application store it reads the
+ * backend from, so no state or pending work of another case reaches this
+ * one.
+ *
+ * @param isBackendRunning - Whether the application store reports a running
+ * backend; its origin is always {@link FIXTURE_BACKEND_URL}.
+ * @returns The fresh agent store hook.
+ */
+async function loadFreshAgentStore(isBackendRunning = true) {
+  vi.resetModules()
+  const { useLysStore } = await import("@/lib/store")
+  const { useAgentStore } = await import("@/lib/store/agents")
+  useLysStore.setState({
+    backendUrl: FIXTURE_BACKEND_URL,
+    backendServerInfo: { status: isBackendRunning ? "running" : "stopped" }
+  })
+  return useAgentStore
+}
+
+/**
+ * Builds a route listing {@link BUILT_IN_AGENTS} and the given stored agents
+ * on one final page.
+ *
+ * @param agents - Stored agents, oldest first.
+ * @returns The route.
+ */
+function buildAgentListRoute(agents: readonly Agent[]): BackendRoute {
+  const page = buildAgentListPage(agents, { builtInAgents: BUILT_IN_AGENTS })
+  return () => buildJsonResponse(200, page)
+}
+
+/**
+ * Builds a route listing the given stored agents 50 to a page.
+ *
+ * @param agents - Stored agents, oldest first.
+ * @returns The route. A page's cursor is the index of the next page's first
+ * agent, and the last page has none.
+ */
+function buildPagedAgentListRoute(agents: readonly Agent[]): BackendRoute {
+  /**
+   * Handles one list request.
+   *
+   * @param request - Observed list request; its `cursor` is the index of the
+   * page's first agent, and a request without one reads the first page.
+   * @returns A 200 carrying that page.
+   */
+  function handlePageRequest(request: ObservedBackendRequest): Response {
+    const start = Number(new URL(request.url).searchParams.get("cursor") ?? 0)
+    const end = start + 50
+    return buildJsonResponse(
+      200,
+      buildAgentListPage(agents.slice(start, end), {
+        storedCount: agents.length,
+        nextCursor: end < agents.length ? String(end) : null
+      })
+    )
+  }
+
+  return handlePageRequest
+}
+
+/**
+ * Loads a fresh agent store whose list shows the given agents.
+ *
+ * @param agents - Stored agents, oldest first.
+ * @param routes - Routes the case needs after the list is read.
+ * @returns The store hook and the backend observation handle.
+ */
+async function loadAgentStoreWithList(
+  agents: readonly Agent[],
+  routes: BackendRoutes = {}
+) {
+  const backend = startBackendFake({
+    [LIST_ROUTE]: buildAgentListRoute(agents),
+    ...routes
+  })
+  const useAgentStore = await loadFreshAgentStore()
+  await useAgentStore.getState().loadAgents()
+  return { useAgentStore, backend }
+}
+
+/**
+ * Opens the read-only view of {@link CALIGINIA} on a fresh store whose list
+ * shows {@link BUILT_IN_AGENTS} and the given stored agents.
+ *
+ * @param agents - Stored agents, oldest first.
+ * @returns The store hook and the backend observation handle.
+ */
+async function openCaliginiaView(agents: readonly Agent[]) {
+  const loaded = await loadAgentStoreWithList(agents, {
+    "GET /api/v1/agents/caliginia": () =>
+      buildJsonResponse(200, buildBuiltInAgentResponse(CALIGINIA))
+  })
+  await loaded.useAgentStore.getState().openAgent(CALIGINIA_AGENT_CODE)
+  return loaded
+}
+
+/**
+ * Builds a list route whose second read stays pending until the case answers
+ * it, as a read already sent before a change.
+ *
+ * @param firstAgents - Stored agents the first read lists.
+ * @param laterAgents - Stored agents every read after the second lists.
+ * @returns The route and the controlled answer of the second read.
+ */
+function buildListRouteWithPendingSecondRead(
+  firstAgents: readonly Agent[],
+  laterAgents: readonly Agent[]
+) {
+  const secondRead = createControlledPromise<Response>()
+  let reads = 0
+
+  /**
+   * Answers one list read.
+   *
+   * @returns The pending second answer, or a page listing the read's agents.
+   */
+  function answerListRead(): Response | Promise<Response> {
+    reads += 1
+    if (reads === 2) return secondRead.promise
+    const agents = reads === 1 ? firstAgents : laterAgents
+    return buildJsonResponse(
+      200,
+      buildAgentListPage(agents, { builtInAgents: BUILT_IN_AGENTS })
+    )
+  }
+
+  return { route: answerListRead, secondRead }
+}
+
+/**
+ * Lists the list reads a backend received, in order.
+ *
+ * @param backend - Backend observation handle.
+ * @returns The observed list requests.
+ */
+function listListReads(backend: ReturnType<typeof startBackendFake>) {
+  return backend.requests.filter((request) => request.routeKey === LIST_ROUTE)
+}
+
+describe("useAgentStore", () => {
+  it("starts with no list and a closed editor", async () => {
+    const useAgentStore = await loadFreshAgentStore()
+
+    expect(useAgentStore.getState()).toMatchObject({
+      list: { status: "idle" },
+      editor: { status: "closed" },
+      savedAgentCode: null
+    })
+  })
+
+  describe("loadAgents", () => {
+    it("reads every page at the largest page size and lists the built-in agents once with the stored agents oldest first", async () => {
+      const firstPage = buildAgentListPage([RESEARCHER], {
+        storedCount: 2,
+        nextCursor: "page-2",
+        builtInAgents: BUILT_IN_AGENTS
+      })
+      const finalPage = buildAgentListPage([WRITER], {
+        storedCount: 2,
+        builtInAgents: BUILT_IN_AGENTS
+      })
+      const backend = startBackendFake({
+        [LIST_ROUTE]: (request) =>
+          buildJsonResponse(
+            200,
+            new URL(request.url).searchParams.get("cursor") === "page-2"
+              ? finalPage
+              : firstPage
+          )
+      })
+      const useAgentStore = await loadFreshAgentStore()
+
+      await useAgentStore.getState().loadAgents()
+
+      expect(useAgentStore.getState().list).toEqual({
+        status: "loaded",
+        builtInAgents: BUILT_IN_AGENT_SUMMARIES,
+        agents: [buildAgentSummary(RESEARCHER), buildAgentSummary(WRITER)],
+        isRefreshing: false
+      })
+      expect(
+        backend.requests.map((request) => new URL(request.url).search)
+      ).toEqual(["?limit=50", "?cursor=page-2&limit=50"])
+      expect(new URL(backend.requests[0]?.url ?? "").origin).toBe(
+        FIXTURE_BACKEND_URL
+      )
+    })
+
+    it("shows loading on the first read and keeps a displayed list while reading it again", async () => {
+      const page = buildAgentListPage([RESEARCHER], {
+        builtInAgents: BUILT_IN_AGENTS
+      })
+      const reread = createControlledPromise<Response>()
+      let reads = 0
+      startBackendFake({
+        [LIST_ROUTE]: () => {
+          reads += 1
+          return reads === 1 ? buildJsonResponse(200, page) : reread.promise
+        }
+      })
+      const useAgentStore = await loadFreshAgentStore()
+      const firstRead = useAgentStore.getState().loadAgents()
+      const whileFirstRead = useAgentStore.getState().list
+      await firstRead
+
+      const secondRead = useAgentStore.getState().loadAgents()
+      const whileSecondRead = useAgentStore.getState().list
+      reread.resolve(buildJsonResponse(200, page))
+      await secondRead
+
+      expect(whileFirstRead).toEqual({ status: "loading" })
+      expect(whileSecondRead).toEqual({
+        status: "loaded",
+        builtInAgents: BUILT_IN_AGENT_SUMMARIES,
+        agents: [buildAgentSummary(RESEARCHER)],
+        isRefreshing: true
+      })
+    })
+
+    it("fails without a request while the backend is stopped", async () => {
+      const backend = startBackendFake({})
+      const useAgentStore = await loadFreshAgentStore(false)
+
+      await useAgentStore.getState().loadAgents()
+
+      expect(useAgentStore.getState().list).toEqual({
+        status: "failed",
+        error: "The backend is not running, so agents cannot be read."
+      })
+      expect(backend.requests).toEqual([])
+    })
+
+    it("shows why the list could not be read", async () => {
+      startBackendFake({ [LIST_ROUTE]: () => buildJsonResponse(500, {}) })
+      const useAgentStore = await loadFreshAgentStore()
+
+      await useAgentStore.getState().loadAgents()
+
+      expect(useAgentStore.getState().list).toMatchObject({
+        status: "failed",
+        error: expect.stringContaining("500")
+      })
+    })
+
+    it.each([
+      [
+        "an empty page that promises more",
+        [
+          buildAgentListPage([], { storedCount: 1, nextCursor: "page-2" }),
+          buildAgentListPage([RESEARCHER])
+        ]
+      ],
+      [
+        "an agent repeated on a later page",
+        [
+          buildAgentListPage([RESEARCHER], {
+            storedCount: 2,
+            nextCursor: "page-2"
+          }),
+          buildAgentListPage([RESEARCHER], { storedCount: 2 })
+        ]
+      ]
+    ])("fails on %s", async (_label, pages) => {
+      let pageIndex = 0
+      startBackendFake({
+        [LIST_ROUTE]: () => buildJsonResponse(200, pages[pageIndex++])
+      })
+      const useAgentStore = await loadFreshAgentStore()
+
+      await useAgentStore.getState().loadAgents()
+
+      expect(useAgentStore.getState().list.status).toBe("failed")
+    })
+
+    it("fails instead of holding more than 1,000 agents", async () => {
+      const agents = Array.from({ length: 1001 }, (_, index) =>
+        buildAgent(`agent-${index}`)
+      )
+      startBackendFake({ [LIST_ROUTE]: buildPagedAgentListRoute(agents) })
+      const useAgentStore = await loadFreshAgentStore()
+
+      await useAgentStore.getState().loadAgents()
+
+      expect(useAgentStore.getState().list).toMatchObject({
+        status: "failed",
+        error: expect.stringContaining("1000")
+      })
+    })
+
+    it("commits only the newest of overlapping reads and aborts the older one", async () => {
+      const olderRead = createControlledPromise<Response>()
+      let reads = 0
+      const backend = startBackendFake({
+        [LIST_ROUTE]: () => {
+          reads += 1
+          return reads === 1
+            ? olderRead.promise
+            : buildJsonResponse(200, buildAgentListPage([WRITER]))
+        }
+      })
+      const useAgentStore = await loadFreshAgentStore()
+      const older = useAgentStore.getState().loadAgents()
+
+      await useAgentStore.getState().loadAgents()
+      olderRead.resolve(
+        buildJsonResponse(200, buildAgentListPage([RESEARCHER]))
+      )
+      await older
+
+      expect(useAgentStore.getState().list).toMatchObject({
+        agents: [buildAgentSummary(WRITER)]
+      })
+      expect(backend.requests[0]?.signal?.aborted).toBe(true)
+    })
+  })
+
+  describe("openAgent", () => {
+    it("shows the agent being read, then its editor holding the stored text", async () => {
+      const { useAgentStore } = await loadAgentStoreWithList([RESEARCHER], {
+        "GET /api/v1/agents/researcher": () =>
+          buildJsonResponse(200, buildCustomAgentResponse(RESEARCHER))
+      })
+
+      const open = useAgentStore.getState().openAgent("researcher")
+      const whileOpening = useAgentStore.getState().editor
+      await open
+
+      expect(whileOpening).toEqual({
+        status: "opening",
+        agentCode: "researcher"
+      })
+      expect(useAgentStore.getState().editor).toEqual({
+        status: "editing",
+        agent: expect.objectContaining(RESEARCHER),
+        draft: {
+          name: RESEARCHER.name,
+          bio: RESEARCHER.bio,
+          systemPrompt: RESEARCHER.systemPrompt
+        },
+        saveAttemptCount: 0,
+        activity: { status: "idle", failure: null }
+      })
+    })
+
+    it("shows a built-in agent being read, then its read-only view", async () => {
+      const { useAgentStore } = await loadAgentStoreWithList([], {
+        "GET /api/v1/agents/caliginia": () =>
+          buildJsonResponse(200, buildBuiltInAgentResponse(CALIGINIA))
+      })
+
+      const open = useAgentStore.getState().openAgent(CALIGINIA_AGENT_CODE)
+      const whileOpening = useAgentStore.getState().editor
+      await open
+
+      expect(whileOpening).toEqual({
+        status: "opening",
+        agentCode: CALIGINIA_AGENT_CODE
+      })
+      expect(useAgentStore.getState().editor).toEqual({
+        status: "viewing",
+        agent: expect.objectContaining(CALIGINIA)
+      })
+    })
+
+    it("reports an agent that no longer exists and removes its row", async () => {
+      const { useAgentStore } = await loadAgentStoreWithList(
+        [RESEARCHER, WRITER],
+        {
+          "GET /api/v1/agents/researcher": () =>
+            buildJsonResponse(404, buildAgentNotFoundProblem())
+        }
+      )
+
+      await useAgentStore.getState().openAgent("researcher")
+
+      expect(useAgentStore.getState()).toMatchObject({
+        editor: {
+          status: "unavailable",
+          agentCode: "researcher",
+          error: "That agent no longer exists."
+        },
+        list: { agents: [buildAgentSummary(WRITER)] }
+      })
+    })
+
+    it("replaces a list read pending when the agent is found missing, so the old answer cannot restore its row", async () => {
+      const list = buildListRouteWithPendingSecondRead(
+        [RESEARCHER, WRITER],
+        [WRITER]
+      )
+      const { useAgentStore, backend } = await loadAgentStoreWithList([], {
+        [LIST_ROUTE]: list.route,
+        "GET /api/v1/agents/researcher": () =>
+          buildJsonResponse(404, buildAgentNotFoundProblem())
+      })
+      const pendingRead = useAgentStore.getState().loadAgents()
+
+      await useAgentStore.getState().openAgent("researcher")
+      list.secondRead.resolve(
+        buildJsonResponse(200, buildAgentListPage([RESEARCHER, WRITER]))
+      )
+      await pendingRead
+      await waitForMicrotasks()
+
+      expect(listListReads(backend)[1]?.signal?.aborted).toBe(true)
+      expect(useAgentStore.getState().list).toMatchObject({
+        agents: [buildAgentSummary(WRITER)],
+        isRefreshing: false
+      })
+    })
+
+    it("reports why the agent could not be read", async () => {
+      const { useAgentStore } = await loadAgentStoreWithList([RESEARCHER], {
+        "GET /api/v1/agents/researcher": () => buildJsonResponse(500, {})
+      })
+
+      await useAgentStore.getState().openAgent("researcher")
+
+      expect(useAgentStore.getState().editor).toMatchObject({
+        status: "unavailable",
+        error: expect.stringContaining("500")
+      })
+    })
+
+    it("reports a stopped backend without a request", async () => {
+      const backend = startBackendFake({})
+      const useAgentStore = await loadFreshAgentStore(false)
+
+      await useAgentStore.getState().openAgent("researcher")
+
+      expect(useAgentStore.getState().editor).toEqual({
+        status: "unavailable",
+        agentCode: "researcher",
+        error: "The backend is not running, so agents cannot be read."
+      })
+      expect(backend.requests).toEqual([])
+    })
+
+    it("abandons a read when the editor is closed before it answers", async () => {
+      const read = createControlledPromise<Response>()
+      const { useAgentStore, backend } = await loadAgentStoreWithList(
+        [RESEARCHER],
+        { "GET /api/v1/agents/researcher": () => read.promise }
+      )
+      const open = useAgentStore.getState().openAgent("researcher")
+      await waitForMicrotasks()
+
+      useAgentStore.getState().closeAgentEditor()
+      read.resolve(buildJsonResponse(200, buildCustomAgentResponse(RESEARCHER)))
+      await open
+
+      expect(useAgentStore.getState().editor).toEqual({ status: "closed" })
+      expect(backend.requests.at(-1)?.signal?.aborted).toBe(true)
+    })
+
+    it("lets a newer open replace a pending one", async () => {
+      const olderRead = createControlledPromise<Response>()
+      const { useAgentStore } = await loadAgentStoreWithList(
+        [RESEARCHER, WRITER],
+        {
+          "GET /api/v1/agents/researcher": () => olderRead.promise,
+          "GET /api/v1/agents/writer": () =>
+            buildJsonResponse(200, buildCustomAgentResponse(WRITER))
+        }
+      )
+      const older = useAgentStore.getState().openAgent("researcher")
+
+      await useAgentStore.getState().openAgent("writer")
+      olderRead.resolve(
+        buildJsonResponse(200, buildCustomAgentResponse(RESEARCHER))
+      )
+      await older
+
+      expect(useAgentStore.getState().editor).toMatchObject({
+        status: "editing",
+        agent: WRITER
+      })
+    })
+  })
+
+  describe("openNewAgent and openAgentCopy", () => {
+    it("opens an empty editor for a new agent", async () => {
+      const useAgentStore = await loadFreshAgentStore()
+
+      useAgentStore.getState().openNewAgent()
+
+      expect(useAgentStore.getState().editor).toEqual({
+        status: "creating",
+        draft: { name: "", bio: "", systemPrompt: "" },
+        code: "",
+        saveAttemptCount: 0,
+        activity: { status: "idle", failure: null }
+      })
+    })
+
+    it("cancels a pending read, so its answer cannot replace the new agent's editor", async () => {
+      const read = createControlledPromise<Response>()
+      const { useAgentStore, backend } = await loadAgentStoreWithList(
+        [RESEARCHER],
+        { "GET /api/v1/agents/researcher": () => read.promise }
+      )
+      const open = useAgentStore.getState().openAgent("researcher")
+      await waitForMicrotasks()
+
+      useAgentStore.getState().openNewAgent()
+      read.resolve(buildJsonResponse(200, buildCustomAgentResponse(RESEARCHER)))
+      await open
+
+      expect(useAgentStore.getState().editor).toMatchObject({
+        status: "creating",
+        draft: { name: "", bio: "", systemPrompt: "" }
+      })
+      expect(backend.requests.at(-1)?.signal?.aborted).toBe(true)
+    })
+
+    it("copies the edited agent into a new agent under a free name and an empty code", async () => {
+      const { useAgentStore } = await loadAgentStoreWithList(
+        [RESEARCHER, buildAgent("copy", { name: "Researcher copy" })],
+        {
+          "GET /api/v1/agents/researcher": () =>
+            buildJsonResponse(200, buildCustomAgentResponse(RESEARCHER))
+        }
+      )
+      await useAgentStore.getState().openAgent("researcher")
+
+      useAgentStore.getState().openAgentCopy()
+
+      expect(useAgentStore.getState().editor).toEqual({
+        status: "creating",
+        draft: {
+          name: "Researcher copy 2",
+          bio: RESEARCHER.bio,
+          systemPrompt: RESEARCHER.systemPrompt
+        },
+        code: "",
+        saveAttemptCount: 0,
+        activity: { status: "idle", failure: null }
+      })
+    })
+
+    it("copies a viewed built-in agent into a new agent under a free name and an empty code", async () => {
+      const { useAgentStore } = await openCaliginiaView([
+        buildAgent("caliginia-copy", { name: "Caliginia copy" })
+      ])
+
+      useAgentStore.getState().openAgentCopy()
+
+      expect(useAgentStore.getState().editor).toEqual({
+        status: "creating",
+        draft: {
+          name: "Caliginia copy 2",
+          bio: CALIGINIA.bio,
+          systemPrompt: CALIGINIA.systemPrompt
+        },
+        code: "",
+        saveAttemptCount: 0,
+        activity: { status: "idle", failure: null }
+      })
+    })
+
+    it("ignores a copy request while a change to the edited agent is pending", async () => {
+      const change = createControlledPromise<Response>()
+      const { useAgentStore } = await openResearcherEditor({
+        "PATCH /api/v1/agents/researcher": () => change.promise
+      })
+      const save = useAgentStore.getState().saveAgentDraft()
+      const whileSaving = useAgentStore.getState().editor
+
+      useAgentStore.getState().openAgentCopy()
+      const afterCopyRequest = useAgentStore.getState().editor
+      change.resolve(buildJsonResponse(200, RESEARCHER))
+      await save
+
+      expect(whileSaving).toMatchObject({ activity: { status: "saving" } })
+      expect(afterCopyRequest).toBe(whileSaving)
+    })
+
+    it("ignores a copy request without a stored agent edited or a built-in agent viewed", async () => {
+      const useAgentStore = await loadFreshAgentStore()
+      useAgentStore.getState().openNewAgent()
+      const before = useAgentStore.getState().editor
+
+      useAgentStore.getState().openAgentCopy()
+
+      expect(useAgentStore.getState().editor).toBe(before)
+    })
+  })
+
+  describe("draft edits", () => {
+    it("replaces the draft being written", async () => {
+      const useAgentStore = await loadFreshAgentStore()
+      useAgentStore.getState().openNewAgent()
+      const draft = { name: "Scout", bio: "", systemPrompt: "" }
+
+      useAgentStore.getState().updateAgentDraft(draft)
+
+      expect(useAgentStore.getState().editor).toMatchObject({ draft })
+    })
+
+    it("ignores a draft while no editor is open", async () => {
+      const useAgentStore = await loadFreshAgentStore()
+
+      useAgentStore
+        .getState()
+        .updateAgentDraft({ name: "Scout", bio: "", systemPrompt: "" })
+
+      expect(useAgentStore.getState().editor).toEqual({ status: "closed" })
+    })
+
+    it("keeps the code form of what is typed for a new agent", async () => {
+      const useAgentStore = await loadFreshAgentStore()
+      useAgentStore.getState().openNewAgent()
+
+      useAgentStore.getState().updateNewAgentCode("Web Scout!")
+
+      expect(useAgentStore.getState().editor).toMatchObject({
+        code: "web-scout-"
+      })
+    })
+
+    it("ignores a code for a stored agent, whose code never changes", async () => {
+      const { useAgentStore } = await loadAgentStoreWithList([RESEARCHER], {
+        "GET /api/v1/agents/researcher": () =>
+          buildJsonResponse(200, buildCustomAgentResponse(RESEARCHER))
+      })
+      await useAgentStore.getState().openAgent("researcher")
+      const before = useAgentStore.getState().editor
+
+      useAgentStore.getState().updateNewAgentCode("other")
+
+      expect(useAgentStore.getState().editor).toBe(before)
+    })
+
+    it("ignores every change to a viewed built-in agent without a request", async () => {
+      const { useAgentStore, backend } = await openCaliginiaView([])
+      const before = useAgentStore.getState().editor
+
+      useAgentStore.getState().updateAgentDraft(SCOUT_DRAFT)
+      useAgentStore.getState().updateNewAgentCode("scout")
+      useAgentStore.getState().openAgentDeleteConfirmation()
+      await useAgentStore.getState().saveAgentDraft()
+      await useAgentStore.getState().deleteAgent()
+
+      expect(useAgentStore.getState().editor).toBe(before)
+      expect(listRouteKeys(backend)).toEqual([
+        LIST_ROUTE,
+        "GET /api/v1/agents/caliginia"
+      ])
+    })
+  })
+})
+
+/** Draft every check accepts for a new agent. */
+const SCOUT_DRAFT = Object.freeze({
+  name: "Scout",
+  bio: "Finds things.",
+  systemPrompt: "You find things."
+})
+
+/** Agent the backend stores for {@link SCOUT_DRAFT}. */
+const SCOUT = buildAgent("scout", SCOUT_DRAFT)
+
+/**
+ * Opens a new-agent editor holding {@link SCOUT_DRAFT} on a fresh store whose
+ * list shows the given agents.
+ *
+ * @param agents - Listed agents.
+ * @param routes - Routes the save needs.
+ * @returns The store hook and the backend observation handle.
+ */
+async function openNewAgentEditor(
+  agents: readonly Agent[],
+  routes: BackendRoutes
+) {
+  const loaded = await loadAgentStoreWithList(agents, routes)
+  loaded.useAgentStore.getState().openNewAgent()
+  loaded.useAgentStore.getState().updateAgentDraft(SCOUT_DRAFT)
+  return loaded
+}
+
+/**
+ * Opens the editor of {@link RESEARCHER}, holding it as stored, on a fresh
+ * store whose list shows {@link RESEARCHER} and {@link WRITER}.
+ *
+ * @param routes - Routes the change needs.
+ * @returns The store hook and the backend observation handle.
+ */
+async function openResearcherEditor(routes: BackendRoutes) {
+  const loaded = await loadAgentStoreWithList([RESEARCHER, WRITER], {
+    "GET /api/v1/agents/researcher": () =>
+      buildJsonResponse(200, buildCustomAgentResponse(RESEARCHER)),
+    ...routes
+  })
+  await loaded.useAgentStore.getState().openAgent("researcher")
+  return loaded
+}
+
+describe("useAgentStore saves", () => {
+  it("stores a new agent, closes the editor, lists it last, and marks it saved", async () => {
+    const { useAgentStore, backend } = await openNewAgentEditor([RESEARCHER], {
+      "POST /api/v1/agents": () => buildJsonResponse(201, SCOUT)
+    })
+
+    await useAgentStore.getState().saveAgentDraft()
+
+    expect(backend.requests.at(-1)?.body).toEqual(SCOUT_DRAFT)
+    expect(useAgentStore.getState()).toMatchObject({
+      editor: { status: "closed" },
+      list: {
+        builtInAgents: BUILT_IN_AGENT_SUMMARIES,
+        agents: [buildAgentSummary(RESEARCHER), buildAgentSummary(SCOUT)]
+      },
+      savedAgentCode: "scout"
+    })
+  })
+
+  it("sends the typed code with a new agent", async () => {
+    const { useAgentStore, backend } = await openNewAgentEditor([], {
+      "POST /api/v1/agents": () => buildJsonResponse(201, SCOUT)
+    })
+    useAgentStore.getState().updateNewAgentCode("scout")
+
+    await useAgentStore.getState().saveAgentDraft()
+
+    expect(backend.requests.at(-1)?.body).toEqual({
+      code: "scout",
+      ...SCOUT_DRAFT
+    })
+  })
+
+  it("does not send a draft with a problem and counts the attempt so the problem shows", async () => {
+    const { useAgentStore, backend } = await openNewAgentEditor(
+      [RESEARCHER],
+      {}
+    )
+    useAgentStore
+      .getState()
+      .updateAgentDraft({ ...SCOUT_DRAFT, name: "Researcher" })
+
+    await useAgentStore.getState().saveAgentDraft()
+
+    expect(useAgentStore.getState().editor).toMatchObject({
+      status: "creating",
+      saveAttemptCount: 1,
+      activity: { status: "idle", failure: null }
+    })
+    expect(listRouteKeys(backend)).toEqual([LIST_ROUTE])
+  })
+
+  it.each([
+    ["name", { ...SCOUT_DRAFT, name: "Caliginia" }, ""],
+    ["code", SCOUT_DRAFT, CALIGINIA_AGENT_CODE]
+  ])(
+    "does not send a new agent under a built-in agent's %s and counts the attempt",
+    async (_field, draft, typedCode) => {
+      const { useAgentStore, backend } = await openNewAgentEditor([], {})
+      useAgentStore.getState().updateAgentDraft(draft)
+      useAgentStore.getState().updateNewAgentCode(typedCode)
+
+      await useAgentStore.getState().saveAgentDraft()
+
+      expect(useAgentStore.getState().editor).toMatchObject({
+        status: "creating",
+        saveAttemptCount: 1,
+        activity: { status: "idle", failure: null }
+      })
+      expect(listRouteKeys(backend)).toEqual([LIST_ROUTE])
+    }
+  )
+
+  it("reports a taken code and keeps the draft", async () => {
+    const { useAgentStore } = await openNewAgentEditor([], {
+      "POST /api/v1/agents": () =>
+        buildJsonResponse(409, buildAgentCodeTakenProblem())
+    })
+    useAgentStore.getState().updateNewAgentCode("scout")
+
+    await useAgentStore.getState().saveAgentDraft()
+
+    expect(useAgentStore.getState().editor).toMatchObject({
+      status: "creating",
+      draft: SCOUT_DRAFT,
+      activity: {
+        status: "idle",
+        failure: "Another agent already uses the code scout."
+      }
+    })
+  })
+
+  it("reports an unconfirmed creation and reads the list again in case it was stored", async () => {
+    let reads = 0
+    const { useAgentStore } = await openNewAgentEditor([], {
+      [LIST_ROUTE]: () => {
+        reads += 1
+        return buildJsonResponse(
+          200,
+          buildAgentListPage(reads === 1 ? [] : [SCOUT])
+        )
+      },
+      "POST /api/v1/agents": () => Promise.reject(createTransportFailure())
+    })
+
+    await useAgentStore.getState().saveAgentDraft()
+    await waitForMicrotasks()
+
+    expect(useAgentStore.getState()).toMatchObject({
+      editor: {
+        status: "creating",
+        activity: {
+          failure: expect.stringMatching(/^Saving could not be confirmed: /)
+        }
+      },
+      list: { agents: [buildAgentSummary(SCOUT)] }
+    })
+  })
+
+  it("changes a stored agent with the draft and replaces its row", async () => {
+    const renamed = buildAgent("researcher", { name: "Scout" })
+    const { useAgentStore, backend } = await openResearcherEditor({
+      "PATCH /api/v1/agents/researcher": () => buildJsonResponse(200, renamed)
+    })
+    const draft = {
+      name: "Scout",
+      bio: RESEARCHER.bio,
+      systemPrompt: RESEARCHER.systemPrompt
+    }
+    useAgentStore.getState().updateAgentDraft(draft)
+
+    await useAgentStore.getState().saveAgentDraft()
+
+    expect(backend.requests.at(-1)?.body).toEqual(draft)
+    expect(useAgentStore.getState()).toMatchObject({
+      editor: { status: "closed" },
+      list: { agents: [buildAgentSummary(renamed), buildAgentSummary(WRITER)] },
+      savedAgentCode: "researcher"
+    })
+  })
+
+  it("keeps the draft of an agent that no longer exists and removes its row", async () => {
+    const { useAgentStore } = await openResearcherEditor({
+      "PATCH /api/v1/agents/researcher": () =>
+        buildJsonResponse(404, buildAgentNotFoundProblem())
+    })
+
+    await useAgentStore.getState().saveAgentDraft()
+
+    expect(useAgentStore.getState()).toMatchObject({
+      editor: {
+        status: "editing",
+        activity: {
+          failure:
+            "That agent no longer exists. Duplicate it to keep your changes."
+        }
+      },
+      list: { agents: [buildAgentSummary(WRITER)] }
+    })
+  })
+
+  it("reports a change the backend refuses because the agent is built in and keeps the draft", async () => {
+    const { useAgentStore } = await openResearcherEditor({
+      "PATCH /api/v1/agents/researcher": () =>
+        buildJsonResponse(409, buildAgentBuiltInProblem())
+    })
+    const draft = { ...SCOUT_DRAFT, name: "Researcher" }
+    useAgentStore.getState().updateAgentDraft(draft)
+
+    await useAgentStore.getState().saveAgentDraft()
+
+    expect(useAgentStore.getState()).toMatchObject({
+      editor: {
+        status: "editing",
+        draft,
+        activity: { status: "idle", failure: BUILT_IN_AGENT_CHANGE_MESSAGE }
+      },
+      list: {
+        agents: [buildAgentSummary(RESEARCHER), buildAgentSummary(WRITER)]
+      },
+      savedAgentCode: null
+    })
+  })
+
+  it("reports a failed change and keeps the draft", async () => {
+    const { useAgentStore } = await openResearcherEditor({
+      "PATCH /api/v1/agents/researcher": () => buildJsonResponse(500, {})
+    })
+
+    await useAgentStore.getState().saveAgentDraft()
+
+    expect(useAgentStore.getState().editor).toMatchObject({
+      status: "editing",
+      activity: {
+        status: "idle",
+        failure: expect.stringMatching(/^Saving failed: .*500/)
+      }
+    })
+  })
+
+  it("reports a stopped backend without a request and counts the attempt", async () => {
+    const { useAgentStore, backend } = await openNewAgentEditor([], {})
+    const { useLysStore } = await import("@/lib/store")
+    useLysStore.setState({ backendServerInfo: { status: "stopped" } })
+
+    await useAgentStore.getState().saveAgentDraft()
+
+    expect(useAgentStore.getState().editor).toMatchObject({
+      saveAttemptCount: 1,
+      activity: {
+        status: "idle",
+        failure: "The backend is not running, so the change was not made."
+      }
+    })
+    expect(listRouteKeys(backend)).toEqual([LIST_ROUTE])
+  })
+
+  it("does not save while the list is being read again", async () => {
+    const reread = createControlledPromise<Response>()
+    let reads = 0
+    const { useAgentStore, backend } = await openNewAgentEditor([], {
+      [LIST_ROUTE]: () => {
+        reads += 1
+        return reads === 1
+          ? buildJsonResponse(200, buildAgentListPage([]))
+          : reread.promise
+      }
+    })
+    const listRead = useAgentStore.getState().loadAgents()
+
+    await useAgentStore.getState().saveAgentDraft()
+    reread.resolve(buildJsonResponse(200, buildAgentListPage([])))
+    await listRead
+
+    expect(listRouteKeys(backend)).toEqual([LIST_ROUTE, LIST_ROUTE])
+    expect(useAgentStore.getState().editor).toMatchObject({
+      saveAttemptCount: 0
+    })
+  })
+
+  it("does not save while no list is displayed, since names and codes are checked against it", async () => {
+    const backend = startBackendFake({
+      [LIST_ROUTE]: () => buildJsonResponse(500, {})
+    })
+    const useAgentStore = await loadFreshAgentStore()
+    await useAgentStore.getState().loadAgents()
+    useAgentStore.getState().openNewAgent()
+    useAgentStore.getState().updateAgentDraft(SCOUT_DRAFT)
+    const before = useAgentStore.getState().editor
+
+    await useAgentStore.getState().saveAgentDraft()
+
+    expect(useAgentStore.getState().list).toMatchObject({ status: "failed" })
+    expect(useAgentStore.getState().editor).toBe(before)
+    expect(listRouteKeys(backend)).toEqual([LIST_ROUTE])
+  })
+
+  it("keeps the editor open and unchanged while a save is pending", async () => {
+    const creation = createControlledPromise<Response>()
+    const { useAgentStore } = await openNewAgentEditor([], {
+      "POST /api/v1/agents": () => creation.promise
+    })
+    const save = useAgentStore.getState().saveAgentDraft()
+    const whileSaving = useAgentStore.getState().editor
+
+    useAgentStore.getState().closeAgentEditor()
+    useAgentStore.getState().openNewAgent()
+    await useAgentStore.getState().openAgent("researcher")
+    useAgentStore.getState().updateAgentDraft({ ...SCOUT_DRAFT, name: "Other" })
+    const afterIgnoredActions = useAgentStore.getState().editor
+    creation.resolve(buildJsonResponse(201, SCOUT))
+    await save
+
+    expect(whileSaving).toMatchObject({ activity: { status: "saving" } })
+    expect(afterIgnoredActions).toBe(whileSaving)
+  })
+
+  it("replaces a list read pending when a save settles, so the old answer cannot undo the save", async () => {
+    const list = buildListRouteWithPendingSecondRead([], [SCOUT])
+    const { useAgentStore, backend } = await openNewAgentEditor([], {
+      [LIST_ROUTE]: list.route,
+      "POST /api/v1/agents": () => buildJsonResponse(201, SCOUT)
+    })
+    const save = useAgentStore.getState().saveAgentDraft()
+    const pendingRead = useAgentStore.getState().loadAgents()
+
+    await save
+    list.secondRead.resolve(buildJsonResponse(200, buildAgentListPage([])))
+    await pendingRead
+    await waitForMicrotasks()
+
+    expect(listListReads(backend)[1]?.signal?.aborted).toBe(true)
+    expect(useAgentStore.getState().list).toMatchObject({
+      agents: [buildAgentSummary(SCOUT)],
+      isRefreshing: false
+    })
+  })
+
+  it("replaces a list read pending when a change finds the agent missing, so the old answer cannot restore its row", async () => {
+    const list = buildListRouteWithPendingSecondRead(
+      [RESEARCHER, WRITER],
+      [WRITER]
+    )
+    const { useAgentStore, backend } = await openResearcherEditor({
+      [LIST_ROUTE]: list.route,
+      "PATCH /api/v1/agents/researcher": () =>
+        buildJsonResponse(404, buildAgentNotFoundProblem())
+    })
+    const save = useAgentStore.getState().saveAgentDraft()
+    const pendingRead = useAgentStore.getState().loadAgents()
+
+    await save
+    list.secondRead.resolve(
+      buildJsonResponse(200, buildAgentListPage([RESEARCHER, WRITER]))
+    )
+    await pendingRead
+    await waitForMicrotasks()
+
+    expect(listListReads(backend)[1]?.signal?.aborted).toBe(true)
+    expect(useAgentStore.getState().list).toMatchObject({
+      agents: [buildAgentSummary(WRITER)],
+      isRefreshing: false
+    })
+  })
+})
+
+describe("useAgentStore deletions", () => {
+  it("asks for confirmation before deleting", async () => {
+    const { useAgentStore, backend } = await openResearcherEditor({})
+
+    await useAgentStore.getState().deleteAgent()
+    useAgentStore.getState().openAgentDeleteConfirmation()
+
+    expect(listRouteKeys(backend)).not.toContain(
+      "DELETE /api/v1/agents/researcher"
+    )
+    expect(useAgentStore.getState().editor).toMatchObject({
+      activity: { status: "confirming-delete" }
+    })
+  })
+
+  it("keeps the agent when the confirmation is closed", async () => {
+    const { useAgentStore } = await openResearcherEditor({})
+    useAgentStore.getState().openAgentDeleteConfirmation()
+
+    useAgentStore.getState().closeAgentDeleteConfirmation()
+
+    expect(useAgentStore.getState().editor).toMatchObject({
+      status: "editing",
+      activity: { status: "idle", failure: null }
+    })
+  })
+
+  it.each([
+    ["the backend deletes it", () => new Response(null, { status: 204 })],
+    [
+      "it was already gone",
+      () => buildJsonResponse(404, buildAgentNotFoundProblem())
+    ]
+  ])("closes the editor and removes the row when %s", async (_label, route) => {
+    const { useAgentStore } = await openResearcherEditor({
+      "DELETE /api/v1/agents/researcher": route
+    })
+    useAgentStore.getState().openAgentDeleteConfirmation()
+
+    const deletion = useAgentStore.getState().deleteAgent()
+    const whileDeleting = useAgentStore.getState().editor
+    await deletion
+
+    expect(whileDeleting).toMatchObject({ activity: { status: "deleting" } })
+    expect(useAgentStore.getState()).toMatchObject({
+      editor: { status: "closed" },
+      list: {
+        builtInAgents: BUILT_IN_AGENT_SUMMARIES,
+        agents: [buildAgentSummary(WRITER)]
+      }
+    })
+  })
+
+  it("replaces a list read pending when a deletion settles, so the old answer cannot restore the row", async () => {
+    const list = buildListRouteWithPendingSecondRead(
+      [RESEARCHER, WRITER],
+      [WRITER]
+    )
+    const { useAgentStore, backend } = await openResearcherEditor({
+      [LIST_ROUTE]: list.route,
+      "DELETE /api/v1/agents/researcher": () =>
+        new Response(null, { status: 204 })
+    })
+    useAgentStore.getState().openAgentDeleteConfirmation()
+    const deletion = useAgentStore.getState().deleteAgent()
+    const pendingRead = useAgentStore.getState().loadAgents()
+
+    await deletion
+    list.secondRead.resolve(
+      buildJsonResponse(200, buildAgentListPage([RESEARCHER, WRITER]))
+    )
+    await pendingRead
+    await waitForMicrotasks()
+
+    expect(listListReads(backend)[1]?.signal?.aborted).toBe(true)
+    expect(useAgentStore.getState().list).toMatchObject({
+      agents: [buildAgentSummary(WRITER)],
+      isRefreshing: false
+    })
+  })
+
+  it("reports a deletion the backend refuses because the agent is built in and keeps the agent", async () => {
+    const { useAgentStore } = await openResearcherEditor({
+      "DELETE /api/v1/agents/researcher": () =>
+        buildJsonResponse(409, buildAgentBuiltInProblem())
+    })
+    useAgentStore.getState().openAgentDeleteConfirmation()
+
+    await useAgentStore.getState().deleteAgent()
+
+    expect(useAgentStore.getState()).toMatchObject({
+      editor: {
+        status: "editing",
+        activity: { status: "idle", failure: BUILT_IN_AGENT_CHANGE_MESSAGE }
+      },
+      list: {
+        agents: [buildAgentSummary(RESEARCHER), buildAgentSummary(WRITER)]
+      }
+    })
+  })
+
+  it("reports a failed deletion and keeps the editor", async () => {
+    const { useAgentStore } = await openResearcherEditor({
+      "DELETE /api/v1/agents/researcher": () => buildJsonResponse(500, {})
+    })
+    useAgentStore.getState().openAgentDeleteConfirmation()
+
+    await useAgentStore.getState().deleteAgent()
+
+    expect(useAgentStore.getState()).toMatchObject({
+      editor: {
+        status: "editing",
+        activity: {
+          status: "idle",
+          failure: expect.stringMatching(/^Deleting failed: .*500/)
+        }
+      },
+      list: {
+        agents: [buildAgentSummary(RESEARCHER), buildAgentSummary(WRITER)]
+      }
+    })
+  })
+
+  it("reports a stopped backend without a request", async () => {
+    const { useAgentStore, backend } = await openResearcherEditor({})
+    useAgentStore.getState().openAgentDeleteConfirmation()
+    const { useLysStore } = await import("@/lib/store")
+    useLysStore.setState({ backendServerInfo: { status: "stopped" } })
+
+    await useAgentStore.getState().deleteAgent()
+
+    expect(useAgentStore.getState().editor).toMatchObject({
+      activity: {
+        failure: "The backend is not running, so the change was not made."
+      }
+    })
+    expect(listRouteKeys(backend)).not.toContain(
+      "DELETE /api/v1/agents/researcher"
+    )
+  })
+})

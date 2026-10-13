@@ -235,6 +235,7 @@ function formatRailStatus(
     case "none":
       return "backend up · no model"
     case "unknown":
+    case "unavailable":
       return "backend up · model state unavailable"
   }
 }

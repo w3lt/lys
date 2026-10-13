@@ -126,7 +126,10 @@ function formatRunningRuntimeMessage(
   if (lmStudioStatus !== "connected") {
     return `Connecting to LM Studio on ${LM_STUDIO_ADDRESS}…`
   }
-  if (modelRuntime.status === "unknown") {
+  if (
+    modelRuntime.status === "unknown" ||
+    modelRuntime.status === "unavailable"
+  ) {
     return "The backend is up, but model state is unavailable."
   }
   if (modelRuntime.status === "loading") return "Loading model weights…"
@@ -163,7 +166,10 @@ export function formatReconnectAction(
     return { label: "Check LM Studio", isEnabled: true }
   }
   if (lmStudioStatus !== "connected") return workingAction
-  if (modelRuntime.status === "unknown") {
+  if (
+    modelRuntime.status === "unknown" ||
+    modelRuntime.status === "unavailable"
+  ) {
     return { label: "Check models", isEnabled: true }
   }
   if (modelRuntime.status === "none") {
@@ -277,7 +283,9 @@ export function formatComposerModelLabel(
  *
  * @param modelRuntime - Current weight residency state.
  * @param modelName - Persisted default model identifier, when one is chosen.
- * @returns The weights named, with any transition they are currently in.
+ * @returns The weights named, with any transition they are currently in. The
+ * chosen default is named while nothing is loaded and while the inventory
+ * cannot be read yet.
  */
 function formatRunningModelLabel(
   modelRuntime: ModelRuntimeState,
@@ -293,6 +301,7 @@ function formatRunningModelLabel(
     case "unknown":
       return "model state unavailable"
     case "none":
+    case "unavailable":
       return modelName ?? "no model selected"
   }
 }

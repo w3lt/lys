@@ -64,7 +64,9 @@ and arguments, plus the `group` and `access` that Settings shows and the
 `toolDefinitionSchema` in `@lys/share`, which the backend's `AgentTool` also
 uses, and the renderer's `listTools` validates the list with
 `listToolsResultSchema` from `@lys/protocol`, which also requires every
-`runner` to be `client`.
+`runner` to be `client`. A list that does not match is rejected with the
+caller-safe message "The app returned an invalid tool list.", and the
+decoding failure is kept as its cause.
 
 Each tool builds its own definition next to the limits it enforces, so a
 description states the current limits. The tools are named `read_text_file`

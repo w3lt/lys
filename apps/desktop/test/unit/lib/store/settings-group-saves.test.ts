@@ -45,16 +45,30 @@ function isSettingsWrite(args: unknown): args is { newSettings: unknown } {
 function startSettingsFileHost() {
   let storedDocument: unknown = STORED_SETTINGS_DOCUMENT
   const writes: ControlledPromise<null>[] = []
+
+  /**
+   * Handles one `save_settings` command as the settings file does.
+   *
+   * @param args - Arguments the renderer invoked the command with.
+   * @returns A promise that resolves with the command's `null` result once
+   * the case fulfills the write, after the document is replaced. It rejects
+   * with the case's reason when the case rejects the write, which leaves the
+   * document as it was.
+   * @throws A string, as a Rust `Err`, when the arguments carry no
+   * `newSettings`; no write is then added.
+   */
+  async function handleSaveSettingsCommand(args: unknown): Promise<null> {
+    if (!isSettingsWrite(args)) throw "save_settings needs newSettings"
+    const write = createControlledPromise<null>()
+    writes.push(write)
+    await write.promise
+    storedDocument = args.newSettings
+    return null
+  }
+
   const host = startNativeHostFake({
     load_settings: () => storedDocument,
-    save_settings: async (args) => {
-      if (!isSettingsWrite(args)) throw "save_settings needs newSettings"
-      const write = createControlledPromise<null>()
-      writes.push(write)
-      await write.promise
-      storedDocument = args.newSettings
-      return null
-    }
+    save_settings: handleSaveSettingsCommand
   })
   return { host, writes, readStoredDocument: () => storedDocument }
 }

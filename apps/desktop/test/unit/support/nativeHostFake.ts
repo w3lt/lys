@@ -43,7 +43,18 @@ export function startNativeHostFake(commands: NativeCommands): NativeHostFake {
   onTestFinished(() => {
     expect(unexpectedCommands, "commands the case did not expect").toEqual([])
   })
-  mockIPC((command, args) => {
+
+  /**
+   * Handles one command the renderer invoked, as the native host.
+   *
+   * @param command - Invoked command name.
+   * @param args - Arguments as invoked, or undefined when it took none.
+   * @returns The result the case declared for the command.
+   * @throws A string naming the command when the case declared none for it,
+   * which rejects the invoke call as a Rust `Err` does. A declared command
+   * that throws fails its invoke call the same way.
+   */
+  function handleInvokedCommand(command: string, args: unknown): unknown {
     observed.push(Object.freeze({ command, args }))
     const handle = commands[command]
     if (handle === undefined) {
@@ -51,6 +62,8 @@ export function startNativeHostFake(commands: NativeCommands): NativeHostFake {
       throw `Unexpected native command: ${command}`
     }
     return handle(args)
-  })
+  }
+
+  mockIPC(handleInvokedCommand)
   return Object.freeze({ commands: observed })
 }

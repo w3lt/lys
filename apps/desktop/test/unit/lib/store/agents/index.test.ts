@@ -11,7 +11,8 @@ import {
   listRouteKeys,
   startBackendFake,
   type BackendRoute,
-  type BackendRoutes
+  type BackendRoutes,
+  type ObservedBackendRequest
 } from "../../../support/backendFake"
 import {
   buildAgent,
@@ -83,6 +84,36 @@ async function loadFreshAgentStore(isBackendRunning = true) {
 function buildAgentListRoute(agents: readonly Agent[]): BackendRoute {
   const page = buildAgentListPage(agents, { builtInAgents: BUILT_IN_AGENTS })
   return () => buildJsonResponse(200, page)
+}
+
+/**
+ * Builds a route listing the given stored agents 50 to a page.
+ *
+ * @param agents - Stored agents, oldest first.
+ * @returns The route. A page's cursor is the index of the next page's first
+ * agent, and the last page has none.
+ */
+function buildPagedAgentListRoute(agents: readonly Agent[]): BackendRoute {
+  /**
+   * Handles one list request.
+   *
+   * @param request - Observed list request; its `cursor` is the index of the
+   * page's first agent, and a request without one reads the first page.
+   * @returns A 200 carrying that page.
+   */
+  function handlePageRequest(request: ObservedBackendRequest): Response {
+    const start = Number(new URL(request.url).searchParams.get("cursor") ?? 0)
+    const end = start + 50
+    return buildJsonResponse(
+      200,
+      buildAgentListPage(agents.slice(start, end), {
+        storedCount: agents.length,
+        nextCursor: end < agents.length ? String(end) : null
+      })
+    )
+  }
+
+  return handlePageRequest
 }
 
 /**
@@ -303,21 +334,7 @@ describe("useAgentStore", () => {
       const agents = Array.from({ length: 1001 }, (_, index) =>
         buildAgent(`agent-${index}`)
       )
-      startBackendFake({
-        [LIST_ROUTE]: (request) => {
-          const start = Number(
-            new URL(request.url).searchParams.get("cursor") ?? 0
-          )
-          const end = start + 50
-          return buildJsonResponse(
-            200,
-            buildAgentListPage(agents.slice(start, end), {
-              storedCount: agents.length,
-              nextCursor: end < agents.length ? String(end) : null
-            })
-          )
-        }
-      })
+      startBackendFake({ [LIST_ROUTE]: buildPagedAgentListRoute(agents) })
       const useAgentStore = await loadFreshAgentStore()
 
       await useAgentStore.getState().loadAgents()

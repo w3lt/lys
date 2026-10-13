@@ -168,9 +168,18 @@ describe("GenerationPaneContent", () => {
 
   it("announces a failed save, keeps the edit, and retries on request", async () => {
     let isSaveFailing = true
-    const saves = startSettingsHost(() => {
+
+    /**
+     * Rejects a save while the case keeps the settings file unwritable.
+     *
+     * @throws A string, as a Rust `Err`, until the case clears
+     * `isSaveFailing`.
+     */
+    function rejectSaveWhileFailing(): void {
       if (isSaveFailing) throw "Settings could not be written."
-    })
+    }
+
+    const saves = startSettingsHost(rejectSaveWhileFailing)
     const useLysStore = await startGenerationPane()
     const user = userEvent.setup()
 

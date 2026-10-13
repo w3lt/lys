@@ -8,7 +8,8 @@ import {
   buildJsonResponse,
   startBackendFake,
   type BackendRoute,
-  type BackendRoutes
+  type BackendRoutes,
+  type ObservedBackendRequest
 } from "../../support/backendFake"
 import {
   buildConversation,
@@ -49,7 +50,15 @@ const DELETE_TRIP_ROUTE = `DELETE /api/v1/conversations/${TRIP.id}`
 function buildSearchingListRoute(
   conversations: readonly ConversationSummary[]
 ): BackendRoute {
-  return (request) => {
+  /**
+   * Handles one list request.
+   *
+   * @param request - Observed list request; without a `query`, every
+   * conversation matches.
+   * @returns A 200 carrying the matches on one final page that counts every
+   * stored conversation.
+   */
+  function handleSearchRequest(request: ObservedBackendRequest): Response {
     const query = new URL(request.url).searchParams.get("query") ?? ""
     const matches = conversations.filter((conversation) =>
       (conversation.title ?? "").toLowerCase().includes(query.toLowerCase())
@@ -59,6 +68,8 @@ function buildSearchingListRoute(
       buildConversationListPage(matches, { storedCount: conversations.length })
     )
   }
+
+  return handleSearchRequest
 }
 
 /**

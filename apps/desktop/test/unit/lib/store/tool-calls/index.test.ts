@@ -155,14 +155,24 @@ function startReplyBackend(routes: BackendRoutes = {}) {
 function startInterruptedReplyBackend(routes: BackendRoutes = {}) {
   const replyStreams: BackendEventStream[] = []
   let eventRequestCount = 0
+
+  /**
+   * Handles one request for {@link REPLY}'s events.
+   *
+   * @returns A bodyless 500 for the second request, which opens no stream;
+   * for every other request, the response of a new event stream, which is
+   * added to the opened reply streams.
+   */
+  function handleReplyEventsRequest(): Response {
+    eventRequestCount += 1
+    if (eventRequestCount === 2) return new Response(null, { status: 500 })
+    const stream = startBackendEventStream()
+    replyStreams.push(stream)
+    return stream.response
+  }
+
   const backend = startBackendFake({
-    [EVENTS_ROUTE]: () => {
-      eventRequestCount += 1
-      if (eventRequestCount === 2) return new Response(null, { status: 500 })
-      const stream = startBackendEventStream()
-      replyStreams.push(stream)
-      return stream.response
-    },
+    [EVENTS_ROUTE]: handleReplyEventsRequest,
     ...routes
   })
   return { backend, replyStreams }

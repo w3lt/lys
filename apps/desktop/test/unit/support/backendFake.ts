@@ -391,17 +391,30 @@ export function startBackendEventStream(): BackendEventStream {
     }
   })
   let isStreamClosed = false
-  const sendText = (text: string) => {
+
+  /**
+   * Sends raw text on the stream.
+   *
+   * @param text - Text written unchanged. It is dropped once the stream is
+   * closed or the client cancelled it.
+   */
+  function sendStreamText(text: string): void {
     if (isStreamCancelled || isStreamClosed) return
     streamController.enqueue(encoder.encode(text))
   }
-  const close = () => {
+
+  /**
+   * Closes the stream, which ends the client's read. It does nothing once
+   * the stream is closed or the client cancelled it.
+   */
+  function closeStream(): void {
     if (isStreamCancelled || isStreamClosed) return
     isStreamClosed = true
     streamController.close()
   }
+
   onTestFinished(async () => {
-    close()
+    closeStream()
     await waitForMicrotasks()
   })
   return Object.freeze({
@@ -410,10 +423,10 @@ export function startBackendEventStream(): BackendEventStream {
       headers: { "Content-Type": "text/event-stream" }
     }),
     sendEvent: (data: unknown) => {
-      sendText(`data: ${JSON.stringify(data)}\n\n`)
+      sendStreamText(`data: ${JSON.stringify(data)}\n\n`)
     },
-    sendText,
-    close,
+    sendText: sendStreamText,
+    close: closeStream,
     isCancelled: () => isStreamCancelled
   })
 }

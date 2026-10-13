@@ -50,7 +50,17 @@ describe("formatLmStudioStatusMeta", () => {
       "127.0.0.1:1234 · status unavailable · refresh to check"
     ],
     ["unknown", "stopped", "127.0.0.1:1234 · start the backend first"],
-    ["unknown", "starting", "127.0.0.1:1234 · start the backend first"],
+    [
+      "unknown",
+      "starting",
+      "127.0.0.1:1234 · waiting for the backend to start"
+    ],
+    ["unknown", "stopping", "127.0.0.1:1234 · the backend is stopping"],
+    [
+      "unknown",
+      "unresponsive",
+      "127.0.0.1:1234 · the backend is not responding"
+    ],
     ["connecting", "running", "127.0.0.1:1234 · connecting"],
     ["connected", "running", "127.0.0.1:1234"],
     ["unreachable", "running", "127.0.0.1:1234 · start LM Studio, then refresh"]

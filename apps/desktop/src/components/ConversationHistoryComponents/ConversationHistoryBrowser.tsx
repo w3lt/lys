@@ -156,7 +156,8 @@ function formatOlderPageStatus(list: ConversationHistoryListState): string {
  * confirming deletion first moves focus to the next row, the previous row, or
  * the search. A title is requested only when it changed and is not blank.
  * Loading, empty, no-match, and failure messages replace the rows, and the
- * region is marked busy while its rows are being replaced.
+ * result region, named Conversations, is marked busy while its rows are
+ * being replaced.
  * @param props - List state, interaction state, focus target, and actions.
  * @returns The search field followed by the scrollable result region.
  */
@@ -542,8 +543,9 @@ export default function ConversationHistoryBrowser({
         resultCountLabel={formatConversationHistoryCount(list)}
         searchFieldRef={searchFieldRef}
       />
-      <div
+      <section
         aria-busy={isRefreshing}
+        aria-label="Conversations"
         className="conversation-history__results"
         onScroll={handleResultsScroll}
       >
@@ -556,7 +558,7 @@ export default function ConversationHistoryBrowser({
         >
           {formatOlderPageStatus(list)}
         </p>
-      </div>
+      </section>
     </>
   )
 }

@@ -1,0 +1,255 @@
+import { modelLoadConfigurationSchema } from "@lys/share"
+import { describe, expect, it } from "vitest"
+import {
+  loadSettings,
+  saveGenerationSettings,
+  saveLoadConfigurationSettings,
+  saveSettings
+} from "@/lib/apis/tauri/settings"
+import type {
+  LoadConfigurationSettings,
+  LysSettings
+} from "@/lib/store/settings"
+import { startNativeHostFake } from "../../../support/nativeHostFake"
+import {
+  createControlledPromise,
+  createSettlementReader,
+  waitForMicrotasks
+} from "../../../support/settlement"
+import {
+  STORED_SETTINGS,
+  STORED_SETTINGS_DOCUMENT,
+  type SettingsDocument
+} from "../../../support/settingsFixtures"
+
+/** Load settings of the model whose key names an object-prototype member. */
+const PROTOTYPE_KEY_LOAD_CONFIGURATION = modelLoadConfigurationSchema.parse({
+  contextLength: 4096
+})
+
+/**
+ * Settings document in which the one model with settings of its own has the
+ * key `__proto__`.
+ *
+ * @remarks The computed key makes `__proto__` a property of the object's own,
+ * as parsing the host's JSON answer does; a literal `__proto__` key would set
+ * the object's prototype instead.
+ */
+const PROTOTYPE_KEY_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
+  ...STORED_SETTINGS_DOCUMENT,
+  loadConfiguration: Object.freeze({
+    default: STORED_SETTINGS_DOCUMENT.loadConfiguration.default,
+    models: Object.freeze({
+      ["__proto__"]: PROTOTYPE_KEY_LOAD_CONFIGURATION
+    })
+  })
+})
+
+/** The renderer's settings for {@link PROTOTYPE_KEY_SETTINGS_DOCUMENT}. */
+const PROTOTYPE_KEY_SETTINGS: LysSettings = Object.freeze({
+  ...STORED_SETTINGS,
+  loadConfiguration: Object.freeze({
+    default: STORED_SETTINGS.loadConfiguration.default,
+    models: new Map([["__proto__", PROTOTYPE_KEY_LOAD_CONFIGURATION]])
+  })
+})
+
+/** Load settings a mixture-of-experts model has of its own after an edit. */
+const EDITED_MODEL_LOAD_CONFIGURATION = modelLoadConfigurationSchema.parse({
+  numExperts: 4
+})
+
+/**
+ * Load settings the store holds after the Model pane edited them: only
+ * `qwen3-30b-a3b` has settings of its own, and the store's copy of the stored
+ * default, read at startup, predates a hand edit of the file.
+ */
+const EDITED_LOAD_CONFIGURATION: LoadConfigurationSettings = Object.freeze({
+  default: modelLoadConfigurationSchema.parse({}),
+  models: new Map([["qwen3-30b-a3b", EDITED_MODEL_LOAD_CONFIGURATION]])
+})
+
+describe("loadSettings", () => {
+  it("resolves with the loaded document's settings, the per-model load settings as a map keyed by model key", async () => {
+    const host = startNativeHostFake({
+      load_settings: () => STORED_SETTINGS_DOCUMENT
+    })
+
+    await expect(loadSettings()).resolves.toEqual(STORED_SETTINGS)
+    expect(host.commands.map((invoked) => invoked.command)).toEqual([
+      "load_settings"
+    ])
+  })
+
+  it("keeps a model key that names an object-prototype member", async () => {
+    startNativeHostFake({
+      load_settings: () => PROTOTYPE_KEY_SETTINGS_DOCUMENT
+    })
+
+    const settings = await loadSettings()
+
+    expect(settings.loadConfiguration.models).toEqual(
+      new Map([["__proto__", PROTOTYPE_KEY_LOAD_CONFIGURATION]])
+    )
+  })
+
+  it("rejects with the host's rejection", async () => {
+    startNativeHostFake({
+      load_settings: () => Promise.reject("Failed to parse settings.json")
+    })
+
+    await expect(loadSettings()).rejects.toBe("Failed to parse settings.json")
+  })
+})
+
+describe("saveSettings", () => {
+  it("sends the settings as the command's newSettings document, the per-model load settings as one object keyed by model key", async () => {
+    const host = startNativeHostFake({ save_settings: () => null })
+
+    await saveSettings(STORED_SETTINGS)
+
+    expect(host.commands).toEqual([
+      {
+        command: "save_settings",
+        args: { newSettings: STORED_SETTINGS_DOCUMENT }
+      }
+    ])
+  })
+
+  it("sends a model key that names an object-prototype member as a property of its own", async () => {
+    const host = startNativeHostFake({ save_settings: () => null })
+
+    await saveSettings(PROTOTYPE_KEY_SETTINGS)
+
+    expect(host.commands).toEqual([
+      {
+        command: "save_settings",
+        args: { newSettings: PROTOTYPE_KEY_SETTINGS_DOCUMENT }
+      }
+    ])
+  })
+
+  it("resolves only after the host finishes writing", async () => {
+    const write = createControlledPromise<null>()
+    startNativeHostFake({ save_settings: () => write.promise })
+
+    const getSettlement = createSettlementReader(saveSettings(STORED_SETTINGS))
+    await waitForMicrotasks()
+    const beforeWrite = getSettlement()
+    write.resolve(null)
+    await waitForMicrotasks()
+
+    expect([beforeWrite, getSettlement()]).toEqual(["pending", "fulfilled"])
+  })
+
+  it("rejects with the host's rejection", async () => {
+    startNativeHostFake({
+      save_settings: () => Promise.reject("Failed to write settings.json")
+    })
+
+    await expect(saveSettings(STORED_SETTINGS)).rejects.toBe(
+      "Failed to write settings.json"
+    )
+  })
+})
+
+describe("saveGenerationSettings", () => {
+  it("replaces only the generation group of the document on disk", async () => {
+    const host = startNativeHostFake({
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => null
+    })
+
+    await saveGenerationSettings({ temperature: 0.9, replyCeiling: 0 })
+
+    expect(host.commands).toEqual([
+      { command: "load_settings", args: {} },
+      {
+        command: "save_settings",
+        args: {
+          newSettings: {
+            ...STORED_SETTINGS_DOCUMENT,
+            generation: { temperature: 0.9, replyCeiling: 0 }
+          }
+        }
+      }
+    ])
+  })
+
+  it("writes nothing when the document cannot be loaded", async () => {
+    const host = startNativeHostFake({
+      load_settings: () => Promise.reject("Failed to read settings.json"),
+      save_settings: () => null
+    })
+
+    await expect(
+      saveGenerationSettings({ temperature: 0.9, replyCeiling: 0 })
+    ).rejects.toBe("Failed to read settings.json")
+    expect(host.commands.map((invoked) => invoked.command)).toEqual([
+      "load_settings"
+    ])
+  })
+
+  it("rejects when the merged document cannot be written", async () => {
+    startNativeHostFake({
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => Promise.reject("Disk full")
+    })
+
+    await expect(
+      saveGenerationSettings({ temperature: 0.9, replyCeiling: 0 })
+    ).rejects.toBe("Disk full")
+  })
+})
+
+describe("saveLoadConfigurationSettings", () => {
+  it("replaces only the per-model load settings of the document on disk, keeping its stored default", async () => {
+    const host = startNativeHostFake({
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => null
+    })
+
+    await saveLoadConfigurationSettings(EDITED_LOAD_CONFIGURATION)
+
+    expect(host.commands).toEqual([
+      { command: "load_settings", args: {} },
+      {
+        command: "save_settings",
+        args: {
+          newSettings: {
+            ...STORED_SETTINGS_DOCUMENT,
+            loadConfiguration: {
+              default: STORED_SETTINGS_DOCUMENT.loadConfiguration.default,
+              models: { "qwen3-30b-a3b": EDITED_MODEL_LOAD_CONFIGURATION }
+            }
+          }
+        }
+      }
+    ])
+  })
+
+  it("writes nothing when the document cannot be loaded", async () => {
+    const host = startNativeHostFake({
+      load_settings: () => Promise.reject("Failed to read settings.json"),
+      save_settings: () => null
+    })
+
+    await expect(
+      saveLoadConfigurationSettings(EDITED_LOAD_CONFIGURATION)
+    ).rejects.toBe("Failed to read settings.json")
+    expect(host.commands.map((invoked) => invoked.command)).toEqual([
+      "load_settings"
+    ])
+  })
+
+  it("rejects when the merged document cannot be written", async () => {
+    startNativeHostFake({
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => Promise.reject("Disk full")
+    })
+
+    await expect(
+      saveLoadConfigurationSettings(EDITED_LOAD_CONFIGURATION)
+    ).rejects.toBe("Disk full")
+  })
+})

@@ -71,12 +71,37 @@ export function formatLmStudioStatusLabel(
 }
 
 /**
+ * Formats why the LM Studio status is not known, for the backend's state.
+ *
+ * @param backendStatus - Store-owned backend lifecycle state.
+ * @returns What the backend is doing while it is starting, stopping, or not
+ * responding; the next step otherwise, which is starting a stopped backend
+ * and refreshing against a running one.
+ */
+function formatUnknownLmStudioStatusReason(
+  backendStatus: BackendServerStatus
+): string {
+  switch (backendStatus) {
+    case "running":
+      return "status unavailable · refresh to check"
+    case "stopped":
+      return "start the backend first"
+    case "starting":
+      return "waiting for the backend to start"
+    case "stopping":
+      return "the backend is stopping"
+    case "unresponsive":
+      return "the backend is not responding"
+  }
+}
+
+/**
  * Formats the address and next step shown under the LM Studio heading.
  *
  * @param lmStudioStatus - Latest published LM Studio status.
  * @param backendStatus - Store-owned backend lifecycle state.
- * @returns The meta line; an `unknown` status names starting the backend when
- * it is not running, and refreshing otherwise.
+ * @returns The meta line; an `unknown` status adds why it is not known,
+ * which depends on the backend's state.
  */
 export function formatLmStudioStatusMeta(
   lmStudioStatus: LmStudioStatus,
@@ -84,9 +109,7 @@ export function formatLmStudioStatusMeta(
 ): string {
   switch (lmStudioStatus) {
     case "unknown":
-      return backendStatus === "running"
-        ? `${LM_STUDIO_ADDRESS} · status unavailable · refresh to check`
-        : `${LM_STUDIO_ADDRESS} · start the backend first`
+      return `${LM_STUDIO_ADDRESS} · ${formatUnknownLmStudioStatusReason(backendStatus)}`
     case "connecting":
       return `${LM_STUDIO_ADDRESS} · connecting`
     case "connected":

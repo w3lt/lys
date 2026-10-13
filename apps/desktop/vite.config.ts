@@ -15,8 +15,14 @@ const host = process.env.TAURI_DEV_HOST
  * uses that host with protocol `ws` and port 1421; when absent or empty, the
  * HMR override is undefined and Vite's default HMR behavior remains while the
  * server host override becomes `false`. The `@` alias resolves to the renderer
- * source directory, while Vitest runs in jsdom with the shared test setup and
- * CSS handling. The `src-tauri` directory is excluded from Vite watch work.
+ * source directory. The `src-tauri` directory is excluded from Vite watch work.
+ *
+ * Vitest runs the unit suite in jsdom with CSS handling. It discovers only
+ * `test/**\/*.test.{ts,tsx}`, so shared harness modules under
+ * `test/unit/support` are never collected as cases, and Vitest's default
+ * failure on an empty selection is kept. Every substituted global,
+ * environment variable, and spy is restored after each case; the setup file
+ * owns the remaining per-case cleanup.
  */
 export default defineConfig(() => ({
   // Renderer transforms required by the desktop bundle.
@@ -53,8 +59,12 @@ export default defineConfig(() => ({
 
   test: {
     // Vitest settings shared by desktop unit and component tests.
+    include: ["test/**/*.test.{ts,tsx}"],
     environment: "jsdom",
-    setupFiles: ["./src/test/setup.ts"],
-    css: true
+    setupFiles: ["./test/unit/setup.ts"],
+    css: true,
+    restoreMocks: true,
+    unstubGlobals: true,
+    unstubEnvs: true
   }
 }))

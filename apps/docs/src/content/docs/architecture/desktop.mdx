@@ -206,6 +206,9 @@ The application store owns requests across pane changes. Stopping the backend
 invalidates pending observations before aborting their local HTTP transport;
 a late response cannot restore obsolete residency. LM Studio owns weights
 separately from the backend process, so a reconnect queries their actual state.
+Until the inventory can be read again, the Runtime pane shows the model state
+as unavailable rather than as no model loaded, and the Composer label keeps
+naming the chosen default.
 
 The Composer label, send eligibility, and chat request use that same compact
 runtime projection. The [default-model setting](/reference/configuration/#persisted-settings-json)

@@ -7,6 +7,10 @@ import type { LocalModelDescriptor } from "./inventory"
 /** Visual tone the status indicator uses for a residency state. */
 export type ModelResidencyTone = "active" | "pending" | "idle"
 
+/** Supporting line while the loaded weights are not observed. */
+const UNOBSERVED_RESIDENCY_META =
+  "refresh the model inventory to check loaded weights"
+
 /**
  * Names the weights currently resident in memory.
  *
@@ -17,6 +21,17 @@ export function readLoadedModelKey(
   modelRuntime: ModelRuntimeState
 ): string | null {
   return modelRuntime.status === "loaded" ? modelRuntime.modelKey : null
+}
+
+/**
+ * Finds the model a residency state names.
+ *
+ * @param modelRuntime - Current residency state.
+ * @returns The model being loaded, loaded, or unloaded, or `null` when the
+ * state names no model.
+ */
+function findRuntimeModelKey(modelRuntime: ModelRuntimeState): string | null {
+  return "modelKey" in modelRuntime ? modelRuntime.modelKey : null
 }
 
 /**
@@ -51,6 +66,7 @@ export function readModelResidencyTone(
       return "pending"
     case "none":
     case "unknown":
+    case "unavailable":
       return "idle"
   }
 }
@@ -67,10 +83,7 @@ export function readModelRowTone(
   model: LocalModelDescriptor
 ): ModelResidencyTone {
   if (modelRuntime.status === "unknown") return "idle"
-  if (
-    modelRuntime.status !== "none" &&
-    modelRuntime.modelKey === model.modelKey
-  ) {
+  if (findRuntimeModelKey(modelRuntime) === model.modelKey) {
     return readModelResidencyTone(modelRuntime)
   }
   return model.loaded ? "active" : "idle"
@@ -95,12 +108,13 @@ export function formatModelResidencyHeading(
     case "none":
       return "No model loaded"
     case "unknown":
+    case "unavailable":
       return "Model state unavailable"
   }
 }
 
 /**
- * Formats the supporting line shown while no weights are resident.
+ * Formats the supporting line shown while no weights are known to be resident.
  *
  * @param availability - Whether model requests can reach LM Studio, and why not.
  * @param defaultModel - Current default model identifier, when one is chosen.
@@ -145,7 +159,11 @@ export function formatModelResidencyMeta(
     case "unloading":
       return `releasing ${modelRuntime.modelKey}`
     case "unknown":
-      return "refresh the model inventory to check loaded weights"
+      return UNOBSERVED_RESIDENCY_META
+    case "unavailable":
+      return availability === "available"
+        ? UNOBSERVED_RESIDENCY_META
+        : formatAbsentResidencyMeta(availability, defaultModel)
     case "none":
       return formatAbsentResidencyMeta(availability, defaultModel)
   }
@@ -162,11 +180,7 @@ export function formatModelRowTag(
   modelRuntime: ModelRuntimeState,
   model: LocalModelDescriptor
 ): string {
-  if (
-    modelRuntime.status !== "none" &&
-    modelRuntime.status !== "unknown" &&
-    modelRuntime.modelKey === model.modelKey
-  ) {
+  if (findRuntimeModelKey(modelRuntime) === model.modelKey) {
     return modelRuntime.status
   }
 
@@ -190,11 +204,7 @@ export function formatComposerModelRowTag(
   model: LocalModelDescriptor,
   selectedModelKey: string | null
 ): string {
-  if (
-    modelRuntime.status !== "none" &&
-    modelRuntime.status !== "unknown" &&
-    modelRuntime.modelKey === model.modelKey
-  ) {
+  if (findRuntimeModelKey(modelRuntime) === model.modelKey) {
     return modelRuntime.status === "loaded" ? "resident" : modelRuntime.status
   }
 

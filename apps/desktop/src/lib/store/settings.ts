@@ -5,7 +5,9 @@ import type { ModelLoadConfiguration } from "@lys/share"
  *
  * @remarks Mirrors Rust's `RunTimeSettings`. Field names match the camelCase
  * wire representation, so a loaded value round-trips without mapping. Runtime
- * edits in the desktop UI remain session-only.
+ * edits in the desktop UI remain session-only. For `autoStartBackend` that is
+ * a known defect (#169): the value is read only when Lys opens, so an edit
+ * never takes effect.
  */
 export type RuntimeSettings = {
   /** Whether desktop initialization requests backend startup. */

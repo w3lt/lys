@@ -196,10 +196,9 @@ describe("RuntimePaneContent", () => {
       )
     })
 
-    // Known defect, found by this suite: the switch changes the setting only
-    // in memory, so the choice is lost before the next time Lys opens, the
-    // only time it applies. #12 asked that the user can make the backend
-    // start when Lys starts.
+    // Known defect (#169): the switch changes the setting only in memory, so
+    // the choice is lost before the next time Lys opens, the only time it
+    // applies.
     it.fails("keeps the choice for the next time Lys opens", async () => {
       const saves: unknown[] = []
       startNativeHostFake({

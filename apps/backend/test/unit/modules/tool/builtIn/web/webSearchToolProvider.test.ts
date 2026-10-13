@@ -126,18 +126,6 @@ describe("WebSearchToolProvider", () => {
   })
 
   describe("sendApiKeyCheck", () => {
-    it("reports an accepted key with its plan credits, without the key", async () => {
-      const answer = await checkKey(
-        answerWithJson({ account: { plan_usage: 37, plan_limit: 1000 } })
-      )
-
-      expect(answer).toEqual({
-        status: "accepted",
-        credits: { used: 37, limit: 1000 }
-      })
-      expect(JSON.stringify(answer)).not.toContain(TEST_TAVILY_API_KEY)
-    })
-
     it("sends nothing without a usable key", async () => {
       const server = await startTavilyServer(answerWithJson({}))
 

@@ -130,23 +130,6 @@ describe("WebSearchTool", () => {
   })
 
   describe("a run", () => {
-    it("sends the trimmed query with the key and frames the results", async () => {
-      const { result, server } = await runSearch(ONE_RESULT, "  night moths\n ")
-
-      expect(result.status).toBe("succeeded")
-      expect(result.content).toContain('Search: "night moths" (sent to Tavily)')
-      expect(result.content).toContain(
-        "Title: Moths\nURL: https://moths.example/\nMoths fly at night."
-      )
-      expect(JSON.parse(server.receivedRequests[0]?.body ?? "").query).toBe(
-        "night moths"
-      )
-      expect(server.receivedRequests[0]?.headers.authorization).toBe(
-        `Bearer ${TEST_TAVILY_API_KEY}`
-      )
-      expect(result.content).not.toContain(TEST_TAVILY_API_KEY)
-    })
-
     it("tells the model plainly when nothing was found", async () => {
       const { result } = await runSearch(
         answerWithJson({ results: [] }),

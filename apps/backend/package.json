@@ -6,7 +6,8 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsx build.mts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:live": "vitest run --config vitest.live.config.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",

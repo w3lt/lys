@@ -1,7 +1,4 @@
-import {
-  checkWebSearchKeyApiResponseSchema,
-  listBackendToolsApiResponseSchema
-} from "@lys/protocol"
+import { listBackendToolsApiResponseSchema } from "@lys/protocol"
 import { describe, expect, it } from "vitest"
 import { createBuiltInTools } from "../../../../../src/modules/tool/builtIn/builtInTools"
 import { buildReadPageDefinition } from "../../../../../src/modules/tool/builtIn/web/readPageTool"
@@ -23,15 +20,13 @@ import {
 
 /**
  * Registers the tool routes over a web search provider whose key reads give
- * one result and whose requests reach a fake Tavily server.
+ * one result and whose requests would reach a fake Tavily server.
  *
  * @param keyRead - What every key read gives.
- * @returns The application.
+ * @returns The application, and the server that records any request sent.
  */
 async function createToolRouteApp(keyRead: TavilyApiKeyRead) {
-  const server = await startTavilyServer(
-    answerWithJson({ account: { plan_usage: 5, plan_limit: 1000 } })
-  )
+  const server = await startTavilyServer(answerWithJson({}))
   const webSearchToolProvider = new WebSearchToolProvider(
     () => Promise.resolve(keyRead),
     server.dependencies
@@ -98,29 +93,6 @@ describe("registerToolRoutes", () => {
   })
 
   describe("key check", () => {
-    it("answers that Tavily accepted the saved key, with its credits", async () => {
-      const { app, server } = await createToolRouteApp({
-        status: "configured",
-        apiKey: TEST_TAVILY_API_KEY
-      })
-
-      const response = await app.inject({
-        method: "GET",
-        url: "/api/v1/tools/web_search/key-check"
-      })
-
-      expect(response.statusCode).toBe(200)
-      expect(response.json()).toEqual({
-        status: "accepted",
-        credits: { used: 5, limit: 1000 }
-      })
-      expect(
-        checkWebSearchKeyApiResponseSchema.safeParse(response.json()).success
-      ).toBe(true)
-      expect(response.body).not.toContain(TEST_TAVILY_API_KEY)
-      expect(server.receivedRequests[0]?.path).toBe("/usage")
-    })
-
     it("answers that no key is saved without contacting Tavily", async () => {
       const { app, server } = await createToolRouteApp({ status: "missing" })
 

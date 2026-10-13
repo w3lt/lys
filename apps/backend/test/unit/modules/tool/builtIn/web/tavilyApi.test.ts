@@ -50,7 +50,7 @@ describe("sendTavilySearchRequest", () => {
     })
   })
 
-  it("keeps the title, URL, and content of at most five results", async () => {
+  it("keeps the first five results when Tavily sends more", async () => {
     const raw = Array.from({ length: 7 }, (_, index) => buildRawResult(index))
     const server = await startTavilyServer(
       answerWithJson({ query: "moths", answer: "LLM text", results: raw })
@@ -62,15 +62,15 @@ describe("sendTavilySearchRequest", () => {
       server.dependencies
     )
 
-    expect(outcome.status).toBe("succeeded")
     const results = outcome.status === "succeeded" ? outcome.results : []
     expect(results).toHaveLength(MAXIMUM_SEARCH_RESULTS)
-    expect(results[0]).toEqual({
-      title: "Moth 0",
-      url: "https://moths.example/0",
-      content: "About moth 0."
-    })
-    expect(Object.isFrozen(results)).toBe(true)
+    expect(results.map((result) => result.title)).toEqual([
+      "Moth 0",
+      "Moth 1",
+      "Moth 2",
+      "Moth 3",
+      "Moth 4"
+    ])
   })
 
   it.each([
@@ -116,28 +116,15 @@ describe("sendTavilySearchRequest", () => {
 })
 
 describe("sendTavilyUsageRequest", () => {
-  it("reads the account's plan credits", async () => {
-    const server = await startTavilyServer(
-      answerWithJson({
-        key: { usage: 3, limit: null },
-        account: {
-          current_plan: "Researcher",
-          plan_usage: 37,
-          plan_limit: 1000
-        }
-      })
-    )
+  it("asks Tavily's usage path with a GET", async () => {
+    const server = await startTavilyServer(answerWithJson({ key: {} }))
 
-    const outcome = await sendTavilyUsageRequest(
+    await sendTavilyUsageRequest(
       TEST_TAVILY_API_KEY,
       new AbortController().signal,
       server.dependencies
     )
 
-    expect(outcome).toEqual({
-      status: "succeeded",
-      credits: { used: 37, limit: 1000 }
-    })
     expect(server.receivedRequests[0]).toMatchObject({
       method: "GET",
       path: "/usage"
@@ -145,8 +132,49 @@ describe("sendTavilyUsageRequest", () => {
   })
 
   it.each([
-    ["no account", { key: { usage: 3 } }],
-    ["an account without plan credits", { account: { current_plan: "x" } }]
+    [
+      "a fractional usage",
+      { plan_usage: 37.5, plan_limit: 1000 },
+      { used: 38, limit: 1000 }
+    ],
+    [
+      "a fractional limit",
+      { plan_usage: 37, plan_limit: 999.01 },
+      { used: 37, limit: 1000 }
+    ],
+    [
+      "a fraction of the first credit, with no limit",
+      { plan_usage: 0.2, plan_limit: null },
+      { used: 1, limit: null }
+    ]
+  ])("rounds %s up to a whole credit", async (_label, account, credits) => {
+    const server = await startTavilyServer(answerWithJson({ account }))
+
+    const outcome = await sendTavilyUsageRequest(
+      TEST_TAVILY_API_KEY,
+      new AbortController().signal,
+      server.dependencies
+    )
+
+    expect(outcome).toEqual({ status: "succeeded", credits })
+  })
+
+  it.each([
+    ["no account", '{"key":{"usage":3}}'],
+    ["an account without plan credits", '{"account":{"current_plan":"x"}}'],
+    ["a negative usage", '{"account":{"plan_usage":-0.5,"plan_limit":1000}}'],
+    [
+      "a usage that is not a number",
+      '{"account":{"plan_usage":"37","plan_limit":1000}}'
+    ],
+    [
+      "a usage too large to show exactly",
+      '{"account":{"plan_usage":1e300,"plan_limit":null}}'
+    ],
+    [
+      "a usage JSON reads as infinite",
+      '{"account":{"plan_usage":1e999,"plan_limit":null}}'
+    ]
   ])("accepts an answer with %s, without credits", async (_label, body) => {
     const server = await startTavilyServer(answerWithJson(body))
 

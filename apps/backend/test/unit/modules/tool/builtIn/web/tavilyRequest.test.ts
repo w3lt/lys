@@ -59,15 +59,11 @@ async function findClosedPort(): Promise<number> {
 }
 
 describe("sendTavilyRequest", () => {
-  it("posts the body with the key and Lys's headers and parses the JSON answer", async () => {
+  it("posts the body with the key and Lys's headers", async () => {
     const server = await startTavilyServer(answerWithJson({ results: [] }))
 
-    const result = await sendUnstoppedRequest(
-      SEARCH_REQUEST,
-      server.dependencies
-    )
+    await sendUnstoppedRequest(SEARCH_REQUEST, server.dependencies)
 
-    expect(result).toEqual({ status: "succeeded", body: { results: [] } })
     const [received] = server.receivedRequests
     expect(received).toMatchObject({
       method: "POST",

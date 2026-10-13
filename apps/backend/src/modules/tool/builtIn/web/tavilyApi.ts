@@ -48,7 +48,10 @@ export type TavilySearchOutcome =
       failure: TavilyRequestFailure
     }>
 
-/** Plan credits of the key's account. */
+/**
+ * Plan credits of the key's account, in whole credits: a fraction Tavily
+ * reports is rounded up.
+ */
 export type TavilyAccountCredits = Readonly<{
   /** Credits used this billing cycle. */
   used: number
@@ -87,10 +90,24 @@ const tavilySearchResponseSchema = z.object({
 /** Validates a usage answer, which must be an object. */
 const tavilyUsageResponseSchema = z.object({ account: z.unknown().optional() })
 
+/**
+ * Validates one credit count of a usage answer, a non-negative number, and
+ * rounds a fraction up to the next whole credit, so a partly used credit
+ * counts as used.
+ *
+ * @remarks The fraction is not kept. A count past the largest safe integer
+ * is refused, because it could not be shown exactly.
+ */
+const tavilyCreditCountSchema = z
+  .number()
+  .nonnegative()
+  .transform(Math.ceil)
+  .pipe(z.int())
+
 /** Validates the plan credits in a usage answer's account. */
 const tavilyAccountCreditsSchema = z.object({
-  plan_usage: z.int().nonnegative(),
-  plan_limit: z.int().nonnegative().nullable()
+  plan_usage: tavilyCreditCountSchema,
+  plan_limit: tavilyCreditCountSchema.nullable()
 })
 
 /** Failure of an answer whose shape is not Tavily's. */
@@ -179,7 +196,7 @@ function buildSearchResult(
  * @param abortSignal - Stops the request; borrowed for the call.
  * @param dependencies - Origin, address rule, and time limit.
  * @returns `succeeded` with the plan credits when the answer reports them,
- * or why there is no usable answer.
+ * each rounded up to a whole credit, or why there is no usable answer.
  * @throws The abort reason once `abortSignal` aborts, and any failure Lys
  * does not recognize.
  */

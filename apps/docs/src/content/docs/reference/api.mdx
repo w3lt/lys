@@ -217,8 +217,8 @@ answers `200` with one of:
 | `failed`      | `reason`: `rate-limited`, `timed-out`, `unreachable`, `provider-error`, or `invalid-response` | The check could not tell whether the key works |
 
 `credits` comes from the account's plan usage and limit when Tavily reports
-them; `limit` is `null` when Tavily reports none. The answer never contains
-the key.
+them; `limit` is `null` when Tavily reports none. Both are whole credits: a
+fraction Tavily reports is rounded up. The answer never contains the key.
 
 ## Tool results
 

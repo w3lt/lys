@@ -51,7 +51,19 @@ contracts, schemas, or behavior that crosses package boundaries.
 - `apps/backend/test/unit` contains a Vitest unit suite. Run it once with
   `pnpm --filter @lys/backend test`, or rerun it on every change with
   `pnpm --filter @lys/backend run test:watch`. It needs no LM Studio server,
-  network access, or `LYS_HOME`.
+  network access, or `LYS_HOME`. When a run ends, it warns that the live suite
+  did not run.
+- `apps/backend/test/live` contains a small live suite that calls the real
+  Tavily API. Run it with `pnpm --filter @lys/backend test:live`, with a real
+  Tavily API key in the `LYS_TEST_TAVILY_API_KEY` environment variable; a case
+  that needs the key fails without it. Each run sends two real searches, at
+  one Tavily credit each, and a few key checks. It shows what only the real
+  service can: that a real search and a real key check succeed, and that
+  Tavily rejects a key it never issued. The unit suite covers what Tavily
+  cannot be made to do on demand, such as a redirect, an untrusted
+  certificate, an oversized or unreadable answer, and other HTTP errors,
+  against a local server. Run the live suite when you change how Lys talks to
+  Tavily.
 - `apps/desktop` has a `vitest run` script, but no desktop test files are
   currently tracked.
 - The shared packages have no package-level test scripts or tracked test suites.
@@ -62,8 +74,8 @@ contracts, schemas, or behavior that crosses package boundaries.
 
 ## Coming soon
 
-Backend coverage is unit-level only: the backend integration and end-to-end
-suites are tracked in [issue #44](https://github.com/w3lt/lys/issues/44) and
+Apart from the live suite for Tavily, backend coverage is unit-level only: the
+backend integration and end-to-end suites are tracked in [issue #44](https://github.com/w3lt/lys/issues/44) and
 [issue #45](https://github.com/w3lt/lys/issues/45), and no CI workflow runs the
 unit suite yet. Desktop and shared-package automated test coverage is currently
 absent. A command that exits successfully without executing tests does not

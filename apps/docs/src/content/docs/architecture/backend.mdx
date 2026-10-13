@@ -228,7 +228,8 @@ otherwise the call is answered at once.
 
 `GET /api/v1/tools/web_search/key-check` reads the key and asks Tavily's
 `GET /usage` about it, through the same client and limits, and answers
-`accepted` (with the plan's credits when reported), `rejected`,
+`accepted` (with the plan's credits when reported, a fraction rounded up to a
+whole credit), `rejected`,
 `unavailable`, or `failed`.
 
 ## Persistence

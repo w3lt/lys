@@ -120,6 +120,9 @@ describe("SettingsView", () => {
     const onDone = vi.fn()
     const user = userEvent.setup()
     render(<SettingsView onDone={onDone} />)
+    // The loading frame and the pane's frame each have a Done button; press
+    // the one that stays.
+    await screen.findByRole("switch", { name: "Start it when Lys opens" })
 
     await user.click(screen.getByRole("button", { name: "Done" }))
 

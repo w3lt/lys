@@ -12,6 +12,22 @@ import {
 export const INVENTORY_ROUTE = "GET /api/v1/llm/list"
 
 /**
+ * Imports of the pane bodies the settings view loads lazily, by pane.
+ *
+ * @remarks Each names the module the view's own lazy loader imports. A pane
+ * missing here would only make its cases wait for the view's import again.
+ */
+const SETTINGS_PANE_BODY_IMPORTS = Object.freeze({
+  runtime: () =>
+    import("@/components/SettingsViewComponents/RuntimePaneContent"),
+  model: () => import("@/components/SettingsViewComponents/ModelPaneContent"),
+  generation: () =>
+    import("@/components/SettingsViewComponents/GenerationPaneContent"),
+  agents: () => import("@/components/SettingsViewComponents/AgentPaneContent"),
+  tools: () => import("@/components/SettingsViewComponents/ToolPaneContent")
+} satisfies Readonly<Record<SettingsPane, () => Promise<unknown>>>)
+
+/**
  * Builds an inventory route that answers as the backend does for the arranged
  * inventory.
  *
@@ -46,7 +62,11 @@ export function buildInventoryRoute(
  * @param runtime - Backend, LM Studio, and model facts.
  * @returns The application store and the view component.
  * @remarks A running backend makes the view read the inventory when it
- * appears, so a case with one declares {@link INVENTORY_ROUTE}.
+ * appears, so a case with one declares {@link INVENTORY_ROUTE}. The body of
+ * the opened pane is imported here as well. The view still shows its busy
+ * frame first and the body after it, but a case's bounded wait for the body
+ * no longer includes evaluating the pane's modules, whose duration depends on
+ * the load of the machine.
  */
 export async function loadFreshSettingsView(
   pane: SettingsPane,
@@ -56,6 +76,7 @@ export async function loadFreshSettingsView(
   const { useLysStore } = await import("@/lib/store")
   const { default: SettingsView } =
     await import("@/views/SettingsView/SettingsView")
+  await SETTINGS_PANE_BODY_IMPORTS[pane]()
   updateStoreRuntime(useLysStore, runtime)
   useLysStore.setState({ settingsPane: pane })
   return { useLysStore, SettingsView }

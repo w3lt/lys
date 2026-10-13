@@ -53,19 +53,27 @@ export function buildBackendToolDefinition(name: string): ToolDefinition {
 }
 
 /**
+ * Arguments of a call to a tool that declares the one `path` argument
+ * {@link buildToolDefinition} gives a tool by default.
+ */
+const PATH_CALL_ARGUMENTS: ChatToolCall["arguments"] = Object.freeze({
+  path: "/notes/todo.md"
+})
+
+/**
  * Builds one tool call the backend asks the desktop to answer.
  *
  * @param sequence - Identity sequence of the call's UUIDv7; keep it distinct
  * from the message sequences of the same case.
  * @param toolName - Name of the offered tool the model called.
  * @param callArguments - Argument values as the model sent them; defaults to
- * the `path` argument that {@link buildToolDefinition} declares by default.
+ * {@link PATH_CALL_ARGUMENTS}.
  * @returns A frozen call validated by the shared `tool-call` event schema.
  */
 export function buildToolCall(
   sequence: number,
   toolName: string,
-  callArguments: ChatToolCall["arguments"] = { path: "/notes/todo.md" }
+  callArguments: ChatToolCall["arguments"] = PATH_CALL_ARGUMENTS
 ): ChatToolCall {
   const call = Object.freeze({
     id: createFixtureUuidV7(sequence),

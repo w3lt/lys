@@ -15,6 +15,7 @@ import { upperFirst } from "lodash"
 import { Button } from "@/components/ui/button"
 import rehypeShiki from "@shikijs/rehype"
 import remarkMath from "remark-math"
+import remarkGfm from "remark-gfm"
 import rehypeKatex from "rehype-katex"
 import { toString } from "hast-util-to-string"
 
@@ -249,7 +250,7 @@ export function MarkdownMessage({
     <div className="markdown-message">
       <MarkdownHooks
         components={markdownComponents}
-        remarkPlugins={[remarkMath]}
+        remarkPlugins={[remarkMath, remarkGfm]}
         rehypePlugins={[
           // Display math arrives as `pre > code`, so KaTeX must claim it
           // before Shiki treats it as a code block.

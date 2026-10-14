@@ -209,29 +209,41 @@ headless browser (`web/pageRendering.ts`):
    `playwright-core` with that proxy, Chromium's sandbox on, WebRTC kept on
    the proxy, and popups blocked. The proxy listens on a random port of
    `127.0.0.1`, serves only the browser's random credentials, resolves every
-   host through the checked lookup, and checks every connected socket, so the
-   address rule in `webAddresses.ts` covers the page, every redirect, and
-   everything the page loads. It refuses connections past 256 or past 64 MiB
-   received;
+   host through the checked lookup, refuses a blocked IP address without
+   connecting to it, and checks every connected socket, so the address rule
+   in `webAddresses.ts` covers the page, every redirect, and everything the
+   page loads; the browser sends this machine's own addresses through the
+   proxy too. It refuses connections past 256 or past 64 MiB received;
 2. it opens the URL in a context that keeps no cookies, storage, or service
    workers and accepts no download, without fetching images, fonts, or media.
    The page's scripts run, and HTTP, `<meta>` refresh, and script redirects
-   are followed. Once the document has loaded, it accepts only
+   are followed. Once the document has arrived, it accepts only
    `text/html`, `application/xhtml+xml`, and `text/plain` with a 2xx status,
-   and waits up to 10 seconds for the network to be quiet for 500
-   milliseconds;
-3. it stops the page's scripts and takes a `DOMSnapshot`, validated against a
-   schema, and rebuilds the page's HTML from it (`web/pageSnapshot.ts`)
+   and waits up to 10 seconds in all for the DOM to be ready and then for the
+   network to be quiet for 500 milliseconds; what has rendered by then is
+   read. When a later navigation of the page fails, such as a `<meta>`
+   refresh to a blocked address, the read fails with that navigation's
+   reason;
+3. it stops the page's scripts, refuses a page whose DOM, with its frames,
+   still has more than 120,000 nodes once the browser has collected those it
+   threw away, and takes a `DOMSnapshot`, validated against a schema, and
+   rebuilds the page's HTML from it (`web/pageSnapshot.ts`)
    without scripts, styles, templates, SVG, or iframes, with shadow-root
    content where it renders, cut at 4 Mi UTF-16 code units. A text node in
    `<body>` is kept only when a person can see it: it has a layout box,
    `visibility: visible`, a color that is not transparent, an opacity above 0
    through its ancestors, at least 2 by 2 pixels left once cut by every
-   `overflow: hidden` or `clip` ancestor and the page's top and left edges,
-   and a color more than 16 apart, in some RGB channel, from its background
-   (white when none is set; unknown on a background image). These values come
-   from the browser's layout, so the page's scripts cannot fake them. A
-   plain-text page is read from its response body instead;
+   `overflow: hidden` or `clip` ancestor and the page's top and left edges
+   (a scrolling ancestor that can be seen lets a person reach all of its
+   content), and a color that, blended over its background as the browser
+   paints it, is more than 16 apart from it in some sRGB channel. The
+   background is white when none is set. Colors in `rgb()`, `lab()`,
+   `lch()`, `oklab()`, `oklch()`, and `color()` in sRGB, Display P3, or XYZ
+   are converted (`web/pageColor.ts`); any other color, and a background
+   image, is unknown and hides nothing. These values come from the browser's
+   layout, so the page's scripts cannot fake them. A plain-text page is read
+   as the text the browser shows, from Playwright's own script world, while
+   the page still shows it, and as HTML once it went on to another document;
 4. it extracts the main text with Mozilla Readability over a linkedom document,
    refusing markup with more than 40,000 start tags before parsing it, and a
    parsed page with more than 40,000 elements or a nesting depth sum above

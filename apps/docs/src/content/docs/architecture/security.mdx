@@ -85,8 +85,9 @@ backend decides which calls ask; the desktop shows the prompts.
   it gets security fixes only when Lys updates that dependency and `build.sh`
   installs the matching browser again.
 - Hidden text is judged from the rendered page: text covered by another
-  element, hidden by `clip-path`, or drawn in a color close to a background
-  image still reaches the model. Text that needs a click to appear, such as a
+  element, hidden by `clip-path` or `filter`, drawn in a color close to a
+  background image, or in a color space Lys does not convert, such as
+  `rec2020`, still reaches the model. Text that needs a click to appear, such as a
   closed accordion, is left out too.
 - A page's third parties, such as analytics and CDNs, see a request from the
   machine Lys runs on, as they would from any browser.
@@ -114,9 +115,11 @@ and what reaches the model:
   read opens on a random port of `127.0.0.1`, which serves only that
   browser's random credentials. The proxy resolves every host through the
   lookup it connects with, so a name cannot resolve differently between the
-  check and the connection, and checks the address every socket reached,
-  which covers IP literals. IPv4-mapped IPv6 addresses are matched against
-  the IPv4 rules. This holds for the page, every redirect, and every request
+  check and the connection, refuses a blocked IP address without connecting
+  to it, and checks the address every socket reached. Chromium is told to
+  send this machine's own addresses through the proxy as well, whatever
+  Playwright's environment says. IPv4-mapped IPv6 addresses are matched
+  against the IPv4 rules. This holds for the page, every redirect, and every request
   its scripts make; WebRTC may not send UDP around the proxy, and service
   workers are blocked.
 - **Redirects.** HTTP, `<meta>` refresh, and script redirects are followed
@@ -129,8 +132,9 @@ and what reaches the model:
   signed-out visitor sees. Requests carry the browser's own `User-Agent`.
 - **Bounds.** One read takes at most 30 seconds, the browser's start
   included, at most 256 connections, and at most 64 MiB received. Images,
-  fonts, and media are not fetched. The rebuilt page is cut at 4 Mi UTF-16
-  code units; markup with more than 40,000 start tags, or a parsed page with
+  fonts, and media are not fetched. A page with more than 120,000 DOM nodes
+  is refused before its snapshot is taken. The rebuilt page is cut at 4 Mi
+  UTF-16 code units; markup with more than 40,000 start tags, or a parsed page with
   more than 40,000 elements or a nesting depth sum above 400,000, is refused
   before Readability runs.
 - **Hidden and invisible text.** After the page's scripts are stopped, Lys

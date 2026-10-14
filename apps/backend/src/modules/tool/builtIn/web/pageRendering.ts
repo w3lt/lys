@@ -232,12 +232,21 @@ const SNAPSHOT_RESERVE_MS = 2_000
 const MAXIMUM_REPORTED_MEDIA_TYPE_LENGTH = 100
 
 /**
+ * Most mebibytes a page's scripts may hold, inclusive. A page that holds
+ * more crashes its renderer, and the read fails as crashed, instead of
+ * growing to the browser's own limit of several gibibytes.
+ */
+const MAXIMUM_PAGE_SCRIPT_MEMORY_MIB = 1024
+
+/**
  * Chromium arguments of every read: WebRTC may not send UDP around the
- * proxy, and no page may open another window.
+ * proxy, no page may open another window, and a page's scripts may hold at
+ * most {@link MAXIMUM_PAGE_SCRIPT_MEMORY_MIB}.
  */
 const BROWSER_LAUNCH_ARGUMENTS: readonly string[] = Object.freeze([
   "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
-  "--block-new-web-contents"
+  "--block-new-web-contents",
+  `--js-flags=--max-old-space-size=${MAXIMUM_PAGE_SCRIPT_MEMORY_MIB}`
 ])
 
 /** Resource types that carry no text, so the browser never fetches them. */

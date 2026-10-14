@@ -26,6 +26,8 @@ export type PageServer = Readonly<{
   port: number
   /** Headers of every request the server received, in arrival order. */
   receivedHeaders: readonly IncomingHttpHeaders[]
+  /** Remote address of every TCP connection the server accepted, in order. */
+  acceptedConnections: readonly string[]
 }>
 
 /**
@@ -86,21 +88,26 @@ export function buildPageServerDependencies(
  * when the current test finishes.
  *
  * @param route - Answers each request.
- * @returns The server's port and the headers it receives.
+ * @returns The server's port, the headers it receives, and the connections it
+ * accepts.
  */
 export async function startPageServer(route: PageRoute): Promise<PageServer> {
   const receivedHeaders: IncomingHttpHeaders[] = []
+  const acceptedConnections: string[] = []
   const server = createServer((request, response) => {
     receivedHeaders.push(request.headers)
     route(request, response)
   })
+  server.on("connection", (socket) =>
+    acceptedConnections.push(socket.remoteAddress ?? "")
+  )
   onTestFinished(async () => {
     server.closeAllConnections()
     await new Promise<void>((resolve) => server.close(() => resolve()))
   })
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
   const { port } = server.address() as AddressInfo
-  return { port, receivedHeaders }
+  return { port, receivedHeaders, acceptedConnections }
 }
 
 /**

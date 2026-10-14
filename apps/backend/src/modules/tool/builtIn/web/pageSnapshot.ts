@@ -1,5 +1,6 @@
 import type { Page } from "playwright-core"
 import * as z from "zod"
+import { parseCssColor, type SrgbColor } from "./pageColor"
 
 /**
  * Most UTF-16 code units of one page Lys reads, inclusive: the HTML built
@@ -93,9 +94,12 @@ const CLIPPING_OVERFLOW_VALUES: ReadonlySet<string> = new Set([
   "clip"
 ])
 
-/** Finds the channels of a computed `rgb()` or `rgba()` color. */
-const RGB_COLOR_PATTERN =
-  /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)$/
+/** Overflow values that let a person scroll to content outside the box. */
+const SCROLLING_OVERFLOW_VALUES: ReadonlySet<string> = new Set([
+  "auto",
+  "overlay",
+  "scroll"
+])
 
 /** Finds a text made only of whitespace. */
 const WHITESPACE_ONLY_PATTERN = /^\s*$/
@@ -196,8 +200,32 @@ const pageSnapshotSchema = z
   })
   .readonly()
 
+/** Validates the part of a Chrome `Memory.getDOMCounters` result Lys reads. */
+const domCountersSchema = z
+  .object({
+    /** DOM nodes alive in the page's renderer, its frames included. */
+    nodes: z.int().nonnegative()
+  })
+  .readonly()
+
 /** What a rendered page's DOM looked like at one moment. */
 export type PageSnapshot = z.infer<typeof pageSnapshotSchema>
+
+/** Outcome of taking a page's snapshot. */
+export type PageSnapshotResult =
+  | Readonly<{
+      /** The snapshot was taken. */
+      status: "taken"
+      /** The page's DOM, validated. */
+      snapshot: PageSnapshot
+    }>
+  | Readonly<{
+      /**
+       * The page and its frames have more than
+       * {@link MAXIMUM_SNAPSHOT_NODES} nodes, so no snapshot was taken.
+       */
+      status: "too-complex"
+    }>
 
 /** DOM nodes of one snapshot document. */
 type SnapshotNodes = PageSnapshot["documents"][number]["nodes"]
@@ -220,14 +248,6 @@ export type VisibleHtmlResult =
 /** Layout boxes of one snapshot document. */
 type SnapshotLayout = PageSnapshot["documents"][number]["layout"]
 
-/** A color as its sRGB channels, 0 to 255, and its alpha, 0 to 1. */
-type RgbColor = Readonly<{
-  red: number
-  green: number
-  blue: number
-  alpha: number
-}>
-
 /** Rectangle of the page, in CSS pixels; an unbounded side is infinite. */
 type ClipRect = Readonly<{
   left: number
@@ -236,17 +256,26 @@ type ClipRect = Readonly<{
   bottom: number
 }>
 
+/** Range of one axis of the page, in CSS pixels; an unbounded end is infinite. */
+type AxisRange = Readonly<{
+  start: number
+  end: number
+}>
+
 /** What a text is drawn on. */
 type TextBackdrop =
   | Readonly<{
-      /** A color, the nearest one that is not transparent. */
+      /** An opaque color: the backgrounds behind the text, blended. */
       kind: "color"
-      /** The color. */
-      color: RgbColor
+      /** The color, with an alpha of 1. */
+      color: SrgbColor
     }>
   | Readonly<{
-      /** An image, whose colors the snapshot does not give. */
-      kind: "image"
+      /**
+       * An image, or a color Lys does not convert, so the text's color cannot
+       * be compared with it.
+       */
+      kind: "unknown"
     }>
 
 /** What each node passes on to its descendants about their visibility. */
@@ -308,6 +337,21 @@ type HtmlStepOutput = Readonly<{
   nextSteps: readonly HtmlStep[]
 }>
 
+/** Backdrop whose colors are not known. */
+const UNKNOWN_BACKDROP: TextBackdrop = Object.freeze({ kind: "unknown" })
+
+/** The whole of one axis. */
+const UNBOUNDED_AXIS: AxisRange = Object.freeze({
+  start: Number.NEGATIVE_INFINITY,
+  end: Number.POSITIVE_INFINITY
+})
+
+/** A range in which nothing can be seen. */
+const EMPTY_AXIS: AxisRange = Object.freeze({ start: 0, end: 0 })
+
+/** Outcome of a page too complex to read. */
+const TOO_COMPLEX_RESULT = Object.freeze({ status: "too-complex" } as const)
+
 /** Output of a step that writes nothing. */
 const EMPTY_STEP_OUTPUT: HtmlStepOutput = Object.freeze({
   html: "",
@@ -319,19 +363,31 @@ const EMPTY_STEP_OUTPUT: HtmlStepOutput = Object.freeze({
  *
  * @param page - Page that finished rendering, borrowed; its browser must stay
  * open until this settles.
- * @returns The page's DOM at that moment, validated.
- * @throws When the browser fails or returns a malformed snapshot.
+ * @returns The page's DOM at that moment, validated; or `too-complex`, with
+ * no snapshot taken, when the page and its frames have more than
+ * {@link MAXIMUM_SNAPSHOT_NODES} nodes.
+ * @throws When the browser fails or returns a malformed snapshot or count.
  * @remarks Stops the page's scripts first, so nothing changes the DOM after
- * the snapshot is taken; the page cannot run any script again. The
- * DevTools session it opens ends with the page.
+ * the snapshot is taken; the page cannot run any script again. Then counts
+ * the nodes the page still has, after the browser collects those it threw
+ * away, so an oversized page is refused before its snapshot is sent to Lys.
+ * The DevTools session it opens ends with the page.
  */
-export async function getPageSnapshot(page: Page): Promise<PageSnapshot> {
+export async function getPageSnapshot(page: Page): Promise<PageSnapshotResult> {
   const session = await page.context().newCDPSession(page)
   await session.send("Emulation.setScriptExecutionDisabled", { value: true })
+  await session.send("HeapProfiler.collectGarbage")
+  const counters = domCountersSchema.parse(
+    await session.send("Memory.getDOMCounters")
+  )
+  if (counters.nodes > MAXIMUM_SNAPSHOT_NODES) return TOO_COMPLEX_RESULT
   const snapshot = await session.send("DOMSnapshot.captureSnapshot", {
     computedStyles: [...PAGE_SNAPSHOT_STYLES]
   })
-  return pageSnapshotSchema.parse(snapshot)
+  return Object.freeze({
+    status: "taken",
+    snapshot: pageSnapshotSchema.parse(snapshot)
+  })
 }
 
 /**
@@ -479,24 +535,6 @@ function readLayoutStyle(
 }
 
 /**
- * Parses a computed color.
- *
- * @param value - Computed `color` or `background-color` value.
- * @returns Its channels, or undefined for a color not written as `rgb()` or
- * `rgba()`, such as a wide-gamut color.
- */
-function parseRgbColor(value: string): RgbColor | undefined {
-  const match = RGB_COLOR_PATTERN.exec(value)
-  if (match === null) return undefined
-  return Object.freeze({
-    red: Number(match[1]),
-    green: Number(match[2]),
-    blue: Number(match[3]),
-    alpha: match[4] === undefined ? 1 : Number(match[4])
-  })
-}
-
-/**
  * Parses a computed opacity.
  *
  * @param value - Computed `opacity`, or an empty string when the snapshot
@@ -510,13 +548,53 @@ function parseOpacity(value: string): number {
 }
 
 /**
+ * Answers whether a box shows enough of itself in a range of one axis.
+ *
+ * @param range - Range that can be seen.
+ * @param box - Box on the same axis.
+ * @returns True when they overlap by at least
+ * {@link MINIMUM_VISIBLE_TEXT_SIZE_PX}.
+ */
+function isAxisBoxShown(range: AxisRange, box: AxisRange): boolean {
+  const shownLength =
+    Math.min(range.end, box.end) - Math.max(range.start, box.start)
+  return shownLength >= MINIMUM_VISIBLE_TEXT_SIZE_PX
+}
+
+/**
+ * Narrows the range of one axis an element's content can be seen in.
+ *
+ * @param range - Range its parent's content can be seen in.
+ * @param box - Element's box on that axis.
+ * @param overflow - Element's computed overflow on that axis.
+ * @returns For an overflow that hides content, the range cut to the box.
+ * For an overflow a person can scroll, the whole axis, since scrolling
+ * brings any of the content into the box, as long as the box itself shows
+ * in the range; else a range in which nothing can be seen. For any other
+ * overflow, the range unchanged.
+ */
+function calculateAxisClip(
+  range: AxisRange,
+  box: AxisRange,
+  overflow: string
+): AxisRange {
+  if (CLIPPING_OVERFLOW_VALUES.has(overflow)) {
+    return Object.freeze({
+      start: Math.max(range.start, box.start),
+      end: Math.min(range.end, box.end)
+    })
+  }
+  if (!SCROLLING_OVERFLOW_VALUES.has(overflow)) return range
+  return isAxisBoxShown(range, box) ? UNBOUNDED_AXIS : EMPTY_AXIS
+}
+
+/**
  * Narrows the part of the page an element's content can be seen in.
  *
  * @param clip - Part its parent's content can be seen in.
  * @param bounds - Element's box: x, y, width, height.
  * @param overflow - Element's computed `overflow-x` and `overflow-y`.
- * @returns The part cut to the element's box on each axis whose overflow
- * hides content; an axis that scrolls or shows its overflow is not cut.
+ * @returns The part cut on each axis as {@link calculateAxisClip} decides.
  */
 function calculateContentClip(
   clip: ClipRect,
@@ -524,14 +602,65 @@ function calculateContentClip(
   overflow: Readonly<{ x: string; y: string }>
 ): ClipRect {
   const [x, y, width, height] = bounds
-  const isXClipped = CLIPPING_OVERFLOW_VALUES.has(overflow.x)
-  const isYClipped = CLIPPING_OVERFLOW_VALUES.has(overflow.y)
+  const horizontal = calculateAxisClip(
+    { start: clip.left, end: clip.right },
+    { start: x, end: x + width },
+    overflow.x
+  )
+  const vertical = calculateAxisClip(
+    { start: clip.top, end: clip.bottom },
+    { start: y, end: y + height },
+    overflow.y
+  )
   return Object.freeze({
-    left: isXClipped ? Math.max(clip.left, x) : clip.left,
-    top: isYClipped ? Math.max(clip.top, y) : clip.top,
-    right: isXClipped ? Math.min(clip.right, x + width) : clip.right,
-    bottom: isYClipped ? Math.min(clip.bottom, y + height) : clip.bottom
+    left: horizontal.start,
+    top: vertical.start,
+    right: horizontal.end,
+    bottom: vertical.end
   })
+}
+
+/**
+ * Blends a color over an opaque one, as the browser paints it.
+ *
+ * @param color - Color on top, with its alpha.
+ * @param base - Opaque color beneath.
+ * @returns The opaque color a person sees.
+ */
+function blendColor(color: SrgbColor, base: SrgbColor): SrgbColor {
+  const blendChannel = (top: number, bottom: number) =>
+    top * color.alpha + bottom * (1 - color.alpha)
+  return Object.freeze({
+    red: blendChannel(color.red, base.red),
+    green: blendChannel(color.green, base.green),
+    blue: blendChannel(color.blue, base.blue),
+    alpha: 1
+  })
+}
+
+/**
+ * Lays a background color over what lies behind it.
+ *
+ * @param color - Background color, with its alpha.
+ * @param backdrop - What lies behind the background.
+ * @returns The backdrop unchanged for a transparent color; the color for an
+ * opaque one; a partly transparent one blended over a color backdrop, or an
+ * unknown backdrop when what lies behind is unknown.
+ */
+function layBackgroundColor(
+  color: SrgbColor,
+  backdrop: TextBackdrop
+): TextBackdrop {
+  if (color.alpha === 0) return backdrop
+  if (backdrop.kind === "color") {
+    return Object.freeze({
+      kind: "color",
+      color: blendColor(color, backdrop.color)
+    })
+  }
+  return color.alpha === 1
+    ? Object.freeze({ kind: "color", color })
+    : UNKNOWN_BACKDROP
 }
 
 /**
@@ -540,8 +669,10 @@ function calculateContentClip(
  * @param tree - Snapshot document.
  * @param layoutIndex - Index of the element's layout box.
  * @param parentBackdrop - What its parent's text is drawn on.
- * @returns An image when the element has a background image, its
- * background color when that is not transparent, else the parent's.
+ * @returns Unknown when the element has a background image or a background
+ * color Lys does not convert; otherwise its background color laid over the
+ * parent's backdrop, or the parent's backdrop when the snapshot gives no
+ * background color.
  */
 function findTextBackdrop(
   tree: SnapshotTree,
@@ -549,13 +680,14 @@ function findTextBackdrop(
   parentBackdrop: TextBackdrop
 ): TextBackdrop {
   if (readLayoutStyle(tree, layoutIndex, "background-image") !== "none") {
-    return Object.freeze({ kind: "image" })
+    return UNKNOWN_BACKDROP
   }
-  const color = parseRgbColor(
-    readLayoutStyle(tree, layoutIndex, "background-color")
-  )
-  if (color === undefined || color.alpha === 0) return parentBackdrop
-  return Object.freeze({ kind: "color", color })
+  const value = readLayoutStyle(tree, layoutIndex, "background-color")
+  if (value === "") return parentBackdrop
+  const color = parseCssColor(value)
+  return color === undefined
+    ? UNKNOWN_BACKDROP
+    : layBackgroundColor(color, parentBackdrop)
 }
 
 /**
@@ -645,24 +777,66 @@ function isTextBoxLargeEnough(
 }
 
 /**
- * Answers whether a text's color stands out from what it is drawn on.
+ * Answers whether two opaque colors can be told apart.
  *
- * @param color - Text color, or undefined when it cannot be judged.
- * @param backdrop - What the text is drawn on.
- * @returns False only when the backdrop is a color and every channel of the
- * text color is within {@link MAXIMUM_INVISIBLE_COLOR_DIFFERENCE} of it.
+ * @param color - Color a person sees.
+ * @param base - Color beneath it.
+ * @returns True when a channel differs by more than
+ * {@link MAXIMUM_INVISIBLE_COLOR_DIFFERENCE}.
  */
-function isColorDistinct(
-  color: RgbColor | undefined,
-  backdrop: TextBackdrop
-): boolean {
-  if (color === undefined || backdrop.kind === "image") return true
+function isColorDistinct(color: SrgbColor, base: SrgbColor): boolean {
   return [
-    color.red - backdrop.color.red,
-    color.green - backdrop.color.green,
-    color.blue - backdrop.color.blue
+    color.red - base.red,
+    color.green - base.green,
+    color.blue - base.blue
   ].some(
     (difference) => Math.abs(difference) > MAXIMUM_INVISIBLE_COLOR_DIFFERENCE
+  )
+}
+
+/**
+ * Answers whether a text's color can be seen on what it is drawn on.
+ *
+ * @param value - Computed `color` of the text.
+ * @param backdrop - What the text is drawn on.
+ * @returns False for a fully transparent color, and for a color that,
+ * blended over a known backdrop, cannot be told from it; true otherwise,
+ * including for a color Lys does not convert.
+ */
+function isTextColorVisible(value: string, backdrop: TextBackdrop): boolean {
+  const color = parseCssColor(value)
+  if (color === undefined) return true
+  if (color.alpha === 0) return false
+  if (backdrop.kind === "unknown") return true
+  return isColorDistinct(blendColor(color, backdrop.color), backdrop.color)
+}
+
+/**
+ * Answers whether a person can see a text that has a layout box.
+ *
+ * @param tree - Snapshot document.
+ * @param layoutIndex - Index of the text's layout box.
+ * @param bounds - Text's box: x, y, width, height.
+ * @param context - Visibility context the text's parent passes on.
+ * @returns True for `visibility: visible`, an opacity above 0 through its
+ * ancestors, a box that shows at least 2 by 2 pixels in the part of the page
+ * it can be seen in, and a color that can be seen on its backdrop.
+ */
+function isRenderedTextVisible(
+  tree: SnapshotTree,
+  layoutIndex: number,
+  bounds: readonly [number, number, number, number],
+  context: VisibilityContext
+): boolean {
+  if (readLayoutStyle(tree, layoutIndex, "visibility") !== "visible") {
+    return false
+  }
+  if (context.opacity <= 0 || !isTextBoxLargeEnough(bounds, context.clip)) {
+    return false
+  }
+  return isTextColorVisible(
+    readLayoutStyle(tree, layoutIndex, "color"),
+    context.backdrop
   )
 }
 
@@ -673,13 +847,16 @@ function isColorDistinct(
  * @param index - Index of the text node.
  * @param text - Its text.
  * @returns True outside `<body>`, for whitespace, and for text that has a
- * layout box, `visibility: visible`, a color that is not transparent, an
- * opacity above 0 through its ancestors, at least 2 by 2 pixels left once
- * cut by every `overflow: hidden` or `clip` ancestor and the page's top and
- * left edges, and a color that stands out from its background.
+ * layout box and passes {@link isRenderedTextVisible}. Content is cut by
+ * every `overflow: hidden` or `clip` ancestor and the page's top and left
+ * edges; a scrolling ancestor that can be seen lets its whole content be
+ * seen, since a person can scroll to it. Colors in any syntax
+ * {@link parseCssColor} converts are compared, partly transparent ones
+ * blended as the browser paints them.
  * @remarks Every value comes from the browser's layout, so the page's
- * scripts cannot change the answer. Text covered by another element and
- * text hidden by `clip-path` are not detected.
+ * scripts cannot change the answer. Text covered by another element, text
+ * hidden by `clip-path` or `filter`, and colors Lys does not convert are not
+ * detected.
  */
 function isTextNodeVisible(
   tree: SnapshotTree,
@@ -692,14 +869,7 @@ function isTextNodeVisible(
   const bounds =
     layoutIndex === undefined ? undefined : tree.layout.bounds[layoutIndex]
   if (layoutIndex === undefined || bounds === undefined) return false
-  if (readLayoutStyle(tree, layoutIndex, "visibility") !== "visible")
-    return false
-  const color = parseRgbColor(readLayoutStyle(tree, layoutIndex, "color"))
-  if (color?.alpha === 0 || context.opacity <= 0) return false
-  return (
-    isTextBoxLargeEnough(bounds, context.clip) &&
-    isColorDistinct(color, context.backdrop)
-  )
+  return isRenderedTextVisible(tree, layoutIndex, bounds, context)
 }
 
 /**
@@ -819,10 +989,9 @@ export function formatCutPageText(text: string): string {
  * exhaust the call stack.
  */
 export function buildVisibleHtml(snapshot: PageSnapshot): VisibleHtmlResult {
+  const nodeCount = snapshot.documents[0]?.nodes.nodeType.length ?? 0
+  if (nodeCount > MAXIMUM_SNAPSHOT_NODES) return TOO_COMPLEX_RESULT
   const tree = buildSnapshotTree(snapshot)
-  if (tree.nodes.nodeType.length > MAXIMUM_SNAPSHOT_NODES) {
-    return Object.freeze({ status: "too-complex" })
-  }
   const pendingSteps: HtmlStep[] = [{ kind: "node", index: 0 }]
   const parts: string[] = []
   let length = 0

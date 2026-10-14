@@ -8,7 +8,7 @@ import {
   type Server,
   type ServerResponse
 } from "node:http"
-import { connect, type AddressInfo, type Socket } from "node:net"
+import { connect, isIP, type AddressInfo, type Socket } from "node:net"
 import type { Duplex } from "node:stream"
 import {
   ConnectionAddressError,
@@ -123,6 +123,12 @@ const DEFAULT_HTTP_PORT = 80
 
 /** Highest TCP port, inclusive. */
 const MAXIMUM_TCP_PORT = 65_535
+
+/** Lowest HTTP status a response can be relayed with, inclusive. */
+const MINIMUM_HTTP_STATUS = 100
+
+/** Highest HTTP status a response can be relayed with, inclusive. */
+const MAXIMUM_HTTP_STATUS = 999
 
 /** Finds the host and port of a CONNECT target, a host name or IP literal. */
 const CONNECT_TARGET_PATTERN =
@@ -286,16 +292,21 @@ function startTunnelRelay(
  * @param upstreamResponse - Response of the remote server.
  * @param response - Response to the client.
  * @param updateReceivedByteCount - Counts each chunk received.
+ * @remarks A status outside 100 to 999, which no response can be sent with,
+ * closes both connections instead, as an unreadable response would.
  */
 function sendUpstreamResponse(
   upstreamResponse: IncomingMessage,
   response: ServerResponse,
   updateReceivedByteCount: (byteCount: number) => void
 ): void {
-  response.writeHead(
-    upstreamResponse.statusCode ?? 502,
-    buildPassedOnHeaders(upstreamResponse.headers)
-  )
+  const statusCode = upstreamResponse.statusCode ?? 0
+  if (statusCode < MINIMUM_HTTP_STATUS || statusCode > MAXIMUM_HTTP_STATUS) {
+    upstreamResponse.socket.destroy()
+    response.socket?.destroy()
+    return
+  }
+  response.writeHead(statusCode, buildPassedOnHeaders(upstreamResponse.headers))
   upstreamResponse.on("data", (chunk: Buffer) =>
     updateReceivedByteCount(chunk.byteLength)
   )
@@ -356,8 +367,9 @@ function closeProxyServer(
  * that send its random credentials. It tunnels `CONNECT host:port` requests
  * and forwards absolute-form `http://` requests. Every outbound connection
  * resolves its host through the checked lookup, so a host with any blocked
- * address is refused, and is checked again on the address the socket
- * reached, which covers IP literals and rebinding. A refusal closes the
+ * address is refused; a blocked IP literal is refused without connecting;
+ * and every connection is checked again on the address the socket reached,
+ * which covers rebinding. A refusal closes the
  * client's connection and is kept for {@link PageProxy.findRefusal}. Once a
  * limit is passed, every connection is closed and new ones are refused.
  * Owns its server and every client and upstream socket. Lifecycle: ready
@@ -540,7 +552,7 @@ export default class PageProxy {
       client.end(BAD_CONNECT_RESPONSE)
       return
     }
-    if (!this.#offerConnection()) {
+    if (this.#refuseBlockedIpAddress(target) || !this.#offerConnection()) {
       client.destroy()
       return
     }
@@ -571,7 +583,10 @@ export default class PageProxy {
       response.end()
       return
     }
-    if (!this.#offerConnection()) {
+    if (
+      this.#refuseBlockedIpAddress(forward.target) ||
+      !this.#offerConnection()
+    ) {
       request.socket.destroy()
       return
     }
@@ -641,6 +656,22 @@ export default class PageProxy {
       request.socket.destroy()
     })
     request.pipe(upstreamRequest)
+  }
+
+  /**
+   * Refuses a target that is an IP address the address rule blocks, before
+   * any connection to it, since a socket skips the lookup for an IP address.
+   *
+   * @param target - Host and port a client asked for.
+   * @returns True when the target was refused and its refusal recorded; false
+   * when it is a host name, which the checked lookup judges, or an allowed
+   * IP address.
+   */
+  #refuseBlockedIpAddress(target: ProxyTarget): boolean {
+    if (isIP(target.host) === 0) return false
+    if (!this.#dependencies.isBlockedAddress(target.host)) return false
+    this.#addRefusal(target, new ConnectionAddressError("blocked-address"))
+    return true
   }
 
   /**

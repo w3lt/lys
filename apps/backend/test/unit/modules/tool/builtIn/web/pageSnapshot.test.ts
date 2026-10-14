@@ -29,7 +29,9 @@ const TEXT_NODE = 3
  */
 async function buildVisibleHtmlOf(html: string): Promise<VisibleHtmlResult> {
   const page = await openTestPage(html)
-  return buildVisibleHtml(await getPageSnapshot(page))
+  const snapshot = await getPageSnapshot(page)
+  if (snapshot.status !== "taken") throw new Error("Expected a snapshot")
+  return buildVisibleHtml(snapshot.snapshot)
 }
 
 /**
@@ -291,6 +293,73 @@ describe("buildVisibleHtml", () => {
     BROWSER_TEST_TIMEOUT_MS
   )
 
+  it(
+    "compares colors written in any CSS color syntax with what they are drawn on",
+    async () => {
+      const html = findBuiltHtml(
+        await buildVisibleHtmlOf(
+          `<style>
+            body { margin: 0; background: oklch(14.1% 0.005 285.823); color: #fff }
+            .white-band { background: #fff; color: #000 }
+          </style>
+          <p>shown-on-oklch-body</p>
+          <p style="background: color-mix(in oklab, #000 80%, transparent)">shown-on-color-mix</p>
+          <p style="background: lab(10 0 0)">shown-on-lab</p>
+          <p style="background: color(display-p3 0 0 0)">shown-on-display-p3</p>
+          <p style="color: oklch(14.1% 0.005 285.823)">hidden-same-as-body</p>
+          <div class="white-band">
+            <p style="color: oklch(1 0 0)">hidden-oklch-white</p>
+            <p style="color: color(srgb 1 1 1)">hidden-srgb-white</p>
+            <p style="color: lab(100 0 0)">hidden-lab-white</p>
+            <p style="color: oklch(0 0 0 / 0)">hidden-transparent-oklch</p>
+            <p style="color: rgba(0, 0, 0, 0.03)">hidden-faint</p>
+            <p style="color: oklch(0.2 0 0)">shown-dark-oklch</p>
+          </div>`
+        )
+      )
+
+      for (const shown of [
+        "shown-on-oklch-body",
+        "shown-on-color-mix",
+        "shown-on-lab",
+        "shown-on-display-p3",
+        "shown-dark-oklch"
+      ]) {
+        expect(html).toContain(shown)
+      }
+      expect(html).not.toMatch(/hidden-/)
+    },
+    BROWSER_TEST_TIMEOUT_MS
+  )
+
+  it(
+    "keeps text a person can scroll to inside a scrolling area of a page that hides its own overflow",
+    async () => {
+      const paragraphs = Array.from(
+        { length: 40 },
+        (_, index) => `<p>paragraph-${index + 1}.</p>`
+      ).join("")
+
+      const html = findBuiltHtml(
+        await buildVisibleHtmlOf(
+          `<style>
+            html, body { height: 100%; overflow: hidden; margin: 0 }
+            main { height: 100%; overflow-y: auto }
+            .away { position: absolute; left: -9999px; height: 50px; overflow: auto }
+          </style>
+          <main>${paragraphs}</main>
+          <div class="away"><p>hidden-in-a-scrolling-area-out-of-sight</p></div>`
+        )
+      )
+
+      for (let index = 1; index <= 40; index += 1) {
+        expect(html).toContain(`paragraph-${index}.`)
+      }
+      expect(html).not.toContain("hidden-in-a-scrolling-area-out-of-sight")
+    },
+    BROWSER_TEST_TIMEOUT_MS
+  )
+
   it("cuts very long HTML at its limit without splitting a character", () => {
     const text = `${"m".repeat(MAXIMUM_PAGE_TEXT_LENGTH - 4)}🦋🦋🦋`
 
@@ -334,4 +403,44 @@ describe("buildVisibleHtml", () => {
 
     expect(buildVisibleHtml(snapshot)).toEqual({ status: "too-complex" })
   })
+})
+
+describe("getPageSnapshot", () => {
+  it(
+    "refuses a page with more nodes than its limit before taking its snapshot",
+    async () => {
+      const page = await openTestPage(
+        `<script>
+          const moths = document.createDocumentFragment()
+          for (let index = 0; index <= ${MAXIMUM_SNAPSHOT_NODES}; index += 1) {
+            moths.appendChild(document.createElement("i"))
+          }
+          document.body.appendChild(moths)
+        </script>`
+      )
+
+      expect(await getPageSnapshot(page)).toEqual({ status: "too-complex" })
+    },
+    BROWSER_TEST_TIMEOUT_MS
+  )
+
+  it(
+    "counts only the nodes a page still has, not those it threw away",
+    async () => {
+      const page = await openTestPage(
+        `<p>Moths fly at night.</p>
+        <script>
+          for (let round = 0; round < 3; round += 1) {
+            const discarded = document.createElement("div")
+            discarded.innerHTML = "<i></i>".repeat(${MAXIMUM_SNAPSHOT_NODES})
+          }
+        </script>`
+      )
+
+      const snapshot = await getPageSnapshot(page)
+
+      expect(snapshot.status).toBe("taken")
+    },
+    BROWSER_TEST_TIMEOUT_MS
+  )
 })

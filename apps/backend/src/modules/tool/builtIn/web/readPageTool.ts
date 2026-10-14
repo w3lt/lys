@@ -39,8 +39,8 @@ export const PAGE_READ_TIMEOUT_MS = 30_000
 
 /**
  * Most milliseconds a read waits in production, once the page's document
- * has loaded, for the page's network to go quiet before reading what has
- * rendered.
+ * has arrived, for its DOM to be ready and its network to go quiet before
+ * reading what has rendered.
  */
 export const PAGE_SETTLE_TIMEOUT_MS = 10_000
 

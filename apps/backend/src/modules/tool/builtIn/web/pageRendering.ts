@@ -53,8 +53,9 @@ export type PageRenderingDependencies = ConnectionAddressRule &
      */
     readTimeoutMs: number
     /**
-     * Most milliseconds the read waits, once the page's document has loaded,
-     * for the page's network to go quiet; a positive integer.
+     * Most milliseconds the read waits, once the page's document has
+     * arrived, for its DOM to be ready and its network to go quiet; a
+     * positive integer. What has rendered by then is read.
      */
     settleTimeoutMs: number
   }>
@@ -149,6 +150,23 @@ type PageRead = Readonly<{
   deadlineMs: number
 }>
 
+/** The one page of a read and the navigations of its own frame that failed. */
+type ReadPage = Readonly<{
+  /** Page of the read, in the read's browser. */
+  page: Page
+  /**
+   * Failed navigations of the page's own frame, in order, for the whole
+   * read: its first document's and every later one's.
+   */
+  failedNavigations: readonly Request[]
+}>
+
+/** A failed outcome, which every step's result type includes. */
+type FailedRendering = Readonly<{
+  status: "failed"
+  failure: PageRenderingFailure
+}>
+
 /** Outcome of starting the browser. */
 type BrowserLaunchResult =
   | Readonly<{
@@ -184,6 +202,23 @@ const PAGE_PROXY_LIMITS: PageProxyLimits = Object.freeze({
   maximumConnections: 256,
   maximumReceivedBytes: 64 * 1024 * 1024
 })
+
+/**
+ * Rule of Chromium's proxy bypass list that sends this machine's own
+ * addresses through the proxy as well, so the address rule refuses them.
+ * Playwright adds it by default but leaves it out when its environment says
+ * so; Lys names it itself.
+ */
+const PROXY_LOOPBACK_RULE = "<-loopback>"
+
+/** Load states the read waits for once the document has arrived, in order. */
+const SETTLE_LOAD_STATES = Object.freeze([
+  "domcontentloaded",
+  "networkidle"
+] as const)
+
+/** Scheme of the page Chromium shows when a navigation fails. */
+const BROWSER_ERROR_PAGE_SCHEME = "chrome-error:"
 
 /** Milliseconds kept at the end of a read for taking the page's snapshot. */
 const SNAPSHOT_RESERVE_MS = 2_000
@@ -240,10 +275,7 @@ const DEFAULT_HTTP_PORT = 80
  * @param failure - Why the page could not be read.
  * @returns A frozen failed result.
  */
-function buildFailedRendering(failure: PageRenderingFailure): Readonly<{
-  status: "failed"
-  failure: PageRenderingFailure
-}> {
+function buildFailedRendering(failure: PageRenderingFailure): FailedRendering {
   return Object.freeze({ status: "failed", failure })
 }
 
@@ -341,12 +373,13 @@ async function waitForReadStep<TResult>(
  *
  * @param read - Read in progress.
  * @returns Launch options: the executable, headless, Chromium's sandbox on,
- * every request through the read's proxy with its credentials, and a start
- * timeout of the time left.
+ * every request through the read's proxy with its credentials, this
+ * machine's own addresses included, and a start timeout of the time left.
  */
 function buildLaunchOptions(read: PageRead): LaunchOptions {
   const proxy = Object.freeze({
     server: read.proxy.url,
+    bypass: PROXY_LOOPBACK_RULE,
     username: read.proxy.credentials.username,
     password: read.proxy.credentials.password
   })
@@ -397,23 +430,6 @@ function routeTextlessResource(route: Route): Promise<void> {
 }
 
 /**
- * Opens the one page of a read in a fresh browser context.
- *
- * @param browser - Browser of the read.
- * @returns A page whose context keeps no service worker and accepts no
- * download, and that never fetches images, fonts, or media.
- */
-async function openReadPage(browser: Browser): Promise<Page> {
-  const context = await browser.newContext({
-    serviceWorkers: "block",
-    acceptDownloads: false
-  })
-  const page = await context.newPage()
-  await page.route("**/*", routeTextlessResource)
-  return page
-}
-
-/**
  * Keeps a request when it is a failed navigation of the page itself.
  *
  * @param failedNavigations - Failed navigations so far, in order.
@@ -428,6 +444,28 @@ function addFailedNavigation(
   if (request.isNavigationRequest() && request.frame() === page.mainFrame()) {
     failedNavigations.push(request)
   }
+}
+
+/**
+ * Opens the one page of a read in a fresh browser context.
+ *
+ * @param browser - Browser of the read.
+ * @returns A page whose context keeps no service worker and accepts no
+ * download, and that never fetches images, fonts, or media, with the
+ * failed navigations of its own frame kept from now on.
+ */
+async function openReadPage(browser: Browser): Promise<ReadPage> {
+  const context = await browser.newContext({
+    serviceWorkers: "block",
+    acceptDownloads: false
+  })
+  const page = await context.newPage()
+  await page.route("**/*", routeTextlessResource)
+  const failedNavigations: Request[] = []
+  page.on("requestfailed", (request) =>
+    addFailedNavigation(failedNavigations, page, request)
+  )
+  return Object.freeze({ page, failedNavigations })
 }
 
 /**
@@ -496,7 +534,7 @@ function classifyDocumentResponse(response: Response): DocumentReadability {
 async function classifyFailedNavigation(
   request: Request,
   proxy: PageProxy
-): Promise<DocumentNavigationResult> {
+): Promise<FailedRendering> {
   const target = new URL(request.url())
   const refusal = proxy.findRefusal(target.hostname, findUrlPort(target))
   if (refusal !== undefined) {
@@ -538,25 +576,21 @@ async function classifyNavigationFailure(
 }
 
 /**
- * Loads the page's document, following its redirects.
+ * Starts loading the page's document, following its HTTP redirects.
  *
- * @param page - Page of the read.
+ * @param readPage - Page of the read.
  * @param read - Read in progress.
- * @returns The response that delivered the document once its DOM is ready,
- * or why it did not load.
+ * @returns The response that delivered the document once the browser has
+ * started showing it, or why it did not arrive.
  * @throws When the navigation failed in an unrecognized way.
  */
 async function navigateToDocument(
-  page: Page,
+  readPage: ReadPage,
   read: PageRead
 ): Promise<DocumentNavigationResult> {
-  const failedNavigations: Request[] = []
-  page.on("requestfailed", (request) =>
-    addFailedNavigation(failedNavigations, page, request)
-  )
   try {
-    const response = await page.goto(read.url, {
-      waitUntil: "domcontentloaded",
+    const response = await readPage.page.goto(read.url, {
+      waitUntil: "commit",
       timeout: getRemainingTimeMs(read)
     })
     if (response === null) {
@@ -566,33 +600,91 @@ async function navigateToDocument(
   } catch (error) {
     return classifyNavigationFailure(
       error,
-      failedNavigations.at(-1),
+      readPage.failedNavigations.at(-1),
       read.proxy
     )
   }
 }
 
 /**
- * Waits until the page's network has been quiet for 500 milliseconds.
+ * Waits for the page to reach one load state before a deadline.
  *
- * @param page - Page whose document has loaded.
- * @param read - Read in progress.
- * @returns A promise that settles once the network went quiet, or once the
- * settle limit, or the read's time left minus the snapshot's reserve, is
- * reached; reaching it is not a failure.
+ * @param page - Page of the read.
+ * @param state - Load state to wait for.
+ * @param deadlineMs - `performance.now()` value by which to stop waiting.
+ * @returns True once the state is reached; false when the deadline passes
+ * first, which is not a failure.
  * @throws When waiting fails for another reason.
  */
-async function waitForNetworkQuiet(page: Page, read: PageRead): Promise<void> {
-  const timeoutMs = Math.min(
-    read.dependencies.settleTimeoutMs,
-    getRemainingTimeMs(read) - SNAPSHOT_RESERVE_MS
-  )
-  if (timeoutMs <= 0) return
+async function waitForLoadStateBefore(
+  page: Page,
+  state: (typeof SETTLE_LOAD_STATES)[number],
+  deadlineMs: number
+): Promise<boolean> {
+  const timeoutMs = Math.floor(deadlineMs - performance.now())
+  if (timeoutMs <= 0) return false
   try {
-    await page.waitForLoadState("networkidle", { timeout: timeoutMs })
+    await page.waitForLoadState(state, { timeout: timeoutMs })
+    return true
   } catch (error) {
     if (!(error instanceof playwrightErrors.TimeoutError)) throw error
+    return false
   }
+}
+
+/**
+ * Waits for the page's DOM to be ready, then for its network to have been
+ * quiet for 500 milliseconds.
+ *
+ * @param page - Page whose document has arrived.
+ * @param read - Read in progress.
+ * @returns A promise that settles once both are reached, or once the settle
+ * limit, or the read's time left minus the snapshot's reserve, is reached;
+ * reaching it is not a failure, and what has rendered is read.
+ * @throws When waiting fails for another reason.
+ */
+async function waitForPageToSettle(page: Page, read: PageRead): Promise<void> {
+  const deadlineMs = Math.min(
+    performance.now() + read.dependencies.settleTimeoutMs,
+    read.deadlineMs - SNAPSHOT_RESERVE_MS
+  )
+  for (const state of SETTLE_LOAD_STATES) {
+    const isReached = await waitForLoadStateBefore(page, state, deadlineMs)
+    if (!isReached) return
+  }
+}
+
+/**
+ * Decides why the page ended on the browser's error page.
+ *
+ * @param readPage - Page of the read, which shows that error page.
+ * @param proxy - Proxy of the read.
+ * @returns What the last failed navigation of the page shows: a later
+ * navigation of its own, such as a `<meta>` refresh or a script, failed.
+ * @throws When no navigation of the page failed, which the browser does not
+ * do before it shows its error page.
+ */
+async function classifyBrowserErrorPage(
+  readPage: ReadPage,
+  proxy: PageProxy
+): Promise<FailedRendering> {
+  const failedNavigation = readPage.failedNavigations.at(-1)
+  if (failedNavigation === undefined) {
+    throw new Error("A page showed the browser's error page without failing")
+  }
+  return classifyFailedNavigation(failedNavigation, proxy)
+}
+
+/**
+ * Removes the fragment of a URL.
+ *
+ * @param url - Absolute URL.
+ * @returns The URL without its `#` part.
+ */
+function removeUrlFragment(url: string): string {
+  const parsedUrl = new URL(url)
+  parsedUrl.hash = ""
+  return parsedUrl.href
 }
 
 /**
@@ -606,7 +698,9 @@ async function readHtmlPage(
   page: Page,
   url: PageUrl
 ): Promise<PageRenderingResult> {
-  const visibleHtml = buildVisibleHtml(await getPageSnapshot(page))
+  const snapshot = await getPageSnapshot(page)
+  const visibleHtml =
+    snapshot.status === "taken" ? buildVisibleHtml(snapshot.snapshot) : snapshot
   if (visibleHtml.status === "too-complex") {
     return buildFailedRendering(Object.freeze({ kind: "too-complex" }))
   }
@@ -622,15 +716,22 @@ async function readHtmlPage(
 /**
  * Reads a plain-text page.
  *
- * @param response - Response that delivered the text.
+ * @param page - Page that shows the text.
  * @param url - URL the browser shows, checked.
+ * @param read - Read in progress.
  * @returns The page's text, cut at {@link MAXIMUM_PAGE_TEXT_LENGTH}.
+ * @remarks Reads the text the browser shows, in Playwright's own script
+ * world, which a page's scripts cannot reach; a plain-text page has none.
  */
 async function readPlainTextPage(
-  response: Response,
-  url: PageUrl
+  page: Page,
+  url: PageUrl,
+  read: PageRead
 ): Promise<PageRenderingResult> {
-  const text = await response.text()
+  const text =
+    (await page
+      .locator("body")
+      .textContent({ timeout: Math.max(1, getRemainingTimeMs(read)) })) ?? ""
   const isTruncated = text.length > MAXIMUM_PAGE_TEXT_LENGTH
   const renderedPage: RenderedPage = Object.freeze({
     url,
@@ -642,33 +743,41 @@ async function readPlainTextPage(
 }
 
 /**
- * Reads the page once its document has loaded.
+ * Reads the page once its document has arrived.
  *
- * @param page - Page of the read.
+ * @param readPage - Page of the read.
  * @param response - Response that delivered the document.
  * @param read - Read in progress.
- * @returns What the page shows, or why it cannot be read.
+ * @returns What the page shows once it settled, or why it cannot be read:
+ * the document's status or media type, why a later navigation of the page
+ * failed, or the rules the URL it ended on breaks. A plain-text document is
+ * read as text while the page still shows it, and as HTML once the page
+ * went on to another document.
  */
 async function readLoadedDocument(
-  page: Page,
+  readPage: ReadPage,
   response: Response,
   read: PageRead
 ): Promise<PageRenderingResult> {
   const readability = classifyDocumentResponse(response)
   if (readability.status === "failed") return readability
-  await waitForNetworkQuiet(page, read)
-  const finalUrl = parsePageUrl(page.url())
+  const { page } = readPage
+  await waitForPageToSettle(page, read)
+  const shownUrl = page.url()
+  if (shownUrl.startsWith(BROWSER_ERROR_PAGE_SCHEME)) {
+    return classifyBrowserErrorPage(readPage, read.proxy)
+  }
+  const finalUrl = parsePageUrl(shownUrl)
   if (finalUrl.status === "invalid") {
     return buildFailedRendering(
       Object.freeze({ kind: "invalid-redirect", problem: finalUrl.problem })
     )
   }
-  switch (readability.mediaType) {
-    case "text/html":
-      return readHtmlPage(page, finalUrl.url)
-    case "text/plain":
-      return readPlainTextPage(response, finalUrl.url)
-  }
+  const isShowingDocument =
+    removeUrlFragment(shownUrl) === removeUrlFragment(response.url())
+  return readability.mediaType === "text/plain" && isShowingDocument
+    ? readPlainTextPage(page, finalUrl.url, read)
+    : readHtmlPage(page, finalUrl.url)
 }
 
 /**
@@ -696,11 +805,11 @@ async function readInBrowser(
   read: PageRead,
   browser: Browser
 ): Promise<PageRenderingResult> {
-  const page = await openReadPage(browser)
+  const readPage = await openReadPage(browser)
   try {
-    const navigation = await navigateToDocument(page, read)
+    const navigation = await navigateToDocument(readPage, read)
     if (navigation.status === "failed") return navigation
-    return await readLoadedDocument(page, navigation.response, read)
+    return await readLoadedDocument(readPage, navigation.response, read)
   } catch (error) {
     if (!isPageCrash(error)) throw error
     return buildFailedRendering(Object.freeze({ kind: "crashed" }))
@@ -747,8 +856,9 @@ async function readThroughProxy(read: PageRead): Promise<PageRenderingResult> {
  * @remarks Starts a proxy that applies the address rule to every connection,
  * then Chromium with that proxy, Chromium's sandbox, and a context that keeps
  * nothing between reads. The page's scripts run and its redirects are
- * followed. Once its document has loaded, the read waits for the network to
- * go quiet, then stops the page's scripts and takes a snapshot. The browser
+ * followed. Once its document has arrived, the read waits, up to the settle
+ * limit, for its DOM to be ready and its network to go quiet, then stops the
+ * page's scripts and takes a snapshot of what has rendered. The browser
  * and the proxy are closed whatever the outcome, Stop included, so nothing
  * keeps running after the read.
  */

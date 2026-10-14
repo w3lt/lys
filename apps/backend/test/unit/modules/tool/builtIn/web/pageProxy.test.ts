@@ -3,7 +3,7 @@ import {
   type IncomingHttpHeaders,
   type IncomingMessage
 } from "node:http"
-import { connect, type Socket } from "node:net"
+import { connect, createServer, type AddressInfo, type Socket } from "node:net"
 import { describe, expect, it, onTestFinished } from "vitest"
 import PageProxy, {
   type PageProxyCredentials,
@@ -235,6 +235,29 @@ function tryConnecting(port: number): Promise<string> {
   })
 }
 
+/**
+ * Starts a TCP server that answers every connection with fixed bytes and
+ * ends it, reading and discarding what the peer sends so that it sees the
+ * peer close. It is closed when the current test finishes, which waits for
+ * every connection to close.
+ *
+ * @param answer - Bytes sent to each connection, such as a malformed HTTP
+ * response.
+ * @returns The port it listens on at 127.0.0.1.
+ */
+async function startRawServer(answer: string): Promise<number> {
+  const server = createServer((socket) => {
+    socket.on("error", () => socket.destroy())
+    socket.resume()
+    socket.end(answer)
+  })
+  onTestFinished(
+    () => new Promise<void>((resolve) => server.close(() => resolve()))
+  )
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+  return (server.address() as AddressInfo).port
+}
+
 describe("PageProxy", () => {
   it("tunnels a CONNECT to an allowed host and carries the page both ways", async () => {
     const server = await startPageServer(
@@ -338,7 +361,7 @@ describe("PageProxy", () => {
     })
   })
 
-  it("refuses a blocked IP address once its socket has connected", async () => {
+  it("refuses a CONNECT to a blocked IP address without connecting to it", async () => {
     const server = await startPageServer(answerWithBody("text/plain", "page"))
     const proxy = await openTestProxy({
       ...LOOPBACK_ONLY_DEPENDENCIES,
@@ -355,7 +378,76 @@ describe("PageProxy", () => {
     expect(proxy.findRefusal("127.0.0.1", server.port)?.kind).toBe(
       "blocked-address"
     )
+    expect(server.acceptedConnections).toHaveLength(0)
+  })
+
+  it("refuses a forwarded request to a blocked IP address without connecting to it", async () => {
+    const server = await startPageServer(answerWithBody("text/plain", "page"))
+    const proxy = await openTestProxy({
+      ...LOOPBACK_ONLY_DEPENDENCIES,
+      isBlockedAddress: () => true
+    })
+
+    const outcome = await sendForward(
+      proxy,
+      `http://127.0.0.1:${server.port}/moths`,
+      formatProxyAuthorization(proxy.credentials)
+    )
+
+    expect(outcome).toEqual({ status: "refused" })
+    expect(proxy.findRefusal("127.0.0.1", server.port)?.kind).toBe(
+      "blocked-address"
+    )
+    expect(server.acceptedConnections).toHaveLength(0)
+  })
+
+  it("refuses a host whose address is blocked by the time its socket has connected", async () => {
+    const server = await startPageServer(answerWithBody("text/plain", "page"))
+    let checkCount = 0
+    const proxy = await openTestProxy({
+      ...LOOPBACK_ONLY_DEPENDENCIES,
+      isBlockedAddress: () => {
+        checkCount += 1
+        return checkCount > 1
+      }
+    })
+
+    const outcome = await sendConnect(
+      proxy,
+      `pages.test:${server.port}`,
+      formatProxyAuthorization(proxy.credentials)
+    )
+
+    expect(outcome).toEqual({ status: "refused" })
+    expect(proxy.findRefusal("pages.test", server.port)?.kind).toBe(
+      "blocked-address"
+    )
     expect(server.receivedHeaders).toHaveLength(0)
+  })
+
+  it("closes a forwarded request whose server answers with a status below 100, and serves the next one", async () => {
+    const oddServer = await startRawServer(
+      "HTTP/1.1 099 Odd\r\nContent-Length: 0\r\n\r\n"
+    )
+    const server = await startPageServer(
+      answerWithBody("text/plain", "Moths fly at night.")
+    )
+    const proxy = await openTestProxy()
+    const authorization = formatProxyAuthorization(proxy.credentials)
+
+    const oddOutcome = await sendForward(
+      proxy,
+      `http://pages.test:${oddServer}/moths`,
+      authorization
+    )
+    const nextOutcome = await sendForward(
+      proxy,
+      `http://pages.test:${server.port}/moths`,
+      authorization
+    )
+
+    expect(oddOutcome).toEqual({ status: "refused" })
+    expect(nextOutcome).toMatchObject({ status: "answered", statusCode: 200 })
   })
 
   it("refuses a host without an address and records why", async () => {

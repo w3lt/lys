@@ -4,7 +4,7 @@ import {
   type ServerResponse
 } from "node:http"
 import type { AddressInfo } from "node:net"
-import { describe, expect, it, onTestFinished } from "vitest"
+import { describe, expect, it, onTestFinished, vi } from "vitest"
 import {
   getRenderedPage,
   type PageRenderingResult
@@ -102,26 +102,84 @@ function findRenderedPage(result: PageRenderingResult) {
 /**
  * Starts a server on the IPv6 loopback that a page may try to reach.
  *
- * @returns Its port and how many requests reached it; it closes after the
- * test.
+ * @returns Its port and how many TCP connections reached it; it closes after
+ * the test.
  */
 async function startPrivateServer(): Promise<
-  Readonly<{ port: number; countRequests: () => number }>
+  Readonly<{ port: number; countConnections: () => number }>
 > {
-  let requestCount = 0
+  let connectionCount = 0
   const server = createServer(
     (_request: IncomingMessage, response: ServerResponse) => {
-      requestCount += 1
       response.end("secret")
     }
   )
+  server.on("connection", () => {
+    connectionCount += 1
+  })
   onTestFinished(async () => {
     server.closeAllConnections()
     await new Promise<void>((resolve) => server.close(() => resolve()))
   })
   await new Promise<void>((resolve) => server.listen(0, "::1", resolve))
   const { port } = server.address() as AddressInfo
-  return { port, countRequests: () => requestCount }
+  return { port, countConnections: () => connectionCount }
+}
+
+/**
+ * Finds a port of the IPv6 loopback that nothing listens on.
+ *
+ * @returns A port that was free a moment ago and is closed again.
+ */
+async function findClosedPrivatePort(): Promise<number> {
+  const server = createServer()
+  await new Promise<void>((resolve) => server.listen(0, "::1", resolve))
+  const { port } = server.address() as AddressInfo
+  await new Promise<void>((resolve) => server.close(() => resolve()))
+  return port
+}
+
+/**
+ * Builds a route that sends the start of an HTML page and never ends it.
+ *
+ * @param html - Markup sent at once.
+ * @returns The route.
+ */
+function answerWithEndlessHtml(html: string): PageRoute {
+  return (_request, response) => {
+    response.writeHead(200, { "content-type": "text/html" })
+    response.write(html)
+  }
+}
+
+/**
+ * Builds a route that counts the requests it answers.
+ *
+ * @param route - Route that answers them.
+ * @returns The counting route and the count so far.
+ */
+function countRequests(
+  route: PageRoute
+): Readonly<{ route: PageRoute; count: () => number }> {
+  let requestCount = 0
+  return {
+    route: (request, response) => {
+      requestCount += 1
+      route(request, response)
+    },
+    count: () => requestCount
+  }
+}
+
+/**
+ * Waits until a browser this test process started is running.
+ *
+ * @returns A promise that settles once the process table shows one.
+ */
+async function waitForBrowserProcess(): Promise<void> {
+  while ((await listBrowserProcessIds()).length === 0) {
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
 }
 
 /**
@@ -248,8 +306,102 @@ describe("getRenderedPage", { timeout: BROWSER_TEST_TIMEOUT_MS }, () => {
     )
 
     expect(page.text).toContain("<p>Moths fly at night.</p>")
-    expect(privateServer.countRequests()).toBe(0)
+    expect(privateServer.countConnections()).toBe(0)
   })
+
+  it("keeps a page off this machine even when Playwright is told not to proxy it", async () => {
+    vi.stubEnv("PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK", "1")
+    onTestFinished(() => {
+      vi.unstubAllEnvs()
+    })
+    const privateServer = await startPrivateServer()
+    const server = await startPageServer(
+      answerWithBody(
+        "text/html",
+        `<p>Moths fly at night.</p><script>fetch("http://[::1]:${privateServer.port}/secret").catch(() => {})</script>`
+      )
+    )
+
+    const page = findRenderedPage(
+      await renderTestPage(buildTestPageUrl(server.port, "/moths"))
+    )
+
+    expect(page.text).toContain("<p>Moths fly at night.</p>")
+    expect(privateServer.countConnections()).toBe(0)
+  })
+
+  it("refuses a redirect to a blocked IP address where nothing listens", async () => {
+    const closedPort = await findClosedPrivatePort()
+    const server = await startPageServer(
+      routeByPath({
+        "/old": redirectTo(302, `http://[::1]:${closedPort}/moths`)
+      })
+    )
+
+    const result = await renderTestPage(buildTestPageUrl(server.port, "/old"))
+
+    expect(result).toEqual({
+      status: "failed",
+      failure: { kind: "blocked-address" }
+    })
+  })
+
+  it.each([
+    [
+      "a meta refresh to an address the rule blocks",
+      '<meta http-equiv="refresh" content="0;url=http://private.test/moths"><p>Moved.</p>',
+      "blocked-address"
+    ],
+    [
+      "a meta refresh to a host without an address",
+      '<meta http-equiv="refresh" content="0;url=http://missing.test/moths"><p>Moved.</p>',
+      "unresolvable-host"
+    ],
+    [
+      "a script navigation after loading to an address the rule blocks",
+      '<p>Moved.</p><script>addEventListener("load", () => location.assign("http://private.test/moths"))</script>',
+      "blocked-address"
+    ]
+  ])(
+    "says why the page could not be read after %s",
+    async (_name, redirectingPage, kind) => {
+      const server = await startPageServer(
+        routeByPath({ "/old": answerWithBody("text/html", redirectingPage) })
+      )
+
+      const result = await renderTestPage(buildTestPageUrl(server.port, "/old"))
+
+      expect(result).toEqual({ status: "failed", failure: { kind } })
+    }
+  )
+
+  it.each([
+    [
+      "a script that never arrives",
+      routeByPath({
+        "/moths": answerWithBody(
+          "text/html",
+          '<p>Moths fly at night.</p><script src="/never.js"></script><p>after</p>'
+        ),
+        "/never.js": holdRequests().route
+      })
+    ],
+    [
+      "a body that never ends",
+      answerWithEndlessHtml("<p>Moths fly at night.</p>")
+    ]
+  ])(
+    "reads what has rendered when the document waits on %s",
+    async (_name, route) => {
+      const server = await startPageServer(route)
+
+      const page = findRenderedPage(
+        await renderTestPage(buildTestPageUrl(server.port, "/moths"))
+      )
+
+      expect(page.text).toContain("<p>Moths fly at night.</p>")
+    }
+  )
 
   it("reads what has rendered when the page never stops loading", async () => {
     const server = await startPageServer(
@@ -332,6 +484,72 @@ describe("getRenderedPage", { timeout: BROWSER_TEST_TIMEOUT_MS }, () => {
       text: "Moths fly at night.\n\nThey rest by day.",
       isTruncated: false
     })
+  })
+
+  it("reads the beginning of a plain-text page far longer than the limit", async () => {
+    const line = "Moths fly at night.\n"
+    const lineCount = Math.ceil((24 * 1024 * 1024) / line.length)
+    const server = await startPageServer(
+      answerWithBody("text/plain", line.repeat(lineCount))
+    )
+
+    const page = findRenderedPage(
+      await renderTestPage(buildTestPageUrl(server.port, "/moths.txt"), {
+        readTimeoutMs: 25_000
+      })
+    )
+
+    expect(page.mediaType).toBe("text/plain")
+    expect(page.isTruncated).toBe(true)
+    expect(page.text).toHaveLength(MAXIMUM_PAGE_TEXT_LENGTH)
+    expect(page.text.startsWith(`${line}${line}`)).toBe(true)
+  })
+
+  it("reads the page a plain-text page refreshes to as that page", async () => {
+    const server = await startPageServer(
+      routeByPath({
+        "/moths.txt": (_request, response) => {
+          response.writeHead(200, {
+            "content-type": "text/plain",
+            refresh: "0;url=/moths"
+          })
+          response.end("Moved.")
+        },
+        "/moths": answerWithBody(
+          "text/html",
+          '<p>Moths fly at night.</p><p style="color: #fff">hidden-white</p>'
+        )
+      })
+    )
+
+    const page = findRenderedPage(
+      await renderTestPage(buildTestPageUrl(server.port, "/moths.txt"))
+    )
+
+    expect(page.mediaType).toBe("text/html")
+    expect(page.url).toBe(buildTestPageUrl(server.port, "/moths"))
+    expect(page.text).toContain("<p>Moths fly at night.</p>")
+    expect(page.text).not.toContain("hidden-white")
+  })
+
+  it("opens no other window a page asks for", async () => {
+    const popup = countRequests(answerWithParagraph("Popup."))
+    const server = await startPageServer(
+      routeByPath({
+        "/moths": answerWithBody(
+          "text/html",
+          '<p>Moths fly at night.</p><script>window.open("/popup")</script>'
+        ),
+        "/popup": popup.route
+      })
+    )
+
+    const page = findRenderedPage(
+      await renderTestPage(buildTestPageUrl(server.port, "/moths"))
+    )
+
+    expect(page.text).toContain("<p>Moths fly at night.</p>")
+    expect(popup.count()).toBe(0)
   })
 
   it("keeps only the beginning of a plain-text page longer than the limit", async () => {
@@ -454,7 +672,7 @@ describe("getRenderedPage", { timeout: BROWSER_TEST_TIMEOUT_MS }, () => {
       abortController.signal,
       buildPageServerDependencies()
     )
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await waitForBrowserProcess()
     abortController.abort(stopReason)
 
     await expect(read).rejects.toBe(stopReason)

@@ -56,6 +56,7 @@ function buildWaitingRead(
   return {
     target: { conversationId, assistantMessageId: REPLY.id, callId: call.id },
     call,
+    step: "approval",
     answer: {
       status: "awaiting-person",
       definition: buildToolDefinition("read_text_file"),
@@ -70,6 +71,9 @@ function buildWaitingRead(
 
 /** Route key of the tool-result endpoint for {@link FIRST_CALL}. */
 const FIRST_RESULT_ROUTE = `POST /api/v1/chat/${FIXTURE_CONVERSATION_ID}/replies/${REPLY.id}/tool-results/${FIRST_CALL.id}`
+
+/** Route key of the tool-approval endpoint for {@link FIRST_CALL}. */
+const FIRST_APPROVAL_ROUTE = `POST /api/v1/chat/${FIXTURE_CONVERSATION_ID}/replies/${REPLY.id}/tool-approvals/${FIRST_CALL.id}`
 
 /**
  * Loads fresh application, chat-view, and tool-call stores with the prompt
@@ -142,10 +146,10 @@ describe("ComposerToolCallPrompt", () => {
     expect(screen.getByRole("status")).toBeEmptyDOMElement()
   })
 
-  it("runs the tool and sends its result when the call is allowed, then shows the next call that waits", async () => {
+  it("sends the person's allowing answer, running nothing itself, then shows the next call that waits", async () => {
     const host = startNativeHostFake({ read_text_file: () => "Buy milk." })
     const backend = startBackendFake({
-      [FIRST_RESULT_ROUTE]: () => new Response(null, { status: 204 })
+      [FIRST_APPROVAL_ROUTE]: () => new Response(null, { status: 204 })
     })
     const { ComposerToolCallPrompt } = await loadFreshToolCallPrompt([
       buildWaitingRead(FIRST_CALL),
@@ -162,11 +166,9 @@ describe("ComposerToolCallPrompt", () => {
     await user.click(screen.getByRole("button", { name: "Allow once" }))
     await waitForRenderedWork()
 
-    expect(host.commands).toEqual([
-      { command: "read_text_file", args: { path: "/notes/todo.md" } }
-    ])
+    expect(host.commands).toEqual([])
     expect(backend.requests.map((request) => request.body)).toEqual([
-      { status: "succeeded", content: "Buy milk." }
+      { status: "allowed" }
     ])
     expect(screen.getByRole("group")).toHaveTextContent(
       "Read /notes/done.md. Nothing is changed."
@@ -227,7 +229,9 @@ describe("ComposerToolCallPrompt", () => {
     const unsentAnswer = { status: "succeeded", content: "Buy milk." } as const
     const { ComposerToolCallPrompt } = await loadFreshToolCallPrompt([
       {
-        ...buildWaitingRead(FIRST_CALL),
+        target: buildWaitingRead(FIRST_CALL).target,
+        call: FIRST_CALL,
+        step: "run",
         answer: {
           status: "send-failed",
           toolAnswer: unsentAnswer,

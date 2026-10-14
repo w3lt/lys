@@ -139,6 +139,30 @@ describe("createSettingsGroupSaves", () => {
     })
   })
 
+  it("applies a tools save after a secrets save sent before it, keeping both groups", async () => {
+    const { writes, readStoredDocument } = startSettingsFileHost()
+    const saves = createSettingsGroupSaves()
+
+    const secretsSave = saves.saveSecretsSettings({ tavilyApiKey: null })
+    const toolsSave = saves.saveToolSettings({
+      justRunToolNames: new Set(["find_files"])
+    })
+    await waitForMicrotasks()
+    const writesDuringFirst = writes.length
+    writes[0]?.resolve(null)
+    await secretsSave
+    await waitForMicrotasks()
+    writes[1]?.resolve(null)
+    await toolsSave
+
+    expect(writesDuringFirst).toBe(1)
+    expect(readStoredDocument()).toEqual({
+      ...STORED_SETTINGS_DOCUMENT,
+      secrets: { tavilyApiKey: null },
+      tools: { justRun: ["find_files"] }
+    })
+  })
+
   it("rejects only the caller of a save that failed and still runs the saves sent after it", async () => {
     const { writes, readStoredDocument } = startSettingsFileHost()
     const saves = createSettingsGroupSaves()

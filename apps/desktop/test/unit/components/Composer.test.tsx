@@ -74,7 +74,8 @@ const REPLY_SNAPSHOT = chatReplyEventSchema.parse({
   type: "reply-snapshot",
   conversationTitle: null,
   assistantMessage: REPLY,
-  pendingToolCalls: []
+  pendingToolCalls: [],
+  pendingToolApprovals: []
 })
 
 /** Start event of a turn that creates the fixture conversation. */
@@ -99,8 +100,8 @@ const BUILT_IN_AGENT_PAGE = buildAgentListPage([], {
 /** Call of {@link REPLY} that reads the fixture notes. */
 const READ_CALL = buildToolCall(10, "read_text_file")
 
-/** Route key of the tool-result endpoint for {@link READ_CALL}. */
-const READ_RESULT_ROUTE = `POST /api/v1/chat/${FIXTURE_CONVERSATION_ID}/replies/${REPLY.id}/tool-results/${READ_CALL.id}`
+/** Route key of the tool-approval endpoint for {@link READ_CALL}. */
+const READ_APPROVAL_ROUTE = `POST /api/v1/chat/${FIXTURE_CONVERSATION_ID}/replies/${REPLY.id}/tool-approvals/${READ_CALL.id}`
 
 /** {@link READ_CALL} as the tool-call store holds it while it asks first. */
 const WAITING_READ: HeldToolCall = Object.freeze({
@@ -110,6 +111,7 @@ const WAITING_READ: HeldToolCall = Object.freeze({
     callId: READ_CALL.id
   }),
   call: READ_CALL,
+  step: "approval",
   answer: Object.freeze({
     status: "awaiting-person",
     definition: buildToolDefinition("read_text_file"),
@@ -1011,7 +1013,7 @@ describe("Composer", () => {
     it("allows the call on Enter while the draft is empty, instead of sending a message", async () => {
       const host = startNativeHostFake({ read_text_file: () => "Buy milk." })
       const backend = startBackendFake({
-        [READ_RESULT_ROUTE]: () => new Response(null, { status: 204 })
+        [READ_APPROVAL_ROUTE]: () => new Response(null, { status: 204 })
       })
       const { Composer } = await loadFreshComposerWithWaitingCall()
       const user = userEvent.setup()
@@ -1022,14 +1024,9 @@ describe("Composer", () => {
       await user.type(getMessageField(), "{Enter}")
       await waitForRenderedWork()
 
-      expect(host.commands).toEqual([
-        { command: "read_text_file", args: { path: "/notes/todo.md" } }
-      ])
-      expect(listRouteKeys(backend)).toEqual([READ_RESULT_ROUTE])
-      expect(backend.requests[0]?.body).toEqual({
-        status: "succeeded",
-        content: "Buy milk."
-      })
+      expect(host.commands).toEqual([])
+      expect(listRouteKeys(backend)).toEqual([READ_APPROVAL_ROUTE])
+      expect(backend.requests[0]?.body).toEqual({ status: "allowed" })
       expect(
         screen.queryByRole("group", {
           name: "Tool call waiting for your answer"
@@ -1045,7 +1042,7 @@ describe("Composer", () => {
       async (_key, keys) => {
         startNativeHostFake({})
         const backend = startBackendFake({
-          [READ_RESULT_ROUTE]: () => new Response(null, { status: 204 })
+          [READ_APPROVAL_ROUTE]: () => new Response(null, { status: 204 })
         })
         const { Composer } = await loadFreshComposerWithWaitingCall()
         const user = userEvent.setup()
@@ -1059,9 +1056,9 @@ describe("Composer", () => {
         await user.type(getMessageField(), `Not that file${keys}`)
         await waitForRenderedWork()
 
-        expect(listRouteKeys(backend)).toEqual([READ_RESULT_ROUTE])
+        expect(listRouteKeys(backend)).toEqual([READ_APPROVAL_ROUTE])
         expect(backend.requests[0]?.body).toEqual({
-          status: "failed",
+          status: "rejected",
           reason: "declined",
           content: "The person declined this call. They said: Not that file"
         })
@@ -1072,7 +1069,7 @@ describe("Composer", () => {
     it("rejects the call without a reason on Escape while the draft is empty", async () => {
       startNativeHostFake({})
       const backend = startBackendFake({
-        [READ_RESULT_ROUTE]: () => new Response(null, { status: 204 })
+        [READ_APPROVAL_ROUTE]: () => new Response(null, { status: 204 })
       })
       const { Composer } = await loadFreshComposerWithWaitingCall()
       const user = userEvent.setup()
@@ -1085,7 +1082,7 @@ describe("Composer", () => {
 
       expect(backend.requests.map((request) => request.body)).toEqual([
         {
-          status: "failed",
+          status: "rejected",
           reason: "declined",
           content: "The person declined this call."
         }
@@ -1095,7 +1092,7 @@ describe("Composer", () => {
     it("rejects the call with the draft from the card's Reject button, and clears the draft", async () => {
       startNativeHostFake({})
       const backend = startBackendFake({
-        [READ_RESULT_ROUTE]: () => new Response(null, { status: 204 })
+        [READ_APPROVAL_ROUTE]: () => new Response(null, { status: 204 })
       })
       const { useChatViewStore, Composer } =
         await loadFreshComposerWithWaitingCall()
@@ -1110,7 +1107,7 @@ describe("Composer", () => {
 
       expect(backend.requests.map((request) => request.body)).toEqual([
         {
-          status: "failed",
+          status: "rejected",
           reason: "declined",
           content:
             "The person declined this call. They said: Use the other folder"
@@ -1147,7 +1144,9 @@ describe("Composer", () => {
       useToolCallStore.setState({
         heldCalls: [
           {
-            ...WAITING_READ,
+            target: WAITING_READ.target,
+            call: READ_CALL,
+            step: "run",
             answer: {
               status: "send-failed",
               toolAnswer: { status: "succeeded", content: "Buy milk." },
@@ -1181,7 +1180,7 @@ describe("Composer", () => {
       async (key) => {
         startNativeHostFake({})
         const backend = startBackendFake({
-          [READ_RESULT_ROUTE]: () => new Response(null, { status: 204 })
+          [READ_APPROVAL_ROUTE]: () => new Response(null, { status: 204 })
         })
         const { useChatViewStore, Composer } =
           await loadFreshComposerWithWaitingCall()

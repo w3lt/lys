@@ -9,6 +9,7 @@ import {
   chatInterruptedEventSchema,
   chatReplyPathParamsSchema,
   chatTitleEventSchema,
+  chatToolApprovalEventSchema,
   chatToolCallEventSchema,
   chatToolCallSchema,
   type ChatReplyPathParams
@@ -28,11 +29,18 @@ const chatReplySnapshotEventSchema = z.strictObject({
   /** Stored reply, including every delta sent to followers before this event. */
   assistantMessage: conversationAssistantMessageSchema,
   /**
-   * Tool calls sent and not yet answered when the snapshot was read, in the
-   * order sent; empty when the reply is not generating. Each pending call
-   * reaches a follower once: here or as a later `tool-call` event.
+   * Calls of client tools sent to run and not yet answered with their result
+   * when the snapshot was read, in the order sent; empty when the reply is
+   * not generating. Each run request reaches a follower once: here or as a
+   * later `tool-call` event.
    */
-  pendingToolCalls: z.array(chatToolCallSchema).readonly()
+  pendingToolCalls: z.array(chatToolCallSchema).readonly(),
+  /**
+   * Approval prompts sent and not yet answered when the snapshot was read, in
+   * the order sent; empty when the reply is not generating. Each prompt
+   * reaches a follower once: here or as a later `tool-approval` event.
+   */
+  pendingToolApprovals: z.array(chatToolCallSchema).readonly()
 })
 
 /**
@@ -51,7 +59,8 @@ export const chatReplyEventSchema = z.discriminatedUnion("type", [
   chatDoneEventSchema,
   chatInterruptedEventSchema,
   chatErrorEventSchema,
-  chatToolCallEventSchema
+  chatToolCallEventSchema,
+  chatToolApprovalEventSchema
 ])
 
 /** Typed event union accepted by the reply-events SSE transport. */

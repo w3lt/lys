@@ -27,8 +27,9 @@ React UI.
 
 `read_text_file` and `find_files` are the desktop side of the client tools that
 let Lys work with files on the user's machine. The desktop's tool-call store
-runs them for tool calls that pass the Ask me or Just run choice in the Tools
-pane; see [Desktop](/architecture/desktop/#tool-calls). The renderer reaches them through `readTextFile` and `findFiles` in
+runs them for the calls the backend sends to run: calls the person allowed, or
+calls of a tool set to Just run in the Tools pane. The backend's tool approval
+service decides which; see [Desktop](/architecture/desktop/#tool-calls). The renderer reaches them through `readTextFile` and `findFiles` in
 `apps/desktop/src/lib/apis/tauri/tools.ts`, which validate arguments, results,
 and declared failures with the schemas exported by `@lys/protocol`.
 
@@ -172,8 +173,9 @@ configuration belongs to the renderer, which applies it when it resolves a load
 
 The desktop automatically saves generation edits by reading this document,
 replacing its generation group, and saving the complete document. Load
-configuration edits are saved the same way, and so is the Tavily API key when
-the person saves or removes it in the Secrets pane. Runtime edits and
+configuration edits are saved the same way, and so are each tool's Ask me or
+Just run choice and the Tavily API key when the person saves or removes it in
+the Secrets pane. Runtime edits and
 `model.contextSize` edits in the UI remain session-only; the automatic saves
 preserve those groups as already stored on disk. The local context size
 supports composer estimates and is separate from the context length a model is

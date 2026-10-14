@@ -46,8 +46,8 @@ export default function ComposerToolCallPrompt({
     findShownToolCall(state, conversationId)
   )
   const resolveToolCall = useToolCallStore((state) => state.resolveToolCall)
-  const sendUnsentToolResult = useToolCallStore(
-    (state) => state.sendUnsentToolResult
+  const sendUnsentToolCallAnswer = useToolCallStore(
+    (state) => state.sendUnsentToolCallAnswer
   )
 
   return (
@@ -62,8 +62,8 @@ export default function ComposerToolCallPrompt({
           key={shownToolCall.call.id}
           onAllowToolCall={() => void resolveToolCall(shownToolCall.call.id)}
           onRejectToolCall={() => onRejectToolCall(shownToolCall.call.id)}
-          onRetryToolResult={() =>
-            void sendUnsentToolResult(shownToolCall.call.id)
+          onRetryToolCallAnswer={() =>
+            void sendUnsentToolCallAnswer(shownToolCall.call.id)
           }
           toolCall={shownToolCall}
         />

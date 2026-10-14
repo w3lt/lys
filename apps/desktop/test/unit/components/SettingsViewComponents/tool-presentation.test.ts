@@ -15,6 +15,7 @@ import {
   formatToolCallsStatus,
   formatToolGroupCount,
   formatToolGroupLabel,
+  formatToolSettingsSaveStatus,
   formatToolTokenEstimate,
   formatToolUnavailableNote,
   isFixedInSecretsPane
@@ -71,16 +72,16 @@ describe("calculateOfferedToolTotals", () => {
     })
   })
 
-  it("leaves out tools switched off, whatever their approval", () => {
-    const choices = new Map([
-      ["read_text_file", { isOn: false, approval: "ask" } as const],
-      ["find_files", { isOn: true, approval: "ask" } as const]
+  it("leaves out tools switched off", () => {
+    const toolSwitches = new Map([
+      ["read_text_file", false],
+      ["find_files", true]
     ])
 
     expect(
       calculateOfferedToolTotals(
         [READ_TEXT_FILE, FIND_FILES],
-        choices,
+        toolSwitches,
         new Map()
       )
     ).toEqual({
@@ -93,7 +94,7 @@ describe("calculateOfferedToolTotals", () => {
     expect(
       calculateOfferedToolTotals(
         [FIND_FILES, WEB_SEARCH],
-        new Map([["web_search", { isOn: true, approval: "ask" } as const]]),
+        new Map([["web_search", true]]),
         new Map([["web_search", "api-key-missing"]])
       )
     ).toEqual({
@@ -262,15 +263,51 @@ describe("tool labels", () => {
     expect(formatToolArgumentCounts(buildArguments(candidates))).toBe(label)
   })
 
-  it("labels and explains each approval", () => {
+  it("labels each approval", () => {
     expect(formatToolApprovalLabel("ask")).toBe("Ask me")
     expect(formatToolApprovalLabel("run")).toBe("Just run")
-    expect(formatToolApprovalNote("ask")).toBe(
-      "You see the call and its arguments. Nothing happens until you say yes."
-    )
-    expect(formatToolApprovalNote("run")).toBe(
-      "Runs the moment the model asks for it."
-    )
+  })
+
+  it.each([
+    [
+      "ask",
+      "reads",
+      "Each call waits for you with its arguments. Nothing runs until you allow it."
+    ],
+    [
+      "ask",
+      "network",
+      "Each call waits for you with its arguments. Nothing runs until you allow it."
+    ],
+    [
+      "run",
+      "reads",
+      "Runs the moment the model asks, without showing you the call."
+    ],
+    [
+      "run",
+      "network",
+      "Sends its request off this machine the moment the model asks, without showing you what it sends."
+    ]
+  ] as const)(
+    "explains %s for a tool with %s access",
+    (approval, access, note) => {
+      expect(formatToolApprovalNote(approval, access)).toBe(note)
+    }
+  )
+})
+
+describe("formatToolSettingsSaveStatus", () => {
+  it.each([
+    ["idle", ""],
+    ["saving", "Saving Just run choices…"],
+    ["saved", ""],
+    [
+      "failed",
+      "Couldn't save your Just run choices. Tool calls keep following the choices Lys last saved until a save works."
+    ]
+  ] as const)("announces a %s save as %j", (status, message) => {
+    expect(formatToolSettingsSaveStatus({ status })).toBe(message)
   })
 })
 

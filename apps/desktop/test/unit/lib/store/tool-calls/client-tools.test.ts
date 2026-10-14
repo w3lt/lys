@@ -5,7 +5,6 @@ import type {
   SearchFilesResult
 } from "@/lib/apis/tauri/tools"
 import {
-  buildDeclinedToolResult,
   buildRunFailedToolResult,
   formatRejectedToolCallContent,
   parseClientToolInput,
@@ -181,19 +180,6 @@ describe("buildRunFailedToolResult", () => {
       status: "failed",
       reason: "runFailed",
       content: "The desktop has no such tool."
-    })
-    expect(chatToolResultSchema.safeParse(result).success).toBe(true)
-  })
-})
-
-describe("buildDeclinedToolResult", () => {
-  it("builds a failed answer the tool-result endpoint accepts, marked as declined", () => {
-    const result = buildDeclinedToolResult("The person declined this call.")
-
-    expect(result).toEqual({
-      status: "failed",
-      reason: "declined",
-      content: "The person declined this call."
     })
     expect(chatToolResultSchema.safeParse(result).success).toBe(true)
   })

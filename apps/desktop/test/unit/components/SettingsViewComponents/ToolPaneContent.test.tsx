@@ -20,6 +20,7 @@ import {
   loadFreshSettingsView
 } from "../../support/settingsViewFixtures"
 import { createControlledPromise } from "../../support/settlement"
+import { STORED_SETTINGS_DOCUMENT } from "../../support/settingsFixtures"
 import {
   buildBackendToolDefinition,
   buildToolDefinition
@@ -112,7 +113,7 @@ describe("ToolPaneContent", () => {
 
     expect(
       screen.getAllByRole("status").map((status) => status.textContent)
-    ).toEqual(["", "Reading tools settings"])
+    ).toEqual(["", "Reading tools settings", ""])
 
     tools.resolve(TOOLS)
     await waitForRenderedWork()
@@ -254,6 +255,116 @@ describe("ToolPaneContent", () => {
       "aria-expanded",
       "true"
     )
+  })
+
+  it("saves a tool put on Just run, says what that does, and reports the save", async () => {
+    const write = createControlledPromise<null>()
+    const host = startNativeHostFake({
+      list_tools: () => TOOLS,
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => write.promise
+    })
+    await startToolPane()
+    const user = userEvent.setup()
+    await user.click(screen.getByRole("button", { name: "read_text_file" }))
+
+    await user.click(screen.getByRole("button", { name: "Just run" }))
+    const saveStatus = screen.getByRole("status", {
+      name: "Just run choices save"
+    })
+    const whileSaving = saveStatus.textContent
+    write.resolve(null)
+    await waitForRenderedWork()
+
+    expect(
+      screen.getByRole("group", { name: "Before it runs" })
+    ).toHaveAccessibleDescription(
+      "Runs the moment the model asks, without showing you the call."
+    )
+    expect(whileSaving).toBe("Saving Just run choices…")
+    expect(saveStatus).toHaveTextContent(/^$/)
+    expect(host.commands.at(-1)).toEqual({
+      command: "save_settings",
+      args: {
+        newSettings: {
+          ...STORED_SETTINGS_DOCUMENT,
+          tools: { justRun: ["read_text_file"] }
+        }
+      }
+    })
+  })
+
+  it("reports a failed save and saves again on Retry saving, keeping the choice meanwhile", async () => {
+    const writes: (() => unknown)[] = [() => Promise.reject("Disk full")]
+    const host = startNativeHostFake({
+      list_tools: () => TOOLS,
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => (writes.shift() ?? (() => null))()
+    })
+    await startToolPane()
+    const user = userEvent.setup()
+    await user.click(screen.getByRole("button", { name: "read_text_file" }))
+    await user.click(screen.getByRole("button", { name: "Just run" }))
+    await waitForRenderedWork()
+
+    expect(
+      screen.getByRole("status", { name: "Just run choices save" })
+    ).toHaveTextContent(
+      "Couldn't save your Just run choices. Tool calls keep following the choices Lys last saved until a save works."
+    )
+    expect(screen.getByRole("button", { name: "Just run" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+    await user.click(screen.getByRole("button", { name: "Retry saving" }))
+    await waitForRenderedWork()
+
+    expect(
+      host.commands.filter((invoked) => invoked.command === "save_settings")
+    ).toHaveLength(2)
+    expect(
+      screen.getByRole("status", { name: "Just run choices save" })
+    ).toHaveTextContent(/^$/)
+    expect(screen.queryByRole("button", { name: "Retry saving" })).toBeNull()
+  })
+
+  it("keeps a failed save's status and Retry saving while the tools are read again, and after that read fails", async () => {
+    const reread = createControlledPromise<unknown>()
+    const reads: (() => unknown)[] = [() => TOOLS]
+    startNativeHostFake({
+      list_tools: () => (reads.shift() ?? (() => reread.promise))(),
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => Promise.reject("Disk full")
+    })
+    await startToolPane()
+    const user = userEvent.setup()
+    await user.click(screen.getByRole("button", { name: "read_text_file" }))
+    await user.click(screen.getByRole("button", { name: "Just run" }))
+    await waitForRenderedWork()
+    const { useToolStore } = await import("@/lib/store/tools")
+    const saveFailure =
+      "Couldn't save your Just run choices. Tool calls keep following the choices Lys last saved until a save works."
+
+    act(() => void useToolStore.getState().loadTools())
+    await waitForRenderedWork()
+    const whileReading = screen.getByRole("status", {
+      name: "Just run choices save"
+    }).textContent
+    const retryWhileReading = screen.queryByRole("button", {
+      name: "Retry saving"
+    })
+    reread.reject("command list_tools failed")
+    await waitForRenderedWork()
+
+    expect(whileReading).toBe(saveFailure)
+    expect(retryWhileReading).toBeInTheDocument()
+    expect(screen.getByText("Lys couldn't read its tool list.")).toBeVisible()
+    expect(
+      screen.getByRole("status", { name: "Just run choices save" })
+    ).toHaveTextContent(saveFailure)
+    expect(
+      screen.getByRole("button", { name: "Retry saving" })
+    ).toBeInTheDocument()
   })
 
   it("locks the controls for a model not trained for tools, and restores them when it changes", async () => {

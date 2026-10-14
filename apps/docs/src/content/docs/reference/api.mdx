@@ -11,30 +11,31 @@ route definitions.
 
 ## Routes
 
-| Method   | Path                                                                            | Request body                                                                       | Response                                                               |
-| -------- | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `GET`    | `/api/v1/heath`                                                                 | none                                                                               | `{ ok: true }`                                                         |
-| `GET`    | `/api/v1/llm/list`                                                              | none                                                                               | `{ llms: LlmInfo[] }`                                                  |
-| `GET`    | `/api/v1/llm/:modelId/health`                                                   | none                                                                               | Loaded-state health observation                                        |
-| `POST`   | `/api/v1/llm/load`                                                              | `{ modelId: string, configuration?: ModelLoadConfiguration }`                      | `LlmInfo`                                                              |
-| `PATCH`  | `/api/v1/llm/unload`                                                            | `{ modelId: string }`                                                              | `204` or typed Problem Details                                         |
-| `GET`    | `/api/v1/llm/runtime`                                                           | none                                                                               | `{ status: "connecting" \| "connected" \| "unreachable" }`             |
-| `POST`   | `/api/v1/llm/runtime/connect`                                                   | none                                                                               | Settled `{ status }`, or service-busy Problem Details                  |
-| `GET`    | `/api/v1/conversations`                                                         | none; optional `query`, `cursor`, `limit` query parameters                         | Conversation list page                                                 |
-| `GET`    | `/api/v1/conversations/:conversationId`                                         | none                                                                               | Conversation with ordered messages                                     |
-| `PATCH`  | `/api/v1/conversations/:conversationId`                                         | `{ title: string }`                                                                | Conversation metadata                                                  |
-| `DELETE` | `/api/v1/conversations/:conversationId`                                         | none                                                                               | Bodyless `204`                                                         |
-| `GET`    | `/api/v1/agents`                                                                | none; optional `cursor`, `limit` query parameters                                  | Built-in agents and a page of stored agents                            |
-| `POST`   | `/api/v1/agents`                                                                | `{ code?, name, bio, systemPrompt }`                                               | `201` agent with `Location`, or `409` Problem Details                  |
-| `GET`    | `/api/v1/agents/:agentCode`                                                     | none                                                                               | Agent with its system prompt                                           |
-| `PATCH`  | `/api/v1/agents/:agentCode`                                                     | at least one of `{ name, bio, systemPrompt }`                                      | Changed agent, or `409` for a built-in agent                           |
-| `DELETE` | `/api/v1/agents/:agentCode`                                                     | none                                                                               | Bodyless `204`, or `409` for a built-in agent                          |
-| `GET`    | `/api/v1/tools`                                                                 | none                                                                               | `{ tools: ToolDefinition[], unavailableTools }`                        |
-| `POST`   | `/api/v1/tools/web_search/key-check`                                            | `{}`                                                                               | `{ status: "accepted" \| "rejected" \| "unavailable" \| "failed", … }` |
-| `POST`   | `/api/v1/chat`                                                                  | `conversation`, `message`, `model`, required `generationOptions`, optional `tools` | `text/event-stream`                                                    |
-| `GET`    | `/api/v1/chat/:conversationId/replies/:assistantMessageId/events`               | none                                                                               | `text/event-stream` (reply snapshot, then live events)                 |
-| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/stop`                 | none                                                                               | Bodyless `204`, or `409` Problem Details                               |
-| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/tool-results/:callId` | `{ status, reason?, content? }`                                                    | Bodyless `204`, or `409` Problem Details                               |
+| Method   | Path                                                                              | Request body                                                                       | Response                                                               |
+| -------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `GET`    | `/api/v1/heath`                                                                   | none                                                                               | `{ ok: true }`                                                         |
+| `GET`    | `/api/v1/llm/list`                                                                | none                                                                               | `{ llms: LlmInfo[] }`                                                  |
+| `GET`    | `/api/v1/llm/:modelId/health`                                                     | none                                                                               | Loaded-state health observation                                        |
+| `POST`   | `/api/v1/llm/load`                                                                | `{ modelId: string, configuration?: ModelLoadConfiguration }`                      | `LlmInfo`                                                              |
+| `PATCH`  | `/api/v1/llm/unload`                                                              | `{ modelId: string }`                                                              | `204` or typed Problem Details                                         |
+| `GET`    | `/api/v1/llm/runtime`                                                             | none                                                                               | `{ status: "connecting" \| "connected" \| "unreachable" }`             |
+| `POST`   | `/api/v1/llm/runtime/connect`                                                     | none                                                                               | Settled `{ status }`, or service-busy Problem Details                  |
+| `GET`    | `/api/v1/conversations`                                                           | none; optional `query`, `cursor`, `limit` query parameters                         | Conversation list page                                                 |
+| `GET`    | `/api/v1/conversations/:conversationId`                                           | none                                                                               | Conversation with ordered messages                                     |
+| `PATCH`  | `/api/v1/conversations/:conversationId`                                           | `{ title: string }`                                                                | Conversation metadata                                                  |
+| `DELETE` | `/api/v1/conversations/:conversationId`                                           | none                                                                               | Bodyless `204`                                                         |
+| `GET`    | `/api/v1/agents`                                                                  | none; optional `cursor`, `limit` query parameters                                  | Built-in agents and a page of stored agents                            |
+| `POST`   | `/api/v1/agents`                                                                  | `{ code?, name, bio, systemPrompt }`                                               | `201` agent with `Location`, or `409` Problem Details                  |
+| `GET`    | `/api/v1/agents/:agentCode`                                                       | none                                                                               | Agent with its system prompt                                           |
+| `PATCH`  | `/api/v1/agents/:agentCode`                                                       | at least one of `{ name, bio, systemPrompt }`                                      | Changed agent, or `409` for a built-in agent                           |
+| `DELETE` | `/api/v1/agents/:agentCode`                                                       | none                                                                               | Bodyless `204`, or `409` for a built-in agent                          |
+| `GET`    | `/api/v1/tools`                                                                   | none                                                                               | `{ tools: ToolDefinition[], unavailableTools }`                        |
+| `POST`   | `/api/v1/tools/web_search/key-check`                                              | `{}`                                                                               | `{ status: "accepted" \| "rejected" \| "unavailable" \| "failed", … }` |
+| `POST`   | `/api/v1/chat`                                                                    | `conversation`, `message`, `model`, required `generationOptions`, optional `tools` | `text/event-stream`                                                    |
+| `GET`    | `/api/v1/chat/:conversationId/replies/:assistantMessageId/events`                 | none                                                                               | `text/event-stream` (reply snapshot, then live events)                 |
+| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/stop`                   | none                                                                               | Bodyless `204`, or `409` Problem Details                               |
+| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/tool-results/:callId`   | `{ status, reason?, content? }`                                                    | Bodyless `204`, or `409` Problem Details                               |
+| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/tool-approvals/:callId` | `{ status, reason?, content? }`                                                    | Bodyless `204`, or `409` Problem Details                               |
 
 `/api/v1/heath` is the current spelling in both the shared protocol package and
 the Fastify route registration.
@@ -226,12 +227,50 @@ one of:
 them; `limit` is `null` when Tavily reports none. Both are whole credits: a
 fraction Tavily reports is rounded up. The answer never contains the key.
 
+## Tool approvals
+
+The backend decides which tool calls need the person: every call of a tool
+that is not saved as Just run, client and backend tools alike. It shows such a
+call with a `tool-approval` event, and the client answers it with
+`POST /api/v1/chat/:conversationId/replies/:assistantMessageId/tool-approvals/:callId`,
+where `callId` is the `id` of the event's call or of its entry in
+`reply-snapshot.pendingToolApprovals`. One request answers one prompt.
+
+```json
+{ "status": "allowed" }
+```
+
+```json
+{
+  "status": "rejected",
+  "reason": "declined",
+  "content": "The person declined this call. They said: not that folder"
+}
+```
+
+After `allowed`, the backend runs a backend tool itself and hands its result
+only to the model, or sends a client tool's call to run with a `tool-call`
+event under the same `id`. After `rejected`, nothing runs and the model reads
+`content`. `reason` is not shown to the model: `declined` when the person
+rejected the call, and `showFailed` when the client could not show it, such as
+a tool it does not list or arguments it cannot describe.
+
+The route answers a bodyless `204` once the answer is accepted, and the
+reply's loop continues. A prompt that is unknown, already answered, or whose
+reply ended, and a call that waits for its result instead, return `409` with
+`urn:lys:problem:chat:tool-call-not-pending` and change nothing, so repeating
+a request whose response was lost is harmless. The backend sets no time limit
+on a prompt; it waits as for a [tool result](#tool-results).
+
 ## Tool results
 
-While a reply waits on a tool call, the client answers it with
+A `tool-call` event asks the client to run one call of a client tool: one the
+person allowed, or one whose tool is saved as Just run. The client runs it
+without asking again and answers with
 `POST /api/v1/chat/:conversationId/replies/:assistantMessageId/tool-results/:callId`,
 where `callId` is the `id` of the call's `tool-call` event or of its entry in
-`reply-snapshot.pendingToolCalls`. One request answers one call.
+`reply-snapshot.pendingToolCalls`. One request answers one call. Calls of
+backend tools never come here; the backend runs them itself.
 
 ```json
 { "status": "succeeded", "content": "The file's text" }
@@ -240,37 +279,25 @@ where `callId` is the `id` of the call's `tool-call` event or of its entry in
 ```json
 {
   "status": "failed",
-  "reason": "declined",
-  "content": "The person declined this call. They said: not that folder"
+  "reason": "toolFailed",
+  "content": "{\"code\":\"fileNotFound\"}"
 }
 ```
 
 `content` is the exact text the model reads; a succeeded result can be empty,
 such as for an empty file, and a failed one cannot. `reason` says why a call
-failed and is not shown to the model: `declined` when the person said no or
-switched the tool or tool calls off, `toolFailed` when the tool ran and
+failed and is not shown to the model: `toolFailed` when the tool ran and
 reported a failure, and `runFailed` when the client could not run it.
 
-A call of a backend tool is answered `failed` the same way, or allowed:
-
-```json
-{ "status": "allowed" }
-```
-
-The backend then runs the tool and hands its result to the model; the client
-never receives it. A client tool's call takes `succeeded` or `failed`, and a
-backend tool's call takes `allowed` or `failed`.
-
-The route answers a bodyless `204` once the answer is accepted, and the
-reply's loop continues. A call that is unknown, already answered, or whose
-reply ended returns `409` with `urn:lys:problem:chat:tool-call-not-pending`
-and changes nothing, so repeating a request whose response was lost is
-harmless. An answer that does not fit the call, such as `allowed` for a
-client tool's call, returns `409` with
-`urn:lys:problem:chat:tool-call-answer-mismatch`; the call keeps waiting. The backend sets no time limit on a pending call. It waits until
-the call is answered, the reply is stopped, or the backend shuts down. A newer
-turn in the conversation or deleting the conversation does not end the wait yet
-([#137](https://github.com/w3lt/lys/issues/137)).
+The route answers a bodyless `204` once the result is accepted, and the
+reply's loop continues. A call that is unknown, already answered, waiting for
+approval instead, or whose reply ended returns `409` with
+`urn:lys:problem:chat:tool-call-not-pending` and changes nothing, so repeating
+a request whose response was lost is harmless. The backend sets no time limit
+on a pending call.
+It waits until the call is answered, the reply is stopped, or the backend
+shuts down. A newer turn in the conversation or deleting the conversation does
+not end the wait yet ([#137](https://github.com/w3lt/lys/issues/137)).
 
 ## Conversation history
 

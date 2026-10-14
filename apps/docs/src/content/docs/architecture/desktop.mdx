@@ -19,11 +19,12 @@ presentation state, not durable conversation storage.
 | Chat state          | `src/lib/store/chat-view` owns the active conversation, the agent selected for a new one, request lifecycle, conversation opening, and error presentation.              |
 | History state       | `src/lib/store/conversation-history` owns the past-conversations dialog, its search and pages, and rename and delete calls.                                             |
 | Agent state         | `src/lib/store/agents` owns the list of built-in and stored agents, the Agents pane's editor and draft, and the agent create, update, and delete calls.                 |
-| Tool state          | `src/lib/store/tools.ts` owns the Tools pane's list of every tool, the app's and the backend's, and the session-only choices that gate tool calls.                      |
-| Tool calls          | `src/lib/store/tool-calls` follows each running reply's tool calls, decides each by the Tools pane, runs client tools or allows backend tools, and sends their answers. |
+| Tool state          | `src/lib/store/tools.ts` owns the Tools pane's list of every tool, the app's and the backend's, and the session-only switches that decide which tools a request offers. |
+| Tool calls          | `src/lib/store/tool-calls` follows each running reply, shows the backend's approval prompts, runs the client tools' calls the backend sends, and sends every answer.    |
+| Tool approvals      | `src/lib/store/tool-settings.ts` owns each tool's Ask me or Just run, saved as the `tools` group of `settings.json` for the backend to read, and its automatic save.    |
 | Shell/runtime state | `src/lib/store/index.ts` tracks which view is open, whether the backend is running, and settings loaded from Tauri.                                                     |
 | Model lifecycle     | `src/lib/store/model-actions.ts` owns real inventory, load, unload, and health requests shared by settings and the composer.                                            |
-| SSE consumption     | `src/lib/apis/http/chat.ts` opens chat and reply-events SSE streams, validates events with Zod, and sends reply stops and tool results.                                 |
+| SSE consumption     | `src/lib/apis/http/chat.ts` opens chat and reply-events SSE streams, validates events with Zod, and sends reply stops, approval answers, and tool results.              |
 | Theme               | `src/app/theme.ts` applies light or dark mode and stores the choice as `lys.theme` in WebView `localStorage`.                                                           |
 
 ## Chat state split
@@ -35,9 +36,9 @@ The desktop currently has six separate state systems:
 | Chat Zustand store      | Active conversation, the agent selected for a new conversation, request and open tokens, local abort controllers, streamed assistant deltas, inline error text       |
 | History Zustand store   | Dialog visibility, search query, displayed conversation pages, the row being renamed or confirmed, pending renames and deletes                                       |
 | Agent Zustand store     | Every listed built-in and stored agent, the open editor or read-only view and its draft, the save attempt, the pending save or delete, the most recently saved agent |
-| Tool Zustand store      | The tool list read from the desktop and the backend, tool calls on or off, each tool's switch and approval                                                           |
-| Tool-call Zustand store | Every tool call held until the backend takes its answer, and the reply follows that deliver them                                                                     |
-| Shell Zustand store     | Active top-level view, loaded runtime settings, backend process status, startup progress                                                                             |
+| Tool Zustand store      | The tool list read from the desktop and the backend, tool calls on or off, each tool's switch                                                                        |
+| Tool-call Zustand store | Every approval prompt and tool call held until the backend takes its answer, and the reply follows that deliver them                                                 |
+| Shell Zustand store     | Active top-level view, loaded settings (each tool's saved approval included), backend process status, startup progress                                               |
 
 The transcript shown in the window is built from backend events for the current
 request, or from the stored transcript read when a past conversation is opened.
@@ -53,7 +54,8 @@ Shell state such as backend status is managed independently.
 4. Each payload is validated against `chatApiStreamEventSchema`.
 5. The store applies `start-*`, `delta`, `done`, `interrupted`, `title`, or
    `error` events to local immutable conversation state, and hands the reply
-   to the tool-call store, which answers its `tool-call` events.
+   to the tool-call store, which answers its `tool-approval` and `tool-call`
+   events.
 
 The composer shows Stop while the turn is awaited or the reply streams, and
 Send otherwise. After `done`, `interrupted`, or `error`, the stream can stay
@@ -349,11 +351,29 @@ no tools: a card says the model isn't trained for tool calls, and every control
 below it recedes and is disabled. An expanded row closes while the controls are
 locked and opens again when they unlock.
 
-Every choice on the pane applies to the next chat request or tool call: tool
-calls on or off, each tool's switch, and Ask me or Just run. Every tool starts
-on Ask me. A tool that only reads this machine starts on; a tool that sends
-requests off the machine (`network`) starts off. The choices last for the
-session only; nothing is saved.
+Tool calls on or off and each tool's switch apply to the next chat request,
+because they decide only which tools a request offers; switching a tool off
+while a reply runs does not stop that reply's calls. A tool that only reads
+this machine starts on; a tool that sends requests off the machine (`network`)
+starts off. Tool calls on or off and each tool's switch last for the session
+only.
+
+Every tool, network tools included, offers both approvals and starts on Ask
+me. The note under "Before it runs" says what each does: on Ask me, "Each call
+waits for you with its arguments. Nothing runs until you allow it."; on Just
+run, a tool that only reads this machine "Runs the moment the model asks,
+without showing you the call.", and a `network` tool "Sends its request off
+this machine the moment the model asks, without showing you what it sends."
+Choosing Just run saves the tool's name in the `tools.justRun` list of
+`settings.json`, and choosing Ask me removes it, so the approval holds after a
+restart. The application store owns that list: a change shows at once and is
+saved automatically, serialized with the other group saves. The backend reads
+the saved list when each round of tool calls arrives, so a change applies from
+the next round once it is saved. A status line under the tools says "Saving
+Just run choices…" while a save runs; when one fails, it says that tool calls
+keep following the choices last saved until a save works, and offers Retry
+saving. A name in the list that Lys does not list now, such as a backend tool
+whose list could not be read, is kept and has no effect.
 
 A backend tool that cannot run now, such as `web_search` without a saved
 Tavily API key, keeps its row: its switch is disabled and shows off, a note
@@ -400,23 +420,33 @@ tool that cannot run (its key was removed since the list was read), the request
 fails with an inline error that says which tool and what to do, and the tool
 list is read again so the next request leaves the tool out.
 
+The backend's tool approval service decides which calls need the person: every
+call of a tool that is not saved as Just run, client and backend tools alike
+(see the [backend's tool approval](/architecture/backend/#tool-approval)). The
+desktop does not decide; it reads neither the switches nor the saved Just run
+list when a call arrives.
+
 The tool-call store follows every reply the chat store starts or follows on
 its own reply-events connection, so tool calls keep moving while another
-conversation is shown. It takes each call from a `tool-call` event or from the
-snapshot's `pendingToolCalls`, once, and decides it by the Tools pane at that
-moment. An answered call stays held while the store follows its reply, so a
-snapshot built before the answer arrived does not bring the call back:
+conversation is shown. It takes each prompt from a `tool-approval` event or the
+snapshot's `pendingToolApprovals`, and each call to run from a `tool-call`
+event or the snapshot's `pendingToolCalls`, once. A held call keeps its step,
+approval or run, so a client tool's prompt and its later run request share one
+identifier, and an answered call stays held while the store follows its reply,
+so a snapshot built before the answer arrived does not bring it back:
 
-1. A tool the desktop does not list, or arguments that do not match its
-   command, is answered as `runFailed`. A backend tool's call is checked too,
-   so the card never describes a URL or a query the backend would not send;
-   a query holding a character hidden on screen is refused by the same rule
-   the backend applies.
-2. With tool calls off, or the tool switched off, the call is answered as
-   `declined`.
-3. On Just run, a client tool runs at once and a backend tool's call is
-   answered `allowed` at once; nothing is shown.
-4. On Ask me, the call waits for the person.
+1. A prompt the desktop cannot show (a tool it does not list, or arguments it
+   cannot describe) is answered `showFailed` at once. A backend tool's call is
+   checked too, so the card never describes a URL or a query the backend would
+   not send; a query holding a character hidden on screen is refused by the
+   same rule the backend applies.
+2. Every other prompt waits for the person.
+3. A call to run is run at once and its result sent; a call the desktop
+   cannot run is answered `runFailed`. Nothing is shown. The desktop does not
+   check that the person allowed the call, so a call that another local
+   caller allowed through the backend runs too, in place of its card (see
+   [Candid limits](/architecture/security/#candid-limits) and
+   [#171](https://github.com/w3lt/lys/issues/171)).
 
 A waiting call shows a card above the composer field: the tool, what it does
 with the machine, where it runs, a plain sentence such as "Read
@@ -424,18 +454,20 @@ with the machine, where it runs, a plain sentence such as "Read
 https://example.com/page. Sends a request to example.com.", with the full URL,
 or "Search the web for “latest Node.js release”. Sends the query to Tavily
 (api.tavily.com).", with the full query, and its arguments on request. Reject sends the composer's text as the reason;
-Allow once runs a client tool, or answers a backend tool's call `allowed` so
-the backend runs it; Allow anyway does the same while keeping the text. In the field, Escape rejects,
+Allow once answers `allowed`, after which the backend runs its tool or sends a
+client tool's call back to run; Allow anyway does the same while keeping the
+text. In the field, Escape rejects,
 Enter with an empty draft allows, and Enter with text rejects with that text.
 Several calls wait in the model's order, one card at a time.
 
 A read sends the file's text, a search sends its report as JSON, and a
 declared tool failure sends the failure as JSON. A backend tool's result goes
-from the backend to the model; the desktop never sees it. Each answer goes to
-the
-[tool-result route](/reference/api/#tool-results). When an answer cannot be
-sent, the card says so and Try again sends the same answer without running the
-tool again. When the reply ends, by finishing, Stop, or backend shutdown, its
+from the backend to the model; the desktop never sees it. Approval answers go
+to the [tool-approval route](/reference/api/#tool-approvals) and results to
+the [tool-result route](/reference/api/#tool-results). When an answer cannot
+be sent, the card says so and Try again sends the same answer without running
+the tool again. An allowed answer still in flight when the call's run request
+arrives does not hold the run back. When the reply ends, by finishing, Stop, or backend shutdown, its
 waiting calls disappear. A newer turn in the conversation or deleting the
 conversation does not end a waiting reply yet
 ([#137](https://github.com/w3lt/lys/issues/137)). After a renderer reload, a
@@ -463,11 +495,13 @@ are gone and the reply is marked interrupted when the backend next starts.
   attachments are never sent.
 - The Tavily API key is stored as plain text in `settings.json`, protected
   only by the file's owner-only permissions; there is no keychain storage.
-- The Tools pane's choices last for the session only; every tool starts on Ask
-  me again after a restart ([#110](https://github.com/w3lt/lys/issues/110)).
-  Whether Just run stays and how approval is enforced is decided in
-  [#156](https://github.com/w3lt/lys/issues/156).
+- Tool calls on or off and each tool's switch last for the session only; after
+  a restart they return to their defaults
+  ([#110](https://github.com/w3lt/lys/issues/110)). Only each tool's approval
+  is saved.
 - There is no "Allow for this chat": each call on Ask me is asked about.
+- Switching a tool or tool calls off does not stop a reply already running;
+  it applies from the next message.
 - Tool calls leave no trace in the transcript: a call on Just run shows
   nothing, and an answered call's card disappears. Steps and saved citations
   are planned in [#154](https://github.com/w3lt/lys/issues/154).

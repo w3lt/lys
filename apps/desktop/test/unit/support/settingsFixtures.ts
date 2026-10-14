@@ -8,7 +8,8 @@ import type {
   LysSettings,
   ModelSettings,
   RuntimeSettings,
-  SecretsSettings
+  SecretsSettings,
+  ToolSettings
 } from "@/lib/store/settings"
 
 /**
@@ -17,18 +18,24 @@ import type {
  *
  * @remarks The runtime, model, generation, and secrets groups are the
  * renderer's groups field for field; the saved key is plain text in JSON and
- * branded only in the renderer. JSON has no map, so the per-model load
+ * branded only in the renderer. JSON has no map or set, so the per-model load
  * settings are one object whose keys are model keys, where the renderer holds
- * a map.
+ * a map, and the tools on Just run are an array, where the renderer holds a
+ * set.
  */
 export type SettingsDocument = Readonly<
-  Omit<LysSettings, "loadConfiguration"> & {
+  Omit<LysSettings, "loadConfiguration" | "tools"> & {
     /** Default and per-model load settings, the latter as one object. */
     loadConfiguration: Readonly<{
       /** Settings for every model that has none of its own. */
       default: ModelLoadConfiguration
       /** Settings each model has of its own, keyed by model key. */
       models: Readonly<Record<string, ModelLoadConfiguration>>
+    }>
+    /** Tool choices, the tools on Just run as an array. */
+    tools: Readonly<{
+      /** Names of the tools on Just run, as the document lists them. */
+      justRun: readonly string[]
     }>
   }
 >
@@ -91,9 +98,15 @@ const STORED_SECRETS_SETTINGS: SecretsSettings = Object.freeze({
   tavilyApiKey: STORED_TAVILY_API_KEY
 })
 
+/** Tools group on disk: `read_page` is on Just run. */
+const STORED_TOOL_SETTINGS: ToolSettings = Object.freeze({
+  justRunToolNames: new Set(["read_page"])
+})
+
 /**
  * Settings document `load_settings` resolves with: every group is set, one
- * model has load settings of its own, and a Tavily API key is saved.
+ * model has load settings of its own, a Tavily API key is saved, and one tool
+ * is on Just run.
  */
 export const STORED_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
   runtime: STORED_RUNTIME_SETTINGS,
@@ -103,15 +116,18 @@ export const STORED_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
     default: STORED_DEFAULT_LOAD_CONFIGURATION,
     models: Object.freeze({ "qwen3-8b": STORED_MODEL_LOAD_CONFIGURATION })
   }),
-  secrets: STORED_SECRETS_SETTINGS
+  secrets: STORED_SECRETS_SETTINGS,
+  tools: Object.freeze({ justRun: Object.freeze(["read_page"]) })
 })
 
 /**
  * The renderer's settings for {@link STORED_SETTINGS_DOCUMENT}: the same
- * groups, with the per-model load settings as a map keyed by model key.
+ * groups, with the per-model load settings as a map keyed by model key and
+ * the tools on Just run as a set.
  *
- * @remarks The map is read-only through its type; no consumer of the settings
- * mutates it, so the value is safe to share between cases.
+ * @remarks The map and the set are read-only through their types; no
+ * consumer of the settings mutates them, so the value is safe to share
+ * between cases.
  */
 export const STORED_SETTINGS: LysSettings = Object.freeze({
   runtime: STORED_RUNTIME_SETTINGS,
@@ -121,5 +137,6 @@ export const STORED_SETTINGS: LysSettings = Object.freeze({
     default: STORED_DEFAULT_LOAD_CONFIGURATION,
     models: new Map([["qwen3-8b", STORED_MODEL_LOAD_CONFIGURATION]])
   }),
-  secrets: STORED_SECRETS_SETTINGS
+  secrets: STORED_SECRETS_SETTINGS,
+  tools: STORED_TOOL_SETTINGS
 })

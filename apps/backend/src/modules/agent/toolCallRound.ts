@@ -1,12 +1,10 @@
-import type {
-  BackendToolCallAnswer,
-  ChatToolCall,
-  ChatToolResult
-} from "@lys/protocol"
+import type { ChatToolCall, ChatToolResult } from "@lys/protocol"
 import type { OpenAIFunctionTool, ToolDefinition } from "@lys/share"
 import { v7 as uuidv7 } from "uuid"
 import type { BuiltInTool, TurnBuiltInTool } from "../tool/builtIn/builtInTool"
 import AgentTool from "../tool/tool"
+import type ToolCallGate from "../toolApproval/toolCallGate"
+import type { ToolApprovalRequest } from "../toolApproval/toolCallGate"
 import type {
   ContextToolCall,
   ModelToolCall,
@@ -22,7 +20,7 @@ type OfferedTool =
       agentTool: AgentTool
     }>
   | Readonly<{
-      /** The backend runs the tool once the client allows each call. */
+      /** The backend runs the tool once each call is allowed. */
       runner: "backend"
       /** Checks the argument types of each call. */
       agentTool: AgentTool
@@ -42,31 +40,41 @@ export type ToolCallRound = Readonly<{
 }>
 
 /**
- * Sends one checked call of a client tool to the client and waits for its
- * result; resolves with undefined when the reply was stopped while the call
- * waited.
+ * Sends one allowed call of a client tool to the client to run and waits for
+ * its result; resolves with undefined when the reply was stopped while the
+ * call waited.
  */
 export type SendClientToolCall = (
   toolCall: ChatToolCall
 ) => Promise<ChatToolResult | undefined>
 
 /**
- * Sends one checked call of a backend tool to the client and waits for it
- * to be allowed or answered as failed; resolves with undefined when the
- * reply was stopped while the call waited.
+ * Creates the approval gate of one round from the choices saved when the
+ * round's calls arrive; rejects only when the saved choices cannot be read
+ * for a reason other than an unreadable file.
  */
-export type SendBuiltInToolCall = (
-  toolCall: ChatToolCall
-) => Promise<BackendToolCallAnswer | undefined>
+export type CreateToolCallGate = () => Promise<ToolCallGate>
 
 /** What answering one round's calls needs from the turn. */
 export type ToolCallRoundContext = Readonly<{
   /** Tools offered for the turn. */
   tools: AgentToolset
-  /** Sends one checked call of a client tool. */
+  /** Sends one allowed call of a client tool to run. */
   sendClientToolCall: SendClientToolCall
-  /** Sends one checked call of a backend tool for approval. */
-  sendBuiltInToolCall: SendBuiltInToolCall
+  /** Creates the approval gate every checked call of the round passes. */
+  createToolCallGate: CreateToolCallGate
+  /** Stops the reply; an allowed backend tool runs under it. */
+  abortSignal: AbortSignal
+}>
+
+/** What handling one call of a round needs. */
+type ToolCallHandling = Readonly<{
+  /** Tools offered for the turn. */
+  tools: AgentToolset
+  /** Approval gate of the round. */
+  gate: ToolCallGate
+  /** Sends one allowed call of a client tool to run. */
+  sendClientToolCall: SendClientToolCall
   /** Stops the reply; an allowed backend tool runs under it. */
   abortSignal: AbortSignal
 }>
@@ -124,19 +132,24 @@ export function buildOfferedTools(
  * round to the context.
  *
  * @param round - The round's text and its calls in the model's order.
- * @param context - Tools, call senders, and the reply's cancellation.
+ * @param context - Tools, the client call sender, the gate factory, and the
+ * reply's cancellation.
  * @returns The assistant message with the round's text and calls, then one
  * result message per call in the model's order; or undefined when the reply
- * was stopped while a call waited or a backend tool ran.
+ * was stopped while the gate was created, a call waited, or a backend tool
+ * ran.
  * @throws If the turn offered no tools: the model called a tool it was not
  * offered, which ends the reply as failed, as before tools existed. Also
- * throws when a backend tool's run fails for a reason other than Stop.
+ * throws when the gate cannot be created, or a backend tool's run fails for
+ * a reason other than Stop.
  * @remarks Each call gets a new UUIDv7. Calls of unknown tools and calls
  * whose arguments do not match are answered here, so the model reads what
- * went wrong; the client never sees them. Every checked call is sent before
- * the first wait, in the model's order, because each call's handling runs
- * synchronously up to its send. A backend tool runs only after its call is
- * allowed.
+ * went wrong; nobody is asked about them. Every other call passes the
+ * round's gate: one created once for the round, so the saved choices are
+ * read once. The gate's prompts and the run requests of calls allowed at
+ * once are sent before the first wait, in the model's order, because each
+ * call's handling runs synchronously up to its first send. Nothing runs
+ * before its call is allowed.
  */
 export async function handleToolCallRound(
   round: ToolCallRound,
@@ -145,8 +158,16 @@ export async function handleToolCallRound(
   if (context.tools.size === 0)
     throw new Error("The model called a tool although none was offered")
   const toolCalls = Object.freeze(round.toolCalls.map(createContextToolCall))
+  const gate = await context.createToolCallGate()
+  if (context.abortSignal.aborted) return undefined
+  const handling: ToolCallHandling = Object.freeze({
+    tools: context.tools,
+    gate,
+    sendClientToolCall: context.sendClientToolCall,
+    abortSignal: context.abortSignal
+  })
   const toolMessages = await Promise.all(
-    toolCalls.map((toolCall) => handleToolCall(toolCall, context))
+    toolCalls.map((toolCall) => handleToolCall(toolCall, handling))
   )
   if (!toolMessages.every(isToolResultMessage)) return undefined
   const assistantMessage: ReplyContextMessage = Object.freeze({
@@ -185,24 +206,26 @@ function createContextToolCall(toolCall: ModelToolCall): ContextToolCall {
 }
 
 /**
- * Has one call answered: by the client or the backend tool when it is a
- * checked call of an offered tool, or here otherwise.
+ * Has one call answered: through the round's gate and then the client or the
+ * backend tool when it is a checked call of an offered tool, or here
+ * otherwise.
  *
  * @param toolCall - Call with its identifier.
- * @param context - Tools, call senders, and the reply's cancellation.
+ * @param handling - Tools, the round's gate, the client call sender, and the
+ * reply's cancellation.
  * @returns The message carrying the text the model reads as the result, or
  * undefined when the reply was stopped while the call waited or ran.
  * @throws When a backend tool's run fails for a reason other than Stop.
  */
 async function handleToolCall(
   toolCall: ContextToolCall,
-  context: ToolCallRoundContext
+  handling: ToolCallHandling
 ): Promise<ToolResultMessage | undefined> {
-  const tool = context.tools.get(toolCall.toolName)
+  const tool = handling.tools.get(toolCall.toolName)
   if (tool === undefined)
     return buildToolResultMessage(
       toolCall,
-      formatUnknownToolMessage(toolCall, context.tools)
+      formatUnknownToolMessage(toolCall, handling.tools)
     )
   const checkedArguments = tool.agentTool.parseCallArguments(
     toolCall.argumentText
@@ -216,63 +239,86 @@ async function handleToolCall(
   })
   switch (tool.runner) {
     case "client":
-      return handleClientToolCall(checkedToolCall, context)
+      return handleClientToolCall(checkedToolCall, handling)
     case "backend":
-      return handleBuiltInToolCall(checkedToolCall, tool.builtInTool, context)
+      return handleBuiltInToolCall(checkedToolCall, tool.builtInTool, handling)
   }
 }
 
 /**
- * Has the client run one checked call of its tool.
+ * Has one checked call of a client tool allowed, then has the client run it.
  *
  * @param toolCall - Checked call.
- * @param context - The client call sender.
- * @returns The message carrying the client's result, or undefined when the
- * reply was stopped while the call waited.
+ * @param handling - The round's gate and the client call sender.
+ * @returns The message carrying the client's result, or the person's
+ * rejection; or undefined when the reply was stopped while the call waited.
  */
 async function handleClientToolCall(
   toolCall: ChatToolCall,
-  context: ToolCallRoundContext
+  handling: ToolCallHandling
 ): Promise<ToolResultMessage | undefined> {
-  const result = await context.sendClientToolCall(toolCall)
+  const request = handling.gate.sendToolApprovalRequest(toolCall)
+  const approval = isToolCallAllowedAtOnce(request)
+    ? request
+    : await request.answer
+  if (approval === undefined) return undefined
+  if (approval.status === "rejected")
+    return buildToolResultMessage(toolCall, approval.content)
+  const result = await handling.sendClientToolCall(toolCall)
   return result === undefined
     ? undefined
     : buildToolResultMessage(toolCall, result.content)
 }
 
 /**
- * Parses one checked call of a backend tool, has the client allow it, and
- * runs it.
+ * Parses one checked call of a backend tool, has it allowed, and runs it.
  *
  * @param toolCall - Checked call.
  * @param builtInTool - Backend tool the call names.
- * @param context - The backend call sender and the reply's cancellation.
+ * @param handling - The round's gate and the reply's cancellation.
  * @returns The message carrying the run's text, the tool's explanation of
- * arguments it cannot run, or the client's failed answer; or undefined when
- * the reply was stopped while the call waited or ran.
+ * arguments it cannot run, or the person's rejection; or undefined when the
+ * reply was stopped while the call waited or ran.
  * @throws When the run rejects although the reply was not stopped.
- * @remarks Arguments the tool cannot run are answered before the client is
+ * @remarks Arguments the tool cannot run are answered before the gate is
  * asked, so the person never sees a call that cannot succeed.
  */
 async function handleBuiltInToolCall(
   toolCall: ChatToolCall,
   builtInTool: BuiltInTool,
-  context: ToolCallRoundContext
+  handling: ToolCallHandling
 ): Promise<ToolResultMessage | undefined> {
   const parsedCall = builtInTool.parseToolCall(toolCall.arguments)
   if (parsedCall.status === "invalid")
     return buildToolResultMessage(toolCall, parsedCall.message)
-  const answer = await context.sendBuiltInToolCall(toolCall)
-  if (answer === undefined) return undefined
-  if (answer.status === "failed")
-    return buildToolResultMessage(toolCall, answer.content)
+  const request = handling.gate.sendToolApprovalRequest(toolCall)
+  const approval = isToolCallAllowedAtOnce(request)
+    ? request
+    : await request.answer
+  if (approval === undefined) return undefined
+  if (approval.status === "rejected")
+    return buildToolResultMessage(toolCall, approval.content)
   try {
-    const result = await parsedCall.runToolCall(context.abortSignal)
+    const result = await parsedCall.runToolCall(handling.abortSignal)
     return buildToolResultMessage(toolCall, result.content)
   } catch (error) {
-    if (context.abortSignal.aborted) return undefined
+    if (handling.abortSignal.aborted) return undefined
     throw error
   }
+}
+
+/**
+ * Answers whether the gate allowed a call without prompting the person.
+ *
+ * @param request - What asking the gate about the call did.
+ * @returns True for `allowed`. The caller then goes on without awaiting, so
+ * the call's run request is sent in the same step and keeps the model's
+ * order among the round's sends.
+ */
+function isToolCallAllowedAtOnce(
+  request: ToolApprovalRequest
+): request is Extract<ToolApprovalRequest, { status: "allowed" }> {
+  return request.status === "allowed"
 }
 
 /**

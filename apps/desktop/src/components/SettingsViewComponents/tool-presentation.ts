@@ -15,10 +15,10 @@ import {
 import type { ToolModelSupport } from "@/lib/models/tool-model-support"
 import {
   TOOL_APPROVALS,
-  getToolChoice,
   type ToolApproval,
-  type ToolChoice
-} from "@/lib/store/tools"
+  type ToolSettingsSaveState
+} from "@/lib/store/tool-settings"
+import { isToolOn } from "@/lib/store/tools"
 
 /** Tone of the tool-calls status dot. */
 export type ToolCallsTone = "neutral" | "active" | "warning"
@@ -84,6 +84,16 @@ const TOOL_ACCESS_LABELS = Object.freeze({
   network: "network"
 } satisfies Readonly<Record<ToolAccess, string>>)
 
+/**
+ * What Just run does, by what the tool does with the machine; a new access
+ * level must add one.
+ */
+const JUST_RUN_NOTES = Object.freeze({
+  reads: "Runs the moment the model asks, without showing you the call.",
+  network:
+    "Sends its request off this machine the moment the model asks, without showing you what it sends."
+} satisfies Readonly<Record<ToolAccess, string>>)
+
 /** Presentation of every runner; a new runner must add one. */
 const TOOL_RUNNER_PRESENTATIONS = Object.freeze({
   client: Object.freeze({
@@ -116,7 +126,7 @@ export function calculateToolTokenEstimate(tool: ToolDefinition): number {
  * Calculates how many tools are offered and what they add to a request.
  *
  * @param tools - Every listed tool.
- * @param toolChoices - Choices the person changed, keyed by tool name.
+ * @param toolSwitches - Switches the person changed, keyed by tool name.
  * @param unavailableTools - Why each tool that cannot run now cannot, by
  * name; such a tool is never offered, whatever its switch says.
  * @returns The count and summed token estimate of the tools that are
@@ -124,12 +134,11 @@ export function calculateToolTokenEstimate(tool: ToolDefinition): number {
  */
 export function calculateOfferedToolTotals(
   tools: readonly ToolDefinition[],
-  toolChoices: ReadonlyMap<string, ToolChoice>,
+  toolSwitches: ReadonlyMap<string, boolean>,
   unavailableTools: ReadonlyMap<string, BackendToolUnavailableReason>
 ): OfferedToolTotals {
   const offeredTools = tools.filter(
-    (tool) =>
-      getToolChoice(toolChoices, tool).isOn && !unavailableTools.has(tool.name)
+    (tool) => isToolOn(toolSwitches, tool) && !unavailableTools.has(tool.name)
   )
   const offeredTokenCount = offeredTools.reduce(
     (tokenCount, tool) => tokenCount + calculateToolTokenEstimate(tool),
@@ -335,14 +344,42 @@ export function formatToolApprovalLabel(approval: ToolApproval): string {
  * Formats what happens before a tool runs under one approval.
  *
  * @param approval - When the tool runs once the model asks for it.
- * @returns A sentence describing the approval.
+ * @param access - What the tool does with the machine.
+ * @returns A sentence describing the approval; for Just run it says what
+ * leaves the machine unseen when the tool sends requests off it.
  */
-export function formatToolApprovalNote(approval: ToolApproval): string {
+export function formatToolApprovalNote(
+  approval: ToolApproval,
+  access: ToolAccess
+): string {
   switch (approval) {
     case "ask":
-      return "You see the call and its arguments. Nothing happens until you say yes."
+      return "Each call waits for you with its arguments. Nothing runs until you allow it."
     case "run":
-      return "Runs the moment the model asks for it."
+      return JUST_RUN_NOTES[access]
+  }
+}
+
+/**
+ * Formats the outcome of the latest save of the Just run choices.
+ *
+ * @param save - Latest application-owned save lifecycle state.
+ * @returns The saving or failure message, or an empty string while idle or
+ * after a successful save, which leave nothing to announce. The failure
+ * message says that tool calls follow the saved choices, because the
+ * backend reads them from the settings file.
+ */
+export function formatToolSettingsSaveStatus(
+  save: ToolSettingsSaveState
+): string {
+  switch (save.status) {
+    case "saving":
+      return "Saving Just run choices…"
+    case "failed":
+      return "Couldn't save your Just run choices. Tool calls keep following the choices Lys last saved until a save works."
+    case "idle":
+    case "saved":
+      return ""
   }
 }
 

@@ -3,12 +3,13 @@ import {
   chatReplyEventsApi,
   chatReplyNotFoundProblemSchema,
   chatReplyNotGeneratingProblemSchema,
-  chatToolCallAnswerMismatchProblemSchema,
   chatToolCallNotPendingProblemSchema,
   conversationNotFoundProblemSchema,
   MAXIMUM_TOOL_RESULT_BODY_BYTES,
+  sendChatToolApprovalApi,
   sendChatToolResultApi,
   stopChatReplyApi,
+  type ChatToolApprovalAnswer,
   type ChatToolCall,
   type ChatToolResult
 } from "@lys/protocol"
@@ -65,7 +66,8 @@ const REPLY_SNAPSHOT_EVENT = Object.freeze({
   type: "reply-snapshot",
   conversationTitle: "Trip plan",
   assistantMessage: ASSISTANT_MESSAGE,
-  pendingToolCalls: []
+  pendingToolCalls: [],
+  pendingToolApprovals: []
 })
 
 /** Generation running for one reply, with both of its controlled tasks. */
@@ -184,7 +186,7 @@ const TOOL_CALL = Object.freeze({
   arguments: Object.freeze({ path: "/notes/todo.md" })
 } satisfies ChatToolCall)
 
-/** Call of a backend tool the controlled reply waits on to be allowed. */
+/** Call of a backend tool the controlled reply shows for approval. */
 const BACKEND_TOOL_CALL = Object.freeze({
   id: createFixtureUuidV7(11),
   toolName: "read_page",
@@ -227,6 +229,48 @@ async function sendToolResult(
   return await app.inject({
     method: "POST",
     url: createToolResultUrl(callId),
+    headers: { "content-type": "application/json" },
+    payload: JSON.stringify(payload)
+  })
+}
+
+/** Answer of a person who rejected a call. */
+const DECLINED_APPROVAL = Object.freeze({
+  status: "rejected",
+  reason: "declined",
+  content: "The person declined this call."
+} satisfies ChatToolApprovalAnswer)
+
+/**
+ * Builds the tool-approval URL of one call of {@link REPLY_TARGET}.
+ *
+ * @param callId - Raw call identifier, possibly malformed.
+ * @returns The request URL.
+ */
+function createToolApprovalUrl(callId: string): string {
+  return createReplyUrl(
+    sendChatToolApprovalApi.path,
+    REPLY_TARGET.conversationId,
+    REPLY_TARGET.assistantMessageId
+  ).replace(":callId", callId)
+}
+
+/**
+ * Sends one approval answer for {@link REPLY_TARGET}.
+ *
+ * @param app - Application with the reply routes registered.
+ * @param callId - Raw call identifier.
+ * @param payload - Raw request body, serialized as JSON.
+ * @returns The completed response.
+ */
+async function sendToolApproval(
+  app: FastifyInstance,
+  callId: string,
+  payload: unknown
+) {
+  return await app.inject({
+    method: "POST",
+    url: createToolApprovalUrl(callId),
     headers: { "content-type": "application/json" },
     payload: JSON.stringify(payload)
   })
@@ -448,6 +492,73 @@ describe("updateFastifyWithChatReplyRoutes", () => {
       ])
     })
 
+    it("lists a prompt the reply waits on in the snapshot apart from calls", async () => {
+      const { app, generations, getConversation } = await createReplyRouteApp()
+      const generation = startControlledGeneration(generations, REPLY_TARGET)
+      await waitForMicrotasks()
+      void generation.replyTask.context.sendClientToolCall(TOOL_CALL)
+      void generation.replyTask.context.sendToolApprovalPrompt(
+        BACKEND_TOOL_CALL
+      )
+      const snapshotRead = Promise.withResolvers<void>()
+      getConversation.mockImplementation(() => {
+        snapshotRead.resolve()
+        return CONVERSATION
+      })
+
+      const responsePromise = app.inject({
+        method: "GET",
+        url: REPLY_EVENTS_URL
+      })
+      await snapshotRead.promise
+      generation.replyTask.resolve()
+      generation.titleTask.resolve()
+      const response = await responsePromise
+
+      const events = parseSseEvents(response.body)
+      expect(events).toEqual([
+        {
+          event: "reply-snapshot",
+          data: {
+            ...REPLY_SNAPSHOT_EVENT,
+            pendingToolCalls: [TOOL_CALL],
+            pendingToolApprovals: [BACKEND_TOOL_CALL]
+          }
+        }
+      ])
+      expect(chatReplyEventSchema.safeParse(events[0]?.data).success).toBe(true)
+    })
+
+    it("sends a prompt made after following began as a tool-approval event", async () => {
+      const { app, generations, getConversation } = await createReplyRouteApp()
+      const generation = startControlledGeneration(generations, REPLY_TARGET)
+      const snapshotRead = Promise.withResolvers<void>()
+      getConversation.mockImplementation(() => {
+        snapshotRead.resolve()
+        return CONVERSATION
+      })
+
+      const responsePromise = app.inject({
+        method: "GET",
+        url: REPLY_EVENTS_URL
+      })
+      await snapshotRead.promise
+      void generation.replyTask.context.sendToolApprovalPrompt(
+        BACKEND_TOOL_CALL
+      )
+      generation.replyTask.resolve()
+      generation.titleTask.resolve()
+      const response = await responsePromise
+
+      expect(parseSseEvents(response.body)).toEqual([
+        { event: "reply-snapshot", data: REPLY_SNAPSHOT_EVENT },
+        {
+          event: "tool-approval",
+          data: { type: "tool-approval", call: BACKEND_TOOL_CALL }
+        }
+      ])
+    })
+
     it("sends a call made after following began as a tool-call event", async () => {
       const { app, generations, getConversation } = await createReplyRouteApp()
       const generation = startControlledGeneration(generations, REPLY_TARGET)
@@ -488,58 +599,22 @@ describe("updateFastifyWithChatReplyRoutes", () => {
       expect(await answer).toEqual(SUCCEEDED_RESULT)
     })
 
-    it("answers 204 and resumes a backend call once it is allowed", async () => {
+    it("answers 409 with the not-pending problem to a result for a call waiting for approval, which keeps waiting", async () => {
       const { app, generations } = await createReplyRouteApp()
       const generation = startControlledGeneration(generations, REPLY_TARGET)
       await waitForMicrotasks()
-      const answer =
-        generation.replyTask.context.sendBuiltInToolCall(BACKEND_TOOL_CALL)
+      void generation.replyTask.context.sendToolApprovalPrompt(TOOL_CALL)
 
-      const response = await sendToolResult(app, BACKEND_TOOL_CALL.id, {
-        status: "allowed"
-      })
+      const response = await sendToolResult(app, TOOL_CALL.id, SUCCEEDED_RESULT)
 
-      expect(response.statusCode).toBe(204)
-      expect(await answer).toEqual({ status: "allowed" })
+      expect(response.statusCode).toBe(409)
+      expect(
+        chatToolCallNotPendingProblemSchema.safeParse(response.json()).success
+      ).toBe(true)
+      expect(
+        generations.findReplyGeneration(REPLY_TARGET)?.pendingToolCalls
+      ).toEqual({ toolCalls: [], toolApprovals: [TOOL_CALL] })
     })
-
-    it.each([
-      ["allowed for a client call", "client", TOOL_CALL, { status: "allowed" }],
-      [
-        "succeeded for a backend call",
-        "backend",
-        BACKEND_TOOL_CALL,
-        SUCCEEDED_RESULT
-      ]
-    ] as const)(
-      "answers 409 with the mismatch problem to %s and leaves the call waiting",
-      async (_label, runner, toolCall, payload) => {
-        const { app, generations } = await createReplyRouteApp()
-        const generation = startControlledGeneration(generations, REPLY_TARGET)
-        await waitForMicrotasks()
-        const { context } = generation.replyTask
-        void (runner === "client"
-          ? context.sendClientToolCall(toolCall)
-          : context.sendBuiltInToolCall(toolCall))
-
-        const response = await sendToolResult(app, toolCall.id, payload)
-
-        expect(response.statusCode).toBe(409)
-        expect(response.headers["content-type"]).toMatch(
-          /^application\/problem\+json/
-        )
-        const problem: unknown = response.json()
-        expect(
-          chatToolCallAnswerMismatchProblemSchema.safeParse(problem).success
-        ).toBe(true)
-        expect(problem).toMatchObject({
-          instance: createToolResultUrl(toolCall.id)
-        })
-        expect(
-          generations.findReplyGeneration(REPLY_TARGET)?.pendingToolCalls
-        ).toEqual([toolCall])
-      }
-    )
 
     it("answers 409 to a second answer for the same call", async () => {
       const { app, generations } = await createReplyRouteApp()
@@ -598,7 +673,12 @@ describe("updateFastifyWithChatReplyRoutes", () => {
     it.each([
       [
         "a failed answer without content",
-        { status: "failed", reason: "declined", content: "" }
+        { status: "failed", reason: "toolFailed", content: "" }
+      ],
+      ["an approval answer", { status: "allowed" }],
+      [
+        "a failed answer the person declined",
+        { status: "failed", reason: "declined", content: "x" }
       ],
       ["an unknown status", { status: "skipped", content: "x" }],
       [
@@ -607,7 +687,7 @@ describe("updateFastifyWithChatReplyRoutes", () => {
       ],
       [
         "a failed answer with an unknown field",
-        { status: "failed", reason: "declined", content: "x", note: "y" }
+        { status: "failed", reason: "runFailed", content: "x", note: "y" }
       ],
       [
         "a failed answer with an unknown reason",
@@ -626,7 +706,7 @@ describe("updateFastifyWithChatReplyRoutes", () => {
         expect(response.statusCode).toBe(400)
         expect(
           generations.findReplyGeneration(REPLY_TARGET)?.pendingToolCalls
-        ).toEqual([TOOL_CALL])
+        ).toEqual({ toolCalls: [TOOL_CALL], toolApprovals: [] })
       }
     )
 
@@ -660,7 +740,7 @@ describe("updateFastifyWithChatReplyRoutes", () => {
       expect(response.statusCode).toBe(413)
       expect(
         generations.findReplyGeneration(REPLY_TARGET)?.pendingToolCalls
-      ).toEqual([TOOL_CALL])
+      ).toEqual({ toolCalls: [TOOL_CALL], toolApprovals: [] })
     })
 
     it.each([
@@ -705,7 +785,7 @@ describe("updateFastifyWithChatReplyRoutes", () => {
         expect(response.statusCode).toBe(400)
         expect(
           generations.findReplyGeneration(REPLY_TARGET)?.pendingToolCalls
-        ).toEqual([TOOL_CALL])
+        ).toEqual({ toolCalls: [TOOL_CALL], toolApprovals: [] })
       }
     )
 
@@ -730,14 +810,182 @@ describe("updateFastifyWithChatReplyRoutes", () => {
 
       await sendToolResult(app, TOOL_CALL.id, {
         status: "failed",
-        reason: "declined",
-        content: "The person declined this call."
+        reason: "toolFailed",
+        content: "The file no longer exists."
       })
 
       expect(logs).toContainEqual(
         expect.objectContaining({
           level: "debug",
           toolCallId: TOOL_CALL.id,
+          reason: "toolFailed"
+        })
+      )
+    })
+  })
+
+  describe("POST tool approval", () => {
+    it.each<[string, ChatToolApprovalAnswer]>([
+      ["allowed", { status: "allowed" }],
+      ["rejected", DECLINED_APPROVAL]
+    ])(
+      "answers 204 and resumes the reply with an answer of %s",
+      async (_label, payload) => {
+        const { app, generations } = await createReplyRouteApp()
+        const generation = startControlledGeneration(generations, REPLY_TARGET)
+        await waitForMicrotasks()
+        const answer =
+          generation.replyTask.context.sendToolApprovalPrompt(BACKEND_TOOL_CALL)
+
+        const response = await sendToolApproval(
+          app,
+          BACKEND_TOOL_CALL.id,
+          payload
+        )
+
+        expect(response.statusCode).toBe(204)
+        expect(response.body).toBe("")
+        expect(await answer).toEqual(payload)
+      }
+    )
+
+    it("answers 409 with the not-pending problem to a second answer for the same prompt", async () => {
+      const { app, generations } = await createReplyRouteApp()
+      const generation = startControlledGeneration(generations, REPLY_TARGET)
+      await waitForMicrotasks()
+      void generation.replyTask.context.sendToolApprovalPrompt(
+        BACKEND_TOOL_CALL
+      )
+      await sendToolApproval(app, BACKEND_TOOL_CALL.id, { status: "allowed" })
+
+      const response = await sendToolApproval(app, BACKEND_TOOL_CALL.id, {
+        status: "allowed"
+      })
+
+      expect(response.statusCode).toBe(409)
+      expect(response.headers["content-type"]).toMatch(
+        /^application\/problem\+json/
+      )
+      const problem: unknown = response.json()
+      expect(
+        chatToolCallNotPendingProblemSchema.safeParse(problem).success
+      ).toBe(true)
+      expect(problem).toMatchObject({
+        instance: createToolApprovalUrl(BACKEND_TOOL_CALL.id)
+      })
+    })
+
+    it("answers 409 to an approval for a call waiting for its result, which keeps waiting", async () => {
+      const { app, generations } = await createReplyRouteApp()
+      const generation = startControlledGeneration(generations, REPLY_TARGET)
+      await waitForMicrotasks()
+      void generation.replyTask.context.sendClientToolCall(TOOL_CALL)
+
+      const response = await sendToolApproval(app, TOOL_CALL.id, {
+        status: "allowed"
+      })
+
+      expect(response.statusCode).toBe(409)
+      expect(
+        generations.findReplyGeneration(REPLY_TARGET)?.pendingToolCalls
+      ).toEqual({ toolCalls: [TOOL_CALL], toolApprovals: [] })
+    })
+
+    it.each([
+      ["no generation runs for the reply", false, BACKEND_TOOL_CALL.id],
+      [
+        "the reply waits on no prompt with that identifier",
+        true,
+        createFixtureUuidV7(404)
+      ]
+    ])("answers 409 when %s", async (_label, isGenerating, callId) => {
+      const { app, generations } = await createReplyRouteApp()
+      if (isGenerating) startControlledGeneration(generations, REPLY_TARGET)
+
+      const response = await sendToolApproval(app, callId, {
+        status: "allowed"
+      })
+
+      expect(response.statusCode).toBe(409)
+    })
+
+    it.each([
+      [
+        "an allowed answer with an unknown field",
+        { status: "allowed", note: "x" }
+      ],
+      [
+        "a rejected answer without content",
+        { status: "rejected", reason: "declined" }
+      ],
+      [
+        "a rejected answer with empty content",
+        { status: "rejected", reason: "declined", content: "" }
+      ],
+      [
+        "a rejected answer with an unknown reason",
+        { status: "rejected", reason: "timedOut", content: "x" }
+      ],
+      ["a tool result", SUCCEEDED_RESULT]
+    ])(
+      "rejects %s with 400 and leaves the prompt waiting",
+      async (_label, payload) => {
+        const { app, generations } = await createReplyRouteApp()
+        const generation = startControlledGeneration(generations, REPLY_TARGET)
+        await waitForMicrotasks()
+        void generation.replyTask.context.sendToolApprovalPrompt(
+          BACKEND_TOOL_CALL
+        )
+
+        const response = await sendToolApproval(
+          app,
+          BACKEND_TOOL_CALL.id,
+          payload
+        )
+
+        expect(response.statusCode).toBe(400)
+        expect(
+          generations.findReplyGeneration(REPLY_TARGET)?.pendingToolCalls
+        ).toEqual({ toolCalls: [], toolApprovals: [BACKEND_TOOL_CALL] })
+      }
+    )
+
+    it("rejects a call identifier the model wrote with 400", async () => {
+      const { app, generations } = await createReplyRouteApp()
+      startControlledGeneration(generations, REPLY_TARGET)
+
+      const response = await sendToolApproval(app, "call_0", {
+        status: "allowed"
+      })
+
+      expect(response.statusCode).toBe(400)
+    })
+
+    it("fails with a server error once the registry is closed for shutdown", async () => {
+      const { app, generations } = await createReplyRouteApp()
+      await generations[Symbol.asyncDispose]()
+
+      const response = await sendToolApproval(app, BACKEND_TOOL_CALL.id, {
+        status: "allowed"
+      })
+
+      expect(response.statusCode).toBe(500)
+    })
+
+    it("logs why the call was not allowed, at debug level", async () => {
+      const { app, generations, logs } = await createReplyRouteApp()
+      const generation = startControlledGeneration(generations, REPLY_TARGET)
+      await waitForMicrotasks()
+      void generation.replyTask.context.sendToolApprovalPrompt(
+        BACKEND_TOOL_CALL
+      )
+
+      await sendToolApproval(app, BACKEND_TOOL_CALL.id, DECLINED_APPROVAL)
+
+      expect(logs).toContainEqual(
+        expect.objectContaining({
+          level: "debug",
+          toolCallId: BACKEND_TOOL_CALL.id,
           reason: "declined"
         })
       )

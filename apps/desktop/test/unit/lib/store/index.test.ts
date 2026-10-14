@@ -515,6 +515,33 @@ describe("useLysStore", () => {
       expect(useLysStore.getState().generationSave).toEqual({ status: "saved" })
     })
 
+    it("saves a tools edit to disk and reports the save", async () => {
+      const host = startDesktopHost(DISK_SETTINGS_DOCUMENT, {
+        save_settings: () => null
+      })
+      const useLysStore = await loadFreshLysStore()
+      await useLysStore.getState().initialize()
+
+      useLysStore.getState().setSettings({
+        ...DISK_SETTINGS,
+        tools: { justRunToolNames: new Set(["find_files"]) }
+      })
+      await waitForMicrotasks()
+
+      expect(host.commands.at(-1)).toEqual({
+        command: "save_settings",
+        args: {
+          newSettings: {
+            ...DISK_SETTINGS_DOCUMENT,
+            tools: { justRun: ["find_files"] }
+          }
+        }
+      })
+      expect(useLysStore.getState().toolSettingsSave).toEqual({
+        status: "saved"
+      })
+    })
+
     it("keeps runtime and model edits in memory without saving them", async () => {
       const host = startDesktopHost(DISK_SETTINGS_DOCUMENT)
       const useLysStore = await loadFreshLysStore()
@@ -605,6 +632,34 @@ describe("useLysStore", () => {
       })
       expect(useLysStore.getState().settings.secrets).toEqual({
         tavilyApiKey: null
+      })
+    })
+  })
+
+  describe("tool approvals", () => {
+    it("saves a tool put on Just run to disk in the store's settings", async () => {
+      const host = startDesktopHost(DISK_SETTINGS_DOCUMENT, {
+        save_settings: () => null
+      })
+      const useLysStore = await loadFreshLysStore()
+      await useLysStore.getState().initialize()
+
+      useLysStore.getState().updateToolApproval("find_files", "run")
+      await waitForMicrotasks()
+
+      expect(host.commands.at(-1)).toEqual({
+        command: "save_settings",
+        args: {
+          newSettings: {
+            ...DISK_SETTINGS_DOCUMENT,
+            tools: {
+              justRun: [...DISK_SETTINGS_DOCUMENT.tools.justRun, "find_files"]
+            }
+          }
+        }
+      })
+      expect(useLysStore.getState().toolSettingsSave).toEqual({
+        status: "saved"
       })
     })
   })

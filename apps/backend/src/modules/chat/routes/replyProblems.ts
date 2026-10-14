@@ -2,13 +2,11 @@ import {
   chatBackendToolUnavailableProblemSchema,
   chatReplyNotFoundProblemSchema,
   chatReplyNotGeneratingProblemSchema,
-  chatToolCallAnswerMismatchProblemSchema,
   chatToolCallNotPendingProblemSchema,
   type BackendToolUnavailableReason,
   type ChatBackendToolUnavailableProblem,
   type ChatReplyNotFoundProblem,
   type ChatReplyNotGeneratingProblem,
-  type ChatToolCallAnswerMismatchProblem,
   type ChatToolCallNotPendingProblem
 } from "@lys/protocol"
 
@@ -56,12 +54,13 @@ export function createChatReplyNotGeneratingProblem(
 
 /**
  * Creates the caller-safe response for answering a tool call that is not
- * waiting for an answer.
+ * waiting for that answer.
  *
  * @param callId - Validated UUIDv7 of a call that is unknown, already
- * answered, or whose reply ended.
+ * answered, waiting for the other kind of answer, or whose reply ended.
  * @param instance - Request path identifying this occurrence.
- * @returns The strict problem accepted by tool-result consumers.
+ * @returns The strict problem accepted by tool-result and tool-approval
+ * consumers.
  */
 export function createChatToolCallNotPendingProblem(
   callId: string,
@@ -72,29 +71,7 @@ export function createChatToolCallNotPendingProblem(
     type: shape.type.value,
     title: shape.title.value,
     status: shape.status.value,
-    detail: `Tool call ${callId} is not waiting for an answer.`,
-    instance
-  }
-}
-
-/**
- * Creates the caller-safe response for answering a waiting tool call with an
- * answer that does not fit it.
- *
- * @param callId - Validated UUIDv7 of the waiting call.
- * @param instance - Request path identifying this occurrence.
- * @returns The strict problem accepted by tool-result consumers.
- */
-export function createChatToolCallAnswerMismatchProblem(
-  callId: string,
-  instance: string
-): ChatToolCallAnswerMismatchProblem {
-  const { shape } = chatToolCallAnswerMismatchProblemSchema.unwrap()
-  return {
-    type: shape.type.value,
-    title: shape.title.value,
-    status: shape.status.value,
-    detail: `Tool call ${callId} cannot take this answer: a client tool's call takes its result, and a backend tool's call takes allowed or failed.`,
+    detail: `Tool call ${callId} is not waiting for this answer.`,
     instance
   }
 }

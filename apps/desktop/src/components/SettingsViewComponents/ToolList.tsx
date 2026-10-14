@@ -1,16 +1,21 @@
 import type { BackendToolUnavailableReason } from "@lys/protocol"
-import type { ToolArgumentDefinition, ToolDefinition } from "@lys/share"
+import type {
+  ToolAccess,
+  ToolArgumentDefinition,
+  ToolDefinition
+} from "@lys/share"
 import { ChevronRight, Lock } from "lucide-react"
 import { useId, type ReactElement } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { TOOL_APPROVALS, type ToolApproval } from "@/lib/store/tool-settings"
 import {
-  TOOL_APPROVALS,
   getToolChoice,
-  type ToolApproval,
-  type ToolChoice
+  isToolOn,
+  type ToolChoice,
+  type ToolChoices
 } from "@/lib/store/tools"
 
 import {
@@ -82,6 +87,8 @@ function ToolArgumentItem({ argument }: ToolArgumentItemProps): ReactElement {
 type ToolApprovalRowProps = {
   /** When the tool runs once the model asks for it, owned by the parent. */
   readonly approval: ToolApproval
+  /** What the tool does with the machine, which the note names. */
+  readonly access: ToolAccess
   /** Whether the tool controls are locked. */
   readonly isLocked: boolean
   /** Proposes another approval for the tool. */
@@ -94,14 +101,15 @@ type ToolApprovalRowProps = {
  *
  * @remarks The parent owns the approval and the lock; the row owns no state or
  * effects. The approval is a single-choice toggle group named by its label and
- * described by the current approval's note; pressing the selected approval
- * again proposes nothing, and the group is disabled while the controls are
- * locked.
- * @param props - Approval, lock, and the approval proposal.
+ * described by the current approval's note, which for Just run says what the
+ * tool does unseen given its access; pressing the selected approval again
+ * proposes nothing, and the group is disabled while the controls are locked.
+ * @param props - Approval, access, lock, and the approval proposal.
  * @returns The approval row of a tool's details.
  */
 function ToolApprovalRow({
   approval,
+  access,
   isLocked,
   onApprovalChange
 }: ToolApprovalRowProps): ReactElement {
@@ -122,7 +130,7 @@ function ToolApprovalRow({
     <div className="settings-view__tool-detail-row">
       <div className="settings-view__identity-lines">
         <h3 id={approvalLabelId}>Before it runs</h3>
-        <p id={approvalNoteId}>{formatToolApprovalNote(approval)}</p>
+        <p id={approvalNoteId}>{formatToolApprovalNote(approval, access)}</p>
       </div>
       <ToggleGroup
         aria-describedby={approvalNoteId}
@@ -210,6 +218,7 @@ function ToolDetails({
       </div>
 
       <ToolApprovalRow
+        access={tool.access}
         approval={choice.approval}
         isLocked={isLocked}
         onApprovalChange={onApprovalChange}
@@ -514,8 +523,8 @@ function ToolRow({
 export type ToolGroupSectionProps = {
   /** Group and its tools, in list order. */
   readonly listing: ToolGroupListing
-  /** Choices the person changed, keyed by tool name. */
-  readonly toolChoices: ReadonlyMap<string, ToolChoice>
+  /** Session switches and saved approvals the rows are drawn with. */
+  readonly toolChoices: ToolChoices
   /** Name of the tool whose details are shown, or null when none is. */
   readonly expandedToolName: string | null
   /** Whether the tool controls are locked. */
@@ -565,7 +574,7 @@ export function ToolGroupSection({
   const headingId = useId()
   const onToolCount = listing.tools.filter(
     (tool) =>
-      getToolChoice(toolChoices, tool).isOn && !unavailableTools.has(tool.name)
+      isToolOn(toolChoices.switches, tool) && !unavailableTools.has(tool.name)
   ).length
 
   /**

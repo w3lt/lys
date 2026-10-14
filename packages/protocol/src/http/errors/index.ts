@@ -14,12 +14,10 @@ export {
   chatBackendToolUnavailableProblemSchema,
   chatReplyNotFoundProblemSchema,
   chatReplyNotGeneratingProblemSchema,
-  chatToolCallAnswerMismatchProblemSchema,
   chatToolCallNotPendingProblemSchema,
   type ChatBackendToolUnavailableProblem,
   type ChatReplyNotFoundProblem,
   type ChatReplyNotGeneratingProblem,
-  type ChatToolCallAnswerMismatchProblem,
   type ChatToolCallNotPendingProblem
 } from "./chat"
 export {

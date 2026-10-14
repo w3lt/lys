@@ -5,7 +5,11 @@ import { useEffect, useRef, useState, type ReactElement } from "react"
 import { Button } from "@/components/ui/button"
 import { calculateToolModelSupport } from "@/lib/models/tool-model-support"
 import { useLysStore } from "@/lib/store"
-import { useToolStore, type ToolListState } from "@/lib/store/tools"
+import {
+  useToolStore,
+  type ToolChoices,
+  type ToolListState
+} from "@/lib/store/tools"
 
 import PaneSkeleton from "./PaneSkeleton"
 import { ToolCallsCard } from "./ToolCallsCard"
@@ -14,6 +18,7 @@ import { ToolUnavailableCard } from "./ToolUnavailableCard"
 import {
   buildToolGroups,
   calculateOfferedToolTotals,
+  formatToolSettingsSaveStatus,
   type ToolGroupListing
 } from "./tool-presentation"
 
@@ -93,8 +98,9 @@ type ToolGroupListProps = {
 /**
  * Presents every group of tools with the choices made about them.
  *
- * @remarks The tool store owns each tool's switch and approval, and the
- * component passes their changes to it. The parent owns which tool is
+ * @remarks The tool store owns each tool's switch for this session, and the
+ * application store owns each tool's approval, which it saves; the
+ * component passes each change to its owner. The parent owns which tool is
  * expanded, the lock, the dimming, and the availability. Groups keep the
  * order in which the listed tools first name them. A tool that cannot run
  * now offers to open the Secrets pane, which the application store selects.
@@ -110,10 +116,17 @@ function ToolGroupList({
   onExpandedToolNameChange,
   unavailableTools
 }: ToolGroupListProps): ReactElement {
-  const toolChoices = useToolStore((state) => state.toolChoices)
+  const toolSwitches = useToolStore((state) => state.toolSwitches)
   const updateToolOn = useToolStore((state) => state.updateToolOn)
-  const updateToolApproval = useToolStore((state) => state.updateToolApproval)
+  const justRunToolNames = useLysStore(
+    (state) => state.settings.tools.justRunToolNames
+  )
+  const updateToolApproval = useLysStore((state) => state.updateToolApproval)
   const setSettingsPane = useLysStore((state) => state.setSettingsPane)
+  const toolChoices: ToolChoices = {
+    switches: toolSwitches,
+    justRunToolNames
+  }
 
   /**
    * Builds the section of one tool group.
@@ -131,7 +144,9 @@ function ToolGroupList({
         listing={listing}
         onExpandedToolNameChange={onExpandedToolNameChange}
         onOpenSecrets={() => setSettingsPane("secrets")}
-        onToolApprovalChange={updateToolApproval}
+        onToolApprovalChange={(tool, approval) =>
+          updateToolApproval(tool.name, approval)
+        }
         onToolOnChange={updateToolOn}
         toolChoices={toolChoices}
         unavailableTools={unavailableTools}
@@ -140,6 +155,47 @@ function ToolGroupList({
   }
 
   return <>{buildToolGroups(tools).map(buildToolGroupSection)}</>
+}
+
+/**
+ * Announces the automatic save of the Just run choices and offers a retry
+ * when a write fails.
+ *
+ * @remarks The application store owns the save across pane unmounts; the
+ * component owns no state or effects. The status is one polite region named
+ * "Just run choices save" that stays mounted while the pane is shown, also
+ * while the tools are read again or cannot be read, so it exists before
+ * every change it announces; it is empty while nothing needs saying. After
+ * a failure, Retry saving writes the current choices again; until a save
+ * works, tool calls follow the choices last saved, because the backend reads
+ * them from the settings file.
+ * @returns The status region and, after a failed save, the retry button.
+ */
+function ToolApprovalSaveFeedback(): ReactElement {
+  const save = useLysStore((state) => state.toolSettingsSave)
+  const saveToolSettings = useLysStore((state) => state.saveToolSettings)
+
+  return (
+    <div className="settings-view__tool-status">
+      <p
+        aria-label="Just run choices save"
+        aria-live="polite"
+        className="settings-view__note"
+        role="status"
+      >
+        {formatToolSettingsSaveStatus(save)}
+      </p>
+      {save.status === "failed" ? (
+        <Button
+          onClick={() => void saveToolSettings()}
+          type="button"
+          variant="outline"
+        >
+          Retry saving
+        </Button>
+      ) : null}
+    </div>
+  )
 }
 
 /** Properties accepted by {@link ToolWorkspace}. */
@@ -159,8 +215,10 @@ type ToolWorkspaceProps = {
  * details are shown, at most one, which resets when the pane is left. While
  * the loaded model was not trained for tools, the controls below the card
  * recede and are disabled, and no tool's details are shown; the tool that
- * was expanded opens again once the controls unlock. Every choice lasts for
- * this session only and applies to the next tool call or chat request.
+ * was expanded opens again once the controls unlock. A switch applies to the
+ * next chat request; an approval applies to the next round of tool calls
+ * once it is saved, because the backend reads it from the settings file.
+ * The switches last for this session only; each tool's approval is saved.
  * @param props - Listed tools and which cannot run now.
  * @returns The tool controls.
  */
@@ -169,7 +227,7 @@ function ToolWorkspace({
   unavailableTools
 }: ToolWorkspaceProps): ReactElement {
   const areToolCallsOn = useToolStore((state) => state.areToolCallsOn)
-  const toolChoices = useToolStore((state) => state.toolChoices)
+  const toolSwitches = useToolStore((state) => state.toolSwitches)
   const updateToolCallsOn = useToolStore((state) => state.updateToolCallsOn)
   const modelRuntime = useLysStore((state) => state.modelRuntime)
   const modelInventory = useLysStore((state) => state.modelInventory)
@@ -179,12 +237,12 @@ function ToolWorkspace({
   const shownToolName = isLocked ? null : expandedToolName
   const totals = calculateOfferedToolTotals(
     tools,
-    toolChoices,
+    toolSwitches,
     unavailableTools
   )
 
   return (
-    <div className="settings-view__stack">
+    <>
       {support.status === "untrained" ? (
         <ToolUnavailableCard modelKey={support.modelKey} />
       ) : null}
@@ -211,7 +269,7 @@ function ToolWorkspace({
           unavailableTools={unavailableTools}
         />
       </div>
-    </div>
+    </>
   )
 }
 
@@ -252,12 +310,15 @@ function ToolListBody({ list }: ToolListBodyProps): ReactElement | null {
  * Presents the Tools pane: Lys's tools, in the app and in the backend, and
  * the choices about them.
  *
- * @remarks The tool store owns the list and the choices. The pane reads the
+ * @remarks The tool store owns the list and the session switches, and the
+ * application store owns the saved approvals. The pane reads the
  * tools from the desktop and the backend when it appears and none were read
  * yet; the read belongs to the store and continues if the pane is left. A
  * status line stays mounted above the tools and, after a failed read of
- * either list, shows the failure and offers Retry. The pane accepts no
- * props and is loaded lazily by the settings view.
+ * either list, shows the failure and offers Retry. The save status of the
+ * Just run choices stays mounted below them, so a failed save and its
+ * Retry saving stay shown while the tools are read again or cannot be read.
+ * The pane accepts no props and is loaded lazily by the settings view.
  * @returns The tools pane body.
  */
 export default function ToolPane(): ReactElement {
@@ -276,7 +337,10 @@ export default function ToolPane(): ReactElement {
           list.status === "failed" ? () => void loadTools() : undefined
         }
       />
-      <ToolListBody list={list} />
+      <div className="settings-view__stack">
+        <ToolListBody list={list} />
+        <ToolApprovalSaveFeedback />
+      </div>
     </div>
   )
 }

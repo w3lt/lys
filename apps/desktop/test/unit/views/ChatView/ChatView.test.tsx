@@ -122,7 +122,8 @@ function buildCompletedNewTurnReplyEvents(): Response {
     type: "reply-snapshot",
     conversationTitle: null,
     assistantMessage: buildCompletedAssistantMessage(3, "I am Lys."),
-    pendingToolCalls: []
+    pendingToolCalls: [],
+    pendingToolApprovals: []
   })
   stream.close()
   return stream.response

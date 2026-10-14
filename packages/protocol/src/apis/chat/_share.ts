@@ -21,6 +21,29 @@ export const chatReplyPathParamsSchema = z
 /** Path parameters addressing one assistant reply in its conversation. */
 export type ChatReplyPathParams = z.infer<typeof chatReplyPathParamsSchema>
 
+/**
+ * Validates the path parameters addressing one tool call of a reply.
+ *
+ * @remarks Shared by the tool-approval and tool-result endpoints. Every
+ * decoded identifier must be UUIDv7; a malformed one is rejected with HTTP
+ * 400 before any lookup.
+ */
+export const chatToolCallPathParamsSchema = z
+  .strictObject({
+    /** UUIDv7 identity of the conversation that holds the reply. */
+    conversationId: z.uuidv7(),
+    /** UUIDv7 identity of the assistant reply that made the call. */
+    assistantMessageId: z.uuidv7(),
+    /** UUIDv7 the backend gave the call in its `tool-approval` or `tool-call` event. */
+    callId: z.uuidv7()
+  })
+  .readonly()
+
+/** Path parameters addressing one tool call of a reply. */
+export type ChatToolCallPathParams = z.infer<
+  typeof chatToolCallPathParamsSchema
+>
+
 /** Validates the event carrying the conversation's persisted title. */
 export const chatTitleEventSchema = z.strictObject({
   type: z.literal("title"),
@@ -63,12 +86,14 @@ export const chatErrorEventSchema = z.strictObject({
 })
 
 /**
- * Validates one tool call that the backend asks a client to answer.
+ * Validates one tool call that the backend asks a client to approve or run.
  *
  * @remarks The backend creates the identifier and has already checked the
  * arguments against the definition of the tool it offered, so an optional
  * argument the model left out is an absent key. The call is never stored; it
- * lives only until it is answered or its reply ends.
+ * lives only until it is answered or its reply ends. A call's approval
+ * prompt and, for a client tool, its later run request carry the same
+ * identifier.
  */
 export const chatToolCallSchema = z
   .strictObject({
@@ -90,15 +115,38 @@ export const chatToolCallSchema = z
 export type ChatToolCall = z.infer<typeof chatToolCallSchema>
 
 /**
- * Validates the event asking a client to answer one tool call.
+ * Validates the event asking a client to run one call of a client tool.
  *
- * @remarks Live only: a client that was not following when it was sent finds
- * the call in the next `reply-snapshot`'s `pendingToolCalls`. The calls of
- * one model round arrive in the model's order.
+ * @remarks Sent only once the call may run: at once for a tool the person
+ * saved as Just run, otherwise after the person allowed the call's approval
+ * prompt. The client runs it without asking again. Live only: a client that
+ * was not following when it was sent finds the call in the next
+ * `reply-snapshot`'s `pendingToolCalls`. Calls of backend tools never arrive
+ * here; the backend runs them itself.
  */
 export const chatToolCallEventSchema = z.strictObject({
   type: z.literal("tool-call"),
-  /** Call the client answers through the tool-result endpoint. */
+  /** Call the client runs and answers through the tool-result endpoint. */
+  call: chatToolCallSchema
+})
+
+/**
+ * Validates the event asking a client to show one call to the person for
+ * approval.
+ *
+ * @remarks The backend sends it for every checked call of a tool that is not
+ * saved as Just run, client and backend tools alike, and runs nothing until
+ * the person's answer arrives through the tool-approval endpoint. A tool on
+ * Just run gets no prompt. Live only: a client that was not following when it
+ * was sent finds the call in the next `reply-snapshot`'s
+ * `pendingToolApprovals`. When a model round's calls arrive, their prompts,
+ * and the run requests of calls that need none, are sent in the model's
+ * order; a run request that follows an allowed prompt is sent when the
+ * answer arrives.
+ */
+export const chatToolApprovalEventSchema = z.strictObject({
+  type: z.literal("tool-approval"),
+  /** Call the person allows or rejects through the tool-approval endpoint. */
   call: chatToolCallSchema
 })
 
@@ -112,8 +160,9 @@ export const chatToolCallEventSchema = z.strictObject({
  * the three: the backend ends a follower that falls too far behind, and a
  * reply whose final state cannot be stored sends none. Such a close says
  * nothing about the reply's outcome; following the reply again or reading
- * its conversation returns the stored state. `tool-call` events arrive while
- * the reply waits for a client to answer them.
+ * its conversation returns the stored state. `tool-approval` and
+ * `tool-call` events arrive while the reply waits for a client to answer
+ * them.
  */
 export type ChatGenerationEvent =
   | z.infer<typeof chatTitleEventSchema>
@@ -122,3 +171,4 @@ export type ChatGenerationEvent =
   | z.infer<typeof chatInterruptedEventSchema>
   | z.infer<typeof chatErrorEventSchema>
   | z.infer<typeof chatToolCallEventSchema>
+  | z.infer<typeof chatToolApprovalEventSchema>

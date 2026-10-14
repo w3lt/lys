@@ -4,9 +4,9 @@ import {
   chatBackendToolUnavailableProblemSchema,
   chatReplyEventSchema,
   chatReplyEventsApi,
-  chatToolCallAnswerMismatchProblemSchema,
   chatToolCallNotPendingProblemSchema,
   conversationAgentMissingProblemSchema,
+  sendChatToolApprovalApi,
   sendChatToolResultApi,
   stopChatReplyApi,
   type BackendToolUnavailableReason,
@@ -15,8 +15,9 @@ import {
   type ChatApiStreamEvent,
   type ChatReplyEvent,
   type ChatReplyPathParams,
-  type ChatToolAnswer,
-  type ChatToolResultPathParams
+  type ChatToolApprovalAnswer,
+  type ChatToolCallPathParams,
+  type ChatToolResult
 } from "@lys/protocol"
 import { EventSourceParserStream } from "eventsource-parser/stream"
 
@@ -126,8 +127,8 @@ const NOT_GENERATING_RESULT: StopChatReplyResult = Object.freeze({
   status: "not-generating"
 })
 
-/** Outcome of sending one tool call's answer to the backend. */
-export type SendChatToolResultResult =
+/** Outcome of sending one tool call's result or approval answer to the backend. */
+export type SendChatToolCallAnswerResult =
   | {
       /** The backend accepted the answer; the reply's loop continues. */
       readonly status: "accepted"
@@ -141,12 +142,12 @@ export type SendChatToolResultResult =
     }
 
 /** Shared accepted outcome; it carries no per-occurrence data. */
-const ACCEPTED_RESULT: SendChatToolResultResult = Object.freeze({
+const ACCEPTED_RESULT: SendChatToolCallAnswerResult = Object.freeze({
   status: "accepted"
 })
 
 /** Shared not-pending outcome; it carries no per-occurrence data. */
-const NOT_PENDING_RESULT: SendChatToolResultResult = Object.freeze({
+const NOT_PENDING_RESULT: SendChatToolCallAnswerResult = Object.freeze({
   status: "not-pending"
 })
 
@@ -272,49 +273,105 @@ export async function stopChatReply(
 }
 
 /**
- * Sends the answer to one tool call of a running reply.
+ * Sends the result of one call a running reply sent the desktop to run.
  *
  * @param target - Call and the reply and conversation that hold it.
- * @param toolAnswer - Validated answer: a desktop tool's result or a
- * declined call, whose `content` the model reads, or `allowed`, which lets
- * the backend run its tool.
+ * @param result - Validated result: the desktop tool's output, or why it
+ * produced none, whose `content` the model reads.
+ * @param connection - Backend origin. The request is deliberately not
+ * cancellable, so a result the tool produced still reaches the backend.
+ * @returns `accepted` after the backend took the result, or `not-pending`
+ * when the call was already answered or its reply ended. Sending the same
+ * result again is therefore safe: a repeat after a lost response returns
+ * `not-pending`.
+ * @throws A caller-safe error when the backend cannot be reached or answers
+ * with an undeclared response.
+ */
+export async function sendChatToolResult(
+  target: ChatToolCallPathParams,
+  result: ChatToolResult,
+  connection: Pick<ChatReplyConnection, "backendUrl">
+): Promise<SendChatToolCallAnswerResult> {
+  return sendChatToolCallAnswer(
+    {
+      url: `${connection.backendUrl}${buildChatToolCallPath(sendChatToolResultApi.path, target)}`,
+      method: sendChatToolResultApi.method,
+      body: result
+    },
+    "tool result"
+  )
+}
+
+/**
+ * Sends the person's answer to one approval prompt of a running reply.
+ *
+ * @param target - Call and the reply and conversation that hold it.
+ * @param answer - Validated answer: `allowed`, after which the backend runs
+ * its tool or sends the desktop's tool's call to run, or `rejected`, whose
+ * `content` the model reads.
  * @param connection - Backend origin. The request is deliberately not
  * cancellable, so an answer the person gave still reaches the backend.
  * @returns `accepted` after the backend took the answer, or `not-pending`
- * when the call was already answered or its reply ended. Sending the same
- * answer again is therefore safe: a repeat after a lost response returns
- * `not-pending`.
- * @throws A caller-safe error when the backend cannot be reached, says the
- * answer does not fit the call, or answers with an undeclared response.
+ * when the prompt was already answered or its reply ended. Sending the same
+ * answer again is therefore safe.
+ * @throws A caller-safe error when the backend cannot be reached or answers
+ * with an undeclared response.
  */
-export async function sendChatToolResult(
-  target: ChatToolResultPathParams,
-  toolAnswer: ChatToolAnswer,
+export async function sendChatToolApproval(
+  target: ChatToolCallPathParams,
+  answer: ChatToolApprovalAnswer,
   connection: Pick<ChatReplyConnection, "backendUrl">
-): Promise<SendChatToolResultResult> {
-  const response = await getChatReplyActionResponse(
-    `${connection.backendUrl}${buildChatToolResultPath(target)}`,
+): Promise<SendChatToolCallAnswerResult> {
+  return sendChatToolCallAnswer(
     {
-      method: sendChatToolResultApi.method,
-      headers: JSON_REQUEST_HEADERS,
-      body: JSON.stringify(toolAnswer),
-      cache: "no-store"
-    }
+      url: `${connection.backendUrl}${buildChatToolCallPath(sendChatToolApprovalApi.path, target)}`,
+      method: sendChatToolApprovalApi.method,
+      body: answer
+    },
+    "approval"
   )
+}
+
+/** One answer to a tool call, addressed to its endpoint. */
+type ChatToolCallAnswerRequest = {
+  /** Absolute URL of the call's tool-result or tool-approval endpoint. */
+  readonly url: string
+  /** HTTP method of the endpoint. */
+  readonly method: string
+  /** Validated answer, serialized as JSON. */
+  readonly body: ChatToolResult | ChatToolApprovalAnswer
+}
+
+/**
+ * Sends one answer to a tool call and reads the endpoint's declared
+ * outcome.
+ *
+ * @param request - Endpoint and validated answer.
+ * @param answerLabel - Words naming the answer in error messages.
+ * @returns `accepted` for 204, or `not-pending` for the declared conflict.
+ * @throws A caller-safe error when the backend cannot be reached or answers
+ * with an undeclared response.
+ */
+async function sendChatToolCallAnswer(
+  request: ChatToolCallAnswerRequest,
+  answerLabel: string
+): Promise<SendChatToolCallAnswerResult> {
+  const response = await getChatReplyActionResponse(request.url, {
+    method: request.method,
+    headers: JSON_REQUEST_HEADERS,
+    body: JSON.stringify(request.body),
+    cache: "no-store"
+  })
   if (response.status === 204) return ACCEPTED_RESULT
-  if (response.status !== 409) {
-    throw new Error(
-      `The backend did not accept the tool result (HTTP ${response.status}).`
-    )
+  if (response.status === 409) {
+    const body = await readFailureBody(response)
+    if (chatToolCallNotPendingProblemSchema.safeParse(body).success) {
+      return NOT_PENDING_RESULT
+    }
   }
-  const body = await readFailureBody(response)
-  if (chatToolCallNotPendingProblemSchema.safeParse(body).success) {
-    return NOT_PENDING_RESULT
-  }
-  if (chatToolCallAnswerMismatchProblemSchema.safeParse(body).success) {
-    throw new Error("The backend said this answer does not fit the tool call.")
-  }
-  throw new Error("The backend did not accept the tool result (HTTP 409).")
+  throw new Error(
+    `The backend did not accept the ${answerLabel} (HTTP ${response.status}).`
+  )
 }
 
 /**
@@ -473,11 +530,16 @@ function buildChatReplyPath(
 /**
  * Builds the path addressing one tool call of a reply.
  *
+ * @param routeTemplate - Tool-result or tool-approval route with
+ * `:conversationId`, `:assistantMessageId`, and `:callId`.
  * @param target - Validated identifiers substituted after encoding.
- * @returns The tool-result route with every identifier percent-encoded.
+ * @returns The route with every identifier percent-encoded.
  */
-function buildChatToolResultPath(target: ChatToolResultPathParams): string {
-  return buildChatReplyPath(sendChatToolResultApi.path, target).replace(
+function buildChatToolCallPath(
+  routeTemplate: string,
+  target: ChatToolCallPathParams
+): string {
+  return buildChatReplyPath(routeTemplate, target).replace(
     ":callId",
     encodeURIComponent(target.callId)
   )

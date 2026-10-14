@@ -6,25 +6,26 @@ sidebar:
   order: 2
 ---
 
-The chat route emits exactly eight SSE payload variants, defined by
+The chat route emits exactly nine SSE payload variants, defined by
 `chatApiStreamEventSchema` in `@lys/protocol`. The reply-events route emits
-`reply-snapshot` followed by the six generation variants (`title`, `delta`,
-`done`, `interrupted`, `error`, `tool-call`), defined by
+`reply-snapshot` followed by the seven generation variants (`title`, `delta`,
+`done`, `interrupted`, `error`, `tool-approval`, `tool-call`), defined by
 `chatReplyEventSchema`.
 
 ## Event variants
 
-| Event name                         | Payload fields                                              | Meaning                                                                                       |
-| ---------------------------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `start-new-conversation-turn`      | `conversation`, `userMessage`, `assistantMessage`           | The backend created a new conversation and persisted the first turn.                          |
-| `start-existing-conversation-turn` | `userMessage`, `assistantMessage`                           | The backend persisted a new turn on an existing conversation.                                 |
-| `title`                            | `title`                                                     | The persisted conversation title, generated or reconciled.                                    |
-| `delta`                            | `content`                                                   | One non-empty assistant text fragment.                                                        |
-| `done`                             | `finishReason`                                              | Successful assistant completion with `stop` or `length`.                                      |
-| `interrupted`                      | none                                                        | The reply ended before the model finished.                                                    |
-| `error`                            | `message`                                                   | A user-presentable chat generation error string.                                              |
-| `tool-call`                        | `call`                                                      | The reply waits for the client to answer this tool call.                                      |
-| `reply-snapshot`                   | `conversationTitle`, `assistantMessage`, `pendingToolCalls` | Reply-events route only: the stored reply and its unanswered tool calls when following began. |
+| Event name                         | Payload fields                                                                      | Meaning                                                                                              |
+| ---------------------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `start-new-conversation-turn`      | `conversation`, `userMessage`, `assistantMessage`                                   | The backend created a new conversation and persisted the first turn.                                 |
+| `start-existing-conversation-turn` | `userMessage`, `assistantMessage`                                                   | The backend persisted a new turn on an existing conversation.                                        |
+| `title`                            | `title`                                                                             | The persisted conversation title, generated or reconciled.                                           |
+| `delta`                            | `content`                                                                           | One non-empty assistant text fragment.                                                               |
+| `done`                             | `finishReason`                                                                      | Successful assistant completion with `stop` or `length`.                                             |
+| `interrupted`                      | none                                                                                | The reply ended before the model finished.                                                           |
+| `error`                            | `message`                                                                           | A user-presentable chat generation error string.                                                     |
+| `tool-approval`                    | `call`                                                                              | The reply waits for the person to allow or reject this tool call.                                    |
+| `tool-call`                        | `call`                                                                              | The reply waits for the client to run this call of a client tool.                                    |
+| `reply-snapshot`                   | `conversationTitle`, `assistantMessage`, `pendingToolCalls`, `pendingToolApprovals` | Reply-events route only: the stored reply and its unanswered calls and prompts when following began. |
 
 ## Payload details
 
@@ -99,9 +100,22 @@ shutdown. The stored reply, if it still exists, is `interrupted` with exactly
 the content delivered before this event. No `delta` or `done` follows it; a
 `title` can.
 
+### `tool-approval`
+
+Carries one tool call the backend shows to the person before anything runs,
+in the same shape as a `tool-call` event's `call`. The backend's tool approval
+service sends it for every call of a tool that is not saved as Just run,
+client and backend tools alike; a call of a tool on Just run gets no prompt.
+The client shows the call and answers with the
+[tool-approval route](/reference/api/#tool-approvals). After `allowed`, a
+backend tool runs in the backend, and a client tool's call comes back as a
+`tool-call` event under the same `id`. The event is live only: a client that
+was not following when it was sent finds the call in the next
+`reply-snapshot`'s `pendingToolApprovals`.
+
 ### `tool-call`
 
-Carries one tool call the reply waits on:
+Carries one call of a client tool that the reply waits for the client to run:
 
 ```json
 {
@@ -119,16 +133,18 @@ request offered, and `arguments` holds the model's values by argument name:
 strings, numbers, or Booleans, already checked against the tool's definition.
 An optional argument the model left out is absent. A call whose arguments do
 not match never reaches the client; the backend answers it itself, and the
-model reads the error. A call of a backend tool, such as `read_page` or `web_search`,
-has the same shape; its arguments have also passed the tool's own checks.
+model reads the error. A call of a backend tool, such as `read_page` or
+`web_search`, never arrives here: once allowed, the backend runs it itself.
 
-The client answers the call with the
-[tool-result route](/reference/api/#tool-results): with its result for a
-client tool, or `allowed` or `failed` for a backend tool. The calls of one model
-round arrive in the model's order, and the next round starts once every one
-has an answer. The model's text in a round that calls tools is streamed and
-stored like any other text. The event is live only: nothing stores it, and a
-client that was not following when it was sent finds the call in the next
+The backend sends this event only once the call may run: at once for a tool
+saved as Just run, otherwise after the person allowed its `tool-approval`
+prompt. The client runs it without asking again and answers with the
+[tool-result route](/reference/api/#tool-results). When a round's calls
+arrive, their prompts and the run requests of calls that need no prompt are
+sent in the model's order; the next round starts once every call has an
+answer. The model's text in a round that calls tools is streamed and stored
+like any other text. The event is live only: nothing stores it, and a client
+that was not following when it was sent finds the call in the next
 `reply-snapshot`'s `pendingToolCalls`.
 
 ### `reply-snapshot`
@@ -136,11 +152,12 @@ client that was not following when it was sent finds the call in the next
 The first event of every reply-events stream. `assistantMessage` is the stored
 reply, including every delta sent before this event, so later `delta` events
 continue from exactly its content. `conversationTitle` is the stored title, or
-`null`. `pendingToolCalls` lists the tool calls sent and not yet answered, in
-the order sent, in the same shape as a `tool-call` event's `call`; it is empty
-when the reply is not generating. Each pending call reaches a follower once,
-either here or as a later `tool-call` event. When the reply's generation has
-already ended, the stream closes right after this event.
+`null`. `pendingToolCalls` lists the calls sent to run and not yet answered
+with their result, and `pendingToolApprovals` the prompts not yet answered,
+each in the order sent and in the same shape as an event's `call`; both are
+empty when the reply is not generating. Each reaches a follower once, either
+here or as a later `tool-call` or `tool-approval` event. When the reply's
+generation has already ended, the stream closes right after this event.
 
 ### `error`
 
@@ -163,7 +180,9 @@ Every valid chat stream begins with one turn-start event. After that:
 1. `start-new-conversation-turn` or `start-existing-conversation-turn`
 2. for a titled existing conversation, its stored `title` event arrives next
 3. zero or more rounds: each round's text as `delta` events, then, when the
-   round calls tools, its `tool-call` events in the model's order. When an
+   round calls tools, its `tool-approval` and `tool-call` events in the
+   model's order, and the `tool-call` event of each allowed client tool's call
+   when its answer arrives. When an
    earlier round sent text, a later round's first `delta` starts with a blank
    line (`\n\n`)
 4. exactly one of `done`, `interrupted`, or `error`

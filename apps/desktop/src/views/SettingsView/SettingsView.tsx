@@ -147,7 +147,7 @@ const SETTINGS_PANES: readonly SettingsPaneDescriptor[] = [
     ordinal: "05",
     note: "What the agents can reach for. Every tool that is on is described to the model with each request, so off is cheaper than unused.",
     footNote:
-      "Tools come from Lys itself and cannot be added or removed here. Nothing here is saved yet, and conversations do not use tools yet.",
+      "Tools come from Lys itself and cannot be added or removed here. Just run choices are saved; tool calls and each tool's switch reset when Lys restarts.",
     contentComponent: ToolPane
   },
   {
@@ -282,8 +282,8 @@ export type SettingsViewProps = {
  * directly rather than through `SettingsContext`; its prompt measure reads the
  * context-window estimate from the application store, and it proposes no
  * settings patch. The Tools pane likewise reads the tool store directly; it
- * lists the tools the desktop and the backend report, and its choices are
- * mocked for the session and never saved.
+ * lists the tools the desktop and the backend report. Its switches last for
+ * the session, and each tool's approval is saved by the application store.
  *
  * Each pane body is a stable lazy component behind a `Suspense` fallback; a
  * pending body renders a separate busy frame, so its heading and Done action

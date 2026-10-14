@@ -992,8 +992,8 @@ export function createChatViewStore(
     /**
      * Applies one generation event shared by chat and followed-reply streams.
      *
-     * @param event - Title, delta, tool-call, final, or error event of the
-     * reply.
+     * @param event - Title, delta, tool-approval, tool-call, final, or error
+     * event of the reply.
      * @param token - Token whose ownership authorizes event side effects.
      * @throws If an in-order handler detects an invariant violation.
      * @remarks Exactly one of `done`, `interrupted`, or `error` ends the
@@ -1019,8 +1019,10 @@ export function createChatViewStore(
         case "error":
           handleChatErrorEvent(event, token)
           return
+        case "tool-approval":
         case "tool-call":
-          // The tool-call store follows this reply itself and owns its calls.
+          // The tool-call store follows this reply itself and owns its
+          // prompts and calls.
           return
       }
     }
@@ -1050,6 +1052,7 @@ export function createChatViewStore(
         case "done":
         case "interrupted":
         case "error":
+        case "tool-approval":
         case "tool-call":
           handleChatGenerationEvent(event, token)
           return
@@ -1076,6 +1079,7 @@ export function createChatViewStore(
         case "done":
         case "interrupted":
         case "error":
+        case "tool-approval":
         case "tool-call":
           handleChatGenerationEvent(event, token)
           return
@@ -1688,8 +1692,8 @@ async function getChatToolOffer(): Promise<ChatToolOfferResult> {
   }
   if (list.status !== "loaded") await loadTools()
 
-  const { list: currentList, toolChoices } = useToolStore.getState()
-  return buildChatToolOffer({ list: currentList, toolChoices })
+  const { list: currentList, toolSwitches } = useToolStore.getState()
+  return buildChatToolOffer({ list: currentList, toolSwitches })
 }
 
 /**

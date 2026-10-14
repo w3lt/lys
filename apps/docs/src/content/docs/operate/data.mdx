@@ -30,6 +30,8 @@ The desktop host owns a JSON settings file at `$LYS_HOME/settings.json`.
   [Configuration](/operate/configuration/)
 - parsed as JSON on load and rewritten as pretty-printed JSON when the Tauri
   `save_settings` command is called
+- read, never written, by the backend for the Tavily API key and the Just run
+  list
 
 The desktop loads this file at initialization and autosaves generation, load
 configuration, and tool approval edits. Each save replaces only its own part and preserves

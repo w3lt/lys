@@ -61,8 +61,8 @@ repository today; it is not a promise of unreleased work.
   answers its tool calls: file tools run in the desktop, `read_page` reads one
   public web page in the backend, and `web_search` searches the web through
   Tavily in the backend, unavailable until a Tavily API key is saved. Each call
-  asks the person first unless its tool is set to Just run, which the desktop
-  enforces for every tool; both web tools start off. Lys's instructions do not
+  asks the person first unless its tool is set to Just run, which the backend
+  decides for every tool from the saved choices; both web tools start off. Lys's instructions do not
   give her today's date yet
   ([#148](https://github.com/w3lt/lys/issues/148)).
 - Generation controls apply to future chat requests and save automatically

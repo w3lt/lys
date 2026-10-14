@@ -20,7 +20,7 @@ the services together.
 | --------------------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | App bootstrap         | `src/app.ts`                      | Registers CORS, SSE support, singleton services, and all routes.                                                                                                                                                                                                                                          |
 | Runtime config        | `src/config.ts`                   | Loads loopback host and port values, the SQLite path under `LYS_HOME`, the system and title prompts, and title limits.                                                                                                                                                                                    |
-| Singleton services    | `src/di/singleton.ts`             | Opens the shared database and creates the chat service, conversation services and the agent service over SQLite records, LLM services without contacting LM Studio, and the built-in tools.                                                                                                               |
+| Singleton services    | `src/di/singleton.ts`             | Opens the shared database and creates the chat service, conversation services and the agent service over SQLite records, LLM services without contacting LM Studio, the built-in tools, and the tool approval service.                                                                                    |
 | Conversation services | `src/modules/conversation`        | Keep the conversation decisions (identities, timestamps, validation, superseding, cursors) over records declared in `records.ts`; contain no SQL.                                                                                                                                                         |
 | Agent service         | `src/modules/agent`               | Owns the built-in agents, lists them with each page of stored agents, validates agent definitions and changes, derives a code from the name when none is given, stamps each change with the current time over records declared in `records.ts`, and finds the agent that answers a chat; contains no SQL. |
 | Database              | `src/infrastructure/database`     | Owns the shared SQLite connection and its migrations, holds the contracts through which stores borrow its transactions, and runs every conversation query in `conversations/` and every agent query in `agents/`.                                                                                         |
@@ -30,6 +30,7 @@ the services together.
 | LLM routes            | `src/modules/llm/routes`          | Lists LM Studio models, checks loaded-model health, loads or unloads a model, and reports or refreshes the LM Studio connection.                                                                                                                                                                          |
 | Built-in tools        | `src/modules/tool/builtIn`        | Tools the backend runs once the desktop allows a call. `read_page` (`web/`) reads one public web page; `web_search` (`web/`) searches the web through Tavily.                                                                                                                                             |
 | Tool routes           | `src/modules/tool/routes`         | Lists the tools the backend runs.                                                                                                                                                                                                                                                                         |
+| Tool approval service | `src/modules/toolApproval`        | Reads the Just run choices saved in `settings.json` once per round of tool calls and decides, for client and backend tools alike, which calls the person must allow first; every call asks when the file cannot be read.                                                                                  |
 | Health route          | `src/modules/health/routes`       | Returns a simple `{ ok: true }` response.                                                                                                                                                                                                                                                                 |
 
 ## Chat request flow
@@ -61,11 +62,13 @@ the services together.
    OpenAI-compatible streaming completion against LM Studio through
    `OpenAiReplyModel`, offers the request's tools (client tools first, then
    backend tools), and runs rounds while the model calls them: each call is
-   checked by `AgentTool`, sent to the desktop as a `tool-call` event, and
-   answered through the tool-result route before the next round. A call of a
-   backend tool is first parsed by the tool, so arguments it can never run are
-   answered without asking; it runs in the backend only after the desktop
-   answers `allowed`, under the reply's cancellation. It persists each delta before sending it to every stream
+   checked by `AgentTool`, then passes the round's
+   [approval gate](#tool-approval). A call of a backend tool is first parsed by
+   the tool, so arguments it can never run are answered without asking. An
+   allowed client tool's call is sent to the desktop as a `tool-call` event
+   and answered through the tool-result route; an allowed backend tool runs in
+   the backend under the reply's cancellation. Every call has an answer before
+   the next round. It persists each delta before sending it to every stream
    following the reply, and stores completion before emitting `done`.
 6. When the conversation has no stored title, `createTitleGenerationTask` runs
    in parallel and emits a `title` event only after a conditional write wins the
@@ -112,19 +115,48 @@ title task per conversation: a turn sent while an earlier turn's title task is
 still running gets none, so its streams close when its reply ends. A
 `ReplyGeneration` owns one turn's reply task and optional title task, their
 cancellation, and the SSE streams following them; no HTTP connection owns it. It
-also lists the tool calls its reply waits on (`PendingToolCalls`), which the
-reply-events snapshot reports and the tool-result route answers. Each stream is
+also lists what its reply waits on (`PendingToolCalls`): calls sent to the
+desktop to run and approval prompts, which the reply-events snapshot reports
+and the tool-result and tool-approval routes answer. Each stream is
 a `ReplyEventSubscription`, an ordered queue that never makes the generation
 wait and closes a follower that falls 4,096 events behind. Only the reply-stop
 route (reply task only) and shutdown (both tasks) cancel work. A newer turn or a
 deletion also ends a reply, but only when the model sends its next content: that
 write is refused, which ends the upstream request. A reply waiting for a tool
-result is not ended this way ([#137](https://github.com/w3lt/lys/issues/137)).
+result or an approval is not ended this way
+([#137](https://github.com/w3lt/lys/issues/137)).
 The title task of a deleted conversation still runs to its end. The registry is
 disposed in Fastify's `preClose` hook, while streams are still open: it closes
 admission, cancels every generation, and waits until each has stored its final
 state before singleton disposal closes SQLite. Task failures are logged by the
 generation that owns them.
+
+## Tool approval
+
+`ToolApprovalService` (`src/modules/toolApproval/toolApprovalService.ts`) is the
+approval gateway for every tool call of every turn, client and backend tools
+alike. When a round of tool calls arrives, `createToolCallGate` reads
+`tools.justRun` from the desktop's settings file with `readJustRunToolNames`
+(`src/infrastructure/settings/justRunToolsFile.ts`) and returns a
+`ToolCallGate` for that round. The reader shares the bounded settings-file
+read (`settingsFile.ts`) with the Tavily key reader: at most 1 MiB, UTF-8,
+parse failures dropped unread. A missing file, `tools` group, or `justRun`
+list means no tool is on Just run.
+
+For each checked call, in the model's order, the gate either lets a call of a
+tool on Just run go on at once, or sends a `tool-approval` event and waits for
+the person's answer through the tool-approval route, with no timer. Both
+happen in the same synchronous step, so a round's prompts and the run
+requests of calls allowed at once keep the model's order. When the settings
+file cannot be read, or `tools`, `justRun`, or a name in it is invalid, no
+tool is on Just run, every call of the round asks, and the chat route logs a
+warning with the request's logger. A choice the desktop saves applies from
+the next round. The desktop is the file's only writer; the backend never
+writes it.
+
+The Tools pane's switches are not part of the gateway: they decide only which
+tools a chat request offers, so switching a tool or tool calls off applies
+from the next message.
 
 ## Built-in tools
 

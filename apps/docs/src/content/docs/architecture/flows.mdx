@@ -117,32 +117,41 @@ of the new turn's context.
    streams as `delta` events and is stored. When a round ends with tool calls,
    the backend checks each call's arguments against its definition, and a
    backend tool also checks them by its own rules, such as `read_page`'s URL
-   rules. It sends one `tool-call` event per valid call, in the model's order.
-   A call to an unknown tool or with invalid arguments is answered by the
-   backend itself.
-4. The desktop's tool-call store, which follows the reply on its own
-   connection, decides each call by the Tools pane: declined when tool calls
-   or the tool are off, `runFailed` when the desktop cannot run or describe
-   it, at once on Just run, or shown above the composer on Ask me.
-5. For a client tool, the store runs the Tauri command and sends its result;
-   for a backend tool, it sends `{ "status": "allowed" }`. Every answer goes to
+   rules. A call to an unknown tool or with invalid arguments is answered by
+   the backend itself.
+4. The backend's tool approval service reads the Just run choices from the
+   settings file once for the round. For each valid call, in the model's order:
+   a tool saved as Just run goes on at once; any other tool's call is shown to
+   the person with a `tool-approval` event. If the settings file cannot be
+   read, every call is shown and the backend logs a warning.
+5. The desktop's tool-call store, which follows the reply on its own
+   connection, shows each prompt above the composer, or answers it
+   `showFailed` at once when it cannot describe the call. Allow once and
+   Reject send the answer to
+   `POST /api/v1/chat/:conversationId/replies/:assistantMessageId/tool-approvals/:callId`.
+6. An allowed client tool's call goes to the desktop as a `tool-call` event
+   under the same `id`; the store runs the Tauri command at once and sends
+   its result to
    `POST /api/v1/chat/:conversationId/replies/:assistantMessageId/tool-results/:callId`.
-   The backend answers `204`, or `409` when the call is no longer pending or
-   the answer does not fit it.
-6. An allowed backend tool runs in the backend under the reply's
-   cancellation, and its result goes only to the model. An allowed
-   `web_search` call sends one query to `https://api.tavily.com` and gives the
-   model the results framed as untrusted text; the model may then call
-   `read_page` for a result's URL, which asks again on Ask me. Once every call of
-   the round has an answer, the backend asks the model again with the
-   results. The loop ends with the first round that makes no
-   tool calls, even one that writes no text, then `done`.
+   Both routes answer `204`, or `409` when the call no longer waits for that
+   answer.
+7. An allowed backend tool runs in the backend under the reply's
+   cancellation, whether or not a desktop follows the reply, and its result
+   goes only to the model. An allowed `web_search` call sends one query to
+   `https://api.tavily.com` and gives the model the results framed as
+   untrusted text; the model may then call `read_page` for a result's URL,
+   which is shown again on Ask me. A rejected call runs nothing; the model
+   reads the rejection. Once every call of the round has an answer, the
+   backend asks the model again with the results. The loop ends with the
+   first round that makes no tool calls, even one that writes no text, then
+   `done`.
 
-The backend sets no time limit on a pending call. It waits until the call is
-answered, the reply is stopped, or the backend shuts down; a newer turn or a
-deletion does not end it yet ([#137](https://github.com/w3lt/lys/issues/137)).
-A client that was not following when a call was sent finds it in the next
-`reply-snapshot`'s `pendingToolCalls`.
+The backend sets no time limit on a prompt or a pending call. It waits until
+the call is answered, the reply is stopped, or the backend shuts down; a newer
+turn or a deletion does not end it yet
+([#137](https://github.com/w3lt/lys/issues/137)). A client that was not
+following when a prompt or call was sent finds it in the next
+`reply-snapshot`'s `pendingToolApprovals` or `pendingToolCalls`.
 
 ## Open a past conversation
 

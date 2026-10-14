@@ -108,8 +108,8 @@ its first use and reused; each delta runs in one write transaction.
 ## Settings ownership
 
 The settings JSON is a separate host-managed artifact. The backend reads only
-the Tavily API key from it and never writes it. The desktop reaches it through
-Tauri commands.
+the Tavily API key and the Just run list (`tools.justRun`) from it, and never
+writes it. The desktop reaches it through Tauri commands.
 
 Generation, load configuration, and tool approval edits are saved
 automatically. Each save reads the document already on disk and replaces only

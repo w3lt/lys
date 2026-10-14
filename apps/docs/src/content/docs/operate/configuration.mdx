@@ -41,8 +41,11 @@ generation controls. It is separate from the context length a model is loaded
 with, which belongs to that model's load configuration.
 
 The `tools` group lists, in `justRun`, the tools set to Just run in Settings →
-Tools; every other tool asks before each call. Removing a name by hand puts
-that tool back on Ask me the next time Lys starts.
+Tools; every other tool asks before each call. The backend reads the list when
+each round of tool calls arrives, so removing a name by hand puts that tool
+back on Ask me from the next round; the Tools pane shows the change the next
+time Lys starts, and a save from the pane before then writes back the names it
+holds. If the backend cannot read the file, every tool call asks.
 
 The `loadConfiguration` group holds the load settings written to the file: a
 `default` for every model, which starts empty and is edited only by hand, and

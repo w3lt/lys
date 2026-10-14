@@ -19,19 +19,19 @@ Lys currently shares contracts through two TypeScript workspace packages.
 
 The public backend surface is small and explicit:
 
-| Concern                                            | Contract source                                |
-| -------------------------------------------------- | ---------------------------------------------- |
-| API prefix and loopback constants                  | `packages/protocol/src/constant.ts`            |
-| Chat and reply routes, requests, and SSE payloads  | `packages/protocol/src/apis/chat/*.ts`         |
-| Tool offer, tool-call event, and tool-result route | `packages/protocol/src/apis/chat/*.ts`         |
-| Model list, health, load, and unload routes        | `packages/protocol/src/apis/llm/*.ts`          |
-| LM Studio connection status and reconnect routes   | `packages/protocol/src/apis/llm/*.ts`          |
-| Conversation list, get, rename, and delete routes  | `packages/protocol/src/apis/conversation/*.ts` |
-| Agent list, create, get, update, and delete routes | `packages/protocol/src/apis/agent/*.ts`        |
-| Problem Details error bodies                       | `packages/protocol/src/http/errors/*.ts`       |
-| Health route path                                  | `packages/protocol/src/apis/health/routes.ts`  |
-| Shared conversation shapes                         | `packages/share/src/models/conversation.ts`    |
-| Shared agent shapes                                | `packages/share/src/models/agent.ts`           |
+| Concern                                                                                  | Contract source                                |
+| ---------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| API prefix and loopback constants                                                        | `packages/protocol/src/constant.ts`            |
+| Chat and reply routes, requests, and SSE payloads                                        | `packages/protocol/src/apis/chat/*.ts`         |
+| Tool offer, tool-approval and tool-call events, and tool-approval and tool-result routes | `packages/protocol/src/apis/chat/*.ts`         |
+| Model list, health, load, and unload routes                                              | `packages/protocol/src/apis/llm/*.ts`          |
+| LM Studio connection status and reconnect routes                                         | `packages/protocol/src/apis/llm/*.ts`          |
+| Conversation list, get, rename, and delete routes                                        | `packages/protocol/src/apis/conversation/*.ts` |
+| Agent list, create, get, update, and delete routes                                       | `packages/protocol/src/apis/agent/*.ts`        |
+| Problem Details error bodies                                                             | `packages/protocol/src/http/errors/*.ts`       |
+| Health route path                                                                        | `packages/protocol/src/apis/health/routes.ts`  |
+| Shared conversation shapes                                                               | `packages/share/src/models/conversation.ts`    |
+| Shared agent shapes                                                                      | `packages/share/src/models/agent.ts`           |
 
 ## Why the packages are split
 

@@ -27,8 +27,9 @@ React UI.
 
 `read_text_file` and `find_files` are the desktop side of the client tools that
 let Lys work with files on the user's machine. The desktop's tool-call store
-runs them for tool calls that pass the Ask me or Just run choice in the Tools
-pane; see [Desktop](/architecture/desktop/#tool-calls). The renderer reaches them through `readTextFile` and `findFiles` in
+runs them for the calls the backend sends to run: calls the person allowed, or
+calls of a tool set to Just run in the Tools pane. The backend's tool approval
+service decides which; see [Desktop](/architecture/desktop/#tool-calls). The renderer reaches them through `readTextFile` and `findFiles` in
 `apps/desktop/src/lib/apis/tauri/tools.ts`, which validate arguments, results,
 and declared failures with the schemas exported by `@lys/protocol`.
 

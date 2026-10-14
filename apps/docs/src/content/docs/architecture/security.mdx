@@ -12,7 +12,7 @@ Zod, and there is no credential-management subsystem yet. There are two
 outbound connections, and both start off: the `read_page` tool reads a public
 web page, and the `web_search` tool sends a query and the person's Tavily API
 key to Tavily's search service. Each runs after the person allows the call, or
-at once when the person chose Just run for the session.
+at once when the person set that tool to Just run, a choice Lys saves.
 
 ## Current trust boundaries
 
@@ -36,6 +36,7 @@ at once when the person chose Just run for the session.
 | CORS policy                | Fastify admits only the `http://localhost:1420` and `http://127.0.0.1:1420` development origins and the `tauri://localhost` app origin.                                                         |
 | Zod validation             | Backend validates route bodies, parameters, and query strings; desktop validates SSE payloads and HTTP responses.                                                                               |
 | Route-local abort handling | Closing the SSE connection aborts the backend chat task.                                                                                                                                        |
+| Approval gateway           | The desktop decides every tool call: a tool asks first unless it is saved as Just run in `settings.json`. The backend runs its tools only on `allowed`.                                         |
 | Approval of web reads      | `read_page` runs only once the desktop answers `allowed`, from the card (full URL and host) or at once on Just run. It starts off.                                                              |
 | Address rule               | `read_page` never connects to loopback, private, link-local, shared, documentation, benchmarking, multicast, or reserved addresses.                                                             |
 | Untrusted page framing     | Page text and the page's title, site, and date reach the model between delimiters it cannot forge, with a notice never to obey them.                                                            |
@@ -51,6 +52,9 @@ at once when the person chose Just run for the session.
   text in `settings.json`, readable by the person's OS account and by any
   process running as it.
 - There is no scoped credential-handle layer.
+- The saved Just run choices live in `settings.json`, so any process running
+  as the person's OS account can edit the file to put a tool on Just run. Lys
+  reads them when it starts.
 - There is no auth token or CSRF layer on the loopback backend, and it checks
   neither the `Host` nor the `Origin` header, so a page that uses DNS
   rebinding can call it like a local process
@@ -68,8 +72,9 @@ at once when the person chose Just run for the session.
 ## Web reads
 
 `read_page` reads any public URL the model chooses: there is no allow list,
-because the person approves the calls, each one on Ask me or all of them for
-the session on Just run. The protections are about where a read may connect
+because the person approves the calls, each one on Ask me or all of them on
+Just run, which Lys saves until the person switches the tool back. The
+protections are about where a read may connect
 and what reaches the model:
 
 - **Arguments.** A URL that is not absolute `http` or `https`, is longer than
@@ -101,7 +106,8 @@ and what reaches the model:
   the person's approval. On Just run it does not: with `read_page` and a file
   tool both on Just run, a page's instructions can lead the model to read a
   file and send its content in the URL of a second `read_page` call, with no
-  card shown.
+  card shown. The pane says so for every `network` tool on Just run, and Ask
+  me stays the default for every tool.
 
 The backend makes the request, so a backend that runs on another machine
 reads from that machine's network position. Today the backend runs on the
@@ -144,7 +150,7 @@ key is saved in Settings → Secrets.
 - **Prompt injection.** A page read with `read_page`, or a snippet, can try to
   make Lys put private text, such as a file she read, into a query. On Ask me
   the card shows the full query before anything is sent; on Just run nothing is
-  shown ([#156](https://github.com/w3lt/lys/issues/156)). A query is at most
+  shown. A query is at most
   400 characters, and one holding a character a person cannot reliably see,
   such as a zero-width, direction, tag, or variation selector character, or a
   Hangul filler, is refused before anyone is asked, so the card never shows

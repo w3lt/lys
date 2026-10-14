@@ -172,8 +172,9 @@ configuration belongs to the renderer, which applies it when it resolves a load
 
 The desktop automatically saves generation edits by reading this document,
 replacing its generation group, and saving the complete document. Load
-configuration edits are saved the same way, and so is the Tavily API key when
-the person saves or removes it in the Secrets pane. Runtime edits and
+configuration edits are saved the same way, and so are each tool's Ask me or
+Just run choice and the Tavily API key when the person saves or removes it in
+the Secrets pane. Runtime edits and
 `model.contextSize` edits in the UI remain session-only; the automatic saves
 preserve those groups as already stored on disk. The local context size
 supports composer estimates and is separate from the context length a model is

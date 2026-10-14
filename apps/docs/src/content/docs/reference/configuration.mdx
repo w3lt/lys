@@ -131,6 +131,9 @@ defaults:
   },
   "secrets": {
     "tavilyApiKey": null
+  },
+  "tools": {
+    "justRun": []
   }
 }
 ```
@@ -145,10 +148,11 @@ defaults:
 | `generation.replyCeiling`  | unsigned 32-bit integer | Maximum reply tokens; the desktop omits the request limit when this is `0`                                       |
 | `loadConfiguration`        | object                  | Settings sent with each model load; see [Load configuration](#load-configuration)                                |
 | `secrets.tavilyApiKey`     | `string \| null`        | Tavily API key of `web_search`, 1 to 256 visible ASCII characters, stored as plain text; see [Secrets](#secrets) |
+| `tools.justRun`            | array of tool names     | Tools that run without asking when a model calls them; every other tool asks; see [Tools](#tools)                |
 
 A missing group, or a missing field in one of them, uses the host defaults;
-for `loadConfiguration` that default is empty, and for `secrets` it holds no
-key. Loading never rewrites an
+for `loadConfiguration` that default is empty, for `secrets` it holds no
+key, and for `tools` it puts no tool on Just run. Loading never rewrites an
 existing file. Invalid JSON or invalid field values, including a temperature
 outside `[0, 1]`, cause loading to fail, and the file is left as it is. Loading
 a missing file creates the parent directory and writes the default document.
@@ -220,6 +224,29 @@ when a chat request offers `web_search`, and when the person checks the key, so
 a saved or removed key applies to the next of these without restarting
 anything. A turn keeps the key it started with.
 
+### Tools
+
+The `tools` group holds the approval the person chose for each tool in Settings
+→ Tools. `justRun` lists the tools set to Just run; every other tool, network
+tools included, is on Ask me and waits for the person before each call.
+
+- A name is 1 to 64 ASCII letters, digits, underscores, or hyphens, the rule
+  every tool name follows. Any other value, `null` for the group or for
+  `justRun`, or an unknown field makes loading the settings fail.
+- A name listed twice counts once, and Lys writes the names in ascending order.
+- A name Lys does not list, such as a tool from another build or a backend tool
+  whose list could not be read, is kept and has no effect.
+- The desktop enforces the approval for the desktop's tools and the backend's
+  alike; the backend runs a tool only after the desktop allows the call, and it
+  never reads this group.
+- Lys reads `settings.json` when it starts. A save from the Tools pane replaces
+  `justRun` with the names Lys holds, so a hand edit of `justRun` made while
+  Lys runs is lost.
+
+An older Lys build does not know the group. It ignores it and removes it the
+next time it saves settings, so every tool asks again after going back to an
+older build.
+
 ## Settings updates
 
 The settings view provides Runtime, Model, Generation, Agents, Tools, and
@@ -246,6 +273,11 @@ group.
 The Secrets pane saves the Tavily API key only when the person presses Save or
 Enter, replacing only the `secrets` group in the same serialized way; Remove
 saves `null`.
+
+Choosing Ask me or Just run in the Tools pane applies to the next tool call at
+once and is saved automatically the same way, replacing only the `tools` group.
+A failed save leaves the choice applied until Lys quits and exposes a retry
+action. Tool calls on or off and each tool's switch remain session-only.
 
 Runtime edits, including auto-start and default-model selection, remain in memory
 for the current session. Edits to `model.contextSize` also remain session-only.

@@ -31,7 +31,7 @@ The Tauri desktop host reads and writes one JSON settings file at
 `$LYS_HOME/settings.json`.
 
 The current schema contains `runtime`, `model`, `generation`,
-`loadConfiguration`, and `secrets` groups. Rust
+`loadConfiguration`, `secrets`, and `tools` groups. Rust
 and the TypeScript settings projection use the same camelCase field names. See
 the [configuration reference](/reference/configuration/) for the complete field
 list, defaults, and accepted values.
@@ -39,6 +39,10 @@ list, defaults, and accepted values.
 The stored `model.contextSize` is a local token budget used by the composer and
 generation controls. It is separate from the context length a model is loaded
 with, which belongs to that model's load configuration.
+
+The `tools` group lists, in `justRun`, the tools set to Just run in Settings →
+Tools; every other tool asks before each call. Removing a name by hand puts
+that tool back on Ask me the next time Lys starts.
 
 The `loadConfiguration` group holds the load settings written to the file: a
 `default` for every model, which starts empty and is edited only by hand, and
@@ -96,7 +100,9 @@ in-memory edits usable.
 Load configuration edits in the Model pane autosave the same way, replacing
 only the `loadConfiguration` group, and the Model pane offers the same retry
 action. The Secrets pane saves the Tavily API key only on Save or Enter,
-replacing only the `secrets` group.
+replacing only the `secrets` group. Choosing Ask me or Just run in the Tools
+pane autosaves the same way, replacing only the `tools` group, and the Tools
+pane offers the same retry action.
 
 Runtime edits and `model.contextSize` edits remain session-only. Changing those
 controls does not persist them, and a later automatic save does not save their

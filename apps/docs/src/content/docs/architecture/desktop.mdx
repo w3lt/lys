@@ -19,8 +19,9 @@ presentation state, not durable conversation storage.
 | Chat state          | `src/lib/store/chat-view` owns the active conversation, the agent selected for a new one, request lifecycle, conversation opening, and error presentation.              |
 | History state       | `src/lib/store/conversation-history` owns the past-conversations dialog, its search and pages, and rename and delete calls.                                             |
 | Agent state         | `src/lib/store/agents` owns the list of built-in and stored agents, the Agents pane's editor and draft, and the agent create, update, and delete calls.                 |
-| Tool state          | `src/lib/store/tools.ts` owns the Tools pane's list of every tool, the app's and the backend's, and the session-only choices that gate tool calls.                      |
+| Tool state          | `src/lib/store/tools.ts` owns the Tools pane's list of every tool, the app's and the backend's, and the session-only switches that gate tool calls.                     |
 | Tool calls          | `src/lib/store/tool-calls` follows each running reply's tool calls, decides each by the Tools pane, runs client tools or allows backend tools, and sends their answers. |
+| Tool approvals      | `src/lib/store/tool-settings.ts` owns each tool's Ask me or Just run, saved as the `tools` group of `settings.json`, and its automatic save.                            |
 | Shell/runtime state | `src/lib/store/index.ts` tracks which view is open, whether the backend is running, and settings loaded from Tauri.                                                     |
 | Model lifecycle     | `src/lib/store/model-actions.ts` owns real inventory, load, unload, and health requests shared by settings and the composer.                                            |
 | SSE consumption     | `src/lib/apis/http/chat.ts` opens chat and reply-events SSE streams, validates events with Zod, and sends reply stops and tool results.                                 |
@@ -35,9 +36,9 @@ The desktop currently has six separate state systems:
 | Chat Zustand store      | Active conversation, the agent selected for a new conversation, request and open tokens, local abort controllers, streamed assistant deltas, inline error text       |
 | History Zustand store   | Dialog visibility, search query, displayed conversation pages, the row being renamed or confirmed, pending renames and deletes                                       |
 | Agent Zustand store     | Every listed built-in and stored agent, the open editor or read-only view and its draft, the save attempt, the pending save or delete, the most recently saved agent |
-| Tool Zustand store      | The tool list read from the desktop and the backend, tool calls on or off, each tool's switch and approval                                                           |
+| Tool Zustand store      | The tool list read from the desktop and the backend, tool calls on or off, each tool's switch                                                                        |
 | Tool-call Zustand store | Every tool call held until the backend takes its answer, and the reply follows that deliver them                                                                     |
-| Shell Zustand store     | Active top-level view, loaded runtime settings, backend process status, startup progress                                                                             |
+| Shell Zustand store     | Active top-level view, loaded settings (each tool's saved approval included), backend process status, startup progress                                               |
 
 The transcript shown in the window is built from backend events for the current
 request, or from the stored transcript read when a past conversation is opened.
@@ -350,10 +351,26 @@ below it recedes and is disabled. An expanded row closes while the controls are
 locked and opens again when they unlock.
 
 Every choice on the pane applies to the next chat request or tool call: tool
-calls on or off, each tool's switch, and Ask me or Just run. Every tool starts
-on Ask me. A tool that only reads this machine starts on; a tool that sends
-requests off the machine (`network`) starts off. The choices last for the
-session only; nothing is saved.
+calls on or off, each tool's switch, and Ask me or Just run. A tool that only
+reads this machine starts on; a tool that sends requests off the machine
+(`network`) starts off. Tool calls on or off and each tool's switch last for
+the session only.
+
+Every tool, network tools included, offers both approvals and starts on Ask
+me. The note under "Before it runs" says what each does: on Ask me, "Each call
+waits for you with its arguments. Nothing runs until you allow it."; on Just
+run, a tool that only reads this machine "Runs the moment the model asks,
+without showing you the call.", and a `network` tool "Sends its request off
+this machine the moment the model asks, without showing you what it sends."
+Choosing Just run saves the tool's name in the `tools.justRun` list of
+`settings.json`, and choosing Ask me removes it, so the approval holds after a
+restart. The application store owns that list: a change applies at once and is
+saved automatically, serialized with the other group saves. A status line under
+the tools says "Saving Just run choices…" while a save runs; when one fails, it
+says the choices apply until Lys quits and that a restart uses the choices last
+saved, and offers Retry saving. A name in the list that Lys does not list now,
+such as a backend tool whose list could not be read, is kept and has no
+effect.
 
 A backend tool that cannot run now, such as `web_search` without a saved
 Tavily API key, keeps its row: its switch is disabled and shows off, a note
@@ -403,9 +420,10 @@ list is read again so the next request leaves the tool out.
 The tool-call store follows every reply the chat store starts or follows on
 its own reply-events connection, so tool calls keep moving while another
 conversation is shown. It takes each call from a `tool-call` event or from the
-snapshot's `pendingToolCalls`, once, and decides it by the Tools pane at that
-moment. An answered call stays held while the store follows its reply, so a
-snapshot built before the answer arrived does not bring the call back:
+snapshot's `pendingToolCalls`, once, and decides it by the Tools pane's
+switches and the saved Just run list at that moment. An answered call stays
+held while the store follows its reply, so a snapshot built before the answer
+arrived does not bring the call back:
 
 1. A tool the desktop does not list, or arguments that do not match its
    command, is answered as `runFailed`. A backend tool's call is checked too,
@@ -414,9 +432,15 @@ snapshot built before the answer arrived does not bring the call back:
    the backend applies.
 2. With tool calls off, or the tool switched off, the call is answered as
    `declined`.
-3. On Just run, a client tool runs at once and a backend tool's call is
-   answered `allowed` at once; nothing is shown.
-4. On Ask me, the call waits for the person.
+3. A tool saved as Just run: a client tool runs at once and a backend tool's
+   call is answered `allowed` at once; nothing is shown.
+4. Every other tool is on Ask me, and the call waits for the person.
+
+This is the approval gateway, and the desktop is its only enforcement point,
+for client and backend tools alike: the backend runs `read_page` or
+`web_search` only once the desktop answers `allowed`, and it never learns the
+approvals. A call that arrives before `settings.json` has loaded sees no saved
+name, so it asks.
 
 A waiting call shows a card above the composer field: the tool, what it does
 with the machine, where it runs, a plain sentence such as "Read
@@ -463,10 +487,10 @@ are gone and the reply is marked interrupted when the backend next starts.
   attachments are never sent.
 - The Tavily API key is stored as plain text in `settings.json`, protected
   only by the file's owner-only permissions; there is no keychain storage.
-- The Tools pane's choices last for the session only; every tool starts on Ask
-  me again after a restart ([#110](https://github.com/w3lt/lys/issues/110)).
-  Whether Just run stays and how approval is enforced is decided in
-  [#156](https://github.com/w3lt/lys/issues/156).
+- Tool calls on or off and each tool's switch last for the session only; after
+  a restart they return to their defaults
+  ([#110](https://github.com/w3lt/lys/issues/110)). Only each tool's approval
+  is saved.
 - There is no "Allow for this chat": each call on Ask me is asked about.
 - Tool calls leave no trace in the transcript: a call on Just run shows
   nothing, and an answered call's card disappears. Steps and saved citations

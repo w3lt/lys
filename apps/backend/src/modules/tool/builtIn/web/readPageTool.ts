@@ -91,7 +91,7 @@ export function buildReadPageDefinition(): ToolDefinition {
   const timeoutSeconds = PAGE_READ_TIMEOUT_MS / MILLISECONDS_PER_SECOND
   return toolDefinitionSchema.parse({
     name: READ_PAGE_TOOL_NAME,
-    description: `Read one public web page in a browser and return its title, URL, and main text, to answer from and cite. The page's scripts run and its redirects are followed. Reads http and https pages that serve HTML or plain text, within ${timeoutSeconds} seconds. Pages that need signing in, PDFs, and addresses on this machine or a private network cannot be read. A page longer than ${MAXIMUM_SELECTED_PASSAGE_LENGTH} characters is cut to the passages that best match focus, or to its beginning.`,
+    description: `Read one public web page in a browser and return its title, URL, and main text, to answer from and cite. The page's scripts run and its redirects are followed. Text the page hides from readers is left out. Reads http and https pages that serve HTML or plain text, within ${timeoutSeconds} seconds. Pages that need signing in, PDFs, and addresses on this machine or a private network cannot be read. A page longer than ${MAXIMUM_SELECTED_PASSAGE_LENGTH} characters is cut to the passages that best match focus, or to its beginning.`,
     group: "network",
     access: "network",
     runner: "backend",
@@ -310,9 +310,9 @@ function parsePageReadInput(
  * @remarks Implements {@link BuiltInTool}. Parsing checks the URL by the
  * page URL rules before the person is asked; a run reads the page in a
  * fresh headless browser whose every connection passes the address rule,
- * with the page's scripts running and its redirects followed, extracts its
- * main text, keeps the passages that fit, and frames them as untrusted page
- * content. Every failure the model can act on becomes its result; only a
+ * with the page's scripts running and its redirects followed, leaves out
+ * text a person cannot see, extracts its main text, keeps the passages that
+ * fit, and frames them as untrusted page content. Every failure the model can act on becomes its result; only a
  * defect rejects. Owns no resource; each run starts and closes its own
  * browser and proxy. Concurrency model: reentrant.
  */

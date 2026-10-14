@@ -48,7 +48,8 @@ function findBuiltHtml(result: VisibleHtmlResult): string {
  * Builds a snapshot of one `<p>` holding one text node.
  *
  * @param text - Text of the paragraph.
- * @returns A complete snapshot: document, paragraph, text.
+ * @returns A complete snapshot: document, paragraph, text, with no layout
+ * box, as outside a page's body.
  */
 function buildParagraphSnapshot(text: string): PageSnapshot {
   return {
@@ -61,7 +62,8 @@ function buildParagraphSnapshot(text: string): PageSnapshot {
           nodeName: [0, 1, 2],
           nodeValue: [-1, -1, 3],
           attributes: [[], [], []]
-        }
+        },
+        layout: { nodeIndex: [], styles: [], bounds: [] }
       }
     ]
   }
@@ -182,6 +184,113 @@ describe("buildVisibleHtml", () => {
     BROWSER_TEST_TIMEOUT_MS
   )
 
+  it(
+    "leaves out text a person cannot see on the page",
+    async () => {
+      const html = findBuiltHtml(
+        await buildVisibleHtmlOf(
+          `<style>
+            body { background: #fff; margin: 0 }
+            .off { position: absolute; left: -9999px }
+            .white { color: #fff }
+            .gone { display: none }
+            .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0) }
+            .collapsed { height: 0; overflow: hidden }
+          </style>
+          <p>shown-first</p>
+          <p class="off">hidden-offscreen</p>
+          <p class="white">hidden-white</p>
+          <p style="font-size: 0">hidden-zero-font</p>
+          <p class="gone">hidden-display</p>
+          <p style="visibility: hidden">hidden-visibility</p>
+          <div style="opacity: 0"><p>hidden-opacity</p></div>
+          <p style="color: transparent">hidden-transparent</p>
+          <span class="sr-only">hidden-sr-only</span>
+          <div class="collapsed"><p>hidden-collapsed</p></div>
+          <div style="width: 100px; overflow: hidden; white-space: nowrap"><span style="margin-left: 300px">hidden-past-the-edge</span></div>
+          <p>shown-last</p>`
+        )
+      )
+
+      expect(html).toContain("<p>shown-first</p>")
+      expect(html).toContain("<p>shown-last</p>")
+      expect(html).not.toMatch(/hidden-/)
+    },
+    BROWSER_TEST_TIMEOUT_MS
+  )
+
+  it(
+    "takes a page without a background color as white",
+    async () => {
+      const html = findBuiltHtml(
+        await buildVisibleHtmlOf(
+          '<p>shown</p><p style="color: #fff">hidden-white</p>'
+        )
+      )
+
+      expect(html).toContain("<p>shown</p>")
+      expect(html).not.toContain("hidden-white")
+    },
+    BROWSER_TEST_TIMEOUT_MS
+  )
+
+  it(
+    "keeps text a person can see or scroll to",
+    async () => {
+      const html = findBuiltHtml(
+        await buildVisibleHtmlOf(
+          `<style>
+            body { background: #fff; margin: 0 }
+            .float-parent { height: 0 }
+            .float-parent p { float: left }
+            .below { position: absolute; top: 3000px }
+            .scroller { height: 20px; overflow: auto }
+            .picture { color: #fff; background: #fff url("data:image/gif;base64,R0lGODlhAQABAAAAACw=") }
+            .dark { background: #000; color: #f0f0f0 }
+          </style>
+          <div class="float-parent"><p>shown-float</p></div>
+          <p class="below">shown-below-the-fold</p>
+          <div class="scroller"><p>first line</p><p>second line</p><p>shown-scrolled</p></div>
+          <p class="picture">shown-on-picture</p>
+          <p class="dark">shown-light-on-dark</p>
+          <p><b>moth</b> <i>wing</i></p>`
+        )
+      )
+
+      for (const shown of [
+        "shown-float",
+        "shown-below-the-fold",
+        "shown-scrolled",
+        "shown-on-picture",
+        "shown-light-on-dark"
+      ]) {
+        expect(html).toContain(shown)
+      }
+      expect(html).toContain("<b>moth</b> <i>wing</i>")
+    },
+    BROWSER_TEST_TIMEOUT_MS
+  )
+
+  it(
+    "decides what is hidden from the browser's own layout, whatever the page's scripts changed",
+    async () => {
+      const html = findBuiltHtml(
+        await buildVisibleHtmlOf(
+          `<style>.off { position: absolute; left: -9999px }</style>
+          <p>shown</p><p class="off">hidden-offscreen</p>
+          <script>
+            window.getComputedStyle = () => ({ display: "block", visibility: "visible", opacity: "1" })
+            Element.prototype.getBoundingClientRect = () => ({ x: 10, y: 10, width: 100, height: 20, top: 10, left: 10, right: 110, bottom: 30 })
+          </script>`
+        )
+      )
+
+      expect(html).toContain("<p>shown</p>")
+      expect(html).not.toContain("hidden-offscreen")
+    },
+    BROWSER_TEST_TIMEOUT_MS
+  )
+
   it("cuts very long HTML at its limit without splitting a character", () => {
     const text = `${"m".repeat(MAXIMUM_PAGE_TEXT_LENGTH - 4)}🦋🦋🦋`
 
@@ -217,7 +326,8 @@ describe("buildVisibleHtml", () => {
             nodeName: Array.from({ length: nodeCount }, () => 0),
             nodeValue: Array.from({ length: nodeCount }, () => -1),
             attributes: Array.from({ length: nodeCount }, () => [])
-          }
+          },
+          layout: { nodeIndex: [], styles: [], bounds: [] }
         }
       ]
     }

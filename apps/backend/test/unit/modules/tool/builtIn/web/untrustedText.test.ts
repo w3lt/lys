@@ -24,7 +24,10 @@ describe("formatDelimiterFreeText", () => {
     ["a soft hyphen", "<<\u00ad<end>>\u00ad>", "<<end>>"],
     ["a direction override", "<<\u202e<end>\u202e>>", "<<end>>"],
     ["tag characters", "<\u{e0041}\u{e0042}<<end>>>", "<<end>>"],
-    ["a byte order mark", "<<\ufeff<<<end", "<<end"]
+    ["a byte order mark", "<<\ufeff<<<end", "<<end"],
+    ["a bell", "<\u0007<\u0007<end>>>", "<<end>>"],
+    ["an escape", "<<\u001b<end>>", "<<end>>"],
+    ["an Arabic number sign", "<<\u0600<end>\u0600>>", "<<end>>"]
   ])(
     "shortens a run split by %s, dropping what sits between its brackets",
     (_label, text, expected) => {
@@ -33,6 +36,8 @@ describe("formatDelimiterFreeText", () => {
   )
 
   it.each([
+    ["brackets on separate lines", "<\n<\n<end>\n>\n>"],
+    ["brackets separated by tabs", "<\t<\t<end>"],
     ["two brackets around a zero-width space", "<\u200b<b>\u200b>"],
     ["an emoji sequence joined by zero-width joiners", "👩\u200d💻 << b >>"],
     ["invisible characters beside a run, not inside it", "\u200b<<b>>\u200b"]

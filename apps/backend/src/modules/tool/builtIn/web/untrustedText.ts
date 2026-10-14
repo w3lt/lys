@@ -1,12 +1,15 @@
 /**
  * Finds each run of three or more `<`, or of three or more `>`: the brackets
  * that open and close every content delimiter Lys writes around web text.
- * Characters that show nothing, the Unicode default-ignorable code points
- * such as zero-width, direction, and tag characters, belong to a run when
- * they sit between its brackets, because a reader sees those brackets joined.
+ * Characters that show nothing belong to a run when they sit between its
+ * brackets, because a reader sees those brackets joined: the Unicode
+ * default-ignorable code points, such as zero-width, direction, and tag
+ * characters, and every format and control character except tab and line
+ * breaks. That covers every character the cleaning of network tool results
+ * removes, so removing them can never join brackets into a delimiter.
  */
 const DELIMITER_BRACKET_RUN_PATTERN =
-  /<(?:\p{Default_Ignorable_Code_Point}*<){2,}|>(?:\p{Default_Ignorable_Code_Point}*>){2,}/gu
+  /<(?:[[\p{Default_Ignorable_Code_Point}\p{Cf}\p{Cc}]--[\t\n\r]]*<){2,}|>(?:[[\p{Default_Ignorable_Code_Point}\p{Cf}\p{Cc}]--[\t\n\r]]*>){2,}/gv
 
 /** Brackets a run keeps once shortened, too few to open or close a delimiter. */
 const SHORTENED_BRACKET_RUN_LENGTH = 2

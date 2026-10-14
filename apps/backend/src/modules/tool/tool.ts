@@ -5,7 +5,8 @@ import {
   type OpenAIFunctionTool,
   type ToolArgumentDefinition,
   type ToolDefinition,
-  type ToolDefinitionCandidate
+  type ToolDefinitionCandidate,
+  type ToolAccess
 } from "@lys/share"
 import * as z from "zod"
 import ToolArgument, {
@@ -76,7 +77,8 @@ const UNPARSABLE_ARGUMENT_JSON = Object.freeze({
  * @remarks The definition is validated when the tool is created and never
  * changes afterwards; the arguments schema is built from it once. Its `group`
  * and `access` describe the tool to the person using Lys and never reach the
- * model. Concurrency model: reentrant; the tool owns no mutable state and
+ * model; `access` also decides whether the tool's results are cleaned of
+ * invisible characters. Concurrency model: reentrant; the tool owns no mutable state and
  * retains no collaborator.
  */
 export default class AgentTool {
@@ -106,6 +108,17 @@ export default class AgentTool {
    */
   public get name(): string {
     return this.#definition.name
+  }
+
+  /**
+   * Returns what the tool reaches.
+   *
+   * @returns `reads` for a tool that only reads this machine, or `network`
+   * for a tool that reaches past it, whose results carry what remote servers
+   * sent.
+   */
+  public get access(): ToolAccess {
+    return this.#definition.access
   }
 
   /**

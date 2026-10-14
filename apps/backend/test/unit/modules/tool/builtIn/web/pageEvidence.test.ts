@@ -38,7 +38,7 @@ const COMPLETE_SELECTION: PassageSelection = {
 
 /** Note the model reads about a page with little text. */
 const SHORT_PAGE_NOTE =
-  "Note: the page has little text. If it should show more, it may need JavaScript, which Lys cannot run."
+  "Note: the page shows little text. It may ask the reader to sign in, or check for automated readers, which Lys does not get past."
 
 /**
  * Formats the evidence of a page whose whole text is one passage.
@@ -147,7 +147,7 @@ describe("formatPageEvidence", () => {
     )
   })
 
-  it("notes that a page with little text may need JavaScript, and still gives its text", () => {
+  it("notes that a page with little text may be a sign-in page or a check, and still gives its text", () => {
     const evidence = formatSinglePassageEvidence("Moths fly at night.")
 
     expect(evidence).toContain(`Read: the whole page.\n${SHORT_PAGE_NOTE}\n\n`)

@@ -1,0 +1,227 @@
+import { describe, expect, it } from "vitest"
+import {
+  buildVisibleHtml,
+  getPageSnapshot,
+  MAXIMUM_PAGE_TEXT_LENGTH,
+  MAXIMUM_SNAPSHOT_NODES,
+  type PageSnapshot,
+  type VisibleHtmlResult
+} from "../../../../../../src/modules/tool/builtIn/web/pageSnapshot"
+import {
+  BROWSER_TEST_TIMEOUT_MS,
+  openTestPage
+} from "../../../../support/pageBrowser"
+
+/** Node type of a DOM document. */
+const DOCUMENT_NODE = 9
+
+/** Node type of a DOM element. */
+const ELEMENT_NODE = 1
+
+/** Node type of a DOM text node. */
+const TEXT_NODE = 3
+
+/**
+ * Builds the visible HTML of markup rendered in a real browser.
+ *
+ * @param html - Markup of the page; its scripts run before the snapshot.
+ * @returns What {@link buildVisibleHtml} makes of the page's snapshot.
+ */
+async function buildVisibleHtmlOf(html: string): Promise<VisibleHtmlResult> {
+  const page = await openTestPage(html)
+  return buildVisibleHtml(await getPageSnapshot(page))
+}
+
+/**
+ * Finds the HTML of a built result.
+ *
+ * @param result - Result expected to be built.
+ * @returns Its HTML.
+ * @throws When the result is not built.
+ */
+function findBuiltHtml(result: VisibleHtmlResult): string {
+  if (result.status !== "built") throw new Error("Expected built HTML")
+  return result.html
+}
+
+/**
+ * Builds a snapshot of one `<p>` holding one text node.
+ *
+ * @param text - Text of the paragraph.
+ * @returns A complete snapshot: document, paragraph, text.
+ */
+function buildParagraphSnapshot(text: string): PageSnapshot {
+  return {
+    strings: ["#document", "P", "#text", text],
+    documents: [
+      {
+        nodes: {
+          parentIndex: [-1, 0, 1],
+          nodeType: [DOCUMENT_NODE, ELEMENT_NODE, TEXT_NODE],
+          nodeName: [0, 1, 2],
+          nodeValue: [-1, -1, 3],
+          attributes: [[], [], []]
+        }
+      }
+    ]
+  }
+}
+
+describe("buildVisibleHtml", () => {
+  it(
+    "keeps the text and nesting of the rendered page",
+    async () => {
+      const html = findBuiltHtml(
+        await buildVisibleHtmlOf(
+          "<main><p>Moths <b>fly</b> at night.</p></main>"
+        )
+      )
+
+      expect(html).toContain("<main><p>Moths <b>fly</b> at night.</p></main>")
+    },
+    BROWSER_TEST_TIMEOUT_MS
+  )
+
+  it(
+    "includes text that the page's scripts wrote before the snapshot",
+    async () => {
+      const html = findBuiltHtml(
+        await buildVisibleHtmlOf(
+          '<div id="root"></div><script>document.getElementById("root").innerHTML = "<p>Written by a script.</p>"</script>'
+        )
+      )
+
+      expect(html).toContain('<div id="root"><p>Written by a script.</p></div>')
+    },
+    BROWSER_TEST_TIMEOUT_MS
+  )
+
+  it(
+    "escapes text and attribute values",
+    async () => {
+      const html = findBuiltHtml(
+        await buildVisibleHtmlOf(
+          `<p title='a "moth" &amp; a butterfly'>wings &lt; 5 cm &amp; night</p>`
+        )
+      )
+
+      expect(html).toContain(
+        '<p title="a &quot;moth&quot; &amp; a butterfly">wings &lt; 5 cm &amp; night</p>'
+      )
+    },
+    BROWSER_TEST_TIMEOUT_MS
+  )
+
+  it(
+    "writes void elements without an end tag",
+    async () => {
+      const html = findBuiltHtml(
+        await buildVisibleHtmlOf('<p>moth<br>night<img alt="moth"></p>')
+      )
+
+      expect(html).toContain('<p>moth<br>night<img alt="moth"></p>')
+    },
+    BROWSER_TEST_TIMEOUT_MS
+  )
+
+  it(
+    "keeps the title and the meta tags of the head",
+    async () => {
+      const html = findBuiltHtml(
+        await buildVisibleHtmlOf(
+          '<head><title>Moths</title><meta property="og:site_name" content="Moth Society"></head><body><p>text</p></body>'
+        )
+      )
+
+      expect(html).toContain("<title>Moths</title>")
+      expect(html).toContain(
+        '<meta property="og:site_name" content="Moth Society">'
+      )
+    },
+    BROWSER_TEST_TIMEOUT_MS
+  )
+
+  it(
+    "leaves out scripts, styles, noscript, templates, SVG, iframes, and comments",
+    async () => {
+      const html = findBuiltHtml(
+        await buildVisibleHtmlOf(
+          '<style>p { color: black }</style><script>var scriptText = "SCRIPT"</script><noscript>NOSCRIPT</noscript><template><p>TEMPLATE</p></template><svg><text>SVG</text></svg><iframe srcdoc="<p>IFRAME</p>"></iframe><!-- COMMENT --><p>kept</p>'
+        )
+      )
+
+      expect(html).toContain("<p>kept</p>")
+      for (const leftOut of [
+        "color: black",
+        "SCRIPT",
+        "NOSCRIPT",
+        "TEMPLATE",
+        "SVG",
+        "IFRAME",
+        "COMMENT"
+      ]) {
+        expect(html).not.toContain(leftOut)
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS
+  )
+
+  it(
+    "writes a shadow root's content inside its host, with slotted light content where it renders",
+    async () => {
+      const html = findBuiltHtml(
+        await buildVisibleHtmlOf(
+          '<moth-card><span>light text</span></moth-card><script>customElements.define("moth-card", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = "<p>shadow text</p><slot></slot>" } })</script>'
+        )
+      )
+
+      expect(html).toContain(
+        "<moth-card><p>shadow text</p><slot><span>light text</span></slot></moth-card>"
+      )
+    },
+    BROWSER_TEST_TIMEOUT_MS
+  )
+
+  it("cuts very long HTML at its limit without splitting a character", () => {
+    const text = `${"m".repeat(MAXIMUM_PAGE_TEXT_LENGTH - 4)}🦋🦋🦋`
+
+    const result = buildVisibleHtml(buildParagraphSnapshot(text))
+
+    if (result.status !== "built") throw new Error("Expected built HTML")
+    expect(result.isTruncated).toBe(true)
+    expect(result.html.length).toBeLessThanOrEqual(MAXIMUM_PAGE_TEXT_LENGTH)
+    expect(result.html).toMatch(/m$/)
+  })
+
+  it("is not truncated when the HTML fits", () => {
+    const result = buildVisibleHtml(buildParagraphSnapshot("Moths"))
+
+    expect(result).toEqual({
+      status: "built",
+      html: "<p>Moths</p>",
+      isTruncated: false
+    })
+  })
+
+  it("refuses a page with more nodes than its limit before building it", () => {
+    const nodeCount = MAXIMUM_SNAPSHOT_NODES + 1
+    const snapshot: PageSnapshot = {
+      strings: ["#document"],
+      documents: [
+        {
+          nodes: {
+            parentIndex: Array.from({ length: nodeCount }, (_, index) =>
+              index === 0 ? -1 : 0
+            ),
+            nodeType: Array.from({ length: nodeCount }, () => DOCUMENT_NODE),
+            nodeName: Array.from({ length: nodeCount }, () => 0),
+            nodeValue: Array.from({ length: nodeCount }, () => -1),
+            attributes: Array.from({ length: nodeCount }, () => [])
+          }
+        }
+      ]
+    }
+
+    expect(buildVisibleHtml(snapshot)).toEqual({ status: "too-complex" })
+  })
+})

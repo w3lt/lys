@@ -3,7 +3,6 @@ import type {
   BuiltInToolCallArguments,
   BuiltInToolResult
 } from "../../../../../../src/modules/tool/builtIn/builtInTool"
-import type { PageRequestDependencies } from "../../../../../../src/modules/tool/builtIn/web/pageRequest"
 import ReadPageTool, {
   buildReadPageDefinition,
   MAXIMUM_PAGE_FOCUS_LENGTH
@@ -12,11 +11,14 @@ import {
   registerBuiltInToolContractSuite,
   type BuiltInToolHarness
 } from "../../../../support/builtInToolContract"
+import { BROWSER_TEST_TIMEOUT_MS } from "../../../../support/pageBrowser"
 import {
   answerWithBody,
+  buildPageServerDependencies,
   buildTestPageUrl,
-  PAGE_SERVER_DEPENDENCIES,
-  startPageServer
+  startPageServer,
+  type PageRoute,
+  type PageServerReadOptions
 } from "../../../../support/pageServer"
 
 /** Paragraph long enough to count as readable text on its own. */
@@ -35,19 +37,25 @@ const EVIDENCE_FRAME = Object.freeze({
     "Cite this page with a numbered marker such as [1], numbering sources in the order you first use them, and list each source you used under your answer as: [n] Title — URL."
 })
 
+/** What the model reads after a browser that is missing or cannot start. */
+const BROWSER_HELP =
+  "Please contact w3lt@negentropy.studio to report problem and require help. Only repair it yourself if you know exactly what you are doing."
+
 /**
  * Runs one call of a read-page tool that reaches test page servers.
  *
  * @param callArguments - Arguments of the call.
- * @param dependencies - Request dependencies; reach test servers by default.
+ * @param options - Read settings the case changes.
  * @returns The run's result.
  * @throws If the arguments are invalid, or whatever the run rejects with.
  */
 async function runReadPage(
   callArguments: BuiltInToolCallArguments,
-  dependencies: PageRequestDependencies = PAGE_SERVER_DEPENDENCIES
+  options: PageServerReadOptions = {}
 ): Promise<BuiltInToolResult> {
-  const parsed = new ReadPageTool(dependencies).parseToolCall(callArguments)
+  const parsed = new ReadPageTool(
+    buildPageServerDependencies(options)
+  ).parseToolCall(callArguments)
   if (parsed.status !== "parsed") throw new Error(parsed.message)
   return parsed.runToolCall(new AbortController().signal)
 }
@@ -62,14 +70,46 @@ async function createReadPageHarness(): Promise<BuiltInToolHarness> {
     answerWithBody("text/plain; charset=utf-8", PAGE_PARAGRAPH)
   )
   return {
-    tool: new ReadPageTool(PAGE_SERVER_DEPENDENCIES),
+    tool: new ReadPageTool(buildPageServerDependencies()),
     runnableArguments: { url: buildTestPageUrl(server.port, "/moths") },
     invalidArguments: { url: "http://localhost/" },
     countStartedWork: () => server.receivedHeaders.length
   }
 }
 
-registerBuiltInToolContractSuite(createReadPageHarness)
+/**
+ * Builds a route that answers with a status and then another route.
+ *
+ * @param status - HTTP status of the answer.
+ * @param route - Route that writes the rest of the answer.
+ * @returns The route.
+ */
+function answerWithStatus(status: number, route: PageRoute): PageRoute {
+  return (request, response) => {
+    response.statusCode = status
+    route(request, response)
+  }
+}
+
+/**
+ * Builds a route that redirects every request.
+ *
+ * @param location - Where it redirects to.
+ * @returns The route.
+ */
+function redirectTo(location: string): PageRoute {
+  return (_request, response) => {
+    response.writeHead(302, { location }).end()
+  }
+}
+
+describe(
+  "ReadPageTool in a browser",
+  { timeout: BROWSER_TEST_TIMEOUT_MS },
+  () => {
+    registerBuiltInToolContractSuite(createReadPageHarness)
+  }
+)
 
 describe("buildReadPageDefinition", () => {
   it("defines a backend tool that reaches the network, with a required url and an optional focus", () => {
@@ -87,15 +127,16 @@ describe("buildReadPageDefinition", () => {
     })
   })
 
-  it("states the limits a read has to the model", () => {
+  it("states to the model how a read works and what it cannot read", () => {
     const { description } = buildReadPageDefinition()
 
-    expect(description).toContain("within 15 seconds.")
+    expect(description).toContain("Read one public web page in a browser")
     expect(description).toContain(
-      "Redirects are not followed: a page that redirects returns the URL it points to, which you can read with another call."
+      "The page's scripts run and its redirects are followed."
     )
+    expect(description).toContain("within 30 seconds.")
     expect(description).toContain(
-      "Pages that need JavaScript, PDFs, and addresses on this machine or a private network cannot be read."
+      "Pages that need signing in, PDFs, and addresses on this machine or a private network cannot be read."
     )
     expect(description).toContain("longer than 12000 characters")
   })
@@ -136,7 +177,7 @@ describe("ReadPageTool", () => {
         "The focus is longer than 200 characters."
       ]
     ])("explains %s", (_label, callArguments, message) => {
-      const tool = new ReadPageTool(PAGE_SERVER_DEPENDENCIES)
+      const tool = new ReadPageTool(buildPageServerDependencies())
 
       expect(tool.parseToolCall(callArguments)).toEqual({
         status: "invalid",
@@ -145,7 +186,7 @@ describe("ReadPageTool", () => {
     })
 
     it("explains a URL longer than the limit", () => {
-      const tool = new ReadPageTool(PAGE_SERVER_DEPENDENCIES)
+      const tool = new ReadPageTool(buildPageServerDependencies())
       const url = `https://example.com/${"a".repeat(2_048)}`
 
       const parsed = tool.parseToolCall({ url })
@@ -157,7 +198,7 @@ describe("ReadPageTool", () => {
     })
 
     it("accepts a focus of exactly the limit once trimmed", () => {
-      const tool = new ReadPageTool(PAGE_SERVER_DEPENDENCIES)
+      const tool = new ReadPageTool(buildPageServerDependencies())
       const focus = ` ${"a".repeat(MAXIMUM_PAGE_FOCUS_LENGTH)} `
 
       const parsed = tool.parseToolCall({ url: "https://example.com/", focus })
@@ -166,7 +207,7 @@ describe("ReadPageTool", () => {
     })
   })
 
-  describe("a run", () => {
+  describe("a run", { timeout: BROWSER_TEST_TIMEOUT_MS }, () => {
     it("gives the whole of a short page between content delimiters, with how to cite it", async () => {
       const server = await startPageServer(
         answerWithBody("text/plain; charset=utf-8", PAGE_PARAGRAPH)
@@ -208,6 +249,42 @@ describe("ReadPageTool", () => {
       expect(result.content).not.toContain("Home · Shop")
     })
 
+    it("reads an article that the page's script writes after loading", async () => {
+      const server = await startPageServer(
+        answerWithBody(
+          "text/html; charset=utf-8",
+          `<html><head><title>Moths</title></head><body><div id="app">Loading…</div><script>document.getElementById("app").innerHTML = ${JSON.stringify(`<article><h1>Moths</h1><p>${PAGE_PARAGRAPH}</p></article>`)}</script></body></html>`
+        )
+      )
+
+      const result = await runReadPage({
+        url: buildTestPageUrl(server.port, "/moths")
+      })
+
+      expect(result.status).toBe("succeeded")
+      expect(result.content).toContain(PAGE_PARAGRAPH)
+      expect(result.content).not.toContain("Loading…")
+    })
+
+    it("follows a redirect and gives the URL of the page it reached, to cite", async () => {
+      const server = await startPageServer((request, response) => {
+        if (request.url === "/old") {
+          response.writeHead(301, { location: "/moths" }).end()
+          return
+        }
+        answerWithBody("text/plain", PAGE_PARAGRAPH)(request, response)
+      })
+
+      const result = await runReadPage({
+        url: buildTestPageUrl(server.port, "/old")
+      })
+
+      expect(result.status).toBe("succeeded")
+      expect(result.content).toMatch(
+        new RegExp(`^URL: ${buildTestPageUrl(server.port, "/moths")}\n`)
+      )
+    })
+
     it("keeps the passages that match the focus when a page is too long to show whole", async () => {
       const fillerParagraphs = Array.from(
         { length: 60 },
@@ -236,14 +313,12 @@ describe("ReadPageTool", () => {
     it.each([
       [
         "the server answers with an error status",
-        answerWithBody("text/plain", "gone", {}),
-        404,
+        answerWithStatus(404, answerWithBody("text/plain", "gone")),
         "the server answered with HTTP status 404."
       ],
       [
         "the body is not a web page",
         answerWithBody("application/pdf", "%PDF-1.7"),
-        200,
         "it is not a web page (application/pdf). Lys reads HTML and plain-text pages only."
       ],
       [
@@ -252,26 +327,44 @@ describe("ReadPageTool", () => {
           "text/html",
           "<html><body><div id=app></div></body></html>"
         ),
-        200,
-        "the page has no readable text. It may need JavaScript to show its content, which Lys cannot run."
+        "the page has no readable text."
       ],
       [
-        "the page nests too deeply",
+        "the page's script nests its elements too deeply",
         answerWithBody(
           "text/html",
-          `<html><body>${"<div>".repeat(1_000)}${PAGE_PARAGRAPH}${"</div>".repeat(1_000)}</body></html>`
+          `<html><body><script>let parent = document.body; for (let depth = 0; depth < 1000; depth += 1) parent = parent.appendChild(document.createElement("div")); parent.textContent = ${JSON.stringify(PAGE_PARAGRAPH)}</script></body></html>`
         ),
-        200,
         "the page is too large or too deeply nested for Lys to read."
+      ],
+      [
+        "it redirects to an address the browser will not load",
+        redirectTo("file:///etc/hosts"),
+        "the browser could not load it (ERR_UNSAFE_REDIRECT)."
+      ],
+      [
+        "it redirects to this machine or a private network",
+        redirectTo("http://private.test/moths"),
+        "its address, or the address of a page it redirects to, belongs to this machine or a private network, which Lys never reads."
+      ],
+      [
+        "it redirects to a host with no address",
+        redirectTo("http://missing.test/moths"),
+        "its host name, or the host name of a page it redirects to, could not be found."
+      ],
+      [
+        "the page crashes the browser while it loads",
+        answerWithBody(
+          "text/html",
+          "<p>Moths</p><script>const moths = []; for (;;) moths.push(new Array(1e7).fill(1.5))</script>"
+        ),
+        "the page crashed Lys's browser while loading."
       ]
-    ])("explains that %s", async (_label, route, status, reason) => {
-      const server = await startPageServer((request, response) => {
-        response.statusCode = status
-        route(request, response)
-      })
+    ])("explains that %s", async (_label, route, reason) => {
+      const server = await startPageServer(route)
       const url = buildTestPageUrl(server.port, "/page")
 
-      const result = await runReadPage({ url })
+      const result = await runReadPage({ url }, { readTimeoutMs: 25_000 })
 
       expect(result).toEqual({
         status: "failed",
@@ -279,32 +372,23 @@ describe("ReadPageTool", () => {
       })
     })
 
-    it("gives the URL a page redirects to, so the model can ask to read it", async () => {
-      const server = await startPageServer((_request, response) => {
-        response.writeHead(301, { location: "/moved" }).end()
-      })
+    it("explains a page that crashes the browser after its document has loaded", async () => {
+      const server = await startPageServer(
+        answerWithBody(
+          "text/html",
+          '<p>Moths</p><script>setInterval(() => fetch("/beacon").catch(() => {}), 100); addEventListener("load", () => setTimeout(() => { const moths = []; for (;;) moths.push(new Array(1e7).fill(1.5)) }, 200))</script>'
+        )
+      )
       const url = buildTestPageUrl(server.port, "/page")
 
-      const result = await runReadPage({ url })
+      const result = await runReadPage(
+        { url },
+        { readTimeoutMs: 25_000, settleTimeoutMs: 10_000 }
+      )
 
       expect(result).toEqual({
         status: "failed",
-        content: `Lys could not read ${url}: it redirects to ${buildTestPageUrl(server.port, "/moved")}. Lys does not follow redirects; call read_page with that URL to read it.`
-      })
-      expect(server.receivedHeaders).toHaveLength(1)
-    })
-
-    it("explains a redirect to an address Lys may not read", async () => {
-      const server = await startPageServer((_request, response) => {
-        response.writeHead(302, { location: "file:///etc/hosts" }).end()
-      })
-      const url = buildTestPageUrl(server.port, "/page")
-
-      const result = await runReadPage({ url })
-
-      expect(result).toEqual({
-        status: "failed",
-        content: `Lys could not read ${url}: it redirects to an address Lys may not read. Only http and https URLs can be read.`
+        content: `Lys could not read ${url}: the page crashed Lys's browser while loading.`
       })
     })
 
@@ -316,12 +400,12 @@ describe("ReadPageTool", () => {
 
       const result = await runReadPage(
         { url },
-        { ...PAGE_SERVER_DEPENDENCIES, isBlockedAddress: () => true }
+        { isBlockedAddress: () => true }
       )
 
       expect(result).toEqual({
         status: "failed",
-        content: `Lys could not read ${url}: its address belongs to this machine or a private network, which Lys never reads.`
+        content: `Lys could not read ${url}: its address, or the address of a page it redirects to, belongs to this machine or a private network, which Lys never reads.`
       })
       expect(server.receivedHeaders).toHaveLength(0)
     })
@@ -332,14 +416,39 @@ describe("ReadPageTool", () => {
       })
       const url = buildTestPageUrl(server.port, "/page")
 
+      const result = await runReadPage({ url }, { readTimeoutMs: 3_000 })
+
+      expect(result).toEqual({
+        status: "failed",
+        content: `Lys could not read ${url}: it did not load within 3 seconds.`
+      })
+    })
+
+    it("tells the person whom to contact when the browser is missing", async () => {
+      const url = buildTestPageUrl(1, "/page")
+
       const result = await runReadPage(
         { url },
-        { ...PAGE_SERVER_DEPENDENCIES, requestTimeoutMs: 50 }
+        { browserExecutablePath: "/nonexistent/lys/chrome-headless-shell" }
       )
 
       expect(result).toEqual({
         status: "failed",
-        content: `Lys could not read ${url}: it did not load within 0.05 seconds.`
+        content: `Lys could not read ${url}: Lys's browser is missing. ${BROWSER_HELP}`
+      })
+    })
+
+    it("tells the person whom to contact when the browser cannot start", async () => {
+      const url = buildTestPageUrl(1, "/page")
+
+      const result = await runReadPage(
+        { url },
+        { browserExecutablePath: "/usr/bin/true" }
+      )
+
+      expect(result).toEqual({
+        status: "failed",
+        content: `Lys could not read ${url}: Lys's browser could not start. ${BROWSER_HELP}`
       })
     })
 
@@ -349,9 +458,9 @@ describe("ReadPageTool", () => {
       const server = await startPageServer(() => {
         abortController.abort(stopReason)
       })
-      const parsed = new ReadPageTool(PAGE_SERVER_DEPENDENCIES).parseToolCall({
-        url: buildTestPageUrl(server.port, "/page")
-      })
+      const parsed = new ReadPageTool(
+        buildPageServerDependencies()
+      ).parseToolCall({ url: buildTestPageUrl(server.port, "/page") })
       if (parsed.status !== "parsed") throw new Error("Expected a parsed call")
 
       await expect(parsed.runToolCall(abortController.signal)).rejects.toBe(

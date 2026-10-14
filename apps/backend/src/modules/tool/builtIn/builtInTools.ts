@@ -10,7 +10,8 @@ import type {
 import ReadyBuiltInToolProvider from "./readyBuiltInToolProvider"
 import ReadPageTool, {
   buildReadPageDefinition,
-  PAGE_READ_TIMEOUT_MS
+  PAGE_READ_TIMEOUT_MS,
+  PAGE_SETTLE_TIMEOUT_MS
 } from "./web/readPageTool"
 import type { TavilyRequestDependencies } from "./web/tavilyRequest"
 import { isBlockedAddress } from "./web/webAddresses"
@@ -79,17 +80,23 @@ export function buildTavilyRequestDependencies(): TavilyRequestDependencies {
  *
  * @param webSearchToolProvider - Provider of the web search tool, lent for
  * the backend's lifetime.
- * @returns A frozen list: the read-page tool, always ready, which resolves
- * names through the operating system and never connects to a blocked
- * address; then the web search tool. Creating it reads and contacts nothing.
+ * @param browserExecutablePath - Absolute path of the Chrome Headless Shell
+ * the read-page tool runs.
+ * @returns A frozen list: the read-page tool, always ready, which reads each
+ * page in that browser, resolves names through the operating system, and
+ * never connects to a blocked address; then the web search tool. Creating it
+ * reads, starts, and contacts nothing.
  */
 export function createBuiltInTools(
-  webSearchToolProvider: BuiltInToolProvider
+  webSearchToolProvider: BuiltInToolProvider,
+  browserExecutablePath: string
 ): readonly BuiltInToolEntry[] {
   const readPageTool = new ReadPageTool({
     lookupHostAddresses: lookupDnsHostAddresses,
     isBlockedAddress,
-    requestTimeoutMs: PAGE_READ_TIMEOUT_MS
+    browserExecutablePath,
+    readTimeoutMs: PAGE_READ_TIMEOUT_MS,
+    settleTimeoutMs: PAGE_SETTLE_TIMEOUT_MS
   })
   const readPage: BuiltInToolEntry = Object.freeze({
     definition: buildReadPageDefinition(),

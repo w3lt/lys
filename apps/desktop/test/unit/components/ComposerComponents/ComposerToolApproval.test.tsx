@@ -73,8 +73,7 @@ const WAITING_PAGE_READ: ShownToolCall = Object.freeze({
     input: {
       runner: "backend",
       toolName: "read_page",
-      url: "https://example.com/docs",
-      host: "example.com"
+      url: "https://example.com/docs"
     }
   }
 } satisfies ShownToolCall)
@@ -156,7 +155,7 @@ describe("ComposerToolApproval", () => {
       ).toBeInTheDocument()
     })
 
-    it("says that a backend tool sends a request, and to which host", () => {
+    it("names the page a backend read reads, and that the backend runs it", () => {
       startToolApproval({ toolCall: WAITING_PAGE_READ, hasDraft: false })
 
       const card = screen.getByRole("group", {
@@ -168,9 +167,7 @@ describe("ComposerToolApproval", () => {
         "Runs in Lys’s backend"
       )
       expect(
-        within(card).getByText(
-          "Read https://example.com/docs. Sends a request to example.com."
-        )
+        within(card).getByText("Read https://example.com/docs.")
       ).toBeInTheDocument()
     })
 

@@ -53,17 +53,14 @@ describe("formatToolCallSummary", () => {
     }
   )
 
-  it("names the full URL a page read requests and the host the request goes to", () => {
+  it("names the full URL a page read reads", () => {
     expect(
       formatToolCallSummary({
         runner: "backend",
         toolName: "read_page",
-        url: "https://example.com:8443/docs?lang=en",
-        host: "example.com:8443"
+        url: "https://example.com:8443/docs?lang=en"
       })
-    ).toBe(
-      "Read https://example.com:8443/docs?lang=en. Sends a request to example.com:8443."
-    )
+    ).toBe("Read https://example.com:8443/docs?lang=en.")
   })
 
   it("quotes a web search's full query and names where it is sent", () => {

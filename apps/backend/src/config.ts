@@ -78,6 +78,16 @@ export const backendConfigSchema = z
       .string()
       .refine(isAbsolute, "Settings file path must be absolute."),
     /**
+     * Absolute filesystem path of the Chrome Headless Shell executable that
+     * runs every `read_page` read.
+     *
+     * @remarks `build.sh` installs that browser; the backend never downloads
+     * or repairs it. When the file is missing, each read fails and says so.
+     */
+    browserExecutablePath: z
+      .string()
+      .refine(isAbsolute, "Browser executable path must be absolute."),
+    /**
      * System prompt of Caliginia, the built-in agent that is Lys's dark side,
      * sent first in the context of every reply she writes.
      *
@@ -129,9 +139,10 @@ export type BackendConfig = z.infer<typeof backendConfigSchema>
  * shared protocol constants, backend limits, and the maintained prompt files.
  *
  * @returns A frozen configuration snapshot that satisfies the complete backend
- * configuration schema, whose database path is `lys_db.sqlite` and whose
- * settings file path is `settings.json` in the `LYS_HOME` directory, and
- * whose prompts were read once during this call.
+ * configuration schema, whose database path is `lys_db.sqlite`, whose
+ * settings file path is `settings.json`, and whose browser executable path is
+ * `runtime/chrome-headless-shell/chrome-headless-shell` in the `LYS_HOME`
+ * directory, and whose prompts were read once during this call.
  * @throws If `LYS_HOME` is unset, empty, or not an absolute path, as
  * described by {@link parseLysHome}.
  * @throws If a prompt file cannot be read or its trimmed contents are empty.
@@ -150,6 +161,12 @@ export function loadBackendConfig(): BackendConfig {
     lmstudioPort: LMSTUDIO_PORT,
     databaseFilePath: join(lysHome, "lys_db.sqlite"),
     settingsFilePath: join(lysHome, "settings.json"),
+    browserExecutablePath: join(
+      lysHome,
+      "runtime",
+      "chrome-headless-shell",
+      "chrome-headless-shell"
+    ),
     caliginiaSystemPrompt: readPrompt("caliginia-system"),
     lysipteraSystemPrompt: readPrompt("lysiptera-system"),
     titleGenerationPrompt: readPrompt("title-generation"),

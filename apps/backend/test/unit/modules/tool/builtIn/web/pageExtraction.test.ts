@@ -4,7 +4,7 @@ import {
   MAXIMUM_PAGE_DEPTH_SUM,
   MAXIMUM_PAGE_ELEMENTS
 } from "../../../../../../src/modules/tool/builtIn/web/pageExtraction"
-import type { PageResponse } from "../../../../../../src/modules/tool/builtIn/web/pageRequest"
+import type { RenderedPage } from "../../../../../../src/modules/tool/builtIn/web/pageRendering"
 import {
   parsePageUrl,
   type PageUrl
@@ -30,16 +30,16 @@ function buildPageUrl(text: string): PageUrl {
 }
 
 /**
- * Builds a page response for extraction.
+ * Builds a rendered page for extraction.
  *
- * @param mediaType - Media type of the body.
- * @param text - Body text.
- * @returns A response from https://moths.example/article.
+ * @param mediaType - How the page is read.
+ * @param text - HTML or plain text of the page.
+ * @returns A page from https://moths.example/article.
  */
 function buildPage(
-  mediaType: PageResponse["mediaType"],
+  mediaType: RenderedPage["mediaType"],
   text: string
-): PageResponse {
+): RenderedPage {
   return {
     url: buildPageUrl("https://moths.example/article"),
     mediaType,

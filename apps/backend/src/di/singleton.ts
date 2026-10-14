@@ -121,8 +121,8 @@ type DatabaseServices = Pick<
  *
  * @param config - LM Studio host and port used to derive local service endpoints,
  * the title-generation prompt and title length limit given to the chat
- * service, and the built-in agents' system prompts given to the agent
- * service.
+ * service, the built-in agents' system prompts given to the agent service,
+ * and the browser executable given to the read-page tool.
  * @param llmRuntimeFailureReporters - Receive the LLM runtime failures that no
  * caller observes, for logging.
  * @param factories - Service factories owned by the composition root.
@@ -208,7 +208,10 @@ export async function createSingletonServices(
       llmRuntimeService: llmRuntimeServiceAcquisition.service,
       ...databaseServices,
       agentService,
-      builtInTools: createBuiltInTools(webSearchToolProvider),
+      builtInTools: createBuiltInTools(
+        webSearchToolProvider,
+        config.browserExecutablePath
+      ),
       webSearchToolProvider,
       toolApprovalService,
       [CLOSE_SINGLETON_SERVICES]: closeOwnedSingletonServices

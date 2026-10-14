@@ -16,6 +16,9 @@ import {
 } from "../../../support/scriptedBuiltInTool"
 import { ScriptedBuiltInToolProvider } from "../../../support/scriptedBuiltInToolProvider"
 
+/** Browser path where no browser is installed. */
+const MISSING_BROWSER_PATH = "/nonexistent/lys-test/chrome-headless-shell"
+
 /** Web search provider that is never ready. */
 const UNAVAILABLE_PROVIDER = new ScriptedBuiltInToolProvider({
   status: "unavailable",
@@ -27,7 +30,7 @@ const LOOK_UP_TOOL = new ScriptedBuiltInTool()
 
 /** Read page, web search (unavailable), then the scripted look-up tool. */
 const ENTRIES: readonly BuiltInToolEntry[] = Object.freeze([
-  ...createBuiltInTools(UNAVAILABLE_PROVIDER),
+  ...createBuiltInTools(UNAVAILABLE_PROVIDER, MISSING_BROWSER_PATH),
   Object.freeze({
     definition: LOOK_UP_WORD_TOOL,
     provider: new ScriptedBuiltInToolProvider({
@@ -39,7 +42,10 @@ const ENTRIES: readonly BuiltInToolEntry[] = Object.freeze([
 
 describe("createBuiltInTools", () => {
   it("lists read_page, then web_search with the given provider, frozen", () => {
-    const entries = createBuiltInTools(UNAVAILABLE_PROVIDER)
+    const entries = createBuiltInTools(
+      UNAVAILABLE_PROVIDER,
+      MISSING_BROWSER_PATH
+    )
 
     expect(entries.map((entry) => entry.definition)).toEqual([
       buildReadPageDefinition(),
@@ -50,7 +56,10 @@ describe("createBuiltInTools", () => {
   })
 
   it("gives every turn the read-page tool, which refuses this machine", async () => {
-    const [readPage] = createBuiltInTools(UNAVAILABLE_PROVIDER)
+    const [readPage] = createBuiltInTools(
+      UNAVAILABLE_PROVIDER,
+      MISSING_BROWSER_PATH
+    )
 
     const lookup = await readPage?.provider.findTurnTool()
 
@@ -62,6 +71,25 @@ describe("createBuiltInTools", () => {
         ? lookup.tool.parseToolCall({ url: "http://[::1]/" })
         : undefined
     expect(parsed).toMatchObject({ status: "invalid" })
+  })
+
+  it("gives the read-page tool the browser it is created with", async () => {
+    const [readPage] = createBuiltInTools(
+      UNAVAILABLE_PROVIDER,
+      MISSING_BROWSER_PATH
+    )
+    const lookup = await readPage?.provider.findTurnTool()
+    if (lookup?.status !== "ready") throw new Error("Expected a ready tool")
+    const parsed = lookup.tool.parseToolCall({ url: "https://example.com/" })
+    if (parsed.status !== "parsed") throw new Error("Expected a parsed call")
+
+    const result = await parsed.runToolCall(new AbortController().signal)
+
+    expect(result).toEqual({
+      status: "failed",
+      content:
+        "Lys could not read https://example.com/: Lys's browser is missing. Please contact w3lt@negentropy.studio to report problem and require help. Only repair it yourself if you know exactly what you are doing."
+    })
   })
 })
 

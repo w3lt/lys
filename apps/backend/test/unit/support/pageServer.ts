@@ -6,12 +6,13 @@ import {
 } from "node:http"
 import type { AddressInfo } from "node:net"
 import { onTestFinished } from "vitest"
-import type { PageRequestDependencies } from "../../../src/modules/tool/builtIn/web/pageRequest"
+import type { PageRenderingDependencies } from "../../../src/modules/tool/builtIn/web/pageRendering"
 import {
   parsePageUrl,
   type PageUrl
 } from "../../../src/modules/tool/builtIn/web/pageUrl"
 import type { HostAddressLookup } from "../../../src/modules/tool/builtIn/web/webConnection"
+import { readTestBrowserExecutablePath } from "./pageBrowser"
 
 /** Answers one request a test page server receives. */
 export type PageRoute = (
@@ -27,19 +28,58 @@ export type PageServer = Readonly<{
   receivedHeaders: readonly IncomingHttpHeaders[]
 }>
 
-/** Lookup that sends every host name to the loopback address. */
-const lookupLoopback: HostAddressLookup = () =>
-  Promise.resolve([{ address: "127.0.0.1", family: 4 }])
+/**
+ * Resolves the test host names: `pages.test` reaches the local page servers,
+ * `private.test` has a private address, and every other name has none.
+ */
+const lookupTestHost: HostAddressLookup = async (hostname) => {
+  switch (hostname) {
+    case "pages.test":
+      return [{ address: "127.0.0.1", family: 4 }]
+    case "private.test":
+      return [{ address: "10.0.0.7", family: 4 }]
+    default:
+      throw Object.assign(new Error(`getaddrinfo ENOTFOUND ${hostname}`), {
+        code: "ENOTFOUND"
+      })
+  }
+}
+
+/** Settings of a read of a test page server that a case may change. */
+export type PageServerReadOptions = Readonly<{
+  /** Browser to start; the test browser when omitted. */
+  browserExecutablePath?: string
+  /** Time limit of the whole read; 10 seconds when omitted. */
+  readTimeoutMs?: number
+  /** Most time waiting for the network to go quiet; 1 second when omitted. */
+  settleTimeoutMs?: number
+  /** Address rule; only the loopback address of the page servers when omitted. */
+  isBlockedAddress?: (address: string) => boolean
+}>
 
 /**
- * Dependencies of a request to a test page server: every host name reaches
- * the loopback address, and no address is blocked.
+ * Builds the dependencies of a browser read of test page servers.
+ *
+ * @param options - Settings the case changes.
+ * @returns Dependencies under which `pages.test` reaches the local page
+ * servers, `private.test` is a private address, every other host name has no
+ * address, and only 127.0.0.1 may be reached.
+ * @throws When no test browser is set and the case does not name one.
  */
-export const PAGE_SERVER_DEPENDENCIES: PageRequestDependencies = Object.freeze({
-  lookupHostAddresses: lookupLoopback,
-  isBlockedAddress: () => false,
-  requestTimeoutMs: 5_000
-})
+export function buildPageServerDependencies(
+  options: PageServerReadOptions = {}
+): PageRenderingDependencies {
+  return Object.freeze({
+    lookupHostAddresses: lookupTestHost,
+    isBlockedAddress:
+      options.isBlockedAddress ??
+      ((address: string) => address !== "127.0.0.1"),
+    browserExecutablePath:
+      options.browserExecutablePath ?? readTestBrowserExecutablePath(),
+    readTimeoutMs: options.readTimeoutMs ?? 10_000,
+    settleTimeoutMs: options.settleTimeoutMs ?? 1_000
+  })
+}
 
 /**
  * Starts a page server on a free loopback port, closed with its connections

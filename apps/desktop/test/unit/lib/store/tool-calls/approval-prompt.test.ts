@@ -73,8 +73,7 @@ describe("calculateToolApprovalPrompt", () => {
       input: {
         runner: "backend",
         toolName: "read_page",
-        url: "https://example.com/docs",
-        host: "example.com"
+        url: "https://example.com/docs"
       }
     })
   })

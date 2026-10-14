@@ -1063,8 +1063,7 @@ describe("Agent", () => {
 
       await getAgentReplyOutcome({
         openReplyStream,
-        builtInTools: [entry],
-        sendBuiltInToolCall: async () => ({ status: "allowed" })
+        builtInTools: [entry]
       })
 
       expect(openReplyStream.mock.calls[1]?.[0].messages.at(-1)).toMatchObject({
@@ -1086,8 +1085,7 @@ describe("Agent", () => {
 
       await getAgentReplyOutcome({
         openReplyStream,
-        builtInTools: [entry],
-        sendBuiltInToolCall: async () => ({ status: "allowed" })
+        builtInTools: [entry]
       })
 
       expect(openReplyStream.mock.calls[1]?.[0].messages.at(-1)).toMatchObject({

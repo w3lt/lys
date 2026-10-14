@@ -230,7 +230,7 @@ async function handleToolCall(
       toolCall,
       formatUnknownToolMessage(toolCall, handling.tools)
     )
-  const message = await handleOfferedToolCall(toolCall, tool, context)
+  const message = await handleOfferedToolCall(toolCall, tool, handling)
   if (message === undefined || tool.agentTool.access !== "network")
     return message
   return buildToolResultMessage(
@@ -245,7 +245,8 @@ async function handleToolCall(
  *
  * @param toolCall - Call with its identifier.
  * @param tool - Offered tool the call names.
- * @param context - Call senders and the reply's cancellation.
+ * @param handling - The round's gate, the client call sender, and the
+ * reply's cancellation.
  * @returns The message carrying the result as the tool or the client gave
  * it, or undefined when the reply was stopped while the call waited or ran.
  * @throws When a backend tool's run fails for a reason other than Stop.
@@ -253,7 +254,7 @@ async function handleToolCall(
 async function handleOfferedToolCall(
   toolCall: ContextToolCall,
   tool: OfferedTool,
-  context: ToolCallRoundContext
+  handling: ToolCallHandling
 ): Promise<ToolResultMessage | undefined> {
   const checkedArguments = tool.agentTool.parseCallArguments(
     toolCall.argumentText

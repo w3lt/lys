@@ -88,7 +88,12 @@ contracts, schemas, or behavior that crosses package boundaries.
   backend suites, and the backend unit suite on every pull request and on every
   push to `main`. Before the suite it installs Chrome Headless Shell with the
   same script, and lets Ubuntu's AppArmor allow the user namespaces Chromium's
-  sandbox needs, so the reads run with the sandbox on, as in Lys.
+  sandbox needs, so the reads run with the sandbox on, as in Lys. It also
+  discards core dumps: the runner hands them to `systemd-coredump`, and a
+  renderer that a test crashes would stay alive until its heap is dumped, so
+  the read would time out instead of reporting the crash. On a Linux machine
+  that dumps cores the same way, the crash tests can time out for this
+  reason.
 - The shared packages have no package-level test scripts or tracked test suites.
 - `apps/backend` also exposes a TypeScript validation path through
   `pnpm --filter @lys/backend exec tsc --noEmit`.

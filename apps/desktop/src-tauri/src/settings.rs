@@ -23,11 +23,17 @@ use std::{
     fs,
     io::{self, ErrorKind, Write},
     path::{Path, PathBuf},
+    process,
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 use serde::{Deserialize, Serialize};
 
 use crate::utils::lys_home::LysHome;
+
+/// Number of temporary files this process has named, so that two saves
+/// running at once in one process never share a temporary file.
+static TEMPORARY_FILE_COUNT: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default, rename_all = "camelCase")]
@@ -142,88 +148,103 @@ fn save_settings_file(settings: &LysSettings, path: &Path) -> Result<(), String>
 /// Replaces the file at `path` with `contents`, readable and writable only by
 /// its owner on Unix.
 ///
-/// The contents are written to a temporary file beside `path`, flushed to
-/// disk, and renamed over `path`, so another process reading `path` sees
-/// either the previous file or the complete new one, never a partial write.
-/// The directory entry is not synced, so the rename itself is not promised to
+/// The contents are written to a new temporary file beside `path` whose name
+/// no other save shares, flushed to disk, and renamed over `path`. Another
+/// process reading `path` therefore sees either the previous file or a
+/// complete new one, never a partial write, also while another host saves the
+/// same file. When two saves overlap, the one renamed last is kept whole. The
+/// directory entry is not synced, so the rename itself is not promised to
 /// survive a power loss. On failure the temporary file this call created is
-/// removed and `path` is unchanged.
+/// removed and `path` is unchanged; a process that stops mid-save leaves its
+/// temporary file, owner-only like `path`.
 ///
 /// # Errors
 ///
-/// Returns the first I/O error of creating, writing, syncing, or renaming.
+/// Returns the first I/O error of creating, writing, syncing, or renaming,
+/// including when the temporary file's name is already taken.
 fn save_owner_only_file_atomically(path: &Path, contents: &[u8]) -> io::Result<()> {
     let temporary_path = build_temporary_path(path);
-    let written = save_temporary_file_and_rename(&temporary_path, path, contents);
+    let temporary_file = create_owner_only_file(&temporary_path)?;
+    let written = save_temporary_file_and_rename(temporary_file, &temporary_path, path, contents);
     if written.is_err() {
         // The write already failed; a failed removal of the temporary file
-        // must not replace that error, and the next save truncates it anyway.
+        // this call created must not replace that error.
         let _ = fs::remove_file(&temporary_path);
     }
 
     written
 }
 
-/// Builds the temporary path beside `path`: its file name followed by `.tmp`.
+/// Builds a temporary path beside `path` that no other save shares: its file
+/// name followed by `.`, this process's id, `.`, the number of temporary files
+/// this process named before, and `.tmp`.
+///
+/// Another host saving the same file runs in another process, so its names
+/// differ. Only a later process with a reused id can meet a name that a
+/// stopped process left behind; creating the file then fails instead of
+/// writing into it.
 fn build_temporary_path(path: &Path) -> PathBuf {
+    let temporary_file_number = TEMPORARY_FILE_COUNT.fetch_add(1, Ordering::Relaxed);
     let mut file_name = path.file_name().map(OsString::from).unwrap_or_default();
-    file_name.push(".tmp");
+    file_name.push(format!(".{}.{temporary_file_number}.tmp", process::id()));
 
     path.with_file_name(file_name)
 }
 
-/// Writes `contents` to `temporary_path` owner-only, syncs it, and renames it
-/// over `path`.
+/// Writes `contents` to the new temporary file at `temporary_path`, syncs it,
+/// closes it, and renames it over `path`.
 ///
 /// # Errors
 ///
 /// Returns the first I/O error.
 fn save_temporary_file_and_rename(
+    mut temporary_file: fs::File,
     temporary_path: &Path,
     path: &Path,
     contents: &[u8],
 ) -> io::Result<()> {
-    let mut file = open_owner_only_file(temporary_path)?;
-    file.write_all(contents)?;
-    file.sync_all()?;
-    drop(file);
+    temporary_file.write_all(contents)?;
+    temporary_file.sync_all()?;
+    drop(temporary_file);
 
     fs::rename(temporary_path, path)
 }
 
 #[cfg(unix)]
-/// Creates or truncates `path` for writing with mode `0600`, also when the
-/// file already existed with wider permissions.
+/// Creates a new file at `path` for writing with mode `0600`, which the
+/// process umask can only narrow.
+///
+/// Nothing that already exists at `path` is opened, truncated, or followed,
+/// including a symbolic link.
 ///
 /// # Errors
 ///
-/// Returns the I/O error of opening the file or setting its permissions.
-fn open_owner_only_file(path: &Path) -> io::Result<fs::File> {
-    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+/// Returns the I/O error of creating the file, such as `AlreadyExists` when
+/// `path` names an existing entry.
+fn create_owner_only_file(path: &Path) -> io::Result<fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
 
-    let file = fs::OpenOptions::new()
+    fs::OpenOptions::new()
         .write(true)
-        .create(true)
-        .truncate(true)
+        .create_new(true)
         .mode(0o600)
-        .open(path)?;
-    file.set_permissions(fs::Permissions::from_mode(0o600))?;
-
-    Ok(file)
+        .open(path)
 }
 
 #[cfg(not(unix))]
-/// Creates or truncates `path` for writing; permissions are left to the
+/// Creates a new file at `path` for writing; permissions are left to the
 /// platform.
+///
+/// Nothing that already exists at `path` is opened or truncated.
 ///
 /// # Errors
 ///
-/// Returns the I/O error of opening the file.
-fn open_owner_only_file(path: &Path) -> io::Result<fs::File> {
+/// Returns the I/O error of creating the file, such as `AlreadyExists` when
+/// `path` names an existing entry.
+fn create_owner_only_file(path: &Path) -> io::Result<fs::File> {
     fs::OpenOptions::new()
         .write(true)
-        .create(true)
-        .truncate(true)
+        .create_new(true)
         .open(path)
 }
 
@@ -247,11 +268,17 @@ fn create_parent_dir(path: &Path) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, path::PathBuf};
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+    };
 
     use serde_json::{json, Value};
 
-    use super::{load_settings_file, save_settings_file, LysSettings};
+    use super::{
+        build_temporary_path, create_owner_only_file, load_settings_file, save_settings_file,
+        LysSettings,
+    };
     use crate::tools::test_directory::TestDirectory;
 
     /// Stored settings that differ from every default and have no load
@@ -301,6 +328,16 @@ mod tests {
     /// Returns the JSON form the settings commands exchange with the renderer.
     fn get_settings_json(settings: &LysSettings) -> Value {
         serde_json::to_value(settings).expect("settings that serialize")
+    }
+
+    /// Lists the names of the temporary files in `directory`.
+    fn list_temporary_file_names(directory: &Path) -> Vec<String> {
+        fs::read_dir(directory)
+            .expect("list the directory")
+            .map(|entry| entry.expect("read a directory entry").file_name())
+            .map(|name| name.to_string_lossy().into_owned())
+            .filter(|name| name.ends_with(".tmp"))
+            .collect()
     }
 
     #[test]
@@ -441,7 +478,111 @@ mod tests {
         save_settings_file(&settings, &path).expect("save the settings");
 
         assert_eq!(read_settings_json(&path), get_complete_settings());
-        assert!(!directory.path().join("settings.json.tmp").exists());
+        assert!(list_temporary_file_names(directory.path()).is_empty());
+    }
+
+    #[test]
+    fn names_a_different_temporary_file_beside_the_settings_file_for_every_save() {
+        let directory = TestDirectory::create("settings-temporary-names");
+        let path = directory.path().join("settings.json");
+
+        let first = build_temporary_path(&path);
+        let second = build_temporary_path(&path);
+
+        assert_ne!(first, second);
+        for temporary_path in [first, second] {
+            assert_eq!(temporary_path.parent(), Some(directory.path()));
+            let name = temporary_path
+                .file_name()
+                .expect("a file name")
+                .to_string_lossy()
+                .into_owned();
+            assert!(
+                name.starts_with(&format!("settings.json.{}.", std::process::id())),
+                "{name}"
+            );
+            assert!(name.ends_with(".tmp"), "{name}");
+        }
+    }
+
+    #[test]
+    fn leaves_the_temporary_files_of_other_saves_untouched() {
+        let directory = TestDirectory::create("settings-other-saves");
+        let path = directory.create_file("settings.json", "{}");
+        let fixed_name = directory.create_file("settings.json.tmp", "an older host's save");
+        // Process id 1 is the operating system's first process, never this test's.
+        let other_process = directory.create_file("settings.json.1.0.tmp", "another host's save");
+        let source_path = directory.create_file("source.json", get_complete_settings().to_string());
+        let settings = load_settings_file(&source_path).expect("settings for a complete file");
+
+        save_settings_file(&settings, &path).expect("save the settings");
+
+        assert_eq!(read_settings_json(&path), get_complete_settings());
+        assert_eq!(
+            fs::read_to_string(&fixed_name).expect("read the older host's file"),
+            "an older host's save"
+        );
+        assert_eq!(
+            fs::read_to_string(&other_process).expect("read the other host's file"),
+            "another host's save"
+        );
+    }
+
+    #[test]
+    fn removes_its_temporary_file_when_the_replacement_fails() {
+        let directory = TestDirectory::create("settings-rename-fails");
+        let path = directory.create_subdirectory("settings.json");
+        directory.create_file("settings.json/kept.txt", "kept");
+        let source_path = directory.create_file("source.json", get_complete_settings().to_string());
+        let settings = load_settings_file(&source_path).expect("settings for a complete file");
+
+        let failure = save_settings_file(&settings, &path).expect_err("a directory at the path");
+
+        assert!(failure.starts_with("Failed to write "), "{failure}");
+        assert!(list_temporary_file_names(directory.path()).is_empty());
+        assert_eq!(
+            fs::read_to_string(path.join("kept.txt")).expect("read the kept file"),
+            "kept"
+        );
+    }
+
+    #[test]
+    fn creating_a_temporary_file_refuses_an_existing_file_without_changing_it() {
+        let directory = TestDirectory::create("settings-temporary-taken");
+        let taken = directory.create_file("settings.json.tmp", "another save's contents");
+
+        let failure = create_owner_only_file(&taken).expect_err("an existing file");
+
+        assert_eq!(failure.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(
+            fs::read_to_string(&taken).expect("read the existing file"),
+            "another save's contents"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn creating_a_temporary_file_never_follows_a_symbolic_link() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let directory = TestDirectory::create("settings-temporary-link");
+        let target = directory.create_file("target.txt", "the link's target");
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o644)).expect("widen the target");
+        let link = directory.path().join("settings.json.tmp");
+        symlink(&target, &link).expect("create the link");
+
+        let failure = create_owner_only_file(&link).expect_err("an existing link");
+
+        assert_eq!(failure.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(
+            fs::read_to_string(&target).expect("read the target"),
+            "the link's target"
+        );
+        let mode = fs::metadata(&target)
+            .expect("read metadata")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o644);
     }
 
     #[cfg(unix)]

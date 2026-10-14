@@ -15,6 +15,7 @@ import { createChatViewStore } from "@/lib/store/chat-view"
 import { NO_CHAT_TOOL_OFFER, type ChatToolOfferResult } from "@/lib/store/tools"
 import {
   buildJsonResponse,
+  createControlledRoute,
   FIXTURE_BACKEND_URL,
   listRouteKeys,
   startBackendEventStream,
@@ -1320,7 +1321,8 @@ describe("useChatViewStore", () => {
     const { backend, streams } = startChatBackend({
       "GET /api/v1/tools": () =>
         buildJsonResponse(200, {
-          tools: [buildBackendToolDefinition("read_page")]
+          tools: [buildBackendToolDefinition("read_page")],
+          unavailableTools: []
         })
     })
     const { useLysStore, useChatViewStore } = await loadFreshChatViewStore(0)
@@ -1342,6 +1344,67 @@ describe("useChatViewStore", () => {
       (request) => request.method === "POST"
     )
     expect(chatRequest?.body).toHaveProperty("tools", { definitions: TOOLS })
+  })
+
+  it("reads the tool list again when the backend refuses an offered tool that can no longer run, and says what to do", async () => {
+    startNativeHostFake({ list_tools: () => TOOLS })
+    const webSearch = buildBackendToolDefinition("web_search")
+    const toolList = createControlledRoute()
+    const backend = startBackendFake({
+      [CHAT_ROUTE]: () =>
+        buildJsonResponse(409, {
+          type: "urn:lys:problem:chat:backend-tool-unavailable",
+          title: "Backend tool unavailable",
+          status: 409,
+          detail: "The offered tool web_search cannot run now.",
+          toolName: "web_search",
+          reason: "api-key-missing"
+        }),
+      "GET /api/v1/tools": toolList.route
+    })
+    const { useLysStore, useChatViewStore } = await loadFreshChatViewStore(0)
+    const { useToolStore } = await import("@/lib/store/tools")
+    useLysStore.setState({
+      modelInventory: {
+        status: "ready",
+        models: [
+          buildLlmInfo("resident", { loaded: true, trainedForToolUse: true })
+        ]
+      }
+    })
+    const firstRead = useToolStore.getState().loadTools()
+    await waitForMicrotasks()
+    toolList.responses[0]?.resolve(
+      buildJsonResponse(200, { tools: [webSearch], unavailableTools: [] })
+    )
+    await firstRead
+    useToolStore.getState().updateToolOn(webSearch, true)
+
+    await useChatViewStore.getState().sendMessage("Find today's news")
+    await waitForMicrotasks()
+    toolList.responses[1]?.resolve(
+      buildJsonResponse(200, {
+        tools: [webSearch],
+        unavailableTools: [{ name: "web_search", reason: "api-key-missing" }]
+      })
+    )
+    await waitForMicrotasks()
+
+    const chatRequest = backend.requests.find(
+      (request) => request.method === "POST"
+    )
+    expect(chatRequest?.body).toHaveProperty("tools", {
+      definitions: TOOLS,
+      backendToolNames: ["web_search"]
+    })
+    expect(useChatViewStore.getState().error).toContain(
+      "web_search is unavailable: no Tavily API key is saved. Add one in Settings → Secrets, or switch web_search off."
+    )
+    expect(toolList.responses).toHaveLength(2)
+    expect(useToolStore.getState().list).toMatchObject({
+      status: "loaded",
+      unavailableTools: new Map([["web_search", "api-key-missing"]])
+    })
   })
 
   it("refuses to send while the backend is not running", async () => {

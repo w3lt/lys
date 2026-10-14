@@ -2,6 +2,7 @@ import {
   checkWebSearchKeyApi,
   listBackendToolsApi,
   type BackendToolUnavailableReason,
+  type CheckWebSearchKeyApiRequestBody,
   type CheckWebSearchKeyApiResponse
 } from "@lys/protocol"
 import type { ToolDefinition } from "@lys/share"
@@ -22,6 +23,11 @@ export type BackendToolList = {
 
 /** HTTP status of a successful list or key check. */
 const HTTP_OK_STATUS = 200
+
+/** Body of every key check: the empty JSON object the protocol requires. */
+const KEY_CHECK_REQUEST_BODY: CheckWebSearchKeyApiRequestBody = Object.freeze(
+  {}
+)
 
 /**
  * Lists every tool the backend runs, in the order Settings shows them.
@@ -92,10 +98,10 @@ async function getToolListResponse(
  * with another status, media type, or shape; the decoding failure is kept as
  * its cause.
  */
-export async function getWebSearchKeyCheck(
+export async function sendWebSearchKeyCheck(
   connection: ToolApiConnection
 ): Promise<CheckWebSearchKeyApiResponse> {
-  const response = await getWebSearchKeyCheckResponse(connection)
+  const response = await sendWebSearchKeyCheckRequest(connection)
   const mediaType = response.headers.get("content-type")?.split(";")[0].trim()
   try {
     if (
@@ -115,19 +121,24 @@ export async function getWebSearchKeyCheck(
 }
 
 /**
- * Gets the response to one key check, in any HTTP status.
+ * Sends one key check as a JSON POST and returns its response, in any HTTP
+ * status.
  *
  * @param connection - Backend origin.
  * @returns The response whose body remains owned by the caller.
  * @throws A caller-safe error retaining the transport failure as its cause.
  */
-async function getWebSearchKeyCheckResponse(
+async function sendWebSearchKeyCheckRequest(
   connection: ToolApiConnection
 ): Promise<Response> {
   try {
     return await fetch(`${connection.backendUrl}${checkWebSearchKeyApi.path}`, {
       method: checkWebSearchKeyApi.method,
-      headers: { Accept: "application/json" },
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(KEY_CHECK_REQUEST_BODY),
       cache: "no-store"
     })
   } catch (cause) {

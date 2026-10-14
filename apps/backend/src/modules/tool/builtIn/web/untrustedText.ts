@@ -1,8 +1,15 @@
 /**
  * Finds each run of three or more `<`, or of three or more `>`: the brackets
  * that open and close every content delimiter Lys writes around web text.
+ * Characters that show nothing, the Unicode default-ignorable code points
+ * such as zero-width, direction, and tag characters, belong to a run when
+ * they sit between its brackets, because a reader sees those brackets joined.
  */
-const DELIMITER_BRACKET_RUN_PATTERN = /<{3,}|>{3,}/g
+const DELIMITER_BRACKET_RUN_PATTERN =
+  /<(?:\p{Default_Ignorable_Code_Point}*<){2,}|>(?:\p{Default_Ignorable_Code_Point}*>){2,}/gu
+
+/** Brackets a run keeps once shortened, too few to open or close a delimiter. */
+const SHORTENED_BRACKET_RUN_LENGTH = 2
 
 /** Finds each run of whitespace, line breaks included. */
 const WHITESPACE_RUN_PATTERN = /\s+/g
@@ -32,11 +39,15 @@ export const CITATION_MARKER_RULE =
  *
  * @param text - Untrusted text from a page or a search service.
  * @returns The text with every run of three or more `<` or `>` shortened to
- * two brackets. No delimiter can remain in any spelling, nested, spaced, or
- * in another case, and shortening a run never joins two others.
+ * two brackets, dropping any character that shows nothing between the run's
+ * brackets. No delimiter can remain in any spelling, nested, spaced, split by
+ * an invisible character, or in another case, and shortening a run never
+ * joins two others.
  */
 export function formatDelimiterFreeText(text: string): string {
-  return text.replace(DELIMITER_BRACKET_RUN_PATTERN, (run) => run.slice(0, 2))
+  return text.replace(DELIMITER_BRACKET_RUN_PATTERN, (run) =>
+    run.charAt(0).repeat(SHORTENED_BRACKET_RUN_LENGTH)
+  )
 }
 
 /**

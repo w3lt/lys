@@ -20,7 +20,7 @@ export const apiToolsRoute = `${API_PREFIX_V1}/tools`
 export const WEB_SEARCH_TOOL_NAME = "web_search"
 
 /**
- * Versioned GET path for checking the saved Tavily API key with Tavily.
+ * Versioned POST path for checking the saved Tavily API key with Tavily.
  *
  * @remarks This path is transmitted in HTTP requests and is not persisted. It
  * is release-stable across compatible clients; changing it requires

@@ -283,7 +283,8 @@ function TavilyKeyForm({
  *
  * @remarks The card and the store own every input; the footer owns no state
  * or effects. The status line is a polite live region. Test is disabled while
- * a check runs, Remove while a save runs.
+ * a check or a save runs, since a check during a removal would report on the
+ * key being removed; Remove is disabled while a save runs.
  * @param props - Status identifier, the facts the line describes, and the
  * requests.
  * @returns The footer.
@@ -318,7 +319,9 @@ function TavilyKeyFooter({
       {savedApiKey !== null && draft.status === "unedited" ? (
         <div className="settings-view__secret-actions">
           <Button
-            disabled={keyCheck.status === "checking"}
+            disabled={
+              keyCheck.status === "checking" || saveState.status === "saving"
+            }
             onClick={onSendTavilyKeyCheck}
             size="sm"
             type="button"

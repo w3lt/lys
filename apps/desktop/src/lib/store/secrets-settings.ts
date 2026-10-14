@@ -58,7 +58,8 @@ export type SecretsSettingsSlice = {
   /**
    * Asks the backend to check the saved key with Tavily.
    * @returns Resolves after the outcome is committed; it never rejects. A
-   * call while a check runs does nothing.
+   * call while a check or a save runs does nothing, so a check never reads
+   * the key a running save or removal is replacing.
    */
   readonly sendTavilyKeyCheck: () => Promise<void>
 }
@@ -74,7 +75,7 @@ export type SecretsSettingsDependencies = {
   /** Saves the secrets group, serialized with the other group saves. */
   readonly saveSecretsSettings: (secrets: SecretsSettings) => Promise<void>
   /** Asks the backend to check the saved key; rejects on transport failure. */
-  readonly getWebSearchKeyCheck: () => Promise<CheckWebSearchKeyApiResponse>
+  readonly sendWebSearchKeyCheck: () => Promise<CheckWebSearchKeyApiResponse>
 }
 
 /** Save state before any save. */
@@ -112,8 +113,10 @@ const CHECK_FAILED: TavilyKeyCheckState = Object.freeze({
  * @returns The slice.
  * @remarks The slice owns the key check's operation number: every check and
  * every save advances it, and a check publishes only while its number is
- * current, so a late result never replaces a newer state. Native writes are
- * not cancellable; leaving the pane cancels nothing.
+ * current, so a late result never replaces a newer state. A check is not
+ * started while a save runs, so the outcome shown always concerns the key
+ * the file holds. Native writes are not cancellable; leaving the pane
+ * cancels nothing.
  */
 export function createSecretsSettingsSlice(
   set: StoreApi<SecretsSettingsStore>["setState"],
@@ -149,12 +152,14 @@ export function createSecretsSettingsSlice(
 
   /** Implements {@link SecretsSettingsSlice.sendTavilyKeyCheck}. */
   async function sendTavilyKeyCheck(): Promise<void> {
-    if (get().tavilyKeyCheck.status === "checking") return
+    const { tavilyKeyCheck, secretsSave } = get()
+    if (tavilyKeyCheck.status === "checking") return
+    if (secretsSave.status === "saving") return
     currentKeyCheckOperation += 1
     const operation = currentKeyCheckOperation
     set({ tavilyKeyCheck: CHECKING })
     try {
-      const outcome = await dependencies.getWebSearchKeyCheck()
+      const outcome = await dependencies.sendWebSearchKeyCheck()
       if (operation !== currentKeyCheckOperation) return
       set({ tavilyKeyCheck: Object.freeze({ status: "checked", outcome }) })
     } catch {

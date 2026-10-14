@@ -204,7 +204,11 @@ async function loadFreshToolCallStore() {
   const { useToolCallStore } = await import("@/lib/store/tool-calls")
   useLysStore.setState({ backendUrl: FIXTURE_BACKEND_URL })
   useToolStore.setState({
-    list: { status: "loaded", tools: [READ_TEXT_FILE, READ_PAGE] }
+    list: {
+      status: "loaded",
+      tools: [READ_TEXT_FILE, READ_PAGE],
+      unavailableTools: new Map()
+    }
   })
   return { useToolStore, useToolCallStore }
 }
@@ -426,7 +430,8 @@ describe("useToolCallStore", () => {
     it("reads the tool list before deciding a call when it has not been read", async () => {
       const host = startNativeHostFake({ list_tools: () => [READ_TEXT_FILE] })
       const { replyStreams } = startReplyBackend({
-        "GET /api/v1/tools": () => buildJsonResponse(200, { tools: [] })
+        "GET /api/v1/tools": () =>
+          buildJsonResponse(200, { tools: [], unavailableTools: [] })
       })
       const { useToolStore, useToolCallStore } = await loadFreshToolCallStore()
       useToolStore.setState({ list: { status: "idle" } })
@@ -447,7 +452,8 @@ describe("useToolCallStore", () => {
         list_tools: () => Promise.reject("command list_tools not found")
       })
       const { backend, replyStreams } = startReplyBackend({
-        "GET /api/v1/tools": () => buildJsonResponse(200, { tools: [] }),
+        "GET /api/v1/tools": () =>
+          buildJsonResponse(200, { tools: [], unavailableTools: [] }),
         ...buildAcceptingToolResultRoutes(READ_CALL)
       })
       const { useToolStore, useToolCallStore } = await loadFreshToolCallStore()

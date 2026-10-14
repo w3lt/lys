@@ -1,4 +1,7 @@
-import { WEB_SEARCH_TOOL_NAME } from "@lys/protocol"
+import {
+  hasHiddenWebSearchQueryCharacter,
+  WEB_SEARCH_TOOL_NAME
+} from "@lys/protocol"
 import {
   toolDefinitionSchema,
   type TavilyApiKey,
@@ -77,7 +80,9 @@ export function buildWebSearchDefinition(): ToolDefinition {
  *
  * @param query - Untrusted query value.
  * @returns The trimmed query, or an explanation when it is not text, is
- * blank, or is too long once trimmed.
+ * blank, is too long once trimmed, or holds a character a person cannot
+ * reliably see, which is refused rather than removed so that the approval
+ * card shows exactly the query sent.
  */
 function parseSearchQuery(
   query: BuiltInToolCallArguments[string] | undefined
@@ -96,6 +101,13 @@ function parseSearchQuery(
     return Object.freeze({
       status: "invalid",
       message: `The query is longer than ${MAXIMUM_SEARCH_QUERY_LENGTH} characters.`
+    })
+  }
+  if (hasHiddenWebSearchQueryCharacter(trimmed)) {
+    return Object.freeze({
+      status: "invalid",
+      message:
+        "The query holds characters that do not show on screen, such as control, zero-width, direction, or tag characters. Write it with visible characters only."
     })
   }
   return Object.freeze({ status: "parsed", query: trimmed })
@@ -243,7 +255,8 @@ export default class WebSearchTool implements BuiltInTool {
    *
    * @param callArguments - The interface-defined argument values: `query`.
    * @returns The interface-defined outcome; `invalid` for a query that is not
-   * text, is blank, or is longer than 400 characters once trimmed.
+   * text, is blank, is longer than 400 characters once trimmed, or holds a
+   * character a person cannot reliably see.
    */
   public parseToolCall(
     callArguments: BuiltInToolCallArguments

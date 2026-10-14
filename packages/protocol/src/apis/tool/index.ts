@@ -8,6 +8,7 @@ export {
   checkWebSearchKeyApi,
   checkWebSearchKeyApiResponseSchema,
   type CheckWebSearchKeyApiReply,
+  type CheckWebSearchKeyApiRequestBody,
   type CheckWebSearchKeyApiResponse,
   type CheckWebSearchKeyApiRoute,
   type TavilyCreditUsage,
@@ -21,3 +22,4 @@ export {
   type ListBackendToolsApiRoute
 } from "./listBackendToolsRoute"
 export { WEB_SEARCH_TOOL_NAME } from "./routes"
+export { hasHiddenWebSearchQueryCharacter } from "./webSearchQuery"

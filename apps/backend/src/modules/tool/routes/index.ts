@@ -15,7 +15,8 @@ import type { BuiltInToolEntry, TurnToolLookup } from "../builtIn/builtInTool"
  * web search tool's saved key.
  *
  * @param app - Application whose singleton services hold the built-in tools
- * and the web search tool provider.
+ * and the web search tool provider, with the zod validator compiler
+ * installed.
  * @returns A promise that resolves after route registration completes.
  * @throws If Fastify cannot register a route. The failure rejects the
  * promise, so `app.register` reports it rather than an uncaught exception.
@@ -58,8 +59,11 @@ function registerListBackendToolsRoute(app: FastifyInstance): void {
  * Registers the endpoint that checks the saved Tavily key.
  *
  * @param app - Application whose singleton services hold the web search tool
- * provider.
+ * provider, with the zod validator compiler installed.
  * @throws If Fastify cannot register the route.
+ * @remarks Fastify answers a request whose body is not the empty JSON object
+ * the protocol requires with HTTP 400, or 415 for a media type it cannot
+ * parse, before the handler reads the key.
  */
 function registerCheckWebSearchKeyRoute(app: FastifyInstance): void {
   const provider = app.webSearchToolProvider
@@ -67,6 +71,7 @@ function registerCheckWebSearchKeyRoute(app: FastifyInstance): void {
     method: checkWebSearchKeyApi.method,
     url: checkWebSearchKeyApi.path,
     schema: {
+      body: checkWebSearchKeyApi.body,
       response: {
         200: z.toJSONSchema(checkWebSearchKeyApi.responses[200], {
           target: "draft-7"

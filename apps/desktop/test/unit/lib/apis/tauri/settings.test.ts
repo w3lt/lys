@@ -4,6 +4,7 @@ import {
   loadSettings,
   saveGenerationSettings,
   saveLoadConfigurationSettings,
+  saveSecretsSettings,
   saveSettings
 } from "@/lib/apis/tauri/settings"
 import type {
@@ -19,6 +20,7 @@ import {
 import {
   STORED_SETTINGS,
   STORED_SETTINGS_DOCUMENT,
+  STORED_TAVILY_API_KEY,
   type SettingsDocument
 } from "../../../support/settingsFixtures"
 
@@ -91,6 +93,42 @@ describe("loadSettings", () => {
     expect(settings.loadConfiguration.models).toEqual(
       new Map([["__proto__", PROTOTYPE_KEY_LOAD_CONFIGURATION]])
     )
+  })
+
+  it("reads a settings file without a saved key as no key", async () => {
+    startNativeHostFake({
+      load_settings: () => ({
+        ...STORED_SETTINGS_DOCUMENT,
+        secrets: { tavilyApiKey: null }
+      })
+    })
+
+    const settings = await loadSettings()
+
+    expect(settings.secrets).toEqual({ tavilyApiKey: null })
+  })
+
+  it("rejects a key that fails the key format without naming the key", async () => {
+    const spacedKey = "tvly-key with-a-space"
+    startNativeHostFake({
+      load_settings: () => ({
+        ...STORED_SETTINGS_DOCUMENT,
+        secrets: { tavilyApiKey: spacedKey }
+      })
+    })
+
+    const failure = await loadSettings().then(
+      () => {
+        throw new Error("The settings loaded")
+      },
+      (rejection: unknown) => rejection
+    )
+
+    expect(failure).toBeInstanceOf(Error)
+    expect(failure).toMatchObject({
+      message: "The settings file holds an invalid Tavily API key."
+    })
+    expect(String(failure)).not.toContain(spacedKey)
   })
 
   it("rejects with the host's rejection", async () => {
@@ -251,5 +289,71 @@ describe("saveLoadConfigurationSettings", () => {
     await expect(
       saveLoadConfigurationSettings(EDITED_LOAD_CONFIGURATION)
     ).rejects.toBe("Disk full")
+  })
+})
+
+describe("saveSecretsSettings", () => {
+  it("replaces only the secrets group of the document on disk", async () => {
+    const host = startNativeHostFake({
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => null
+    })
+
+    await saveSecretsSettings({ tavilyApiKey: null })
+
+    expect(host.commands).toEqual([
+      { command: "load_settings", args: {} },
+      {
+        command: "save_settings",
+        args: {
+          newSettings: {
+            ...STORED_SETTINGS_DOCUMENT,
+            secrets: { tavilyApiKey: null }
+          }
+        }
+      }
+    ])
+  })
+
+  it("writes a new key as the document's plain-text key", async () => {
+    const host = startNativeHostFake({
+      load_settings: () => ({
+        ...STORED_SETTINGS_DOCUMENT,
+        secrets: { tavilyApiKey: null }
+      }),
+      save_settings: () => null
+    })
+
+    await saveSecretsSettings({ tavilyApiKey: STORED_TAVILY_API_KEY })
+
+    expect(host.commands[1]).toEqual({
+      command: "save_settings",
+      args: { newSettings: STORED_SETTINGS_DOCUMENT }
+    })
+  })
+
+  it("writes nothing when the document cannot be loaded", async () => {
+    const host = startNativeHostFake({
+      load_settings: () => Promise.reject("Failed to read settings.json"),
+      save_settings: () => null
+    })
+
+    await expect(saveSecretsSettings({ tavilyApiKey: null })).rejects.toBe(
+      "Failed to read settings.json"
+    )
+    expect(host.commands.map((invoked) => invoked.command)).toEqual([
+      "load_settings"
+    ])
+  })
+
+  it("rejects when the merged document cannot be written", async () => {
+    startNativeHostFake({
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => Promise.reject("Disk full")
+    })
+
+    await expect(saveSecretsSettings({ tavilyApiKey: null })).rejects.toBe(
+      "Disk full"
+    )
   })
 })

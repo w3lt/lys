@@ -26,7 +26,7 @@ import {
 import { create } from "zustand"
 import { BACKEND_HOST, BACKEND_PORT } from "@lys/protocol"
 import { getBackendStatus, startBackend, stopBackend } from "../apis"
-import { getWebSearchKeyCheck } from "../apis/http/tools"
+import { sendWebSearchKeyCheck } from "../apis/http/tools"
 import { isLoadConfigurationSettingsEqual } from "../models/model-load-configuration"
 
 /** Top-level view selected by the application store. */
@@ -253,8 +253,8 @@ export const useLysStore = create<LysStore>()((set, get) => {
     ...createLoadConfigurationSettingsSlice(set, get, settingsGroupSaves),
     ...createSecretsSettingsSlice(set, get, {
       saveSecretsSettings: settingsGroupSaves.saveSecretsSettings,
-      getWebSearchKeyCheck: () =>
-        getWebSearchKeyCheck({ backendUrl: get().backendUrl })
+      sendWebSearchKeyCheck: () =>
+        sendWebSearchKeyCheck({ backendUrl: get().backendUrl })
     }),
     ...createModelSlice(set, get, {
       getConnection: () => ({

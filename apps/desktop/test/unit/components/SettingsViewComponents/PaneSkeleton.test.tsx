@@ -4,7 +4,14 @@ import type { SettingsPane } from "@/app/types"
 import PaneSkeleton from "@/components/SettingsViewComponents/PaneSkeleton"
 
 describe("PaneSkeleton", () => {
-  it.each<SettingsPane>(["runtime", "model", "generation", "agents", "tools"])(
+  it.each<SettingsPane>([
+    "runtime",
+    "model",
+    "generation",
+    "agents",
+    "tools",
+    "secrets"
+  ])(
     "announces once, politely, that the %s settings are being read",
     (pane) => {
       render(<PaneSkeleton pane={pane} />)

@@ -6,6 +6,7 @@ import {
 } from "../../../../../src/modules/tool/builtIn/builtInTools"
 import WebSearchToolProvider from "../../../../../src/modules/tool/builtIn/web/webSearchToolProvider"
 import registerToolRoutes from "../../../../../src/modules/tool/routes"
+import { updateFastifyWithHttpTransport } from "../../../../../src/http"
 import { createTestFastify } from "../../../../unit/support/fastifyTestApp"
 import { getLiveTavilyApiKey } from "../../../support/liveTavily"
 
@@ -18,13 +19,15 @@ describe("registerToolRoutes against the Tavily API", () => {
         buildTavilyRequestDependencies()
       )
       const { app } = createTestFastify()
+      await updateFastifyWithHttpTransport(app)
       app.decorate("webSearchToolProvider", webSearchToolProvider)
       app.decorate("builtInTools", createBuiltInTools(webSearchToolProvider))
       await registerToolRoutes(app)
 
       const response = await app.inject({
-        method: "GET",
-        url: "/api/v1/tools/web_search/key-check"
+        method: "POST",
+        url: "/api/v1/tools/web_search/key-check",
+        payload: {}
       })
 
       // Checked first, and as a Boolean, so no later failure can print a key.

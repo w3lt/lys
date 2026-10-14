@@ -3,6 +3,7 @@ import type { LysSettings, RuntimeSettings } from "@/lib/store/settings"
 import {
   buildJsonResponse,
   createTransportFailure,
+  FIXTURE_BACKEND_URL,
   startBackendFake,
   type BackendRoutes
 } from "../../support/backendFake"
@@ -203,6 +204,9 @@ describe("useLysStore", () => {
     expect(useLysStore.getState().settings.loadConfiguration).toEqual({
       default: {},
       models: new Map()
+    })
+    expect(useLysStore.getState().settings.secrets).toEqual({
+      tavilyApiKey: null
     })
   })
 
@@ -555,6 +559,52 @@ describe("useLysStore", () => {
       expect(useLysStore.getState().modelRuntime).toEqual({
         status: "loaded",
         modelKey: "later"
+      })
+    })
+  })
+
+  describe("secrets", () => {
+    it("checks the saved key at the application store's current backend", async () => {
+      const backend = startBackendFake({
+        "POST /api/v1/tools/web_search/key-check": () =>
+          buildJsonResponse(200, { status: "rejected" })
+      })
+      const useLysStore = await loadFreshLysStore()
+      useLysStore.setState({ backendUrl: FIXTURE_BACKEND_URL })
+
+      await useLysStore.getState().sendTavilyKeyCheck()
+
+      expect(backend.requests.map((request) => request.url)).toEqual([
+        `${FIXTURE_BACKEND_URL}/api/v1/tools/web_search/key-check`
+      ])
+      expect(useLysStore.getState().tavilyKeyCheck).toEqual({
+        status: "checked",
+        outcome: { status: "rejected" }
+      })
+    })
+
+    it("saves a key removal to disk in the store's settings", async () => {
+      const host = startDesktopHost(DISK_SETTINGS_DOCUMENT, {
+        save_settings: () => null
+      })
+      const useLysStore = await loadFreshLysStore()
+      await useLysStore.getState().initialize()
+
+      await expect(useLysStore.getState().saveTavilyApiKey(null)).resolves.toBe(
+        "saved"
+      )
+
+      expect(host.commands.at(-1)).toEqual({
+        command: "save_settings",
+        args: {
+          newSettings: {
+            ...DISK_SETTINGS_DOCUMENT,
+            secrets: { tavilyApiKey: null }
+          }
+        }
+      })
+      expect(useLysStore.getState().settings.secrets).toEqual({
+        tavilyApiKey: null
       })
     })
   })

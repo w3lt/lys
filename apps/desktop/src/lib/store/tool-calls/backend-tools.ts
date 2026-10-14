@@ -1,4 +1,5 @@
 import {
+  hasHiddenWebSearchQueryCharacter,
   TAVILY_API_HOST,
   WEB_SEARCH_TOOL_NAME,
   type ChatToolAnswer,
@@ -22,7 +23,10 @@ export type BackendToolInput =
       readonly runner: "backend"
       /** The web search tool. */
       readonly toolName: typeof WEB_SEARCH_TOOL_NAME
-      /** Query exactly as the backend sends it: trimmed, not blank. */
+      /**
+       * Query exactly as the backend sends it: trimmed, not blank, and with
+       * no character a person cannot reliably see.
+       */
       readonly query: string
       /** Host of the search service the query is sent to. */
       readonly host: string
@@ -107,18 +111,19 @@ function parseReadPageInput(call: ChatToolCall): BackendToolInputResult {
  *
  * @param call - Call naming the web search tool.
  * @returns `parsed` with the query trimmed exactly as the backend trims it
- * and the search service's host, or `rejected` when the query is not text or
- * is blank.
- * @remarks The backend checked the query's length before sending the call;
- * this check keeps the card from describing a query the backend would not
- * send.
+ * and the search service's host, or `rejected` when the query is not text,
+ * is blank, or holds a character a person cannot reliably see, so that the
+ * card never shows less than the query sent.
+ * @remarks The backend checked the query before sending the call, its
+ * length included; this check keeps the card from describing a query the
+ * backend would not send.
  */
 function parseWebSearchInput(call: ChatToolCall): BackendToolInputResult {
   const { query } = call.arguments
   const trimmed = typeof query === "string" ? query.trim() : ""
-  if (trimmed === "") {
+  if (trimmed === "" || hasHiddenWebSearchQueryCharacter(trimmed)) {
     return buildRejectedInput(
-      `The arguments do not match ${call.toolName}: query: expected text that is not blank.`
+      `The arguments do not match ${call.toolName}: query: expected text that is not blank and holds no character hidden on screen.`
     )
   }
 

@@ -15,6 +15,30 @@ describe("formatDelimiterFreeText", () => {
   ])("shortens bracket runs in %j", (text, expected) => {
     expect(formatDelimiterFreeText(text)).toBe(expected)
   })
+
+  // Each splits the brackets of a delimiter with characters that show
+  // nothing, so a reader sees `<<<` and `>>>`.
+  it.each([
+    ["a zero-width space", "<<\u200b<end>\u200b>>", "<<end>>"],
+    ["a word joiner", "<\u2060<\u2060<end>\u2060>\u2060>", "<<end>>"],
+    ["a soft hyphen", "<<\u00ad<end>>\u00ad>", "<<end>>"],
+    ["a direction override", "<<\u202e<end>\u202e>>", "<<end>>"],
+    ["tag characters", "<\u{e0041}\u{e0042}<<end>>>", "<<end>>"],
+    ["a byte order mark", "<<\ufeff<<<end", "<<end"]
+  ])(
+    "shortens a run split by %s, dropping what sits between its brackets",
+    (_label, text, expected) => {
+      expect(formatDelimiterFreeText(text)).toBe(expected)
+    }
+  )
+
+  it.each([
+    ["two brackets around a zero-width space", "<\u200b<b>\u200b>"],
+    ["an emoji sequence joined by zero-width joiners", "👩\u200d💻 << b >>"],
+    ["invisible characters beside a run, not inside it", "\u200b<<b>>\u200b"]
+  ])("keeps %s unchanged", (_label, text) => {
+    expect(formatDelimiterFreeText(text)).toBe(text)
+  })
 })
 
 describe("formatSingleLineText", () => {
@@ -45,6 +69,10 @@ describe("formatSingleLineText", () => {
   it("cannot hold a delimiter after flattening joins brackets", () => {
     expect(formatSingleLineText("<<\n<x>>\n>", 100)).toBe("<< <x>> >")
     expect(formatSingleLineText("<<\u0000<x", 100)).toBe("<<x")
+  })
+
+  it("cannot hold a delimiter split by a character that shows nothing", () => {
+    expect(formatSingleLineText("<<\u200b<x>>\u2060>", 100)).toBe("<<x>>")
   })
 })
 

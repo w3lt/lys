@@ -117,6 +117,28 @@ describe("createSettingsGroupSaves", () => {
     })
   })
 
+  it("applies a secrets save after a generation save sent before it, keeping both groups", async () => {
+    const { writes, readStoredDocument } = startSettingsFileHost()
+    const saves = createSettingsGroupSaves()
+
+    const generationSave = saves.saveGenerationSettings(EDITED_GENERATION)
+    const secretsSave = saves.saveSecretsSettings({ tavilyApiKey: null })
+    await waitForMicrotasks()
+    const writesDuringFirst = writes.length
+    writes[0]?.resolve(null)
+    await generationSave
+    await waitForMicrotasks()
+    writes[1]?.resolve(null)
+    await secretsSave
+
+    expect(writesDuringFirst).toBe(1)
+    expect(readStoredDocument()).toEqual({
+      ...STORED_SETTINGS_DOCUMENT,
+      generation: EDITED_GENERATION,
+      secrets: { tavilyApiKey: null }
+    })
+  })
+
   it("rejects only the caller of a save that failed and still runs the saves sent after it", async () => {
     const { writes, readStoredDocument } = startSettingsFileHost()
     const saves = createSettingsGroupSaves()

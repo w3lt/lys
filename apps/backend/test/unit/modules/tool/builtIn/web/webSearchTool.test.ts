@@ -26,6 +26,22 @@ const ONE_RESULT = answerWithJson({
   ]
 })
 
+/** Distance from an ASCII character to the tag character that spells it. */
+const TAG_CHARACTER_OFFSET = 0xe0000
+
+/**
+ * Spells ASCII text in Unicode tag characters, which show nothing on screen
+ * but which a model reads as the text.
+ *
+ * @param text - ASCII text.
+ * @returns The same text in tag characters.
+ */
+function formatAsTagCharacters(text: string): string {
+  return Array.from(text, (character) =>
+    String.fromCodePoint(TAG_CHARACTER_OFFSET + character.charCodeAt(0))
+  ).join("")
+}
+
 /**
  * Runs one search against a fake Tavily server.
  *
@@ -117,6 +133,48 @@ describe("WebSearchTool", () => {
         status: "invalid",
         message
       })
+    })
+
+    // The approval card would show only the visible part of each query.
+    it.each([
+      [
+        "tag characters that spell hidden text",
+        `weather in hanoi${formatAsTagCharacters(" ssn 123-45-6789")}`
+      ],
+      ["a zero-width space", "weather\u200bin hanoi"],
+      ["a zero-width joiner of an emoji sequence", "👩\u200d💻 jobs"],
+      ["a direction override", "weather in \u202eionah"],
+      ["a direction isolate", "weather \u2066in\u2069 hanoi"],
+      ["a line break", "weather\nin hanoi"],
+      ["a line separator", "weather\u2028in hanoi"],
+      ["a private-use character", "weather \ue000 hanoi"],
+      ["an unassigned code point", "weather \u{10ffff} hanoi"]
+    ])("refuses a query with %s without searching", async (_label, query) => {
+      const server = await startTavilyServer(ONE_RESULT)
+      const tool = new WebSearchTool(TEST_TAVILY_API_KEY, server.dependencies)
+
+      expect(tool.parseToolCall({ query })).toEqual({
+        status: "invalid",
+        message:
+          "The query holds characters that do not show on screen, such as control, zero-width, direction, or tag characters. Write it with visible characters only."
+      })
+      expect(server.receivedRequests).toHaveLength(0)
+    })
+
+    it.each([
+      ["Vietnamese with its tone marks", "thời tiết Hà Nội"],
+      [
+        "tone marks as combining characters",
+        "thời tiết Hà Nội".normalize("NFD")
+      ],
+      ["Japanese", "東京の天気"],
+      ["an emoji with a variation selector", "❤️ moths"]
+    ])("sends a query of %s as written", async (_label, query) => {
+      const { server } = await runSearch(ONE_RESULT, query)
+
+      expect(JSON.parse(server.receivedRequests[0]?.body ?? "").query).toBe(
+        query
+      )
     })
 
     it("accepts a query of exactly 400 characters once trimmed", async () => {

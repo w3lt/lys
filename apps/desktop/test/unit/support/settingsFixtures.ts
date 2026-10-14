@@ -1,21 +1,25 @@
 import {
   modelLoadConfigurationSchema,
+  tavilyApiKeySchema,
   type ModelLoadConfiguration
 } from "@lys/share"
 import type {
   GenerationSettings,
   LysSettings,
   ModelSettings,
-  RuntimeSettings
+  RuntimeSettings,
+  SecretsSettings
 } from "@/lib/store/settings"
 
 /**
  * Settings document as the Tauri settings commands exchange it: the JSON form
  * of Rust's `LysSettings`.
  *
- * @remarks The runtime, model, and generation groups are the renderer's
- * groups field for field. JSON has no map, so the per-model load settings are
- * one object whose keys are model keys, where the renderer holds a map.
+ * @remarks The runtime, model, generation, and secrets groups are the
+ * renderer's groups field for field; the saved key is plain text in JSON and
+ * branded only in the renderer. JSON has no map, so the per-model load
+ * settings are one object whose keys are model keys, where the renderer holds
+ * a map.
  */
 export type SettingsDocument = Readonly<
   Omit<LysSettings, "loadConfiguration"> & {
@@ -75,8 +79,21 @@ const STORED_MODEL_LOAD_CONFIGURATION = modelLoadConfigurationSchema.parse({
 })
 
 /**
- * Settings document `load_settings` resolves with: every group is set, and
- * one model has load settings of its own.
+ * Tavily API key saved on disk: a made-up value of a key's shape, never a key
+ * Tavily issued.
+ */
+export const STORED_TAVILY_API_KEY = tavilyApiKeySchema.parse(
+  "tvly-dev-fixture-0000000000000000"
+)
+
+/** Secrets group on disk, distinct from the first-run group, which has no key. */
+const STORED_SECRETS_SETTINGS: SecretsSettings = Object.freeze({
+  tavilyApiKey: STORED_TAVILY_API_KEY
+})
+
+/**
+ * Settings document `load_settings` resolves with: every group is set, one
+ * model has load settings of its own, and a Tavily API key is saved.
  */
 export const STORED_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
   runtime: STORED_RUNTIME_SETTINGS,
@@ -85,7 +102,8 @@ export const STORED_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
   loadConfiguration: Object.freeze({
     default: STORED_DEFAULT_LOAD_CONFIGURATION,
     models: Object.freeze({ "qwen3-8b": STORED_MODEL_LOAD_CONFIGURATION })
-  })
+  }),
+  secrets: STORED_SECRETS_SETTINGS
 })
 
 /**
@@ -102,5 +120,6 @@ export const STORED_SETTINGS: LysSettings = Object.freeze({
   loadConfiguration: Object.freeze({
     default: STORED_DEFAULT_LOAD_CONFIGURATION,
     models: new Map([["qwen3-8b", STORED_MODEL_LOAD_CONFIGURATION]])
-  })
+  }),
+  secrets: STORED_SECRETS_SETTINGS
 })

@@ -583,6 +583,22 @@ describe("getRenderedPage", { timeout: BROWSER_TEST_TIMEOUT_MS }, () => {
     expect(result).toEqual({ status: "failed", failure: { kind: "crashed" } })
   })
 
+  it("fails a page that crashes the browser while Lys takes its snapshot", async () => {
+    const server = await startPageServer(
+      answerWithBody(
+        "text/html",
+        "<p>Moths</p><script>const moths = []; for (;;) moths.push(new Array(1e7).fill(1.5))</script>"
+      )
+    )
+
+    const result = await renderTestPage(
+      buildTestPageUrl(server.port, "/moths"),
+      { readTimeoutMs: 25_000, settleTimeoutMs: 100 }
+    )
+
+    expect(result).toEqual({ status: "failed", failure: { kind: "crashed" } })
+  })
+
   it("says the browser is missing when its executable does not exist, and sends nothing", async () => {
     const server = await startPageServer(answerWithParagraph("Moths"))
 

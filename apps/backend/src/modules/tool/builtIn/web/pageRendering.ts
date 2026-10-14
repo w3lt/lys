@@ -159,6 +159,11 @@ type ReadPage = Readonly<{
    * read: its first document's and every later one's.
    */
   failedNavigations: readonly Request[]
+  /**
+   * Aborts once the page crashes the browser, which a call waiting on the
+   * page's renderer would otherwise never learn.
+   */
+  crashSignal: AbortSignal
 }>
 
 /** A failed outcome, which every step's result type includes. */
@@ -452,7 +457,8 @@ function addFailedNavigation(
  * @param browser - Browser of the read.
  * @returns A page whose context keeps no service worker and accepts no
  * download, and that never fetches images, fonts, or media, with the
- * failed navigations of its own frame kept from now on.
+ * failed navigations of its own frame kept, and its crash watched, from now
+ * on.
  */
 async function openReadPage(browser: Browser): Promise<ReadPage> {
   const context = await browser.newContext({
@@ -465,7 +471,11 @@ async function openReadPage(browser: Browser): Promise<ReadPage> {
   page.on("requestfailed", (request) =>
     addFailedNavigation(failedNavigations, page, request)
   )
-  return Object.freeze({ page, failedNavigations })
+  const crash = new AbortController()
+  page.once("crash", () =>
+    crash.abort(new Error("The page crashed Lys's browser"))
+  )
+  return Object.freeze({ page, failedNavigations, crashSignal: crash.signal })
 }
 
 /**
@@ -793,12 +803,30 @@ function isPageCrash(error: unknown): boolean {
 }
 
 /**
+ * Loads the page and reads it.
+ *
+ * @param readPage - Page of the read.
+ * @param read - Read in progress.
+ * @returns What the page shows, or why it cannot be read.
+ * @throws Any failure Lys does not recognize, a crash included.
+ */
+async function readOpenedPage(
+  readPage: ReadPage,
+  read: PageRead
+): Promise<PageRenderingResult> {
+  const navigation = await navigateToDocument(readPage, read)
+  if (navigation.status === "failed") return navigation
+  return readLoadedDocument(readPage, navigation.response, read)
+}
+
+/**
  * Reads the page in a started browser.
  *
  * @param read - Read in progress.
  * @param browser - Browser of the read, borrowed; the caller closes it.
  * @returns What the page shows, or why it cannot be read; `crashed` when the
- * page crashes the browser at any step, before or after its document loaded.
+ * page crashes the browser at any step, before or after its document
+ * arrived, a step still waiting on the crashed page included.
  * @throws Any failure Lys does not recognize.
  */
 async function readInBrowser(
@@ -807,11 +835,12 @@ async function readInBrowser(
 ): Promise<PageRenderingResult> {
   const readPage = await openReadPage(browser)
   try {
-    const navigation = await navigateToDocument(readPage, read)
-    if (navigation.status === "failed") return navigation
-    return await readLoadedDocument(readPage, navigation.response, read)
+    return await waitForReadStep(
+      readOpenedPage(readPage, read),
+      readPage.crashSignal
+    )
   } catch (error) {
-    if (!isPageCrash(error)) throw error
+    if (!readPage.crashSignal.aborted && !isPageCrash(error)) throw error
     return buildFailedRendering(Object.freeze({ kind: "crashed" }))
   }
 }

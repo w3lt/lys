@@ -195,12 +195,15 @@ cannot be read.
 
 `web_search(query)` searches the web through the Tavily Search API with the
 person's API key. The query is trimmed and must have 1 to 400 characters, none
-of which is a control, format, surrogate, private-use, or unassigned code
-point, or a line or paragraph separator; otherwise the call is answered at
-once. Such characters show nothing or can reorder text, so they are refused
-rather than removed, and the approval card shows exactly the query sent. The
-rule is `hasHiddenWebSearchQueryCharacter` in `@lys/protocol`, which the
-desktop applies too.
+of which is a Unicode default-ignorable code point (such as a zero-width,
+direction, tag, or variation selector character, or a Hangul filler), a
+control, format, surrogate, private-use, or unassigned code point, or a line
+or paragraph separator; otherwise the call is answered at once. Such
+characters show nothing or can reorder text, so they are refused rather than
+removed, and the approval card shows exactly the query sent. An emoji written
+with a variation selector, such as `❤️`, is refused too. The rule is
+`hasHiddenWebSearchQueryCharacter` in `@lys/protocol`, which the desktop
+applies too.
 
 - **Key.** `WebSearchToolProvider` reads `secrets.tavilyApiKey` from the
   desktop's settings file (`settingsFilePath`, `$LYS_HOME/settings.json`) with

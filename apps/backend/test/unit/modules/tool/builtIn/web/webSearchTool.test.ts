@@ -30,15 +30,23 @@ const ONE_RESULT = answerWithJson({
 const TAG_CHARACTER_OFFSET = 0xe0000
 
 /**
- * Spells ASCII text in Unicode tag characters, which show nothing on screen
- * but which a model reads as the text.
- *
- * @param text - ASCII text.
- * @returns The same text in tag characters.
+ * Distance from an ASCII character to the variation selector that carries it
+ * when the 256 variation selectors stand for one byte each, bytes 16 to 255
+ * being U+E0100 to U+E01EF.
  */
-function formatAsTagCharacters(text: string): string {
+const VARIATION_SELECTOR_OFFSET = 0xe00f0
+
+/**
+ * Spells printable ASCII text in characters that show nothing on screen but
+ * that a model or a decoder reads back as the text.
+ *
+ * @param text - Printable ASCII text.
+ * @param offset - Distance from each character to the one that hides it.
+ * @returns The same text in hidden characters.
+ */
+function formatAsHiddenCharacters(text: string, offset: number): string {
   return Array.from(text, (character) =>
-    String.fromCodePoint(TAG_CHARACTER_OFFSET + character.charCodeAt(0))
+    String.fromCodePoint(offset + character.charCodeAt(0))
   ).join("")
 }
 
@@ -139,10 +147,17 @@ describe("WebSearchTool", () => {
     it.each([
       [
         "tag characters that spell hidden text",
-        `weather in hanoi${formatAsTagCharacters(" ssn 123-45-6789")}`
+        `weather in hanoi${formatAsHiddenCharacters(" ssn 123-45-6789", TAG_CHARACTER_OFFSET)}`
+      ],
+      [
+        "variation selectors that carry hidden text",
+        `weather in hanoi${formatAsHiddenCharacters(" ssn 123-45-6789", VARIATION_SELECTOR_OFFSET)}`
       ],
       ["a zero-width space", "weather\u200bin hanoi"],
       ["a zero-width joiner of an emoji sequence", "👩\u200d💻 jobs"],
+      ["an emoji with a variation selector", "❤\ufe0f moths"],
+      ["a Hangul filler", "weather\u3164in hanoi"],
+      ["a combining grapheme joiner", "weather\u034fin hanoi"],
       ["a direction override", "weather in \u202eionah"],
       ["a direction isolate", "weather \u2066in\u2069 hanoi"],
       ["a line break", "weather\nin hanoi"],
@@ -156,7 +171,7 @@ describe("WebSearchTool", () => {
       expect(tool.parseToolCall({ query })).toEqual({
         status: "invalid",
         message:
-          "The query holds characters that do not show on screen, such as control, zero-width, direction, or tag characters. Write it with visible characters only."
+          "The query holds characters that do not show on screen, such as control, zero-width, direction, tag, or variation selector characters. Write it with visible characters only."
       })
       expect(server.receivedRequests).toHaveLength(0)
     })
@@ -168,7 +183,8 @@ describe("WebSearchTool", () => {
         "thời tiết Hà Nội".normalize("NFD")
       ],
       ["Japanese", "東京の天気"],
-      ["an emoji with a variation selector", "❤️ moths"]
+      ["Korean", "서울 날씨"],
+      ["an emoji drawn in color without a variation selector", "🦋 moths"]
     ])("sends a query of %s as written", async (_label, query) => {
       const { server } = await runSearch(ONE_RESULT, query)
 

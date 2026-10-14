@@ -107,7 +107,7 @@ function parseSearchQuery(
     return Object.freeze({
       status: "invalid",
       message:
-        "The query holds characters that do not show on screen, such as control, zero-width, direction, or tag characters. Write it with visible characters only."
+        "The query holds characters that do not show on screen, such as control, zero-width, direction, tag, or variation selector characters. Write it with visible characters only."
     })
   }
   return Object.freeze({ status: "parsed", query: trimmed })

@@ -91,6 +91,10 @@ describe("parseBackendToolInput", () => {
       "a query hiding text in tag characters",
       { query: "weather\u{e0073}\u{e0073}\u{e006e}" }
     ],
+    [
+      "a query hiding text in variation selectors",
+      { query: "weather\u{e0163}\u{e0163}\u{e015e}" }
+    ],
     ["a query with a zero-width space", { query: "weather\u200bhanoi" }],
     ["a query with a direction override", { query: "weather \u202eionah" }],
     ["a query with a line break inside", { query: "weather\nhanoi" }]

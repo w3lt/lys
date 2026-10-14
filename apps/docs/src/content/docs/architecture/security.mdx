@@ -146,9 +146,10 @@ key is saved in Settings → Secrets.
   the card shows the full query before anything is sent; on Just run nothing is
   shown ([#156](https://github.com/w3lt/lys/issues/156)). A query is at most
   400 characters, and one holding a character a person cannot reliably see,
-  such as a zero-width, direction, or tag character, is refused before anyone
-  is asked, so the card never shows less than is sent. The zero-width joiner
-  of an emoji sequence counts too.
+  such as a zero-width, direction, tag, or variation selector character, or a
+  Hangul filler, is refused before anyone is asked, so the card never shows
+  less than is sent. The zero-width joiner of an emoji sequence and the
+  variation selector of an emoji such as `❤️` count too.
 - **Local callers.** The loopback backend has no authentication, so any local
   process, including one run by another user account on the machine, can ask
   it to check the key, or send a chat request that offers `web_search` and

@@ -17,11 +17,8 @@ const WHITESPACE_RUN_PATTERN = /\s+/g
 /** Finds each control character; whitespace runs are replaced before it runs. */
 const CONTROL_CHARACTER_PATTERN = /\p{Cc}/gu
 
-/** Smallest UTF-16 code unit that opens a surrogate pair. */
-const HIGH_SURROGATE_MINIMUM = 0xd800
-
-/** Largest UTF-16 code unit that opens a surrogate pair. */
-const HIGH_SURROGATE_MAXIMUM = 0xdbff
+/** Finds a high surrogate, the code unit that opens a pair, ending a text. */
+const TRAILING_HIGH_SURROGATE_PATTERN = /[\uD800-\uDBFF]$/
 
 /** Character that ends an excerpt cut short. */
 const EXCERPT_ELLIPSIS = "…"
@@ -61,10 +58,10 @@ export function formatDelimiterFreeText(text: string): string {
  */
 function formatCutText(text: string, maximumLength: number): string {
   if (text.length <= maximumLength) return text
-  const lastKept = text.charCodeAt(maximumLength - 1)
-  const endsInsidePair =
-    lastKept >= HIGH_SURROGATE_MINIMUM && lastKept <= HIGH_SURROGATE_MAXIMUM
-  return text.slice(0, endsInsidePair ? maximumLength - 1 : maximumLength)
+  const cutText = text.slice(0, maximumLength)
+  return TRAILING_HIGH_SURROGATE_PATTERN.test(cutText)
+    ? cutText.slice(0, -1)
+    : cutText
 }
 
 /**

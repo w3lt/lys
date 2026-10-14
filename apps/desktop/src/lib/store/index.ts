@@ -12,6 +12,10 @@ import {
   createLoadConfigurationSettingsSlice,
   type LoadConfigurationSettingsSlice
 } from "./load-configuration-settings"
+import {
+  createSecretsSettingsSlice,
+  type SecretsSettingsSlice
+} from "./secrets-settings"
 import { createSettingsGroupSaves } from "./settings-group-saves"
 import { getBackendReadiness, type BackendReadiness } from "./backend-readiness"
 import {
@@ -22,6 +26,7 @@ import {
 import { create } from "zustand"
 import { BACKEND_HOST, BACKEND_PORT } from "@lys/protocol"
 import { getBackendStatus, startBackend, stopBackend } from "../apis"
+import { sendWebSearchKeyCheck } from "../apis/http/tools"
 import { isLoadConfigurationSettingsEqual } from "../models/model-load-configuration"
 
 /** Top-level view selected by the application store. */
@@ -129,6 +134,7 @@ type LysStore = LysState &
   ModelSlice &
   GenerationSettingsSlice &
   LoadConfigurationSettingsSlice &
+  SecretsSettingsSlice &
   LmStudioStatusSlice
 
 /** Initial renderer-side store state before Tauri initialization. */
@@ -245,6 +251,11 @@ export const useLysStore = create<LysStore>()((set, get) => {
     ...initialState,
     ...createGenerationSettingsSlice(set, get, settingsGroupSaves),
     ...createLoadConfigurationSettingsSlice(set, get, settingsGroupSaves),
+    ...createSecretsSettingsSlice(set, get, {
+      saveSecretsSettings: settingsGroupSaves.saveSecretsSettings,
+      sendWebSearchKeyCheck: () =>
+        sendWebSearchKeyCheck({ backendUrl: get().backendUrl })
+    }),
     ...createModelSlice(set, get, {
       getConnection: () => ({
         backendUrl: get().backendUrl,

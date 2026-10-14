@@ -54,9 +54,13 @@ it. What she keeps is a SQLite database in your home directory,
 settings file — all of them yours to read, move, or delete, as long as the
 [three database files travel together](https://lys.negentropy.studio/operate/data/).
 Set `LYS_HOME` to an absolute path and she keeps them there instead.
-The one way out is a web page you let her read: the `read_page` tool starts
-off, she asks before every page unless you choose Just run for the session,
-and her own backend fetches it, with no service in between.
+There are two ways out, and both start off. A web page you let her read: the
+`read_page` tool fetches it from her own backend, with no service in between.
+And a web search: the `web_search` tool sends the query, with the Tavily API
+key you save in Settings → Secrets, to Tavily's search service. She asks
+before every page and every search unless you choose Just run for the session.
+The key is stored in plain text in `settings.json`, readable only by your user
+account.
 
 That closeness is the design goal rather than a finished guarantee. Local
 ownership is how the system is built, but the handbook is candid about
@@ -74,8 +78,8 @@ deleted, or reopened and continued where they stopped. Model settings can list,
 load, unload, and check local models; chat answers with a loaded model,
 preferring the default you choose, though that choice lasts only for the
 session. Generation controls shape future replies and save automatically.
-She can use tools when you let her: read and search files on your machine, or
-read a public web page, asking before each call. Memory and continuity are
+She can use tools when you let her: read and search files on your machine,
+search the web, or read a public web page, asking before each call. Memory and continuity are
 directions Lys is growing toward, not capabilities she already has.
 
 [See what exists today and what remains unfinished →](https://lys.negentropy.studio/overview/status/)

@@ -1576,3 +1576,119 @@
     gap: 24px;
   }
 }
+
+.settings-view__tool-unavailable-note {
+  margin: 0;
+  padding: 0 16px 12px 44px;
+  color: var(--app-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.settings-view__secret-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 18px;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 10px;
+  background: var(--app-surface-panel);
+}
+
+.settings-view__secret-card-header,
+.settings-view__secret-label-line,
+.settings-view__secret-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.settings-view__secret-state {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  color: var(--app-text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+
+  &::before {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--app-status-neutral);
+    content: "";
+  }
+
+  &[data-tone="success"]::before {
+    background: var(--app-status-success);
+  }
+
+  &[data-tone="attention"]::before {
+    background: var(--app-status-pending);
+  }
+
+  &[data-tone="danger"]::before {
+    background: var(--app-status-danger);
+  }
+}
+
+.settings-view__secret-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  a {
+    color: var(--app-text-link);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    text-decoration: none;
+  }
+}
+
+.settings-view__secret-entry {
+  display: flex;
+  gap: 8px;
+}
+
+.settings-view__secret-field {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+
+  input {
+    font-family: var(--font-mono);
+  }
+}
+
+.settings-view__secret-status {
+  margin: 0;
+  color: var(--app-text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+
+  &[data-tone="pending"],
+  &[data-tone="attention"] {
+    color: var(--app-text);
+  }
+
+  &[data-tone="success"] {
+    color: var(--app-status-success);
+  }
+
+  &[data-tone="danger"] {
+    color: var(--app-text-danger);
+  }
+}
+
+.settings-view__secret-actions {
+  display: flex;
+  flex: none;
+  gap: 6px;
+}

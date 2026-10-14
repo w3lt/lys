@@ -29,6 +29,16 @@ export const LOOK_UP_WORD_TOOL: ToolDefinition = toolDefinitionSchema.parse({
   arguments: [{ type: "string", name: "word", description: "Word to look up." }]
 })
 
+/** Definition of a scripted backend tool whose provider is never ready. */
+export const CHECK_SPELLING_TOOL: ToolDefinition = toolDefinitionSchema.parse({
+  name: "check_spelling",
+  description: "Check the spelling of one word.",
+  group: "network",
+  access: "network",
+  runner: "backend",
+  arguments: [{ type: "string", name: "word", description: "Word to check." }]
+})
+
 /** Function tool a model is offered for {@link LOOK_UP_WORD_TOOL}. */
 export const LOOK_UP_WORD_FORMAT = Object.freeze({
   type: "function",

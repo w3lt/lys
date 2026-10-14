@@ -68,6 +68,16 @@ const ToolPane = lazy(
   () => import("@/components/SettingsViewComponents/ToolPaneContent")
 )
 
+/**
+ * Lazily loads the secrets settings body; the parent supplies the fallback.
+ *
+ * @remarks React owns module loading and
+ * suspension while the settings view owns pane selection and the fallback.
+ */
+const SecretsPane = lazy(
+  () => import("@/components/SettingsViewComponents/SecretsPaneContent")
+)
+
 /** A no-props settings body that may suspend while its module is imported. */
 type SettingsPaneContentComponent =
   | typeof RuntimePaneContent
@@ -75,6 +85,7 @@ type SettingsPaneContentComponent =
   | typeof GenerationPaneContent
   | typeof AgentPane
   | typeof ToolPane
+  | typeof SecretsPane
 
 /** Metadata and lazy body used to render one settings pane. */
 export type SettingsPaneDescriptor = {
@@ -138,6 +149,15 @@ const SETTINGS_PANES: readonly SettingsPaneDescriptor[] = [
     footNote:
       "Tools come from Lys itself and cannot be added or removed here. Nothing here is saved yet, and conversations do not use tools yet.",
     contentComponent: ToolPane
+  },
+  {
+    value: "secrets",
+    label: "Secrets",
+    ordinal: "06",
+    note: "Keys for the services Lys calls on your behalf. Each key goes only to its own service and is never sent to the model.",
+    footNote:
+      "Saved in plain text in settings.json in Lys's home folder, readable only by your user account. Lys's backend reads it when it lists tools and when a message offers web_search; a reply keeps the key it started with.",
+    contentComponent: SecretsPane
   }
 ]
 

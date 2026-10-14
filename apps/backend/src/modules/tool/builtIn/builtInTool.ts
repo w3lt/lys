@@ -1,4 +1,4 @@
-import type { ChatToolCall } from "@lys/protocol"
+import type { BackendToolUnavailableReason, ChatToolCall } from "@lys/protocol"
 import type { ToolDefinition } from "@lys/share"
 
 /** Argument values of one call, by argument name, after the type check. */
@@ -69,10 +69,54 @@ export interface BuiltInTool {
   parseToolCall(callArguments: BuiltInToolCallArguments): ParsedBuiltInToolCall
 }
 
-/** One tool the backend runs: its definition and the tool that runs it. */
+/** Outcome of looking up the tool that runs one turn's calls. */
+export type TurnToolLookup =
+  | Readonly<{
+      /** The tool can run the turn's calls. */
+      status: "ready"
+      /** Tool that parses and runs the turn's calls. */
+      tool: BuiltInTool
+    }>
+  | Readonly<{
+      /** The tool cannot run now. */
+      status: "unavailable"
+      /** Why. */
+      reason: BackendToolUnavailableReason
+    }>
+
+/**
+ * A built-in tool provider can give the tool that runs one turn's calls, or
+ * say why it cannot run now.
+ *
+ * @remarks Consumed by the tool list, which reports availability, and by the
+ * chat route, which looks up every offered backend tool before it stores a
+ * turn. Providers are ready when created. A lookup reads what the tool
+ * needs at that moment, such as a saved key, so the tool it gives keeps that
+ * for the whole turn. Concurrency model: reentrant.
+ */
+export interface BuiltInToolProvider {
+  /**
+   * Finds the tool that runs one turn's calls.
+   *
+   * @returns `ready` with the tool, or `unavailable` with why. It resolves
+   * for every expected state, including a missing or unreadable setting.
+   * @throws Only on a defect.
+   */
+  findTurnTool(): Promise<TurnToolLookup>
+}
+
+/** One tool the backend runs: its definition and what finds it for a turn. */
 export type BuiltInToolEntry = Readonly<{
   /** Definition offered to the model and listed in Settings; its runner is `backend`. */
   definition: ToolDefinition
-  /** Tool that parses and runs its calls. */
+  /** Finds the tool for each turn and reports whether it can run. */
+  provider: BuiltInToolProvider
+}>
+
+/** One backend tool found for a turn: its definition and the tool. */
+export type TurnBuiltInTool = Readonly<{
+  /** Definition offered to the model. */
+  definition: ToolDefinition
+  /** Tool that parses and runs the turn's calls. */
   tool: BuiltInTool
 }>

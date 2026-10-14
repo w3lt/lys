@@ -37,6 +37,18 @@ const READ_PAGE = buildBackendToolDefinition("read_page")
 /** The web group listing the backend's tool. */
 const [WEB_GROUP] = buildToolGroups([READ_PAGE])
 
+/** Backend tool that can lack what it needs to run. */
+const WEB_SEARCH = buildBackendToolDefinition("web_search")
+
+/** The web group listing both backend tools. */
+const [SEARCH_GROUP] = buildToolGroups([READ_PAGE, WEB_SEARCH])
+
+/** Choices that switch both backend tools on and let them run at once. */
+const BACKEND_TOOLS_ON: ReadonlyMap<string, ToolChoice> = new Map([
+  ["read_page", { isOn: true, approval: "run" }],
+  ["web_search", { isOn: true, approval: "ask" }]
+])
+
 /**
  * Renders the group with spies for every proposal.
  *
@@ -49,7 +61,8 @@ function startToolGroup(
   const proposals = {
     onExpandedToolNameChange: vi.fn(),
     onToolOnChange: vi.fn(),
-    onToolApprovalChange: vi.fn()
+    onToolApprovalChange: vi.fn(),
+    onOpenSecrets: vi.fn()
   }
   render(
     <ToolGroupSection
@@ -58,6 +71,7 @@ function startToolGroup(
       isLocked={false}
       listing={FILES_GROUP}
       toolChoices={new Map()}
+      unavailableTools={new Map()}
       {...proposals}
       {...props}
     />
@@ -283,6 +297,72 @@ describe("ToolGroupSection", () => {
       READ_TEXT_FILE,
       "run"
     )
+  })
+
+  it("shows a switched-on tool that cannot run now as off, disabled, and not counted, with why", async () => {
+    const proposals = startToolGroup({
+      listing: SEARCH_GROUP,
+      toolChoices: BACKEND_TOOLS_ON,
+      unavailableTools: new Map([["web_search", "api-key-invalid"]])
+    })
+    const user = userEvent.setup()
+
+    const section = screen.getByRole("region", { name: "web" })
+    expect(section).toHaveTextContent(/^web1 of 2 on/)
+    const toolSwitch = screen.getByRole("switch", { name: "Use web_search" })
+    await user.click(toolSwitch)
+    expect(proposals.onToolOnChange).not.toHaveBeenCalled()
+    expect(toolSwitch).not.toBeChecked()
+    expect(toolSwitch).toHaveAttribute("aria-disabled", "true")
+    expect(toolSwitch).toHaveAccessibleDescription(
+      "The Tavily API key in settings.json isn't valid. Fix or remove secrets.tavilyApiKey in that file."
+    )
+    // A tool that cannot run is not offered, so it does not ask either.
+    expect(getToolToggle("web_search")).toHaveAccessibleDescription(
+      "network in backend Runs web_search in the backend."
+    )
+    expect(
+      within(getToolRow("web_search")).queryByRole("button", {
+        name: "Open Secrets"
+      })
+    ).toBeNull()
+    expect(
+      screen.getByRole("switch", { name: "Use read_page" })
+    ).toHaveAccessibleDescription("")
+  })
+
+  it("offers to open the Secrets pane for a missing key", async () => {
+    const proposals = startToolGroup({
+      listing: SEARCH_GROUP,
+      toolChoices: BACKEND_TOOLS_ON,
+      unavailableTools: new Map([["web_search", "api-key-missing"]])
+    })
+    const user = userEvent.setup()
+
+    expect(
+      screen.getByRole("switch", { name: "Use web_search" })
+    ).toHaveAccessibleDescription(
+      "Needs a Tavily API key. Add one in Settings → Secrets. Open Secrets"
+    )
+    await user.click(screen.getByRole("button", { name: "Open Secrets" }))
+
+    expect(proposals.onOpenSecrets).toHaveBeenCalledOnce()
+    expect(proposals.onToolOnChange).not.toHaveBeenCalled()
+  })
+
+  it("names an unreadable settings file without a button, since the pane cannot fix it", () => {
+    startToolGroup({
+      listing: SEARCH_GROUP,
+      toolChoices: BACKEND_TOOLS_ON,
+      unavailableTools: new Map([["web_search", "settings-unreadable"]])
+    })
+
+    expect(
+      screen.getByRole("switch", { name: "Use web_search" })
+    ).toHaveAccessibleDescription(
+      "Lys couldn't read settings.json. Fix that file by hand."
+    )
+    expect(screen.queryByRole("button", { name: "Open Secrets" })).toBeNull()
   })
 
   it("disables every control while locked", async () => {

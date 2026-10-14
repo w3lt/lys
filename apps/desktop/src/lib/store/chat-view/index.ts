@@ -14,6 +14,7 @@ import {
 import { create, type StoreApi, type UseBoundStore } from "zustand"
 
 import {
+  BackendToolUnavailableError,
   readChatEvents,
   readChatReplyEvents,
   stopChatReply,
@@ -1692,6 +1693,32 @@ async function getChatToolOffer(): Promise<ChatToolOfferResult> {
 }
 
 /**
+ * Opens one chat stream, and reads the tool list again when the backend
+ * refuses the request because an offered backend tool cannot run now.
+ *
+ * @param payload - Valid chat request.
+ * @param options - Optional transport cancellation settings.
+ * @returns The chat events, as {@link readChatEvents} yields them.
+ * @throws Whatever {@link readChatEvents} throws, unchanged, after starting
+ * the tool list read for a {@link BackendToolUnavailableError}, so the next
+ * request no longer offers that tool.
+ * @remarks The tool store owns the read; it never rejects.
+ */
+async function* readChatEventsRefreshingTools(
+  payload: ChatApiRequestBody,
+  options?: ChatApiOptions
+): AsyncGenerator<ChatApiStreamEvent, void, unknown> {
+  try {
+    yield* readChatEvents(payload, options)
+  } catch (error) {
+    if (error instanceof BackendToolUnavailableError) {
+      void useToolStore.getState().loadTools()
+    }
+    throw error
+  }
+}
+
+/**
  * Chat-view store used by the desktop React tree.
  *
  * @remarks This singleton owns the live browser request and open lifecycles.
@@ -1709,7 +1736,7 @@ async function getChatToolOffer(): Promise<ChatToolOfferResult> {
  */
 export const useChatViewStore: UseBoundStore<StoreApi<ChatViewStore>> =
   createChatViewStore({
-    streamChat: readChatEvents,
+    streamChat: readChatEventsRefreshingTools,
     streamChatReply: (target, signal) =>
       readChatReplyEvents(target, {
         backendUrl: useLysStore.getState().backendUrl,

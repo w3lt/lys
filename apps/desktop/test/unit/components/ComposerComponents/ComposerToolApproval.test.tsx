@@ -77,6 +77,27 @@ const WAITING_PAGE_READ: ShownToolCall = Object.freeze({
   }
 })
 
+/** Call to the backend's web search. */
+const WEB_SEARCH_CALL = buildToolCall(12, "web_search", {
+  query: "moths at night"
+})
+
+/** Web search that waits for the person. */
+const WAITING_WEB_SEARCH: ShownToolCall = Object.freeze({
+  target: buildCallTarget(WEB_SEARCH_CALL.id),
+  call: WEB_SEARCH_CALL,
+  answer: {
+    status: "awaiting-person",
+    definition: buildBackendToolDefinition("web_search"),
+    input: {
+      runner: "backend",
+      toolName: "web_search",
+      query: "moths at night",
+      host: "api.tavily.com"
+    }
+  }
+})
+
 /** Search whose result could not be sent to the backend. */
 const UNSENT_SEARCH: ShownToolCall = Object.freeze({
   target: buildCallTarget(SEARCH_CALL.id),
@@ -147,6 +168,25 @@ describe("ComposerToolApproval", () => {
           "Read https://example.com/docs. Sends a request to example.com."
         )
       ).toBeInTheDocument()
+    })
+
+    it("quotes a web search's whole query and says it is sent to Tavily", async () => {
+      const user = userEvent.setup()
+      startToolApproval({ toolCall: WAITING_WEB_SEARCH, hasDraft: false })
+      const card = screen.getByRole("group", {
+        name: "Tool call waiting for your answer"
+      })
+
+      await user.click(screen.getByRole("button", { name: "Arguments" }))
+
+      expect(
+        within(card).getByText(
+          "Search the web for “moths at night”. Sends the query to Tavily (api.tavily.com)."
+        )
+      ).toBeInTheDocument()
+      expect(
+        screen.getAllByRole("definition").map((value) => value.textContent)
+      ).toEqual(["moths at night"])
     })
 
     it("keeps the arguments hidden until asked, then lists each by name in the call's order", async () => {

@@ -1,5 +1,6 @@
 import {
   chatApiRequestBodySchema,
+  chatBackendToolUnavailableProblemSchema,
   chatToolCallAnswerMismatchProblemSchema,
   chatToolCallNotPendingProblemSchema,
   chatToolResultSchema,
@@ -8,6 +9,7 @@ import {
 import { CALIGINIA_AGENT_CODE } from "@lys/share"
 import { describe, expect, it } from "vitest"
 import {
+  BackendToolUnavailableError,
   readChatEvents,
   readChatReplyEvents,
   sendChatToolResult,
@@ -98,6 +100,26 @@ const CONVERSATION_AGENT_MISSING_PROBLEM =
     status: 409,
     detail: "No agent has the code this conversation was started with."
   })
+
+/**
+ * Builds the problem the backend sends when an offered backend tool cannot
+ * run now.
+ *
+ * @param reason - Why the tool cannot run.
+ * @returns The problem, validated by the shared schema.
+ */
+function buildBackendToolUnavailableProblem(
+  reason: "api-key-missing" | "api-key-invalid" | "settings-unreadable"
+) {
+  return chatBackendToolUnavailableProblemSchema.parse({
+    type: "urn:lys:problem:chat:backend-tool-unavailable",
+    title: "Backend tool unavailable",
+    status: 409,
+    detail: "The offered tool web_search cannot run now.",
+    toolName: "web_search",
+    reason
+  })
+}
 
 /** Problem the backend sends for an answer to a call that is not waiting. */
 const TOOL_CALL_NOT_PENDING_PROBLEM = chatToolCallNotPendingProblemSchema.parse(
@@ -239,6 +261,41 @@ describe("readChatEvents", () => {
     ).rejects.toThrow(DELETED_CONVERSATION_AGENT_MESSAGE)
   })
 
+  it.each([
+    [
+      "api-key-missing",
+      "web_search is unavailable: no Tavily API key is saved. Add one in Settings → Secrets, or switch web_search off."
+    ],
+    [
+      "api-key-invalid",
+      "web_search is unavailable: the Tavily API key in settings.json isn't valid. Fix or remove secrets.tavilyApiKey in that file, or switch web_search off."
+    ],
+    [
+      "settings-unreadable",
+      "web_search is unavailable: Lys couldn't read settings.json. Fix that file by hand, or switch web_search off."
+    ]
+  ] as const)(
+    "reports an offered tool that cannot run because of %s, with what to do",
+    async (reason, message) => {
+      startBackendFake({
+        [CHAT_ROUTE]: () =>
+          buildJsonResponse(409, buildBackendToolUnavailableProblem(reason))
+      })
+
+      const failure = await listStreamEvents(
+        readChatEvents(NEW_CONVERSATION_REQUEST)
+      ).then(
+        () => {
+          throw new Error("The chat stream opened")
+        },
+        (rejection: unknown) => rejection
+      )
+
+      expect(failure).toBeInstanceOf(BackendToolUnavailableError)
+      expect(failure).toMatchObject({ message })
+    }
+  )
+
   it("does not report an undeclared conflict as a deleted agent", async () => {
     startBackendFake({
       [CHAT_ROUTE]: () => buildJsonResponse(409, { message: "conflict" })
@@ -250,6 +307,7 @@ describe("readChatEvents", () => {
 
     await expect(events).rejects.toThrow("409")
     await expect(events).rejects.not.toThrow(DELETED_CONVERSATION_AGENT_MESSAGE)
+    await expect(events).rejects.not.toBeInstanceOf(BackendToolUnavailableError)
   })
 
   it.each([

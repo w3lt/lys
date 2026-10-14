@@ -72,6 +72,7 @@ not find a runtime that `build.sh` installed under another directory.
 | LM Studio HTTP base URL        | `http://${LMSTUDIO_HOST}:${LMSTUDIO_PORT}/v1`                                         |
 | LM Studio WebSocket base URL   | `ws://${LMSTUDIO_HOST}:${LMSTUDIO_PORT}`                                              |
 | SQLite path                    | `$LYS_HOME/lys_db.sqlite`; see [Lys home directory](#lys-home-directory)              |
+| Settings file path             | `$LYS_HOME/settings.json`, as `settingsFilePath`; read for the Tavily API key         |
 | Caliginia system prompt        | `src/utils/prompts/caliginia.txt`, as `caliginiaSystemPrompt`                         |
 | Lysiptera system prompt        | `src/utils/prompts/lysiptera.txt`, as `lysipteraSystemPrompt`                         |
 | Title-generation prompt        | `src/utils/prompts/title-generation.txt`, as `titleGenerationPrompt`                  |
@@ -96,7 +97,7 @@ and no defaults are applied.
 | `backendHost`                                                             | An IPv4 loopback address (`127.x.x.x`); the backend does not authenticate non-browser callers |
 | `backendPort`, `lmstudioPort`                                             | An integer from 1 to 65535                                                                    |
 | `lmstudioHost`                                                            | A host name or IPv4 address, used unbracketed in the `http://` and `ws://` URLs               |
-| `databaseFilePath`                                                        | An absolute path                                                                              |
+| `databaseFilePath`, `settingsFilePath`                                    | An absolute path                                                                              |
 | `caliginiaSystemPrompt`, `lysipteraSystemPrompt`, `titleGenerationPrompt` | Non-empty text without leading or trailing whitespace                                         |
 | `titleGenerationMaxAttempts`, `generatedTitleMaxLength`                   | A positive integer                                                                            |
 
@@ -127,25 +128,36 @@ defaults:
   "loadConfiguration": {
     "default": {},
     "models": {}
+  },
+  "secrets": {
+    "tavilyApiKey": null
   }
 }
 ```
 
-| Key                        | Type                    | Meaning                                                                                            |
-| -------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------- |
-| `runtime.autoStartBackend` | `boolean`               | Whether desktop initialization should ask Tauri to start the backend automatically                 |
-| `runtime.defaultModel`     | `string \| null`        | Preferred model used when it is loaded; otherwise the first loaded inventory entry is the fallback |
-| `runtime.backendAddress`   | `string`                | Backend address displayed in settings; HTTP clients still target the fixed loopback address        |
-| `model.contextSize`        | unsigned 32-bit integer | Context-size estimate displayed in the Model pane; not forwarded by the load API                   |
-| `generation.temperature`   | number in `[0, 1]`      | Sampling temperature sent with each new chat request                                               |
-| `generation.replyCeiling`  | unsigned 32-bit integer | Maximum reply tokens; the desktop omits the request limit when this is `0`                         |
-| `loadConfiguration`        | object                  | Settings sent with each model load; see [Load configuration](#load-configuration)                  |
+| Key                        | Type                    | Meaning                                                                                                          |
+| -------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `runtime.autoStartBackend` | `boolean`               | Whether desktop initialization should ask Tauri to start the backend automatically                               |
+| `runtime.defaultModel`     | `string \| null`        | Preferred model used when it is loaded; otherwise the first loaded inventory entry is the fallback               |
+| `runtime.backendAddress`   | `string`                | Backend address displayed in settings; HTTP clients still target the fixed loopback address                      |
+| `model.contextSize`        | unsigned 32-bit integer | Context-size estimate displayed in the Model pane; not forwarded by the load API                                 |
+| `generation.temperature`   | number in `[0, 1]`      | Sampling temperature sent with each new chat request                                                             |
+| `generation.replyCeiling`  | unsigned 32-bit integer | Maximum reply tokens; the desktop omits the request limit when this is `0`                                       |
+| `loadConfiguration`        | object                  | Settings sent with each model load; see [Load configuration](#load-configuration)                                |
+| `secrets.tavilyApiKey`     | `string \| null`        | Tavily API key of `web_search`, 1 to 256 visible ASCII characters, stored as plain text; see [Secrets](#secrets) |
 
 A missing group, or a missing field in one of them, uses the host defaults;
-for `loadConfiguration` that default is empty. Loading never rewrites an
+for `loadConfiguration` that default is empty, and for `secrets` it holds no
+key. Loading never rewrites an
 existing file. Invalid JSON or invalid field values, including a temperature
 outside `[0, 1]`, cause loading to fail, and the file is left as it is. Loading
 a missing file creates the parent directory and writes the default document.
+
+Every save writes a temporary file beside `settings.json`, readable and
+writable only by its owner on Unix, flushes it to disk, and renames it over the
+file, so a reader sees the previous document or the whole new one, never part
+of a write. The Tauri host is the file's only writer; the backend reads it for
+the Tavily API key.
 
 The file carries no version marker. The maintainer accepted that for
 [PR #143](https://github.com/w3lt/lys/pull/143); see the
@@ -193,9 +205,25 @@ An older Lys build does not know the group. It ignores it and removes it the
 next time it saves settings, so going back to an older build loses the stored
 load configurations.
 
+### Secrets
+
+The `secrets` group holds the keys of the services Lys calls on the person's
+behalf; today only `tavilyApiKey`, the key `web_search` sends to Tavily. The
+key is opaque: Lys never changes it, and Rust and the backend accept 1 to 256
+visible ASCII characters (`!` through `~`), so it cannot hold a space or a line
+break. An invalid key makes the file fail to load, like an out-of-range
+temperature. The key is plain text, protected by the file's owner-only
+permissions; there is no keychain storage yet.
+
+The backend reads the key from this file when the desktop lists the tools,
+when a chat request offers `web_search`, and when the person checks the key, so
+a saved or removed key applies to the next of these without restarting
+anything. A turn keeps the key it started with.
+
 ## Settings updates
 
-The settings view provides Runtime, Model, Generation, and Agents panes. Model
+The settings view provides Runtime, Model, Generation, Agents, Tools, and
+Secrets panes. Model
 inventory, load, unload, and loaded-state health controls call the backend
 through the application store. The user's agents are stored by the backend,
 not in `settings.json`, and the built-in agents ship with the backend and are
@@ -214,6 +242,10 @@ only the `models` part of the `loadConfiguration` group. The save keeps the
 apply to the next load of the model they belong to. The desktop runs the two
 kinds of save one at a time, so neither writes back an older copy of the other
 group.
+
+The Secrets pane saves the Tavily API key only when the person presses Save or
+Enter, replacing only the `secrets` group in the same serialized way; Remove
+saves `null`.
 
 Runtime edits, including auto-start and default-model selection, remain in memory
 for the current session. Edits to `model.contextSize` also remain session-only.

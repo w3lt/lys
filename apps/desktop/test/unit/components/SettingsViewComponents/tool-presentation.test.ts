@@ -15,13 +15,21 @@ import {
   formatToolCallsStatus,
   formatToolGroupCount,
   formatToolGroupLabel,
-  formatToolTokenEstimate
+  formatToolTokenEstimate,
+  formatToolUnavailableNote,
+  isFixedInSecretsPane
 } from "@/components/SettingsViewComponents/tool-presentation"
-import { buildToolDefinition } from "../../support/toolFixtures"
+import {
+  buildBackendToolDefinition,
+  buildToolDefinition
+} from "../../support/toolFixtures"
 
 /** Tools listed in Settings order. */
 const READ_TEXT_FILE = buildToolDefinition("read_text_file")
 const FIND_FILES = buildToolDefinition("find_files")
+
+/** Backend tool that can lack what it needs to run. */
+const WEB_SEARCH = buildBackendToolDefinition("web_search")
 
 /**
  * Lists the arguments of a tool the shared schema accepted.
@@ -50,7 +58,11 @@ describe("calculateToolTokenEstimate", () => {
 describe("calculateOfferedToolTotals", () => {
   it("counts every tool while none was switched off", () => {
     expect(
-      calculateOfferedToolTotals([READ_TEXT_FILE, FIND_FILES], new Map())
+      calculateOfferedToolTotals(
+        [READ_TEXT_FILE, FIND_FILES],
+        new Map(),
+        new Map()
+      )
     ).toEqual({
       offeredToolCount: 2,
       offeredTokenCount:
@@ -66,11 +78,55 @@ describe("calculateOfferedToolTotals", () => {
     ])
 
     expect(
-      calculateOfferedToolTotals([READ_TEXT_FILE, FIND_FILES], choices)
+      calculateOfferedToolTotals(
+        [READ_TEXT_FILE, FIND_FILES],
+        choices,
+        new Map()
+      )
     ).toEqual({
       offeredToolCount: 1,
       offeredTokenCount: calculateToolTokenEstimate(FIND_FILES)
     })
+  })
+
+  it("leaves out a switched-on tool that cannot run now", () => {
+    expect(
+      calculateOfferedToolTotals(
+        [FIND_FILES, WEB_SEARCH],
+        new Map([["web_search", { isOn: true, approval: "ask" } as const]]),
+        new Map([["web_search", "api-key-missing"]])
+      )
+    ).toEqual({
+      offeredToolCount: 1,
+      offeredTokenCount: calculateToolTokenEstimate(FIND_FILES)
+    })
+  })
+})
+
+describe("formatToolUnavailableNote", () => {
+  it.each([
+    [
+      "api-key-missing",
+      "Needs a Tavily API key. Add one in Settings → Secrets."
+    ],
+    [
+      "api-key-invalid",
+      "The Tavily API key in settings.json isn't valid. Fix or remove secrets.tavilyApiKey in that file."
+    ],
+    [
+      "settings-unreadable",
+      "Lys couldn't read settings.json. Fix that file by hand."
+    ]
+  ] as const)("says what to do when the reason is %s", (reason, note) => {
+    expect(formatToolUnavailableNote(reason)).toBe(note)
+  })
+})
+
+describe("isFixedInSecretsPane", () => {
+  it("is true only for a missing key, which a save from the pane fixes", () => {
+    expect(isFixedInSecretsPane("api-key-missing")).toBe(true)
+    expect(isFixedInSecretsPane("api-key-invalid")).toBe(false)
+    expect(isFixedInSecretsPane("settings-unreadable")).toBe(false)
   })
 })
 

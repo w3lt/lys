@@ -1,13 +1,17 @@
 import {
   chatApi,
   chatApiStreamEventSchema,
+  chatBackendToolUnavailableProblemSchema,
   chatReplyEventSchema,
   chatReplyEventsApi,
   chatToolCallAnswerMismatchProblemSchema,
   chatToolCallNotPendingProblemSchema,
+  conversationAgentMissingProblemSchema,
   sendChatToolResultApi,
   stopChatReplyApi,
+  type BackendToolUnavailableReason,
   type ChatApiRequestBody,
+  type ChatBackendToolUnavailableProblem,
   type ChatApiStreamEvent,
   type ChatReplyEvent,
   type ChatReplyPathParams,
@@ -17,6 +21,49 @@ import {
 import { EventSourceParserStream } from "eventsource-parser/stream"
 
 import { DELETED_CONVERSATION_AGENT_MESSAGE } from "@/lib/conversation-agent-messages"
+
+/** What the person can do for each reason a backend tool cannot run. */
+const BACKEND_TOOL_UNAVAILABLE_ADVICE = Object.freeze({
+  "api-key-missing":
+    "no Tavily API key is saved. Add one in Settings → Secrets",
+  "api-key-invalid":
+    "the Tavily API key in settings.json isn't valid. Fix or remove secrets.tavilyApiKey in that file",
+  "settings-unreadable":
+    "Lys couldn't read settings.json. Fix that file by hand"
+} satisfies Readonly<Record<BackendToolUnavailableReason, string>>)
+
+/**
+ * Formats the message of a chat request refused for an unavailable tool.
+ *
+ * @param toolName - Tool that cannot run.
+ * @param reason - Why.
+ * @returns One sentence naming the tool, why, and what to do, including
+ * switching the tool off.
+ */
+function formatBackendToolUnavailableMessage(
+  toolName: string,
+  reason: BackendToolUnavailableReason
+): string {
+  return `${toolName} is unavailable: ${BACKEND_TOOL_UNAVAILABLE_ADVICE[reason]}, or switch ${toolName} off.`
+}
+
+/**
+ * Chat request refused because an offered backend tool cannot run now.
+ *
+ * @remarks Its type tells the chat view to read the tool list again; its
+ * message, built from the backend's problem, tells the person what to do.
+ * The subclass preserves the native `Error` contract.
+ */
+export class BackendToolUnavailableError extends Error {
+  /**
+   * Creates the error for one refused request.
+   *
+   * @param problem - Validated problem the backend sent.
+   */
+  public constructor(problem: ChatBackendToolUnavailableProblem) {
+    super(formatBackendToolUnavailableMessage(problem.toolName, problem.reason))
+  }
+}
 
 /** Transport options for reading one backend chat event stream. */
 export type ChatApiOptions = {
@@ -120,8 +167,9 @@ const MISSING_REPLY_MESSAGE = "The reply is no longer stored."
  * @returns An async generator yielding validated chat protocol events.
  * @throws If the request, stream read, JSON parse, or event validation fails;
  * with {@link DELETED_CONVERSATION_AGENT_MESSAGE} when the backend reports
- * that the continued conversation's agent no longer exists, which stored
- * nothing.
+ * that the continued conversation's agent no longer exists, and a
+ * {@link BackendToolUnavailableError} when an offered backend tool cannot run
+ * now; neither stored anything.
  */
 export async function* readChatEvents(
   payload: ChatApiRequestBody,
@@ -135,11 +183,8 @@ export async function* readChatEvents(
     signal
   })
 
-  if (
-    response.status === 409 &&
-    isConversationAgentMissingProblem(await readFailureBody(response))
-  ) {
-    throw new Error(DELETED_CONVERSATION_AGENT_MESSAGE)
+  if (response.status === 409) {
+    throw buildChatConflictError(await readFailureBody(response))
   }
   if (!response.ok || !response.body) {
     throw new Error(`Chat request failed: ${response.status}`)
@@ -345,7 +390,26 @@ async function* readServerSentEvents<TStreamEvent>(
  * problem.
  */
 function isConversationAgentMissingProblem(body: unknown): boolean {
-  return chatApi.responses[409].safeParse(body).success
+  return conversationAgentMissingProblemSchema.safeParse(body).success
+}
+
+/**
+ * Builds the error of a chat request the backend refused with 409.
+ *
+ * @param body - Untrusted problem body.
+ * @returns A {@link BackendToolUnavailableError} for an unavailable tool, the
+ * deleted-agent error for a missing conversation agent, or a generic error
+ * for any other 409 body.
+ */
+function buildChatConflictError(body: unknown): Error {
+  const toolProblem = chatBackendToolUnavailableProblemSchema.safeParse(body)
+  if (toolProblem.success) {
+    return new BackendToolUnavailableError(toolProblem.data)
+  }
+  if (isConversationAgentMissingProblem(body)) {
+    return new Error(DELETED_CONVERSATION_AGENT_MESSAGE)
+  }
+  return new Error("Chat request failed: 409")
 }
 
 /**

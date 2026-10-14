@@ -1,6 +1,7 @@
 import {
   agentNotFoundProblemSchema,
   chatApi,
+  chatBackendToolUnavailableProblemSchema,
   chatApiStreamEventSchema,
   conversationAgentMissingProblemSchema,
   conversationNotFoundProblemSchema
@@ -452,17 +453,70 @@ describe("updateFastifyWithChatRoute", () => {
       ...NEW_CONVERSATION_REQUEST,
       tools: {
         definitions: [],
-        backendToolNames: ["look_up_word", "web_search"]
+        backendToolNames: ["look_up_word", "fetch_url"]
       }
     })
 
     expect(response.statusCode).toBe(400)
     expect(response.json()).toMatchObject({
       message:
-        "The request offers backend tools the backend does not run: web_search"
+        "The request offers backend tools the backend does not run: fetch_url"
     })
     expect(testApp.createConversationTurn).not.toHaveBeenCalled()
     expect(testApp.completeChatStream).not.toHaveBeenCalled()
+  })
+
+  it("refuses a backend tool that cannot run now before storing a turn, naming it and why", async () => {
+    const testApp = await createChatRouteTestApp()
+    updateFastifyWithChatRoute(testApp.app, {
+      ...CHAT_ROUTE_OPTIONS,
+      generations: testApp.generations
+    })
+
+    const response = await sendChatRequest(testApp.app, {
+      ...NEW_CONVERSATION_REQUEST,
+      tools: {
+        definitions: [],
+        backendToolNames: ["look_up_word", "check_spelling"]
+      }
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.headers["content-type"]).toContain(
+      "application/problem+json"
+    )
+    expect(response.json()).toEqual({
+      type: "urn:lys:problem:chat:backend-tool-unavailable",
+      title: "Backend tool unavailable",
+      status: 409,
+      detail: "check_spelling is unavailable: no Tavily API key is saved.",
+      instance: "/api/v1/chat",
+      toolName: "check_spelling",
+      reason: "api-key-missing"
+    })
+    expect(
+      chatBackendToolUnavailableProblemSchema.safeParse(response.json()).success
+    ).toBe(true)
+    expect(testApp.createConversationTurn).not.toHaveBeenCalled()
+    expect(testApp.completeChatStream).not.toHaveBeenCalled()
+  })
+
+  it("still refuses an unknown backend tool before looking any up", async () => {
+    const testApp = await createChatRouteTestApp()
+    updateFastifyWithChatRoute(testApp.app, {
+      ...CHAT_ROUTE_OPTIONS,
+      generations: testApp.generations
+    })
+
+    const response = await sendChatRequest(testApp.app, {
+      ...NEW_CONVERSATION_REQUEST,
+      tools: {
+        definitions: [],
+        backendToolNames: ["check_spelling", "fetch_url"]
+      }
+    })
+
+    expect(response.statusCode).toBe(400)
   })
 
   it.each([

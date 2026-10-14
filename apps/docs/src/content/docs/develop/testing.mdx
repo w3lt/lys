@@ -51,7 +51,20 @@ contracts, schemas, or behavior that crosses package boundaries.
 - `apps/backend/test/unit` contains a Vitest unit suite. Run it once with
   `pnpm --filter @lys/backend test`, or rerun it on every change with
   `pnpm --filter @lys/backend run test:watch`. It needs no LM Studio server,
-  network access, or `LYS_HOME`.
+  network access, or `LYS_HOME`. When a run ends, it warns that the live suite
+  did not run.
+- `apps/backend/test/live` contains a small live suite that calls the real
+  Tavily API. Run it with `pnpm --filter @lys/backend test:live`, with a real
+  Tavily API key in the `LYS_TEST_TAVILY_API_KEY` environment variable; a case
+  that needs the key fails without it. Each run sends two real searches, at
+  one Tavily credit each, and four usage requests with the real key, at two
+  credits each, so it spends ten credits. It shows what only the real
+  service can: that a real search and a real key check succeed, and that
+  Tavily rejects a key it never issued. The unit suite covers what Tavily
+  cannot be made to do on demand, such as a redirect, an untrusted
+  certificate, an oversized or unreadable answer, and other HTTP errors,
+  against a local server. Run the live suite when you change how Lys talks to
+  Tavily.
 - `apps/desktop/test/unit` contains a Vitest unit suite for the renderer: the
   HTTP and Tauri API wrappers, the stores and their pure logic, and the
   components, renderer hooks, and views, rendered with Testing Library in
@@ -67,9 +80,9 @@ contracts, schemas, or behavior that crosses package boundaries.
 - The `Desktop unit tests` workflow runs that typecheck and the desktop suite on
   every pull request and on every push to `main`.
 - The `Backend unit tests` workflow runs
-  `pnpm --filter @lys/backend exec tsc --noEmit`, which also typechecks the
-  suite, and the backend suite on every pull request and on every push to
-  `main`.
+  `pnpm --filter @lys/backend exec tsc --noEmit`, which also typechecks both
+  backend suites, and the backend unit suite on every pull request and on every
+  push to `main`.
 - The shared packages have no package-level test scripts or tracked test suites.
 - `apps/backend` also exposes a TypeScript validation path through
   `pnpm --filter @lys/backend exec tsc --noEmit`.
@@ -78,8 +91,8 @@ contracts, schemas, or behavior that crosses package boundaries.
 
 ## Coming soon
 
-Backend coverage is unit-level only: the backend integration and end-to-end
-suites are tracked in [issue #44](https://github.com/w3lt/lys/issues/44) and
+Apart from the live suite for Tavily, backend coverage is unit-level only: the
+backend integration and end-to-end suites are tracked in [issue #44](https://github.com/w3lt/lys/issues/44) and
 [issue #45](https://github.com/w3lt/lys/issues/45). The desktop unit suite runs
 in jsdom, so layout, scrolling, real pointer and drag behavior, and
 assistive-technology output belong to the end-to-end suite. Native Tauri tests

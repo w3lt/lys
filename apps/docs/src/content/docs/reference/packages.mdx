@@ -37,6 +37,8 @@ package.
   creates, edits, and deletes stored agents, through the backend agent routes.
 - The composer's agent menu selects the agent that answers a new
   conversation.
+- The Secrets settings pane saves the Tavily API key of `web_search` through
+  Tauri and checks it through the backend.
 
 ### `@lys/backend`
 
@@ -44,7 +46,8 @@ package.
 - Framework: Fastify
 - Important runtime dependencies: `@fastify/sse`, `@lmstudio/sdk`, `openai`,
   `fastify-type-provider-zod`, and `@mozilla/readability` with `linkedom`,
-  which extract a web page's main text for `read_page`
+  which extract a web page's main text for `read_page`. `web_search` uses
+  Node's `node:https` and no search SDK
 - `build` (root `pnpm backend:build`) bundles `src/index.ts` with esbuild into
   `dist/backend.mjs` and copies the two prompt files beside it; `build.sh`
   installs that output as the release backend.
@@ -63,12 +66,17 @@ package.
   list, get, rename, delete, and missing-conversation contracts, and the agent
   list, create, get, update, delete, missing-agent, and taken-code contracts
 - Defines the backend loopback host and port constants used by both backend and
-  desktop
+  desktop, and the Tavily host that `web_search` sends queries to and the
+  approval card names
+- Describes the backend tool list with each tool's availability, the
+  `web_search` key check, and the backend-tool-unavailable chat problem
+- Holds the rule, applied by both the backend and the desktop, that refuses a
+  `web_search` query holding a character a person cannot reliably see
 
 ### `@lys/share`
 
 - Exports Zod schemas and inferred TypeScript types for conversations,
-  messages, and agents
+  messages, agents, tools, and the Tavily API key format
 - Used by both backend persistence code and desktop chat state; the agent
   schemas and limits are used by the backend, `@lys/protocol`, and the desktop
   agent store and editor

@@ -1,3 +1,7 @@
+import type {
+  BackendToolUnavailableReason,
+  UnavailableBackendTool
+} from "@lys/protocol"
 import type { ToolDefinition } from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
 import {
@@ -30,6 +34,13 @@ const CLIENT_TOOLS = [
 /** Tool the backend lists: it sends requests off this machine. */
 const READ_PAGE = buildBackendToolDefinition("read_page")
 
+/** Second tool the backend lists, which can lack what it needs to run. */
+const WEB_SEARCH = buildBackendToolDefinition("web_search")
+
+/** Availability of a list in which every tool can run now. */
+const ALL_TOOLS_AVAILABLE: ReadonlyMap<string, BackendToolUnavailableReason> =
+  new Map()
+
 /** Route key of the backend's tool list. */
 const BACKEND_TOOLS_ROUTE = "GET /api/v1/tools"
 
@@ -37,12 +48,15 @@ const BACKEND_TOOLS_ROUTE = "GET /api/v1/tools"
  * Builds the backend's tool-list route.
  *
  * @param tools - Tools the backend lists.
+ * @param unavailableTools - Listed tools that cannot run now, and why; none
+ * by default.
  * @returns The route answering with them.
  */
 function buildBackendToolsRoute(
-  tools: readonly ToolDefinition[] = [READ_PAGE]
+  tools: readonly ToolDefinition[] = [READ_PAGE],
+  unavailableTools: readonly UnavailableBackendTool[] = []
 ): BackendRoute {
-  return () => buildJsonResponse(200, { tools })
+  return () => buildJsonResponse(200, { tools, unavailableTools })
 }
 
 /**
@@ -109,7 +123,8 @@ describe("buildChatToolOffer", () => {
       buildChatToolOffer({
         list: {
           status: "loaded",
-          tools: [readTextFile, findFiles, searchFiles, READ_PAGE]
+          tools: [readTextFile, findFiles, searchFiles, READ_PAGE],
+          unavailableTools: ALL_TOOLS_AVAILABLE
         },
         toolChoices: new Map([["read_text_file", SWITCHED_OFF]])
       })
@@ -124,13 +139,49 @@ describe("buildChatToolOffer", () => {
 
     expect(
       buildChatToolOffer({
-        list: { status: "loaded", tools: [findFiles, READ_PAGE] },
+        list: {
+          status: "loaded",
+          tools: [findFiles, READ_PAGE],
+          unavailableTools: ALL_TOOLS_AVAILABLE
+        },
         toolChoices: new Map([["read_page", SWITCHED_ON]])
       })
     ).toEqual({
       status: "offered",
       offer: { definitions: [findFiles], backendToolNames: ["read_page"] }
     })
+  })
+
+  it("leaves out a switched-on backend tool that cannot run now", () => {
+    expect(
+      buildChatToolOffer({
+        list: {
+          status: "loaded",
+          tools: [READ_PAGE, WEB_SEARCH],
+          unavailableTools: new Map([["web_search", "api-key-missing"]])
+        },
+        toolChoices: new Map([
+          ["read_page", SWITCHED_ON],
+          ["web_search", SWITCHED_ON]
+        ])
+      })
+    ).toEqual({
+      status: "offered",
+      offer: { definitions: [], backendToolNames: ["read_page"] }
+    })
+  })
+
+  it("offers no tools when the only switched-on tool cannot run now", () => {
+    expect(
+      buildChatToolOffer({
+        list: {
+          status: "loaded",
+          tools: [WEB_SEARCH],
+          unavailableTools: new Map([["web_search", "settings-unreadable"]])
+        },
+        toolChoices: new Map([["web_search", SWITCHED_ON]])
+      })
+    ).toEqual({ status: "not-offered" })
   })
 
   it.each([
@@ -140,7 +191,11 @@ describe("buildChatToolOffer", () => {
   ])("offers no tools when %s", (_label, tools) => {
     expect(
       buildChatToolOffer({
-        list: { status: "loaded", tools },
+        list: {
+          status: "loaded",
+          tools,
+          unavailableTools: ALL_TOOLS_AVAILABLE
+        },
         toolChoices: new Map([
           ["read_text_file", SWITCHED_OFF],
           ["find_files", SWITCHED_OFF]
@@ -207,11 +262,31 @@ describe("useToolStore", () => {
       expect(whileReading).toEqual({ status: "loading" })
       expect(useToolStore.getState().list).toEqual({
         status: "loaded",
-        tools: [...CLIENT_TOOLS, READ_PAGE]
+        tools: [...CLIENT_TOOLS, READ_PAGE],
+        unavailableTools: new Map()
       })
       expect(backend.requests.map((request) => request.url)).toEqual([
         "http://127.0.0.1:12345/api/v1/tools"
       ])
+    })
+
+    it("keeps why each backend tool that cannot run now cannot, by name", async () => {
+      startNativeHostFake({ list_tools: () => CLIENT_TOOLS })
+      startBackendFake({
+        [BACKEND_TOOLS_ROUTE]: buildBackendToolsRoute(
+          [READ_PAGE, WEB_SEARCH],
+          [{ name: "web_search", reason: "api-key-invalid" }]
+        )
+      })
+      const useToolStore = await loadFreshToolStore()
+
+      await useToolStore.getState().loadTools()
+
+      expect(useToolStore.getState().list).toEqual({
+        status: "loaded",
+        tools: [...CLIENT_TOOLS, READ_PAGE, WEB_SEARCH],
+        unavailableTools: new Map([["web_search", "api-key-invalid"]])
+      })
     })
 
     it("joins a read already in flight", async () => {

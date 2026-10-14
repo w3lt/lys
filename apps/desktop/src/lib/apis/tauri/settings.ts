@@ -1,11 +1,12 @@
-import type { ModelLoadConfiguration } from "@lys/share"
+import { tavilyApiKeySchema, type ModelLoadConfiguration } from "@lys/share"
 
 import type {
   GenerationSettings,
   LoadConfigurationSettings,
   LysSettings,
   ModelSettings,
-  RuntimeSettings
+  RuntimeSettings,
+  SecretsSettings
 } from "@/lib/store/settings"
 import { invoke } from "@tauri-apps/api/core"
 
@@ -25,6 +26,17 @@ type SettingsDocumentLoadConfiguration = {
 }
 
 /**
+ * The `secrets` group as the settings document holds it.
+ *
+ * @remarks Matches Rust's `SecretsSettings`; the key is plain text here and
+ * branded only after {@link buildSecretsSettings} parses it.
+ */
+type SettingsDocumentSecrets = {
+  /** Saved key, or null. */
+  readonly tavilyApiKey: string | null
+}
+
+/**
  * Complete settings document as the Tauri settings commands exchange it.
  *
  * @remarks Matches Rust's `LysSettings` field for field: `load_settings`
@@ -40,6 +52,27 @@ type SettingsDocument = {
   readonly generation: GenerationSettings
   /** Default and per-model load settings, the latter as one object. */
   readonly loadConfiguration: SettingsDocumentLoadConfiguration
+  /** Secrets, with the key as plain text. */
+  readonly secrets: SettingsDocumentSecrets
+}
+
+/**
+ * Builds the renderer's secrets from the document group.
+ *
+ * @param secrets - Group Rust validated.
+ * @returns The secrets with the key branded.
+ * @throws If the key fails the shared key schema, which Rust's validation
+ * rules out; the error never contains the key.
+ */
+function buildSecretsSettings(
+  secrets: SettingsDocumentSecrets
+): SecretsSettings {
+  if (secrets.tavilyApiKey === null) return { tavilyApiKey: null }
+  const parsed = tavilyApiKeySchema.safeParse(secrets.tavilyApiKey)
+  if (!parsed.success) {
+    throw new Error("The settings file holds an invalid Tavily API key.")
+  }
+  return { tavilyApiKey: parsed.data }
 }
 
 /**
@@ -63,7 +96,8 @@ function buildLysSettings(settingsDocument: SettingsDocument): LysSettings {
     runtime: settingsDocument.runtime,
     model: settingsDocument.model,
     generation: settingsDocument.generation,
-    loadConfiguration
+    loadConfiguration,
+    secrets: buildSecretsSettings(settingsDocument.secrets)
   }
 }
 
@@ -85,7 +119,8 @@ function buildSettingsDocument(settings: LysSettings): SettingsDocument {
     runtime: settings.runtime,
     model: settings.model,
     generation: settings.generation,
-    loadConfiguration
+    loadConfiguration,
+    secrets: { tavilyApiKey: settings.secrets.tavilyApiKey }
   }
 }
 
@@ -159,4 +194,22 @@ export async function saveLoadConfigurationSettings(
     ...persistedSettings,
     loadConfiguration: savedLoadConfiguration
   })
+}
+
+/**
+ * Persists the secrets while preserving everything else already on disk.
+ * @param secrets - Secrets to save; a null key removes the saved one.
+ * @returns Resolves after the merged settings document is written by Tauri,
+ * which replaces the file atomically and owner-only.
+ * @throws The native load or save rejection; no replacement is written if
+ * loading fails.
+ * @remarks The application store serializes this read-modify-write operation
+ * with the other settings-group saves, so that overlapping saves cannot write
+ * back each other's stale group.
+ */
+export async function saveSecretsSettings(
+  secrets: SecretsSettings
+): Promise<void> {
+  const persistedSettings = await loadSettings()
+  await saveSettings({ ...persistedSettings, secrets })
 }

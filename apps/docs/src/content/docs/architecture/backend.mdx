@@ -28,7 +28,7 @@ the services together.
 | Conversation routes   | `src/modules/conversation/routes` | Lists, searches, retrieves, renames, and deletes stored conversations.                                                                                                                                                                                                                                    |
 | Agent routes          | `src/modules/agent/routes`        | Lists the built-in and stored agents, retrieves one, and creates, changes, and deletes stored agents; changing or deleting a built-in agent is refused.                                                                                                                                                   |
 | LLM routes            | `src/modules/llm/routes`          | Lists LM Studio models, checks loaded-model health, loads or unloads a model, and reports or refreshes the LM Studio connection.                                                                                                                                                                          |
-| Built-in tools        | `src/modules/tool/builtIn`        | Tools the backend runs once the desktop allows a call. `read_page` (`web/`) reads one public web page.                                                                                                                                                                                                    |
+| Built-in tools        | `src/modules/tool/builtIn`        | Tools the backend runs once the desktop allows a call. `read_page` (`web/`) reads one public web page; `web_search` (`web/`) searches the web through Tavily.                                                                                                                                             |
 | Tool routes           | `src/modules/tool/routes`         | Lists the tools the backend runs.                                                                                                                                                                                                                                                                         |
 | Health route          | `src/modules/health/routes`       | Returns a simple `{ ok: true }` response.                                                                                                                                                                                                                                                                 |
 
@@ -132,11 +132,29 @@ A built-in tool implements `BuiltInTool` (`src/modules/tool/builtIn/builtInTool.
 `parseToolCall` checks a call's arguments before the person is asked and
 returns either an explanation the model reads or a run function. The run
 returns the text the model reads, or rejects only with the Stop reason or a
-defect. `createBuiltInTools()` builds the list once at startup;
-`GET /api/v1/tools` returns their definitions, and the desktop offers the
-switched-on ones by name.
+defect.
 
-`read_page` is the only built-in tool. Its arguments are `url` and an
+Each entry of the registry pairs a definition with a `BuiltInToolProvider`,
+whose `findTurnTool()` gives the tool for one turn or says why it cannot run
+now (`api-key-missing`, `api-key-invalid`, or `settings-unreadable`).
+`createBuiltInTools()` builds the list once at startup: `read_page`, always
+ready through `ReadyBuiltInToolProvider`, then `web_search`, found by
+`WebSearchToolProvider`. `GET /api/v1/tools` returns every definition and
+looks up every tool again to list the ones that cannot run now; the desktop
+offers the switched-on, available ones by name. The chat route looks up every
+offered backend tool before it looks up the agent and stores the turn, and
+answers 409 `backend-tool-unavailable`, storing nothing, when one cannot run.
+The turn keeps the tools it found then.
+
+The address-checked connection (`web/webConnection.ts`: the checked lookup,
+the connected-socket check, and Lys's user agent) and the formatting of
+untrusted web text (`web/untrustedText.ts`: delimiter-free text, single-line
+fields without control characters, excerpts, and the citation rule) are
+shared by both web tools.
+
+### `read_page`
+
+Its arguments are `url` and an
 optional `focus`. A URL longer than 2,048 characters, not absolute `http` or
 `https`, carrying a username or password, or naming this machine or a blocked
 IP address is answered at once. Once allowed, a read:
@@ -163,12 +181,74 @@ IP address is answered at once. Once allowed, a read:
    untrusted and an instruction to cite the page, and notes a page with less
    than 200 characters of main text, which may need JavaScript. Every run of
    three or more `<` or `>` in page text is shortened to two, so no page can
-   write a delimiter.
+   write a delimiter. Characters that show nothing (Unicode default-ignorable
+   code points, such as zero-width, direction, and tag characters) belong to a
+   run when they sit between its brackets, and are dropped with it, so they
+   cannot hide a delimiter either.
 
 The whole read must finish within 15 seconds. Failures
 the model can act on, such as an HTTP error status, a non-HTML body, or a page
 without any main text, become the call's result. Pages that need JavaScript
 cannot be read.
+
+### `web_search`
+
+`web_search(query)` searches the web through the Tavily Search API with the
+person's API key. The query is trimmed and must have 1 to 400 characters, none
+of which is a Unicode default-ignorable code point (such as a zero-width,
+direction, tag, or variation selector character, or a Hangul filler), a
+control, format, surrogate, private-use, or unassigned code point, or a line
+or paragraph separator; otherwise the call is answered at once. Such
+characters show nothing or can reorder text, so they are refused rather than
+removed, and the approval card shows exactly the query sent. An emoji written
+with a variation selector, such as `❤️`, is refused too. The rule is
+`hasHiddenWebSearchQueryCharacter` in `@lys/protocol`, which the desktop
+applies too.
+
+- **Key.** `WebSearchToolProvider` reads `secrets.tavilyApiKey` from the
+  desktop's settings file (`settingsFilePath`, `$LYS_HOME/settings.json`) with
+  `readTavilyApiKey` (`src/infrastructure/settings/tavilyApiKeyFile.ts`),
+  once per tool list request, chat request, and key check. The desktop host is
+  the file's only writer. The reader reads at most 1 MiB, takes only that
+  field, and drops every parse failure without logging it, because JSON parse
+  messages quote the text. A missing file, group, or `null` means no key; a
+  value that fails the key format is invalid; anything else unreadable is
+  `settings-unreadable`. A turn's tool holds the key read when the turn
+  started.
+- **Request** (`web/tavilyRequest.ts`, `web/tavilyApi.ts`). Once allowed, one
+  `POST https://api.tavily.com/search` asks for a basic search (one credit) of
+  at most 5 results, without Tavily's generated answer, raw page text, or
+  images. The client uses `node:https` with certificate verification forced on
+  and TLS 1.2 at least, the same address rule as `read_page` on every resolved
+  address and the connected socket, one connection per request, no cookies or
+  proxy, and the key only in the `authorization` header. No redirect is
+  followed. The whole request must finish within 15 seconds, and a body larger
+  than 1 MiB, not `application/json` in UTF-8, or compressed is refused.
+- **Evidence** (`web/searchEvidence.ts`). A result is kept only when its URL
+  passes `read_page`'s URL rules, once per URL; titles are cut to 300
+  characters and snippets to 500, flattened onto one line. The query line,
+  the result count, and an untrusted-content notice precede the results,
+  which sit between `<<<search results>>>` delimiters; a closing note says a
+  snippet is only an excerpt to read before relying on it and repeats the
+  citation rule. No results produce a plain statement that nothing was found.
+- **Failures.** A rejected key (401/403), rate limiting (429, with its
+  `Retry-After` seconds), used-up credits (432/433), other HTTP errors, a
+  redirect, a timeout, an unreachable host, an address refused by the rule,
+  and an unreadable or oversized answer each become the call's result in
+  Lys's own words; Tavily's error text is never passed on.
+
+`POST /api/v1/tools/web_search/key-check`, whose body must be the empty JSON
+object `{}`, reads the key and asks Tavily's `GET /usage` about it, through the
+same client and limits, and answers
+`accepted` (with the plan's credits when reported, a fraction rounded up to a
+whole credit), `rejected`,
+`unavailable`, or `failed`. Tavily charges two credits for each `GET /usage`,
+although its documentation lists no cost for it; the check still uses it
+because only that answer reports the plan's credits, which Test shows. Each
+check sends the key to Tavily, so it is a
+`POST` with a JSON body, which a page on another site cannot send without a
+CORS preflight that the backend refuses; another body is answered with 400, or
+415 for a media type Fastify cannot parse, before the key is read.
 
 ## Persistence
 

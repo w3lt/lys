@@ -134,6 +134,28 @@ describe("createSingletonServices", () => {
     )
   })
 
+  it("lists read_page, then web_search found by the bundle's web search tool provider", async () => {
+    const { factories } = createRecordedFactories()
+
+    const services = await createSingletonServices(
+      TEST_BACKEND_CONFIG,
+      createFailureReporters(),
+      factories
+    )
+    onTestFinished(async () => await closeSingletonServices(services))
+
+    expect(services.builtInTools.map((entry) => entry.definition.name)).toEqual(
+      ["read_page", "web_search"]
+    )
+    expect(services.builtInTools[1]?.provider).toBe(
+      services.webSearchToolProvider
+    )
+    expect(await services.webSearchToolProvider.findTurnTool()).toEqual({
+      status: "unavailable",
+      reason: "api-key-missing"
+    })
+  })
+
   it("returns a frozen bundle of the services", async () => {
     const { factories, acquisitions } = createRecordedFactories()
 

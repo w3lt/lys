@@ -49,8 +49,12 @@ The backend itself depends on:
 - an LM Studio instance reachable at `127.0.0.1:1234` for model features;
   startup does not require it
 - outbound HTTP and HTTPS access and a working name resolver for the
-  `read_page` tool only; nothing else needs the network, and a read that
-  cannot connect becomes the tool call's result
+  `read_page` and `web_search` tools only; nothing else needs the network, and
+  a read or search that cannot connect becomes the tool call's result
+- for `web_search`, a Tavily Search API key (Tavily's free plan gives 1,000
+  credits a month; a basic search costs one, and a key check two), saved in
+  Settings → Secrets;
+  without it `web_search` is unavailable and never offered
 
 The backend's chat and model services are both wired to that LM Studio address.
 The backend opens its HTTP listener at `127.0.0.1:12345` without waiting for LM

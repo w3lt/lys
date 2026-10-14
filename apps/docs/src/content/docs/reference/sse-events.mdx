@@ -119,8 +119,8 @@ request offered, and `arguments` holds the model's values by argument name:
 strings, numbers, or Booleans, already checked against the tool's definition.
 An optional argument the model left out is absent. A call whose arguments do
 not match never reaches the client; the backend answers it itself, and the
-model reads the error. A call of a backend tool, such as `read_page`, has the
-same shape; its arguments have also passed the tool's own checks.
+model reads the error. A call of a backend tool, such as `read_page` or `web_search`,
+has the same shape; its arguments have also passed the tool's own checks.
 
 The client answers the call with the
 [tool-result route](/reference/api/#tool-results): with its result for a

@@ -5,7 +5,7 @@ import type {
 } from "@lys/protocol"
 import type { OpenAIFunctionTool, ToolDefinition } from "@lys/share"
 import { v7 as uuidv7 } from "uuid"
-import type { BuiltInTool, BuiltInToolEntry } from "../tool/builtIn/builtInTool"
+import type { BuiltInTool, TurnBuiltInTool } from "../tool/builtIn/builtInTool"
 import AgentTool from "../tool/tool"
 import type {
   ContextToolCall,
@@ -79,7 +79,7 @@ type ToolResultMessage = Extract<ReplyContextMessage, { role: "tool" }>
  *
  * @param clientTools - Validated definitions of the client tools, each name
  * once.
- * @param builtInTools - Backend tools offered for the turn, each name once.
+ * @param builtInTools - Backend tools found for the turn, each name once.
  * @returns The tools by name: client tools in offer order, then backend
  * tools in offer order.
  * @throws If a backend tool has the name of a client tool; the chat request
@@ -87,7 +87,7 @@ type ToolResultMessage = Extract<ReplyContextMessage, { role: "tool" }>
  */
 export function buildAgentToolset(
   clientTools: readonly ToolDefinition[],
-  builtInTools: readonly BuiltInToolEntry[]
+  builtInTools: readonly TurnBuiltInTool[]
 ): AgentToolset {
   const tools = new Map<string, OfferedTool>(
     clientTools.map(buildClientToolEntry)

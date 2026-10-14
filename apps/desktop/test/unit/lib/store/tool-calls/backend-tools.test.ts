@@ -65,13 +65,56 @@ describe("parseBackendToolInput", () => {
     })
   })
 
-  it("rejects a backend tool it has no description for, so the tool is not allowed", () => {
-    const call = buildToolCall(1, "web_search", { query: "lys" })
+  it("parses a web search call into the trimmed query and the host it is sent to", () => {
+    const call = buildToolCall(1, "web_search", {
+      query: "  thời tiết Hà Nội \n"
+    })
+
+    expect(parseBackendToolInput(call)).toEqual({
+      status: "parsed",
+      input: {
+        runner: "backend",
+        toolName: "web_search",
+        query: "thời tiết Hà Nội",
+        host: "api.tavily.com"
+      }
+    })
+  })
+
+  // Each would leave the card showing less than the query sent to Tavily,
+  // or describe a query the backend never sends.
+  it.each([
+    ["a blank query", { query: " \n\t " }],
+    ["a query that is not text", { query: 42 }],
+    ["no query", {}],
+    [
+      "a query hiding text in tag characters",
+      { query: "weather\u{e0073}\u{e0073}\u{e006e}" }
+    ],
+    [
+      "a query hiding text in variation selectors",
+      { query: "weather\u{e0163}\u{e0163}\u{e015e}" }
+    ],
+    ["a query with a zero-width space", { query: "weather\u200bhanoi" }],
+    ["a query with a direction override", { query: "weather \u202eionah" }],
+    ["a query with a line break inside", { query: "weather\nhanoi" }]
+  ])("rejects a web search call with %s", (_label, callArguments) => {
+    const call = buildToolCall(1, "web_search", callArguments)
 
     expect(parseBackendToolInput(call)).toEqual({
       status: "rejected",
       content:
-        'The desktop cannot describe the backend tool "web_search", so it was not run.'
+        "The arguments do not match web_search: query: expected text that is not blank and holds no character hidden on screen."
+    })
+  })
+
+  it("rejects a backend tool it has no description for, so the tool is not allowed", () => {
+    const call = buildToolCall(1, "read_feed", { url: "https://example.com/" })
+
+    expect(parseBackendToolInput(call)).toEqual({
+      status: "rejected",
+      content:
+        'The desktop cannot describe the backend tool "read_feed", so it was not run.'
     })
   })
 })

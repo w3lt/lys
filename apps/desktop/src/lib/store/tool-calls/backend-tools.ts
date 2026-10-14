@@ -1,16 +1,36 @@
-import type { ChatToolAnswer, ChatToolCall } from "@lys/protocol"
+import {
+  hasHiddenWebSearchQueryCharacter,
+  TAVILY_API_HOST,
+  WEB_SEARCH_TOOL_NAME,
+  type ChatToolAnswer,
+  type ChatToolCall
+} from "@lys/protocol"
 
 /** Validated input of one call to a tool the backend runs. */
-export type BackendToolInput = {
-  /** The backend runs the tool once the call is allowed. */
-  readonly runner: "backend"
-  /** The read-page tool. */
-  readonly toolName: "read_page"
-  /** Normalized absolute http or https URL of the page. */
-  readonly url: string
-  /** Host the request goes to, with its port when it has one. */
-  readonly host: string
-}
+export type BackendToolInput =
+  | {
+      /** The backend runs the tool once the call is allowed. */
+      readonly runner: "backend"
+      /** The read-page tool. */
+      readonly toolName: "read_page"
+      /** Normalized absolute http or https URL of the page. */
+      readonly url: string
+      /** Host the request goes to, with its port when it has one. */
+      readonly host: string
+    }
+  | {
+      /** The backend runs the tool once the call is allowed. */
+      readonly runner: "backend"
+      /** The web search tool. */
+      readonly toolName: typeof WEB_SEARCH_TOOL_NAME
+      /**
+       * Query exactly as the backend sends it: trimmed, not blank, and with
+       * no character a person cannot reliably see.
+       */
+      readonly query: string
+      /** Host of the search service the query is sent to. */
+      readonly host: string
+    }
 
 /** Outcome of checking one backend call's tool name and arguments. */
 export type BackendToolInputResult =
@@ -87,6 +107,36 @@ function parseReadPageInput(call: ChatToolCall): BackendToolInputResult {
 }
 
 /**
+ * Parses the arguments of a web search call.
+ *
+ * @param call - Call naming the web search tool.
+ * @returns `parsed` with the query trimmed exactly as the backend trims it
+ * and the search service's host, or `rejected` when the query is not text,
+ * is blank, or holds a character a person cannot reliably see, so that the
+ * card never shows less than the query sent.
+ * @remarks The backend checked the query before sending the call, its
+ * length included; this check keeps the card from describing a query the
+ * backend would not send.
+ */
+function parseWebSearchInput(call: ChatToolCall): BackendToolInputResult {
+  const { query } = call.arguments
+  const trimmed = typeof query === "string" ? query.trim() : ""
+  if (trimmed === "" || hasHiddenWebSearchQueryCharacter(trimmed)) {
+    return buildRejectedInput(
+      `The arguments do not match ${call.toolName}: query: expected text that is not blank and holds no character hidden on screen.`
+    )
+  }
+
+  const input: BackendToolInput = Object.freeze({
+    runner: "backend",
+    toolName: WEB_SEARCH_TOOL_NAME,
+    query: trimmed,
+    host: TAVILY_API_HOST
+  })
+  return Object.freeze({ status: "parsed", input })
+}
+
+/**
  * Parses one call into the input of a backend tool the desktop can describe.
  *
  * @param call - Call whose arguments the backend checked against the tool's
@@ -98,6 +148,7 @@ export function parseBackendToolInput(
   call: ChatToolCall
 ): BackendToolInputResult {
   if (call.toolName === "read_page") return parseReadPageInput(call)
+  if (call.toolName === WEB_SEARCH_TOOL_NAME) return parseWebSearchInput(call)
   return buildRejectedInput(
     `The desktop cannot describe the backend tool "${call.toolName}", so it was not run.`
   )

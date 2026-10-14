@@ -50,3 +50,17 @@ export const LMSTUDIO_HOST = "127.0.0.1"
  */
 export const LMSTUDIO_PORT = 1234
 // ============== ENV CONFIG ============== //
+
+// ============== EXTERNAL SERVICES ============== //
+/**
+ * Host of the Tavily Search API, the only service the `web_search` tool sends
+ * queries to.
+ *
+ * @remarks The backend sends every Tavily request to `https://` followed by
+ * this host, and the desktop's approval card names it as where a query goes,
+ * so both read this one value. It is not persisted. Changing it changes where
+ * queries and the person's Tavily API key are sent and requires a coordinated
+ * desktop and backend release.
+ */
+export const TAVILY_API_HOST = "api.tavily.com"
+// ============== EXTERNAL SERVICES ============== //

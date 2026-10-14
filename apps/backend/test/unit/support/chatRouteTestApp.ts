@@ -11,7 +11,12 @@ import ReplyGenerationRegistry from "../../../src/modules/chat/replyGenerationRe
 import { createChatSseTestApp } from "./chatSseRoute"
 import { openConversationTestServices } from "./conversationDatabase"
 import type { TestFastify } from "./fastifyTestApp"
-import { LOOK_UP_WORD_TOOL, ScriptedBuiltInTool } from "./scriptedBuiltInTool"
+import {
+  CHECK_SPELLING_TOOL,
+  LOOK_UP_WORD_TOOL,
+  ScriptedBuiltInTool
+} from "./scriptedBuiltInTool"
+import { ScriptedBuiltInToolProvider } from "./scriptedBuiltInToolProvider"
 
 /** Published path of the chat route. */
 const CHAT_PATH = "/api/v1/chat"
@@ -62,8 +67,9 @@ export type ChatRouteTestApp = TestFastify &
  * keeps its records on the same in-memory database and builds the built-in
  * agents with {@link TEST_BUILT_IN_AGENT_PROMPTS}; every agent's model calls
  * go through the `completeChatStream` spy. The decorated history reader reads
- * the same database. The only backend tool is the scripted `look_up_word`
- * tool. When the test finishes, the registry is disposed
+ * the same database. The backend tools are the scripted `look_up_word`
+ * tool, always ready, and `check_spelling`, whose provider is never ready
+ * (`api-key-missing`). When the test finishes, the registry is disposed
  * first, so every generation it holds has stored its final state before the
  * in-memory conversation database is closed.
  */
@@ -109,7 +115,17 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
     Object.freeze([
       Object.freeze({
         definition: LOOK_UP_WORD_TOOL,
-        tool: new ScriptedBuiltInTool()
+        provider: new ScriptedBuiltInToolProvider({
+          status: "ready",
+          tool: new ScriptedBuiltInTool()
+        })
+      }),
+      Object.freeze({
+        definition: CHECK_SPELLING_TOOL,
+        provider: new ScriptedBuiltInToolProvider({
+          status: "unavailable",
+          reason: "api-key-missing"
+        })
       })
     ])
   )

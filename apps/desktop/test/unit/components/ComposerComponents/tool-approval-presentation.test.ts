@@ -65,6 +65,19 @@ describe("formatToolCallSummary", () => {
       "Read https://example.com:8443/docs?lang=en. Sends a request to example.com:8443."
     )
   })
+
+  it("quotes a web search's full query and names where it is sent", () => {
+    expect(
+      formatToolCallSummary({
+        runner: "backend",
+        toolName: "web_search",
+        query: "thời tiết Hà Nội",
+        host: "api.tavily.com"
+      })
+    ).toBe(
+      "Search the web for “thời tiết Hà Nội”. Sends the query to Tavily (api.tavily.com)."
+    )
+  })
 })
 
 describe("formatToolCallAnnouncement", () => {

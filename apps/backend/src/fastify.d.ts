@@ -8,6 +8,7 @@ import type StoredConversationTurns from "./modules/conversation/turns"
 import type LlmRuntimeService from "./modules/llm/llmRuntimeService"
 import type LlmService from "./modules/llm/llmService"
 import type { BuiltInToolEntry } from "./modules/tool/builtIn/builtInTool"
+import type WebSearchToolProvider from "./modules/tool/builtIn/web/webSearchToolProvider"
 
 declare module "fastify" {
   /** Fastify application services installed by the singleton-services plugin. */
@@ -28,5 +29,10 @@ declare module "fastify" {
     agentService: AgentService
     /** Every tool the backend runs, in the order Settings lists them. */
     builtInTools: readonly BuiltInToolEntry[]
+    /**
+     * Application-scoped lookup of the web search tool and checks of the
+     * saved Tavily key.
+     */
+    webSearchToolProvider: WebSearchToolProvider
   }
 }

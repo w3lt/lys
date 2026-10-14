@@ -1,8 +1,8 @@
-import type { ChatToolOffer } from "@lys/protocol"
+import type { BackendToolUnavailableReason, ChatToolOffer } from "@lys/protocol"
 import type { ToolAccess, ToolDefinition } from "@lys/share"
 import { create, type StoreApi, type UseBoundStore } from "zustand"
 
-import { listBackendTools } from "@/lib/apis/http/tools"
+import { listBackendTools, type BackendToolList } from "@/lib/apis/http/tools"
 import { listTools } from "@/lib/apis/tauri/tools"
 import { useLysStore } from "@/lib/store"
 
@@ -56,6 +56,14 @@ export type ToolListState =
        * each in the order its source lists them.
        */
       readonly tools: readonly ToolDefinition[]
+      /**
+       * Why each backend tool that cannot run now cannot, keyed by tool
+       * name; such a tool is never offered and its switch is disabled.
+       */
+      readonly unavailableTools: ReadonlyMap<
+        string,
+        BackendToolUnavailableReason
+      >
     }
   | {
       /** The latest read of either list failed. */
@@ -118,8 +126,11 @@ type ToolStore = ToolStoreState & ToolStoreActions
 type ToolStoreDependencies = {
   /** Lists the desktop's tools; rejects when the list cannot be read. */
   readonly listClientTools: () => Promise<readonly ToolDefinition[]>
-  /** Lists the backend's tools; rejects when the list cannot be read. */
-  readonly listBackendTools: () => Promise<readonly ToolDefinition[]>
+  /**
+   * Lists the backend's tools and which cannot run now; rejects when the
+   * list cannot be read.
+   */
+  readonly listBackendTools: () => Promise<BackendToolList>
 }
 
 /** List state while a read is pending. */
@@ -191,9 +202,10 @@ const TOOL_LIST_RECOVERY_ACTION =
  * checked that tool calls are on and that the loaded model was trained for
  * tool use.
  * @returns `offered` with the definitions of the switched-on desktop tools
- * and the names of the switched-on backend tools, each in list order;
- * `not-offered` when no tool is on; or `unavailable` when the list was not
- * read.
+ * and the names of the switched-on backend tools that can run now, each in
+ * list order; `not-offered` when no such tool is on; or `unavailable` when
+ * the list was not read. A backend tool that cannot run now is never
+ * offered, whatever its switch says.
  */
 export function buildChatToolOffer({
   list,
@@ -210,7 +222,9 @@ export function buildChatToolOffer({
   }
 
   const onTools = list.tools.filter(
-    (tool) => getToolChoice(toolChoices, tool).isOn
+    (tool) =>
+      getToolChoice(toolChoices, tool).isOn &&
+      !list.unavailableTools.has(tool.name)
   )
   if (onTools.length === 0) return NO_CHAT_TOOL_OFFER
 
@@ -330,8 +344,14 @@ function createToolStore(
           dependencies.listClientTools(),
           dependencies.listBackendTools()
         ])
-        const tools = buildToolList(clientTools, backendTools)
-        set({ list: Object.freeze({ status: "loaded", tools }) })
+        const tools = buildToolList(clientTools, backendTools.tools)
+        set({
+          list: Object.freeze({
+            status: "loaded",
+            tools,
+            unavailableTools: backendTools.unavailableTools
+          })
+        })
       } catch (error) {
         const message = formatToolListError(error)
         set({ list: Object.freeze({ status: "failed", error: message }) })

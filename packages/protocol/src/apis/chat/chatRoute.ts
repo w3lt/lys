@@ -12,6 +12,7 @@ import {
   type ToolDefinition
 } from "@lys/share"
 import { agentNotFoundProblemSchema } from "../../http/errors/agent"
+import { chatBackendToolUnavailableProblemSchema } from "../../http/errors/chat"
 import {
   conversationAgentMissingProblemSchema,
   conversationNotFoundProblemSchema
@@ -138,8 +139,9 @@ function hasDistinctOfferedToolNames(offer: ChatToolOfferCandidate): boolean {
  * because the backend does not know them, and the switched-on tools the
  * backend runs by name, because the backend owns their definitions. At least
  * one tool is offered, and no name is offered twice across the two lists.
- * The backend rejects a backend tool name it does not run. Offered only to a
- * model trained for tool use.
+ * The backend rejects a backend tool name it does not run (400) and an
+ * offered backend tool that cannot run now (409). Offered only to a model
+ * trained for tool use.
  */
 const chatToolOfferSchema = chatToolOfferListsSchema
   .refine(hasOfferedTool, "A tool offer names at least one tool.")
@@ -218,12 +220,16 @@ export const chatApiStreamEventSchema = z.discriminatedUnion("type", [
  * @remarks A 404 is the agent-not-found problem when a new conversation
  * names a code no agent has, and the conversation-not-found problem when a
  * continued conversation is not stored. A 409 is the conversation agent
- * missing problem: the continued conversation is stored, but its agent no
- * longer exists.
+ * missing problem when the continued conversation is stored but its agent no
+ * longer exists, and the backend tool unavailable problem when an offered
+ * backend tool cannot run now.
  */
 const chatApiResponseSchemas = Object.freeze({
   404: z.union([agentNotFoundProblemSchema, conversationNotFoundProblemSchema]),
-  409: conversationAgentMissingProblemSchema
+  409: z.union([
+    conversationAgentMissingProblemSchema,
+    chatBackendToolUnavailableProblemSchema
+  ])
 })
 
 /**

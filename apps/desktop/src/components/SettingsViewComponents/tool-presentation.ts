@@ -1,3 +1,4 @@
+import type { BackendToolUnavailableReason } from "@lys/protocol"
 import {
   buildToolFunctionFormat,
   type ToolAccess,
@@ -62,6 +63,15 @@ export type ToolRunnerPresentation = {
   readonly note: string
 }
 
+/** Note under an unavailable tool, by reason; a new reason must add one. */
+const TOOL_UNAVAILABLE_NOTES = Object.freeze({
+  "api-key-missing": "Needs a Tavily API key. Add one in Settings → Secrets.",
+  "api-key-invalid":
+    "The Tavily API key in settings.json isn't valid. Fix or remove secrets.tavilyApiKey in that file.",
+  "settings-unreadable":
+    "Lys couldn't read settings.json. Fix that file by hand."
+} satisfies Readonly<Record<BackendToolUnavailableReason, string>>)
+
 /** Lowercase heading text of every tool group; a new group must add one. */
 const TOOL_GROUP_LABELS = Object.freeze({
   files: "files",
@@ -103,18 +113,23 @@ export function calculateToolTokenEstimate(tool: ToolDefinition): number {
 }
 
 /**
- * Calculates how many tools are switched on and what they add to a request.
+ * Calculates how many tools are offered and what they add to a request.
  *
  * @param tools - Every listed tool.
  * @param toolChoices - Choices the person changed, keyed by tool name.
- * @returns The count and summed token estimate of the tools switched on.
+ * @param unavailableTools - Why each tool that cannot run now cannot, by
+ * name; such a tool is never offered, whatever its switch says.
+ * @returns The count and summed token estimate of the tools that are
+ * switched on and can run now.
  */
 export function calculateOfferedToolTotals(
   tools: readonly ToolDefinition[],
-  toolChoices: ReadonlyMap<string, ToolChoice>
+  toolChoices: ReadonlyMap<string, ToolChoice>,
+  unavailableTools: ReadonlyMap<string, BackendToolUnavailableReason>
 ): OfferedToolTotals {
   const offeredTools = tools.filter(
-    (tool) => getToolChoice(toolChoices, tool).isOn
+    (tool) =>
+      getToolChoice(toolChoices, tool).isOn && !unavailableTools.has(tool.name)
   )
   const offeredTokenCount = offeredTools.reduce(
     (tokenCount, tool) => tokenCount + calculateToolTokenEstimate(tool),
@@ -342,4 +357,31 @@ export function findToolApproval(
   groupValue: readonly string[]
 ): ToolApproval | undefined {
   return TOOL_APPROVALS.find((approval) => groupValue.includes(approval))
+}
+
+/**
+ * Formats why a tool cannot run now.
+ *
+ * @param reason - Why the backend says it cannot run.
+ * @returns One sentence with what to do.
+ */
+export function formatToolUnavailableNote(
+  reason: BackendToolUnavailableReason
+): string {
+  return TOOL_UNAVAILABLE_NOTES[reason]
+}
+
+/**
+ * Determines whether the Secrets pane fixes why a tool cannot run.
+ *
+ * @param reason - Why the backend says it cannot run.
+ * @returns True only for a missing key. An invalid key or an unreadable
+ * settings file is fixed in settings.json by hand: the desktop cannot load
+ * either at startup, and a save from the pane would replace the file with the
+ * settings it loaded earlier.
+ */
+export function isFixedInSecretsPane(
+  reason: BackendToolUnavailableReason
+): boolean {
+  return reason === "api-key-missing"
 }

@@ -184,6 +184,20 @@ const PANE_SKELETONS: Record<SettingsPane, PaneSkeletonShape> = {
     ],
     list: [],
     block: false
+  },
+  secrets: {
+    cards: [],
+    heading: true,
+    rows: [
+      {
+        id: "tavily",
+        label: "92px",
+        description: "260px",
+        control: { width: "62px", height: "18px" }
+      }
+    ],
+    list: [],
+    block: false
   }
 }
 

@@ -1,5 +1,6 @@
 import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import type { UnavailableBackendTool } from "@lys/protocol"
 import type { ToolDefinition } from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
 import {
@@ -33,6 +34,9 @@ const TOOLS = [
 
 /** Tool the backend lists; it sends requests off this machine. */
 const READ_PAGE = buildBackendToolDefinition("read_page")
+
+/** Backend tool that can lack what it needs to run. */
+const WEB_SEARCH = buildBackendToolDefinition("web_search")
 
 /** A loaded model trained for tool use. */
 const TRAINED_RUNTIME: RuntimeArrangement = {
@@ -71,15 +75,23 @@ function formatOffer(tools: readonly ToolDefinition[]): string {
 
 /**
  * Renders the settings view on the Tools pane, with the backend listing
- * {@link READ_PAGE}, and waits for the pane body.
+ * {@link READ_PAGE} by default, and waits for the pane body.
  *
  * @param runtime - Backend, LM Studio, and model facts.
+ * @param backendTools - Tools the backend lists.
+ * @param unavailableTools - Listed tools that cannot run now, and why; none
+ * by default.
  * @returns The application store.
  */
-async function startToolPane(runtime: RuntimeArrangement = TRAINED_RUNTIME) {
+async function startToolPane(
+  runtime: RuntimeArrangement = TRAINED_RUNTIME,
+  backendTools: readonly ToolDefinition[] = [READ_PAGE],
+  unavailableTools: readonly UnavailableBackendTool[] = []
+) {
   startBackendFake({
     [INVENTORY_ROUTE]: buildInventoryRoute(runtime),
-    "GET /api/v1/tools": () => buildJsonResponse(200, { tools: [READ_PAGE] })
+    "GET /api/v1/tools": () =>
+      buildJsonResponse(200, { tools: backendTools, unavailableTools })
   })
   const { useLysStore, SettingsView } = await loadFreshSettingsView(
     "tools",
@@ -184,6 +196,30 @@ describe("ToolPaneContent", () => {
     expect(screen.getByRole("region", { name: "web" })).toHaveTextContent(
       /^web1 of 1 on/
     )
+  })
+
+  it("leaves a tool that cannot run now out of the offer and opens the Secrets pane on request", async () => {
+    startNativeHostFake({ list_tools: () => TOOLS })
+    const useLysStore = await startToolPane(
+      TRAINED_RUNTIME,
+      [READ_PAGE, WEB_SEARCH],
+      [{ name: "web_search", reason: "api-key-missing" }]
+    )
+    const user = userEvent.setup()
+
+    const searchSwitch = screen.getByRole("switch", { name: "Use web_search" })
+    await user.click(searchSwitch)
+    expect(searchSwitch).not.toBeChecked()
+    expect(
+      screen.getByRole("switch", { name: "Tool calls" })
+    ).toHaveAccessibleDescription(`qwen3-8b · ${formatOffer(TOOLS)}`)
+    await user.click(screen.getByRole("button", { name: "Open Secrets" }))
+
+    expect(useLysStore.getState().settingsPane).toBe("secrets")
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Secrets" })
+    ).toBeInTheDocument()
+    await waitForRenderedWork()
   })
 
   it("offers nothing once tool calls are switched off", async () => {

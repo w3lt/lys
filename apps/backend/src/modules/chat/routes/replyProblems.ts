@@ -1,8 +1,11 @@
 import {
+  chatBackendToolUnavailableProblemSchema,
   chatReplyNotFoundProblemSchema,
   chatReplyNotGeneratingProblemSchema,
   chatToolCallAnswerMismatchProblemSchema,
   chatToolCallNotPendingProblemSchema,
+  type BackendToolUnavailableReason,
+  type ChatBackendToolUnavailableProblem,
   type ChatReplyNotFoundProblem,
   type ChatReplyNotGeneratingProblem,
   type ChatToolCallAnswerMismatchProblem,
@@ -93,5 +96,39 @@ export function createChatToolCallAnswerMismatchProblem(
     status: shape.status.value,
     detail: `Tool call ${callId} cannot take this answer: a client tool's call takes its result, and a backend tool's call takes allowed or failed.`,
     instance
+  }
+}
+
+/** Caller-safe clause for each reason a backend tool cannot run. */
+const BACKEND_TOOL_UNAVAILABLE_CLAUSES = Object.freeze({
+  "api-key-missing": "no Tavily API key is saved.",
+  "api-key-invalid": "the saved Tavily API key is not valid.",
+  "settings-unreadable": "Lys could not read its settings file."
+} satisfies Readonly<Record<BackendToolUnavailableReason, string>>)
+
+/**
+ * Creates the caller-safe response for offering a backend tool that cannot
+ * run now.
+ *
+ * @param toolName - Name of the first offered tool that cannot run.
+ * @param reason - Why it cannot run.
+ * @param instance - Request path identifying this occurrence.
+ * @returns The strict problem accepted by chat consumers; it never holds the
+ * key or anything read from the settings file.
+ */
+export function createChatBackendToolUnavailableProblem(
+  toolName: string,
+  reason: BackendToolUnavailableReason,
+  instance: string
+): ChatBackendToolUnavailableProblem {
+  const { shape } = chatBackendToolUnavailableProblemSchema.unwrap()
+  return {
+    type: shape.type.value,
+    title: shape.title.value,
+    status: shape.status.value,
+    detail: `${toolName} is unavailable: ${BACKEND_TOOL_UNAVAILABLE_CLAUSES[reason]}`,
+    instance,
+    toolName,
+    reason
   }
 }

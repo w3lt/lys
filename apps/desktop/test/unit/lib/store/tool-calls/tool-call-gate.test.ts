@@ -61,7 +61,11 @@ function buildToolCallSettings(
   areToolCallsOn = true
 ): ToolCallSettings {
   return {
-    list: { status: "loaded", tools: [READ_TEXT_FILE, READ_PAGE] },
+    list: {
+      status: "loaded",
+      tools: [READ_TEXT_FILE, READ_PAGE],
+      unavailableTools: new Map()
+    },
     areToolCallsOn,
     toolChoices: new Map(Object.entries(toolChoices))
   }
@@ -102,7 +106,11 @@ describe("calculateToolCallGate", () => {
       const deleteFile: ToolDefinition = buildToolDefinition("delete_file")
       const settings: ToolCallSettings = {
         ...buildToolCallSettings(),
-        list: { status: "loaded", tools: [deleteFile] }
+        list: {
+          status: "loaded",
+          tools: [deleteFile],
+          unavailableTools: new Map()
+        }
       }
 
       expect(

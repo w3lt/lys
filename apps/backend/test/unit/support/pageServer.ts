@@ -6,14 +6,12 @@ import {
 } from "node:http"
 import type { AddressInfo } from "node:net"
 import { onTestFinished } from "vitest"
-import type {
-  HostAddressLookup,
-  PageRequestDependencies
-} from "../../../src/modules/tool/builtIn/web/pageRequest"
+import type { PageRequestDependencies } from "../../../src/modules/tool/builtIn/web/pageRequest"
 import {
   parsePageUrl,
   type PageUrl
 } from "../../../src/modules/tool/builtIn/web/pageUrl"
+import type { HostAddressLookup } from "../../../src/modules/tool/builtIn/web/webConnection"
 
 /** Answers one request a test page server receives. */
 export type PageRoute = (

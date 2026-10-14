@@ -11,12 +11,14 @@ pub mod load_configuration;
 pub mod model;
 pub mod runtime;
 pub mod secrets;
+pub mod tools;
 
 use generation::GenerationSettings;
 use load_configuration::LoadConfigurationSettings;
 use model::ModelSettings;
 use runtime::RunTimeSettings;
 use secrets::SecretsSettings;
+use tools::ToolSettings;
 
 use std::{
     ffi::OsString,
@@ -40,10 +42,11 @@ static TEMPORARY_FILE_COUNT: AtomicU64 = AtomicU64::new(0);
 /// Complete persisted Lys settings value.
 ///
 /// The private fields group runtime, model, generation, load configuration,
-/// and secrets settings in the serialized JSON representation while keeping
-/// those groups behind the settings module's API boundary. A missing group
-/// takes that group's defaults; the load configuration group's default is
-/// empty, and the secrets group's default holds no key.
+/// secrets, and tools settings in the serialized JSON representation while
+/// keeping those groups behind the settings module's API boundary. A missing
+/// group takes that group's defaults; the load configuration group's default
+/// is empty, the secrets group's default holds no key, and the tools group's
+/// default puts no tool on Just run.
 pub struct LysSettings {
     /// Process settings and default-model selection in the `runtime` object.
     runtime: RunTimeSettings,
@@ -55,6 +58,8 @@ pub struct LysSettings {
     load_configuration: LoadConfigurationSettings,
     /// Secrets, such as the Tavily API key, in the `secrets` object.
     secrets: SecretsSettings,
+    /// Tools set to Just run, in the `tools` object.
+    tools: ToolSettings,
 }
 
 impl LysSettings {
@@ -309,6 +314,7 @@ mod tests {
             "models": { "qwen/qwen3-8b": { "contextLength": 16384 } }
         });
         settings["secrets"] = json!({ "tavilyApiKey": "tvly-synthetic-0123456789" });
+        settings["tools"] = json!({ "justRun": ["read_page", "read_text_file"] });
 
         settings
     }
@@ -316,6 +322,11 @@ mod tests {
     /// Secrets group of a settings file without a saved key.
     fn get_empty_secrets() -> Value {
         json!({ "tavilyApiKey": null })
+    }
+
+    /// Tools group of a settings file in which every tool asks first.
+    fn get_empty_tools() -> Value {
+        json!({ "justRun": [] })
     }
 
     /// Reads the settings file at `path` as JSON.
@@ -351,6 +362,7 @@ mod tests {
         assert_eq!(stored, get_settings_json(&settings));
         assert_eq!(stored["loadConfiguration"], get_empty_load_configuration());
         assert_eq!(stored["secrets"], get_empty_secrets());
+        assert_eq!(stored["tools"], get_empty_tools());
     }
 
     #[test]
@@ -374,6 +386,7 @@ mod tests {
         let mut expected = get_settings_without_load_configuration();
         expected["loadConfiguration"] = get_empty_load_configuration();
         expected["secrets"] = get_empty_secrets();
+        expected["tools"] = get_empty_tools();
         assert_eq!(get_settings_json(&settings), expected);
         assert_eq!(
             fs::read_to_string(&path).expect("read the settings file"),
@@ -408,12 +421,18 @@ mod tests {
         spaced_key["secrets"]["tavilyApiKey"] = json!("tvly-key with space");
         let mut null_secrets = get_settings_without_load_configuration();
         null_secrets["secrets"] = Value::Null;
+        let mut null_tools = get_settings_without_load_configuration();
+        null_tools["tools"] = Value::Null;
+        let mut invalid_tool_name = get_complete_settings();
+        invalid_tool_name["tools"]["justRun"] = json!(["read page"]);
         let unusable_files = [
             invalid_group.to_string(),
             null_group.to_string(),
             null_default.to_string(),
             spaced_key.to_string(),
             null_secrets.to_string(),
+            null_tools.to_string(),
+            invalid_tool_name.to_string(),
             String::from("{ not json"),
         ];
 

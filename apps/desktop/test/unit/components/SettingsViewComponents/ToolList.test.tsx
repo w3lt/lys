@@ -258,7 +258,7 @@ describe("ToolGroupSection", () => {
       name: "Before it runs"
     })
     expect(approval).toHaveAccessibleDescription(
-      "You see the call and its arguments. Nothing happens until you say yes."
+      "Each call waits for you with its arguments. Nothing runs until you allow it."
     )
     expect(
       within(approval).getByRole("button", { name: "Ask me" })
@@ -286,6 +286,22 @@ describe("ToolGroupSection", () => {
     expect(details).toHaveTextContent(
       "Handled by Lys’s backend, which sends the request from wherever it runs."
     )
+  })
+
+  it("says that a backend tool on Just run sends its request without showing it", () => {
+    startToolGroup({
+      listing: WEB_GROUP,
+      expandedToolName: "read_page",
+      toolChoices: BACKEND_TOOLS_ON
+    })
+
+    const approval = screen.getByRole("group", { name: "Before it runs" })
+    expect(approval).toHaveAccessibleDescription(
+      "Sends its request off this machine the moment the model asks, without showing you what it sends."
+    )
+    expect(
+      within(approval).getByRole("button", { name: "Just run" })
+    ).toHaveAttribute("aria-pressed", "true")
   })
 
   it("says when an expanded tool takes no arguments", () => {

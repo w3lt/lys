@@ -18,6 +18,7 @@ import { ToolUnavailableCard } from "./ToolUnavailableCard"
 import {
   buildToolGroups,
   calculateOfferedToolTotals,
+  formatToolSettingsSaveStatus,
   type ToolGroupListing
 } from "./tool-presentation"
 
@@ -156,6 +157,45 @@ function ToolGroupList({
   return <>{buildToolGroups(tools).map(buildToolGroupSection)}</>
 }
 
+/**
+ * Announces the automatic save of the Just run choices and offers a retry
+ * when a write fails.
+ *
+ * @remarks The application store owns the save across pane unmounts; the
+ * component owns no state or effects. The status is one polite region named
+ * "Just run choices save" that stays mounted while the tools are shown, so
+ * it exists before every change it announces; it is empty while nothing
+ * needs saying. After a failure, Retry saving writes the current choices
+ * again, which stay applied for this session meanwhile.
+ * @returns The status region and, after a failed save, the retry button.
+ */
+function ToolApprovalSaveFeedback(): ReactElement {
+  const save = useLysStore((state) => state.toolSettingsSave)
+  const saveToolSettings = useLysStore((state) => state.saveToolSettings)
+
+  return (
+    <div className="settings-view__tool-status">
+      <p
+        aria-label="Just run choices save"
+        aria-live="polite"
+        className="settings-view__note"
+        role="status"
+      >
+        {formatToolSettingsSaveStatus(save)}
+      </p>
+      {save.status === "failed" ? (
+        <Button
+          onClick={() => void saveToolSettings()}
+          type="button"
+          variant="outline"
+        >
+          Retry saving
+        </Button>
+      ) : null}
+    </div>
+  )
+}
+
 /** Properties accepted by {@link ToolWorkspace}. */
 type ToolWorkspaceProps = {
   /** Every tool, the app's then the backend's, in the order Settings lists them. */
@@ -173,8 +213,10 @@ type ToolWorkspaceProps = {
  * details are shown, at most one, which resets when the pane is left. While
  * the loaded model was not trained for tools, the controls below the card
  * recede and are disabled, and no tool's details are shown; the tool that
- * was expanded opens again once the controls unlock. Every choice lasts for
- * this session only and applies to the next tool call or chat request.
+ * was expanded opens again once the controls unlock. Every choice applies to
+ * the next tool call or chat request. The switches last for this session
+ * only; each tool's approval is saved, and the save's status follows the
+ * tools.
  * @param props - Listed tools and which cannot run now.
  * @returns The tool controls.
  */
@@ -225,6 +267,7 @@ function ToolWorkspace({
           unavailableTools={unavailableTools}
         />
       </div>
+      <ToolApprovalSaveFeedback />
     </div>
   )
 }
@@ -266,7 +309,8 @@ function ToolListBody({ list }: ToolListBodyProps): ReactElement | null {
  * Presents the Tools pane: Lys's tools, in the app and in the backend, and
  * the choices about them.
  *
- * @remarks The tool store owns the list and the choices. The pane reads the
+ * @remarks The tool store owns the list and the session switches, and the
+ * application store owns the saved approvals. The pane reads the
  * tools from the desktop and the backend when it appears and none were read
  * yet; the read belongs to the store and continues if the pane is left. A
  * status line stays mounted above the tools and, after a failed read of

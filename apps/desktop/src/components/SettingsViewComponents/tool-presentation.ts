@@ -13,7 +13,11 @@ import {
   formatTokenCount
 } from "@/components/ComposerComponents/composer-context"
 import type { ToolModelSupport } from "@/lib/models/tool-model-support"
-import { TOOL_APPROVALS, type ToolApproval } from "@/lib/store/tool-settings"
+import {
+  TOOL_APPROVALS,
+  type ToolApproval,
+  type ToolSettingsSaveState
+} from "@/lib/store/tool-settings"
 import { isToolOn } from "@/lib/store/tools"
 
 /** Tone of the tool-calls status dot. */
@@ -78,6 +82,16 @@ const TOOL_GROUP_LABELS = Object.freeze({
 const TOOL_ACCESS_LABELS = Object.freeze({
   reads: "reads",
   network: "network"
+} satisfies Readonly<Record<ToolAccess, string>>)
+
+/**
+ * What Just run does, by what the tool does with the machine; a new access
+ * level must add one.
+ */
+const JUST_RUN_NOTES = Object.freeze({
+  reads: "Runs the moment the model asks, without showing you the call.",
+  network:
+    "Sends its request off this machine the moment the model asks, without showing you what it sends."
 } satisfies Readonly<Record<ToolAccess, string>>)
 
 /** Presentation of every runner; a new runner must add one. */
@@ -330,14 +344,40 @@ export function formatToolApprovalLabel(approval: ToolApproval): string {
  * Formats what happens before a tool runs under one approval.
  *
  * @param approval - When the tool runs once the model asks for it.
- * @returns A sentence describing the approval.
+ * @param access - What the tool does with the machine.
+ * @returns A sentence describing the approval; for Just run it says what
+ * leaves the machine unseen when the tool sends requests off it.
  */
-export function formatToolApprovalNote(approval: ToolApproval): string {
+export function formatToolApprovalNote(
+  approval: ToolApproval,
+  access: ToolAccess
+): string {
   switch (approval) {
     case "ask":
-      return "You see the call and its arguments. Nothing happens until you say yes."
+      return "Each call waits for you with its arguments. Nothing runs until you allow it."
     case "run":
-      return "Runs the moment the model asks for it."
+      return JUST_RUN_NOTES[access]
+  }
+}
+
+/**
+ * Formats the outcome of the latest save of the Just run choices.
+ *
+ * @param save - Latest application-owned save lifecycle state.
+ * @returns The saving or failure message, or an empty string while idle or
+ * after a successful save, which leave nothing to announce.
+ */
+export function formatToolSettingsSaveStatus(
+  save: ToolSettingsSaveState
+): string {
+  switch (save.status) {
+    case "saving":
+      return "Saving Just run choices…"
+    case "failed":
+      return "Couldn't save your Just run choices. They apply until you quit Lys; after a restart, Lys uses the choices it last saved."
+    case "idle":
+    case "saved":
+      return ""
   }
 }
 

@@ -15,6 +15,7 @@ import {
   formatToolCallsStatus,
   formatToolGroupCount,
   formatToolGroupLabel,
+  formatToolSettingsSaveStatus,
   formatToolTokenEstimate,
   formatToolUnavailableNote,
   isFixedInSecretsPane
@@ -262,15 +263,51 @@ describe("tool labels", () => {
     expect(formatToolArgumentCounts(buildArguments(candidates))).toBe(label)
   })
 
-  it("labels and explains each approval", () => {
+  it("labels each approval", () => {
     expect(formatToolApprovalLabel("ask")).toBe("Ask me")
     expect(formatToolApprovalLabel("run")).toBe("Just run")
-    expect(formatToolApprovalNote("ask")).toBe(
-      "You see the call and its arguments. Nothing happens until you say yes."
-    )
-    expect(formatToolApprovalNote("run")).toBe(
-      "Runs the moment the model asks for it."
-    )
+  })
+
+  it.each([
+    [
+      "ask",
+      "reads",
+      "Each call waits for you with its arguments. Nothing runs until you allow it."
+    ],
+    [
+      "ask",
+      "network",
+      "Each call waits for you with its arguments. Nothing runs until you allow it."
+    ],
+    [
+      "run",
+      "reads",
+      "Runs the moment the model asks, without showing you the call."
+    ],
+    [
+      "run",
+      "network",
+      "Sends its request off this machine the moment the model asks, without showing you what it sends."
+    ]
+  ] as const)(
+    "explains %s for a tool with %s access",
+    (approval, access, note) => {
+      expect(formatToolApprovalNote(approval, access)).toBe(note)
+    }
+  )
+})
+
+describe("formatToolSettingsSaveStatus", () => {
+  it.each([
+    ["idle", ""],
+    ["saving", "Saving Just run choices…"],
+    ["saved", ""],
+    [
+      "failed",
+      "Couldn't save your Just run choices. They apply until you quit Lys; after a restart, Lys uses the choices it last saved."
+    ]
+  ] as const)("announces a %s save as %j", (status, message) => {
+    expect(formatToolSettingsSaveStatus({ status })).toBe(message)
   })
 })
 

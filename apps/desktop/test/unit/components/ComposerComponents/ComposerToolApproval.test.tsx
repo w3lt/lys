@@ -129,7 +129,7 @@ function startToolApproval(
   const answers = {
     onAllowToolCall: vi.fn(),
     onRejectToolCall: vi.fn(),
-    onRetryToolResult: vi.fn()
+    onRetryToolCallAnswer: vi.fn()
   }
   render(<ComposerToolApproval {...props} {...answers} />)
   return answers
@@ -250,7 +250,7 @@ describe("ComposerToolApproval", () => {
       ).toBeInTheDocument()
       expect(answers.onAllowToolCall).toHaveBeenCalledOnce()
       expect(answers.onRejectToolCall).toHaveBeenCalledOnce()
-      expect(answers.onRetryToolResult).not.toHaveBeenCalled()
+      expect(answers.onRetryToolCallAnswer).not.toHaveBeenCalled()
     })
 
     it("offers Allow anyway, without the Enter shortcut, while the composer holds a draft that Enter would send as the answer", async () => {
@@ -291,7 +291,7 @@ describe("ComposerToolApproval", () => {
         "Couldn't send the answer to Lys: The backend could not be reached."
       )
       expect(within(card).getAllByRole("button")).toHaveLength(1)
-      expect(answers.onRetryToolResult).toHaveBeenCalledOnce()
+      expect(answers.onRetryToolCallAnswer).toHaveBeenCalledOnce()
       expect(answers.onAllowToolCall).not.toHaveBeenCalled()
       expect(answers.onRejectToolCall).not.toHaveBeenCalled()
     })

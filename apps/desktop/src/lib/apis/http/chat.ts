@@ -16,8 +16,8 @@ import {
   type ChatReplyEvent,
   type ChatReplyPathParams,
   type ChatToolApprovalAnswer,
-  type ChatToolResult,
-  type ChatToolResultPathParams
+  type ChatToolCallPathParams,
+  type ChatToolResult
 } from "@lys/protocol"
 import { EventSourceParserStream } from "eventsource-parser/stream"
 
@@ -128,7 +128,7 @@ const NOT_GENERATING_RESULT: StopChatReplyResult = Object.freeze({
 })
 
 /** Outcome of sending one tool call's result or approval answer to the backend. */
-export type SendChatToolResultResult =
+export type SendChatToolCallAnswerResult =
   | {
       /** The backend accepted the answer; the reply's loop continues. */
       readonly status: "accepted"
@@ -142,12 +142,12 @@ export type SendChatToolResultResult =
     }
 
 /** Shared accepted outcome; it carries no per-occurrence data. */
-const ACCEPTED_RESULT: SendChatToolResultResult = Object.freeze({
+const ACCEPTED_RESULT: SendChatToolCallAnswerResult = Object.freeze({
   status: "accepted"
 })
 
 /** Shared not-pending outcome; it carries no per-occurrence data. */
-const NOT_PENDING_RESULT: SendChatToolResultResult = Object.freeze({
+const NOT_PENDING_RESULT: SendChatToolCallAnswerResult = Object.freeze({
   status: "not-pending"
 })
 
@@ -288,10 +288,10 @@ export async function stopChatReply(
  * with an undeclared response.
  */
 export async function sendChatToolResult(
-  target: ChatToolResultPathParams,
+  target: ChatToolCallPathParams,
   result: ChatToolResult,
   connection: Pick<ChatReplyConnection, "backendUrl">
-): Promise<SendChatToolResultResult> {
+): Promise<SendChatToolCallAnswerResult> {
   return sendChatToolCallAnswer(
     {
       url: `${connection.backendUrl}${buildChatToolCallPath(sendChatToolResultApi.path, target)}`,
@@ -318,10 +318,10 @@ export async function sendChatToolResult(
  * with an undeclared response.
  */
 export async function sendChatToolApproval(
-  target: ChatToolResultPathParams,
+  target: ChatToolCallPathParams,
   answer: ChatToolApprovalAnswer,
   connection: Pick<ChatReplyConnection, "backendUrl">
-): Promise<SendChatToolResultResult> {
+): Promise<SendChatToolCallAnswerResult> {
   return sendChatToolCallAnswer(
     {
       url: `${connection.backendUrl}${buildChatToolCallPath(sendChatToolApprovalApi.path, target)}`,
@@ -355,7 +355,7 @@ type ChatToolCallAnswerRequest = {
 async function sendChatToolCallAnswer(
   request: ChatToolCallAnswerRequest,
   answerLabel: string
-): Promise<SendChatToolResultResult> {
+): Promise<SendChatToolCallAnswerResult> {
   const response = await getChatReplyActionResponse(request.url, {
     method: request.method,
     headers: JSON_REQUEST_HEADERS,
@@ -537,7 +537,7 @@ function buildChatReplyPath(
  */
 function buildChatToolCallPath(
   routeTemplate: string,
-  target: ChatToolResultPathParams
+  target: ChatToolCallPathParams
 ): string {
   return buildChatReplyPath(routeTemplate, target).replace(
     ":callId",

@@ -3,11 +3,11 @@ import {
   chatToolCallNotPendingProblemSchema,
   type ChatToolCallNotPendingProblem
 } from "../../http/errors/chat"
-import { apiChatReplyToolApprovalRoute } from "./routes"
 import {
-  chatToolResultPathParamsSchema,
-  type ChatToolResultPathParams
-} from "./toolResultRoute"
+  chatToolCallPathParamsSchema,
+  type ChatToolCallPathParams
+} from "./_share"
+import { apiChatReplyToolApprovalRoute } from "./routes"
 
 /** Validates the answer that lets the backend go on with one call. */
 const allowedChatToolApprovalSchema = z.strictObject({
@@ -71,7 +71,7 @@ const sendChatToolApprovalApiResponseSchemas = Object.freeze({
 export const sendChatToolApprovalApi = Object.freeze({
   method: "POST",
   path: apiChatReplyToolApprovalRoute,
-  params: chatToolResultPathParamsSchema,
+  params: chatToolCallPathParamsSchema,
   body: chatToolApprovalAnswerSchema,
   responses: sendChatToolApprovalApiResponseSchemas
 })
@@ -87,7 +87,7 @@ export type SendChatToolApprovalApiReply = {
 /** Fastify route type for the tool-approval endpoint. */
 export type SendChatToolApprovalApiRoute = {
   /** Validated identifiers of the call being answered. */
-  readonly Params: ChatToolResultPathParams
+  readonly Params: ChatToolCallPathParams
   /** Validated answer. */
   readonly Body: ChatToolApprovalAnswer
   /** Status-specific empty success and Problem Details payloads. */

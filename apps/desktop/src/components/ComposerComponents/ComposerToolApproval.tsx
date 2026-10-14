@@ -27,7 +27,7 @@ type ComposerToolApprovalProps = {
   /** Requests that the parent reject the waiting call, with the draft as reason. */
   readonly onRejectToolCall: () => void
   /** Requests that the parent send the failed answer again. */
-  readonly onRetryToolResult: () => void
+  readonly onRetryToolCallAnswer: () => void
 }
 
 /** Properties accepted by {@link ComposerToolCallRequest}. */
@@ -79,7 +79,7 @@ type ComposerToolResultFailureProps = {
   /** User-presentable reason the answer was not sent. */
   readonly error: string
   /** Requests that the parent send the failed answer again. */
-  readonly onRetryToolResult: () => void
+  readonly onRetryToolCallAnswer: () => void
 }
 
 /**
@@ -278,7 +278,7 @@ function ComposerToolCallRequest({
 function ComposerToolResultFailure({
   toolName,
   error,
-  onRetryToolResult
+  onRetryToolCallAnswer
 }: ComposerToolResultFailureProps): ReactElement {
   return (
     <fieldset
@@ -300,7 +300,7 @@ function ComposerToolResultFailure({
       </p>
 
       <div className="composer__approval-footer">
-        <Button onClick={onRetryToolResult} size="sm" type="button">
+        <Button onClick={onRetryToolCallAnswer} size="sm" type="button">
           Try again
         </Button>
       </div>
@@ -325,7 +325,7 @@ export default function ComposerToolApproval({
   hasDraft,
   onAllowToolCall,
   onRejectToolCall,
-  onRetryToolResult
+  onRetryToolCallAnswer
 }: ComposerToolApprovalProps): ReactElement {
   const { answer } = toolCall
 
@@ -344,7 +344,7 @@ export default function ComposerToolApproval({
       return (
         <ComposerToolResultFailure
           error={answer.error}
-          onRetryToolResult={onRetryToolResult}
+          onRetryToolCallAnswer={onRetryToolCallAnswer}
           toolName={toolCall.call.toolName}
         />
       )

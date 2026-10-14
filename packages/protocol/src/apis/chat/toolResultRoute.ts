@@ -3,6 +3,10 @@ import {
   chatToolCallNotPendingProblemSchema,
   type ChatToolCallNotPendingProblem
 } from "../../http/errors/chat"
+import {
+  chatToolCallPathParamsSchema,
+  type ChatToolCallPathParams
+} from "./_share"
 import { apiChatReplyToolResultRoute } from "./routes"
 
 /** Bytes in one mebibyte. */
@@ -17,28 +21,6 @@ const BYTES_PER_MEBIBYTE = 1024 * 1024
  * a larger body with `413`.
  */
 export const MAXIMUM_TOOL_RESULT_BODY_BYTES = 8 * BYTES_PER_MEBIBYTE
-
-/**
- * Validates the path parameters addressing one tool call of a reply.
- *
- * @remarks Every decoded identifier must be UUIDv7; a malformed one is
- * rejected with HTTP 400 before any lookup.
- */
-export const chatToolResultPathParamsSchema = z
-  .strictObject({
-    /** UUIDv7 identity of the conversation that holds the reply. */
-    conversationId: z.uuidv7(),
-    /** UUIDv7 identity of the assistant reply that made the call. */
-    assistantMessageId: z.uuidv7(),
-    /** UUIDv7 the backend gave the call in its `tool-approval` or `tool-call` event. */
-    callId: z.uuidv7()
-  })
-  .readonly()
-
-/** Path parameters addressing one tool call of a reply. */
-export type ChatToolResultPathParams = z.infer<
-  typeof chatToolResultPathParamsSchema
->
 
 /** Validates the answer of a client tool that ran and returned its output. */
 const succeededChatToolResultSchema = z.strictObject({
@@ -101,7 +83,7 @@ const sendChatToolResultApiResponseSchemas = Object.freeze({
 export const sendChatToolResultApi = Object.freeze({
   method: "POST",
   path: apiChatReplyToolResultRoute,
-  params: chatToolResultPathParamsSchema,
+  params: chatToolCallPathParamsSchema,
   body: chatToolResultSchema,
   bodyLimitBytes: MAXIMUM_TOOL_RESULT_BODY_BYTES,
   responses: sendChatToolResultApiResponseSchemas
@@ -118,7 +100,7 @@ export type SendChatToolResultApiReply = {
 /** Fastify route type for the tool-result endpoint. */
 export type SendChatToolResultApiRoute = {
   /** Validated identifiers of the call being answered. */
-  readonly Params: ChatToolResultPathParams
+  readonly Params: ChatToolCallPathParams
   /** Validated result. */
   readonly Body: ChatToolResult
   /** Status-specific empty success and Problem Details payloads. */

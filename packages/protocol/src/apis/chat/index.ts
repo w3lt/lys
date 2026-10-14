@@ -14,7 +14,8 @@ export {
 export type {
   ChatGenerationEvent,
   ChatReplyPathParams,
-  ChatToolCall
+  ChatToolCall,
+  ChatToolCallPathParams
 } from "./_share"
 export {
   chatReplyEventSchema,
@@ -39,7 +40,6 @@ export {
   chatToolResultSchema,
   sendChatToolResultApi,
   type ChatToolResult,
-  type ChatToolResultPathParams,
   type SendChatToolResultApiReply,
   type SendChatToolResultApiRoute
 } from "./toolResultRoute"

@@ -21,6 +21,29 @@ export const chatReplyPathParamsSchema = z
 /** Path parameters addressing one assistant reply in its conversation. */
 export type ChatReplyPathParams = z.infer<typeof chatReplyPathParamsSchema>
 
+/**
+ * Validates the path parameters addressing one tool call of a reply.
+ *
+ * @remarks Shared by the tool-approval and tool-result endpoints. Every
+ * decoded identifier must be UUIDv7; a malformed one is rejected with HTTP
+ * 400 before any lookup.
+ */
+export const chatToolCallPathParamsSchema = z
+  .strictObject({
+    /** UUIDv7 identity of the conversation that holds the reply. */
+    conversationId: z.uuidv7(),
+    /** UUIDv7 identity of the assistant reply that made the call. */
+    assistantMessageId: z.uuidv7(),
+    /** UUIDv7 the backend gave the call in its `tool-approval` or `tool-call` event. */
+    callId: z.uuidv7()
+  })
+  .readonly()
+
+/** Path parameters addressing one tool call of a reply. */
+export type ChatToolCallPathParams = z.infer<
+  typeof chatToolCallPathParamsSchema
+>
+
 /** Validates the event carrying the conversation's persisted title. */
 export const chatTitleEventSchema = z.strictObject({
   type: z.literal("title"),

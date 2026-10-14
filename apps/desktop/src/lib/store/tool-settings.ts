@@ -176,7 +176,10 @@ export function createToolSettingsSlice(
     if (getToolApproval(tools.justRunToolNames, toolName) === approval) return
 
     const nextTools = buildToolSettings(tools, toolName, approval)
-    set((state) => ({ settings: { ...state.settings, tools: nextTools } }))
+    set((state) => {
+      const settings: LysSettings = { ...state.settings, tools: nextTools }
+      return { settings }
+    })
     // Saving never rejects; it records its outcome in toolSettingsSave.
     void saveToolSettings()
   }

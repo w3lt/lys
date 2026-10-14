@@ -1245,7 +1245,7 @@ describe("useToolCallStore", () => {
 
       const retry = useToolCallStore
         .getState()
-        .sendUnsentToolResult(READ_CALL.id)
+        .sendUnsentToolCallAnswer(READ_CALL.id)
       await waitForMicrotasks()
       const whileRetrying = useToolCallStore.getState().heldCalls
       toolResult.responses[1]?.resolve(
@@ -1281,7 +1281,7 @@ describe("useToolCallStore", () => {
       ])
       await useToolCallStore.getState().rejectToolCall(READ_CALL.id, "")
 
-      await useToolCallStore.getState().sendUnsentToolResult(READ_CALL.id)
+      await useToolCallStore.getState().sendUnsentToolCallAnswer(READ_CALL.id)
 
       expect(listToolAnswers(backend)).toHaveLength(2)
       expect(useToolCallStore.getState().heldCalls).toMatchObject([
@@ -1324,13 +1324,13 @@ describe("useToolCallStore", () => {
       startNativeHostFake({})
       const { backend } = startReplyBackend()
       const { useToolCallStore } = await loadFreshToolCallStore()
-      const { resolveToolCall, rejectToolCall, sendUnsentToolResult } =
+      const { resolveToolCall, rejectToolCall, sendUnsentToolCallAnswer } =
         useToolCallStore.getState()
 
       await Promise.all([
         resolveToolCall(READ_CALL.id),
         rejectToolCall(READ_CALL.id, "late"),
-        sendUnsentToolResult(READ_CALL.id)
+        sendUnsentToolCallAnswer(READ_CALL.id)
       ])
 
       expect(backend.requests).toEqual([])
@@ -1346,16 +1346,16 @@ describe("useToolCallStore", () => {
         buildStreamingSnapshot(),
         buildApprovalEvent(READ_CALL)
       ])
-      const { resolveToolCall, rejectToolCall, sendUnsentToolResult } =
+      const { resolveToolCall, rejectToolCall, sendUnsentToolCallAnswer } =
         useToolCallStore.getState()
-      await sendUnsentToolResult(READ_CALL.id)
+      await sendUnsentToolCallAnswer(READ_CALL.id)
       const answersBeforeRejection = listToolAnswers(backend).length
       await rejectToolCall(READ_CALL.id, "")
 
       await Promise.all([
         resolveToolCall(READ_CALL.id),
         rejectToolCall(READ_CALL.id, "again"),
-        sendUnsentToolResult(READ_CALL.id)
+        sendUnsentToolCallAnswer(READ_CALL.id)
       ])
 
       expect(answersBeforeRejection).toBe(0)

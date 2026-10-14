@@ -3,8 +3,8 @@ import type {
   ChatReplyPathParams,
   ChatToolApprovalAnswer,
   ChatToolCall,
-  ChatToolResult,
-  ChatToolResultPathParams
+  ChatToolCallPathParams,
+  ChatToolResult
 } from "@lys/protocol"
 import type { ToolDefinition } from "@lys/share"
 import { create, type StoreApi, type UseBoundStore } from "zustand"
@@ -13,7 +13,7 @@ import {
   readChatReplyEvents,
   sendChatToolApproval,
   sendChatToolResult,
-  type SendChatToolResultResult
+  type SendChatToolCallAnswerResult
 } from "@/lib/apis/http/chat"
 import { findFiles, readTextFile } from "@/lib/apis/tauri/tools"
 import { useLysStore } from "@/lib/store"
@@ -122,7 +122,7 @@ export type HeldToolCallAnswer = HeldToolApprovalAnswer | HeldToolRunAnswer
 export type HeldToolCall =
   | {
       /** Call, reply, and conversation the answer is sent to. */
-      readonly target: ChatToolResultPathParams
+      readonly target: ChatToolCallPathParams
       /** Call as the backend sent it. */
       readonly call: ChatToolCall
       /** The backend shows the call to the person for approval. */
@@ -132,7 +132,7 @@ export type HeldToolCall =
     }
   | {
       /** Call, reply, and conversation the result is sent to. */
-      readonly target: ChatToolResultPathParams
+      readonly target: ChatToolCallPathParams
       /** Call as the backend sent it. */
       readonly call: ChatToolCall
       /** The backend asked the desktop to run the call. */
@@ -210,7 +210,7 @@ type ToolCallActions = {
    * it never rejects. The tool does not run again. A call whose answer did
    * not fail is ignored.
    */
-  sendUnsentToolResult: (callId: string) => Promise<void>
+  sendUnsentToolCallAnswer: (callId: string) => Promise<void>
 }
 
 /** Complete contract of the tool-call store. */
@@ -236,14 +236,14 @@ type ToolCallStoreDependencies = {
   readonly streamChatReply: ReplyEventStream
   /** Sends one run's result; throws when the backend cannot take it. */
   readonly sendChatToolResult: (
-    target: ChatToolResultPathParams,
+    target: ChatToolCallPathParams,
     result: ChatToolResult
-  ) => Promise<SendChatToolResultResult>
+  ) => Promise<SendChatToolCallAnswerResult>
   /** Sends one prompt's answer; throws when the backend cannot take it. */
   readonly sendChatToolApproval: (
-    target: ChatToolResultPathParams,
+    target: ChatToolCallPathParams,
     answer: ChatToolApprovalAnswer
-  ) => Promise<SendChatToolResultResult>
+  ) => Promise<SendChatToolCallAnswerResult>
   /** Gets the tool list, loading it when it has not been read; never rejects. */
   readonly getToolList: () => Promise<ToolListState>
   /** Runs one validated call; never rejects. */
@@ -314,7 +314,7 @@ export function findShownToolCall(
  * @param error - Untrusted thrown value.
  * @returns A sentence for the composer's failed-answer card.
  */
-function formatToolResultSendError(error: unknown): string {
+function formatToolCallAnswerSendError(error: unknown): string {
   return error instanceof Error && error.message
     ? `Couldn't send the answer to Lys: ${error.message}`
     : "Couldn't send the answer to Lys."
@@ -348,10 +348,10 @@ function buildReplyFollows(
  * @param callId - Identifier of the call.
  * @returns A frozen address.
  */
-function buildToolResultTarget(
+function buildToolCallAnswerTarget(
   target: ChatReplyPathParams,
   callId: string
-): ChatToolResultPathParams {
+): ChatToolCallPathParams {
   return Object.freeze({
     conversationId: target.conversationId,
     assistantMessageId: target.assistantMessageId,
@@ -368,7 +368,7 @@ function buildToolResultTarget(
  * @returns A frozen held call in the approval step.
  */
 function buildSendingToolApproval(
-  target: ChatToolResultPathParams,
+  target: ChatToolCallPathParams,
   call: ChatToolCall,
   toolAnswer: ChatToolApprovalAnswer
 ): SendingHeldToolCall {
@@ -385,7 +385,7 @@ function buildSendingToolApproval(
  * @returns A frozen held call in the run step.
  */
 function buildSendingToolRun(
-  target: ChatToolResultPathParams,
+  target: ChatToolCallPathParams,
   call: ChatToolCall,
   toolAnswer: ChatToolResult
 ): SendingHeldToolCall {
@@ -601,7 +601,7 @@ function createToolCallStore(
      */
     function sendToolCallAnswer(
       heldCall: SendingHeldToolCall
-    ): Promise<SendChatToolResultResult> {
+    ): Promise<SendChatToolCallAnswerResult> {
       switch (heldCall.step) {
         case "approval":
           return dependencies.sendChatToolApproval(
@@ -637,7 +637,7 @@ function createToolCallStore(
         updateHeldToolCall(buildAnsweredHeldToolCall(heldCall))
       } catch (error) {
         if (!isHeldToolCallSending(heldCall.call.id, heldCall.step)) return
-        const sendError = formatToolResultSendError(error)
+        const sendError = formatToolCallAnswerSendError(error)
         updateHeldToolCall(buildSendFailedHeldToolCall(heldCall, sendError))
       }
     }
@@ -682,7 +682,7 @@ function createToolCallStore(
     ): void {
       if (findHeldToolCall(call.id) !== undefined) return
 
-      const answerTarget = buildToolResultTarget(target, call.id)
+      const answerTarget = buildToolCallAnswerTarget(target, call.id)
       const prompt = calculateToolApprovalPrompt(call, list)
       switch (prompt.status) {
         case "ask": {
@@ -735,7 +735,7 @@ function createToolCallStore(
 
       const holdToolCall =
         heldCall === undefined ? addHeldToolCall : updateHeldToolCall
-      const answerTarget = buildToolResultTarget(target, call.id)
+      const answerTarget = buildToolCallAnswerTarget(target, call.id)
       const parsed = parseClientToolInput(call)
       if (parsed.status === "rejected") {
         const result = buildRunFailedToolResult(parsed.content)
@@ -948,13 +948,14 @@ function createToolCallStore(
     }
 
     /**
-     * Implements {@link ToolCallActions.sendUnsentToolResult} for this store.
+     * Implements {@link ToolCallActions.sendUnsentToolCallAnswer} for this
+     * store.
      *
      * @param callId - Identifier of a held call.
      * @returns The settlement defined by
-     * {@link ToolCallActions.sendUnsentToolResult}.
+     * {@link ToolCallActions.sendUnsentToolCallAnswer}.
      */
-    function sendUnsentToolResult(callId: string): Promise<void> {
+    function sendUnsentToolCallAnswer(callId: string): Promise<void> {
       const heldCall = findHeldToolCall(callId)
       const resent =
         heldCall === undefined ? undefined : buildResentHeldToolCall(heldCall)
@@ -968,7 +969,7 @@ function createToolCallStore(
       startReplyToolCallFollow,
       resolveToolCall,
       rejectToolCall,
-      sendUnsentToolResult
+      sendUnsentToolCallAnswer
     }
   }
 

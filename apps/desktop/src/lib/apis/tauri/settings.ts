@@ -122,13 +122,16 @@ function buildLysSettings(settingsDocument: SettingsDocument): LysSettings {
     default: settingsDocument.loadConfiguration.default,
     models
   }
+  const tools: ToolSettings = {
+    justRunToolNames: new Set(settingsDocument.tools.justRun)
+  }
   return {
     runtime: settingsDocument.runtime,
     model: settingsDocument.model,
     generation: settingsDocument.generation,
     loadConfiguration,
     secrets: buildSecretsSettings(settingsDocument.secrets),
-    tools: { justRunToolNames: new Set(settingsDocument.tools.justRun) }
+    tools
   }
 }
 

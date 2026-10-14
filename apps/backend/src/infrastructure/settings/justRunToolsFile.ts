@@ -27,6 +27,14 @@ export type JustRunToolNamesRead =
     }>
 
 /**
+ * Validates the settings document's optional `tools` group, keeping only its
+ * optional `justRun` list.
+ */
+const settingsToolsGroupSchema = z
+  .object({ justRun: z.array(toolNameSchema).optional() })
+  .optional()
+
+/**
  * Validates the part of the settings document this reader uses.
  *
  * @remarks The desktop host owns and validates the whole document. This
@@ -34,9 +42,7 @@ export type JustRunToolNamesRead =
  * unread, so a group or field it does not know never makes the list
  * unreadable.
  */
-const settingsToolsSchema = z.object({
-  tools: z.object({ justRun: z.array(toolNameSchema).optional() }).optional()
-})
+const settingsToolsSchema = z.object({ tools: settingsToolsGroupSchema })
 
 /** The part of the settings document this reader uses. */
 type SettingsTools = z.infer<typeof settingsToolsSchema>

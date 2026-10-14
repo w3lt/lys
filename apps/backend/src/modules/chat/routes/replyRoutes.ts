@@ -5,7 +5,7 @@ import {
   stopChatReplyApi,
   type ChatReplyEvent,
   type ChatReplyEventsApiRoute,
-  type ChatToolResultPathParams,
+  type ChatToolCallPathParams,
   type SendChatToolApprovalApiRoute,
   type SendChatToolResultApiRoute,
   type StopChatReplyApiRoute
@@ -59,6 +59,10 @@ export default function updateFastifyWithChatReplyRoutes(
     history: app.conversationHistoryReader,
     generations
   }
+  const toolApprovalSchema = {
+    params: sendChatToolApprovalApi.params,
+    body: sendChatToolApprovalApi.body
+  }
   app.route<ChatReplyEventsApiRoute>({
     method: chatReplyEventsApi.method,
     url: chatReplyEventsApi.path,
@@ -88,10 +92,7 @@ export default function updateFastifyWithChatReplyRoutes(
   app.route<SendChatToolApprovalApiRoute>({
     method: sendChatToolApprovalApi.method,
     url: sendChatToolApprovalApi.path,
-    schema: {
-      params: sendChatToolApprovalApi.params,
-      body: sendChatToolApprovalApi.body
-    },
+    schema: toolApprovalSchema,
     handler: (request, reply) =>
       handleSendChatToolApprovalRequest(request, reply, generations)
   })
@@ -272,7 +273,7 @@ function handleSendChatToolApprovalRequest(
  * @throws If the registry is closed because shutdown began.
  */
 function resolveReplyToolCall(
-  target: ChatToolResultPathParams,
+  target: ChatToolCallPathParams,
   answer: ToolCallAnswer,
   generations: ReplyGenerationRegistry
 ): ToolCallAnswerOutcome {

@@ -208,10 +208,11 @@ on how many run at once.
   end them; it applies from the next message. Each round sends the growing
   context to LM Studio again, which refuses a request beyond the model's
   context length unless its context overflow setting truncates the context
-  instead. On Just run, a round of N `read_page` calls opens N connections at
-  once and holds up to N × 4 MiB of page bodies; each read ends within 15
-  seconds, and their extractions run one after another on the backend's
-  thread, about a second each at most. A round of N `web_search` calls sends
+  instead. On Just run, a round of N `read_page` calls starts N headless browsers
+  at once, each behind its own proxy, with at most 256 connections and 64 MiB
+  received each and the memory a Chromium page takes; each read ends within
+  30 seconds and closes its browser, and their extractions run one after
+  another on the backend's thread, about a second each at most. A round of N `web_search` calls sends
   N queries to Tavily at once, each costing one Tavily credit, each ending
   within 15 seconds and reading at most 1 MiB.
 - **Removal condition:** [#136](https://github.com/w3lt/lys/issues/136) adds
@@ -282,7 +283,8 @@ I-3 and I-8.
   because it would hide a defect from the person.
 - **Risk and control:** the round rejects as soon as one run rejects, and the
   reply is stored as failed. The round's other backend runs keep going until
-  they end, for `read_page` a request of at most 15 seconds and 4 MiB plus an
+  they end, for `read_page` a browser read of at most 30 seconds, 256
+  connections, and 64 MiB received, which closes its browser, plus an
   extraction of about a second, for `web_search` a request of at most 15
   seconds and 1 MiB, and their results are discarded: nothing
   they produce is stored or shown. Calls still waiting for the person end

@@ -55,7 +55,8 @@ settings file — all of them yours to read, move, or delete, as long as the
 [three database files travel together](https://lys.negentropy.studio/operate/data/).
 Set `LYS_HOME` to an absolute path and she keeps them there instead.
 There are two ways out, and both start off. A web page you let her read: the
-`read_page` tool fetches it from her own backend, with no service in between.
+`read_page` tool opens it in a headless browser her own backend starts, with
+no service in between, and leaves out text the page hides from you.
 And a web search: the `web_search` tool sends the query, with the Tavily API
 key you save in Settings → Secrets, to Tavily's search service. She asks
 before every page and every search unless you set that tool to Just run, a

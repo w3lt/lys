@@ -36,8 +36,9 @@ search path. Release builds instead run `$LYS_HOME/runtime/node/bin/node` with
 `$LYS_HOME/runtime/backend/backend.mjs`, both installed by `build.sh` on macOS;
 see the [Lys home directory](/reference/configuration/#lys-home-directory).
 Neither launch path uses a backend bundled inside the desktop app. `build.sh`
-itself also needs `curl`, `jq`, and network access to `nodejs.org` to download
-that runtime; see [Packaging and releases](/operate/releases/).
+itself also needs `curl`, `jq`, `unzip`, and network access to `nodejs.org` and
+`storage.googleapis.com` to download that runtime and the browser; see
+[Packaging and releases](/operate/releases/).
 
 The backend itself depends on:
 
@@ -51,6 +52,12 @@ The backend itself depends on:
 - outbound HTTP and HTTPS access and a working name resolver for the
   `read_page` and `web_search` tools only; nothing else needs the network, and
   a read or search that cannot connect becomes the tool call's result
+- for `read_page`, Chrome Headless Shell at
+  `$LYS_HOME/runtime/chrome-headless-shell/chrome-headless-shell`, the Chrome
+  for Testing build the backend's `playwright-core` is made for, installed by
+  `build.sh` or by `scripts/install-chrome-headless-shell.sh <directory>`
+  (macOS on Apple silicon or Intel, or Linux on x86-64). Without it every read
+  fails and says whom to contact; nothing else needs it
 - for `web_search`, a Tavily Search API key (Tavily's free plan gives 1,000
   credits a month; a basic search costs one, and a key check two), saved in
   Settings → Secrets;

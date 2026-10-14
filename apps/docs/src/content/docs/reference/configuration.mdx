@@ -38,14 +38,15 @@ A rejected value stops the desktop app before any window opens and prints
 `Lys cannot start: …` to standard error. The host does not create the directory
 at startup; loading settings creates it when `settings.json` is missing.
 
-| Path under `$LYS_HOME`        | Used by        | Contents                                                |
-| ----------------------------- | -------------- | ------------------------------------------------------- |
-| `settings.json`               | Tauri host     | [Persisted settings JSON](#persisted-settings-json)     |
-| `lys_db.sqlite`               | Backend        | Conversation database                                   |
-| `runtime/node/bin/node`       | Release builds | Node.js executable that runs the backend                |
-| `runtime/backend/backend.mjs` | Release builds | Backend bundle that the release Node.js executable runs |
+| Path under `$LYS_HOME`                                | Used by        | Contents                                                |
+| ----------------------------------------------------- | -------------- | ------------------------------------------------------- |
+| `settings.json`                                       | Tauri host     | [Persisted settings JSON](#persisted-settings-json)     |
+| `lys_db.sqlite`                                       | Backend        | Conversation database                                   |
+| `runtime/node/bin/node`                               | Release builds | Node.js executable that runs the backend                |
+| `runtime/backend/backend.mjs`                         | Release builds | Backend bundle that the release Node.js executable runs |
+| `runtime/chrome-headless-shell/chrome-headless-shell` | Backend        | Browser `read_page` reads every page in                 |
 
-On macOS, `build.sh` installs the two `runtime/` entries under
+On macOS, `build.sh` installs the three `runtime/` entries under
 `${LYS_HOME:-$HOME/.lys}`. It treats an empty value as unset but does not reject
 a relative path.
 

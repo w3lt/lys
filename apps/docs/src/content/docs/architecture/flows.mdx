@@ -137,7 +137,10 @@ of the new turn's context.
    answer.
 7. An allowed backend tool runs in the backend under the reply's
    cancellation, whether or not a desktop follows the reply, and its result
-   goes only to the model. An allowed `web_search` call sends one query to
+   goes only to the model, cleaned of invisible characters when the tool
+   reaches the network, as every network tool's result is. An allowed
+   `read_page` call reads the page in a fresh headless browser that follows
+   its redirects. An allowed `web_search` call sends one query to
    `https://api.tavily.com` and gives the model the results framed as
    untrusted text; the model may then call `read_page` for a result's URL,
    which is shown again on Ask me. A rejected call runs nothing; the model

@@ -28,7 +28,7 @@ the services together.
 | Conversation routes   | `src/modules/conversation/routes` | Lists, searches, retrieves, renames, and deletes stored conversations.                                                                                                                                                                                                                                    |
 | Agent routes          | `src/modules/agent/routes`        | Lists the built-in and stored agents, retrieves one, and creates, changes, and deletes stored agents; changing or deleting a built-in agent is refused.                                                                                                                                                   |
 | LLM routes            | `src/modules/llm/routes`          | Lists LM Studio models, checks loaded-model health, loads or unloads a model, and reports or refreshes the LM Studio connection.                                                                                                                                                                          |
-| Built-in tools        | `src/modules/tool/builtIn`        | Tools the backend runs once the desktop allows a call. `read_page` (`web/`) reads one public web page; `web_search` (`web/`) searches the web through Tavily.                                                                                                                                             |
+| Built-in tools        | `src/modules/tool/builtIn`        | Tools the backend runs once the desktop allows a call. `read_page` (`web/`) reads one public web page in a headless browser; `web_search` (`web/`) searches the web through Tavily.                                                                                                                       |
 | Tool routes           | `src/modules/tool/routes`         | Lists the tools the backend runs.                                                                                                                                                                                                                                                                         |
 | Tool approval service | `src/modules/toolApproval`        | Reads the Just run choices saved in `settings.json` once per round of tool calls and decides, for client and backend tools alike, which calls the person must allow first; every call asks when the file cannot be read.                                                                                  |
 | Health route          | `src/modules/health/routes`       | Returns a simple `{ ok: true }` response.                                                                                                                                                                                                                                                                 |
@@ -178,50 +178,86 @@ offered backend tool before it looks up the agent and stores the turn, and
 answers 409 `backend-tool-unavailable`, storing nothing, when one cannot run.
 The turn keeps the tools it found then.
 
-The address-checked connection (`web/webConnection.ts`: the checked lookup,
-the connected-socket check, and Lys's user agent) and the formatting of
-untrusted web text (`web/untrustedText.ts`: delimiter-free text, single-line
-fields without control characters, excerpts, and the citation rule) are
-shared by both web tools.
+The address-checked connection (`web/webConnection.ts`: the checked lookup
+and the connected-socket check) and the formatting of untrusted web text
+(`web/untrustedText.ts`: delimiter-free text, single-line fields without
+control characters, excerpts, and the citation rule) are shared by both web
+tools.
+
+Every result of a tool whose definition has `access: "network"`, client or
+backend, succeeded or failed, passes `formatNetworkToolResult()`
+(`src/modules/tool/networkToolResult.ts`) in the tool-call round before the
+model reads it, so a new network tool is cleaned without code of its own. It
+removes Unicode format and control characters (zero-width, direction
+controls, tag characters, `BEL`, `ESC`, and the like) except tabs and line
+breaks, and keeps a zero-width joiner or non-joiner only between two visible
+characters, where emoji, Persian, and Indic text need it. When it removed
+anything, it adds a last line saying how many characters, so the model can
+tell the person the source hid text.
 
 ### `read_page`
 
 Its arguments are `url` and an
 optional `focus`. A URL longer than 2,048 characters, not absolute `http` or
 `https`, carrying a username or password, or naming this machine or a blocked
-IP address is answered at once. Once allowed, a read:
+IP address is answered at once. Once allowed, a read runs in a fresh
+headless browser (`web/pageRendering.ts`):
 
-1. requests the page with Node's `http`/`https` client; every address a host
-   name resolves to, and every connected socket, must pass the address rule in
-   `webAddresses.ts`. No redirect is followed: a redirect's target is checked
-   as a new URL and given to the model, which can call `read_page` with it;
-2. accepts only `text/html`, `application/xhtml+xml`, and `text/plain`,
-   asks for and decompresses gzip and Brotli (a `deflate` body is refused,
-   because servers send it in two incompatible forms), reads at most 4 MiB,
-   and decodes the charset from the byte order mark, the header, or a
-   `<meta>` tag, where a UTF-16 label means UTF-8 and `x-user-defined` means
-   windows-1252, as in browsers;
-3. extracts the main text with Mozilla Readability over a linkedom document,
+1. it checks that Chrome Headless Shell is installed at
+   `$LYS_HOME/runtime/chrome-headless-shell/chrome-headless-shell`, opens a
+   `PageProxy` (`web/pageProxy.ts`), and starts the browser through
+   `playwright-core` with that proxy, Chromium's sandbox on, WebRTC kept on
+   the proxy, and popups blocked. The proxy listens on a random port of
+   `127.0.0.1`, serves only the browser's random credentials, resolves every
+   host through the checked lookup, and checks every connected socket, so the
+   address rule in `webAddresses.ts` covers the page, every redirect, and
+   everything the page loads. It refuses connections past 256 or past 64 MiB
+   received;
+2. it opens the URL in a context that keeps no cookies, storage, or service
+   workers and accepts no download, without fetching images, fonts, or media.
+   The page's scripts run, and HTTP, `<meta>` refresh, and script redirects
+   are followed. Once the document has loaded, it accepts only
+   `text/html`, `application/xhtml+xml`, and `text/plain` with a 2xx status,
+   and waits up to 10 seconds for the network to be quiet for 500
+   milliseconds;
+3. it stops the page's scripts and takes a `DOMSnapshot`, validated against a
+   schema, and rebuilds the page's HTML from it (`web/pageSnapshot.ts`)
+   without scripts, styles, templates, SVG, or iframes, with shadow-root
+   content where it renders, cut at 4 Mi UTF-16 code units. A text node in
+   `<body>` is kept only when a person can see it: it has a layout box,
+   `visibility: visible`, a color that is not transparent, an opacity above 0
+   through its ancestors, at least 2 by 2 pixels left once cut by every
+   `overflow: hidden` or `clip` ancestor and the page's top and left edges,
+   and a color more than 16 apart, in some RGB channel, from its background
+   (white when none is set; unknown on a background image). These values come
+   from the browser's layout, so the page's scripts cannot fake them. A
+   plain-text page is read from its response body instead;
+4. it extracts the main text with Mozilla Readability over a linkedom document,
    refusing markup with more than 40,000 start tags before parsing it, and a
    parsed page with more than 40,000 elements or a nesting depth sum above
    400,000. A `<br>` or a nested block keeps the words around it apart;
-4. splits the text into passages of at most 1,200 characters and keeps at most
-   12,000 characters: the whole page, the passages that best match `focus` by
-   BM25, or the beginning;
-5. frames the page's title, site, and date and the passages between
-   `<<<page content>>>` delimiters, with a notice that the content is
-   untrusted and an instruction to cite the page, and notes a page with less
-   than 200 characters of main text, which may need JavaScript. Every run of
-   three or more `<` or `>` in page text is shortened to two, so no page can
-   write a delimiter. Characters that show nothing (Unicode default-ignorable
-   code points, such as zero-width, direction, and tag characters) belong to a
-   run when they sit between its brackets, and are dropped with it, so they
+5. it splits the text into passages of at most 1,200 characters and keeps at
+   most 12,000 characters: the whole page, the passages that best match
+   `focus` by BM25, or the beginning;
+6. it frames the page's title, site, and date and the passages between
+   `<<<page content>>>` delimiters, with the final URL, a notice that the
+   content is untrusted, and an instruction to cite the page, and notes a page
+   with less than 200 characters of main text, which may ask the reader to
+   sign in or check for automated readers. Every run of three or more `<` or
+   `>` in page text is shortened to two, so no page can write a delimiter.
+   Characters that show nothing (Unicode default-ignorable code points, and
+   every format and control character except tabs and line breaks) belong to
+   a run when they sit between its brackets, and are dropped with it, so they
    cannot hide a delimiter either.
 
-The whole read must finish within 15 seconds. Failures
-the model can act on, such as an HTTP error status, a non-HTML body, or a page
-without any main text, become the call's result. Pages that need JavaScript
-cannot be read.
+The whole read, the browser's start included, must finish within 30 seconds;
+the page's document must arrive in that time, after which Lys reads what has
+rendered. Stop and the time limit close the browser, and the browser and the
+proxy are closed whatever the outcome. Failures the model can act on, such as
+an HTTP error status, a non-HTML body, a blocked address, a crash, or a page
+without any main text, become the call's result. A missing browser, or one
+that cannot start, fails the read with whom to contact. Lys reads what a
+signed-out visitor sees; it never signs in.
 
 ### `web_search`
 

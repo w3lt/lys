@@ -46,7 +46,8 @@ The script stops at the first failing step. In order, it:
 
 1. Runs `pnpm install --frozen-lockfile`.
 2. Runs `pnpm run backend:build`, which bundles the backend into
-   `apps/backend/dist/backend.mjs` and copies its prompt files beside it.
+   `apps/backend/dist/backend.mjs` and copies its prompt files and the
+   `playwright-core` package beside it.
 3. Creates `$LYS_HOME/runtime`, using `${LYS_HOME:-$HOME/.lys}`.
 4. Downloads the newest Node.js release in the major version named by
    `.nvmrc`, or the latest LTS release when `.nvmrc` is absent, verifies it
@@ -54,14 +55,21 @@ The script stops at the first failing step. In order, it:
    `$LYS_HOME/runtime/node`. A matching installed version is reused.
 5. Moves `apps/backend/dist` to `$LYS_HOME/runtime/backend`, replacing the
    previously installed backend.
-6. Runs `pnpm run desktop:build:ci` and `pnpm run desktop:bundle:ci`, which
+6. Runs `scripts/install-chrome-headless-shell.sh` for
+   `$LYS_HOME/runtime/chrome-headless-shell`: it downloads, from Chrome for
+   Testing over HTTPS, the Chrome Headless Shell version the installed
+   `playwright-core` names, checks the version the downloaded browser reports
+   (Chrome for Testing publishes no checksums), and replaces the previous
+   one. A matching installed version is reused.
+7. Runs `pnpm run desktop:build:ci` and `pnpm run desktop:bundle:ci`, which
    build the Tauri app without bundling and then bundle only `Lys.app`.
-7. Removes any previously installed `/Applications/Lys.app`, then copies the
+8. Removes any previously installed `/Applications/Lys.app`, then copies the
    new `Lys.app` there with `ditto`. Without the removal, files from the old
    bundle would remain inside the new one.
 
 The script needs the toolchain from [Environment setup](/develop/setup/), plus
-`curl`, `jq`, and network access to `nodejs.org`.
+`curl`, `jq`, `unzip`, and network access to `nodejs.org` and
+`storage.googleapis.com`.
 
 :::caution[Desktop runtime is still under development]
 Release builds of the desktop app start the backend from a runtime installed in

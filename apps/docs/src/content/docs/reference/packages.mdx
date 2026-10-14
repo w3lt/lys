@@ -45,12 +45,16 @@ package.
 - Entry point: `src/index.ts`
 - Framework: Fastify
 - Important runtime dependencies: `@fastify/sse`, `@lmstudio/sdk`, `openai`,
-  `fastify-type-provider-zod`, and `@mozilla/readability` with `linkedom`,
-  which extract a web page's main text for `read_page`. `web_search` uses
-  Node's `node:https` and no search SDK
+  `fastify-type-provider-zod`, `playwright-core` (pinned at `1.64.0`), which
+  drives the Chrome Headless Shell `read_page` reads pages in, and
+  `@mozilla/readability` with `linkedom`, which extract a page's main text.
+  `web_search` uses Node's `node:https` and no search SDK
 - `build` (root `pnpm backend:build`) bundles `src/index.ts` with esbuild into
-  `dist/backend.mjs` and copies the two prompt files beside it; `build.sh`
-  installs that output as the release backend.
+  `dist/backend.mjs` and copies the two prompt files beside it.
+  `playwright-core` reads its own package files at run time, so it stays out
+  of the bundle and is copied to `dist/node_modules/playwright-core`; `build.sh`
+  installs that output as the release backend, then the browser version that
+  package names.
 
 ### `@lys/docs`
 

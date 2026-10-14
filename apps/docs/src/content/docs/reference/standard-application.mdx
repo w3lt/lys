@@ -125,6 +125,11 @@ they accept any absolute path that the desktop process can read, instead of
 constraining it to the resources Lys may use. The exception was approved by
 the maintainer on 2026-10-07 for
 [PR #115](https://github.com/w3lt/lys/pull/115), following review finding I-1.
+On 2026-10-14 the maintainer approved its current control and risk text for
+[PR #175](https://github.com/w3lt/lys/pull/175), following review findings I-1
+and C-1: the backend's approval gateway decides each call, Just run is saved
+in `settings.json`, and the exposure to callers that reach the backend is
+accepted until [#171](https://github.com/w3lt/lys/issues/171).
 
 - **Scope:** only the
   [read-text-file](https://github.com/w3lt/lys/blob/main/apps/desktop/src-tauri/src/tools/read_text_file.rs)

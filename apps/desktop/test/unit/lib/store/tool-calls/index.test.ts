@@ -93,6 +93,21 @@ const ALLOWED_APPROVAL = Object.freeze({
 /** Bodyless success of the tool-result and tool-approval endpoints. */
 const ACCEPTED_STATUS = 204
 
+/** Failure a broken store listener throws. */
+const LISTENER_FAILURE = new Error("A listener failed.")
+
+/**
+ * Handles a tool-call state change the way a broken store listener would.
+ *
+ * @param state - State after the change.
+ * @throws {@link LISTENER_FAILURE} once the first held call is answered.
+ */
+function handleAnsweredToolCallStateChange(state: {
+  readonly heldCalls: readonly HeldToolCall[]
+}): void {
+  if (state.heldCalls[0]?.answer.status === "answered") throw LISTENER_FAILURE
+}
+
 /**
  * Builds the snapshot that starts every stream of {@link REPLY} while it is
  * generating.
@@ -1179,6 +1194,30 @@ describe("useToolCallStore", () => {
 
       await useToolCallStore.getState().rejectToolCall(READ_CALL.id, "")
 
+      expect(useToolCallStore.getState().heldCalls).toMatchObject([
+        { answer: { status: "answered" } }
+      ])
+    })
+
+    it("rejects with a store listener's failure after the backend took the rejection, instead of showing it as unsent", async () => {
+      const { replyStreams } = startReplyBackend(
+        buildAcceptingToolCallRoutes(READ_CALL)
+      )
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      await startFollowWithEvents(useToolCallStore, replyStreams, [
+        buildStreamingSnapshot(),
+        buildApprovalEvent(READ_CALL)
+      ])
+      const unsubscribe = useToolCallStore.subscribe(
+        handleAnsweredToolCallStateChange
+      )
+
+      const rejection = useToolCallStore
+        .getState()
+        .rejectToolCall(READ_CALL.id, "")
+
+      await expect(rejection).rejects.toBe(LISTENER_FAILURE)
+      unsubscribe()
       expect(useToolCallStore.getState().heldCalls).toMatchObject([
         { answer: { status: "answered" } }
       ])

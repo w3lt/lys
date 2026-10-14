@@ -113,7 +113,7 @@ describe("ToolPaneContent", () => {
 
     expect(
       screen.getAllByRole("status").map((status) => status.textContent)
-    ).toEqual(["", "Reading tools settings"])
+    ).toEqual(["", "Reading tools settings", ""])
 
     tools.resolve(TOOLS)
     await waitForRenderedWork()
@@ -326,6 +326,45 @@ describe("ToolPaneContent", () => {
       screen.getByRole("status", { name: "Just run choices save" })
     ).toHaveTextContent(/^$/)
     expect(screen.queryByRole("button", { name: "Retry saving" })).toBeNull()
+  })
+
+  it("keeps a failed save's status and Retry saving while the tools are read again, and after that read fails", async () => {
+    const reread = createControlledPromise<unknown>()
+    const reads: (() => unknown)[] = [() => TOOLS]
+    startNativeHostFake({
+      list_tools: () => (reads.shift() ?? (() => reread.promise))(),
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => Promise.reject("Disk full")
+    })
+    await startToolPane()
+    const user = userEvent.setup()
+    await user.click(screen.getByRole("button", { name: "read_text_file" }))
+    await user.click(screen.getByRole("button", { name: "Just run" }))
+    await waitForRenderedWork()
+    const { useToolStore } = await import("@/lib/store/tools")
+    const saveFailure =
+      "Couldn't save your Just run choices. Tool calls keep following the choices Lys last saved until a save works."
+
+    act(() => void useToolStore.getState().loadTools())
+    await waitForRenderedWork()
+    const whileReading = screen.getByRole("status", {
+      name: "Just run choices save"
+    }).textContent
+    const retryWhileReading = screen.queryByRole("button", {
+      name: "Retry saving"
+    })
+    reread.reject("command list_tools failed")
+    await waitForRenderedWork()
+
+    expect(whileReading).toBe(saveFailure)
+    expect(retryWhileReading).toBeInTheDocument()
+    expect(screen.getByText("Lys couldn't read its tool list.")).toBeVisible()
+    expect(
+      screen.getByRole("status", { name: "Just run choices save" })
+    ).toHaveTextContent(saveFailure)
+    expect(
+      screen.getByRole("button", { name: "Retry saving" })
+    ).toBeInTheDocument()
   })
 
   it("locks the controls for a model not trained for tools, and restores them when it changes", async () => {

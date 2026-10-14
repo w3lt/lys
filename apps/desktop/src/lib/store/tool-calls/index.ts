@@ -498,6 +498,30 @@ function createToolCallStore(
   let replyFollows: ReadonlyMap<string, AbortController> = new Map()
 
   /**
+   * Sends a held call's answer to the endpoint of its step.
+   *
+   * @param heldCall - Held call whose answer is being sent.
+   * @returns The backend's outcome.
+   * @throws When the backend cannot take the answer.
+   */
+  function sendToolCallAnswer(
+    heldCall: SendingHeldToolCall
+  ): Promise<SendChatToolCallAnswerResult> {
+    switch (heldCall.step) {
+      case "approval":
+        return dependencies.sendChatToolApproval(
+          heldCall.target,
+          heldCall.answer.toolAnswer
+        )
+      case "run":
+        return dependencies.sendChatToolResult(
+          heldCall.target,
+          heldCall.answer.toolAnswer
+        )
+    }
+  }
+
+  /**
    * Creates the state and actions that own this store's held calls.
    *
    * @param set - Zustand capability that applies observable state changes.
@@ -593,39 +617,17 @@ function createToolCallStore(
     }
 
     /**
-     * Sends a held call's answer to the endpoint of its step.
-     *
-     * @param heldCall - Held call whose answer is being sent.
-     * @returns The backend's outcome.
-     * @throws When the backend cannot take the answer.
-     */
-    function sendToolCallAnswer(
-      heldCall: SendingHeldToolCall
-    ): Promise<SendChatToolCallAnswerResult> {
-      switch (heldCall.step) {
-        case "approval":
-          return dependencies.sendChatToolApproval(
-            heldCall.target,
-            heldCall.answer.toolAnswer
-          )
-        case "run":
-          return dependencies.sendChatToolResult(
-            heldCall.target,
-            heldCall.answer.toolAnswer
-          )
-      }
-    }
-
-    /**
      * Holds a call as sending its answer, sends it, and marks the call
      * answered once the backend no longer waits for it.
      *
      * @param heldCall - Held call with the answer to send.
-     * @returns A promise that settles after the send; it never rejects. An
-     * accepted or not-pending answer marks the call `answered`; a failed send
-     * keeps it as `send-failed` with the answer. Either happens only while
-     * the call is still sending in the same step, so a run that started while
-     * an allowed answer was in flight is never overwritten.
+     * @returns A promise that settles after the send; a failed send never
+     * rejects it. An accepted or not-pending answer marks the call
+     * `answered`; a failed send keeps it as `send-failed` with the answer.
+     * Either happens only while the call is still sending in the same step,
+     * so a run that started while an allowed answer was in flight is never
+     * overwritten. Only the send's failure is recorded: a store listener that
+     * throws on either update rejects the promise.
      */
     async function sendHeldToolAnswer(
       heldCall: SendingHeldToolCall
@@ -633,13 +635,14 @@ function createToolCallStore(
       updateHeldToolCall(heldCall)
       try {
         await sendToolCallAnswer(heldCall)
-        if (!isHeldToolCallSending(heldCall.call.id, heldCall.step)) return
-        updateHeldToolCall(buildAnsweredHeldToolCall(heldCall))
       } catch (error) {
         if (!isHeldToolCallSending(heldCall.call.id, heldCall.step)) return
         const sendError = formatToolCallAnswerSendError(error)
         updateHeldToolCall(buildSendFailedHeldToolCall(heldCall, sendError))
+        return
       }
+      if (!isHeldToolCallSending(heldCall.call.id, heldCall.step)) return
+      updateHeldToolCall(buildAnsweredHeldToolCall(heldCall))
     }
 
     /**

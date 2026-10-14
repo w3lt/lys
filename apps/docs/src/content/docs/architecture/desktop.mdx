@@ -383,9 +383,11 @@ replaces only the `secrets` group of `settings.json`, serialized with the other
 group saves; Remove saves `null`. After a save or removal, the pane reads the
 tool list again, so `web_search`'s availability in the Tools pane follows the
 key. Test asks the backend to check the saved key with Tavily and shows the
-result, with the plan's credits when Tavily reports them. The application store
-owns the save and the check; a check that finishes after a newer save or check
-is dropped. The status line is a polite live region that describes the field.
+result, with the plan's credits when Tavily reports them. Test is unavailable
+while a check or a save runs, so a check never reports on a key that a running
+save or removal is replacing. The application store owns the save and the
+check; a check that finishes after a newer save is dropped. The status line is
+a polite live region that describes the field.
 
 ## Tool calls
 
@@ -407,7 +409,9 @@ snapshot built before the answer arrived does not bring the call back:
 
 1. A tool the desktop does not list, or arguments that do not match its
    command, is answered as `runFailed`. A backend tool's call is checked too,
-   so the card never describes a URL or a query the backend would not send.
+   so the card never describes a URL or a query the backend would not send;
+   a query holding a character hidden on screen is refused by the same rule
+   the backend applies.
 2. With tool calls off, or the tool switched off, the call is answered as
    `declined`.
 3. On Just run, a client tool runs at once and a backend tool's call is

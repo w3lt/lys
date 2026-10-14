@@ -30,7 +30,7 @@ route definitions.
 | `PATCH`  | `/api/v1/agents/:agentCode`                                                     | at least one of `{ name, bio, systemPrompt }`                                      | Changed agent, or `409` for a built-in agent                           |
 | `DELETE` | `/api/v1/agents/:agentCode`                                                     | none                                                                               | Bodyless `204`, or `409` for a built-in agent                          |
 | `GET`    | `/api/v1/tools`                                                                 | none                                                                               | `{ tools: ToolDefinition[], unavailableTools }`                        |
-| `GET`    | `/api/v1/tools/web_search/key-check`                                            | none                                                                               | `{ status: "accepted" \| "rejected" \| "unavailable" \| "failed", … }` |
+| `POST`   | `/api/v1/tools/web_search/key-check`                                            | `{}`                                                                               | `{ status: "accepted" \| "rejected" \| "unavailable" \| "failed", … }` |
 | `POST`   | `/api/v1/chat`                                                                  | `conversation`, `message`, `model`, required `generationOptions`, optional `tools` | `text/event-stream`                                                    |
 | `GET`    | `/api/v1/chat/:conversationId/replies/:assistantMessageId/events`               | none                                                                               | `text/event-stream` (reply snapshot, then live events)                 |
 | `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/stop`                 | none                                                                               | Bodyless `204`, or `409` Problem Details                               |
@@ -204,10 +204,15 @@ reads the settings file but contacts nothing, and never contains the key.
 
 ### Key check
 
-`GET /api/v1/tools/web_search/key-check` reads the saved Tavily API key and
+`POST /api/v1/tools/web_search/key-check` reads the saved Tavily API key and
 asks Tavily's usage endpoint about it, through the same client and limits as
-a search; it changes nothing and is not cancelled when the client leaves. It
-answers `200` with one of:
+a search; it changes nothing in Lys and is not cancelled when the client
+leaves. The body must be the empty JSON object `{}`, sent as
+`application/json`: the check takes no input, but a request with a JSON body
+needs a CORS preflight, so a page on another site cannot make the backend send
+the key to Tavily. Another body is answered with `400`, or `415` for a media
+type the backend cannot parse, before the key is read. It answers `200` with
+one of:
 
 | `status`      | Other fields                                                                                  | Meaning                                        |
 | ------------- | --------------------------------------------------------------------------------------------- | ---------------------------------------------- |

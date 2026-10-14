@@ -51,7 +51,14 @@ at once when the person chose Just run for the session.
   text in `settings.json`, readable by the person's OS account and by any
   process running as it.
 - There is no scoped credential-handle layer.
-- There is no auth token or CSRF layer on the loopback backend.
+- There is no auth token or CSRF layer on the loopback backend, and it checks
+  neither the `Host` nor the `Origin` header, so a page that uses DNS
+  rebinding can call it like a local process
+  ([#171](https://github.com/w3lt/lys/issues/171)).
+- Characters that show nothing, such as zero-width, direction, and tag
+  characters, still reach the model inside a page's or a result's text. Only a
+  delimiter they split is caught; removing them is
+  [#161](https://github.com/w3lt/lys/issues/161).
 - The current Tauri configuration sets no Content Security Policy (`csp` is
   `null`).
 - The backend currently uses a dummy API key value when talking to local
@@ -106,16 +113,19 @@ same machine as the desktop.
 the person's API key. It is unavailable, and never offered to a model, until a
 key is saved in Settings → Secrets.
 
-- **What is sent.** The query (at most 400 characters), the key in the
-  `authorization` header, and Lys's `User-Agent`. Nothing else from the
+- **What is sent.** The query (at most 400 characters, none of which is
+  hidden on screen), the key in the `authorization` header, and Lys's
+  `User-Agent`. Nothing else from the
   conversation leaves the machine unless the model puts it into the query. No
   cookie, `Referer`, or proxy is used.
 - **Where it goes.** Always `https://api.tavily.com`, a constant the model
   cannot change. Certificate verification is forced on whatever the
   environment says, and TLS 1.2 is the minimum. The address rule of
   `read_page` also applies: if `api.tavily.com` resolved to this machine or a
-  private network, Lys would not connect, so the key never goes there. A
-  redirect is not followed.
+  private network, Lys would not connect, so the key never goes there. A proxy
+  or VPN that answers every name with an address of its own, as Clash and
+  Surge do in their fake-IP mode (198.18.0.0/15), therefore makes every search
+  and Test fail. A redirect is not followed.
 - **What comes back.** At most 5 results with a title (300 characters), URL,
   and snippet (500 characters), from a body of at most 1 MiB within 15
   seconds. Results whose URL `read_page` could not read are left out. Titles,
@@ -135,13 +145,22 @@ key is saved in Settings → Secrets.
   make Lys put private text, such as a file she read, into a query. On Ask me
   the card shows the full query before anything is sent; on Just run nothing is
   shown ([#156](https://github.com/w3lt/lys/issues/156)). A query is at most
-  400 characters.
+  400 characters, and one holding a character a person cannot reliably see,
+  such as a zero-width, direction, or tag character, is refused before anyone
+  is asked, so the card never shows less than is sent. The zero-width joiner
+  of an emoji sequence counts too.
 - **Local callers.** The loopback backend has no authentication, so any local
   process, including one run by another user account on the machine, can ask
   it to check the key, or send a chat request that offers `web_search` and
   answer its calls with `allowed`, which runs searches with the saved key and
   spends the person's Tavily credits. No answer contains the key: the key
   check says only whether it works, and searches return only results.
+- **Web pages.** A page open in the person's browser cannot do either from its
+  own site: the key check and a chat request are `POST`s with a JSON body,
+  which need a CORS preflight that the backend refuses for every origin but
+  the desktop's. A page that uses DNS rebinding reaches the backend under its
+  own name, needs no preflight, and can do what a local process can
+  ([#171](https://github.com/w3lt/lys/issues/171)).
 
 ## Practical implication
 

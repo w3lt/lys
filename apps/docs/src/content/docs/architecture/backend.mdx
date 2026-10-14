@@ -181,7 +181,10 @@ IP address is answered at once. Once allowed, a read:
    untrusted and an instruction to cite the page, and notes a page with less
    than 200 characters of main text, which may need JavaScript. Every run of
    three or more `<` or `>` in page text is shortened to two, so no page can
-   write a delimiter.
+   write a delimiter. Characters that show nothing (Unicode default-ignorable
+   code points, such as zero-width, direction, and tag characters) belong to a
+   run when they sit between its brackets, and are dropped with it, so they
+   cannot hide a delimiter either.
 
 The whole read must finish within 15 seconds. Failures
 the model can act on, such as an HTTP error status, a non-HTML body, or a page
@@ -191,8 +194,13 @@ cannot be read.
 ### `web_search`
 
 `web_search(query)` searches the web through the Tavily Search API with the
-person's API key. The query is trimmed and must have 1 to 400 characters;
-otherwise the call is answered at once.
+person's API key. The query is trimmed and must have 1 to 400 characters, none
+of which is a control, format, surrogate, private-use, or unassigned code
+point, or a line or paragraph separator; otherwise the call is answered at
+once. Such characters show nothing or can reorder text, so they are refused
+rather than removed, and the approval card shows exactly the query sent. The
+rule is `hasHiddenWebSearchQueryCharacter` in `@lys/protocol`, which the
+desktop applies too.
 
 - **Key.** `WebSearchToolProvider` reads `secrets.tavilyApiKey` from the
   desktop's settings file (`settingsFilePath`, `$LYS_HOME/settings.json`) with
@@ -226,11 +234,15 @@ otherwise the call is answered at once.
   and an unreadable or oversized answer each become the call's result in
   Lys's own words; Tavily's error text is never passed on.
 
-`GET /api/v1/tools/web_search/key-check` reads the key and asks Tavily's
-`GET /usage` about it, through the same client and limits, and answers
+`POST /api/v1/tools/web_search/key-check`, whose body must be the empty JSON
+object `{}`, reads the key and asks Tavily's `GET /usage` about it, through the
+same client and limits, and answers
 `accepted` (with the plan's credits when reported, a fraction rounded up to a
 whole credit), `rejected`,
-`unavailable`, or `failed`.
+`unavailable`, or `failed`. Each check sends the key to Tavily, so it is a
+`POST` with a JSON body, which a page on another site cannot send without a
+CORS preflight that the backend refuses; another body is answered with 400, or
+415 for a media type Fastify cannot parse, before the key is read.
 
 ## Persistence
 

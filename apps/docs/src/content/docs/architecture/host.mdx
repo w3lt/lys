@@ -148,11 +148,16 @@ The host creates the following defaults when the settings file is missing:
 Only the Rust host writes this file. The React UI reaches it through Tauri
 `invoke` calls, and the backend reads it for the Tavily API key of
 `web_search`. Every write, including the defaults of a missing file, goes to a
-temporary file beside it, opened with mode `0600` on Unix and flushed to disk,
-which is then renamed over the file. A reader therefore sees the previous
-document or the complete new one, and other OS users cannot read the key. The
-rename itself is not synced to the directory, so it is not promised to survive
-a power loss. When `settings.json` is a symbolic link, the rename replaces the
+new temporary file beside it, created with mode `0600` on Unix and flushed to
+disk, which is then renamed over the file. The temporary file's name holds the
+process id and a per-process number, so no two saves share one, and creating
+it never opens, truncates, or follows anything already at that name. A reader
+therefore sees the previous document or a complete new one, also while the
+installed app and a development build save at the same moment (the one
+renamed last is kept), and other OS users cannot read the key. A failed save
+removes its temporary file; a host that stops in the middle of a save leaves
+it, owner-only. The rename itself is not synced to the directory, so it is not
+promised to survive a power loss. When `settings.json` is a symbolic link, the rename replaces the
 link with a regular file, and the file it pointed to stops receiving saves.
 
 The `secrets` group holds the Tavily API key as plain text, validated on load

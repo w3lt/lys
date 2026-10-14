@@ -675,6 +675,35 @@ describe("useToolCallStore", () => {
       expect(listToolAnswers(backend)).toEqual([buildSentAnswer(READ_RESULT)])
     })
 
+    it("runs a call sent to run while its card still waits for the person, in place of the card, since it does not check who allowed it", async () => {
+      const host = startNativeHostFake({ read_text_file: () => "Buy milk." })
+      const { backend, replyStreams } = startReplyBackend(
+        buildAcceptingToolCallRoutes(READ_CALL)
+      )
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      const stream = await startFollowWithEvents(
+        useToolCallStore,
+        replyStreams,
+        [buildStreamingSnapshot(), buildApprovalEvent(READ_CALL)]
+      )
+      const whileWaiting = useToolCallStore.getState()
+
+      stream.sendEvent(buildRunEvent(READ_CALL))
+      await waitForMicrotasks()
+
+      expect(
+        findShownToolCall(whileWaiting, REPLY_TARGET.conversationId)?.call
+      ).toEqual(READ_CALL)
+      expect(host.commands).toHaveLength(1)
+      expect(listToolAnswers(backend)).toEqual([buildSentAnswer(READ_RESULT)])
+      expect(
+        findShownToolCall(
+          useToolCallStore.getState(),
+          REPLY_TARGET.conversationId
+        )
+      ).toBeUndefined()
+    })
+
     it("answers a call it cannot run as not run", async () => {
       const host = startNativeHostFake({})
       const call = buildToolCall(13, "delete_file")

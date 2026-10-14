@@ -150,7 +150,11 @@ the maintainer on 2026-10-07 for
   unless they set it to Just run in the Tools pane, a choice saved in
   `settings.json` that lasts until they switch it back and that the backend
   reads for every round of tool calls, and tools are offered only to models
-  trained for tool use.
+  trained for tool use. The backend does not yet tie an answer to a prompt to
+  the person: any caller that reaches it, a local process or a page that uses
+  DNS rebinding, can answer a waiting prompt with `allowed`, and the desktop
+  then runs that call on a reply it follows, even while the call's card still
+  waits for the person ([#171](https://github.com/w3lt/lys/issues/171)).
   The renderer's Markdown pipeline does not render raw HTML, so review found no
   path for injected script to reach the commands. The window has no content
   security policy, so this control depends on the renderer running only its

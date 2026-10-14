@@ -442,7 +442,11 @@ so a snapshot built before the answer arrived does not bring it back:
    same rule the backend applies.
 2. Every other prompt waits for the person.
 3. A call to run is run at once and its result sent; a call the desktop
-   cannot run is answered `runFailed`. Nothing is shown.
+   cannot run is answered `runFailed`. Nothing is shown. The desktop does not
+   check that the person allowed the call, so a call that another local
+   caller allowed through the backend runs too, in place of its card (see
+   [Candid limits](/architecture/security/#candid-limits) and
+   [#171](https://github.com/w3lt/lys/issues/171)).
 
 A waiting call shows a card above the composer field: the tool, what it does
 with the machine, where it runs, a plain sentence such as "Read

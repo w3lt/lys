@@ -53,10 +53,15 @@ the values changed for each model, which the Model settings pane edits. A load
 takes each setting from the model's own values, then from `default`, then from
 the committed default file, which is never copied into `settings.json`.
 
-Lys reads the file when it starts, so a hand edit takes effect the next time
-Lys starts. There is one exception: a save from the Model pane replaces
-`models` with the entries Lys holds, so a hand edit of `models` made while Lys
-runs is lost. Such a save leaves `default` as it is in the file.
+The desktop reads the file when Lys starts, so a hand edit of `runtime`,
+`model`, `generation`, or `loadConfiguration` takes effect the next time Lys
+starts. The backend reads `tools.justRun` and the Tavily API key from the file
+itself, so a hand edit of either applies without a restart, as the `tools`
+paragraph above and [Tavily API key](#tavily-api-key) describe. A save from a
+settings pane writes the values Lys holds over a hand edit of its group made
+while Lys runs: the Generation pane replaces `generation`, the Model pane
+replaces `loadConfiguration.models` and leaves `default` as it is in the file,
+the Secrets pane replaces `secrets`, and the Tools pane replaces `tools`.
 
 Missing groups and fields receive their Rust defaults; the `loadConfiguration`
 default is empty. Invalid JSON or invalid typed values fail loading; for

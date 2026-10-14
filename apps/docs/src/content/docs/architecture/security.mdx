@@ -65,6 +65,16 @@ backend decides which calls ask; the desktop shows the prompts.
   neither the `Host` nor the `Origin` header, so a page that uses DNS
   rebinding can call it like a local process
   ([#171](https://github.com/w3lt/lys/issues/171)).
+- Nothing ties an answer to an approval prompt to the person. Any caller that
+  reaches the backend, a local process or a page that uses DNS rebinding, can
+  read a waiting prompt from the reply's events and answer it with `allowed`.
+  For `read_text_file` and `search_files`, the desktop then runs the call with
+  the person's account on a reply it follows, including one it starts
+  following when the person opens the conversation, and even while the call's
+  card still waits for the person. The model reads what the call returns, and
+  the stored reply, which can quote it, is readable through the same API. This
+  stays open until callers are authenticated
+  ([#171](https://github.com/w3lt/lys/issues/171)).
 - Characters that show nothing, such as zero-width, direction, and tag
   characters, still reach the model inside a page's or a result's text. Only a
   delimiter they split is caught; removing them is
@@ -173,7 +183,9 @@ key is saved in Settings → Secrets.
   answer its approval prompts with `allowed`, or need no answer while
   `web_search` is on Just run, which runs searches with the saved key.
   Both spend the person's Tavily credits. No answer contains the key: the key
-  check says only whether it works, and searches return only results.
+  check says only whether it works, and searches return only results. Such an
+  `allowed` answer can also make the desktop run a file tool's call; see
+  [Candid limits](#candid-limits).
 - **Web pages.** A page open in the person's browser cannot do either from its
   own site: the key check and a chat request are `POST`s with a JSON body,
   which need a CORS preflight that the backend refuses for every origin but

@@ -137,7 +137,7 @@ key is saved in Settings → Secrets.
   Test, and never logs it or anything else read from the file; a parse error,
   which could quote the key, is dropped. A turn keeps the key it started with.
   Test asks Tavily's usage endpoint, which reports whether the key works and
-  its plan credits.
+  its plan credits, and spends two credits each time.
 - **Tavily sees every query**, tied to the person's account. Tavily's account
   setting "Allow Use of Query Data" controls whether Tavily uses queries to
   improve its service; switching it off is recommended.
@@ -149,12 +149,17 @@ key is saved in Settings → Secrets.
   such as a zero-width, direction, tag, or variation selector character, or a
   Hangul filler, is refused before anyone is asked, so the card never shows
   less than is sent. The zero-width joiner of an emoji sequence and the
-  variation selector of an emoji such as `❤️` count too.
+  variation selector of an emoji such as `❤️` count too. Spaces other than
+  the plain space, such as U+2003 or the ideographic space U+3000, and the
+  blank braille pattern U+2800 are sent: the card shows each as a gap, but
+  not which one it is, so a run of them could carry a few bits. They are
+  allowed because Chinese and Japanese text and pasted text use them, and a
+  hidden message would need a long run of visible gaps.
 - **Local callers.** The loopback backend has no authentication, so any local
   process, including one run by another user account on the machine, can ask
   it to check the key, or send a chat request that offers `web_search` and
-  answer its calls with `allowed`, which runs searches with the saved key and
-  spends the person's Tavily credits. No answer contains the key: the key
+  answer its calls with `allowed`, which runs searches with the saved key.
+  Both spend the person's Tavily credits. No answer contains the key: the key
   check says only whether it works, and searches return only results.
 - **Web pages.** A page open in the person's browser cannot do either from its
   own site: the key check and a chat request are `POST`s with a JSON body,

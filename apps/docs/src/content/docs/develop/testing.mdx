@@ -57,7 +57,8 @@ contracts, schemas, or behavior that crosses package boundaries.
   Tavily API. Run it with `pnpm --filter @lys/backend test:live`, with a real
   Tavily API key in the `LYS_TEST_TAVILY_API_KEY` environment variable; a case
   that needs the key fails without it. Each run sends two real searches, at
-  one Tavily credit each, and a few key checks. It shows what only the real
+  one Tavily credit each, and four usage requests with the real key, at two
+  credits each, so it spends ten credits. It shows what only the real
   service can: that a real search and a real key check succeed, and that
   Tavily rejects a key it never issued. The unit suite covers what Tavily
   cannot be made to do on demand, such as a redirect, an untrusted

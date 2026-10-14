@@ -74,8 +74,9 @@ unavailable until one is saved.
 3. Open Settings → Secrets, paste the key into the Tavily card, and press Save
    or Enter. Surrounding spaces are removed; the key itself is never changed.
 4. Press Test to ask Tavily whether the key works; it shows the plan's credits
-   when Tavily reports them. Remove deletes the saved key. Test is unavailable
-   while a save or removal runs.
+   when Tavily reports them. Each press spends two credits, although Tavily's
+   documentation lists no cost for the usage endpoint that Test asks. Remove
+   deletes the saved key. Test is unavailable while a save or removal runs.
 
 The key is stored as plain text in the `secrets` group of `settings.json`.
 Lys's backend reads it when it lists the tools, when a message offers

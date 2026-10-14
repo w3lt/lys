@@ -242,7 +242,10 @@ object `{}`, reads the key and asks Tavily's `GET /usage` about it, through the
 same client and limits, and answers
 `accepted` (with the plan's credits when reported, a fraction rounded up to a
 whole credit), `rejected`,
-`unavailable`, or `failed`. Each check sends the key to Tavily, so it is a
+`unavailable`, or `failed`. Tavily charges two credits for each `GET /usage`,
+although its documentation lists no cost for it; the check still uses it
+because only that answer reports the plan's credits, which Test shows. Each
+check sends the key to Tavily, so it is a
 `POST` with a JSON body, which a page on another site cannot send without a
 CORS preflight that the backend refuses; another body is answered with 400, or
 415 for a media type Fastify cannot parse, before the key is read.

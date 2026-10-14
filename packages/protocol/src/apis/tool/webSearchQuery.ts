@@ -10,7 +10,9 @@
  * variation selectors can carry one byte each. The zero-width joiner of an
  * emoji sequence, the zero-width non-joiner of Persian and Indic scripts, and
  * the variation selectors of emoji and Mongolian text, such as the one that
- * draws `❤️` in color, are found too.
+ * draws `❤️` in color, are found too. Spaces other than U+0020, such as the
+ * ideographic space of Chinese and Japanese text, and the blank braille
+ * pattern are not found: the card shows each as a gap, though not which one.
  */
 const HIDDEN_QUERY_CHARACTER_PATTERN =
   /[\p{C}\p{Default_Ignorable_Code_Point}\p{Zl}\p{Zp}]/u

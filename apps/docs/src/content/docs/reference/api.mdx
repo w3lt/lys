@@ -207,7 +207,8 @@ reads the settings file but contacts nothing, and never contains the key.
 `POST /api/v1/tools/web_search/key-check` reads the saved Tavily API key and
 asks Tavily's usage endpoint about it, through the same client and limits as
 a search; it changes nothing in Lys and is not cancelled when the client
-leaves. The body must be the empty JSON object `{}`, sent as
+leaves. Each check that reaches Tavily with the key spends two of the
+account's Tavily credits. The body must be the empty JSON object `{}`, sent as
 `application/json`: the check takes no input, but a request with a JSON body
 needs a CORS preflight, so a page on another site cannot make the backend send
 the key to Tavily. Another body is answered with `400`, or `415` for a media

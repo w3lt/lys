@@ -52,7 +52,8 @@ The backend itself depends on:
   `read_page` and `web_search` tools only; nothing else needs the network, and
   a read or search that cannot connect becomes the tool call's result
 - for `web_search`, a Tavily Search API key (Tavily's free plan gives 1,000
-  credits a month; a basic search costs one), saved in Settings → Secrets;
+  credits a month; a basic search costs one, and a key check two), saved in
+  Settings → Secrets;
   without it `web_search` is unavailable and never offered
 
 The backend's chat and model services are both wired to that LM Studio address.

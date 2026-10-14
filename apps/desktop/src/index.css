@@ -219,6 +219,7 @@
   --app-surface-selected: oklch(0.9 0.055 215 / 78%);
   --app-surface-code: oklch(0.92 0.025 280);
   --app-surface-code-header: oklch(0.88 0.035 278);
+  --app-surface-table-header: var(--muted);
   --app-surface-danger: oklch(0.95 0.045 25);
   /* Dims the workspace behind a floating panel without hiding its content. */
   --app-surface-veil: oklch(0.3 0.06 294 / 18%);

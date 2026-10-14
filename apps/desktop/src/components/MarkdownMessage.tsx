@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useId,
   useRef,
   useState,
   type ComponentProps,
@@ -184,20 +185,51 @@ function MarkdownPre({
 }
 
 /**
- * Adapts react-markdown links to open in a new tab without a referrer.
+ * Reports whether a link destination is a fragment of the current document.
  *
- * @remarks Only the destination and title a Markdown link can carry are
- * rendered, so the source node the renderer supplies never becomes a DOM
- * attribute.
- * @param props - Renderer-provided link children, destination, title, and
- * the hast node they were rendered from.
- * @returns The external link.
+ * @param href - Link destination supplied by the renderer, when present.
+ * @returns Whether the destination begins with `#`.
+ */
+function isFragmentHref(href: string | undefined): boolean {
+  return href?.startsWith("#") ?? false
+}
+
+/**
+ * Adapts react-markdown links to the navigation their destination needs.
+ *
+ * @remarks A fragment link, such as a footnote reference or its
+ * back-reference, stays in the current document: it keeps its `id`,
+ * `aria-label`, and `aria-describedby`, which those links use to name and
+ * reach each other. Every other link opens in a new tab without a referrer and
+ * renders only the destination and title a Markdown link can carry. In both
+ * cases the source node the renderer supplies never becomes a DOM attribute.
+ * @param props - Renderer-provided link children, destination, title,
+ * footnote identity and accessible relationships, and the hast node they were
+ * rendered from.
+ * @returns The in-document or external link.
  */
 function MarkdownLink({
+  "aria-describedby": ariaDescribedBy,
+  "aria-label": ariaLabel,
   children,
   href,
+  id,
   title
 }: ComponentProps<"a"> & ExtraProps) {
+  if (isFragmentHref(href)) {
+    return (
+      <a
+        aria-describedby={ariaDescribedBy}
+        aria-label={ariaLabel}
+        href={href}
+        id={id}
+        title={title}
+      >
+        {children}
+      </a>
+    )
+  }
+
   return (
     <a href={href} rel="noreferrer" target="_blank" title={title}>
       {children}
@@ -208,10 +240,11 @@ function MarkdownLink({
 /**
  * Markdown renderer mappings used by every {@link MarkdownMessage}.
  *
- * @remarks Links route through {@link MarkdownLink} and open in a new tab
- * without the referrer; fenced code routes through {@link MarkdownPre} for
- * language labels and copying. These mappings are presentation
- * configuration, not application state.
+ * @remarks Links route through {@link MarkdownLink}, which keeps footnote
+ * links in the message and opens every other link in a new tab without the
+ * referrer; fenced code routes through {@link MarkdownPre} for language
+ * labels and copying. These mappings are presentation configuration, not
+ * application state.
  */
 const markdownComponents: Components = {
   a: MarkdownLink,
@@ -223,10 +256,16 @@ const markdownComponents: Components = {
  *
  * @remarks The parent owns source text and
  * streaming state; this component owns no application state or external
- * resource. Markdown links receive the configured external-navigation
- * attributes, `$…$` and `$$…$$` math renders through KaTeX, code blocks
- * receive the copy interaction, and the streaming caret is a polite status
- * announcement, worded by the parent, only while `streaming` is true.
+ * resource. GitHub Flavored Markdown adds tables, task lists, strikethrough,
+ * literal autolinks, and footnotes. Footnote and back-reference ids begin with
+ * an identifier the renderer gives this message, so a footnote link reaches
+ * its own message's note even when several messages number their notes the
+ * same way. The visually hidden "Footnotes" heading keeps remark-rehype's
+ * fixed `footnote-label` id, so every message with footnotes repeats it.
+ * Markdown links receive the configured navigation attributes,
+ * `$…$` and `$$…$$` math renders through KaTeX, code blocks receive the copy
+ * interaction, and the streaming caret is a polite status announcement,
+ * worded by the parent, only while `streaming` is true.
  * Shiki highlights fenced code with CSS `light-dark()` token colors from the
  * GitHub Light and GitHub Dark themes, so highlighted code follows the
  * inherited `color-scheme` without being highlighted again. Each language's
@@ -234,9 +273,9 @@ const markdownComponents: Components = {
  * session. A fence naming a language Shiki does not bundle, compared
  * case-sensitively, renders as plain `text`; a fence without a language stays
  * unhighlighted. Processing is asynchronous: until a message's first pass
- * resolves, it renders as plain Markdown without the link, math, and
- * code-block handling. Later passes keep the previous output visible until the
- * new text is processed.
+ * resolves, it renders as GitHub Flavored Markdown without the link, math,
+ * and code-block handling. Later passes keep the previous output visible until
+ * the new text is processed.
  * @param props - Markdown source, current streaming presentation state, and
  * the caret's announcement.
  * @returns The rendered Markdown body and optional generation caret.
@@ -246,11 +285,15 @@ export function MarkdownMessage({
   streaming,
   generatingLabel
 }: MarkdownMessageProps) {
+  const instanceId = useId()
+  const footnoteRehypeOptions = { clobberPrefix: `${instanceId}-` }
+
   return (
     <div className="markdown-message">
       <MarkdownHooks
         components={markdownComponents}
         remarkPlugins={[remarkMath, remarkGfm]}
+        remarkRehypeOptions={footnoteRehypeOptions}
         rehypePlugins={[
           // Display math arrives as `pre > code`, so KaTeX must claim it
           // before Shiki treats it as a code block.
@@ -270,7 +313,14 @@ export function MarkdownMessage({
             }
           ]
         ]}
-        fallback={<ReactMarkdown>{text}</ReactMarkdown>}
+        fallback={
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            remarkRehypeOptions={footnoteRehypeOptions}
+          >
+            {text}
+          </ReactMarkdown>
+        }
       >
         {text}
       </MarkdownHooks>

@@ -51,6 +51,15 @@ jobs:
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
 
+      # The read_page tests crash pages on purpose. When the kernel pipes a
+      # crashing process's core dump to a handler such as apport, the renderer
+      # stays alive until its gigabyte heap is dumped, so the crash reaches the
+      # read too late. The runner discards core dumps instead.
+      - name: Let a crashed browser process exit at once
+        run: |
+          echo "core_pattern was: $(cat /proc/sys/kernel/core_pattern)"
+          sudo sysctl -w kernel.core_pattern='|/bin/false'
+
       # The backend tsconfig includes `test`, so this also typechecks the suite.
       - name: Typecheck the backend and its tests
         run: pnpm --filter @lys/backend exec tsc --noEmit

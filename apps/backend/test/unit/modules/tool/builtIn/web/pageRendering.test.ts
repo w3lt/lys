@@ -495,7 +495,8 @@ describe("getRenderedPage", { timeout: BROWSER_TEST_TIMEOUT_MS }, () => {
 
     const page = findRenderedPage(
       await renderTestPage(buildTestPageUrl(server.port, "/moths.txt"), {
-        readTimeoutMs: 25_000
+        readTimeoutMs: 25_000,
+        settleTimeoutMs: 15_000
       })
     )
 

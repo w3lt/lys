@@ -207,7 +207,8 @@ headless browser (`web/pageRendering.ts`):
    `$LYS_HOME/runtime/chrome-headless-shell/chrome-headless-shell`, opens a
    `PageProxy` (`web/pageProxy.ts`), and starts the browser through
    `playwright-core` with that proxy, Chromium's sandbox on, WebRTC kept on
-   the proxy, and popups blocked. The proxy listens on a random port of
+   the proxy, popups blocked, and the page's scripts held to 1 GiB of memory,
+   past which the page crashes and the read fails. The proxy listens on a random port of
    `127.0.0.1`, serves only the browser's random credentials, resolves every
    host through the checked lookup, refuses a blocked IP address without
    connecting to it, and checks every connected socket, so the address rule

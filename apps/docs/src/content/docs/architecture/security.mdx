@@ -131,7 +131,8 @@ and what reaches the model:
   page sets last for that read only; Lys never signs in, so it reads what a
   signed-out visitor sees. Requests carry the browser's own `User-Agent`.
 - **Bounds.** One read takes at most 30 seconds, the browser's start
-  included, at most 256 connections, and at most 64 MiB received. Images,
+  included, at most 256 connections, at most 64 MiB received, and at most
+  1 GiB held by the page's scripts. Images,
   fonts, and media are not fetched. A page with more than 120,000 DOM nodes
   is refused before its snapshot is taken. The rebuilt page is cut at 4 Mi
   UTF-16 code units; markup with more than 40,000 start tags, or a parsed page with

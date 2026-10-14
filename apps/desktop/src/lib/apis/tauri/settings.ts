@@ -6,7 +6,8 @@ import type {
   LysSettings,
   ModelSettings,
   RuntimeSettings,
-  SecretsSettings
+  SecretsSettings,
+  ToolSettings
 } from "@/lib/store/settings"
 import { invoke } from "@tauri-apps/api/core"
 
@@ -37,6 +38,19 @@ type SettingsDocumentSecrets = {
 }
 
 /**
+ * The `tools` group as the settings document holds it.
+ *
+ * @remarks Matches Rust's `ToolSettings`. JSON has no set, so the names are
+ * one array, which Rust stores in ascending order with each name once. That
+ * array stays inside this adapter; the rest of the renderer reads the set of
+ * {@link ToolSettings}.
+ */
+type SettingsDocumentTools = {
+  /** Names of the tools on Just run. */
+  readonly justRun: readonly string[]
+}
+
+/**
  * Complete settings document as the Tauri settings commands exchange it.
  *
  * @remarks Matches Rust's `LysSettings` field for field: `load_settings`
@@ -54,6 +68,8 @@ type SettingsDocument = {
   readonly loadConfiguration: SettingsDocumentLoadConfiguration
   /** Secrets, with the key as plain text. */
   readonly secrets: SettingsDocumentSecrets
+  /** Tool choices, with the names on Just run as one array. */
+  readonly tools: SettingsDocumentTools
 }
 
 /**
@@ -76,13 +92,27 @@ function buildSecretsSettings(
 }
 
 /**
+ * Builds the document group that stores the renderer's tool choices.
+ *
+ * @param tools - Tool choices owned by the desktop store.
+ * @returns A newly owned group listing the names in the set's order; Rust
+ * stores them in ascending order.
+ */
+function buildSettingsDocumentTools(
+  tools: ToolSettings
+): SettingsDocumentTools {
+  return { justRun: [...tools.justRunToolNames] }
+}
+
+/**
  * Builds the renderer's settings from a settings document.
  *
  * @param settingsDocument - Document a Tauri settings command resolved with,
  * already validated by Rust.
  * @returns Settings holding the document's groups. The per-model load
  * settings are a newly owned map with one entry per key of the document's
- * object, whatever the text of the key.
+ * object, whatever the text of the key, and the tools on Just run are a
+ * newly owned set.
  */
 function buildLysSettings(settingsDocument: SettingsDocument): LysSettings {
   const models = new Map(
@@ -97,7 +127,8 @@ function buildLysSettings(settingsDocument: SettingsDocument): LysSettings {
     model: settingsDocument.model,
     generation: settingsDocument.generation,
     loadConfiguration,
-    secrets: buildSecretsSettings(settingsDocument.secrets)
+    secrets: buildSecretsSettings(settingsDocument.secrets),
+    tools: { justRunToolNames: new Set(settingsDocument.tools.justRun) }
   }
 }
 
@@ -107,7 +138,8 @@ function buildLysSettings(settingsDocument: SettingsDocument): LysSettings {
  * @param settings - Complete settings value owned by the desktop store.
  * @returns A document holding the same groups. The per-model load settings
  * are a newly owned object with one property of its own per map entry, also
- * for a model key that names a member of the object prototype.
+ * for a model key that names a member of the object prototype, and the tools
+ * on Just run are an array.
  */
 function buildSettingsDocument(settings: LysSettings): SettingsDocument {
   const models = Object.fromEntries(settings.loadConfiguration.models)
@@ -120,7 +152,8 @@ function buildSettingsDocument(settings: LysSettings): SettingsDocument {
     model: settings.model,
     generation: settings.generation,
     loadConfiguration,
-    secrets: { tavilyApiKey: settings.secrets.tavilyApiKey }
+    secrets: { tavilyApiKey: settings.secrets.tavilyApiKey },
+    tools: buildSettingsDocumentTools(settings.tools)
   }
 }
 
@@ -128,7 +161,8 @@ function buildSettingsDocument(settings: LysSettings): SettingsDocument {
  * Loads desktop settings from the Tauri-persisted settings file.
  *
  * @returns The settings of the complete document after Rust validation and
- * defaulting, with the per-model load settings as a map keyed by model key.
+ * defaulting, with the per-model load settings as a map keyed by model key
+ * and the tools on Just run as a set.
  * @throws The Tauri invoke rejection when the settings path cannot be read or parsed.
  */
 export async function loadSettings(): Promise<LysSettings> {
@@ -145,7 +179,8 @@ export async function loadSettings(): Promise<LysSettings> {
  * or file-writing failures.
  * @remarks The named newSettings argument matches Rust's new_settings
  * parameter. The per-model load settings are sent as one object keyed by
- * model key, the form the settings file keeps.
+ * model key, and the tools on Just run as one array, the forms the settings
+ * file keeps.
  */
 export async function saveSettings(settings: LysSettings): Promise<void> {
   const newSettings = buildSettingsDocument(settings)
@@ -212,4 +247,20 @@ export async function saveSecretsSettings(
 ): Promise<void> {
   const persistedSettings = await loadSettings()
   await saveSettings({ ...persistedSettings, secrets })
+}
+
+/**
+ * Persists the tool choices while preserving everything else already on disk.
+ * @param tools - Tool choices to save; every name in the set is written, also
+ * one Lys does not list now.
+ * @returns Resolves after the merged settings document is written by Tauri.
+ * @throws The native load or save rejection; no replacement is written if
+ * loading fails.
+ * @remarks The application store serializes this read-modify-write operation
+ * with the other settings-group saves, so that overlapping saves cannot write
+ * back each other's stale group.
+ */
+export async function saveToolSettings(tools: ToolSettings): Promise<void> {
+  const persistedSettings = await loadSettings()
+  await saveSettings({ ...persistedSettings, tools })
 }

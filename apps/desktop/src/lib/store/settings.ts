@@ -111,13 +111,30 @@ export type SecretsSettings = {
 }
 
 /**
+ * Tool choices persisted under the `tools` JSON object.
+ *
+ * @remarks Holds what Rust's `ToolSettings` holds; Rust validates each name
+ * against the shared tool name rule and reads a missing group or list as
+ * empty. The settings file keeps the names as one array in ascending order,
+ * which the Tauri settings adapter converts to and from the set held here.
+ * A tool not in the set asks the person before each call. A name Lys does
+ * not list is kept and has no effect. The application store saves the group
+ * automatically whenever a tool's approval changes.
+ */
+export type ToolSettings = {
+  /** Names of the tools that run at once, without asking, when called. */
+  readonly justRunToolNames: ReadonlySet<string>
+}
+
+/**
  * Renderer projection of the complete Tauri-persisted settings document.
  *
- * @remarks Holds the five groups of Rust's `LysSettings` under the same
+ * @remarks Holds the six groups of Rust's `LysSettings` under the same
  * names, so a saved value cannot silently drop a persisted group. The
  * runtime, model, and generation groups match Rust field for field. The load
  * configuration group differs only in its per-model settings, a map here and
- * one object in the document; the Tauri settings adapter converts between
+ * one object in the document, and the tools group in its names, a set here
+ * and one array in the document; the Tauri settings adapter converts between
  * the two.
  */
 export type LysSettings = {
@@ -131,6 +148,8 @@ export type LysSettings = {
   loadConfiguration: LoadConfigurationSettings
   /** Keys of the services Lys calls on the person's behalf. */
   secrets: SecretsSettings
+  /** Tools the person set to Just run. */
+  tools: ToolSettings
 }
 
 /**
@@ -163,6 +182,14 @@ const INITIAL_SECRETS_SETTINGS: SecretsSettings = Object.freeze({
 })
 
 /**
+ * Tool choices shown before Tauri initialization completes: no tool on Just
+ * run, as in a first-run settings file, so every call asks.
+ */
+const INITIAL_TOOL_SETTINGS: ToolSettings = Object.freeze({
+  justRunToolNames: new Set<string>()
+})
+
+/**
  * Renderer-side fallback settings used before Tauri initialization completes.
  *
  * @remarks Values match the Rust `Default` implementations so the pre-load
@@ -182,5 +209,6 @@ export const initialSettingsState: LysSettings = {
     replyCeiling: 2048
   },
   loadConfiguration: INITIAL_LOAD_CONFIGURATION_SETTINGS,
-  secrets: INITIAL_SECRETS_SETTINGS
+  secrets: INITIAL_SECRETS_SETTINGS,
+  tools: INITIAL_TOOL_SETTINGS
 }

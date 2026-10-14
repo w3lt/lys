@@ -13,12 +13,8 @@ import {
   formatTokenCount
 } from "@/components/ComposerComponents/composer-context"
 import type { ToolModelSupport } from "@/lib/models/tool-model-support"
-import {
-  TOOL_APPROVALS,
-  getToolChoice,
-  type ToolApproval,
-  type ToolChoice
-} from "@/lib/store/tools"
+import { TOOL_APPROVALS, type ToolApproval } from "@/lib/store/tool-settings"
+import { getToolChoice, type ToolChoice } from "@/lib/store/tools"
 
 /** Tone of the tool-calls status dot. */
 export type ToolCallsTone = "neutral" | "active" | "warning"

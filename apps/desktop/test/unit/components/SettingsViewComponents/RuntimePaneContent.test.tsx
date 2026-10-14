@@ -43,15 +43,16 @@ const NOTHING_LOADED: RuntimeArrangement = {
 
 /**
  * Settings document of a first run: every group at its default, no load
- * setting stored, no Tavily API key saved. Its backend starts when Lys opens,
- * so a saved `false` can only come from the switch.
+ * setting stored, no Tavily API key saved, no tool on Just run. Its backend
+ * starts when Lys opens, so a saved `false` can only come from the switch.
  */
 const FIRST_RUN_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
   runtime: initialSettingsState.runtime,
   model: initialSettingsState.model,
   generation: initialSettingsState.generation,
   loadConfiguration: Object.freeze({ default: {}, models: {} }),
-  secrets: initialSettingsState.secrets
+  secrets: initialSettingsState.secrets,
+  tools: Object.freeze({ justRun: Object.freeze([]) })
 })
 
 /**

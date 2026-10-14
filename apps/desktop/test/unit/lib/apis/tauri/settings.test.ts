@@ -5,7 +5,8 @@ import {
   saveGenerationSettings,
   saveLoadConfigurationSettings,
   saveSecretsSettings,
-  saveSettings
+  saveSettings,
+  saveToolSettings
 } from "@/lib/apis/tauri/settings"
 import type {
   LoadConfigurationSettings,
@@ -129,6 +130,19 @@ describe("loadSettings", () => {
       message: "The settings file holds an invalid Tavily API key."
     })
     expect(String(failure)).not.toContain(spacedKey)
+  })
+
+  it("reads the tools on Just run as a set, and an empty list as none", async () => {
+    startNativeHostFake({
+      load_settings: () => ({
+        ...STORED_SETTINGS_DOCUMENT,
+        tools: { justRun: [] }
+      })
+    })
+
+    const settings = await loadSettings()
+
+    expect(settings.tools.justRunToolNames).toEqual(new Set())
   })
 
   it("rejects with the host's rejection", async () => {
@@ -355,5 +369,72 @@ describe("saveSecretsSettings", () => {
     await expect(saveSecretsSettings({ tavilyApiKey: null })).rejects.toBe(
       "Disk full"
     )
+  })
+})
+
+describe("saveToolSettings", () => {
+  it("replaces only the tools group of the document on disk", async () => {
+    const host = startNativeHostFake({
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => null
+    })
+
+    await saveToolSettings({
+      justRunToolNames: new Set(["read_text_file", "find_files"])
+    })
+
+    expect(host.commands).toEqual([
+      { command: "load_settings", args: {} },
+      {
+        command: "save_settings",
+        args: {
+          newSettings: {
+            ...STORED_SETTINGS_DOCUMENT,
+            tools: { justRun: ["read_text_file", "find_files"] }
+          }
+        }
+      }
+    ])
+  })
+
+  it("writes an empty list when no tool is on Just run", async () => {
+    const host = startNativeHostFake({
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => null
+    })
+
+    await saveToolSettings({ justRunToolNames: new Set() })
+
+    expect(host.commands[1]).toEqual({
+      command: "save_settings",
+      args: {
+        newSettings: { ...STORED_SETTINGS_DOCUMENT, tools: { justRun: [] } }
+      }
+    })
+  })
+
+  it("writes nothing when the document cannot be loaded", async () => {
+    const host = startNativeHostFake({
+      load_settings: () => Promise.reject("Failed to read settings.json"),
+      save_settings: () => null
+    })
+
+    await expect(
+      saveToolSettings({ justRunToolNames: new Set(["find_files"]) })
+    ).rejects.toBe("Failed to read settings.json")
+    expect(host.commands.map((invoked) => invoked.command)).toEqual([
+      "load_settings"
+    ])
+  })
+
+  it("rejects when the merged document cannot be written", async () => {
+    startNativeHostFake({
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => Promise.reject("Disk full")
+    })
+
+    await expect(
+      saveToolSettings({ justRunToolNames: new Set(["find_files"]) })
+    ).rejects.toBe("Disk full")
   })
 })

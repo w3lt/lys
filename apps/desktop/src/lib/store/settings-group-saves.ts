@@ -1,13 +1,15 @@
 import {
   saveGenerationSettings,
   saveLoadConfigurationSettings,
-  saveSecretsSettings
+  saveSecretsSettings,
+  saveToolSettings
 } from "@/lib/apis/tauri/settings"
 
 import type {
   GenerationSettings,
   LoadConfigurationSettings,
-  SecretsSettings
+  SecretsSettings,
+  ToolSettings
 } from "./settings"
 
 /**
@@ -45,6 +47,14 @@ export type SettingsGroupSaves = {
    * the native load or save rejection.
    */
   readonly saveSecretsSettings: (secrets: SecretsSettings) => Promise<void>
+  /**
+   * Saves the tools group after every save sent earlier has settled.
+   *
+   * @param tools - Tool choices to persist.
+   * @returns Resolves after the settings file is written, and rejects with
+   * the native load or save rejection.
+   */
+  readonly saveToolSettings: (tools: ToolSettings) => Promise<void>
 }
 
 /** One settings group whose latest value is to be saved. */
@@ -100,7 +110,9 @@ export function createSettingsGroupSaves(): SettingsGroupSaves {
         saveLoadConfigurationSettings(loadConfiguration)
       ),
     saveSecretsSettings: (secrets) =>
-      saveSettingsGroupInOrder(() => saveSecretsSettings(secrets))
+      saveSettingsGroupInOrder(() => saveSecretsSettings(secrets)),
+    saveToolSettings: (tools) =>
+      saveSettingsGroupInOrder(() => saveToolSettings(tools))
   }
 }
 

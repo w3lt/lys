@@ -17,6 +17,11 @@ import {
   type SecretsSettingsSlice
 } from "./secrets-settings"
 import { createSettingsGroupSaves } from "./settings-group-saves"
+import {
+  createToolSettingsSlice,
+  isToolSettingsEqual,
+  type ToolSettingsSlice
+} from "./tool-settings"
 import { getBackendReadiness, type BackendReadiness } from "./backend-readiness"
 import {
   createLmStudioStatusSlice,
@@ -83,12 +88,12 @@ type LysActions = {
    */
   setSettingsPane: (pane: SettingsPane) => void
   /**
-   * Replaces store-owned settings and automatically persists generation and
-   * load configuration edits.
+   * Replaces store-owned settings and automatically persists generation, load
+   * configuration, and tools edits.
    *
    * @param settings - Complete settings value applied in memory immediately.
-   * Runtime and model edits remain session-only; generationSave and
-   * loadConfigurationSave report persistence.
+   * Runtime and model edits remain session-only; generationSave,
+   * loadConfigurationSave, and toolSettingsSave report persistence.
    */
   setSettings: (settings: LysSettings) => void
   /**
@@ -135,6 +140,7 @@ type LysStore = LysState &
   GenerationSettingsSlice &
   LoadConfigurationSettingsSlice &
   SecretsSettingsSlice &
+  ToolSettingsSlice &
   LmStudioStatusSlice
 
 /** Initial renderer-side store state before Tauri initialization. */
@@ -157,10 +163,11 @@ const initialState: LysState = {
  *
  * @remarks Initialization and process actions are application-owned
  * asynchronous transitions. Tauri errors propagate from the returned promises;
- * settings are edited in memory by setSettings. The generation and load
- * configuration slices own automatic saves and retain their completion or
- * failure state across pane changes; the store runs their writes one at a
- * time, so one group's save never writes back the other group's older value.
+ * settings are edited in memory by setSettings, and tool approvals by
+ * updateToolApproval. The generation, load configuration, and tool-settings
+ * slices own automatic saves and retain their completion or failure state
+ * across pane changes; the store runs every group's writes one at a time, so
+ * one group's save never writes back another group's older value.
  *
  * Model requests are owned by the model slice, use the shared HTTP protocol,
  * and are admitted only while the backend runs and LM Studio is connected.
@@ -251,6 +258,7 @@ export const useLysStore = create<LysStore>()((set, get) => {
     ...initialState,
     ...createGenerationSettingsSlice(set, get, settingsGroupSaves),
     ...createLoadConfigurationSettingsSlice(set, get, settingsGroupSaves),
+    ...createToolSettingsSlice(set, get, settingsGroupSaves),
     ...createSecretsSettingsSlice(set, get, {
       saveSecretsSettings: settingsGroupSaves.saveSecretsSettings,
       sendWebSearchKeyCheck: () =>
@@ -309,10 +317,15 @@ export const useLysStore = create<LysStore>()((set, get) => {
         get().loadConfigurationSave.status !== "saving"
           ? { status: "idle" as const }
           : get().loadConfigurationSave
+      const hasToolsChanged = !isToolSettingsEqual(
+        get().settings.tools,
+        settings.tools
+      )
       set({ settings, modelRuntime, generationSave, loadConfigurationSave })
       if (hasGenerationChanged) void get().saveGenerationSettings()
       if (hasLoadConfigurationChanged)
         void get().saveLoadConfigurationSettings()
+      if (hasToolsChanged) void get().saveToolSettings()
     },
 
     startBackend: async () => {

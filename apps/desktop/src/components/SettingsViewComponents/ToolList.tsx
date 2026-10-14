@@ -6,12 +6,8 @@ import { useId, type ReactElement } from "react"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import {
-  TOOL_APPROVALS,
-  getToolChoice,
-  type ToolApproval,
-  type ToolChoice
-} from "@/lib/store/tools"
+import { TOOL_APPROVALS, type ToolApproval } from "@/lib/store/tool-settings"
+import { getToolChoice, type ToolChoice } from "@/lib/store/tools"
 
 import {
   calculateToolTokenEstimate,

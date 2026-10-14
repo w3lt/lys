@@ -5,17 +5,7 @@ import { create, type StoreApi, type UseBoundStore } from "zustand"
 import { listBackendTools, type BackendToolList } from "@/lib/apis/http/tools"
 import { listTools } from "@/lib/apis/tauri/tools"
 import { useLysStore } from "@/lib/store"
-
-/** Every approval the Tools pane offers for a tool, in display order. */
-export const TOOL_APPROVALS = Object.freeze(["ask", "run"] as const)
-
-/**
- * When a tool runs once the model asks for it: `ask` waits for the person to
- * say yes, and `run` runs it at once.
- *
- * @remarks The tool-call store applies it when each call arrives.
- */
-export type ToolApproval = (typeof TOOL_APPROVALS)[number]
+import type { ToolApproval } from "@/lib/store/tool-settings"
 
 /** Choice the person made in the Tools pane for one tool. */
 export type ToolChoice = {

@@ -71,16 +71,16 @@ describe("calculateOfferedToolTotals", () => {
     })
   })
 
-  it("leaves out tools switched off, whatever their approval", () => {
-    const choices = new Map([
-      ["read_text_file", { isOn: false, approval: "ask" } as const],
-      ["find_files", { isOn: true, approval: "ask" } as const]
+  it("leaves out tools switched off", () => {
+    const toolSwitches = new Map([
+      ["read_text_file", false],
+      ["find_files", true]
     ])
 
     expect(
       calculateOfferedToolTotals(
         [READ_TEXT_FILE, FIND_FILES],
-        choices,
+        toolSwitches,
         new Map()
       )
     ).toEqual({
@@ -93,7 +93,7 @@ describe("calculateOfferedToolTotals", () => {
     expect(
       calculateOfferedToolTotals(
         [FIND_FILES, WEB_SEARCH],
-        new Map([["web_search", { isOn: true, approval: "ask" } as const]]),
+        new Map([["web_search", true]]),
         new Map([["web_search", "api-key-missing"]])
       )
     ).toEqual({

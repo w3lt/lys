@@ -5,7 +5,11 @@ import { useEffect, useRef, useState, type ReactElement } from "react"
 import { Button } from "@/components/ui/button"
 import { calculateToolModelSupport } from "@/lib/models/tool-model-support"
 import { useLysStore } from "@/lib/store"
-import { useToolStore, type ToolListState } from "@/lib/store/tools"
+import {
+  useToolStore,
+  type ToolChoices,
+  type ToolListState
+} from "@/lib/store/tools"
 
 import PaneSkeleton from "./PaneSkeleton"
 import { ToolCallsCard } from "./ToolCallsCard"
@@ -93,8 +97,9 @@ type ToolGroupListProps = {
 /**
  * Presents every group of tools with the choices made about them.
  *
- * @remarks The tool store owns each tool's switch and approval, and the
- * component passes their changes to it. The parent owns which tool is
+ * @remarks The tool store owns each tool's switch for this session, and the
+ * application store owns each tool's approval, which it saves; the
+ * component passes each change to its owner. The parent owns which tool is
  * expanded, the lock, the dimming, and the availability. Groups keep the
  * order in which the listed tools first name them. A tool that cannot run
  * now offers to open the Secrets pane, which the application store selects.
@@ -110,10 +115,17 @@ function ToolGroupList({
   onExpandedToolNameChange,
   unavailableTools
 }: ToolGroupListProps): ReactElement {
-  const toolChoices = useToolStore((state) => state.toolChoices)
+  const toolSwitches = useToolStore((state) => state.toolSwitches)
   const updateToolOn = useToolStore((state) => state.updateToolOn)
-  const updateToolApproval = useToolStore((state) => state.updateToolApproval)
+  const justRunToolNames = useLysStore(
+    (state) => state.settings.tools.justRunToolNames
+  )
+  const updateToolApproval = useLysStore((state) => state.updateToolApproval)
   const setSettingsPane = useLysStore((state) => state.setSettingsPane)
+  const toolChoices: ToolChoices = {
+    switches: toolSwitches,
+    justRunToolNames
+  }
 
   /**
    * Builds the section of one tool group.
@@ -131,7 +143,9 @@ function ToolGroupList({
         listing={listing}
         onExpandedToolNameChange={onExpandedToolNameChange}
         onOpenSecrets={() => setSettingsPane("secrets")}
-        onToolApprovalChange={updateToolApproval}
+        onToolApprovalChange={(tool, approval) =>
+          updateToolApproval(tool.name, approval)
+        }
         onToolOnChange={updateToolOn}
         toolChoices={toolChoices}
         unavailableTools={unavailableTools}
@@ -169,7 +183,7 @@ function ToolWorkspace({
   unavailableTools
 }: ToolWorkspaceProps): ReactElement {
   const areToolCallsOn = useToolStore((state) => state.areToolCallsOn)
-  const toolChoices = useToolStore((state) => state.toolChoices)
+  const toolSwitches = useToolStore((state) => state.toolSwitches)
   const updateToolCallsOn = useToolStore((state) => state.updateToolCallsOn)
   const modelRuntime = useLysStore((state) => state.modelRuntime)
   const modelInventory = useLysStore((state) => state.modelInventory)
@@ -179,7 +193,7 @@ function ToolWorkspace({
   const shownToolName = isLocked ? null : expandedToolName
   const totals = calculateOfferedToolTotals(
     tools,
-    toolChoices,
+    toolSwitches,
     unavailableTools
   )
 

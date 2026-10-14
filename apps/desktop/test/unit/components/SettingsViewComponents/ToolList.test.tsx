@@ -7,7 +7,7 @@ import {
   buildToolGroups,
   calculateToolTokenEstimate
 } from "@/components/SettingsViewComponents/tool-presentation"
-import type { ToolChoice } from "@/lib/store/tools"
+import type { ToolChoices } from "@/lib/store/tools"
 import {
   buildBackendToolDefinition,
   buildToolDefinition
@@ -43,11 +43,28 @@ const WEB_SEARCH = buildBackendToolDefinition("web_search")
 /** The web group listing both backend tools. */
 const [SEARCH_GROUP] = buildToolGroups([READ_PAGE, WEB_SEARCH])
 
-/** Choices that switch both backend tools on and let them run at once. */
-const BACKEND_TOOLS_ON: ReadonlyMap<string, ToolChoice> = new Map([
-  ["read_page", { isOn: true, approval: "run" }],
-  ["web_search", { isOn: true, approval: "ask" }]
-])
+/**
+ * Builds the choices the rows are drawn with.
+ *
+ * @param switches - Tools the person switched on or off, by name.
+ * @param justRunToolNames - Tools saved as Just run.
+ * @returns The choices.
+ */
+function buildToolChoices(
+  switches: Readonly<Record<string, boolean>>,
+  justRunToolNames: readonly string[]
+): ToolChoices {
+  return {
+    switches: new Map(Object.entries(switches)),
+    justRunToolNames: new Set(justRunToolNames)
+  }
+}
+
+/** Choices that switch both backend tools on and let `read_page` run at once. */
+const BACKEND_TOOLS_ON = buildToolChoices(
+  { read_page: true, web_search: true },
+  ["read_page"]
+)
 
 /**
  * Renders the group with spies for every proposal.
@@ -70,7 +87,7 @@ function startToolGroup(
       isDimmed={false}
       isLocked={false}
       listing={FILES_GROUP}
-      toolChoices={new Map()}
+      toolChoices={buildToolChoices({}, [])}
       unavailableTools={new Map()}
       {...proposals}
       {...props}
@@ -129,9 +146,7 @@ function getToolToggle(toolName: string): HTMLElement {
 describe("ToolGroupSection", () => {
   it("lists the group's tools under its heading with how many are on", () => {
     startToolGroup({
-      toolChoices: new Map<string, ToolChoice>([
-        ["list_roots", { isOn: false, approval: "run" }]
-      ])
+      toolChoices: buildToolChoices({ list_roots: false }, ["list_roots"])
     })
 
     const section = screen.getByRole("region", { name: "files" })
@@ -161,26 +176,26 @@ describe("ToolGroupSection", () => {
     ).toBeChecked()
   })
 
-  it.each<[string, ToolChoice, string]>([
+  it.each<[string, ToolChoices, string]>([
     [
       "on and asks first",
-      { isOn: true, approval: "ask" },
+      buildToolChoices({ read_text_file: true }, []),
       "reads in Lys Runs read_text_file. asks before it runs"
     ],
     [
       "on and runs at once",
-      { isOn: true, approval: "run" },
+      buildToolChoices({ read_text_file: true }, ["read_text_file"]),
       "reads in Lys Runs read_text_file."
     ],
     [
       "off, though it would ask first",
-      { isOn: false, approval: "ask" },
+      buildToolChoices({ read_text_file: false }, []),
       "reads in Lys Runs read_text_file."
     ]
   ])(
     "notes that a tool asks before it runs only while it is on and asks: %s",
-    (_case, choice, description) => {
-      startToolGroup({ toolChoices: new Map([["read_text_file", choice]]) })
+    (_case, toolChoices, description) => {
+      startToolGroup({ toolChoices })
 
       expect(getToolToggle("read_text_file")).toHaveAccessibleDescription(
         description

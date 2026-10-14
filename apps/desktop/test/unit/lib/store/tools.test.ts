@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from "vitest"
 import {
   buildChatToolOffer,
   getToolChoice,
-  type ToolChoice,
+  isToolOn,
   type ToolListState
 } from "@/lib/store/tools"
 import {
@@ -71,40 +71,48 @@ async function loadFreshToolStore() {
   return useToolStore
 }
 
-describe("getToolChoice", () => {
-  it("returns the choice the person changed", () => {
-    const choice = { isOn: false, approval: "ask" } as const
+describe("isToolOn", () => {
+  it("returns the switch the person changed", () => {
     const findFiles = buildToolDefinition("find_files")
 
-    expect(getToolChoice(new Map([["find_files", choice]]), findFiles)).toBe(
-      choice
-    )
+    expect(isToolOn(new Map([["find_files", false]]), findFiles)).toBe(false)
+    expect(isToolOn(new Map([["read_page", true]]), READ_PAGE)).toBe(true)
   })
 
-  it("returns on and asking first for an unchanged tool that only reads this machine", () => {
-    expect(getToolChoice(new Map(), buildToolDefinition("find_files"))).toEqual(
-      { isOn: true, approval: "ask" }
-    )
+  it("returns on for an unchanged tool that only reads this machine and off for one that sends requests off it", () => {
+    expect(isToolOn(new Map(), buildToolDefinition("find_files"))).toBe(true)
+    expect(isToolOn(new Map(), READ_PAGE)).toBe(false)
   })
+})
 
-  it("returns off and asking first for an unchanged tool that sends requests off this machine", () => {
-    expect(getToolChoice(new Map(), READ_PAGE)).toEqual({
+describe("getToolChoice", () => {
+  it("combines the session switch with the saved approval", () => {
+    const findFiles = buildToolDefinition("find_files")
+    const toolChoices = {
+      switches: new Map([["find_files", false]]),
+      justRunToolNames: new Set(["find_files"])
+    }
+
+    expect(getToolChoice(toolChoices, findFiles)).toEqual({
       isOn: false,
-      approval: "ask"
+      approval: "run"
     })
   })
-})
 
-/** Choice of a tool the person switched off. */
-const SWITCHED_OFF: ToolChoice = Object.freeze({
-  isOn: false,
-  approval: "ask"
-})
+  it("asks first for a tool whose name is not saved as Just run, network tools included", () => {
+    const toolChoices = {
+      switches: new Map([["read_page", true]]),
+      justRunToolNames: new Set(["find_files"])
+    }
 
-/** Choice of a tool the person switched on. */
-const SWITCHED_ON: ToolChoice = Object.freeze({
-  isOn: true,
-  approval: "ask"
+    expect(getToolChoice(toolChoices, READ_PAGE)).toEqual({
+      isOn: true,
+      approval: "ask"
+    })
+    expect(
+      getToolChoice(toolChoices, buildToolDefinition("read_text_file"))
+    ).toEqual({ isOn: true, approval: "ask" })
+  })
 })
 
 /** Tool list states before a read has committed a list. */
@@ -126,7 +134,7 @@ describe("buildChatToolOffer", () => {
           tools: [readTextFile, findFiles, searchFiles, READ_PAGE],
           unavailableTools: ALL_TOOLS_AVAILABLE
         },
-        toolChoices: new Map([["read_text_file", SWITCHED_OFF]])
+        toolSwitches: new Map([["read_text_file", false]])
       })
     ).toEqual({
       status: "offered",
@@ -144,7 +152,7 @@ describe("buildChatToolOffer", () => {
           tools: [findFiles, READ_PAGE],
           unavailableTools: ALL_TOOLS_AVAILABLE
         },
-        toolChoices: new Map([["read_page", SWITCHED_ON]])
+        toolSwitches: new Map([["read_page", true]])
       })
     ).toEqual({
       status: "offered",
@@ -160,9 +168,9 @@ describe("buildChatToolOffer", () => {
           tools: [READ_PAGE, WEB_SEARCH],
           unavailableTools: new Map([["web_search", "api-key-missing"]])
         },
-        toolChoices: new Map([
-          ["read_page", SWITCHED_ON],
-          ["web_search", SWITCHED_ON]
+        toolSwitches: new Map([
+          ["read_page", true],
+          ["web_search", true]
         ])
       })
     ).toEqual({
@@ -179,7 +187,7 @@ describe("buildChatToolOffer", () => {
           tools: [WEB_SEARCH],
           unavailableTools: new Map([["web_search", "settings-unreadable"]])
         },
-        toolChoices: new Map([["web_search", SWITCHED_ON]])
+        toolSwitches: new Map([["web_search", true]])
       })
     ).toEqual({ status: "not-offered" })
   })
@@ -196,9 +204,9 @@ describe("buildChatToolOffer", () => {
           tools,
           unavailableTools: ALL_TOOLS_AVAILABLE
         },
-        toolChoices: new Map([
-          ["read_text_file", SWITCHED_OFF],
-          ["find_files", SWITCHED_OFF]
+        toolSwitches: new Map([
+          ["read_text_file", false],
+          ["find_files", false]
         ])
       })
     ).toEqual({ status: "not-offered" })
@@ -210,7 +218,7 @@ describe("buildChatToolOffer", () => {
     expect(
       buildChatToolOffer({
         list: { status: "failed", error: reason },
-        toolChoices: new Map()
+        toolSwitches: new Map()
       })
     ).toEqual({
       status: "unavailable",
@@ -223,7 +231,7 @@ describe("buildChatToolOffer", () => {
   it.each(UNREAD_TOOL_LISTS)(
     "reports the tool list unavailable while it is $status",
     (list) => {
-      expect(buildChatToolOffer({ list, toolChoices: new Map() })).toEqual({
+      expect(buildChatToolOffer({ list, toolSwitches: new Map() })).toEqual({
         status: "unavailable",
         error: expect.stringMatching(
           /^Lys couldn't read its tool list\. .*Turn tool calls off in Settings → Tools/
@@ -234,13 +242,13 @@ describe("buildChatToolOffer", () => {
 })
 
 describe("useToolStore", () => {
-  it("starts with no list, tool calls on, and no changed choice", async () => {
+  it("starts with no list, tool calls on, and no changed switch", async () => {
     const useToolStore = await loadFreshToolStore()
 
     expect(useToolStore.getState()).toMatchObject({
       list: { status: "idle" },
       areToolCallsOn: true,
-      toolChoices: new Map()
+      toolSwitches: new Map()
     })
   })
 
@@ -392,43 +400,21 @@ describe("useToolStore", () => {
     expect(useToolStore.getState().areToolCallsOn).toBe(false)
   })
 
-  it("switches one tool off and keeps its approval", async () => {
+  it("switches one tool off, and a backend tool on", async () => {
     const useToolStore = await loadFreshToolStore()
     const findFiles = buildToolDefinition("find_files")
-    useToolStore.getState().updateToolApproval(findFiles, "run")
 
     useToolStore.getState().updateToolOn(findFiles, false)
+    useToolStore.getState().updateToolOn(READ_PAGE, true)
 
-    expect(
-      getToolChoice(useToolStore.getState().toolChoices, findFiles)
-    ).toEqual({ isOn: false, approval: "run" })
+    const { toolSwitches } = useToolStore.getState()
+    expect(isToolOn(toolSwitches, findFiles)).toBe(false)
+    expect(isToolOn(toolSwitches, READ_PAGE)).toBe(true)
   })
 
-  it("changes one tool's approval and keeps whether it is on", async () => {
+  it("leaves other tools and earlier switch snapshots unchanged", async () => {
     const useToolStore = await loadFreshToolStore()
-    const findFiles = buildToolDefinition("find_files")
-    useToolStore.getState().updateToolOn(findFiles, false)
-
-    useToolStore.getState().updateToolApproval(findFiles, "run")
-
-    expect(
-      getToolChoice(useToolStore.getState().toolChoices, findFiles)
-    ).toEqual({ isOn: false, approval: "run" })
-  })
-
-  it("keeps a backend tool off when only its approval changes", async () => {
-    const useToolStore = await loadFreshToolStore()
-
-    useToolStore.getState().updateToolApproval(READ_PAGE, "run")
-
-    expect(
-      getToolChoice(useToolStore.getState().toolChoices, READ_PAGE)
-    ).toEqual({ isOn: false, approval: "run" })
-  })
-
-  it("leaves other tools and earlier choice snapshots unchanged", async () => {
-    const useToolStore = await loadFreshToolStore()
-    const before = useToolStore.getState().toolChoices
+    const before = useToolStore.getState().toolSwitches
 
     useToolStore
       .getState()
@@ -436,11 +422,11 @@ describe("useToolStore", () => {
     await waitForMicrotasks()
 
     expect(
-      getToolChoice(
-        useToolStore.getState().toolChoices,
+      isToolOn(
+        useToolStore.getState().toolSwitches,
         buildToolDefinition("read_text_file")
       )
-    ).toEqual({ isOn: true, approval: "ask" })
+    ).toBe(true)
     expect(before.size).toBe(0)
   })
 })

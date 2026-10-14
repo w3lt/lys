@@ -3,7 +3,7 @@ import type { ToolDefinition } from "@lys/share"
 
 import {
   getToolChoice,
-  type ToolChoice,
+  type ToolChoices,
   type ToolListState
 } from "@/lib/store/tools"
 
@@ -32,8 +32,8 @@ export type ToolCallSettings = {
   readonly list: ToolListState
   /** Whether agents may call tools at all. */
   readonly areToolCallsOn: boolean
-  /** Choices the person changed, keyed by tool name. */
-  readonly toolChoices: ReadonlyMap<string, ToolChoice>
+  /** Session switches and saved approvals of the tools. */
+  readonly toolChoices: ToolChoices
 }
 
 /** What the desktop does with one arriving call. */
@@ -158,8 +158,9 @@ function buildRunGate(input: ToolCallInput): ToolCallGate {
  * @param settings - Tool settings sampled when the call arrived.
  * @returns `answered` when the tool is unknown, its arguments do not match,
  * or tool calls or the tool are switched off; otherwise the tool's approval
- * decides: Just run runs a desktop tool at once or allows a backend tool at
- * once, and Ask me waits for the person.
+ * decides: a tool saved as Just run runs at once on the desktop, or is
+ * allowed at once when the backend runs it, and every other tool waits for
+ * the person (Ask me).
  * @remarks The settings are read once per call, so switching a tool off
  * affects every call that arrives afterwards, including later calls of a
  * reply already running.

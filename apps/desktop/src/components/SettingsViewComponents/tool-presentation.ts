@@ -14,7 +14,7 @@ import {
 } from "@/components/ComposerComponents/composer-context"
 import type { ToolModelSupport } from "@/lib/models/tool-model-support"
 import { TOOL_APPROVALS, type ToolApproval } from "@/lib/store/tool-settings"
-import { getToolChoice, type ToolChoice } from "@/lib/store/tools"
+import { isToolOn } from "@/lib/store/tools"
 
 /** Tone of the tool-calls status dot. */
 export type ToolCallsTone = "neutral" | "active" | "warning"
@@ -112,7 +112,7 @@ export function calculateToolTokenEstimate(tool: ToolDefinition): number {
  * Calculates how many tools are offered and what they add to a request.
  *
  * @param tools - Every listed tool.
- * @param toolChoices - Choices the person changed, keyed by tool name.
+ * @param toolSwitches - Switches the person changed, keyed by tool name.
  * @param unavailableTools - Why each tool that cannot run now cannot, by
  * name; such a tool is never offered, whatever its switch says.
  * @returns The count and summed token estimate of the tools that are
@@ -120,12 +120,11 @@ export function calculateToolTokenEstimate(tool: ToolDefinition): number {
  */
 export function calculateOfferedToolTotals(
   tools: readonly ToolDefinition[],
-  toolChoices: ReadonlyMap<string, ToolChoice>,
+  toolSwitches: ReadonlyMap<string, boolean>,
   unavailableTools: ReadonlyMap<string, BackendToolUnavailableReason>
 ): OfferedToolTotals {
   const offeredTools = tools.filter(
-    (tool) =>
-      getToolChoice(toolChoices, tool).isOn && !unavailableTools.has(tool.name)
+    (tool) => isToolOn(toolSwitches, tool) && !unavailableTools.has(tool.name)
   )
   const offeredTokenCount = offeredTools.reduce(
     (tokenCount, tool) => tokenCount + calculateToolTokenEstimate(tool),

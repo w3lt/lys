@@ -4,7 +4,7 @@ import {
   calculateToolCallGate,
   type ToolCallSettings
 } from "@/lib/store/tool-calls/tool-call-gate"
-import type { ToolChoice, ToolListState } from "@/lib/store/tools"
+import type { ToolListState } from "@/lib/store/tools"
 import {
   buildBackendToolDefinition,
   buildToolCall,
@@ -51,13 +51,16 @@ const UNREAD_TOOL_LISTS: readonly ToolListState[] = Object.freeze([
  * Builds the tool settings sampled when a call arrives: both fixture tools
  * listed and tool calls on.
  *
- * @param toolChoices - Choices the person changed, by tool name; none by
- * default, so each tool has the choice it starts with.
+ * @param switches - Tools the person switched on or off, by name; none by
+ * default, so each tool is on or off as it starts.
+ * @param justRunToolNames - Tools saved as Just run; none by default, so
+ * every tool asks.
  * @param areToolCallsOn - Whether agents may call tools at all.
  * @returns The settings.
  */
 function buildToolCallSettings(
-  toolChoices: Readonly<Record<string, ToolChoice>> = {},
+  switches: Readonly<Record<string, boolean>> = {},
+  justRunToolNames: readonly string[] = [],
   areToolCallsOn = true
 ): ToolCallSettings {
   return {
@@ -67,7 +70,10 @@ function buildToolCallSettings(
       unavailableTools: new Map()
     },
     areToolCallsOn,
-    toolChoices: new Map(Object.entries(toolChoices))
+    toolChoices: {
+      switches: new Map(Object.entries(switches)),
+      justRunToolNames: new Set(justRunToolNames)
+    }
   }
 }
 
@@ -142,9 +148,7 @@ describe("calculateToolCallGate", () => {
 
     it("is answered as not run when a backend tool's URL is not one the backend reads, even on Just run", () => {
       const call = buildToolCall(3, "read_page", { url: "file:///etc/passwd" })
-      const settings = buildToolCallSettings({
-        read_page: { isOn: true, approval: "run" }
-      })
+      const settings = buildToolCallSettings({ read_page: true }, ["read_page"])
 
       expect(calculateToolCallGate(call, settings)).toEqual({
         status: "answered",
@@ -161,7 +165,8 @@ describe("calculateToolCallGate", () => {
   describe("a call the person switched off", () => {
     it("is declined when tool calls are off, whatever the tool's own choice", () => {
       const settings = buildToolCallSettings(
-        { read_text_file: { isOn: true, approval: "run" } },
+        { read_text_file: true },
+        ["read_text_file"],
         false
       )
 
@@ -176,9 +181,9 @@ describe("calculateToolCallGate", () => {
     })
 
     it("is declined when its tool is off", () => {
-      const settings = buildToolCallSettings({
-        read_text_file: { isOn: false, approval: "run" }
-      })
+      const settings = buildToolCallSettings({ read_text_file: false }, [
+        "read_text_file"
+      ])
 
       expect(calculateToolCallGate(READ_CALL, settings)).toEqual({
         status: "answered",
@@ -205,16 +210,14 @@ describe("calculateToolCallGate", () => {
   })
 
   describe("a call whose tool is on", () => {
-    it("asks the person first for a desktop tool whose choice is unchanged", () => {
+    it("asks the person first for a desktop tool whose name is not saved as Just run", () => {
       expect(calculateToolCallGate(READ_CALL, buildToolCallSettings())).toEqual(
         { status: "ask", definition: READ_TEXT_FILE, input: READ_INPUT }
       )
     })
 
-    it("runs a desktop tool at once on Just run", () => {
-      const settings = buildToolCallSettings({
-        read_text_file: { isOn: true, approval: "run" }
-      })
+    it("runs a desktop tool at once when its name is saved as Just run", () => {
+      const settings = buildToolCallSettings({}, ["read_text_file"])
 
       expect(calculateToolCallGate(READ_CALL, settings)).toEqual({
         status: "run",
@@ -222,10 +225,10 @@ describe("calculateToolCallGate", () => {
       })
     })
 
-    it("asks the person first for a backend tool on Ask me, with the page it would request", () => {
-      const settings = buildToolCallSettings({
-        read_page: { isOn: true, approval: "ask" }
-      })
+    it("asks the person first for a backend tool whose name is not saved as Just run, with the page it would request", () => {
+      const settings = buildToolCallSettings({ read_page: true }, [
+        "read_text_file"
+      ])
 
       expect(calculateToolCallGate(PAGE_CALL, settings)).toEqual({
         status: "ask",
@@ -234,10 +237,8 @@ describe("calculateToolCallGate", () => {
       })
     })
 
-    it("allows a backend tool at once on Just run, since the backend runs it", () => {
-      const settings = buildToolCallSettings({
-        read_page: { isOn: true, approval: "run" }
-      })
+    it("allows a backend tool at once when its name is saved as Just run, since the backend runs it", () => {
+      const settings = buildToolCallSettings({ read_page: true }, ["read_page"])
 
       expect(calculateToolCallGate(PAGE_CALL, settings)).toEqual({
         status: "answered",

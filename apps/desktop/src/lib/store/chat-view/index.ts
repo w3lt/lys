@@ -1688,8 +1688,8 @@ async function getChatToolOffer(): Promise<ChatToolOfferResult> {
   }
   if (list.status !== "loaded") await loadTools()
 
-  const { list: currentList, toolChoices } = useToolStore.getState()
-  return buildChatToolOffer({ list: currentList, toolChoices })
+  const { list: currentList, toolSwitches } = useToolStore.getState()
+  return buildChatToolOffer({ list: currentList, toolSwitches })
 }
 
 /**

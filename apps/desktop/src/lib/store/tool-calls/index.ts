@@ -115,8 +115,9 @@ type ToolCallActions = {
    * @param target - Reply that is generating, and its conversation.
    * @remarks The store follows the reply on its own connection, independent
    * of the chat view, until the reply ends; a reply it already follows is
-   * ignored. Calls on Run run at once, or are allowed at once when the
-   * backend runs the tool, and calls on Ask wait in arrival order. When the
+   * ignored. Calls of tools saved as Just run run at once, or are allowed
+   * at once when the backend runs the tool, and every other call waits for
+   * the person in arrival order. When the
    * following ends, every call of the reply still held is dropped.
    */
   startReplyToolCallFollow: (target: ChatReplyPathParams) => void
@@ -718,14 +719,20 @@ const CLIENT_TOOL_COMMANDS: ClientToolCommands = Object.freeze({
  * Gets the tool settings a call is decided by, loading the tool list when it
  * has not been read.
  *
- * @returns A promise that resolves with the list and the person's choices;
- * it never rejects, because a failed list read is part of the list state.
+ * @returns A promise that resolves with the list, the session switches, and
+ * the saved approvals, all read at one point after the list is ready; it
+ * never rejects, because a failed list read is part of the list state.
  */
 async function getToolCallSettings(): Promise<ToolCallSettings> {
   if (useToolStore.getState().list.status !== "loaded") {
     await useToolStore.getState().loadTools()
   }
-  const { list, areToolCallsOn, toolChoices } = useToolStore.getState()
+  const { list, areToolCallsOn, toolSwitches } = useToolStore.getState()
+  const { justRunToolNames } = useLysStore.getState().settings.tools
+  const toolChoices = Object.freeze({
+    switches: toolSwitches,
+    justRunToolNames
+  })
 
   return Object.freeze({ list, areToolCallsOn, toolChoices })
 }
@@ -735,7 +742,8 @@ async function getToolCallSettings(): Promise<ToolCallSettings> {
  *
  * @remarks This singleton follows every reply the chat view starts or
  * follows, independent of which conversation is shown. It answers each tool
- * call by the Tools pane's choices at the moment the call arrives, runs
+ * call by the tool store's switches and the application store's saved
+ * approvals at the moment the call arrives, runs
  * client tools through Tauri, allows the backend's tools, and sends every
  * answer to the backend origin the application store names when each request
  * starts. It holds nothing

@@ -210,7 +210,28 @@ async function loadFreshToolCallStore() {
       unavailableTools: new Map()
     }
   })
-  return { useToolStore, useToolCallStore }
+  return { useLysStore, useToolStore, useToolCallStore }
+}
+
+/**
+ * Sets the tools saved as Just run, as a loaded settings file would.
+ *
+ * @param useLysStore - Fresh application store.
+ * @param justRunToolNames - Names of the tools on Just run.
+ */
+function saveJustRunToolNames(
+  useLysStore: Awaited<
+    ReturnType<typeof loadFreshToolCallStore>
+  >["useLysStore"],
+  justRunToolNames: readonly string[]
+): void {
+  const { settings } = useLysStore.getState()
+  useLysStore.setState({
+    settings: {
+      ...settings,
+      tools: { justRunToolNames: new Set(justRunToolNames) }
+    }
+  })
 }
 
 /** Tool-call store hook of a freshly evaluated store module. */
@@ -473,15 +494,15 @@ describe("useToolCallStore", () => {
       ])
     })
 
-    it("runs a desktop tool on Just run at once and sends its result, showing the person nothing", async () => {
+    it("runs a desktop tool saved as Just run at once and sends its result, showing the person nothing", async () => {
       const read = createControlledPromise<unknown>()
       const host = startNativeHostFake({ read_text_file: () => read.promise })
       const toolResult = createControlledRoute()
       const { backend, replyStreams } = startReplyBackend({
         [buildToolResultRouteKey(READ_CALL)]: toolResult.route
       })
-      const { useToolStore, useToolCallStore } = await loadFreshToolCallStore()
-      useToolStore.getState().updateToolApproval(READ_TEXT_FILE, "run")
+      const { useLysStore, useToolCallStore } = await loadFreshToolCallStore()
+      saveJustRunToolNames(useLysStore, ["read_text_file"])
 
       await startFollowWithEvents(useToolCallStore, replyStreams, [
         buildStreamingSnapshot(),
@@ -519,14 +540,15 @@ describe("useToolCallStore", () => {
       ])
     })
 
-    it("allows a backend tool on Just run at once, without running anything on the desktop", async () => {
+    it("allows a backend tool saved as Just run at once, without running anything on the desktop", async () => {
       startNativeHostFake({})
       const { backend, replyStreams } = startReplyBackend(
         buildAcceptingToolResultRoutes(PAGE_CALL)
       )
-      const { useToolStore, useToolCallStore } = await loadFreshToolCallStore()
+      const { useLysStore, useToolStore, useToolCallStore } =
+        await loadFreshToolCallStore()
       useToolStore.getState().updateToolOn(READ_PAGE, true)
-      useToolStore.getState().updateToolApproval(READ_PAGE, "run")
+      saveJustRunToolNames(useLysStore, ["read_page"])
 
       await startFollowWithEvents(useToolCallStore, replyStreams, [
         buildStreamingSnapshot(),

@@ -5,7 +5,7 @@ import { create, type StoreApi, type UseBoundStore } from "zustand"
 import { listBackendTools, type BackendToolList } from "@/lib/apis/http/tools"
 import { listTools } from "@/lib/apis/tauri/tools"
 import { useLysStore } from "@/lib/store"
-import type { ToolApproval } from "@/lib/store/tool-settings"
+import { getToolApproval, type ToolApproval } from "@/lib/store/tool-settings"
 
 /** Choice the person made in the Tools pane for one tool. */
 export type ToolChoice = {
@@ -16,17 +16,27 @@ export type ToolChoice = {
 }
 
 /**
- * Choice of a tool the person has not changed in this session, by what the
- * tool does with the machine.
+ * Everything a tool's choice is read from: the switches the tool store owns
+ * for this session and the approvals the application store saves.
+ */
+export type ToolChoices = {
+  /** Tools the person switched on or off in this session, by name. */
+  readonly switches: ReadonlyMap<string, boolean>
+  /** Tools saved as Just run; every other tool asks first. */
+  readonly justRunToolNames: ReadonlySet<string>
+}
+
+/**
+ * Whether a tool the person has not switched in this session is on, by what
+ * the tool does with the machine.
  *
  * @remarks A tool that only reads data on this machine starts on; a tool
- * that sends requests off the machine starts off. Every tool asks first until
- * the person picks Just run, which lasts for this session only.
+ * that sends requests off the machine starts off.
  */
-const DEFAULT_TOOL_CHOICES = Object.freeze({
-  reads: Object.freeze({ isOn: true, approval: "ask" }),
-  network: Object.freeze({ isOn: false, approval: "ask" })
-} satisfies Readonly<Record<ToolAccess, ToolChoice>>)
+const IS_TOOL_ON_BY_DEFAULT = Object.freeze({
+  reads: true,
+  network: false
+} satisfies Readonly<Record<ToolAccess, boolean>>)
 
 /** Lifecycle of the list of every tool: the desktop's and the backend's. */
 export type ToolListState =
@@ -62,17 +72,18 @@ export type ToolListState =
       readonly error: string
     }
 
-/** Observable state of the Tools pane, kept for the session only. */
+/** Observable state of the Tools pane's switches, kept for the session only. */
 type ToolStoreState = {
   /** Lifecycle of the list of every tool. */
   readonly list: ToolListState
   /** Whether agents may call tools at all; on until switched off. */
   readonly areToolCallsOn: boolean
   /**
-   * Choices the person changed, keyed by tool name. A tool without an entry
-   * uses the default choice that {@link getToolChoice} returns.
+   * Whether each tool the person switched in this session is on, keyed by
+   * tool name. A tool without an entry is on or off as {@link isToolOn}
+   * says it starts.
    */
-  readonly toolChoices: ReadonlyMap<string, ToolChoice>
+  readonly toolSwitches: ReadonlyMap<string, boolean>
 }
 
 /** Actions of the Tools pane store. */
@@ -94,19 +105,12 @@ type ToolStoreActions = {
    */
   updateToolCallsOn: (areToolCallsOn: boolean) => void
   /**
-   * Switches one tool on or off, keeping its approval.
+   * Switches one tool on or off for this session.
    *
    * @param tool - Definition of a listed tool.
    * @param isOn - Whether the tool is offered to the model.
    */
   updateToolOn: (tool: ToolDefinition, isOn: boolean) => void
-  /**
-   * Replaces when one tool runs, keeping whether it is on.
-   *
-   * @param tool - Definition of a listed tool.
-   * @param approval - When the tool runs once the model asks for it.
-   */
-  updateToolApproval: (tool: ToolDefinition, approval: ToolApproval) => void
 }
 
 /** Complete contract of the Tools pane store. */
@@ -127,20 +131,38 @@ type ToolStoreDependencies = {
 const LOADING_TOOL_LIST: ToolListState = Object.freeze({ status: "loading" })
 
 /**
+ * Answers whether one tool is switched on.
+ *
+ * @param toolSwitches - Switches the person changed in this session, keyed
+ * by tool name.
+ * @param tool - Name and access of the tool.
+ * @returns The tool's changed switch, or, when the person has not switched
+ * it, on unless the tool sends requests off this machine.
+ */
+export function isToolOn(
+  toolSwitches: ReadonlyMap<string, boolean>,
+  tool: Pick<ToolDefinition, "name" | "access">
+): boolean {
+  return toolSwitches.get(tool.name) ?? IS_TOOL_ON_BY_DEFAULT[tool.access]
+}
+
+/**
  * Gets the choice for one tool.
  *
- * @param toolChoices - Choices the person changed in this session, keyed by
- * tool name.
+ * @param toolChoices - Session switches and saved approvals.
  * @param tool - Name and access of the tool.
- * @returns The tool's changed choice, or, when the person has not changed
- * it, the default for its access: asking first, and on unless the tool sends
- * requests off this machine.
+ * @returns A frozen choice: whether the tool is on, from {@link isToolOn},
+ * and Just run only when its name is saved as Just run, so a tool asks first
+ * by default, network tools included.
  */
 export function getToolChoice(
-  toolChoices: ReadonlyMap<string, ToolChoice>,
+  toolChoices: ToolChoices,
   tool: Pick<ToolDefinition, "name" | "access">
 ): ToolChoice {
-  return toolChoices.get(tool.name) ?? DEFAULT_TOOL_CHOICES[tool.access]
+  return Object.freeze({
+    isOn: isToolOn(toolChoices.switches, tool),
+    approval: getToolApproval(toolChoices.justRunToolNames, tool.name)
+  })
 }
 
 /**
@@ -177,8 +199,8 @@ export const NO_CHAT_TOOL_OFFER: ChatToolOfferResult = Object.freeze({
 export type BuildChatToolOfferInput = {
   /** Lifecycle of the tool list, read before building. */
   readonly list: ToolListState
-  /** Choices the person changed, keyed by tool name. */
-  readonly toolChoices: ReadonlyMap<string, ToolChoice>
+  /** Switches the person changed, keyed by tool name. */
+  readonly toolSwitches: ReadonlyMap<string, boolean>
 }
 
 /** Action that lets the person chat when the tool list cannot be read. */
@@ -199,7 +221,7 @@ const TOOL_LIST_RECOVERY_ACTION =
  */
 export function buildChatToolOffer({
   list,
-  toolChoices
+  toolSwitches
 }: BuildChatToolOfferInput): ChatToolOfferResult {
   if (list.status !== "loaded") {
     const reason =
@@ -213,8 +235,7 @@ export function buildChatToolOffer({
 
   const onTools = list.tools.filter(
     (tool) =>
-      getToolChoice(toolChoices, tool).isOn &&
-      !list.unavailableTools.has(tool.name)
+      isToolOn(toolSwitches, tool) && !list.unavailableTools.has(tool.name)
   )
   if (onTools.length === 0) return NO_CHAT_TOOL_OFFER
 
@@ -234,22 +255,22 @@ export function buildChatToolOffer({
 }
 
 /**
- * Builds the tool choices with one tool's choice replaced.
+ * Builds the tool switches with one tool's switch replaced.
  *
- * @param toolChoices - Current choices, left unchanged.
- * @param toolName - Name of the tool whose choice is replaced.
- * @param choice - Complete replacement choice.
- * @returns A new map holding every current choice and the replacement.
+ * @param toolSwitches - Current switches, left unchanged.
+ * @param toolName - Name of the tool whose switch is replaced.
+ * @param isOn - Whether the tool is offered to the model.
+ * @returns A new map holding every current switch and the replacement.
  */
-function buildToolChoices(
-  toolChoices: ReadonlyMap<string, ToolChoice>,
+function buildToolSwitches(
+  toolSwitches: ReadonlyMap<string, boolean>,
   toolName: string,
-  choice: ToolChoice
-): ReadonlyMap<string, ToolChoice> {
-  const nextToolChoices = new Map(toolChoices)
-  nextToolChoices.set(toolName, choice)
+  isOn: boolean
+): ReadonlyMap<string, boolean> {
+  const nextToolSwitches = new Map(toolSwitches)
+  nextToolSwitches.set(toolName, isOn)
 
-  return nextToolChoices
+  return nextToolSwitches
 }
 
 /**
@@ -297,7 +318,7 @@ function formatToolListError(error: unknown): string {
  * @param dependencies - Readers of the desktop's and the backend's tool
  * lists.
  * @returns A Zustand hook and store API owning the Tools pane's list and its
- * session-only choices.
+ * session-only switches.
  */
 function createToolStore(
   dependencies: ToolStoreDependencies
@@ -361,50 +382,24 @@ function createToolStore(
     }
 
     /**
-     * Switches one tool on or off, keeping its approval.
+     * Switches one tool on or off for this session.
      *
      * @param tool - Definition of a listed tool.
      * @param isOn - Whether the tool is offered to the model.
      */
     function updateToolOn(tool: ToolDefinition, isOn: boolean): void {
-      set((state) => {
-        const { approval } = getToolChoice(state.toolChoices, tool)
-        const choice = Object.freeze({ isOn, approval } satisfies ToolChoice)
-
-        return {
-          toolChoices: buildToolChoices(state.toolChoices, tool.name, choice)
-        }
-      })
-    }
-
-    /**
-     * Replaces when one tool runs, keeping whether it is on.
-     *
-     * @param tool - Definition of a listed tool.
-     * @param approval - When the tool runs once the model asks for it.
-     */
-    function updateToolApproval(
-      tool: ToolDefinition,
-      approval: ToolApproval
-    ): void {
-      set((state) => {
-        const { isOn } = getToolChoice(state.toolChoices, tool)
-        const choice = Object.freeze({ isOn, approval } satisfies ToolChoice)
-
-        return {
-          toolChoices: buildToolChoices(state.toolChoices, tool.name, choice)
-        }
-      })
+      set((state) => ({
+        toolSwitches: buildToolSwitches(state.toolSwitches, tool.name, isOn)
+      }))
     }
 
     return {
       list: Object.freeze({ status: "idle" }),
       areToolCallsOn: true,
-      toolChoices: new Map(),
+      toolSwitches: new Map(),
       loadTools,
       updateToolCallsOn: (areToolCallsOn) => set({ areToolCallsOn }),
-      updateToolOn,
-      updateToolApproval
+      updateToolOn
     }
   }
 
@@ -417,10 +412,11 @@ function createToolStore(
  *
  * @remarks This singleton owns the list of every tool, read from the desktop
  * and from the backend origin the application store names when each read
- * starts, and the person's choices: tool calls on or off and each tool's
- * switch and approval. The chat view offers the switched-on tools to a model
+ * starts, and the person's switches: tool calls on or off and each tool on
+ * or off. The switches last for the session only; nothing here is saved.
+ * Each tool's approval belongs to the application store, which saves it in
+ * the settings file. The chat view offers the switched-on tools to a model
  * trained for tool use, and the tool-call store applies each tool's approval.
- * The choices last for the session only; nothing is saved.
  */
 export const useToolStore: UseBoundStore<StoreApi<ToolStore>> = createToolStore(
   {

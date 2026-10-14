@@ -16,6 +16,7 @@
 .markdown-message ul,
 .markdown-message ol,
 .markdown-message blockquote,
+.markdown-message table,
 .markdown-message .markdown-message__code-block {
   margin: 0 0 16px;
 }
@@ -50,8 +51,64 @@
   padding-left: 24px;
 }
 
-.markdown-message li + li {
-  margin-top: 4px;
+/* The application's base styles remove list markers; replies keep them. */
+.markdown-message ul {
+  list-style-type: disc;
+}
+
+.markdown-message li ul {
+  list-style-type: circle;
+}
+
+.markdown-message ol {
+  list-style-type: decimal;
+}
+
+.markdown-message li::marker {
+  color: var(--app-text-muted);
+}
+
+.markdown-message li + li,
+.markdown-message li > ul,
+.markdown-message li > ol {
+  margin: 4px 0 0;
+}
+
+/*
+ * A task's checkbox takes the place of its list marker, so its text lines up
+ * with the text of other list items. The checkbox only reports progress; it
+ * is never operable, so it keeps one look rather than a dimmed disabled one.
+ */
+.markdown-message .task-list-item {
+  list-style-type: none;
+}
+
+.markdown-message .task-list-item input[type="checkbox"] {
+  appearance: none;
+  border: 1px solid var(--app-control-thumb);
+  border-radius: var(--radius-detail);
+  height: 14px;
+  margin: 0 8px 0 -22px;
+  position: relative;
+  vertical-align: -2px;
+  width: 14px;
+}
+
+.markdown-message .task-list-item input[type="checkbox"]:checked {
+  background: var(--app-control-selected);
+  border-color: var(--app-control-selected);
+}
+
+.markdown-message .task-list-item input[type="checkbox"]:checked::after {
+  border: solid var(--app-control-selected-thumb);
+  border-width: 0 2px 2px 0;
+  content: "";
+  height: 8px;
+  left: 4px;
+  position: absolute;
+  top: 1px;
+  transform: rotate(45deg);
+  width: 4px;
 }
 
 .markdown-message a {
@@ -74,6 +131,108 @@
   border-left: 2px solid var(--app-border-interactive);
   color: var(--app-text-muted);
   padding-left: 16px;
+}
+
+/*
+ * Only footnote references produce `sup`. A zero line height keeps the
+ * raised number from spreading the lines of its paragraph.
+ */
+.markdown-message sup {
+  font-size: 0.75em;
+  line-height: 0;
+}
+
+.markdown-message sup > a,
+.markdown-message .footnotes a[href^="#"] {
+  text-decoration: none;
+}
+
+/* Following a footnote link leaves room above its target. */
+.markdown-message sup > a,
+.markdown-message .footnotes li {
+  scroll-margin-block: 24px;
+}
+
+.markdown-message .footnotes {
+  border-top: 1px solid var(--app-border-subtle);
+  color: var(--app-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  margin-top: 24px;
+  padding-top: 12px;
+}
+
+.markdown-message .footnotes > ol,
+.markdown-message .footnotes p {
+  margin: 0;
+}
+
+/* The back-reference is the only in-document link a note carries. */
+.markdown-message .footnotes a[href^="#"] {
+  margin-left: 4px;
+}
+
+.markdown-message table {
+  border: 1px solid var(--app-border-default);
+  border-collapse: separate;
+  border-radius: var(--radius-surface);
+  border-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+  width: 100%;
+}
+
+/* A column alignment set in the Markdown is inline, so it wins over `start`. */
+.markdown-message th,
+.markdown-message td {
+  padding: 8px 12px;
+  text-align: start;
+}
+
+/*
+ * An address or a path is one long word that would widen its column past the
+ * message, so links and code may break anywhere. Plain words never break,
+ * which keeps short labels and numbers whole; a table with many columns of
+ * them can still be wider than the message.
+ */
+.markdown-message td a,
+.markdown-message td code {
+  overflow-wrap: anywhere;
+}
+
+.markdown-message th {
+  background: var(--app-surface-table-header);
+  color: var(--app-text-strong);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  vertical-align: bottom;
+}
+
+.markdown-message td {
+  border-top: 1px solid var(--app-border-subtle);
+  vertical-align: top;
+}
+
+.markdown-message tbody > tr:first-child > td {
+  border-top-color: var(--app-border-default);
+}
+
+/* Corner cells follow the rounded border so the header band stays inside it. */
+.markdown-message table > :first-child > tr:first-child > :first-child {
+  border-start-start-radius: calc(var(--radius-surface) - 1px);
+}
+
+.markdown-message table > :first-child > tr:first-child > :last-child {
+  border-start-end-radius: calc(var(--radius-surface) - 1px);
+}
+
+.markdown-message table > :last-child > tr:last-child > :first-child {
+  border-end-start-radius: calc(var(--radius-surface) - 1px);
+}
+
+.markdown-message table > :last-child > tr:last-child > :last-child {
+  border-end-end-radius: calc(var(--radius-surface) - 1px);
 }
 
 .markdown-message__code-block {

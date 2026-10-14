@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest"
 import { MarkdownMessage } from "@/components/MarkdownMessage"
 import { waitForMicrotasks } from "../support/settlement"
@@ -11,6 +11,37 @@ const TYPESCRIPT_BLOCK = "```ts\nconst a = 1\nconst b = 2\n```\n"
  * message announces it only while the reply streams.
  */
 const GENERATING_LABEL = "Caliginia is generating"
+
+/** GFM table whose second column is right-aligned and whose body has a link. */
+const MODEL_TABLE =
+  "| Model | Context |\n| --- | ---: |\n| [qwen3-8b](https://example.com/qwen) | 32,768 |\n"
+
+/**
+ * Waits until a message's asynchronous pass has resolved.
+ *
+ * @param linkName - Accessible name of an external link in the message.
+ * @returns Settlement once that link opens in a new tab, which only the
+ * resolved pass renders.
+ */
+async function waitForProcessedPass(linkName: string) {
+  await vi.waitFor(() => {
+    expect(screen.getByRole("link", { name: linkName })).toHaveAttribute(
+      "target",
+      "_blank"
+    )
+  })
+}
+
+/**
+ * Finds the element a fragment link points to.
+ *
+ * @param link - Link whose destination is a fragment of the document.
+ * @returns The element with the fragment's id, when one exists.
+ */
+function findFragmentTarget(link: HTMLElement) {
+  const fragmentId = link.getAttribute("href")?.slice(1) ?? ""
+  return document.getElementById(fragmentId)
+}
 
 /**
  * Installs a clipboard on the navigator for one case.
@@ -117,6 +148,103 @@ describe("MarkdownMessage", () => {
       expect(screen.getAllByRole("math")).toHaveLength(2)
     })
     expect(screen.queryByRole("code")).not.toBeInTheDocument()
+  })
+
+  it("renders a GFM table with its header, body, and column alignment", async () => {
+    render(
+      <MarkdownMessage
+        generatingLabel={GENERATING_LABEL}
+        streaming={false}
+        text={MODEL_TABLE}
+      />
+    )
+    await waitForProcessedPass("qwen3-8b")
+
+    const table = screen.getByRole("table")
+    const headers = within(table).getAllByRole("columnheader")
+
+    expect(headers.map((header) => header.textContent)).toEqual([
+      "Model",
+      "Context"
+    ])
+    expect(within(table).getByRole("cell", { name: "32,768" })).toHaveStyle({
+      textAlign: "right"
+    })
+  })
+
+  it("shows a table before the first pass resolves", async () => {
+    render(
+      <MarkdownMessage
+        generatingLabel={GENERATING_LABEL}
+        streaming={false}
+        text={MODEL_TABLE}
+      />
+    )
+
+    // Only the resolved pass opens links in a new tab, so this is the
+    // output shown before it.
+    expect(screen.getByRole("link", { name: "qwen3-8b" })).not.toHaveAttribute(
+      "target"
+    )
+    expect(screen.getByRole("table")).toBeInTheDocument()
+
+    await waitForProcessedPass("qwen3-8b")
+  })
+
+  it("keeps footnote links in each message and points them at its own notes", async () => {
+    render(
+      <>
+        <MarkdownMessage
+          generatingLabel={GENERATING_LABEL}
+          streaming={false}
+          text={
+            "First claim.[^1]\n\n[^1]: [First source](https://example.com/1)"
+          }
+        />
+        <MarkdownMessage
+          generatingLabel={GENERATING_LABEL}
+          streaming={false}
+          text={
+            "Second claim.[^1]\n\n[^1]: [Second source](https://example.com/2)"
+          }
+        />
+      </>
+    )
+    await waitForProcessedPass("First source")
+    await waitForProcessedPass("Second source")
+
+    const references = screen.getAllByRole("link", { name: "1" })
+    const backReferences = screen.getAllByRole("link", {
+      name: "Back to reference 1"
+    })
+
+    expect(references).toHaveLength(2)
+    expect(references[0]).not.toHaveAttribute("target")
+    expect(findFragmentTarget(references[0])).toHaveTextContent("First source")
+    expect(findFragmentTarget(references[1])).toHaveTextContent("Second source")
+    expect(backReferences[0]).not.toHaveAttribute("target")
+    expect(findFragmentTarget(backReferences[0])).toBe(references[0])
+    expect(findFragmentTarget(backReferences[1])).toBe(references[1])
+  })
+
+  it("shows task items as checkboxes that report their state", async () => {
+    render(
+      <MarkdownMessage
+        generatingLabel={GENERATING_LABEL}
+        streaming={false}
+        text={
+          "- [x] Installed [LM Studio](https://example.com/lms)\n- [ ] Configured the context\n"
+        }
+      />
+    )
+    await waitForProcessedPass("LM Studio")
+
+    const [installed, configured] = screen.getAllByRole("checkbox")
+
+    expect(installed).toBeChecked()
+    expect(installed).toBeDisabled()
+    expect(configured).not.toBeChecked()
+    expect(configured).toBeDisabled()
   })
 
   it("labels a code block with its language and copies its plain text", async () => {

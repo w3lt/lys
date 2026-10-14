@@ -3,8 +3,8 @@
 //! The group holds the names of the tools the person set to Just run. Every
 //! other tool asks the person before each call, so a missing group, an empty
 //! list, and a settings file written before the group existed all mean that
-//! every tool asks. The renderer's tool-call gate reads the names; this module
-//! only stores them.
+//! every tool asks. The backend's tool approval service reads the names from
+//! the saved file for every round of tool calls; this module only stores them.
 
 use std::collections::BTreeSet;
 

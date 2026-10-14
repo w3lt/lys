@@ -21,6 +21,17 @@ jobs:
     timeout-minutes: 15
 
     steps:
+      - name: Check runner resources
+        run: |
+          echo "=== CPU ==="
+          nproc
+          lscpu
+
+          echo "=== Memory ==="
+          free -h
+
+          echo "=== Disk ==="
+          df -h
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -51,10 +62,10 @@ jobs:
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
 
-      # The read_page tests crash pages on purpose. When the kernel pipes a
-      # crashing process's core dump to a handler such as apport, the renderer
+      # The read_page tests crash pages on purpose. The runner's kernel pipes a
+      # crashing process's core dump to systemd-coredump, and the renderer
       # stays alive until its gigabyte heap is dumped, so the crash reaches the
-      # read too late. The runner discards core dumps instead.
+      # read after its time limit. The runner discards core dumps instead.
       - name: Let a crashed browser process exit at once
         run: |
           echo "core_pattern was: $(cat /proc/sys/kernel/core_pattern)"

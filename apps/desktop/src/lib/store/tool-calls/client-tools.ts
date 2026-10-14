@@ -56,12 +56,6 @@ export type ClientToolCommands = {
   readonly findFiles: (filter: SearchFilesFilter) => Promise<SearchFilesResult>
 }
 
-/** Model-readable answer when the person switched tool calls off. */
-export const TOOL_CALLS_OFF_CONTENT = "The person switched tool calls off."
-
-/** Model-readable answer when the person switched the called tool off. */
-export const TOOL_OFF_CONTENT = "The person switched this tool off."
-
 /** Model-readable start of every answer to a call the person rejected. */
 const DECLINED_CALL_CONTENT = "The person declined this call."
 
@@ -223,17 +217,6 @@ function buildToolFailedToolResult(failure: object): ChatToolResult {
  */
 export function buildRunFailedToolResult(content: string): ChatToolResult {
   return Object.freeze({ status: "failed", reason: "runFailed", content })
-}
-
-/**
- * Builds the answer for a call that was declined, by the person or by a
- * switch.
- *
- * @param content - Non-empty explanation the model reads.
- * @returns A frozen declined result.
- */
-export function buildDeclinedToolResult(content: string): ChatToolResult {
-  return Object.freeze({ status: "failed", reason: "declined", content })
 }
 
 /**

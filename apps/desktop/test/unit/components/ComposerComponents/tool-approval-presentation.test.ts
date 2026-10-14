@@ -85,6 +85,7 @@ describe("formatToolCallAnnouncement", () => {
     const waitingCall: ShownToolCall = {
       target: READ_CALL_TARGET,
       call: READ_CALL,
+      step: "approval",
       answer: {
         status: "awaiting-person",
         definition: buildToolDefinition("read_text_file"),
@@ -101,6 +102,7 @@ describe("formatToolCallAnnouncement", () => {
     const unsentCall: ShownToolCall = {
       target: READ_CALL_TARGET,
       call: READ_CALL,
+      step: "run",
       answer: {
         status: "send-failed",
         toolAnswer: { status: "succeeded", content: "Buy milk." },

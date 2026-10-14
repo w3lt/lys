@@ -166,7 +166,8 @@ function ToolGroupList({
  * "Just run choices save" that stays mounted while the tools are shown, so
  * it exists before every change it announces; it is empty while nothing
  * needs saying. After a failure, Retry saving writes the current choices
- * again, which stay applied for this session meanwhile.
+ * again; until a save works, tool calls follow the choices last saved,
+ * because the backend reads them from the settings file.
  * @returns The status region and, after a failed save, the retry button.
  */
 function ToolApprovalSaveFeedback(): ReactElement {
@@ -213,10 +214,11 @@ type ToolWorkspaceProps = {
  * details are shown, at most one, which resets when the pane is left. While
  * the loaded model was not trained for tools, the controls below the card
  * recede and are disabled, and no tool's details are shown; the tool that
- * was expanded opens again once the controls unlock. Every choice applies to
- * the next tool call or chat request. The switches last for this session
- * only; each tool's approval is saved, and the save's status follows the
- * tools.
+ * was expanded opens again once the controls unlock. A switch applies to the
+ * next chat request; an approval applies to the next round of tool calls
+ * once it is saved, because the backend reads it from the settings file.
+ * The switches last for this session only; each tool's approval is saved,
+ * and the save's status follows the tools.
  * @param props - Listed tools and which cannot run now.
  * @returns The tool controls.
  */

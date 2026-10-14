@@ -1,4 +1,8 @@
-import type { ChatToolCall } from "@lys/protocol"
+import type {
+  ChatToolApprovalAnswer,
+  ChatToolCall,
+  ChatToolResult
+} from "@lys/protocol"
 import { describe, expect, it, vi } from "vitest"
 import { findShownToolCall, type HeldToolCall } from "@/lib/store/tool-calls"
 import {
@@ -69,34 +73,65 @@ const READ_INPUT = Object.freeze({
 })
 
 /** Answer of a read that returned the fixture notes. */
-const READ_RESULT = Object.freeze({ status: "succeeded", content: "Buy milk." })
+const READ_RESULT = Object.freeze({
+  status: "succeeded",
+  content: "Buy milk."
+} satisfies ChatToolResult)
 
-/** Answer of a call the person rejected without a reason. */
-const REJECTED_RESULT = Object.freeze({
-  status: "failed",
+/** Answer of a person who rejected a call without a reason. */
+const DECLINED_APPROVAL = Object.freeze({
+  status: "rejected",
   reason: "declined",
   content: "The person declined this call."
-})
+} satisfies ChatToolApprovalAnswer)
 
-/** Bodyless success of the tool-result endpoint. */
+/** Answer of a person who allowed a call. */
+const ALLOWED_APPROVAL = Object.freeze({
+  status: "allowed"
+} satisfies ChatToolApprovalAnswer)
+
+/** Bodyless success of the tool-result and tool-approval endpoints. */
 const ACCEPTED_STATUS = 204
 
 /**
  * Builds the snapshot that starts every stream of {@link REPLY} while it is
  * generating.
  *
- * @param pendingToolCalls - Calls the backend still waits for.
+ * @param pendingToolApprovals - Calls the backend still shows for approval.
+ * @param pendingToolCalls - Calls the backend still waits to be run.
  * @returns The snapshot event.
  */
 function buildStreamingSnapshot(
+  pendingToolApprovals: readonly ChatToolCall[] = [],
   pendingToolCalls: readonly ChatToolCall[] = []
 ) {
   return {
     type: "reply-snapshot",
     conversationTitle: null,
     assistantMessage: REPLY,
-    pendingToolCalls
+    pendingToolCalls,
+    pendingToolApprovals
   }
+}
+
+/**
+ * Builds the event that shows one call for approval.
+ *
+ * @param call - Call shown.
+ * @returns The `tool-approval` event.
+ */
+function buildApprovalEvent(call: ChatToolCall) {
+  return { type: "tool-approval", call }
+}
+
+/**
+ * Builds the event that asks the desktop to run one call.
+ *
+ * @param call - Call to run.
+ * @returns The `tool-call` event.
+ */
+function buildRunEvent(call: ChatToolCall) {
+  return { type: "tool-call", call }
 }
 
 /**
@@ -111,14 +146,27 @@ function buildToolResultRouteKey(call: ChatToolCall): string {
 }
 
 /**
- * Builds a tool-result route that takes every answer to one call of
+ * Builds the route key of the tool-approval endpoint for one call of
  * {@link REPLY}.
  *
  * @param call - Call being answered.
- * @returns The route under its key.
+ * @returns The `"<METHOD> <path>"` key.
  */
-function buildAcceptingToolResultRoutes(call: ChatToolCall): BackendRoutes {
+function buildToolApprovalRouteKey(call: ChatToolCall): string {
+  return `POST /api/v1/chat/${REPLY_TARGET.conversationId}/replies/${REPLY_TARGET.assistantMessageId}/tool-approvals/${call.id}`
+}
+
+/**
+ * Builds tool-approval and tool-result routes that take every answer to one
+ * call of {@link REPLY}.
+ *
+ * @param call - Call being answered.
+ * @returns The routes under their keys.
+ */
+function buildAcceptingToolCallRoutes(call: ChatToolCall): BackendRoutes {
   return {
+    [buildToolApprovalRouteKey(call)]: () =>
+      new Response(null, { status: ACCEPTED_STATUS }),
     [buildToolResultRouteKey(call)]: () =>
       new Response(null, { status: ACCEPTED_STATUS })
   }
@@ -179,21 +227,43 @@ function startInterruptedReplyBackend(routes: BackendRoutes = {}) {
 }
 
 /**
- * Lists the answers a backend received at the tool-result endpoint.
+ * Lists the answers a backend received at the tool-approval and tool-result
+ * endpoints.
  *
  * @param backend - Backend observation handle.
- * @returns The JSON body of each tool-result request, in arrival order.
+ * @returns The endpoint and JSON body of each answer, in arrival order.
  */
 function listToolAnswers(backend: BackendFake): unknown[] {
   return backend.requests
     .filter((request) => request.method === "POST")
-    .map((request) => request.body)
+    .map((request) => ({
+      endpoint: request.url.includes("/tool-approvals/")
+        ? "tool-approvals"
+        : "tool-results",
+      body: request.body
+    }))
+}
+
+/**
+ * Builds one answer as {@link listToolAnswers} lists it.
+ *
+ * @param body - Approval answer or tool result.
+ * @returns The answer with the endpoint its kind goes to.
+ */
+function buildSentAnswer(body: ChatToolApprovalAnswer | ChatToolResult) {
+  return {
+    endpoint:
+      body.status === "allowed" || body.status === "rejected"
+        ? "tool-approvals"
+        : "tool-results",
+    body
+  }
 }
 
 /**
  * Loads fresh application, tool, and tool-call stores: the backend is at
- * {@link FIXTURE_BACKEND_URL}, both fixture tools are listed with the
- * choices they start with, and no reply is followed.
+ * {@link FIXTURE_BACKEND_URL}, both fixture tools are listed, and no reply is
+ * followed.
  *
  * @returns The tool and tool-call store hooks of newly evaluated modules.
  */
@@ -211,27 +281,6 @@ async function loadFreshToolCallStore() {
     }
   })
   return { useLysStore, useToolStore, useToolCallStore }
-}
-
-/**
- * Sets the tools saved as Just run, as a loaded settings file would.
- *
- * @param useLysStore - Fresh application store.
- * @param justRunToolNames - Names of the tools on Just run.
- */
-function saveJustRunToolNames(
-  useLysStore: Awaited<
-    ReturnType<typeof loadFreshToolCallStore>
-  >["useLysStore"],
-  justRunToolNames: readonly string[]
-): void {
-  const { settings } = useLysStore.getState()
-  useLysStore.setState({
-    settings: {
-      ...settings,
-      tools: { justRunToolNames: new Set(justRunToolNames) }
-    }
-  })
 }
 
 /** Tool-call store hook of a freshly evaluated store module. */
@@ -263,19 +312,20 @@ async function startFollowWithEvents(
 
 /**
  * Ends the store's follow of {@link REPLY} through a stream failure, then
- * follows the reply again while the backend still waits for
+ * follows the reply again while the backend still waits on
  * {@link READ_CALL}.
  *
  * @param useToolCallStore - Tool-call store following the reply on a backend
  * started by {@link startInterruptedReplyBackend}.
  * @param firstStream - Stream of the first follow, which brought the call.
+ * @param snapshot - Snapshot the new follow starts with, listing the call.
  * @param replyStreams - Streams the backend opened so far.
- * @returns Resolves once the new follow's snapshot, which lists the call as
- * waiting, was handled.
+ * @returns Resolves once the new follow's snapshot was handled.
  */
 async function startFollowAfterStreamFailure(
   useToolCallStore: ToolCallStoreHook,
   firstStream: BackendEventStream,
+  snapshot: ReturnType<typeof buildStreamingSnapshot>,
   replyStreams: readonly BackendEventStream[]
 ): Promise<void> {
   // The early close makes the store follow again; that request fails.
@@ -283,12 +333,13 @@ async function startFollowAfterStreamFailure(
   await waitForMicrotasks()
   useToolCallStore.getState().startReplyToolCallFollow(REPLY_TARGET)
   await waitForMicrotasks()
-  replyStreams[1]?.sendEvent(buildStreamingSnapshot([READ_CALL]))
+  replyStreams[1]?.sendEvent(snapshot)
   await waitForMicrotasks()
 }
 
 /**
- * Builds one held call of a conversation for the selector cases.
+ * Builds one held call of a conversation, shown for approval, for the
+ * selector cases.
  *
  * @param sequence - Identity sequence of the call.
  * @param conversationId - Conversation whose reply made the call.
@@ -298,13 +349,35 @@ async function startFollowAfterStreamFailure(
 function buildHeldToolCall(
   sequence: number,
   conversationId: string,
-  answer: HeldToolCall["answer"]
+  answer: Extract<HeldToolCall, { step: "approval" }>["answer"]
 ): HeldToolCall {
   const call = buildToolCall(sequence, "read_text_file")
   return {
     target: { conversationId, assistantMessageId: REPLY.id, callId: call.id },
     call,
+    step: "approval",
     answer
+  }
+}
+
+/**
+ * Builds one held call of a conversation that the backend sent to run, for
+ * the selector cases.
+ *
+ * @param sequence - Identity sequence of the call.
+ * @param conversationId - Conversation whose reply made the call.
+ * @returns The held call, running.
+ */
+function buildRunningToolCall(
+  sequence: number,
+  conversationId: string
+): HeldToolCall {
+  const call = buildToolCall(sequence, "read_text_file")
+  return {
+    target: { conversationId, assistantMessageId: REPLY.id, callId: call.id },
+    call,
+    step: "run",
+    answer: { status: "running" }
   }
 }
 
@@ -314,7 +387,7 @@ describe("findShownToolCall", () => {
   /** Another conversation with calls of its own. */
   const otherConversationId = createFixtureUuidV7(2)
   /** Answer of a call that waits for the person. */
-  const awaitingPerson: HeldToolCall["answer"] = {
+  const awaitingPerson = {
     status: "awaiting-person",
     definition: READ_TEXT_FILE,
     input: {
@@ -322,7 +395,7 @@ describe("findShownToolCall", () => {
       toolName: "read_text_file",
       input: { path: "/notes/todo.md" }
     }
-  }
+  } as const
 
   it("shows nothing before a conversation is shown", () => {
     const heldCalls = [
@@ -340,7 +413,7 @@ describe("findShownToolCall", () => {
     )
     const heldCalls = [
       buildHeldToolCall(20, otherConversationId, awaitingPerson),
-      buildHeldToolCall(21, shownConversationId, { status: "running" }),
+      buildRunningToolCall(21, shownConversationId),
       buildHeldToolCall(22, shownConversationId, { status: "answered" }),
       earliestWaiting,
       buildHeldToolCall(24, shownConversationId, awaitingPerson)
@@ -354,13 +427,13 @@ describe("findShownToolCall", () => {
   it("shows a call whose answer failed to send", () => {
     const unsent = buildHeldToolCall(21, shownConversationId, {
       status: "send-failed",
-      toolAnswer: REJECTED_RESULT,
+      toolAnswer: DECLINED_APPROVAL,
       error: "Couldn't send the answer to Lys."
     })
     const heldCalls = [
       buildHeldToolCall(20, shownConversationId, {
         status: "sending",
-        toolAnswer: REJECTED_RESULT
+        toolAnswer: DECLINED_APPROVAL
       }),
       unsent
     ]
@@ -370,7 +443,7 @@ describe("findShownToolCall", () => {
 
   it("shows nothing while every call of the conversation is being handled without the person", () => {
     const heldCalls = [
-      buildHeldToolCall(20, shownConversationId, { status: "running" }),
+      buildRunningToolCall(20, shownConversationId),
       buildHeldToolCall(21, otherConversationId, awaitingPerson)
     ]
 
@@ -401,19 +474,20 @@ describe("useToolCallStore", () => {
       ])
     })
 
-    it("holds a call on Ask me for the person, without answering it", async () => {
+    it("holds a call shown for approval for the person, without answering it", async () => {
       const { backend, replyStreams } = startReplyBackend()
       const { useToolCallStore } = await loadFreshToolCallStore()
 
       await startFollowWithEvents(useToolCallStore, replyStreams, [
         buildStreamingSnapshot(),
-        { type: "tool-call", call: READ_CALL }
+        buildApprovalEvent(READ_CALL)
       ])
 
       expect(useToolCallStore.getState().heldCalls).toEqual([
         {
           target: { ...REPLY_TARGET, callId: READ_CALL.id },
           call: READ_CALL,
+          step: "approval",
           answer: {
             status: "awaiting-person",
             definition: READ_TEXT_FILE,
@@ -424,16 +498,15 @@ describe("useToolCallStore", () => {
       expect(listToolAnswers(backend)).toEqual([])
     })
 
-    it("holds the calls a snapshot lists as waiting, then later calls, in arrival order", async () => {
+    it("holds the prompts a snapshot lists, then later prompts, in arrival order", async () => {
       const { replyStreams } = startReplyBackend()
-      const { useToolStore, useToolCallStore } = await loadFreshToolCallStore()
-      useToolStore.getState().updateToolOn(READ_PAGE, true)
+      const { useToolCallStore } = await loadFreshToolCallStore()
 
       await startFollowWithEvents(useToolCallStore, replyStreams, [
         buildStreamingSnapshot([READ_CALL, PAGE_CALL]),
         { type: "delta", content: "Reading" },
         { type: "title", title: "Notes" },
-        { type: "tool-call", call: SECOND_READ_CALL }
+        buildApprovalEvent(SECOND_READ_CALL)
       ])
 
       expect(
@@ -448,7 +521,34 @@ describe("useToolCallStore", () => {
       ])
     })
 
-    it("reads the tool list before deciding a call when it has not been read", async () => {
+    it("runs the calls a snapshot lists as waiting to run", async () => {
+      const host = startNativeHostFake({ read_text_file: () => "Buy milk." })
+      const { backend, replyStreams } = startReplyBackend(
+        buildAcceptingToolCallRoutes(READ_CALL)
+      )
+      const { useToolCallStore } = await loadFreshToolCallStore()
+
+      await startFollowWithEvents(useToolCallStore, replyStreams, [
+        buildStreamingSnapshot([PAGE_CALL], [READ_CALL])
+      ])
+
+      expect(host.commands).toEqual([
+        { command: "read_text_file", args: { path: "/notes/todo.md" } }
+      ])
+      expect(listToolAnswers(backend)).toEqual([buildSentAnswer(READ_RESULT)])
+      expect(
+        useToolCallStore.getState().heldCalls.map(({ call, step, answer }) => ({
+          callId: call.id,
+          step,
+          status: answer.status
+        }))
+      ).toEqual([
+        { callId: PAGE_CALL.id, step: "approval", status: "awaiting-person" },
+        { callId: READ_CALL.id, step: "run", status: "answered" }
+      ])
+    })
+
+    it("reads the tool list before showing a prompt when it has not been read", async () => {
       const host = startNativeHostFake({ list_tools: () => [READ_TEXT_FILE] })
       const { replyStreams } = startReplyBackend({
         "GET /api/v1/tools": () =>
@@ -459,7 +559,7 @@ describe("useToolCallStore", () => {
 
       await startFollowWithEvents(useToolCallStore, replyStreams, [
         buildStreamingSnapshot(),
-        { type: "tool-call", call: READ_CALL }
+        buildApprovalEvent(READ_CALL)
       ])
 
       expect(host.commands).toEqual([{ command: "list_tools", args: {} }])
@@ -468,45 +568,50 @@ describe("useToolCallStore", () => {
       ])
     })
 
-    it("answers a call as not run when the tool list cannot be read", async () => {
+    it("answers a prompt it cannot show at once, when the tool list cannot be read", async () => {
       startNativeHostFake({
         list_tools: () => Promise.reject("command list_tools not found")
       })
       const { backend, replyStreams } = startReplyBackend({
         "GET /api/v1/tools": () =>
           buildJsonResponse(200, { tools: [], unavailableTools: [] }),
-        ...buildAcceptingToolResultRoutes(READ_CALL)
+        ...buildAcceptingToolCallRoutes(READ_CALL)
       })
       const { useToolStore, useToolCallStore } = await loadFreshToolCallStore()
       useToolStore.setState({ list: { status: "idle" } })
 
       await startFollowWithEvents(useToolCallStore, replyStreams, [
         buildStreamingSnapshot(),
-        { type: "tool-call", call: READ_CALL }
+        buildApprovalEvent(READ_CALL)
       ])
 
       expect(listToolAnswers(backend)).toEqual([
-        {
-          status: "failed",
-          reason: "runFailed",
+        buildSentAnswer({
+          status: "rejected",
+          reason: "showFailed",
           content: "The desktop couldn't read its tool list."
-        }
+        })
       ])
+      expect(
+        findShownToolCall(
+          useToolCallStore.getState(),
+          REPLY_TARGET.conversationId
+        )
+      ).toBeUndefined()
     })
 
-    it("runs a desktop tool saved as Just run at once and sends its result, showing the person nothing", async () => {
+    it("runs a call the backend sends to run at once and sends its result, showing the person nothing", async () => {
       const read = createControlledPromise<unknown>()
       const host = startNativeHostFake({ read_text_file: () => read.promise })
       const toolResult = createControlledRoute()
       const { backend, replyStreams } = startReplyBackend({
         [buildToolResultRouteKey(READ_CALL)]: toolResult.route
       })
-      const { useLysStore, useToolCallStore } = await loadFreshToolCallStore()
-      saveJustRunToolNames(useLysStore, ["read_text_file"])
+      const { useToolCallStore } = await loadFreshToolCallStore()
 
       await startFollowWithEvents(useToolCallStore, replyStreams, [
         buildStreamingSnapshot(),
-        { type: "tool-call", call: READ_CALL }
+        buildRunEvent(READ_CALL)
       ])
       const whileRunning = useToolCallStore.getState()
       read.resolve("Buy milk.")
@@ -521,7 +626,7 @@ describe("useToolCallStore", () => {
         { command: "read_text_file", args: { path: "/notes/todo.md" } }
       ])
       expect(whileRunning.heldCalls).toMatchObject([
-        { answer: { status: "running" } }
+        { step: "run", answer: { status: "running" } }
       ])
       expect(whileSending.heldCalls).toMatchObject([
         { answer: { status: "sending", toolAnswer: READ_RESULT } }
@@ -531,81 +636,50 @@ describe("useToolCallStore", () => {
           findShownToolCall(state, REPLY_TARGET.conversationId)
         )
       ).toEqual([undefined, undefined])
-      expect(listToolAnswers(backend)).toEqual([READ_RESULT])
-      expect(backend.requests.at(-1)?.url).toBe(
-        `${FIXTURE_BACKEND_URL}/api/v1/chat/${REPLY_TARGET.conversationId}/replies/${REPLY_TARGET.assistantMessageId}/tool-results/${READ_CALL.id}`
-      )
+      expect(listToolAnswers(backend)).toEqual([buildSentAnswer(READ_RESULT)])
       expect(useToolCallStore.getState().heldCalls).toMatchObject([
         { call: READ_CALL, answer: { status: "answered" } }
       ])
     })
 
-    it("allows a backend tool saved as Just run at once, without running anything on the desktop", async () => {
-      startNativeHostFake({})
+    it("runs a call the backend sends to run whatever the tool switches say, since the backend decides", async () => {
+      const host = startNativeHostFake({ read_text_file: () => "Buy milk." })
       const { backend, replyStreams } = startReplyBackend(
-        buildAcceptingToolResultRoutes(PAGE_CALL)
-      )
-      const { useLysStore, useToolStore, useToolCallStore } =
-        await loadFreshToolCallStore()
-      useToolStore.getState().updateToolOn(READ_PAGE, true)
-      saveJustRunToolNames(useLysStore, ["read_page"])
-
-      await startFollowWithEvents(useToolCallStore, replyStreams, [
-        buildStreamingSnapshot(),
-        { type: "tool-call", call: PAGE_CALL }
-      ])
-
-      expect(listToolAnswers(backend)).toEqual([{ status: "allowed" }])
-      expect(useToolCallStore.getState().heldCalls).toMatchObject([
-        { answer: { status: "answered" } }
-      ])
-    })
-
-    it("declines a call at once while tool calls are switched off", async () => {
-      const { backend, replyStreams } = startReplyBackend(
-        buildAcceptingToolResultRoutes(READ_CALL)
+        buildAcceptingToolCallRoutes(READ_CALL)
       )
       const { useToolStore, useToolCallStore } = await loadFreshToolCallStore()
       useToolStore.getState().updateToolCallsOn(false)
+      useToolStore.getState().updateToolOn(READ_TEXT_FILE, false)
 
       await startFollowWithEvents(useToolCallStore, replyStreams, [
         buildStreamingSnapshot(),
-        { type: "tool-call", call: READ_CALL }
+        buildRunEvent(READ_CALL)
       ])
 
-      expect(listToolAnswers(backend)).toEqual([
-        {
-          status: "failed",
-          reason: "declined",
-          content: "The person switched tool calls off."
-        }
-      ])
+      expect(host.commands).toHaveLength(1)
+      expect(listToolAnswers(backend)).toEqual([buildSentAnswer(READ_RESULT)])
     })
 
-    it("decides each call by the choices at the moment it arrives", async () => {
+    it("answers a call it cannot run as not run", async () => {
+      const host = startNativeHostFake({})
+      const call = buildToolCall(13, "delete_file")
       const { backend, replyStreams } = startReplyBackend(
-        buildAcceptingToolResultRoutes(SECOND_READ_CALL)
+        buildAcceptingToolCallRoutes(call)
       )
-      const { useToolStore, useToolCallStore } = await loadFreshToolCallStore()
-      const stream = await startFollowWithEvents(
-        useToolCallStore,
-        replyStreams,
-        [buildStreamingSnapshot(), { type: "tool-call", call: READ_CALL }]
-      )
+      const { useToolCallStore } = await loadFreshToolCallStore()
 
-      useToolStore.getState().updateToolOn(READ_TEXT_FILE, false)
-      stream.sendEvent({ type: "tool-call", call: SECOND_READ_CALL })
-      await waitForMicrotasks()
+      await startFollowWithEvents(useToolCallStore, replyStreams, [
+        buildStreamingSnapshot(),
+        buildRunEvent(call)
+      ])
 
-      expect(
-        useToolCallStore.getState().heldCalls.map(({ answer }) => answer.status)
-      ).toEqual(["awaiting-person", "answered"])
+      expect(host.commands).toEqual([])
       expect(listToolAnswers(backend)).toEqual([
-        {
+        buildSentAnswer({
           status: "failed",
-          reason: "declined",
-          content: "The person switched this tool off."
-        }
+          reason: "runFailed",
+          content: expect.stringContaining("delete_file")
+        })
       ])
     })
 
@@ -621,7 +695,7 @@ describe("useToolCallStore", () => {
         const stream = await startFollowWithEvents(
           useToolCallStore,
           replyStreams,
-          [buildStreamingSnapshot(), { type: "tool-call", call: READ_CALL }]
+          [buildStreamingSnapshot(), buildApprovalEvent(READ_CALL)]
         )
 
         stream.sendEvent(finalEvent)
@@ -645,7 +719,8 @@ describe("useToolCallStore", () => {
             type: "reply-snapshot",
             conversationTitle: null,
             assistantMessage: buildCompletedAssistantMessage(3, "Done."),
-            pendingToolCalls: []
+            pendingToolCalls: [],
+            pendingToolApprovals: []
           }
         ]
       )
@@ -668,13 +743,13 @@ describe("useToolCallStore", () => {
       expect(listRouteKeys(backend)).toEqual([EVENTS_ROUTE, EVENTS_ROUTE])
     })
 
-    it("follows again after the stream closes early, keeping a waiting call and not asking twice", async () => {
+    it("follows again after the stream closes early, keeping a waiting prompt and not asking twice", async () => {
       const { backend, replyStreams } = startReplyBackend()
       const { useToolCallStore } = await loadFreshToolCallStore()
       const firstStream = await startFollowWithEvents(
         useToolCallStore,
         replyStreams,
-        [buildStreamingSnapshot(), { type: "tool-call", call: READ_CALL }]
+        [buildStreamingSnapshot(), buildApprovalEvent(READ_CALL)]
       )
       const [waitingCall] = useToolCallStore.getState().heldCalls
 
@@ -688,15 +763,15 @@ describe("useToolCallStore", () => {
       expect(useToolCallStore.getState().heldCalls[0]).toBe(waitingCall)
     })
 
-    it("keeps an answered call answered when a later snapshot still lists it as waiting", async () => {
+    it("keeps an answered prompt answered when a later snapshot still lists it as waiting", async () => {
       const { backend, replyStreams } = startReplyBackend(
-        buildAcceptingToolResultRoutes(READ_CALL)
+        buildAcceptingToolCallRoutes(READ_CALL)
       )
       const { useToolCallStore } = await loadFreshToolCallStore()
       const firstStream = await startFollowWithEvents(
         useToolCallStore,
         replyStreams,
-        [buildStreamingSnapshot(), { type: "tool-call", call: READ_CALL }]
+        [buildStreamingSnapshot(), buildApprovalEvent(READ_CALL)]
       )
       await useToolCallStore.getState().rejectToolCall(READ_CALL.id, "")
 
@@ -708,7 +783,9 @@ describe("useToolCallStore", () => {
       expect(useToolCallStore.getState().heldCalls).toMatchObject([
         { call: READ_CALL, answer: { status: "answered" } }
       ])
-      expect(listToolAnswers(backend)).toEqual([REJECTED_RESULT])
+      expect(listToolAnswers(backend)).toEqual([
+        buildSentAnswer(DECLINED_APPROVAL)
+      ])
     })
 
     it("stops after two streams in a row close without an event past the snapshot", async () => {
@@ -763,7 +840,7 @@ describe("useToolCallStore", () => {
       const firstStream = await startFollowWithEvents(
         useToolCallStore,
         replyStreams,
-        [buildStreamingSnapshot(), { type: "tool-call", call: READ_CALL }]
+        [buildStreamingSnapshot(), buildApprovalEvent(READ_CALL)]
       )
 
       firstStream.close()
@@ -774,10 +851,7 @@ describe("useToolCallStore", () => {
     })
 
     it.each([
-      [
-        "does not start with a snapshot",
-        [{ type: "tool-call", call: READ_CALL }]
-      ],
+      ["does not start with a snapshot", [buildApprovalEvent(READ_CALL)]],
       [
         "sends a second snapshot",
         [buildStreamingSnapshot([READ_CALL]), buildStreamingSnapshot()]
@@ -812,7 +886,7 @@ describe("useToolCallStore", () => {
       const stream = await startFollowWithEvents(
         useToolCallStore,
         replyStreams,
-        [buildStreamingSnapshot(), { type: "tool-call", call: READ_CALL }]
+        [buildStreamingSnapshot(), buildApprovalEvent(READ_CALL)]
       )
       useToolCallStore.getState().startReplyToolCallFollow(otherTarget)
       await waitForMicrotasks()
@@ -820,7 +894,8 @@ describe("useToolCallStore", () => {
         type: "reply-snapshot",
         conversationTitle: null,
         assistantMessage: otherReply,
-        pendingToolCalls: [SECOND_READ_CALL]
+        pendingToolCalls: [],
+        pendingToolApprovals: [SECOND_READ_CALL]
       })
       await waitForMicrotasks()
       const whileBothWait = useToolCallStore.getState()
@@ -841,25 +916,71 @@ describe("useToolCallStore", () => {
   })
 
   describe("resolveToolCall", () => {
-    it("runs the allowed desktop tool and sends its result", async () => {
+    it("allows a desktop tool's call and runs it once the backend sends it to run, under the same identifier", async () => {
       const host = startNativeHostFake({ read_text_file: () => "Buy milk." })
       const { backend, replyStreams } = startReplyBackend(
-        buildAcceptingToolResultRoutes(READ_CALL)
+        buildAcceptingToolCallRoutes(READ_CALL)
       )
       const { useToolCallStore } = await loadFreshToolCallStore()
-      await startFollowWithEvents(useToolCallStore, replyStreams, [
-        buildStreamingSnapshot(),
-        { type: "tool-call", call: READ_CALL }
-      ])
+      const stream = await startFollowWithEvents(
+        useToolCallStore,
+        replyStreams,
+        [buildStreamingSnapshot(), buildApprovalEvent(READ_CALL)]
+      )
 
       await useToolCallStore.getState().resolveToolCall(READ_CALL.id)
+      const afterAllowing = useToolCallStore.getState()
+      stream.sendEvent(buildRunEvent(READ_CALL))
+      await waitForMicrotasks()
 
+      expect(afterAllowing.heldCalls).toMatchObject([
+        { step: "approval", answer: { status: "answered" } }
+      ])
       expect(host.commands).toEqual([
         { command: "read_text_file", args: { path: "/notes/todo.md" } }
       ])
-      expect(listToolAnswers(backend)).toEqual([READ_RESULT])
+      expect(listToolAnswers(backend)).toEqual([
+        buildSentAnswer(ALLOWED_APPROVAL),
+        buildSentAnswer(READ_RESULT)
+      ])
       expect(useToolCallStore.getState().heldCalls).toMatchObject([
-        { answer: { status: "answered" } }
+        { call: READ_CALL, step: "run", answer: { status: "answered" } }
+      ])
+    })
+
+    it("runs a call whose run request arrives while its allowed answer is still being sent, and still sends the result", async () => {
+      startNativeHostFake({ read_text_file: () => "Buy milk." })
+      const approval = createControlledRoute()
+      const { backend, replyStreams } = startReplyBackend({
+        [buildToolApprovalRouteKey(READ_CALL)]: approval.route,
+        [buildToolResultRouteKey(READ_CALL)]: () =>
+          new Response(null, { status: ACCEPTED_STATUS })
+      })
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      const stream = await startFollowWithEvents(
+        useToolCallStore,
+        replyStreams,
+        [buildStreamingSnapshot(), buildApprovalEvent(READ_CALL)]
+      )
+
+      const resolution = useToolCallStore
+        .getState()
+        .resolveToolCall(READ_CALL.id)
+      await waitForMicrotasks()
+      stream.sendEvent(buildRunEvent(READ_CALL))
+      await waitForMicrotasks()
+      approval.responses[0]?.resolve(
+        new Response(null, { status: ACCEPTED_STATUS })
+      )
+      await resolution
+      await waitForMicrotasks()
+
+      expect(listToolAnswers(backend)).toEqual([
+        buildSentAnswer(ALLOWED_APPROVAL),
+        buildSentAnswer(READ_RESULT)
+      ])
+      expect(useToolCallStore.getState().heldCalls).toMatchObject([
+        { step: "run", answer: { status: "answered" } }
       ])
     })
 
@@ -868,51 +989,51 @@ describe("useToolCallStore", () => {
         read_text_file: () => Promise.reject({ code: "fileNotFound" })
       })
       const { backend, replyStreams } = startReplyBackend(
-        buildAcceptingToolResultRoutes(READ_CALL)
+        buildAcceptingToolCallRoutes(READ_CALL)
+      )
+      const { useToolCallStore } = await loadFreshToolCallStore()
+
+      await startFollowWithEvents(useToolCallStore, replyStreams, [
+        buildStreamingSnapshot(),
+        buildRunEvent(READ_CALL)
+      ])
+
+      expect(listToolAnswers(backend)).toEqual([
+        buildSentAnswer({
+          status: "failed",
+          reason: "toolFailed",
+          content: JSON.stringify({ code: "fileNotFound" })
+        })
+      ])
+    })
+
+    it("allows a backend tool's call, running nothing on the desktop", async () => {
+      const host = startNativeHostFake({})
+      const { backend, replyStreams } = startReplyBackend(
+        buildAcceptingToolCallRoutes(PAGE_CALL)
       )
       const { useToolCallStore } = await loadFreshToolCallStore()
       await startFollowWithEvents(useToolCallStore, replyStreams, [
         buildStreamingSnapshot(),
-        { type: "tool-call", call: READ_CALL }
-      ])
-
-      await useToolCallStore.getState().resolveToolCall(READ_CALL.id)
-
-      expect(listToolAnswers(backend)).toEqual([
-        {
-          status: "failed",
-          reason: "toolFailed",
-          content: JSON.stringify({ code: "fileNotFound" })
-        }
-      ])
-    })
-
-    it("lets the backend run its allowed tool", async () => {
-      startNativeHostFake({})
-      const { backend, replyStreams } = startReplyBackend(
-        buildAcceptingToolResultRoutes(PAGE_CALL)
-      )
-      const { useToolStore, useToolCallStore } = await loadFreshToolCallStore()
-      useToolStore.getState().updateToolOn(READ_PAGE, true)
-      await startFollowWithEvents(useToolCallStore, replyStreams, [
-        buildStreamingSnapshot(),
-        { type: "tool-call", call: PAGE_CALL }
+        buildApprovalEvent(PAGE_CALL)
       ])
 
       await useToolCallStore.getState().resolveToolCall(PAGE_CALL.id)
 
-      expect(listToolAnswers(backend)).toEqual([{ status: "allowed" }])
+      expect(listToolAnswers(backend)).toEqual([
+        buildSentAnswer(ALLOWED_APPROVAL)
+      ])
+      expect(host.commands).toEqual([])
     })
 
-    it("runs the tool once when it is pressed twice", async () => {
-      const host = startNativeHostFake({ read_text_file: () => "Buy milk." })
+    it("sends the answer once when it is pressed twice", async () => {
       const { backend, replyStreams } = startReplyBackend(
-        buildAcceptingToolResultRoutes(READ_CALL)
+        buildAcceptingToolCallRoutes(READ_CALL)
       )
       const { useToolCallStore } = await loadFreshToolCallStore()
       await startFollowWithEvents(useToolCallStore, replyStreams, [
         buildStreamingSnapshot(),
-        { type: "tool-call", call: READ_CALL }
+        buildApprovalEvent(READ_CALL)
       ])
 
       await Promise.all([
@@ -920,8 +1041,31 @@ describe("useToolCallStore", () => {
         useToolCallStore.getState().resolveToolCall(READ_CALL.id)
       ])
 
+      expect(listToolAnswers(backend)).toEqual([
+        buildSentAnswer(ALLOWED_APPROVAL)
+      ])
+    })
+
+    it("runs a call once when its run request arrives twice", async () => {
+      const read = createControlledPromise<unknown>()
+      const host = startNativeHostFake({ read_text_file: () => read.promise })
+      const { backend, replyStreams } = startReplyBackend(
+        buildAcceptingToolCallRoutes(READ_CALL)
+      )
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      const stream = await startFollowWithEvents(
+        useToolCallStore,
+        replyStreams,
+        [buildStreamingSnapshot([], [READ_CALL])]
+      )
+
+      stream.sendEvent(buildRunEvent(READ_CALL))
+      await waitForMicrotasks()
+      read.resolve("Buy milk.")
+      await waitForMicrotasks()
+
       expect(host.commands).toHaveLength(1)
-      expect(listToolAnswers(backend)).toEqual([READ_RESULT])
+      expect(listToolAnswers(backend)).toEqual([buildSentAnswer(READ_RESULT)])
     })
 
     it("does not send the result of a tool that finishes after its reply ended", async () => {
@@ -932,46 +1076,51 @@ describe("useToolCallStore", () => {
       const stream = await startFollowWithEvents(
         useToolCallStore,
         replyStreams,
-        [buildStreamingSnapshot(), { type: "tool-call", call: READ_CALL }]
+        [buildStreamingSnapshot(), buildRunEvent(READ_CALL)]
       )
-      const resolution = useToolCallStore
-        .getState()
-        .resolveToolCall(READ_CALL.id)
+
       stream.sendEvent({ type: "interrupted" })
       await waitForMicrotasks()
-
       read.resolve("Buy milk.")
-      await resolution
+      await waitForMicrotasks()
 
       expect(listToolAnswers(backend)).toEqual([])
       expect(useToolCallStore.getState().heldCalls).toEqual([])
     })
 
-    it("does not send the result of a tool that finishes after its call started waiting again", async () => {
-      const read = createControlledPromise<unknown>()
-      startNativeHostFake({ read_text_file: () => read.promise })
-      const { backend, replyStreams } = startInterruptedReplyBackend()
+    it("sends one result when a call sent to run arrives again after its follow ended", async () => {
+      const reads = [
+        createControlledPromise<unknown>(),
+        createControlledPromise<unknown>()
+      ]
+      const host = startNativeHostFake({
+        read_text_file: () => reads[host.commands.length - 1]?.promise
+      })
+      const { backend, replyStreams } = startInterruptedReplyBackend(
+        buildAcceptingToolCallRoutes(READ_CALL)
+      )
       const { useToolCallStore } = await loadFreshToolCallStore()
       const firstStream = await startFollowWithEvents(
         useToolCallStore,
         replyStreams,
-        [buildStreamingSnapshot(), { type: "tool-call", call: READ_CALL }]
+        [buildStreamingSnapshot(), buildRunEvent(READ_CALL)]
       )
-      const resolution = useToolCallStore
-        .getState()
-        .resolveToolCall(READ_CALL.id)
       await startFollowAfterStreamFailure(
         useToolCallStore,
         firstStream,
+        buildStreamingSnapshot([], [READ_CALL]),
         replyStreams
       )
 
-      read.resolve("Buy milk.")
-      await resolution
+      reads[0]?.resolve("Buy milk.")
+      await waitForMicrotasks()
+      reads[1]?.resolve("Buy milk.")
+      await waitForMicrotasks()
 
-      expect(listToolAnswers(backend)).toEqual([])
+      expect(host.commands).toHaveLength(2)
+      expect(listToolAnswers(backend)).toEqual([buildSentAnswer(READ_RESULT)])
       expect(useToolCallStore.getState().heldCalls).toMatchObject([
-        { call: READ_CALL, answer: { status: "awaiting-person" } }
+        { call: READ_CALL, answer: { status: "answered" } }
       ])
     })
   })
@@ -986,21 +1135,22 @@ describe("useToolCallStore", () => {
     ])(
       "sends the rejection with the reason %o and runs nothing",
       async (note, content) => {
-        startNativeHostFake({})
+        const host = startNativeHostFake({})
         const { backend, replyStreams } = startReplyBackend(
-          buildAcceptingToolResultRoutes(READ_CALL)
+          buildAcceptingToolCallRoutes(READ_CALL)
         )
         const { useToolCallStore } = await loadFreshToolCallStore()
         await startFollowWithEvents(useToolCallStore, replyStreams, [
           buildStreamingSnapshot(),
-          { type: "tool-call", call: READ_CALL }
+          buildApprovalEvent(READ_CALL)
         ])
 
         await useToolCallStore.getState().rejectToolCall(READ_CALL.id, note)
 
         expect(listToolAnswers(backend)).toEqual([
-          { status: "failed", reason: "declined", content }
+          buildSentAnswer({ status: "rejected", reason: "declined", content })
         ])
+        expect(host.commands).toEqual([])
         expect(useToolCallStore.getState().heldCalls).toMatchObject([
           { answer: { status: "answered" } }
         ])
@@ -1009,7 +1159,7 @@ describe("useToolCallStore", () => {
 
     it("marks the call answered when the backend no longer waits for it", async () => {
       const { replyStreams } = startReplyBackend({
-        [buildToolResultRouteKey(READ_CALL)]: () =>
+        [buildToolApprovalRouteKey(READ_CALL)]: () =>
           buildJsonResponse(
             409,
             {
@@ -1024,7 +1174,7 @@ describe("useToolCallStore", () => {
       const { useToolCallStore } = await loadFreshToolCallStore()
       await startFollowWithEvents(useToolCallStore, replyStreams, [
         buildStreamingSnapshot(),
-        { type: "tool-call", call: READ_CALL }
+        buildApprovalEvent(READ_CALL)
       ])
 
       await useToolCallStore.getState().rejectToolCall(READ_CALL.id, "")
@@ -1045,18 +1195,18 @@ describe("useToolCallStore", () => {
       [
         "the backend refuses it",
         () => new Response(null, { status: 500 }),
-        "Couldn't send the answer to Lys: The backend did not accept the tool result (HTTP 500)."
+        "Couldn't send the answer to Lys: The backend did not accept the approval (HTTP 500)."
       ]
     ])(
       "keeps the answer and shows the reason when %s",
-      async (_label, toolResultRoute, error) => {
+      async (_label, approvalRoute, error) => {
         const { replyStreams } = startReplyBackend({
-          [buildToolResultRouteKey(READ_CALL)]: toolResultRoute
+          [buildToolApprovalRouteKey(READ_CALL)]: approvalRoute
         })
         const { useToolCallStore } = await loadFreshToolCallStore()
         await startFollowWithEvents(useToolCallStore, replyStreams, [
           buildStreamingSnapshot(),
-          { type: "tool-call", call: READ_CALL }
+          buildApprovalEvent(READ_CALL)
         ])
 
         await useToolCallStore.getState().rejectToolCall(READ_CALL.id, "")
@@ -1067,7 +1217,7 @@ describe("useToolCallStore", () => {
             call: READ_CALL,
             answer: {
               status: "send-failed",
-              toolAnswer: REJECTED_RESULT,
+              toolAnswer: DECLINED_APPROVAL,
               error
             }
           }
@@ -1087,14 +1237,11 @@ describe("useToolCallStore", () => {
       const { useToolCallStore } = await loadFreshToolCallStore()
       await startFollowWithEvents(useToolCallStore, replyStreams, [
         buildStreamingSnapshot(),
-        { type: "tool-call", call: READ_CALL }
+        buildRunEvent(READ_CALL)
       ])
-      const resolution = useToolCallStore
-        .getState()
-        .resolveToolCall(READ_CALL.id)
-      await waitForMicrotasks()
       toolResult.responses[0]?.reject(createTransportFailure())
-      await resolution
+      await waitForMicrotasks()
+      const afterFailure = useToolCallStore.getState()
 
       const retry = useToolCallStore
         .getState()
@@ -1106,10 +1253,16 @@ describe("useToolCallStore", () => {
       )
       await retry
 
+      expect(
+        findShownToolCall(afterFailure, REPLY_TARGET.conversationId)?.call
+      ).toEqual(READ_CALL)
       expect(whileRetrying).toMatchObject([
         { answer: { status: "sending", toolAnswer: READ_RESULT } }
       ])
-      expect(listToolAnswers(backend)).toEqual([READ_RESULT, READ_RESULT])
+      expect(listToolAnswers(backend)).toEqual([
+        buildSentAnswer(READ_RESULT),
+        buildSentAnswer(READ_RESULT)
+      ])
       expect(host.commands).toHaveLength(1)
       expect(useToolCallStore.getState().heldCalls).toMatchObject([
         { answer: { status: "answered" } }
@@ -1118,13 +1271,13 @@ describe("useToolCallStore", () => {
 
     it("stays unsent when sending it again fails too", async () => {
       const { backend, replyStreams } = startReplyBackend({
-        [buildToolResultRouteKey(READ_CALL)]: () =>
+        [buildToolApprovalRouteKey(READ_CALL)]: () =>
           Promise.reject(createTransportFailure())
       })
       const { useToolCallStore } = await loadFreshToolCallStore()
       await startFollowWithEvents(useToolCallStore, replyStreams, [
         buildStreamingSnapshot(),
-        { type: "tool-call", call: READ_CALL }
+        buildApprovalEvent(READ_CALL)
       ])
       await useToolCallStore.getState().rejectToolCall(READ_CALL.id, "")
 
@@ -1132,20 +1285,20 @@ describe("useToolCallStore", () => {
 
       expect(listToolAnswers(backend)).toHaveLength(2)
       expect(useToolCallStore.getState().heldCalls).toMatchObject([
-        { answer: { status: "send-failed", toolAnswer: REJECTED_RESULT } }
+        { answer: { status: "send-failed", toolAnswer: DECLINED_APPROVAL } }
       ])
     })
 
-    it("leaves a call that waits again alone when the answer sent before its follow ended fails", async () => {
-      const toolResult = createControlledRoute()
+    it("leaves a prompt that waits again alone when the answer sent before its follow ended fails", async () => {
+      const approval = createControlledRoute()
       const { replyStreams } = startInterruptedReplyBackend({
-        [buildToolResultRouteKey(READ_CALL)]: toolResult.route
+        [buildToolApprovalRouteKey(READ_CALL)]: approval.route
       })
       const { useToolCallStore } = await loadFreshToolCallStore()
       const firstStream = await startFollowWithEvents(
         useToolCallStore,
         replyStreams,
-        [buildStreamingSnapshot(), { type: "tool-call", call: READ_CALL }]
+        [buildStreamingSnapshot(), buildApprovalEvent(READ_CALL)]
       )
       const rejection = useToolCallStore
         .getState()
@@ -1153,10 +1306,11 @@ describe("useToolCallStore", () => {
       await startFollowAfterStreamFailure(
         useToolCallStore,
         firstStream,
+        buildStreamingSnapshot([READ_CALL]),
         replyStreams
       )
 
-      toolResult.responses[0]?.reject(createTransportFailure())
+      approval.responses[0]?.reject(createTransportFailure())
       await rejection
 
       expect(useToolCallStore.getState().heldCalls).toMatchObject([
@@ -1182,15 +1336,15 @@ describe("useToolCallStore", () => {
       expect(backend.requests).toEqual([])
     })
 
-    it("neither answers a waiting call again nor resends an answer that did not fail", async () => {
+    it("neither answers a prompt again nor resends an answer that did not fail", async () => {
       startNativeHostFake({})
       const { backend, replyStreams } = startReplyBackend(
-        buildAcceptingToolResultRoutes(READ_CALL)
+        buildAcceptingToolCallRoutes(READ_CALL)
       )
       const { useToolCallStore } = await loadFreshToolCallStore()
       await startFollowWithEvents(useToolCallStore, replyStreams, [
         buildStreamingSnapshot(),
-        { type: "tool-call", call: READ_CALL }
+        buildApprovalEvent(READ_CALL)
       ])
       const { resolveToolCall, rejectToolCall, sendUnsentToolResult } =
         useToolCallStore.getState()
@@ -1205,7 +1359,29 @@ describe("useToolCallStore", () => {
       ])
 
       expect(answersBeforeRejection).toBe(0)
-      expect(listToolAnswers(backend)).toEqual([REJECTED_RESULT])
+      expect(listToolAnswers(backend)).toEqual([
+        buildSentAnswer(DECLINED_APPROVAL)
+      ])
+    })
+
+    it("neither allows nor rejects a call that is running", async () => {
+      const read = createControlledPromise<unknown>()
+      startNativeHostFake({ read_text_file: () => read.promise })
+      const { backend, replyStreams } = startReplyBackend(
+        buildAcceptingToolCallRoutes(READ_CALL)
+      )
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      await startFollowWithEvents(useToolCallStore, replyStreams, [
+        buildStreamingSnapshot(),
+        buildRunEvent(READ_CALL)
+      ])
+
+      await useToolCallStore.getState().resolveToolCall(READ_CALL.id)
+      await useToolCallStore.getState().rejectToolCall(READ_CALL.id, "no")
+      read.resolve("Buy milk.")
+      await waitForMicrotasks()
+
+      expect(listToolAnswers(backend)).toEqual([buildSentAnswer(READ_RESULT)])
     })
   })
 })

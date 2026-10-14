@@ -1,18 +1,6 @@
-import { chatToolAnswerSchema } from "@lys/protocol"
 import { describe, expect, it } from "vitest"
-import {
-  ALLOWED_TOOL_ANSWER,
-  parseBackendToolInput
-} from "@/lib/store/tool-calls/backend-tools"
+import { parseBackendToolInput } from "@/lib/store/tool-calls/backend-tools"
 import { buildToolCall } from "../../../support/toolFixtures"
-
-describe("ALLOWED_TOOL_ANSWER", () => {
-  it("is the answer the tool-result endpoint takes as allowing a backend tool", () => {
-    expect(chatToolAnswerSchema.parse(ALLOWED_TOOL_ANSWER)).toEqual({
-      status: "allowed"
-    })
-  })
-})
 
 describe("parseBackendToolInput", () => {
   it("parses a read-page call into the page's URL and the host it is requested from", () => {

@@ -14,14 +14,17 @@ export const TOOL_APPROVALS = Object.freeze(["ask", "run"] as const)
  * allow each call, and `run` runs it at once.
  *
  * @remarks A tool asks unless its name is saved as Just run in the `tools`
- * settings group. The tool-call gate applies the approval when each call
- * arrives, for the desktop's tools and the backend's alike.
+ * settings group. The backend's tool approval service reads the saved group
+ * when each round of tool calls arrives and decides, for the desktop's tools
+ * and the backend's alike, which calls are shown to the person; the desktop
+ * only saves the choice.
  */
 export type ToolApproval = (typeof TOOL_APPROVALS)[number]
 
 /**
- * Application-owned lifecycle of the latest tool-choice save; a choice stays
- * applied for the session when its save fails.
+ * Application-owned lifecycle of the latest tool-choice save; a choice whose
+ * save fails stays selected in the pane, while tool calls keep following the
+ * choices last saved.
  */
 export type ToolSettingsSaveState =
   | { readonly status: "idle" }
@@ -38,10 +41,11 @@ export type ToolSettingsSlice = {
    *
    * @param toolName - Name of a listed tool.
    * @param approval - When the tool runs once the model asks for it.
-   * @remarks The approval applies to every call that arrives afterwards. A
-   * tool that already has the approval changes and saves nothing.
-   * `toolSettingsSave` reports the save; a failed save leaves the approval
-   * applied for this session only.
+   * @remarks The pane shows the approval at once; tool calls follow it from
+   * the next round of calls after the save completes, because the backend
+   * reads the settings file. A tool that already has the approval changes
+   * and saves nothing. `toolSettingsSave` reports the save; after a failed
+   * save, tool calls keep following the choices last saved.
    */
   readonly updateToolApproval: (
     toolName: string,

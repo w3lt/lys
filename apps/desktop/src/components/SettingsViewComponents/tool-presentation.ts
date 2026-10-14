@@ -365,7 +365,9 @@ export function formatToolApprovalNote(
  *
  * @param save - Latest application-owned save lifecycle state.
  * @returns The saving or failure message, or an empty string while idle or
- * after a successful save, which leave nothing to announce.
+ * after a successful save, which leave nothing to announce. The failure
+ * message says that tool calls follow the saved choices, because the
+ * backend reads them from the settings file.
  */
 export function formatToolSettingsSaveStatus(
   save: ToolSettingsSaveState
@@ -374,7 +376,7 @@ export function formatToolSettingsSaveStatus(
     case "saving":
       return "Saving Just run choices…"
     case "failed":
-      return "Couldn't save your Just run choices. They apply until you quit Lys; after a restart, Lys uses the choices it last saved."
+      return "Couldn't save your Just run choices. Tool calls keep following the choices Lys last saved until a save works."
     case "idle":
     case "saved":
       return ""

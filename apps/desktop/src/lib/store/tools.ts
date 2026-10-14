@@ -415,8 +415,8 @@ function createToolStore(
  * starts, and the person's switches: tool calls on or off and each tool on
  * or off. The switches last for the session only; nothing here is saved.
  * Each tool's approval belongs to the application store, which saves it in
- * the settings file. The chat view offers the switched-on tools to a model
- * trained for tool use, and the tool-call store applies each tool's approval.
+ * the settings file, where the backend's tool approval service reads it. The
+ * chat view offers the switched-on tools to a model trained for tool use.
  */
 export const useToolStore: UseBoundStore<StoreApi<ToolStore>> = createToolStore(
   {

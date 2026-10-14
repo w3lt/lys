@@ -1,7 +1,7 @@
 import {
   chatApiRequestBodySchema,
   chatBackendToolUnavailableProblemSchema,
-  chatToolCallAnswerMismatchProblemSchema,
+  chatToolApprovalAnswerSchema,
   chatToolCallNotPendingProblemSchema,
   chatToolResultSchema,
   conversationAgentMissingProblemSchema
@@ -12,6 +12,7 @@ import {
   BackendToolUnavailableError,
   readChatEvents,
   readChatReplyEvents,
+  sendChatToolApproval,
   sendChatToolResult,
   stopChatReply
 } from "@/lib/apis/http/chat"
@@ -87,6 +88,14 @@ const TOOL_CALL_TARGET = Object.freeze({
 /** Route key of the tool-result endpoint for {@link TOOL_CALL_TARGET}. */
 const TOOL_RESULT_ROUTE = `POST /api/v1/chat/${REPLY_TARGET.conversationId}/replies/${REPLY_TARGET.assistantMessageId}/tool-results/${TOOL_CALL.id}`
 
+/** Route key of the tool-approval endpoint for {@link TOOL_CALL_TARGET}. */
+const TOOL_APPROVAL_ROUTE = `POST /api/v1/chat/${REPLY_TARGET.conversationId}/replies/${REPLY_TARGET.assistantMessageId}/tool-approvals/${TOOL_CALL.id}`
+
+/** Answer of a person who allowed a call. */
+const ALLOWED_TOOL_APPROVAL = Object.freeze(
+  chatToolApprovalAnswerSchema.parse({ status: "allowed" })
+)
+
 /** Answer of a tool that ran and returned its output. */
 const SUCCEEDED_TOOL_RESULT = Object.freeze(
   chatToolResultSchema.parse({ status: "succeeded", content: "Buy milk." })
@@ -130,15 +139,6 @@ const TOOL_CALL_NOT_PENDING_PROBLEM = chatToolCallNotPendingProblemSchema.parse(
     detail: "No tool call is waiting under this identifier."
   }
 )
-
-/** Problem the backend sends for an answer that does not fit its tool call. */
-const TOOL_CALL_ANSWER_MISMATCH_PROBLEM =
-  chatToolCallAnswerMismatchProblemSchema.parse({
-    type: "urn:lys:problem:chat:tool-call-answer-mismatch",
-    title: "Tool call answer does not fit the call",
-    status: 409,
-    detail: "A client tool's call cannot be answered as allowed."
-  })
 
 /** Start event the backend sends for {@link NEW_CONVERSATION_REQUEST}. */
 const NEW_CONVERSATION_START_EVENT = Object.freeze({
@@ -389,7 +389,7 @@ describe("readChatReplyEvents", () => {
     expect(backend.requests[0]?.signal).toBe(signal)
   })
 
-  it("yields the snapshot with its pending tool calls and the live events in order", async () => {
+  it("yields the snapshot with its pending tool calls and prompts and the live events in order", async () => {
     const stream = startBackendEventStream()
     startBackendFake({ [REPLY_EVENTS_ROUTE]: () => stream.response })
     const events = [
@@ -397,8 +397,10 @@ describe("readChatReplyEvents", () => {
         type: "reply-snapshot",
         conversationTitle: null,
         assistantMessage: buildStreamingAssistantMessage(3, "Hi"),
-        pendingToolCalls: [TOOL_CALL]
+        pendingToolCalls: [TOOL_CALL],
+        pendingToolApprovals: [buildToolCall(6, "read_text_file")]
       },
+      { type: "tool-approval", call: buildToolCall(7, "find_files") },
       { type: "tool-call", call: buildToolCall(5, "find_files") },
       { type: "delta", content: " there" },
       { type: "done", finishReason: "length" }
@@ -570,21 +572,6 @@ describe("sendChatToolResult", () => {
     ).resolves.toEqual({ status: "not-pending" })
   })
 
-  it("rejects an answer the backend says does not fit the call, without its detail", async () => {
-    startBackendFake({
-      [TOOL_RESULT_ROUTE]: () =>
-        buildJsonResponse(409, TOOL_CALL_ANSWER_MISMATCH_PROBLEM)
-    })
-
-    await expect(
-      sendChatToolResult(TOOL_CALL_TARGET, SUCCEEDED_TOOL_RESULT, {
-        backendUrl: FIXTURE_BACKEND_URL
-      })
-    ).rejects.toThrow(
-      /^The backend said this answer does not fit the tool call\.$/
-    )
-  })
-
   it.each([
     ["an undeclared success", 200, { status: "accepted" }],
     [
@@ -614,6 +601,75 @@ describe("sendChatToolResult", () => {
 
     await expect(
       sendChatToolResult(TOOL_CALL_TARGET, SUCCEEDED_TOOL_RESULT, {
+        backendUrl: FIXTURE_BACKEND_URL
+      })
+    ).rejects.toMatchObject({ cause: transportFailure })
+  })
+})
+
+describe("sendChatToolApproval", () => {
+  it("sends the answer to the call's approval route and reports it accepted, without a cancellation signal", async () => {
+    const backend = startBackendFake({
+      [TOOL_APPROVAL_ROUTE]: () => new Response(null, { status: 204 })
+    })
+
+    await expect(
+      sendChatToolApproval(TOOL_CALL_TARGET, ALLOWED_TOOL_APPROVAL, {
+        backendUrl: FIXTURE_BACKEND_URL
+      })
+    ).resolves.toEqual({ status: "accepted" })
+    expect(backend.requests).toHaveLength(1)
+    expect(backend.requests[0]?.url).toBe(
+      `${FIXTURE_BACKEND_URL}/api/v1/chat/${REPLY_TARGET.conversationId}/replies/${REPLY_TARGET.assistantMessageId}/tool-approvals/${TOOL_CALL.id}`
+    )
+    expect(backend.requests[0]?.body).toEqual({ status: "allowed" })
+    expect(backend.requests[0]?.headers.get("Content-Type")).toBe(
+      "application/json"
+    )
+    expect(backend.requests[0]?.signal).toBeUndefined()
+  })
+
+  it("reports not pending for the declared conflict", async () => {
+    startBackendFake({
+      [TOOL_APPROVAL_ROUTE]: () =>
+        buildJsonResponse(409, TOOL_CALL_NOT_PENDING_PROBLEM)
+    })
+
+    await expect(
+      sendChatToolApproval(TOOL_CALL_TARGET, ALLOWED_TOOL_APPROVAL, {
+        backendUrl: FIXTURE_BACKEND_URL
+      })
+    ).resolves.toEqual({ status: "not-pending" })
+  })
+
+  it.each([
+    ["an undeclared success", 200, { status: "accepted" }],
+    [
+      "another route's declared conflict",
+      409,
+      buildReplyNotGeneratingProblem()
+    ],
+    ["a server failure", 500, { detail: "boom" }]
+  ])("rejects %s with its status", async (_label, status, body) => {
+    startBackendFake({
+      [TOOL_APPROVAL_ROUTE]: () => buildJsonResponse(status, body)
+    })
+
+    await expect(
+      sendChatToolApproval(TOOL_CALL_TARGET, ALLOWED_TOOL_APPROVAL, {
+        backendUrl: FIXTURE_BACKEND_URL
+      })
+    ).rejects.toThrow(String(status))
+  })
+
+  it("rejects when the backend cannot be reached and keeps the transport failure as its cause", async () => {
+    const transportFailure = createTransportFailure()
+    startBackendFake({
+      [TOOL_APPROVAL_ROUTE]: () => Promise.reject(transportFailure)
+    })
+
+    await expect(
+      sendChatToolApproval(TOOL_CALL_TARGET, ALLOWED_TOOL_APPROVAL, {
         backendUrl: FIXTURE_BACKEND_URL
       })
     ).rejects.toMatchObject({ cause: transportFailure })

@@ -500,12 +500,13 @@ describe("createChatViewStore", () => {
       expect(store.getState().conversation?.title).toBe("Greeting")
     })
 
-    it("leaves a tool call to the tool-call follow and keeps streaming the reply", async () => {
+    it("leaves approval prompts and tool calls to the tool-call follow and keeps streaming the reply", async () => {
       const { store, streams, send } = await startStreamingReply()
 
       await sendStreamEvents(
         streams[0],
         { type: "delta", content: "Let me look." },
+        { type: "tool-approval", call: buildToolCall(5, "read_text_file") },
         { type: "tool-call", call: buildToolCall(4, "read_text_file") }
       )
       const afterToolCall = store.getState()
@@ -798,7 +799,8 @@ function sendFinalGeneratingReplySnapshot(stream: BackendEventStream): void {
     type: "reply-snapshot",
     conversationTitle: null,
     assistantMessage: buildCompletedAssistantMessage(32, "Partial answer."),
-    pendingToolCalls: []
+    pendingToolCalls: [],
+    pendingToolApprovals: []
   })
   stream.close()
 }
@@ -828,7 +830,8 @@ const GENERATING_SNAPSHOT_EVENT = Object.freeze({
   type: "reply-snapshot",
   conversationTitle: "Named meanwhile",
   assistantMessage: buildStreamingAssistantMessage(32, "Partial answer"),
-  pendingToolCalls: []
+  pendingToolCalls: [],
+  pendingToolApprovals: []
 })
 
 /** Target of {@link GENERATING_REPLY} as the tool-call follow receives it. */
@@ -1055,7 +1058,7 @@ describe("following a stored reply", () => {
     expect(toolCallFollows).toEqual([])
   })
 
-  it("keeps following a reply through its pending and live tool calls", async () => {
+  it("keeps following a reply through its pending and live prompts and tool calls", async () => {
     const { replyStreams } = startFollowBackend(
       buildStoredConversationRoutes(GENERATING_CONVERSATION)
     )
@@ -1067,8 +1070,10 @@ describe("following a stored reply", () => {
       replyStreams[0],
       {
         ...GENERATING_SNAPSHOT_EVENT,
-        pendingToolCalls: [buildToolCall(40, "read_text_file")]
+        pendingToolCalls: [buildToolCall(40, "read_text_file")],
+        pendingToolApprovals: [buildToolCall(42, "read_text_file")]
       },
+      { type: "tool-approval", call: buildToolCall(43, "find_files") },
       { type: "tool-call", call: buildToolCall(41, "find_files") },
       { type: "delta", content: "!" },
       { type: "done", finishReason: "stop" }

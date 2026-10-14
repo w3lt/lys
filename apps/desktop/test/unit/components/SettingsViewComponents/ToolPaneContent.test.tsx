@@ -310,7 +310,7 @@ describe("ToolPaneContent", () => {
     expect(
       screen.getByRole("status", { name: "Just run choices save" })
     ).toHaveTextContent(
-      "Couldn't save your Just run choices. They apply until you quit Lys; after a restart, Lys uses the choices it last saved."
+      "Couldn't save your Just run choices. Tool calls keep following the choices Lys last saved until a save works."
     )
     expect(screen.getByRole("button", { name: "Just run" })).toHaveAttribute(
       "aria-pressed",

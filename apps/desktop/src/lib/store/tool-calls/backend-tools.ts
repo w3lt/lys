@@ -2,7 +2,6 @@ import {
   hasHiddenWebSearchQueryCharacter,
   TAVILY_API_HOST,
   WEB_SEARCH_TOOL_NAME,
-  type ChatToolAnswer,
   type ChatToolCall
 } from "@lys/protocol"
 
@@ -46,11 +45,6 @@ export type BackendToolInputResult =
       /** Explanation the model reads. */
       readonly content: string
     }
-
-/** Answer that lets the backend run one call of its tool. */
-export const ALLOWED_TOOL_ANSWER: ChatToolAnswer = Object.freeze({
-  status: "allowed"
-})
 
 /** URL schemes the read-page tool reads, as the URL parser reports them. */
 const PAGE_URL_PROTOCOLS: ReadonlySet<string> = new Set(["http:", "https:"])

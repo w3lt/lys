@@ -45,6 +45,7 @@ function buildCallTarget(callId: string): ShownToolCall["target"] {
 const WAITING_SEARCH: ShownToolCall = Object.freeze({
   target: buildCallTarget(SEARCH_CALL.id),
   call: SEARCH_CALL,
+  step: "approval",
   answer: {
     status: "awaiting-person",
     definition: buildToolDefinition("search_files"),
@@ -59,12 +60,13 @@ const WAITING_SEARCH: ShownToolCall = Object.freeze({
       }
     }
   }
-})
+} satisfies ShownToolCall)
 
 /** Page read that waits for the person. */
 const WAITING_PAGE_READ: ShownToolCall = Object.freeze({
   target: buildCallTarget(PAGE_CALL.id),
   call: PAGE_CALL,
+  step: "approval",
   answer: {
     status: "awaiting-person",
     definition: buildBackendToolDefinition("read_page"),
@@ -75,7 +77,7 @@ const WAITING_PAGE_READ: ShownToolCall = Object.freeze({
       host: "example.com"
     }
   }
-})
+} satisfies ShownToolCall)
 
 /** Call to the backend's web search. */
 const WEB_SEARCH_CALL = buildToolCall(12, "web_search", {
@@ -86,6 +88,7 @@ const WEB_SEARCH_CALL = buildToolCall(12, "web_search", {
 const WAITING_WEB_SEARCH: ShownToolCall = Object.freeze({
   target: buildCallTarget(WEB_SEARCH_CALL.id),
   call: WEB_SEARCH_CALL,
+  step: "approval",
   answer: {
     status: "awaiting-person",
     definition: buildBackendToolDefinition("web_search"),
@@ -96,18 +99,19 @@ const WAITING_WEB_SEARCH: ShownToolCall = Object.freeze({
       host: "api.tavily.com"
     }
   }
-})
+} satisfies ShownToolCall)
 
-/** Search whose result could not be sent to the backend. */
+/** Search whose result could not be sent to the backend after it ran. */
 const UNSENT_SEARCH: ShownToolCall = Object.freeze({
   target: buildCallTarget(SEARCH_CALL.id),
   call: SEARCH_CALL,
+  step: "run",
   answer: {
     status: "send-failed",
     toolAnswer: { status: "succeeded", content: "{}" },
     error: "Couldn't send the answer to Lys: The backend could not be reached."
   }
-})
+} satisfies ShownToolCall)
 
 /**
  * Renders the card for one shown call.

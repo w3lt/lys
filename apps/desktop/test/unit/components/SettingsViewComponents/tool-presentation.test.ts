@@ -304,7 +304,7 @@ describe("formatToolSettingsSaveStatus", () => {
     ["saved", ""],
     [
       "failed",
-      "Couldn't save your Just run choices. They apply until you quit Lys; after a restart, Lys uses the choices it last saved."
+      "Couldn't save your Just run choices. Tool calls keep following the choices Lys last saved until a save works."
     ]
   ] as const)("announces a %s save as %j", (status, message) => {
     expect(formatToolSettingsSaveStatus({ status })).toBe(message)

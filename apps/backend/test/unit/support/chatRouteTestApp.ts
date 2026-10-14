@@ -8,6 +8,9 @@ import ChatService from "../../../src/modules/chat/chatService"
 import OpenAiReplyModel from "../../../src/modules/chat/openAiReplyModel"
 import type StoredConversationTurns from "../../../src/modules/conversation/turns"
 import ReplyGenerationRegistry from "../../../src/modules/chat/replyGenerationRegistry"
+import ToolApprovalService, {
+  type ReadJustRunToolNames
+} from "../../../src/modules/toolApproval/toolApprovalService"
 import { createChatSseTestApp } from "./chatSseRoute"
 import { openConversationTestServices } from "./conversationDatabase"
 import type { TestFastify } from "./fastifyTestApp"
@@ -46,6 +49,11 @@ export type ChatRouteTestApp = TestFastify &
     /** Title generation of `app.chatService`; rejects if it is ever called. */
     generateTitle: MockInstance<ChatService["generateTitle"]>
     /**
+     * Reader of the saved Just run choices behind `app.toolApprovalService`;
+     * rejects until a case configures it.
+     */
+    readJustRunToolNames: MockInstance<ReadJustRunToolNames>
+    /**
      * Registry a case passes to the chat route; disposed when the test
      * finishes, before the conversation database closes.
      */
@@ -69,7 +77,9 @@ export type ChatRouteTestApp = TestFastify &
  * go through the `completeChatStream` spy. The decorated history reader reads
  * the same database. The backend tools are the scripted `look_up_word`
  * tool, always ready, and `check_spelling`, whose provider is never ready
- * (`api-key-missing`). When the test finishes, the registry is disposed
+ * (`api-key-missing`). The decorated tool approval service reads the saved
+ * Just run choices through the `readJustRunToolNames` spy. When the test
+ * finishes, the registry is disposed
  * first, so every generation it holds has stored its final state before the
  * in-memory conversation database is closed.
  */
@@ -101,6 +111,9 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
       chatService.completeChatStream(options)
     )
   })
+  const readJustRunToolNames = vi.fn<ReadJustRunToolNames>(() =>
+    Promise.reject(createUnexpectedCallError("readJustRunToolNames"))
+  )
   const generations = new ReplyGenerationRegistry()
   onTestFinished(async () => {
     await generations[Symbol.asyncDispose]()
@@ -110,6 +123,10 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
   testFastify.app.decorate("conversationHistoryReader", history)
   testFastify.app.decorate("chatService", chatService)
   testFastify.app.decorate("agentService", agentService)
+  testFastify.app.decorate(
+    "toolApprovalService",
+    new ToolApprovalService(readJustRunToolNames)
+  )
   testFastify.app.decorate(
     "builtInTools",
     Object.freeze([
@@ -134,6 +151,7 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
     createConversationTurn,
     completeChatStream,
     generateTitle,
+    readJustRunToolNames,
     generations
   })
 }

@@ -9,6 +9,7 @@ import type LlmRuntimeService from "./modules/llm/llmRuntimeService"
 import type LlmService from "./modules/llm/llmService"
 import type { BuiltInToolEntry } from "./modules/tool/builtIn/builtInTool"
 import type WebSearchToolProvider from "./modules/tool/builtIn/web/webSearchToolProvider"
+import type ToolApprovalService from "./modules/toolApproval/toolApprovalService"
 
 declare module "fastify" {
   /** Fastify application services installed by the singleton-services plugin. */
@@ -34,5 +35,10 @@ declare module "fastify" {
      * saved Tavily key.
      */
     webSearchToolProvider: WebSearchToolProvider
+    /**
+     * Application-scoped approval gateway that decides, from the saved Just
+     * run choices, which tool calls ask the person first.
+     */
+    toolApprovalService: ToolApprovalService
   }
 }

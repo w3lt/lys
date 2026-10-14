@@ -16,7 +16,7 @@ import {
   buildAgentToolset,
   buildOfferedTools,
   handleToolCallRound,
-  type SendBuiltInToolCall,
+  type CreateToolCallGate,
   type SendClientToolCall,
   type ToolCallRound
 } from "./toolCallRound"
@@ -79,18 +79,18 @@ export type AgentTurn = Readonly<{
   /** Queues one event for every stream following the reply; never waits. */
   sendEvent: (event: ChatGenerationEvent) => void
   /**
-   * Sends one checked call of a client tool to every stream following the
-   * reply and waits for the client's result; resolves with undefined when the
-   * reply was stopped or shut down while the call waited. Never rejects.
+   * Sends one allowed call of a client tool to every stream following the
+   * reply to run and waits for the client's result; resolves with undefined
+   * when the reply was stopped or shut down while the call waited. Never
+   * rejects.
    */
   sendClientToolCall: SendClientToolCall
   /**
-   * Sends one checked call of a backend tool to every stream following the
-   * reply and waits for the client to allow it or answer it as failed;
-   * resolves with undefined when the reply was stopped or shut down while
-   * the call waited. Never rejects.
+   * Creates the approval gate of one round of tool calls, which asks the
+   * person through every stream following the reply unless the tool is
+   * saved as Just run. Called once per round, when the round's calls arrive.
    */
-  sendBuiltInToolCall: SendBuiltInToolCall
+  createToolCallGate: CreateToolCallGate
   /**
    * Receives the failure that ended a reply cancelled by Stop or shutdown, or
    * reported as cancelled by the model.
@@ -255,7 +255,7 @@ export default class Agent {
       const roundMessages = await handleToolCallRound(round, {
         tools,
         sendClientToolCall: turn.sendClientToolCall,
-        sendBuiltInToolCall: turn.sendBuiltInToolCall,
+        createToolCallGate: turn.createToolCallGate,
         abortSignal: turn.abortSignal
       })
       if (roundMessages === undefined) return undefined

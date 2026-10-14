@@ -1,5 +1,6 @@
 import type {
   ChatGenerationEvent,
+  ChatToolApprovalAnswer,
   ChatToolCall,
   ChatToolResult
 } from "@lys/protocol"
@@ -14,6 +15,9 @@ import type {
   ReplyStreamEvent
 } from "../../../../src/modules/agent/replyModel"
 import type { TurnBuiltInTool } from "../../../../src/modules/tool/builtIn/builtInTool"
+import ToolCallGate, {
+  type SendToolApprovalPrompt
+} from "../../../../src/modules/toolApproval/toolCallGate"
 import { ChatCompletionCancelledError } from "../../../../src/utils/errors"
 import {
   createAssistantMessage,
@@ -76,8 +80,15 @@ type AgentReplyScenario = Readonly<{
   builtInTools?: readonly TurnBuiltInTool[]
   /** Client results; any client tool call fails the case by default. */
   sendClientToolCall?: AgentTurn["sendClientToolCall"]
-  /** Client approvals; any backend tool call fails the case by default. */
-  sendBuiltInToolCall?: AgentTurn["sendBuiltInToolCall"]
+  /**
+   * Tools saved as Just run; every offered tool by default, so a case that
+   * does not arrange approval runs its calls without prompts.
+   */
+  justRunToolNames?: readonly string[]
+  /** The person's answers; any prompt fails the case by default. */
+  sendToolApprovalPrompt?: SendToolApprovalPrompt
+  /** Gate of each round; a gate over {@link justRunToolNames} by default. */
+  createToolCallGate?: AgentTurn["createToolCallGate"]
 }>
 
 /**
@@ -128,6 +139,30 @@ const LOOK_UP_MOTH_ROUND: readonly ReplyStreamEvent[] = Object.freeze([
   }
 ])
 
+/** Round in which the model reads the file `/a`. */
+const READ_A_ROUND: readonly ReplyStreamEvent[] = Object.freeze([
+  {
+    type: "tool-calls",
+    toolCalls: [{ toolName: "read_text_file", argumentText: '{"path":"/a"}' }]
+  }
+])
+
+/** Answer of a person who rejected a call with a note. */
+const DECLINED_APPROVAL = Object.freeze({
+  status: "rejected",
+  reason: "declined",
+  content: "The person declined this call. Their note: not now"
+} satisfies ChatToolApprovalAnswer)
+
+/**
+ * Creates a prompt sender whose prompts the person allows.
+ *
+ * @returns A spy recording every prompted call.
+ */
+function createAllowingPromptSender() {
+  return vi.fn<SendToolApprovalPrompt>(async () => ({ status: "allowed" }))
+}
+
 /** Round that ends the reply without text. */
 const FINISH_ROUND: readonly ReplyStreamEvent[] = Object.freeze([
   { type: "finish", finishReason: "stop" }
@@ -148,6 +183,25 @@ function createLookUpWordTool(runScript?: BuiltInToolRunScript) {
 /** Matches a UUIDv7 the agent gave a call. */
 const UUID_V7_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+
+/**
+ * Builds the gate factory of one case.
+ *
+ * @param scenario - Offered tools, saved Just run choices, and prompt answers.
+ * @returns A factory creating a gate over the case's choices for each round.
+ */
+function buildCreateToolCallGate(
+  scenario: AgentReplyScenario
+): AgentTurn["createToolCallGate"] {
+  const justRunToolNames = scenario.justRunToolNames ?? [
+    ...(scenario.clientTools ?? []).map((tool) => tool.name),
+    ...(scenario.builtInTools ?? []).map((entry) => entry.definition.name)
+  ]
+  const sendToolApprovalPrompt =
+    scenario.sendToolApprovalPrompt ?? handleUnexpectedToolCall
+  return async () =>
+    new ToolCallGate(new Set(justRunToolNames), sendToolApprovalPrompt)
+}
 
 /**
  * Has one agent answer one turn to settlement and records the effects.
@@ -179,8 +233,8 @@ async function getAgentReplyOutcome(scenario: AgentReplyScenario) {
       builtInTools: scenario.builtInTools ?? [],
       sendClientToolCall:
         scenario.sendClientToolCall ?? handleUnexpectedToolCall,
-      sendBuiltInToolCall:
-        scenario.sendBuiltInToolCall ?? handleUnexpectedToolCall,
+      createToolCallGate:
+        scenario.createToolCallGate ?? buildCreateToolCallGate(scenario),
       abortSignal: scenario.abortSignal ?? new AbortController().signal,
       sendEvent: (event) => {
         events.push(event)
@@ -644,7 +698,7 @@ describe("Agent", () => {
       clientTools: [],
       builtInTools: [],
       sendClientToolCall: handleUnexpectedToolCall,
-      sendBuiltInToolCall: handleUnexpectedToolCall,
+      createToolCallGate: handleUnexpectedToolCall,
       userMessageContent,
       abortSignal: new AbortController().signal,
       updateAssistantMessageContent: () => true,
@@ -921,7 +975,7 @@ describe("Agent", () => {
       expect(run.persistedDeltas).toEqual(["Found it."])
     })
 
-    it("hands the model a failed answer's content", async () => {
+    it("hands the model a failed result's content", async () => {
       const openReplyStream = createRoundStreams(
         [
           {
@@ -939,14 +993,14 @@ describe("Agent", () => {
         clientTools: [READ_TEXT_FILE_TOOL],
         sendClientToolCall: async () => ({
           status: "failed",
-          reason: "declined",
-          content: "The person declined this call."
+          reason: "toolFailed",
+          content: "The file /a no longer exists."
         })
       })
 
       expect(openReplyStream.mock.calls[1]?.[0].messages.at(-1)).toMatchObject({
         role: "tool",
-        content: "The person declined this call."
+        content: "The file /a no longer exists."
       })
     })
 
@@ -990,9 +1044,7 @@ describe("Agent", () => {
         runSignals.push(abortSignal)
         return { status: "succeeded", content: `${word}: a night insect` }
       })
-      const sendBuiltInToolCall = vi.fn<AgentTurn["sendBuiltInToolCall"]>(
-        async () => ({ status: "allowed" })
-      )
+      const sendToolApprovalPrompt = createAllowingPromptSender()
       const openReplyStream = createRoundStreams(LOOK_UP_MOTH_ROUND, [
         { type: "text", content: "A moth is a night insect." },
         { type: "finish", finishReason: "stop" }
@@ -1003,14 +1055,15 @@ describe("Agent", () => {
         abortSignal: cancellation.signal,
         clientTools: [READ_TEXT_FILE_TOOL],
         builtInTools: [entry],
-        sendBuiltInToolCall
+        justRunToolNames: [],
+        sendToolApprovalPrompt
       })
 
       expect(openReplyStream.mock.calls[0]?.[0].tools).toEqual([
         READ_TEXT_FILE_FORMAT,
         LOOK_UP_WORD_FORMAT
       ])
-      expect(sendBuiltInToolCall.mock.calls).toEqual([
+      expect(sendToolApprovalPrompt.mock.calls).toEqual([
         [
           {
             id: expect.stringMatching(UUID_V7_PATTERN),
@@ -1020,10 +1073,10 @@ describe("Agent", () => {
         ]
       ])
       expect(runSignals).toEqual([cancellation.signal])
-      const sentCallId = sendBuiltInToolCall.mock.calls[0]?.[0].id
+      const promptedCallId = sendToolApprovalPrompt.mock.calls[0]?.[0].id
       expect(openReplyStream.mock.calls[1]?.[0].messages.at(-1)).toEqual({
         role: "tool",
-        toolCallId: sentCallId,
+        toolCallId: promptedCallId,
         content: "moth: a night insect"
       })
       expect(run.events).toEqual([
@@ -1032,9 +1085,24 @@ describe("Agent", () => {
       ])
     })
 
-    it("answers arguments the tool cannot run without asking the client", async () => {
+    it("runs a call of a tool saved as Just run without prompting the person", async () => {
       const { tool, entry } = createLookUpWordTool()
-      const sendBuiltInToolCall = vi.fn<AgentTurn["sendBuiltInToolCall"]>()
+      const sendToolApprovalPrompt = createAllowingPromptSender()
+
+      await getAgentReplyOutcome({
+        openReplyStream: createRoundStreams(LOOK_UP_MOTH_ROUND, FINISH_ROUND),
+        builtInTools: [entry],
+        justRunToolNames: ["look_up_word"],
+        sendToolApprovalPrompt
+      })
+
+      expect(sendToolApprovalPrompt).not.toHaveBeenCalled()
+      expect(tool.startedWords).toEqual(["moth"])
+    })
+
+    it("answers arguments the tool cannot run without prompting the person", async () => {
+      const { tool, entry } = createLookUpWordTool()
+      const sendToolApprovalPrompt = createAllowingPromptSender()
       const openReplyStream = createRoundStreams(
         [
           {
@@ -1050,10 +1118,11 @@ describe("Agent", () => {
       await getAgentReplyOutcome({
         openReplyStream,
         builtInTools: [entry],
-        sendBuiltInToolCall
+        justRunToolNames: [],
+        sendToolApprovalPrompt
       })
 
-      expect(sendBuiltInToolCall).not.toHaveBeenCalled()
+      expect(sendToolApprovalPrompt).not.toHaveBeenCalled()
       expect(tool.startedWords).toEqual([])
       expect(openReplyStream.mock.calls[1]?.[0].messages.at(-1)).toMatchObject({
         role: "tool",
@@ -1061,7 +1130,7 @@ describe("Agent", () => {
       })
     })
 
-    it("hands the model the client's failed answer without running the tool", async () => {
+    it("hands the model the person's rejection without running the tool", async () => {
       const { tool, entry } = createLookUpWordTool()
       const openReplyStream = createRoundStreams(
         LOOK_UP_MOTH_ROUND,
@@ -1071,21 +1140,18 @@ describe("Agent", () => {
       await getAgentReplyOutcome({
         openReplyStream,
         builtInTools: [entry],
-        sendBuiltInToolCall: async () => ({
-          status: "failed",
-          reason: "declined",
-          content: "The person declined this call."
-        })
+        justRunToolNames: [],
+        sendToolApprovalPrompt: async () => DECLINED_APPROVAL
       })
 
       expect(tool.startedWords).toEqual([])
       expect(openReplyStream.mock.calls[1]?.[0].messages.at(-1)).toMatchObject({
         role: "tool",
-        content: "The person declined this call."
+        content: DECLINED_APPROVAL.content
       })
     })
 
-    it("interrupts without running the tool when the reply is stopped while the call waits", async () => {
+    it("interrupts without running the tool when the reply is stopped while the prompt waits", async () => {
       const cancellation = new AbortController()
       const { tool, entry } = createLookUpWordTool()
       const openReplyStream = createRoundStreams(LOOK_UP_MOTH_ROUND)
@@ -1094,7 +1160,8 @@ describe("Agent", () => {
         openReplyStream,
         abortSignal: cancellation.signal,
         builtInTools: [entry],
-        sendBuiltInToolCall: async () => {
+        justRunToolNames: [],
+        sendToolApprovalPrompt: async () => {
           cancellation.abort()
           return undefined
         }
@@ -1118,8 +1185,7 @@ describe("Agent", () => {
       const run = await getAgentReplyOutcome({
         openReplyStream,
         abortSignal: cancellation.signal,
-        builtInTools: [entry],
-        sendBuiltInToolCall: async () => ({ status: "allowed" })
+        builtInTools: [entry]
       })
 
       expect(openReplyStream).toHaveBeenCalledOnce()
@@ -1137,13 +1203,171 @@ describe("Agent", () => {
 
       const run = await getAgentReplyOutcome({
         openReplyStream: createRoundStreams(LOOK_UP_MOTH_ROUND),
-        builtInTools: [entry],
-        sendBuiltInToolCall: async () => ({ status: "allowed" })
+        builtInTools: [entry]
       })
 
       expect(run.persistedStates).toEqual([{ status: "failed" }])
       expect(run.events).toEqual([CHAT_FAILURE_EVENT])
       expect(run.reportedFailures).toEqual([defect])
+    })
+  })
+
+  describe("tool call approval", () => {
+    it("prompts the person for a client tool on Ask me and sends the call to run once allowed, under the prompt's identifier", async () => {
+      const sent: string[] = []
+      const sendToolApprovalPrompt = vi.fn<SendToolApprovalPrompt>(
+        async (toolCall) => {
+          sent.push(`prompt ${toolCall.id}`)
+          return { status: "allowed" }
+        }
+      )
+      const sendClientToolCall = vi.fn<AgentTurn["sendClientToolCall"]>(
+        async (toolCall) => {
+          sent.push(`run ${toolCall.id}`)
+          return { status: "succeeded", content: "Buy milk" }
+        }
+      )
+      const openReplyStream = createRoundStreams(READ_A_ROUND, FINISH_ROUND)
+
+      await getAgentReplyOutcome({
+        openReplyStream,
+        clientTools: [READ_TEXT_FILE_TOOL],
+        justRunToolNames: [],
+        sendToolApprovalPrompt,
+        sendClientToolCall
+      })
+
+      const callId = sendToolApprovalPrompt.mock.calls[0]?.[0].id
+      expect(sent).toEqual([`prompt ${callId}`, `run ${callId}`])
+      expect(sendClientToolCall.mock.calls).toEqual([
+        [{ id: callId, toolName: "read_text_file", arguments: { path: "/a" } }]
+      ])
+      expect(openReplyStream.mock.calls[1]?.[0].messages.at(-1)).toEqual({
+        role: "tool",
+        toolCallId: callId,
+        content: "Buy milk"
+      })
+    })
+
+    it("hands the model the person's rejection without sending the client tool's call to run", async () => {
+      const sendClientToolCall = vi.fn<AgentTurn["sendClientToolCall"]>()
+      const openReplyStream = createRoundStreams(READ_A_ROUND, FINISH_ROUND)
+
+      await getAgentReplyOutcome({
+        openReplyStream,
+        clientTools: [READ_TEXT_FILE_TOOL],
+        justRunToolNames: [],
+        sendToolApprovalPrompt: async () => DECLINED_APPROVAL,
+        sendClientToolCall
+      })
+
+      expect(sendClientToolCall).not.toHaveBeenCalled()
+      expect(openReplyStream.mock.calls[1]?.[0].messages.at(-1)).toMatchObject({
+        role: "tool",
+        content: DECLINED_APPROVAL.content
+      })
+    })
+
+    it("sends a round's prompts and run requests in the model's order", async () => {
+      const sent: string[] = []
+      const { entry } = createLookUpWordTool()
+      const openReplyStream = createRoundStreams(
+        [
+          {
+            type: "tool-calls",
+            toolCalls: [
+              { toolName: "read_text_file", argumentText: '{"path":"/a"}' },
+              { toolName: "look_up_word", argumentText: '{"word":"moth"}' },
+              { toolName: "read_text_file", argumentText: '{"path":"/b"}' }
+            ]
+          }
+        ],
+        FINISH_ROUND
+      )
+
+      await getAgentReplyOutcome({
+        openReplyStream,
+        clientTools: [READ_TEXT_FILE_TOOL],
+        builtInTools: [entry],
+        justRunToolNames: ["read_text_file"],
+        sendToolApprovalPrompt: async (toolCall) => {
+          sent.push(`prompt ${String(toolCall.arguments.word)}`)
+          return { status: "allowed" }
+        },
+        sendClientToolCall: async (toolCall) => {
+          sent.push(`run ${String(toolCall.arguments.path)}`)
+          return { status: "succeeded", content: "text" }
+        }
+      })
+
+      expect(sent).toEqual(["run /a", "prompt moth", "run /b"])
+    })
+
+    it("creates one gate per round of tool calls", async () => {
+      const createToolCallGate = vi.fn<AgentTurn["createToolCallGate"]>(
+        async () => new ToolCallGate(new Set(["read_text_file"]), vi.fn())
+      )
+
+      await getAgentReplyOutcome({
+        openReplyStream: createRoundStreams(
+          [
+            {
+              type: "tool-calls",
+              toolCalls: [
+                { toolName: "read_text_file", argumentText: '{"path":"/a"}' },
+                { toolName: "read_text_file", argumentText: '{"path":"/b"}' }
+              ]
+            }
+          ],
+          READ_A_ROUND,
+          FINISH_ROUND
+        ),
+        clientTools: [READ_TEXT_FILE_TOOL],
+        createToolCallGate,
+        sendClientToolCall: async () => ({ status: "succeeded", content: "x" })
+      })
+
+      expect(createToolCallGate).toHaveBeenCalledTimes(2)
+    })
+
+    it("interrupts without prompting or running anything when the reply is stopped while the gate reads the saved choices", async () => {
+      const cancellation = new AbortController()
+      const sendToolApprovalPrompt = createAllowingPromptSender()
+      const sendClientToolCall = vi.fn<AgentTurn["sendClientToolCall"]>()
+      const openReplyStream = createRoundStreams(READ_A_ROUND)
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream,
+        abortSignal: cancellation.signal,
+        clientTools: [READ_TEXT_FILE_TOOL],
+        sendClientToolCall,
+        createToolCallGate: async () => {
+          cancellation.abort()
+          return new ToolCallGate(new Set(), sendToolApprovalPrompt)
+        }
+      })
+
+      expect(sendToolApprovalPrompt).not.toHaveBeenCalled()
+      expect(sendClientToolCall).not.toHaveBeenCalled()
+      expect(openReplyStream).toHaveBeenCalledOnce()
+      expect(run.persistedStates).toEqual([{ status: "interrupted" }])
+      expect(run.events).toEqual([INTERRUPTED_EVENT])
+    })
+
+    it("fails the reply when the gate cannot be created", async () => {
+      const failure = new Error("Closing settings.json failed.")
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream: createRoundStreams(READ_A_ROUND),
+        clientTools: [READ_TEXT_FILE_TOOL],
+        createToolCallGate: async () => {
+          throw failure
+        }
+      })
+
+      expect(run.persistedStates).toEqual([{ status: "failed" }])
+      expect(run.events).toEqual([CHAT_FAILURE_EVENT])
+      expect(run.reportedFailures).toEqual([failure])
     })
   })
 })

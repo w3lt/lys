@@ -21,6 +21,8 @@ import {
 } from "../../../src/di/singleton"
 import SqliteDatabase from "../../../src/infrastructure/database/sqliteDatabase"
 import { TEST_BACKEND_CONFIG } from "../support/backendConfig"
+import { createFixtureUuidV7 } from "../support/conversationFixtures"
+import { writeSettingsFile } from "../support/settingsFile"
 
 /** Name of each acquisition whose release the bundle owns. */
 type AcquisitionName = "chat" | "database" | "llm-runtime"
@@ -156,6 +158,42 @@ describe("createSingletonServices", () => {
     })
   })
 
+  it("decides tool approvals from the Just run choices in the configured settings file", async () => {
+    const { factories } = createRecordedFactories()
+    const settingsFilePath = await writeSettingsFile(
+      JSON.stringify({ tools: { justRun: ["read_page"] } })
+    )
+    const sendToolApprovalPrompt = vi.fn(async () => ({
+      status: "allowed" as const
+    }))
+
+    const services = await createSingletonServices(
+      { ...TEST_BACKEND_CONFIG, settingsFilePath },
+      createFailureReporters(),
+      factories
+    )
+    onTestFinished(async () => await closeSingletonServices(services))
+    const gate = await services.toolApprovalService.createToolCallGate(
+      sendToolApprovalPrompt,
+      vi.fn()
+    )
+
+    expect(
+      gate.sendToolApprovalRequest({
+        id: createFixtureUuidV7(1),
+        toolName: "read_page",
+        arguments: { url: "https://example.com/" }
+      })
+    ).toEqual({ status: "allowed" })
+    expect(
+      gate.sendToolApprovalRequest({
+        id: createFixtureUuidV7(2),
+        toolName: "web_search",
+        arguments: { query: "lys" }
+      }).status
+    ).toBe("prompted")
+  })
+
   it("returns a frozen bundle of the services", async () => {
     const { factories, acquisitions } = createRecordedFactories()
 
@@ -262,7 +300,7 @@ describe("createSingletonServices", () => {
         updateAssistantMessageState: () => true,
         sendEvent: vi.fn(),
         sendClientToolCall: vi.fn(),
-        sendBuiltInToolCall: vi.fn(),
+        createToolCallGate: vi.fn(),
         reportReplyCancellation: vi.fn(),
         reportReplyFailure: vi.fn()
       })

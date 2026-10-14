@@ -28,12 +28,16 @@ export {
   type StopChatReplyApiRoute
 } from "./stopReplyRoute"
 export {
+  chatToolApprovalAnswerSchema,
+  sendChatToolApprovalApi,
+  type ChatToolApprovalAnswer,
+  type SendChatToolApprovalApiReply,
+  type SendChatToolApprovalApiRoute
+} from "./toolApprovalRoute"
+export {
   MAXIMUM_TOOL_RESULT_BODY_BYTES,
-  chatToolAnswerSchema,
   chatToolResultSchema,
   sendChatToolResultApi,
-  type BackendToolCallAnswer,
-  type ChatToolAnswer,
   type ChatToolResult,
   type ChatToolResultPathParams,
   type SendChatToolResultApiReply,

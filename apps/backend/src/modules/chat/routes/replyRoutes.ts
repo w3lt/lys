@@ -1,10 +1,12 @@
 import {
   chatReplyEventsApi,
+  sendChatToolApprovalApi,
   sendChatToolResultApi,
   stopChatReplyApi,
   type ChatReplyEvent,
   type ChatReplyEventsApiRoute,
-  type ChatToolCall,
+  type ChatToolResultPathParams,
+  type SendChatToolApprovalApiRoute,
   type SendChatToolResultApiRoute,
   type StopChatReplyApiRoute
 } from "@lys/protocol"
@@ -12,18 +14,25 @@ import type { ConversationAssistantMessage } from "@lys/share"
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify"
 import type { ConversationReader } from "../../conversation/capabilities"
 import { createConversationNotFoundProblem } from "../../conversation/routes/notFound"
+import type {
+  PendingToolCallSnapshot,
+  ToolCallAnswer,
+  ToolCallAnswerOutcome
+} from "../pendingToolCalls"
 import ReplyEventSubscription from "../replyEventSubscription"
 import type ReplyGenerationRegistry from "../replyGenerationRegistry"
 import {
   createChatReplyNotFoundProblem,
   createChatReplyNotGeneratingProblem,
-  createChatToolCallAnswerMismatchProblem,
   createChatToolCallNotPendingProblem
 } from "./replyProblems"
 import { createEventSender, openReplyEventStream } from "./share"
 
 /** Pending calls of a reply that is not generating. */
-const NO_PENDING_TOOL_CALLS: readonly ChatToolCall[] = Object.freeze([])
+const NO_PENDING_TOOL_CALLS: PendingToolCallSnapshot = Object.freeze({
+  toolCalls: Object.freeze([]),
+  toolApprovals: Object.freeze([])
+})
 
 /** Capabilities the reply routes borrow for their registered lifetime. */
 type ChatReplyRouteDependencies = Readonly<{
@@ -34,8 +43,8 @@ type ChatReplyRouteDependencies = Readonly<{
 }>
 
 /**
- * Installs the endpoints that follow, stop, and answer the tool calls of one
- * reply's generation.
+ * Installs the endpoints that follow, stop, and answer the tool calls and
+ * approval prompts of one reply's generation.
  *
  * @param app - Backend with SSE, validation, and conversation persistence.
  * @param generations - Registry shared with the chat route; its owner
@@ -76,6 +85,16 @@ export default function updateFastifyWithChatReplyRoutes(
     handler: (request, reply) =>
       handleSendChatToolResultRequest(request, reply, generations)
   })
+  app.route<SendChatToolApprovalApiRoute>({
+    method: sendChatToolApprovalApi.method,
+    url: sendChatToolApprovalApi.path,
+    schema: {
+      params: sendChatToolApprovalApi.params,
+      body: sendChatToolApprovalApi.body
+    },
+    handler: (request, reply) =>
+      handleSendChatToolApprovalRequest(request, reply, generations)
+  })
 }
 
 /**
@@ -92,9 +111,9 @@ export default function updateFastifyWithChatReplyRoutes(
  * @remarks Reading the snapshot and registering the follower happen in one
  * synchronous step, and every delta is stored before it is sent, so the
  * snapshot plus later deltas equal the stored reply. The snapshot's pending
- * calls are read in the same step, so each call reaches this follower once:
- * in the snapshot or as a later `tool-call` event. Closing this stream does
- * not affect the generation.
+ * calls and prompts are read in the same step, so each reaches this follower
+ * once: in the snapshot or as a later `tool-call` or `tool-approval` event.
+ * Closing this stream does not affect the generation.
  */
 async function handleChatReplyEventsRequest(
   request: FastifyRequest<ChatReplyEventsApiRoute>,
@@ -126,11 +145,13 @@ async function handleChatReplyEventsRequest(
   const subscription = new ReplyEventSubscription<ChatReplyEvent>(
     createEventSender<ChatReplyEvent>(reply.sse)
   )
+  const pendingToolCalls = generation?.pendingToolCalls ?? NO_PENDING_TOOL_CALLS
   subscription.handleStreamEvent({
     type: "reply-snapshot",
     conversationTitle: conversation.title,
     assistantMessage,
-    pendingToolCalls: generation?.pendingToolCalls ?? NO_PENDING_TOOL_CALLS
+    pendingToolCalls: pendingToolCalls.toolCalls,
+    pendingToolApprovals: pendingToolCalls.toolApprovals
   })
   if (generation === undefined) subscription.close()
   else generation.openSubscription(subscription)
@@ -172,46 +193,109 @@ async function handleStopChatReplyRequest(
 }
 
 /**
- * Resumes a reply with the client's answer to one of its waiting tool calls.
+ * Resumes a reply with the client's result for one call it was sent to run.
  *
- * @param request - Validated call identifiers and answer.
+ * @param request - Validated call identifiers and result.
  * @param reply - HTTP response owner.
  * @param generations - Borrowed registry.
  * @throws If the registry is closed because shutdown began; nothing is
  * answered.
- * @remarks Sends the 204, the not-pending problem, or the answer-mismatch
- * problem before returning. Only a failed answer's content reaches the
- * model; its reason is logged at debug level. After `allowed`, the reply
- * runs the backend tool itself.
+ * @remarks Sends the 204 or the not-pending problem before returning. Only a
+ * failed result's content reaches the model; its reason is logged at debug
+ * level.
  */
 function handleSendChatToolResultRequest(
   request: FastifyRequest<SendChatToolResultApiRoute>,
   reply: FastifyReply<SendChatToolResultApiRoute>,
   generations: ReplyGenerationRegistry
 ): void {
-  const { callId } = request.params
-  const generation = generations.findReplyGeneration(request.params)
-  const outcome =
-    generation?.resolveToolCall(callId, request.body) ?? "not-pending"
-  switch (outcome) {
-    case "not-pending":
-      reply
-        .type("application/problem+json")
-        .code(409)
-        .send(createChatToolCallNotPendingProblem(callId, request.url))
-      return
-    case "mismatched":
-      reply
-        .type("application/problem+json")
-        .code(409)
-        .send(createChatToolCallAnswerMismatchProblem(callId, request.url))
-      return
-    case "accepted":
-      if (request.body.status === "failed")
-        request.log.debug(
-          { toolCallId: callId, reason: request.body.reason },
-          "Tool call was answered as failed"
-        )
-      reply.code(204).send()
+  const outcome = resolveReplyToolCall(
+    request.params,
+    request.body,
+    generations
+  )
+  if (outcome === "not-pending") {
+    sendToolCallNotPendingProblem(reply, request.params.callId, request.url)
+    return
   }
+  if (request.body.status === "failed")
+    request.log.debug(
+      { toolCallId: request.params.callId, reason: request.body.reason },
+      "Tool call was answered as failed"
+    )
+  reply.code(204).send()
+}
+
+/**
+ * Resumes a reply with the person's answer to one of its approval prompts.
+ *
+ * @param request - Validated call identifiers and answer.
+ * @param reply - HTTP response owner.
+ * @param generations - Borrowed registry.
+ * @throws If the registry is closed because shutdown began; nothing is
+ * answered.
+ * @remarks Sends the 204 or the not-pending problem before returning. After
+ * `allowed`, the reply runs a backend tool itself or sends a client tool's
+ * call to run. Only a rejection's content reaches the model; its reason is
+ * logged at debug level.
+ */
+function handleSendChatToolApprovalRequest(
+  request: FastifyRequest<SendChatToolApprovalApiRoute>,
+  reply: FastifyReply<SendChatToolApprovalApiRoute>,
+  generations: ReplyGenerationRegistry
+): void {
+  const outcome = resolveReplyToolCall(
+    request.params,
+    request.body,
+    generations
+  )
+  if (outcome === "not-pending") {
+    sendToolCallNotPendingProblem(reply, request.params.callId, request.url)
+    return
+  }
+  if (request.body.status === "rejected")
+    request.log.debug(
+      { toolCallId: request.params.callId, reason: request.body.reason },
+      "Tool call was not allowed"
+    )
+  reply.code(204).send()
+}
+
+/**
+ * Hands one answer to the generation of the addressed reply.
+ *
+ * @param target - Validated call, reply, and conversation identifiers.
+ * @param answer - Validated result or approval answer.
+ * @param generations - Borrowed registry.
+ * @returns `accepted` when the reply waited for that answer; `not-pending`
+ * when no generation runs for the reply or it does not wait for that answer.
+ * @throws If the registry is closed because shutdown began.
+ */
+function resolveReplyToolCall(
+  target: ChatToolResultPathParams,
+  answer: ToolCallAnswer,
+  generations: ReplyGenerationRegistry
+): ToolCallAnswerOutcome {
+  const generation = generations.findReplyGeneration(target)
+  return generation?.resolveToolCall(target.callId, answer) ?? "not-pending"
+}
+
+/**
+ * Sends the problem response for an answer no call waits for.
+ *
+ * @param reply - Response owner; the response has not started.
+ * @param callId - Validated identifier of the answered call.
+ * @param instance - Request path identifying this occurrence.
+ */
+function sendToolCallNotPendingProblem(
+  reply: FastifyReply<
+    SendChatToolResultApiRoute | SendChatToolApprovalApiRoute
+  >,
+  callId: string,
+  instance: string
+): void {
+  reply
+    .type("application/problem+json")
+    .code(409)
+    .send(createChatToolCallNotPendingProblem(callId, instance))
 }

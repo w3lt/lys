@@ -23,6 +23,7 @@ import {
   chatErrorEventSchema,
   chatInterruptedEventSchema,
   chatTitleEventSchema,
+  chatToolApprovalEventSchema,
   chatToolCallEventSchema
 } from "./_share"
 
@@ -182,8 +183,9 @@ export const chatApiRequestBodySchema = z.strictObject({
  * reply events because its task runs concurrently. The stream closes after
  * both tasks settle; like every generation stream (see
  * `ChatGenerationEvent`), it can close without a final reply event.
- * `tool-call` events ask the client to answer a call; see the tool-result
- * endpoint. The `type` discriminant is the compatibility boundary used by
+ * `tool-approval` events ask the client to show a call to the person; see
+ * the tool-approval endpoint. `tool-call` events ask the client to run a call
+ * of a client tool; see the tool-result endpoint. The `type` discriminant is the compatibility boundary used by
  * desktop consumers.
  */
 export const chatApiStreamEventSchema = z.discriminatedUnion("type", [
@@ -210,7 +212,8 @@ export const chatApiStreamEventSchema = z.discriminatedUnion("type", [
   chatDoneEventSchema,
   chatInterruptedEventSchema,
   chatErrorEventSchema,
-  chatToolCallEventSchema
+  chatToolCallEventSchema,
+  chatToolApprovalEventSchema
 ])
 
 /**

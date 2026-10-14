@@ -31,3 +31,14 @@ export const apiChatReplyStopRoute = `${API_PREFIX_V1}/chat/:conversationId/repl
  * compatibility breaks.
  */
 export const apiChatReplyToolResultRoute = `${API_PREFIX_V1}/chat/:conversationId/replies/:assistantMessageId/tool-results/:callId`
+
+/**
+ * Versioned POST path for answering one approval prompt of a running reply.
+ *
+ * @remarks This path is transmitted in HTTP requests and is not persisted.
+ * Consumers substitute percent-encoded UUIDv7 identifiers for
+ * `:conversationId`, `:assistantMessageId`, and `:callId`. Changing it
+ * requires coordinated route registration because tool-approval URL
+ * compatibility breaks.
+ */
+export const apiChatReplyToolApprovalRoute = `${API_PREFIX_V1}/chat/:conversationId/replies/:assistantMessageId/tool-approvals/:callId`

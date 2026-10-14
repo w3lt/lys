@@ -26,6 +26,7 @@ import {
   findTurnBuiltInTools,
   type TurnToolSetLookup
 } from "../../tool/builtIn/builtInTools"
+import type ToolApprovalService from "../../toolApproval/toolApprovalService"
 import type { TitleGenerationOptions } from "../chatService"
 import { createConversationNotFoundProblem } from "../../conversation/routes/notFound"
 import type {
@@ -83,7 +84,13 @@ type ChatRouteDependencies = Readonly<{
   generations: ReplyGenerationRegistry
   /** Every tool the backend runs, which a request may offer by name. */
   builtInTools: readonly BuiltInToolEntry[]
+  /** Approval gateway every tool call of every turn passes. */
+  toolApprovals: ToolApprovalService
 }>
+
+/** Warning logged when a round's calls all ask because the choices are unreadable. */
+const UNREADABLE_JUST_RUN_CHOICES_MESSAGE =
+  "The saved Just run choices could not be read from settings.json; every tool call of this round asks the person"
 
 /** Client tools of a request that offered none. */
 const NO_REQUESTED_TOOLS: readonly ToolDefinition[] = Object.freeze([])
@@ -195,7 +202,8 @@ export default function updateFastifyWithChatRoute(
       app.chatService.generateTitle(options),
     titleGenerationMaxAttempts,
     generations,
-    builtInTools: app.builtInTools
+    builtInTools: app.builtInTools,
+    toolApprovals: app.toolApprovalService
   }
   app.route<ChatApiRoute>({
     method: chatApi.method,
@@ -434,8 +442,8 @@ function startTurnGeneration(input: TurnGenerationInput): ReplyGeneration {
  *
  * @param input - Stored turn, its agent, and the request values the reply
  * keeps.
- * @param context - Generation-owned cancellation, event sender, and tool call
- * sender.
+ * @param context - Generation-owned cancellation, event sender, tool call
+ * sender, and approval prompt sender.
  * @returns Settlement after the reply is final.
  * @throws The agent's failure after the fallback finalization; an
  * `AggregateError` of the agent's failure and the fallback's failure when the
@@ -481,9 +489,11 @@ async function createTurnReplyTask(
  *
  * @param input - Stored turn, its tools, and the request values the reply
  * keeps.
- * @param context - Generation-owned cancellation, event sender, and tool call
- * senders.
- * @returns The agent turn, whose writes go to the stored reply.
+ * @param context - Generation-owned cancellation, event sender, tool call
+ * sender, and approval prompt sender.
+ * @returns The agent turn, whose writes go to the stored reply and whose
+ * tool calls pass the approval gateway; an unreadable settings file is
+ * logged as a warning with the request's logger.
  */
 function buildAgentTurn(
   input: TurnGenerationInput,
@@ -491,7 +501,7 @@ function buildAgentTurn(
     abortSignal,
     sendEvent,
     sendClientToolCall,
-    sendBuiltInToolCall
+    sendToolApprovalPrompt
   }: ReplyTaskContext
 ): AgentTurn {
   const { turn, dependencies } = input
@@ -516,7 +526,13 @@ function buildAgentTurn(
       ),
     sendEvent,
     sendClientToolCall,
-    sendBuiltInToolCall,
+    createToolCallGate: () =>
+      dependencies.toolApprovals.createToolCallGate(
+        sendToolApprovalPrompt,
+        () => {
+          input.logger.warn(UNREADABLE_JUST_RUN_CHOICES_MESSAGE)
+        }
+      ),
     reportReplyCancellation: (failure) => {
       input.logger.debug({ err: failure }, "Chat completion was cancelled")
     },

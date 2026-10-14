@@ -105,7 +105,7 @@ async function createHelloReply(agent: Agent): Promise<void> {
     updateAssistantMessageState: () => true,
     sendEvent: vi.fn(),
     sendClientToolCall: vi.fn(),
-    sendBuiltInToolCall: vi.fn(),
+    createToolCallGate: vi.fn(),
     reportReplyCancellation: vi.fn(),
     reportReplyFailure: vi.fn()
   })

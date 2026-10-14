@@ -1,6 +1,6 @@
 import type {
-  BackendToolCallAnswer,
   ChatGenerationEvent,
+  ChatToolApprovalAnswer,
   ChatToolCall,
   ChatToolResult
 } from "@lys/protocol"
@@ -29,19 +29,19 @@ const BACKEND_CALL = Object.freeze({
   arguments: Object.freeze({ url: "https://example.com/" })
 } satisfies ChatToolCall)
 
-/** Answer a client gives to allow a backend call. */
+/** Answer of a person who allowed a call. */
 const ALLOWED_ANSWER = Object.freeze({
   status: "allowed"
-} satisfies BackendToolCallAnswer)
+} satisfies ChatToolApprovalAnswer)
 
-/** Answer a client gives when the person declines a call. */
+/** Answer of a person who rejected a call. */
 const DECLINED_ANSWER = Object.freeze({
-  status: "failed",
+  status: "rejected",
   reason: "declined",
   content: "The person declined this call."
-} satisfies ChatToolResult)
+} satisfies ChatToolApprovalAnswer)
 
-/** Answer a client gives to a call. */
+/** Result a client sends for a call it ran. */
 const SUCCEEDED_RESULT = Object.freeze({
   status: "succeeded",
   content: "Buy milk"
@@ -68,7 +68,10 @@ describe("PendingToolCalls", () => {
     void pendingToolCalls.sendClientToolCall(FIRST_CALL, sendEvent)
 
     expect(sentEvents).toEqual([{ type: "tool-call", call: FIRST_CALL }])
-    expect(pendingToolCalls.toolCalls).toEqual([FIRST_CALL])
+    expect(pendingToolCalls.snapshot).toEqual({
+      toolCalls: [FIRST_CALL],
+      toolApprovals: []
+    })
   })
 
   it("lists waiting calls in send order and drops each once it is answered", () => {
@@ -78,7 +81,7 @@ describe("PendingToolCalls", () => {
 
     pendingToolCalls.resolveToolCall(FIRST_CALL.id, SUCCEEDED_RESULT)
 
-    expect(pendingToolCalls.toolCalls).toEqual([SECOND_CALL])
+    expect(pendingToolCalls.snapshot.toolCalls).toEqual([SECOND_CALL])
   })
 
   it("resumes a call with its answer once and refuses a second answer", async () => {
@@ -100,6 +103,9 @@ describe("PendingToolCalls", () => {
     expect(
       pendingToolCalls.resolveToolCall(FIRST_CALL.id, SUCCEEDED_RESULT)
     ).toBe("not-pending")
+    expect(
+      pendingToolCalls.resolveToolCall(FIRST_CALL.id, ALLOWED_ANSWER)
+    ).toBe("not-pending")
   })
 
   it("ends every wait without an answer when cancelled and refuses later answers", async () => {
@@ -108,30 +114,44 @@ describe("PendingToolCalls", () => {
       FIRST_CALL,
       sendEvent
     )
-    const secondAnswer = pendingToolCalls.sendClientToolCall(
-      SECOND_CALL,
+    const promptAnswer = pendingToolCalls.sendToolApprovalPrompt(
+      BACKEND_CALL,
       sendEvent
     )
 
     pendingToolCalls.cancelToolCalls()
 
     expect(await firstAnswer).toBeUndefined()
-    expect(await secondAnswer).toBeUndefined()
-    expect(pendingToolCalls.toolCalls).toEqual([])
+    expect(await promptAnswer).toBeUndefined()
+    expect(pendingToolCalls.snapshot).toEqual({
+      toolCalls: [],
+      toolApprovals: []
+    })
     expect(
       pendingToolCalls.resolveToolCall(FIRST_CALL.id, SUCCEEDED_RESULT)
     ).toBe("not-pending")
+    expect(
+      pendingToolCalls.resolveToolCall(BACKEND_CALL.id, ALLOWED_ANSWER)
+    ).toBe("not-pending")
   })
 
-  it("neither lists nor sends a call made after cancelling, and ends its wait at once", async () => {
+  it("neither lists nor sends a call or prompt made after cancelling, and ends its wait at once", async () => {
     const { pendingToolCalls, sendEvent, sentEvents } = createRecordingCalls()
     pendingToolCalls.cancelToolCalls()
 
     const answer = pendingToolCalls.sendClientToolCall(FIRST_CALL, sendEvent)
+    const promptAnswer = pendingToolCalls.sendToolApprovalPrompt(
+      BACKEND_CALL,
+      sendEvent
+    )
 
     expect(await answer).toBeUndefined()
+    expect(await promptAnswer).toBeUndefined()
     expect(sentEvents).toEqual([])
-    expect(pendingToolCalls.toolCalls).toEqual([])
+    expect(pendingToolCalls.snapshot).toEqual({
+      toolCalls: [],
+      toolApprovals: []
+    })
   })
 
   it("rejects a second call with a waiting call's identifier without sending it", () => {
@@ -139,26 +159,33 @@ describe("PendingToolCalls", () => {
     void pendingToolCalls.sendClientToolCall(FIRST_CALL, sendEvent)
 
     expect(() =>
-      pendingToolCalls.sendClientToolCall(FIRST_CALL, sendEvent)
+      pendingToolCalls.sendToolApprovalPrompt(FIRST_CALL, sendEvent)
     ).toThrow("A tool call with this identifier is already waiting")
     expect(sentEvents).toHaveLength(1)
   })
 
-  it("lists a backend call and sends the same event a client call sends", () => {
+  it("lists a prompt apart from calls and sends a tool-approval event in the same step", () => {
     const { pendingToolCalls, sendEvent, sentEvents } = createRecordingCalls()
+    void pendingToolCalls.sendClientToolCall(FIRST_CALL, sendEvent)
 
-    void pendingToolCalls.sendBuiltInToolCall(BACKEND_CALL, sendEvent)
+    void pendingToolCalls.sendToolApprovalPrompt(BACKEND_CALL, sendEvent)
 
-    expect(sentEvents).toEqual([{ type: "tool-call", call: BACKEND_CALL }])
-    expect(pendingToolCalls.toolCalls).toEqual([BACKEND_CALL])
+    expect(sentEvents).toEqual([
+      { type: "tool-call", call: FIRST_CALL },
+      { type: "tool-approval", call: BACKEND_CALL }
+    ])
+    expect(pendingToolCalls.snapshot).toEqual({
+      toolCalls: [FIRST_CALL],
+      toolApprovals: [BACKEND_CALL]
+    })
   })
 
   it.each([
     ["allowed", ALLOWED_ANSWER],
-    ["failed", DECLINED_ANSWER]
-  ])("resumes a backend call answered as %s", async (_status, answer) => {
+    ["rejected", DECLINED_ANSWER]
+  ])("resumes a prompt answered as %s", async (_status, answer) => {
     const { pendingToolCalls, sendEvent } = createRecordingCalls()
-    const waitedAnswer = pendingToolCalls.sendBuiltInToolCall(
+    const waitedAnswer = pendingToolCalls.sendToolApprovalPrompt(
       BACKEND_CALL,
       sendEvent
     )
@@ -167,10 +194,10 @@ describe("PendingToolCalls", () => {
       "accepted"
     )
     expect(await waitedAnswer).toBe(answer)
-    expect(pendingToolCalls.toolCalls).toEqual([])
+    expect(pendingToolCalls.snapshot.toolApprovals).toEqual([])
   })
 
-  it("keeps a client call waiting when it is answered as allowed", async () => {
+  it("keeps a call waiting for its result when it is answered as allowed", async () => {
     const { pendingToolCalls, sendEvent } = createRecordingCalls()
     const waitedResult = pendingToolCalls.sendClientToolCall(
       FIRST_CALL,
@@ -179,46 +206,57 @@ describe("PendingToolCalls", () => {
 
     expect(
       pendingToolCalls.resolveToolCall(FIRST_CALL.id, ALLOWED_ANSWER)
-    ).toBe("mismatched")
-    expect(pendingToolCalls.toolCalls).toEqual([FIRST_CALL])
+    ).toBe("not-pending")
+    expect(pendingToolCalls.snapshot.toolCalls).toEqual([FIRST_CALL])
     pendingToolCalls.cancelToolCalls()
     expect(await waitedResult).toBeUndefined()
   })
 
-  it("keeps a backend call waiting when it is answered with a result", async () => {
+  it("keeps a prompt waiting when it is answered with a result", async () => {
     const { pendingToolCalls, sendEvent } = createRecordingCalls()
-    const waitedAnswer = pendingToolCalls.sendBuiltInToolCall(
+    const waitedAnswer = pendingToolCalls.sendToolApprovalPrompt(
       BACKEND_CALL,
       sendEvent
     )
 
     expect(
       pendingToolCalls.resolveToolCall(BACKEND_CALL.id, SUCCEEDED_RESULT)
-    ).toBe("mismatched")
-    expect(pendingToolCalls.toolCalls).toEqual([BACKEND_CALL])
+    ).toBe("not-pending")
+    expect(pendingToolCalls.snapshot.toolApprovals).toEqual([BACKEND_CALL])
     pendingToolCalls.cancelToolCalls()
     expect(await waitedAnswer).toBeUndefined()
   })
 
-  it("ends a backend call's wait without an answer when cancelled", async () => {
-    const { pendingToolCalls, sendEvent } = createRecordingCalls()
-    const waitedAnswer = pendingToolCalls.sendBuiltInToolCall(
-      BACKEND_CALL,
+  it("sends a call to run under the identifier of its answered prompt", async () => {
+    const { pendingToolCalls, sendEvent, sentEvents } = createRecordingCalls()
+    const prompt = pendingToolCalls.sendToolApprovalPrompt(
+      FIRST_CALL,
       sendEvent
     )
+    pendingToolCalls.resolveToolCall(FIRST_CALL.id, ALLOWED_ANSWER)
+    await prompt
 
-    pendingToolCalls.cancelToolCalls()
+    const result = pendingToolCalls.sendClientToolCall(FIRST_CALL, sendEvent)
 
-    expect(await waitedAnswer).toBeUndefined()
+    expect(sentEvents).toEqual([
+      { type: "tool-approval", call: FIRST_CALL },
+      { type: "tool-call", call: FIRST_CALL }
+    ])
     expect(
-      pendingToolCalls.resolveToolCall(BACKEND_CALL.id, ALLOWED_ANSWER)
-    ).toBe("not-pending")
+      pendingToolCalls.resolveToolCall(FIRST_CALL.id, SUCCEEDED_RESULT)
+    ).toBe("accepted")
+    expect(await result).toBe(SUCCEEDED_RESULT)
   })
 
-  it("returns a list that cannot be changed", () => {
+  it("returns a snapshot whose lists cannot be changed", () => {
     const { pendingToolCalls, sendEvent } = createRecordingCalls()
     void pendingToolCalls.sendClientToolCall(FIRST_CALL, sendEvent)
+    void pendingToolCalls.sendToolApprovalPrompt(BACKEND_CALL, sendEvent)
 
-    expect(Object.isFrozen(pendingToolCalls.toolCalls)).toBe(true)
+    const { snapshot } = pendingToolCalls
+
+    expect(Object.isFrozen(snapshot)).toBe(true)
+    expect(Object.isFrozen(snapshot.toolCalls)).toBe(true)
+    expect(Object.isFrozen(snapshot.toolApprovals)).toBe(true)
   })
 })

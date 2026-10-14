@@ -18,6 +18,8 @@ import LlmRuntimeService, {
   type LlmRuntimeFailureReporters
 } from "../modules/llm/llmRuntimeService"
 import LlmService from "../modules/llm/llmService"
+import ToolApprovalService from "../modules/toolApproval/toolApprovalService"
+import { readJustRunToolNames } from "../infrastructure/settings/justRunToolsFile"
 import { readTavilyApiKey } from "../infrastructure/settings/tavilyApiKeyFile"
 import type { BuiltInToolEntry } from "../modules/tool/builtIn/builtInTool"
 import {
@@ -97,6 +99,11 @@ export type SingletonServices = Readonly<{
    * key; it owns nothing to release.
    */
   webSearchToolProvider: WebSearchToolProvider
+  /**
+   * Decides which tool calls ask the person first, from the Just run
+   * choices saved in the settings file; it owns nothing to release.
+   */
+  toolApprovalService: ToolApprovalService
   /** Module-private cleanup capability for the complete owned service lifetime. */
   [CLOSE_SINGLETON_SERVICES]: CloseSingletonServices
 }>
@@ -133,8 +140,9 @@ type DatabaseServices = Pick<
  * persistence first, so its startup recovery runs before any history is
  * read. The agent service is created next, over its Sqlite records and the
  * chat service; it reads nothing at creation and owns nothing to release.
- * The web search tool provider and the built-in tools are created last;
- * they read and contact nothing at creation and own nothing to release.
+ * The web search tool provider, the built-in tools, and the tool approval
+ * service are created last; they read and contact nothing at creation and
+ * own nothing to release.
  * Creation stops at the first failure. The database is not part of the
  * returned bundle: the bundle's cleanup closes it after the LLM runtime
  * service and before the chat service.
@@ -183,6 +191,9 @@ export async function createSingletonServices(
       () => readTavilyApiKey(config.settingsFilePath),
       buildTavilyRequestDependencies()
     )
+    const toolApprovalService = new ToolApprovalService(() =>
+      readJustRunToolNames(config.settingsFilePath)
+    )
     let closeCompletion: Promise<void> | undefined = undefined
 
     /** Joins every close request to one complete service-lifetime disposal. */
@@ -199,6 +210,7 @@ export async function createSingletonServices(
       agentService,
       builtInTools: createBuiltInTools(webSearchToolProvider),
       webSearchToolProvider,
+      toolApprovalService,
       [CLOSE_SINGLETON_SERVICES]: closeOwnedSingletonServices
     })
   } catch (creationError) {

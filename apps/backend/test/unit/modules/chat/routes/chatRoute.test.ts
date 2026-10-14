@@ -6,7 +6,8 @@ import {
   conversationAgentMissingProblemSchema,
   conversationNotFoundProblemSchema
 } from "@lys/protocol"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
+import type ReplyGeneration from "../../../../../src/modules/chat/replyGeneration"
 import updateFastifyWithChatRoute, {
   type ChatRouteOptions
 } from "../../../../../src/modules/chat/routes/chatRoute"
@@ -610,4 +611,147 @@ describe("updateFastifyWithChatRoute", () => {
       )
     }
   )
+
+  describe("tool call approval", () => {
+    /** Request whose turn offers the scripted backend look-up tool. */
+    const LOOK_UP_REQUEST = Object.freeze({
+      ...NEW_CONVERSATION_REQUEST,
+      tools: { definitions: [], backendToolNames: ["look_up_word"] }
+    })
+
+    /**
+     * Registers the chat route on a test application whose model looks up
+     * `moth` in its first round and answers `Done` in its second.
+     *
+     * @returns The application and the generation the route starts, once
+     * started.
+     */
+    async function createLookUpApp() {
+      const testApp = await createChatRouteTestApp()
+      testApp.createConversationTurn.mockRestore()
+      testApp.completeChatStream
+        .mockImplementationOnce(async () =>
+          (async function* () {
+            yield createChatCompletionChunk({
+              toolCalls: [
+                {
+                  index: 0,
+                  id: "call_0",
+                  type: "function",
+                  function: {
+                    name: "look_up_word",
+                    arguments: '{"word":"moth"}'
+                  }
+                }
+              ]
+            })
+            yield createChatCompletionChunk({ finishReason: "tool_calls" })
+          })()
+        )
+        .mockImplementationOnce(async () =>
+          (async function* () {
+            yield createChatCompletionChunk({
+              content: "Done",
+              finishReason: "stop"
+            })
+          })()
+        )
+      testApp.generateTitle.mockResolvedValue("Trip plan")
+      const startReplyGeneration = vi.spyOn(
+        testApp.generations,
+        "startReplyGeneration"
+      )
+      updateFastifyWithChatRoute(testApp.app, {
+        ...CHAT_ROUTE_OPTIONS,
+        generations: testApp.generations
+      })
+
+      /**
+       * Gets the generation the route started.
+       *
+       * @returns The generation.
+       * @throws If the route has not started one.
+       */
+      function getGeneration(): ReplyGeneration {
+        const result = startReplyGeneration.mock.results[0]
+        if (result?.type !== "return") throw new Error("No generation started.")
+        return result.value
+      }
+
+      return { testApp, getGeneration }
+    }
+
+    it("asks the person before a call of a tool on Ask me runs, and runs it once allowed", async () => {
+      const { testApp, getGeneration } = await createLookUpApp()
+      testApp.readJustRunToolNames.mockResolvedValue({
+        status: "read",
+        toolNames: new Set()
+      })
+
+      const responsePromise = sendChatRequest(testApp.app, LOOK_UP_REQUEST)
+      await vi.waitFor(() => {
+        expect(getGeneration().pendingToolCalls.toolApprovals).toHaveLength(1)
+      })
+      const [prompt] = getGeneration().pendingToolCalls.toolApprovals
+      if (prompt === undefined) throw new Error("No prompt was sent.")
+      expect(testApp.completeChatStream).toHaveBeenCalledOnce()
+      getGeneration().resolveToolCall(prompt.id, { status: "allowed" })
+      const response = await responsePromise
+
+      const events = parseSseEvents(response.body)
+      expect(events).toContainEqual({
+        event: "tool-approval",
+        data: { type: "tool-approval", call: prompt }
+      })
+      expect(prompt).toMatchObject({
+        toolName: "look_up_word",
+        arguments: { word: "moth" }
+      })
+      expect(testApp.completeChatStream).toHaveBeenCalledTimes(2)
+      expect(events.at(-1)?.event).toBe("done")
+    })
+
+    it("runs a call of a tool saved as Just run without asking the person", async () => {
+      const { testApp } = await createLookUpApp()
+      testApp.readJustRunToolNames.mockResolvedValue({
+        status: "read",
+        toolNames: new Set(["look_up_word"])
+      })
+
+      const response = await sendChatRequest(testApp.app, LOOK_UP_REQUEST)
+
+      const eventTypes = parseSseEvents(response.body).map(
+        (event) => event.event
+      )
+      expect(eventTypes).not.toContain("tool-approval")
+      expect(eventTypes.at(-1)).toBe("done")
+      expect(testApp.readJustRunToolNames).toHaveBeenCalledOnce()
+    })
+
+    it("asks the person and logs a warning with the request's logger when the saved choices cannot be read", async () => {
+      const { testApp, getGeneration } = await createLookUpApp()
+      testApp.readJustRunToolNames.mockResolvedValue({ status: "unreadable" })
+
+      const responsePromise = sendChatRequest(testApp.app, LOOK_UP_REQUEST)
+      await vi.waitFor(() => {
+        expect(getGeneration().pendingToolCalls.toolApprovals).toHaveLength(1)
+      })
+      const [prompt] = getGeneration().pendingToolCalls.toolApprovals
+      if (prompt === undefined) throw new Error("No prompt was sent.")
+      getGeneration().resolveToolCall(prompt.id, {
+        status: "rejected",
+        reason: "declined",
+        content: "The person declined this call."
+      })
+      await responsePromise
+
+      expect(testApp.logs).toContainEqual(
+        expect.objectContaining({
+          level: "warn",
+          reqId: expect.any(String),
+          msg: expect.stringContaining("Just run")
+        })
+      )
+    })
+  })
 })

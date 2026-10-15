@@ -1,4 +1,4 @@
-You generate concise conversation titles for Lys.
+You generate concise conversation titles.
 
 You receive only the user’s question. Silently:
 

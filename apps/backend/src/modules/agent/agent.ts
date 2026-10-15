@@ -297,29 +297,52 @@ export default class Agent {
       }),
       sourceCatalog: new SourceCatalog(turn.sources)
     })
-    let messages = buildAgentContext(
+    const messages = buildAgentContext(
       this.#systemPrompt,
       turn.history,
       turn.userMessageContent
     )
-    let round = await this.#createReplyRound(state, { messages, round: 0 })
-    while (round.status === "tool-calls") {
-      const roundMessages = await handleToolCallRound(round, {
-        tools,
-        sendClientToolCall: turn.sendClientToolCall,
-        createToolCallGate: turn.createToolCallGate,
-        abortSignal: turn.abortSignal,
-        replyParts: state.replyParts,
-        sourceCatalog: state.sourceCatalog
-      })
-      if (roundMessages === undefined) return undefined
-      messages = [...messages, ...roundMessages]
-      round = await this.#createReplyRound(state, {
-        messages,
-        round: round.round + 1
-      })
-    }
-    return round.status === "finished" ? round.finishReason : undefined
+    const round = await this.#createReplyRound(state, { messages, round: 0 })
+    return this.#continueReply(state, messages, round)
+  }
+
+  /**
+   * Continues a reply after one of its rounds ended: has the round's tool
+   * calls answered and asks the model for the next round, until a round
+   * finishes the reply or the reply ends.
+   *
+   * @param state - The reply's turn, tools, part sequence, and catalog.
+   * @param messages - Context the ended round answered, in send order.
+   * @param round - How that round ended.
+   * @returns The supported finish reason, or undefined after cancellation,
+   * supersession, or deletion.
+   * @throws As {@link Agent.createReply} reports for a round or a call.
+   * @remarks Each round needs the results of the round before it, so the
+   * rounds run one after another.
+   */
+  async #continueReply(
+    state: ReplyRoundState,
+    messages: readonly ReplyContextMessage[],
+    round: ReplyRound
+  ): Promise<ConversationAssistantMessageFinishReason | undefined> {
+    if (round.status !== "tool-calls")
+      return round.status === "finished" ? round.finishReason : undefined
+    const { turn } = state
+    const roundMessages = await handleToolCallRound(round, {
+      tools: state.tools,
+      sendClientToolCall: turn.sendClientToolCall,
+      createToolCallGate: turn.createToolCallGate,
+      abortSignal: turn.abortSignal,
+      replyParts: state.replyParts,
+      sourceCatalog: state.sourceCatalog
+    })
+    if (roundMessages === undefined) return undefined
+    const nextMessages = [...messages, ...roundMessages]
+    const nextRound = await this.#createReplyRound(state, {
+      messages: nextMessages,
+      round: round.round + 1
+    })
+    return this.#continueReply(state, nextMessages, nextRound)
   }
 
   /**

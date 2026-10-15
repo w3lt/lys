@@ -150,7 +150,7 @@ export default function updateFastifyWithChatRoute(
  * @param reply - SSE or pre-stream error response owner.
  * @param dependencies - Borrowed persistence, agents, and registry.
  * @returns Settlement after the stream ends, or after a problem response.
- * @throws An {@link UnknownBackendToolError}, before anything is stored,
+ * @throws An `UnknownBackendToolError`, before anything is stored,
  * when the request offers a backend tool the backend does not run; and
  * unexpected failures before the stream starts, for Fastify's HTTP error
  * boundary. An offered backend tool that cannot run now is answered with a

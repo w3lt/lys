@@ -117,31 +117,3 @@ export function findReplyRoundFitFailure(
     ? new ReplyContextOverflowError(requiredTokens, measurement.contextLength)
     : undefined
 }
-
-/**
- * Formats the sentence followers are sent when a reply fails.
- *
- * @param failure - Failure that ended the reply.
- * @returns For a round that did not fit, what it needed and the window, with
- * the next steps; for a model that is not loaded, how to load it; otherwise
- * the general sentence. No upstream or internal text is included.
- */
-export function formatReplyFailureMessage(failure: unknown): string {
-  if (failure instanceof ReplyContextOverflowError) {
-    return `The conversation no longer fits the model's context window: the next request to the model needs ${formatTokenCount(failure.requiredTokens)} tokens, including the room kept for the reply, and the model is loaded with ${formatTokenCount(failure.contextLength)}. Start a new conversation, or load the model with a longer context in Settings → Model.`
-  }
-  if (failure instanceof ReplyModelNotLoadedError) {
-    return "The model is not loaded, so Lys cannot check that the conversation fits it. Load the model in Settings → Model, then try again."
-  }
-  return "Chat completion failed. Please try again."
-}
-
-/**
- * Formats a token count for a sentence.
- *
- * @param tokenCount - Whole number of tokens.
- * @returns The count with comma thousands separators, such as `8,192`.
- */
-function formatTokenCount(tokenCount: number): string {
-  return tokenCount.toLocaleString("en-US")
-}

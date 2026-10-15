@@ -77,6 +77,36 @@ the services together.
    that ends early becomes `interrupted`; title-generation failures are logged
    instead.
 
+### Context window check
+
+Before each round, the agent measures the round's context and offered tools
+against the model the turn names. `LlmReplyContextMeter` gives `LlmService`
+the text the model reads for each message (its content, and the name and
+argument text of each tool call it carries) and each offered tool's JSON;
+`LlmService` counts them with the loaded model's tokenizer through the model
+operation queue and reports the context length the model is loaded with. The
+meter adds a fixed allowance for the chat template's markup: 8 tokens per
+message, 16 per tool call of an earlier round, and 160 once when tools are
+offered.
+
+A round is sent only when its tokens and the reply ceiling (or zero without
+one) together stay within that context length. Otherwise the round is not
+sent: the reply is stored `failed`, keeping the text earlier rounds wrote,
+and its `error` event names the tokens needed and the context length. A model
+that is not loaded is never loaded for the round; the reply fails with an
+`error` that asks to load it. A measurement that fails, because LM Studio is
+not connected or the queue is full, also fails the reply, with the general
+sentence. Without this check, LM Studio's context overflow setting could keep
+the start of the conversation, drop its middle, and let the model answer an
+earlier message.
+
+`POST /api/v1/chat/context` makes the same measurement for the composer's
+context meter. It resolves the agent and the conversation as the chat route
+does, through the same lookups, reads a continued conversation once, and
+asks the agent's `findContextMeasurement` for the system prompt, tools, and
+stored messages a turn's first round would send without its new message. See
+the [route contract](/reference/api/#chat-context-measurement).
+
 Each completion receives the system prompt of the conversation's agent, prior
 user messages, non-empty
 completed or interrupted assistant replies, and the current user message once.
@@ -400,12 +430,12 @@ message text updates.
 
 Chat generation and model management use separate integration boundaries:
 
-| Service             | Backend dependency        | Current use                                                                                                              |
-| ------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `ChatService`       | `openai` SDK              | Streams chat completions and generates titles through LM Studio's OpenAI-compatible HTTP interface.                      |
-| `LlmService`        | `LlmEngineOperationQueue` | Applies inventory, loaded-model health, loading, and stop-by-key policy to operations serialized by the runtime service. |
-| `LlmRuntimeService` | `LlmRuntime`              | Owns the LM Studio runtime, its connection status, and the serialized model-operation queue; connects on demand.         |
-| `LmStudioRuntime`   | `@lmstudio/sdk`           | Verifies engine availability, implements model operations and lifecycle inspection, and owns SDK client cleanup.         |
+| Service             | Backend dependency        | Current use                                                                                                      |
+| ------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `ChatService`       | `openai` SDK              | Streams chat completions and generates titles through LM Studio's OpenAI-compatible HTTP interface.              |
+| `LlmService`        | `LlmEngineOperationQueue` | Runs inventory, health, load, stop-by-key, and context measurement through the serialized queue.                 |
+| `LlmRuntimeService` | `LlmRuntime`              | Owns the LM Studio runtime, its connection status, and the serialized model-operation queue; connects on demand. |
+| `LmStudioRuntime`   | `@lmstudio/sdk`           | Verifies engine availability, implements model operations and lifecycle inspection, and owns SDK client cleanup. |
 
 Fastify exposes the application-scoped `llmService` and `llmRuntimeService`.
 Model routes use provider-neutral capabilities of `LlmService`; the runtime
@@ -457,6 +487,8 @@ See the [health response contract](/reference/api/#model-health-responses).
 | LM Studio is not connected                                                             | List, load, unload, and health requests receive `503` with `urn:lys:problem:llm:runtime-unavailable` before acceptance.                  |
 | A runtime call fails and LM Studio stopped answering                                   | The runtime is released, the status becomes `unreachable`, and a rejected request receives the runtime-unavailable `503`.                |
 | A request resolves after a failed runtime call; the probe or release then fails        | The response keeps its result; the backend logs the probe or release failure at `error`.                                                 |
+| A reply round does not fit the loaded model, or its model is not loaded                | The round is not sent; the reply is stored failed and followers receive an `error` that says why.                                        |
+| A reply round cannot be measured (LM Studio not connected, queue full)                 | The round is not sent; the reply is stored failed and followers receive the general `error`.                                             |
 | Model stream ends without a finish reason                                              | The route treats it as an error and may emit `error`.                                                                                    |
 | Assistant row was deleted or already finalized                                         | Late writes return false without recreating data.                                                                                        |
 | Assistant terminal state cannot be persisted                                           | The task aggregates the original and storage failures, plus a failed fallback's, and rejects; the generation logs it. No final event.    |

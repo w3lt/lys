@@ -165,6 +165,17 @@ Carries a non-empty `message` string that reports a chat generation failure.
 The desktop presents it inline and may also mark the current assistant message
 as failed locally. Title-generation failures never produce `error` events.
 
+The message is one of three sentences, never upstream text:
+
+- When a round of the reply would not fit the model's context window, it
+  names the tokens the request needs, including the reply ceiling, and the
+  context length the model is loaded with, and suggests starting a new
+  conversation or loading the model with a longer context. The round was not
+  sent.
+- When the model is not loaded, so the round could not be measured, it asks
+  to load the model in Settings → Model and try again. The round was not sent.
+- For any other failure: `Chat completion failed. Please try again.`
+
 ## What is not on the current stream
 
 - No `event_id`

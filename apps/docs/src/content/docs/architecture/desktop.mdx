@@ -71,6 +71,40 @@ failed open, follows that reply again from a stored `reply-snapshot`. Quitting
 the app also ends the backend; a reply still generating then keeps its
 persisted text and is marked interrupted when the backend next starts.
 
+## Context meter
+
+The composer's context meter shows how much of the loaded model's context
+window the next message would take. While the composer could send, the
+`useChatContextMeasurement` hook asks
+[`POST /api/v1/chat/context`](/reference/api/#chat-context-measurement) to
+measure what sending would build: the shown conversation, or the agent a new
+one would start with; the loaded model; and the tools the Tools pane would
+offer, reading the tool list first when tool calls are on for a model trained
+for tool use and the list was never read. It measures again when any of
+those, or the shown conversation's stored messages, change; a newer
+measurement abandons the older one, whose result is never shown. While a reply
+is awaited or a conversation opens, nothing is measured and the meter keeps
+its last numbers.
+
+The backend counts the agent's system prompt, the offered tool definitions,
+and the stored messages a turn includes with the model's tokenizer; the
+composer adds an estimate of the trimmed draft at 3.7 characters per token
+and the reply ceiling as the reserve. The window is the context length the
+model is loaded with. The panel lists, in send order, the agent instructions,
+tool definitions, earlier messages, your message, the room left or the amount
+over, and the reserve. Counts carry `~`. The meter never claims that earlier
+messages are shortened or summarized: every round sends every message a turn
+includes. Staged attachments are never sent, so they are not counted, and the
+panel says so while files are staged.
+
+Send is disabled while the measured request, the draft, and the reserve
+exceed the window. Before the first measurement settles, and when the window
+cannot be measured (the model is not loaded in LM Studio, LM Studio cannot be
+reached, or the request fails), the meter says so and sending stays allowed,
+because the backend checks every round before sending it. "Change the window"
+opens the Model pane, where the model's load configuration sets the context
+length for its next load.
+
 ## Assistant message rendering
 
 `MarkdownMessage` renders each assistant reply with `react-markdown`. Links
@@ -480,9 +514,13 @@ are gone and the reply is marked interrupted when the backend next starts.
 - Runtime edits and `model.contextSize` edits remain session-only. Generation
   settings and load configurations save automatically; a failed save leaves the
   edits available for the current session.
-- The retained local context budget, `model.contextSize`, is still used for
-  composer estimates. It is separate from the context length in a model's load
-  configuration and does not follow it.
+- The retained local context budget, `model.contextSize`, still sets the
+  reply ceiling slider's usual range and the agent editor's prompt measure. It
+  is separate from the context length in a model's load configuration and does
+  not follow it.
+- The context meter measures again only when its inputs change, so a
+  measurement that failed while the model-operation queue was busy stays
+  unknown until the conversation, the model, or the tools change.
 - The KV cache load setting has no effect with the installed LM Studio SDK; see
   the [load request](/reference/api/#model-load-request).
 - Model observations refresh on LM Studio connection, entry into settings,
@@ -490,9 +528,9 @@ are gone and the reply is marked interrupted when the backend next starts.
   backend start, Refresh, and failed model requests; it is not polled. Changes
   made by another LM Studio client between observations are not pushed to the
   desktop.
-- The composer's attachment tray stages files and long pastes for its local
-  context estimate only. The chat protocol has no attachment field, so staged
-  attachments are never sent.
+- The composer's attachment tray stages files and long pastes, which the
+  context meter does not count. The chat protocol has no attachment field, so
+  staged attachments are never sent.
 - The Tavily API key is stored as plain text in `settings.json`, protected
   only by the file's owner-only permissions; there is no keychain storage.
 - Tool calls on or off and each tool's switch last for the session only; after

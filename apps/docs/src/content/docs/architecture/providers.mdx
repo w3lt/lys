@@ -30,6 +30,18 @@ load. This has not been checked against a running LM Studio. The backend keeps
 no load settings; the desktop stores them and sends them with each load. See the [load request](/reference/api/#model-load-request)
 for the fields.
 
+Before each round of a reply, and for the composer's context meter, the
+backend measures a context against the loaded model with
+`LlmService.findLlmContextMeasurement()`, which runs through the same model
+operation queue. `LmStudioRuntime` finds the instances `client.llm.listLoaded()`
+reports for the model a chat request names, matching an instance identifier
+or a model key, reports the smallest of their `getContextLength()` answers,
+and counts each text with the first instance's `tokenize()`. It never loads a
+model: when none is loaded there is no measurement. The counts cover each
+message's text and each tool's JSON; the backend adds a fixed allowance for
+the chat template's markup instead of rendering the template. This has not
+been checked against a running LM Studio.
+
 Generation temperature and reply-ceiling edits are saved automatically and
 applied to future chat requests. The [API reference](/reference/api/#chat-request-body)
 defines how those controls reach chat completion; title generation uses its own
@@ -40,6 +52,7 @@ request.
 ```text
 Desktop chat store -> Fastify /api/v1/chat -> ChatService -> LM Studio /v1
 Fastify /api/v1/llm/* -> LlmService -> LlmRuntimeService -> LlmRuntime -> LmStudioRuntime -> LM Studio SDK
+Agent (each round), Fastify /api/v1/chat/context -> LlmReplyContextMeter -> LlmService -> ... -> LM Studio SDK
 ```
 
 The desktop settings view supplies the shared context for its Runtime, Model,
@@ -50,7 +63,7 @@ routes use the application-scoped `llmService` through provider-neutral
 capabilities, and `LlmService` sends each operation through the queue owned by
 `llmRuntimeService`. `LlmRuntimeService` acquires `LmStudioRuntime` for one
 configured LM Studio server when it connects and owns it until it releases it.
-It consumes the full `LlmRuntime`: the four engine operations, the availability
+It consumes the full `LlmRuntime`: the five engine operations, the availability
 probe, and disposal. Concrete runtime selection belongs in composition.
 
 `LmStudioRuntime` owns SDK calls, vendor-data validation, immutable runtime
@@ -111,8 +124,9 @@ WebSocket authentication and are not used as a substitute.
 ## Model operation queue
 
 The `LlmRuntimeService` queue accepts one active operation and up to eight
-waiting operations across inventory, health, loading, unloading, and connection
-attempts together. Accepted operations run in arrival order. A full queue
+waiting operations across inventory, health, loading, unloading, context
+measurement, and connection attempts together. A reply round's measurement
+therefore waits behind a load in progress. Accepted operations run in arrival order. A full queue
 rejects a new request immediately with HTTP `503` and the Problem Details type
 `urn:lys:problem:llm:service-busy`; rejected work never reaches the runtime.
 Finishing an operation releases its capacity on either success or failure.

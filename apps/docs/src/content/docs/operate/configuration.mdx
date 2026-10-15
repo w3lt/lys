@@ -36,9 +36,11 @@ and the TypeScript settings projection use the same camelCase field names. See
 the [configuration reference](/reference/configuration/) for the complete field
 list, defaults, and accepted values.
 
-The stored `model.contextSize` is a local token budget used by the composer and
-generation controls. It is separate from the context length a model is loaded
-with, which belongs to that model's load configuration.
+The stored `model.contextSize` is a local token budget used by the generation
+controls and the agent editor's prompt measure. It is separate from the
+context length a model is loaded with, which belongs to that model's load
+configuration. The composer's context meter does not use it: it shows the
+context length the loaded model reports.
 
 The `tools` group lists, in `justRun`, the tools set to Just run in Settings →
 Tools; every other tool asks before each call. The backend reads the list when

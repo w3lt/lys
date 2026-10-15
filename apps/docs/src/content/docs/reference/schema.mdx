@@ -23,17 +23,39 @@ JSON schema for runtime, model, and generation settings.
 
 ### `conversation_messages`
 
-| Column            | Type            | Notes                                                                                                       |
-| ----------------- | --------------- | ----------------------------------------------------------------------------------------------------------- |
-| `id`              | `TEXT`          | Primary key                                                                                                 |
-| `conversation_id` | `TEXT NOT NULL` | Foreign key to `conversations(id)` with `ON DELETE CASCADE`                                                 |
-| `role`            | `TEXT NOT NULL` | `user` or `assistant`                                                                                       |
-| `model`           | `TEXT`          | Required for assistant rows, absent for user rows                                                           |
-| `content`         | `TEXT NOT NULL` | User content is non-empty; assistant content accumulates persisted deltas and may be empty before any delta |
-| `status`          | `TEXT`          | Assistant-only: `streaming`, `completed`, `interrupted`, `failed`                                           |
-| `finish_reason`   | `TEXT`          | Assistant-only: `stop` or `length`, nullable while not completed                                            |
-| `created_at`      | `TEXT NOT NULL` | ISO timestamp                                                                                               |
-| `updated_at`      | `TEXT`          | Required for assistant rows                                                                                 |
+One row per message, and one row per part of a reply. A reply's row holds its
+model and lifecycle; its reasoning, text, and tool calls are rows of their own
+under it. The table is `STRICT`.
+
+| Column            | Type            | Notes                                                                                                                                                 |
+| ----------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`              | `TEXT`          | Primary key; a tool call's row uses the call's own UUIDv7                                                                                             |
+| `conversation_id` | `TEXT NOT NULL` | Foreign key to `conversations(id)` with `ON DELETE CASCADE`                                                                                           |
+| `role`            | `TEXT NOT NULL` | `user`, `assistant` (a reply), or one of a reply's parts: `reasoning`, `text`, `tool_call`                                                            |
+| `reply_id`        | `TEXT`          | Parts only: foreign key to the reply's row with `ON DELETE CASCADE`                                                                                   |
+| `position`        | `INTEGER`       | Parts only: zero-based order in the reply, unique per reply                                                                                           |
+| `round`           | `INTEGER`       | Parts only: zero-based model round the part belongs to                                                                                                |
+| `model`           | `TEXT`          | Required for reply rows, absent for every other row                                                                                                   |
+| `content`         | `TEXT NOT NULL` | User text; a reasoning or text part's text, which grows with each stored fragment; a tool call's result once it has one; always `''` on a reply row   |
+| `status`          | `TEXT`          | Reply: `streaming`, `completed`, `interrupted`, `failed`. Tool call: `awaiting-approval`, `running`, `succeeded`, `failed`, `rejected`, `interrupted` |
+| `finish_reason`   | `TEXT`          | Reply-only: `stop` or `length`, null while not completed                                                                                              |
+| `tool_name`       | `TEXT`          | Tool calls only: the called tool                                                                                                                      |
+| `tool_arguments`  | `TEXT`          | Tool calls only: the model's argument text as it wrote it                                                                                             |
+| `source_numbers`  | `TEXT`          | Succeeded tool calls only: JSON array of the numbers of the sources the result shows, in its order; null when it shows none                           |
+| `created_at`      | `TEXT NOT NULL` | ISO timestamp                                                                                                                                         |
+| `updated_at`      | `TEXT`          | Required for reply and part rows                                                                                                                      |
+
+### `conversation_sources`
+
+The numbered sources the tool calls of a conversation's replies showed. A
+number keeps its source for the whole conversation. The table is `STRICT`.
+
+| Column            | Type               | Notes                                                                              |
+| ----------------- | ------------------ | ---------------------------------------------------------------------------------- |
+| `conversation_id` | `TEXT NOT NULL`    | Foreign key to `conversations(id)` with `ON DELETE CASCADE`                        |
+| `number`          | `INTEGER NOT NULL` | The source's number in the conversation, from 1; primary key with the conversation |
+| `url`             | `TEXT NOT NULL`    | Non-empty address, unique in the conversation                                      |
+| `title`           | `TEXT NOT NULL`    | Non-empty title as the tool showed it when the source was first numbered           |
 
 ### `agents`
 
@@ -48,11 +70,23 @@ JSON schema for runtime, model, and generation settings.
 
 ## Important constraints
 
-- User rows must have non-empty content and no model, status, or finish reason.
-- Assistant rows must have a model and status.
-- Completed assistant rows must also have a non-null finish reason.
-- Streaming, interrupted, and failed assistant rows must keep a null finish
-  reason.
+- User rows must have non-empty content and no model, status, finish reason,
+  or update time.
+- Reply rows must have empty content, a non-empty model, a status, and an
+  update time. Completed replies must also have a non-null finish reason;
+  streaming, interrupted, and failed replies must keep a null one.
+- User and reply rows have no `reply_id`, `position`, `round`, `tool_name`,
+  `tool_arguments`, or `source_numbers`. Part rows must have a `reply_id`, a
+  non-negative `position` and `round`, and an update time, and have no model
+  or finish reason.
+- Reasoning and text parts must have non-empty content and no status or tool
+  columns.
+- Tool calls must have a tool name, argument text, and status. Waiting,
+  running, and interrupted calls have empty content; failed and rejected calls
+  have non-empty content; only succeeded calls may have `source_numbers`,
+  which must be valid JSON.
+- Sources must have a number of at least 1 and a non-empty URL and title; a
+  conversation holds each number and each URL once.
 - Conversation rows must have a non-empty `agent_code`; SQLite checks only
   that, and the shared conversation schema checks its agent code format on
   every row the backend writes and reads. A row added without the column gets
@@ -68,18 +102,34 @@ JSON schema for runtime, model, and generation settings.
   UTF-16 surrogate; and millisecond ISO timestamps. A row that breaks them
   fails to read.
 
-The current backend inserts an empty assistant row before generation and later
-appends each streamed delta before publication, then updates its status and finish
-reason. Partial text is retained on failure or interruption.
+The current backend inserts a reply row without parts before generation. It
+then stores each part, and appends each fragment to the last reasoning or
+text part, before publishing it, stores each change of a tool call before
+publishing it, and finally updates the reply's status and finish reason. A
+succeeded call's sources are stored in the same transaction as the call: a
+URL the conversation already numbered keeps its row and title. Ending a reply,
+superseding it with a newer turn, and startup recovery mark its waiting and
+running calls `interrupted`. Partial parts are retained on failure or
+interruption.
+
+### Reply parts
+
+The shared `ReplyPart` type reads these rows: `kind` (`reasoning`, `text`, or
+`tool-call`), `id`, `round`, `createdAt`, `updatedAt`, and `content` for
+reasoning and text; `toolName`, `argumentText`, `status`, `sourceNumbers`, and,
+for a succeeded, failed, or rejected call, `result` for a tool call. A reply's
+`parts` are its rows in `position` order, and a conversation's `sources` are
+its source rows in `number` order.
 
 ## Indexes and triggers
 
 | Name                                       | Kind    | Purpose                                                                      |
 | ------------------------------------------ | ------- | ---------------------------------------------------------------------------- |
 | `conversation_messages_conversation_idx`   | index   | Orders messages by conversation, creation time, and id                       |
-| `update_conversation_after_message_insert` | trigger | Updates `conversations.updated_at` after inserts                             |
+| `conversation_messages_reply_part_idx`     | index   | Unique: one part per position of a reply                                     |
+| `update_conversation_after_message_insert` | trigger | Updates `conversations.updated_at` after inserts, parts included             |
 | `update_conversation_updated_at`           | trigger | Keeps explicit activity updates monotonic; title-only updates do not fire it |
-| `update_conversation_after_message_update` | trigger | Updates `conversations.updated_at` after message text changes                |
+| `update_conversation_after_message_update` | trigger | Updates `conversations.updated_at` after a row's `content` changes           |
 
 ## Migration strategy
 
@@ -99,10 +149,17 @@ the built-in agents Caliginia and Lysiptera, and Caliginia is the one new
 conversations start with. Titles, times, and messages stay, a conversation
 under any other code keeps it, and an agent stored under `lys` stays the
 user's own. Builds that support only version 7 refuse a version-8 database.
-Versions 1–3 are unchanged. Missing migrations
-and the version marker commit together. At startup, streaming assistant rows
-become interrupted with a refreshed message `updated_at`; content, conversation
-`updated_at`, and history order are preserved.
+Version 9 rebuilds `conversation_messages` with reply parts, because SQLite
+cannot change a table's checks in place, and adds `conversation_sources`. Every
+message keeps its identity, times, and order. Each stored reply's text, which
+holds every round's text joined by blank lines, becomes one `text` part of
+round 0 with the reply's times; a reply without text gets no part. Version 9
+cannot be undone, and builds that support only version 8 refuse a version-9
+database. Versions 1–3 are unchanged. Missing migrations
+and the version marker commit together. At startup, streaming replies
+become interrupted with a refreshed `updated_at`, and so do their waiting and
+running tool calls; parts, conversation `updated_at`, and history order are
+preserved.
 
 ## Settings JSON
 

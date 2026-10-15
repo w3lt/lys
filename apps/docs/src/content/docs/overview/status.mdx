@@ -31,14 +31,18 @@ repository today; it is not a promise of unreleased work.
   own. A conversation keeps its agent for every turn, and one whose agent was
   deleted stays readable but accepts no new message.
 - Conversation history supports search, cursor pagination, transcript retrieval,
-  rename, and deletion. Assistant deltas are persisted before publication;
-  continuation uses the current prompt of the conversation's agent and eligible
-  stored history.
+  rename, and deletion. A reply's parts, its reasoning, text, and tool calls
+  with their results, are each persisted before publication; continuation
+  uses the current prompt of the conversation's agent and eligible stored
+  history, without reasoning.
 - The desktop's past-conversations dialog, opened from the composer or with
   Command+K or Control+K, searches, renames, and deletes stored conversations,
   and reopens one so its next message continues it.
 - Assistant replies render as Markdown with KaTeX math and syntax-highlighted
-  code blocks whose Copy button copies the plain code.
+  code blocks whose Copy button copies the plain code. A reply shows its
+  reasoning and its tool steps, each call with its arguments and result,
+  folded away, and its answer's `[n]` citations link to the web sources its
+  tools numbered, which are listed under the answer.
 - For a conversation without a stored title, the backend also attempts to
   generate a title asynchronously and emits the first assigned title as a stream
   event. When the conversation remains untitled, its next turn tries again; an
@@ -89,9 +93,7 @@ The current repository does not yet provide:
   for its local context estimate
 - a Conversation settings pane
 - replay or reconnect semantics for chat streams
-- tool choices that are saved ([#110](https://github.com/w3lt/lys/issues/110)),
-  and tool steps and citations saved with replies
-  ([#154](https://github.com/w3lt/lys/issues/154))
+- tool choices that are saved ([#110](https://github.com/w3lt/lys/issues/110))
 - a production desktop release workflow
 - evidenced ADR and RFC records, and a canonical release log
 

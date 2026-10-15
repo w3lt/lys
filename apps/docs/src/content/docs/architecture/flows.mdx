@@ -61,13 +61,15 @@ A manual Start follows steps 4–8.
    problem instead and stores nothing.
 5. The backend emits a `start-new-conversation-turn` or
    `start-existing-conversation-turn` event.
-6. The backend streams zero or more `delta` events, then a `done` event when the
-   model finishes successfully.
+6. The backend stores each reasoning or text part of the reply, and each
+   fragment that extends one, then streams it as a `reply-part` or
+   `reply-part-delta` event, and ends with a `done` event when the model
+   finishes successfully.
 7. For an existing conversation with a stored title, the backend emits that
    title immediately after the turn-start event to reconcile desktop metadata.
    When the conversation has no stored title, a parallel title task requests a
    title after the turn-start event. The first usable title assigned is emitted
-   before, during, or after the assistant deltas and completion. An untitled
+   before, during, or after the reply's parts and completion. An untitled
    turn whose title task neither generates nor assigns a title sends no title
    event; a turn started after that task ended requests a title again while
    the conversation remains untitled. A turn sent while an earlier turn's title
@@ -113,12 +115,15 @@ of the new turn's context.
    for the turn. When an offered tool cannot run, the backend answers `409`
    with the `backend-tool-unavailable` problem and stores nothing; the desktop
    shows the error and reads the tool list again.
-3. The backend offers the tools to the model in every round. Each round's text
-   streams as `delta` events and is stored. When a round ends with tool calls,
+3. The backend offers the tools to the model in every round. Each round's
+   reasoning and text are stored as parts of that round and streamed. When a
+   round ends with tool calls,
    the backend checks each call's arguments against its definition, and a
    backend tool also checks them by its own rules, such as `read_page`'s URL
    rules. A call to an unknown tool or with invalid arguments is answered by
-   the backend itself.
+   the backend itself and stored as a `failed` call. Every other call is
+   stored as a part too, `running` or `awaiting-approval`, and each later
+   change of it is stored and sent as a `reply-part` event.
 4. The backend's tool approval service reads the Just run choices from the
    settings file once for the round. For each valid call, in the model's order:
    a tool saved as Just run goes on at once; any other tool's call is shown to
@@ -137,17 +142,22 @@ of the new turn's context.
    answer.
 7. An allowed backend tool runs in the backend under the reply's
    cancellation, whether or not a desktop follows the reply, and its result
-   goes only to the model, cleaned of invisible characters when the tool
-   reaches the network, as every network tool's result is. An allowed
+   goes to the model and is stored with the call, cleaned of invisible
+   characters when the tool reaches the network, as every network tool's
+   result is. A web tool numbers each source it shows after the
+   conversation's earlier sources, keeping a URL's number; the sources are
+   stored and sent as a `sources` event before the call's `reply-part`. An allowed
    `read_page` call reads the page in a fresh headless browser that follows
    its redirects. An allowed `web_search` call sends one query to
    `https://api.tavily.com` and gives the model the results framed as
    untrusted text; the model may then call `read_page` for a result's URL,
    which is shown again on Ask me. A rejected call runs nothing; the model
-   reads the rejection. Once every call of the round has an answer, the
+   reads the rejection, which is stored as the call's result. Once every call of the round has an answer, the
    backend asks the model again with the results. The loop ends with the
    first round that makes no tool calls, even one that writes no text, then
-   `done`.
+   `done`. The desktop shows the rounds that called tools as the reply's
+   steps, the last round's text as the answer with its `[n]` citations
+   linked, and the cited sources under it.
 
 The backend sets no time limit on a prompt or a pending call. It waits until
 the call is answered, the reply is stopped, or the backend shuts down; a newer

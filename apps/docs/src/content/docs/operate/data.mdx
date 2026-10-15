@@ -55,9 +55,11 @@ last few writes; an application crash cannot.
 The checked-in schema currently creates:
 
 - `conversations`
-- `conversation_messages`
+- `conversation_messages`, which also holds each reply's parts
+- `conversation_sources`
 - `agents`
-- one index on `(conversation_id, created_at, id)`
+- one index on `(conversation_id, created_at, id)`, and one unique index on
+  each reply's part positions
 - triggers that keep `conversations.updated_at` in sync
 
 SQLite `PRAGMA user_version` tracks the applied migration level. On startup the

@@ -12,6 +12,7 @@ import { Menu, Plus, Settings } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { useAnsweringAgent } from "@/lib/hooks/answeringAgent"
+import { useChatContextMeasurement } from "@/lib/hooks/chatContextMeasurement"
 import { useLysStore } from "@/lib/store"
 import { useAgentStore } from "@/lib/store/agents"
 import {
@@ -37,9 +38,8 @@ import {
   stagePastedText
 } from "./ComposerComponents/composer-attachments"
 import {
-  type ComposerAttachment,
-  calculateContextUsage,
-  type ContextTurn
+  buildContextMeterState,
+  type ComposerAttachment
 } from "./ComposerComponents/composer-context"
 import {
   calculateComposerActivity,
@@ -74,24 +74,6 @@ export type ComposerProps = {
 const NO_ATTACHMENTS: readonly ComposerAttachment[] = Object.freeze([])
 
 /**
- * Selects the largest staged attachment.
- *
- * @param attachments - Files staged for the next message.
- * @returns The costliest attachment, or `undefined` when the tray is empty.
- */
-function findLargestAttachment(
-  attachments: readonly ComposerAttachment[]
-): ComposerAttachment | undefined {
-  return attachments.reduce<ComposerAttachment | undefined>(
-    (largest, attachment) =>
-      !largest || attachment.estimatedTokens > largest.estimatedTokens
-        ? attachment
-        : largest,
-    undefined
-  )
-}
-
-/**
  * Presents the chat draft editor, its context tray, and the session controls.
  *
  * @remarks The application store owns
@@ -103,8 +85,10 @@ function findLargestAttachment(
  * message-field ref. Enter without Shift submits once and suppresses the
  * newline; Shift+Enter keeps it. Sending requires a non-empty draft, and is
  * refused while a reply is awaited or streams, while a past conversation is
- * opening, while generation is unavailable, or while the estimated request
- * exceeds the window. The Past conversations button opens history, or closes
+ * opening, while generation is unavailable, or while the measured request
+ * with the draft's estimate exceeds the loaded model's window. A request the
+ * meter could not measure can still be sent; the backend checks every round
+ * before sending it. The Past conversations button opens history, or closes
  * it when open, and exposes that state through `aria-expanded`. While
  * generation is unavailable, a banner names the first missing prerequisite —
  * the backend, LM Studio, or loaded weights — and its action starts a stopped
@@ -153,8 +137,9 @@ function findLargestAttachment(
  * deliberately inert: attachments are held in the renderer and never sent
  * because the chat protocol carries no attachment field; and selecting weights
  * updates settings in memory only, since this view does not persist them.
- * Context figures are client-side estimates throughout, marked `~` wherever
- * they appear.
+ * Context figures come from the backend's measurement of the conversation
+ * with the loaded model, plus an estimate of the draft, and are marked `~`
+ * wherever they appear; staged attachments are not counted.
  *
  * @param props - Parent-owned ref for the message field and the request
  * for a new conversation.
@@ -217,17 +202,15 @@ export function Composer({
   const activity = calculateComposerActivity(request, conversationOpen)
   const activityLabel = formatComposerActivity(activity)
 
-  const turns: readonly ContextTurn[] = (conversation?.messages ?? []).map(
-    (message) => ({ id: message.id, text: message.content })
+  const contextMeasurement = useChatContextMeasurement(
+    activity === "idle" && !isUnavailable
   )
-  const contextUsage = calculateContextUsage({
-    budget: settings.model.contextSize,
-    reserve: settings.generation.replyCeiling,
-    turns,
-    attachments
+  const contextMeter = buildContextMeterState(contextMeasurement.outcome, {
+    draft: inputDraft,
+    reserve: settings.generation.replyCeiling
   })
-  const largestAttachment = findLargestAttachment(attachments)
-  const isOverWindow = contextUsage.overflowTokens > 0
+  const isOverWindow =
+    contextMeter.status === "measured" && contextMeter.usage.overflowTokens > 0
 
   const canSubmitDraft = inputDraft.trim().length > 0 && !isOverWindow
   const isFieldDisabled = isUnavailable || isAgentDeleted
@@ -461,9 +444,6 @@ export function Composer({
                   removeComposerAttachment(staged, attachmentId)
                 )
               }
-              overflowingAttachmentId={
-                isOverWindow ? largestAttachment?.id : undefined
-              }
             />
           ) : null}
 
@@ -599,10 +579,9 @@ export function Composer({
 
             {!isUnavailable ? (
               <ComposerContextMeter
-                attachments={attachments}
-                largestAttachment={largestAttachment}
+                hasStagedFiles={attachments.length > 0}
+                meter={contextMeter}
                 onChangeWindow={handleChangeWindow}
-                usage={contextUsage}
               />
             ) : null}
           </div>

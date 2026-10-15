@@ -2,6 +2,10 @@ import {
   chatApi,
   chatApiStreamEventSchema,
   chatBackendToolUnavailableProblemSchema,
+  chatContextApi,
+  llmModelNotLoadedProblemSchema,
+  llmRuntimeUnavailableProblemSchema,
+  llmServiceBusyProblemSchema,
   chatReplyEventSchema,
   chatReplyEventsApi,
   chatToolCallNotPendingProblemSchema,
@@ -12,6 +16,8 @@ import {
   type BackendToolUnavailableReason,
   type ChatApiRequestBody,
   type ChatBackendToolUnavailableProblem,
+  type ChatContextApiRequestBody,
+  type ChatContextApiResponse,
   type ChatApiStreamEvent,
   type ChatReplyEvent,
   type ChatReplyPathParams,
@@ -95,6 +101,32 @@ export type StopChatReplyResult =
       /** No generation was running for the reply; nothing changed. */
       readonly status: "not-generating"
     }
+
+/** Transport scope sampled once for one context measurement. */
+export type ChatContextConnection = {
+  /** Application-owned backend origin without a trailing slash. */
+  readonly backendUrl: string
+  /** Abandons the measurement; the backend may still finish it. */
+  readonly signal: AbortSignal
+}
+
+/** Outcome of asking the backend what the next message would take. */
+export type ChatContextMeasurementResult =
+  | {
+      /** The backend measured the conversation with the loaded model. */
+      readonly status: "measured"
+      /** The window and the tokens of each measured part. */
+      readonly measurement: ChatContextApiResponse
+    }
+  | {
+      /** LM Studio has no loaded instance of the model; nothing was measured. */
+      readonly status: "model-not-loaded"
+    }
+
+/** Shared not-loaded outcome; it carries no per-occurrence data. */
+const MODEL_NOT_LOADED_RESULT: ChatContextMeasurementResult = Object.freeze({
+  status: "model-not-loaded"
+})
 
 /** Headers for a JSON request that expects an event stream. */
 const JSON_EVENT_STREAM_HEADERS: Readonly<Record<string, string>> =
@@ -269,6 +301,95 @@ export async function stopChatReply(
   }
   throw new Error(
     `The backend could not stop the reply (HTTP ${response.status}).`
+  )
+}
+
+/**
+ * Asks the backend how much of the model's context window a conversation
+ * takes before its next message.
+ *
+ * @param payload - Valid request naming the conversation, the model, and the
+ * tools the next message would offer, as the chat request would.
+ * @param connection - Backend origin and the signal that abandons the
+ * measurement.
+ * @returns `measured` with the validated measurement, or `model-not-loaded`
+ * when LM Studio has no loaded instance of the model.
+ * @throws The abort reason when the signal aborts; the backend's own sentence
+ * when its model operations are busy or LM Studio cannot be reached; and a
+ * caller-safe sentence when the backend cannot be reached, answers with any
+ * other status, or sends a measurement that does not match the contract.
+ */
+export async function getChatContextMeasurement(
+  payload: ChatContextApiRequestBody,
+  connection: ChatContextConnection
+): Promise<ChatContextMeasurementResult> {
+  const response = await getChatContextResponse(payload, connection)
+  if (response.status !== 200) return await handleChatContextFailure(response)
+  try {
+    const body: unknown = await response.json()
+    return {
+      status: "measured",
+      measurement: chatContextApi.responses[200].parse(body)
+    }
+  } catch (cause) {
+    if (connection.signal.aborted) throw connection.signal.reason
+    throw new Error("The backend sent an invalid context measurement.", {
+      cause
+    })
+  }
+}
+
+/**
+ * Sends one context measurement request.
+ *
+ * @param payload - Valid measurement request.
+ * @param connection - Backend origin and the abandoning signal.
+ * @returns The response whose body remains owned by the caller.
+ * @throws The abort reason when the signal aborts, or a caller-safe error
+ * retaining the transport failure as its cause.
+ */
+async function getChatContextResponse(
+  payload: ChatContextApiRequestBody,
+  connection: ChatContextConnection
+): Promise<Response> {
+  try {
+    return await fetch(`${connection.backendUrl}${chatContextApi.path}`, {
+      method: chatContextApi.method,
+      headers: JSON_REQUEST_HEADERS,
+      body: JSON.stringify(payload),
+      signal: connection.signal,
+      cache: "no-store"
+    })
+  } catch (cause) {
+    if (connection.signal.aborted) throw connection.signal.reason
+    throw new Error("The backend could not be reached.", { cause })
+  }
+}
+
+/**
+ * Reads a measurement response that carries no measurement.
+ *
+ * @param response - Response with a status other than 200, whose body is
+ * consumed here.
+ * @returns `model-not-loaded` when the body is the declared not-loaded
+ * problem.
+ * @throws With the backend's sentence for its declared busy or unavailable
+ * problem, and with `The context could not be measured (HTTP <status>).`
+ * for any other response.
+ */
+async function handleChatContextFailure(
+  response: Response
+): Promise<ChatContextMeasurementResult> {
+  const body = await readFailureBody(response)
+  if (llmModelNotLoadedProblemSchema.safeParse(body).success) {
+    return MODEL_NOT_LOADED_RESULT
+  }
+  const runtimeProblem = llmRuntimeUnavailableProblemSchema
+    .or(llmServiceBusyProblemSchema)
+    .safeParse(body)
+  if (runtimeProblem.success) throw new Error(runtimeProblem.data.detail)
+  throw new Error(
+    `The context could not be measured (HTTP ${response.status}).`
   )
 }
 

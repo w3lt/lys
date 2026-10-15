@@ -14,7 +14,7 @@ import {
   type Conversation
 } from "@lys/share"
 import type { ComponentType } from "react"
-import { describe, expect, it, onTestFinished, vi } from "vitest"
+import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
 import { STARTER_PROMPTS } from "@/app/content"
 import { createStoredChatViewConversation } from "@/lib/store/chat-view/conversation-transitions"
 import type { ChatViewProps } from "@/views/ChatView/ChatView"
@@ -31,6 +31,10 @@ import {
   type BackendRoutes,
   type ObservedBackendRequest
 } from "../../support/backendFake"
+import {
+  listRequestsBesideMeasurements,
+  MEASURING_BACKEND_ROUTES
+} from "../../support/chatContextFixtures"
 import {
   buildCompletedAssistantMessage,
   buildConversation,
@@ -163,6 +167,7 @@ async function loadFreshChatView(runtime: RuntimeArrangement = READY_RUNTIME) {
 function startChatViewBackend(routes: BackendRoutes = {}) {
   const streams: BackendEventStream[] = []
   const backend = startBackendFake({
+    ...MEASURING_BACKEND_ROUTES,
     [`GET ${AGENTS_PATH}`]: () =>
       buildJsonResponse(
         200,
@@ -262,6 +267,11 @@ function sendHistoryShortcut(init: KeyboardEventInit): boolean {
 }
 
 describe("ChatView", () => {
+  // A ready composer measures what its next message would be sent with.
+  beforeEach(() => {
+    startBackendFake(MEASURING_BACKEND_ROUTES)
+  })
+
   it("shows the conversation and the composer named after the agent that answers, and no history while it is closed", async () => {
     const { backend } = startChatViewBackend()
     const { ChatView } = await loadFreshChatView()
@@ -556,7 +566,9 @@ describe("ChatView", () => {
       expect(
         screen.getByRole("textbox", { name: "Message Caliginia" })
       ).toHaveFocus()
-      expect(backend.requests.at(-1)?.url).toContain(STORED.id)
+      expect(listRequestsBesideMeasurements(backend).at(-1)?.url).toContain(
+        STORED.id
+      )
       expect(screen.getByText("Start with the route.")).toBeInTheDocument()
     })
 
@@ -652,7 +664,9 @@ describe("ChatView", () => {
       await user.click(screen.getByRole("button", { name: STARTER_PROMPTS[0] }))
       await waitForRenderedWork()
 
-      expect(backend.requests.at(-1)?.body).toMatchObject({
+      expect(
+        listRequestsBesideMeasurements(backend).at(-1)?.body
+      ).toMatchObject({
         conversation: { kind: "new", agentCode: CALIGINIA_AGENT_CODE },
         message: STARTER_PROMPTS[0]
       })

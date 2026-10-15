@@ -207,27 +207,12 @@
     background-color var(--duration-standard) var(--ease-standard);
 }
 
-/*
- * The attachment singled out as the reason the window overflows. The removal
- * button's accessible name carries the same fact, so the tone is a second cue
- * rather than the only one.
- */
-.composer__chip[data-overflowing] {
-  border-color: var(--app-status-pending);
-  background: color-mix(in oklch, var(--app-status-pending) 8%, transparent);
-}
-
 .composer__chip-kind {
   font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--app-text-faint);
-}
-
-.composer__chip[data-overflowing] .composer__chip-kind,
-.composer__chip[data-overflowing] .composer__chip-tokens {
-  color: var(--app-status-pending);
 }
 
 .composer__chip-name {
@@ -730,15 +715,6 @@
 
 .composer__meter-row[data-tone="accent"] .composer__meter-swatch {
   background: var(--lys-violet);
-}
-
-.composer__meter-row[data-tone="recap"] .composer__meter-swatch {
-  background: var(--lys-cyan);
-}
-
-.composer__meter-row[data-tone="recap"] dt,
-.composer__meter-row[data-tone="recap"] dd {
-  color: var(--app-text-link);
 }
 
 .composer__meter-row[data-tone="warning"] .composer__meter-swatch {

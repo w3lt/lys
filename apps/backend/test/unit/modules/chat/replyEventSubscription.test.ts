@@ -1,8 +1,15 @@
 import type { ChatGenerationEvent } from "@lys/protocol"
 import { describe, expect, it } from "vitest"
 import ReplyEventSubscription from "../../../../src/modules/chat/replyEventSubscription"
+import {
+  createFixtureUuidV7,
+  FIXTURE_TIMESTAMP
+} from "../../support/conversationFixtures"
 import { waitForMicrotasks } from "../../support/microtasks"
 import { createSettlementReader } from "../../support/settlement"
+
+/** Identity of the reply part the sample fragments extend. */
+const STREAMED_PART_ID = createFixtureUuidV7(12)
 
 /**
  * Most events offered while measuring a subscription's queue capacity, so a
@@ -38,13 +45,18 @@ type GatedWriter = Readonly<{
 }>
 
 /**
- * Creates a delta event distinguishable by its position.
+ * Creates a fragment event distinguishable by its position.
  *
  * @param sequence - Position that tells the event apart in write order.
- * @returns A new delta event.
+ * @returns A new event appending a fragment to one reply part.
  */
 function createDelta(sequence: number): ChatGenerationEvent {
-  return { type: "delta", content: `chunk ${sequence}` }
+  return {
+    type: "reply-part-delta",
+    partId: STREAMED_PART_ID,
+    content: `chunk ${sequence}`,
+    updatedAt: FIXTURE_TIMESTAMP
+  }
 }
 
 /**

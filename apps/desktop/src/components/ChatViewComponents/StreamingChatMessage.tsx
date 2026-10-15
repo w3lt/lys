@@ -1,3 +1,4 @@
+import type { ConversationSource } from "@lys/share"
 import type { ReactElement } from "react"
 
 import type { StreamingConversationAssistantMessage } from "@/lib/store/chat-view/conversation-transitions"
@@ -10,6 +11,8 @@ export type StreamingChatMessageProps = {
   readonly message: StreamingConversationAssistantMessage
   /** Name of the agent that answers the conversation. */
   readonly speakerName: string
+  /** Numbered sources of the conversation, which replies may cite. */
+  readonly sources: readonly ConversationSource[]
 }
 
 /**
@@ -21,14 +24,21 @@ export type StreamingChatMessageProps = {
  * cancellation must stay reachable in active phases that have no assistant
  * message. Terminal Stopped/Failed announcements are rendered by
  * {@link LysMessage} after the parent supplies a terminal message.
- * @param props - Active assistant message to present and its speaker.
+ * @param props - Active assistant message to present, its speaker, and the
+ * conversation's sources.
  * @returns The streaming assistant message presentation.
  */
 export default function StreamingChatMessage({
   message,
-  speakerName
+  speakerName,
+  sources
 }: StreamingChatMessageProps): ReactElement {
   return (
-    <LysMessage kind="streaming" message={message} speakerName={speakerName} />
+    <LysMessage
+      kind="streaming"
+      message={message}
+      sources={sources}
+      speakerName={speakerName}
+    />
   )
 }

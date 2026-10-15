@@ -12,13 +12,14 @@ import { createFixtureUuidV7 } from "../../support/conversationFixtures"
  * reader that observes its edits, and the committed turn.
  */
 function openEditorWithTurn() {
-  const { database, turns, editor, history } = openConversationTestServices()
+  const { database, turns, replyParts, editor, history } =
+    openConversationTestServices()
   const turn = turns.createConversationTurn({
     conversation: { kind: "new", agentCode: "lys" },
     userMessageContent: "Hello",
     model: "qwen/qwen3-8b"
   })
-  return { database, turns, editor, history, turn }
+  return { database, turns, replyParts, editor, history, turn }
 }
 
 describe("StoredConversationHistoryEditor", () => {
@@ -95,12 +96,21 @@ describe("StoredConversationHistoryEditor", () => {
     })
 
     it("removes the transcript with the conversation", () => {
-      const { editor, turns, turn } = openEditorWithTurn()
+      const { editor, turns, replyParts, turn } = openEditorWithTurn()
 
       editor.deleteConversation(turn.conversation.id)
 
       expect(
-        turns.updateAssistantMessageContent(turn.assistantMessage.id, "late")
+        replyParts.createReplyPart(turn.assistantMessage.id, {
+          kind: "text",
+          round: 0,
+          content: "late"
+        })
+      ).toBeUndefined()
+      expect(
+        turns.updateAssistantMessageState(turn.assistantMessage.id, {
+          status: "failed"
+        })
       ).toBe(false)
     })
   })

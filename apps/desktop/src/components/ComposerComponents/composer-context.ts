@@ -9,6 +9,8 @@
  * The agent editor uses only the text estimate and the token-count format.
  */
 
+import type { ReplyPart } from "@lys/share"
+
 /** Average characters per token used to estimate text length. */
 const CHARACTERS_PER_TOKEN = 3.7
 
@@ -31,6 +33,21 @@ export type ContextTurn = {
   /** Turn text whose length drives the estimate. */
   readonly text: string
 }
+
+/** Transcript message whose context text the estimator measures. */
+export type ContextMessage =
+  | Readonly<{
+      /** A message the person wrote. */
+      role: "user"
+      /** Text of the message. */
+      content: string
+    }>
+  | Readonly<{
+      /** A reply the agent wrote. */
+      role: "assistant"
+      /** Parts of the reply in stored order. */
+      parts: readonly ReplyPart[]
+    }>
 
 /** One file staged in the composer's context tray. */
 export type ComposerAttachment = {
@@ -130,6 +147,36 @@ export function formatTokenCount(tokenCount: number): string {
   if (tokenCount < 1000) return String(Math.round(tokenCount))
 
   return `${(tokenCount / 1000).toFixed(tokenCount >= 10_000 ? 0 : 1)}k`
+}
+
+/**
+ * Formats the text of one transcript message that later turns send to the
+ * model again.
+ *
+ * @param message - User message, or reply with its parts.
+ * @returns The user message's text; for a reply, the text of its text parts,
+ * then the argument text and result of each tool call that has a result, on
+ * separate lines. Reasoning and calls without a result are left out, as the
+ * backend leaves them out of later context.
+ */
+export function formatContextMessageText(message: ContextMessage): string {
+  if (message.role === "user") return message.content
+
+  return message.parts.flatMap(listContextPartTexts).join("\n")
+}
+
+/**
+ * Lists the texts of one reply part that later turns send to the model again.
+ *
+ * @param part - Part of a stored reply.
+ * @returns A text part's content; a tool call's argument text and result
+ * once it has a result; nothing for reasoning or a call without a result.
+ */
+function listContextPartTexts(part: ReplyPart): readonly string[] {
+  if (part.kind === "text") return [part.content]
+  if (part.kind === "tool-call" && "result" in part)
+    return [part.argumentText, part.result]
+  return []
 }
 
 /**

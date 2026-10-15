@@ -1,9 +1,14 @@
-import { conversationAssistantMessageSchema } from "@lys/share"
+import {
+  conversationAssistantMessageSchema,
+  conversationSourceSchema
+} from "@lys/share"
 import * as z from "zod"
 import { chatReplyNotFoundProblemSchema } from "../../http/errors/chat"
 import { conversationNotFoundProblemSchema } from "../../http/errors/conversation"
 import {
-  chatDeltaEventSchema,
+  chatReplyPartDeltaEventSchema,
+  chatReplyPartEventSchema,
+  chatSourcesEventSchema,
   chatDoneEventSchema,
   chatErrorEventSchema,
   chatInterruptedEventSchema,
@@ -19,15 +24,21 @@ import { apiChatReplyEventsRoute } from "./routes"
 /**
  * Validates the event that starts every reply-events stream.
  *
- * @remarks The reply includes every delta sent to any follower before this
- * event, so later `delta` events continue from exactly its content.
+ * @remarks The reply includes every part and fragment sent to any follower
+ * before this event, so later `reply-part` and `reply-part-delta` events
+ * continue from exactly its parts.
  */
 const chatReplySnapshotEventSchema = z.strictObject({
   type: z.literal("reply-snapshot"),
   /** Stored conversation title when the snapshot was read; null while untitled. */
   conversationTitle: z.string().min(1).nullable(),
-  /** Stored reply, including every delta sent to followers before this event. */
+  /** Stored reply, including every part sent to followers before this event. */
   assistantMessage: conversationAssistantMessageSchema,
+  /**
+   * The conversation's stored sources when the snapshot was read, in number
+   * order; later `sources` events add to them.
+   */
+  sources: z.array(conversationSourceSchema).readonly(),
   /**
    * Calls of client tools sent to run and not yet answered with their result
    * when the snapshot was read, in the order sent; empty when the reply is
@@ -55,7 +66,9 @@ const chatReplySnapshotEventSchema = z.strictObject({
 export const chatReplyEventSchema = z.discriminatedUnion("type", [
   chatReplySnapshotEventSchema,
   chatTitleEventSchema,
-  chatDeltaEventSchema,
+  chatReplyPartEventSchema,
+  chatReplyPartDeltaEventSchema,
+  chatSourcesEventSchema,
   chatDoneEventSchema,
   chatInterruptedEventSchema,
   chatErrorEventSchema,

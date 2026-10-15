@@ -23,8 +23,8 @@ const AGENT_NAME = "Caliginia"
  * Builds the parent-owned controls of an idle, pinned panel answered by
  * {@link AGENT_NAME}.
  *
- * @returns Fresh callback spies, the transcript ref, the agent's name, and
- * idle state.
+ * @returns Fresh callback spies, the transcript ref, the agent's name, no
+ * sources, and idle state.
  */
 function buildPanelControls() {
   return {
@@ -34,6 +34,7 @@ function buildPanelControls() {
     onJumpToLatest: vi.fn(),
     onSendMessage: vi.fn(() => Promise.resolve()),
     onTranscriptScroll: vi.fn(),
+    sources: [],
     transcriptRef: createRef<HTMLDivElement>()
   }
 }

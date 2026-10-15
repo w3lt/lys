@@ -1,8 +1,36 @@
 import type { BackendToolUnavailableReason, ChatToolCall } from "@lys/protocol"
-import type { ToolDefinition } from "@lys/share"
+import type { ConversationSource, ToolDefinition } from "@lys/share"
 
 /** Argument values of one call, by argument name, after the type check. */
 export type BuiltInToolCallArguments = ChatToolCall["arguments"]
+
+/** One web page or search result a tool shows the model, before numbering. */
+export type WebSourceCandidate = Readonly<{
+  /** Normalized `http` or `https` address the source was read from. */
+  url: string
+  /** Non-empty title shown to the model, flattened onto one line. */
+  title: string
+}>
+
+/**
+ * Numbers web sources for the conversation the call belongs to.
+ *
+ * @param candidates - Sources the result is about to show, in its order.
+ * @returns Each candidate numbered, in the same order: a URL the conversation
+ * has numbered already keeps its number and stored title, and a new URL gets
+ * the next number. Bounded synchronous work; it never throws.
+ */
+export type AddWebSources = (
+  candidates: readonly WebSourceCandidate[]
+) => readonly ConversationSource[]
+
+/** What one run of a built-in tool borrows from its turn. */
+export type BuiltInToolRunContext = Readonly<{
+  /** Stops the run; borrowed for the call. */
+  abortSignal: AbortSignal
+  /** Numbers the web sources the result shows; borrowed for the call. */
+  addWebSources: AddWebSources
+}>
 
 /** Text one run of a built-in tool produced for the model. */
 export type BuiltInToolResult =
@@ -11,6 +39,11 @@ export type BuiltInToolResult =
       status: "succeeded"
       /** Output the model reads. */
       content: string
+      /**
+       * Numbered sources the output shows, in its order, as
+       * {@link AddWebSources} returned them; empty when it shows none.
+       */
+      sources: readonly ConversationSource[]
     }>
   | Readonly<{
       /** The tool could not do its work, for a reason the model can act on. */
@@ -22,13 +55,14 @@ export type BuiltInToolResult =
 /**
  * Runs one parsed call.
  *
- * @param abortSignal - Stops the run; borrowed for the call.
- * @returns The text the model reads.
- * @throws The abort reason once `abortSignal` aborts; any other rejection is
- * a defect, not an expected outcome.
+ * @param context - The call's cancellation and source numbering, borrowed
+ * for the call.
+ * @returns The text the model reads and the sources it shows.
+ * @throws The abort reason once the context's signal aborts; any other
+ * rejection is a defect, not an expected outcome.
  */
 export type BuiltInToolCallRun = (
-  abortSignal: AbortSignal
+  context: BuiltInToolRunContext
 ) => Promise<BuiltInToolResult>
 
 /** Outcome of parsing one call's arguments. */

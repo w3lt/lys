@@ -16,11 +16,15 @@ import {
   conversationMetadataSchema,
   conversationSchema,
   conversationUserMessageSchema,
+  replyPartSchema,
   type Conversation,
   type ConversationAssistantMessage,
   type ConversationMessage,
   type ConversationMetadata,
-  type ConversationUserMessage
+  type ConversationSource,
+  type ConversationUserMessage,
+  type ReplyPart,
+  type ToolCallReplyPart
 } from "@lys/share"
 
 /**
@@ -90,19 +94,115 @@ function buildValidatedAssistantMessage<T extends ConversationAssistantMessage>(
   return Object.freeze(message)
 }
 
+/** Sequence offset of the text part a reply built from text holds. */
+const TEXT_PART_SEQUENCE_OFFSET = 0x10000
+
+/**
+ * Builds a stored reasoning or text part.
+ *
+ * @param kind - Kind of the part.
+ * @param sequence - Identity sequence of the part.
+ * @param round - Zero-based round of the part.
+ * @param content - Non-empty text of the part.
+ * @returns A frozen part stored at {@link FIXTURE_TIMESTAMP}, validated by the
+ * shared schema.
+ */
+export function buildFragmentPart(
+  kind: "reasoning" | "text",
+  sequence: number,
+  round: number,
+  content: string
+): ReplyPart {
+  return Object.freeze(
+    replyPartSchema.parse({
+      kind,
+      id: createFixtureUuidV7(sequence),
+      round,
+      createdAt: FIXTURE_TIMESTAMP,
+      updatedAt: FIXTURE_TIMESTAMP,
+      content
+    })
+  )
+}
+
+/** State-dependent fields of a tool-call fixture. */
+export type ToolCallPartFixtureState =
+  | Readonly<{ status: "awaiting-approval" | "running" | "interrupted" }>
+  | Readonly<{
+      status: "succeeded"
+      result: string
+      sourceNumbers: readonly number[]
+    }>
+  | Readonly<{ status: "failed" | "rejected"; result: string }>
+
+/**
+ * Builds a stored tool call.
+ *
+ * @param sequence - Identity sequence of the call.
+ * @param round - Zero-based round of the call.
+ * @param call - Tool name and the model's argument text.
+ * @param state - State of the call, with its result and source numbers when
+ * the state has them.
+ * @returns A frozen call stored at {@link FIXTURE_TIMESTAMP}, validated by the
+ * shared schema.
+ */
+export function buildToolCallPart(
+  sequence: number,
+  round: number,
+  call: Readonly<{ toolName: string; argumentText: string }>,
+  state: ToolCallPartFixtureState
+): ToolCallReplyPart {
+  const part = replyPartSchema.parse({
+    kind: "tool-call",
+    id: createFixtureUuidV7(sequence),
+    round,
+    createdAt: FIXTURE_TIMESTAMP,
+    updatedAt: FIXTURE_TIMESTAMP,
+    toolName: call.toolName,
+    argumentText: call.argumentText,
+    sourceNumbers: [],
+    ...state
+  })
+  if (part.kind !== "tool-call") throw new Error("Expected a tool-call part")
+  return Object.freeze(part)
+}
+
+/**
+ * Builds the parts of a reply fixture.
+ *
+ * @param sequence - Identity sequence of the reply.
+ * @param body - The reply's parts, or its text, which becomes one text part
+ * of round 0 as a reply stored before parts existed; empty text means no
+ * parts.
+ * @returns The parts in stored order.
+ */
+function buildReplyParts(
+  sequence: number,
+  body: string | readonly ReplyPart[]
+): readonly ReplyPart[] {
+  if (typeof body !== "string") return Object.freeze([...body])
+  if (body === "") return Object.freeze([])
+  return Object.freeze([
+    buildFragmentPart("text", TEXT_PART_SEQUENCE_OFFSET + sequence, 0, body)
+  ])
+}
+
 /**
  * Builds the shared fields of an assistant message from {@link FIXTURE_MODEL}.
  *
  * @param sequence - Identity sequence of the message.
- * @param content - Stored reply text, possibly empty.
+ * @param body - Stored parts, or stored reply text, possibly empty.
  * @returns The fields that do not depend on the lifecycle.
  */
-function buildAssistantMessageBase(sequence: number, content: string) {
+function buildAssistantMessageBase(
+  sequence: number,
+  body: string | readonly ReplyPart[]
+) {
   return {
     id: createFixtureUuidV7(sequence),
     role: "assistant" as const,
     model: FIXTURE_MODEL,
-    content,
+    parts: buildReplyParts(sequence, body),
     createdAt: FIXTURE_TIMESTAMP,
     updatedAt: FIXTURE_TIMESTAMP
   }
@@ -112,15 +212,16 @@ function buildAssistantMessageBase(sequence: number, content: string) {
  * Builds an assistant message whose generation is still running.
  *
  * @param sequence - Identity sequence of the message.
- * @param content - Reply text received so far, possibly empty.
+ * @param body - Parts received so far, or their text as one text part;
+ * possibly empty.
  * @returns A frozen streaming reply validated by the shared schema.
  */
 export function buildStreamingAssistantMessage(
   sequence: number,
-  content: string
+  body: string | readonly ReplyPart[]
 ): AssistantMessageFixture<"streaming", null> {
   return buildValidatedAssistantMessage({
-    ...buildAssistantMessageBase(sequence, content),
+    ...buildAssistantMessageBase(sequence, body),
     status: "streaming" as const,
     finishReason: null
   })
@@ -130,17 +231,17 @@ export function buildStreamingAssistantMessage(
  * Builds an assistant message the model completed.
  *
  * @param sequence - Identity sequence of the message.
- * @param content - Complete reply text.
+ * @param body - The reply's parts, or its text as one text part.
  * @param finishReason - Reason the model stopped; defaults to `stop`.
  * @returns A frozen completed reply validated by the shared schema.
  */
 export function buildCompletedAssistantMessage(
   sequence: number,
-  content: string,
+  body: string | readonly ReplyPart[],
   finishReason: "stop" | "length" = "stop"
 ): AssistantMessageFixture<"completed", "stop" | "length"> {
   return buildValidatedAssistantMessage({
-    ...buildAssistantMessageBase(sequence, content),
+    ...buildAssistantMessageBase(sequence, body),
     status: "completed" as const,
     finishReason
   })
@@ -150,17 +251,18 @@ export function buildCompletedAssistantMessage(
  * Builds an assistant message whose generation ended without completing.
  *
  * @param sequence - Identity sequence of the message.
- * @param content - Reply text stored before it ended.
+ * @param body - Parts stored before it ended, or their text as one text
+ * part.
  * @param status - Whether the reply was interrupted or failed.
  * @returns A frozen ended reply validated by the shared schema.
  */
 export function buildEndedAssistantMessage(
   sequence: number,
-  content: string,
+  body: string | readonly ReplyPart[],
   status: "interrupted" | "failed"
 ): AssistantMessageFixture<"interrupted" | "failed", null> {
   return buildValidatedAssistantMessage({
-    ...buildAssistantMessageBase(sequence, content),
+    ...buildAssistantMessageBase(sequence, body),
     status,
     finishReason: null
   })
@@ -195,17 +297,20 @@ export function buildConversationMetadata(
  * @param id - Conversation identity.
  * @param title - Stored title, or null before title generation saves one.
  * @param messages - Transcript in stored order.
+ * @param sources - Numbered sources of the conversation; none by default.
  * @returns A frozen conversation validated by the shared schema.
  */
 export function buildConversation(
   id: string,
   title: string | null,
-  messages: readonly ConversationMessage[]
+  messages: readonly ConversationMessage[],
+  sources: readonly ConversationSource[] = []
 ): Conversation {
   return Object.freeze(
     conversationSchema.parse({
       ...buildConversationMetadata(id, title),
-      messages
+      messages,
+      sources
     })
   )
 }

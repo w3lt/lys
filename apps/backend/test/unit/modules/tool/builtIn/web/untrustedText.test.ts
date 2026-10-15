@@ -100,9 +100,9 @@ describe("formatExcerptText", () => {
 })
 
 describe("CITATION_MARKER_RULE", () => {
-  it("names the marker and the source list format", () => {
+  it("asks for the source numbers Lys shows and no list of sources", () => {
     expect(CITATION_MARKER_RULE).toBe(
-      "a numbered marker such as [1], numbering sources in the order you first use them, and list each source you used under your answer as: [n] Title — URL."
+      "its source number in square brackets, such as [3], right after what it supports. Use only the numbers Lys shows, and do not write a list of sources: Lys lists the sources you cite under your answer."
     )
   })
 })

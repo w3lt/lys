@@ -29,9 +29,14 @@ const EXCERPT_ELLIPSIS = "…"
 /**
  * Sentence ending that tells the model how to cite web sources, shared by
  * every web tool so citations look the same whichever tool found the source.
+ *
+ * @remarks Lys numbers each source of a conversation and shows the number
+ * with the source; the desktop links each marker to the source with that
+ * number and lists the cited sources under the answer, so the model writes
+ * no list of its own.
  */
 export const CITATION_MARKER_RULE =
-  "a numbered marker such as [1], numbering sources in the order you first use them, and list each source you used under your answer as: [n] Title — URL."
+  "its source number in square brackets, such as [3], right after what it supports. Use only the numbers Lys shows, and do not write a list of sources: Lys lists the sources you cite under your answer."
 
 /**
  * Formats untrusted web text so that it cannot hold a content delimiter, so

@@ -13,9 +13,6 @@ import {
 /** Conversation the cases store. */
 const CONVERSATION_ID = createFixtureUuidV7(1)
 
-/** Streaming reply the cases append to. */
-const REPLY_ID = createFixtureUuidV7(11)
-
 /**
  * Creates a database file location in a directory owned by the current test.
  *
@@ -36,49 +33,6 @@ describe("SqliteConversationTurnRecordWriter", () => {
   registerConversationTurnTransactionContractSuite(() =>
     openSqliteConversationRecords()
   )
-
-  it("commits each delta before returning, visible to another connection", () => {
-    const databaseFilePath = createOwnedDatabaseFilePath()
-    const records = openSqliteConversationRecords(databaseFilePath)
-    records.saveConversation({
-      id: CONVERSATION_ID,
-      title: null,
-      agentCode: "lys",
-      createdAt: "2025-01-01T00:00:00.000Z"
-    })
-    records.saveAssistantMessage({
-      id: REPLY_ID,
-      conversationId: CONVERSATION_ID,
-      model: "qwen/qwen3-8b",
-      content: "",
-      status: "streaming",
-      finishReason: null,
-      createdAt: "2025-01-01T00:00:01.000Z",
-      updatedAt: "2025-01-01T00:00:01.000Z"
-    })
-    const observer = new DatabaseSync(databaseFilePath)
-    onTestFinished(() => {
-      observer.close()
-    })
-    const getStoredContent = () =>
-      observer
-        .prepare("SELECT content FROM conversation_messages WHERE id = ?")
-        .get(REPLY_ID)
-
-    records.turnRecordWriter.updateAssistantMessageContent({
-      assistantMessageId: REPLY_ID,
-      content: "Hel",
-      updatedAt: "2025-01-01T00:00:02.000Z"
-    })
-    expect(getStoredContent()).toEqual({ content: "Hel" })
-
-    records.turnRecordWriter.updateAssistantMessageContent({
-      assistantMessageId: REPLY_ID,
-      content: "lo",
-      updatedAt: "2025-01-01T00:00:03.000Z"
-    })
-    expect(getStoredContent()).toEqual({ content: "Hello" })
-  })
 
   it("fails before running a turn operation while another connection holds the write lock", () => {
     const databaseFilePath = createOwnedDatabaseFilePath()

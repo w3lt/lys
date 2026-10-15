@@ -815,7 +815,9 @@ function createToolCallStore(
           startToolRun(target, event.call)
           return "reply-continues"
         case "title":
-        case "delta":
+        case "reply-part":
+        case "reply-part-delta":
+        case "sources":
           return "reply-continues"
         case "done":
         case "interrupted":

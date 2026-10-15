@@ -11,8 +11,30 @@ import {
   createChatSseTestApp,
   sendChatSseRouteRequest
 } from "../../../support/chatSseRoute"
+import {
+  createFixtureUuidV7,
+  FIXTURE_TIMESTAMP
+} from "../../../support/conversationFixtures"
 import { waitForMicrotasks } from "../../../support/microtasks"
 import { createSettlementReader } from "../../../support/settlement"
+
+/** Identity of the reply part the sample fragments extend. */
+const STREAMED_PART_ID = createFixtureUuidV7(12)
+
+/**
+ * Creates a sample event appending one fragment to a reply part.
+ *
+ * @param content - The fragment.
+ * @returns The `reply-part-delta` event.
+ */
+function createFragmentEvent(content: string): ChatGenerationEvent {
+  return {
+    type: "reply-part-delta",
+    partId: STREAMED_PART_ID,
+    content,
+    updatedAt: FIXTURE_TIMESTAMP
+  }
+}
 
 /** Connection capability read by {@link openReplyEventStream}. */
 type FollowedConnection = Pick<ReplySse, "onClose" | "isConnected">
@@ -50,7 +72,7 @@ describe("createEventSender", () => {
     const { app } = await createChatSseTestApp()
     registerChatSseRoute(app, async (_request, reply) => {
       const sendEvent = createEventSender<ChatGenerationEvent>(reply.sse)
-      await sendEvent({ type: "delta", content: "Hi" })
+      await sendEvent(createFragmentEvent("Hi"))
       await sendEvent({ type: "done", finishReason: "stop" })
     })
 
@@ -58,7 +80,10 @@ describe("createEventSender", () => {
 
     expect(response.contentType).toBe("text/event-stream")
     expect(response.events).toEqual([
-      { event: "delta", data: { type: "delta", content: "Hi" } },
+      {
+        event: "reply-part-delta",
+        data: createFragmentEvent("Hi")
+      },
       { event: "done", data: { type: "done", finishReason: "stop" } }
     ])
   })
@@ -68,10 +93,9 @@ describe("createEventSender", () => {
     let failure: unknown
     registerChatSseRoute(app, async (_request, reply) => {
       reply.sse.close()
-      failure = await createEventSender<ChatGenerationEvent>(reply.sse)({
-        type: "delta",
-        content: "late"
-      }).catch((error: unknown) => error)
+      failure = await createEventSender<ChatGenerationEvent>(reply.sse)(
+        createFragmentEvent("late")
+      ).catch((error: unknown) => error)
     })
 
     await sendChatSseRouteRequest(app)
@@ -88,7 +112,7 @@ describe("openReplyEventStream", () => {
         createEventSender(reply.sse)
       )
       const stream = openReplyEventStream(reply.sse, subscription)
-      subscription.handleStreamEvent({ type: "delta", content: "Hi" })
+      subscription.handleStreamEvent(createFragmentEvent("Hi"))
       subscription.handleStreamEvent({ type: "done", finishReason: "stop" })
       subscription.close()
       await stream
@@ -97,7 +121,10 @@ describe("openReplyEventStream", () => {
     const response = await sendChatSseRouteRequest(app)
 
     expect(response.events).toEqual([
-      { event: "delta", data: { type: "delta", content: "Hi" } },
+      {
+        event: "reply-part-delta",
+        data: createFragmentEvent("Hi")
+      },
       { event: "done", data: { type: "done", finishReason: "stop" } }
     ])
   })
@@ -112,10 +139,9 @@ describe("openReplyEventStream", () => {
       const stream = openReplyEventStream(reply.sse, subscription)
       reply.sse.close()
       await stream
-      acceptedAfterClose = subscription.handleStreamEvent({
-        type: "delta",
-        content: "late"
-      })
+      acceptedAfterClose = subscription.handleStreamEvent(
+        createFragmentEvent("late")
+      )
     })
 
     await sendChatSseRouteRequest(app)
@@ -132,10 +158,9 @@ describe("openReplyEventStream", () => {
       )
       reply.sse.close()
       await openReplyEventStream(reply.sse, subscription)
-      acceptedAfterOpen = subscription.handleStreamEvent({
-        type: "delta",
-        content: "late"
-      })
+      acceptedAfterOpen = subscription.handleStreamEvent(
+        createFragmentEvent("late")
+      )
     })
 
     await sendChatSseRouteRequest(app)
@@ -148,7 +173,7 @@ describe("openReplyEventStream", () => {
     const subscription = new ReplyEventSubscription<ChatGenerationEvent>(
       () => new Promise<void>(() => {})
     )
-    subscription.handleStreamEvent({ type: "delta", content: "stalled" })
+    subscription.handleStreamEvent(createFragmentEvent("stalled"))
     const closedState = createSettlementReader(subscription.closed)
 
     const stream = openReplyEventStream(connection, subscription)

@@ -1,3 +1,5 @@
+import type { ConversationSource } from "@lys/share"
+import type { WebSourceCandidate } from "../builtInTool"
 import { parsePageUrl, type PageUrl, type PageUrlResult } from "./pageUrl"
 import {
   MAXIMUM_SEARCH_QUERY_LENGTH,
@@ -18,14 +20,6 @@ export const MAXIMUM_SEARCH_TITLE_LENGTH = 300
  */
 export const MAXIMUM_SEARCH_SNIPPET_LENGTH = 500
 
-/** What the model is shown about one search. */
-export type SearchEvidenceInput = Readonly<{
-  /** Trimmed query that was sent. */
-  query: string
-  /** Results Tavily gave, in its order; untrusted. */
-  results: readonly TavilySearchResult[]
-}>
-
 /** One result shown to the model. */
 type ShownSearchResult = Readonly<{
   /** Flattened, bounded title, or the URL's host when the title is empty. */
@@ -37,11 +31,24 @@ type ShownSearchResult = Readonly<{
 }>
 
 /** Results shown, and how many were left out for their address. */
-type SearchResultSelection = Readonly<{
+export type SearchResultSelection = Readonly<{
   /** Results shown, in Tavily's order, each URL once. */
   shown: readonly ShownSearchResult[]
   /** Results left out because Lys could never read their URL. */
   leftOutCount: number
+}>
+
+/** What the model is shown about one search. */
+export type SearchEvidenceInput = Readonly<{
+  /** Trimmed query that was sent. */
+  query: string
+  /** Results shown and how many were left out. */
+  selection: SearchResultSelection
+  /**
+   * Each shown result numbered as a source of the conversation, in the same
+   * order; one per shown result.
+   */
+  sources: readonly ConversationSource[]
 }>
 
 /** Line that opens the search results. */
@@ -104,12 +111,12 @@ function parseShownResultUrl(text: string): PageUrlResult {
 /**
  * Selects the results shown to the model.
  *
- * @param results - Results Tavily gave, in its order.
+ * @param results - Results Tavily gave, in its order; untrusted.
  * @returns Each result whose URL passes the page URL rules, so the model can
  * ask `read_page` to read it, once per normalized URL; and how many were
  * left out for their URL. Duplicates are dropped without being counted.
  */
-function selectShownResults(
+export function selectShownSearchResults(
   results: readonly TavilySearchResult[]
 ): SearchResultSelection {
   const shown: ShownSearchResult[] = []
@@ -174,30 +181,59 @@ function formatSearchLines(
 }
 
 /**
- * Formats one shown result.
+ * Builds the sources a search shows, before they are numbered.
  *
+ * @param selection - Results shown.
+ * @returns Each shown result's URL and title, in the same order.
+ */
+export function listSearchSourceCandidates(
+  selection: SearchResultSelection
+): readonly WebSourceCandidate[] {
+  return Object.freeze(
+    selection.shown.map((result) =>
+      Object.freeze({ url: result.url, title: result.title })
+    )
+  )
+}
+
+/**
+ * Formats one shown result with its source number.
+ *
+ * @param sources - Numbered sources, one per shown result, in order.
  * @param result - Shown result.
- * @returns Its title, URL, and snippet, one per line.
+ * @param index - Its position among the shown results.
+ * @returns Its source number, title, URL, and snippet, one per line.
+ * @throws If no source is numbered at the result's position, which breaks
+ * the evidence input's contract.
  * @remarks A normalized URL percent-encodes `<` and `>`, so it cannot hold a
  * delimiter either.
  */
-function formatShownResult(result: ShownSearchResult): string {
-  return `Title: ${result.title}\nURL: ${result.url}\n${result.snippet}`
+function formatShownResult(
+  sources: readonly ConversationSource[],
+  result: ShownSearchResult,
+  index: number
+): string {
+  const source = sources[index]
+  if (source === undefined)
+    throw new Error("Every shown search result needs its source number")
+  return `Source [${source.number}]\nTitle: ${result.title}\nURL: ${result.url}\n${result.snippet}`
 }
 
 /**
  * Formats the text the model reads after a search.
  *
- * @param input - Query and Tavily's results.
+ * @param input - Query, the results shown, and their source numbers.
  * @returns With results: the query and count lines, the untrusted notice,
- * the results between delimiters, then how far to trust snippets and how to
- * cite. Without a result to show: that nothing was found, and not to guess.
+ * the results between delimiters, each with its source number, then how far
+ * to trust snippets and how to cite. Without a result to show: that nothing
+ * was found, and not to guess.
+ * @throws If a shown result has no source number.
  * @remarks Everything Tavily wrote sits between the delimiters and none of it
  * can hold a delimiter, so a result cannot end the results early and speak
  * outside them.
  */
 export function formatSearchEvidence(input: SearchEvidenceInput): string {
-  const selection = selectShownResults(input.results)
+  const { selection, sources } = input
   const queryText = formatSingleLineText(
     input.query,
     MAXIMUM_SEARCH_QUERY_LENGTH
@@ -209,7 +245,9 @@ export function formatSearchEvidence(input: SearchEvidenceInput): string {
     formatSearchLines(queryText, selection),
     UNTRUSTED_RESULTS_NOTICE,
     SEARCH_RESULTS_START,
-    ...selection.shown.map(formatShownResult),
+    ...selection.shown.map((result, index) =>
+      formatShownResult(sources, result, index)
+    ),
     SEARCH_RESULTS_END,
     RESULTS_CLOSING
   ].join("\n\n")

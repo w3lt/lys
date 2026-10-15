@@ -6,10 +6,13 @@ import type {
 } from "@lys/protocol"
 import {
   toolDefinitionSchema,
+  type ConversationAssistantMessage,
   type ConversationMessage,
+  type ConversationSource,
+  type ReplyPart,
   type ToolDefinition
 } from "@lys/share"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import Agent, {
   type AgentTurn,
   type AssistantMessageCompletion
@@ -24,10 +27,17 @@ import ToolCallGate, {
 } from "../../../../src/modules/toolApproval/toolCallGate"
 import { ChatCompletionCancelledError } from "../../../../src/utils/errors"
 import {
+  openConversationTestServices,
+  saveSourceRow,
+  type ConversationTestServices
+} from "../../support/conversationDatabase"
+import {
   createAssistantMessage,
+  createTextPart,
   createUserMessage
 } from "../../support/conversationFixtures"
 import {
+  answerWithWordSource,
   LOOK_UP_WORD_FORMAT,
   LOOK_UP_WORD_TOOL,
   ScriptedBuiltInTool,
@@ -40,6 +50,9 @@ import {
 
 /** Opens one reply stream for the agent under test. */
 type OpenReplyStream = ReplyModel["openReplyStream"]
+
+/** Wall-clock time of every stored change; the cases fake only `Date`. */
+const NOW = "2026-03-04T05:06:07.890Z"
 
 /**
  * Matches the event sent to followers after a failure that was not a
@@ -66,18 +79,56 @@ const TURN_REQUEST = Object.freeze({
   generationOptions: { temperature: 0.4, replyCeiling: 128 }
 })
 
+/** The stored conversation and streaming reply a case's agent writes. */
+type AgentTurnStore = Readonly<{
+  /** Services over the case's own test database. */
+  services: ConversationTestServices
+  /** Stored conversation of the turn. */
+  conversationId: string
+  /** Streaming reply the agent writes. */
+  replyId: string
+}>
+
+/** Reply storage of one turn, bound to its stored reply. */
+type ReplyStorage = Pick<
+  AgentTurn,
+  | "createReplyPart"
+  | "updateReplyPartContent"
+  | "updateReplyToolCall"
+  | "updateAssistantMessageState"
+>
+
+/**
+ * Replaces one storage capability of a case's turn, given the stored one.
+ *
+ * @param stored - The capability bound to the case's stored reply.
+ * @returns The capability the turn uses.
+ */
+type ReplyStorageOverride<Capability> = (stored: Capability) => Capability
+
 /** Test-controlled parts of one reply. */
 type AgentReplyScenario = Readonly<{
   /** Model behavior. */
   openReplyStream: OpenReplyStream
   /** Transcript before the turn; empty by default. */
   history?: readonly ConversationMessage[]
+  /**
+   * Stored turn the agent writes; a new one without sources by default. A
+   * case that changes the reply while it streams opens its own.
+   */
+  store?: AgentTurnStore
   /** Cancellation owned by the case; a fresh signal by default. */
   abortSignal?: AbortSignal
-  /** Delta storage result; stores every delta by default. */
-  updateAssistantMessageContent?: AgentTurn["updateAssistantMessageContent"]
-  /** Final-state storage result; stores every transition by default. */
-  updateAssistantMessageState?: AgentTurn["updateAssistantMessageState"]
+  /** Part creation; stores every part by default. */
+  createReplyPart?: ReplyStorageOverride<AgentTurn["createReplyPart"]>
+  /** Fragment storage; stores every fragment by default. */
+  updateReplyPartContent?: ReplyStorageOverride<
+    AgentTurn["updateReplyPartContent"]
+  >
+  /** Final-state storage; stores every transition by default. */
+  updateAssistantMessageState?: ReplyStorageOverride<
+    AgentTurn["updateAssistantMessageState"]
+  >
   /** Offered client tools; none by default. */
   clientTools?: readonly ToolDefinition[]
   /** Offered backend tools; none by default. */
@@ -94,6 +145,72 @@ type AgentReplyScenario = Readonly<{
   /** Gate of each round; a gate over {@link justRunToolNames} by default. */
   createToolCallGate?: AgentTurn["createToolCallGate"]
 }>
+
+/**
+ * Opens a test database holding one new turn whose reply streams.
+ *
+ * @param sources - Sources the conversation stored before the turn.
+ * @returns The stored turn; its database closes when the test finishes.
+ */
+function openAgentTurnStore(
+  sources: readonly ConversationSource[] = []
+): AgentTurnStore {
+  const services = openConversationTestServices()
+  const turn = services.turns.createConversationTurn({
+    conversation: { kind: "new", agentCode: AGENT_PROFILE.code },
+    userMessageContent: TURN_REQUEST.userMessageContent,
+    model: TURN_REQUEST.model
+  })
+  for (const source of sources)
+    saveSourceRow(services.database, turn.conversation.id, source)
+  return {
+    services,
+    conversationId: turn.conversation.id,
+    replyId: turn.assistantMessage.id
+  }
+}
+
+/**
+ * Builds the reply storage of a stored turn.
+ *
+ * @param store - Stored turn.
+ * @returns The capabilities bound to the turn's reply.
+ */
+function buildReplyStorage(store: AgentTurnStore): ReplyStorage {
+  const { replyParts, turns } = store.services
+  return {
+    createReplyPart: (draft) =>
+      replyParts.createReplyPart(store.replyId, draft),
+    updateReplyPartContent: (partId, content) =>
+      replyParts.updateReplyPartContent(store.replyId, partId, content),
+    updateReplyToolCall: (toolCallId, change) =>
+      replyParts.updateReplyToolCall(store.replyId, toolCallId, change),
+    updateAssistantMessageState: (completion) =>
+      turns.updateAssistantMessageState(store.replyId, completion)
+  }
+}
+
+/**
+ * Gets a stored turn's reply and its conversation's sources.
+ *
+ * @param store - Stored turn.
+ * @returns The reply as stored now and the conversation's sources.
+ * @throws If the reply is no longer stored.
+ */
+function getStoredReply(store: AgentTurnStore): Readonly<{
+  reply: ConversationAssistantMessage
+  sources: readonly ConversationSource[]
+}> {
+  const conversation = store.services.history.getConversation(
+    store.conversationId
+  )
+  const reply = conversation?.messages.find(
+    (message) => message.id === store.replyId
+  )
+  if (conversation === undefined || reply?.role !== "assistant")
+    throw new Error("The case's reply is not stored")
+  return { reply, sources: conversation.sources }
+}
 
 /**
  * Creates a model whose stream yields fixed events.
@@ -133,6 +250,71 @@ function createRoundStreams(...rounds: (readonly ReplyStreamEvent[])[]) {
       })()
     )
   return openReplyStream
+}
+
+/** One step of a scripted stream: an event to yield, or an action to run. */
+type ScriptedStreamStep = ReplyStreamEvent | (() => void)
+
+/** Whether a scripted stream was released by its reader. */
+type StreamRelease = { isReleased: boolean }
+
+/**
+ * Yields a scripted stream's events, running its actions between them, and
+ * records when the reader releases the stream.
+ *
+ * @param steps - Events and actions in order.
+ * @param release - Set once the stream is released, early or at its end.
+ * @yields Each event of `steps`.
+ */
+async function* yieldScriptedStream(
+  steps: readonly ScriptedStreamStep[],
+  release: StreamRelease
+): AsyncGenerator<ReplyStreamEvent> {
+  try {
+    for (const step of steps) {
+      if (typeof step === "function") step()
+      else yield step
+    }
+  } finally {
+    release.isReleased = true
+  }
+}
+
+/**
+ * Creates a model whose one stream follows a script and reports its release.
+ *
+ * @param steps - Events to yield and actions to run between them.
+ * @returns A stream opener recording its requests, and the stream's release.
+ */
+function createScriptedStream(...steps: ScriptedStreamStep[]) {
+  const release: StreamRelease = { isReleased: false }
+  const openReplyStream = vi.fn<OpenReplyStream>(async () =>
+    yieldScriptedStream(steps, release)
+  )
+  return { openReplyStream, release }
+}
+
+/**
+ * Checks that each event's part or fragment was already stored when the
+ * event was sent.
+ *
+ * @param event - Sent event.
+ * @param storedParts - The reply's parts as stored when it was sent.
+ */
+function expectStoredBeforeSent(
+  event: ChatGenerationEvent,
+  storedParts: readonly ReplyPart[]
+): void {
+  if (event.type === "reply-part")
+    expect(storedParts.find((part) => part.id === event.part.id)).toEqual(
+      event.part
+    )
+  if (event.type !== "reply-part-delta") return
+  const storedPart = storedParts.find((part) => part.id === event.partId)
+  expect(
+    storedPart?.kind !== "tool-call" &&
+      storedPart?.content.endsWith(event.content)
+  ).toBe(true)
 }
 
 /** Client tool that reaches the network, whose answers are cleaned. */
@@ -194,7 +376,7 @@ function createLookUpWordTool(runScript?: BuiltInToolRunScript) {
   return { tool, entry }
 }
 
-/** Matches a UUIDv7 the agent gave a call. */
+/** Matches a UUIDv7 the agent or the store gave a call or part. */
 const UUID_V7_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 
@@ -218,24 +400,54 @@ function buildCreateToolCallGate(
 }
 
 /**
- * Has one agent answer one turn to settlement and records the effects.
+ * Builds the reply storage of one case: the stored turn's, with the case's
+ * replacements.
+ *
+ * @param scenario - Replacements of the case.
+ * @param store - Stored turn of the case.
+ * @returns Spies over each capability the turn uses.
+ */
+function buildScenarioReplyStorage(
+  scenario: AgentReplyScenario,
+  store: AgentTurnStore
+) {
+  const stored = buildReplyStorage(store)
+  return {
+    createReplyPart: vi.fn(
+      scenario.createReplyPart?.(stored.createReplyPart) ??
+        stored.createReplyPart
+    ),
+    updateReplyPartContent: vi.fn(
+      scenario.updateReplyPartContent?.(stored.updateReplyPartContent) ??
+        stored.updateReplyPartContent
+    ),
+    updateReplyToolCall: vi.fn(stored.updateReplyToolCall),
+    updateAssistantMessageState: vi.fn(
+      scenario.updateAssistantMessageState?.(
+        stored.updateAssistantMessageState
+      ) ?? stored.updateAssistantMessageState
+    )
+  }
+}
+
+/**
+ * Has one agent answer one turn to settlement over a stored turn and records
+ * the effects.
  *
  * @param scenario - Model, history, storage, and cancellation behavior.
- * @returns The sent events, stored deltas and states, reported cancellations
- * and failures, and the reply's settlement.
+ * @returns The sent events with the parts stored when each was sent, the
+ * final states asked for, the storage spies, reported cancellations and
+ * failures, the reply's settlement, and the reply and sources stored after
+ * it.
  */
 async function getAgentReplyOutcome(scenario: AgentReplyScenario) {
+  const store = scenario.store ?? openAgentTurnStore()
   const events: ChatGenerationEvent[] = []
+  const storedPartsAtEvents: (readonly ReplyPart[])[] = []
   const reportedCancellations: unknown[] = []
   const reportedFailures: unknown[] = []
-  const persistedDeltas: string[] = []
   const persistedStates: AssistantMessageCompletion[] = []
-  const updateAssistantMessageContent = vi.fn(
-    scenario.updateAssistantMessageContent ?? (() => true)
-  )
-  const updateAssistantMessageState = vi.fn(
-    scenario.updateAssistantMessageState ?? (() => true)
-  )
+  const storage = buildScenarioReplyStorage(scenario, store)
   const agent = new Agent(AGENT_PROFILE, {
     openReplyStream: scenario.openReplyStream
   })
@@ -243,6 +455,7 @@ async function getAgentReplyOutcome(scenario: AgentReplyScenario) {
     .createReply({
       ...TURN_REQUEST,
       history: scenario.history ?? [],
+      sources: getStoredReply(store).sources,
       clientTools: scenario.clientTools ?? [],
       builtInTools: scenario.builtInTools ?? [],
       sendClientToolCall:
@@ -252,6 +465,7 @@ async function getAgentReplyOutcome(scenario: AgentReplyScenario) {
       abortSignal: scenario.abortSignal ?? new AbortController().signal,
       sendEvent: (event) => {
         events.push(event)
+        storedPartsAtEvents.push(getStoredReply(store).reply.parts)
       },
       reportReplyCancellation: (failure) => {
         reportedCancellations.push(failure)
@@ -259,34 +473,76 @@ async function getAgentReplyOutcome(scenario: AgentReplyScenario) {
       reportReplyFailure: (failure) => {
         reportedFailures.push(failure)
       },
-      updateAssistantMessageContent: (content) => {
-        const persisted = updateAssistantMessageContent(content)
-        if (persisted) {
-          persistedDeltas.push(content)
-        }
-        return persisted
-      },
+      createReplyPart: storage.createReplyPart,
+      updateReplyPartContent: storage.updateReplyPartContent,
+      updateReplyToolCall: storage.updateReplyToolCall,
       updateAssistantMessageState: (completion) => {
         persistedStates.push(completion)
-        return updateAssistantMessageState(completion)
+        return storage.updateAssistantMessageState(completion)
       }
     })
     .then(
       () => ({ status: "resolved" as const }),
       (error: unknown) => ({ status: "rejected" as const, error })
     )
+  const { reply, sources } = getStoredReply(store)
   return {
     events,
-    persistedDeltas,
+    storedPartsAtEvents,
     persistedStates,
-    updateAssistantMessageContent,
+    storage,
     reportedCancellations,
     reportedFailures,
-    settlement
+    settlement,
+    reply,
+    parts: reply.parts,
+    sources
+  }
+}
+
+/**
+ * Matches the event that sends a new part.
+ *
+ * @param part - Fields the part has.
+ * @returns A matcher of the `reply-part` event.
+ */
+function matchReplyPartEvent(part: Readonly<Record<string, unknown>>) {
+  return { type: "reply-part", part: expect.objectContaining(part) }
+}
+
+/**
+ * Matches a stored reasoning or text part of this case's turn.
+ *
+ * @param kind - Kind of the part.
+ * @param round - Round of the part.
+ * @param content - Its whole text.
+ * @returns A matcher of the stored part.
+ */
+function matchStoredFragmentPart(
+  kind: "reasoning" | "text",
+  round: number,
+  content: string
+) {
+  return {
+    kind,
+    id: expect.stringMatching(UUID_V7_PATTERN),
+    round,
+    createdAt: NOW,
+    updatedAt: NOW,
+    content
   }
 }
 
 describe("Agent", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] })
+    vi.setSystemTime(new Date(NOW))
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it("reports the code it was created with", () => {
     const agent = new Agent(AGENT_PROFILE, {
       openReplyStream: createEventStream()
@@ -307,11 +563,13 @@ describe("Agent", () => {
       abortSignal,
       history: [
         createUserMessage(1, "Earlier question"),
-        createAssistantMessage(2, "Earlier answer", {
+        createAssistantMessage(2, [createTextPart(12, 0, "Earlier answer")], {
           status: "completed",
           finishReason: "stop"
         }),
-        createAssistantMessage(3, "Failed answer", { status: "failed" })
+        createAssistantMessage(3, [createTextPart(13, 0, "Failed answer")], {
+          status: "failed"
+        })
       ]
     })
 
@@ -329,7 +587,7 @@ describe("Agent", () => {
     })
   })
 
-  it("stores and sends each text, then completes with the finish reason", async () => {
+  it("stores a round's text fragments as one text part, sends the part and then each fragment, and completes with the finish reason", async () => {
     const run = await getAgentReplyOutcome({
       openReplyStream: createEventStream(
         { type: "text", content: "Hi" },
@@ -338,16 +596,70 @@ describe("Agent", () => {
       )
     })
 
-    expect(run.persistedDeltas).toEqual(["Hi", " there"])
+    expect(run.parts).toEqual([matchStoredFragmentPart("text", 0, "Hi there")])
     expect(run.events).toEqual([
-      { type: "delta", content: "Hi" },
-      { type: "delta", content: " there" },
+      { type: "reply-part", part: { ...run.parts[0], content: "Hi" } },
+      {
+        type: "reply-part-delta",
+        partId: run.parts[0]?.id,
+        content: " there",
+        updatedAt: NOW
+      },
       { type: "done", finishReason: "stop" }
     ])
     expect(run.persistedStates).toEqual([
       { status: "completed", finishReason: "stop" }
     ])
+    expect(run.reply).toMatchObject({
+      status: "completed",
+      finishReason: "stop"
+    })
     expect(run.settlement).toEqual({ status: "resolved" })
+  })
+
+  it("stores reasoning as parts of its own, apart from the text between them", async () => {
+    const run = await getAgentReplyOutcome({
+      openReplyStream: createEventStream(
+        { type: "reasoning", content: "They say " },
+        { type: "reasoning", content: "hello." },
+        { type: "text", content: "Hi!" },
+        { type: "reasoning", content: "Add more?" },
+        { type: "text", content: " Welcome." },
+        { type: "finish", finishReason: "stop" }
+      )
+    })
+
+    expect(run.parts).toEqual([
+      matchStoredFragmentPart("reasoning", 0, "They say hello."),
+      matchStoredFragmentPart("text", 0, "Hi!"),
+      matchStoredFragmentPart("reasoning", 0, "Add more?"),
+      matchStoredFragmentPart("text", 0, " Welcome.")
+    ])
+    expect(run.events.map((event) => event.type)).toEqual([
+      "reply-part",
+      "reply-part-delta",
+      "reply-part",
+      "reply-part",
+      "reply-part",
+      "done"
+    ])
+  })
+
+  it("stores every part and fragment before sending it", async () => {
+    const run = await getAgentReplyOutcome({
+      openReplyStream: createEventStream(
+        { type: "reasoning", content: "Think" },
+        { type: "reasoning", content: "ing" },
+        { type: "text", content: "Hi" },
+        { type: "text", content: " there" },
+        { type: "finish", finishReason: "stop" }
+      )
+    })
+
+    run.events.forEach((event, index) => {
+      expectStoredBeforeSent(event, run.storedPartsAtEvents[index] ?? [])
+    })
+    expect(run.events).toHaveLength(5)
   })
 
   it("completes with a length finish reason", async () => {
@@ -359,7 +671,7 @@ describe("Agent", () => {
     })
 
     expect(run.events).toEqual([
-      { type: "delta", content: "Cut" },
+      matchReplyPartEvent({ kind: "text", content: "Cut" }),
       { type: "done", finishReason: "length" }
     ])
     expect(run.persistedStates).toEqual([
@@ -367,55 +679,60 @@ describe("Agent", () => {
     ])
   })
 
-  it("interrupts without sending text whose storage was refused and releases the stream", async () => {
-    let isStreamReleased = false
+  it("interrupts without sending a fragment the store refused because a newer turn finalized the reply, and releases the stream", async () => {
+    const store = openAgentTurnStore()
+    const stream = createScriptedStream(
+      { type: "text", content: "Hi" },
+      () => {
+        store.services.turns.updateAssistantMessageState(store.replyId, {
+          status: "interrupted"
+        })
+      },
+      { type: "text", content: " refused" },
+      { type: "text", content: " after" },
+      { type: "finish", finishReason: "stop" }
+    )
     const run = await getAgentReplyOutcome({
-      openReplyStream: vi.fn<OpenReplyStream>(async () =>
-        (async function* (): AsyncGenerator<ReplyStreamEvent> {
-          try {
-            yield { type: "text", content: "Hi" }
-            yield { type: "text", content: "deleted" }
-            yield { type: "text", content: "after" }
-            yield { type: "finish", finishReason: "stop" }
-          } finally {
-            isStreamReleased = true
-          }
-        })()
-      ),
-      updateAssistantMessageContent: (content) => content !== "deleted"
+      store,
+      openReplyStream: stream.openReplyStream
     })
 
-    expect(run.updateAssistantMessageContent.mock.calls).toEqual([
-      ["Hi"],
-      ["deleted"]
+    expect(run.storage.updateReplyPartContent.mock.calls).toEqual([
+      [run.parts[0]?.id, " refused"]
     ])
+    expect(run.parts).toEqual([matchStoredFragmentPart("text", 0, "Hi")])
     expect(run.events).toEqual([
-      { type: "delta", content: "Hi" },
+      matchReplyPartEvent({ kind: "text", content: "Hi" }),
       INTERRUPTED_EVENT
     ])
-    expect(
-      run.persistedStates.filter(({ status }) => status !== "interrupted")
-    ).toEqual([])
-    expect(isStreamReleased).toBe(true)
+    expect(run.persistedStates).toEqual([{ status: "interrupted" }])
+    expect(stream.release.isReleased).toBe(true)
     expect(run.settlement).toEqual({ status: "resolved" })
   })
 
-  it("reports an interruption when a newer turn or a deletion already finalized the reply", async () => {
+  it("reports an interruption when a newer turn finalized the reply before it completed", async () => {
+    const store = openAgentTurnStore()
     const run = await getAgentReplyOutcome({
-      openReplyStream: createEventStream(
-        { type: "text", content: "Hi" },
-        { type: "finish", finishReason: "stop" }
-      ),
-      updateAssistantMessageState: () => false
+      store,
+      openReplyStream: vi.fn<OpenReplyStream>(async () =>
+        (async function* (): AsyncGenerator<ReplyStreamEvent> {
+          yield { type: "text", content: "Hi" }
+          store.services.turns.updateAssistantMessageState(store.replyId, {
+            status: "interrupted"
+          })
+          yield { type: "finish", finishReason: "stop" }
+        })()
+      )
     })
 
     expect(run.persistedStates).toEqual([
       { status: "completed", finishReason: "stop" }
     ])
     expect(run.events).toEqual([
-      { type: "delta", content: "Hi" },
+      matchReplyPartEvent({ kind: "text", content: "Hi" }),
       INTERRUPTED_EVENT
     ])
+    expect(run.reply.status).toBe("interrupted")
     expect(run.settlement).toEqual({ status: "resolved" })
   })
 
@@ -430,34 +747,32 @@ describe("Agent", () => {
     expect(openReplyStream).not.toHaveBeenCalled()
     expect(run.persistedStates).toEqual([{ status: "interrupted" }])
     expect(run.events).toEqual([INTERRUPTED_EVENT])
+    expect(run.parts).toEqual([])
   })
 
   it("stops reading the stream once cancelled, keeps the stored text, and releases the stream", async () => {
     const cancellation = new AbortController()
-    let isStreamReleased = false
+    const stream = createScriptedStream(
+      { type: "text", content: "Partial" },
+      () => {
+        cancellation.abort()
+      },
+      { type: "text", content: "ignored" },
+      { type: "finish", finishReason: "stop" }
+    )
     const run = await getAgentReplyOutcome({
       abortSignal: cancellation.signal,
-      openReplyStream: vi.fn<OpenReplyStream>(async () =>
-        (async function* (): AsyncGenerator<ReplyStreamEvent> {
-          try {
-            yield { type: "text", content: "Partial" }
-            cancellation.abort()
-            yield { type: "text", content: "ignored" }
-            yield { type: "finish", finishReason: "stop" }
-          } finally {
-            isStreamReleased = true
-          }
-        })()
-      )
+      openReplyStream: stream.openReplyStream
     })
 
-    expect(run.persistedDeltas).toEqual(["Partial"])
+    expect(run.parts).toEqual([matchStoredFragmentPart("text", 0, "Partial")])
     expect(run.events).toEqual([
-      { type: "delta", content: "Partial" },
+      matchReplyPartEvent({ kind: "text", content: "Partial" }),
       INTERRUPTED_EVENT
     ])
     expect(run.persistedStates).toEqual([{ status: "interrupted" }])
-    expect(isStreamReleased).toBe(true)
+    expect(run.reply.status).toBe("interrupted")
+    expect(stream.release.isReleased).toBe(true)
   })
 
   it("interrupts when the stream ends after cancellation", async () => {
@@ -474,7 +789,7 @@ describe("Agent", () => {
 
     expect(run.persistedStates).toEqual([{ status: "interrupted" }])
     expect(run.events).toEqual([
-      { type: "delta", content: "Partial" },
+      matchReplyPartEvent({ kind: "text", content: "Partial" }),
       INTERRUPTED_EVENT
     ])
   })
@@ -527,7 +842,7 @@ describe("Agent", () => {
 
     expect(run.persistedStates).toEqual([{ status: "interrupted" }])
     expect(run.events).toEqual([
-      { type: "delta", content: "Partial" },
+      matchReplyPartEvent({ kind: "text", content: "Partial" }),
       INTERRUPTED_EVENT
     ])
     expect(run.reportedCancellations).toEqual([
@@ -551,20 +866,25 @@ describe("Agent", () => {
     expect(run.settlement).toEqual({ status: "resolved" })
   })
 
-  it("fails after the sent text when the stream fails", async () => {
+  it("fails after the sent text when the stream fails, keeping the stored parts", async () => {
     const run = await getAgentReplyOutcome({
       openReplyStream: vi.fn<OpenReplyStream>(async () =>
         (async function* (): AsyncGenerator<ReplyStreamEvent> {
+          yield { type: "reasoning", content: "Hmm" }
           yield { type: "text", content: "Partial" }
           throw new Error("Unsupported chat finish reason")
         })()
       )
     })
 
-    expect(run.persistedDeltas).toEqual(["Partial"])
+    expect(run.parts).toEqual([
+      matchStoredFragmentPart("reasoning", 0, "Hmm"),
+      matchStoredFragmentPart("text", 0, "Partial")
+    ])
     expect(run.persistedStates).toEqual([{ status: "failed" }])
     expect(run.events).toEqual([
-      { type: "delta", content: "Partial" },
+      matchReplyPartEvent({ kind: "reasoning", content: "Hmm" }),
+      matchReplyPartEvent({ kind: "text", content: "Partial" }),
       CHAT_FAILURE_EVENT
     ])
   })
@@ -574,10 +894,10 @@ describe("Agent", () => {
       openReplyStream: createEventStream({ type: "text", content: "Partial" })
     })
 
-    expect(run.persistedDeltas).toEqual(["Partial"])
+    expect(run.parts).toEqual([matchStoredFragmentPart("text", 0, "Partial")])
     expect(run.persistedStates).toEqual([{ status: "failed" }])
     expect(run.events).toEqual([
-      { type: "delta", content: "Partial" },
+      matchReplyPartEvent({ kind: "text", content: "Partial" }),
       CHAT_FAILURE_EVENT
     ])
     expect(run.reportedFailures).toEqual([
@@ -598,18 +918,38 @@ describe("Agent", () => {
     expect(run.reportedFailures).toEqual([
       new Error("The model called a tool although none was offered")
     ])
+    expect(run.parts).toEqual([])
   })
 
-  it("fails without sending text that cannot be stored", async () => {
+  it("fails without sending a part that cannot be stored", async () => {
     const run = await getAgentReplyOutcome({
       openReplyStream: createEventStream({ type: "text", content: "Hi" }),
-      updateAssistantMessageContent: () => {
+      createReplyPart: () => () => {
         throw new Error("Database is closed")
       }
     })
 
     expect(run.persistedStates).toEqual([{ status: "failed" }])
     expect(run.events).toEqual([CHAT_FAILURE_EVENT])
+  })
+
+  it("fails without sending a fragment that cannot be stored", async () => {
+    const run = await getAgentReplyOutcome({
+      openReplyStream: createEventStream(
+        { type: "text", content: "Hi" },
+        { type: "text", content: " there" }
+      ),
+      updateReplyPartContent: () => () => {
+        throw new Error("Database is closed")
+      }
+    })
+
+    expect(run.persistedStates).toEqual([{ status: "failed" }])
+    expect(run.events).toEqual([
+      matchReplyPartEvent({ kind: "text", content: "Hi" }),
+      CHAT_FAILURE_EVENT
+    ])
+    expect(run.parts).toEqual([matchStoredFragmentPart("text", 0, "Hi")])
   })
 
   it("fails after the sent text when the completed state cannot be stored", async () => {
@@ -619,12 +959,10 @@ describe("Agent", () => {
         { type: "text", content: "Hi" },
         { type: "finish", finishReason: "stop" }
       ),
-      updateAssistantMessageState: vi
-        .fn<AgentTurn["updateAssistantMessageState"]>()
-        .mockImplementationOnce(() => {
+      updateAssistantMessageState: (stored) =>
+        vi.fn(stored).mockImplementationOnce(() => {
           throw persistenceFailure
         })
-        .mockReturnValue(true)
     })
 
     expect(run.persistedStates).toEqual([
@@ -632,24 +970,23 @@ describe("Agent", () => {
       { status: "failed" }
     ])
     expect(run.events).toEqual([
-      { type: "delta", content: "Hi" },
+      matchReplyPartEvent({ kind: "text", content: "Hi" }),
       CHAT_FAILURE_EVENT
     ])
     expect(run.reportedFailures).toEqual([persistenceFailure])
+    expect(run.reply.status).toBe("failed")
     expect(run.settlement).toEqual({ status: "resolved" })
   })
 
   it("fails when the interrupted state cannot be stored", async () => {
     const persistenceFailure = new Error("Database is closed")
     const run = await getAgentReplyOutcome({
-      openReplyStream: createEventStream({ type: "text", content: "deleted" }),
-      updateAssistantMessageContent: () => false,
-      updateAssistantMessageState: vi
-        .fn<AgentTurn["updateAssistantMessageState"]>()
-        .mockImplementationOnce(() => {
+      openReplyStream: createEventStream({ type: "text", content: "refused" }),
+      createReplyPart: () => () => undefined,
+      updateAssistantMessageState: (stored) =>
+        vi.fn(stored).mockImplementationOnce(() => {
           throw persistenceFailure
         })
-        .mockReturnValue(true)
     })
 
     expect(run.persistedStates).toEqual([
@@ -667,7 +1004,7 @@ describe("Agent", () => {
       openReplyStream: vi.fn<OpenReplyStream>(async () => {
         throw streamFailure
       }),
-      updateAssistantMessageState: () => {
+      updateAssistantMessageState: () => () => {
         throw persistenceFailure
       }
     })
@@ -694,29 +1031,33 @@ describe("Agent", () => {
         })()
       }
     })
+    const firstStore = openAgentTurnStore()
+    const secondStore = openAgentTurnStore()
     const firstEvents: ChatGenerationEvent[] = []
     const secondEvents: ChatGenerationEvent[] = []
     /**
-     * Builds a turn that stores everything and records its events.
+     * Builds a turn over its own stored reply that records its events.
      *
      * @param userMessageContent - Question the turn answers.
+     * @param store - Stored turn whose reply it writes.
      * @param events - Receives the turn's events in order.
      * @returns The turn.
      */
     const createTurn = (
       userMessageContent: string,
+      store: AgentTurnStore,
       events: ChatGenerationEvent[]
     ): AgentTurn => ({
       ...TURN_REQUEST,
+      ...buildReplyStorage(store),
       history: [],
+      sources: [],
       clientTools: [],
       builtInTools: [],
       sendClientToolCall: handleUnexpectedToolCall,
       createToolCallGate: handleUnexpectedToolCall,
       userMessageContent,
       abortSignal: new AbortController().signal,
-      updateAssistantMessageContent: () => true,
-      updateAssistantMessageState: () => true,
       sendEvent: (event) => {
         events.push(event)
       },
@@ -724,21 +1065,30 @@ describe("Agent", () => {
       reportReplyFailure: () => undefined
     })
 
-    const firstReply = agent.createReply(createTurn("First", firstEvents))
-    await agent.createReply(createTurn("Second", secondEvents))
+    const firstReply = agent.createReply(
+      createTurn("First", firstStore, firstEvents)
+    )
+    await agent.createReply(createTurn("Second", secondStore, secondEvents))
     expect(firstEvents).toEqual([])
     firstReplyGate.resolve()
     await firstReply
 
     expect(firstEvents).toEqual([
-      { type: "delta", content: "Re: First" },
+      matchReplyPartEvent({ kind: "text", content: "Re: First" }),
       { type: "done", finishReason: "stop" }
     ])
     expect(secondEvents).toEqual([
-      { type: "delta", content: "Re: Second" },
+      matchReplyPartEvent({ kind: "text", content: "Re: Second" }),
       { type: "done", finishReason: "stop" }
     ])
+    expect(getStoredReply(firstStore).reply.parts).toEqual([
+      matchStoredFragmentPart("text", 0, "Re: First")
+    ])
+    expect(getStoredReply(secondStore).reply.parts).toEqual([
+      matchStoredFragmentPart("text", 0, "Re: Second")
+    ])
   })
+
   describe("tool calls", () => {
     it("offers the turn's tools, sends each checked call in the model's order, and asks the model again with the results", async () => {
       const sentCalls: ChatToolCall[] = []
@@ -806,10 +1156,47 @@ describe("Agent", () => {
         { role: "tool", toolCallId: firstCall?.id, content: "text of /a" },
         { role: "tool", toolCallId: secondCall?.id, content: "text of /b" }
       ])
+      expect(run.events.at(-2)).toEqual(
+        matchReplyPartEvent({ kind: "text", round: 1, content: "Both read." })
+      )
+      expect(run.events.at(-1)).toEqual({ type: "done", finishReason: "stop" })
+    })
+
+    it("stores each call under the identifier it sends, as running, then with its result", async () => {
+      const run = await getAgentReplyOutcome({
+        openReplyStream: createRoundStreams(READ_A_ROUND, FINISH_ROUND),
+        clientTools: [READ_TEXT_FILE_TOOL],
+        sendClientToolCall: async () => ({
+          status: "succeeded",
+          content: "Buy milk"
+        })
+      })
+
+      const call = {
+        kind: "tool-call",
+        id: expect.stringMatching(UUID_V7_PATTERN),
+        round: 0,
+        toolName: "read_text_file",
+        argumentText: '{"path":"/a"}',
+        sourceNumbers: [],
+        createdAt: NOW,
+        updatedAt: NOW
+      }
+      expect(run.parts).toEqual([
+        { ...call, status: "succeeded", result: "Buy milk" }
+      ])
       expect(run.events).toEqual([
-        { type: "delta", content: "Both read." },
+        { type: "reply-part", part: { ...call, status: "running" } },
+        {
+          type: "reply-part",
+          part: { ...call, status: "succeeded", result: "Buy milk" }
+        },
         { type: "done", finishReason: "stop" }
       ])
+      expect(run.storage.updateReplyToolCall).toHaveBeenCalledWith(
+        run.parts[0]?.id,
+        { status: "succeeded", result: "Buy milk", sources: [] }
+      )
     })
 
     it("keeps the model's order when the client answers the second call first", async () => {
@@ -847,15 +1234,19 @@ describe("Agent", () => {
       })
       answers.get("/b")?.resolve({ status: "succeeded", content: "B" })
       answers.get("/a")?.resolve({ status: "succeeded", content: "A" })
-      await outcome
+      const run = await outcome
 
       const contents = openReplyStream.mock.calls[1]?.[0].messages
         .filter((message) => message.role === "tool")
         .map((message) => message.content)
       expect(contents).toEqual(["A", "B"])
+      expect(run.parts).toEqual([
+        expect.objectContaining({ argumentText: '{"path":"/a"}', result: "A" }),
+        expect.objectContaining({ argumentText: '{"path":"/b"}', result: "B" })
+      ])
     })
 
-    it("answers an unknown tool and invalid arguments itself, without sending them", async () => {
+    it("stores an unknown tool and invalid arguments as failed calls and answers them without sending them", async () => {
       const openReplyStream = createRoundStreams(
         [
           {
@@ -870,7 +1261,7 @@ describe("Agent", () => {
       )
       const sendClientToolCall = vi.fn<AgentTurn["sendClientToolCall"]>()
 
-      await getAgentReplyOutcome({
+      const run = await getAgentReplyOutcome({
         openReplyStream,
         clientTools: [READ_TEXT_FILE_TOOL],
         sendClientToolCall
@@ -888,26 +1279,48 @@ describe("Agent", () => {
           content: expect.stringContaining("read_text_file")
         })
       ])
+      expect(run.parts).toEqual([
+        expect.objectContaining({
+          toolName: "delete_everything",
+          status: "failed",
+          result: toolMessages?.[0]?.content
+        }),
+        expect.objectContaining({
+          toolName: "read_text_file",
+          status: "failed",
+          result: toolMessages?.[1]?.content
+        })
+      ])
+      expect(run.events.slice(0, 2)).toEqual([
+        matchReplyPartEvent({
+          toolName: "delete_everything",
+          status: "failed"
+        }),
+        matchReplyPartEvent({ toolName: "read_text_file", status: "failed" })
+      ])
     })
 
-    it("streams each round's text and separates rounds by a blank line", async () => {
+    it("stores each round's parts under the round's index and gives the model each round's own text with its calls", async () => {
+      const openReplyStream = createRoundStreams(
+        [
+          { type: "text", content: "Let me look." },
+          {
+            type: "tool-calls",
+            toolCalls: [
+              { toolName: "read_text_file", argumentText: '{"path":"/a"}' }
+            ]
+          }
+        ],
+        [
+          { type: "reasoning", content: "It says milk." },
+          { type: "text", content: "Found it." },
+          { type: "text", content: " Buy milk." },
+          { type: "finish", finishReason: "stop" }
+        ]
+      )
+
       const run = await getAgentReplyOutcome({
-        openReplyStream: createRoundStreams(
-          [
-            { type: "text", content: "Let me look." },
-            {
-              type: "tool-calls",
-              toolCalls: [
-                { toolName: "read_text_file", argumentText: '{"path":"/a"}' }
-              ]
-            }
-          ],
-          [
-            { type: "text", content: "Found it." },
-            { type: "text", content: " Buy milk." },
-            { type: "finish", finishReason: "stop" }
-          ]
-        ),
+        openReplyStream,
         clientTools: [READ_TEXT_FILE_TOOL],
         sendClientToolCall: async () => ({
           status: "succeeded",
@@ -915,20 +1328,23 @@ describe("Agent", () => {
         })
       })
 
-      expect(run.persistedDeltas).toEqual([
-        "Let me look.",
-        "\n\nFound it.",
-        " Buy milk."
+      expect(run.parts).toEqual([
+        matchStoredFragmentPart("text", 0, "Let me look."),
+        expect.objectContaining({
+          kind: "tool-call",
+          round: 0,
+          status: "succeeded"
+        }),
+        matchStoredFragmentPart("reasoning", 1, "It says milk."),
+        matchStoredFragmentPart("text", 1, "Found it. Buy milk.")
       ])
-      expect(run.events).toEqual([
-        { type: "delta", content: "Let me look." },
-        { type: "delta", content: "\n\nFound it." },
-        { type: "delta", content: " Buy milk." },
-        { type: "done", finishReason: "stop" }
-      ])
+      expect(openReplyStream.mock.calls[1]?.[0].messages.at(-2)).toMatchObject({
+        role: "assistant",
+        content: "Let me look."
+      })
     })
 
-    it("separates a later round's text from text an earlier round wrote before a round with only tool calls", async () => {
+    it("stores no text part for a round with only calls and starts the next round's text in a part of its own", async () => {
       const run = await getAgentReplyOutcome({
         openReplyStream: createRoundStreams(
           [
@@ -960,36 +1376,17 @@ describe("Agent", () => {
         })
       })
 
-      expect(run.persistedDeltas).toEqual(["Let me look.", "\n\nFound it."])
+      expect(run.parts.map((part) => [part.kind, part.round] as const)).toEqual(
+        [
+          ["text", 0],
+          ["tool-call", 0],
+          ["tool-call", 1],
+          ["text", 2]
+        ]
+      )
     })
 
-    it("starts a later round's text without a separator when no earlier round wrote text", async () => {
-      const run = await getAgentReplyOutcome({
-        openReplyStream: createRoundStreams(
-          [
-            {
-              type: "tool-calls",
-              toolCalls: [
-                { toolName: "read_text_file", argumentText: '{"path":"/a"}' }
-              ]
-            }
-          ],
-          [
-            { type: "text", content: "Found it." },
-            { type: "finish", finishReason: "stop" }
-          ]
-        ),
-        clientTools: [READ_TEXT_FILE_TOOL],
-        sendClientToolCall: async () => ({
-          status: "succeeded",
-          content: "Buy milk"
-        })
-      })
-
-      expect(run.persistedDeltas).toEqual(["Found it."])
-    })
-
-    it("hands the model a failed result's content", async () => {
+    it("stores a failed result and hands the model its content", async () => {
       const openReplyStream = createRoundStreams(
         [
           {
@@ -1002,7 +1399,7 @@ describe("Agent", () => {
         [{ type: "finish", finishReason: "stop" }]
       )
 
-      await getAgentReplyOutcome({
+      const run = await getAgentReplyOutcome({
         openReplyStream,
         clientTools: [READ_TEXT_FILE_TOOL],
         sendClientToolCall: async () => ({
@@ -1016,9 +1413,15 @@ describe("Agent", () => {
         role: "tool",
         content: "The file /a no longer exists."
       })
+      expect(run.parts).toEqual([
+        expect.objectContaining({
+          status: "failed",
+          result: "The file /a no longer exists."
+        })
+      ])
     })
 
-    it("interrupts without another round when the reply is stopped while a call waits", async () => {
+    it("interrupts without another round, and marks the call interrupted, when the reply is stopped while a call waits", async () => {
       const cancellation = new AbortController()
       const openReplyStream = createRoundStreams([
         { type: "text", content: "Let me look." },
@@ -1041,36 +1444,69 @@ describe("Agent", () => {
       })
 
       expect(openReplyStream).toHaveBeenCalledOnce()
-      expect(run.persistedDeltas).toEqual(["Let me look."])
+      expect(run.parts).toEqual([
+        matchStoredFragmentPart("text", 0, "Let me look."),
+        expect.objectContaining({ kind: "tool-call", status: "interrupted" })
+      ])
       expect(run.persistedStates).toEqual([{ status: "interrupted" }])
       expect(run.events).toEqual([
-        { type: "delta", content: "Let me look." },
+        matchReplyPartEvent({ kind: "text", content: "Let me look." }),
+        matchReplyPartEvent({ kind: "tool-call", status: "running" }),
         INTERRUPTED_EVENT
       ])
+    })
+
+    it("interrupts without sending a call the store refused because a newer turn finalized the reply", async () => {
+      const store = openAgentTurnStore()
+      const sendClientToolCall = vi.fn<AgentTurn["sendClientToolCall"]>()
+      const openReplyStream = createRoundStreams(READ_A_ROUND)
+
+      const run = await getAgentReplyOutcome({
+        store,
+        openReplyStream,
+        clientTools: [READ_TEXT_FILE_TOOL],
+        sendClientToolCall,
+        createToolCallGate: async () => {
+          store.services.turns.updateAssistantMessageState(store.replyId, {
+            status: "interrupted"
+          })
+          return new ToolCallGate(new Set(["read_text_file"]), vi.fn())
+        }
+      })
+
+      expect(sendClientToolCall).not.toHaveBeenCalled()
+      expect(openReplyStream).toHaveBeenCalledOnce()
+      expect(run.parts).toEqual([])
+      expect(run.events).toEqual([INTERRUPTED_EVENT])
     })
   })
 
   describe("results of tools that reach the network", () => {
-    it("removes invisible characters from a backend tool's result and says how many", async () => {
+    it("removes invisible characters from a backend tool's result, says how many, and stores the cleaned result", async () => {
       const { entry } = createLookUpWordTool(async (word) => ({
         status: "succeeded",
-        content: `${word}:\u200B a night\u2066 insect`
+        content: `${word}:\u200B a night\u2066 insect`,
+        sources: []
       }))
       const openReplyStream = createRoundStreams(
         LOOK_UP_MOTH_ROUND,
         FINISH_ROUND
       )
 
-      await getAgentReplyOutcome({
+      const run = await getAgentReplyOutcome({
         openReplyStream,
         builtInTools: [entry]
       })
 
+      const cleaned =
+        "moth: a night insect\n\nLys removed 2 invisible characters from this result."
       expect(openReplyStream.mock.calls[1]?.[0].messages.at(-1)).toMatchObject({
         role: "tool",
-        content:
-          "moth: a night insect\n\nLys removed 2 invisible characters from this result."
+        content: cleaned
       })
+      expect(run.parts).toEqual([
+        expect.objectContaining({ status: "succeeded", result: cleaned })
+      ])
     })
 
     it("removes invisible characters from a backend tool's failed run", async () => {
@@ -1157,9 +1593,13 @@ describe("Agent", () => {
     it("offers client tools before backend tools and runs an allowed call under the turn's signal", async () => {
       const cancellation = new AbortController()
       const runSignals: AbortSignal[] = []
-      const { entry } = createLookUpWordTool(async (word, abortSignal) => {
-        runSignals.push(abortSignal)
-        return { status: "succeeded", content: `${word}: a night insect` }
+      const { entry } = createLookUpWordTool(async (word, context) => {
+        runSignals.push(context.abortSignal)
+        return {
+          status: "succeeded",
+          content: `${word}: a night insect`,
+          sources: []
+        }
       })
       const sendToolApprovalPrompt = createAllowingPromptSender()
       const openReplyStream = createRoundStreams(LOOK_UP_MOTH_ROUND, [
@@ -1197,7 +1637,22 @@ describe("Agent", () => {
         content: "moth: a night insect"
       })
       expect(run.events).toEqual([
-        { type: "delta", content: "A moth is a night insect." },
+        matchReplyPartEvent({
+          id: promptedCallId,
+          toolName: "look_up_word",
+          status: "awaiting-approval"
+        }),
+        matchReplyPartEvent({ id: promptedCallId, status: "running" }),
+        matchReplyPartEvent({
+          id: promptedCallId,
+          status: "succeeded",
+          result: "moth: a night insect"
+        }),
+        matchReplyPartEvent({
+          kind: "text",
+          round: 1,
+          content: "A moth is a night insect."
+        }),
         { type: "done", finishReason: "stop" }
       ])
     })
@@ -1232,7 +1687,7 @@ describe("Agent", () => {
         FINISH_ROUND
       )
 
-      await getAgentReplyOutcome({
+      const run = await getAgentReplyOutcome({
         openReplyStream,
         builtInTools: [entry],
         justRunToolNames: [],
@@ -1245,16 +1700,22 @@ describe("Agent", () => {
         role: "tool",
         content: "Cannot look up unknown."
       })
+      expect(run.parts).toEqual([
+        expect.objectContaining({
+          status: "failed",
+          result: "Cannot look up unknown."
+        })
+      ])
     })
 
-    it("hands the model the person's rejection without running the tool", async () => {
+    it("stores the person's rejection and hands it to the model without running the tool", async () => {
       const { tool, entry } = createLookUpWordTool()
       const openReplyStream = createRoundStreams(
         LOOK_UP_MOTH_ROUND,
         FINISH_ROUND
       )
 
-      await getAgentReplyOutcome({
+      const run = await getAgentReplyOutcome({
         openReplyStream,
         builtInTools: [entry],
         justRunToolNames: [],
@@ -1266,9 +1727,15 @@ describe("Agent", () => {
         role: "tool",
         content: DECLINED_APPROVAL.content
       })
+      expect(run.parts).toEqual([
+        expect.objectContaining({
+          status: "rejected",
+          result: DECLINED_APPROVAL.content
+        })
+      ])
     })
 
-    it("interrupts without running the tool when the reply is stopped while the prompt waits", async () => {
+    it("interrupts without running the tool, and marks the waiting call interrupted, when the reply is stopped while the prompt waits", async () => {
       const cancellation = new AbortController()
       const { tool, entry } = createLookUpWordTool()
       const openReplyStream = createRoundStreams(LOOK_UP_MOTH_ROUND)
@@ -1287,15 +1754,21 @@ describe("Agent", () => {
       expect(tool.startedWords).toEqual([])
       expect(openReplyStream).toHaveBeenCalledOnce()
       expect(run.persistedStates).toEqual([{ status: "interrupted" }])
-      expect(run.events).toEqual([INTERRUPTED_EVENT])
+      expect(run.events).toEqual([
+        matchReplyPartEvent({ status: "awaiting-approval" }),
+        INTERRUPTED_EVENT
+      ])
+      expect(run.parts).toEqual([
+        expect.objectContaining({ status: "interrupted" })
+      ])
     })
 
     it("interrupts without another round when the reply is stopped while the tool runs", async () => {
       const cancellation = new AbortController()
-      const { entry } = createLookUpWordTool(async (_word, abortSignal) => {
+      const { entry } = createLookUpWordTool(async (_word, context) => {
         cancellation.abort()
-        abortSignal.throwIfAborted()
-        return { status: "succeeded", content: "too late" }
+        context.abortSignal.throwIfAborted()
+        return { status: "succeeded", content: "too late", sources: [] }
       })
       const openReplyStream = createRoundStreams(LOOK_UP_MOTH_ROUND)
 
@@ -1307,7 +1780,13 @@ describe("Agent", () => {
 
       expect(openReplyStream).toHaveBeenCalledOnce()
       expect(run.persistedStates).toEqual([{ status: "interrupted" }])
-      expect(run.events).toEqual([INTERRUPTED_EVENT])
+      expect(run.events).toEqual([
+        matchReplyPartEvent({ status: "running" }),
+        INTERRUPTED_EVENT
+      ])
+      expect(run.parts).toEqual([
+        expect.objectContaining({ status: "interrupted" })
+      ])
       expect(run.reportedFailures).toEqual([])
       expect(run.reportedCancellations).toEqual([])
     })
@@ -1324,8 +1803,124 @@ describe("Agent", () => {
       })
 
       expect(run.persistedStates).toEqual([{ status: "failed" }])
-      expect(run.events).toEqual([CHAT_FAILURE_EVENT])
+      expect(run.events).toEqual([
+        matchReplyPartEvent({ status: "running" }),
+        CHAT_FAILURE_EVENT
+      ])
       expect(run.reportedFailures).toEqual([defect])
+      expect(run.parts).toEqual([
+        expect.objectContaining({ status: "interrupted" })
+      ])
+    })
+  })
+
+  describe("sources", () => {
+    it("numbers the sources a backend tool shows after the conversation's, stores them, and sends them before the call that shows them", async () => {
+      const earlierSource = {
+        number: 4,
+        url: "https://earlier.example/",
+        title: "Earlier"
+      }
+      const { entry } = createLookUpWordTool(answerWithWordSource)
+      const openReplyStream = createRoundStreams(
+        LOOK_UP_MOTH_ROUND,
+        FINISH_ROUND
+      )
+
+      const run = await getAgentReplyOutcome({
+        store: openAgentTurnStore([earlierSource]),
+        openReplyStream,
+        builtInTools: [entry]
+      })
+
+      const newSource = {
+        number: 5,
+        url: "https://words.example/moth",
+        title: "Dictionary: moth"
+      }
+      expect(run.events).toEqual([
+        matchReplyPartEvent({ status: "running" }),
+        { type: "sources", sources: [newSource] },
+        matchReplyPartEvent({ status: "succeeded", sourceNumbers: [5] }),
+        { type: "done", finishReason: "stop" }
+      ])
+      expect(run.sources).toEqual([earlierSource, newSource])
+      expect(openReplyStream.mock.calls[1]?.[0].messages.at(-1)).toMatchObject({
+        role: "tool",
+        content: "moth: a definition. Source [5]"
+      })
+    })
+
+    it("gives a URL the number it has in the conversation and stores it once", async () => {
+      const knownSource = {
+        number: 2,
+        url: "https://words.example/moth",
+        title: "Moths, the stored title"
+      }
+      const { entry } = createLookUpWordTool(answerWithWordSource)
+
+      const run = await getAgentReplyOutcome({
+        store: openAgentTurnStore([knownSource]),
+        openReplyStream: createRoundStreams(LOOK_UP_MOTH_ROUND, FINISH_ROUND),
+        builtInTools: [entry]
+      })
+
+      expect(run.events).toContainEqual({
+        type: "sources",
+        sources: [knownSource]
+      })
+      expect(run.parts).toEqual([
+        expect.objectContaining({
+          result: "moth: a definition. Source [2]",
+          sourceNumbers: [2]
+        })
+      ])
+      expect(run.sources).toEqual([knownSource])
+    })
+
+    it("gives a URL one number across the calls and rounds of a turn", async () => {
+      const { entry } = createLookUpWordTool(answerWithWordSource)
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream: createRoundStreams(
+          [
+            {
+              type: "tool-calls",
+              toolCalls: [
+                { toolName: "look_up_word", argumentText: '{"word":"moth"}' },
+                { toolName: "look_up_word", argumentText: '{"word":"lamp"}' }
+              ]
+            }
+          ],
+          LOOK_UP_MOTH_ROUND,
+          FINISH_ROUND
+        ),
+        builtInTools: [entry]
+      })
+
+      expect(
+        run.parts.map((part) =>
+          part.kind === "tool-call" ? part.sourceNumbers : []
+        )
+      ).toEqual([[1], [2], [1]])
+      expect(run.sources.map((source) => source.url)).toEqual([
+        "https://words.example/moth",
+        "https://words.example/lamp"
+      ])
+    })
+
+    it("stores no source for a client tool's result", async () => {
+      const run = await getAgentReplyOutcome({
+        openReplyStream: createRoundStreams(READ_A_ROUND, FINISH_ROUND),
+        clientTools: [READ_TEXT_FILE_TOOL],
+        sendClientToolCall: async () => ({
+          status: "succeeded",
+          content: "See https://moths.example/"
+        })
+      })
+
+      expect(run.events.some((event) => event.type === "sources")).toBe(false)
+      expect(run.sources).toEqual([])
     })
   })
 

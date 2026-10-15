@@ -4,6 +4,7 @@ import type AgentService from "./modules/agent/agentService"
 import type ChatService from "./modules/chat/chatService"
 import type StoredConversationHistoryEditor from "./modules/conversation/historyEditor"
 import type StoredConversationHistoryReader from "./modules/conversation/historyReader"
+import type StoredReplyParts from "./modules/conversation/replyParts"
 import type StoredConversationTurns from "./modules/conversation/turns"
 import type LlmRuntimeService from "./modules/llm/llmRuntimeService"
 import type LlmService from "./modules/llm/llmService"
@@ -20,8 +21,10 @@ declare module "fastify" {
     llmService: LlmService
     /** Application-scoped LLM runtime connection and model-operation queue. */
     llmRuntimeService: LlmRuntimeService
-    /** Application-scoped persistence of chat turns and their replies. */
+    /** Application-scoped persistence of chat turns and their replies' states. */
     conversationTurns: StoredConversationTurns
+    /** Application-scoped persistence of reply parts and the sources they read. */
+    replyParts: StoredReplyParts
     /** Application-scoped reading and search of conversation history. */
     conversationHistoryReader: StoredConversationHistoryReader
     /** Application-scoped renaming and deletion of stored conversations. */

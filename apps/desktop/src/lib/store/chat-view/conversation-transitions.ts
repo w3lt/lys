@@ -5,7 +5,9 @@ import type {
   ConversationAssistantMessageFinishReason,
   ConversationMessage,
   ConversationMetadata,
-  ConversationUserMessage
+  ConversationSource,
+  ConversationUserMessage,
+  ReplyPart
 } from "@lys/share"
 
 /** Immutable user message published by the chat-view store. */
@@ -16,10 +18,10 @@ type ReadonlyConversationAssistantMessageBase = Readonly<
   Omit<ConversationAssistantMessage, "status" | "finishReason">
 >
 
-/** Immutable assistant message that can accept stream deltas. */
+/** Immutable assistant message that can accept new parts and fragments. */
 export type StreamingConversationAssistantMessage =
   ReadonlyConversationAssistantMessageBase & {
-    /** Active lifecycle state accepting content deltas. */
+    /** Active lifecycle state accepting parts and fragments. */
     readonly status: "streaming"
     /** Streaming replies do not yet have a completion reason. */
     readonly finishReason: null
@@ -52,10 +54,12 @@ export type ReadonlyConversationMessage =
  * Transitively immutable conversation published by the chat-view store.
  *
  * @remarks Every transition returns a new frozen outer conversation. A
- * metadata-only transition may reuse the existing immutable message collection
- * by identity; content or lifecycle transitions create a new frozen collection
- * and replace only the affected message. Consumers may retain snapshots
- * safely; no transition mutates a previous conversation or message object.
+ * metadata-only transition may reuse the existing immutable message and
+ * source collections by identity; part or lifecycle transitions create a new
+ * frozen message collection and replace only the affected message, and a
+ * source transition creates a new frozen source collection. Consumers may
+ * retain snapshots safely; no transition mutates a previous conversation,
+ * message, part, or source object.
  */
 export type ChatViewConversation = Readonly<
   Omit<Conversation, "messages"> & {
@@ -72,18 +76,28 @@ export type StartConversationTurnOptions = {
   readonly previousConversation?: ChatViewConversation
   /** Persisted user message acknowledged by the backend. */
   readonly userMessage: ConversationUserMessage
-  /** Persisted assistant message that will receive streamed content. */
+  /** Persisted assistant message that will receive streamed parts. */
   readonly assistantMessage: StreamingConversationAssistantMessage
 }
 
-/** Inputs required to update one assistant reply with streamed content. */
-export type UpdateAssistantReplyContentOptions = {
-  /** Identifier of the assistant message receiving the delta. */
+/** Inputs required to add or replace one part of a streaming reply. */
+export type UpdateAssistantReplyPartOptions = {
+  /** Identifier of the streaming assistant message the part belongs to. */
   readonly assistantMessageId: string
-  /** Non-empty content emitted by the chat stream. */
+  /** Protocol-validated part, complete as the backend stored it. */
+  readonly part: ReplyPart
+}
+
+/** Inputs required to append one stored fragment to a reply part. */
+export type UpdateAssistantReplyPartContentOptions = {
+  /** Identifier of the streaming assistant message the part belongs to. */
+  readonly assistantMessageId: string
+  /** Identifier of the reasoning or text part the fragment extends. */
+  readonly partId: string
+  /** Non-empty fragment emitted by the chat stream. */
   readonly content: string
-  /** ISO timestamp applied to the updated assistant message. */
-  readonly timestamp: string
+  /** Time the backend stored the fragment, the part's new update time. */
+  readonly updatedAt: string
 }
 
 /** Inputs required to update an assistant reply to a valid terminal state. */
@@ -136,33 +150,41 @@ export function isCompletedConversationMessage(
   return message.role === "user" || message.status !== "streaming"
 }
 
+/** Sources of a conversation that has none. */
+const NO_SOURCES: readonly ConversationSource[] = Object.freeze([])
+
 /**
  * Combines backend metadata and messages with matching local history.
  *
  * @param options - Metadata, prior state, and the new backend-owned turn.
  * @returns A frozen conversation containing matching history followed by the
- * user and assistant messages received from the backend.
- * @remarks History is preserved only when the metadata identifier matches the
- * prior conversation. A new identifier intentionally starts a fresh transcript.
+ * user and assistant messages received from the backend, and the matching
+ * history's sources.
+ * @remarks History and sources are preserved only when the metadata
+ * identifier matches the prior conversation. A new identifier intentionally
+ * starts a fresh transcript without sources.
  */
 export function startConversationTurn(
   options: StartConversationTurnOptions
 ): ChatViewConversation {
-  const previousMessages =
+  const previousConversation =
     options.previousConversation?.id === options.conversationMetadata.id
-      ? options.previousConversation.messages
-      : []
+      ? options.previousConversation
+      : undefined
   const userMessage = Object.freeze({ ...options.userMessage })
-  const assistantMessage = Object.freeze({ ...options.assistantMessage })
+  const assistantMessage = createStreamingAssistantMessage(
+    options.assistantMessage
+  )
   const messages = Object.freeze([
-    ...previousMessages,
+    ...(previousConversation?.messages ?? []),
     userMessage,
     assistantMessage
   ] satisfies readonly ReadonlyConversationMessage[])
 
   return Object.freeze({
     ...options.conversationMetadata,
-    messages
+    messages,
+    sources: previousConversation?.sources ?? NO_SOURCES
   })
 }
 
@@ -183,51 +205,171 @@ export function updateConversationTitle(
 }
 
 /**
- * Appends one delta to the assistant message owned by the active request.
+ * Finds the streaming assistant message a stream event addresses.
  *
  * @param conversation - Conversation containing the active assistant message.
- * @param options - Assistant identifier, protocol-validated delta content, and
- * update timestamp.
- * @returns A new conversation containing the appended assistant content.
- * @throws If the owned assistant message is absent or already terminal.
- * @remarks Only a streaming assistant accepts deltas. The prior conversation
- * remains unchanged and the message's content is appended in event order.
+ * @param assistantMessageId - Identifier of the addressed message.
+ * @returns The streaming assistant message.
+ * @throws If the message is absent or already terminal.
  */
-export function updateAssistantReplyContent(
+function getStreamingAssistantMessage(
   conversation: ChatViewConversation,
-  options: UpdateAssistantReplyContentOptions
-): ChatViewConversation {
+  assistantMessageId: string
+): StreamingConversationAssistantMessage {
   const assistantMessage = conversation.messages.find(
-    (message) => message.id === options.assistantMessageId
+    (message) => message.id === assistantMessageId
   )
   if (assistantMessage?.role !== "assistant") {
-    throw new Error(
-      `Assistant message ${options.assistantMessageId} was not found`
-    )
+    throw new Error(`Assistant message ${assistantMessageId} was not found`)
   }
   if (assistantMessage.status !== "streaming") {
     throw new Error(
-      `Assistant message ${options.assistantMessageId} is already terminal`
+      `Assistant message ${assistantMessageId} is already terminal`
     )
   }
+  return assistantMessage
+}
 
+/**
+ * Builds a conversation whose streaming reply has new parts.
+ *
+ * @param conversation - Conversation containing the streaming reply.
+ * @param assistantMessage - The streaming reply before the change.
+ * @param parts - The reply's parts after the change.
+ * @returns A new frozen conversation with only that reply replaced; the
+ * reply's own update time is kept, as the backend keeps it.
+ */
+function buildConversationWithReplyParts(
+  conversation: ChatViewConversation,
+  assistantMessage: StreamingConversationAssistantMessage,
+  parts: readonly ReplyPart[]
+): ChatViewConversation {
   const updatedAssistantMessage = Object.freeze({
     ...assistantMessage,
-    content: assistantMessage.content + options.content,
-    updatedAt: options.timestamp
+    parts: Object.freeze(parts)
   } satisfies StreamingConversationAssistantMessage)
   const messages = Object.freeze(
     conversation.messages.map((message) =>
-      message.id === options.assistantMessageId
-        ? updatedAssistantMessage
-        : message
+      message.id === assistantMessage.id ? updatedAssistantMessage : message
     )
   )
+  return Object.freeze({ ...conversation, messages })
+}
 
-  return Object.freeze({
-    ...conversation,
-    messages
+/**
+ * Adds a new part to the streaming reply, or replaces the part stored under
+ * the same identifier, such as a tool call that changed state.
+ *
+ * @param conversation - Conversation containing the active assistant message.
+ * @param options - Assistant identifier and the part as stored.
+ * @returns A new conversation whose reply holds the part: in place of the
+ * earlier one with its identifier, else after every earlier part.
+ * @throws If the owned assistant message is absent or already terminal.
+ */
+export function updateAssistantReplyPart(
+  conversation: ChatViewConversation,
+  options: UpdateAssistantReplyPartOptions
+): ChatViewConversation {
+  const assistantMessage = getStreamingAssistantMessage(
+    conversation,
+    options.assistantMessageId
+  )
+  const part = Object.freeze({ ...options.part })
+  const isKnownPart = assistantMessage.parts.some(({ id }) => id === part.id)
+  const parts = isKnownPart
+    ? assistantMessage.parts.map((storedPart) =>
+        storedPart.id === part.id ? part : storedPart
+      )
+    : [...assistantMessage.parts, part]
+  return buildConversationWithReplyParts(conversation, assistantMessage, parts)
+}
+
+/**
+ * Appends one stored fragment to a reasoning or text part of the streaming
+ * reply.
+ *
+ * @param conversation - Conversation containing the active assistant message.
+ * @param options - Assistant and part identifiers, the fragment, and the time
+ * it was stored.
+ * @returns A new conversation whose part ends with the fragment and carries
+ * its update time.
+ * @throws If the owned assistant message is absent or already terminal, or
+ * the part is absent or a tool call.
+ */
+export function updateAssistantReplyPartContent(
+  conversation: ChatViewConversation,
+  options: UpdateAssistantReplyPartContentOptions
+): ChatViewConversation {
+  const assistantMessage = getStreamingAssistantMessage(
+    conversation,
+    options.assistantMessageId
+  )
+  const storedPart = assistantMessage.parts.find(
+    ({ id }) => id === options.partId
+  )
+  if (storedPart === undefined || storedPart.kind === "tool-call") {
+    throw new Error(
+      `Reply part ${options.partId} is not a reasoning or text part of the reply`
+    )
+  }
+  const part = Object.freeze({
+    ...storedPart,
+    content: storedPart.content + options.content,
+    updatedAt: options.updatedAt
   })
+  const parts = assistantMessage.parts.map((candidate) =>
+    candidate.id === part.id ? part : candidate
+  )
+  return buildConversationWithReplyParts(conversation, assistantMessage, parts)
+}
+
+/**
+ * Merges numbered sources into the conversation's sources.
+ *
+ * @param conversation - Conversation the sources belong to.
+ * @param sources - Protocol-validated sources the backend stored.
+ * @returns A new conversation holding every source once per number, in
+ * number order; a source under a number already held replaces it, which
+ * changes nothing because a number never changes its source.
+ */
+export function updateConversationSources(
+  conversation: ChatViewConversation,
+  sources: readonly ConversationSource[]
+): ChatViewConversation {
+  const sourcesByNumber = new Map(
+    [...conversation.sources, ...sources].map((source) => [
+      source.number,
+      Object.freeze({ ...source })
+    ])
+  )
+  const mergedSources = Object.freeze(
+    [...sourcesByNumber.values()].sort(
+      (first, second) => first.number - second.number
+    )
+  )
+  return Object.freeze({ ...conversation, sources: mergedSources })
+}
+
+/**
+ * Builds the parts of a reply that ended: a waiting or running tool call
+ * becomes interrupted, as the backend stores it when the reply ends.
+ *
+ * @param parts - The reply's parts when it ended.
+ * @param updatedAt - Update time of each interrupted call.
+ * @returns Frozen parts; every other part is kept by identity.
+ */
+function buildEndedReplyParts(
+  parts: readonly ReplyPart[],
+  updatedAt: string
+): readonly ReplyPart[] {
+  return Object.freeze(
+    parts.map((part): ReplyPart =>
+      part.kind === "tool-call" &&
+      (part.status === "awaiting-approval" || part.status === "running")
+        ? Object.freeze({ ...part, status: "interrupted", updatedAt })
+        : part
+    )
+  )
 }
 
 /**
@@ -237,15 +379,18 @@ export function updateAssistantReplyContent(
  * @param options - Exact terminal lifecycle transition to publish.
  * @returns A frozen assistant in the requested valid terminal state.
  * @remarks The transition preserves the streaming message identity and
- * content while replacing status, finish reason, and update timestamp.
+ * parts while replacing status, finish reason, and update timestamp; a
+ * waiting or running tool call becomes interrupted at that timestamp.
  */
 function createTerminalConversationAssistantMessage(
   assistantMessage: StreamingConversationAssistantMessage,
   options: UpdateAssistantReplyStatusOptions
 ): TerminalConversationAssistantMessage {
+  const parts = buildEndedReplyParts(assistantMessage.parts, options.timestamp)
   if (options.status === "completed") {
     return Object.freeze({
       ...assistantMessage,
+      parts,
       status: options.status,
       finishReason: options.finishReason,
       updatedAt: options.timestamp
@@ -254,6 +399,7 @@ function createTerminalConversationAssistantMessage(
 
   return Object.freeze({
     ...assistantMessage,
+    parts,
     status: options.status,
     finishReason: options.finishReason,
     updatedAt: options.timestamp
@@ -268,7 +414,8 @@ function createTerminalConversationAssistantMessage(
  * @returns A new conversation containing the terminal assistant message.
  * @throws If the owned assistant message is absent or already terminal.
  * @remarks Terminal state is one-way: completed, interrupted, and failed
- * assistants cannot receive later deltas or another terminal transition.
+ * assistants cannot receive later parts, fragments, or another terminal
+ * transition.
  */
 export function updateAssistantReplyStatus(
   conversation: ChatViewConversation,
@@ -315,8 +462,9 @@ export function updateAssistantReplyStatus(
  * failed message carries one; storage constraints forbid both.
  * @remarks A stored `streaming` status here belongs to a reply that does not
  * end the transcript, so no generation can still be writing it for this view;
- * it is presented as interrupted with the content stored so far. The stored
- * record itself is not changed.
+ * it is presented as interrupted with the parts stored so far, its waiting
+ * and running tool calls presented as interrupted too. The stored record
+ * itself is not changed.
  */
 function createStoredAssistantMessage(
   message: ConversationAssistantMessage
@@ -328,7 +476,7 @@ function createStoredAssistantMessage(
         createdAt: message.createdAt,
         model: message.model,
         role: message.role,
-        content: message.content,
+        parts: buildEndedReplyParts(message.parts, message.updatedAt),
         status: "interrupted",
         finishReason: null,
         updatedAt: message.updatedAt
@@ -342,7 +490,7 @@ function createStoredAssistantMessage(
         createdAt: message.createdAt,
         model: message.model,
         role: message.role,
-        content: message.content,
+        parts: buildStoredReplyParts(message.parts),
         status: message.status,
         finishReason: message.finishReason,
         updatedAt: message.updatedAt
@@ -357,12 +505,24 @@ function createStoredAssistantMessage(
         createdAt: message.createdAt,
         model: message.model,
         role: message.role,
-        content: message.content,
+        parts: buildStoredReplyParts(message.parts),
         status: message.status,
         finishReason: message.finishReason,
         updatedAt: message.updatedAt
       })
   }
+}
+
+/**
+ * Builds the immutable parts of a stored or snapshot reply.
+ *
+ * @param parts - Schema-validated parts in stored order.
+ * @returns A frozen copy holding frozen copies of the parts.
+ */
+function buildStoredReplyParts(
+  parts: readonly ReplyPart[]
+): readonly ReplyPart[] {
+  return Object.freeze(parts.map((part) => Object.freeze({ ...part })))
 }
 
 /**
@@ -390,9 +550,9 @@ function createStoredConversationMessage(
 /**
  * Creates one immutable streaming assistant from a validated record.
  *
- * @param message - Stored or snapshot reply that is streaming without a
- * finish reason.
- * @returns A frozen streaming assistant carrying the record's content and
+ * @param message - Stored, snapshot, or turn-start reply that is streaming
+ * without a finish reason.
+ * @returns A frozen streaming assistant carrying the record's parts and
  * update time.
  */
 function createStreamingAssistantMessage(
@@ -403,7 +563,7 @@ function createStreamingAssistantMessage(
     createdAt: message.createdAt,
     model: message.model,
     role: message.role,
-    content: message.content,
+    parts: buildStoredReplyParts(message.parts),
     status: message.status,
     finishReason: message.finishReason,
     updatedAt: message.updatedAt
@@ -459,6 +619,9 @@ export function createStoredChatViewConversation(
     title: conversation.title,
     agentCode: conversation.agentCode,
     messages,
+    sources: Object.freeze(
+      conversation.sources.map((source) => Object.freeze({ ...source }))
+    ),
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt
   } satisfies ChatViewConversation)
@@ -485,12 +648,12 @@ export function findStreamingReply(
  *
  * @param conversation - Conversation whose streaming reply is followed.
  * @param snapshot - Schema-validated stored reply sent when following began.
- * @returns A new conversation whose reply carries the snapshot's content,
+ * @returns A new conversation whose reply carries the snapshot's parts,
  * status, finish reason, and update time.
  * @throws If the reply is absent or already terminal locally, or a final
  * snapshot violates its status and finish-reason pairing.
- * @remarks The snapshot contains every delta sent before it, so it replaces
- * the local content instead of appending to it.
+ * @remarks The snapshot contains every part and fragment sent before it, so
+ * it replaces the local parts instead of adding to them.
  */
 export function updateAssistantReplyWithSnapshot(
   conversation: ChatViewConversation,

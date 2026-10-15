@@ -110,8 +110,9 @@ export default function updateFastifyWithChatReplyRoutes(
  * @throws Before the stream starts, if reading the conversation fails or the
  * registry is closed because shutdown began.
  * @remarks Reading the snapshot and registering the follower happen in one
- * synchronous step, and every delta is stored before it is sent, so the
- * snapshot plus later deltas equal the stored reply. The snapshot's pending
+ * synchronous step, and every part, fragment, and source is stored before it
+ * is sent, so the snapshot plus later events equal the stored reply and the
+ * conversation's stored sources. The snapshot's pending
  * calls and prompts are read in the same step, so each reaches this follower
  * once: in the snapshot or as a later `tool-call` or `tool-approval` event.
  * Closing this stream does not affect the generation.
@@ -151,6 +152,7 @@ async function handleChatReplyEventsRequest(
     type: "reply-snapshot",
     conversationTitle: conversation.title,
     assistantMessage,
+    sources: conversation.sources,
     pendingToolCalls: pendingToolCalls.toolCalls,
     pendingToolApprovals: pendingToolCalls.toolApprovals
   })

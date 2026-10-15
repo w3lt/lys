@@ -18,7 +18,9 @@ import {
   conversationNotFoundProblemSchema
 } from "../../http/errors/conversation"
 import {
-  chatDeltaEventSchema,
+  chatReplyPartDeltaEventSchema,
+  chatReplyPartEventSchema,
+  chatSourcesEventSchema,
   chatDoneEventSchema,
   chatErrorEventSchema,
   chatInterruptedEventSchema,
@@ -180,7 +182,9 @@ export const chatApiRequestBodySchema = z.strictObject({
  * `error` after a generation failure. A `title` event follows the start event
  * either to reconcile an existing persisted title or to publish a newly
  * persisted title. A generated title may arrive before, between, or after the
- * reply events because its task runs concurrently. The stream closes after
+ * reply events because its task runs concurrently. `reply-part`,
+ * `reply-part-delta`, and `sources` events carry the reply's parts and the
+ * sources its tool calls read, each stored before it is sent. The stream closes after
  * both tasks settle; like every generation stream (see
  * `ChatGenerationEvent`), it can close without a final reply event.
  * `tool-approval` events ask the client to show a call to the person; see
@@ -195,7 +199,7 @@ export const chatApiStreamEventSchema = z.discriminatedUnion("type", [
     conversation: conversationMetadataSchema,
     /** Persisted user message created before generation starts. */
     userMessage: conversationUserMessageSchema,
-    /** Empty or in-progress assistant message that receives deltas. */
+    /** Streaming assistant message without parts; later events add them. */
     assistantMessage: conversationAssistantMessageSchema
   }),
 
@@ -203,12 +207,14 @@ export const chatApiStreamEventSchema = z.discriminatedUnion("type", [
     type: z.literal("start-existing-conversation-turn"),
     /** Persisted user message appended to the existing conversation. */
     userMessage: conversationUserMessageSchema,
-    /** Empty or in-progress assistant message that receives deltas. */
+    /** Streaming assistant message without parts; later events add them. */
     assistantMessage: conversationAssistantMessageSchema
   }),
 
   chatTitleEventSchema,
-  chatDeltaEventSchema,
+  chatReplyPartEventSchema,
+  chatReplyPartDeltaEventSchema,
+  chatSourcesEventSchema,
   chatDoneEventSchema,
   chatInterruptedEventSchema,
   chatErrorEventSchema,

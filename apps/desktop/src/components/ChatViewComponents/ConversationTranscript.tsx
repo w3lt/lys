@@ -1,3 +1,4 @@
+import type { ConversationSource } from "@lys/share"
 import type { ReactElement } from "react"
 
 import type {
@@ -18,6 +19,8 @@ export type ConversationTranscriptProps =
       readonly completedMessages: readonly CompletedConversationMessage[]
       /** Name of the agent that answers the conversation. */
       readonly speakerName: string
+      /** Numbered sources of the conversation, which replies may cite. */
+      readonly sources: readonly ConversationSource[]
       /** Current lifecycle error rendered after messages when defined. */
       readonly error?: string
     }
@@ -26,10 +29,12 @@ export type ConversationTranscriptProps =
       readonly kind: "streaming-tail"
       /** Ordered user and terminal assistant messages before the active reply. */
       readonly completedMessages: readonly CompletedConversationMessage[]
-      /** Final assistant message accepting streamed content. */
+      /** Final assistant message accepting streamed parts. */
       readonly streamingMessage: StreamingConversationAssistantMessage
       /** Name of the agent that answers the conversation. */
       readonly speakerName: string
+      /** Numbered sources of the conversation, which replies may cite. */
+      readonly sources: readonly ConversationSource[]
       /** Current lifecycle error rendered after messages when defined. */
       readonly error?: string
     }
@@ -39,8 +44,8 @@ export type ConversationTranscriptProps =
  *
  * @remarks The explicit variant selects
  * whether one streaming assistant follows the completed prefix. The parent
- * owns messages, lifecycle state, and the name every assistant reply is shown
- * under; the transcript exposes no interruption
+ * owns messages, lifecycle state, the conversation's sources, and the name
+ * every assistant reply is shown under; the transcript exposes no interruption
  * control, because cancellation must stay reachable in active phases that have
  * no assistant message and is therefore owned by the composer. Entries in the
  * completed prefix are keyed by immutable message identifier; the streaming
@@ -60,12 +65,14 @@ export default function ConversationTranscript(
         <CompletedChatMessage
           key={message.id}
           message={message}
+          sources={props.sources}
           speakerName={props.speakerName}
         />
       ))}
       {props.kind === "streaming-tail" && (
         <StreamingChatMessage
           message={props.streamingMessage}
+          sources={props.sources}
           speakerName={props.speakerName}
         />
       )}

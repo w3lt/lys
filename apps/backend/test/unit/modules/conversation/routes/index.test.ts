@@ -10,6 +10,9 @@ import updateFastifyWithConversationRoutes from "../../../../../src/modules/conv
 import {
   createAssistantMessage,
   createFixtureUuidV7,
+  createReasoningPart,
+  createTextPart,
+  createToolCallPart,
   createUserMessage,
   FIXTURE_TIMESTAMP
 } from "../../../support/conversationFixtures"
@@ -36,11 +39,25 @@ const CONVERSATION = Object.freeze({
   ...CONVERSATION_METADATA,
   messages: [
     createUserMessage(2, "Plan my trip"),
-    createAssistantMessage(3, "Here is a plan", {
-      status: "completed",
-      finishReason: "stop"
-    })
-  ]
+    createAssistantMessage(
+      3,
+      [
+        createReasoningPart(4, 0, "They want a plan."),
+        createToolCallPart(
+          {
+            sequence: 5,
+            round: 0,
+            toolName: "web_search",
+            argumentText: '{"query":"trip"}'
+          },
+          { status: "succeeded", result: "Results", sourceNumbers: [1] }
+        ),
+        createTextPart(6, 1, "Here is a plan [1]")
+      ],
+      { status: "completed", finishReason: "stop" }
+    )
+  ],
+  sources: [{ number: 1, url: "https://trips.example/", title: "Trips" }]
 } satisfies Conversation)
 
 /** One-conversation page returned by the stubbed history. */
@@ -212,7 +229,7 @@ describe("updateFastifyWithConversationRoutes", () => {
   })
 
   describe("GET /api/v1/conversations/:conversationId", () => {
-    it("responds with the conversation and transcript read from history", async () => {
+    it("responds with the conversation, its transcript with every reply part, and its sources read from history", async () => {
       const { app, historyCalls } = await createConversationRouteApp()
       historyCalls.getConversation.mockReturnValue(CONVERSATION)
 

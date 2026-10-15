@@ -15,6 +15,7 @@ import {
   ScriptedBuiltInTool
 } from "../../../support/scriptedBuiltInTool"
 import { ScriptedBuiltInToolProvider } from "../../../support/scriptedBuiltInToolProvider"
+import { createRecordedRunContext } from "../../../support/builtInToolContract"
 
 /** Browser path where no browser is installed. */
 const MISSING_BROWSER_PATH = "/nonexistent/lys-test/chrome-headless-shell"
@@ -94,7 +95,9 @@ describe("createBuiltInTools", () => {
     const parsed = lookup.tool.parseToolCall({ url: "https://example.com/" })
     if (parsed.status !== "parsed") throw new Error("Expected a parsed call")
 
-    const result = await parsed.runToolCall(new AbortController().signal)
+    const result = await parsed.runToolCall(
+      createRecordedRunContext(new AbortController().signal).context
+    )
 
     expect(result).toEqual({
       status: "failed",

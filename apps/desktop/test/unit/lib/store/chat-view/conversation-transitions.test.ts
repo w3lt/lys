@@ -9,9 +9,11 @@ import {
   isCompletedConversationMessage,
   isStreamingConversationAssistantMessage,
   startConversationTurn,
-  updateAssistantReplyContent,
+  updateAssistantReplyPart,
+  updateAssistantReplyPartContent,
   updateAssistantReplyStatus,
   updateAssistantReplyWithSnapshot,
+  updateConversationSources,
   updateConversationTitle,
   type ChatViewConversation,
   type ReadonlyConversationMessage
@@ -21,7 +23,9 @@ import {
   buildConversation,
   buildConversationMetadata,
   buildEndedAssistantMessage,
+  buildFragmentPart,
   buildStreamingAssistantMessage,
+  buildToolCallPart,
   buildUserMessage,
   createFixtureUuidV7,
   FIXTURE_CONVERSATION_ID
@@ -36,21 +40,42 @@ const EARLIER_TURN = [
   buildCompletedAssistantMessage(3, "Hello!")
 ] as const
 
+/** Text part the streaming reply holds. */
+const STREAMED_TEXT = buildFragmentPart("text", 50, 0, "Part")
+
+/** Web search call the streaming reply is running. */
+const RUNNING_CALL = buildToolCallPart(
+  51,
+  0,
+  { toolName: "web_search", argumentText: '{"query":"moths"}' },
+  { status: "running" }
+)
+
 /** Reply streaming at the end of the fixture conversation. */
-const STREAMING_REPLY = buildStreamingAssistantMessage(5, "Part")
+const STREAMING_REPLY = buildStreamingAssistantMessage(5, [STREAMED_TEXT])
+
+/** Source the fixture conversation stored. */
+const STORED_SOURCE = Object.freeze({
+  number: 1,
+  url: "https://moths.example/",
+  title: "Moths"
+})
 
 /**
  * Builds a frozen chat-view conversation as the store publishes it.
  *
  * @param messages - Transcript in order.
+ * @param sources - The conversation's sources; none by default.
  * @returns The conversation with the fixture identity and no title.
  */
 function buildChatViewConversation(
-  messages: readonly ReadonlyConversationMessage[]
+  messages: readonly ReadonlyConversationMessage[],
+  sources: ChatViewConversation["sources"] = []
 ): ChatViewConversation {
   return Object.freeze({
     ...buildConversationMetadata(FIXTURE_CONVERSATION_ID, null),
-    messages: Object.freeze([...messages])
+    messages: Object.freeze([...messages]),
+    sources: Object.freeze([...sources])
   })
 }
 
@@ -71,7 +96,8 @@ const STREAMING_CONVERSATION = buildChatViewConversation([
 function parseStoredConversation(messages: readonly unknown[]) {
   return conversationSchema.parse({
     ...buildConversationMetadata(FIXTURE_CONVERSATION_ID, "Stored"),
-    messages
+    messages,
+    sources: []
   })
 }
 
@@ -102,8 +128,8 @@ describe("isCompletedConversationMessage", () => {
 })
 
 describe("startConversationTurn", () => {
-  it("appends the new turn after the history of the same conversation", () => {
-    const previous = buildChatViewConversation(EARLIER_TURN)
+  it("appends the new turn after the history of the same conversation and keeps its sources", () => {
+    const previous = buildChatViewConversation(EARLIER_TURN, [STORED_SOURCE])
     const metadata = buildConversationMetadata(
       FIXTURE_CONVERSATION_ID,
       "Greeting"
@@ -122,15 +148,16 @@ describe("startConversationTurn", () => {
         ...EARLIER_TURN,
         buildUserMessage(4, "Tell me more"),
         STREAMING_REPLY
-      ]
+      ],
+      sources: [STORED_SOURCE]
     })
     expect(Object.isFrozen(conversation)).toBe(true)
     expect(Object.isFrozen(conversation.messages)).toBe(true)
     expect(previous.messages).toHaveLength(2)
   })
 
-  it("starts a fresh transcript for a different conversation", () => {
-    const previous = buildChatViewConversation(EARLIER_TURN)
+  it("starts a fresh transcript without sources for a different conversation", () => {
+    const previous = buildChatViewConversation(EARLIER_TURN, [STORED_SOURCE])
 
     const conversation = startConversationTurn({
       conversationMetadata: buildConversationMetadata(
@@ -146,6 +173,7 @@ describe("startConversationTurn", () => {
       createFixtureUuidV7(10),
       STREAMING_REPLY.id
     ])
+    expect(conversation.sources).toEqual([])
   })
 })
 
@@ -163,53 +191,137 @@ describe("updateConversationTitle", () => {
   })
 })
 
-describe("updateAssistantReplyContent", () => {
-  it("appends deltas in order and stamps the update time", () => {
-    const once = updateAssistantReplyContent(STREAMING_CONVERSATION, {
+describe("updateAssistantReplyPart", () => {
+  it("adds a new part after the reply's earlier parts and keeps the reply's update time", () => {
+    const conversation = updateAssistantReplyPart(STREAMING_CONVERSATION, {
       assistantMessageId: STREAMING_REPLY.id,
-      content: " one",
-      timestamp: LATER
-    })
-    const twice = updateAssistantReplyContent(once, {
-      assistantMessageId: STREAMING_REPLY.id,
-      content: " two",
-      timestamp: LATER
+      part: RUNNING_CALL
     })
 
-    expect(twice.messages.at(-1)).toEqual({
+    expect(conversation.messages.at(-1)).toEqual({
       ...STREAMING_REPLY,
-      content: "Part one two",
-      updatedAt: LATER
+      parts: [STREAMED_TEXT, RUNNING_CALL]
     })
+    expect(Object.isFrozen(conversation.messages.at(-1))).toBe(true)
+  })
+
+  it("replaces the part stored under the same identifier in place", () => {
+    const withCall = updateAssistantReplyPart(STREAMING_CONVERSATION, {
+      assistantMessageId: STREAMING_REPLY.id,
+      part: RUNNING_CALL
+    })
+    const succeeded = buildToolCallPart(
+      51,
+      0,
+      { toolName: "web_search", argumentText: '{"query":"moths"}' },
+      { status: "succeeded", result: "Results", sourceNumbers: [1] }
+    )
+
+    const conversation = updateAssistantReplyPart(withCall, {
+      assistantMessageId: STREAMING_REPLY.id,
+      part: succeeded
+    })
+
+    const reply = conversation.messages.at(-1)
+    expect(reply?.role === "assistant" && reply.parts).toEqual([
+      STREAMED_TEXT,
+      succeeded
+    ])
   })
 
   it("changes only the addressed reply and leaves the previous conversation intact", () => {
-    const conversation = updateAssistantReplyContent(STREAMING_CONVERSATION, {
+    const conversation = updateAssistantReplyPart(STREAMING_CONVERSATION, {
       assistantMessageId: STREAMING_REPLY.id,
-      content: "!",
-      timestamp: LATER
+      part: RUNNING_CALL
     })
 
-    expect(conversation.messages.slice(0, -1)).toEqual(
-      STREAMING_CONVERSATION.messages.slice(0, -1)
-    )
     expect(conversation.messages[0]).toBe(STREAMING_CONVERSATION.messages[0])
+    expect(conversation.sources).toBe(STREAMING_CONVERSATION.sources)
     expect(STREAMING_CONVERSATION.messages.at(-1)).toBe(STREAMING_REPLY)
-    expect(Object.isFrozen(conversation.messages.at(-1))).toBe(true)
   })
 
   it.each([
     ["an absent reply", createFixtureUuidV7(99)],
     ["a user message", createFixtureUuidV7(4)],
     ["a terminal reply", createFixtureUuidV7(3)]
-  ])("refuses a delta for %s", (_label, assistantMessageId) => {
+  ])("refuses a part for %s", (_label, assistantMessageId) => {
     expect(() =>
-      updateAssistantReplyContent(STREAMING_CONVERSATION, {
+      updateAssistantReplyPart(STREAMING_CONVERSATION, {
         assistantMessageId,
-        content: "x",
-        timestamp: LATER
+        part: RUNNING_CALL
       })
     ).toThrow(assistantMessageId)
+  })
+})
+
+describe("updateAssistantReplyPartContent", () => {
+  it("appends fragments to the part in order and stamps the part's update time", () => {
+    const once = updateAssistantReplyPartContent(STREAMING_CONVERSATION, {
+      assistantMessageId: STREAMING_REPLY.id,
+      partId: STREAMED_TEXT.id,
+      content: " one",
+      updatedAt: LATER
+    })
+    const twice = updateAssistantReplyPartContent(once, {
+      assistantMessageId: STREAMING_REPLY.id,
+      partId: STREAMED_TEXT.id,
+      content: " two",
+      updatedAt: LATER
+    })
+
+    expect(twice.messages.at(-1)).toEqual({
+      ...STREAMING_REPLY,
+      parts: [{ ...STREAMED_TEXT, content: "Part one two", updatedAt: LATER }]
+    })
+  })
+
+  it.each([
+    ["an absent part", createFixtureUuidV7(98)],
+    ["a tool call", RUNNING_CALL.id]
+  ])("refuses a fragment for %s", (_label, partId) => {
+    const withCall = updateAssistantReplyPart(STREAMING_CONVERSATION, {
+      assistantMessageId: STREAMING_REPLY.id,
+      part: RUNNING_CALL
+    })
+
+    expect(() =>
+      updateAssistantReplyPartContent(withCall, {
+        assistantMessageId: STREAMING_REPLY.id,
+        partId,
+        content: "x",
+        updatedAt: LATER
+      })
+    ).toThrow(partId)
+  })
+
+  it("refuses a fragment for a terminal reply", () => {
+    expect(() =>
+      updateAssistantReplyPartContent(STREAMING_CONVERSATION, {
+        assistantMessageId: createFixtureUuidV7(3),
+        partId: STREAMED_TEXT.id,
+        content: "x",
+        updatedAt: LATER
+      })
+    ).toThrow("terminal")
+  })
+})
+
+describe("updateConversationSources", () => {
+  it("adds new sources in number order and keeps the transcript by identity", () => {
+    const withStored = buildChatViewConversation(EARLIER_TURN, [STORED_SOURCE])
+    const third = { number: 3, url: "https://c.example/", title: "C" }
+    const second = { number: 2, url: "https://b.example/", title: "B" }
+
+    const conversation = updateConversationSources(withStored, [
+      third,
+      STORED_SOURCE,
+      second
+    ])
+
+    expect(conversation.sources).toEqual([STORED_SOURCE, second, third])
+    expect(conversation.messages).toBe(withStored.messages)
+    expect(withStored.sources).toEqual([STORED_SOURCE])
+    expect(Object.isFrozen(conversation.sources)).toBe(true)
   })
 })
 
@@ -231,7 +343,7 @@ describe("updateAssistantReplyStatus", () => {
   })
 
   it.each(["interrupted", "failed"] as const)(
-    "ends the reply as %s without a finish reason, keeping its content",
+    "ends the reply as %s without a finish reason, keeping its parts",
     (status) => {
       const conversation = updateAssistantReplyStatus(STREAMING_CONVERSATION, {
         assistantMessageId: STREAMING_REPLY.id,
@@ -249,7 +361,56 @@ describe("updateAssistantReplyStatus", () => {
     }
   )
 
-  it("refuses a second terminal transition and later deltas", () => {
+  it.each(["completed", "interrupted", "failed"] as const)(
+    "marks the reply's waiting and running calls interrupted at the time it ends as %s, as the backend does",
+    (status) => {
+      const finishedCall = buildToolCallPart(
+        52,
+        0,
+        { toolName: "read_page", argumentText: "{}" },
+        { status: "failed", result: "Unreadable" }
+      )
+      const waitingCall = buildToolCallPart(
+        53,
+        1,
+        { toolName: "read_page", argumentText: "{}" },
+        { status: "awaiting-approval" }
+      )
+      const reply = buildStreamingAssistantMessage(5, [
+        STREAMED_TEXT,
+        RUNNING_CALL,
+        finishedCall,
+        waitingCall
+      ])
+
+      const conversation = updateAssistantReplyStatus(
+        buildChatViewConversation([buildUserMessage(4, "Go"), reply]),
+        status === "completed"
+          ? {
+              assistantMessageId: reply.id,
+              status,
+              finishReason: "stop",
+              timestamp: LATER
+            }
+          : {
+              assistantMessageId: reply.id,
+              status,
+              finishReason: null,
+              timestamp: LATER
+            }
+      )
+
+      const ended = conversation.messages.at(-1)
+      expect(ended?.role === "assistant" && ended.parts).toEqual([
+        STREAMED_TEXT,
+        { ...RUNNING_CALL, status: "interrupted", updatedAt: LATER },
+        finishedCall,
+        { ...waitingCall, status: "interrupted", updatedAt: LATER }
+      ])
+    }
+  )
+
+  it("refuses a second terminal transition and later parts", () => {
     const completed = updateAssistantReplyStatus(STREAMING_CONVERSATION, {
       assistantMessageId: STREAMING_REPLY.id,
       status: "completed",
@@ -266,10 +427,9 @@ describe("updateAssistantReplyStatus", () => {
       })
     ).toThrow("terminal")
     expect(() =>
-      updateAssistantReplyContent(completed, {
+      updateAssistantReplyPart(completed, {
         assistantMessageId: STREAMING_REPLY.id,
-        content: "late",
-        timestamp: LATER
+        part: RUNNING_CALL
       })
     ).toThrow("terminal")
   })
@@ -287,11 +447,12 @@ describe("updateAssistantReplyStatus", () => {
 })
 
 describe("createStoredChatViewConversation", () => {
-  it("presents a stored conversation in stored order, frozen", () => {
+  it("presents a stored conversation in stored order with its sources, frozen", () => {
     const stored = buildConversation(
       FIXTURE_CONVERSATION_ID,
       "Stored",
-      EARLIER_TURN
+      EARLIER_TURN,
+      [STORED_SOURCE]
     )
 
     const conversation = createStoredChatViewConversation(stored)
@@ -302,6 +463,7 @@ describe("createStoredChatViewConversation", () => {
     expect(
       conversation.messages.every((message) => Object.isFrozen(message))
     ).toBe(true)
+    expect(Object.isFrozen(conversation.sources)).toBe(true)
   })
 
   it("keeps a streaming reply that ends the transcript streaming so it can be followed", () => {
@@ -315,8 +477,11 @@ describe("createStoredChatViewConversation", () => {
     )
   })
 
-  it("presents an earlier streaming reply as interrupted with its stored content", () => {
-    const abandoned = buildStreamingAssistantMessage(3, "Half an ans")
+  it("presents an earlier streaming reply as interrupted with its stored parts, its open calls interrupted", () => {
+    const abandoned = buildStreamingAssistantMessage(3, [
+      buildFragmentPart("text", 30, 0, "Half an ans"),
+      RUNNING_CALL
+    ])
     const stored = buildConversation(FIXTURE_CONVERSATION_ID, null, [
       buildUserMessage(2, "Hi"),
       abandoned,
@@ -325,6 +490,7 @@ describe("createStoredChatViewConversation", () => {
 
     expect(createStoredChatViewConversation(stored).messages[1]).toEqual({
       ...abandoned,
+      parts: [abandoned.parts[0], { ...RUNNING_CALL, status: "interrupted" }],
       status: "interrupted",
       finishReason: null
     })
@@ -390,7 +556,7 @@ describe("findStreamingReply", () => {
 })
 
 describe("updateAssistantReplyWithSnapshot", () => {
-  it("replaces the local content with the snapshot's instead of appending", () => {
+  it("replaces the local parts with the snapshot's instead of adding to them", () => {
     const snapshot = buildStreamingAssistantMessage(5, "Partial answer")
 
     const conversation = updateAssistantReplyWithSnapshot(

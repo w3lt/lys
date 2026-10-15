@@ -34,7 +34,7 @@ function createConversation(
     updatedAt: now
   })
   transaction.createConversation(metadata)
-  return { ...metadata, messages: [] }
+  return { ...metadata, messages: [], sources: [] }
 }
 
 /**
@@ -74,7 +74,7 @@ export function createConversationTurn(
     id: uuidv7(),
     role: "assistant",
     model: options.model,
-    content: "",
+    parts: [],
     status: "streaming",
     finishReason: null,
     createdAt: now,

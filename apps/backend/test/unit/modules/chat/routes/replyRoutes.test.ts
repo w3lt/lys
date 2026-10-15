@@ -9,6 +9,7 @@ import {
   sendChatToolApprovalApi,
   sendChatToolResultApi,
   stopChatReplyApi,
+  type ChatGenerationEvent,
   type ChatToolApprovalAnswer,
   type ChatToolCall,
   type ChatToolResult
@@ -27,6 +28,7 @@ import ControlledReplyTask from "../../../support/controlledReplyTask"
 import {
   createAssistantMessage,
   createFixtureUuidV7,
+  createTextPart,
   createUserMessage,
   FIXTURE_TIMESTAMP
 } from "../../../support/conversationFixtures"
@@ -40,10 +42,21 @@ const CONVERSATION_ID = createFixtureUuidV7(1)
 /** Stored user message of {@link CONVERSATION}. */
 const USER_MESSAGE = createUserMessage(2, "Plan my trip")
 
+/** Text part {@link ASSISTANT_MESSAGE} has stored so far. */
+const STREAMED_TEXT_PART = createTextPart(4, 0, "Here is")
+
 /** Stored reply of {@link CONVERSATION} that the routes address. */
-const ASSISTANT_MESSAGE = createAssistantMessage(3, "Here is", {
+const ASSISTANT_MESSAGE = createAssistantMessage(3, [STREAMED_TEXT_PART], {
   status: "streaming"
 })
+
+/** Fragment the running generation appends to {@link STREAMED_TEXT_PART}. */
+const STREAMED_FRAGMENT_EVENT = Object.freeze({
+  type: "reply-part-delta",
+  partId: STREAMED_TEXT_PART.id,
+  content: " a",
+  updatedAt: FIXTURE_TIMESTAMP
+} satisfies ChatGenerationEvent)
 
 /** Address of {@link ASSISTANT_MESSAGE} in its conversation. */
 const REPLY_TARGET = Object.freeze({
@@ -58,7 +71,8 @@ const CONVERSATION = Object.freeze({
   agentCode: "lys",
   createdAt: FIXTURE_TIMESTAMP,
   updatedAt: FIXTURE_TIMESTAMP,
-  messages: [USER_MESSAGE, ASSISTANT_MESSAGE]
+  messages: [USER_MESSAGE, ASSISTANT_MESSAGE],
+  sources: [{ number: 1, url: "https://trips.example/", title: "Trips" }]
 } satisfies Conversation)
 
 /** Snapshot event opening every stream that follows {@link REPLY_TARGET}. */
@@ -66,6 +80,7 @@ const REPLY_SNAPSHOT_EVENT = Object.freeze({
   type: "reply-snapshot",
   conversationTitle: "Trip plan",
   assistantMessage: ASSISTANT_MESSAGE,
+  sources: CONVERSATION.sources,
   pendingToolCalls: [],
   pendingToolApprovals: []
 })
@@ -412,7 +427,7 @@ describe("updateFastifyWithChatReplyRoutes", () => {
       // The route reads the snapshot and registers its follower in one
       // synchronous step, so the follower exists once this read is observed.
       await snapshotRead.promise
-      generation.replyTask.context.sendEvent({ type: "delta", content: " a" })
+      generation.replyTask.context.sendEvent(STREAMED_FRAGMENT_EVENT)
       generation.replyTask.context.sendEvent({
         type: "done",
         finishReason: "stop"
@@ -426,7 +441,7 @@ describe("updateFastifyWithChatReplyRoutes", () => {
       const events = parseSseEvents(response.body)
       expect(events).toEqual([
         { event: "reply-snapshot", data: REPLY_SNAPSHOT_EVENT },
-        { event: "delta", data: { type: "delta", content: " a" } },
+        { event: "reply-part-delta", data: STREAMED_FRAGMENT_EVENT },
         { event: "done", data: { type: "done", finishReason: "stop" } },
         { event: "title", data: { type: "title", title: "Trips" } }
       ])

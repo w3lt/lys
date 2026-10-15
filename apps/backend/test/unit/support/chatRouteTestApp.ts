@@ -15,6 +15,7 @@ import { createChatSseTestApp } from "./chatSseRoute"
 import { openConversationTestServices } from "./conversationDatabase"
 import type { TestFastify } from "./fastifyTestApp"
 import {
+  answerWithWordSource,
   CHECK_SPELLING_TOOL,
   LOOK_UP_WORD_TOOL,
   ScriptedBuiltInTool
@@ -71,12 +72,15 @@ export type ChatRouteTestApp = TestFastify &
  * under test. Unconfigured turn creation throws and both chat-service calls
  * reject with `Unexpected chat route call: <name>`, so a case that reaches
  * persistence or the model without arranging it fails. No database row is
- * written and no HTTP request leaves the process. The decorated agent service
+ * written and no HTTP request leaves the process. The decorated reply-part
+ * persistence is real and stores on the same in-memory database. The
+ * decorated agent service
  * keeps its records on the same in-memory database and builds the built-in
  * agents with {@link TEST_BUILT_IN_AGENT_PROMPTS}; every agent's model calls
  * go through the `completeChatStream` spy. The decorated history reader reads
  * the same database. The backend tools are the scripted `look_up_word`
- * tool, always ready, and `check_spelling`, whose provider is never ready
+ * tool, always ready, which numbers the dictionary page of each word it looks
+ * up as a source, and `check_spelling`, whose provider is never ready
  * (`api-key-missing`). The decorated tool approval service reads the saved
  * Just run choices through the `readJustRunToolNames` spy. When the test
  * finishes, the registry is disposed
@@ -85,7 +89,8 @@ export type ChatRouteTestApp = TestFastify &
  */
 export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
   const testFastify = await createChatSseTestApp()
-  const { database, turns, history } = openConversationTestServices()
+  const { database, turns, replyParts, history } =
+    openConversationTestServices()
   const createConversationTurn = vi
     .spyOn(turns, "createConversationTurn")
     .mockImplementation(() => handleUnexpectedCall("createConversationTurn"))
@@ -120,6 +125,7 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
   })
   testFastify.app.setValidatorCompiler(validatorCompiler)
   testFastify.app.decorate("conversationTurns", turns)
+  testFastify.app.decorate("replyParts", replyParts)
   testFastify.app.decorate("conversationHistoryReader", history)
   testFastify.app.decorate("chatService", chatService)
   testFastify.app.decorate("agentService", agentService)
@@ -134,7 +140,7 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
         definition: LOOK_UP_WORD_TOOL,
         provider: new ScriptedBuiltInToolProvider({
           status: "ready",
-          tool: new ScriptedBuiltInTool()
+          tool: new ScriptedBuiltInTool(answerWithWordSource)
         })
       }),
       Object.freeze({

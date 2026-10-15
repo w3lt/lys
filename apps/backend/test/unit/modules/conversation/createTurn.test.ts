@@ -4,7 +4,11 @@ import { createConversationTurn } from "../../../../src/modules/conversation/cre
 import type { CreateConversationTurnOptions } from "../../../../src/modules/chat/persistence"
 import { ConversationNotFoundError } from "../../../../src/utils/errors"
 import { openSqliteConversationRecords } from "../../support/conversationDatabase"
-import { createFixtureUuidV7 } from "../../support/conversationFixtures"
+import {
+  createFixtureUuidV7,
+  createTextPart,
+  formatMessageText
+} from "../../support/conversationFixtures"
 import type { ConversationRecordsHarness } from "../../support/conversationRecordsContract"
 
 /** Time of every turn a case creates. */
@@ -51,7 +55,12 @@ function saveExistingConversation(records: ConversationRecordsHarness): void {
     id: createFixtureUuidV7(11),
     conversationId: EXISTING_CONVERSATION_ID,
     model: "qwen/qwen3-8b",
-    content: "Earlier answer",
+    parts: [
+      createTextPart(511, 0, "Earlier answer", {
+        createdAt: "2026-01-01T00:00:02.000Z",
+        updatedAt: "2026-01-01T00:00:03.000Z"
+      })
+    ],
     status: "completed",
     finishReason: "stop",
     createdAt: "2026-01-01T00:00:02.000Z",
@@ -76,7 +85,8 @@ describe("createConversationTurn", () => {
       agentCode: "options-agent",
       createdAt: NOW,
       updatedAt: NOW,
-      messages: []
+      messages: [],
+      sources: []
     })
     expect(z.uuidv7().safeParse(turn.conversation.id).success).toBe(true)
     expect(
@@ -84,7 +94,7 @@ describe("createConversationTurn", () => {
     ).toMatchObject({ agentCode: "options-agent", createdAt: NOW })
   })
 
-  it("appends a user message and an empty streaming reply", () => {
+  it("appends a user message and a streaming reply without parts", () => {
     const records = openSqliteConversationRecords()
 
     const turn = createCommittedTurn(records, {
@@ -103,7 +113,7 @@ describe("createConversationTurn", () => {
       id: expect.any(String),
       role: "assistant",
       model: "qwen/qwen3-8b",
-      content: "",
+      parts: [],
       status: "streaming",
       finishReason: null,
       createdAt: NOW,
@@ -130,25 +140,30 @@ describe("createConversationTurn", () => {
       title: "Trip plan",
       agentCode: "stored-agent"
     })
-    expect(turn.conversation.messages.map(({ content }) => content)).toEqual([
+    expect(turn.conversation.messages.map(formatMessageText)).toEqual([
       "Earlier question",
       "Earlier answer"
     ])
     expect(
       records.recordReader
         .findConversation(EXISTING_CONVERSATION_ID)
-        ?.messages.map(({ content }) => content)
+        ?.messages.map(formatMessageText)
     ).toEqual(["Earlier question", "Earlier answer", "Next question", ""])
   })
 
-  it("interrupts a reply still streaming in the continued conversation and keeps its text", () => {
+  it("interrupts a reply still streaming in the continued conversation and keeps its parts", () => {
     const records = openSqliteConversationRecords()
     saveExistingConversation(records)
     records.saveAssistantMessage({
       id: createFixtureUuidV7(12),
       conversationId: EXISTING_CONVERSATION_ID,
       model: "qwen/qwen3-8b",
-      content: "Partial",
+      parts: [
+        createTextPart(512, 0, "Partial", {
+          createdAt: "2026-01-01T00:00:04.000Z",
+          updatedAt: "2026-01-01T00:00:04.000Z"
+        })
+      ],
       status: "streaming",
       finishReason: null,
       createdAt: "2026-01-01T00:00:04.000Z",
@@ -163,7 +178,7 @@ describe("createConversationTurn", () => {
 
     expect(turn.conversation.messages.at(-1)).toMatchObject({
       id: createFixtureUuidV7(12),
-      content: "Partial",
+      parts: [{ kind: "text", content: "Partial" }],
       status: "interrupted",
       finishReason: null,
       updatedAt: NOW
@@ -184,7 +199,12 @@ describe("createConversationTurn", () => {
       id: createFixtureUuidV7(20),
       conversationId: otherConversationId,
       model: "qwen/qwen3-8b",
-      content: "Other partial",
+      parts: [
+        createTextPart(520, 0, "Other partial", {
+          createdAt: "2026-01-01T00:00:05.000Z",
+          updatedAt: "2026-01-01T00:00:05.000Z"
+        })
+      ],
       status: "streaming",
       finishReason: null,
       createdAt: "2026-01-01T00:00:05.000Z",
@@ -199,7 +219,10 @@ describe("createConversationTurn", () => {
 
     expect(
       records.recordReader.findConversation(otherConversationId)?.messages[0]
-    ).toMatchObject({ status: "streaming", content: "Other partial" })
+    ).toMatchObject({
+      status: "streaming",
+      parts: [{ kind: "text", content: "Other partial" }]
+    })
   })
 
   it("rejects an absent conversation before appending messages", () => {
@@ -232,7 +255,12 @@ describe("createConversationTurn", () => {
       id: createFixtureUuidV7(12),
       conversationId: EXISTING_CONVERSATION_ID,
       model: "qwen/qwen3-8b",
-      content: "Partial",
+      parts: [
+        createTextPart(512, 0, "Partial", {
+          createdAt: "2026-01-01T00:00:04.000Z",
+          updatedAt: "2026-01-01T00:00:04.000Z"
+        })
+      ],
       status: "streaming",
       finishReason: null,
       createdAt: "2026-01-01T00:00:04.000Z",

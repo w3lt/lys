@@ -58,6 +58,27 @@ const MILLISECONDS_PER_SECOND = 1_000
 const TOO_COMPLEX_PAGE_REASON =
   "the page is too large or too deeply nested for Lys to read."
 
+/** Read failures whose explanation depends on nothing but their kind. */
+type FixedReasonFailureKind = Exclude<
+  PageRenderingFailure["kind"],
+  | "timed-out"
+  | "transfer-failed"
+  | "http-status"
+  | "unsupported-content-type"
+  | "invalid-redirect"
+>
+
+/** Why a page could not be read, for each failure that carries no detail. */
+const FIXED_FAILURE_REASONS = Object.freeze({
+  "browser-missing": `Lys's browser is missing. ${BROWSER_HELP_SENTENCES}`,
+  "browser-failed": `Lys's browser could not start. ${BROWSER_HELP_SENTENCES}`,
+  "blocked-address":
+    "its address, or the address of a page it redirects to, belongs to this machine or a private network, which Lys never reads.",
+  "unresolvable-host":
+    "its host name, or the host name of a page it redirects to, could not be found.",
+  crashed: "the page crashed Lys's browser while loading."
+} satisfies Readonly<Record<FixedReasonFailureKind, string>>)
+
 /** Input of one parsed read. */
 type PageReadInput = Readonly<{
   /** Page to read. */
@@ -91,7 +112,7 @@ export function buildReadPageDefinition(): ToolDefinition {
   const timeoutSeconds = PAGE_READ_TIMEOUT_MS / MILLISECONDS_PER_SECOND
   return toolDefinitionSchema.parse({
     name: READ_PAGE_TOOL_NAME,
-    description: `Read one public web page in a browser and return its title, URL, and main text, to answer from and cite. The page's scripts run and its redirects are followed. Text the page hides from readers is left out. Reads http and https pages that serve HTML or plain text, within ${timeoutSeconds} seconds. Pages that need signing in, PDFs, and addresses on this machine or a private network cannot be read. A page longer than ${MAXIMUM_SELECTED_PASSAGE_LENGTH} characters is cut to the passages that best match focus, or to its beginning.`,
+    description: `Read one public web page in a browser and return its title, URL, and main text, to answer from and cite. The page's scripts run and its redirects are followed. Reads http and https pages that serve HTML or plain text, within ${timeoutSeconds} seconds. Pages that need signing in, PDFs, and addresses on this machine or a private network cannot be read. A page longer than ${MAXIMUM_SELECTED_PASSAGE_LENGTH} characters is cut to the passages that best match focus, or to its beginning.`,
     group: "network",
     access: "network",
     runner: "backend",
@@ -130,22 +151,16 @@ function buildFailedReadResult(url: string, reason: string): BuiltInToolResult {
  *
  * @param failure - Recognized read failure.
  * @param readTimeoutMs - Time limit of the read.
- * @returns A clause for {@link buildFailedReadResult}; a browser that is
- * missing or cannot start is reported with what the person should do.
+ * @returns A clause for {@link buildFailedReadResult}: the read's time
+ * limit, or the failure's detail, for a failure that carries one; otherwise
+ * the fixed reason of its kind, which for a browser that is missing or
+ * cannot start says what the person should do.
  */
 function formatPageRenderingFailure(
   failure: PageRenderingFailure,
   readTimeoutMs: number
 ): string {
   switch (failure.kind) {
-    case "browser-missing":
-      return `Lys's browser is missing. ${BROWSER_HELP_SENTENCES}`
-    case "browser-failed":
-      return `Lys's browser could not start. ${BROWSER_HELP_SENTENCES}`
-    case "blocked-address":
-      return "its address, or the address of a page it redirects to, belongs to this machine or a private network, which Lys never reads."
-    case "unresolvable-host":
-      return "its host name, or the host name of a page it redirects to, could not be found."
     case "timed-out":
       return `it did not load within ${readTimeoutMs / MILLISECONDS_PER_SECOND} seconds.`
     case "transfer-failed":
@@ -156,10 +171,8 @@ function formatPageRenderingFailure(
       return `it is not a web page (${failure.mediaType ?? "no content type"}). Lys reads HTML and plain-text pages only.`
     case "invalid-redirect":
       return `it redirects to an address Lys may not read. ${formatPageUrlProblem(failure.problem)}`
-    case "crashed":
-      return "the page crashed Lys's browser while loading."
-    case "too-complex":
-      return TOO_COMPLEX_PAGE_REASON
+    default:
+      return FIXED_FAILURE_REASONS[failure.kind]
   }
 }
 
@@ -310,9 +323,9 @@ function parsePageReadInput(
  * @remarks Implements {@link BuiltInTool}. Parsing checks the URL by the
  * page URL rules before the person is asked; a run reads the page in a
  * fresh headless browser whose every connection passes the address rule,
- * with the page's scripts running and its redirects followed, leaves out
- * text a person cannot see, extracts its main text, keeps the passages that
- * fit, and frames them as untrusted page content. Every failure the model can act on becomes its result; only a
+ * with the page's scripts running and its redirects followed, reads all of
+ * its text, hidden text included, extracts its main text, keeps the
+ * passages that fit, and frames them as untrusted page content. Every failure the model can act on becomes its result; only a
  * defect rejects. Owns no resource; each run starts and closes its own
  * browser and proxy. Concurrency model: reentrant.
  */

@@ -10,19 +10,21 @@ import {
   type Response,
   type Route
 } from "playwright-core"
+import {
+  findPageMediaType,
+  getPageDocument,
+  type PageDocument,
+  type PageMediaType
+} from "./pageDocument"
 import PageProxy, { type PageProxyLimits } from "./pageProxy"
 import {
-  buildVisibleHtml,
-  formatCutPageText,
-  getPageSnapshot,
-  MAXIMUM_PAGE_TEXT_LENGTH
-} from "./pageSnapshot"
-import { parsePageUrl, type PageUrl, type PageUrlProblem } from "./pageUrl"
+  getUrlPort,
+  parsePageUrl,
+  type PageUrl,
+  type PageUrlProblem
+} from "./pageUrl"
 import { formatSingleLineText } from "./untrustedText"
 import { hasErrorCode, type ConnectionAddressRule } from "./webConnection"
-
-/** How Lys reads a page: as HTML, or as plain text. */
-export type PageMediaType = "text/html" | "text/plain"
 
 /** A page Lys read in the browser. */
 export type RenderedPage = Readonly<{
@@ -31,19 +33,29 @@ export type RenderedPage = Readonly<{
   /** Whether `text` is HTML or plain text. */
   mediaType: PageMediaType
   /**
-   * For HTML, the rendered page's HTML, built from its snapshot; for plain
-   * text, the page's text.
+   * For HTML, the HTML of the page's DOM once it rendered; for plain text,
+   * the page's text.
    */
   text: string
   /**
-   * Whether the page was longer than {@link MAXIMUM_PAGE_TEXT_LENGTH} and
-   * only its beginning was read.
+   * Whether the page was longer than the page text limit and only its
+   * beginning was read.
    */
   isTruncated: boolean
 }>
 
+/** Receives the causes of read failures the model is told about only by kind. */
+export type PageRenderingFailureReporters = Readonly<{
+  /**
+   * Receives why Lys's browser is missing or could not start; the read then
+   * fails as `browser-missing` or `browser-failed`.
+   */
+  reportBrowserFailure: (failure: unknown) => void
+}>
+
 /** What one browser read needs from its environment. */
 export type PageRenderingDependencies = ConnectionAddressRule &
+  PageRenderingFailureReporters &
   Readonly<{
     /** Absolute path of the Chrome Headless Shell executable. */
     browserExecutablePath: string
@@ -82,7 +94,7 @@ export type PageRenderingFailure =
       kind: "unresolvable-host"
     }>
   | Readonly<{
-      /** The page's document did not arrive within the read's time limit. */
+      /** The read did not finish within its time limit. */
       kind: "timed-out"
     }>
   | Readonly<{
@@ -92,17 +104,23 @@ export type PageRenderingFailure =
       code: string
     }>
   | Readonly<{
-      /** The page's document came with a status other than 2xx. */
+      /**
+       * The page's document, or the document it went on to, came with a
+       * status other than 2xx.
+       */
       kind: "http-status"
       /** HTTP status code of the document. */
       status: number
     }>
   | Readonly<{
-      /** The document is not HTML or plain text. */
+      /**
+       * The page's document, or the document it went on to, is not HTML or
+       * plain text.
+       */
       kind: "unsupported-content-type"
       /**
-       * Media type the server named, cleaned and cut to 100 characters;
-       * undefined when it named none.
+       * Media type of the document, cleaned and cut to 100 characters;
+       * undefined when the server named none.
        */
       mediaType: string | undefined
     }>
@@ -116,10 +134,6 @@ export type PageRenderingFailure =
       /** The page crashed the browser while it loaded. */
       kind: "crashed"
     }>
-  | Readonly<{
-      /** The rendered page has too many nodes to read. */
-      kind: "too-complex"
-    }>
 
 /** Outcome of one browser read. */
 export type PageRenderingResult =
@@ -129,12 +143,15 @@ export type PageRenderingResult =
       /** What the browser showed. */
       page: RenderedPage
     }>
-  | Readonly<{
-      /** The page could not be read. */
-      status: "failed"
-      /** Why. */
-      failure: PageRenderingFailure
-    }>
+  | FailedRendering
+
+/** A failed outcome, which every step's result type includes. */
+type FailedRendering = Readonly<{
+  /** The page could not be read. */
+  status: "failed"
+  /** Why. */
+  failure: PageRenderingFailure
+}>
 
 /** One read in progress, lent to each of its steps. */
 type PageRead = Readonly<{
@@ -142,7 +159,7 @@ type PageRead = Readonly<{
   url: PageUrl
   /** Stop of the reply; owned by the caller. */
   abortSignal: AbortSignal
-  /** Browser, address rule, and time limits. */
+  /** Browser, address rule, failure reporters, and time limits. */
   dependencies: PageRenderingDependencies
   /** Proxy the browser's traffic goes through; borrowed from the read. */
   proxy: PageProxy
@@ -150,15 +167,12 @@ type PageRead = Readonly<{
   deadlineMs: number
 }>
 
-/** The one page of a read and the navigations of its own frame that failed. */
+/** The one page of a read and what is known about how it loaded. */
 type ReadPage = Readonly<{
   /** Page of the read, in the read's browser. */
   page: Page
-  /**
-   * Failed navigations of the page's own frame, in order, for the whole
-   * read: its first document's and every later one's.
-   */
-  failedNavigations: readonly Request[]
+  /** Last failed navigation of the page's own frame, for the whole read. */
+  navigationFailures: FailedNavigationRecorder
   /**
    * Aborts once the page crashes the browser, which a call waiting on the
    * page's renderer would otherwise never learn.
@@ -166,31 +180,33 @@ type ReadPage = Readonly<{
   crashSignal: AbortSignal
 }>
 
-/** A failed outcome, which every step's result type includes. */
-type FailedRendering = Readonly<{
-  status: "failed"
+/** Why the browser's executable cannot run, and the system error that says so. */
+type BrowserExecutableProblem = Readonly<{
+  /** `browser-missing` or `browser-failed`. */
   failure: PageRenderingFailure
+  /** File system error of the check. */
+  cause: NodeJS.ErrnoException
 }>
 
 /** Outcome of starting the browser. */
-type BrowserLaunchResult =
+type BrowserStartResult =
   | Readonly<{
       /** The browser started; the read owns it. */
-      status: "launched"
+      status: "started"
       /** The started browser. */
       browser: Browser
     }>
-  | Readonly<{ status: "failed"; failure: PageRenderingFailure }>
+  | FailedRendering
 
 /** Outcome of loading the page's document. */
-type DocumentNavigationResult =
+type DocumentLoadResult =
   | Readonly<{
       /** The document loaded. */
       status: "loaded"
       /** Response that delivered it, after every HTTP redirect. */
       response: Response
     }>
-  | Readonly<{ status: "failed"; failure: PageRenderingFailure }>
+  | FailedRendering
 
 /** Whether a loaded document can be read, and how. */
 type DocumentReadability =
@@ -200,7 +216,7 @@ type DocumentReadability =
       /** How it is read. */
       mediaType: PageMediaType
     }>
-  | Readonly<{ status: "failed"; failure: PageRenderingFailure }>
+  | FailedRendering
 
 /** Most work the proxy accepts for one read. */
 const PAGE_PROXY_LIMITS: PageProxyLimits = Object.freeze({
@@ -225,11 +241,23 @@ const SETTLE_LOAD_STATES = Object.freeze([
 /** Scheme of the page Chromium shows when a navigation fails. */
 const BROWSER_ERROR_PAGE_SCHEME = "chrome-error:"
 
-/** Milliseconds kept at the end of a read for taking the page's snapshot. */
-const SNAPSHOT_RESERVE_MS = 2_000
+/** Milliseconds kept at the end of a read for reading the page's document. */
+const DOCUMENT_READ_RESERVE_MS = 2_000
 
 /** Most characters of a media type a failure reports. */
 const MAXIMUM_REPORTED_MEDIA_TYPE_LENGTH = 100
+
+/** Lowest HTTP status of a document Lys reads, inclusive. */
+const MINIMUM_READABLE_STATUS = 200
+
+/** Highest HTTP status of a document Lys reads, inclusive. */
+const MAXIMUM_READABLE_STATUS = 299
+
+/**
+ * Status the browser reports for a document it built without a response,
+ * such as one a `javascript:` URL wrote; Lys reads such a document.
+ */
+const NO_RESPONSE_STATUS = 0
 
 /**
  * Most mebibytes a page's scripts may hold, inclusive. A page that holds
@@ -256,32 +284,81 @@ const TEXTLESS_RESOURCE_TYPES: ReadonlySet<string> = new Set([
   "media"
 ])
 
-/** Media types Lys reads, mapped to how it reads them. */
-const PAGE_MEDIA_TYPES: ReadonlyMap<string, PageMediaType> = new Map([
-  ["text/html", "text/html"],
-  ["application/xhtml+xml", "text/html"],
-  ["text/plain", "text/plain"]
-])
-
 /** File error codes that mean the browser's executable does not exist. */
 const MISSING_FILE_CODES: ReadonlySet<string> = new Set(["ENOENT", "ENOTDIR"])
 
 /** Finds the error code in a Chromium network failure, such as `net::ERR_ABORTED`. */
 const NETWORK_ERROR_CODE_PATTERN = /^net::(ERR_[A-Z0-9_]+)$/
 
+/** Failure of a read that did not finish within its time limit. */
+const TIMED_OUT_FAILURE: PageRenderingFailure = Object.freeze({
+  kind: "timed-out"
+})
+
+/** Failure of a browser that exists but could not start. */
+const BROWSER_FAILED_FAILURE: PageRenderingFailure = Object.freeze({
+  kind: "browser-failed"
+})
+
 /**
- * Word in every error Playwright raises because the page crashed, such as
- * "Page crashed" from a navigation and "Navigation failed because page
- * crashed!" from a wait; Playwright gives no other way to tell a crash from
- * other failures of a pending call.
+ * Owns the last failed navigation of one page's own frame, recorded from
+ * the page's request events, to tell why the page's document did not
+ * arrive or why the page ended on the browser's error page.
+ *
+ * @remarks Invariant: holds the most recent failed navigation request of
+ * the page's main frame since it was registered, or none. Its event
+ * registration lasts as long as the borrowed page, which closes with the
+ * read's browser, so it has no cleanup of its own. Concurrency model:
+ * single-owner; Playwright delivers the page's events on the backend's event
+ * loop, and only the read that registered it reads it.
  */
-const PAGE_CRASH_MESSAGE_WORD = "crashed"
+class FailedNavigationRecorder {
+  /**
+   * Last failed navigation of the page's own frame, a borrowed Playwright
+   * record; undefined while none has failed.
+   */
+  #lastFailedNavigation: Request | undefined = undefined
 
-/** Port of an https URL that names none. */
-const DEFAULT_HTTPS_PORT = 443
+  /** Creates a recorder that has recorded nothing; only `register` does. */
+  private constructor() {}
 
-/** Port of an http URL that names none. */
-const DEFAULT_HTTP_PORT = 80
+  /**
+   * Starts recording the failed navigations of a page.
+   *
+   * @param page - Page of the read, borrowed; it must stay open while the
+   * recorder is read.
+   * @returns A recorder whose handler is registered on the page's
+   * `requestfailed` event.
+   */
+  public static register(page: Page): FailedNavigationRecorder {
+    const recorder = new FailedNavigationRecorder()
+    page.on("requestfailed", (request) =>
+      recorder.#handleRequestFailed(request)
+    )
+    return recorder
+  }
+
+  /**
+   * Last failed navigation of the page's own frame.
+   *
+   * @returns The Playwright record of the request, or undefined when none
+   * has failed since registration.
+   */
+  public get lastFailedNavigation(): Request | undefined {
+    return this.#lastFailedNavigation
+  }
+
+  /**
+   * Keeps a failed request when it is a navigation of the page's own frame.
+   *
+   * @param request - Request that failed.
+   */
+  #handleRequestFailed(request: Request): void {
+    if (!request.isNavigationRequest()) return
+    if (request.frame().parentFrame() !== null) return
+    this.#lastFailedNavigation = request
+  }
+}
 
 /**
  * Builds a failed outcome.
@@ -309,22 +386,24 @@ function getRemainingTimeMs(read: PageRead): number {
  *
  * @param executablePath - Path of the executable.
  * @returns `browser-missing` when it does not exist, `browser-failed` when
- * it exists but is not executable, or undefined when it can run.
+ * it exists but is not executable, each with the error that says so; or
+ * undefined when it can run.
  * @throws A failure of the check that carries no system error code.
  */
-async function findBrowserExecutableFailure(
+async function findBrowserExecutableProblem(
   executablePath: string
-): Promise<PageRenderingFailure | undefined> {
+): Promise<BrowserExecutableProblem | undefined> {
   try {
     await access(executablePath, fileConstants.X_OK)
     return undefined
   } catch (error) {
     if (!hasErrorCode(error)) throw error
-    return Object.freeze({
+    const failure: PageRenderingFailure = Object.freeze({
       kind: MISSING_FILE_CODES.has(error.code)
         ? "browser-missing"
         : "browser-failed"
     })
+    return Object.freeze({ failure, cause: error })
   }
 }
 
@@ -358,23 +437,23 @@ async function closeAfterUse<TResult>(
 }
 
 /**
- * Waits for a step of a read unless the read is stopped first.
+ * Waits for a step of a read unless a signal aborts first.
  *
  * @param step - Step in progress.
- * @param signal - Ends the wait.
+ * @param signal - Ends the wait; it may already have aborted.
  * @returns What the step resolved with.
  * @throws The signal's reason once it aborts, or the step's failure. A step
  * left behind keeps running until its browser is closed; its later failure
- * is ignored.
+ * is observed and ignored.
  */
 async function waitForReadStep<TResult>(
   step: Promise<TResult>,
   signal: AbortSignal
 ): Promise<TResult> {
-  signal.throwIfAborted()
   const { promise: stopped, reject } = Promise.withResolvers<never>()
   const rejectStopped = () => reject(signal.reason)
   signal.addEventListener("abort", rejectStopped, { once: true })
+  if (signal.aborted) rejectStopped()
   try {
     return await Promise.race([step, stopped])
   } finally {
@@ -386,11 +465,13 @@ async function waitForReadStep<TResult>(
  * Builds how the browser starts for one read.
  *
  * @param read - Read in progress.
+ * @param timeoutMs - Most milliseconds the start may take; a positive
+ * integer.
  * @returns Launch options: the executable, headless, Chromium's sandbox on,
  * every request through the read's proxy with its credentials, this
- * machine's own addresses included, and a start timeout of the time left.
+ * machine's own addresses included, and the start timeout.
  */
-function buildLaunchOptions(read: PageRead): LaunchOptions {
+function buildLaunchOptions(read: PageRead, timeoutMs: number): LaunchOptions {
   const proxy = Object.freeze({
     server: read.proxy.url,
     bypass: PROXY_LOOPBACK_RULE,
@@ -401,63 +482,78 @@ function buildLaunchOptions(read: PageRead): LaunchOptions {
     executablePath: read.dependencies.browserExecutablePath,
     headless: true,
     chromiumSandbox: true,
-    timeout: getRemainingTimeMs(read),
+    timeout: timeoutMs,
     proxy,
     args: [...BROWSER_LAUNCH_ARGUMENTS]
   }
 }
 
 /**
- * Starts the browser of one read.
+ * Handles a browser start that failed: tells a start that ran out of time
+ * from a broken browser, and reports the broken browser's cause.
  *
- * @param read - Read in progress.
- * @returns The started browser, owned by the caller, or `browser-failed`.
- * @throws The stop reason when the read was stopped while the browser
- * started; a browser that started anyway is closed first. Starting cannot be
- * interrupted, so a stop waits for it, at most the read's time limit.
+ * @param error - What the start rejected with.
+ * @param read - Read in progress, whose failure reporter receives the cause
+ * of a start that failed for any reason other than time.
+ * @returns `timed-out` when the start ran out of the read's time;
+ * `browser-failed` otherwise.
  */
-async function launchPageBrowser(read: PageRead): Promise<BrowserLaunchResult> {
-  const [launch] = await Promise.allSettled([
-    chromium.launch(buildLaunchOptions(read))
-  ])
-  if (launch?.status === "fulfilled" && read.abortSignal.aborted) {
-    await launch.value.close()
+function handleBrowserStartFailure(
+  error: unknown,
+  read: PageRead
+): FailedRendering {
+  if (error instanceof playwrightErrors.TimeoutError) {
+    return buildFailedRendering(TIMED_OUT_FAILURE)
   }
-  read.abortSignal.throwIfAborted()
-  if (launch?.status !== "fulfilled") {
-    return buildFailedRendering(Object.freeze({ kind: "browser-failed" }))
-  }
-  return Object.freeze({ status: "launched", browser: launch.value })
+  read.dependencies.reportBrowserFailure(error)
+  return buildFailedRendering(BROWSER_FAILED_FAILURE)
 }
 
 /**
- * Stops the browser from fetching a resource that carries no text.
+ * Starts the browser of one read.
+ *
+ * @param read - Read in progress.
+ * @returns The started browser, owned by the caller; `timed-out` when no
+ * time is left or the start runs out of it; or `browser-failed`.
+ * @throws The stop reason when the read was stopped while the browser
+ * started; a browser that started anyway is closed first, and when closing
+ * it fails, an `AggregateError` holding the stop reason and that failure. A
+ * start that failed is still handled, its cause reported, before the stop
+ * reason is thrown. Starting cannot be interrupted, so a stop waits for it,
+ * at most the read's time limit.
+ */
+async function startPageBrowser(read: PageRead): Promise<BrowserStartResult> {
+  const timeoutMs = getRemainingTimeMs(read)
+  if (timeoutMs === 0) return buildFailedRendering(TIMED_OUT_FAILURE)
+  const [start] = await Promise.allSettled([
+    chromium.launch(buildLaunchOptions(read, timeoutMs))
+  ])
+  if (start?.status !== "fulfilled") {
+    const failure = handleBrowserStartFailure(start?.reason, read)
+    read.abortSignal.throwIfAborted()
+    return failure
+  }
+  const browser = start.value
+  if (read.abortSignal.aborted) {
+    return closeAfterUse(Promise.reject<never>(read.abortSignal.reason), () =>
+      browser.close()
+    )
+  }
+  return Object.freeze({ status: "started", browser })
+}
+
+/**
+ * Lets a request of the page through unless it fetches a resource that
+ * carries no text.
  *
  * @param route - Request the page is about to send.
  * @returns A promise that settles once the request is let through or
  * aborted.
  */
-function routeTextlessResource(route: Route): Promise<void> {
+function handleResourceRoute(route: Route): Promise<void> {
   return TEXTLESS_RESOURCE_TYPES.has(route.request().resourceType())
     ? route.abort()
     : route.continue()
-}
-
-/**
- * Keeps a request when it is a failed navigation of the page itself.
- *
- * @param failedNavigations - Failed navigations so far, in order.
- * @param page - Page of the read.
- * @param request - Request that failed.
- */
-function addFailedNavigation(
-  failedNavigations: Request[],
-  page: Page,
-  request: Request
-): void {
-  if (request.isNavigationRequest() && request.frame() === page.mainFrame()) {
-    failedNavigations.push(request)
-  }
 }
 
 /**
@@ -466,8 +562,8 @@ function addFailedNavigation(
  * @param browser - Browser of the read.
  * @returns A page whose context keeps no service worker and accepts no
  * download, and that never fetches images, fonts, or media, with the
- * failed navigations of its own frame kept, and its crash watched, from now
- * on.
+ * failed navigations of its own frame recorded, and its crash watched, from
+ * now on.
  */
 async function openReadPage(browser: Browser): Promise<ReadPage> {
   const context = await browser.newContext({
@@ -475,27 +571,13 @@ async function openReadPage(browser: Browser): Promise<ReadPage> {
     acceptDownloads: false
   })
   const page = await context.newPage()
-  await page.route("**/*", routeTextlessResource)
-  const failedNavigations: Request[] = []
-  page.on("requestfailed", (request) =>
-    addFailedNavigation(failedNavigations, page, request)
-  )
+  await page.route("**/*", handleResourceRoute)
+  const navigationFailures = FailedNavigationRecorder.register(page)
   const crash = new AbortController()
   page.once("crash", () =>
     crash.abort(new Error("The page crashed Lys's browser"))
   )
-  return Object.freeze({ page, failedNavigations, crashSignal: crash.signal })
-}
-
-/**
- * Finds the port a URL connects to.
- *
- * @param url - http or https URL.
- * @returns Its port, or the scheme's default port.
- */
-function findUrlPort(url: URL): number {
-  if (url.port !== "") return Number(url.port)
-  return url.protocol === "https:" ? DEFAULT_HTTPS_PORT : DEFAULT_HTTP_PORT
+  return Object.freeze({ page, navigationFailures, crashSignal: crash.signal })
 }
 
 /**
@@ -510,21 +592,37 @@ function parseMediaType(contentType: string | undefined): string | undefined {
 }
 
 /**
- * Decides whether a loaded document can be read.
+ * Answers whether a document's status lets Lys read it.
  *
- * @param response - Response that delivered the document.
- * @returns How to read it, or why it cannot be read: its status or its
- * media type.
+ * @param status - HTTP status of the document's response.
+ * @returns True for 2xx, and for 0, which the browser reports for a
+ * document it built without a response.
  */
-function classifyDocumentResponse(response: Response): DocumentReadability {
-  if (!response.ok()) {
-    return buildFailedRendering(
-      Object.freeze({ kind: "http-status", status: response.status() })
-    )
+function isReadableStatus(status: number): boolean {
+  return (
+    status === NO_RESPONSE_STATUS ||
+    (status >= MINIMUM_READABLE_STATUS && status <= MAXIMUM_READABLE_STATUS)
+  )
+}
+
+/**
+ * Decides whether a document can be read.
+ *
+ * @param status - HTTP status of the document's response.
+ * @param mediaType - Lowercase media type of the document, or undefined
+ * when its server named none.
+ * @returns How to read it, or why it cannot be read: its status, then its
+ * media type, cleaned and cut for the failure.
+ */
+function parseDocumentReadability(
+  status: number,
+  mediaType: string | undefined
+): DocumentReadability {
+  if (!isReadableStatus(status)) {
+    return buildFailedRendering(Object.freeze({ kind: "http-status", status }))
   }
-  const mediaType = parseMediaType(response.headers()["content-type"])
   const pageMediaType =
-    mediaType === undefined ? undefined : PAGE_MEDIA_TYPES.get(mediaType)
+    mediaType === undefined ? undefined : findPageMediaType(mediaType)
   if (pageMediaType !== undefined) {
     return Object.freeze({ status: "readable", mediaType: pageMediaType })
   }
@@ -541,6 +639,20 @@ function classifyDocumentResponse(response: Response): DocumentReadability {
 }
 
 /**
+ * Decides whether the document a response delivered can be read.
+ *
+ * @param response - Untrusted response that delivered the document.
+ * @returns How to read it, or why it cannot be read: its status or its
+ * media type.
+ */
+function parseDocumentResponse(response: Response): DocumentReadability {
+  return parseDocumentReadability(
+    response.status(),
+    parseMediaType(response.headers()["content-type"])
+  )
+}
+
+/**
  * Decides why a navigation request of the page failed.
  *
  * @param request - The failed navigation, possibly a redirect's target.
@@ -550,18 +662,18 @@ function classifyDocumentResponse(response: Response): DocumentReadability {
  * the network error.
  * @throws When the failure is not a Chromium network error.
  */
-async function classifyFailedNavigation(
+async function parseFailedNavigation(
   request: Request,
   proxy: PageProxy
 ): Promise<FailedRendering> {
   const target = new URL(request.url())
-  const refusal = proxy.findRefusal(target.hostname, findUrlPort(target))
+  const refusal = proxy.findRefusal(target.hostname, getUrlPort(target))
   if (refusal !== undefined) {
     return buildFailedRendering(Object.freeze({ kind: refusal.kind }))
   }
   const response = await request.response()
   const readability =
-    response === null ? undefined : classifyDocumentResponse(response)
+    response === null ? undefined : parseDocumentResponse(response)
   if (readability?.status === "failed") return readability
   const errorText = request.failure()?.errorText ?? ""
   const code = NETWORK_ERROR_CODE_PATTERN.exec(errorText)?.[1]
@@ -582,20 +694,20 @@ async function classifyFailedNavigation(
  * @returns `timed-out`, or what the failed request shows.
  * @throws `error` when it is neither, a crash included.
  */
-async function classifyNavigationFailure(
+async function parseDocumentLoadFailure(
   error: unknown,
   failedNavigation: Request | undefined,
   proxy: PageProxy
-): Promise<DocumentNavigationResult> {
+): Promise<FailedRendering> {
   if (error instanceof playwrightErrors.TimeoutError) {
-    return buildFailedRendering(Object.freeze({ kind: "timed-out" }))
+    return buildFailedRendering(TIMED_OUT_FAILURE)
   }
   if (failedNavigation === undefined) throw error
-  return classifyFailedNavigation(failedNavigation, proxy)
+  return parseFailedNavigation(failedNavigation, proxy)
 }
 
 /**
- * Starts loading the page's document, following its HTTP redirects.
+ * Loads the page's document, following its HTTP redirects.
  *
  * @param readPage - Page of the read.
  * @param read - Read in progress.
@@ -603,10 +715,10 @@ async function classifyNavigationFailure(
  * started showing it, or why it did not arrive.
  * @throws When the navigation failed in an unrecognized way.
  */
-async function navigateToDocument(
+async function loadPageDocument(
   readPage: ReadPage,
   read: PageRead
-): Promise<DocumentNavigationResult> {
+): Promise<DocumentLoadResult> {
   try {
     const response = await readPage.page.goto(read.url, {
       waitUntil: "commit",
@@ -617,9 +729,9 @@ async function navigateToDocument(
     }
     return Object.freeze({ status: "loaded", response })
   } catch (error) {
-    return classifyNavigationFailure(
+    return parseDocumentLoadFailure(
       error,
-      readPage.failedNavigations.at(-1),
+      readPage.navigationFailures.lastFailedNavigation,
       read.proxy
     )
   }
@@ -658,14 +770,14 @@ async function waitForLoadStateBefore(
  * @param page - Page whose document has arrived.
  * @param read - Read in progress.
  * @returns A promise that settles once both are reached, or once the settle
- * limit, or the read's time left minus the snapshot's reserve, is reached;
- * reaching it is not a failure, and what has rendered is read.
+ * limit, or the read's time left minus the document read's reserve, is
+ * reached; reaching it is not a failure, and what has rendered is read.
  * @throws When waiting fails for another reason.
  */
 async function waitForPageToSettle(page: Page, read: PageRead): Promise<void> {
   const deadlineMs = Math.min(
     performance.now() + read.dependencies.settleTimeoutMs,
-    read.deadlineMs - SNAPSHOT_RESERVE_MS
+    read.deadlineMs - DOCUMENT_READ_RESERVE_MS
   )
   for (const state of SETTLE_LOAD_STATES) {
     const isReached = await waitForLoadStateBefore(page, state, deadlineMs)
@@ -683,132 +795,79 @@ async function waitForPageToSettle(page: Page, read: PageRead): Promise<void> {
  * @throws When no navigation of the page failed, which the browser does not
  * do before it shows its error page.
  */
-async function classifyBrowserErrorPage(
+async function parseBrowserErrorPage(
   readPage: ReadPage,
   proxy: PageProxy
 ): Promise<FailedRendering> {
-  const failedNavigation = readPage.failedNavigations.at(-1)
+  const failedNavigation = readPage.navigationFailures.lastFailedNavigation
   if (failedNavigation === undefined) {
     throw new Error("A page showed the browser's error page without failing")
   }
-  return classifyFailedNavigation(failedNavigation, proxy)
+  return parseFailedNavigation(failedNavigation, proxy)
 }
 
 /**
- * Removes the fragment of a URL.
+ * Builds the outcome of reading the document a page ended on.
  *
- * @param url - Absolute URL.
- * @returns The URL without its `#` part.
+ * @param readPage - Page of the read.
+ * @param document - The document, as Lys read it.
+ * @param proxy - Proxy of the read.
+ * @returns The page; or why it cannot be read: why the page's last
+ * navigation failed when the document is the browser's error page, the
+ * rules the document's URL breaks, or the document's status or media type.
+ * @throws When the page shows the browser's error page without a failed
+ * navigation.
  */
-function removeUrlFragment(url: string): string {
-  const parsedUrl = new URL(url)
-  parsedUrl.hash = ""
-  return parsedUrl.href
-}
-
-/**
- * Reads a rendered HTML page.
- *
- * @param page - Page that finished rendering.
- * @param url - URL the browser shows, checked.
- * @returns The HTML of what the page shows, or `too-complex`.
- */
-async function readHtmlPage(
-  page: Page,
-  url: PageUrl
+async function buildRenderedResult(
+  readPage: ReadPage,
+  document: PageDocument,
+  proxy: PageProxy
 ): Promise<PageRenderingResult> {
-  const snapshot = await getPageSnapshot(page)
-  const visibleHtml =
-    snapshot.status === "taken" ? buildVisibleHtml(snapshot.snapshot) : snapshot
-  if (visibleHtml.status === "too-complex") {
-    return buildFailedRendering(Object.freeze({ kind: "too-complex" }))
+  if (document.url.startsWith(BROWSER_ERROR_PAGE_SCHEME)) {
+    return parseBrowserErrorPage(readPage, proxy)
   }
-  const renderedPage: RenderedPage = Object.freeze({
-    url,
-    mediaType: "text/html",
-    text: visibleHtml.html,
-    isTruncated: visibleHtml.isTruncated
+  const url = parsePageUrl(document.url)
+  if (url.status === "invalid") {
+    return buildFailedRendering(
+      Object.freeze({ kind: "invalid-redirect", problem: url.problem })
+    )
+  }
+  const readability = parseDocumentReadability(
+    document.responseStatus,
+    document.contentType
+  )
+  if (readability.status === "failed") return readability
+  const page: RenderedPage = Object.freeze({
+    url: url.url,
+    mediaType: readability.mediaType,
+    text: document.text,
+    isTruncated: document.isTruncated
   })
-  return Object.freeze({ status: "rendered", page: renderedPage })
-}
-
-/**
- * Reads a plain-text page.
- *
- * @param page - Page that shows the text.
- * @param url - URL the browser shows, checked.
- * @param read - Read in progress.
- * @returns The page's text, cut at {@link MAXIMUM_PAGE_TEXT_LENGTH}.
- * @remarks Reads the text the browser shows, in Playwright's own script
- * world, which a page's scripts cannot reach; a plain-text page has none.
- */
-async function readPlainTextPage(
-  page: Page,
-  url: PageUrl,
-  read: PageRead
-): Promise<PageRenderingResult> {
-  const text =
-    (await page
-      .locator("body")
-      .textContent({ timeout: Math.max(1, getRemainingTimeMs(read)) })) ?? ""
-  const isTruncated = text.length > MAXIMUM_PAGE_TEXT_LENGTH
-  const renderedPage: RenderedPage = Object.freeze({
-    url,
-    mediaType: "text/plain",
-    text: isTruncated ? formatCutPageText(text) : text,
-    isTruncated
-  })
-  return Object.freeze({ status: "rendered", page: renderedPage })
+  return Object.freeze({ status: "rendered", page })
 }
 
 /**
  * Reads the page once its document has arrived.
  *
  * @param readPage - Page of the read.
- * @param response - Response that delivered the document.
+ * @param response - Response that delivered the first document.
  * @param read - Read in progress.
  * @returns What the page shows once it settled, or why it cannot be read:
- * the document's status or media type, why a later navigation of the page
- * failed, or the rules the URL it ended on breaks. A plain-text document is
- * read as text while the page still shows it, and as HTML once the page
- * went on to another document.
+ * the first document's status or media type, why a later navigation of the
+ * page failed, the rules the URL it ended on breaks, or the status or media
+ * type of the document it ended on, however it got there. Each is judged
+ * on the document Lys read.
  */
 async function readLoadedDocument(
   readPage: ReadPage,
   response: Response,
   read: PageRead
 ): Promise<PageRenderingResult> {
-  const readability = classifyDocumentResponse(response)
+  const readability = parseDocumentResponse(response)
   if (readability.status === "failed") return readability
-  const { page } = readPage
-  await waitForPageToSettle(page, read)
-  const shownUrl = page.url()
-  if (shownUrl.startsWith(BROWSER_ERROR_PAGE_SCHEME)) {
-    return classifyBrowserErrorPage(readPage, read.proxy)
-  }
-  const finalUrl = parsePageUrl(shownUrl)
-  if (finalUrl.status === "invalid") {
-    return buildFailedRendering(
-      Object.freeze({ kind: "invalid-redirect", problem: finalUrl.problem })
-    )
-  }
-  const isShowingDocument =
-    removeUrlFragment(shownUrl) === removeUrlFragment(response.url())
-  return readability.mediaType === "text/plain" && isShowingDocument
-    ? readPlainTextPage(page, finalUrl.url, read)
-    : readHtmlPage(page, finalUrl.url)
-}
-
-/**
- * Answers whether a Playwright call failed because the page crashed.
- *
- * @param error - What the call rejected with.
- * @returns True for an error whose message says the page crashed.
- */
-function isPageCrash(error: unknown): boolean {
-  return (
-    error instanceof Error && error.message.includes(PAGE_CRASH_MESSAGE_WORD)
-  )
+  await waitForPageToSettle(readPage.page, read)
+  const document = await getPageDocument(readPage.page)
+  return buildRenderedResult(readPage, document, read.proxy)
 }
 
 /**
@@ -823,9 +882,9 @@ async function readOpenedPage(
   readPage: ReadPage,
   read: PageRead
 ): Promise<PageRenderingResult> {
-  const navigation = await navigateToDocument(readPage, read)
-  if (navigation.status === "failed") return navigation
-  return readLoadedDocument(readPage, navigation.response, read)
+  const load = await loadPageDocument(readPage, read)
+  if (load.status === "failed") return load
+  return readLoadedDocument(readPage, load.response, read)
 }
 
 /**
@@ -837,6 +896,9 @@ async function readOpenedPage(
  * page crashes the browser at any step, before or after its document
  * arrived, a step still waiting on the crashed page included.
  * @throws Any failure Lys does not recognize.
+ * @remarks Playwright reports a page's crash before it rejects the calls
+ * that waited on the page, so the crash ends the wait first, and the calls'
+ * later failures are left behind with the step.
  */
 async function readInBrowser(
   read: PageRead,
@@ -849,7 +911,7 @@ async function readInBrowser(
       readPage.crashSignal
     )
   } catch (error) {
-    if (!readPage.crashSignal.aborted && !isPageCrash(error)) throw error
+    if (error !== readPage.crashSignal.reason) throw error
     return buildFailedRendering(Object.freeze({ kind: "crashed" }))
   }
 }
@@ -858,25 +920,38 @@ async function readInBrowser(
  * Reads the page in a browser whose traffic goes through the read's proxy.
  *
  * @param read - Read in progress.
- * @returns What the page shows, or why it cannot be read.
- * @throws The stop reason once the read is stopped.
+ * @returns What the page shows, or why it cannot be read; `timed-out` only
+ * when the read's time limit ended the wait.
+ * @throws The stop reason once the read is stopped; any failure Lys does not
+ * recognize, closing the browser included, and when both the read and
+ * closing fail, an `AggregateError` holding both.
  * @remarks Stop or the read's time limit ends the wait at once; the browser
- * is then closed, which ends every step still running.
+ * is then closed, which ends every step still running. The time limit's
+ * timer and the link to the reply's Stop are released when the read ends.
  */
 async function readThroughProxy(read: PageRead): Promise<PageRenderingResult> {
-  const launch = await launchPageBrowser(read)
-  if (launch.status === "failed") return launch
-  const deadline = AbortSignal.timeout(getRemainingTimeMs(read))
-  const readSignal = AbortSignal.any([read.abortSignal, deadline])
+  const start = await startPageBrowser(read)
+  if (start.status === "failed") return start
+  const deadlineReason = new Error("The page read reached its time limit")
+  const readStop = new AbortController()
+  const deadlineTimer = setTimeout(
+    () => readStop.abort(deadlineReason),
+    getRemainingTimeMs(read)
+  )
+  const forwardStop = () => readStop.abort(read.abortSignal.reason)
+  read.abortSignal.addEventListener("abort", forwardStop, { once: true })
+  if (read.abortSignal.aborted) forwardStop()
   try {
     return await closeAfterUse(
-      waitForReadStep(readInBrowser(read, launch.browser), readSignal),
-      () => launch.browser.close()
+      waitForReadStep(readInBrowser(read, start.browser), readStop.signal),
+      () => start.browser.close()
     )
   } catch (error) {
-    read.abortSignal.throwIfAborted()
-    if (!deadline.aborted) throw error
-    return buildFailedRendering(Object.freeze({ kind: "timed-out" }))
+    if (error !== deadlineReason) throw error
+    return buildFailedRendering(TIMED_OUT_FAILURE)
+  } finally {
+    clearTimeout(deadlineTimer)
+    read.abortSignal.removeEventListener("abort", forwardStop)
   }
 }
 
@@ -885,20 +960,21 @@ async function readThroughProxy(read: PageRead): Promise<PageRenderingResult> {
  *
  * @param url - Page to read, checked by the page URL rules.
  * @param abortSignal - Stops the read.
- * @param dependencies - Browser, address rule, and time limits.
- * @returns What the browser showed: the HTML of the visible page, or a
- * plain-text page's text, and the URL it ended on; or why the page could not
- * be read.
+ * @param dependencies - Browser, address rule, failure reporters, and time
+ * limits.
+ * @returns What the browser showed: the HTML of the page, or a plain-text
+ * page's text, and the URL it ended on; or why the page could not be read.
  * @throws The stop reason once `abortSignal` aborts; nothing is started when
  * it already has. Any failure Lys does not recognize, which is a defect.
  * @remarks Starts a proxy that applies the address rule to every connection,
  * then Chromium with that proxy, Chromium's sandbox, and a context that keeps
  * nothing between reads. The page's scripts run and its redirects are
  * followed. Once its document has arrived, the read waits, up to the settle
- * limit, for its DOM to be ready and its network to go quiet, then stops the
- * page's scripts and takes a snapshot of what has rendered. The browser
- * and the proxy are closed whatever the outcome, Stop included, so nothing
- * keeps running after the read.
+ * limit, for its DOM to be ready and its network to go quiet, then reads
+ * the document the page ended on, hidden text included, and checks that
+ * document's status and media type, however the page reached it. The
+ * browser and the proxy are closed whatever the outcome, Stop included, so
+ * nothing keeps running after the read.
  */
 export async function getRenderedPage(
   url: PageUrl,
@@ -907,11 +983,12 @@ export async function getRenderedPage(
 ): Promise<PageRenderingResult> {
   abortSignal.throwIfAborted()
   const deadlineMs = performance.now() + dependencies.readTimeoutMs
-  const executableFailure = await findBrowserExecutableFailure(
+  const executableProblem = await findBrowserExecutableProblem(
     dependencies.browserExecutablePath
   )
-  if (executableFailure !== undefined) {
-    return buildFailedRendering(executableFailure)
+  if (executableProblem !== undefined) {
+    dependencies.reportBrowserFailure(executableProblem.cause)
+    return buildFailedRendering(executableProblem.failure)
   }
   abortSignal.throwIfAborted()
   const proxy = await PageProxy.open({
@@ -926,5 +1003,7 @@ export async function getRenderedPage(
     proxy,
     deadlineMs
   })
-  return closeAfterUse(readThroughProxy(read), () => proxy.close())
+  return closeAfterUse(readThroughProxy(read), () =>
+    proxy[Symbol.asyncDispose]()
+  )
 }

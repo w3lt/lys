@@ -15,6 +15,7 @@ import LlmService from "../../../src/modules/llm/llmService"
 import {
   closeSingletonServices,
   createSingletonServices,
+  type SingletonFailureReporters,
   type SingletonServiceAcquisition,
   type SingletonServiceFactories,
   type SingletonServices
@@ -33,10 +34,12 @@ type AcquisitionName = "chat" | "database" | "llm-runtime"
  * @returns Reporters whose calls each case can inspect.
  */
 function createFailureReporters() {
-  return {
+  const llmRuntime = {
     reportLlmRuntimeAcquisitionFailure: vi.fn(),
     reportLlmRuntimeAvailabilityCheckFailure: vi.fn()
   } satisfies LlmRuntimeFailureReporters
+  const pageRendering = { reportBrowserFailure: vi.fn() }
+  return { llmRuntime, pageRendering } satisfies SingletonFailureReporters
 }
 
 /**
@@ -87,7 +90,7 @@ function createRecordedFactories() {
     database: createAcquisition(database, "database", closeLog),
     llmRuntime: createAcquisition(
       new LlmRuntimeService({
-        ...createFailureReporters(),
+        ...createFailureReporters().llmRuntime,
         acquireLlmRuntime: async () => {
           throw new Error("Unexpected LLM runtime acquisition")
         }
@@ -132,7 +135,7 @@ describe("createSingletonServices", () => {
     )
     expect(factories.createLlmRuntimeService).toHaveBeenCalledWith(
       "ws://lmstudio.test:4321",
-      reporters
+      reporters.llmRuntime
     )
   })
 

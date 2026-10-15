@@ -1,7 +1,9 @@
+import { once } from "node:events"
 import {
   request as requestHttp,
   type IncomingHttpHeaders,
-  type IncomingMessage
+  type IncomingMessage,
+  type OutgoingHttpHeaders
 } from "node:http"
 import { connect, createServer, type AddressInfo, type Socket } from "node:net"
 import { describe, expect, it, onTestFinished } from "vitest"
@@ -10,8 +12,12 @@ import PageProxy, {
   type PageProxyDependencies,
   type PageProxyLimits
 } from "../../../../../../src/modules/tool/builtIn/web/pageProxy"
-import type { HostAddressLookup } from "../../../../../../src/modules/tool/builtIn/web/webConnection"
-import { answerWithBody, startPageServer } from "../../../../support/pageServer"
+import {
+  answerWithBody,
+  listTestHostAddresses,
+  routeByPath,
+  startPageServer
+} from "../../../../support/pageServer"
 
 /** Limits no test reaches unless it lowers them. */
 const GENEROUS_LIMITS: PageProxyLimits = Object.freeze({
@@ -19,26 +25,9 @@ const GENEROUS_LIMITS: PageProxyLimits = Object.freeze({
   maximumReceivedBytes: 1024 * 1024
 })
 
-/**
- * Resolves the test host names: `pages.test` reaches the local page servers,
- * `private.test` has a private address, and `missing.test` has none.
- */
-const lookupTestHost: HostAddressLookup = async (hostname) => {
-  switch (hostname) {
-    case "pages.test":
-      return [{ address: "127.0.0.1", family: 4 }]
-    case "private.test":
-      return [{ address: "10.0.0.7", family: 4 }]
-    default:
-      throw Object.assign(new Error(`getaddrinfo ENOTFOUND ${hostname}`), {
-        code: "ENOTFOUND"
-      })
-  }
-}
-
 /** Reaches the local page servers and blocks every other address. */
 const LOOPBACK_ONLY_DEPENDENCIES: PageProxyDependencies = Object.freeze({
-  lookupHostAddresses: lookupTestHost,
+  lookupHostAddresses: listTestHostAddresses,
   isBlockedAddress: (address: string) => address !== "127.0.0.1",
   limits: GENEROUS_LIMITS
 })
@@ -68,7 +57,7 @@ async function openTestProxy(
   dependencies: PageProxyDependencies = LOOPBACK_ONLY_DEPENDENCIES
 ): Promise<PageProxy> {
   const proxy = await PageProxy.open(dependencies)
-  onTestFinished(() => proxy.close())
+  onTestFinished(() => proxy[Symbol.asyncDispose]())
   return proxy
 }
 
@@ -119,6 +108,20 @@ function buildConnectOutcome(
 }
 
 /**
+ * Builds the headers that carry a proxy's credentials.
+ *
+ * @param authorization - Proxy-Authorization value, or undefined to send none.
+ * @returns The header, or no headers.
+ */
+function buildProxyHeaders(
+  authorization: string | undefined
+): OutgoingHttpHeaders {
+  return authorization === undefined
+    ? {}
+    : { "proxy-authorization": authorization }
+}
+
+/**
  * Sends one CONNECT request to a proxy.
  *
  * @param proxy - Proxy to send it to.
@@ -127,29 +130,25 @@ function buildConnectOutcome(
  * @returns The open tunnel, the proxy's answer, or `refused` when the proxy
  * closed the connection without one.
  */
-function sendConnect(
+async function sendConnect(
   proxy: PageProxy,
   target: string,
   authorization: string | undefined
 ): Promise<ConnectOutcome> {
-  return new Promise((resolve) => {
-    const headers =
-      authorization === undefined
-        ? {}
-        : { "proxy-authorization": authorization }
-    const request = requestHttp({
-      host: "127.0.0.1",
-      port: findProxyPort(proxy),
-      method: "CONNECT",
-      path: target,
-      headers
-    })
-    request.once("connect", (response, socket) =>
-      resolve(buildConnectOutcome(response, socket))
-    )
-    request.once("error", () => resolve({ status: "refused" }))
-    request.end()
+  const request = requestHttp({
+    host: "127.0.0.1",
+    port: findProxyPort(proxy),
+    method: "CONNECT",
+    path: target,
+    headers: buildProxyHeaders(authorization)
   })
+  request.end()
+  try {
+    const [response, socket] = await once(request, "connect")
+    return buildConnectOutcome(response, socket)
+  } catch {
+    return { status: "refused" }
+  }
 }
 
 /**
@@ -170,40 +169,46 @@ function readPageThroughTunnel(socket: Socket): Promise<string> {
 }
 
 /**
+ * Reads the whole body of a response.
+ *
+ * @param response - Response whose body is still to come.
+ * @returns The body as text once it ended.
+ * @throws When the connection closed before the body ended.
+ */
+async function readResponseBody(response: IncomingMessage): Promise<string> {
+  const chunks: Buffer[] = []
+  for await (const chunk of response) chunks.push(Buffer.from(chunk))
+  return Buffer.concat(chunks).toString()
+}
+
+/**
  * Sends one plain http request through a proxy.
  *
  * @param proxy - Proxy to send it to.
  * @param url - Absolute http URL to request.
  * @param authorization - Proxy-Authorization value, or undefined to send none.
- * @returns The answer, or `refused` when the proxy closed the connection.
+ * @returns The answer, or `refused` when the proxy closed the connection
+ * before the answer ended.
  */
-function sendForward(
+async function sendForward(
   proxy: PageProxy,
   url: string,
   authorization: string | undefined
 ): Promise<ForwardOutcome> {
-  return new Promise((resolve) => {
-    const headers =
-      authorization === undefined
-        ? {}
-        : { "proxy-authorization": authorization }
-    const request = requestHttp(
-      { host: "127.0.0.1", port: findProxyPort(proxy), path: url, headers },
-      (response) => {
-        const chunks: Buffer[] = []
-        response.on("data", (chunk: Buffer) => chunks.push(chunk))
-        response.once("end", () =>
-          resolve({
-            status: "answered",
-            statusCode: response.statusCode ?? 0,
-            body: Buffer.concat(chunks).toString()
-          })
-        )
-      }
-    )
-    request.once("error", () => resolve({ status: "refused" }))
-    request.end()
+  const request = requestHttp({
+    host: "127.0.0.1",
+    port: findProxyPort(proxy),
+    path: url,
+    headers: buildProxyHeaders(authorization)
   })
+  request.end()
+  try {
+    const [response] = await once(request, "response")
+    const body = await readResponseBody(response)
+    return { status: "answered", statusCode: response.statusCode ?? 0, body }
+  } catch {
+    return { status: "refused" }
+  }
 }
 
 /**
@@ -537,9 +542,9 @@ describe("PageProxy", () => {
     expect(later).toEqual({ status: "refused" })
   })
 
-  it("closes its open tunnels and its port when closed, and closing again resolves", async () => {
+  it("closes its open tunnels and its port when disposed of, and disposing again resolves", async () => {
     const server = await startPageServer(answerWithBody("text/plain", "page"))
-    const proxy = await PageProxy.open(LOOPBACK_ONLY_DEPENDENCIES)
+    const proxy = await openTestProxy()
     const port = findProxyPort(proxy)
     const outcome = await sendConnect(
       proxy,
@@ -548,12 +553,216 @@ describe("PageProxy", () => {
     )
     if (outcome.status !== "connected") throw new Error("Expected a tunnel")
 
-    await Promise.all([proxy.close(), proxy.close()])
+    await Promise.all([
+      proxy[Symbol.asyncDispose](),
+      proxy[Symbol.asyncDispose]()
+    ])
     await waitForSocketClose(outcome.socket)
 
     expect(await tryConnecting(port)).toBe("ECONNREFUSED")
-    await expect(proxy.close()).resolves.toBeUndefined()
+    await expect(proxy[Symbol.asyncDispose]()).resolves.toBeUndefined()
   })
+
+  it("refuses a connection that arrives while it is being disposed of", async () => {
+    const proxy = await openTestProxy()
+    const port = findProxyPort(proxy)
+
+    const disposal = proxy[Symbol.asyncDispose]()
+    const attempt = await tryConnecting(port)
+    await disposal
+
+    expect(attempt).toBe("ECONNREFUSED")
+  })
+
+  it("still answers with its address, credentials, and refusals once disposed of", async () => {
+    const proxy = await openTestProxy()
+    await sendConnect(
+      proxy,
+      "private.test:443",
+      formatProxyAuthorization(proxy.credentials)
+    )
+    const url = proxy.url
+    const credentials = proxy.credentials
+
+    await proxy[Symbol.asyncDispose]()
+
+    expect(proxy.url).toBe(url)
+    expect(proxy.credentials).toEqual(credentials)
+    expect(proxy.findRefusal("private.test", 443)?.kind).toBe("blocked-address")
+  })
+
+  it.each([
+    ["a connection limit of 0", { ...GENEROUS_LIMITS, maximumConnections: 0 }],
+    [
+      "a fractional connection limit",
+      { ...GENEROUS_LIMITS, maximumConnections: 1.5 }
+    ],
+    [
+      "a connection limit that is not a number",
+      { ...GENEROUS_LIMITS, maximumConnections: Number.NaN }
+    ],
+    ["a negative byte limit", { ...GENEROUS_LIMITS, maximumReceivedBytes: -1 }],
+    [
+      "an infinite byte limit",
+      { ...GENEROUS_LIMITS, maximumReceivedBytes: Number.POSITIVE_INFINITY }
+    ]
+  ])("refuses to open with %s", async (_label, limits) => {
+    await expect(
+      PageProxy.open({ ...LOOPBACK_ONLY_DEPENDENCIES, limits })
+    ).rejects.toBeInstanceOf(RangeError)
+  })
+
+  it("rejects a forwarded request whose target is not an absolute http URL", async () => {
+    const proxy = await openTestProxy()
+    const authorization = formatProxyAuthorization(proxy.credentials)
+
+    const relative = await sendForward(proxy, "/moths", authorization)
+    const https = await sendForward(
+      proxy,
+      "https://pages.test/moths",
+      authorization
+    )
+
+    expect(relative).toMatchObject({ status: "answered", statusCode: 400 })
+    expect(https).toMatchObject({ status: "answered", statusCode: 400 })
+  })
+
+  it.each([
+    ["port 0", "pages.test:0"],
+    ["port 65536", "pages.test:65536"]
+  ])("rejects a CONNECT target on %s", async (_label, target) => {
+    const proxy = await openTestProxy()
+
+    const outcome = await sendConnect(
+      proxy,
+      target,
+      formatProxyAuthorization(proxy.credentials)
+    )
+
+    expect(outcome).toMatchObject({ status: "answered", statusCode: 400 })
+  })
+
+  it("accepts a CONNECT target on port 65535, the highest port", async () => {
+    const proxy = await openTestProxy()
+
+    const outcome = await sendConnect(
+      proxy,
+      "pages.test:65535",
+      formatProxyAuthorization(proxy.credentials)
+    )
+
+    expect(outcome.status).not.toBe("answered")
+    expect(proxy.findRefusal("pages.test", 65_535)).toBeUndefined()
+  })
+
+  it("refuses a forwarded request whose host's address is blocked by the time its socket has connected", async () => {
+    const server = await startPageServer(answerWithBody("text/plain", "page"))
+    let checkCount = 0
+    const proxy = await openTestProxy({
+      ...LOOPBACK_ONLY_DEPENDENCIES,
+      isBlockedAddress: () => {
+        checkCount += 1
+        return checkCount > 1
+      }
+    })
+
+    const outcome = await sendForward(
+      proxy,
+      `http://pages.test:${server.port}/moths`,
+      formatProxyAuthorization(proxy.credentials)
+    )
+
+    expect(outcome).toEqual({ status: "refused" })
+    expect(proxy.findRefusal("pages.test", server.port)?.kind).toBe(
+      "blocked-address"
+    )
+    expect(server.receivedHeaders).toHaveLength(0)
+  })
+
+  it("refuses forwarded requests past its connection limit", async () => {
+    const server = await startPageServer(answerWithBody("text/plain", "page"))
+    const proxy = await openTestProxy({
+      ...LOOPBACK_ONLY_DEPENDENCIES,
+      limits: { ...GENEROUS_LIMITS, maximumConnections: 1 }
+    })
+    const authorization = formatProxyAuthorization(proxy.credentials)
+
+    const first = await sendForward(
+      proxy,
+      `http://pages.test:${server.port}/moths`,
+      authorization
+    )
+    const second = await sendForward(
+      proxy,
+      `http://pages.test:${server.port}/moths`,
+      authorization
+    )
+
+    expect(first).toEqual({ status: "answered", statusCode: 200, body: "page" })
+    expect(second).toEqual({ status: "refused" })
+    expect(server.receivedHeaders).toHaveLength(1)
+  })
+
+  it("closes an open tunnel when a new connection passes its connection limit", async () => {
+    const server = await startPageServer(answerWithBody("text/plain", "page"))
+    const proxy = await openTestProxy({
+      ...LOOPBACK_ONLY_DEPENDENCIES,
+      limits: { ...GENEROUS_LIMITS, maximumConnections: 1 }
+    })
+    const authorization = formatProxyAuthorization(proxy.credentials)
+    const first = await sendConnect(
+      proxy,
+      `pages.test:${server.port}`,
+      authorization
+    )
+    if (first.status !== "connected") throw new Error("Expected a tunnel")
+
+    const second = await sendConnect(
+      proxy,
+      `pages.test:${server.port}`,
+      authorization
+    )
+    await waitForSocketClose(first.socket)
+
+    expect(second).toEqual({ status: "refused" })
+    expect(first.socket.closed).toBe(true)
+  })
+
+  it.each([
+    ["exactly its byte limit", 1024, "answered"],
+    ["one byte past its byte limit", 1025, "refused"]
+  ])(
+    "after a forwarded response of %s, %s the next request",
+    async (_label, bodyLength, laterStatus) => {
+      const server = await startPageServer(
+        routeByPath({
+          "/moths": answerWithBody("text/plain", "m".repeat(bodyLength)),
+          "/empty": answerWithBody("text/plain", "")
+        })
+      )
+      const proxy = await openTestProxy({
+        ...LOOPBACK_ONLY_DEPENDENCIES,
+        limits: { ...GENEROUS_LIMITS, maximumReceivedBytes: 1024 }
+      })
+      const authorization = formatProxyAuthorization(proxy.credentials)
+
+      const outcome = await sendForward(
+        proxy,
+        `http://pages.test:${server.port}/moths`,
+        authorization
+      )
+      const later = await sendForward(
+        proxy,
+        `http://pages.test:${server.port}/empty`,
+        authorization
+      )
+
+      const isWhole =
+        outcome.status === "answered" && outcome.body.length === bodyLength
+      expect(isWhole).toBe(bodyLength <= 1024)
+      expect(later.status).toBe(laterStatus)
+    }
+  )
 
   it("gives each proxy its own credentials", async () => {
     const proxy = await openTestProxy()

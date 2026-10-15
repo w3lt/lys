@@ -5,8 +5,11 @@ import { readTestBrowserExecutablePath } from "./pageBrowser"
 /** Runs a command and resolves with its output. */
 const execFileAsync = promisify(execFile)
 
-/** Finds the process ID, parent process ID, and command line of a `ps` line. */
-const PROCESS_LINE_PATTERN = /^\s*(\d+)\s+(\d+)\s+(.*)$/
+/**
+ * Finds the process ID, parent process ID, and command line of a `ps` line;
+ * the command line keeps any spaces `ps` adds before it.
+ */
+const PROCESS_LINE_PATTERN = /^\s*(\d+)\s+(\d+)\s(.*)$/
 
 /** One running process. */
 type ProcessEntry = Readonly<{

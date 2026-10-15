@@ -6,10 +6,11 @@ import { defineConfig } from "vitest/config"
  * @remarks Discovers only `test/unit/**\/*.test.ts`, so shared harness modules
  * under `test/unit/support` are never collected as cases and the live suite
  * under `test/live` never runs here; a global teardown warns of that when a
- * run ends. Tests run in Node without any external runtime; every substituted
- * global, environment variable, and spy is restored after each case. Vitest's
- * default failure on an empty selection is kept, so a run that discovers no
- * cases fails instead of passing.
+ * run ends. Tests run in Node; the read_page cases also start the Chrome
+ * Headless Shell that `LYS_TEST_BROWSER_EXECUTABLE_PATH` names, and fail when
+ * it is not set. Every substituted global, environment variable, and spy is
+ * restored after each case. Vitest's default failure on an empty selection
+ * is kept, so a run that discovers no cases fails instead of passing.
  */
 export default defineConfig({
   test: {

@@ -26,7 +26,8 @@ describe("registerToolRoutes against the Tavily API", () => {
         "builtInTools",
         createBuiltInTools(
           webSearchToolProvider,
-          TEST_BACKEND_CONFIG.browserExecutablePath
+          TEST_BACKEND_CONFIG.browserExecutablePath,
+          () => undefined
         )
       )
       await registerToolRoutes(app)

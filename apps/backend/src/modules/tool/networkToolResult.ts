@@ -16,16 +16,27 @@ const STRAY_JOINER_PATTERN =
   /(?<=^|[\s\u200C\u200D])[\u200C\u200D]|[\u200C\u200D](?=$|[\s\u200C\u200D])/gu
 
 /**
+ * Finds each variation selector except one text-style (U+FE0E) or
+ * emoji-style (U+FE0F) selector right after a visible character, which is
+ * how emoji and keycaps are written. Any other selector only picks a rare
+ * alternate shape, and a run of them can spell a message a person never
+ * sees, one byte per selector.
+ */
+const STRAY_VARIATION_SELECTOR_PATTERN =
+  /[\p{Variation_Selector}--[\uFE0E\uFE0F]]|(?<=^|[\s\p{Variation_Selector}\u200C\u200D])[\uFE0E\uFE0F]/gv
+
+/**
  * Formats the result of a tool that reaches the network for the model.
  *
  * @param content - Text the tool produced, which carries what a remote
  * server sent.
  * @returns The text without characters a person cannot see: format and
- * control characters other than tabs and line breaks, and zero-width
- * joiners and non-joiners that do not sit between two visible characters.
- * When any were removed, a last paragraph says how many, so the model can
- * tell the person the source tried to hide text; otherwise the text
- * unchanged.
+ * control characters other than tabs and line breaks, zero-width joiners
+ * and non-joiners that do not sit between two visible characters, and
+ * every variation selector except one text- or emoji-style selector right
+ * after a visible character. When any were removed, a last paragraph says
+ * how many, so the model can tell the person the source tried to hide text;
+ * otherwise the text unchanged.
  * @remarks Every content delimiter Lys writes around web text treats these
  * characters as part of a bracket run, so removing them never joins brackets
  * into a delimiter.
@@ -34,6 +45,7 @@ export function formatNetworkToolResult(content: string): string {
   const visibleText = content
     .replace(INVISIBLE_CHARACTER_PATTERN, "")
     .replace(STRAY_JOINER_PATTERN, "")
+    .replace(STRAY_VARIATION_SELECTOR_PATTERN, "")
   const removedCount =
     Array.from(content).length - Array.from(visibleText).length
   if (removedCount === 0) return content

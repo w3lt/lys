@@ -4,12 +4,13 @@ import {
   type ServerResponse
 } from "node:http"
 import type { AddressInfo } from "node:net"
+import { performance } from "node:perf_hooks"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import {
   getRenderedPage,
   type PageRenderingResult
 } from "../../../../../../src/modules/tool/builtIn/web/pageRendering"
-import { MAXIMUM_PAGE_TEXT_LENGTH } from "../../../../../../src/modules/tool/builtIn/web/pageSnapshot"
+import { MAXIMUM_PAGE_TEXT_LENGTH } from "../../../../../../src/modules/tool/builtIn/web/pageDocument"
 import {
   parsePageUrl,
   type PageUrl
@@ -20,6 +21,7 @@ import {
   answerWithBody,
   buildPageServerDependencies,
   buildTestPageUrl,
+  routeByPath,
   startPageServer,
   type PageRoute,
   type PageServerReadOptions
@@ -41,24 +43,6 @@ function renderTestPage(
     new AbortController().signal,
     buildPageServerDependencies(options)
   )
-}
-
-/**
- * Builds a route that answers each path with its own handler.
- *
- * @param routes - Handler of each path; any other path gets a 404.
- * @returns The route.
- */
-function routeByPath(routes: Readonly<Record<string, PageRoute>>): PageRoute {
-  return (request, response) => {
-    const route = routes[request.url ?? ""]
-    if (route !== undefined) {
-      route(request, response)
-      return
-    }
-    response.writeHead(404)
-    response.end()
-  }
 }
 
 /**
@@ -516,10 +500,7 @@ describe("getRenderedPage", { timeout: BROWSER_TEST_TIMEOUT_MS }, () => {
           })
           response.end("Moved.")
         },
-        "/moths": answerWithBody(
-          "text/html",
-          '<p>Moths fly at night.</p><p style="color: #fff">hidden-white</p>'
-        )
+        "/moths": answerWithParagraph("Moths fly at night.")
       })
     )
 
@@ -530,7 +511,6 @@ describe("getRenderedPage", { timeout: BROWSER_TEST_TIMEOUT_MS }, () => {
     expect(page.mediaType).toBe("text/html")
     expect(page.url).toBe(buildTestPageUrl(server.port, "/moths"))
     expect(page.text).toContain("<p>Moths fly at night.</p>")
-    expect(page.text).not.toContain("hidden-white")
   })
 
   it("opens no other window a page asks for", async () => {
@@ -600,7 +580,7 @@ describe("getRenderedPage", { timeout: BROWSER_TEST_TIMEOUT_MS }, () => {
     expect(result).toEqual({ status: "failed", failure: { kind: "crashed" } })
   })
 
-  it("fails a page that crashes the browser while Lys takes its snapshot", async () => {
+  it("fails a page that crashes the browser while Lys reads its document", async () => {
     const server = await startPageServer(
       answerWithBody(
         "text/html",
@@ -616,13 +596,15 @@ describe("getRenderedPage", { timeout: BROWSER_TEST_TIMEOUT_MS }, () => {
     expect(result).toEqual({ status: "failed", failure: { kind: "crashed" } })
   })
 
-  it("says the browser is missing when its executable does not exist, and sends nothing", async () => {
+  it("says the browser is missing when its executable does not exist, reports why, and sends nothing", async () => {
     const server = await startPageServer(answerWithParagraph("Moths"))
+    const reportBrowserFailure = vi.fn()
 
     const result = await renderTestPage(
       buildTestPageUrl(server.port, "/moths"),
       {
-        browserExecutablePath: "/nonexistent/lys/chrome-headless-shell"
+        browserExecutablePath: "/nonexistent/lys/chrome-headless-shell",
+        reportBrowserFailure
       }
     )
 
@@ -631,15 +613,20 @@ describe("getRenderedPage", { timeout: BROWSER_TEST_TIMEOUT_MS }, () => {
       failure: { kind: "browser-missing" }
     })
     expect(server.receivedHeaders).toHaveLength(0)
+    expect(reportBrowserFailure.mock.calls[0]?.[0]).toMatchObject({
+      code: "ENOENT"
+    })
   })
 
-  it("says the browser could not start when its executable is not a browser", async () => {
+  it("says the browser could not start when its executable is not a browser, and reports why", async () => {
     const server = await startPageServer(answerWithParagraph("Moths"))
+    const reportBrowserFailure = vi.fn()
 
     const result = await renderTestPage(
       buildTestPageUrl(server.port, "/moths"),
       {
-        browserExecutablePath: "/usr/bin/true"
+        browserExecutablePath: "/usr/bin/true",
+        reportBrowserFailure
       }
     )
 
@@ -648,16 +635,302 @@ describe("getRenderedPage", { timeout: BROWSER_TEST_TIMEOUT_MS }, () => {
       failure: { kind: "browser-failed" }
     })
     expect(server.receivedHeaders).toHaveLength(0)
+    expect(reportBrowserFailure).toHaveBeenCalledTimes(1)
+    expect(reportBrowserFailure.mock.calls[0]?.[0]).toBeInstanceOf(Error)
   })
 
-  it("leaves no browser running after a read", async () => {
-    const server = await startPageServer(answerWithParagraph("Moths"))
+  it.each([
+    ["a read that succeeds", answerWithParagraph("Moths"), "rendered"],
+    ["a read that fails", routeByPath({}), "failed"],
+    ["a read that times out", holdRequests().route, "failed"],
+    [
+      "a read whose page crashes",
+      answerWithBody(
+        "text/html",
+        "<p>Moths</p><script>const moths = []; for (;;) moths.push(new Array(1e7).fill(1.5))</script>"
+      ),
+      "failed"
+    ]
+  ])("leaves no browser running after %s", async (_label, route, status) => {
+    const server = await startPageServer(route)
 
-    findRenderedPage(
+    const result = await renderTestPage(
+      buildTestPageUrl(server.port, "/moths"),
+      { readTimeoutMs: 6_000 }
+    )
+
+    expect(result.status).toBe(status)
+    expect(await listBrowserProcessIds()).toEqual([])
+  })
+
+  it.each([
+    [
+      "a meta refresh",
+      '<meta http-equiv="refresh" content="0;url=/missing"><p>Moved.</p>'
+    ],
+    [
+      "a script navigation",
+      '<p>Moved.</p><script>addEventListener("load", () => location.assign("/missing"))</script>'
+    ]
+  ])(
+    "fails with the status of a page that %s leads to",
+    async (_label, redirectingPage) => {
+      const server = await startPageServer(
+        routeByPath({
+          "/old": answerWithBody("text/html", redirectingPage),
+          "/missing": (_request, response) => {
+            response.writeHead(404, { "content-type": "text/html" })
+            response.end("<p>No moths here.</p>")
+          }
+        })
+      )
+
+      const result = await renderTestPage(buildTestPageUrl(server.port, "/old"))
+
+      expect(result).toEqual({
+        status: "failed",
+        failure: { kind: "http-status", status: 404 }
+      })
+    }
+  )
+
+  it("fails a page whose script leads to a document that is not a web page, and names its media type", async () => {
+    const server = await startPageServer(
+      routeByPath({
+        "/old": answerWithBody(
+          "text/html",
+          '<p>Moved.</p><script>addEventListener("load", () => location.assign("/moths.json"))</script>'
+        ),
+        "/moths.json": answerWithBody("application/json", '{"moths":"fly"}')
+      })
+    )
+
+    const result = await renderTestPage(buildTestPageUrl(server.port, "/old"))
+
+    expect(result).toEqual({
+      status: "failed",
+      failure: {
+        kind: "unsupported-content-type",
+        mediaType: "application/json"
+      }
+    })
+  })
+
+  it("fails a page that sends itself to a URL Lys may not read", async () => {
+    const server = await startPageServer(
+      answerWithBody(
+        "text/html",
+        '<p>Moths fly at night.</p><script>addEventListener("load", () => location.replace("about:blank"))</script>'
+      )
+    )
+
+    const result = await renderTestPage(buildTestPageUrl(server.port, "/moths"))
+
+    expect(result).toEqual({
+      status: "failed",
+      failure: { kind: "invalid-redirect", problem: "unsupported-scheme" }
+    })
+  })
+
+  it("keeps nothing a page stores, such as a cookie or local storage, for the next read", async () => {
+    const server = await startPageServer(
+      answerWithBody(
+        "text/html",
+        `<p id="kept"></p>
+        <script>
+          const kept = [document.cookie, localStorage.getItem("moth"), sessionStorage.getItem("moth")]
+          document.getElementById("kept").textContent = "kept:" + kept.filter((value) => value !== null && value !== "").join(",") + "."
+          document.cookie = "moth=luna; max-age=3600"
+          localStorage.setItem("moth", "luna")
+          sessionStorage.setItem("moth", "luna")
+        </script>`
+      )
+    )
+    const url = buildTestPageUrl(server.port, "/moths")
+
+    const first = findRenderedPage(await renderTestPage(url))
+    const second = findRenderedPage(await renderTestPage(url))
+
+    expect(first.text).toContain('<p id="kept">kept:.</p>')
+    expect(second.text).toContain('<p id="kept">kept:.</p>')
+  })
+
+  it("times out a page whose scripts never let the browser read it", async () => {
+    const server = await startPageServer(
+      answerWithBody(
+        "text/html",
+        '<p>Moths fly at night.</p><script>addEventListener("load", () => { for (;;) {} })</script>'
+      )
+    )
+
+    const result = await renderTestPage(
+      buildTestPageUrl(server.port, "/moths"),
+      { readTimeoutMs: 4_000, settleTimeoutMs: 500 }
+    )
+
+    expect(result).toEqual({ status: "failed", failure: { kind: "timed-out" } })
+    expect(await listBrowserProcessIds()).toEqual([])
+  })
+
+  it.each([
+    ["a media type of exactly 100 characters", 100, 100],
+    ["a media type of 101 characters", 101, 100]
+  ])(
+    "reports %s cut to at most 100 characters",
+    async (_label, mediaTypeLength, reportedLength) => {
+      const mediaType = `application/${"x".repeat(mediaTypeLength - "application/".length)}`
+      const server = await startPageServer(answerWithBody(mediaType, "moths"))
+
+      const result = await renderTestPage(
+        buildTestPageUrl(server.port, "/moths")
+      )
+
+      expect(result).toEqual({
+        status: "failed",
+        failure: {
+          kind: "unsupported-content-type",
+          mediaType: mediaType.slice(0, reportedLength)
+        }
+      })
+    }
+  )
+
+  it("reports a media type with its whitespace flattened", async () => {
+    const server = await startPageServer(
+      answerWithBody("application/x\tmoth", "moths")
+    )
+
+    const result = await renderTestPage(buildTestPageUrl(server.port, "/moths"))
+
+    expect(result).toEqual({
+      status: "failed",
+      failure: {
+        kind: "unsupported-content-type",
+        mediaType: "application/x moth"
+      }
+    })
+  })
+
+  it("fails a document that comes without a content type as not a web page", async () => {
+    const server = await startPageServer(
+      answerWithBody(undefined, "<p>Moths fly at night.</p>")
+    )
+
+    const result = await renderTestPage(buildTestPageUrl(server.port, "/moths"))
+
+    expect(result).toEqual({
+      status: "failed",
+      failure: { kind: "unsupported-content-type", mediaType: undefined }
+    })
+  })
+
+  it("never fetches the images, fonts, or media a page names", async () => {
+    const resources = countRequests(answerWithBody("image/png", "png"))
+    const server = await startPageServer(
+      routeByPath({
+        "/moths": answerWithBody(
+          "text/html",
+          `<style>@font-face { font-family: Moth; src: url("/moth.woff2") } p { font-family: Moth }</style>
+          <p>Moths fly at night.</p><img src="/moth.png"><video src="/moth.mp4" autoplay muted></video>`
+        ),
+        "/moth.png": resources.route,
+        "/moth.woff2": resources.route,
+        "/moth.mp4": resources.route
+      })
+    )
+
+    const page = findRenderedPage(
       await renderTestPage(buildTestPageUrl(server.port, "/moths"))
     )
 
-    expect(await listBrowserProcessIds()).toEqual([])
+    expect(page.text).toContain("<p>Moths fly at night.</p>")
+    expect(resources.count()).toBe(0)
+  })
+
+  it("lets no page register a service worker", async () => {
+    const worker = countRequests(
+      answerWithBody(
+        "text/javascript",
+        "self.addEventListener('fetch', () => {})"
+      )
+    )
+    const server = await startPageServer(
+      routeByPath({
+        "/moths": answerWithBody(
+          "text/html",
+          `<p id="worker"></p>
+          <script>
+            navigator.serviceWorker.register("/worker.js").then(
+              () => { document.getElementById("worker").textContent = "registered" },
+              () => { document.getElementById("worker").textContent = "refused" }
+            )
+          </script>`
+        ),
+        "/worker.js": worker.route
+      })
+    )
+
+    const page = findRenderedPage(
+      await renderTestPage(buildTestPageUrl(server.port, "/moths"))
+    )
+
+    expect(page.text).not.toContain("registered")
+    expect(worker.count()).toBe(0)
+  })
+
+  it("fails a page that downloads instead of showing a document", async () => {
+    const server = await startPageServer(
+      answerWithBody("text/html", "<p>Moths fly at night.</p>", {
+        "content-disposition": 'attachment; filename="moths.html"'
+      })
+    )
+
+    const result = await renderTestPage(buildTestPageUrl(server.port, "/moths"))
+
+    expect(result).toEqual({
+      status: "failed",
+      failure: { kind: "transfer-failed", code: "ERR_ABORTED" }
+    })
+  })
+
+  it("times out without starting the browser when the read has no time left", async () => {
+    const server = await startPageServer(answerWithParagraph("Moths"))
+    const reportBrowserFailure = vi.fn()
+    let nowMs = 0
+    vi.spyOn(performance, "now").mockImplementation(() => {
+      nowMs += 10
+      return nowMs
+    })
+
+    const result = await renderTestPage(
+      buildTestPageUrl(server.port, "/moths"),
+      {
+        browserExecutablePath: "/usr/bin/true",
+        readTimeoutMs: 5,
+        reportBrowserFailure
+      }
+    )
+
+    expect(result).toEqual({ status: "failed", failure: { kind: "timed-out" } })
+    expect(server.receivedHeaders).toHaveLength(0)
+    expect(reportBrowserFailure, "no start was tried").not.toHaveBeenCalled()
+  })
+
+  it("times out, rather than calling the browser broken, when the browser runs out of the read's time while starting, and the browser exits", async () => {
+    const server = await startPageServer(answerWithParagraph("Moths"))
+    const reportBrowserFailure = vi.fn()
+
+    const result = await renderTestPage(
+      buildTestPageUrl(server.port, "/moths"),
+      { readTimeoutMs: 40, reportBrowserFailure }
+    )
+
+    expect(result).toEqual({ status: "failed", failure: { kind: "timed-out" } })
+    expect(reportBrowserFailure).not.toHaveBeenCalled()
+    await vi.waitFor(
+      async () => expect(await listBrowserProcessIds()).toEqual([]),
+      { timeout: 2_000, interval: 50 }
+    )
   })
 
   it("rejects with the stop reason and starts nothing when already stopped", async () => {

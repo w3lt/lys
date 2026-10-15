@@ -82,6 +82,8 @@ export function buildTavilyRequestDependencies(): TavilyRequestDependencies {
  * the backend's lifetime.
  * @param browserExecutablePath - Absolute path of the Chrome Headless Shell
  * the read-page tool runs.
+ * @param reportBrowserFailure - Receives why that browser is missing or
+ * could not start, for logging.
  * @returns A frozen list: the read-page tool, always ready, which reads each
  * page in that browser, resolves names through the operating system, and
  * never connects to a blocked address; then the web search tool. Creating it
@@ -89,11 +91,13 @@ export function buildTavilyRequestDependencies(): TavilyRequestDependencies {
  */
 export function createBuiltInTools(
   webSearchToolProvider: BuiltInToolProvider,
-  browserExecutablePath: string
+  browserExecutablePath: string,
+  reportBrowserFailure: (failure: unknown) => void
 ): readonly BuiltInToolEntry[] {
   const readPageTool = new ReadPageTool({
     lookupHostAddresses: lookupDnsHostAddresses,
     isBlockedAddress,
+    reportBrowserFailure,
     browserExecutablePath,
     readTimeoutMs: PAGE_READ_TIMEOUT_MS,
     settleTimeoutMs: PAGE_SETTLE_TIMEOUT_MS

@@ -1,4 +1,9 @@
-import { chromium, type Browser, type LaunchOptions } from "playwright-core"
+import {
+  chromium,
+  type Browser,
+  type LaunchOptions,
+  type Page
+} from "playwright-core"
 import { onTestFinished } from "vitest"
 
 /** Environment variable naming the browser executable the tests run. */
@@ -26,13 +31,13 @@ export function readTestBrowserExecutablePath(): string {
 }
 
 /**
- * Launches the test browser the way production does, so a test can watch it.
+ * Starts the test browser the way production does, so a test can watch it.
  *
  * @param options - Playwright launch options; production passes its proxy
  * and arguments here.
- * @returns The launched browser; the test closes it when it finishes.
+ * @returns The started browser; the test closes it when it finishes.
  */
-export async function launchTestBrowser(
+export async function startTestBrowser(
   options: LaunchOptions = {}
 ): Promise<Browser> {
   const browser = await chromium.launch(options)
@@ -46,8 +51,8 @@ export async function launchTestBrowser(
  * @param html - Markup the page shows; its scripts run.
  * @returns The page, once its markup has loaded.
  */
-export async function openTestPage(html: string) {
-  const browser = await launchTestBrowser({
+export async function openTestPage(html: string): Promise<Page> {
+  const browser = await startTestBrowser({
     executablePath: readTestBrowserExecutablePath(),
     headless: true
   })

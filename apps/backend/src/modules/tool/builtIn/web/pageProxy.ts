@@ -8,8 +8,9 @@ import {
   type Server,
   type ServerResponse
 } from "node:http"
-import { connect, isIP, type AddressInfo, type Socket } from "node:net"
+import { connect, isIP, type Socket } from "node:net"
 import type { Duplex } from "node:stream"
+import { getUrlPort } from "./pageUrl"
 import {
   ConnectionAddressError,
   createCheckedLookup,
@@ -20,9 +21,12 @@ import {
 
 /** Most work one proxy accepts for the read it serves. */
 export type PageProxyLimits = Readonly<{
-  /** Most outbound connections, inclusive; a positive integer. */
+  /** Most outbound connections, inclusive; a positive safe integer. */
   maximumConnections: number
-  /** Most bytes received from remote servers, inclusive; a positive integer. */
+  /**
+   * Most bytes received from remote servers, inclusive; a positive safe
+   * integer.
+   */
   maximumReceivedBytes: number
 }>
 
@@ -118,8 +122,11 @@ const BAD_CONNECT_RESPONSE =
 const CONNECTION_ESTABLISHED_RESPONSE =
   "HTTP/1.1 200 Connection Established\r\n\r\n"
 
-/** Port of an http URL that names none. */
-const DEFAULT_HTTP_PORT = 80
+/** Address the proxy listens on and its URL names: this machine's IPv4 loopback. */
+const LOOPBACK_ADDRESS = "127.0.0.1"
+
+/** Finds an IPv6 address in the brackets a URL or CONNECT target writes it in. */
+const BRACKETED_HOST_PATTERN = /^\[(.*)\]$/
 
 /** Highest TCP port, inclusive. */
 const MAXIMUM_TCP_PORT = 65_535
@@ -184,9 +191,8 @@ function parseForwardTarget(
 ): ForwardTarget | undefined {
   const url = URL.parse(requestUrl ?? "")
   if (url?.protocol !== "http:") return undefined
-  const port = url.port === "" ? DEFAULT_HTTP_PORT : Number(url.port)
-  const host = url.hostname.replace(/^\[(.*)\]$/, "$1")
-  const target: ProxyTarget = Object.freeze({ host, port })
+  const host = url.hostname.replace(BRACKETED_HOST_PATTERN, "$1")
+  const target: ProxyTarget = Object.freeze({ host, port: getUrlPort(url) })
   return Object.freeze({
     target,
     path: `${url.pathname}${url.search}`,
@@ -260,7 +266,7 @@ function buildProxyEndpoint(
     `${credentials.username}:${credentials.password}`
   ).toString("base64")
   return Object.freeze({
-    url: `http://127.0.0.1:${port}`,
+    url: `http://${LOOPBACK_ADDRESS}:${port}`,
     credentials,
     authorization: `Basic ${token}`
   })
@@ -326,17 +332,46 @@ function closeSockets(sockets: ReadonlySet<Duplex>): void {
  * Starts a server listening on a random port of 127.0.0.1.
  *
  * @param server - Server that is not listening yet.
- * @returns The port it listens on.
+ * @returns The address the server reports once it listens.
  * @throws The server's listening failure.
  */
-function openLoopbackListener(server: Server): Promise<number> {
+function openLoopbackListener(
+  server: Server
+): Promise<ReturnType<Server["address"]>> {
   return new Promise((resolve, reject) => {
     server.once("error", reject)
-    server.listen(0, "127.0.0.1", () => {
+    server.listen(0, LOOPBACK_ADDRESS, () => {
       server.off("error", reject)
-      resolve((server.address() as AddressInfo).port)
+      resolve(server.address())
     })
   })
+}
+
+/**
+ * Answers whether a limit is a positive safe integer.
+ *
+ * @param limit - Limit given to a proxy.
+ * @returns True for 1 and every larger safe integer.
+ */
+function isValidProxyLimit(limit: number): boolean {
+  return Number.isSafeInteger(limit) && limit > 0
+}
+
+/**
+ * Checks the limits given to a proxy.
+ *
+ * @param limits - Limits a caller gave.
+ * @returns The same limits once both are positive safe integers.
+ * @throws A `RangeError` naming the first limit that is not.
+ */
+function parsePageProxyLimits(limits: PageProxyLimits): PageProxyLimits {
+  if (!isValidProxyLimit(limits.maximumConnections)) {
+    throw new RangeError("maximumConnections must be a positive safe integer")
+  }
+  if (!isValidProxyLimit(limits.maximumReceivedBytes)) {
+    throw new RangeError("maximumReceivedBytes must be a positive safe integer")
+  }
+  return limits
 }
 
 /**
@@ -373,9 +408,11 @@ function closeProxyServer(
  * client's connection and is kept for {@link PageProxy.findRefusal}. Once a
  * limit is passed, every connection is closed and new ones are refused.
  * Owns its server and every client and upstream socket. Lifecycle: ready
- * (or exhausted) → closing → closed. Concurrency model: single-owner; the
- * read that opens it owns it on the Node event loop, where every socket
- * callback changes its state synchronously.
+ * (or exhausted) → closing → closed; once closing, every connection is
+ * refused, while `url`, `credentials`, and `findRefusal` still answer from
+ * what the proxy recorded. Concurrency model: single-owner; the read that
+ * opens it owns it on the Node event loop, where every socket callback
+ * changes its state synchronously.
  */
 export default class PageProxy {
   /** Listening server; owned. */
@@ -424,14 +461,22 @@ export default class PageProxy {
    * @param dependencies - Lookup, address rule, and limits, lent for the
    * proxy's lifetime.
    * @returns A ready proxy listening on a random port of 127.0.0.1, with new
-   * random credentials. The caller owns it and must close it.
-   * @throws When the server cannot listen; nothing is left open.
+   * random credentials. The caller owns it and must dispose of it.
+   * @throws A `RangeError` when a limit is not a positive safe integer,
+   * before anything opens; the server's failure when it cannot listen, and
+   * a `TypeError` when it listens elsewhere than on a TCP port, with nothing
+   * left open.
    */
   public static async open(
     dependencies: PageProxyDependencies
   ): Promise<PageProxy> {
+    parsePageProxyLimits(dependencies.limits)
     const server = createServer()
-    const port = await openLoopbackListener(server)
+    const address = await openLoopbackListener(server)
+    if (address === null || typeof address === "string") {
+      await closeProxyServer(server, new Set())
+      throw new TypeError("The proxy server is not listening on a TCP port")
+    }
     const credentials: PageProxyCredentials = Object.freeze({
       username: randomUUID(),
       password: randomUUID()
@@ -439,7 +484,7 @@ export default class PageProxy {
     const proxy = new PageProxy(
       server,
       dependencies,
-      buildProxyEndpoint(port, credentials)
+      buildProxyEndpoint(address.port, credentials)
     )
     proxy.#registerServerHandlers()
     return proxy
@@ -473,7 +518,9 @@ export default class PageProxy {
    * the address rule. A connection refused by a limit is not recorded.
    */
   public findRefusal(host: string, port: number): PageProxyRefusal | undefined {
-    const normalizedHost = host.replace(/^\[(.*)\]$/, "$1").toLowerCase()
+    const normalizedHost = host
+      .replace(BRACKETED_HOST_PATTERN, "$1")
+      .toLowerCase()
     return this.#refusals.get(`${normalizedHost}:${port}`)
   }
 
@@ -485,7 +532,7 @@ export default class PageProxy {
    * resolves at once. The proxy ends closed even when closing fails.
    * @throws The server's closing failure.
    */
-  public close(): Promise<void> {
+  public [Symbol.asyncDispose](): Promise<void> {
     switch (this.#state.status) {
       case "closing":
         return this.#state.closure
@@ -552,7 +599,7 @@ export default class PageProxy {
       client.end(BAD_CONNECT_RESPONSE)
       return
     }
-    if (this.#refuseBlockedIpAddress(target) || !this.#offerConnection()) {
+    if (!this.#offerConnection(target)) {
       client.destroy()
       return
     }
@@ -583,10 +630,7 @@ export default class PageProxy {
       response.end()
       return
     }
-    if (
-      this.#refuseBlockedIpAddress(forward.target) ||
-      !this.#offerConnection()
-    ) {
+    if (!this.#offerConnection(forward.target)) {
       request.socket.destroy()
       return
     }
@@ -659,29 +703,25 @@ export default class PageProxy {
   }
 
   /**
-   * Refuses a target that is an IP address the address rule blocks, before
-   * any connection to it, since a socket skips the lookup for an IP address.
+   * Offers one more outbound connection to the address rule and the
+   * connection limit.
    *
    * @param target - Host and port a client asked for.
-   * @returns True when the target was refused and its refusal recorded; false
-   * when it is a host name, which the checked lookup judges, or an allowed
-   * IP address.
+   * @returns True when the proxy accepts it. False for an IP address the
+   * address rule blocks, whose refusal is recorded before any connection to
+   * it, since a socket skips the lookup for an IP address; and false when
+   * the proxy is closing, has reached a limit, or reaches the connection
+   * limit now, which closes every connection. A host name passes on to the
+   * checked lookup.
    */
-  #refuseBlockedIpAddress(target: ProxyTarget): boolean {
-    if (isIP(target.host) === 0) return false
-    if (!this.#dependencies.isBlockedAddress(target.host)) return false
-    this.#addRefusal(target, new ConnectionAddressError("blocked-address"))
-    return true
-  }
-
-  /**
-   * Offers one more outbound connection to the connection limit.
-   *
-   * @returns True when the proxy accepts it; false when it is closing, has
-   * reached a limit, or reaches the connection limit now, which closes every
-   * connection.
-   */
-  #offerConnection(): boolean {
+  #offerConnection(target: ProxyTarget): boolean {
+    if (
+      isIP(target.host) !== 0 &&
+      this.#dependencies.isBlockedAddress(target.host)
+    ) {
+      this.#addRefusal(target, new ConnectionAddressError("blocked-address"))
+      return false
+    }
     const state = this.#state
     if (state.status !== "ready") return false
     if (state.connectionCount >= this.#dependencies.limits.maximumConnections) {

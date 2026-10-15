@@ -59,7 +59,7 @@ export function formatDelimiterFreeText(text: string): string {
  * @returns The text itself when it fits; otherwise its beginning, one code
  * unit shorter when the cut would end on the first half of a pair.
  */
-function formatCutText(text: string, maximumLength: number): string {
+export function formatCutText(text: string, maximumLength: number): string {
   if (text.length <= maximumLength) return text
   const cutText = text.slice(0, maximumLength)
   return TRAILING_HIGH_SURROGATE_PATTERN.test(cutText)

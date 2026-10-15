@@ -1,6 +1,8 @@
 import fastifyPlugin from "fastify-plugin"
 import { type FastifyPluginAsync } from "fastify"
 import type { BackendConfig } from "../config"
+import type { LlmRuntimeFailureReporters } from "../modules/llm/llmRuntimeService"
+import type { PageRenderingFailureReporters } from "../modules/tool/builtIn/web/pageRendering"
 import { closeSingletonServices, createSingletonServices } from "./singleton"
 
 /** Options used to install application-scoped singleton services. */
@@ -25,7 +27,7 @@ type SingletonServicePluginOptions = {
 const singletonPlugin: FastifyPluginAsync<
   SingletonServicePluginOptions
 > = async (app, { config }) => {
-  const singletonServices = await createSingletonServices(config, {
+  const llmRuntime: LlmRuntimeFailureReporters = {
     reportLlmRuntimeAcquisitionFailure: (failure) => {
       app.log.warn({ err: failure }, "LM Studio runtime acquisition failed")
     },
@@ -35,6 +37,18 @@ const singletonPlugin: FastifyPluginAsync<
         "LM Studio runtime check or release failed after a model operation"
       )
     }
+  }
+  const pageRendering: PageRenderingFailureReporters = {
+    reportBrowserFailure: (failure) => {
+      app.log.error(
+        { err: failure },
+        "read_page's browser is missing or could not start"
+      )
+    }
+  }
+  const singletonServices = await createSingletonServices(config, {
+    llmRuntime,
+    pageRendering
   })
 
   app.addHook("onClose", async () => {

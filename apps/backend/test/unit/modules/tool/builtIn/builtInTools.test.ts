@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import type { BuiltInToolEntry } from "../../../../../src/modules/tool/builtIn/builtInTool"
 import {
   buildTavilyRequestDependencies,
@@ -19,6 +19,9 @@ import { ScriptedBuiltInToolProvider } from "../../../support/scriptedBuiltInToo
 /** Browser path where no browser is installed. */
 const MISSING_BROWSER_PATH = "/nonexistent/lys-test/chrome-headless-shell"
 
+/** Ignores the cause of a browser failure, which these cases do not check. */
+const IGNORE_BROWSER_FAILURE = () => undefined
+
 /** Web search provider that is never ready. */
 const UNAVAILABLE_PROVIDER = new ScriptedBuiltInToolProvider({
   status: "unavailable",
@@ -30,7 +33,11 @@ const LOOK_UP_TOOL = new ScriptedBuiltInTool()
 
 /** Read page, web search (unavailable), then the scripted look-up tool. */
 const ENTRIES: readonly BuiltInToolEntry[] = Object.freeze([
-  ...createBuiltInTools(UNAVAILABLE_PROVIDER, MISSING_BROWSER_PATH),
+  ...createBuiltInTools(
+    UNAVAILABLE_PROVIDER,
+    MISSING_BROWSER_PATH,
+    IGNORE_BROWSER_FAILURE
+  ),
   Object.freeze({
     definition: LOOK_UP_WORD_TOOL,
     provider: new ScriptedBuiltInToolProvider({
@@ -44,7 +51,8 @@ describe("createBuiltInTools", () => {
   it("lists read_page, then web_search with the given provider, frozen", () => {
     const entries = createBuiltInTools(
       UNAVAILABLE_PROVIDER,
-      MISSING_BROWSER_PATH
+      MISSING_BROWSER_PATH,
+      IGNORE_BROWSER_FAILURE
     )
 
     expect(entries.map((entry) => entry.definition)).toEqual([
@@ -58,7 +66,8 @@ describe("createBuiltInTools", () => {
   it("gives every turn the read-page tool, which refuses this machine", async () => {
     const [readPage] = createBuiltInTools(
       UNAVAILABLE_PROVIDER,
-      MISSING_BROWSER_PATH
+      MISSING_BROWSER_PATH,
+      IGNORE_BROWSER_FAILURE
     )
 
     const lookup = await readPage?.provider.findTurnTool()
@@ -73,10 +82,12 @@ describe("createBuiltInTools", () => {
     expect(parsed).toMatchObject({ status: "invalid" })
   })
 
-  it("gives the read-page tool the browser it is created with", async () => {
+  it("gives the read-page tool the browser it is created with, and reports why it is missing", async () => {
+    const reportBrowserFailure = vi.fn()
     const [readPage] = createBuiltInTools(
       UNAVAILABLE_PROVIDER,
-      MISSING_BROWSER_PATH
+      MISSING_BROWSER_PATH,
+      reportBrowserFailure
     )
     const lookup = await readPage?.provider.findTurnTool()
     if (lookup?.status !== "ready") throw new Error("Expected a ready tool")
@@ -89,6 +100,10 @@ describe("createBuiltInTools", () => {
       status: "failed",
       content:
         "Lys could not read https://example.com/: Lys's browser is missing. Please contact w3lt@negentropy.studio to report problem and require help. Only repair it yourself if you know exactly what you are doing."
+    })
+    expect(reportBrowserFailure).toHaveBeenCalledTimes(1)
+    expect(reportBrowserFailure.mock.calls[0]?.[0]).toMatchObject({
+      code: "ENOENT"
     })
   })
 })

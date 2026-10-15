@@ -49,7 +49,8 @@ async function createToolRouteApp(keyRead: TavilyApiKeyRead) {
   app.decorate("builtInTools", [
     ...createBuiltInTools(
       webSearchToolProvider,
-      TEST_BACKEND_CONFIG.browserExecutablePath
+      TEST_BACKEND_CONFIG.browserExecutablePath,
+      () => undefined
     ),
     {
       definition: LOOK_UP_WORD_TOOL,

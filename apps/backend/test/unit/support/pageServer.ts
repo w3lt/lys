@@ -31,19 +31,26 @@ export type PageServer = Readonly<{
 }>
 
 /**
- * Resolves the test host names: `pages.test` reaches the local page servers,
- * `private.test` has a private address, and every other name has none.
+ * Lists the addresses of the test host names: `pages.test` reaches the local
+ * page servers, `private.test` has a private address, and every other name
+ * has none.
+ *
+ * @param hostname - Host name to look up.
+ * @returns A promise of the name's addresses; rejected with an `ENOTFOUND`
+ * error for a name without any.
  */
-const lookupTestHost: HostAddressLookup = async (hostname) => {
+export const listTestHostAddresses: HostAddressLookup = (hostname) => {
   switch (hostname) {
     case "pages.test":
-      return [{ address: "127.0.0.1", family: 4 }]
+      return Promise.resolve([{ address: "127.0.0.1", family: 4 }])
     case "private.test":
-      return [{ address: "10.0.0.7", family: 4 }]
+      return Promise.resolve([{ address: "10.0.0.7", family: 4 }])
     default:
-      throw Object.assign(new Error(`getaddrinfo ENOTFOUND ${hostname}`), {
-        code: "ENOTFOUND"
-      })
+      return Promise.reject(
+        Object.assign(new Error(`getaddrinfo ENOTFOUND ${hostname}`), {
+          code: "ENOTFOUND"
+        })
+      )
   }
 }
 
@@ -57,6 +64,8 @@ export type PageServerReadOptions = Readonly<{
   settleTimeoutMs?: number
   /** Address rule; only the loopback address of the page servers when omitted. */
   isBlockedAddress?: (address: string) => boolean
+  /** Receives why the browser failed; ignored when omitted. */
+  reportBrowserFailure?: (failure: unknown) => void
 }>
 
 /**
@@ -72,10 +81,11 @@ export function buildPageServerDependencies(
   options: PageServerReadOptions = {}
 ): PageRenderingDependencies {
   return Object.freeze({
-    lookupHostAddresses: lookupTestHost,
+    lookupHostAddresses: listTestHostAddresses,
     isBlockedAddress:
       options.isBlockedAddress ??
       ((address: string) => address !== "127.0.0.1"),
+    reportBrowserFailure: options.reportBrowserFailure ?? (() => undefined),
     browserExecutablePath:
       options.browserExecutablePath ?? readTestBrowserExecutablePath(),
     readTimeoutMs: options.readTimeoutMs ?? 10_000,
@@ -143,4 +153,31 @@ export function answerWithBody(
       response.setHeader(name, value)
     response.end(body)
   }
+}
+
+/**
+ * Builds a route that answers each path with its own handler.
+ *
+ * @param routes - Handler of each path; any other path gets a 404.
+ * @returns The route.
+ */
+export function routeByPath(
+  routes: Readonly<Record<string, PageRoute>>
+): PageRoute {
+  return (request, response) =>
+    (routes[request.url ?? ""] ?? answerWithNotFound)(request, response)
+}
+
+/**
+ * Answers a request for a path the server does not have.
+ *
+ * @param _request - The request.
+ * @param response - Response, ended with status 404 and no body.
+ */
+function answerWithNotFound(
+  _request: IncomingMessage,
+  response: ServerResponse
+): void {
+  response.writeHead(404)
+  response.end()
 }

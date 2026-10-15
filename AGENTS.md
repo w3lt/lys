@@ -11,6 +11,7 @@ Agents MUST follow:
 3. Every active item standard linked from `docs/CODE_STANDARDS.md` that applies to a construct being added or modified.
 4. [JSDoc Standard](docs/JSDOC.md) for repository-owned JavaScript and TypeScript in its scope.
 5. [Merge Request Review](docs/code_reviews/MR_REVIEW.md) or [Full Code Review](docs/code_reviews/FULL_CODE_REVIEW.md) when reviewing code rather than authoring it.
+6. [Work on an Issue](docs/agent_operations/WORK_ON_ISSUE.md) when asked to work on an issue.
 
 This file MUST NOT be used to redefine or weaken a canonical construction rule. Rule ownership stays with the documents under `docs/`.
 
@@ -66,6 +67,8 @@ An agent MUST:
 5. Identify applicable rule IDs and relevant validation commands.
 6. Ask for direction only when unresolved ambiguity would materially change behavior, architecture, data, security, compatibility, or external state.
 
+During a [Work on an Issue](docs/agent_operations/WORK_ON_ISSUE.md) operation, an agent MUST NOT stop to ask. It decides, records, and reports every decision as that manual defines. For that operation only, this replaces item 6 above and the request in `CONTRIBUTING.md` to ask for a decision.
+
 ### During implementation
 
 An agent MUST:
@@ -115,6 +118,8 @@ Agents MUST preserve unrelated work already present in the working tree.
 
 Agents MUST NOT create commits, branches, tags, pull requests, or staged changes unless explicitly requested.
 
+A request to work on an issue is an explicit request for exactly the actions that [Work on an Issue](docs/agent_operations/WORK_ON_ISSUE.md) authorizes. It never authorizes merging or approving a pull request, tagging, releasing, force-pushing, or committing dependency manifests.
+
 Agents MUST NOT perform destructive operations without explicit authorization and verified targets.
 
 Agents MUST treat credentials, tokens, private keys, `.env*` files, production configuration, and user data as sensitive. They MUST NOT read, print, copy, or commit secrets.
@@ -129,3 +134,5 @@ The final report MUST state:
 - Any remaining risk, limitation, deferred work, or required follow-up.
 
 If no risk or follow-up remains, say so explicitly.
+
+For a Work on an Issue operation, the report that manual defines, together with the pull request description, satisfies this section.

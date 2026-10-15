@@ -85,10 +85,10 @@ const NO_ATTACHMENTS: readonly ComposerAttachment[] = Object.freeze([])
  * message-field ref. Enter without Shift submits once and suppresses the
  * newline; Shift+Enter keeps it. Sending requires a non-empty draft, and is
  * refused while a reply is awaited or streams, while a past conversation is
- * opening, while generation is unavailable, or while the measured request
+ * opening, while generation is unavailable, or while the current measurement
  * with the draft's estimate exceeds the loaded model's window. A request the
- * meter could not measure can still be sent; the backend checks every round
- * before sending it. The Past conversations button opens history, or closes
+ * meter could not measure, or is measuring again, can still be sent; the
+ * backend checks every round before sending it. The Past conversations button opens history, or closes
  * it when open, and exposes that state through `aria-expanded`. While
  * generation is unavailable, a banner names the first missing prerequisite —
  * the backend, LM Studio, or loaded weights — and its action starts a stopped
@@ -209,8 +209,12 @@ export function Composer({
     draft: inputDraft,
     reserve: settings.generation.replyCeiling
   })
+  // A pending measurement may describe another conversation, so only a
+  // current one refuses the send; the backend still checks every round.
   const isOverWindow =
-    contextMeter.status === "measured" && contextMeter.usage.overflowTokens > 0
+    !contextMeasurement.isPending &&
+    contextMeter.status === "measured" &&
+    contextMeter.usage.overflowTokens > 0
 
   const canSubmitDraft = inputDraft.trim().length > 0 && !isOverWindow
   const isFieldDisabled = isUnavailable || isAgentDeleted

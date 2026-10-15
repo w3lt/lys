@@ -22,6 +22,7 @@ import type { HeldToolCall } from "@/lib/store/tool-calls"
 import { buildAgentListPage, buildBuiltInAgent } from "../support/agentFixtures"
 import {
   buildJsonResponse,
+  createControlledRoute,
   listRouteKeys,
   startBackendEventStream,
   startBackendFake,
@@ -1398,6 +1399,37 @@ describe("Composer", () => {
       expect(
         screen.getByRole("button", { name: "Context window · over by ~1.1k" })
       ).toBeInTheDocument()
+    })
+
+    it("lets the person send while a newer measurement is pending, whatever the earlier one found", async () => {
+      const { route, responses } = createControlledRoute()
+      startChatBackend({ [CHAT_CONTEXT_ROUTE]: route })
+      const { useChatViewStore, Composer } = await loadFreshComposer()
+      const user = userEvent.setup()
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
+      await user.type(getMessageField(), "Summarize this")
+      await waitForRenderedWork()
+      await act(async () => {
+        responses[0]?.resolve(
+          buildJsonResponse(200, {
+            ...FIXTURE_CHAT_CONTEXT_MEASUREMENT,
+            historyTokens: 5000,
+            historyMessageCount: 4
+          })
+        )
+      })
+      await waitForRenderedWork()
+      expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
+
+      act(() => {
+        useChatViewStore.getState().selectAgent(LYSIPTERA_AGENT_CODE)
+      })
+      await waitForRenderedWork()
+
+      expect(responses).toHaveLength(2)
+      expect(screen.getByRole("button", { name: "Send" })).toBeEnabled()
     })
 
     it("lets the person send when the window cannot be measured, and says why", async () => {

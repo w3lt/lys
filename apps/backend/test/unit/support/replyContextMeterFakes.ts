@@ -25,12 +25,14 @@ export type FakeReplyContextMeter = ReplyContextMeter &
 export function createRoomyReplyContextMeter(): FakeReplyContextMeter {
   return Object.freeze({
     findReplyContextMeasurement: vi.fn(
-      async (request: ReplyContextMeasurementRequest) =>
-        Object.freeze({
-          contextLength: ROOMY_CONTEXT_LENGTH,
-          messageTokenCounts: Object.freeze(request.messages.map(() => 1)),
-          toolTokenCount: 0
-        })
+      (request: ReplyContextMeasurementRequest) =>
+        Promise.resolve(
+          Object.freeze({
+            contextLength: ROOMY_CONTEXT_LENGTH,
+            messageTokenCounts: Object.freeze(request.messages.map(() => 1)),
+            toolTokenCount: 0
+          })
+        )
     )
   })
 }
@@ -44,6 +46,6 @@ export function createUnloadedReplyContextMeter(): FakeReplyContextMeter {
   return Object.freeze({
     findReplyContextMeasurement: vi.fn<
       ReplyContextMeter["findReplyContextMeasurement"]
-    >(async () => undefined)
+    >(() => Promise.resolve(undefined))
   })
 }

@@ -118,9 +118,9 @@ export function useChatContextMeasurement(
       (outcome) => {
         if (!controller.signal.aborted) setSettled({ inputKey, outcome })
       },
-      (failure: unknown) => {
+      (error: unknown) => {
         if (controller.signal.aborted) return
-        setSettled({ inputKey, outcome: buildFailedOutcome(failure) })
+        setSettled({ inputKey, outcome: buildFailedOutcome(error) })
       }
     )
 

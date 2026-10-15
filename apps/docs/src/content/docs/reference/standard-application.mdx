@@ -210,7 +210,8 @@ on how many run at once.
   context length unless its context overflow setting truncates the context
   instead. On Just run, a round of N `read_page` calls starts N headless browsers
   at once, each behind its own proxy, with at most 256 connections and 64 MiB
-  received each and the memory a Chromium page takes; each read ends within
+  received each, and each page's scripts holding at most 1 GiB beside the
+  memory Chromium itself takes; each read ends within
   30 seconds and closes its browser, and their extractions run one after
   another on the backend's thread, about a second each at most. A round of N `web_search` calls sends
   N queries to Tavily at once, each costing one Tavily credit, each ending

@@ -241,15 +241,17 @@ headless browser (`web/pageRendering.ts`):
    as a `<meta>` refresh can, it reads the new one, so a page that never holds
    still times out. The document read, however the page reached it, must have
    a URL that passes the URL rules and be HTML, XHTML, or plain text with a
-   2xx status, or with status 0, which the browser reports for a document it
-   built without a response. The HTML is written from the DOM as the page renders it: an open
+   2xx status. A document a script writes, as through a `javascript:` URL,
+   keeps the status of the document that wrote it. The HTML is written from the DOM as the page renders it: an open
    shadow root's content inside its host and slotted content inside its slot,
    without scripts, styles, `<noscript>`, templates, SVG, iframes, comments,
    or the `hidden`, `aria-hidden`, and `style` attributes, so that the
    main-text extraction keeps the elements they hide. Hidden text is read like
    any other text. The script stops at 4 Mi UTF-16 code units and cuts every
-   text and attribute value before it escapes it, so no page can make Lys
-   receive more; the backend then cuts the result at the limit without
+   text, and each element's attributes together, to what is left of that
+   limit before it escapes them, so no page can make Lys receive more, nor
+   make the script build more than a few times the limit at once from long
+   texts or many long attributes; the backend then cuts the result at the limit without
    splitting a character. A closed shadow root cannot be read, so its host's
    own children are written instead. A plain-text page is read as its body's
    text, cut the same way;

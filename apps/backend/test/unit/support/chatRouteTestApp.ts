@@ -19,6 +19,7 @@ import {
   LOOK_UP_WORD_TOOL,
   ScriptedBuiltInTool
 } from "./scriptedBuiltInTool"
+import { createRoomyReplyContextMeter } from "./replyContextMeterFakes"
 import { ScriptedBuiltInToolProvider } from "./scriptedBuiltInToolProvider"
 
 /** Published path of the chat route. */
@@ -109,7 +110,8 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
     builtInAgents: buildBuiltInAgents(TEST_BUILT_IN_AGENT_PROMPTS),
     replyModel: new OpenAiReplyModel((options) =>
       chatService.completeChatStream(options)
-    )
+    ),
+    replyContextMeter: createRoomyReplyContextMeter()
   })
   const readJustRunToolNames = vi.fn<ReadJustRunToolNames>(() =>
     Promise.reject(createUnexpectedCallError("readJustRunToolNames"))

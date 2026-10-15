@@ -129,6 +129,26 @@ export function buildOfferedTools(
 }
 
 /**
+ * Builds the function tools a model would be offered for tool definitions.
+ *
+ * @param definitions - Offered tool definitions in offer order: client tools
+ * first, then backend tools, as {@link buildAgentToolset} orders them.
+ * @returns A frozen list in the same order and format as
+ * {@link buildOfferedTools} builds for a turn with these tools; empty for no
+ * definition.
+ * @throws A Zod error when a definition does not match `toolDefinitionSchema`.
+ */
+export function buildDefinedToolOffer(
+  definitions: readonly ToolDefinition[]
+): readonly OpenAIFunctionTool[] {
+  return Object.freeze(
+    definitions.map((definition) =>
+      new AgentTool(definition).buildAgentFormat()
+    )
+  )
+}
+
+/**
  * Has every call of one round answered and builds the messages that add the
  * round to the context.
  *

@@ -10,10 +10,23 @@ import type {
 } from "@lys/share"
 import type { TurnBuiltInTool } from "../tool/builtIn/builtInTool"
 import { ChatCompletionCancelledError } from "../../utils/errors"
-import { buildAgentContext } from "./agentContext"
-import type { ReplyContextMessage, ReplyModel } from "./replyModel"
+import { buildAgentContext, buildAgentHistoryContext } from "./agentContext"
+import {
+  findReplyRoundFitFailure,
+  formatReplyFailureMessage
+} from "./replyContextFit"
+import type {
+  ReplyContextMeasurement,
+  ReplyContextMeter
+} from "./replyContextMeter"
+import type {
+  ReplyContextMessage,
+  ReplyModel,
+  ReplyStreamEvent
+} from "./replyModel"
 import {
   buildAgentToolset,
+  buildDefinedToolOffer,
   buildOfferedTools,
   handleToolCallRound,
   type CreateToolCallGate,
@@ -123,6 +136,36 @@ const ENDED_REPLY_ROUND = Object.freeze({
   status: "ended"
 } satisfies ReplyRound)
 
+/** What the next message of a conversation would be sent with. */
+export type AgentContextInput = Readonly<{
+  /** Stored transcript, in conversation order; empty for a new conversation. */
+  history: readonly ConversationMessage[]
+  /** Identifier of the model the message would be sent to. */
+  model: string
+  /**
+   * Definitions of the offered tools, each name once: client tools first,
+   * then backend tools; empty when none would be offered.
+   */
+  tools: readonly ToolDefinition[]
+}>
+
+/**
+ * How much of the model's context window a conversation takes before its next
+ * message, in tokens of the model's own tokenizer.
+ */
+export type AgentContextMeasurement = Readonly<{
+  /** Context length the model is loaded with; a positive integer. */
+  contextLength: number
+  /** Tokens of the agent's system prompt. */
+  systemPromptTokens: number
+  /** Tokens of the offered tool definitions; 0 when none are offered. */
+  toolTokens: number
+  /** Tokens of the stored messages a turn would include. */
+  historyTokens: number
+  /** Number of stored messages a turn would include. */
+  historyMessageCount: number
+}>
+
 /** Context and text placement of one round. */
 type ReplyRoundInput = Readonly<{
   /** Context the model answers, in send order. */
@@ -142,7 +185,9 @@ type ReplyRoundInput = Readonly<{
  * turn's rounds and context live only in that turn's `createReply` call, so
  * one instance answers overlapping turns, each through its own
  * {@link AgentTurn}, as long as the model access permits overlapping streams.
- * Owns no resource: the model's owner releases it. Concurrency model:
+ * Every round's context is measured against the model's window before it is
+ * sent, and a round that does not fit, or whose model is not loaded, is never
+ * sent. Owns no resource: the model's owner releases it. Concurrency model:
  * reentrant.
  */
 export default class Agent {
@@ -152,16 +197,25 @@ export default class Agent {
   readonly #systemPrompt: string
   /** Borrowed model access that writes every reply. */
   readonly #replyModel: ReplyModel
+  /** Borrowed meter that measures every context before it is sent. */
+  readonly #replyContextMeter: ReplyContextMeter
 
   /**
    * Creates a ready agent without contacting its model.
    * @param profile - Trusted code and system prompt of the agent.
    * @param replyModel - Model access lent for the agent's lifetime.
+   * @param replyContextMeter - Context meter of the same model, lent for the
+   * agent's lifetime.
    */
-  public constructor(profile: AgentProfile, replyModel: ReplyModel) {
+  public constructor(
+    profile: AgentProfile,
+    replyModel: ReplyModel,
+    replyContextMeter: ReplyContextMeter
+  ) {
     this.#code = profile.code
     this.#systemPrompt = profile.systemPrompt
     this.#replyModel = replyModel
+    this.#replyContextMeter = replyContextMeter
   }
 
   /**
@@ -170,6 +224,34 @@ export default class Agent {
    */
   public get code(): string {
     return this.#code
+  }
+
+  /**
+   * Finds how much of the model's context window a conversation takes before
+   * its next message.
+   *
+   * @param input - Stored transcript, model, and offered tool definitions,
+   * borrowed until the returned promise settles.
+   * @returns A promise resolving to the window and the tokens of this agent's
+   * system prompt, of the tools, and of the stored messages a turn would
+   * include, measured exactly as a turn's first round sends them without its
+   * new message; or to undefined when the model is not loaded.
+   * @throws The meter's failure when the model's runtime cannot be reached,
+   * is busy, or fails; and a Zod error for a definition that does not match
+   * `toolDefinitionSchema`.
+   */
+  public async findContextMeasurement(
+    input: AgentContextInput
+  ): Promise<AgentContextMeasurement | undefined> {
+    const measurement =
+      await this.#replyContextMeter.findReplyContextMeasurement({
+        messages: buildAgentHistoryContext(this.#systemPrompt, input.history),
+        tools: buildDefinedToolOffer(input.tools),
+        model: input.model
+      })
+    return measurement === undefined
+      ? undefined
+      : buildAgentContextMeasurement(measurement)
   }
 
   /**
@@ -197,7 +279,10 @@ export default class Agent {
    * that calls tools has its calls answered and the model is asked again;
    * every round's text is stored and sent. A client tool's call is answered
    * by the client; a backend tool's call runs here once the client allows
-   * it, under the turn's cancellation.
+   * it, under the turn's cancellation. A round whose context, tools, and
+   * reply ceiling exceed the model's context length, or whose model is not
+   * loaded, is not sent: the reply fails, keeping the text earlier rounds
+   * stored, and its `error` event says why.
    */
   public async createReply(turn: AgentTurn): Promise<void> {
     try {
@@ -228,7 +313,8 @@ export default class Agent {
    * @param turn - Turn context, tools, reply storage, and cancellation.
    * @returns The supported finish reason, or undefined after cancellation,
    * supersession, or deletion.
-   * @throws If the model fails, a stream ends without ending its round, a
+   * @throws If a round does not fit the model's window or its model is not
+   * loaded, the model fails, a stream ends without ending its round, a
    * delta cannot be stored, the model calls a tool although none was
    * offered, or a backend tool's run fails for a reason other than Stop.
    * @remarks A round that ends with tool calls has each call answered, then
@@ -279,8 +365,9 @@ export default class Agent {
    * @param input - The round's context, offered tools, and text prefix.
    * @returns How the round ended: finished, with tool calls and the round's
    * own text, or ended by cancellation, supersession, or deletion.
-   * @throws If the model fails, its stream ends without ending the round, or a
-   * delta cannot be stored.
+   * @throws If the round does not fit the model's window or its model is
+   * not loaded, the model fails, its stream ends without ending the round, or
+   * a delta cannot be stored.
    * @remarks Storing and sending happen in one synchronous step, so a
    * follower that reads a snapshot in its own step sees either both or
    * neither. Leaving the stream early releases the model request.
@@ -290,13 +377,7 @@ export default class Agent {
     input: ReplyRoundInput
   ): Promise<ReplyRound> {
     if (turn.abortSignal.aborted) return ENDED_REPLY_ROUND
-    const stream = await this.#replyModel.openReplyStream({
-      messages: input.messages,
-      tools: input.tools,
-      model: turn.model,
-      generationOptions: turn.generationOptions,
-      abortSignal: turn.abortSignal
-    })
+    const stream = await this.#openReplyRoundStream(turn, input)
     let roundText = ""
     for await (const event of stream) {
       if (turn.abortSignal.aborted) return ENDED_REPLY_ROUND
@@ -317,6 +398,73 @@ export default class Agent {
     if (turn.abortSignal.aborted) return ENDED_REPLY_ROUND
     throw new Error("Model stream ended without a finish reason")
   }
+
+  /**
+   * Opens one round's reply stream once its context is measured to fit.
+   *
+   * @param turn - Turn model, generation controls, and cancellation.
+   * @param input - The round's context and offered tools.
+   * @returns The model's events for the round.
+   * @throws A `ReplyModelNotLoadedError` when the model is not loaded, a
+   * `ReplyContextOverflowError` when the context, tools, and reply ceiling
+   * exceed its context length, the meter's failure, or the model's failure
+   * to open the stream. Nothing is sent to the model before the context is
+   * known to fit.
+   * @remarks The measurement cannot be cancelled; Stop during it cancels the
+   * opening that follows.
+   */
+  async #openReplyRoundStream(
+    turn: AgentTurn,
+    input: ReplyRoundInput
+  ): Promise<AsyncIterable<ReplyStreamEvent>> {
+    const measurement =
+      await this.#replyContextMeter.findReplyContextMeasurement({
+        messages: input.messages,
+        tools: input.tools,
+        model: turn.model
+      })
+    const fitFailure = findReplyRoundFitFailure({
+      measurement,
+      model: turn.model,
+      reserveTokens: turn.generationOptions.replyCeiling ?? 0
+    })
+    if (fitFailure !== undefined) throw fitFailure
+    return await this.#replyModel.openReplyStream({
+      messages: input.messages,
+      tools: input.tools,
+      model: turn.model,
+      generationOptions: turn.generationOptions,
+      abortSignal: turn.abortSignal
+    })
+  }
+}
+
+/**
+ * Builds the conversation measurement from a measured context.
+ *
+ * @param measurement - Measurement of the system prompt followed by the
+ * included history, with the offered tools.
+ * @returns The window and the system prompt's, tools', and history's tokens.
+ * @throws If the measurement holds no count, which breaks the meter's
+ * one-count-per-message contract.
+ */
+function buildAgentContextMeasurement(
+  measurement: ReplyContextMeasurement
+): AgentContextMeasurement {
+  const [systemPromptTokens, ...historyTokenCounts] =
+    measurement.messageTokenCounts
+  if (systemPromptTokens === undefined)
+    throw new Error("The context measurement has no system prompt count")
+  return Object.freeze({
+    contextLength: measurement.contextLength,
+    systemPromptTokens,
+    toolTokens: measurement.toolTokenCount,
+    historyTokens: historyTokenCounts.reduce(
+      (total, messageTokens) => total + messageTokens,
+      0
+    ),
+    historyMessageCount: historyTokenCounts.length
+  })
 }
 
 /**
@@ -329,7 +477,8 @@ export default class Agent {
  * failure when the terminal state cannot be stored.
  * @remarks The model reports a cancelled request even when the agent has not
  * yet observed its own abort, so both mean an interrupted reply. Any other
- * failure stores `failed` and sends an `error` event. Both are reported as
+ * failure stores `failed` and sends an `error` event whose sentence says why
+ * when the round did not fit or its model is not loaded. Both are reported as
  * {@link Agent.createReply} describes.
  */
 function handleReplyFailure(turn: AgentTurn, error: unknown): void {
@@ -354,6 +503,6 @@ function handleReplyFailure(turn: AgentTurn, error: unknown): void {
   turn.sendEvent(
     isCancelled
       ? { type: "interrupted" }
-      : { type: "error", message: "Chat completion failed. Please try again." }
+      : { type: "error", message: formatReplyFailureMessage(error) }
   )
 }

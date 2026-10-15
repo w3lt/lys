@@ -7,6 +7,7 @@ import type { BuiltInAgent } from "@lys/share"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import AgentService from "../../../../../src/modules/agent/agentService"
 import { buildBuiltInAgents } from "../../../../../src/modules/agent/builtInAgents"
+import type { ReplyContextMeter } from "../../../../../src/modules/agent/replyContextMeter"
 import type { ReplyModel } from "../../../../../src/modules/agent/replyModel"
 import { updateFastifyWithHttpTransport } from "../../../../../src/http"
 import SqliteAgentRecordStore from "../../../../../src/infrastructure/database/agents/sqliteAgentRecordStore"
@@ -54,6 +55,14 @@ const UNUSED_REPLY_MODEL = Object.freeze({
   openReplyStream: () =>
     Promise.reject(new Error("Unexpected model call from an agent route"))
 } satisfies ReplyModel)
+
+/** Context meter the agent routes never use. */
+const UNUSED_REPLY_CONTEXT_METER = Object.freeze({
+  findReplyContextMeasurement: () =>
+    Promise.reject(
+      new Error("Unexpected context measurement from an agent route")
+    )
+} satisfies ReplyContextMeter)
 
 /**
  * Encodes a list cursor naming one agent created at {@link NOW}, its JSON
@@ -103,7 +112,8 @@ async function createAgentRouteApp(
   const agents = new AgentService({
     recordStore: new SqliteAgentRecordStore(openTestDatabase()),
     builtInAgents,
-    replyModel: UNUSED_REPLY_MODEL
+    replyModel: UNUSED_REPLY_MODEL,
+    replyContextMeter: UNUSED_REPLY_CONTEXT_METER
   })
   await updateFastifyWithHttpTransport(app)
   app.decorate("agentService", agents)

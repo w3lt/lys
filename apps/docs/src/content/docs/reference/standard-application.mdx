@@ -413,6 +413,57 @@ PR #152, following review finding I-7.
 - **Removal condition:** a change that splits `Composer` and `ChatView` to
   within the limit removes this exception. No issue tracks that split.
 
+## Reply parts size exception
+
+**Proposed, not yet approved.** [PR #186](https://github.com/w3lt/lys/pull/186)
+asks for an exception to the size limit of
+[FUNC-013](https://github.com/w3lt/lys/blob/main/docs/code_standards/FUNCTION.md),
+40 executable lines, for functions that were already over it and that the
+pull request made a little longer. Counts below are physical lines with code,
+from a scan of each function's body, before and after the pull request.
+
+- **Scope:** only the line counts of these functions. Their other FUNC-013
+  limits are not excepted, and every function the pull request added follows
+  FUNC-013, except `registerReplyPartRecordWriterContractSuite`, listed below.
+  - `ConversationPanel` in
+    [ConversationPanel.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ChatViewComponents/ConversationPanel.tsx):
+    62 → 65, for the conversation's sources it passes to the transcript.
+  - `createChatViewStore` and `createChatViewStoreState` in
+    [chat-view/index.ts](https://github.com/w3lt/lys/blob/main/apps/desktop/src/lib/store/chat-view/index.ts):
+    533 → 563 and 502 → 532, for the `reply-part`, `reply-part-delta`, and
+    `sources` handlers that replace the `delta` handler.
+  - `createToolCallStore` and `createToolCallStoreState` in
+    [tool-calls/index.ts](https://github.com/w3lt/lys/blob/main/apps/desktop/src/lib/store/tool-calls/index.ts):
+    228 → 230 and 210 → 212, for the new event names in one `switch`.
+  - The `singletonPlugin` callback in
+    [di/fastify.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/di/fastify.ts):
+    33 → 34, for one `decorate` call.
+  - Test helpers: `getAgentReplyOutcome` in `agent.test.ts` (47 → 49),
+    `registerBuiltInToolContractSuite` in `builtInToolContract.ts` (41 → 55),
+    `createChatRouteTestApp` in `chatRouteTestApp.ts` (55 → 57), and the
+    contract-suite registrars in `conversationRecordsContract.ts`, which grew
+    with their new cases, and the new
+    `registerReplyPartRecordWriterContractSuite` there (299), written like
+    the other registrars of that file.
+- **Constraint:** each function was over the limit before PR #186. The store
+  factories hold every event handler as a closure over the store's `set` and
+  token checks, so a new event handler is written inside them, as the
+  `delta` handler was; the transition logic itself is in
+  `conversation-transitions.ts`. A contract-suite registrar holds its
+  `describe` and `it` cases, as every registrar in the file does.
+- **Alternatives considered:**
+  - Splitting the store factories or the panel within PR #186 was not taken.
+    It moves the request, stop, open, and follow handling, which is outside
+    the pull request's purpose.
+  - Splitting the new contract-suite registrar into one registrar per
+    operation was not taken. Each part would still hold its cases, and the
+    file's other registrars stay as they are.
+- **Risk and control:** a long function is harder to review and to change
+  safely. The added handlers delegate to named transitions, the switch arms
+  only return, and the added test cases are independent.
+- **Removal condition:** a change that splits these functions to within the
+  limit removes this exception. No issue tracks that split.
+
 ## API boundaries
 
 Canonical rules: [API-004, API-020, API-034](https://github.com/w3lt/lys/blob/main/docs/code_standards/API.md).

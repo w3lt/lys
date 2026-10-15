@@ -118,7 +118,7 @@ Agents MUST preserve unrelated work already present in the working tree.
 
 Agents MUST NOT create commits, branches, tags, pull requests, or staged changes unless explicitly requested.
 
-A request to work on an issue is an explicit request for exactly the actions that [Work on an Issue](docs/agent_operations/WORK_ON_ISSUE.md) authorizes. It never authorizes merging or approving a pull request, tagging, releasing, force-pushing, or committing dependency manifests.
+A request to work on an issue is an explicit request for exactly the actions that [Work on an Issue](docs/agent_operations/WORK_ON_ISSUE.md) authorizes. It never authorizes merging or approving a pull request, tagging, releasing, force-pushing, or committing a dependency file or a generated file, such as a lockfile.
 
 Agents MUST NOT perform destructive operations without explicit authorization and verified targets.
 

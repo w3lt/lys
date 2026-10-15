@@ -80,12 +80,14 @@ type PageScriptSettings = Readonly<{
 }>
 
 /**
- * Finds the error DevTools gives when the document a script world belonged
+ * Finds the errors DevTools gives when the document a script world belonged
  * to was replaced, as by a `<meta>` refresh, before or while the page script
- * ran in it. DevTools gives only this text, so only this adapter reads it.
+ * ran in it: the world is gone, or the page navigated during the call.
+ * DevTools gives only this text, so only this adapter reads it. A page that
+ * closed instead fails the next attempt with another error.
  */
 const REPLACED_DOCUMENT_ERROR_PATTERN =
-  /\((?:Page\.createIsolatedWorld|Runtime\.callFunctionOn)\): (?:Cannot find context with specified id|Execution context was destroyed\.)$/m
+  /\((?:Page\.createIsolatedWorld|Runtime\.callFunctionOn)\): (?:Cannot find context with specified id|Execution context was destroyed\.|Inspected target navigated or closed)$/m
 
 /**
  * Global object of the page script's own world, as far as the script reads

@@ -22,11 +22,6 @@ impl GenerationTemperature {
     pub fn new(value: f64) -> Option<Self> {
         (0.0..=1.0).contains(&value).then_some(Self(value))
     }
-
-    /// Returns the validated floating-point temperature.
-    pub fn get(&self) -> f64 {
-        self.0
-    }
 }
 
 impl Default for GenerationTemperature {

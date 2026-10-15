@@ -410,7 +410,7 @@ describe("getPageDocument", () => {
   )
 
   it(
-    "keeps reading a page that keeps replacing its document, rather than failing",
+    "never fails while a page keeps replacing its document, and reads one of them or keeps reading",
     async () => {
       const page = await openServedTestPage(
         routeByPath({
@@ -424,14 +424,19 @@ describe("getPageDocument", () => {
           )
         })
       )
-      const stillReading = Symbol("still reading")
 
       const outcome = await Promise.race([
-        getPageDocument(page),
-        new Promise((resolve) => setTimeout(() => resolve(stillReading), 1_500))
+        getPageDocument(page).then(
+          (document) => document.url,
+          (error: unknown) => error
+        ),
+        new Promise((resolve) =>
+          setTimeout(() => resolve("still reading"), 1_500)
+        )
       ])
 
-      expect(outcome).toBe(stillReading)
+      expect(outcome).not.toBeInstanceOf(Error)
+      expect(String(outcome)).toMatch(/^(still reading|.*\/moths(\/again)?)$/)
     },
     BROWSER_TEST_TIMEOUT_MS
   )

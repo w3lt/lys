@@ -418,10 +418,13 @@ function formatPageScriptText(text: string): string {
  *
  * @param element - Element of the page.
  * @param remainingLength - Most code units the page's HTML may still grow
- * by; each value is cut to it before it is escaped.
+ * by, which the attributes share: each value is cut to what they have left
+ * before it is escaped, each formatted attribute is cut to it too, and no
+ * attribute is formatted once nothing is left.
  * @param settings - Attributes to leave out.
  * @returns ` name="value"` for each attribute whose name can be written and
- * is not left out, in DOM order; an empty string when there is none.
+ * is not left out, in DOM order, ending where `remainingLength` runs out,
+ * which may be inside an attribute; an empty string when there is none.
  * @remarks Runs in the page; see {@link PAGE_SCRIPT_DECLARATION}.
  */
 function formatPageScriptAttributes(
@@ -431,15 +434,20 @@ function formatPageScriptAttributes(
 ): string {
   const writableNamePattern = /^[^\s"'>/=\p{Cc}]+$/u
   const attributes: string[] = []
+  let attributesLength = 0
   for (const attribute of Array.from(element.attributes)) {
+    const availableLength = remainingLength - attributesLength
+    if (availableLength <= 0) break
     const { name } = attribute
     if (settings.leftOutAttributes.includes(name)) continue
     if (!writableNamePattern.test(name)) continue
     const value = attribute.value
-      .slice(0, remainingLength)
+      .slice(0, availableLength)
       .replaceAll("&", "&amp;")
       .replaceAll('"', "&quot;")
-    attributes.push(` ${name}="${value}"`)
+    const formattedAttribute = ` ${name}="${value}"`.slice(0, availableLength)
+    attributes.push(formattedAttribute)
+    attributesLength += formattedAttribute.length
   }
   return attributes.join("")
 }
@@ -449,7 +457,7 @@ function formatPageScriptAttributes(
  *
  * @param element - Element of the page.
  * @param remainingLength - Most code units the page's HTML may still grow
- * by.
+ * by; its attributes are cut to it.
  * @param settings - Elements and attributes to leave out, and void
  * elements.
  * @returns Its start tag, then its children and end tag; nothing for an
@@ -543,11 +551,17 @@ function formatPageScriptStep(
  * @param settings - Limit and what to leave out.
  * @returns The HTML of the document in the order the page renders it, at
  * most one code unit past the limit, and whether it was longer than the
- * limit. The walk stops as soon as it passes the limit, and every text and
- * attribute value is cut before it is escaped, so the page's size never
- * bounds the work or the result.
- * @remarks Runs in the page; see {@link PAGE_SCRIPT_DECLARATION}. Walks the
- * tree with its own stack, so nesting depth cannot exhaust the call stack.
+ * limit.
+ * @remarks Runs in the page; see {@link PAGE_SCRIPT_DECLARATION}. The walk
+ * stops as soon as it passes the limit. Each text, and the attributes of
+ * each element together, are cut to the length the HTML may still grow by
+ * before they are escaped, so however long the page's texts and attribute
+ * values are, and however many attributes an element has, one step builds
+ * at most a few times the limit, plus the names of the element and the
+ * attributes it writes. The time the walk takes still grows with
+ * the number of nodes it visits before the limit, nodes that write nothing,
+ * such as comments, included. Walks the tree with its own stack, so nesting
+ * depth cannot exhaust the call stack.
  */
 function buildPageScriptHtml(
   document: PageScriptDocumentNode,

@@ -32,8 +32,9 @@ export const READ_PAGE_TOOL_NAME = "read_page"
 export const MAXIMUM_PAGE_FOCUS_LENGTH = 200
 
 /**
- * Milliseconds one read may take in production, from the browser's start to
- * the page's snapshot.
+ * Milliseconds one read may take in production, from the start of the read,
+ * before the browser is checked and started, to reading the page's
+ * document.
  */
 export const PAGE_READ_TIMEOUT_MS = 30_000
 

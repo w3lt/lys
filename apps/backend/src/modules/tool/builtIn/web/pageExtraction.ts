@@ -679,8 +679,8 @@ function buildPlainTextBlocks(text: string): readonly PageBlock[] {
 /**
  * Extracts the main text of a page Lys read.
  *
- * @param page - Page the browser rendered: the HTML built from its snapshot,
- * or a plain-text page's text.
+ * @param page - Page the browser rendered: the HTML Lys writes from the
+ * page's DOM when it reads the page's document, or a plain-text page's text.
  * @returns The page's title, site, publication date, and main text as
  * blocks; `no-readable-text` when the page has no main text; or, for
  * HTML, `too-complex` when the page passes {@link MAXIMUM_PAGE_ELEMENTS} or

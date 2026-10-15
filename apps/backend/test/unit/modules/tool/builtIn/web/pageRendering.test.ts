@@ -580,6 +580,29 @@ describe("getRenderedPage", { timeout: BROWSER_TEST_TIMEOUT_MS }, () => {
     expect(result).toEqual({ status: "failed", failure: { kind: "crashed" } })
   })
 
+  it("reads a page whose element holds many attributes as long as the limit, within the browser's memory limit", async () => {
+    const server = await startPageServer(
+      answerWithBody(
+        "text/html",
+        `<p>Moths fly at night.</p><div id="wings"></div>
+        <script>
+          const quotes = '"'.repeat(${MAXIMUM_PAGE_TEXT_LENGTH})
+          const wings = document.getElementById("wings")
+          for (let index = 0; index < 24; index += 1) wings.setAttribute("data-wing-" + index, quotes)
+        </script>`
+      )
+    )
+
+    const page = findRenderedPage(
+      await renderTestPage(buildTestPageUrl(server.port, "/moths"))
+    )
+
+    expect(page.isTruncated).toBe(true)
+    expect(page.text.length).toBeLessThanOrEqual(MAXIMUM_PAGE_TEXT_LENGTH)
+    expect(page.text).toContain("<p>Moths fly at night.</p>")
+    expect(page.text).toContain('<div id="wings" data-wing-0="&quot;&quot;')
+  })
+
   it("fails a page that crashes the browser while Lys reads its document", async () => {
     const server = await startPageServer(
       answerWithBody(
@@ -730,6 +753,23 @@ describe("getRenderedPage", { timeout: BROWSER_TEST_TIMEOUT_MS }, () => {
       status: "failed",
       failure: { kind: "invalid-redirect", problem: "unsupported-scheme" }
     })
+  })
+
+  it("reads the document a page's script writes through a javascript: URL", async () => {
+    const server = await startPageServer(
+      answerWithBody(
+        "text/html",
+        `<p>Loading moths.</p><script>addEventListener("load", () => { location.href = "javascript:'<p>Moths fly at night.</p>'" })</script>`
+      )
+    )
+
+    const page = findRenderedPage(
+      await renderTestPage(buildTestPageUrl(server.port, "/moths"))
+    )
+
+    expect(page.url).toBe(buildTestPageUrl(server.port, "/moths"))
+    expect(page.text).toContain("<p>Moths fly at night.</p>")
+    expect(page.text).not.toContain("Loading moths.")
   })
 
   it("keeps nothing a page stores, such as a cookie or local storage, for the next read", async () => {

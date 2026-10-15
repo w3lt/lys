@@ -254,12 +254,6 @@ const MINIMUM_READABLE_STATUS = 200
 const MAXIMUM_READABLE_STATUS = 299
 
 /**
- * Status the browser reports for a document it built without a response,
- * such as one a `javascript:` URL wrote; Lys reads such a document.
- */
-const NO_RESPONSE_STATUS = 0
-
-/**
  * Most mebibytes a page's scripts may hold, inclusive. A page that holds
  * more crashes its renderer, and the read fails as crashed, instead of
  * growing to the browser's own limit of several gibibytes.
@@ -595,14 +589,11 @@ function parseMediaType(contentType: string | undefined): string | undefined {
  * Answers whether a document's status lets Lys read it.
  *
  * @param status - HTTP status of the document's response.
- * @returns True for 2xx, and for 0, which the browser reports for a
- * document it built without a response.
+ * @returns True for 2xx only. A document a page's script writes, as through
+ * a `javascript:` URL, keeps the status of the document that wrote it.
  */
 function isReadableStatus(status: number): boolean {
-  return (
-    status === NO_RESPONSE_STATUS ||
-    (status >= MINIMUM_READABLE_STATUS && status <= MAXIMUM_READABLE_STATUS)
-  )
+  return status >= MINIMUM_READABLE_STATUS && status <= MAXIMUM_READABLE_STATUS
 }
 
 /**

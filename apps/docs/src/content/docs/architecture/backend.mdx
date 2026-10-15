@@ -98,7 +98,9 @@ that is not loaded is never loaded for the round; the reply fails with an
 not connected or the queue is full, also fails the reply, with the general
 sentence. Without this check, LM Studio's context overflow setting could keep
 the start of the conversation, drop its middle, and let the model answer an
-earlier message.
+earlier message. With the reply ceiling off, nothing is held back for the
+reply, so a reply that grows past the window is still handled by that
+setting.
 
 `POST /api/v1/chat/context` makes the same measurement for the composer's
 context meter. It resolves the agent and the conversation as the chat route

@@ -97,9 +97,9 @@ messages are shortened or summarized: every round sends every message a turn
 includes. Staged attachments are never sent, so they are not counted, and the
 panel says so while files are staged.
 
-Send is disabled while the measured request, the draft, and the reserve
-exceed the window. Before the first measurement settles, and when the window
-cannot be measured (the model is not loaded in LM Studio, LM Studio cannot be
+Send is disabled while the current measurement, the draft, and the reserve
+exceed the window. While a newer measurement is pending, before the first one
+settles, and when the window cannot be measured (the model is not loaded in LM Studio, LM Studio cannot be
 reached, or the request fails), the meter says so and sending stays allowed,
 because the backend checks every round before sending it. "Change the window"
 opens the Model pane, where the model's load configuration sets the context

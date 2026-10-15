@@ -13,20 +13,24 @@ import reactDom from "eslint-plugin-react-dom"
  *
  * @remarks Applies the JavaScript, TypeScript, React, and Prettier-compatible
  * rules used by the workspace lint command. Configured global ignores cover
- * root-level `dist`, `node_modules`, and nested `src-tauri/target` paths; this
- * configuration affects static analysis only and has no application runtime
- * effect.
+ * `dist`, `node_modules`, `.astro`, and `src-tauri/target` paths in every
+ * workspace, and the root `worktree/` directory; this configuration affects
+ * static analysis only and has no application runtime effect.
  */
 export default defineConfig([
   // Patterns are matched against every workspace, not only the repository
   // root, so a built application or generated type directory inside `apps/*`
   // is excluded as well. `.astro` holds the types Astro generates for
-  // `apps/docs`.
+  // `apps/docs`. `worktree/` matches only at the root, where AI agents create
+  // git worktrees (docs/agent_operations/WORK_ON_ISSUE.md): each one is another
+  // checkout of this repository, which ESLint would otherwise lint again under
+  // that checkout's own configuration.
   globalIgnores([
     "**/dist",
     "**/node_modules",
     "**/.astro",
-    "**/src-tauri/target"
+    "**/src-tauri/target",
+    "worktree/"
   ]),
   {
     files: ["**/*.{js,mjs,cjs,ts,mts,cts,jsx,tsx}"],

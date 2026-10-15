@@ -26,4 +26,7 @@ dist-ssr
 *.sw?
 
 .superpowers/
+
+# AI agents' working files and worktrees: docs/agent_operations/WORK_ON_ISSUE.md
 .agent-work/
+/worktree/

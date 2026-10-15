@@ -2,6 +2,7 @@ import type { ModelLoadConfiguration } from "@lys/share"
 import type { LlmEngine } from "./llmEngine"
 import type {
   DownloadedLlmModel,
+  LlmContextMeasurement,
   LoadedLlmModelInstance
 } from "./llmRuntimeTypes"
 
@@ -99,6 +100,23 @@ export default class FailureRecordingLlmEngine implements LlmEngine {
     await this.#handleLlmEngineCall(
       async () =>
         await this.#llmEngine.stopLoadedLlmModelInstance(modelIdentifier)
+    )
+  }
+
+  /**
+   * Implements {@link LlmEngine.findLlmContextMeasurement} by forwarding.
+   *
+   * @param model - Interface-defined model selection.
+   * @param texts - Interface-defined texts to count, forwarded unchanged.
+   * @returns The interface-defined measurement from the borrowed engine.
+   * @throws The borrowed engine's failure, after recording it.
+   */
+  public async findLlmContextMeasurement(
+    model: string,
+    texts: readonly string[]
+  ): Promise<LlmContextMeasurement | undefined> {
+    return await this.#handleLlmEngineCall(
+      async () => await this.#llmEngine.findLlmContextMeasurement(model, texts)
     )
   }
 

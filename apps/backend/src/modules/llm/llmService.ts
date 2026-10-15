@@ -24,6 +24,7 @@ import type {
 import type { LlmEngine } from "./llmEngine"
 import type {
   DownloadedLlmModel,
+  LlmContextMeasurement,
   LoadedLlmModelInstance
 } from "./llmRuntimeTypes"
 
@@ -86,7 +87,8 @@ export type LlmServiceCreationOptions = {
  * Concurrency model: reentrant; overlapping calls are serialized by the
  * borrowed queue, not by this class.
  * Implements {@link LlmModelHealthReader}, {@link LlmModelInventory},
- * {@link LlmModelLoader}, and {@link LlmModelStopper}.
+ * {@link LlmModelLoader}, and {@link LlmModelStopper}, and measures contexts
+ * for chat replies.
  */
 export default class LlmService
   implements
@@ -203,6 +205,31 @@ export default class LlmService
           async (identifier) =>
             await llmEngine.stopLoadedLlmModelInstance(identifier)
         )
+    )
+  }
+
+  /**
+   * Measures texts with the tokenizer of a loaded model, through the queue.
+   *
+   * @param model - Model selection as a chat request names it.
+   * @param texts - Texts to count, each on its own.
+   * @returns A promise resolving to the measurement
+   * {@link LlmEngine.findLlmContextMeasurement} defines, or to undefined when no
+   * loaded instance matches the selection.
+   * @throws If the measurement fails, or the queue rejects the operation: the
+   * service-busy failure when it is full, the runtime-unavailable failure
+   * when no runtime is connected or it stopped answering, and
+   * `The LLM runtime is closed.` after cleanup begins.
+   * @remarks The measurement waits behind earlier accepted model operations,
+   * including a load in progress.
+   */
+  public async findLlmContextMeasurement(
+    model: string,
+    texts: readonly string[]
+  ): Promise<LlmContextMeasurement | undefined> {
+    return await this.#llmEngineOperationQueue.handleLlmEngineOperationRequest(
+      async (llmEngine) =>
+        await llmEngine.findLlmContextMeasurement(model, texts)
     )
   }
 }

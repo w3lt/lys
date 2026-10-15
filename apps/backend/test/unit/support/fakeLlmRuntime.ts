@@ -17,6 +17,8 @@ export type FakeLlmRuntime = LlmRuntime &
     loadLlmModel: Mock<LlmEngine["loadLlmModel"]>
     /** Instance stop command. */
     stopLoadedLlmModelInstance: Mock<LlmEngine["stopLoadedLlmModelInstance"]>
+    /** Context measurement query. */
+    findLlmContextMeasurement: Mock<LlmEngine["findLlmContextMeasurement"]>
     /** Provider readiness probe. */
     getRuntimeAvailability: Mock<LlmRuntimeLifecycle["getRuntimeAvailability"]>
     /** Runtime release. */
@@ -49,6 +51,10 @@ export function createFakeLlmRuntime(): FakeLlmRuntime {
     stopLoadedLlmModelInstance: vi.fn<LlmEngine["stopLoadedLlmModelInstance"]>(
       () =>
         Promise.reject(createUnexpectedCallError("stopLoadedLlmModelInstance"))
+    ),
+    findLlmContextMeasurement: vi.fn<LlmEngine["findLlmContextMeasurement"]>(
+      () =>
+        Promise.reject(createUnexpectedCallError("findLlmContextMeasurement"))
     ),
     getRuntimeAvailability: vi.fn<
       LlmRuntimeLifecycle["getRuntimeAvailability"]

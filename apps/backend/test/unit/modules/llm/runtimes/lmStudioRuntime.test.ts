@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
 import LmStudioRuntime from "../../../../../src/modules/llm/runtimes/lmStudioRuntime"
 import { createLmStudioLlmRecord } from "../../../support/llmFixtures"
 import {
+  FAKE_LOADED_CONTEXT_LENGTH,
   fakeLmStudio,
   type FakeLmStudioOperations
 } from "../../../support/lmStudioSdkFake"
@@ -450,6 +451,179 @@ describe("LmStudioRuntime", () => {
       })
       expect(runtime.lifecycleStatus).toBe("ready")
     })
+  })
+
+  describe("findLlmContextMeasurement", () => {
+    it("counts each text with the model's tokenizer and reports the context length it is loaded with", async () => {
+      fakeLmStudio.inventory = {
+        downloadedModels: [],
+        loadedModels: [
+          { modelKey: "qwen/qwen3-8b", identifier: "qwen/qwen3-8b" }
+        ]
+      }
+      const runtime = await createOwnedRuntime()
+
+      const measurement = await runtime.findLlmContextMeasurement(
+        "qwen/qwen3-8b",
+        ["You are Lys.", "", "Hello"]
+      )
+
+      expect(measurement).toEqual({
+        contextLength: FAKE_LOADED_CONTEXT_LENGTH,
+        textTokenCounts: [12, 0, 5]
+      })
+      expect(Object.isFrozen(measurement)).toBe(true)
+      expect(Object.isFrozen(measurement?.textTokenCounts)).toBe(true)
+    })
+
+    it("reports the smallest context length among the instances a model key names", async () => {
+      fakeLmStudio.inventory = {
+        downloadedModels: [],
+        loadedModels: [
+          { modelKey: "qwen/qwen3-8b", identifier: "qwen/qwen3-8b" },
+          { modelKey: "qwen/qwen3-8b", identifier: "qwen/qwen3-8b:2" },
+          { modelKey: "google/gemma-4-12b", identifier: "google/gemma-4-12b" }
+        ]
+      }
+      const contextLengths = new Map([
+        ["qwen/qwen3-8b", 16_384],
+        ["qwen/qwen3-8b:2", 8192],
+        ["google/gemma-4-12b", 2048]
+      ])
+      fakeLmStudio.operations = {
+        ...fakeLmStudio.operations,
+        getContextLength: async (identifier) =>
+          contextLengths.get(identifier) ?? 0
+      }
+      const runtime = await createOwnedRuntime()
+
+      await expect(
+        runtime.findLlmContextMeasurement("qwen/qwen3-8b", ["Hi"])
+      ).resolves.toEqual({ contextLength: 8192, textTokenCounts: [2] })
+    })
+
+    it("measures only the instance an instance identifier names", async () => {
+      fakeLmStudio.inventory = {
+        downloadedModels: [],
+        loadedModels: [
+          { modelKey: "qwen/qwen3-8b", identifier: "qwen/qwen3-8b" },
+          { modelKey: "qwen/qwen3-8b", identifier: "qwen/qwen3-8b:2" }
+        ]
+      }
+      const getContextLength = vi.fn(async (identifier: string) =>
+        identifier === "qwen/qwen3-8b:2" ? 32_768 : 4096
+      )
+      fakeLmStudio.operations = {
+        ...fakeLmStudio.operations,
+        getContextLength
+      }
+      const runtime = await createOwnedRuntime()
+
+      await expect(
+        runtime.findLlmContextMeasurement("qwen/qwen3-8b:2", [])
+      ).resolves.toEqual({ contextLength: 32_768, textTokenCounts: [] })
+      expect(getContextLength).toHaveBeenCalledExactlyOnceWith(
+        "qwen/qwen3-8b:2"
+      )
+    })
+
+    it("resolves to undefined without asking a tokenizer when the model is not loaded", async () => {
+      fakeLmStudio.inventory = {
+        downloadedModels: [],
+        loadedModels: [
+          { modelKey: "qwen/qwen3-8b", identifier: "qwen/qwen3-8b" }
+        ]
+      }
+      const tokenize = vi.fn<FakeLmStudioOperations["tokenize"]>()
+      fakeLmStudio.operations = { ...fakeLmStudio.operations, tokenize }
+      const runtime = await createOwnedRuntime()
+
+      await expect(
+        runtime.findLlmContextMeasurement("google/gemma-4-12b", ["Hello"])
+      ).resolves.toBeUndefined()
+      expect(tokenize).not.toHaveBeenCalled()
+    })
+
+    it("does not ask the tokenizer when there is no text", async () => {
+      fakeLmStudio.inventory = {
+        downloadedModels: [],
+        loadedModels: [
+          { modelKey: "qwen/qwen3-8b", identifier: "qwen/qwen3-8b" }
+        ]
+      }
+      const tokenize = vi.fn<FakeLmStudioOperations["tokenize"]>()
+      fakeLmStudio.operations = { ...fakeLmStudio.operations, tokenize }
+      const runtime = await createOwnedRuntime()
+
+      await expect(
+        runtime.findLlmContextMeasurement("qwen/qwen3-8b", [])
+      ).resolves.toEqual({
+        contextLength: FAKE_LOADED_CONTEXT_LENGTH,
+        textTokenCounts: []
+      })
+      expect(tokenize).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      [
+        "a failed loaded-instance query",
+        {
+          listLoaded: async () => {
+            throw new Error("socket closed")
+          }
+        }
+      ],
+      [
+        "a failed context length query",
+        {
+          getContextLength: async () => {
+            throw new Error("socket closed")
+          }
+        }
+      ],
+      [
+        "a failed tokenizer query",
+        {
+          tokenize: async () => {
+            throw new Error("socket closed")
+          }
+        }
+      ],
+      [
+        "a context length that is not positive",
+        { getContextLength: async () => 0 }
+      ],
+      [
+        "a context length that is not whole",
+        { getContextLength: async () => 4096.5 }
+      ],
+      ["a token list missing for a text", { tokenize: async () => [[1, 2]] }]
+    ] satisfies readonly (readonly [
+      string,
+      Partial<FakeLmStudioOperations>
+    ])[])(
+      "translates %s and keeps the reason as its cause",
+      async (_scenario, operations) => {
+        fakeLmStudio.inventory = {
+          downloadedModels: [],
+          loadedModels: [
+            { modelKey: "qwen/qwen3-8b", identifier: "qwen/qwen3-8b" }
+          ]
+        }
+        fakeLmStudio.operations = { ...fakeLmStudio.operations, ...operations }
+        const runtime = await createOwnedRuntime()
+
+        const failure = await getRejection(
+          runtime.findLlmContextMeasurement("qwen/qwen3-8b", ["Hi", "Lys"])
+        )
+
+        expect(failure).toMatchObject({
+          message: "The LLM runtime could not measure the context.",
+          cause: expect.any(Error)
+        })
+        expect(runtime.lifecycleStatus).toBe("ready")
+      }
+    )
   })
 
   describe("operation admission", () => {

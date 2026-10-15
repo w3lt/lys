@@ -31,7 +31,7 @@ The issue type is the issue's type label: `Bug`, `Feature`, `Improvement`, `Main
 
 ### Prerequisites
 
-The operation needs `git` with worktree support, `gh` logged in to the agent's own account, network access to GitHub and SonarCloud, and write access to the `lys-worktrees/` directory beside the main checkout. An agent without them MUST say so instead of starting.
+The operation needs `git` with worktree support, `gh` logged in to the agent's own account, and network access to GitHub and SonarCloud. An agent without them MUST say so instead of starting.
 
 ## Authorization
 
@@ -139,10 +139,10 @@ The nine steps run in order. A later step MUST NOT begin before its predecessor'
    - When that name, or the worktree directory that Step 2.4 derives from it, is already taken by earlier work on the issue whose pull request is merged or closed, add `-2`, or the next free number, to both.
    - Example: issue #171, "[Improvement] Refuse requests from other sites and rebound host names on every backend route", gives `improvement/#171-improvement-refuse-requests-from-other-sites-and-rebound-host-names-on-every-backend-route`.
 
-4. Create the worktree beside the main checkout, which is the first entry of `git worktree list`. The agent MUST NOT work inside the main checkout. `--no-track` keeps the new branch from tracking the base, so a push can never land on it:
+4. Create the worktree in the git-ignored `worktree/` directory of the main checkout, which is the first entry of `git worktree list`. The agent works only in its worktree and MUST NOT change the main checkout's own files. `--no-track` keeps the new branch from tracking the base, so a push can never land on it:
 
    ```sh
-   git worktree add --no-track -b "<branch>" "<parent of the main checkout>/lys-worktrees/issue-<number><suffix>" "origin/<base>"
+   git worktree add --no-track -b "<branch>" "<main checkout>/worktree/issue-<number><suffix>" "origin/<base>"
    ```
 
    `<suffix>` is the `-2`-style suffix the branch name got in item 3, or empty.

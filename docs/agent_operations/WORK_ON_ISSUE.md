@@ -181,6 +181,8 @@ A spec and a plan MUST be written for:
 - a design bug;
 - an Improvement or Maintenance change that alters the system design: a contract, ownership, data flow, a trust boundary, the shape of stored data, or a process or package boundary.
 
+A trust boundary is a place where data or requests pass between parts that trust each other differently; the handbook's [security page](../../apps/docs/src/content/docs/architecture/security.mdx) lists the current ones. A change alters one when it adds a boundary, or changes who may cross a boundary or what checks the crossing.
+
 For any other change, this step is skipped, and the approach goes into the pull request description at a length that matches the change.
 
 The spec becomes the design part of the pull request description, so it MUST stand alone for a reviewer who has only it and the code. It covers:

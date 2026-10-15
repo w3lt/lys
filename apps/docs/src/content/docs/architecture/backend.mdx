@@ -190,10 +190,18 @@ backend, succeeded or failed, passes `formatNetworkToolResult()`
 model reads it, so a new network tool is cleaned without code of its own. It
 removes Unicode format and control characters (zero-width, direction
 controls, tag characters, `BEL`, `ESC`, and the like) except tabs and line
-breaks, and keeps a zero-width joiner or non-joiner only between two visible
-characters, where emoji, Persian, and Indic text need it. When it removed
-anything, it adds a last line saying how many characters, so the model can
-tell the person the source hid text.
+breaks, keeps a zero-width joiner or non-joiner only between two visible
+characters, where emoji, Persian, and Indic text need it, and removes every
+variation selector except one text-style (U+FE0E) or emoji-style (U+FE0F)
+selector right after a visible character, as in `❤️` or `1️⃣`. A run of
+variation selectors can spell a message one byte per selector, and the other
+selectors only pick a rare alternate shape of the character before them.
+When it removed anything, it adds a last line saying how many characters, so
+the model can tell the person the source hid text. The format characters it
+removes include a few visible signs, such as the Arabic number signs
+(U+0600–U+0605) and the end-of-ayah sign (U+06DD), and the tag characters of
+the England, Scotland, and Wales flags, which then show as a plain black
+flag; a character picked by a variation selector keeps its default shape.
 
 ### `read_page`
 
@@ -218,33 +226,33 @@ headless browser (`web/pageRendering.ts`):
 2. it opens the URL in a context that keeps no cookies, storage, or service
    workers and accepts no download, without fetching images, fonts, or media.
    The page's scripts run, and HTTP, `<meta>` refresh, and script redirects
-   are followed. Once the document has arrived, it accepts only
+   are followed. Once the first document has arrived, it accepts only
    `text/html`, `application/xhtml+xml`, and `text/plain` with a 2xx status,
    and waits up to 10 seconds in all for the DOM to be ready and then for the
    network to be quiet for 500 milliseconds; what has rendered by then is
    read. When a later navigation of the page fails, such as a `<meta>`
    refresh to a blocked address, the read fails with that navigation's
    reason;
-3. it stops the page's scripts, refuses a page whose DOM, with its frames,
-   still has more than 120,000 nodes once the browser has collected those it
-   threw away, and takes a `DOMSnapshot`, validated against a schema, and
-   rebuilds the page's HTML from it (`web/pageSnapshot.ts`)
-   without scripts, styles, templates, SVG, or iframes, with shadow-root
-   content where it renders, cut at 4 Mi UTF-16 code units. A text node in
-   `<body>` is kept only when a person can see it: it has a layout box,
-   `visibility: visible`, a color that is not transparent, an opacity above 0
-   through its ancestors, at least 2 by 2 pixels left once cut by every
-   `overflow: hidden` or `clip` ancestor and the page's top and left edges
-   (a scrolling ancestor that can be seen lets a person reach all of its
-   content), and a color that, blended over its background as the browser
-   paints it, is more than 16 apart from it in some sRGB channel. The
-   background is white when none is set. Colors in `rgb()`, `lab()`,
-   `lch()`, `oklab()`, `oklch()`, and `color()` in sRGB, Display P3, or XYZ
-   are converted (`web/pageColor.ts`); any other color, and a background
-   image, is unknown and hides nothing. These values come from the browser's
-   layout, so the page's scripts cannot fake them. A plain-text page is read
-   as the text the browser shows, from Playwright's own script world, while
-   the page still shows it, and as HTML once it went on to another document;
+3. it stops the page's scripts and reads the document the page ended on
+   (`web/pageDocument.ts`) with one script run in a script world of Lys's
+   own, which the page's scripts can neither reach nor interrupt: the
+   document's URL and media type, the HTTP status of its response, and its
+   HTML or text. When the page replaces its document before that script runs,
+   as a `<meta>` refresh can, it reads the new one, so a page that never holds
+   still times out. The document read, however the page reached it, must have
+   a URL that passes the URL rules and be HTML, XHTML, or plain text with a
+   2xx status, or with status 0, which the browser reports for a document it
+   built without a response. The HTML is written from the DOM as the page renders it: an open
+   shadow root's content inside its host and slotted content inside its slot,
+   without scripts, styles, `<noscript>`, templates, SVG, iframes, comments,
+   or the `hidden`, `aria-hidden`, and `style` attributes, so that the
+   main-text extraction keeps the elements they hide. Hidden text is read like
+   any other text. The script stops at 4 Mi UTF-16 code units and cuts every
+   text and attribute value before it escapes it, so no page can make Lys
+   receive more; the backend then cuts the result at the limit without
+   splitting a character. A closed shadow root cannot be read, so its host's
+   own children are written instead. A plain-text page is read as its body's
+   text, cut the same way;
 4. it extracts the main text with Mozilla Readability over a linkedom document,
    refusing markup with more than 40,000 start tags before parsing it, and a
    parsed page with more than 40,000 elements or a nesting depth sum above
@@ -269,7 +277,9 @@ rendered. Stop and the time limit close the browser, and the browser and the
 proxy are closed whatever the outcome. Failures the model can act on, such as
 an HTTP error status, a non-HTML body, a blocked address, a crash, or a page
 without any main text, become the call's result. A missing browser, or one
-that cannot start, fails the read with whom to contact. Lys reads what a
+that cannot start, fails the read with whom to contact, and its cause goes
+to the backend log. A browser whose start runs out of time is killed by
+Playwright, which can finish a moment after the read ends. Lys reads what a
 signed-out visitor sees; it never signs in.
 
 ### `web_search`

@@ -56,8 +56,11 @@ The backend itself depends on:
   `$LYS_HOME/runtime/chrome-headless-shell/chrome-headless-shell`, the Chrome
   for Testing build the backend's `playwright-core` is made for, installed by
   `build.sh` or by `scripts/install-chrome-headless-shell.sh <directory>`
-  (macOS on Apple silicon or Intel, or Linux on x86-64). Without it every read
-  fails and says whom to contact; nothing else needs it
+  (macOS on Apple silicon or Intel, or Linux on x86-64), which installs only an
+  archive whose SHA-256 `scripts/chrome-headless-shell-checksums.txt` records
+  for that version and platform, so a `playwright-core` update that changes
+  the browser version adds a line for each platform there. Without the browser
+  every read fails and says whom to contact; nothing else needs it
 - for `web_search`, a Tavily Search API key (Tavily's free plan gives 1,000
   credits a month; a basic search costs one, and a key check two), saved in
   Settings → Secrets;

@@ -43,8 +43,7 @@ backend decides which calls ask; the desktop shows the prompts.
 | Approval of web reads       | `read_page` runs only once the person allows the call on the card (full URL), or at once on Just run. Allowing a read lets the page load what it needs from public hosts. It starts off.                                                                                                                    |
 | Address rule                | No connection of a read, the page's own or one its scripts or redirects make, reaches loopback, private, link-local, shared, documentation, benchmarking, multicast, or reserved addresses.                                                                                                                 |
 | Browser isolation           | A fresh Chromium profile per read with its sandbox on; nothing is kept between reads, and the browser is closed when the read ends.                                                                                                                                                                         |
-| Hidden text removal         | Text a person cannot see on the rendered page, such as text moved off-screen, white on white, or zero-sized, is left out before extraction.                                                                                                                                                                 |
-| Invisible character removal | Every network tool's result loses Unicode format and control characters, such as zero-width, direction, and tag characters, and says how many it lost.                                                                                                                                                      |
+| Invisible character removal | Every network tool's result loses Unicode format and control characters, such as zero-width, direction, and tag characters, and every variation selector but one emoji- or text-style selector after a visible character, and says how many it lost.                                                        |
 | Untrusted page framing      | Page text and the page's title, site, and date reach the model between delimiters it cannot forge, with a notice never to obey them.                                                                                                                                                                        |
 | Approval of searches        | `web_search` runs only once the person allows the call on the card (full query and "Sends the query to Tavily (api.tavily.com)"), or at once on Just run. It starts off.                                                                                                                                    |
 | Fixed search destination    | Every search goes to `https://api.tavily.com` with certificate verification forced on, TLS 1.2 or later, no redirects, and the address rule on every resolved address and the connected socket.                                                                                                             |
@@ -84,11 +83,17 @@ backend decides which calls ask; the desktop shows the prompts.
   sandbox confines them, but the browser is the build `playwright-core` pins:
   it gets security fixes only when Lys updates that dependency and `build.sh`
   installs the matching browser again.
-- Hidden text is judged from the rendered page: text covered by another
-  element, hidden by `clip-path` or `filter`, drawn in a color close to a
-  background image, or in a color space Lys does not convert, such as
-  `rec2020`, still reaches the model. Text that needs a click to appear, such as a
-  closed accordion, is left out too.
+- Hidden text reaches the model. `read_page` reads everything a page holds,
+  text it hides from view included, such as a closed accordion, text moved
+  off-screen, or white text on white, because the content is what a read is
+  for. Instructions a page hides from the person therefore reach the model as
+  page content, inside the untrusted framing. The content of a closed shadow
+  root is not read.
+- Removing invisible characters removes a few visible signs too, such as the
+  Arabic number signs (U+0600–U+0605) and the end-of-ayah sign (U+06DD),
+  turns the England, Scotland, and Wales flags into a plain black flag, and
+  shows a character a variation selector picked an alternate shape for in
+  its default shape.
 - A page's third parties, such as analytics and CDNs, see a request from the
   machine Lys runs on, as they would from any browser.
 - The current Tauri configuration sets no Content Security Policy (`csp` is
@@ -124,7 +129,9 @@ and what reaches the model:
   workers are blocked.
 - **Redirects.** HTTP, `<meta>` refresh, and script redirects are followed
   to any public host, each connection checked like the first. The result
-  cites the URL the browser ended on, which must pass the URL rules too.
+  cites the URL the browser ended on, which must pass the URL rules too, and
+  the document there must be HTML or plain text with a 2xx status, however
+  the page reached it.
 - **Isolation.** Each read starts Chrome Headless Shell with a fresh profile
   and Chromium's sandbox on, refuses downloads and popups, and closes the
   browser when it ends, on Stop and on failure included. Cookies or storage a
@@ -133,21 +140,21 @@ and what reaches the model:
 - **Bounds.** One read takes at most 30 seconds, the browser's start
   included, at most 256 connections, at most 64 MiB received, and at most
   1 GiB held by the page's scripts. Images,
-  fonts, and media are not fetched. A page with more than 120,000 DOM nodes
-  is refused before its snapshot is taken. The rebuilt page is cut at 4 Mi
-  UTF-16 code units; markup with more than 40,000 start tags, or a parsed page with
-  more than 40,000 elements or a nesting depth sum above 400,000, is refused
-  before Readability runs.
-- **Hidden and invisible text.** After the page's scripts are stopped, Lys
-  keeps only body text a person can see, judged from the browser's layout and
-  computed styles, which the page's scripts cannot change. The result, like
-  every network tool's result, then loses format and control characters
-  other than tabs and line breaks, and says how many it removed; a zero-width
-  joiner or non-joiner stays only between two visible characters.
+  fonts, and media are not fetched. The page's HTML or text is cut at 4 Mi
+  UTF-16 code units inside the page, before it leaves the browser, so no page
+  can make the backend receive more; markup with more than 40,000 start tags,
+  or a parsed page with more than 40,000 elements or a nesting depth sum
+  above 400,000, is refused before Readability runs.
+- **Hidden and invisible text.** Lys reads hidden text like any other text,
+  from a script world of its own that the page's scripts cannot reach. The
+  result, like every network tool's result, then loses format and control
+  characters other than tabs and line breaks, and every variation selector
+  except one emoji- or text-style selector after a visible character, and
+  says how many it removed; a zero-width joiner or non-joiner stays only
+  between two visible characters.
 - **Prompt injection.** The model is told that page content is untrusted and
-  must never be followed, and hidden text no longer reaches it. This lowers
-  the risk but cannot remove it: a page can still try to steer the reply with
-  visible text. On Ask me, each further tool call still needs
+  must never be followed. This lowers the risk but cannot remove it: a page
+  can still try to steer the reply with any of its text, hidden or visible. On Ask me, each further tool call still needs
   the person's approval. On Just run it does not: with `read_page` and a file
   tool both on Just run, a page's instructions can lead the model to read a
   file and send its content in the URL of a second `read_page` call, with no

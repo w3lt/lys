@@ -58,9 +58,11 @@ The script stops at the first failing step. In order, it:
 6. Runs `scripts/install-chrome-headless-shell.sh` for
    `$LYS_HOME/runtime/chrome-headless-shell`: it downloads, from Chrome for
    Testing over HTTPS, the Chrome Headless Shell version the installed
-   `playwright-core` names, checks the version the downloaded browser reports
-   (Chrome for Testing publishes no checksums), and replaces the previous
-   one. A matching installed version is reused.
+   `playwright-core` names, checks the archive against the SHA-256 recorded
+   for that version and platform in `scripts/chrome-headless-shell-checksums.txt`
+   (Chrome for Testing publishes no checksums of its own) and then the version
+   the browser reports, and replaces the previous one. A matching installed
+   version is reused.
 7. Runs `pnpm run desktop:build:ci` and `pnpm run desktop:bundle:ci`, which
    build the Tauri app without bundling and then bundle only `Lys.app`.
 8. Removes any previously installed `/Applications/Lys.app`, then copies the

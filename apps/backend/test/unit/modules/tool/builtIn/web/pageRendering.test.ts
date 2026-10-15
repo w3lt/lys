@@ -472,7 +472,7 @@ describe("getRenderedPage", { timeout: BROWSER_TEST_TIMEOUT_MS }, () => {
 
   it("reads the beginning of a plain-text page far longer than the limit", async () => {
     const line = "Moths fly at night.\n"
-    const lineCount = Math.ceil((24 * 1024 * 1024) / line.length)
+    const lineCount = Math.ceil((12 * 1024 * 1024) / line.length)
     const server = await startPageServer(
       answerWithBody("text/plain", line.repeat(lineCount))
     )

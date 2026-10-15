@@ -4,7 +4,11 @@ import type {
   ChatToolCall,
   ChatToolResult
 } from "@lys/protocol"
-import type { ConversationMessage, ToolDefinition } from "@lys/share"
+import {
+  toolDefinitionSchema,
+  type ConversationMessage,
+  type ToolDefinition
+} from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
 import Agent, {
   type AgentTurn,
@@ -130,6 +134,16 @@ function createRoundStreams(...rounds: (readonly ReplyStreamEvent[])[]) {
     )
   return openReplyStream
 }
+
+/** Client tool that reaches the network, whose answers are cleaned. */
+const FETCH_NOTE_TOOL: ToolDefinition = toolDefinitionSchema.parse({
+  name: "fetch_note",
+  description: "Fetch one note from a web service.",
+  group: "network",
+  access: "network",
+  runner: "client",
+  arguments: [{ type: "string", name: "id", description: "Note to fetch." }]
+})
 
 /** Round in which the model looks up the word `moth`. */
 const LOOK_UP_MOTH_ROUND: readonly ReplyStreamEvent[] = Object.freeze([
@@ -1033,6 +1047,109 @@ describe("Agent", () => {
         { type: "delta", content: "Let me look." },
         INTERRUPTED_EVENT
       ])
+    })
+  })
+
+  describe("results of tools that reach the network", () => {
+    it("removes invisible characters from a backend tool's result and says how many", async () => {
+      const { entry } = createLookUpWordTool(async (word) => ({
+        status: "succeeded",
+        content: `${word}:\u200B a night\u2066 insect`
+      }))
+      const openReplyStream = createRoundStreams(
+        LOOK_UP_MOTH_ROUND,
+        FINISH_ROUND
+      )
+
+      await getAgentReplyOutcome({
+        openReplyStream,
+        builtInTools: [entry]
+      })
+
+      expect(openReplyStream.mock.calls[1]?.[0].messages.at(-1)).toMatchObject({
+        role: "tool",
+        content:
+          "moth: a night insect\n\nLys removed 2 invisible characters from this result."
+      })
+    })
+
+    it("removes invisible characters from a backend tool's failed run", async () => {
+      const { entry } = createLookUpWordTool(async () => ({
+        status: "failed",
+        content: "The dictionary said:\u202E stop"
+      }))
+      const openReplyStream = createRoundStreams(
+        LOOK_UP_MOTH_ROUND,
+        FINISH_ROUND
+      )
+
+      await getAgentReplyOutcome({
+        openReplyStream,
+        builtInTools: [entry]
+      })
+
+      expect(openReplyStream.mock.calls[1]?.[0].messages.at(-1)).toMatchObject({
+        role: "tool",
+        content:
+          "The dictionary said: stop\n\nLys removed 1 invisible character from this result."
+      })
+    })
+
+    it("removes invisible characters from a client tool that reaches the network", async () => {
+      const openReplyStream = createRoundStreams(
+        [
+          {
+            type: "tool-calls",
+            toolCalls: [
+              { toolName: "fetch_note", argumentText: '{"id":"moths"}' }
+            ]
+          }
+        ],
+        FINISH_ROUND
+      )
+
+      await getAgentReplyOutcome({
+        openReplyStream,
+        clientTools: [FETCH_NOTE_TOOL],
+        sendClientToolCall: async () => ({
+          status: "succeeded",
+          content: "Moths\u200B fly at night."
+        })
+      })
+
+      expect(openReplyStream.mock.calls[1]?.[0].messages.at(-1)).toMatchObject({
+        role: "tool",
+        content:
+          "Moths fly at night.\n\nLys removed 1 invisible character from this result."
+      })
+    })
+
+    it("leaves the result of a tool that only reads this machine as it is", async () => {
+      const openReplyStream = createRoundStreams(
+        [
+          {
+            type: "tool-calls",
+            toolCalls: [
+              { toolName: "read_text_file", argumentText: '{"path":"/a"}' }
+            ]
+          }
+        ],
+        FINISH_ROUND
+      )
+
+      await getAgentReplyOutcome({
+        openReplyStream,
+        clientTools: [READ_TEXT_FILE_TOOL],
+        sendClientToolCall: async () => ({
+          status: "succeeded",
+          content: "Moths\u200B fly at night."
+        })
+      })
+
+      expect(openReplyStream.mock.calls[1]?.[0].messages.at(-1)).toMatchObject({
+        role: "tool",
+        content: "Moths\u200B fly at night."
+      })
     })
   })
 

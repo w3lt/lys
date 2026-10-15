@@ -21,9 +21,8 @@ export const DRAFT_APPROVAL_HINT = "↵ sends your message as her answer"
  *
  * @param input - Validated input of the call.
  * @returns The action and its target, then its effect: a tool that reads
- * this machine changes nothing, a tool that reads the web names the host it
- * sends a request to, under the full URL, and a web search names where its
- * full query goes.
+ * this machine changes nothing, a page read names the full URL of the page,
+ * and a web search names where its full query goes.
  */
 export function formatToolCallSummary(input: ToolCallInput): string {
   switch (input.toolName) {
@@ -32,7 +31,7 @@ export function formatToolCallSummary(input: ToolCallInput): string {
     case "search_files":
       return `Search ${SEARCH_TARGET_PHRASES[input.filter.target]} under ${input.filter.root} for “${input.filter.query}”. Nothing is changed.`
     case "read_page":
-      return `Read ${input.url}. Sends a request to ${input.host}.`
+      return `Read ${input.url}.`
     case "web_search":
       return `Search the web for “${input.query}”. Sends the query to Tavily (${input.host}).`
   }

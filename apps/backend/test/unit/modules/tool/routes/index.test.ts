@@ -10,6 +10,7 @@ import { buildWebSearchDefinition } from "../../../../../src/modules/tool/builtI
 import registerToolRoutes from "../../../../../src/modules/tool/routes"
 import { updateFastifyWithHttpTransport } from "../../../../../src/http"
 import type { TavilyApiKeyRead } from "../../../../../src/infrastructure/settings/tavilyApiKeyFile"
+import { TEST_BACKEND_CONFIG } from "../../../support/backendConfig"
 import { createTestFastify } from "../../../support/fastifyTestApp"
 import {
   LOOK_UP_WORD_TOOL,
@@ -46,7 +47,11 @@ async function createToolRouteApp(keyRead: TavilyApiKeyRead) {
   await updateFastifyWithHttpTransport(app)
   app.decorate("webSearchToolProvider", webSearchToolProvider)
   app.decorate("builtInTools", [
-    ...createBuiltInTools(webSearchToolProvider),
+    ...createBuiltInTools(
+      webSearchToolProvider,
+      TEST_BACKEND_CONFIG.browserExecutablePath,
+      () => undefined
+    ),
     {
       definition: LOOK_UP_WORD_TOOL,
       provider: new ScriptedBuiltInToolProvider({

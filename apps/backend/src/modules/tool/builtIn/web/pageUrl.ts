@@ -46,6 +46,12 @@ export type PageUrlResult =
       problem: PageUrlProblem
     }>
 
+/** Port of an https URL that names none. */
+const DEFAULT_HTTPS_PORT = 443
+
+/** Port of an http URL that names none. */
+const DEFAULT_HTTP_PORT = 80
+
 /** Explanations the model reads for each URL problem, by problem. */
 const PAGE_URL_PROBLEM_MESSAGES = Object.freeze({
   "too-long": `The URL is longer than ${MAXIMUM_PAGE_URL_LENGTH} characters.`,
@@ -123,6 +129,18 @@ export function parsePageUrl(text: string): PageUrlResult {
   // The checks above prove every PageUrl invariant for this normalized text.
   const pageUrl = url.href as PageUrl
   return Object.freeze({ status: "valid", url: pageUrl })
+}
+
+/**
+ * Gets the TCP port a URL connects to.
+ *
+ * @param url - Parsed http or https URL.
+ * @returns The port the URL names; otherwise its scheme's default port, 443
+ * for https and 80 for http.
+ */
+export function getUrlPort(url: URL): number {
+  if (url.port !== "") return Number(url.port)
+  return url.protocol === "https:" ? DEFAULT_HTTPS_PORT : DEFAULT_HTTP_PORT
 }
 
 /**

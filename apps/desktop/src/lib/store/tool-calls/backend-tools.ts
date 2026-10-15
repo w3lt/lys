@@ -14,8 +14,6 @@ export type BackendToolInput =
       readonly toolName: "read_page"
       /** Normalized absolute http or https URL of the page. */
       readonly url: string
-      /** Host the request goes to, with its port when it has one. */
-      readonly host: string
     }
   | {
       /** The backend runs the tool once the call is allowed. */
@@ -77,7 +75,7 @@ function parseAbsoluteUrl(text: string): URL | undefined {
  * Parses the arguments of a read-page call.
  *
  * @param call - Call naming the read-page tool.
- * @returns `parsed` with the normalized URL and its host, or `rejected` when
+ * @returns `parsed` with the normalized URL, or `rejected` when
  * the URL is not text or not an absolute http or https URL.
  * @remarks The backend checked the URL before sending the call; this check
  * keeps the card from describing a URL the backend would not read.
@@ -94,8 +92,7 @@ function parseReadPageInput(call: ChatToolCall): BackendToolInputResult {
   const input: BackendToolInput = Object.freeze({
     runner: "backend",
     toolName: "read_page",
-    url: parsedUrl.href,
-    host: parsedUrl.host
+    url: parsedUrl.href
   })
   return Object.freeze({ status: "parsed", input })
 }

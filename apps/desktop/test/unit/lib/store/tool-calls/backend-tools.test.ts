@@ -3,7 +3,7 @@ import { parseBackendToolInput } from "@/lib/store/tool-calls/backend-tools"
 import { buildToolCall } from "../../../support/toolFixtures"
 
 describe("parseBackendToolInput", () => {
-  it("parses a read-page call into the page's URL and the host it is requested from", () => {
+  it("parses a read-page call into the page's URL", () => {
     const call = buildToolCall(1, "read_page", {
       url: "https://example.com/docs/intro?lang=en#setup"
     })
@@ -13,13 +13,12 @@ describe("parseBackendToolInput", () => {
       input: {
         runner: "backend",
         toolName: "read_page",
-        url: "https://example.com/docs/intro?lang=en#setup",
-        host: "example.com"
+        url: "https://example.com/docs/intro?lang=en#setup"
       }
     })
   })
 
-  it("normalizes the URL as a URL parser does and keeps the port in the host", () => {
+  it("normalizes the URL as a URL parser does", () => {
     const call = buildToolCall(1, "read_page", {
       url: "HTTP://Example.COM:8080/a b"
     })
@@ -29,8 +28,7 @@ describe("parseBackendToolInput", () => {
       input: {
         runner: "backend",
         toolName: "read_page",
-        url: "http://example.com:8080/a%20b",
-        host: "example.com:8080"
+        url: "http://example.com:8080/a%20b"
       }
     })
   })

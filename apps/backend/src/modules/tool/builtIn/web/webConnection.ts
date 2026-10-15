@@ -31,8 +31,10 @@ export type ConnectionAddressFailureKind =
   "blocked-address" | "unresolvable-host"
 
 /**
- * User agent of every request Lys sends to the web: it names Lys and links to
- * its source, in the form sites expect from automated readers.
+ * User agent of every request Lys's own HTTP client sends to the web, which
+ * is every request to Tavily: it names Lys and links to its source, in the
+ * form sites expect from automated readers. Pages `read_page` reads are
+ * requested by the browser, with the browser's own user agent.
  */
 export const LYS_USER_AGENT =
   "Mozilla/5.0 (compatible; Lys; +https://github.com/w3lt/lys)"

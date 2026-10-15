@@ -2,6 +2,7 @@ import type { ChatToolCall, ChatToolResult } from "@lys/protocol"
 import type { OpenAIFunctionTool, ToolDefinition } from "@lys/share"
 import { v7 as uuidv7 } from "uuid"
 import type { BuiltInTool, TurnBuiltInTool } from "../tool/builtIn/builtInTool"
+import { formatNetworkToolResult } from "../tool/networkToolResult"
 import AgentTool from "../tool/tool"
 import type ToolCallGate from "../toolApproval/toolCallGate"
 import type { ToolApprovalRequest } from "../toolApproval/toolCallGate"
@@ -214,7 +215,9 @@ function createContextToolCall(toolCall: ModelToolCall): ContextToolCall {
  * @param handling - Tools, the round's gate, the client call sender, and the
  * reply's cancellation.
  * @returns The message carrying the text the model reads as the result, or
- * undefined when the reply was stopped while the call waited or ran.
+ * undefined when the reply was stopped while the call waited or ran. The
+ * result of a tool that reaches the network is cleaned of invisible
+ * characters, whichever side answered and however the call ended.
  * @throws When a backend tool's run fails for a reason other than Stop.
  */
 async function handleToolCall(
@@ -227,6 +230,32 @@ async function handleToolCall(
       toolCall,
       formatUnknownToolMessage(toolCall, handling.tools)
     )
+  const message = await handleOfferedToolCall(toolCall, tool, handling)
+  if (message === undefined || tool.agentTool.access !== "network")
+    return message
+  return buildToolResultMessage(
+    toolCall,
+    formatNetworkToolResult(message.content)
+  )
+}
+
+/**
+ * Has one call of an offered tool answered: by the client or the backend
+ * tool when its arguments check out, or here otherwise.
+ *
+ * @param toolCall - Call with its identifier.
+ * @param tool - Offered tool the call names.
+ * @param handling - The round's gate, the client call sender, and the
+ * reply's cancellation.
+ * @returns The message carrying the result as the tool or the client gave
+ * it, or undefined when the reply was stopped while the call waited or ran.
+ * @throws When a backend tool's run fails for a reason other than Stop.
+ */
+async function handleOfferedToolCall(
+  toolCall: ContextToolCall,
+  tool: OfferedTool,
+  handling: ToolCallHandling
+): Promise<ToolResultMessage | undefined> {
   const checkedArguments = tool.agentTool.parseCallArguments(
     toolCall.argumentText
   )

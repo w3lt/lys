@@ -59,7 +59,9 @@ repository today; it is not a promise of unreleased work.
   Secrets pane saves the Tavily API key `web_search` needs, and checks it.
 - A chat offers the switched-on tools to a model trained for tool use and
   answers its tool calls: file tools run in the desktop, `read_page` reads one
-  public web page in the backend, and `web_search` searches the web through
+  public web page in a headless browser the backend starts, running its
+  scripts, following its redirects, and leaving out text a person cannot see,
+  and `web_search` searches the web through
   Tavily in the backend, unavailable until a Tavily API key is saved. Each call
   asks the person first unless its tool is set to Just run, which the backend
   decides for every tool from the saved choices; both web tools start off. Lys's instructions do not
@@ -75,7 +77,8 @@ repository today; it is not a promise of unreleased work.
 - The Composer label, send eligibility, and each chat request use the loaded
   runtime projection described in [desktop model settings](/architecture/desktop/#model-settings).
 - On macOS, `build.sh` builds the desktop app from a source checkout, installs
-  its backend runtime under `$LYS_HOME/runtime`, and copies `Lys.app` to
+  its backend runtime and the browser `read_page` uses under
+  `$LYS_HOME/runtime`, and copies `Lys.app` to
   `/Applications`. See [Packaging and releases](/operate/releases/).
 
 ## Coming soon
@@ -87,10 +90,8 @@ The current repository does not yet provide:
 - a Conversation settings pane
 - replay or reconnect semantics for chat streams
 - tool choices that are saved ([#110](https://github.com/w3lt/lys/issues/110)),
-  tool steps and citations saved with replies
-  ([#154](https://github.com/w3lt/lys/issues/154)),
-  and pages that need JavaScript
-  ([#155](https://github.com/w3lt/lys/issues/155))
+  and tool steps and citations saved with replies
+  ([#154](https://github.com/w3lt/lys/issues/154))
 - a production desktop release workflow
 - evidenced ADR and RFC records, and a canonical release log
 

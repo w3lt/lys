@@ -38,6 +38,28 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # read_page tests run real reads in the browser build.sh installs.
+      - name: Install the browser read_page reads pages in
+        run: scripts/install-chrome-headless-shell.sh "$RUNNER_TEMP/chrome-headless-shell"
+
+      # read_page runs Chromium with its sandbox on. Ubuntu's AppArmor blocks
+      # the unprivileged user namespaces that sandbox needs for a browser
+      # outside an installed package, so the runner allows them.
+      - name: Allow the browser's sandbox on the runner
+        run: |
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+
+      # The read_page tests crash pages on purpose. The runner's kernel pipes a
+      # crashing process's core dump to systemd-coredump, and the renderer
+      # stays alive until its gigabyte heap is dumped, so the crash reaches the
+      # read after its time limit. The runner discards core dumps instead.
+      - name: Let a crashed browser process exit at once
+        run: |
+          echo "core_pattern was: $(cat /proc/sys/kernel/core_pattern)"
+          sudo sysctl -w kernel.core_pattern='|/bin/false'
+
       # The backend tsconfig includes `test`, so this also typechecks the suite.
       - name: Typecheck the backend and its tests
         run: pnpm --filter @lys/backend exec tsc --noEmit
@@ -45,3 +67,5 @@ jobs:
       # Vitest fails when it discovers no test files.
       - name: Run the unit suite
         run: pnpm --filter @lys/backend test
+        env:
+          LYS_TEST_BROWSER_EXECUTABLE_PATH: ${{ runner.temp }}/chrome-headless-shell/chrome-headless-shell

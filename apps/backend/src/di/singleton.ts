@@ -26,6 +26,7 @@ import {
   buildTavilyRequestDependencies,
   createBuiltInTools
 } from "../modules/tool/builtIn/builtInTools"
+import type { PageRenderingFailureReporters } from "../modules/tool/builtIn/web/pageRendering"
 import WebSearchToolProvider from "../modules/tool/builtIn/web/webSearchToolProvider"
 
 /** Private close operation owned by one returned singleton-service bundle. */
@@ -60,6 +61,14 @@ export type SingletonServiceFactories = Readonly<{
     lmsBaseUrl: string,
     llmRuntimeFailureReporters: LlmRuntimeFailureReporters
   ) => SingletonServiceAcquisition<LlmRuntimeService>
+}>
+
+/** Receive the failures of the services that no caller observes in full, for logging. */
+export type SingletonFailureReporters = Readonly<{
+  /** Receive the LLM runtime failures that no caller observes. */
+  llmRuntime: LlmRuntimeFailureReporters
+  /** Receive the causes of read failures the model learns only by kind. */
+  pageRendering: PageRenderingFailureReporters
 }>
 
 /** Production factories used when the composition root supplies no substitutes. */
@@ -108,6 +117,12 @@ export type SingletonServices = Readonly<{
   [CLOSE_SINGLETON_SERVICES]: CloseSingletonServices
 }>
 
+/** Services that run, find, and approve tools; they own nothing to release. */
+type ToolServices = Pick<
+  SingletonServices,
+  "builtInTools" | "webSearchToolProvider" | "toolApprovalService"
+>
+
 /** Services that keep their data in the shared database and own nothing. */
 type DatabaseServices = Pick<
   SingletonServices,
@@ -121,10 +136,11 @@ type DatabaseServices = Pick<
  *
  * @param config - LM Studio host and port used to derive local service endpoints,
  * the title-generation prompt and title length limit given to the chat
- * service, and the built-in agents' system prompts given to the agent
- * service.
- * @param llmRuntimeFailureReporters - Receive the LLM runtime failures that no
- * caller observes, for logging.
+ * service, the built-in agents' system prompts given to the agent service,
+ * and the browser executable given to the read-page tool.
+ * @param failureReporters - Receive the LLM runtime failures that no caller
+ * observes and the causes of read failures the model learns only by kind,
+ * for logging.
  * @param factories - Service factories owned by the composition root.
  * @returns A promise resolving to the frozen bundle of owned services,
  * configured with the HTTP `/v1` chat endpoint and WebSocket LM Studio
@@ -149,17 +165,15 @@ type DatabaseServices = Pick<
  */
 export async function createSingletonServices(
   config: BackendConfig,
-  llmRuntimeFailureReporters: LlmRuntimeFailureReporters,
+  failureReporters: SingletonFailureReporters,
   factories: SingletonServiceFactories = DEFAULT_SINGLETON_SERVICE_FACTORIES
 ): Promise<SingletonServices> {
   const serviceLifetime = new AsyncDisposableStack()
 
   try {
-    const chatServiceAcquisition = factories.createChatService({
-      openAiBaseUrl: `http://${config.lmstudioHost}:${config.lmstudioPort}/v1`,
-      titleGenerationPrompt: config.titleGenerationPrompt,
-      generatedTitleMaxLength: config.generatedTitleMaxLength
-    })
+    const chatServiceAcquisition = factories.createChatService(
+      buildChatServiceOptions(config)
+    )
     serviceLifetime.defer(chatServiceAcquisition.closeService)
     const chatService = chatServiceAcquisition.service
 
@@ -168,31 +182,23 @@ export async function createSingletonServices(
     )
     serviceLifetime.defer(databaseAcquisition.closeService)
     const databaseServices = createDatabaseServices(databaseAcquisition.service)
-    const agentService = new AgentService({
-      recordStore: new SqliteAgentRecordStore(databaseAcquisition.service),
-      builtInAgents: buildBuiltInAgents({
-        caliginia: config.caliginiaSystemPrompt,
-        lysiptera: config.lysipteraSystemPrompt
-      }),
-      replyModel: new OpenAiReplyModel((options) =>
-        chatService.completeChatStream(options)
-      )
-    })
+    const agentService = createAgentService(
+      config,
+      databaseAcquisition.service,
+      chatService
+    )
 
     const llmRuntimeServiceAcquisition = factories.createLlmRuntimeService(
       `ws://${config.lmstudioHost}:${config.lmstudioPort}`,
-      llmRuntimeFailureReporters
+      failureReporters.llmRuntime
     )
     serviceLifetime.defer(llmRuntimeServiceAcquisition.closeService)
     const llmService = new LlmService({
       llmEngineOperationQueue: llmRuntimeServiceAcquisition.service
     })
-    const webSearchToolProvider = new WebSearchToolProvider(
-      () => readTavilyApiKey(config.settingsFilePath),
-      buildTavilyRequestDependencies()
-    )
-    const toolApprovalService = new ToolApprovalService(() =>
-      readJustRunToolNames(config.settingsFilePath)
+    const toolServices = createToolServices(
+      config,
+      failureReporters.pageRendering
     )
     let closeCompletion: Promise<void> | undefined = undefined
 
@@ -208,9 +214,7 @@ export async function createSingletonServices(
       llmRuntimeService: llmRuntimeServiceAcquisition.service,
       ...databaseServices,
       agentService,
-      builtInTools: createBuiltInTools(webSearchToolProvider),
-      webSearchToolProvider,
-      toolApprovalService,
+      ...toolServices,
       [CLOSE_SINGLETON_SERVICES]: closeOwnedSingletonServices
     })
   } catch (creationError) {
@@ -220,6 +224,82 @@ export async function createSingletonServices(
       "Singleton service creation and cleanup both failed."
     )
   }
+}
+
+/**
+ * Builds the settings the chat service is created with.
+ *
+ * @param config - LM Studio host and port, and the title-generation prompt
+ * and title length limit.
+ * @returns The HTTP `/v1` endpoint of LM Studio and the title settings.
+ */
+function buildChatServiceOptions(
+  config: BackendConfig
+): ChatServiceCreationOptions {
+  return {
+    openAiBaseUrl: `http://${config.lmstudioHost}:${config.lmstudioPort}/v1`,
+    titleGenerationPrompt: config.titleGenerationPrompt,
+    generatedTitleMaxLength: config.generatedTitleMaxLength
+  }
+}
+
+/**
+ * Creates the agent service over the shared database and the chat service.
+ *
+ * @param config - System prompts of the built-in agents.
+ * @param database - Shared database lent to the agent records; the caller
+ * keeps ownership and closes it.
+ * @param chatService - Chat service the agents answer through, lent for the
+ * service's lifetime.
+ * @returns The agent service, which reads nothing at creation and owns
+ * nothing to release.
+ */
+function createAgentService(
+  config: BackendConfig,
+  database: SqliteDatabase,
+  chatService: ChatService
+): AgentService {
+  const builtInAgents = buildBuiltInAgents({
+    caliginia: config.caliginiaSystemPrompt,
+    lysiptera: config.lysipteraSystemPrompt
+  })
+  return new AgentService({
+    recordStore: new SqliteAgentRecordStore(database),
+    builtInAgents,
+    replyModel: new OpenAiReplyModel((options) =>
+      chatService.completeChatStream(options)
+    )
+  })
+}
+
+/**
+ * Creates the services that run, find, and approve tools.
+ *
+ * @param config - Settings file the web search key and the Just run choices
+ * are read from, and the browser executable given to the read-page tool.
+ * @param pageRenderingFailureReporters - Receive the causes of read failures
+ * the model learns only by kind.
+ * @returns The web search tool provider, every built-in tool, and the tool
+ * approval service; they read and contact nothing at creation and own
+ * nothing to release.
+ */
+function createToolServices(
+  config: BackendConfig,
+  pageRenderingFailureReporters: PageRenderingFailureReporters
+): ToolServices {
+  const webSearchToolProvider = new WebSearchToolProvider(
+    () => readTavilyApiKey(config.settingsFilePath),
+    buildTavilyRequestDependencies()
+  )
+  const builtInTools = createBuiltInTools(
+    webSearchToolProvider,
+    config.browserExecutablePath,
+    pageRenderingFailureReporters.reportBrowserFailure
+  )
+  const toolApprovalService = new ToolApprovalService(() =>
+    readJustRunToolNames(config.settingsFilePath)
+  )
+  return { builtInTools, webSearchToolProvider, toolApprovalService }
 }
 
 /**

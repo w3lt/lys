@@ -7,6 +7,7 @@ import {
 import WebSearchToolProvider from "../../../../../src/modules/tool/builtIn/web/webSearchToolProvider"
 import registerToolRoutes from "../../../../../src/modules/tool/routes"
 import { updateFastifyWithHttpTransport } from "../../../../../src/http"
+import { TEST_BACKEND_CONFIG } from "../../../../unit/support/backendConfig"
 import { createTestFastify } from "../../../../unit/support/fastifyTestApp"
 import { getLiveTavilyApiKey } from "../../../support/liveTavily"
 
@@ -21,7 +22,14 @@ describe("registerToolRoutes against the Tavily API", () => {
       const { app } = createTestFastify()
       await updateFastifyWithHttpTransport(app)
       app.decorate("webSearchToolProvider", webSearchToolProvider)
-      app.decorate("builtInTools", createBuiltInTools(webSearchToolProvider))
+      app.decorate(
+        "builtInTools",
+        createBuiltInTools(
+          webSearchToolProvider,
+          TEST_BACKEND_CONFIG.browserExecutablePath,
+          () => undefined
+        )
+      )
       await registerToolRoutes(app)
 
       const response = await app.inject({

@@ -9,6 +9,22 @@ import * as z from "zod"
 import AgentTool from "../../../../src/modules/tool/tool"
 
 describe("AgentTool", () => {
+  it.each(["reads", "network"] as const)(
+    "reports that a tool with %s access has that access",
+    (access) => {
+      const tool = new AgentTool({
+        name: "look_up_word",
+        description: "Look up one word.",
+        group: "network",
+        access,
+        runner: "backend",
+        arguments: []
+      })
+
+      expect(tool.access).toBe(access)
+    }
+  )
+
   it("offers the model each argument in declaration order, with an enum as a limited string", () => {
     const tool = new AgentTool({
       name: "search_files",

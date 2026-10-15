@@ -1,6 +1,6 @@
 import { Readability } from "@mozilla/readability"
 import { parseHTML } from "linkedom"
-import type { PageResponse } from "./pageRequest"
+import type { RenderedPage } from "./pageRendering"
 
 /** Kind of one block of page text. */
 export type PageBlockKind = "heading" | "text"
@@ -34,10 +34,7 @@ export type PageExtractionResult =
       article: PageArticle
     }>
   | Readonly<{
-      /**
-       * The page has no main text, which usually means it needs JavaScript
-       * to show its content.
-       */
+      /** The page has no main text. */
       status: "no-readable-text"
     }>
   | Readonly<{
@@ -633,7 +630,7 @@ function hasMoreStartTagsThanElementLimit(html: string): boolean {
  * @returns The article, `no-readable-text`, or `too-complex`.
  * @throws When linkedom or Readability fail on the markup.
  */
-function extractHtmlArticle(page: PageResponse): PageExtractionResult {
+function extractHtmlArticle(page: RenderedPage): PageExtractionResult {
   if (hasMoreStartTagsThanElementLimit(page.text)) {
     return Object.freeze({ status: "too-complex" })
   }
@@ -682,7 +679,8 @@ function buildPlainTextBlocks(text: string): readonly PageBlock[] {
 /**
  * Extracts the main text of a page Lys read.
  *
- * @param page - HTML or plain-text page.
+ * @param page - Page the browser rendered: the HTML Lys writes from the
+ * page's DOM when it reads the page's document, or a plain-text page's text.
  * @returns The page's title, site, publication date, and main text as
  * blocks; `no-readable-text` when the page has no main text; or, for
  * HTML, `too-complex` when the page passes {@link MAXIMUM_PAGE_ELEMENTS} or
@@ -693,12 +691,12 @@ function buildPlainTextBlocks(text: string): readonly PageBlock[] {
  * {@link MAXIMUM_PAGE_ELEMENTS} is refused before it is parsed. Then
  * scripts, styles, `<noscript>`, and `<template>` elements are removed, the
  * parsed page's size is checked, and Readability selects the main content.
- * No script on the page ever runs. The work is synchronous; the limits keep
+ * Extraction runs no script of the page. The work is synchronous; the limits keep
  * it to about a second on current hardware, deeply nested markup included.
  * Markup that puts its text outside `<body>` reads as having no text. A
  * plain-text page is titled by its host.
  */
-export function extractPageArticle(page: PageResponse): PageExtractionResult {
+export function extractPageArticle(page: RenderedPage): PageExtractionResult {
   switch (page.mediaType) {
     case "text/html":
       return extractHtmlArticle(page)
@@ -713,7 +711,7 @@ export function extractPageArticle(page: PageResponse): PageExtractionResult {
  * @param page - Plain-text page Lys read.
  * @returns The article, titled by the page's host, or `no-readable-text`.
  */
-function extractPlainTextArticle(page: PageResponse): PageExtractionResult {
+function extractPlainTextArticle(page: RenderedPage): PageExtractionResult {
   const article: PageArticle = Object.freeze({
     title: new URL(page.url).host,
     siteName: undefined,

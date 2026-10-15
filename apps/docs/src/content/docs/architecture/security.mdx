@@ -1,6 +1,6 @@
 ---
 title: Security and trust boundaries
-description: "The current local trust boundary: loopback services, schema validation, approved web reads and searches, a plain-text search key, and file-backed settings without credential management."
+description: "The current local trust boundary: loopback services, schema validation, approved web reads in a headless browser and searches, a plain-text search key, and file-backed settings without credential management."
 docType: architecture
 sidebar:
   order: 8
@@ -10,8 +10,9 @@ The current security posture is intentionally simple and local. The backend and
 LM Studio both run on loopback, request and event payloads are validated with
 Zod, and there is no credential-management subsystem yet. There are two
 outbound connections, and both start off: the `read_page` tool reads a public
-web page, and the `web_search` tool sends a query and the person's Tavily API
-key to Tavily's search service. Each runs after the person allows the call, or
+web page in a headless browser, which also loads what the page needs from
+public hosts, and the `web_search` tool sends a query and the person's Tavily
+API key to Tavily's search service. Each runs after the person allows the call, or
 at once when the person set that tool to Just run, a choice Lys saves. The
 backend decides which calls ask; the desktop shows the prompts.
 
@@ -25,27 +26,30 @@ backend decides which calls ask; the desktop shows the prompts.
 | Backend -> SQLite file       | Local filesystem access to `$LYS_HOME/lys_db.sqlite`.                                                                      |
 | Tauri host -> settings file  | Local filesystem access to `$LYS_HOME/settings.json`.                                                                      |
 | Tauri host -> user files     | File tools read any path the OS user running Lys can read.                                                                 |
-| Backend -> public web        | `read_page` requests one model-chosen URL per allowed call.                                                                |
+| Backend -> browser           | Each `read_page` call starts Chrome Headless Shell, which runs the page's scripts.                                         |
+| Browser -> public web        | The page, its redirects, and what it loads, only through the read's proxy.                                                 |
 | Backend -> Tavily            | `web_search` sends one query and the saved API key to `api.tavily.com` per allowed call.                                   |
 | Backend -> settings file     | Reads the Tavily API key and the saved Just run choices from `$LYS_HOME/settings.json`; the Tauri host is the only writer. |
 
 ## Current controls
 
-| Control                    | What it does                                                                                                                                                                                                                                                                                                |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Loopback host constants    | Backend and LM Studio addresses default to `127.0.0.1`.                                                                                                                                                                                                                                                     |
-| CORS policy                | Fastify admits only the `http://localhost:1420` and `http://127.0.0.1:1420` development origins and the `tauri://localhost` app origin.                                                                                                                                                                     |
-| Zod validation             | Backend validates route bodies, parameters, and query strings; desktop validates SSE payloads and HTTP responses.                                                                                                                                                                                           |
-| Route-local abort handling | Closing the SSE connection aborts the backend chat task.                                                                                                                                                                                                                                                    |
-| Approval gateway           | The backend's tool approval service decides every tool call, client and backend tools alike: a tool asks first unless it is saved as Just run in `settings.json`, and every call asks when that file cannot be read. The desktop shows the prompts and runs only the client tools' calls the backend sends. |
-| Approval of web reads      | `read_page` runs only once the person allows the call on the card (full URL and host), or at once on Just run. It starts off.                                                                                                                                                                               |
-| Address rule               | `read_page` never connects to loopback, private, link-local, shared, documentation, benchmarking, multicast, or reserved addresses.                                                                                                                                                                         |
-| Untrusted page framing     | Page text and the page's title, site, and date reach the model between delimiters it cannot forge, with a notice never to obey them.                                                                                                                                                                        |
-| Approval of searches       | `web_search` runs only once the person allows the call on the card (full query and "Sends the query to Tavily (api.tavily.com)"), or at once on Just run. It starts off.                                                                                                                                    |
-| Fixed search destination   | Every search goes to `https://api.tavily.com` with certificate verification forced on, TLS 1.2 or later, no redirects, and the address rule on every resolved address and the connected socket.                                                                                                             |
-| Search key handling        | The key goes only into the `authorization` header sent to Tavily; it never appears in results, the model's context, events, API answers, logs, or errors.                                                                                                                                                   |
-| Owner-only settings file   | `settings.json` is replaced atomically and is readable only by its owner on Unix.                                                                                                                                                                                                                           |
-| Untrusted result framing   | Result titles, URLs, and snippets reach the model between delimiters it cannot forge, with a notice never to obey them.                                                                                                                                                                                     |
+| Control                     | What it does                                                                                                                                                                                                                                                                                                |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Loopback host constants     | Backend and LM Studio addresses default to `127.0.0.1`.                                                                                                                                                                                                                                                     |
+| CORS policy                 | Fastify admits only the `http://localhost:1420` and `http://127.0.0.1:1420` development origins and the `tauri://localhost` app origin.                                                                                                                                                                     |
+| Zod validation              | Backend validates route bodies, parameters, and query strings; desktop validates SSE payloads and HTTP responses.                                                                                                                                                                                           |
+| Route-local abort handling  | Closing the SSE connection aborts the backend chat task.                                                                                                                                                                                                                                                    |
+| Approval gateway            | The backend's tool approval service decides every tool call, client and backend tools alike: a tool asks first unless it is saved as Just run in `settings.json`, and every call asks when that file cannot be read. The desktop shows the prompts and runs only the client tools' calls the backend sends. |
+| Approval of web reads       | `read_page` runs only once the person allows the call on the card (full URL), or at once on Just run. Allowing a read lets the page load what it needs from public hosts. It starts off.                                                                                                                    |
+| Address rule                | No connection of a read, the page's own or one its scripts or redirects make, reaches loopback, private, link-local, shared, documentation, benchmarking, multicast, or reserved addresses.                                                                                                                 |
+| Browser isolation           | A fresh Chromium profile per read with its sandbox on; nothing is kept between reads, and the browser is closed when the read ends.                                                                                                                                                                         |
+| Invisible character removal | Every network tool's result loses Unicode format and control characters, such as zero-width, direction, and tag characters, and every variation selector but one emoji- or text-style selector after a visible character, and says how many it lost.                                                        |
+| Untrusted page framing      | Page text and the page's title, site, and date reach the model between delimiters it cannot forge, with a notice never to obey them.                                                                                                                                                                        |
+| Approval of searches        | `web_search` runs only once the person allows the call on the card (full query and "Sends the query to Tavily (api.tavily.com)"), or at once on Just run. It starts off.                                                                                                                                    |
+| Fixed search destination    | Every search goes to `https://api.tavily.com` with certificate verification forced on, TLS 1.2 or later, no redirects, and the address rule on every resolved address and the connected socket.                                                                                                             |
+| Search key handling         | The key goes only into the `authorization` header sent to Tavily; it never appears in results, the model's context, events, API answers, logs, or errors.                                                                                                                                                   |
+| Owner-only settings file    | `settings.json` is replaced atomically and is readable only by its owner on Unix.                                                                                                                                                                                                                           |
+| Untrusted result framing    | Result titles, URLs, and snippets reach the model between delimiters it cannot forge, with a notice never to obey them.                                                                                                                                                                                     |
 
 ## Candid limits
 
@@ -75,10 +79,23 @@ backend decides which calls ask; the desktop shows the prompts.
   the stored reply, which can quote it, is readable through the same API. This
   stays open until callers are authenticated
   ([#171](https://github.com/w3lt/lys/issues/171)).
-- Characters that show nothing, such as zero-width, direction, and tag
-  characters, still reach the model inside a page's or a result's text. Only a
-  delimiter they split is caught; removing them is
-  [#161](https://github.com/w3lt/lys/issues/161).
+- `read_page` runs the scripts of pages the model chooses in Chromium. Its
+  sandbox confines them, but the browser is the build `playwright-core` pins:
+  it gets security fixes only when Lys updates that dependency and `build.sh`
+  installs the matching browser again.
+- Hidden text reaches the model. `read_page` reads everything a page holds,
+  text it hides from view included, such as a closed accordion, text moved
+  off-screen, or white text on white, because the content is what a read is
+  for. Instructions a page hides from the person therefore reach the model as
+  page content, inside the untrusted framing. The content of a closed shadow
+  root is not read.
+- Removing invisible characters removes a few visible signs too, such as the
+  Arabic number signs (U+0600–U+0605) and the end-of-ayah sign (U+06DD),
+  turns the England, Scotland, and Wales flags into a plain black flag, and
+  shows a character a variation selector picked an alternate shape for in
+  its default shape.
+- A page's third parties, such as analytics and CDNs, see a request from the
+  machine Lys runs on, as they would from any browser.
 - The current Tauri configuration sets no Content Security Policy (`csp` is
   `null`).
 - The backend currently uses a dummy API key value when talking to local
@@ -89,43 +106,62 @@ backend decides which calls ask; the desktop shows the prompts.
 
 `read_page` reads any public URL the model chooses: there is no allow list,
 because the person approves the calls, each one on Ask me or all of them on
-Just run, which Lys saves until the person switches the tool back. The
-protections are about where a read may connect
+Just run, which Lys saves until the person switches the tool back. Allowing a
+read lets the page load what it needs from public hosts, as any browser visit
+does; the card names the page. The protections are about where a read may
+connect
 and what reaches the model:
 
 - **Arguments.** A URL that is not absolute `http` or `https`, is longer than
   2,048 characters, carries a username or password, or names `localhost` or a
   blocked IP address is answered without asking. The WHATWG URL parser
   normalizes odd spellings of an address, such as `http://2130706433/`, first.
-- **Connections.** The check runs inside the lookup the connection itself
-  uses: every address the host name resolves to must pass, so the name cannot
-  resolve differently between the check and the connection. The connected
-  socket's address is checked again. IPv4-mapped IPv6 addresses are matched
-  against the IPv4 rules.
-- **Redirects.** No redirect is followed, so a read only ever requests the
-  URL the call names, on the host the card shows. When a page redirects, the
-  model gets the target URL and has to call `read_page` again to read it,
-  which asks again on Ask me. A target that fails the URL checks is reported
-  without its URL. [#158](https://github.com/w3lt/lys/issues/158) decides
-  whether some redirects should be followed.
-- **Requests.** No cookie, credential, or `Referer` is sent, and nothing is
-  stored. The request names Lys in its `User-Agent`.
-- **Bounds.** One read takes at most 15 seconds and 4 MiB of body. Markup
-  with more than 40,000 start tags is refused before it is parsed, and a
-  parsed page with more than 40,000 elements or a nesting depth sum above
-  400,000 is refused before Readability runs. Extraction still runs on the
-  backend's only thread, but these limits keep it to about a second on
-  current hardware, deeply nested hostile markup included.
+- **Connections.** The browser reaches the network only through a proxy the
+  read opens on a random port of `127.0.0.1`, which serves only that
+  browser's random credentials. The proxy resolves every host through the
+  lookup it connects with, so a name cannot resolve differently between the
+  check and the connection, refuses a blocked IP address without connecting
+  to it, and checks the address every socket reached. Chromium is told to
+  send this machine's own addresses through the proxy as well, whatever
+  Playwright's environment says. IPv4-mapped IPv6 addresses are matched
+  against the IPv4 rules. This holds for the page, every redirect, and every request
+  its scripts make; WebRTC may not send UDP around the proxy, and service
+  workers are blocked.
+- **Redirects.** HTTP, `<meta>` refresh, and script redirects are followed
+  to any public host, each connection checked like the first. The result
+  cites the URL the browser ended on, which must pass the URL rules too, and
+  the document there must be HTML or plain text with a 2xx status, however
+  the page reached it.
+- **Isolation.** Each read starts Chrome Headless Shell with a fresh profile
+  and Chromium's sandbox on, refuses downloads and popups, and closes the
+  browser when it ends, on Stop and on failure included. Cookies or storage a
+  page sets last for that read only; Lys never signs in, so it reads what a
+  signed-out visitor sees. Requests carry the browser's own `User-Agent`.
+- **Bounds.** One read takes at most 30 seconds, the browser's start
+  included, at most 256 connections, at most 64 MiB received, and at most
+  1 GiB held by the page's scripts. Images,
+  fonts, and media are not fetched. The page's HTML or text is cut at 4 Mi
+  UTF-16 code units inside the page, before it leaves the browser, so no page
+  can make the backend receive more; markup with more than 40,000 start tags,
+  or a parsed page with more than 40,000 elements or a nesting depth sum
+  above 400,000, is refused before Readability runs.
+- **Hidden and invisible text.** Lys reads hidden text like any other text,
+  from a script world of its own that the page's scripts cannot reach. The
+  result, like every network tool's result, then loses format and control
+  characters other than tabs and line breaks, and every variation selector
+  except one emoji- or text-style selector after a visible character, and
+  says how many it removed; a zero-width joiner or non-joiner stays only
+  between two visible characters.
 - **Prompt injection.** The model is told that page content is untrusted and
-  must never be followed. This lowers the risk but cannot remove it: a page can
-  still try to steer the reply. On Ask me, each further tool call still needs
+  must never be followed. This lowers the risk but cannot remove it: a page
+  can still try to steer the reply with any of its text, hidden or visible. On Ask me, each further tool call still needs
   the person's approval. On Just run it does not: with `read_page` and a file
   tool both on Just run, a page's instructions can lead the model to read a
   file and send its content in the URL of a second `read_page` call, with no
   card shown. The pane says so for every `network` tool on Just run, and Ask
   me stays the default for every tool.
 
-The backend makes the request, so a backend that runs on another machine
+The backend starts the browser, so a backend that runs on another machine
 reads from that machine's network position. Today the backend runs on the
 same machine as the desktop.
 

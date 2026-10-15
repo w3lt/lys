@@ -50,7 +50,7 @@ export const SHORT_PAGE_TEXT_LENGTH = 200
 
 /** Note added when a page has little main text. */
 const SHORT_PAGE_NOTE =
-  "Note: the page has little text. If it should show more, it may need JavaScript, which Lys cannot run."
+  "Note: the page shows little text. It may ask the reader to sign in, or check for automated readers, which Lys does not get past."
 
 /**
  * Formats one field shown on a single line.

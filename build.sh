@@ -128,13 +128,16 @@ mkdir -p "$BACKEND_DIR"
 rm -r "$BACKEND_DIR"
 mv apps/backend/dist "$BACKEND_DIR"
 
-# Step 8. Build the desktop app
+# Step 9. Install the browser read_page reads every page in
+scripts/install-chrome-headless-shell.sh "$LYS_HOME/runtime/chrome-headless-shell"
+
+# Step 10. Build the desktop app
 pnpm run desktop:build:ci
 
-# Step 9. Bundle the desktop app
+# Step 11. Bundle the desktop app
 pnpm run desktop:bundle:ci
 
-# Step 10.Install the desktop app
+# Step 12. Install the desktop app
 APP_BUNDLE="apps/desktop/src-tauri/target/release/bundle/macos/Lys.app"
 [[ -d "$APP_BUNDLE" ]] || {
   echo "App bundle not found: $APP_BUNDLE" >&2

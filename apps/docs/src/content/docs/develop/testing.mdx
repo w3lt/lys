@@ -51,8 +51,12 @@ contracts, schemas, or behavior that crosses package boundaries.
 - `apps/backend/test/unit` contains a Vitest unit suite. Run it once with
   `pnpm --filter @lys/backend test`, or rerun it on every change with
   `pnpm --filter @lys/backend run test:watch`. It needs no LM Studio server,
-  network access, or `LYS_HOME`. When a run ends, it warns that the live suite
-  did not run.
+  network access, or `LYS_HOME`, but it needs Chrome Headless Shell: the
+  `read_page` cases read pages from local servers in the real browser. Install
+  it with `scripts/install-chrome-headless-shell.sh <directory>` and set
+  `LYS_TEST_BROWSER_EXECUTABLE_PATH` to `<directory>/chrome-headless-shell`;
+  without it those cases fail and name the script. When a run ends, it warns
+  that the live suite did not run.
 - `apps/backend/test/live` contains a small live suite that calls the real
   Tavily API. Run it with `pnpm --filter @lys/backend test:live`, with a real
   Tavily API key in the `LYS_TEST_TAVILY_API_KEY` environment variable; a case
@@ -82,7 +86,14 @@ contracts, schemas, or behavior that crosses package boundaries.
 - The `Backend unit tests` workflow runs
   `pnpm --filter @lys/backend exec tsc --noEmit`, which also typechecks both
   backend suites, and the backend unit suite on every pull request and on every
-  push to `main`.
+  push to `main`. Before the suite it installs Chrome Headless Shell with the
+  same script, and lets Ubuntu's AppArmor allow the user namespaces Chromium's
+  sandbox needs, so the reads run with the sandbox on, as in Lys. It also
+  discards core dumps: the runner hands them to `systemd-coredump`, and a
+  renderer that a test crashes would stay alive until its heap is dumped, so
+  the read would time out instead of reporting the crash. On a Linux machine
+  that dumps cores the same way, the crash tests can time out for this
+  reason.
 - The shared packages have no package-level test scripts or tracked test suites.
 - `apps/backend` also exposes a TypeScript validation path through
   `pnpm --filter @lys/backend exec tsc --noEmit`.

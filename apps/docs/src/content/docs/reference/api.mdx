@@ -195,7 +195,7 @@ order Settings shows them, and the listed tools that cannot run now:
 
 (Definitions shortened.) Every definition has `runner` `backend`. The
 definitions are fixed for one backend build: `read_page`, which reads one
-public web page, and `web_search`, which searches the web through Tavily
+public web page in a headless browser, and `web_search`, which searches the web through Tavily
 (both group and access `network`). Availability is read again on every
 request. `reason` is `api-key-missing` (no Tavily API key is saved),
 `api-key-invalid` (the saved key fails the key format), or
@@ -284,7 +284,9 @@ backend tools never come here; the backend runs them itself.
 }
 ```
 
-`content` is the exact text the model reads; a succeeded result can be empty,
+`content` is the text the model reads; for a tool whose access is `network`,
+the backend first removes invisible characters from it and adds a line
+saying how many, as for every network tool's result. A succeeded result can be empty,
 such as for an empty file, and a failed one cannot. `reason` says why a call
 failed and is not shown to the model: `toolFailed` when the tool ran and
 reported a failure, and `runFailed` when the client could not run it.

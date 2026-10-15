@@ -42,3 +42,13 @@ export const apiChatReplyToolResultRoute = `${API_PREFIX_V1}/chat/:conversationI
  * compatibility breaks.
  */
 export const apiChatReplyToolApprovalRoute = `${API_PREFIX_V1}/chat/:conversationId/replies/:assistantMessageId/tool-approvals/:callId`
+
+/**
+ * Versioned POST path for measuring the context a conversation's next message
+ * would be sent with.
+ *
+ * @remarks This path is transmitted in HTTP requests and is not persisted.
+ * Changing it requires coordinated route registration because chat-context
+ * URL compatibility breaks.
+ */
+export const apiChatContextRoute = `${API_PREFIX_V1}/chat/context`

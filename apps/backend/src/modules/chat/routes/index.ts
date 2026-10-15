@@ -1,4 +1,6 @@
 import type { FastifyInstance } from "fastify"
+import { serializerCompiler } from "fastify-type-provider-zod"
+import registerChatContextRoute from "./chatContextRoute"
 import registerChatRoute, { type ChatRouteOptions } from "./chatRoute"
 import ReplyGenerationRegistry from "../replyGenerationRegistry"
 import updateFastifyWithChatReplyRoutes from "./replyRoutes"
@@ -11,8 +13,8 @@ import updateFastifyWithChatReplyRoutes from "./replyRoutes"
  * @returns A promise that resolves after child route registrars complete.
  * @throws If a child route registrar fails. The failure rejects the promise,
  * so `app.register` reports it rather than an uncaught exception.
- * @remarks The registry is disposed in `preClose`, while SSE streams are
- * still open: every generation stores its final state and its followers end
+ * @remarks The group's JSON responses are serialized with their Zod schemas.
+ * The registry is disposed in `preClose`, while SSE streams are still open: every generation stores its final state and its followers end
  * before the server waits for requests and before services close SQLite.
  */
 export default function registerChatRoutes(
@@ -24,7 +26,9 @@ export default function registerChatRoutes(
     app.addHook("preClose", async () => {
       await generations[Symbol.asyncDispose]()
     })
+    app.setSerializerCompiler(serializerCompiler)
     registerChatRoute(app, { ...options, generations })
+    registerChatContextRoute(app)
     updateFastifyWithChatReplyRoutes(app, generations)
     resolve()
   })

@@ -257,12 +257,13 @@ function buildCreateToolCallGate(
  * Has one agent answer one turn to settlement and records the effects.
  *
  * @param scenario - Model, history, storage, and cancellation behavior.
- * @returns The sent events, stored deltas and states, reported cancellations
- * and failures, and the reply's settlement.
+ * @returns The sent events, stored deltas and states, reported
+ * cancellations, refusals, and failures, and the reply's settlement.
  */
 async function getAgentReplyOutcome(scenario: AgentReplyScenario) {
   const events: ChatGenerationEvent[] = []
   const reportedCancellations: unknown[] = []
+  const reportedRefusals: unknown[] = []
   const reportedFailures: unknown[] = []
   const persistedDeltas: string[] = []
   const persistedStates: AssistantMessageCompletion[] = []
@@ -294,6 +295,9 @@ async function getAgentReplyOutcome(scenario: AgentReplyScenario) {
       reportReplyCancellation: (failure) => {
         reportedCancellations.push(failure)
       },
+      reportReplyRefusal: (failure) => {
+        reportedRefusals.push(failure)
+      },
       reportReplyFailure: (failure) => {
         reportedFailures.push(failure)
       },
@@ -319,6 +323,7 @@ async function getAgentReplyOutcome(scenario: AgentReplyScenario) {
     persistedStates,
     updateAssistantMessageContent,
     reportedCancellations,
+    reportedRefusals,
     reportedFailures,
     settlement
   }
@@ -765,6 +770,7 @@ describe("Agent", () => {
         events.push(event)
       },
       reportReplyCancellation: () => undefined,
+      reportReplyRefusal: () => undefined,
       reportReplyFailure: () => undefined
     })
 
@@ -869,10 +875,11 @@ describe("Agent", () => {
           message: `The conversation no longer fits the model's context window: the next request to the model needs ${requiredTokens} tokens, including the room kept for the reply, and the model is loaded with ${contextLength}. Start a new conversation, or load the model with a longer context in Settings → Model.`
         }
       ])
-      expect(run.reportedFailures).toEqual([
+      expect(run.reportedRefusals).toEqual([
         expect.any(ReplyContextOverflowError)
       ])
-      expect(run.reportedFailures[0]).toMatchObject({
+      expect(run.reportedFailures).toEqual([])
+      expect(run.reportedRefusals[0]).toMatchObject({
         requiredTokens,
         contextLength
       })
@@ -929,9 +936,10 @@ describe("Agent", () => {
             "The model is not loaded, so Lys cannot check that the conversation fits it. Load the model in Settings → Model, then try again."
         }
       ])
-      expect(run.reportedFailures).toEqual([
+      expect(run.reportedRefusals).toEqual([
         expect.any(ReplyModelNotLoadedError)
       ])
+      expect(run.reportedFailures).toEqual([])
     })
 
     it("interrupts without waiting for a pending measurement, and never sends the round, when stopped while the context is measured", async () => {

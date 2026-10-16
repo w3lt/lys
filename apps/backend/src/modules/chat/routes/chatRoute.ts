@@ -332,8 +332,10 @@ async function createTurnReplyTask(
  * @param context - Generation-owned cancellation, event sender, tool call
  * sender, and approval prompt sender.
  * @returns The agent turn, whose writes go to the stored reply and whose
- * tool calls pass the approval gateway; an unreadable settings file is
- * logged as a warning with the request's logger.
+ * tool calls pass the approval gateway. With the request's logger, an
+ * unreadable settings file is logged as a warning; a cancelled reply, and a
+ * round that was not sent because it did not fit or its model was not
+ * loaded, at debug level; and any other reply failure as an error.
  */
 function buildAgentTurn(
   input: TurnGenerationInput,
@@ -375,6 +377,12 @@ function buildAgentTurn(
       ),
     reportReplyCancellation: (failure) => {
       input.logger.debug({ err: failure }, "Chat completion was cancelled")
+    },
+    reportReplyRefusal: (failure) => {
+      input.logger.debug(
+        { err: failure },
+        "Chat round was not sent to the model"
+      )
     },
     reportReplyFailure: (failure) => {
       input.logger.error({ err: failure }, "Chat completion stream failed")

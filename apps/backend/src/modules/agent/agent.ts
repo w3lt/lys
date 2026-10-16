@@ -111,7 +111,15 @@ export type AgentTurn = Readonly<{
    * reported as cancelled by the model.
    */
   reportReplyCancellation: (failure: unknown) => void
-  /** Receives the failure that ended a reply stored as failed. */
+  /**
+   * Receives the failure that ended a reply stored as failed because a round
+   * was not sent: it did not fit the model's context window, or the model was
+   * not loaded. The person is told why through the reply's `error` event.
+   */
+  reportReplyRefusal: (
+    failure: ReplyContextOverflowError | ReplyModelNotLoadedError
+  ) => void
+  /** Receives any other failure that ended a reply stored as failed. */
   reportReplyFailure: (failure: unknown) => void
 }>
 
@@ -282,15 +290,16 @@ export default class Agent {
    * after a model failure. Partial text stays stored. Interrupted replies stay
    * in later context; failed replies do not. Each failure is reported once,
    * before its final state is stored: to `reportReplyCancellation` when the
-   * turn was cancelled or the model reports a cancellation, and to
-   * `reportReplyFailure` otherwise. When the turn offers tools, each round
-   * that calls tools has its calls answered and the model is asked again;
-   * every round's text is stored and sent. A client tool's call is answered
-   * by the client; a backend tool's call runs here once the client allows
-   * it, under the turn's cancellation. A round whose context, tools, and
-   * reply ceiling exceed the model's context length, or whose model is not
-   * loaded, is not sent: the reply fails, keeping the text earlier rounds
-   * stored, and its `error` event says why.
+   * turn was cancelled or the model reports a cancellation, to
+   * `reportReplyRefusal` when a round was not sent because it did not fit or
+   * its model was not loaded, and to `reportReplyFailure` otherwise. When the
+   * turn offers tools, each round that calls tools has its calls answered and
+   * the model is asked again; every round's text is stored and sent. A client
+   * tool's call is answered by the client; a backend tool's call runs here
+   * once the client allows it, under the turn's cancellation. A round whose
+   * context, tools, and reply ceiling exceed the model's context length, or
+   * whose model is not loaded, is not sent: the reply fails, keeping the text
+   * earlier rounds stored, and its `error` event says why.
    */
   public async createReply(turn: AgentTurn): Promise<void> {
     try {
@@ -505,6 +514,11 @@ function handleReplyFailure(turn: AgentTurn, error: unknown): void {
     turn.abortSignal.aborted || error instanceof ChatCompletionCancelledError
   if (isCancelled) {
     turn.reportReplyCancellation(error)
+  } else if (
+    error instanceof ReplyContextOverflowError ||
+    error instanceof ReplyModelNotLoadedError
+  ) {
+    turn.reportReplyRefusal(error)
   } else {
     turn.reportReplyFailure(error)
   }

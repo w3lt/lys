@@ -109,6 +109,7 @@ async function createHelloReply(agent: Agent): Promise<void> {
     sendClientToolCall: vi.fn(),
     createToolCallGate: vi.fn(),
     reportReplyCancellation: vi.fn(),
+    reportReplyRefusal: vi.fn(),
     reportReplyFailure: vi.fn()
   })
 }

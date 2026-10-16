@@ -641,6 +641,32 @@ describe("updateFastifyWithChatRoute", () => {
     }
   )
 
+  it("logs a round that was not sent because the model is not loaded at debug level, not as a failure", async () => {
+    const testApp = await createChatRouteTestApp()
+    registerStoringChatRoute(testApp)
+    testApp.findLlmContextMeasurement.mockResolvedValue(undefined)
+
+    const response = await sendChatRequest(
+      testApp.app,
+      NEW_CONVERSATION_REQUEST
+    )
+
+    expect(response.statusCode).toBe(200)
+    expect(testApp.logs).toContainEqual(
+      expect.objectContaining({
+        level: "debug",
+        msg: "Chat round was not sent to the model",
+        reqId: expect.any(String),
+        err: expect.objectContaining({
+          message: `The model "${NEW_CONVERSATION_REQUEST.model}" is not loaded`
+        })
+      })
+    )
+    expect(testApp.logs).not.toContainEqual(
+      expect.objectContaining({ level: "error" })
+    )
+  })
+
   describe("tool call approval", () => {
     /** Request whose turn offers the scripted backend look-up tool. */
     const LOOK_UP_REQUEST = Object.freeze({

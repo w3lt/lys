@@ -87,9 +87,10 @@ is awaited or a conversation opens, nothing is measured and the meter keeps
 its last numbers.
 
 The backend counts the agent's system prompt, the offered tool definitions,
-and the stored messages a turn includes with the model's tokenizer; the
-composer adds an estimate of the trimmed draft at 3.7 characters per token
-and the reply ceiling as the reserve. The window is the context length the
+the stored messages a turn includes, and the markup around the new message
+with the model's tokenizer; the composer adds an estimate of the trimmed
+draft's text at 3.7 characters per token and the reply ceiling as the
+reserve. The window is the context length the
 model is loaded with. The panel lists, in send order, the agent instructions,
 tool definitions, earlier messages, your message, the room left or the amount
 over, and the reserve. Counts carry `~`. The meter never claims that earlier

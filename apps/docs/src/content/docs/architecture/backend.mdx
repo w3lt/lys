@@ -106,8 +106,9 @@ setting.
 context meter. It resolves the agent and the conversation as the chat route
 does, through the same lookups, reads a continued conversation once, and
 asks the agent's `findContextMeasurement` for the system prompt, tools, and
-stored messages a turn's first round would send without its new message. See
-the [route contract](/reference/api/#chat-context-measurement).
+stored messages a turn's first round would send, with an empty new message
+that measures the markup around the text. See the
+[route contract](/reference/api/#chat-context-measurement).
 
 Each completion receives the system prompt of the conversation's agent, prior
 user messages, non-empty

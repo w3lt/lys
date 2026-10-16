@@ -13,7 +13,8 @@ const MEASUREMENT = Object.freeze({
   systemPromptTokens: 2260,
   toolTokens: 410,
   historyTokens: 1000,
-  historyMessageCount: 4
+  historyMessageCount: 4,
+  messageMarkupTokens: 8
 })
 
 describe("estimateTextTokens", () => {
@@ -55,7 +56,7 @@ describe("formatTokenCount", () => {
 })
 
 describe("calculateContextUsage", () => {
-  it("adds the draft's estimate to the measured parts and keeps the reply reserve free", () => {
+  it("adds the draft's estimate and the markup around it to the measured parts and keeps the reply reserve free", () => {
     const usage = calculateContextUsage({
       measurement: MEASUREMENT,
       draft: "x".repeat(370),
@@ -69,11 +70,11 @@ describe("calculateContextUsage", () => {
       toolTokens: 410,
       historyTokens: 1000,
       historyMessageCount: 4,
-      messageTokens: 100,
-      usedTokens: 3770,
+      messageTokens: 108,
+      usedTokens: 3778,
       overflowTokens: 0,
-      freeTokens: 2374,
-      filledFraction: (3770 + 2048) / 8192
+      freeTokens: 2366,
+      filledFraction: (3778 + 2048) / 8192
     })
   })
 
@@ -84,14 +85,26 @@ describe("calculateContextUsage", () => {
       reserve: 0
     })
 
-    expect(usage.messageTokens).toBe(10)
+    expect(usage.messageTokens).toBe(18)
+  })
+
+  it("refuses a short draft that fits only without the markup around the new message", () => {
+    const reserve = 8192 - 2260 - 410 - 1000 - 3
+
+    const usage = calculateContextUsage({
+      measurement: MEASUREMENT,
+      draft: "Thanks!",
+      reserve
+    })
+
+    expect(usage).toMatchObject({ messageTokens: 10, overflowTokens: 7 })
   })
 
   it("fits a request that takes exactly the whole window with the reserve", () => {
     const usage = calculateContextUsage({
       measurement: MEASUREMENT,
       draft: "",
-      reserve: 8192 - 2260 - 410 - 1000
+      reserve: 8192 - 2260 - 410 - 1000 - 8
     })
 
     expect(usage).toMatchObject({
@@ -109,8 +122,8 @@ describe("calculateContextUsage", () => {
     })
 
     expect(usage).toMatchObject({
-      usedTokens: 3770,
-      overflowTokens: 3770 + 5000 - 8192,
+      usedTokens: 3778,
+      overflowTokens: 3778 + 5000 - 8192,
       freeTokens: 0,
       filledFraction: 1
     })

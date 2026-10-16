@@ -998,11 +998,11 @@ describe("Agent", () => {
   })
 
   describe("findContextMeasurement", () => {
-    it("measures its system prompt, the usable history, and the offered tools as a turn sends them, without a new message", async () => {
+    it("measures its system prompt, the usable history, the offered tools, and an empty new message as a turn sends them", async () => {
       const replyContextMeter = createRoomyReplyContextMeter()
       replyContextMeter.findReplyContextMeasurement.mockResolvedValue({
         contextLength: 8192,
-        messageTokenCounts: [2260, 400, 600],
+        messageTokenCounts: [2260, 400, 600, 9],
         toolTokenCount: 410
       })
       const agent = new Agent(
@@ -1029,7 +1029,8 @@ describe("Agent", () => {
         systemPromptTokens: 2260,
         toolTokens: 410,
         historyTokens: 1000,
-        historyMessageCount: 2
+        historyMessageCount: 2,
+        messageMarkupTokens: 9
       })
       expect(
         replyContextMeter.findReplyContextMeasurement
@@ -1037,7 +1038,8 @@ describe("Agent", () => {
         messages: [
           { role: "system", content: "You are Lys." },
           { role: "user", content: "Earlier question" },
-          { role: "assistant", content: "Earlier answer", toolCalls: [] }
+          { role: "assistant", content: "Earlier answer", toolCalls: [] },
+          { role: "user", content: "" }
         ],
         tools: [READ_TEXT_FILE_FORMAT, LOOK_UP_WORD_FORMAT],
         model: TURN_REQUEST.model

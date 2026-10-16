@@ -171,7 +171,7 @@ describe("registerChatContextRoute", () => {
     const { app, replyContextMeter } = await createChatContextRouteApp()
     replyContextMeter.findReplyContextMeasurement.mockResolvedValue({
       contextLength: 8192,
-      messageTokenCounts: [2260],
+      messageTokenCounts: [2260, 9],
       toolTokenCount: 410
     })
 
@@ -191,12 +191,16 @@ describe("registerChatContextRoute", () => {
       systemPromptTokens: 2260,
       toolTokens: 410,
       historyTokens: 0,
-      historyMessageCount: 0
+      historyMessageCount: 0,
+      messageMarkupTokens: 9
     })
     expect(
       replyContextMeter.findReplyContextMeasurement
     ).toHaveBeenCalledExactlyOnceWith({
-      messages: [{ role: "system", content: CALIGINIA.systemPrompt }],
+      messages: [
+        { role: "system", content: CALIGINIA.systemPrompt },
+        { role: "user", content: "" }
+      ],
       tools: [
         new AgentTool(READ_TEXT_FILE_TOOL).buildAgentFormat(),
         new AgentTool(LOOK_UP_WORD_TOOL).buildAgentFormat()
@@ -211,7 +215,7 @@ describe("registerChatContextRoute", () => {
     saveStoredConversation(database, "caliginia")
     replyContextMeter.findReplyContextMeasurement.mockResolvedValue({
       contextLength: 8192,
-      messageTokenCounts: [2260, 10, 20, 30],
+      messageTokenCounts: [2260, 10, 20, 30, 9],
       toolTokenCount: 0
     })
 
@@ -226,7 +230,8 @@ describe("registerChatContextRoute", () => {
       systemPromptTokens: 2260,
       toolTokens: 0,
       historyTokens: 60,
-      historyMessageCount: 3
+      historyMessageCount: 3,
+      messageMarkupTokens: 9
     })
     expect(
       replyContextMeter.findReplyContextMeasurement
@@ -235,7 +240,8 @@ describe("registerChatContextRoute", () => {
         { role: "system", content: CALIGINIA.systemPrompt },
         { role: "user", content: "Earlier question" },
         { role: "assistant", content: "Earlier answer", toolCalls: [] },
-        { role: "user", content: "Second question" }
+        { role: "user", content: "Second question" },
+        { role: "user", content: "" }
       ],
       tools: [],
       model: MODEL

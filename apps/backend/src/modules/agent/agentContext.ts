@@ -36,33 +36,14 @@ function buildStoredContextMessage(
 }
 
 /**
- * Builds the part of an agent's context that comes before a turn's message.
- * @param systemPrompt - The agent's own instructions, sent first.
- * @param history - Stored transcript before the turn, in conversation order.
- * @returns The system prompt, then the history's user messages, completed
- * replies, and nonempty interrupted replies in order. Failed, streaming, and
- * empty replies are left out; each message keeps only its role and text, and
- * a reply carries no tool calls.
- */
-export function buildAgentHistoryContext(
-  systemPrompt: string,
-  history: readonly ConversationMessage[]
-): readonly ReplyContextMessage[] {
-  return [
-    { role: "system", content: systemPrompt },
-    ...history
-      .filter(shouldIncludeContextMessage)
-      .map(buildStoredContextMessage)
-  ]
-}
-
-/**
  * Builds the context an agent sends to its model for one turn.
  * @param systemPrompt - The agent's own instructions, sent first.
  * @param history - Stored transcript before the turn, in conversation order.
  * @param userMessageContent - Text of the message the turn answers, sent last.
- * @returns The context {@link buildAgentHistoryContext} builds, then the new
- * message once.
+ * @returns The system prompt, the history's user messages, completed replies,
+ * and nonempty interrupted replies in order, then the new message once. Failed,
+ * streaming, and empty replies are left out; each message keeps only its role
+ * and text, and a reply carries no tool calls.
  */
 export function buildAgentContext(
   systemPrompt: string,
@@ -70,7 +51,10 @@ export function buildAgentContext(
   userMessageContent: string
 ): readonly ReplyContextMessage[] {
   return [
-    ...buildAgentHistoryContext(systemPrompt, history),
+    { role: "system", content: systemPrompt },
+    ...history
+      .filter(shouldIncludeContextMessage)
+      .map(buildStoredContextMessage),
     { role: "user", content: userMessageContent }
   ]
 }

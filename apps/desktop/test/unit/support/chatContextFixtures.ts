@@ -19,7 +19,8 @@ export const FIXTURE_CHAT_CONTEXT_MEASUREMENT: ChatContextApiResponse =
     systemPromptTokens: 2260,
     toolTokens: 0,
     historyTokens: 0,
-    historyMessageCount: 0
+    historyMessageCount: 0,
+    messageMarkupTokens: 8
   })
 
 /**

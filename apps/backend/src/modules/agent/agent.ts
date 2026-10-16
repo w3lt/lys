@@ -10,7 +10,7 @@ import type {
 } from "@lys/share"
 import type { TurnBuiltInTool } from "../tool/builtIn/builtInTool"
 import { ChatCompletionCancelledError } from "../../utils/errors"
-import { buildAgentContext, buildAgentHistoryContext } from "./agentContext"
+import { buildAgentContext } from "./agentContext"
 import {
   findReplyRoundFitFailure,
   ReplyContextOverflowError,
@@ -152,7 +152,7 @@ export type AgentContextInput = Readonly<{
 
 /**
  * How much of the model's context window a conversation takes before its next
- * message, in tokens of the model's own tokenizer.
+ * message's text, in tokens of the model's own tokenizer.
  */
 export type AgentContextMeasurement = Readonly<{
   /** Context length the model is loaded with; a positive integer. */
@@ -165,6 +165,11 @@ export type AgentContextMeasurement = Readonly<{
   historyTokens: number
   /** Number of stored messages a turn would include. */
   historyMessageCount: number
+  /**
+   * Tokens the next message takes without its text: the chat template's
+   * markup around it.
+   */
+  messageMarkupTokens: number
 }>
 
 /** Context and text placement of one round. */
@@ -234,9 +239,10 @@ export default class Agent {
    * @param input - Stored transcript, model, and offered tool definitions,
    * borrowed until the returned promise settles.
    * @returns A promise resolving to the window and the tokens of this agent's
-   * system prompt, of the tools, and of the stored messages a turn would
-   * include, measured exactly as a turn's first round sends them without its
-   * new message; or to undefined when the model is not loaded.
+   * system prompt, of the tools, of the stored messages a turn would include,
+   * and of the new message's markup, measured exactly as a turn's first round
+   * sends them with an empty new message; or to undefined when the model is
+   * not loaded.
    * @throws The meter's failure when the model's runtime cannot be reached,
    * is busy, or fails; and a Zod error for a definition that does not match
    * `toolDefinitionSchema`.
@@ -246,7 +252,7 @@ export default class Agent {
   ): Promise<AgentContextMeasurement | undefined> {
     const measurement =
       await this.#replyContextMeter.findReplyContextMeasurement({
-        messages: buildAgentHistoryContext(this.#systemPrompt, input.history),
+        messages: buildAgentContext(this.#systemPrompt, input.history, ""),
         tools: buildDefinedToolOffer(input.tools),
         model: input.model
       })
@@ -477,19 +483,22 @@ async function waitForReplyContextMeasurement(
 /**
  * Builds the conversation measurement from a measured context.
  *
- * @param measurement - Measurement of the system prompt followed by the
- * included history, with the offered tools.
- * @returns The window and the system prompt's, tools', and history's tokens.
- * @throws If the measurement holds no count, which breaks the meter's
- * one-count-per-message contract.
+ * @param measurement - Measurement of the system prompt, the included
+ * history, and an empty new message, with the offered tools.
+ * @returns The window and the system prompt's, tools', history's, and new
+ * message markup's tokens.
+ * @throws If the measurement holds fewer than two counts, which breaks the
+ * meter's one-count-per-message contract.
  */
 function buildAgentContextMeasurement(
   measurement: ReplyContextMeasurement
 ): AgentContextMeasurement {
-  const [systemPromptTokens, ...historyTokenCounts] =
+  const [systemPromptTokens, ...laterTokenCounts] =
     measurement.messageTokenCounts
-  if (systemPromptTokens === undefined)
-    throw new Error("The context measurement has no system prompt count")
+  const messageMarkupTokens = laterTokenCounts.at(-1)
+  if (systemPromptTokens === undefined || messageMarkupTokens === undefined)
+    throw new Error("The context measurement lacks a message's count")
+  const historyTokenCounts = laterTokenCounts.slice(0, -1)
   return Object.freeze({
     contextLength: measurement.contextLength,
     systemPromptTokens,
@@ -498,7 +507,8 @@ function buildAgentContextMeasurement(
       (total, messageTokens) => total + messageTokens,
       0
     ),
-    historyMessageCount: historyTokenCounts.length
+    historyMessageCount: historyTokenCounts.length,
+    messageMarkupTokens
   })
 }
 

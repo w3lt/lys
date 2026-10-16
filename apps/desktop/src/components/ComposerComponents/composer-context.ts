@@ -7,14 +7,15 @@ import type { ChatContextMeasurementOutcome } from "@/lib/hooks/chatContextMeasu
  * editor's system-prompt measure.
  *
  * @remarks The backend measures what the next message would be sent with —
- * the agent's system prompt, the offered tool definitions, and the stored
- * messages a turn includes — with the loaded model's tokenizer, and reports
- * the context length the model is loaded with. Only the draft is estimated
- * here, from its length, because it changes with every keystroke. Labels
- * prefix counts with `~` because the draft is estimated and the backend's
- * counts include an allowance for the chat template. Staged attachments are
- * never sent, so they are not part of the window. The agent editor uses only
- * the text estimate and the token-count format.
+ * the agent's system prompt, the offered tool definitions, the stored
+ * messages a turn includes, and the markup around the new message — with the
+ * loaded model's tokenizer, and reports the context length the model is
+ * loaded with. Only the draft's text is estimated here, from its length,
+ * because it changes with every keystroke. Labels prefix counts with `~`
+ * because the draft is estimated and the backend's counts include an
+ * allowance for the chat template. Staged attachments are never sent, so they
+ * are not part of the window. The agent editor uses only the text estimate
+ * and the token-count format.
  */
 
 /** Average characters per token used to estimate text length. */
@@ -60,7 +61,10 @@ export type ContextUsage = {
   readonly historyTokens: number
   /** Number of stored messages the next turn would include. */
   readonly historyMessageCount: number
-  /** Estimated tokens of the draft as it would be sent. */
+  /**
+   * Tokens of the draft as it would be sent: the measured markup around the
+   * new message plus the estimate of its text.
+   */
   readonly messageTokens: number
   /** Tokens the request would take, without the reply reserve. */
   readonly usedTokens: number
@@ -137,14 +141,15 @@ export function formatTokenCount(tokenCount: number): string {
  * Calculates the breakdown of the context window the next message would take.
  *
  * @param input - The backend's measurement, the draft, and the reply reserve.
- * @returns The measured parts, the draft's estimate, and what is left or over.
+ * @returns The measured parts, the draft's tokens, and what is left or over.
  * @remarks The rule matches the backend's check before every round: the
  * request fits while its tokens and the reserve together do not exceed the
  * context length.
  */
 export function calculateContextUsage(input: ContextUsageInput): ContextUsage {
   const { measurement, reserve } = input
-  const messageTokens = estimateTextTokens(input.draft.trim())
+  const messageTokens =
+    measurement.messageMarkupTokens + estimateTextTokens(input.draft.trim())
   const usedTokens =
     measurement.systemPromptTokens +
     measurement.toolTokens +

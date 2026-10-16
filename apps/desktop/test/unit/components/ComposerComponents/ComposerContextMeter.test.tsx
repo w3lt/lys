@@ -23,12 +23,14 @@ const MEASUREMENT = Object.freeze({
   systemPromptTokens: 2260,
   toolTokens: 410,
   historyTokens: 1000,
-  historyMessageCount: 4
+  historyMessageCount: 4,
+  messageMarkupTokens: 8
 })
 
 /**
- * A window that fits: 3,680 measured and estimated tokens and a 1,024-token
- * reserve of 8,192; the 37-character draft estimates to 10 tokens.
+ * A window that fits: 3,688 measured and estimated tokens and a 1,024-token
+ * reserve of 8,192; the 37-character draft estimates to 10 tokens, plus 8 for
+ * the markup around it.
  */
 const FITTING_METER = buildContextMeterState(
   { status: "measured", measurement: MEASUREMENT },
@@ -39,7 +41,7 @@ const FITTING_METER = buildContextMeterState(
 const OVERFLOWING_METER = buildContextMeterState(
   {
     status: "measured",
-    measurement: { ...MEASUREMENT, historyTokens: 5000 }
+    measurement: { ...MEASUREMENT, historyTokens: 4992 }
   },
   { draft: "x".repeat(37), reserve: 1024 }
 )
@@ -113,7 +115,7 @@ describe("ComposerContextMeter", () => {
       "Agent instructions: ~2.3k",
       "Tool definitions: ~410",
       "4 earlier messages: ~1.0k",
-      "Your message: ~10",
+      "Your message: ~18",
       "Room left: ~3.5k",
       "Reserved for the reply: ~1.0k"
     ])
@@ -145,7 +147,7 @@ describe("ComposerContextMeter", () => {
       "Agent instructions: ~2.3k",
       "Tool definitions: none",
       "Earlier messages: none",
-      "Your message: ~0",
+      "Your message: ~8",
       "Room left: ~5.9k",
       "Reserved for the reply: ~0"
     ])

@@ -94,14 +94,15 @@ A manual Start follows steps 4–8.
    older one.
 3. The backend finds the agent and the conversation as the chat route does,
    builds the system prompt, offered tools, and stored messages a turn's first
-   round would send, and measures them with the loaded model's tokenizer
-   through the model operation queue.
+   round would send, with an empty new message for the markup around the
+   text, and measures them with the loaded model's tokenizer through the
+   model operation queue.
 4. The backend answers with the context length and the tokens of each part,
    or with a `503` problem when the model is not loaded, LM Studio is not
    connected, or the queue is full.
-5. The composer adds an estimate of the draft and the reply ceiling, shows
-   the result in its context meter, and disables Send while the request would
-   not fit.
+5. The composer adds an estimate of the draft's text and the reply ceiling,
+   shows the result in its context meter, and disables Send while the request
+   would not fit.
 
 ## Stop an in-flight reply
 

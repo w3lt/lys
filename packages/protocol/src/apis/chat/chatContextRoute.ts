@@ -17,7 +17,7 @@ import { apiChatContextRoute } from "./routes"
  * would be sent with.
  *
  * @remarks Names the conversation, model, and tools exactly as the chat
- * request that would send the message names them; the message itself is not
+ * request that would send the message names them; the message's text is not
  * part of the measurement.
  */
 export const chatContextApiRequestBodySchema = z.strictObject({
@@ -34,7 +34,7 @@ const tokenCountSchema = z.int().nonnegative()
 
 /**
  * Validates how much of the model's context window a conversation takes
- * before its next message.
+ * before its next message's text.
  *
  * @remarks Counts are tokens of the loaded model's own tokenizer, each with an
  * allowance for the chat template's markup around it.
@@ -50,7 +50,12 @@ export const chatContextApiResponseSchema = z
     /** Tokens of the stored messages the next turn would include. */
     historyTokens: tokenCountSchema,
     /** Number of stored messages the next turn would include. */
-    historyMessageCount: tokenCountSchema
+    historyMessageCount: tokenCountSchema,
+    /**
+     * Tokens the next message takes without its text: the chat template's
+     * markup around it. A client adds its own count of the text.
+     */
+    messageMarkupTokens: tokenCountSchema
   })
   .readonly()
 
@@ -80,14 +85,15 @@ const chatContextApiResponseSchemas = Object.freeze({
  * message would be sent with.
  *
  * @remarks The backend builds the context as a turn's first round would, with
- * the agent's current system prompt, the stored messages a turn includes, and
- * the offered tools, then counts it with the loaded model's tokenizer and
- * reports the context length the model is loaded with. Nothing is stored and
- * the model is never loaded or asked to generate. The measurement shares the
- * model-operation queue, so it waits behind a load in progress. An offered
- * backend tool is measured whether or not it can run now. The descriptor is
- * imported by backend and desktop transport code; changing its method, path,
- * or schemas is a compatibility change requiring coordinated consumers.
+ * the agent's current system prompt, the stored messages a turn includes, an
+ * empty new message, and the offered tools, then counts it with the loaded
+ * model's tokenizer and reports the context length the model is loaded with.
+ * Nothing is stored and the model is never loaded or asked to generate. The
+ * measurement shares the model-operation queue, so it waits behind a load in
+ * progress. An offered backend tool is measured whether or not it can run
+ * now. The descriptor is imported by backend and desktop transport code;
+ * changing its method, path, or schemas is a compatibility change requiring
+ * coordinated consumers.
  */
 export const chatContextApi = Object.freeze({
   method: "POST",

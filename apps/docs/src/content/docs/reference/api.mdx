@@ -201,10 +201,10 @@ meter calls it; nothing is stored and the model generates nothing.
 
 `conversation`, `model`, and `tools` follow the [chat request body](#chat-request-body);
 there is no `message` and no `generationOptions`. The backend builds the
-context a turn's first round would send without its new message: the
-answering agent's current system prompt, the stored messages a turn includes,
-and the offered tools, client tools first. It counts them with the loaded
-model's tokenizer and answers `200`:
+context a turn's first round would send, with an empty new message in place of
+the text: the answering agent's current system prompt, the stored messages a
+turn includes, the empty message, and the offered tools, client tools first.
+It counts them with the loaded model's tokenizer and answers `200`:
 
 ```json
 {
@@ -212,7 +212,8 @@ model's tokenizer and answers `200`:
   "systemPromptTokens": 2268,
   "toolTokens": 412,
   "historyTokens": 1032,
-  "historyMessageCount": 4
+  "historyMessageCount": 4,
+  "messageMarkupTokens": 8
 }
 ```
 
@@ -223,6 +224,7 @@ model's tokenizer and answers `200`:
 | `toolTokens`          | Tokens of the offered tool definitions; `0` when none are offered             |
 | `historyTokens`       | Tokens of the stored messages the next turn would include                     |
 | `historyMessageCount` | Number of those messages                                                      |
+| `messageMarkupTokens` | Tokens the new message takes without its text; a client adds the text's count |
 
 - Each count is the text's tokens plus a fixed allowance for the chat
   template's markup: 8 tokens per message, 16 per tool call of an earlier

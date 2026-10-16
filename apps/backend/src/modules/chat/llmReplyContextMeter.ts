@@ -49,8 +49,9 @@ const TOOL_OFFER_TEMPLATE_TOKENS = 160
  * them in the model's chat template, which this class does not render, so a
  * fixed allowance for the template's markup is added to each message, each
  * earlier tool call, and the tool offer. Owns no resource: the LLM service's
- * owner releases the runtime. Concurrency model: reentrant; it keeps no
- * state, and the borrowed query serializes its own work.
+ * owner releases the runtime, and its queue keeps each accepted measurement
+ * until it settles. Concurrency model: reentrant; it keeps no state, and the
+ * borrowed query serializes its own work.
  */
 export default class LlmReplyContextMeter implements ReplyContextMeter {
   /** Borrowed query of the backend's LLM service. */

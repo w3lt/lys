@@ -19,6 +19,7 @@ import {
   ReplyModelNotLoadedError
 } from "../../../../src/modules/agent/replyContextFit"
 import type {
+  ReplyContextMeasurement,
   ReplyContextMeasurementRequest,
   ReplyContextMeter
 } from "../../../../src/modules/agent/replyContextMeter"
@@ -931,6 +932,44 @@ describe("Agent", () => {
       expect(run.reportedFailures).toEqual([
         expect.any(ReplyModelNotLoadedError)
       ])
+    })
+
+    it("interrupts without waiting for a pending measurement, and never sends the round, when stopped while the context is measured", async () => {
+      const cancellation = new AbortController()
+      const measurement = Promise.withResolvers<
+        ReplyContextMeasurement | undefined
+      >()
+      const replyContextMeter = createRoomyReplyContextMeter()
+      replyContextMeter.findReplyContextMeasurement.mockImplementation(() => {
+        // Stop arrives after the agent starts waiting for the measurement.
+        queueMicrotask(() => {
+          cancellation.abort()
+        })
+        return measurement.promise
+      })
+      const openReplyStream = createEventStream({
+        type: "finish",
+        finishReason: "stop"
+      })
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream,
+        replyContextMeter,
+        abortSignal: cancellation.signal
+      })
+      measurement.resolve({
+        contextLength: 1_000_000,
+        messageTokenCounts: [1, 1],
+        toolTokenCount: 0
+      })
+      await measurement.promise
+
+      expect(run.settlement).toEqual({ status: "resolved" })
+      expect(run.persistedStates).toEqual([{ status: "interrupted" }])
+      expect(run.events).toEqual([INTERRUPTED_EVENT])
+      expect(run.reportedCancellations).toEqual([cancellation.signal.reason])
+      expect(run.reportedFailures).toEqual([])
+      expect(openReplyStream).not.toHaveBeenCalled()
     })
 
     it("fails with the general sentence and reports the failure when the context cannot be measured", async () => {

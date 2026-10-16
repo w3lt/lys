@@ -317,7 +317,9 @@ export default class Agent {
    * @throws If a round does not fit the model's window or its model is not
    * loaded, the model fails, a stream ends without ending its round, a
    * delta cannot be stored, the model calls a tool although none was
-   * offered, or a backend tool's run fails for a reason other than Stop.
+   * offered, or a backend tool's run fails for a reason other than Stop; and
+   * the turn's abort reason when it is stopped while a round's context is
+   * measured.
    * @remarks A round that ends with tool calls has each call answered, then
    * the model is asked again with the round and its results. A later round's
    * first text starts on a new paragraph when an earlier round stored text.
@@ -368,7 +370,8 @@ export default class Agent {
    * own text, or ended by cancellation, supersession, or deletion.
    * @throws If the round does not fit the model's window or its model is
    * not loaded, the model fails, its stream ends without ending the round, or
-   * a delta cannot be stored.
+   * a delta cannot be stored; and the turn's abort reason when it is stopped
+   * while the round's context is measured.
    * @remarks Storing and sending happen in one synchronous step, so a
    * follower that reads a snapshot in its own step sees either both or
    * neither. Leaving the stream early releases the model request.
@@ -409,21 +412,25 @@ export default class Agent {
    * @throws A `ReplyModelNotLoadedError` when the model is not loaded, a
    * `ReplyContextOverflowError` when the context, tools, and reply ceiling
    * exceed its context length, the meter's failure, or the model's failure
-   * to open the stream. Nothing is sent to the model before the context is
-   * known to fit.
-   * @remarks The measurement cannot be cancelled; Stop during it cancels the
-   * opening that follows.
+   * to open the stream; and the turn's abort reason when it is stopped
+   * while the measurement is pending. Nothing is sent to the model before the
+   * context is known to fit.
+   * @remarks Stop ends the wait for the measurement at once. A measurement
+   * the meter already accepted keeps running under the meter's ownership,
+   * and its outcome is ignored.
    */
   async #openReplyRoundStream(
     turn: AgentTurn,
     input: ReplyRoundInput
   ): Promise<AsyncIterable<ReplyStreamEvent>> {
-    const measurement =
-      await this.#replyContextMeter.findReplyContextMeasurement({
+    const measurement = await waitForReplyContextMeasurement(
+      this.#replyContextMeter.findReplyContextMeasurement({
         messages: input.messages,
         tools: input.tools,
         model: turn.model
-      })
+      }),
+      turn.abortSignal
+    )
     const fitFailure = findReplyRoundFitFailure({
       measurement,
       model: turn.model,
@@ -437,6 +444,33 @@ export default class Agent {
       generationOptions: turn.generationOptions,
       abortSignal: turn.abortSignal
     })
+  }
+}
+
+/**
+ * Waits for a round's context measurement until the turn is stopped.
+ *
+ * @param measurement - Pending measurement, owned by the meter that accepted
+ * it.
+ * @param abortSignal - The turn's cancellation.
+ * @returns The measurement's result when it settles before Stop.
+ * @throws The measurement's failure when it settles first; and the signal's
+ * abort reason when the turn is stopped first, or was already stopped.
+ * @remarks Stopping ends only this wait: the meter still completes the
+ * measurement, and its later outcome is observed and ignored.
+ */
+async function waitForReplyContextMeasurement(
+  measurement: Promise<ReplyContextMeasurement | undefined>,
+  abortSignal: AbortSignal
+): Promise<ReplyContextMeasurement | undefined> {
+  const { promise: stopped, reject } = Promise.withResolvers<never>()
+  const rejectStopped = () => reject(abortSignal.reason)
+  abortSignal.addEventListener("abort", rejectStopped, { once: true })
+  if (abortSignal.aborted) rejectStopped()
+  try {
+    return await Promise.race([measurement, stopped])
+  } finally {
+    abortSignal.removeEventListener("abort", rejectStopped)
   }
 }
 

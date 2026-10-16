@@ -49,8 +49,10 @@ export interface ReplyContextMeter {
    * so no measurement exists. It never loads the model.
    * @throws If the model's runtime cannot be reached, is busy, or answers
    * with a failure; nothing is sent to the model.
-   * @remarks Completion-only: it cannot be cancelled and may wait behind
-   * other model operations, such as a load.
+   * @remarks Completion-only: the meter's owner keeps an accepted
+   * measurement until it settles, independently of the caller, so a caller
+   * that stops waiting leaves it running. It may wait behind other model
+   * operations, such as a load.
    */
   findReplyContextMeasurement(
     request: ReplyContextMeasurementRequest

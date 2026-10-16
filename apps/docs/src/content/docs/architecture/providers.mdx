@@ -127,10 +127,11 @@ WebSocket authentication and are not used as a substitute.
 The `LlmRuntimeService` queue accepts one active operation and up to eight
 waiting operations across inventory, health, loading, unloading, context
 measurement, and connection attempts together. A reply round's measurement
-therefore waits behind a load in progress. Accepted operations run in arrival order. A full queue
-rejects a new request immediately with HTTP `503` and the Problem Details type
-`urn:lys:problem:llm:service-busy`; rejected work never reaches the runtime.
-Finishing an operation releases its capacity on either success or failure.
+therefore waits behind a load in progress. Accepted operations run in arrival
+order. A full queue rejects a new request immediately with HTTP `503` and the
+Problem Details type `urn:lys:problem:llm:service-busy`; rejected work never
+reaches the runtime. Finishing an operation releases its capacity on either
+success or failure.
 
 The first accepted operation reserves the active position before execution starts,
 so a burst arriving in the same event-loop turn cannot exceed nine accepted

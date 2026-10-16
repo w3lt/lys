@@ -187,17 +187,17 @@ function readMeterTone(meter: ContextMeterState): "over" | "tight" | "normal" {
 /**
  * Reports how full the window is and what is occupying it.
  *
- * @remarks The parent owns what is known
- * about the window, whether files are staged, and the request to change the
- * window; this component owns only whether its panel is disclosed. The control is a disclosure: the
- * button carries `aria-expanded` and points at the panel it reveals, the panel
- * closes on Escape and on a pointer press outside it, and focus is returned to
- * the button when Escape closes it. The window is the context length the model
- * is loaded with. Counts are prefixed with `~`, because the draft is estimated
- * and the backend's counts include an allowance for the chat template; no
- * state claims that earlier messages are shortened or summarized, because
- * they never are. The meter's fill is accompanied by a text label so the state
- * is never carried by the bar alone.
+ * @remarks The parent owns what is known about the window, whether files are
+ * staged, and the request to change the window; this component owns only
+ * whether its panel is disclosed. The control is a disclosure: the button
+ * carries `aria-expanded` and points at the panel it reveals, the panel closes
+ * on Escape and on a pointer press outside it, and focus is returned to the
+ * button when Escape closes it. The window is the context length the model is
+ * loaded with. Counts are prefixed with `~`, because the draft is estimated and
+ * the backend's counts include an allowance for the chat template; no state
+ * claims that earlier messages are shortened or summarized, because they never
+ * are. The meter's fill is accompanied by a text label so the state is never
+ * carried by the bar alone.
  *
  * @param props - What is known about the window, whether files are staged,
  * and the window-change callback.

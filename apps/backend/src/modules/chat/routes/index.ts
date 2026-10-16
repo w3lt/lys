@@ -14,8 +14,9 @@ import updateFastifyWithChatReplyRoutes from "./replyRoutes"
  * @throws If a child route registrar fails. The failure rejects the promise,
  * so `app.register` reports it rather than an uncaught exception.
  * @remarks The group's JSON responses are serialized with their Zod schemas.
- * The registry is disposed in `preClose`, while SSE streams are still open: every generation stores its final state and its followers end
- * before the server waits for requests and before services close SQLite.
+ * The registry is disposed in `preClose`, while SSE streams are still open:
+ * every generation stores its final state and its followers end before the
+ * server waits for requests and before services close SQLite.
  */
 export default function registerChatRoutes(
   app: FastifyInstance,

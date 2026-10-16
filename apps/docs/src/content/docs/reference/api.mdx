@@ -199,12 +199,13 @@ meter calls it; nothing is stored and the model generates nothing.
 }
 ```
 
-`conversation`, `model`, and `tools` follow the [chat request body](#chat-request-body);
-there is no `message` and no `generationOptions`. The backend builds the
-context a turn's first round would send, with an empty new message in place of
-the text: the answering agent's current system prompt, the stored messages a
-turn includes, the empty message, and the offered tools, client tools first.
-It counts them with the loaded model's tokenizer and answers `200`:
+`conversation`, `model`, and `tools` follow the
+[chat request body](#chat-request-body); there is no `message` and no
+`generationOptions`. The backend builds the context a turn's first round would
+send, with an empty new message in place of the text: the answering agent's
+current system prompt, the stored messages a turn includes, the empty message,
+and the offered tools, client tools first. It counts them with the loaded
+model's tokenizer and answers `200`:
 
 ```json
 {
@@ -236,8 +237,9 @@ It counts them with the loaded model's tokenizer and answers `200`:
 - The model is matched like a chat request names it: a loaded instance's
   identifier or a loaded model's key. A model that is not loaded is never
   loaded; the route answers `503` with `urn:lys:problem:llm:model-not-loaded`.
-- The measurement runs through the [model operation queue](#model-operation-admission),
-  so it waits behind a load in progress, and a full queue answers `503` with
+- The measurement runs through the
+  [model operation queue](#model-operation-admission), so it waits behind a
+  load in progress, and a full queue answers `503` with
   `urn:lys:problem:llm:service-busy`.
 - A new conversation naming an unknown agent, a conversation that is not
   stored, and a conversation whose agent was deleted get the same `404` and

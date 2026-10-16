@@ -88,12 +88,13 @@ const NO_ATTACHMENTS: readonly ComposerAttachment[] = Object.freeze([])
  * opening, while generation is unavailable, or while the current measurement
  * with the draft's estimate exceeds the loaded model's window. A request the
  * meter could not measure, or is measuring again, can still be sent; the
- * backend checks every round before sending it. The Past conversations button opens history, or closes
- * it when open, and exposes that state through `aria-expanded`. While
- * generation is unavailable, a banner names the first missing prerequisite —
- * the backend, LM Studio, or loaded weights — and its action starts a stopped
- * backend or opens the settings pane that fixes the problem: Runtime for the
- * backend and LM Studio, Model for inventory and loading.
+ * backend checks every round before sending it. The Past conversations button
+ * opens history, or closes it when open, and exposes that state through
+ * `aria-expanded`. While generation is unavailable, a banner names the first
+ * missing prerequisite — the backend, LM Studio, or loaded weights — and its
+ * action starts a stopped backend or opens the settings pane that fixes the
+ * problem: Runtime for the backend and LM Studio, Model for inventory and
+ * loading.
  *
  * The primary control is Stop while a reply is awaited — while the
  * conversation turn is awaited and while the reply streams — and Send

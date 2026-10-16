@@ -421,9 +421,9 @@ three reporters that log with the request's logger: a cancelled reply and a
 round that was not sent, because it did not fit or its model was not loaded,
 at debug level, and any other failed reply at error level. A new
 conversation must name a built-in or stored agent, or the chat route answers
-`404` before storing anything. When a stored conversation's agent no longer exists, the chat route
-answers `409` and stores nothing, so the conversation stays readable and
-accepts messages again once an agent has that code.
+`404` before storing anything. When a stored conversation's agent no longer
+exists, the chat route answers `409` and stores nothing, so the conversation
+stays readable and accepts messages again once an agent has that code.
 Version 4 preserves activity
 timestamps on rename, version 5 preserves them on status-only message updates,
 version 6 adds the `agents` table, version 7 replaces the stored system prompt

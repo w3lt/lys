@@ -105,8 +105,8 @@ function buildStoredAgent(
  * commits before it returns; a create is one write transaction per code it
  * tries. Owns no resource: the records' owner closes their store, after which
  * every records operation fails with `Database is closed`, and the model's
- * owner releases it and its context meter. Concurrency model: single-owner, synchronous on the
- * backend's event loop.
+ * owner releases it and its context meter. Concurrency model: single-owner,
+ * synchronous on the backend's event loop.
  */
 export default class AgentService
   implements AgentLister, AgentReader, AgentCreator, AgentEditor, AgentDeleter

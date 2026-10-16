@@ -309,7 +309,9 @@ the value is missing, invalid, or unavailable.
   through [`POST /api/v1/chat/context`](/reference/api/#chat-context-measurement).
 - LM Studio applies its own settings when it loads a model by itself, for
   example when a chat request names a model that is not loaded. The load
-  configuration applies only to loads Lys starts.
+  configuration applies only to loads Lys starts. The backend checks that the
+  model is loaded before each reply round and each title request, so this
+  happens only when the model is unloaded between that check and the request.
 
 ## Coming soon
 

@@ -129,12 +129,15 @@ for a turn whose conversation has no stored title, unless an earlier turn of
 that conversation is still generating one, and uses that turn's user message.
 A conversation that remains untitled after an earlier task failed or was
 cancelled gets another try on its next turn after that task ended. It uses a
-separate chat
-completion request with a JSON-schema response format that limits the title to
-`generatedTitleMaxLength` Unicode code points (100 by default), then validates the
-reply; JSON wrapped in one Markdown code fence is accepted. Only a reply that
-cannot be used as a title leads to another attempt, up to
-`titleGenerationMaxAttempts` attempts per turn (three by default). An HTTP,
+separate chat completion request with a JSON-schema response format that limits
+the title to `generatedTitleMaxLength` Unicode code points (100 by default),
+then validates the reply; JSON wrapped in one Markdown code fence is accepted.
+Only a reply that cannot be used as a title leads to another attempt, up to
+`titleGenerationMaxAttempts` attempts per turn (three by default). Before each
+attempt, the task asks the model-operation queue whether the model is loaded,
+without loading it. When it is not, the turn requests no title, logs
+`model-not-loaded` at debug level, and the next turn tries again, so a title
+request does not make LM Studio load the model with its own settings. An HTTP,
 connection, or cancellation failure ends title generation for the turn, after
 the OpenAI SDK has retried a connection failure, timeout, or 408, 409, 429, or
 5xx response up to two more times within the attempt. A generated title is

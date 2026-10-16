@@ -9,6 +9,7 @@ import type {
   ToolDefinition
 } from "@lys/share"
 import type { TurnBuiltInTool } from "../tool/builtIn/builtInTool"
+import { waitForSettlementOrAbort } from "../../utils/abort"
 import { ChatCompletionCancelledError } from "../../utils/errors"
 import { buildAgentContext } from "./agentContext"
 import {
@@ -429,7 +430,7 @@ export default class Agent {
     turn: AgentTurn,
     input: ReplyRoundInput
   ): Promise<AsyncIterable<ReplyStreamEvent>> {
-    const measurement = await waitForReplyContextMeasurement(
+    const measurement = await waitForSettlementOrAbort(
       this.#replyContextMeter.findReplyContextMeasurement({
         messages: input.messages,
         tools: input.tools,
@@ -450,33 +451,6 @@ export default class Agent {
       generationOptions: turn.generationOptions,
       abortSignal: turn.abortSignal
     })
-  }
-}
-
-/**
- * Waits for a round's context measurement until the turn is stopped.
- *
- * @param measurement - Pending measurement, owned by the meter that accepted
- * it.
- * @param abortSignal - The turn's cancellation.
- * @returns The measurement's result when it settles before Stop.
- * @throws The measurement's failure when it settles first; and the signal's
- * abort reason when the turn is stopped first, or was already stopped.
- * @remarks Stopping ends only this wait: the meter still completes the
- * measurement, and its later outcome is observed and ignored.
- */
-async function waitForReplyContextMeasurement(
-  measurement: Promise<ReplyContextMeasurement | undefined>,
-  abortSignal: AbortSignal
-): Promise<ReplyContextMeasurement | undefined> {
-  const { promise: stopped, reject } = Promise.withResolvers<never>()
-  const rejectStopped = () => reject(abortSignal.reason)
-  abortSignal.addEventListener("abort", rejectStopped, { once: true })
-  if (abortSignal.aborted) rejectStopped()
-  try {
-    return await Promise.race([measurement, stopped])
-  } finally {
-    abortSignal.removeEventListener("abort", rejectStopped)
   }
 }
 

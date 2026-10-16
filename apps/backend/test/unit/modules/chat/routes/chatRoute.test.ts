@@ -338,6 +338,35 @@ describe("updateFastifyWithChatRoute", () => {
     }
   )
 
+  it("does not ask for a new conversation's title while the model is not loaded, so neither request can load it", async () => {
+    const testApp = await createChatRouteTestApp()
+    registerStoringChatRoute(testApp)
+    testApp.findLlmContextMeasurement.mockResolvedValue(undefined)
+
+    const response = await sendChatRequest(
+      testApp.app,
+      NEW_CONVERSATION_REQUEST
+    )
+
+    expect(response.statusCode).toBe(200)
+    expect(testApp.completeChatStream).not.toHaveBeenCalled()
+    expect(testApp.generateTitle).not.toHaveBeenCalled()
+    expect(testApp.findLlmContextMeasurement).toHaveBeenCalledWith(
+      NEW_CONVERSATION_REQUEST.model,
+      []
+    )
+    expect(
+      parseSseEvents(response.body).map(({ event }) => event)
+    ).not.toContain("title")
+    expect(testApp.logs).toContainEqual(
+      expect.objectContaining({
+        level: "debug",
+        titleGenerationOutcome: "model-not-loaded",
+        titleGenerationAttempts: 0
+      })
+    )
+  })
+
   it("has a stored agent answer a new conversation with its stored system prompt", async () => {
     const testApp = await createChatRouteTestApp()
     registerStoringChatRoute(testApp)

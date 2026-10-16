@@ -5,9 +5,11 @@ import SqliteAgentRecordStore from "../../../src/infrastructure/database/agents/
 import AgentService from "../../../src/modules/agent/agentService"
 import { buildBuiltInAgents } from "../../../src/modules/agent/builtInAgents"
 import ChatService from "../../../src/modules/chat/chatService"
+import LlmReplyContextMeter from "../../../src/modules/chat/llmReplyContextMeter"
 import OpenAiReplyModel from "../../../src/modules/chat/openAiReplyModel"
 import type StoredConversationTurns from "../../../src/modules/conversation/turns"
 import ReplyGenerationRegistry from "../../../src/modules/chat/replyGenerationRegistry"
+import LlmService from "../../../src/modules/llm/llmService"
 import ToolApprovalService, {
   type ReadJustRunToolNames
 } from "../../../src/modules/toolApproval/toolApprovalService"
@@ -19,7 +21,7 @@ import {
   LOOK_UP_WORD_TOOL,
   ScriptedBuiltInTool
 } from "./scriptedBuiltInTool"
-import { createRoomyReplyContextMeter } from "./replyContextMeterFakes"
+import { ROOMY_CONTEXT_LENGTH } from "./replyContextMeterFakes"
 import { ScriptedBuiltInToolProvider } from "./scriptedBuiltInToolProvider"
 
 /** Published path of the chat route. */
@@ -50,6 +52,14 @@ export type ChatRouteTestApp = TestFastify &
     /** Title generation of `app.chatService`; rejects if it is ever called. */
     generateTitle: MockInstance<ChatService["generateTitle"]>
     /**
+     * Context measurement of `app.llmService`, which every agent's meter and
+     * the title task's loaded check use; by default the model is loaded with
+     * a window larger than any test context, and each text is one token.
+     */
+    findLlmContextMeasurement: MockInstance<
+      LlmService["findLlmContextMeasurement"]
+    >
+    /**
      * Reader of the saved Just run choices behind `app.toolApprovalService`;
      * rejects until a case configures it.
      */
@@ -75,14 +85,16 @@ export type ChatRouteTestApp = TestFastify &
  * written and no HTTP request leaves the process. The decorated agent service
  * keeps its records on the same in-memory database and builds the built-in
  * agents with {@link TEST_BUILT_IN_AGENT_PROMPTS}; every agent's model calls
- * go through the `completeChatStream` spy. The decorated history reader reads
- * the same database. The backend tools are the scripted `look_up_word`
- * tool, always ready, and `check_spelling`, whose provider is never ready
- * (`api-key-missing`). The decorated tool approval service reads the saved
- * Just run choices through the `readJustRunToolNames` spy. When the test
- * finishes, the registry is disposed
- * first, so every generation it holds has stored its final state before the
- * in-memory conversation database is closed.
+ * go through the `completeChatStream` spy, and every measurement, by their
+ * meters and by the title task, through the `findLlmContextMeasurement` spy
+ * of the decorated LLM service, whose queue rejects anything else. The
+ * decorated history reader reads the same database. The backend tools are
+ * the scripted `look_up_word` tool, always ready, and `check_spelling`,
+ * whose provider is never ready (`api-key-missing`). The decorated tool
+ * approval service reads the saved Just run choices through the
+ * `readJustRunToolNames` spy. When the test finishes, the registry is
+ * disposed first, so every generation it holds has stored its final state
+ * before the in-memory conversation database is closed.
  */
 export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
   const testFastify = await createChatSseTestApp()
@@ -105,13 +117,29 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
     .mockImplementation(() =>
       Promise.reject(createUnexpectedCallError("generateTitle"))
     )
+  const llmService = new LlmService({
+    llmEngineOperationQueue: Object.freeze({
+      handleLlmEngineOperationRequest: () =>
+        Promise.reject(createUnexpectedCallError("LLM engine operation"))
+    })
+  })
+  const findLlmContextMeasurement = vi
+    .spyOn(llmService, "findLlmContextMeasurement")
+    .mockImplementation(async (_model, texts) =>
+      Object.freeze({
+        contextLength: ROOMY_CONTEXT_LENGTH,
+        textTokenCounts: Object.freeze(texts.map(() => 1))
+      })
+    )
   const agentService = new AgentService({
     recordStore: new SqliteAgentRecordStore(database),
     builtInAgents: buildBuiltInAgents(TEST_BUILT_IN_AGENT_PROMPTS),
     replyModel: new OpenAiReplyModel((options) =>
       chatService.completeChatStream(options)
     ),
-    replyContextMeter: createRoomyReplyContextMeter()
+    replyContextMeter: new LlmReplyContextMeter((model, texts) =>
+      llmService.findLlmContextMeasurement(model, texts)
+    )
   })
   const readJustRunToolNames = vi.fn<ReadJustRunToolNames>(() =>
     Promise.reject(createUnexpectedCallError("readJustRunToolNames"))
@@ -124,6 +152,7 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
   testFastify.app.decorate("conversationTurns", turns)
   testFastify.app.decorate("conversationHistoryReader", history)
   testFastify.app.decorate("chatService", chatService)
+  testFastify.app.decorate("llmService", llmService)
   testFastify.app.decorate("agentService", agentService)
   testFastify.app.decorate(
     "toolApprovalService",
@@ -153,6 +182,7 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
     createConversationTurn,
     completeChatStream,
     generateTitle,
+    findLlmContextMeasurement,
     readJustRunToolNames,
     generations
   })

@@ -68,6 +68,12 @@ type ChatRouteDependencies = TurnAgentLookups &
     titleWriter: GeneratedConversationTitleWriter
     /** Bound title operation retained separately from chat completion. */
     generateTitle: (options: TitleGenerationOptions) => Promise<string>
+    /**
+     * Context length a model is loaded with, observed through the
+     * model-operation queue without loading it; undefined when it is not
+     * loaded.
+     */
+    findLoadedContextLength: (model: string) => Promise<number | undefined>
     /** Inclusive maximum number of title requests permitted for one turn. */
     titleGenerationMaxAttempts: number
     /** Registry that owns every generation this route starts. */
@@ -127,6 +133,9 @@ export default function updateFastifyWithChatRoute(
       app.conversationHistoryReader.getConversation(conversationId)?.agentCode,
     generateTitle: (options: TitleGenerationOptions) =>
       app.chatService.generateTitle(options),
+    findLoadedContextLength: async (model: string) =>
+      (await app.llmService.findLlmContextMeasurement(model, []))
+        ?.contextLength,
     titleGenerationMaxAttempts,
     generations,
     builtInTools: app.builtInTools,
@@ -409,6 +418,7 @@ function createTurnTitleTask(
   const { turn, dependencies } = input
   return createTitleGenerationTask({
     generateTitle: dependencies.generateTitle,
+    findLoadedContextLength: dependencies.findLoadedContextLength,
     userMessageContent: turn.userMessage.content,
     model: input.model,
     abortSignal,

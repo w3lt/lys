@@ -125,11 +125,13 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
   })
   const findLlmContextMeasurement = vi
     .spyOn(llmService, "findLlmContextMeasurement")
-    .mockImplementation(async (_model, texts) =>
-      Object.freeze({
-        contextLength: ROOMY_CONTEXT_LENGTH,
-        textTokenCounts: Object.freeze(texts.map(() => 1))
-      })
+    .mockImplementation((_model, texts) =>
+      Promise.resolve(
+        Object.freeze({
+          contextLength: ROOMY_CONTEXT_LENGTH,
+          textTokenCounts: Object.freeze(texts.map(() => 1))
+        })
+      )
     )
   const agentService = new AgentService({
     recordStore: new SqliteAgentRecordStore(database),

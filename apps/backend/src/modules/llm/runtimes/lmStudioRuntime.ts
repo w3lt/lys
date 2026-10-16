@@ -21,8 +21,8 @@ import {
 /** Validates a context length LM Studio reports for a loaded instance. */
 const lmStudioContextLengthSchema = z.int().positive()
 
-/** Validates the token lists LM Studio returns for a batch of texts. */
-const lmStudioTokenizedTextsSchema = z.array(z.array(z.number()))
+/** Validates the token count LM Studio returns for one text. */
+const lmStudioTokenCountSchema = z.int().nonnegative()
 
 /** Admission and cleanup state owned exclusively by one LM Studio runtime. */
 type LmStudioRuntimeState =
@@ -391,9 +391,10 @@ function isSelectedLoadedModel(loadedModel: LLM, model: string): boolean {
  * @returns A frozen measurement with the smallest reported context length and
  * one count per text; undefined when no instance is selected.
  * @throws If a query fails, or an answer is not a positive whole context
- * length or one token list per text.
+ * length or a whole token count ≥ 0.
  * @remarks Instances of one model share its tokenizer, so the first one
- * counts the texts. No text means no tokenizer query.
+ * counts the texts, with one concurrent query per text that returns only its
+ * count. No text means no tokenizer query.
  */
 async function findLoadedLlmContextMeasurement(
   selectedModels: readonly LLM[],
@@ -406,15 +407,14 @@ async function findLoadedLlmContextMeasurement(
       lmStudioContextLengthSchema.parse(await loadedModel.getContextLength())
     )
   )
-  const tokenizedTexts =
-    texts.length === 0
-      ? []
-      : lmStudioTokenizedTextsSchema
-          .length(texts.length)
-          .parse(await tokenizingModel.tokenize([...texts]))
+  const textTokenCounts = await Promise.all(
+    texts.map(async (text) =>
+      lmStudioTokenCountSchema.parse(await tokenizingModel.countTokens(text))
+    )
+  )
   return Object.freeze({
     contextLength: Math.min(...contextLengths),
-    textTokenCounts: Object.freeze(tokenizedTexts.map(({ length }) => length))
+    textTokenCounts: Object.freeze(textTokenCounts)
   })
 }
 

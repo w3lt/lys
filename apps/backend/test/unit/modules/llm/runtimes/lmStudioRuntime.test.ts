@@ -461,6 +461,8 @@ describe("LmStudioRuntime", () => {
           { modelKey: "qwen/qwen3-8b", identifier: "qwen/qwen3-8b" }
         ]
       }
+      const countTokens = vi.fn(fakeLmStudio.operations.countTokens)
+      fakeLmStudio.operations = { ...fakeLmStudio.operations, countTokens }
       const runtime = await createOwnedRuntime()
 
       const measurement = await runtime.findLlmContextMeasurement(
@@ -472,6 +474,11 @@ describe("LmStudioRuntime", () => {
         contextLength: FAKE_LOADED_CONTEXT_LENGTH,
         textTokenCounts: [12, 0, 5]
       })
+      expect(countTokens.mock.calls).toEqual([
+        ["qwen/qwen3-8b", "You are Lys."],
+        ["qwen/qwen3-8b", ""],
+        ["qwen/qwen3-8b", "Hello"]
+      ])
       expect(Object.isFrozen(measurement)).toBe(true)
       expect(Object.isFrozen(measurement?.textTokenCounts)).toBe(true)
     })
@@ -534,14 +541,14 @@ describe("LmStudioRuntime", () => {
           { modelKey: "qwen/qwen3-8b", identifier: "qwen/qwen3-8b" }
         ]
       }
-      const tokenize = vi.fn<FakeLmStudioOperations["tokenize"]>()
-      fakeLmStudio.operations = { ...fakeLmStudio.operations, tokenize }
+      const countTokens = vi.fn<FakeLmStudioOperations["countTokens"]>()
+      fakeLmStudio.operations = { ...fakeLmStudio.operations, countTokens }
       const runtime = await createOwnedRuntime()
 
       await expect(
         runtime.findLlmContextMeasurement("google/gemma-4-12b", ["Hello"])
       ).resolves.toBeUndefined()
-      expect(tokenize).not.toHaveBeenCalled()
+      expect(countTokens).not.toHaveBeenCalled()
     })
 
     it("does not ask the tokenizer when there is no text", async () => {
@@ -551,8 +558,8 @@ describe("LmStudioRuntime", () => {
           { modelKey: "qwen/qwen3-8b", identifier: "qwen/qwen3-8b" }
         ]
       }
-      const tokenize = vi.fn<FakeLmStudioOperations["tokenize"]>()
-      fakeLmStudio.operations = { ...fakeLmStudio.operations, tokenize }
+      const countTokens = vi.fn<FakeLmStudioOperations["countTokens"]>()
+      fakeLmStudio.operations = { ...fakeLmStudio.operations, countTokens }
       const runtime = await createOwnedRuntime()
 
       await expect(
@@ -561,7 +568,7 @@ describe("LmStudioRuntime", () => {
         contextLength: FAKE_LOADED_CONTEXT_LENGTH,
         textTokenCounts: []
       })
-      expect(tokenize).not.toHaveBeenCalled()
+      expect(countTokens).not.toHaveBeenCalled()
     })
 
     it.each([
@@ -584,7 +591,7 @@ describe("LmStudioRuntime", () => {
       [
         "a failed tokenizer query",
         {
-          tokenize: async () => {
+          countTokens: async () => {
             throw new Error("socket closed")
           }
         }
@@ -597,7 +604,8 @@ describe("LmStudioRuntime", () => {
         "a context length that is not whole",
         { getContextLength: async () => 4096.5 }
       ],
-      ["a token list missing for a text", { tokenize: async () => [[1, 2]] }]
+      ["a token count that is not whole", { countTokens: async () => 1.5 }],
+      ["a negative token count", { countTokens: async () => -1 }]
     ] satisfies readonly (readonly [
       string,
       Partial<FakeLmStudioOperations>

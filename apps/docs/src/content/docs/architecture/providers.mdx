@@ -36,8 +36,9 @@ backend measures a context against the loaded model with
 operation queue. `LmStudioRuntime` finds the instances `client.llm.listLoaded()`
 reports for the model a chat request names, matching an instance identifier
 or a model key, reports the smallest of their `getContextLength()` answers,
-and counts each text with the first instance's `tokenize()`. It never loads a
-model: when none is loaded there is no measurement. The counts cover each
+and counts each text with the first instance's `countTokens()`, one SDK
+query per text, all at once. It never loads a model: when none is loaded
+there is no measurement. The counts cover each
 message's text and each tool's JSON; the backend adds a fixed allowance for
 the chat template's markup instead of rendering the template. This has not
 been checked against a running LM Studio.

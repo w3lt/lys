@@ -47,11 +47,8 @@ export type FakeLmStudioOperations = Readonly<{
   unload: (identifier: string) => Promise<void>
   /** Answers a loaded handle's `getContextLength()` for its identifier. */
   getContextLength: (identifier: string) => Promise<number>
-  /** Answers a loaded handle's `tokenize(texts)` for its identifier. */
-  tokenize: (
-    identifier: string,
-    texts: readonly string[]
-  ) => Promise<readonly (readonly number[])[]>
+  /** Answers a loaded handle's `countTokens(text)` for its identifier. */
+  countTokens: (identifier: string, text: string) => Promise<number>
   /** Releases the resources of one client. */
   disposeClient: () => Promise<void>
 }>
@@ -73,10 +70,8 @@ export type FakeLmStudioLoadedHandle = FakeLoadedLlmHandle &
   Readonly<{
     /** Forwards to the engine's `getContextLength` operation. */
     getContextLength: () => Promise<number>
-    /** Forwards to the engine's `tokenize` operation. */
-    tokenize: (
-      texts: readonly string[]
-    ) => Promise<readonly (readonly number[])[]>
+    /** Forwards to the engine's `countTokens` operation. */
+    countTokens: (text: string) => Promise<number>
   }>
 
 /** Context length the default `getContextLength` reports for every instance. */
@@ -99,11 +94,11 @@ const EMPTY_LM_STUDIO_INVENTORY: FakeLmStudioInventory = Object.freeze({
  * exact downloaded key, ignores its options, and adds a handle whose
  * identifier is the key, suffixed `:<n>` for later instances; `unload` rejects
  * an unknown identifier; `listLoaded` returns SDK-like handles whose
- * `getContextLength()` and `tokenize()` reach the engine's operations of the
- * same names, which by default report {@link FAKE_LOADED_CONTEXT_LENGTH} and
- * one token per UTF-16 code unit. Client
- * construction and disposal have no default effect, so a case that observes
- * them replaces those operations with spies. Invariant: the inventory, frozen
+ * `getContextLength()` and `countTokens()` reach the engine's operations of
+ * the same names, which by default report {@link FAKE_LOADED_CONTEXT_LENGTH}
+ * and one token per UTF-16 code unit. Client construction and disposal have
+ * no default effect, so a case that observes them replaces those operations
+ * with spies. Invariant: the inventory, frozen
  * together with every record and handle it holds, and the operations are each
  * one complete frozen value owned by the engine; every change replaces the
  * whole value, so no reader observes a partial update. Each case must call
@@ -198,8 +193,8 @@ class FakeLmStudioEngine {
         }),
       disposeClient: () => Promise.resolve(),
       getContextLength: () => Promise.resolve(FAKE_LOADED_CONTEXT_LENGTH),
-      tokenize: (_identifier: string, texts: readonly string[]) =>
-        Promise.resolve(texts.map(buildCodeUnitTokens))
+      countTokens: (_identifier: string, text: string) =>
+        Promise.resolve(text.length)
     })
   }
 
@@ -217,8 +212,8 @@ class FakeLmStudioEngine {
       identifier,
       getContextLength: async () =>
         await this.#operations.getContextLength(identifier),
-      tokenize: async (texts: readonly string[]) =>
-        await this.#operations.tokenize(identifier, texts)
+      countTokens: async (text: string) =>
+        await this.#operations.countTokens(identifier, text)
     })
   }
 
@@ -282,16 +277,6 @@ class FakeLmStudioEngine {
       loadedModels: Object.freeze(loadedModels.toSpliced(index, 1))
     })
   }
-}
-
-/**
- * Tokenizes a text as the default fake tokenizer does.
- *
- * @param text - Text to tokenize.
- * @returns One token per UTF-16 code unit, numbered from zero.
- */
-function buildCodeUnitTokens(text: string): readonly number[] {
-  return Array.from({ length: text.length }, (_token, index) => index)
 }
 
 /**

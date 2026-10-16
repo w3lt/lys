@@ -89,9 +89,9 @@ before rejection. Empty downloaded and loaded inventories are valid. The
 runtime service calls it for the startup attempt and for each refresh that needs
 a new runtime, never before the backend listens.
 
-The synchronous `lifecycleStatus` getter reports `ready`, `active`, `closing`,
-or `closed`, including after disposal. These values describe the adapter's
-admission and cleanup state; `ready` alone does not establish current engine
+The runtime keeps its admission and cleanup state (`ready`, `active`,
+`closing`, or `closed`) private; callers observe it only through which
+operations it admits. Admission alone does not establish current engine
 availability.
 
 `getRuntimeAvailability()` performs a fresh SDK query and returns `available` or

@@ -10,7 +10,6 @@ import type {
   DownloadedLlmModel,
   LlmContextMeasurement,
   LlmRuntimeAvailability,
-  LlmRuntimeLifecycleStatus,
   LoadedLlmModelInstance
 } from "../llmRuntimeTypes"
 import {
@@ -70,15 +69,6 @@ export default class LmStudioRuntime implements LlmRuntime {
 
   /** Authoritative operational admission and terminal cleanup state. */
   #state: LmStudioRuntimeState = Object.freeze({ status: "ready" })
-
-  /**
-   * Observes the current runtime admission and cleanup phase.
-   *
-   * @returns The authoritative phase at the instant of access.
-   */
-  public get lifecycleStatus(): LlmRuntimeLifecycleStatus {
-    return this.#state.status
-  }
 
   /**
    * Retains an already protected SDK client without starting external work.

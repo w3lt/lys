@@ -43,6 +43,35 @@ async function getRejection(operation: Promise<unknown>): Promise<unknown> {
   )
 }
 
+/**
+ * Checks that a runtime is ready: it admits a new operation.
+ *
+ * @param runtime - Runtime with no operation running and no disposal begun.
+ * @remarks The availability query resolves whatever LM Studio answers and
+ * rejects only when the runtime refuses it, so resolving shows admission.
+ */
+async function expectOperationAdmitted(
+  runtime: LmStudioRuntime
+): Promise<void> {
+  await expect(runtime.getRuntimeAvailability()).resolves.toMatch(
+    /^(available|unavailable)$/
+  )
+}
+
+/**
+ * Checks that a runtime refuses a new operation because its disposal began,
+ * whether cleanup is still running or has settled.
+ *
+ * @param runtime - Runtime whose disposal began.
+ */
+async function expectOperationRefusedAsClosed(
+  runtime: LmStudioRuntime
+): Promise<void> {
+  await expect(runtime.getRuntimeAvailability()).rejects.toThrow(
+    "The LLM runtime is closed."
+  )
+}
+
 describe("LmStudioRuntime", () => {
   beforeEach(() => {
     fakeLmStudio.reset()
@@ -60,7 +89,7 @@ describe("LmStudioRuntime", () => {
 
       const runtime = await createOwnedRuntime()
 
-      expect(runtime.lifecycleStatus).toBe("ready")
+      await expectOperationAdmitted(runtime)
       expect(constructClient).toHaveBeenCalledExactlyOnceWith({
         baseUrl: LM_STUDIO_URL
       })
@@ -151,7 +180,7 @@ describe("LmStudioRuntime", () => {
       await expect(runtime.getRuntimeAvailability()).resolves.toBe(
         "unavailable"
       )
-      expect(runtime.lifecycleStatus).toBe("ready")
+      await expectOperationAdmitted(runtime)
     })
   })
 
@@ -199,7 +228,7 @@ describe("LmStudioRuntime", () => {
         message: "The LLM runtime could not list downloaded models.",
         cause: sdkFailure
       })
-      expect(runtime.lifecycleStatus).toBe("ready")
+      await expectOperationAdmitted(runtime)
     })
 
     it("rejects malformed vendor metadata", async () => {
@@ -404,7 +433,7 @@ describe("LmStudioRuntime", () => {
           message: 'Model "missing/model" is not downloaded.'
         })
       })
-      expect(runtime.lifecycleStatus).toBe("ready")
+      await expectOperationAdmitted(runtime)
     })
 
     it("rejects a loaded handle without a valid identity", async () => {
@@ -449,7 +478,7 @@ describe("LmStudioRuntime", () => {
           message: 'No loaded instance "missing".'
         })
       })
-      expect(runtime.lifecycleStatus).toBe("ready")
+      await expectOperationAdmitted(runtime)
     })
   })
 
@@ -629,13 +658,13 @@ describe("LmStudioRuntime", () => {
           message: "The LLM runtime could not measure the context.",
           cause: expect.any(Error)
         })
-        expect(runtime.lifecycleStatus).toBe("ready")
+        await expectOperationAdmitted(runtime)
       }
     )
   })
 
   describe("operation admission", () => {
-    it("is active while an operation runs and ready after it settles", async () => {
+    it("admits a new operation once the running one settles", async () => {
       const runtime = await createOwnedRuntime()
       const listing = Promise.withResolvers<readonly unknown[]>()
       fakeLmStudio.operations = {
@@ -644,11 +673,13 @@ describe("LmStudioRuntime", () => {
       }
 
       const operation = runtime.listLoadedLlmModelInstances()
-      expect(runtime.lifecycleStatus).toBe("active")
+      await expect(runtime.getRuntimeAvailability()).rejects.toThrow(
+        "The LLM runtime already has an active operation."
+      )
       listing.resolve([])
       await operation
 
-      expect(runtime.lifecycleStatus).toBe("ready")
+      await expectOperationAdmitted(runtime)
     })
 
     it("refuses an overlapping operation before reaching the SDK", async () => {
@@ -683,7 +714,7 @@ describe("LmStudioRuntime", () => {
 
       await runtime[Symbol.asyncDispose]()
 
-      expect(runtime.lifecycleStatus).toBe("closed")
+      await expectOperationRefusedAsClosed(runtime)
       expect(disposeClient).toHaveBeenCalledOnce()
     })
 
@@ -700,13 +731,13 @@ describe("LmStudioRuntime", () => {
 
       const disposal = runtime[Symbol.asyncDispose]()
       await waitForMicrotasks()
-      expect(runtime.lifecycleStatus).toBe("closing")
+      await expectOperationRefusedAsClosed(runtime)
       expect(disposeClient).not.toHaveBeenCalled()
 
       listing.resolve([])
       await expect(active).resolves.toEqual([])
       await disposal
-      expect(runtime.lifecycleStatus).toBe("closed")
+      await expectOperationRefusedAsClosed(runtime)
       expect(disposeClient).toHaveBeenCalledOnce()
     })
 
@@ -754,7 +785,7 @@ describe("LmStudioRuntime", () => {
         cause: releaseFailure
       })
       expect(repeatedFailure).toBe(firstFailure)
-      expect(runtime.lifecycleStatus).toBe("closed")
+      await expectOperationRefusedAsClosed(runtime)
       expect(disposeClient).toHaveBeenCalledOnce()
     })
   })

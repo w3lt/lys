@@ -1,9 +1,5 @@
 import type { LlmInfo } from "@lys/protocol"
 
-/** Runtime phases exposed by synchronous lifecycle observation. */
-export type LlmRuntimeLifecycleStatus =
-  "ready" | "active" | "closing" | "closed"
-
 /** Result of one admitted provider readiness query. */
 export type LlmRuntimeAvailability = "available" | "unavailable"
 

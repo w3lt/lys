@@ -29,9 +29,7 @@ export type FakeLlmRuntime = LlmRuntime &
  * Creates a runtime double whose unconfigured operations fail.
  *
  * @returns Mocks that each reject with `Unexpected LLM runtime call: <name>`
- * until a case configures them, except disposal, which resolves. Reading
- * `lifecycleStatus` throws the same failure, because no consumer under test
- * is expected to observe it.
+ * until a case configures them, except disposal, which resolves.
  * @remarks Failing by default keeps an operation a case did not arrange from
  * silently succeeding with an empty inventory or an available runtime.
  */
@@ -61,21 +59,8 @@ export function createFakeLlmRuntime(): FakeLlmRuntime {
     >(() =>
       Promise.reject(createUnexpectedCallError("getRuntimeAvailability"))
     ),
-    get lifecycleStatus(): never {
-      return handleUnexpectedCall("lifecycleStatus")
-    },
     [Symbol.asyncDispose]: vi.fn(() => Promise.resolve())
   })
-}
-
-/**
- * Fails an operation that the current case did not arrange.
- *
- * @param operationName - Runtime operation that was called.
- * @throws Always.
- */
-function handleUnexpectedCall(operationName: string): never {
-  throw createUnexpectedCallError(operationName)
 }
 
 /**

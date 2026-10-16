@@ -38,9 +38,9 @@ disposal, and the class's public static factory.
 | Declaration                    | Effective surface                                                                                  | Count |
 | ------------------------------ | -------------------------------------------------------------------------------------------------- | ----: |
 | `LlmEngine`                    | Downloaded inventory, loaded-instance inventory, load, stop, and context measurement               |     5 |
-| `LlmRuntimeLifecycle`          | `lifecycleStatus`, `getRuntimeAvailability()`, and `[Symbol.asyncDispose]()`                       |     3 |
-| `LlmRuntime`                   | All inherited `LlmEngine` and `LlmRuntimeLifecycle` operations; no additional declarations         |     8 |
-| `LmStudioRuntime`              | The eight runtime operations plus public static `create()`; its private constructor does not count |     9 |
+| `LlmRuntimeLifecycle`          | `getRuntimeAvailability()` and `[Symbol.asyncDispose]()`                                           |     2 |
+| `LlmRuntime`                   | All inherited `LlmEngine` and `LlmRuntimeLifecycle` operations; no additional declarations         |     7 |
+| `LmStudioRuntime`              | The seven runtime operations plus public static `create()`; its private constructor does not count |     8 |
 | `LlmEngineOperationQueue`      | `handleLlmEngineOperationRequest()`                                                                |     1 |
 | `LlmRuntimeConnectionObserver` | `llmRuntimeConnectionStatus`                                                                       |     1 |
 | `LlmRuntimeConnector`          | `connectLlmRuntime()`                                                                              |     1 |
@@ -58,16 +58,21 @@ on behalf of `LlmService`, `getRuntimeAvailability()` for probes, and disposal.
 [Singleton composition](https://github.com/w3lt/lys/blob/main/apps/backend/src/di/singleton.ts)
 supplies `create()` as the runtime service's acquisition capability; each
 acquired instance transfers to the runtime service, which releases it when it
-drops the connection or cleans up. Source inspection found no production calls
-to `lifecycleStatus`. The factory's readiness check calls the SDK directly, so
-it does not establish a consumer of the public availability method.
+drops the connection or cleans up. The factory's readiness check calls the SDK
+directly, so it does not establish a consumer of the public availability method.
 
-The eight-operation composite and nine-operation class exceed their default
-limits. Shared resource identity alone does not satisfy the exception criteria:
-the inspected production owner uses seven of the eight operations, and no actual
-consumer or approved public contract was established for `lifecycleStatus`.
-No valid exception approval was established in the inspected repository and PR
-review evidence. [Issue #37](https://github.com/w3lt/lys/issues/37) remains unresolved;
+[Issue #140](https://github.com/w3lt/lys/issues/140) added
+`findLlmContextMeasurement` to `LlmEngine` and removed the `lifecycleStatus`
+getter, which had no production consumer, so the composite's and the class's
+counts did not change. Counting tokens and reading the loaded context length
+need the LM Studio SDK client, which `LmStudioRuntime` owns privately and which
+only the runtime service's queue may reach.
+
+The seven-operation composite and eight-operation class exceed their default
+limits. Shared resource identity alone does not satisfy the exception criteria,
+although the production owner now uses every operation. No valid exception
+approval was established in the inspected repository and PR review evidence.
+[Issue #37](https://github.com/w3lt/lys/issues/37) remains unresolved;
 recording these facts does not approve an exception or change the implementation.
 
 Historically, [review finding I-8 on PR #23](https://github.com/w3lt/lys/pull/23#issuecomment-5633082465)
@@ -81,39 +86,10 @@ mapping here does not close the finding's underlying surface-compliance issue.
 A separate implementation decision can reduce the surface or provide the evidence
 and explicit reviewer approval required by the
 [exception process](https://github.com/w3lt/lys/blob/main/CONTRIBUTING.md).
-Removing both currently unused observations would leave six interface operations
-and seven public class operations including `create()`. That is a proposed change,
-not an implemented compatibility decision. Behavioral coverage remains separate
-work tracked in [issue #25](https://github.com/w3lt/lys/issues/25).
-
-### Context measurement operation (proposed, not yet approved)
-
-[Issue #140](https://github.com/w3lt/lys/issues/140) adds
-`findLlmContextMeasurement` to `LlmEngine`, so `LlmRuntime` and
-`LmStudioRuntime` each gain one operation on a surface that already exceeds
-[IFACE-006](https://github.com/w3lt/lys/blob/main/docs/code_standards/INTERFACE.md)
-and [CLASS-006](https://github.com/w3lt/lys/blob/main/docs/code_standards/CLASS.md)
-without an approved exception. This record proposes that growth; the
-maintainer has not approved it.
-
-- **Rules:** IFACE-006 for `LlmRuntime` (eight operations) and CLASS-006 for
-  `LmStudioRuntime` (nine public operations). `LlmEngine` itself stays within
-  IFACE-006 with five.
-- **Constraint:** counting tokens and reading the loaded context length need
-  the LM Studio SDK client, which `LmStudioRuntime` owns privately and which
-  only the runtime service's queue may reach, one operation at a time.
-- **Alternatives considered:** counting with a characters-per-token estimate
-  in the backend, which needs no runtime operation but undercounts text such
-  as Chinese or code, so a round could still overflow silently; and a second
-  SDK client owned elsewhere, which duplicates the connection and its
-  lifecycle outside the runtime service.
-- **Scope:** the one operation, used by `LlmService.findLlmContextMeasurement()`
-  for reply rounds and the chat-context route.
-- **Risk and control:** the surface grows by one operation of the same
-  resource owner, under the same admission, failure recording, and cleanup as
-  the other engine operations.
-- **Removal condition:** a decision on the runtime surface that splits the
-  runtime's capabilities, or an approved exception covering the composite.
+With `lifecycleStatus` removed, every operation of the composite has a
+production consumer, so bringing it within its limit needs a split of the
+runtime's capabilities or an approved exception. Behavioral coverage remains
+separate work tracked in [issue #25](https://github.com/w3lt/lys/issues/25).
 
 ## Agent editor error discovery exception
 

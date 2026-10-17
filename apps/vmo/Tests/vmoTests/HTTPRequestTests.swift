@@ -26,16 +26,78 @@ struct HTTPRequestParsingTests {
     func readsMethodAndPath() throws {
         let request = try HTTPRequest(parsingHead: Data("GET /dummy-json HTTP/1.1\r\nHost: localhost".utf8))
 
-        #expect(request == HTTPRequest(method: .get, path: "/dummy-json"))
+        #expect(request == HTTPRequest(method: .get, path: "/dummy-json", query: []))
     }
 
-    /// Verifies that routing sees the path without its query, so
-    /// `/dummy-json?pretty=1` reaches `/dummy-json`.
-    @Test("Drops the query from the path")
-    func dropsQuery() throws {
-        let request = try HTTPRequest(parsingHead: Data("GET /dummy-json?pretty=1 HTTP/1.1".utf8))
+    /// Verifies that the query is split from the path, so `/read?…` still
+    /// reaches `/read`, and that its names and values arrive decoded.
+    @Test("Splits the query from the path and decodes its parameters")
+    func splitsQueryFromPath() throws {
+        let request = try HTTPRequest(parsingHead: Data("GET /read?url=https%3A%2F%2Fa.com&x=1+2 HTTP/1.1".utf8))
 
-        #expect(request.path == "/dummy-json")
+        #expect(request.path == "/read")
+        #expect(request.query == [
+            HTTPQueryParameter(name: "url", value: "https://a.com"),
+            HTTPQueryParameter(name: "x", value: "1 2"),
+        ])
+    }
+
+    /// Verifies how a query is split and decoded: empty segments are skipped,
+    /// repeats are kept in order, only the first `=` separates, `+` is a space
+    /// while `%2B` is a plus, hex digits of either case are UTF-8 bytes, a
+    /// leading byte order mark is kept, and other characters stay as they are.
+    ///
+    /// - Parameters:
+    ///   - target: Request target of a `GET` request line.
+    ///   - expectedQuery: Parameters the request must hold.
+    @Test(
+        "Decodes the query as a URL form",
+        arguments: [
+            ("/", []),
+            ("/?", []),
+            ("/?&&", []),
+            ("/?a", [HTTPQueryParameter(name: "a", value: "")]),
+            ("/?a=", [HTTPQueryParameter(name: "a", value: "")]),
+            ("/?=1", [HTTPQueryParameter(name: "", value: "1")]),
+            ("/?a=1&&a=2", [HTTPQueryParameter(name: "a", value: "1"), HTTPQueryParameter(name: "a", value: "2")]),
+            ("/?a=1=2", [HTTPQueryParameter(name: "a", value: "1=2")]),
+            ("/?a+b=%2B+c", [HTTPQueryParameter(name: "a b", value: "+ c")]),
+            ("/?caf%C3%A9=%c3%a9", [HTTPQueryParameter(name: "café", value: "é")]),
+            ("/?a=%EF%BB%BFx", [HTTPQueryParameter(name: "a", value: "\u{FEFF}x")]),
+            ("/?a=1?b/c", [HTTPQueryParameter(name: "a", value: "1?b/c")]),
+        ] as [(String, [HTTPQueryParameter])]
+    )
+    func decodesQuery(target: String, expectedQuery: [HTTPQueryParameter]) throws {
+        let request = try HTTPRequest(parsingHead: Data("GET \(target) HTTP/1.1".utf8))
+
+        #expect(request.query == expectedQuery)
+    }
+
+    /// Verifies that a query is refused as malformed (400) when a `%` lacks
+    /// two hex digits or the decoded bytes are not UTF-8, in a name or a value,
+    /// even after a valid parameter. A sign is not a hex digit.
+    ///
+    /// - Parameter target: Request target of a `GET` request line.
+    @Test(
+        "Rejects a query with a broken percent escape or invalid UTF-8",
+        arguments: [
+            "/?a=%zz",
+            "/?a=%",
+            "/?a=%2",
+            "/?a=%-1",
+            "/?a=%+1",
+            "/?%zz=1",
+            "/?a=1&b=%zz",
+            "/?a=%FF",
+            "/?a=%C3",
+            "/?a=%C0%AF",
+            "/?a=%ED%A0%80",
+        ]
+    )
+    func rejectsUndecodableQuery(target: String) {
+        #expect(throws: HTTPRequestError.malformedRequest) {
+            try HTTPRequest(parsingHead: Data("GET \(target) HTTP/1.1".utf8))
+        }
     }
 
     /// Verifies that methods compare case-sensitively, as HTTP defines, so
@@ -55,7 +117,7 @@ struct HTTPRequestParsingTests {
     func acceptsHTTP1Versions(version: String) throws {
         let request = try HTTPRequest(parsingHead: Data("GET / \(version)".utf8))
 
-        #expect(request == HTTPRequest(method: .get, path: "/"))
+        #expect(request == HTTPRequest(method: .get, path: "/", query: []))
     }
 
     /// Verifies that a well-formed version other than HTTP/1 is refused as

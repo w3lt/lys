@@ -22,6 +22,15 @@ private func buildEchoRoute(method: HTTPMethod, path: String) -> Route {
     }
 }
 
+/// Formats a query as `name=value` pairs joined by `&`, without encoding, so a
+/// test can read which parameters a route received.
+///
+/// - Parameter query: Parameters a route received.
+/// - Returns: The pairs in order, such as `x=1&x=2 3`.
+private func formatQuery(_ query: [HTTPQueryParameter]) -> String {
+    query.map { "\($0.name)=\($0.value)" }.joined(separator: "&")
+}
+
 /// Checks how the router picks a route and answers requests that no route
 /// serves.
 @Suite("Routing requests")
@@ -35,10 +44,26 @@ struct RouterTests {
             buildEchoRoute(method: .get, path: "/second"),
         ])
 
-        let response = await router.handleRequest(HTTPRequest(method: .get, path: "/second"))
+        let response = await router.handleRequest(HTTPRequest(method: .get, path: "/second", query: []))
 
         #expect(response.status == .ok)
         #expect(response.body == Data("GET /second".utf8))
+    }
+
+    /// Verifies that a request with a query reaches the route for its path,
+    /// and that the route receives every parameter in order.
+    @Test("Matches on the path alone and passes the query to the route")
+    func passesQueryToRoute() async throws {
+        let queryEchoRoute = Route(method: .get, path: "/read") { request in
+            HTTPResponse(status: .ok, text: formatQuery(request.query))
+        }
+        let router = try Router(routes: [queryEchoRoute])
+        let query = [HTTPQueryParameter(name: "x", value: "1"), HTTPQueryParameter(name: "x", value: "2 3")]
+
+        let response = await router.handleRequest(HTTPRequest(method: .get, path: "/read", query: query))
+
+        #expect(response.status == .ok)
+        #expect(response.body == Data("x=1&x=2 3".utf8))
     }
 
     /// Verifies that a path with no route is answered 404.
@@ -46,7 +71,7 @@ struct RouterTests {
     func answersNotFound() async throws {
         let router = try Router(routes: [buildEchoRoute(method: .get, path: "/first")])
 
-        let response = await router.handleRequest(HTTPRequest(method: .get, path: "/missing"))
+        let response = await router.handleRequest(HTTPRequest(method: .get, path: "/missing", query: []))
 
         #expect(response.status == .notFound)
         #expect(response.body == Data("Not Found\n".utf8))
@@ -63,7 +88,7 @@ struct RouterTests {
             buildEchoRoute(method: .get, path: "/first"),
         ])
 
-        let response = await router.handleRequest(HTTPRequest(method: HTTPMethod(token: "POST"), path: "/first"))
+        let response = await router.handleRequest(HTTPRequest(method: HTTPMethod(token: "POST"), path: "/first", query: []))
 
         #expect(response.status == .methodNotAllowed)
         #expect(response.headerFields.contains(HTTPHeaderField(name: "Allow", value: "DELETE, GET")))
@@ -78,7 +103,7 @@ struct RouterTests {
         }
         let router = try Router(routes: [failingRoute])
 
-        let response = await router.handleRequest(HTTPRequest(method: .get, path: "/failing"))
+        let response = await router.handleRequest(HTTPRequest(method: .get, path: "/failing", query: []))
 
         #expect(response.status == .internalServerError)
         #expect(response.body == Data("Internal Server Error\n".utf8))

@@ -22,7 +22,7 @@ struct EndpointTests {
     func answersHelloWorld() async throws {
         let router = try Router(routes: [.helloWorld])
 
-        let response = await router.handleRequest(HTTPRequest(method: .get, path: "/"))
+        let response = await router.handleRequest(HTTPRequest(method: .get, path: "/", query: []))
 
         #expect(response.status == .ok)
         #expect(response.headerFields == [HTTPHeaderField(name: "Content-Type", value: "text/plain; charset=utf-8")])
@@ -35,7 +35,7 @@ struct EndpointTests {
     func answersDummyJSON() async throws {
         let router = try Router(routes: [.dummyJSON])
 
-        let response = await router.handleRequest(HTTPRequest(method: .get, path: "/dummy-json"))
+        let response = await router.handleRequest(HTTPRequest(method: .get, path: "/dummy-json", query: []))
 
         #expect(response.status == .ok)
         #expect(response.headerFields == [HTTPHeaderField(name: "Content-Type", value: "application/json; charset=utf-8")])

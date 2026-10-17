@@ -30,3 +30,12 @@ dist-ssr
 # AI agents' working files and worktrees: docs/agent_operations/WORK_ON_ISSUE.md
 .agent-work/
 /worktree/
+
+# Swift package: apps/vmorchestrator
+/apps/vmorchestrator/.build
+/apps/vmorchestrator/Packages
+/apps/vmorchestrator/**/xcuserdata/
+/apps/vmorchestrator/**/DerivedData/
+/apps/vmorchestrator/.swiftpm/configuration/registries.json
+/apps/vmorchestrator/.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
+/apps/vmorchestrator/**/.netrc

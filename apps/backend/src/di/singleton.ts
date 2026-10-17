@@ -11,8 +11,10 @@ import OpenAiReplyModel from "../modules/chat/openAiReplyModel"
 import SqliteConversationRecordEditor from "../infrastructure/database/conversations/sqliteConversationRecordEditor"
 import SqliteConversationRecordReader from "../infrastructure/database/conversations/sqliteConversationRecordReader"
 import SqliteConversationTurnRecordWriter from "../infrastructure/database/conversations/sqliteConversationTurnRecordWriter"
+import SqliteReplyPartRecordWriter from "../infrastructure/database/conversations/sqliteReplyPartRecordWriter"
 import StoredConversationHistoryEditor from "../modules/conversation/historyEditor"
 import StoredConversationHistoryReader from "../modules/conversation/historyReader"
+import StoredReplyParts from "../modules/conversation/replyParts"
 import StoredConversationTurns from "../modules/conversation/turns"
 import LlmRuntimeService, {
   type LlmRuntimeFailureReporters
@@ -88,6 +90,11 @@ export type SingletonServices = Readonly<{
   llmRuntimeService: LlmRuntimeService
   /** Turn persistence over the shared database; it owns nothing to release. */
   conversationTurns: StoredConversationTurns
+  /**
+   * Reply-part and source persistence over the shared database; it owns
+   * nothing to release.
+   */
+  replyParts: StoredReplyParts
   /** History reading over the shared database; it owns nothing to release. */
   conversationHistoryReader: StoredConversationHistoryReader
   /** History editing over the shared database; it owns nothing to release. */
@@ -127,6 +134,7 @@ type ToolServices = Pick<
 type DatabaseServices = Pick<
   SingletonServices,
   | "conversationTurns"
+  | "replyParts"
   | "conversationHistoryReader"
   | "conversationHistoryEditor"
 >
@@ -321,6 +329,7 @@ function createDatabaseServices(database: SqliteDatabase): DatabaseServices {
   )
   return {
     conversationTurns,
+    replyParts: new StoredReplyParts(new SqliteReplyPartRecordWriter(database)),
     conversationHistoryReader: new StoredConversationHistoryReader(
       SqliteConversationRecordReader.create(database)
     ),

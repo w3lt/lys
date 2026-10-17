@@ -1,3 +1,4 @@
+import type { ConversationSource } from "@lys/share"
 import { memo, type ReactElement } from "react"
 
 import type { CompletedConversationMessage } from "@/lib/store/chat-view/conversation-transitions"
@@ -11,28 +12,36 @@ export type CompletedChatMessageProps = {
   readonly message: CompletedConversationMessage
   /** Name of the agent that answers the conversation. */
   readonly speakerName: string
+  /** Numbered sources of the conversation, which replies may cite. */
+  readonly sources: readonly ConversationSource[]
 }
 
 /**
  * Selects role-specific presentation for one completed transcript message.
  *
  * @remarks The shared message object is
- * immutable; memoization skips body work while its identity and the speaker's
- * name are unchanged.
- * @param props - Stable completed message selected by the transcript and the
- * name its assistant replies are shown under.
+ * immutable; memoization skips body work while its identity, the speaker's
+ * name, and the identity of the conversation's sources are unchanged.
+ * @param props - Stable completed message selected by the transcript, the
+ * name its assistant replies are shown under, and the conversation's sources.
  * @returns The rendered role-specific transcript message.
  */
 function CompletedChatMessage({
   message,
-  speakerName
+  speakerName,
+  sources
 }: CompletedChatMessageProps): ReactElement {
   if (message.role === "user") {
     return <UserMessage message={message} />
   }
 
   return (
-    <LysMessage kind="terminal" message={message} speakerName={speakerName} />
+    <LysMessage
+      kind="terminal"
+      message={message}
+      sources={sources}
+      speakerName={speakerName}
+    />
   )
 }
 

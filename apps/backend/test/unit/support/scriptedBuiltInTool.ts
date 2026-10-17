@@ -3,6 +3,7 @@ import type {
   BuiltInTool,
   BuiltInToolCallArguments,
   BuiltInToolResult,
+  BuiltInToolRunContext,
   ParsedBuiltInToolCall
 } from "../../../src/modules/tool/builtIn/builtInTool"
 
@@ -10,13 +11,13 @@ import type {
  * Work one run of a {@link ScriptedBuiltInTool} does.
  *
  * @param word - Word the call asked about.
- * @param abortSignal - The run's cancellation.
+ * @param context - The run's cancellation and source numbering.
  * @returns What the model reads.
  * @throws Whatever the script throws, such as the abort reason.
  */
 export type BuiltInToolRunScript = (
   word: string,
-  abortSignal: AbortSignal
+  context: BuiltInToolRunContext
 ) => Promise<BuiltInToolResult>
 
 /** Definition of the scripted look-up tool the backend runs. */
@@ -67,7 +68,32 @@ export function answerWithWordDefinition(
 ): Promise<BuiltInToolResult> {
   return Promise.resolve({
     status: "succeeded",
-    content: `${word}: a definition`
+    content: `${word}: a definition`,
+    sources: []
+  })
+}
+
+/**
+ * Run script that numbers the dictionary page of the word as a source and
+ * answers with it.
+ *
+ * @param word - Word the call asked about.
+ * @param context - The run's source numbering.
+ * @returns A settled promise of a succeeded result citing the page by its
+ * number, with the numbered page as its source.
+ */
+export function answerWithWordSource(
+  word: string,
+  context: BuiltInToolRunContext
+): Promise<BuiltInToolResult> {
+  const sources = context.addWebSources([
+    { url: `https://words.example/${word}`, title: `Dictionary: ${word}` }
+  ])
+  const numbers = sources.map((source) => `[${source.number}]`).join(" ")
+  return Promise.resolve({
+    status: "succeeded",
+    content: `${word}: a definition. Source ${numbers}`,
+    sources
   })
 }
 
@@ -122,7 +148,7 @@ export class ScriptedBuiltInTool implements BuiltInTool {
     }
     return {
       status: "parsed",
-      runToolCall: (abortSignal) => this.#runWordLookUp(word, abortSignal)
+      runToolCall: (context) => this.#runWordLookUp(word, context)
     }
   }
 
@@ -130,16 +156,16 @@ export class ScriptedBuiltInTool implements BuiltInTool {
    * Runs one look-up.
    *
    * @param word - Word to look up.
-   * @param abortSignal - The run's cancellation.
+   * @param context - The run's cancellation and source numbering.
    * @returns The script's result.
    * @throws The abort reason when already stopped, or the script's failure.
    */
   async #runWordLookUp(
     word: string,
-    abortSignal: AbortSignal
+    context: BuiltInToolRunContext
   ): Promise<BuiltInToolResult> {
-    abortSignal.throwIfAborted()
+    context.abortSignal.throwIfAborted()
     this.#startedWords.push(word)
-    return this.#runScript(word, abortSignal)
+    return this.#runScript(word, context)
   }
 }

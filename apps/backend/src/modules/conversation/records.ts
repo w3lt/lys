@@ -3,9 +3,12 @@ import type {
   Conversation,
   ConversationAssistantMessage,
   ConversationMetadata,
-  ConversationUserMessage
+  ConversationUserMessage,
+  ReplyPart,
+  ToolCallReplyPart
 } from "@lys/share"
 import type { AssistantMessageCompletion } from "../agent/agent"
+import type { ReplyToolCallChange } from "../agent/replyPartSequence"
 
 /**
  * Position after which a conversation list page starts: the activity time and
@@ -49,13 +52,38 @@ export type ConversationPage = Readonly<{
   hasMore: boolean
 }>
 
-/** One delta for a reply that is still streaming. */
-export type UpdateAssistantMessageContentInput = Readonly<{
+/** One new part for a reply that is still streaming. */
+export type CreateReplyPartInput = Readonly<{
   /** UUIDv7 of the reply. */
   assistantMessageId: string
-  /** Non-empty delta, appended after the stored text. */
+  /**
+   * Valid part whose identity is not stored yet, with its times; it follows
+   * every part the reply already has.
+   */
+  part: ReplyPart
+}>
+
+/** One fragment for a reasoning or text part of a reply still streaming. */
+export type UpdateReplyPartContentInput = Readonly<{
+  /** UUIDv7 of the reply. */
+  assistantMessageId: string
+  /** UUIDv7 of the reasoning or text part. */
+  partId: string
+  /** Non-empty fragment, appended after the part's stored content. */
   content: string
-  /** Message timestamp stored with the delta. */
+  /** Part timestamp stored with the fragment. */
+  updatedAt: string
+}>
+
+/** One change of a tool call of a reply still streaming. */
+export type UpdateReplyToolCallInput = Readonly<{
+  /** UUIDv7 of the reply. */
+  assistantMessageId: string
+  /** UUIDv7 of the call, the tool-call part's identity. */
+  toolCallId: string
+  /** The call's next state; a succeeded call's sources are stored with it. */
+  change: ReplyToolCallChange
+  /** Part timestamp stored with the change. */
   updatedAt: string
 }>
 
@@ -171,7 +199,7 @@ export interface ConversationRecordEditor {
 
 /**
  * Persists chat turns and their replies for the turn writer: atomic turn
- * creation, reply content and state, startup recovery, and generated titles.
+ * creation, reply state, startup recovery, and generated titles.
  *
  * @remarks Every call runs in one write transaction that commits before it
  * returns and changes nothing when it fails, including when the store cannot
@@ -211,33 +239,23 @@ export interface ConversationTurnRecordWriter {
    * Marks every reply still streaming, in every conversation, as interrupted.
    *
    * @param updatedAt - Message timestamp stored on each interrupted reply.
-   * @remarks Keeps each reply's text, has no finish reason, and changes no
-   * conversation's activity time. Repeating the call changes nothing more.
+   * @remarks Keeps each reply's parts, has no finish reason, and changes no
+   * conversation's activity time. Each such reply's tool calls still waiting
+   * for approval or running become interrupted too. Repeating the call
+   * changes nothing more.
    * @throws If the store is closed or the write fails.
    */
   updateAllStreamingAssistantMessagesToInterrupted(updatedAt: string): void
   /**
-   * Appends a delta to a reply that is still streaming.
-   *
-   * @param input - Reply, delta, and message timestamp.
-   * @returns True when appended; false when the reply is finalized or not
-   * stored, which changes nothing.
-   * @throws If the store is closed or the write fails.
-   * @remarks An appended delta also moves its conversation's activity time
-   * forward, to the store's current time when that is later than the stored
-   * activity time and otherwise to a later time the store chooses.
-   */
-  updateAssistantMessageContent(
-    input: UpdateAssistantMessageContentInput
-  ): boolean
-  /**
-   * Finalizes a reply that is still streaming, keeping its text and its
+   * Finalizes a reply that is still streaming, keeping its parts and its
    * conversation's activity time.
    *
    * @param input - Reply, terminal state, and message timestamp.
    * @returns True when finalized; false when it already was or is not stored,
    * which changes nothing.
    * @throws If the store is closed or the write fails.
+   * @remarks In the same transaction, the reply's tool calls still waiting
+   * for approval or running become interrupted, with the same timestamp.
    */
   updateAssistantMessageState(input: UpdateAssistantMessageStateInput): boolean
   /**
@@ -254,6 +272,61 @@ export interface ConversationTurnRecordWriter {
     conversationId: string,
     title: string
   ): boolean
+}
+
+/**
+ * Persists the parts of replies that are still streaming, and the sources
+ * their tool calls read, for the reply-part writer.
+ *
+ * @remarks Every call runs in one write transaction that commits before it
+ * returns and changes nothing when it fails, including when the store cannot
+ * begin or commit it; an `AggregateError` then holds that failure followed by
+ * each failure to roll back. A reply that is finalized or not stored refuses
+ * every write through a false or undefined result. A new or changed part
+ * moves its conversation's activity time forward, as a new message does; a
+ * tool call's state change without a result does not. Borrowed from the
+ * store's owner without the authority to close it; every call fails with
+ * `Database is closed` after the owner closes the store. Calls cannot be
+ * nested. Concurrency model: single-owner, synchronous on the backend's event
+ * loop.
+ */
+export interface ReplyPartRecordWriter {
+  /**
+   * Stores a part after every part its reply has.
+   *
+   * @param input - Reply and the complete part.
+   * @returns True when stored; false when the reply is finalized or not
+   * stored, which changes nothing.
+   * @throws If the store is closed or the write fails, including when the
+   * part's identity is already stored, which breaks the precondition.
+   */
+  createReplyPart(input: CreateReplyPartInput): boolean
+  /**
+   * Appends a fragment to a reasoning or text part of a reply.
+   *
+   * @param input - Reply, part, fragment, and part timestamp.
+   * @returns True when appended; false when the reply is finalized or not
+   * stored, or the part is not one of its reasoning or text parts, which
+   * changes nothing.
+   * @throws If the store is closed or the write fails.
+   */
+  updateReplyPartContent(input: UpdateReplyPartContentInput): boolean
+  /**
+   * Stores one change of a reply's tool call and, for a succeeded call, its
+   * sources.
+   *
+   * @param input - Reply, call, change, and part timestamp.
+   * @returns The call as stored, or undefined when the reply is finalized or
+   * not stored, or the call is not one of its calls in a state the change
+   * follows (`running` and `rejected` follow `awaiting-approval`;
+   * `succeeded` and `failed` follow `running`), which changes nothing.
+   * @throws If the store is closed, the write fails, or a source's number is
+   * stored for another URL in the conversation. A source whose URL the
+   * conversation already stores keeps its stored row.
+   */
+  updateReplyToolCall(
+    input: UpdateReplyToolCallInput
+  ): ToolCallReplyPart | undefined
 }
 
 /**
@@ -274,9 +347,10 @@ export interface ConversationTurnTransaction {
    * @param conversationId - UUIDv7 of the conversation; an absent one changes
    * nothing.
    * @param updatedAt - Message timestamp stored on each interrupted reply.
-   * @remarks Keeps each reply's text, stores no finish reason, and keeps the
-   * conversation's activity time; finalized replies and other conversations
-   * are unchanged.
+   * @remarks Keeps each reply's parts, stores no finish reason, and keeps the
+   * conversation's activity time; each such reply's tool calls still waiting
+   * for approval or running become interrupted too. Finalized replies and
+   * other conversations are unchanged.
    * @throws If the transaction has ended or the write fails.
    */
   updateStreamingAssistantMessagesToInterrupted(
@@ -320,11 +394,11 @@ export interface ConversationTurnTransaction {
     message: ConversationUserMessage
   ): void
   /**
-   * Appends an assistant message exactly as given, including its text and
-   * state.
+   * Appends an assistant message exactly as given, including its state.
    *
    * @param conversationId - UUIDv7 of a stored conversation.
-   * @param message - Valid message whose identity is not stored yet.
+   * @param message - Valid message whose identity is not stored yet and that
+   * has no parts; its parts are stored later, one by one.
    * @throws If the transaction has ended or the write fails.
    * @throws The store's own error when the conversation is not stored or the
    * message's identity is, which breaks the precondition.

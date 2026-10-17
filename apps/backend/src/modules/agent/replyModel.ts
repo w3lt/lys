@@ -67,6 +67,12 @@ export type ReplyStreamRequest = Readonly<{
 /** One event of a reply stream, in the order the model produced it. */
 export type ReplyStreamEvent =
   | Readonly<{
+      /** The model produced more reasoning, apart from its reply text. */
+      type: "reasoning"
+      /** Nonempty reasoning that follows the earlier reasoning. */
+      content: string
+    }>
+  | Readonly<{
       /** The model produced more reply text. */
       type: "text"
       /** Nonempty text that follows the earlier text. */

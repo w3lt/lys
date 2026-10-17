@@ -41,8 +41,8 @@ One chat turn currently crosses these boundaries:
 3. The desktop reads typed stream events and updates its local presentation
    state from them.
 
-The backend persists each assistant delta before sending it and records the
-reply's final status, so a stored conversation can be reopened from the
+The backend persists each part of a reply, its reasoning, text, and tool
+calls, before sending it and records the reply's final status, so a stored conversation can be reopened from the
 desktop's conversation history and continued.
 
 The current public protocol surface is small: a health route; LLM inventory,

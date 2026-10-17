@@ -33,6 +33,9 @@ function listRenderedMessages(): string[] {
     .map((article) => article.textContent ?? "")
 }
 
+/** Sources of a conversation that has none. */
+const NO_SOURCES = Object.freeze([])
+
 describe("ConversationTranscript", () => {
   it("renders completed messages in order with their speakers", () => {
     render(
@@ -40,6 +43,7 @@ describe("ConversationTranscript", () => {
         completedMessages={[QUESTION, ANSWER, FOLLOW_UP]}
         kind="completed-only"
         speakerName={SPEAKER_NAME}
+        sources={NO_SOURCES}
       />
     )
 
@@ -57,6 +61,7 @@ describe("ConversationTranscript", () => {
         completedMessages={[QUESTION, ANSWER, FOLLOW_UP]}
         kind="streaming-tail"
         speakerName={SPEAKER_NAME}
+        sources={NO_SOURCES}
         streamingMessage={buildStreamingAssistantMessage(4, "Yes, it")}
       />
     )
@@ -72,6 +77,7 @@ describe("ConversationTranscript", () => {
       <ConversationTranscript
         completedMessages={[QUESTION, ANSWER, FOLLOW_UP]}
         kind="streaming-tail"
+        sources={NO_SOURCES}
         speakerName={CALIGINIA_AGENT_CODE}
         streamingMessage={buildStreamingAssistantMessage(4, "Yes, it")}
       />
@@ -83,6 +89,7 @@ describe("ConversationTranscript", () => {
         completedMessages={[QUESTION, ANSWER, FOLLOW_UP]}
         kind="streaming-tail"
         speakerName={SPEAKER_NAME}
+        sources={NO_SOURCES}
         streamingMessage={buildStreamingAssistantMessage(4, "Yes, it")}
       />
     )
@@ -105,6 +112,7 @@ describe("ConversationTranscript", () => {
         error="The backend stopped before the reply finished."
         kind="completed-only"
         speakerName={SPEAKER_NAME}
+        sources={NO_SOURCES}
       />
     )
 
@@ -125,6 +133,7 @@ describe("ConversationTranscript", () => {
         completedMessages={[QUESTION]}
         kind="streaming-tail"
         speakerName={SPEAKER_NAME}
+        sources={NO_SOURCES}
         streamingMessage={buildStreamingAssistantMessage(2, "A local")}
       />
     )
@@ -135,6 +144,7 @@ describe("ConversationTranscript", () => {
         completedMessages={[QUESTION, ANSWER, FOLLOW_UP]}
         kind="completed-only"
         speakerName={SPEAKER_NAME}
+        sources={NO_SOURCES}
       />
     )
 
@@ -147,6 +157,7 @@ describe("ConversationTranscript", () => {
         completedMessages={[QUESTION, ANSWER]}
         kind="completed-only"
         speakerName={SPEAKER_NAME}
+        sources={NO_SOURCES}
       />
     )
     const [question] = screen.getAllByRole("article")
@@ -159,6 +170,7 @@ describe("ConversationTranscript", () => {
         ]}
         kind="completed-only"
         speakerName={SPEAKER_NAME}
+        sources={NO_SOURCES}
       />
     )
 

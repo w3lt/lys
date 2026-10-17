@@ -19,6 +19,7 @@ import {
 } from "../../../support/backendFake"
 import {
   buildCompletedAssistantMessage,
+  buildFragmentPart,
   buildStreamingAssistantMessage,
   createFixtureUuidV7,
   FIXTURE_CONVERSATION_ID
@@ -108,6 +109,12 @@ function handleAnsweredToolCallStateChange(state: {
   if (state.heldCalls[0]?.answer.status === "answered") throw LISTENER_FAILURE
 }
 
+/** Event that sends a text part of {@link REPLY}, which the follow ignores. */
+const READING_PART_EVENT = Object.freeze({
+  type: "reply-part",
+  part: buildFragmentPart("text", 40, 0, "Reading")
+})
+
 /**
  * Builds the snapshot that starts every stream of {@link REPLY} while it is
  * generating.
@@ -124,6 +131,7 @@ function buildStreamingSnapshot(
     type: "reply-snapshot",
     conversationTitle: null,
     assistantMessage: REPLY,
+    sources: [],
     pendingToolCalls,
     pendingToolApprovals
   }
@@ -519,7 +527,7 @@ describe("useToolCallStore", () => {
 
       await startFollowWithEvents(useToolCallStore, replyStreams, [
         buildStreamingSnapshot([READ_CALL, PAGE_CALL]),
-        { type: "delta", content: "Reading" },
+        READING_PART_EVENT,
         { type: "title", title: "Notes" },
         buildApprovalEvent(SECOND_READ_CALL)
       ])
@@ -763,6 +771,7 @@ describe("useToolCallStore", () => {
             type: "reply-snapshot",
             conversationTitle: null,
             assistantMessage: buildCompletedAssistantMessage(3, "Done."),
+            sources: [],
             pendingToolCalls: [],
             pendingToolApprovals: []
           }
@@ -863,7 +872,7 @@ describe("useToolCallStore", () => {
       await waitForMicrotasks()
 
       replyStreams[1]?.sendEvent(buildStreamingSnapshot())
-      replyStreams[1]?.sendEvent({ type: "delta", content: "Reading" })
+      replyStreams[1]?.sendEvent(READING_PART_EVENT)
       replyStreams[1]?.close()
       await waitForMicrotasks()
       replyStreams[2]?.sendEvent(buildStreamingSnapshot())
@@ -938,6 +947,7 @@ describe("useToolCallStore", () => {
         type: "reply-snapshot",
         conversationTitle: null,
         assistantMessage: otherReply,
+        sources: [],
         pendingToolCalls: [],
         pendingToolApprovals: [SECOND_READ_CALL]
       })

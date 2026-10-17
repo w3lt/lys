@@ -1,14 +1,21 @@
 import { MAXIMUM_CONVERSATION_LIST_PAGE_SIZE } from "@lys/protocol"
 import { describe, expect, it, vi } from "vitest"
 import * as z from "zod"
+import type { ConversationSource, ReplyPart } from "@lys/share"
 import type {
   ConversationRecordEditor,
   ConversationRecordReader,
   ConversationTurnRecordWriter,
   ConversationTurnTransaction,
-  ListConversationsInput
+  ListConversationsInput,
+  ReplyPartRecordWriter
 } from "../../../src/modules/conversation/records"
-import { createFixtureUuidV7 } from "./conversationFixtures"
+import {
+  createFixtureUuidV7,
+  createReasoningPart,
+  createTextPart,
+  createToolCallPart
+} from "./conversationFixtures"
 import { getThrownFailure } from "./databaseTransactionsContract"
 
 /** Stored conversation columns a harness writes exactly as given. */
@@ -46,8 +53,11 @@ export type AssistantMessageRowFixture = Readonly<{
   conversationId: string
   /** Generating model. */
   model: string
-  /** Stored reply text. */
-  content: string
+  /**
+   * Stored parts in order, each one row under the reply, valid or not; empty
+   * for a reply without any.
+   */
+  parts: readonly ReplyPart[]
   /** Stored lifecycle status. */
   status: "streaming" | "completed" | "interrupted" | "failed"
   /** Stored finish reason, non-null only for completed replies. */
@@ -69,6 +79,8 @@ export type ConversationRecordsHarness = Readonly<{
   recordEditor: ConversationRecordEditor
   /** Turn persistence over the store. */
   turnRecordWriter: ConversationTurnRecordWriter
+  /** Reply-part persistence over the store. */
+  replyPartRecordWriter: ReplyPartRecordWriter
   /** Stores one conversation exactly as given, valid or not. */
   saveConversation: (row: ConversationRowFixture) => void
   /**
@@ -77,8 +89,13 @@ export type ConversationRecordsHarness = Readonly<{
    * conversation's activity time; an earlier time lets the store choose it.
    */
   saveUserMessage: (row: UserMessageRowFixture) => void
-  /** Stores one assistant message exactly as given, in the same time order. */
+  /**
+   * Stores one assistant message and its parts exactly as given, in the same
+   * time order.
+   */
   saveAssistantMessage: (row: AssistantMessageRowFixture) => void
+  /** Stores one source of a stored conversation exactly as given. */
+  saveSource: (conversationId: string, source: ConversationSource) => void
   /** Closes the store as its owner does; a repeated call changes nothing. */
   closeRecords: () => void
 }>
@@ -165,14 +182,14 @@ function saveListedConversation(
  *
  * @param harness - Store under test.
  * @param conversationId - Identity of the conversation.
- * @param reply - Identity sequence, text, and state of the reply.
+ * @param reply - Identity sequence, parts, and state of the reply.
  */
 function saveConversationWithReply(
   harness: ConversationRecordsHarness,
   conversationId: string,
   reply: Pick<
     AssistantMessageRowFixture,
-    "content" | "status" | "finishReason"
+    "parts" | "status" | "finishReason"
   > & { sequence: number }
 ): void {
   harness.saveConversation({
@@ -185,7 +202,7 @@ function saveConversationWithReply(
     id: createFixtureUuidV7(reply.sequence),
     conversationId,
     model: "qwen/qwen3-8b",
-    content: reply.content,
+    parts: reply.parts,
     status: reply.status,
     finishReason: reply.finishReason,
     createdAt: "2025-01-01T00:00:01.000Z",
@@ -255,7 +272,8 @@ export function registerConversationRecordReaderContractSuite(
           agentCode: "lys",
           createdAt: CREATED_AT,
           updatedAt: CREATED_AT,
-          messages: []
+          messages: [],
+          sources: []
         })
       })
 
@@ -273,20 +291,67 @@ export function registerConversationRecordReaderContractSuite(
           content: "Hello",
           createdAt: "2025-01-01T00:00:01.000Z"
         })
+        const parts = [
+          createReasoningPart(12, 0, "They ask about moths"),
+          createTextPart(13, 0, "Let me look"),
+          createToolCallPart(
+            {
+              sequence: 14,
+              round: 0,
+              toolName: "web_search",
+              argumentText: '{"query":"moth"}'
+            },
+            {
+              status: "succeeded",
+              result: "Source [1]\nMoths",
+              sourceNumbers: [1, 2]
+            }
+          ),
+          createToolCallPart(
+            {
+              sequence: 15,
+              round: 0,
+              toolName: "read_page",
+              argumentText: "{"
+            },
+            { status: "failed", result: "Invalid arguments" }
+          ),
+          createToolCallPart(
+            {
+              sequence: 16,
+              round: 0,
+              toolName: "read_text_file",
+              argumentText: "{}"
+            },
+            { status: "rejected", result: "Declined" }
+          ),
+          createToolCallPart(
+            { sequence: 17, round: 0, toolName: "", argumentText: "" },
+            { status: "interrupted" }
+          ),
+          createTextPart(18, 1, "Moths are insects [1].")
+        ]
         harness.saveAssistantMessage({
           id: createFixtureUuidV7(11),
           conversationId: CONVERSATION_ID,
           model: "qwen/qwen3-8b",
-          content: "Hi there",
+          parts,
           status: "completed",
           finishReason: "stop",
           createdAt: "2025-01-01T00:00:02.000Z",
           updatedAt: "2025-01-01T00:00:03.000Z"
         })
+        const sources = [
+          { number: 1, url: "https://example.com/moth", title: "Moth" },
+          { number: 2, url: "https://example.org/", title: "Insects" }
+        ]
+        harness.saveSource(CONVERSATION_ID, sources[1]!)
+        harness.saveSource(CONVERSATION_ID, sources[0]!)
 
-        expect(
-          harness.recordReader.findConversation(CONVERSATION_ID)?.messages
-        ).toEqual([
+        const conversation =
+          harness.recordReader.findConversation(CONVERSATION_ID)
+
+        expect(conversation?.messages).toEqual([
           {
             id: createFixtureUuidV7(10),
             role: "user",
@@ -297,13 +362,14 @@ export function registerConversationRecordReaderContractSuite(
             id: createFixtureUuidV7(11),
             role: "assistant",
             model: "qwen/qwen3-8b",
-            content: "Hi there",
+            parts,
             status: "completed",
             finishReason: "stop",
             createdAt: "2025-01-01T00:00:02.000Z",
             updatedAt: "2025-01-01T00:00:03.000Z"
           }
         ])
+        expect(conversation?.sources).toEqual(sources)
       })
 
       it("orders the transcript by creation time and then by identity", () => {
@@ -330,7 +396,9 @@ export function registerConversationRecordReaderContractSuite(
         expect(
           harness.recordReader
             .findConversation(CONVERSATION_ID)
-            ?.messages.map(({ content }) => content)
+            ?.messages.map((message) =>
+              message.role === "user" ? message.content : message.id
+            )
         ).toEqual([
           "earlier identity, same time",
           "later identity, same time",
@@ -418,6 +486,62 @@ export function registerConversationRecordReaderContractSuite(
           harness.recordReader.findConversation(CONVERSATION_ID)
         ).toThrow(z.ZodError)
       })
+
+      it("rejects a stored part that violates the part contract", () => {
+        const harness = createHarness()
+        saveConversationWithReply(harness, CONVERSATION_ID, {
+          sequence: 11,
+          parts: [
+            createTextPart(12, 0, "Kept"),
+            { ...createTextPart(13, 0, "Bad"), id: "not-a-uuid" }
+          ],
+          status: "completed",
+          finishReason: "stop"
+        })
+
+        expect(() =>
+          harness.recordReader.findConversation(CONVERSATION_ID)
+        ).toThrow(z.ZodError)
+      })
+
+      it("rejects a stored source that violates the source contract", () => {
+        const harness = createHarness()
+        harness.saveConversation({
+          id: CONVERSATION_ID,
+          title: null,
+          agentCode: "lys",
+          createdAt: CREATED_AT
+        })
+        harness.saveSource(CONVERSATION_ID, {
+          number: 1,
+          url: "ftp://example.com/",
+          title: "Not a web page"
+        })
+
+        expect(() =>
+          harness.recordReader.findConversation(CONVERSATION_ID)
+        ).toThrow(z.ZodError)
+      })
+
+      it("reads only the addressed conversation's sources", () => {
+        const harness = createHarness()
+        for (const id of [CONVERSATION_ID, OTHER_CONVERSATION_ID])
+          harness.saveConversation({
+            id,
+            title: null,
+            agentCode: "lys",
+            createdAt: CREATED_AT
+          })
+        const source = { number: 1, url: "https://example.com/", title: "A" }
+        harness.saveSource(OTHER_CONVERSATION_ID, source)
+
+        expect(
+          harness.recordReader.findConversation(CONVERSATION_ID)?.sources
+        ).toEqual([])
+        expect(
+          harness.recordReader.findConversation(OTHER_CONVERSATION_ID)?.sources
+        ).toEqual([source])
+      })
     })
 
     describe("listConversations", () => {
@@ -482,7 +606,7 @@ export function registerConversationRecordReaderContractSuite(
         ])
       })
 
-      it("previews the latest message with content, skipping an empty reply", () => {
+      it("previews a reply's latest text as the reply's, never its reasoning or a tool result", () => {
         const harness = createHarness()
         const id = saveListedConversation(harness, {
           sequence: 1,
@@ -494,7 +618,46 @@ export function registerConversationRecordReaderContractSuite(
           id: createFixtureUuidV7(150),
           conversationId: id,
           model: "qwen/qwen3-8b",
-          content: "",
+          parts: [
+            createReasoningPart(151, 0, "Thinking"),
+            createTextPart(152, 0, "First"),
+            createToolCallPart(
+              {
+                sequence: 153,
+                round: 0,
+                toolName: "web_search",
+                argumentText: "{}"
+              },
+              { status: "succeeded", result: "Tool output", sourceNumbers: [] }
+            ),
+            createTextPart(154, 1, "Final answer"),
+            createReasoningPart(155, 1, "Afterthought")
+          ],
+          status: "completed",
+          finishReason: "stop",
+          createdAt: createFixtureTimestamp(1, 30),
+          updatedAt: createFixtureTimestamp(1, 30)
+        })
+
+        expect(
+          harness.recordReader.listConversations(FIRST_PAGE).conversations[0]
+            ?.preview
+        ).toEqual({ role: "assistant", content: "Final answer" })
+      })
+
+      it("previews the latest message with text, skipping a reply that has none", () => {
+        const harness = createHarness()
+        const id = saveListedConversation(harness, {
+          sequence: 1,
+          title: null,
+          userMessages: ["Question"],
+          createdAtMinute: 1
+        })
+        harness.saveAssistantMessage({
+          id: createFixtureUuidV7(150),
+          conversationId: id,
+          model: "qwen/qwen3-8b",
+          parts: [createReasoningPart(151, 0, "Thinking")],
           status: "streaming",
           finishReason: null,
           createdAt: createFixtureTimestamp(1, 30),
@@ -505,6 +668,47 @@ export function registerConversationRecordReaderContractSuite(
           harness.recordReader.listConversations(FIRST_PAGE).conversations[0]
             ?.preview
         ).toEqual({ role: "user", content: "Question" })
+      })
+
+      it.each([
+        ["reply text", "textword", 1],
+        ["reasoning", "thinkword", 0],
+        ["a tool result", "toolword", 0]
+      ])("matches %s: %s", (_label, query, matchCount) => {
+        const harness = createHarness()
+        const id = saveListedConversation(harness, {
+          sequence: 1,
+          title: null,
+          userMessages: ["Question"],
+          createdAtMinute: 1
+        })
+        harness.saveAssistantMessage({
+          id: createFixtureUuidV7(150),
+          conversationId: id,
+          model: "qwen/qwen3-8b",
+          parts: [
+            createReasoningPart(151, 0, "A thinkword"),
+            createToolCallPart(
+              {
+                sequence: 152,
+                round: 0,
+                toolName: "web_search",
+                argumentText: "{}"
+              },
+              { status: "succeeded", result: "A toolword", sourceNumbers: [] }
+            ),
+            createTextPart(153, 1, "A textword")
+          ],
+          status: "completed",
+          finishReason: "stop",
+          createdAt: createFixtureTimestamp(1, 30),
+          updatedAt: createFixtureTimestamp(1, 30)
+        })
+
+        expect(
+          harness.recordReader.listConversations({ ...FIRST_PAGE, query })
+            .matchCount
+        ).toBe(matchCount)
       })
 
       it("previews nothing for a conversation without messages", () => {
@@ -805,24 +1009,39 @@ export function registerConversationRecordEditorContractSuite(
         ).toBe(0)
       })
 
-      it("removes the transcript with the conversation", () => {
+      it("removes the transcript, its replies' parts, and its sources with the conversation", () => {
         const harness = createHarness()
         saveConversationWithReply(harness, CONVERSATION_ID, {
           sequence: 11,
-          content: "Partial",
+          parts: [createTextPart(1011, 0, "Partial")],
           status: "streaming",
           finishReason: null
+        })
+        harness.saveSource(CONVERSATION_ID, {
+          number: 1,
+          url: "https://example.com/",
+          title: "Example"
         })
 
         harness.recordEditor.deleteConversation(CONVERSATION_ID)
 
         expect(
-          harness.turnRecordWriter.updateAssistantMessageContent({
+          harness.replyPartRecordWriter.updateReplyPartContent({
             assistantMessageId: createFixtureUuidV7(11),
+            partId: createFixtureUuidV7(1011),
             content: " late",
             updatedAt: CHANGED_AT
           })
         ).toBe(false)
+        harness.saveConversation({
+          id: CONVERSATION_ID,
+          title: null,
+          agentCode: "lys",
+          createdAt: CREATED_AT
+        })
+        expect(
+          harness.recordReader.findConversation(CONVERSATION_ID)
+        ).toMatchObject({ messages: [], sources: [] })
       })
     })
 
@@ -904,7 +1123,8 @@ export function registerConversationTurnRecordWriterContractSuite(
         expect(result).toBe("created")
         expect(recordReader.findConversation(CONVERSATION_ID)).toEqual({
           ...createNewConversationMetadata(CONVERSATION_ID),
-          messages: []
+          messages: [],
+          sources: []
         })
       })
 
@@ -993,7 +1213,8 @@ export function registerConversationTurnRecordWriterContractSuite(
         expect(nestedOperation).not.toHaveBeenCalled()
         expect(harness.recordReader.findConversation(CONVERSATION_ID)).toEqual({
           ...metadata,
-          messages: []
+          messages: [],
+          sources: []
         })
       })
 
@@ -1028,7 +1249,7 @@ export function registerConversationTurnRecordWriterContractSuite(
             id: createFixtureUuidV7(11),
             role: "assistant",
             model: "qwen/qwen3-8b",
-            content: "",
+            parts: [],
             status: "streaming",
             finishReason: null,
             createdAt: CHANGED_AT,
@@ -1046,48 +1267,90 @@ export function registerConversationTurnRecordWriterContractSuite(
     })
 
     describe("updateAllStreamingAssistantMessagesToInterrupted", () => {
-      it("interrupts every streaming reply, keeping its text and the activity time", () => {
+      it("interrupts every streaming reply and its waiting and running calls, keeping its parts and the activity time", () => {
         const harness = createHarness()
+        const waitingCall = createToolCallPart(
+          {
+            sequence: 1012,
+            round: 0,
+            toolName: "web_search",
+            argumentText: "{}"
+          },
+          { status: "awaiting-approval" }
+        )
+        const runningCall = createToolCallPart(
+          {
+            sequence: 1013,
+            round: 0,
+            toolName: "read_page",
+            argumentText: "{}"
+          },
+          { status: "running" }
+        )
+        const finishedCall = createToolCallPart(
+          {
+            sequence: 1014,
+            round: 0,
+            toolName: "read_page",
+            argumentText: "{}"
+          },
+          { status: "failed", result: "Could not read" }
+        )
+        const text = createTextPart(1011, 0, "Partial")
         saveConversationWithReply(harness, CONVERSATION_ID, {
           sequence: 11,
-          content: "Partial",
+          parts: [text, waitingCall, runningCall, finishedCall],
           status: "streaming",
           finishReason: null
         })
         saveConversationWithReply(harness, OTHER_CONVERSATION_ID, {
           sequence: 21,
-          content: "",
+          parts: [],
           status: "streaming",
           finishReason: null
         })
+        const activityTime = getActivityTime(harness)
 
         harness.turnRecordWriter.updateAllStreamingAssistantMessagesToInterrupted(
           CHANGED_AT
         )
 
-        for (const [id, content] of [
-          [CONVERSATION_ID, "Partial"],
-          [OTHER_CONVERSATION_ID, ""]
-        ] as const) {
-          expect(harness.recordReader.findConversation(id)).toMatchObject({
-            updatedAt: "2025-01-01T00:00:01.000Z",
-            messages: [
-              {
-                content,
-                status: "interrupted",
-                finishReason: null,
-                updatedAt: CHANGED_AT
-              }
-            ]
-          })
-        }
+        expect(getActivityTime(harness)).toBe(activityTime)
+        expect(
+          harness.recordReader.findConversation(CONVERSATION_ID)?.messages
+        ).toMatchObject([
+          {
+            parts: [
+              text,
+              { ...waitingCall, status: "interrupted", updatedAt: CHANGED_AT },
+              { ...runningCall, status: "interrupted", updatedAt: CHANGED_AT },
+              finishedCall
+            ],
+            status: "interrupted",
+            finishReason: null,
+            updatedAt: CHANGED_AT
+          }
+        ])
+        expect(
+          harness.recordReader.findConversation(OTHER_CONVERSATION_ID)
+        ).toMatchObject({
+          updatedAt: "2025-01-01T00:00:01.000Z",
+          messages: [
+            {
+              parts: [],
+              status: "interrupted",
+              finishReason: null,
+              updatedAt: CHANGED_AT
+            }
+          ]
+        })
       })
 
       it("changes nothing more when repeated", () => {
         const harness = createHarness()
         saveConversationWithReply(harness, CONVERSATION_ID, {
           sequence: 11,
-          content: "Partial",
+          parts: [createTextPart(1011, 0, "Partial")],
           status: "streaming",
           finishReason: null
         })
@@ -1113,7 +1376,7 @@ export function registerConversationTurnRecordWriterContractSuite(
         const harness = createHarness()
         saveConversationWithReply(harness, CONVERSATION_ID, {
           sequence: 11,
-          content: "Done",
+          parts: [createTextPart(1011, 0, "Done")],
           ...state
         })
 
@@ -1127,115 +1390,17 @@ export function registerConversationTurnRecordWriterContractSuite(
       })
     })
 
-    describe("updateAssistantMessageContent", () => {
-      it("appends deltas to a streaming reply in call order", () => {
-        const harness = createHarness()
-        saveConversationWithReply(harness, CONVERSATION_ID, {
-          sequence: 11,
-          content: "",
-          status: "streaming",
-          finishReason: null
-        })
-        const replyId = createFixtureUuidV7(11)
-
-        expect(
-          harness.turnRecordWriter.updateAssistantMessageContent({
-            assistantMessageId: replyId,
-            content: "Hi",
-            updatedAt: "2026-03-04T05:06:07.000Z"
-          })
-        ).toBe(true)
-        expect(
-          harness.turnRecordWriter.updateAssistantMessageContent({
-            assistantMessageId: replyId,
-            content: " there",
-            updatedAt: CHANGED_AT
-          })
-        ).toBe(true)
-
-        expect(
-          harness.recordReader.findConversation(CONVERSATION_ID)?.messages[0]
-        ).toMatchObject({
-          content: "Hi there",
-          status: "streaming",
-          updatedAt: CHANGED_AT
-        })
-      })
-
-      it("moves the conversation's activity time forward with each delta", () => {
-        const harness = createHarness()
-        saveConversationWithReply(harness, CONVERSATION_ID, {
-          sequence: 11,
-          content: "",
-          status: "streaming",
-          finishReason: null
-        })
-        const replyId = createFixtureUuidV7(11)
-        const beforeDeltas = getActivityTime(harness)
-
-        harness.turnRecordWriter.updateAssistantMessageContent({
-          assistantMessageId: replyId,
-          content: "Hi",
-          updatedAt: CHANGED_AT
-        })
-        const afterFirstDelta = getActivityTime(harness)
-        harness.turnRecordWriter.updateAssistantMessageContent({
-          assistantMessageId: replyId,
-          content: " there",
-          updatedAt: CHANGED_AT
-        })
-
-        expect(afterFirstDelta).toBeGreaterThan(beforeDeltas)
-        expect(getActivityTime(harness)).toBeGreaterThan(afterFirstDelta)
-      })
-
-      it("returns false for a finalized reply and keeps its text", () => {
-        const harness = createHarness()
-        saveConversationWithReply(harness, CONVERSATION_ID, {
-          sequence: 11,
-          content: "Done",
-          status: "interrupted",
-          finishReason: null
-        })
-
-        expect(
-          harness.turnRecordWriter.updateAssistantMessageContent({
-            assistantMessageId: createFixtureUuidV7(11),
-            content: " late",
-            updatedAt: CHANGED_AT
-          })
-        ).toBe(false)
-
-        expect(
-          harness.recordReader.findConversation(CONVERSATION_ID)?.messages[0]
-        ).toMatchObject({
-          content: "Done",
-          updatedAt: "2025-01-01T00:00:01.000Z"
-        })
-      })
-
-      it("returns false for a reply that is not stored", () => {
-        const { turnRecordWriter } = createHarness()
-
-        expect(
-          turnRecordWriter.updateAssistantMessageContent({
-            assistantMessageId: createFixtureUuidV7(11),
-            content: "Hi",
-            updatedAt: CHANGED_AT
-          })
-        ).toBe(false)
-      })
-    })
-
     describe("updateAssistantMessageState", () => {
       it("completes a streaming reply with its finish reason", () => {
         const harness = createHarness()
         saveConversationWithReply(harness, CONVERSATION_ID, {
           sequence: 11,
-          content: "Hi",
+          parts: [createTextPart(1011, 0, "Hi")],
           status: "streaming",
           finishReason: null
         })
+
+        const activityTime = getActivityTime(harness)
 
         expect(
           harness.turnRecordWriter.updateAssistantMessageState({
@@ -1245,13 +1410,13 @@ export function registerConversationTurnRecordWriterContractSuite(
           })
         ).toBe(true)
 
+        expect(getActivityTime(harness)).toBe(activityTime)
         expect(
           harness.recordReader.findConversation(CONVERSATION_ID)
         ).toMatchObject({
-          updatedAt: "2025-01-01T00:00:01.000Z",
           messages: [
             {
-              content: "Hi",
+              parts: [createTextPart(1011, 0, "Hi")],
               status: "completed",
               finishReason: "length",
               updatedAt: CHANGED_AT
@@ -1260,13 +1425,98 @@ export function registerConversationTurnRecordWriterContractSuite(
         })
       })
 
+      it("interrupts the finalized reply's waiting and running calls in the same write", () => {
+        const harness = createHarness()
+        const waitingCall = createToolCallPart(
+          {
+            sequence: 1012,
+            round: 0,
+            toolName: "web_search",
+            argumentText: "{}"
+          },
+          { status: "awaiting-approval" }
+        )
+        const runningCall = createToolCallPart(
+          {
+            sequence: 1013,
+            round: 0,
+            toolName: "read_page",
+            argumentText: "{}"
+          },
+          { status: "running" }
+        )
+        const finishedCall = createToolCallPart(
+          {
+            sequence: 1014,
+            round: 0,
+            toolName: "read_page",
+            argumentText: "{}"
+          },
+          { status: "succeeded", result: "Page", sourceNumbers: [] }
+        )
+        saveConversationWithReply(harness, CONVERSATION_ID, {
+          sequence: 11,
+          parts: [waitingCall, runningCall, finishedCall],
+          status: "streaming",
+          finishReason: null
+        })
+
+        harness.turnRecordWriter.updateAssistantMessageState({
+          assistantMessageId: createFixtureUuidV7(11),
+          completion: { status: "interrupted" },
+          updatedAt: CHANGED_AT
+        })
+
+        expect(
+          harness.recordReader.findConversation(CONVERSATION_ID)?.messages[0]
+        ).toMatchObject({
+          status: "interrupted",
+          parts: [
+            { ...waitingCall, status: "interrupted", updatedAt: CHANGED_AT },
+            { ...runningCall, status: "interrupted", updatedAt: CHANGED_AT },
+            finishedCall
+          ]
+        })
+      })
+
+      it("leaves the calls of a reply that was already final unchanged", () => {
+        const harness = createHarness()
+        const runningCall = createToolCallPart(
+          {
+            sequence: 1012,
+            round: 0,
+            toolName: "read_page",
+            argumentText: "{}"
+          },
+          { status: "running" }
+        )
+        saveConversationWithReply(harness, CONVERSATION_ID, {
+          sequence: 11,
+          parts: [runningCall],
+          status: "failed",
+          finishReason: null
+        })
+
+        expect(
+          harness.turnRecordWriter.updateAssistantMessageState({
+            assistantMessageId: createFixtureUuidV7(11),
+            completion: { status: "interrupted" },
+            updatedAt: CHANGED_AT
+          })
+        ).toBe(false)
+
+        expect(
+          harness.recordReader.findConversation(CONVERSATION_ID)?.messages[0]
+        ).toMatchObject({ status: "failed", parts: [runningCall] })
+      })
+
       it.each(["interrupted", "failed"] as const)(
         "stores %s without a finish reason",
         (status) => {
           const harness = createHarness()
           saveConversationWithReply(harness, CONVERSATION_ID, {
             sequence: 11,
-            content: "Hi",
+            parts: [createTextPart(1011, 0, "Hi")],
             status: "streaming",
             finishReason: null
           })
@@ -1289,7 +1539,7 @@ export function registerConversationTurnRecordWriterContractSuite(
         const harness = createHarness()
         saveConversationWithReply(harness, CONVERSATION_ID, {
           sequence: 11,
-          content: "Done",
+          parts: [createTextPart(1011, 0, "Done")],
           status: "completed",
           finishReason: "stop"
         })
@@ -1394,13 +1644,6 @@ export function registerConversationTurnRecordWriterContractSuite(
         )
       ).toThrow("Database is closed")
       expect(() =>
-        harness.turnRecordWriter.updateAssistantMessageContent({
-          assistantMessageId: replyId,
-          content: "Hi",
-          updatedAt: CHANGED_AT
-        })
-      ).toThrow("Database is closed")
-      expect(() =>
         harness.turnRecordWriter.updateAssistantMessageState({
           assistantMessageId: replyId,
           completion: { status: "failed" },
@@ -1438,10 +1681,11 @@ export function registerConversationTurnTransactionContractSuite(
         }
       )
 
-      expect(observed).toEqual({ ...metadata, messages: [] })
+      expect(observed).toEqual({ ...metadata, messages: [], sources: [] })
       expect(recordReader.findConversation(CONVERSATION_ID)).toEqual({
         ...metadata,
-        messages: []
+        messages: [],
+        sources: []
       })
     })
 
@@ -1496,7 +1740,8 @@ export function registerConversationTurnTransactionContractSuite(
         agentCode: "stored-agent",
         createdAt: CREATED_AT,
         updatedAt: CREATED_AT,
-        messages: []
+        messages: [],
+        sources: []
       })
     })
 
@@ -1519,7 +1764,7 @@ export function registerConversationTurnTransactionContractSuite(
             id: createFixtureUuidV7(11),
             role: "assistant",
             model: "qwen/qwen3-8b",
-            content: "",
+            parts: [],
             status: "streaming",
             finishReason: null,
             createdAt: CHANGED_AT,
@@ -1586,7 +1831,7 @@ export function registerConversationTurnTransactionContractSuite(
             id: createFixtureUuidV7(11),
             role: "assistant",
             model: "qwen/qwen3-8b",
-            content: "",
+            parts: [],
             status: "streaming",
             finishReason: null,
             createdAt: CHANGED_AT,
@@ -1610,7 +1855,7 @@ export function registerConversationTurnTransactionContractSuite(
         id: createFixtureUuidV7(11),
         role: "assistant",
         model: "qwen/qwen3-8b",
-        content: "Hi there",
+        parts: [],
         status: "completed",
         finishReason: "stop",
         createdAt: CHANGED_AT,
@@ -1635,20 +1880,35 @@ export function registerConversationTurnTransactionContractSuite(
       ])
     })
 
-    it("interrupts only the addressed conversation's streaming replies", () => {
+    it("interrupts only the addressed conversation's streaming replies and their open calls", () => {
       const harness = createHarness()
+      const text = createTextPart(1011, 0, "Partial")
+      const runningCall = createToolCallPart(
+        { sequence: 1012, round: 0, toolName: "read_page", argumentText: "{}" },
+        { status: "running" }
+      )
+      const otherWaitingCall = createToolCallPart(
+        {
+          sequence: 1022,
+          round: 0,
+          toolName: "web_search",
+          argumentText: "{}"
+        },
+        { status: "awaiting-approval" }
+      )
       saveConversationWithReply(harness, CONVERSATION_ID, {
         sequence: 11,
-        content: "Partial",
+        parts: [text, runningCall],
         status: "streaming",
         finishReason: null
       })
       saveConversationWithReply(harness, OTHER_CONVERSATION_ID, {
         sequence: 21,
-        content: "Other partial",
+        parts: [otherWaitingCall],
         status: "streaming",
         finishReason: null
       })
+      const activityTime = getActivityTime(harness)
 
       harness.turnRecordWriter.handleConversationTurnWriteRequest(
         (transaction) => {
@@ -1659,30 +1919,31 @@ export function registerConversationTurnTransactionContractSuite(
         }
       )
 
+      expect(getActivityTime(harness)).toBe(activityTime)
       expect(
-        harness.recordReader.findConversation(CONVERSATION_ID)
-      ).toMatchObject({
-        updatedAt: "2025-01-01T00:00:01.000Z",
-        messages: [
-          {
-            content: "Partial",
-            status: "interrupted",
-            finishReason: null,
-            updatedAt: CHANGED_AT
-          }
-        ]
-      })
+        harness.recordReader.findConversation(CONVERSATION_ID)?.messages
+      ).toMatchObject([
+        {
+          parts: [
+            text,
+            { ...runningCall, status: "interrupted", updatedAt: CHANGED_AT }
+          ],
+          status: "interrupted",
+          finishReason: null,
+          updatedAt: CHANGED_AT
+        }
+      ])
       expect(
         harness.recordReader.findConversation(OTHER_CONVERSATION_ID)
           ?.messages[0]
-      ).toMatchObject({ content: "Other partial", status: "streaming" })
+      ).toMatchObject({ parts: [otherWaitingCall], status: "streaming" })
     })
 
     it("leaves a finalized reply unchanged when interrupting its conversation", () => {
       const harness = createHarness()
       saveConversationWithReply(harness, CONVERSATION_ID, {
         sequence: 11,
-        content: "Done",
+        parts: [createTextPart(1011, 0, "Done")],
         status: "completed",
         finishReason: "stop"
       })
@@ -1703,6 +1964,480 @@ export function registerConversationTurnTransactionContractSuite(
         finishReason: "stop",
         updatedAt: "2025-01-01T00:00:01.000Z"
       })
+    })
+  })
+}
+
+/** Reply most reply-part cases address. */
+const REPLY_ID = createFixtureUuidV7(11)
+
+/**
+ * Stores the conversation most cases address with one reply.
+ *
+ * @param harness - Store under test.
+ * @param parts - The reply's stored parts.
+ * @param status - The reply's state; streaming unless a case finalized it.
+ */
+function saveReplyWithParts(
+  harness: ConversationRecordsHarness,
+  parts: readonly ReplyPart[],
+  status: "streaming" | "interrupted" = "streaming"
+): void {
+  saveConversationWithReply(harness, CONVERSATION_ID, {
+    sequence: 11,
+    parts,
+    status,
+    finishReason: null
+  })
+}
+
+/**
+ * Reads the parts of the reply most cases address.
+ *
+ * @param harness - Store under test.
+ * @returns Its stored parts, or undefined when it is not stored.
+ */
+function readReplyParts(
+  harness: ConversationRecordsHarness
+): readonly ReplyPart[] | undefined {
+  const reply = harness.recordReader
+    .findConversation(CONVERSATION_ID)
+    ?.messages.find((message) => message.id === REPLY_ID)
+  return reply?.role === "assistant" ? reply.parts : undefined
+}
+
+/**
+ * Creates a stored web search call in one state.
+ *
+ * @param sequence - Identity sequence of the call.
+ * @param status - Its state, without a result.
+ * @returns The call.
+ */
+function createSearchCall(
+  sequence: number,
+  status: "awaiting-approval" | "running"
+) {
+  return createToolCallPart(
+    {
+      sequence,
+      round: 0,
+      toolName: "web_search",
+      argumentText: '{"query":"moth"}'
+    },
+    { status }
+  )
+}
+
+/**
+ * Registers the provider-independent {@link ReplyPartRecordWriter} contract
+ * cases.
+ *
+ * @param createHarness - Creates the records over an empty store per case.
+ */
+export function registerReplyPartRecordWriterContractSuite(
+  createHarness: ConversationRecordsHarnessFactory
+): void {
+  describe("ReplyPartRecordWriter contract", () => {
+    describe("createReplyPart", () => {
+      it("stores each part after the reply's earlier ones, exactly as given", () => {
+        const harness = createHarness()
+        const earlier = createTextPart(1001, 0, "Earlier")
+        saveReplyWithParts(harness, [earlier])
+        const created = [
+          createReasoningPart(1002, 1, "Thinking"),
+          createTextPart(1003, 1, "Looking"),
+          createSearchCall(1004, "awaiting-approval"),
+          createToolCallPart(
+            { sequence: 1005, round: 1, toolName: "nope", argumentText: "x" },
+            { status: "failed", result: "No tool is named nope" }
+          )
+        ]
+
+        for (const part of created)
+          expect(
+            harness.replyPartRecordWriter.createReplyPart({
+              assistantMessageId: REPLY_ID,
+              part
+            })
+          ).toBe(true)
+
+        expect(readReplyParts(harness)).toEqual([earlier, ...created])
+      })
+
+      it("moves the conversation's activity time to a later part's time", () => {
+        const harness = createHarness()
+        saveReplyWithParts(harness, [])
+
+        harness.replyPartRecordWriter.createReplyPart({
+          assistantMessageId: REPLY_ID,
+          part: {
+            ...createTextPart(1001, 0, "Text"),
+            createdAt: CHANGED_AT,
+            updatedAt: CHANGED_AT
+          }
+        })
+
+        expect(getActivityTime(harness)).toBe(Date.parse(CHANGED_AT))
+      })
+
+      it("returns false for a finalized reply and stores nothing", () => {
+        const harness = createHarness()
+        saveReplyWithParts(harness, [], "interrupted")
+
+        expect(
+          harness.replyPartRecordWriter.createReplyPart({
+            assistantMessageId: REPLY_ID,
+            part: createTextPart(1001, 0, "Late")
+          })
+        ).toBe(false)
+        expect(readReplyParts(harness)).toEqual([])
+      })
+
+      it("returns false for a reply that is not stored", () => {
+        const { replyPartRecordWriter } = createHarness()
+
+        expect(
+          replyPartRecordWriter.createReplyPart({
+            assistantMessageId: REPLY_ID,
+            part: createTextPart(1001, 0, "Text")
+          })
+        ).toBe(false)
+      })
+
+      it("refuses a part whose identity is already stored and keeps the stored one", () => {
+        const harness = createHarness()
+        const stored = createTextPart(1001, 0, "Stored")
+        saveReplyWithParts(harness, [stored])
+
+        expect(() =>
+          harness.replyPartRecordWriter.createReplyPart({
+            assistantMessageId: REPLY_ID,
+            part: createTextPart(1001, 0, "Again")
+          })
+        ).toThrow()
+        expect(readReplyParts(harness)).toEqual([stored])
+      })
+    })
+
+    describe("updateReplyPartContent", () => {
+      it.each([
+        ["reasoning", createReasoningPart(1001, 0, "Think")],
+        ["text", createTextPart(1001, 0, "Hi")]
+      ])("appends fragments to a %s part in call order", (_label, part) => {
+        const harness = createHarness()
+        saveReplyWithParts(harness, [part])
+
+        for (const content of [" a", " b"])
+          expect(
+            harness.replyPartRecordWriter.updateReplyPartContent({
+              assistantMessageId: REPLY_ID,
+              partId: part.id,
+              content,
+              updatedAt: CHANGED_AT
+            })
+          ).toBe(true)
+
+        expect(readReplyParts(harness)).toEqual([
+          {
+            ...part,
+            content: `${part.kind === "tool-call" ? "" : part.content} a b`,
+            updatedAt: CHANGED_AT
+          }
+        ])
+      })
+
+      it("moves the conversation's activity time forward with each fragment", () => {
+        const harness = createHarness()
+        const part = createTextPart(1001, 0, "Hi")
+        saveReplyWithParts(harness, [part])
+        const beforeFragments = getActivityTime(harness)
+
+        harness.replyPartRecordWriter.updateReplyPartContent({
+          assistantMessageId: REPLY_ID,
+          partId: part.id,
+          content: " there",
+          updatedAt: CHANGED_AT
+        })
+
+        expect(getActivityTime(harness)).toBeGreaterThan(beforeFragments)
+      })
+
+      it("returns false for a finalized reply and keeps the part", () => {
+        const harness = createHarness()
+        const part = createTextPart(1001, 0, "Done")
+        saveReplyWithParts(harness, [part], "interrupted")
+
+        expect(
+          harness.replyPartRecordWriter.updateReplyPartContent({
+            assistantMessageId: REPLY_ID,
+            partId: part.id,
+            content: " late",
+            updatedAt: CHANGED_AT
+          })
+        ).toBe(false)
+        expect(readReplyParts(harness)).toEqual([part])
+      })
+
+      it("returns false for a tool call and for another reply's part", () => {
+        const harness = createHarness()
+        const call = createSearchCall(1001, "running")
+        saveReplyWithParts(harness, [call])
+        saveConversationWithReply(harness, OTHER_CONVERSATION_ID, {
+          sequence: 21,
+          parts: [createTextPart(1021, 0, "Other")],
+          status: "streaming",
+          finishReason: null
+        })
+
+        for (const partId of [call.id, createFixtureUuidV7(1021)])
+          expect(
+            harness.replyPartRecordWriter.updateReplyPartContent({
+              assistantMessageId: REPLY_ID,
+              partId,
+              content: " late",
+              updatedAt: CHANGED_AT
+            })
+          ).toBe(false)
+        expect(readReplyParts(harness)).toEqual([call])
+      })
+    })
+
+    describe("updateReplyToolCall", () => {
+      it("moves a waiting call to running and returns it, keeping the activity time", () => {
+        const harness = createHarness()
+        const call = createSearchCall(1001, "awaiting-approval")
+        saveReplyWithParts(harness, [call])
+        const activityTime = getActivityTime(harness)
+
+        const updated = harness.replyPartRecordWriter.updateReplyToolCall({
+          assistantMessageId: REPLY_ID,
+          toolCallId: call.id,
+          change: { status: "running" },
+          updatedAt: CHANGED_AT
+        })
+
+        const running = { ...call, status: "running", updatedAt: CHANGED_AT }
+        expect(updated).toEqual(running)
+        expect(readReplyParts(harness)).toEqual([running])
+        expect(getActivityTime(harness)).toBe(activityTime)
+      })
+
+      it("stores a waiting call's rejection as its result", () => {
+        const harness = createHarness()
+        const call = createSearchCall(1001, "awaiting-approval")
+        saveReplyWithParts(harness, [call])
+
+        const updated = harness.replyPartRecordWriter.updateReplyToolCall({
+          assistantMessageId: REPLY_ID,
+          toolCallId: call.id,
+          change: { status: "rejected", result: "The person declined." },
+          updatedAt: CHANGED_AT
+        })
+
+        expect(updated).toEqual({
+          ...call,
+          status: "rejected",
+          result: "The person declined.",
+          updatedAt: CHANGED_AT
+        })
+      })
+
+      it("stores a running call's failure as its result", () => {
+        const harness = createHarness()
+        const call = createSearchCall(1001, "running")
+        saveReplyWithParts(harness, [call])
+
+        expect(
+          harness.replyPartRecordWriter.updateReplyToolCall({
+            assistantMessageId: REPLY_ID,
+            toolCallId: call.id,
+            change: { status: "failed", result: "Tavily is down." },
+            updatedAt: CHANGED_AT
+          })
+        ).toEqual({
+          ...call,
+          status: "failed",
+          result: "Tavily is down.",
+          updatedAt: CHANGED_AT
+        })
+      })
+
+      it("stores a running call's success with the numbers of its sources and the sources in the call's conversation", () => {
+        const harness = createHarness()
+        const call = createSearchCall(1001, "running")
+        saveReplyWithParts(harness, [call])
+        const kept = { number: 1, url: "https://kept.example/", title: "Kept" }
+        harness.saveSource(CONVERSATION_ID, kept)
+        const sources = [
+          { number: 2, url: "https://new.example/", title: "New" },
+          { ...kept, title: "Retitled" }
+        ]
+
+        const updated = harness.replyPartRecordWriter.updateReplyToolCall({
+          assistantMessageId: REPLY_ID,
+          toolCallId: call.id,
+          change: { status: "succeeded", result: "Results", sources },
+          updatedAt: CHANGED_AT
+        })
+
+        expect(updated).toEqual({
+          ...call,
+          status: "succeeded",
+          result: "Results",
+          sourceNumbers: [2, 1],
+          updatedAt: CHANGED_AT
+        })
+        expect(
+          harness.recordReader.findConversation(CONVERSATION_ID)?.sources
+        ).toEqual([kept, sources[0]])
+        expect(getActivityTime(harness)).toBeGreaterThan(
+          Date.parse("2025-01-01T00:00:01.000Z")
+        )
+      })
+
+      it("stores an empty success without sources", () => {
+        const harness = createHarness()
+        const call = createSearchCall(1001, "running")
+        saveReplyWithParts(harness, [call])
+
+        expect(
+          harness.replyPartRecordWriter.updateReplyToolCall({
+            assistantMessageId: REPLY_ID,
+            toolCallId: call.id,
+            change: { status: "succeeded", result: "", sources: [] },
+            updatedAt: CHANGED_AT
+          })
+        ).toEqual({
+          ...call,
+          status: "succeeded",
+          result: "",
+          updatedAt: CHANGED_AT
+        })
+      })
+
+      it.each([
+        [
+          "running",
+          "awaiting-approval" as const,
+          { status: "succeeded", result: "x", sources: [] } as const
+        ],
+        [
+          "running",
+          "awaiting-approval" as const,
+          { status: "failed", result: "x" } as const
+        ],
+        ["running", "running" as const, { status: "running" } as const],
+        [
+          "awaiting-approval",
+          "running" as const,
+          { status: "rejected", result: "x" } as const
+        ]
+      ])(
+        "returns undefined for a change that does not follow the call's state (%s from %s)",
+        (_label, status, change) => {
+          const harness = createHarness()
+          const call = createSearchCall(1001, status)
+          saveReplyWithParts(harness, [call])
+
+          expect(
+            harness.replyPartRecordWriter.updateReplyToolCall({
+              assistantMessageId: REPLY_ID,
+              toolCallId: call.id,
+              change,
+              updatedAt: CHANGED_AT
+            })
+          ).toBeUndefined()
+          expect(readReplyParts(harness)).toEqual([call])
+        }
+      )
+
+      it("returns undefined for a finished call, a finalized reply, and an unknown call", () => {
+        const harness = createHarness()
+        const finished = createToolCallPart(
+          {
+            sequence: 1001,
+            round: 0,
+            toolName: "read_page",
+            argumentText: "{}"
+          },
+          { status: "failed", result: "No" }
+        )
+        saveReplyWithParts(harness, [finished])
+        const finalizedHarness = createHarness()
+        const running = createSearchCall(1002, "running")
+        saveReplyWithParts(finalizedHarness, [running], "interrupted")
+
+        for (const [records, toolCallId] of [
+          [harness, finished.id],
+          [finalizedHarness, running.id],
+          [harness, createFixtureUuidV7(9999)]
+        ] as const)
+          expect(
+            records.replyPartRecordWriter.updateReplyToolCall({
+              assistantMessageId: REPLY_ID,
+              toolCallId,
+              change: { status: "failed", result: "Late" },
+              updatedAt: CHANGED_AT
+            })
+          ).toBeUndefined()
+        expect(readReplyParts(harness)).toEqual([finished])
+        expect(readReplyParts(finalizedHarness)).toEqual([running])
+      })
+
+      it("refuses a source whose number the conversation stores for another URL and changes nothing", () => {
+        const harness = createHarness()
+        const call = createSearchCall(1001, "running")
+        saveReplyWithParts(harness, [call])
+        const stored = { number: 1, url: "https://stored.example/", title: "A" }
+        harness.saveSource(CONVERSATION_ID, stored)
+
+        expect(() =>
+          harness.replyPartRecordWriter.updateReplyToolCall({
+            assistantMessageId: REPLY_ID,
+            toolCallId: call.id,
+            change: {
+              status: "succeeded",
+              result: "Results",
+              sources: [
+                { number: 1, url: "https://other.example/", title: "B" }
+              ]
+            },
+            updatedAt: CHANGED_AT
+          })
+        ).toThrow()
+        expect(readReplyParts(harness)).toEqual([call])
+        expect(
+          harness.recordReader.findConversation(CONVERSATION_ID)?.sources
+        ).toEqual([stored])
+      })
+    })
+
+    it("rejects every operation after the store closes", () => {
+      const harness = createHarness()
+      harness.closeRecords()
+
+      expect(() =>
+        harness.replyPartRecordWriter.createReplyPart({
+          assistantMessageId: REPLY_ID,
+          part: createTextPart(1001, 0, "Text")
+        })
+      ).toThrow("Database is closed")
+      expect(() =>
+        harness.replyPartRecordWriter.updateReplyPartContent({
+          assistantMessageId: REPLY_ID,
+          partId: createFixtureUuidV7(1001),
+          content: "Text",
+          updatedAt: CHANGED_AT
+        })
+      ).toThrow("Database is closed")
+      expect(() =>
+        harness.replyPartRecordWriter.updateReplyToolCall({
+          assistantMessageId: REPLY_ID,
+          toolCallId: createFixtureUuidV7(1001),
+          change: { status: "running" },
+          updatedAt: CHANGED_AT
+        })
+      ).toThrow("Database is closed")
     })
   })
 }

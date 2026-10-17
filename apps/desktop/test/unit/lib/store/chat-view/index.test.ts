@@ -29,8 +29,10 @@ import {
   buildConversation,
   buildConversationMetadata,
   buildConversationNotFoundProblem,
+  buildFragmentPart,
   buildReplyNotGeneratingProblem,
   buildStreamingAssistantMessage,
+  buildToolCallPart,
   buildUserMessage,
   createFixtureUuidV7,
   FIXTURE_CONVERSATION_ID
@@ -49,6 +51,40 @@ import {
 
 /** Time every transition stamps on the message it changes. */
 const NOW = "2026-07-08T09:10:11.123Z"
+
+/** Time the backend stored a fragment the cases stream. */
+const FRAGMENT_TIME = "2026-07-08T09:10:10.000Z"
+
+/**
+ * Builds the event that sends a new text part of a reply.
+ *
+ * @param sequence - Identity sequence of the part.
+ * @param round - Zero-based round of the part.
+ * @param content - Text of the part.
+ * @returns The `reply-part` event.
+ */
+function buildTextPartEvent(sequence: number, round: number, content: string) {
+  return {
+    type: "reply-part",
+    part: buildFragmentPart("text", sequence, round, content)
+  } as const
+}
+
+/**
+ * Builds the event that appends a stored fragment to a reply part.
+ *
+ * @param partId - Part the fragment extends.
+ * @param content - The fragment.
+ * @returns The `reply-part-delta` event, stored at {@link FRAGMENT_TIME}.
+ */
+function buildFragmentEvent(partId: string, content: string) {
+  return {
+    type: "reply-part-delta",
+    partId,
+    content,
+    updatedAt: FRAGMENT_TIME
+  } as const
+}
 
 /** Route key of the chat request. */
 const CHAT_ROUTE = "POST /api/v1/chat"
@@ -461,13 +497,14 @@ describe("createChatViewStore", () => {
   })
 
   describe("streamed events", () => {
-    it("appends deltas, completes the reply with its finish reason, then returns to idle", async () => {
+    it("adds parts, appends fragments, completes the reply with its finish reason, then returns to idle", async () => {
       const { store, streams, send } = await startStreamingReply()
+      const textEvent = buildTextPartEvent(40, 0, "Hi")
 
       await sendStreamEvents(
         streams[0],
-        { type: "delta", content: "Hi" },
-        { type: "delta", content: " there" },
+        textEvent,
+        buildFragmentEvent(textEvent.part.id, " there"),
         { type: "done", finishReason: "length" }
       )
       const afterDone = store.getState().request
@@ -478,7 +515,9 @@ describe("createChatViewStore", () => {
       expect(store.getState().request).toEqual({ status: "idle" })
       expect(store.getState().conversation?.messages.at(-1)).toEqual({
         ...FIRST_REPLY,
-        content: "Hi there",
+        parts: [
+          { ...textEvent.part, content: "Hi there", updatedAt: FRAGMENT_TIME }
+        ],
         status: "completed",
         finishReason: "length",
         updatedAt: NOW
@@ -505,14 +544,14 @@ describe("createChatViewStore", () => {
 
       await sendStreamEvents(
         streams[0],
-        { type: "delta", content: "Let me look." },
+        buildTextPartEvent(40, 0, "Let me look."),
         { type: "tool-approval", call: buildToolCall(5, "read_text_file") },
         { type: "tool-call", call: buildToolCall(4, "read_text_file") }
       )
       const afterToolCall = store.getState()
       await sendStreamEvents(
         streams[0],
-        { type: "delta", content: "\n\nFound it." },
+        buildTextPartEvent(41, 1, "Found it."),
         { type: "done", finishReason: "stop" }
       )
       streams[0]?.close()
@@ -523,28 +562,88 @@ describe("createChatViewStore", () => {
         error: undefined
       })
       expect(afterToolCall.conversation?.messages.at(-1)).toMatchObject({
-        content: "Let me look.",
+        parts: [{ content: "Let me look." }],
         status: "streaming"
       })
       expect(store.getState().conversation?.messages.at(-1)).toMatchObject({
-        content: "Let me look.\n\nFound it.",
+        parts: [
+          { round: 0, content: "Let me look." },
+          { round: 1, content: "Found it." }
+        ],
         status: "completed"
       })
     })
 
-    it("shows a reply the backend interrupted", async () => {
+    it("replaces a changed tool call in place and merges the sources it stored into the conversation", async () => {
       const { store, streams, send } = await startStreamingReply()
+      const running = buildToolCallPart(
+        40,
+        0,
+        { toolName: "web_search", argumentText: '{"query":"moths"}' },
+        { status: "running" }
+      )
+      const succeeded = buildToolCallPart(
+        40,
+        0,
+        { toolName: "web_search", argumentText: '{"query":"moths"}' },
+        { status: "succeeded", result: "Source [1]", sourceNumbers: [1] }
+      )
+      const source = {
+        number: 1,
+        url: "https://moths.example/",
+        title: "Moths"
+      }
 
       await sendStreamEvents(
         streams[0],
-        { type: "delta", content: "Par" },
+        { type: "reply-part", part: running },
+        { type: "sources", sources: [source] },
+        { type: "reply-part", part: succeeded },
+        { type: "done", finishReason: "stop" }
+      )
+      streams[0]?.close()
+      await send
+
+      expect(store.getState().conversation).toMatchObject({
+        sources: [source],
+        messages: [{}, { parts: [succeeded] }]
+      })
+    })
+
+    it("marks a call still running interrupted when the backend interrupts the reply", async () => {
+      const { store, streams, send } = await startStreamingReply()
+      const running = buildToolCallPart(
+        40,
+        0,
+        { toolName: "web_search", argumentText: "{}" },
+        { status: "running" }
+      )
+
+      await sendStreamEvents(
+        streams[0],
+        { type: "reply-part", part: running },
         { type: "interrupted" }
       )
       streams[0]?.close()
       await send
 
       expect(store.getState().conversation?.messages.at(-1)).toMatchObject({
-        content: "Par",
+        parts: [{ id: running.id, status: "interrupted", updatedAt: NOW }],
+        status: "interrupted"
+      })
+    })
+
+    it("shows a reply the backend interrupted", async () => {
+      const { store, streams, send } = await startStreamingReply()
+
+      await sendStreamEvents(streams[0], buildTextPartEvent(40, 0, "Par"), {
+        type: "interrupted"
+      })
+      streams[0]?.close()
+      await send
+
+      expect(store.getState().conversation?.messages.at(-1)).toMatchObject({
+        parts: [{ content: "Par" }],
         status: "interrupted",
         finishReason: null
       })
@@ -698,13 +797,13 @@ describe("createChatViewStore", () => {
       })
 
       await store.getState().stopStreaming()
-      await sendStreamEvents(streams[0], { type: "delta", content: "more" })
+      await sendStreamEvents(streams[0], buildTextPartEvent(40, 0, "more"))
 
       expect(store.getState().error).toMatch(
         /^The reply could not be stopped: .*500/
       )
       expect(store.getState().conversation?.messages.at(-1)).toMatchObject({
-        content: "more",
+        parts: [{ content: "more" }],
         status: "streaming"
       })
     })
@@ -738,7 +837,7 @@ describe("createChatViewStore", () => {
       store.getState().selectAgent(LYSIPTERA_AGENT_CODE)
 
       store.getState().resetConversation()
-      await sendStreamEvents(streams[0], { type: "delta", content: "late" })
+      await sendStreamEvents(streams[0], buildTextPartEvent(40, 0, "late"))
       await send
 
       expect(store.getState()).toMatchObject({
@@ -764,6 +863,9 @@ const STORED_CONVERSATION = buildConversation(STORED_ID, "Stored", [
 /** Stored conversation whose last reply is still generating. */
 const GENERATING_ID = createFixtureUuidV7(30)
 const GENERATING_REPLY = buildStreamingAssistantMessage(32, "Partial")
+
+/** Identity of the text part every {@link GENERATING_REPLY} fixture holds. */
+const GENERATING_TEXT_PART_ID = GENERATING_REPLY.parts[0]?.id ?? ""
 const GENERATING_CONVERSATION = buildConversation(GENERATING_ID, null, [
   buildUserMessage(31, "Question"),
   GENERATING_REPLY
@@ -799,6 +901,7 @@ function sendFinalGeneratingReplySnapshot(stream: BackendEventStream): void {
     type: "reply-snapshot",
     conversationTitle: null,
     assistantMessage: buildCompletedAssistantMessage(32, "Partial answer."),
+    sources: [],
     pendingToolCalls: [],
     pendingToolApprovals: []
   })
@@ -830,6 +933,7 @@ const GENERATING_SNAPSHOT_EVENT = Object.freeze({
   type: "reply-snapshot",
   conversationTitle: "Named meanwhile",
   assistantMessage: buildStreamingAssistantMessage(32, "Partial answer"),
+  sources: [],
   pendingToolCalls: [],
   pendingToolApprovals: []
 })
@@ -1007,7 +1111,7 @@ describe("following a stored reply", () => {
     await sendStreamEvents(
       replyStreams[0],
       GENERATING_SNAPSHOT_EVENT,
-      { type: "delta", content: "!" },
+      buildFragmentEvent(GENERATING_TEXT_PART_ID, "!"),
       { type: "done", finishReason: "stop" }
     )
     replyStreams[0]?.close()
@@ -1024,12 +1128,36 @@ describe("following a stored reply", () => {
         { id: createFixtureUuidV7(31) },
         {
           id: GENERATING_REPLY.id,
-          content: "Partial answer!",
+          parts: [{ content: "Partial answer!" }],
           status: "completed",
           finishReason: "stop"
         }
       ]
     })
+  })
+
+  it("takes the sources the snapshot lists, which the reply stored while the conversation opened", async () => {
+    const { replyStreams } = startFollowBackend(
+      buildStoredConversationRoutes(GENERATING_CONVERSATION)
+    )
+    const { store } = createChatHarness()
+    const open = store.getState().openConversation(GENERATING_ID)
+    await waitForMicrotasks()
+    const source = { number: 1, url: "https://moths.example/", title: "Moths" }
+
+    await sendStreamEvents(replyStreams[0], {
+      ...GENERATING_SNAPSHOT_EVENT,
+      sources: [source]
+    })
+    const whileFollowing = store.getState().conversation
+    await sendStreamEvents(replyStreams[0], {
+      type: "done",
+      finishReason: "stop"
+    })
+    replyStreams[0]?.close()
+    await open
+
+    expect(whileFollowing?.sources).toEqual([source])
   })
 
   it("hands a reply still generating to the tool-call follow as soon as the conversation opens", async () => {
@@ -1075,7 +1203,7 @@ describe("following a stored reply", () => {
       },
       { type: "tool-approval", call: buildToolCall(43, "find_files") },
       { type: "tool-call", call: buildToolCall(41, "find_files") },
-      { type: "delta", content: "!" },
+      buildFragmentEvent(GENERATING_TEXT_PART_ID, "!"),
       { type: "done", finishReason: "stop" }
     )
     replyStreams[0]?.close()
@@ -1083,7 +1211,7 @@ describe("following a stored reply", () => {
 
     expect(store.getState().error).toBeUndefined()
     expect(store.getState().conversation?.messages.at(-1)).toMatchObject({
-      content: "Partial answer!",
+      parts: [{ content: "Partial answer!" }],
       status: "completed"
     })
   })
@@ -1096,14 +1224,17 @@ describe("following a stored reply", () => {
     const open = store.getState().openConversation(GENERATING_ID)
     await waitForMicrotasks()
 
-    await sendStreamEvents(replyStreams[0], { type: "delta", content: "x" })
+    await sendStreamEvents(
+      replyStreams[0],
+      buildFragmentEvent(GENERATING_TEXT_PART_ID, "x")
+    )
     await open
 
     expect(store.getState().error).toBe(
       "Reply stream did not start with a snapshot."
     )
     expect(store.getState().conversation?.messages.at(-1)).toMatchObject({
-      content: "Partial",
+      parts: [{ content: "Partial" }],
       status: "interrupted"
     })
   })
@@ -1124,7 +1255,7 @@ describe("following a stored reply", () => {
       "Stopped following the reply before it finished."
     )
     expect(store.getState().conversation?.messages.at(-1)).toMatchObject({
-      content: "Partial answer",
+      parts: [{ content: "Partial answer" }],
       status: "interrupted"
     })
   })
@@ -1197,7 +1328,7 @@ describe("following a stored reply", () => {
       error: expect.stringMatching(/^The conversation could not be opened/)
     })
     expect(whileRefollowing.conversation?.messages.at(-1)).toMatchObject({
-      content: "Partial answer, longer"
+      parts: [{ content: "Partial answer, longer" }]
     })
   })
 })

@@ -8,7 +8,6 @@ import type {
   ConversationTurnOperation,
   ConversationTurnRecordWriter,
   ConversationTurnTransaction,
-  UpdateAssistantMessageContentInput,
   UpdateAssistantMessageStateInput
 } from "../../../modules/conversation/records"
 import type {
@@ -17,9 +16,83 @@ import type {
 } from "../databaseTransactions"
 import { findConversation } from "./findConversation"
 
-/** Appends one delta to an assistant reply only while it is still streaming. */
-const UPDATE_ASSISTANT_MESSAGE_CONTENT_SQL = `UPDATE conversation_messages SET content = content || ?, updated_at = ?
+/**
+ * Marks the waiting and running tool calls of one conversation's streaming
+ * replies as interrupted; bound to the timestamp, then the conversation.
+ */
+const UPDATE_CONVERSATION_OPEN_TOOL_CALLS_TO_INTERRUPTED_SQL = `UPDATE conversation_messages SET status = 'interrupted', updated_at = ?
+    WHERE role = 'tool_call' AND status IN ('awaiting-approval', 'running')
+      AND reply_id IN (SELECT id FROM conversation_messages
+        WHERE conversation_id = ? AND role = 'assistant' AND status = 'streaming')`
+
+/**
+ * Marks the waiting and running tool calls of every streaming reply as
+ * interrupted; bound to the timestamp.
+ */
+const UPDATE_ALL_OPEN_TOOL_CALLS_TO_INTERRUPTED_SQL = `UPDATE conversation_messages SET status = 'interrupted', updated_at = ?
+      WHERE role = 'tool_call' AND status IN ('awaiting-approval', 'running')
+        AND reply_id IN (SELECT id FROM conversation_messages
+          WHERE role = 'assistant' AND status = 'streaming')`
+
+/**
+ * Marks the waiting and running tool calls of one reply as interrupted;
+ * bound to the timestamp, then the reply.
+ */
+const UPDATE_REPLY_OPEN_TOOL_CALLS_TO_INTERRUPTED_SQL = `UPDATE conversation_messages SET status = 'interrupted', updated_at = ?
+      WHERE role = 'tool_call' AND status IN ('awaiting-approval', 'running')
+        AND reply_id = ?`
+
+/**
+ * Marks every streaming reply and its waiting and running tool calls as
+ * interrupted.
+ *
+ * @param statements - Compilation lent to the running write operation.
+ * @param updatedAt - Timestamp stored on every changed row.
+ */
+function updateAllStreamingRepliesToInterrupted(
+  statements: DatabaseStatementCompiler,
+  updatedAt: string
+): void {
+  statements
+    .getStatement(UPDATE_ALL_OPEN_TOOL_CALLS_TO_INTERRUPTED_SQL)
+    .run(updatedAt)
+  statements
+    .getStatement(
+      `UPDATE conversation_messages SET status = 'interrupted', updated_at = ?
+      WHERE role = 'assistant' AND status = 'streaming'`
+    )
+    .run(updatedAt)
+}
+
+/**
+ * Finalizes one streaming reply and, once it is final, marks its waiting and
+ * running tool calls as interrupted.
+ *
+ * @param statements - Compilation lent to the running write operation.
+ * @param input - Reply, terminal state, and timestamp.
+ * @returns True when the reply was streaming and is now final.
+ */
+function updateStreamingReplyState(
+  statements: DatabaseStatementCompiler,
+  input: UpdateAssistantMessageStateInput
+): boolean {
+  const { assistantMessageId, completion, updatedAt } = input
+  const finishReason =
+    completion.status === "completed" ? completion.finishReason : null
+  const isFinalized =
+    statements
+      .getStatement(
+        `UPDATE conversation_messages SET status = ?, finish_reason = ?, updated_at = ?
       WHERE id = ? AND role = 'assistant' AND status = 'streaming'`
+      )
+      .run(completion.status, finishReason, updatedAt, assistantMessageId)
+      .changes === 1
+  if (isFinalized)
+    statements
+      .getStatement(UPDATE_REPLY_OPEN_TOOL_CALLS_TO_INTERRUPTED_SQL)
+      .run(updatedAt, assistantMessageId)
+  return isFinalized
+}
 
 /**
  * Reads and writes one turn's rows through the statement compiler lent to one
@@ -55,6 +128,9 @@ class SqliteConversationTurnTransaction implements ConversationTurnTransaction {
     conversationId: string,
     updatedAt: string
   ): void {
+    this.#statements
+      .getStatement(UPDATE_CONVERSATION_OPEN_TOOL_CALLS_TO_INTERRUPTED_SQL)
+      .run(updatedAt, conversationId)
     this.#statements
       .getStatement(
         `UPDATE conversation_messages SET status = 'interrupted', updated_at = ?
@@ -114,9 +190,10 @@ class SqliteConversationTurnTransaction implements ConversationTurnTransaction {
   }
 
   /**
-   * Implements {@link ConversationTurnTransaction.createAssistantMessage}.
+   * Implements {@link ConversationTurnTransaction.createAssistantMessage};
+   * the reply row holds no text, which its parts hold.
    * @param conversationId - Interface-defined conversation.
-   * @param message - Interface-defined message.
+   * @param message - Interface-defined message without parts.
    * @throws The interface-defined failures; an absent conversation fails the
    * foreign-key constraint and a stored identity the primary-key constraint.
    */
@@ -128,13 +205,12 @@ class SqliteConversationTurnTransaction implements ConversationTurnTransaction {
       .getStatement(
         `INSERT INTO conversation_messages
     (id, conversation_id, role, model, content, status, finish_reason, created_at, updated_at)
-    VALUES (?, ?, 'assistant', ?, ?, ?, ?, ?, ?)`
+    VALUES (?, ?, 'assistant', ?, '', ?, ?, ?, ?)`
       )
       .run(
         message.id,
         conversationId,
         message.model,
-        message.content,
         message.status,
         message.finishReason,
         message.createdAt,
@@ -193,37 +269,14 @@ export default class SqliteConversationTurnRecordWriter implements ConversationT
   public updateAllStreamingAssistantMessagesToInterrupted(
     updatedAt: string
   ): void {
-    this.#databaseWriter.handleDatabaseWriteRequest((statements) =>
-      statements
-        .getStatement(
-          `UPDATE conversation_messages SET status = 'interrupted', updated_at = ?
-      WHERE role = 'assistant' AND status = 'streaming'`
-        )
-        .run(updatedAt)
-    )
+    this.#databaseWriter.handleDatabaseWriteRequest((statements) => {
+      updateAllStreamingRepliesToInterrupted(statements, updatedAt)
+    })
   }
 
   /**
-   * Implements {@link ConversationTurnRecordWriter.updateAssistantMessageContent};
-   * the schema's message-update trigger moves the activity time forward.
-   * @param input - Interface-defined reply, delta, and message timestamp.
-   * @returns The interface-defined append outcome.
-   * @throws The interface-defined closed and write failures.
-   */
-  public updateAssistantMessageContent(
-    input: UpdateAssistantMessageContentInput
-  ): boolean {
-    return this.#databaseWriter.handleDatabaseWriteRequest(
-      (statements) =>
-        statements
-          .getStatement(UPDATE_ASSISTANT_MESSAGE_CONTENT_SQL)
-          .run(input.content, input.updatedAt, input.assistantMessageId)
-          .changes === 1
-    )
-  }
-
-  /**
-   * Implements {@link ConversationTurnRecordWriter.updateAssistantMessageState}.
+   * Implements {@link ConversationTurnRecordWriter.updateAssistantMessageState},
+   * interrupting the reply's open tool calls once the reply is finalized.
    * @param input - Interface-defined reply, terminal state, and message
    * timestamp.
    * @returns The interface-defined finalization outcome.
@@ -232,18 +285,8 @@ export default class SqliteConversationTurnRecordWriter implements ConversationT
   public updateAssistantMessageState(
     input: UpdateAssistantMessageStateInput
   ): boolean {
-    const { assistantMessageId, completion, updatedAt } = input
-    const finishReason =
-      completion.status === "completed" ? completion.finishReason : null
-    return this.#databaseWriter.handleDatabaseWriteRequest(
-      (statements) =>
-        statements
-          .getStatement(
-            `UPDATE conversation_messages SET status = ?, finish_reason = ?, updated_at = ?
-      WHERE id = ? AND role = 'assistant' AND status = 'streaming'`
-          )
-          .run(completion.status, finishReason, updatedAt, assistantMessageId)
-          .changes === 1
+    return this.#databaseWriter.handleDatabaseWriteRequest((statements) =>
+      updateStreamingReplyState(statements, input)
     )
   }
 

@@ -36,9 +36,14 @@ type AssistantContextMessage = Extract<
  * Translates a borrowed OpenAI-compatible streamed chat completion into agent
  * reply streams.
  *
- * @remarks Implements {@link ReplyModel}. Text events and the round's tool
- * calls come from the choice with index 0; a chunk without it is skipped, and
- * empty or absent text produces no event. Owns no resource: the chat
+ * @remarks Implements {@link ReplyModel}. Reasoning, text, and the round's
+ * tool calls come from the choice with index 0; a chunk without it is
+ * skipped, and empty or absent reasoning or text produces no event.
+ * Reasoning is the delta's `reasoning` field, or its `reasoning_content`
+ * field when it has no `reasoning`; LM Studio sends one of them, depending
+ * on the model and its version, only while its setting that separates
+ * reasoning from content is on. A value of another type is not reasoning and
+ * is left out. Owns no resource: the chat
  * completion's owner releases its client. Concurrency model: reentrant; it
  * keeps no state and the chat completion permits overlapping requests.
  */
@@ -83,13 +88,40 @@ export default class OpenAiReplyModel implements ReplyModel {
 }
 
 /**
+ * Reads the reasoning a streamed delta carries.
+ *
+ * @param delta - Delta of choice 0 of one chunk; its reasoning fields are
+ * not part of the OpenAI types, so they are checked here.
+ * @returns The non-empty `reasoning` string, else the non-empty
+ * `reasoning_content` string, else undefined.
+ */
+function findDeltaReasoning(
+  delta: ChatCompletionChunk.Choice.Delta
+): string | undefined {
+  if (
+    "reasoning" in delta &&
+    typeof delta.reasoning === "string" &&
+    delta.reasoning !== ""
+  )
+    return delta.reasoning
+  if (
+    "reasoning_content" in delta &&
+    typeof delta.reasoning_content === "string" &&
+    delta.reasoning_content !== ""
+  )
+    return delta.reasoning_content
+  return undefined
+}
+
+/**
  * Translates streamed chat completion chunks into reply events.
  *
  * @param chunks - Upstream chunks, owned by the returned stream.
- * @returns Text events in chunk order, then the event that ends the round: a
- * `finish`, or `tool-calls` built from the round's tool-call fragments. A
- * chunk carrying both text and a finish reason yields the text first.
- * Leaving the iteration early releases the chunks.
+ * @returns Reasoning and text events in chunk order, then the event that
+ * ends the round: a `finish`, or `tool-calls` built from the round's
+ * tool-call fragments. A chunk carrying reasoning, text, and a finish reason
+ * yields them in that order. Leaving the iteration early releases the
+ * chunks.
  * @throws If the upstream fails, a chunk carries an unsupported finish
  * reason, or the model reports tool calls without sending any.
  */
@@ -100,6 +132,8 @@ async function* parseReplyStreamEvents(
   for await (const chunk of chunks) {
     const choice = chunk.choices.find(({ index }) => index === 0)
     if (choice === undefined) continue
+    const reasoning = findDeltaReasoning(choice.delta)
+    if (reasoning !== undefined) yield { type: "reasoning", content: reasoning }
     const content = choice.delta.content
     if (content) yield { type: "text", content }
     toolCallFragments = [

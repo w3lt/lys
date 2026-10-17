@@ -1,9 +1,15 @@
 import type {
   Conversation,
   ConversationAssistantMessage,
-  ConversationUserMessage
+  ConversationUserMessage,
+  ReplyPart,
+  ToolCallReplyPart
 } from "@lys/share"
 import type { AssistantMessageCompletion } from "../agent/agent"
+import type {
+  ReplyPartDraft,
+  ReplyToolCallChange
+} from "../agent/replyPartSequence"
 
 /** Conversation a turn starts or continues, selected by `kind`. */
 export type ConversationTurnTarget =
@@ -36,7 +42,7 @@ export type ConversationTurn = Readonly<{
   conversation: Conversation
   /** User message committed with this turn. */
   userMessage: ConversationUserMessage
-  /** Empty streaming reply committed with this turn. */
+  /** Streaming reply without parts committed with this turn. */
   assistantMessage: ConversationAssistantMessage
   /** Whether this operation created the conversation. */
   isNewConversation: boolean
@@ -57,22 +63,13 @@ export interface ConversationTurnWriter {
     options: CreateConversationTurnOptions
   ): ConversationTurn
   /**
-   * Appends a nonempty delta before it is sent to the reply's followers.
-   * @param assistantMessageId - Streaming reply UUIDv7.
-   * @param content - Nonempty model fragment in stream order.
-   * @returns False if deleted or finalized; otherwise true after persistence.
-   * @throws If validation or persistence fails, including after store closure.
-   */
-  updateAssistantMessageContent(
-    assistantMessageId: string,
-    content: string
-  ): boolean
-  /**
-   * Finalizes a streaming reply once while retaining all its persisted text.
+   * Finalizes a streaming reply once while retaining all its persisted parts.
    * @param assistantMessageId - Streaming reply UUIDv7.
    * @param completion - Coupled terminal state and supported finish reason.
    * @returns False after deletion or prior finalization; otherwise true after persistence.
    * @throws If persistence fails, including after store closure.
+   * @remarks The reply's tool calls still waiting for approval or running
+   * become interrupted in the same write.
    */
   updateAssistantMessageState(
     assistantMessageId: string,
@@ -93,4 +90,62 @@ export interface GeneratedConversationTitleWriter {
     conversationId: string,
     title: string
   ): string | undefined
+}
+
+/**
+ * Stores the parts of a streaming reply before they are sent to its
+ * followers, for the chat route that lends them to the reply's agent.
+ *
+ * @remarks Each call reads the current time once and stores it with the part
+ * or change. A reply that is finalized, superseded, or deleted refuses every
+ * write through an undefined result. Borrowed until the backend store closes;
+ * no cleanup authority. Concurrency model: single-owner, synchronous on the
+ * backend's event loop.
+ */
+export interface ReplyPartWriter {
+  /**
+   * Stores a new part after the reply's last one.
+   * @param assistantMessageId - Streaming reply UUIDv7.
+   * @param draft - The part; a reasoning or text part gets a new UUIDv7.
+   * @returns The stored part with its identity and times, or undefined when
+   * the reply is no longer streaming.
+   * @throws If the draft is invalid, such as empty text (before any storage
+   * work), or persistence fails.
+   */
+  createReplyPart(
+    assistantMessageId: string,
+    draft: ReplyPartDraft
+  ): ReplyPart | undefined
+  /**
+   * Appends a fragment to one of the reply's reasoning or text parts.
+   * @param assistantMessageId - Streaming reply UUIDv7.
+   * @param partId - UUIDv7 of the reply's reasoning or text part.
+   * @param content - Non-empty fragment in stream order.
+   * @returns The time stored as the part's `updatedAt`, or undefined when the
+   * reply is no longer streaming or the part is not one of its reasoning or
+   * text parts.
+   * @throws If the fragment is empty (before any storage work) or
+   * persistence fails.
+   */
+  updateReplyPartContent(
+    assistantMessageId: string,
+    partId: string,
+    content: string
+  ): string | undefined
+  /**
+   * Stores one change of one of the reply's tool calls, and a succeeded
+   * call's sources in its conversation.
+   * @param assistantMessageId - Streaming reply UUIDv7.
+   * @param toolCallId - UUIDv7 of the call.
+   * @param change - The call's next state.
+   * @returns The call as stored, or undefined when the reply is no longer
+   * streaming or the call is not in the state the change follows.
+   * @throws If persistence fails, including when a source's number is
+   * stored for another URL in the conversation.
+   */
+  updateReplyToolCall(
+    assistantMessageId: string,
+    toolCallId: string,
+    change: ReplyToolCallChange
+  ): ToolCallReplyPart | undefined
 }

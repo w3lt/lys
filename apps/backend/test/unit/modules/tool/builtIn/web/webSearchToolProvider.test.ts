@@ -15,6 +15,7 @@ import {
   TEST_TAVILY_API_KEY,
   type TavilyRoute
 } from "../../../../support/tavilyServer"
+import { createRecordedRunContext } from "../../../../support/builtInToolContract"
 
 /** Dependencies that never connect; for cases that send nothing. */
 const UNUSED_DEPENDENCIES: TavilyRequestDependencies = Object.freeze({
@@ -113,7 +114,9 @@ describe("WebSearchToolProvider", () => {
       await writeFile(path, JSON.stringify({ secrets: { tavilyApiKey: null } }))
       const parsed = lookup.tool.parseToolCall({ query: "moths" })
       if (parsed.status !== "parsed") throw new Error("Expected a parsed call")
-      await parsed.runToolCall(new AbortController().signal)
+      await parsed.runToolCall(
+        createRecordedRunContext(new AbortController().signal).context
+      )
 
       expect(server.receivedRequests[0]?.headers.authorization).toBe(
         `Bearer ${TEST_TAVILY_API_KEY}`

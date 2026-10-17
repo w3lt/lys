@@ -3,10 +3,15 @@ import {
   calculateContextUsage,
   estimateAttachmentTokens,
   estimateTextTokens,
+  formatContextMessageText,
   formatTokenCount,
   type ComposerAttachment,
   type ContextTurn
 } from "@/components/ComposerComponents/composer-context"
+import {
+  buildFragmentPart,
+  buildToolCallPart
+} from "../../support/conversationFixtures"
 
 /**
  * Builds one conversation turn whose text is a run of one character.
@@ -34,6 +39,39 @@ function buildAttachment(
 ): ComposerAttachment {
   return { id, name: `${id}.txt`, kind: "txt", estimatedTokens }
 }
+
+describe("formatContextMessageText", () => {
+  it("measures a user message by its text", () => {
+    expect(
+      formatContextMessageText({ role: "user", content: "Plan my trip" })
+    ).toBe("Plan my trip")
+  })
+
+  it("measures a reply by what later turns send again: its text and each answered call, without reasoning or unanswered calls", () => {
+    expect(
+      formatContextMessageText({
+        role: "assistant",
+        parts: [
+          buildFragmentPart("reasoning", 10, 0, "Search first."),
+          buildFragmentPart("text", 11, 0, "Searching."),
+          buildToolCallPart(
+            12,
+            0,
+            { toolName: "web_search", argumentText: '{"query":"moths"}' },
+            { status: "succeeded", result: "Results", sourceNumbers: [] }
+          ),
+          buildToolCallPart(
+            13,
+            1,
+            { toolName: "read_page", argumentText: "{}" },
+            { status: "interrupted" }
+          ),
+          buildFragmentPart("text", 14, 1, "Moths fly.")
+        ]
+      })
+    ).toBe('Searching.\n{"query":"moths"}\nResults\nMoths fly.')
+  })
+})
 
 describe("estimateTextTokens", () => {
   it.each([

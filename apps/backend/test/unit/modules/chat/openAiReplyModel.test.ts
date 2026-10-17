@@ -51,6 +51,33 @@ function createChunkStream(...chunks: ChatCompletionChunk[]) {
   )
 }
 
+/** Reasoning fields an OpenAI-compatible server adds to a delta. */
+type ReasoningDeltaFields = Readonly<{
+  /** Field LM Studio 0.4 and OpenRouter stream reasoning in. */
+  reasoning?: unknown
+  /** Field DeepSeek and llama.cpp stream reasoning in. */
+  reasoning_content?: unknown
+  /** Text the same delta carries; none by default. */
+  content?: string
+}>
+
+/**
+ * Creates a chunk whose first choice's delta carries reasoning fields, which
+ * the SDK's types do not declare but its stream passes through.
+ *
+ * @param fields - Fields of the delta.
+ * @returns A chunk with only that delta and no finish reason.
+ */
+function createReasoningChunk(
+  fields: ReasoningDeltaFields
+): ChatCompletionChunk {
+  const delta = { content: null, ...fields }
+  return {
+    ...createChatCompletionChunk({}),
+    choices: [{ index: 0, delta, finish_reason: null }]
+  }
+}
+
 /**
  * Reads a reply stream to its end or failure.
  *
@@ -368,6 +395,60 @@ describe("OpenAiReplyModel", () => {
       { type: "text", content: "Cut" },
       { type: "finish", finishReason: "length" }
     ])
+  })
+
+  it("yields the reasoning field before the text of the same chunk", async () => {
+    const run = await listReplyStreamEvents(
+      createChunkStream(
+        createReasoningChunk({ reasoning: "They greet me." }),
+        createReasoningChunk({ reasoning: " Greet back.", content: "Hi" }),
+        createChatCompletionChunk({ finishReason: "stop" })
+      )
+    )
+
+    expect(run.events).toEqual([
+      { type: "reasoning", content: "They greet me." },
+      { type: "reasoning", content: " Greet back." },
+      { type: "text", content: "Hi" },
+      { type: "finish", finishReason: "stop" }
+    ])
+  })
+
+  it("reads reasoning_content when a delta has no reasoning text, and prefers reasoning when it has both", async () => {
+    const run = await listReplyStreamEvents(
+      createChunkStream(
+        createReasoningChunk({ reasoning_content: "First" }),
+        createReasoningChunk({ reasoning: "", reasoning_content: "Second" }),
+        createReasoningChunk({ reasoning: "Third", reasoning_content: "Not" }),
+        createChatCompletionChunk({ finishReason: "stop" })
+      )
+    )
+
+    expect(run.events).toEqual([
+      { type: "reasoning", content: "First" },
+      { type: "reasoning", content: "Second" },
+      { type: "reasoning", content: "Third" },
+      { type: "finish", finishReason: "stop" }
+    ])
+  })
+
+  it.each([
+    ["an empty reasoning field", { reasoning: "" }],
+    ["a reasoning field that is not text", { reasoning: 42 }],
+    ["a null reasoning_content field", { reasoning_content: null }],
+    [
+      "a reasoning_content field that is not text",
+      { reasoning_content: { text: "x" } }
+    ]
+  ])("yields no reasoning for %s", async (_label, fields) => {
+    const run = await listReplyStreamEvents(
+      createChunkStream(
+        createReasoningChunk(fields),
+        createChatCompletionChunk({ finishReason: "stop" })
+      )
+    )
+
+    expect(run.events).toEqual([{ type: "finish", finishReason: "stop" }])
   })
 
   it("skips chunks without text or without the first choice", async () => {

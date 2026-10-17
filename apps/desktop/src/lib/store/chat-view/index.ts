@@ -44,9 +44,11 @@ import {
   findStreamingReply,
   isStreamingConversationAssistantMessage,
   startConversationTurn,
-  updateAssistantReplyContent,
+  updateAssistantReplyPart,
+  updateAssistantReplyPartContent,
   updateAssistantReplyStatus,
   updateAssistantReplyWithSnapshot,
+  updateConversationSources,
   updateConversationTitle
 } from "./conversation-transitions"
 
@@ -812,25 +814,69 @@ export function createChatViewStore(
     }
 
     /**
-     * Handles one authorized content delta for the streaming assistant reply.
+     * Handles one new or changed part of the streaming assistant reply.
      *
-     * @param event - Delta event emitted by the backend stream.
+     * @param event - Part event emitted by the backend stream.
      * @param token - Token expected to own the started reply.
      * @throws If the event is out of order or its assistant is absent.
      */
-    function handleChatDeltaEvent(
-      event: Extract<ChatApiStreamEvent, { type: "delta" }>,
+    function handleChatReplyPartEvent(
+      event: Extract<ChatGenerationEvent, { type: "reply-part" }>,
       token: number
     ): void {
       const request = getStreamingReply(token)
-      const conversation = getActiveConversation()
 
       set({
-        conversation: updateAssistantReplyContent(conversation, {
+        conversation: updateAssistantReplyPart(getActiveConversation(), {
           assistantMessageId: request.assistantMessageId,
-          content: event.content,
-          timestamp: dependencies.createTimestamp()
+          part: event.part
         })
+      })
+    }
+
+    /**
+     * Handles one fragment of a reasoning or text part of the streaming
+     * assistant reply.
+     *
+     * @param event - Fragment event emitted by the backend stream.
+     * @param token - Token expected to own the started reply.
+     * @throws If the event is out of order, or its assistant or part is
+     * absent.
+     */
+    function handleChatReplyPartDeltaEvent(
+      event: Extract<ChatGenerationEvent, { type: "reply-part-delta" }>,
+      token: number
+    ): void {
+      const request = getStreamingReply(token)
+
+      set({
+        conversation: updateAssistantReplyPartContent(getActiveConversation(), {
+          assistantMessageId: request.assistantMessageId,
+          partId: event.partId,
+          content: event.content,
+          updatedAt: event.updatedAt
+        })
+      })
+    }
+
+    /**
+     * Handles the numbered sources a tool call of the streaming reply stored.
+     *
+     * @param event - Sources event emitted by the backend stream.
+     * @param token - Token expected to own the started reply.
+     * @throws If the event is out of order or the conversation is absent.
+     */
+    function handleChatSourcesEvent(
+      event: Extract<ChatGenerationEvent, { type: "sources" }>,
+      token: number
+    ): void {
+      getStreamingReply(token)
+
+      set({
+        conversation: updateConversationSources(
+          getActiveConversation(),
+          event.sources
+        )
       })
     }
 
@@ -938,9 +984,12 @@ export function createChatViewStore(
         throw new Error("Reply snapshot did not match the followed reply")
       }
 
-      const withReply = updateAssistantReplyWithSnapshot(
-        getActiveConversation(),
-        event.assistantMessage
+      const withReply = updateConversationSources(
+        updateAssistantReplyWithSnapshot(
+          getActiveConversation(),
+          event.assistantMessage
+        ),
+        event.sources
       )
       const conversation =
         event.conversationTitle === null
@@ -992,8 +1041,8 @@ export function createChatViewStore(
     /**
      * Applies one generation event shared by chat and followed-reply streams.
      *
-     * @param event - Title, delta, tool-approval, tool-call, final, or error
-     * event of the reply.
+     * @param event - Title, part, fragment, sources, tool-approval, tool-call,
+     * final, or error event of the reply.
      * @param token - Token whose ownership authorizes event side effects.
      * @throws If an in-order handler detects an invariant violation.
      * @remarks Exactly one of `done`, `interrupted`, or `error` ends the
@@ -1007,8 +1056,14 @@ export function createChatViewStore(
         case "title":
           handleChatTitleEvent(event, token)
           return
-        case "delta":
-          handleChatDeltaEvent(event, token)
+        case "reply-part":
+          handleChatReplyPartEvent(event, token)
+          return
+        case "reply-part-delta":
+          handleChatReplyPartDeltaEvent(event, token)
+          return
+        case "sources":
+          handleChatSourcesEvent(event, token)
           return
         case "done":
           handleChatDoneEvent(event, token)
@@ -1048,7 +1103,9 @@ export function createChatViewStore(
           handleChatTurnStartEvent(event, token)
           return
         case "title":
-        case "delta":
+        case "reply-part":
+        case "reply-part-delta":
+        case "sources":
         case "done":
         case "interrupted":
         case "error":
@@ -1075,7 +1132,9 @@ export function createChatViewStore(
           handleChatReplySnapshotEvent(event, token)
           return
         case "title":
-        case "delta":
+        case "reply-part":
+        case "reply-part-delta":
+        case "sources":
         case "done":
         case "interrupted":
         case "error":

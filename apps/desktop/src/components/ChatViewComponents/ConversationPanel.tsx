@@ -1,3 +1,4 @@
+import type { ConversationSource } from "@lys/share"
 import { ArrowDown } from "lucide-react"
 import type { ReactElement, RefObject } from "react"
 
@@ -30,6 +31,8 @@ type ConversationPanelCommonProps = {
    * and named in the pending-work status.
    */
   readonly agentName: string
+  /** Numbered sources of the conversation, which replies may cite. */
+  readonly sources: readonly ConversationSource[]
 }
 
 /**
@@ -61,7 +64,7 @@ export type ConversationPanelProps = ConversationPanelCommonProps &
  * Presents the conversation transcript and its navigation affordances.
  *
  * @remarks The parent owns conversation
- * state, transcript position, scrolling, submission, and the name of the
+ * state and sources, transcript position, scrolling, submission, and the name of the
  * agent that answers. The panel exposes no
  * interruption control, because cancellation must stay reachable in active
  * phases that have no assistant message and is therefore owned by the
@@ -86,7 +89,8 @@ export default function ConversationPanel(
     onSendMessage,
     isAtBottom,
     activity,
-    agentName
+    agentName,
+    sources
   } = props
   const isEmptyConversation =
     props.kind === "completed-only" &&
@@ -98,6 +102,7 @@ export default function ConversationPanel(
         kind="streaming-tail"
         completedMessages={props.completedMessages}
         error={error}
+        sources={sources}
         speakerName={agentName}
         streamingMessage={props.streamingMessage}
       />
@@ -106,6 +111,7 @@ export default function ConversationPanel(
         kind="completed-only"
         completedMessages={props.completedMessages}
         error={error}
+        sources={sources}
         speakerName={agentName}
       />
     )

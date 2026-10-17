@@ -293,14 +293,17 @@ describe("createSingletonServices", () => {
 
       await services.agentService.findChatAgent(agentCode)?.createReply({
         history: [],
+        sources: [],
         userMessageContent: "Hello",
         model: "qwen/qwen3-8b",
         generationOptions: { temperature: 0.4 },
         clientTools: [],
         builtInTools: [],
         abortSignal: new AbortController().signal,
-        updateAssistantMessageContent: () => true,
         updateAssistantMessageState: () => true,
+        createReplyPart: vi.fn(),
+        updateReplyPartContent: vi.fn(),
+        updateReplyToolCall: vi.fn(),
         sendEvent: vi.fn(),
         sendClientToolCall: vi.fn(),
         createToolCallGate: vi.fn(),

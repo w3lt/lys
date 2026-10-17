@@ -28,6 +28,7 @@ import {
 import {
   buildStreamingAssistantMessage,
   buildConversationMetadata,
+  buildFragmentPart,
   buildConversationNotFoundProblem,
   buildReplyNotFoundProblem,
   buildReplyNotGeneratingProblem,
@@ -222,14 +223,25 @@ describe("readChatEvents", () => {
     }
   )
 
-  it("yields each event in order, tool calls included, until the backend ends the stream", async () => {
+  it("yields each event in order, parts, sources, and tool calls included, until the backend ends the stream", async () => {
     const stream = startBackendEventStream()
     startBackendFake({ [CHAT_ROUTE]: () => stream.response })
+    const text = buildFragmentPart("text", 40, 0, "Let me")
     const events = [
       NEW_CONVERSATION_START_EVENT,
-      { type: "delta", content: "Let me look." },
+      { type: "reply-part", part: text },
+      {
+        type: "reply-part-delta",
+        partId: text.id,
+        content: " look.",
+        updatedAt: "2026-01-02T03:04:06.000Z"
+      },
       { type: "tool-call", call: TOOL_CALL },
-      { type: "delta", content: "\n\nHi" },
+      {
+        type: "sources",
+        sources: [{ number: 1, url: "https://moths.example/", title: "Moths" }]
+      },
+      { type: "reply-part", part: buildFragmentPart("text", 41, 1, "Hi") },
       { type: "title", title: "Greeting" },
       { type: "done", finishReason: "stop" }
     ]
@@ -311,7 +323,16 @@ describe("readChatEvents", () => {
   })
 
   it.each([
-    ["an empty delta", { type: "delta", content: "" }],
+    [
+      "an empty fragment",
+      {
+        type: "reply-part-delta",
+        partId: createFixtureUuidV7(40),
+        content: "",
+        updatedAt: "2026-01-02T03:04:06.000Z"
+      }
+    ],
+    ["an event of the removed delta type", { type: "delta", content: "Hi" }],
     [
       "a tool call whose identifier is not a UUIDv7",
       { type: "tool-call", call: { ...TOOL_CALL, id: "call-1" } }
@@ -397,12 +418,13 @@ describe("readChatReplyEvents", () => {
         type: "reply-snapshot",
         conversationTitle: null,
         assistantMessage: buildStreamingAssistantMessage(3, "Hi"),
+        sources: [],
         pendingToolCalls: [TOOL_CALL],
         pendingToolApprovals: [buildToolCall(6, "read_text_file")]
       },
       { type: "tool-approval", call: buildToolCall(7, "find_files") },
       { type: "tool-call", call: buildToolCall(5, "find_files") },
-      { type: "delta", content: " there" },
+      { type: "reply-part", part: buildFragmentPart("text", 41, 1, "There") },
       { type: "done", finishReason: "length" }
     ]
     sendStreamEvents(stream, events)
@@ -474,7 +496,7 @@ describe("readChatReplyEvents", () => {
   it("cancels the response body when the consumer stops reading early", async () => {
     const stream = startBackendEventStream()
     startBackendFake({ [REPLY_EVENTS_ROUTE]: () => stream.response })
-    stream.sendEvent({ type: "delta", content: "Hi" })
+    stream.sendEvent({ type: "title", title: "Greeting" })
 
     await readFirstStreamEvent(
       readChatReplyEvents(REPLY_TARGET, { backendUrl: FIXTURE_BACKEND_URL })

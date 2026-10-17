@@ -39,7 +39,8 @@ import {
 import {
   type ComposerAttachment,
   calculateContextUsage,
-  type ContextTurn
+  type ContextTurn,
+  formatContextMessageText
 } from "./ComposerComponents/composer-context"
 import {
   calculateComposerActivity,
@@ -218,7 +219,7 @@ export function Composer({
   const activityLabel = formatComposerActivity(activity)
 
   const turns: readonly ContextTurn[] = (conversation?.messages ?? []).map(
-    (message) => ({ id: message.id, text: message.content })
+    (message) => ({ id: message.id, text: formatContextMessageText(message) })
   )
   const contextUsage = calculateContextUsage({
     budget: settings.model.contextSize,

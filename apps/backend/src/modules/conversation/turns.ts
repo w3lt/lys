@@ -9,8 +9,8 @@ import { createConversationTurn } from "./createTurn"
 import type { ConversationTurnRecordWriter } from "./records"
 
 /**
- * Retains borrowed turn records to persist atomic turns, their generation
- * lifecycle, and generated titles under the turn policy.
+ * Retains borrowed turn records to persist atomic turns, their replies'
+ * final states, and generated titles under the turn policy.
  *
  * @remarks Invariant: once created, no reply left by an earlier process is
  * still marked streaming. Owns no resource: the records' owner closes the
@@ -75,35 +75,13 @@ export default class StoredConversationTurns
   }
 
   /**
-   * Appends a content delta before it is published to a stream consumer.
-   * @param assistantMessageId - UUIDv7 of the streaming reply.
-   * @param content - Nonempty delta received from the model.
-   * @returns True if appended; false if the reply was deleted or already finalized.
-   * @throws If content is empty (before any storage work), the store is
-   * closed, or the write fails.
-   * @remarks Stores the current time as the reply's update time, in one write
-   * transaction that commits before this method returns.
-   */
-  public updateAssistantMessageContent(
-    assistantMessageId: string,
-    content: string
-  ): boolean {
-    if (content.length === 0)
-      throw new Error("Assistant delta must not be empty")
-    return this.#turnRecordWriter.updateAssistantMessageContent({
-      assistantMessageId,
-      content,
-      updatedAt: new Date().toISOString()
-    })
-  }
-
-  /**
    * Commits one terminal state without changing already-finalized or deleted rows.
    * @param assistantMessageId - UUIDv7 of the streaming reply.
    * @param completion - Valid coupled status and completion reason.
    * @returns True if finalized; false when the message is no longer streaming or stored.
    * @throws If the store is closed or the write fails.
-   * @remarks Stores the current time as the reply's update time.
+   * @remarks Stores the current time as the reply's update time, and as the
+   * update time of each of its tool calls that becomes interrupted.
    */
   public updateAssistantMessageState(
     assistantMessageId: string,

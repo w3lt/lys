@@ -6,10 +6,15 @@ import type {
 } from "../../../modules/conversation/records"
 import type { DatabaseStatementCompiler } from "../databaseTransactions"
 
-/** Shared SQL predicate for counts and pages; values are always bound parameters. */
+/**
+ * Shared SQL predicate for counts and pages; values are always bound
+ * parameters. Only the person's messages and reply text count: reasoning and
+ * tool results are not searched.
+ */
 const matchingConversationSql = `($query = '' OR contains_search(c.title, $query)
   OR EXISTS (SELECT 1 FROM conversation_messages m
-    WHERE m.conversation_id = c.id AND contains_search(m.content, $query)))`
+    WHERE m.conversation_id = c.id AND m.role IN ('user', 'text')
+      AND contains_search(m.content, $query)))`
 
 /** Validates the two count aggregates read within the same page snapshot. */
 const conversationCountsSchema = z.strictObject({
@@ -25,6 +30,8 @@ const conversationCountsSchema = z.strictObject({
  * and the inclusive page size, from one to
  * `MAXIMUM_CONVERSATION_LIST_PAGE_SIZE`.
  * @returns The validated page with full preview text, and whether more rows match.
+ * A preview is the person's message or one text part of a reply, shown as
+ * the reply's; reasoning and tool calls are never previews.
  * @throws If SQLite or stored-record validation fails.
  * @remarks Requires the `contains_search` function on the connection.
  */
@@ -44,12 +51,14 @@ export function listConversations(
   )
   const rows = statements
     .getStatement(
-      `SELECT c.id, c.title, c.created_at AS createdAt,
-    c.updated_at AS updatedAt, p.role AS previewRole, p.content AS previewContent
+      `SELECT c.id, c.title, c.created_at AS createdAt, c.updated_at AS updatedAt,
+    CASE p.role WHEN 'text' THEN 'assistant' ELSE p.role END AS previewRole,
+    p.content AS previewContent
     FROM conversations c LEFT JOIN conversation_messages p ON p.id = (
       SELECT m.id FROM conversation_messages m
-      WHERE m.conversation_id = c.id AND m.content <> ''
-      ORDER BY contains_search(m.content, $query) DESC, m.created_at DESC, m.id DESC LIMIT 1
+      WHERE m.conversation_id = c.id AND m.role IN ('user', 'text')
+      ORDER BY contains_search(m.content, $query) DESC, m.created_at DESC,
+        m.position DESC, m.id DESC LIMIT 1
     ) WHERE ${matchingConversationSql}
       AND ($updatedAt IS NULL OR c.updated_at < $updatedAt
         OR (c.updated_at = $updatedAt AND c.id < $id))

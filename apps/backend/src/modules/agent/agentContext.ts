@@ -1,38 +1,115 @@
-import type { ConversationMessage } from "@lys/share"
+import type {
+  ConversationAssistantMessage,
+  ConversationMessage,
+  ReplyPart,
+  ToolCallReplyPart
+} from "@lys/share"
 import type { ContextToolCall, ReplyContextMessage } from "./replyModel"
 
-/** Tool calls of a stored reply, which never carries any. */
-const NO_CONTEXT_TOOL_CALLS: readonly ContextToolCall[] = Object.freeze([])
+/** A stored tool call that has the result the model read. */
+type AnsweredToolCallReplyPart = Extract<
+  ToolCallReplyPart,
+  { status: "succeeded" | "failed" | "rejected" }
+>
 
 /**
- * Selects stored messages that can supply conversation context.
- * @param message - One persisted transcript message.
- * @returns True for user text, completed replies, and nonempty interrupted replies.
+ * Selects stored replies that can supply conversation context.
+ * @param message - One persisted stored reply.
+ * @returns True for completed and interrupted replies; failed and streaming
+ * replies are left out.
  */
-function shouldIncludeContextMessage(message: ConversationMessage): boolean {
-  if (message.role === "user") return true
-  if (message.content.length === 0) return false
+function isContextReply(message: ConversationAssistantMessage): boolean {
   return message.status === "completed" || message.status === "interrupted"
 }
 
 /**
- * Builds the context message of one stored message.
- * @param message - Stored user message or assistant reply.
- * @returns Its role and text; a reply carries no tool calls.
+ * Answers whether a stored part is a tool call with a result.
+ * @param part - One part of a stored reply.
+ * @returns True for a call that succeeded, failed, or was rejected.
  */
-function buildStoredContextMessage(
-  message: ConversationMessage
-): ReplyContextMessage {
-  switch (message.role) {
-    case "user":
-      return { role: "user", content: message.content }
-    case "assistant":
-      return {
-        role: "assistant",
-        content: message.content,
-        toolCalls: NO_CONTEXT_TOOL_CALLS
-      }
+function isAnsweredToolCall(
+  part: ReplyPart
+): part is AnsweredToolCallReplyPart {
+  return part.kind === "tool-call" && "result" in part
+}
+
+/**
+ * Groups a stored reply's parts by the round they belong to.
+ * @param parts - Parts in stored order, whose rounds never decrease.
+ * @returns Each round's parts in stored order, rounds in order.
+ */
+function groupReplyPartsByRound(
+  parts: readonly ReplyPart[]
+): readonly (readonly ReplyPart[])[] {
+  const rounds: ReplyPart[][] = []
+  for (const part of parts) {
+    const lastRound = rounds.at(-1)
+    if (lastRound?.[0]?.round === part.round) lastRound.push(part)
+    else rounds.push([part])
   }
+  return rounds
+}
+
+/**
+ * Builds the context form of a stored call.
+ * @param part - Stored call with a result.
+ * @returns The call with its identity, name, and the model's argument text.
+ */
+function buildContextToolCall(
+  part: AnsweredToolCallReplyPart
+): ContextToolCall {
+  return {
+    id: part.id,
+    toolName: part.toolName,
+    argumentText: part.argumentText
+  }
+}
+
+/**
+ * Builds the context messages of one stored round.
+ * @param parts - The round's parts in stored order.
+ * @returns One assistant message with the round's text and its answered
+ * calls, then one result message per answered call; none when the round has
+ * neither text nor an answered call. Reasoning and calls without a result
+ * are left out.
+ */
+function buildStoredRoundContextMessages(
+  parts: readonly ReplyPart[]
+): readonly ReplyContextMessage[] {
+  const text = parts
+    .flatMap((part) => (part.kind === "text" ? [part.content] : []))
+    .join("")
+  const answeredCalls = parts.filter(isAnsweredToolCall)
+  if (text === "" && answeredCalls.length === 0) return []
+  const assistantMessage: ReplyContextMessage = {
+    role: "assistant",
+    content: text,
+    toolCalls: answeredCalls.map(buildContextToolCall)
+  }
+  const resultMessages = answeredCalls.map((part): ReplyContextMessage => ({
+    role: "tool",
+    toolCallId: part.id,
+    content: part.result
+  }))
+  return [assistantMessage, ...resultMessages]
+}
+
+/**
+ * Builds the context messages of one stored message.
+ * @param message - Stored user message or reply.
+ * @returns The user message's text; a context reply's rounds as
+ * {@link buildStoredRoundContextMessages} builds them; nothing for another
+ * reply.
+ */
+function buildStoredContextMessages(
+  message: ConversationMessage
+): readonly ReplyContextMessage[] {
+  if (message.role === "user")
+    return [{ role: "user", content: message.content }]
+  if (!isContextReply(message)) return []
+  return groupReplyPartsByRound(message.parts).flatMap(
+    buildStoredRoundContextMessages
+  )
 }
 
 /**
@@ -40,10 +117,12 @@ function buildStoredContextMessage(
  * @param systemPrompt - The agent's own instructions, sent first.
  * @param history - Stored transcript before the turn, in conversation order.
  * @param userMessageContent - Text of the message the turn answers, sent last.
- * @returns The system prompt, the history's user messages, completed replies,
- * and nonempty interrupted replies in order, then the new message once. Failed,
- * streaming, and empty replies are left out; each message keeps only its role
- * and text, and a reply carries no tool calls.
+ * @returns The system prompt, then the history's user messages and the rounds
+ * of its completed and interrupted replies in order, then the new message
+ * once. Each stored round sends its text and the tool calls that have a
+ * result, followed by those results; reasoning, calls without a result, and
+ * rounds with neither text nor such a call are left out, and failed and
+ * streaming replies are left out whole.
  */
 export function buildAgentContext(
   systemPrompt: string,
@@ -52,9 +131,7 @@ export function buildAgentContext(
 ): readonly ReplyContextMessage[] {
   return [
     { role: "system", content: systemPrompt },
-    ...history
-      .filter(shouldIncludeContextMessage)
-      .map(buildStoredContextMessage),
+    ...history.flatMap(buildStoredContextMessages),
     { role: "user", content: userMessageContent }
   ]
 }

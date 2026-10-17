@@ -96,6 +96,18 @@ async function startWebResearcherConversation(
   return start.conversation.id
 }
 
+/**
+ * Streams fixed chat completion chunks.
+ *
+ * @param chunks - Chunks yielded in order.
+ * @yields Each chunk.
+ */
+async function* createChunkStream(
+  ...chunks: ReturnType<typeof createChatCompletionChunk>[]
+): AsyncGenerator<ReturnType<typeof createChatCompletionChunk>> {
+  yield* chunks
+}
+
 describe("updateFastifyWithChatRoute", () => {
   it("responds with the missing-conversation problem before storing a turn or contacting the model", async () => {
     const testApp = await createChatRouteTestApp()
@@ -329,10 +341,20 @@ describe("updateFastifyWithChatRoute", () => {
         })
       )
       const replyEvents = parseSseEvents(response.body).filter(
-        ({ event }) => event === "delta" || event === "done"
+        ({ event }) => event === "reply-part" || event === "done"
       )
       expect(replyEvents).toEqual([
-        { event: "delta", data: { type: "delta", content: "Hi" } },
+        {
+          event: "reply-part",
+          data: {
+            type: "reply-part",
+            part: expect.objectContaining({
+              kind: "text",
+              round: 0,
+              content: "Hi"
+            })
+          }
+        },
         { event: "done", data: { type: "done", finishReason: "stop" } }
       ])
     }
@@ -752,6 +774,110 @@ describe("updateFastifyWithChatRoute", () => {
           msg: expect.stringContaining("Just run")
         })
       )
+    })
+  })
+
+  describe("web sources", () => {
+    /**
+     * Has the model answer one turn by looking up a word, then saying `Done`.
+     *
+     * @param testApp - Test application whose model the turn uses.
+     * @param word - Word the model looks up.
+     */
+    function queueLookUpTurn(testApp: ChatRouteTestApp, word: string): void {
+      const callChunk = createChatCompletionChunk({
+        toolCalls: [
+          {
+            index: 0,
+            id: "call_0",
+            type: "function",
+            function: {
+              name: "look_up_word",
+              arguments: JSON.stringify({ word })
+            }
+          }
+        ]
+      })
+      testApp.completeChatStream
+        .mockImplementationOnce(async () =>
+          createChunkStream(
+            callChunk,
+            createChatCompletionChunk({ finishReason: "tool_calls" })
+          )
+        )
+        .mockImplementationOnce(async () =>
+          createChunkStream(
+            createChatCompletionChunk({
+              content: "Done [1]",
+              finishReason: "stop"
+            })
+          )
+        )
+    }
+
+    it("numbers a later turn's new sources after the ones the conversation stored, keeping a known URL's number", async () => {
+      const testApp = await createChatRouteTestApp()
+      testApp.createConversationTurn.mockRestore()
+      testApp.generateTitle.mockResolvedValue("Moths")
+      testApp.readJustRunToolNames.mockResolvedValue({
+        status: "read",
+        toolNames: new Set(["look_up_word"])
+      })
+      updateFastifyWithChatRoute(testApp.app, {
+        ...CHAT_ROUTE_OPTIONS,
+        generations: testApp.generations
+      })
+      const tools = { definitions: [], backendToolNames: ["look_up_word"] }
+      queueLookUpTurn(testApp, "moth")
+      const first = await sendChatRequest(testApp.app, {
+        ...NEW_CONVERSATION_REQUEST,
+        tools
+      })
+      const start = chatApiStreamEventSchema.parse(
+        parseSseEvents(first.body)[0]?.data
+      )
+      if (start.type !== "start-new-conversation-turn")
+        throw new Error("The chat route did not start a new conversation")
+      queueLookUpTurn(testApp, "lamp")
+      queueLookUpTurn(testApp, "moth")
+
+      const second = await sendChatRequest(testApp.app, {
+        ...NEW_CONVERSATION_REQUEST,
+        conversation: { kind: "existing", id: start.conversation.id },
+        message: "And lamps?",
+        tools
+      })
+      const third = await sendChatRequest(testApp.app, {
+        ...NEW_CONVERSATION_REQUEST,
+        conversation: { kind: "existing", id: start.conversation.id },
+        message: "Moths again?",
+        tools
+      })
+
+      const moth = {
+        number: 1,
+        url: "https://words.example/moth",
+        title: "Dictionary: moth"
+      }
+      const lamp = {
+        number: 2,
+        url: "https://words.example/lamp",
+        title: "Dictionary: lamp"
+      }
+      for (const [response, sources] of [
+        [first, [moth]],
+        [second, [lamp]],
+        [third, [moth]]
+      ] as const)
+        expect(parseSseEvents(response.body)).toContainEqual({
+          event: "sources",
+          data: { type: "sources", sources }
+        })
+      expect(
+        testApp.app.conversationHistoryReader.getConversation(
+          start.conversation.id
+        )?.sources
+      ).toEqual([moth, lamp])
     })
   })
 })

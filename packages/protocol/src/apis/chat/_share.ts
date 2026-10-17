@@ -1,4 +1,9 @@
-import { toolArgumentNameSchema, toolNameSchema } from "@lys/share"
+import {
+  conversationSourceSchema,
+  replyPartSchema,
+  toolArgumentNameSchema,
+  toolNameSchema
+} from "@lys/share"
 import * as z from "zod"
 
 /**
@@ -51,11 +56,49 @@ export const chatTitleEventSchema = z.strictObject({
   title: z.string().min(1)
 })
 
-/** Validates one stored assistant text fragment, sent in stream order. */
-export const chatDeltaEventSchema = z.strictObject({
-  type: z.literal("delta"),
-  /** Non-empty assistant content fragment in stream order. */
-  content: z.string().min(1)
+/**
+ * Validates the event reporting one stored part of the reply.
+ *
+ * @remarks A part whose identifier the reply does not have yet is new and
+ * follows every earlier part. A tool call whose identifier the reply has
+ * already is the same call in a later state and replaces it. The part is
+ * stored before this event is sent.
+ */
+export const chatReplyPartEventSchema = z.strictObject({
+  type: z.literal("reply-part"),
+  /** Stored part, complete as of this event. */
+  part: replyPartSchema
+})
+
+/**
+ * Validates the event reporting one stored fragment of a reasoning or text
+ * part, sent in stream order.
+ *
+ * @remarks The fragment is appended after the part's earlier content and is
+ * stored before this event is sent.
+ */
+export const chatReplyPartDeltaEventSchema = z.strictObject({
+  type: z.literal("reply-part-delta"),
+  /** UUIDv7 of the reasoning or text part the fragment belongs to. */
+  partId: z.uuidv7(),
+  /** Non-empty fragment appended after the part's earlier content. */
+  content: z.string().min(1),
+  /** Time the fragment was stored, the part's new `updatedAt`. */
+  updatedAt: z.iso.datetime({ precision: 3 })
+})
+
+/**
+ * Validates the event reporting the numbered sources stored with one tool
+ * call.
+ *
+ * @remarks Sent right before the `reply-part` event of the call whose result
+ * shows them. A number the client already has keeps the same source, so
+ * merging by number is safe.
+ */
+export const chatSourcesEventSchema = z.strictObject({
+  type: z.literal("sources"),
+  /** Sources the call's result shows, in the order it shows them. */
+  sources: z.array(conversationSourceSchema).readonly()
 })
 
 /** Validates the event reporting that the reply completed and was stored. */
@@ -72,7 +115,8 @@ export const chatDoneEventSchema = z.strictObject({
  * @remarks Sent when the reply was stopped, superseded by a newer turn in its
  * conversation, deleted with its conversation, or cancelled by backend
  * shutdown. The stored reply, if it still exists, is `interrupted` with
- * exactly the content delivered before this event.
+ * exactly the parts delivered before this event, and its tool calls that
+ * were still waiting for approval or running are `interrupted`.
  */
 export const chatInterruptedEventSchema = z.strictObject({
   type: z.literal("interrupted")
@@ -90,8 +134,9 @@ export const chatErrorEventSchema = z.strictObject({
  *
  * @remarks The backend creates the identifier and has already checked the
  * arguments against the definition of the tool it offered, so an optional
- * argument the model left out is an absent key. The call is never stored; it
- * lives only until it is answered or its reply ends. A call's approval
+ * argument the model left out is an absent key. The request to answer it
+ * lives only until it is answered or its reply ends; the call itself is
+ * stored as a tool-call part under the same identifier. A call's approval
  * prompt and, for a client tool, its later run request carry the same
  * identifier.
  */
@@ -160,13 +205,16 @@ export const chatToolApprovalEventSchema = z.strictObject({
  * the three: the backend ends a follower that falls too far behind, and a
  * reply whose final state cannot be stored sends none. Such a close says
  * nothing about the reply's outcome; following the reply again or reading
- * its conversation returns the stored state. `tool-approval` and
- * `tool-call` events arrive while the reply waits for a client to answer
- * them.
+ * its conversation returns the stored state. `reply-part`,
+ * `reply-part-delta`, and `sources` events carry what the reply stored, in
+ * the order it stored it. `tool-approval` and `tool-call` events arrive while
+ * the reply waits for a client to answer them.
  */
 export type ChatGenerationEvent =
   | z.infer<typeof chatTitleEventSchema>
-  | z.infer<typeof chatDeltaEventSchema>
+  | z.infer<typeof chatReplyPartEventSchema>
+  | z.infer<typeof chatReplyPartDeltaEventSchema>
+  | z.infer<typeof chatSourcesEventSchema>
   | z.infer<typeof chatDoneEventSchema>
   | z.infer<typeof chatInterruptedEventSchema>
   | z.infer<typeof chatErrorEventSchema>

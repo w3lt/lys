@@ -5,19 +5,30 @@ import ReplyGeneration, {
   type ReplyTaskContext
 } from "../../../../src/modules/chat/replyGeneration"
 import ControlledReplyTask from "../../support/controlledReplyTask"
+import {
+  createFixtureUuidV7,
+  FIXTURE_TIMESTAMP
+} from "../../support/conversationFixtures"
 import { waitForMicrotasks } from "../../support/microtasks"
 import { createSettlementReader } from "../../support/settlement"
 
+/** Identity of the reply part the sample fragments extend. */
+const STREAMED_PART_ID = createFixtureUuidV7(12)
+
 /** First reply fragment a task sends. */
 const FIRST_DELTA = Object.freeze({
-  type: "delta",
-  content: "Hi"
+  type: "reply-part-delta",
+  partId: STREAMED_PART_ID,
+  content: "Hi",
+  updatedAt: FIXTURE_TIMESTAMP
 } satisfies ChatGenerationEvent)
 
 /** Second reply fragment a task sends. */
 const SECOND_DELTA = Object.freeze({
-  type: "delta",
-  content: " there"
+  type: "reply-part-delta",
+  partId: STREAMED_PART_ID,
+  content: " there",
+  updatedAt: FIXTURE_TIMESTAMP
 } satisfies ChatGenerationEvent)
 
 /** Title a title task sends while the reply is still streaming. */

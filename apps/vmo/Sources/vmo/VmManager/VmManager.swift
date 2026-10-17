@@ -113,7 +113,7 @@ actor VmManager {
             _ = try await manager.create(containerId, reference: imageReference, rootfsSizeInBytes: 1.gib()) {
                 @Sendable config in
                 config.cpus = 2
-                config.memoryInBytes = 521.mib()
+                config.memoryInBytes = 512.mib()
                 config.process.arguments = ["/bin/sh"]
                 config.process.workingDirectory = "/"
             }

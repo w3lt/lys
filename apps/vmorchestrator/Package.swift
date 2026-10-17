@@ -4,16 +4,26 @@
 import PackageDescription
 
 let package = Package(
-    name: "vmorchestrator",
+    name: "vmo",
+    platforms: [.macOS("26.0")],
+    products: [
+        .executable(name: "vmo", targets: ["vmo"])
+    ],
+    dependencies: [
+        .package(url: "https://github.com/apple/containerization", exact: "0.52.0")
+    ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
         // Targets can depend on other targets in this package and products from dependencies.
         .executableTarget(
-            name: "vmorchestrator"
+            name: "vmo",
+            dependencies: [
+                .product(name: "Containerization", package: "containerization")
+            ]
         ),
         .testTarget(
-            name: "vmorchestratorTests",
-            dependencies: ["vmorchestrator"]
+            name: "vmoTests",
+            dependencies: ["vmo"]
         ),
     ],
     swiftLanguageModes: [.v6]

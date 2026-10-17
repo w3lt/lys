@@ -26,7 +26,7 @@ In `packages/protocol/src/apis/`, primary payload contracts such as request bodi
 
 Endpoint descriptors, status-to-schema maps, reply maps, and framework route wrappers MAY use ordinary objects and TypeScript types that compose the primary contracts. They do not require Zod schemas solely for type derivation. Avoid handwritten mirrors of an inferable schema-map or descriptor shape. Use `z.infer`, `z.input`, or `z.output` only with an actual Zod schema, never with a plain descriptor or schema map.
 
-## LLM runtime surface and unresolved review
+## LLM runtime surface and review history
 
 The current runtime surface maps to
 [IFACE-006 and IFACE-026](https://github.com/w3lt/lys/blob/main/docs/code_standards/INTERFACE.md)
@@ -72,16 +72,17 @@ The seven-operation composite and eight-operation class exceed their default
 limits. Shared resource identity alone does not satisfy the exception criteria,
 although the production owner now uses every operation. No valid exception
 approval was established in the inspected repository and PR review evidence.
-[Issue #37](https://github.com/w3lt/lys/issues/37) remains unresolved;
-recording these facts does not approve an exception or change the implementation.
+Recording these facts does not approve an exception or change the
+implementation.
 
 Historically, [review finding I-8 on PR #23](https://github.com/w3lt/lys/pull/23#issuecomment-5633082465)
 identified a missing design record and approval behind source-level exception
 claims. Those claims were subsequently removed from source documentation. The
 missing record was not present in the inspected repository or its path history,
 and the inspected PR review list was empty; this describes the inspected evidence,
-not proof that no discussion could have occurred elsewhere. Moving the review
-mapping here does not close the finding's underlying surface-compliance issue.
+not proof that no discussion could have occurred elsewhere.
+[Issue #37](https://github.com/w3lt/lys/issues/37) tracked the finding, and the
+maintainer closed it as completed on 2026-09-29.
 
 A separate implementation decision can reduce the surface or provide the evidence
 and explicit reviewer approval required by the

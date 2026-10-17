@@ -1,210 +1,196 @@
 import Foundation
 import Network
 
-final class WebServer: Sendable {
-    private let port: NWEndpoint.Port
-    private let host: NWEndpoint.Host
+/// Listener callbacks, delivered to the serving loop in the order the listener
+/// reported them.
+private enum ListenerEvent: Sendable {
+    /// The listener accepted a connection that has not been started.
+    case connectionAccepted(NWConnection)
+    /// The listener stopped because of an error. No event follows it.
+    case listenerFailed(NWError)
+}
 
-    init(port: NWEndpoint.Port = 8080, host: NWEndpoint.Host = "127.0.0.1") {
+/// Owns a router and a local TCP address to serve HTTP/1.1 there, while
+/// answering each connection's one request through the router and closing every
+/// connection it accepts.
+///
+/// Every connection carries one request and one response, then closes.
+/// Concurrency model: reentrant. The server has no mutable state; each
+/// ``start()`` call owns its own listener and connection tasks.
+final class WebServer: Sendable {
+    /// Routes that answer requests.
+    private let router: Router
+    /// Local address the listener binds.
+    private let host: NWEndpoint.Host
+    /// Local TCP port the listener binds.
+    private let port: NWEndpoint.Port
+
+    /// Creates a server that is not listening yet.
+    ///
+    /// - Parameters:
+    ///   - router: Routes that answer requests.
+    ///   - host: Local address to bind. Defaults to the IPv4 loopback address,
+    ///     so only this machine can connect.
+    ///   - port: TCP port to bind. Defaults to 8080.
+    init(router: Router, host: NWEndpoint.Host = "127.0.0.1", port: NWEndpoint.Port = 8080) {
+        self.router = router
         self.host = host
         self.port = port
     }
-    
-    public func start() async throws {
+
+    /// Starts listening and serves connections until the calling task is
+    /// cancelled or the listener fails.
+    ///
+    /// Connections are served concurrently, one child task each. After
+    /// cancellation the call cancels every open connection, waits for their
+    /// tasks to end, and returns normally. It returns at once when the task is
+    /// already cancelled.
+    ///
+    /// - Throws: The listener's `NWError` when it cannot be created or fails,
+    ///   for example because the port is in use. Open connections are
+    ///   cancelled and their tasks have ended before the error is thrown.
+    func start() async throws {
+        guard !Task.isCancelled else {
+            return
+        }
+        let listener = try buildListener()
+        let (events, continuation) = AsyncStream.makeStream(of: ListenerEvent.self)
+        defer {
+            listener.cancel()
+            continuation.finish()
+        }
+        listener.stateUpdateHandler = { state in
+            self.handleListenerStateUpdate(state, continuation: continuation)
+        }
+        listener.newConnectionHandler = { connection in
+            handleListenerNewConnection(connection, continuation: continuation)
+        }
+        listener.start(queue: DispatchQueue(label: "WebServer.Listener"))
+        try await withThrowingDiscardingTaskGroup { group in
+            try await addConnectionTasks(from: events, to: &group)
+        }
+    }
+
+    /// Builds a TCP listener bound to exactly this server's host and port.
+    ///
+    /// The port is given only through the required local endpoint, because
+    /// Network.framework rejects a listener that also receives it separately.
+    ///
+    /// - Returns: A listener that has not been started.
+    /// - Throws: `NWError` when Network.framework rejects the parameters.
+    private func buildListener() throws -> NWListener {
         let parameters = NWParameters.tcp
         parameters.allowLocalEndpointReuse = true
-        parameters.requiredLocalEndpoint = .hostPort(host: self.host, port: self.port)
-        
-        let listener = try NWListener(using: parameters, on: self.port)
-        listener.stateUpdateHandler = { state in
-            switch state {
-            case .ready:
-                print("WebServer listening on \(self.host):\(self.port)")
-            case .failed(let error):
-                print("Listener failed: \(error)")
-            case .cancelled:
-                print("Listener cancelled")
-            default:
-                break
-            }
-        }
-        
-        listener.newConnectionHandler = { [weak self] connection in
-            guard let self else { return }
-            connection.stateUpdateHandler = { state in
-                switch state {
-                case .ready:
-                    Task {
-                        do {
-                            try await self.handle(connection: connection)
-                        } catch {
-                            print("Connection Error: \(error)")
-                            connection.cancel()
-                        }
-                    }
-                case .failed(let error):
-                    print("Connection failed: \(error)")
-                    connection.cancel()
-                case .cancelled:
-                    break
-                default:
-                    break
-                }
-            }
-            let queue = DispatchQueue(label: "WebServer.Connection", qos: .userInitiated)
-            connection.start(queue: queue)
-        }
-        
-        let queue = DispatchQueue(label: "WebServer.Listener", qos: .userInitiated)
-        listener.start(queue: queue)
-        
-        defer { listener.cancel() }
-        
-        // Keep the listener alive until the task is cancelled
-        while !Task.isCancelled {
-            try await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
-        }
-    }
-    
-    private func handle(connection: NWConnection) async throws {
-        // Read until end of headers (CRLF CRLF)
-        var buffer = Data()
-        let headerTerminator = Data([13, 10, 13, 10]) // \r\n\r\n
-        while true {
-            let (data, isComplete) = try await receiveChunk(from: connection)
-            if let data, !data.isEmpty {
-                buffer.append(data)
-            }
-            if buffer.range(of: headerTerminator) != nil { break }
-            if isComplete { break }
-        }
-
-        guard let headerRange = buffer.range(of: headerTerminator) else {
-            try await sendResponse(
-                connection: connection,
-                statusCode: 400,
-                reason: "Bad Request",
-                headers: ["Content-Type": "text/plain; charset=utf-8"],
-                body: Data("Bad Request\n".utf8)
-            )
-            connection.cancel()
-            return
-        }
-
-        let headerData = buffer[..<headerRange.lowerBound]
-        guard let headerString = String(data: headerData, encoding: .utf8) else {
-            try await sendResponse(
-                connection: connection,
-                statusCode: 400,
-                reason: "Bad Request",
-                headers: ["Content-Type": "text/plain; charset=utf-8"],
-                body: Data("Bad Request\n".utf8)
-            )
-            connection.cancel()
-            return
-        }
-
-        let requestLine = headerString.split(separator: "\r\n", maxSplits: 1, omittingEmptySubsequences: false).first ?? ""
-        let parts = requestLine.split(separator: " ")
-        let method = parts.count > 0 ? String(parts[0]) : "GET"
-        let path = parts.count > 1 ? String(parts[1]) : "/"
-
-        if method != "GET" {
-            try await sendResponse(
-                connection: connection,
-                statusCode: 405,
-                reason: "Method Not Allowed",
-                headers: ["Content-Type": "text/plain; charset=utf-8", "Allow": "GET"],
-                body: Data("Method Not Allowed\n".utf8)
-            )
-            connection.cancel()
-            return
-        }
-
-        switch path {
-        case "/":
-            let body = Data("Hello, world!\n".utf8)
-            try await sendResponse(
-                connection: connection,
-                statusCode: 200,
-                reason: "OK",
-                headers: ["Content-Type": "text/plain; charset=utf-8"],
-                body: body
-            )
-        case "/dummy-json":
-            let jsonObject: [String: Any] = [
-                "message": "This is dummy JSON",
-                "items": [1, 2, 3],
-                "success": true
-            ]
-            let body = try JSONSerialization.data(withJSONObject: jsonObject, options: [.prettyPrinted])
-            try await sendResponse(
-                connection: connection,
-                statusCode: 200,
-                reason: "OK",
-                headers: ["Content-Type": "application/json; charset=utf-8"],
-                body: body
-            )
-        default:
-            let body = Data("Not Found\n".utf8)
-            try await sendResponse(
-                connection: connection,
-                statusCode: 404,
-                reason: "Not Found",
-                headers: ["Content-Type": "text/plain; charset=utf-8"],
-                body: body
-            )
-        }
-
-        connection.cancel()
+        parameters.requiredLocalEndpoint = .hostPort(host: host, port: port)
+        return try NWListener(using: parameters)
     }
 
-    private func receiveChunk(from connection: NWConnection) async throws -> (Data?, Bool) {
-        try await withCheckedThrowingContinuation { continuation in
-            connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { data, _, isComplete, error in
-                if let error = error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume(returning: (data, isComplete))
-                }
-            }
+    /// Reports a listener state change.
+    ///
+    /// Runs on the listener queue. Failure and cancellation finish the event
+    /// stream, so the serving loop stops after the events already delivered.
+    ///
+    /// - Parameters:
+    ///   - state: New listener state.
+    ///   - continuation: Producer side of the serving loop's event stream.
+    private func handleListenerStateUpdate(
+        _ state: NWListener.State,
+        continuation: AsyncStream<ListenerEvent>.Continuation
+    ) {
+        switch state {
+        case .setup:
+            break // Initial state before the listener starts; nothing to report.
+        case .ready:
+            print("WebServer listening on \(host):\(port)")
+        case .waiting(let error):
+            print("WebServer waiting to listen on \(host):\(port): \(error)")
+        case .failed(let error):
+            continuation.yield(.listenerFailed(error))
+            continuation.finish()
+        case .cancelled:
+            continuation.finish()
+        @unknown default:
+            print("WebServer listener entered unknown state \(state)")
         }
     }
 
-    private func sendResponse(
-        connection: NWConnection,
-        statusCode: Int,
-        reason: String,
-        headers: [String: String],
-        body: Data
+    /// Adds one child task per accepted connection until the event stream ends.
+    ///
+    /// The stream ends when the calling task is cancelled or the listener is
+    /// cancelled. Connections already buffered in the stream still get a task;
+    /// in a cancelled group that task cancels its connection at once.
+    ///
+    /// - Parameters:
+    ///   - events: Listener events in the order they occurred.
+    ///   - group: Group that owns the connection tasks.
+    /// - Throws: The listener's `NWError` when it fails.
+    private func addConnectionTasks(
+        from events: AsyncStream<ListenerEvent>,
+        to group: inout ThrowingDiscardingTaskGroup<any Error>
     ) async throws {
-        var headerLines: [String] = []
-        headerLines.append("HTTP/1.1 \(statusCode) \(reason)")
-        var allHeaders = headers
-        allHeaders["Content-Length"] = "\(body.count)"
-        allHeaders["Connection"] = "close"
-
-        for (key, value) in allHeaders {
-            headerLines.append("\(key): \(value)")
+        for await event in events {
+            switch event {
+            case .connectionAccepted(let connection):
+                group.addTask { await self.handleConnection(connection) }
+            case .listenerFailed(let error):
+                throw error
+            }
         }
-        headerLines.append("") // blank line
-        let headerString = headerLines.joined(separator: "\r\n") + "\r\n"
-        var responseData = Data(headerString.utf8)
-        responseData.append(body)
-
-        try await send(data: responseData, over: connection)
     }
 
-    private func send(data: Data, over connection: NWConnection) async throws {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            connection.send(content: data, completion: .contentProcessed { error in
-                if let error = error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume()
-                }
-            })
+    /// Serves one accepted connection from start to close.
+    ///
+    /// The connection is cancelled on every path. Task cancellation cancels it
+    /// at once, which ends a pending read or send. Failures are logged here
+    /// because no caller can act on them: the connection is already lost.
+    ///
+    /// - Parameter connection: Accepted connection that has not been started.
+    private func handleConnection(_ connection: NWConnection) async {
+        connection.start(queue: DispatchQueue(label: "WebServer.Connection"))
+        defer { connection.cancel() }
+        do {
+            try await withTaskCancellationHandler {
+                try await handleRequest(on: connection)
+            } onCancel: {
+                connection.cancel()
+            }
+        } catch {
+            print("WebServer connection \(connection.endpoint) failed: \(error)")
+        }
+    }
+
+    /// Reads the connection's request and sends the one response for it.
+    ///
+    /// A request that cannot reach a route gets the matching error response.
+    ///
+    /// - Parameter connection: Started connection whose request has not been
+    ///   read.
+    /// - Throws: The connection's `NWError` when receiving or sending fails.
+    private func handleRequest(on connection: NWConnection) async throws {
+        do {
+            let head = try await connection.readRequestHead()
+            let request = try HTTPRequest(parsingHead: head)
+            let response = await router.handleRequest(request)
+            try await connection.sendResponse(response)
+        } catch let error as HTTPRequestError {
+            try await connection.sendResponse(HTTPResponse(requestError: error))
         }
     }
 }
 
+/// Passes a connection the listener accepted to the serving loop, or cancels
+/// it when the loop has already ended.
+///
+/// Runs on the listener queue.
+///
+/// - Parameters:
+///   - connection: Accepted connection that has not been started.
+///   - continuation: Producer side of the serving loop's event stream.
+private func handleListenerNewConnection(
+    _ connection: NWConnection,
+    continuation: AsyncStream<ListenerEvent>.Continuation
+) {
+    if case .terminated = continuation.yield(.connectionAccepted(connection)) {
+        connection.cancel()
+    }
+}

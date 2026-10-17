@@ -31,11 +31,11 @@ dist-ssr
 .agent-work/
 /worktree/
 
-# Swift package: apps/vmorchestrator
-/apps/vmorchestrator/.build
-/apps/vmorchestrator/Packages
-/apps/vmorchestrator/**/xcuserdata/
-/apps/vmorchestrator/**/DerivedData/
-/apps/vmorchestrator/.swiftpm/configuration/registries.json
-/apps/vmorchestrator/.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
-/apps/vmorchestrator/**/.netrc
+# Swift package: apps/vmo
+/apps/vmo/.build
+/apps/vmo/Packages
+/apps/vmo/**/xcuserdata/
+/apps/vmo/**/DerivedData/
+/apps/vmo/.swiftpm/configuration/registries.json
+/apps/vmo/.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
+/apps/vmo/**/.netrc

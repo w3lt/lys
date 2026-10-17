@@ -24,9 +24,9 @@ struct HTTPRequestParsingTests {
     /// header lines after it are not routed on.
     @Test("Reads the method and path from the request line and ignores header lines")
     func readsMethodAndPath() throws {
-        let request = try HTTPRequest(parsingHead: Data("GET /dummy-json HTTP/1.1\r\nHost: localhost".utf8))
+        let request = try HTTPRequest(parsingHead: Data("GET /web/read-page HTTP/1.1\r\nHost: localhost".utf8))
 
-        #expect(request == HTTPRequest(method: .get, path: "/dummy-json", query: []))
+        #expect(request == HTTPRequest(method: .get, path: "/web/read-page", query: []))
     }
 
     /// Verifies that the query is split from the path, so `/read?…` still

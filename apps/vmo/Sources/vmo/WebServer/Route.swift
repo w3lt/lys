@@ -1,8 +1,10 @@
 /// One endpoint: the method and path it answers and the closure that answers
 /// it.
 ///
-/// Each endpoint is a static member declared in `Endpoints/`. The entry point
-/// registers it by passing it to ``Router/init(routes:)``.
+/// Each endpoint is declared in `Endpoints/`: a static member when it needs
+/// nothing, or a static factory that receives the services it uses. The entry
+/// point builds every route from its services and registers it by passing it
+/// to ``Router/init(routes:)``.
 struct Route: Sendable {
     /// Method the route answers.
     let method: HTTPMethod

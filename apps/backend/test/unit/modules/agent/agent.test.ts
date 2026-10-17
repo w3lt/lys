@@ -14,6 +14,15 @@ import Agent, {
   type AgentTurn,
   type AssistantMessageCompletion
 } from "../../../../src/modules/agent/agent"
+import {
+  ReplyContextOverflowError,
+  ReplyModelNotLoadedError
+} from "../../../../src/modules/agent/replyContextFit"
+import type {
+  ReplyContextMeasurement,
+  ReplyContextMeasurementRequest,
+  ReplyContextMeter
+} from "../../../../src/modules/agent/replyContextMeter"
 import type {
   ReplyModel,
   ReplyStreamEvent
@@ -27,6 +36,10 @@ import {
   createAssistantMessage,
   createUserMessage
 } from "../../support/conversationFixtures"
+import {
+  createRoomyReplyContextMeter,
+  createUnloadedReplyContextMeter
+} from "../../support/replyContextMeterFakes"
 import {
   LOOK_UP_WORD_FORMAT,
   LOOK_UP_WORD_TOOL,
@@ -93,6 +106,8 @@ type AgentReplyScenario = Readonly<{
   sendToolApprovalPrompt?: SendToolApprovalPrompt
   /** Gate of each round; a gate over {@link justRunToolNames} by default. */
   createToolCallGate?: AgentTurn["createToolCallGate"]
+  /** Context meter of the model; every context fits by default. */
+  replyContextMeter?: ReplyContextMeter
 }>
 
 /**
@@ -194,6 +209,27 @@ function createLookUpWordTool(runScript?: BuiltInToolRunScript) {
   return { tool, entry }
 }
 
+/**
+ * Creates a meter that counts one token per character of each message's text
+ * and offers no tools, for a model loaded with a fixed context length.
+ *
+ * @param contextLength - Context length the model is loaded with.
+ * @returns A meter spy.
+ */
+function createCharacterReplyContextMeter(contextLength: number) {
+  return {
+    findReplyContextMeasurement: vi.fn(
+      async (request: ReplyContextMeasurementRequest) => ({
+        contextLength,
+        messageTokenCounts: request.messages.map(
+          (message) => message.content.length
+        ),
+        toolTokenCount: 0
+      })
+    )
+  } satisfies ReplyContextMeter
+}
+
 /** Matches a UUIDv7 the agent gave a call. */
 const UUID_V7_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
@@ -221,12 +257,13 @@ function buildCreateToolCallGate(
  * Has one agent answer one turn to settlement and records the effects.
  *
  * @param scenario - Model, history, storage, and cancellation behavior.
- * @returns The sent events, stored deltas and states, reported cancellations
- * and failures, and the reply's settlement.
+ * @returns The sent events, stored deltas and states, reported
+ * cancellations, refusals, and failures, and the reply's settlement.
  */
 async function getAgentReplyOutcome(scenario: AgentReplyScenario) {
   const events: ChatGenerationEvent[] = []
   const reportedCancellations: unknown[] = []
+  const reportedRefusals: unknown[] = []
   const reportedFailures: unknown[] = []
   const persistedDeltas: string[] = []
   const persistedStates: AssistantMessageCompletion[] = []
@@ -236,9 +273,11 @@ async function getAgentReplyOutcome(scenario: AgentReplyScenario) {
   const updateAssistantMessageState = vi.fn(
     scenario.updateAssistantMessageState ?? (() => true)
   )
-  const agent = new Agent(AGENT_PROFILE, {
-    openReplyStream: scenario.openReplyStream
-  })
+  const agent = new Agent(
+    AGENT_PROFILE,
+    { openReplyStream: scenario.openReplyStream },
+    scenario.replyContextMeter ?? createRoomyReplyContextMeter()
+  )
   const settlement = await agent
     .createReply({
       ...TURN_REQUEST,
@@ -255,6 +294,9 @@ async function getAgentReplyOutcome(scenario: AgentReplyScenario) {
       },
       reportReplyCancellation: (failure) => {
         reportedCancellations.push(failure)
+      },
+      reportReplyRefusal: (failure) => {
+        reportedRefusals.push(failure)
       },
       reportReplyFailure: (failure) => {
         reportedFailures.push(failure)
@@ -281,6 +323,7 @@ async function getAgentReplyOutcome(scenario: AgentReplyScenario) {
     persistedStates,
     updateAssistantMessageContent,
     reportedCancellations,
+    reportedRefusals,
     reportedFailures,
     settlement
   }
@@ -288,9 +331,11 @@ async function getAgentReplyOutcome(scenario: AgentReplyScenario) {
 
 describe("Agent", () => {
   it("reports the code it was created with", () => {
-    const agent = new Agent(AGENT_PROFILE, {
-      openReplyStream: createEventStream()
-    })
+    const agent = new Agent(
+      AGENT_PROFILE,
+      { openReplyStream: createEventStream() },
+      createRoomyReplyContextMeter()
+    )
 
     expect(agent.code).toBe("lys")
   })
@@ -684,16 +729,20 @@ describe("Agent", () => {
 
   it("answers overlapping turns independently", async () => {
     const firstReplyGate = Promise.withResolvers<void>()
-    const agent = new Agent(AGENT_PROFILE, {
-      openReplyStream: async (request) => {
-        const question = request.messages.at(-1)?.content ?? ""
-        return (async function* (): AsyncGenerator<ReplyStreamEvent> {
-          if (question === "First") await firstReplyGate.promise
-          yield { type: "text", content: `Re: ${question}` }
-          yield { type: "finish", finishReason: "stop" }
-        })()
-      }
-    })
+    const agent = new Agent(
+      AGENT_PROFILE,
+      {
+        openReplyStream: async (request) => {
+          const question = request.messages.at(-1)?.content ?? ""
+          return (async function* (): AsyncGenerator<ReplyStreamEvent> {
+            if (question === "First") await firstReplyGate.promise
+            yield { type: "text", content: `Re: ${question}` }
+            yield { type: "finish", finishReason: "stop" }
+          })()
+        }
+      },
+      createRoomyReplyContextMeter()
+    )
     const firstEvents: ChatGenerationEvent[] = []
     const secondEvents: ChatGenerationEvent[] = []
     /**
@@ -721,6 +770,7 @@ describe("Agent", () => {
         events.push(event)
       },
       reportReplyCancellation: () => undefined,
+      reportReplyRefusal: () => undefined,
       reportReplyFailure: () => undefined
     })
 
@@ -739,6 +789,288 @@ describe("Agent", () => {
       { type: "done", finishReason: "stop" }
     ])
   })
+  describe("context window", () => {
+    it("measures each round's context, tools, and model before the round is sent", async () => {
+      const order: string[] = []
+      const replyContextMeter = createRoomyReplyContextMeter()
+      replyContextMeter.findReplyContextMeasurement.mockImplementation(
+        async (request) => {
+          order.push("measure")
+          return {
+            contextLength: 1_000_000,
+            messageTokenCounts: request.messages.map(() => 1),
+            toolTokenCount: 0
+          }
+        }
+      )
+      const roundStreams = createRoundStreams(READ_A_ROUND, FINISH_ROUND)
+      const openReplyStream = vi.fn<OpenReplyStream>(async (request) => {
+        order.push("send")
+        return await roundStreams(request)
+      })
+
+      await getAgentReplyOutcome({
+        openReplyStream,
+        replyContextMeter,
+        clientTools: [READ_TEXT_FILE_TOOL],
+        sendClientToolCall: async () => ({
+          status: "succeeded",
+          content: "text of /a"
+        })
+      })
+
+      expect(order).toEqual(["measure", "send", "measure", "send"])
+      const measuredRequests =
+        replyContextMeter.findReplyContextMeasurement.mock.calls.map(
+          ([request]) => request
+        )
+      const sentRequests = openReplyStream.mock.calls.map(([request]) => ({
+        messages: request.messages,
+        tools: request.tools,
+        model: request.model
+      }))
+      expect(measuredRequests).toEqual(sentRequests)
+    })
+
+    it("sends a round whose context and reply ceiling take exactly the whole window", async () => {
+      const openReplyStream = createEventStream({
+        type: "finish",
+        finishReason: "stop"
+      })
+      const replyCeiling = TURN_REQUEST.generationOptions.replyCeiling
+      const contextLength =
+        replyCeiling + "You are Lys.".length + "Hello".length
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream,
+        replyContextMeter: createCharacterReplyContextMeter(contextLength)
+      })
+
+      expect(openReplyStream).toHaveBeenCalledOnce()
+      expect(run.persistedStates).toEqual([
+        { status: "completed", finishReason: "stop" }
+      ])
+    })
+
+    it("fails without contacting the model, and says why, when the context and the reply ceiling exceed the window", async () => {
+      const openReplyStream = createEventStream({
+        type: "finish",
+        finishReason: "stop"
+      })
+      const replyCeiling = TURN_REQUEST.generationOptions.replyCeiling
+      const requiredTokens =
+        replyCeiling + "You are Lys.".length + "Hello".length
+      const contextLength = requiredTokens - 1
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream,
+        replyContextMeter: createCharacterReplyContextMeter(contextLength)
+      })
+
+      expect(openReplyStream).not.toHaveBeenCalled()
+      expect(run.persistedStates).toEqual([{ status: "failed" }])
+      expect(run.events).toEqual([
+        {
+          type: "error",
+          message: `The conversation no longer fits the model's context window: the next request to the model needs ${requiredTokens} tokens, including the room kept for the reply, and the model is loaded with ${contextLength}. Start a new conversation, or load the model with a longer context in Settings → Model.`
+        }
+      ])
+      expect(run.reportedRefusals).toEqual([
+        expect.any(ReplyContextOverflowError)
+      ])
+      expect(run.reportedFailures).toEqual([])
+      expect(run.reportedRefusals[0]).toMatchObject({
+        requiredTokens,
+        contextLength
+      })
+      expect(run.settlement).toEqual({ status: "resolved" })
+    })
+
+    it("does not send the round after a tool result that overflows the window, keeping the earlier round's text", async () => {
+      const openReplyStream = createRoundStreams(
+        [{ type: "text", content: "Let me read it." }, ...READ_A_ROUND],
+        [
+          { type: "text", content: "The first message's answer again." },
+          { type: "finish", finishReason: "stop" }
+        ]
+      )
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream,
+        clientTools: [READ_TEXT_FILE_TOOL],
+        sendClientToolCall: async () => ({
+          status: "succeeded",
+          content: "x".repeat(20_000)
+        }),
+        replyContextMeter: createCharacterReplyContextMeter(8192)
+      })
+
+      expect(openReplyStream).toHaveBeenCalledOnce()
+      expect(run.persistedDeltas).toEqual(["Let me read it."])
+      expect(run.persistedStates).toEqual([{ status: "failed" }])
+      expect(run.events.at(-1)).toEqual({
+        type: "error",
+        message: expect.stringContaining(
+          "the model is loaded with 8,192. Start a new conversation"
+        )
+      })
+    })
+
+    it("fails without contacting the model, and says how to load it, when the model is not loaded", async () => {
+      const openReplyStream = createEventStream({
+        type: "finish",
+        finishReason: "stop"
+      })
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream,
+        replyContextMeter: createUnloadedReplyContextMeter()
+      })
+
+      expect(openReplyStream).not.toHaveBeenCalled()
+      expect(run.persistedStates).toEqual([{ status: "failed" }])
+      expect(run.events).toEqual([
+        {
+          type: "error",
+          message:
+            "The model is not loaded, so Lys cannot check that the conversation fits it. Load the model in Settings → Model, then try again."
+        }
+      ])
+      expect(run.reportedRefusals).toEqual([
+        expect.any(ReplyModelNotLoadedError)
+      ])
+      expect(run.reportedFailures).toEqual([])
+    })
+
+    it("interrupts without waiting for a pending measurement, and never sends the round, when stopped while the context is measured", async () => {
+      const cancellation = new AbortController()
+      const measurement = Promise.withResolvers<
+        ReplyContextMeasurement | undefined
+      >()
+      const replyContextMeter = createRoomyReplyContextMeter()
+      replyContextMeter.findReplyContextMeasurement.mockImplementation(() => {
+        // Stop arrives after the agent starts waiting for the measurement.
+        queueMicrotask(() => {
+          cancellation.abort()
+        })
+        return measurement.promise
+      })
+      const openReplyStream = createEventStream({
+        type: "finish",
+        finishReason: "stop"
+      })
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream,
+        replyContextMeter,
+        abortSignal: cancellation.signal
+      })
+      measurement.resolve({
+        contextLength: 1_000_000,
+        messageTokenCounts: [1, 1],
+        toolTokenCount: 0
+      })
+      await measurement.promise
+
+      expect(run.settlement).toEqual({ status: "resolved" })
+      expect(run.persistedStates).toEqual([{ status: "interrupted" }])
+      expect(run.events).toEqual([INTERRUPTED_EVENT])
+      expect(run.reportedCancellations).toEqual([cancellation.signal.reason])
+      expect(run.reportedFailures).toEqual([])
+      expect(openReplyStream).not.toHaveBeenCalled()
+    })
+
+    it("fails with the general sentence and reports the failure when the context cannot be measured", async () => {
+      const openReplyStream = createEventStream({
+        type: "finish",
+        finishReason: "stop"
+      })
+      const measurementFailure = new Error("The LLM runtime is unavailable.")
+      const replyContextMeter = createRoomyReplyContextMeter()
+      replyContextMeter.findReplyContextMeasurement.mockRejectedValue(
+        measurementFailure
+      )
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream,
+        replyContextMeter
+      })
+
+      expect(openReplyStream).not.toHaveBeenCalled()
+      expect(run.persistedStates).toEqual([{ status: "failed" }])
+      expect(run.events).toEqual([
+        { type: "error", message: "Chat completion failed. Please try again." }
+      ])
+      expect(run.reportedFailures).toEqual([measurementFailure])
+    })
+  })
+
+  describe("findContextMeasurement", () => {
+    it("measures its system prompt, the usable history, the offered tools, and an empty new message as a turn sends them", async () => {
+      const replyContextMeter = createRoomyReplyContextMeter()
+      replyContextMeter.findReplyContextMeasurement.mockResolvedValue({
+        contextLength: 8192,
+        messageTokenCounts: [2260, 400, 600, 9],
+        toolTokenCount: 410
+      })
+      const agent = new Agent(
+        AGENT_PROFILE,
+        { openReplyStream: createEventStream() },
+        replyContextMeter
+      )
+
+      const measurement = await agent.findContextMeasurement({
+        history: [
+          createUserMessage(1, "Earlier question"),
+          createAssistantMessage(2, "Earlier answer", {
+            status: "completed",
+            finishReason: "stop"
+          }),
+          createAssistantMessage(3, "Failed answer", { status: "failed" })
+        ],
+        model: TURN_REQUEST.model,
+        tools: [READ_TEXT_FILE_TOOL, LOOK_UP_WORD_TOOL]
+      })
+
+      expect(measurement).toEqual({
+        contextLength: 8192,
+        systemPromptTokens: 2260,
+        toolTokens: 410,
+        historyTokens: 1000,
+        historyMessageCount: 2,
+        messageMarkupTokens: 9
+      })
+      expect(
+        replyContextMeter.findReplyContextMeasurement
+      ).toHaveBeenCalledExactlyOnceWith({
+        messages: [
+          { role: "system", content: "You are Lys." },
+          { role: "user", content: "Earlier question" },
+          { role: "assistant", content: "Earlier answer", toolCalls: [] },
+          { role: "user", content: "" }
+        ],
+        tools: [READ_TEXT_FILE_FORMAT, LOOK_UP_WORD_FORMAT],
+        model: TURN_REQUEST.model
+      })
+    })
+
+    it("resolves to undefined when the model is not loaded", async () => {
+      const agent = new Agent(
+        AGENT_PROFILE,
+        { openReplyStream: createEventStream() },
+        createUnloadedReplyContextMeter()
+      )
+
+      await expect(
+        agent.findContextMeasurement({
+          history: [],
+          model: TURN_REQUEST.model,
+          tools: []
+        })
+      ).resolves.toBeUndefined()
+    })
+  })
+
   describe("tool calls", () => {
     it("offers the turn's tools, sends each checked call in the model's order, and asks the model again with the results", async () => {
       const sentCalls: ChatToolCall[] = []

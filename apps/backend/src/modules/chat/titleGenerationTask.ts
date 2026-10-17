@@ -1,12 +1,21 @@
 import type { ChatGenerationEvent } from "@lys/protocol"
 import type { FastifyBaseLogger } from "fastify"
 import type { TitleGenerationOptions } from "./chatService"
+import { waitForSettlementOrAbort } from "../../utils/abort"
 import { TitleGenerationOutputError } from "../../utils/errors"
 
 /** Inputs, attempt limit, and callbacks for one title-generation task. */
 export type CreateTitleGenerationTaskOptions = {
   /** Starts one external title request, borrowing the application adapter. */
   generateTitle: (options: TitleGenerationOptions) => Promise<string>
+  /**
+   * Observes the context length a model is loaded with, through the
+   * model-operation queue; resolves to undefined when the model is not
+   * loaded, and rejects when the runtime cannot be reached or is busy. It
+   * never loads the model. Completion-only: the queue keeps an accepted
+   * observation until it settles.
+   */
+  findLoadedContextLength: (model: string) => Promise<number | undefined>
   /** User content used as the title-generation prompt. */
   userMessageContent: string
   /** Model identifier passed to the chat service. */
@@ -27,6 +36,7 @@ export type CreateTitleGenerationTaskOptions = {
 type TitleGenerationAttemptOptions = Pick<
   CreateTitleGenerationTaskOptions,
   | "generateTitle"
+  | "findLoadedContextLength"
   | "userMessageContent"
   | "model"
   | "abortSignal"
@@ -59,6 +69,12 @@ type TitleGenerationResult =
       readonly error: unknown
     }
   | {
+      /** The model is not loaded, so no further title request is made. */
+      readonly status: "model-not-loaded"
+      /** Title requests made before the model was observed as not loaded. */
+      readonly attempts: number
+    }
+  | {
       /** Title generation ended without a usable title. */
       readonly status: "failed"
       /** Title requests made. */
@@ -75,10 +91,14 @@ type GeneratedTitle = Extract<TitleGenerationResult, { status: "generated" }>
  * outcome.
  *
  * Titles are requested up to `titleGenerationMaxAttempts` times; only a reply
- * unusable as a title consumes another request. A generated title is persisted
- * only while the conversation remains untitled, before one `title` event is
- * sent to the turn's followers. If the conversation was renamed or deleted
- * first, this task preserves the stored state and sends no event. Other
+ * unusable as a title consumes another request. Before each request the
+ * model is checked to be loaded, and no request is sent when it is not, so a
+ * title request never makes LM Studio load the model with its own settings.
+ * A model unloaded between that check and the request can still be loaded
+ * by LM Studio. A generated title is persisted only while the conversation
+ * remains untitled, before one `title` event is sent to the turn's
+ * followers. If the conversation was renamed or deleted first, this task
+ * preserves the stored state and sends no event. Other
  * unsuccessful outcomes leave this task's candidate unsaved; a turn that
  * starts after this task settles retries if the conversation is still
  * untitled. Stopping the reply does not cancel this task; only backend
@@ -86,14 +106,17 @@ type GeneratedTitle = Extract<TitleGenerationResult, { status: "generated" }>
  * `titleGenerationOutcome` and `titleGenerationAttempts` fields, plus `err`
  * for the failure or abort reason behind them: `retrying` at debug level
  * before each further request; `title-not-generated` at warn level after
- * exhausted attempts or a failure that is not retried; `abandoned` at debug
- * level after a shutdown cancellation; `already-titled` at debug level,
+ * exhausted attempts, a failure that is not retried, or a failed loaded
+ * check; `model-not-loaded` at debug level, without `err`, when the model is
+ * not loaded; `abandoned` at debug level after a shutdown cancellation,
+ * including one during the loaded check; `already-titled` at debug level,
  * without `err`, when the conversation was renamed or deleted first; and
  * `title-not-saved` at error level after a persistence failure. The task
  * never sends an `error` event.
  *
- * @param options - Title generator, prompt input, attempt limit, cancellation
- * signal, event sender, logger, and title persistence callback.
+ * @param options - Title generator, loaded check, prompt input, attempt
+ * limit, cancellation signal, event sender, logger, and title persistence
+ * callback.
  * @returns A promise that resolves after the title is sent or the outcome is
  * logged; it does not reject.
  */
@@ -106,6 +129,15 @@ export default async function createTitleGenerationTask(
   switch (titleGeneration.status) {
     case "generated":
       handleGeneratedTitle(options, titleGeneration)
+      return
+    case "model-not-loaded":
+      logger.debug(
+        {
+          titleGenerationOutcome: "model-not-loaded",
+          titleGenerationAttempts: titleGeneration.attempts
+        },
+        "Title generation skipped because the model is not loaded"
+      )
       return
     case "abandoned":
       logger.debug(
@@ -131,30 +163,34 @@ export default async function createTitleGenerationTask(
 }
 
 /**
- * Requests a title until one is usable, the attempt limit is reached, or
- * shutdown cancels it.
+ * Requests a title until one is usable, the attempt limit is reached, the
+ * model is not loaded, or shutdown cancels it.
  *
  * @remarks Only {@link TitleGenerationOutputError} consumes another attempt.
  * HTTP, connection, and cancellation failures end generation at once; within
  * the failed attempt, the OpenAI SDK has already retried connection failures,
- * timeouts, and 408, 409, 429, and 5xx responses.
- * @param options - Title generator, prompt input, signal, logger, and attempt limit.
+ * timeouts, and 408, 409, 429, and 5xx responses. Each request follows a
+ * loaded check.
+ * @param options - Title generator, loaded check, prompt input, signal,
+ * logger, and attempt limit.
  * @returns A promise that resolves to the generation result; it does not reject.
  */
-async function generateTitleWithinAttempts({
-  generateTitle,
-  userMessageContent,
-  model,
-  abortSignal,
-  logger,
-  titleGenerationMaxAttempts
-}: TitleGenerationAttemptOptions): Promise<TitleGenerationResult> {
+async function generateTitleWithinAttempts(
+  options: TitleGenerationAttemptOptions
+): Promise<TitleGenerationResult> {
+  const {
+    generateTitle,
+    userMessageContent,
+    model,
+    abortSignal,
+    logger,
+    titleGenerationMaxAttempts
+  } = options
   let attempts = 0
 
   while (true) {
-    if (abortSignal.aborted) {
-      return { status: "abandoned", attempts, error: abortSignal.reason }
-    }
+    const unsentResult = await findUnsentTitleResult(options, attempts)
+    if (unsentResult !== undefined) return unsentResult
 
     attempts += 1
     try {
@@ -187,6 +223,47 @@ async function generateTitleWithinAttempts({
         "Generated title was unusable; requesting another"
       )
     }
+  }
+}
+
+/**
+ * Checks that a title request may be sent: the task is not cancelled and the
+ * model is loaded.
+ *
+ * @param options - Loaded check, model, and shutdown signal.
+ * @param attempts - Title requests made so far.
+ * @returns Undefined when the request may be sent; otherwise the result that
+ * ends generation: abandoned on shutdown, including during the check,
+ * model-not-loaded, or failed when the check fails.
+ * @remarks Shutdown ends the wait for the check at once; the queue still
+ * completes a check it accepted, and its outcome is ignored.
+ */
+async function findUnsentTitleResult(
+  {
+    findLoadedContextLength,
+    model,
+    abortSignal
+  }: Pick<
+    TitleGenerationAttemptOptions,
+    "findLoadedContextLength" | "model" | "abortSignal"
+  >,
+  attempts: number
+): Promise<TitleGenerationResult | undefined> {
+  if (abortSignal.aborted) {
+    return { status: "abandoned", attempts, error: abortSignal.reason }
+  }
+  try {
+    const contextLength = await waitForSettlementOrAbort(
+      findLoadedContextLength(model),
+      abortSignal
+    )
+    return contextLength === undefined
+      ? { status: "model-not-loaded", attempts }
+      : undefined
+  } catch (error) {
+    return abortSignal.aborted
+      ? { status: "abandoned", attempts, error }
+      : { status: "failed", attempts, error }
   }
 }
 

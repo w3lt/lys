@@ -26,6 +26,7 @@ import type {
 } from "./capabilities"
 import { createAgentListCursor, type AgentListOptions } from "./listOptions"
 import type { AgentRecordStore } from "./records"
+import type { ReplyContextMeter } from "./replyContextMeter"
 import type { ReplyModel } from "./replyModel"
 
 /** Records, built-in agents, and model access the agent service is built from. */
@@ -39,6 +40,11 @@ export type AgentServiceOptions = Readonly<{
   builtInAgents: readonly BuiltInAgent[]
   /** Model access lent to every agent for the service's lifetime. */
   replyModel: ReplyModel
+  /**
+   * Context meter of the same model, lent to every agent for the service's
+   * lifetime.
+   */
+  replyContextMeter: ReplyContextMeter
 }>
 
 /** Shared outcome of a change no agent could take. */
@@ -99,8 +105,8 @@ function buildStoredAgent(
  * commits before it returns; a create is one write transaction per code it
  * tries. Owns no resource: the records' owner closes their store, after which
  * every records operation fails with `Database is closed`, and the model's
- * owner releases it. Concurrency model: single-owner, synchronous on the
- * backend's event loop.
+ * owner releases it and its context meter. Concurrency model: single-owner,
+ * synchronous on the backend's event loop.
  */
 export default class AgentService
   implements AgentLister, AgentReader, AgentCreator, AgentEditor, AgentDeleter
@@ -117,11 +123,14 @@ export default class AgentService
   /** Borrowed model access that writes every agent's replies. */
   readonly #replyModel: ReplyModel
 
+  /** Borrowed meter that measures every agent's contexts. */
+  readonly #replyContextMeter: ReplyContextMeter
+
   /**
-   * Retains the borrowed records, the built-in agents, and the model access
-   * without reading the records or contacting the model.
+   * Retains the borrowed records, the built-in agents, the model access, and
+   * the context meter without reading the records or contacting the model.
    * @param options - Agent records, the built-in agents, and the model access
-   * every agent borrows.
+   * and context meter every agent borrows.
    */
   public constructor(options: AgentServiceOptions) {
     this.#recordStore = options.recordStore
@@ -132,6 +141,7 @@ export default class AgentService
       options.builtInAgents.map(buildBuiltInAgentSummary)
     )
     this.#replyModel = options.replyModel
+    this.#replyContextMeter = options.replyContextMeter
   }
 
   /**
@@ -294,7 +304,8 @@ export default class AgentService
       ? undefined
       : new Agent(
           { code: profile.code, systemPrompt: profile.systemPrompt },
-          this.#replyModel
+          this.#replyModel,
+          this.#replyContextMeter
         )
   }
 }

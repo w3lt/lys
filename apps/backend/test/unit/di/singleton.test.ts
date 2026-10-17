@@ -23,6 +23,7 @@ import {
 import SqliteDatabase from "../../../src/infrastructure/database/sqliteDatabase"
 import { TEST_BACKEND_CONFIG } from "../support/backendConfig"
 import { createFixtureUuidV7 } from "../support/conversationFixtures"
+import { createFakeLlmRuntime } from "../support/fakeLlmRuntime"
 import { writeSettingsFile } from "../support/settingsFile"
 
 /** Name of each acquisition whose release the bundle owns. */
@@ -278,7 +279,7 @@ describe("createSingletonServices", () => {
     ["caliginia", TEST_BACKEND_CONFIG.caliginiaSystemPrompt],
     ["lysiptera", TEST_BACKEND_CONFIG.lysipteraSystemPrompt]
   ])(
-    "builds the built-in agent %s from its configured prompt over the acquired chat service",
+    "builds the built-in agent %s from its configured prompt over the acquired chat and LLM services",
     async (agentCode, systemPrompt) => {
       const { factories, acquisitions } = createRecordedFactories()
       const services = await createSingletonServices(
@@ -287,6 +288,17 @@ describe("createSingletonServices", () => {
         factories
       )
       onTestFinished(async () => await closeSingletonServices(services))
+      const engine = createFakeLlmRuntime()
+      engine.findLlmContextMeasurement.mockImplementation(
+        async (_model, texts) => ({
+          contextLength: 1_000_000,
+          textTokenCounts: texts.map(() => 1)
+        })
+      )
+      vi.spyOn(
+        acquisitions.llmRuntime.service,
+        "handleLlmEngineOperationRequest"
+      ).mockImplementation(async (operation) => await operation(engine))
       const completeChatStream = vi
         .spyOn(acquisitions.chat.service, "completeChatStream")
         .mockRejectedValue(new Error("model not loaded"))
@@ -305,9 +317,14 @@ describe("createSingletonServices", () => {
         sendClientToolCall: vi.fn(),
         createToolCallGate: vi.fn(),
         reportReplyCancellation: vi.fn(),
+        reportReplyRefusal: vi.fn(),
         reportReplyFailure: vi.fn()
       })
 
+      expect(engine.findLlmContextMeasurement).toHaveBeenCalledWith(
+        "qwen/qwen3-8b",
+        [systemPrompt, "Hello"]
+      )
       expect(completeChatStream).toHaveBeenCalledWith(
         expect.objectContaining({
           messages: [

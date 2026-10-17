@@ -26,7 +26,7 @@ In `packages/protocol/src/apis/`, primary payload contracts such as request bodi
 
 Endpoint descriptors, status-to-schema maps, reply maps, and framework route wrappers MAY use ordinary objects and TypeScript types that compose the primary contracts. They do not require Zod schemas solely for type derivation. Avoid handwritten mirrors of an inferable schema-map or descriptor shape. Use `z.infer`, `z.input`, or `z.output` only with an actual Zod schema, never with a plain descriptor or schema map.
 
-## LLM runtime surface and unresolved review
+## LLM runtime surface and review history
 
 The current runtime surface maps to
 [IFACE-006 and IFACE-026](https://github.com/w3lt/lys/blob/main/docs/code_standards/INTERFACE.md)
@@ -37,8 +37,8 @@ disposal, and the class's public static factory.
 
 | Declaration                    | Effective surface                                                                                  | Count |
 | ------------------------------ | -------------------------------------------------------------------------------------------------- | ----: |
-| `LlmEngine`                    | Downloaded inventory, loaded-instance inventory, load, and stop                                    |     4 |
-| `LlmRuntimeLifecycle`          | `lifecycleStatus`, `getRuntimeAvailability()`, and `[Symbol.asyncDispose]()`                       |     3 |
+| `LlmEngine`                    | Downloaded inventory, loaded-instance inventory, load, stop, and context measurement               |     5 |
+| `LlmRuntimeLifecycle`          | `getRuntimeAvailability()` and `[Symbol.asyncDispose]()`                                           |     2 |
 | `LlmRuntime`                   | All inherited `LlmEngine` and `LlmRuntimeLifecycle` operations; no additional declarations         |     7 |
 | `LmStudioRuntime`              | The seven runtime operations plus public static `create()`; its private constructor does not count |     8 |
 | `LlmEngineOperationQueue`      | `handleLlmEngineOperationRequest()`                                                                |     1 |
@@ -53,38 +53,44 @@ The declarations are in [engine capability](https://github.com/w3lt/lys/blob/mai
 [runtime capabilities](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/llm/llmRuntimeCapabilities.ts),
 and [runtime service](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/llm/llmRuntimeService.ts).
 
-`LlmRuntimeService` consumes the full `LlmRuntime`: the four engine operations
+`LlmRuntimeService` consumes the full `LlmRuntime`: the five engine operations
 on behalf of `LlmService`, `getRuntimeAvailability()` for probes, and disposal.
 [Singleton composition](https://github.com/w3lt/lys/blob/main/apps/backend/src/di/singleton.ts)
 supplies `create()` as the runtime service's acquisition capability; each
 acquired instance transfers to the runtime service, which releases it when it
-drops the connection or cleans up. Source inspection found no production calls
-to `lifecycleStatus`. The factory's readiness check calls the SDK directly, so
-it does not establish a consumer of the public availability method.
+drops the connection or cleans up. The factory's readiness check calls the SDK
+directly, so it does not establish a consumer of the public availability method.
+
+[Issue #140](https://github.com/w3lt/lys/issues/140) added
+`findLlmContextMeasurement` to `LlmEngine` and removed the `lifecycleStatus`
+getter, which had no production consumer, so the composite's and the class's
+counts did not change. Counting tokens and reading the loaded context length
+need the LM Studio SDK client, which `LmStudioRuntime` owns privately and which
+only the runtime service's queue may reach.
 
 The seven-operation composite and eight-operation class exceed their default
-limits. Shared resource identity alone does not satisfy the exception criteria:
-the inspected production owner uses six of the seven operations, and no actual
-consumer or approved public contract was established for `lifecycleStatus`.
-No valid exception approval was established in the inspected repository and PR
-review evidence. [Issue #37](https://github.com/w3lt/lys/issues/37) remains unresolved;
-recording these facts does not approve an exception or change the implementation.
+limits. Shared resource identity alone does not satisfy the exception criteria,
+although the production owner now uses every operation. No valid exception
+approval was established in the inspected repository and PR review evidence.
+Recording these facts does not approve an exception or change the
+implementation.
 
 Historically, [review finding I-8 on PR #23](https://github.com/w3lt/lys/pull/23#issuecomment-5633082465)
 identified a missing design record and approval behind source-level exception
 claims. Those claims were subsequently removed from source documentation. The
 missing record was not present in the inspected repository or its path history,
 and the inspected PR review list was empty; this describes the inspected evidence,
-not proof that no discussion could have occurred elsewhere. Moving the review
-mapping here does not close the finding's underlying surface-compliance issue.
+not proof that no discussion could have occurred elsewhere.
+[Issue #37](https://github.com/w3lt/lys/issues/37) tracked the finding, and the
+maintainer closed it as completed on 2026-09-29.
 
 A separate implementation decision can reduce the surface or provide the evidence
 and explicit reviewer approval required by the
 [exception process](https://github.com/w3lt/lys/blob/main/CONTRIBUTING.md).
-Removing both currently unused observations would leave five interface operations
-and six public class operations including `create()`. That is a proposed change,
-not an implemented compatibility decision. Behavioral coverage remains separate
-work tracked in [issue #25](https://github.com/w3lt/lys/issues/25).
+With `lifecycleStatus` removed, every operation of the composite has a
+production consumer, so bringing it within its limit needs a split of the
+runtime's capabilities or an approved exception. Behavioral coverage remains
+separate work tracked in [issue #25](https://github.com/w3lt/lys/issues/25).
 
 ## Agent editor error discovery exception
 
@@ -206,16 +212,16 @@ on how many run at once.
   itself (a prompt it cannot show, or a call it cannot run). Such calls repeat
   until the person presses Stop. Switching a tool or tool calls off does not
   end them; it applies from the next message. Each round sends the growing
-  context to LM Studio again, which refuses a request beyond the model's
-  context length unless its context overflow setting truncates the context
-  instead. On Just run, a round of N `read_page` calls starts N headless browsers
-  at once, each behind its own proxy, with at most 256 connections and 64 MiB
-  received each, and each page's scripts holding at most 1 GiB beside the
-  memory Chromium itself takes; each read ends within
-  30 seconds and closes its browser, and their extractions run one after
-  another on the backend's thread, about a second each at most. A round of N `web_search` calls sends
-  N queries to Tavily at once, each costing one Tavily credit, each ending
-  within 15 seconds and reading at most 1 MiB.
+  context to LM Studio again; the backend measures each round first and ends the
+  reply when the round would not fit the loaded model's context length. On Just
+  run, a round of N `read_page` calls starts N headless browsers at once, each
+  behind its own proxy, with at most 256 connections and 64 MiB received each,
+  and each page's scripts holding at most 1 GiB beside the memory Chromium
+  itself takes; each read ends within 30 seconds and closes its browser, and
+  their extractions run one after another on the backend's thread, about a
+  second each at most. A round of N `web_search` calls sends N queries to Tavily
+  at once, each costing one Tavily credit, each ending within 15 seconds and
+  reading at most 1 MiB.
 - **Removal condition:** [#136](https://github.com/w3lt/lys/issues/136) adds
   the limit back, which also bounds how many backend tool calls of a round
   run at once.

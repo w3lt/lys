@@ -61,8 +61,13 @@ A manual Start follows steps 4–8.
    problem instead and stores nothing.
 5. The backend emits a `start-new-conversation-turn` or
    `start-existing-conversation-turn` event.
-6. The backend streams zero or more `delta` events, then a `done` event when the
-   model finishes successfully.
+6. Before each round of the reply, the backend measures the round's context
+   with the loaded model's tokenizer. A round that does not fit the context
+   length the model is loaded with, together with the reply ceiling, or whose
+   model is not loaded, is not sent: the reply is stored failed and the
+   backend emits `error` with the reason. Otherwise the backend streams zero
+   or more `delta` events, then a `done` event when the model finishes
+   successfully.
 7. For an existing conversation with a stored title, the backend emits that
    title immediately after the turn-start event to reconcile desktop metadata.
    When the conversation has no stored title, a parallel title task requests a
@@ -78,6 +83,26 @@ A manual Start follows steps 4–8.
    that stream; the backend still saves the title, and the desktop receives it
    with the next turn or when it reads the conversation again
    ([issue #96](https://github.com/w3lt/lys/issues/96)).
+
+## Measure the next message
+
+1. While the composer could send, it builds the measurement request that
+   sending would make: `conversation` (`{ kind: "existing", id }` for the
+   shown conversation, `{ kind: "new", agentCode }` otherwise), the loaded
+   `model`, and the `tools` the Tools pane would offer.
+2. The desktop sends `POST /api/v1/chat/context`. A newer request abandons an
+   older one.
+3. The backend finds the agent and the conversation as the chat route does,
+   builds the system prompt, offered tools, and stored messages a turn's first
+   round would send, with an empty new message for the markup around the
+   text, and measures them with the loaded model's tokenizer through the
+   model operation queue.
+4. The backend answers with the context length and the tokens of each part,
+   or with a `503` problem when the model is not loaded, LM Studio is not
+   connected, or the queue is full.
+5. The composer adds an estimate of the draft's text and the reply ceiling,
+   shows the result in its context meter, and disables Send while the request
+   would not fit.
 
 ## Stop an in-flight reply
 

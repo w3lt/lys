@@ -30,6 +30,7 @@ the actual declaration and consumers.
 | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
 | `ChatService`                        | [backend/src/modules/chat/chatService.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/chat/chatService.ts)                                                                                                 | resource owner or boundary adapter |
 | `OpenAiReplyModel`                   | [backend/src/modules/chat/openAiReplyModel.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/chat/openAiReplyModel.ts)                                                                                       | resource owner or boundary adapter |
+| `LlmReplyContextMeter`               | [backend/src/modules/chat/llmReplyContextMeter.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/chat/llmReplyContextMeter.ts)                                                                               | resource owner or boundary adapter |
 | `SqliteDatabase`                     | [backend/src/infrastructure/database/sqliteDatabase.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/infrastructure/database/sqliteDatabase.ts)                                                                     | resource owner                     |
 | `SqliteStatementCache`               | [backend/src/infrastructure/database/sqliteDatabase.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/infrastructure/database/sqliteDatabase.ts)                                                                     | resource owner or boundary adapter |
 | `SqliteStatementCompiler`            | [backend/src/infrastructure/database/sqliteDatabase.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/infrastructure/database/sqliteDatabase.ts)                                                                     | resource owner or boundary adapter |
@@ -71,9 +72,11 @@ the actual declaration and consumers.
 | `UnknownBackendToolError`            | [backend/src/modules/chat/routes/chatRoute.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/chat/routes/chatRoute.ts)                                                                                       | framework adapter                  |
 | `BackendToolUnavailableError`        | [desktop/src/lib/apis/http/chat.ts](https://github.com/w3lt/lys/blob/main/apps/desktop/src/lib/apis/http/chat.ts)                                                                                                             | framework adapter                  |
 
-The runtime surface exception discussed in [issue #37](https://github.com/w3lt/lys/issues/37)
-remains unresolved. Recording a resource-owner label does not approve its public
-surface or establish an exception.
+The maintainer closed [issue #37](https://github.com/w3lt/lys/issues/37), which
+discussed the runtime surface exception, as completed on 2026-09-29. The
+[standard application page](/reference/standard-application/#llm-runtime-surface-and-review-history)
+records the runtime's current surface. Recording a resource-owner label does not
+approve its public surface or establish an exception.
 
 ## Desktop views and feature declarations
 

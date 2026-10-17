@@ -302,12 +302,16 @@ the value is missing, invalid, or unavailable.
 
 - The React shell loads runtime settings from Tauri, but runtime and model edits,
   including `runtime.defaultModel`, are not persisted back through `save_settings`.
-- `model.contextSize` is still a separate local estimate. The composer's
-  context meter uses it and does not follow the context length a model is
-  loaded with.
+- `model.contextSize` is still a separate local estimate, used by the
+  generation controls and the agent editor's prompt measure. It does not
+  follow the context length a model is loaded with. The composer's context
+  meter does not use it: it shows the context length the loaded model reports
+  through [`POST /api/v1/chat/context`](/reference/api/#chat-context-measurement).
 - LM Studio applies its own settings when it loads a model by itself, for
   example when a chat request names a model that is not loaded. The load
-  configuration applies only to loads Lys starts.
+  configuration applies only to loads Lys starts. The backend checks that the
+  model is loaded before each reply round and each title request, so this
+  happens only when the model is unloaded between that check and the request.
 
 ## Coming soon
 

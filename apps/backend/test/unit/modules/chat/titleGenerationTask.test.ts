@@ -14,6 +14,7 @@ import {
 type TitleGenerationOutcome =
   | "retrying"
   | "title-not-generated"
+  | "model-not-loaded"
   | "abandoned"
   | "already-titled"
   | "title-not-saved"
@@ -36,6 +37,8 @@ function findOutcomeRecords(
 type TitleTaskScenario = Readonly<{
   /** Title request behavior. */
   generateTitle: CreateTitleGenerationTaskOptions["generateTitle"]
+  /** Loaded check; the model is loaded with 4096 tokens by default. */
+  findLoadedContextLength?: CreateTitleGenerationTaskOptions["findLoadedContextLength"]
   /** Inclusive attempt limit; 3 by default. */
   titleGenerationMaxAttempts?: number
   /** Shutdown cancellation owned by the case; a fresh signal by default. */
@@ -81,6 +84,8 @@ async function getTitleTaskOutcome(scenario: TitleTaskScenario) {
   )
   await createTitleGenerationTask({
     generateTitle: scenario.generateTitle,
+    findLoadedContextLength:
+      scenario.findLoadedContextLength ?? (async () => 4096),
     userMessageContent: "Plan my trip to Hanoi",
     model: "qwen/qwen3-8b",
     abortSignal: scenario.abortSignal ?? new AbortController().signal,
@@ -247,6 +252,109 @@ describe("createTitleGenerationTask", () => {
       })
     ])
     expect(findOutcomeRecords(run.logs, "title-not-generated")).toEqual([])
+  })
+
+  it("sends no title request when the model is not loaded, so the request cannot load it", async () => {
+    const generateTitle = createScriptedTitleGenerator("Hanoi trip")
+    const findLoadedContextLength = vi.fn(async () => undefined)
+
+    const run = await getTitleTaskOutcome({
+      generateTitle,
+      findLoadedContextLength
+    })
+
+    expect(findLoadedContextLength).toHaveBeenCalledExactlyOnceWith(
+      "qwen/qwen3-8b"
+    )
+    expect(generateTitle).not.toHaveBeenCalled()
+    expect(run.updateConversationTitle).not.toHaveBeenCalled()
+    expect(run.events).toEqual([])
+    expect(findOutcomeRecords(run.logs, "model-not-loaded")).toEqual([
+      expect.objectContaining({
+        level: "debug",
+        titleGenerationOutcome: "model-not-loaded",
+        titleGenerationAttempts: 0
+      })
+    ])
+    expect(
+      findOutcomeRecords(run.logs, "model-not-loaded")[0]
+    ).not.toHaveProperty("err")
+  })
+
+  it("checks that the model is loaded before every request, and stops when a retry finds it unloaded", async () => {
+    const order: string[] = []
+    const generateTitle = vi.fn(async () => {
+      order.push("request")
+      throw new TitleGenerationOutputError("blank")
+    })
+    const findLoadedContextLength = vi
+      .fn(async (): Promise<number | undefined> => {
+        order.push("check")
+        return undefined
+      })
+      .mockImplementationOnce(async () => {
+        order.push("check")
+        return 4096
+      })
+
+    const run = await getTitleTaskOutcome({
+      generateTitle,
+      findLoadedContextLength
+    })
+
+    expect(order).toEqual(["check", "request", "check"])
+    expect(findOutcomeRecords(run.logs, "model-not-loaded")).toEqual([
+      expect.objectContaining({ titleGenerationAttempts: 1 })
+    ])
+    expect(findOutcomeRecords(run.logs, "title-not-generated")).toEqual([])
+  })
+
+  it("sends no title request and logs the failure when the loaded check fails", async () => {
+    const generateTitle = createScriptedTitleGenerator("Hanoi trip")
+
+    const run = await getTitleTaskOutcome({
+      generateTitle,
+      findLoadedContextLength: async () => {
+        throw new Error("The LLM service is busy.")
+      }
+    })
+
+    expect(generateTitle).not.toHaveBeenCalled()
+    expect(findOutcomeRecords(run.logs, "title-not-generated")).toEqual([
+      expect.objectContaining({
+        level: "warn",
+        titleGenerationAttempts: 0,
+        err: expect.objectContaining({ message: "The LLM service is busy." })
+      })
+    ])
+  })
+
+  it("abandons a pending loaded check at shutdown without waiting for it", async () => {
+    const cancellation = new AbortController()
+    const check = Promise.withResolvers<number | undefined>()
+    const generateTitle = createScriptedTitleGenerator("Hanoi trip")
+
+    const run = await getTitleTaskOutcome({
+      generateTitle,
+      abortSignal: cancellation.signal,
+      findLoadedContextLength: () => {
+        // Shutdown arrives after the task starts waiting for the check.
+        queueMicrotask(() => {
+          cancellation.abort(new Error("backend shutting down"))
+        })
+        return check.promise
+      }
+    })
+    check.resolve(4096)
+    await check.promise
+
+    expect(generateTitle).not.toHaveBeenCalled()
+    expect(findOutcomeRecords(run.logs, "abandoned")).toEqual([
+      expect.objectContaining({
+        titleGenerationAttempts: 0,
+        err: expect.objectContaining({ message: "backend shutting down" })
+      })
+    ])
   })
 
   it("sends no event when the conversation was renamed or deleted first", async () => {

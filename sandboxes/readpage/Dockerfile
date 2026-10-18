@@ -1,6 +1,6 @@
 FROM alpine:3.24.2
 
-RUN apk add --no-cache chromium-headless-shell python3 py3-beautifulsoup4
+RUN apk add --no-cache chromium-headless-shell py3-beautifulsoup4 python3
 
 WORKDIR /app
 COPY sandboxes/readpage/parse_dom.py /app/parse_dom.py

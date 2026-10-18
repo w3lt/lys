@@ -11,7 +11,7 @@ struct vmo {
     static func main() async {
         do {
             try await withServices { services in
-                let router = try Router(routes: [.helloWorld, .readPage(vmManager: services.vmManager)])
+                let router = try Router(routes: [.helloWorld, .health, .readPage(vmManager: services.vmManager)])
                 try await startWebServer(router: router)
             }
         } catch {

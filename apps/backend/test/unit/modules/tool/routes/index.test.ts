@@ -10,7 +10,6 @@ import { buildWebSearchDefinition } from "../../../../../src/modules/tool/builtI
 import registerToolRoutes from "../../../../../src/modules/tool/routes"
 import { updateFastifyWithHttpTransport } from "../../../../../src/http"
 import type { TavilyApiKeyRead } from "../../../../../src/infrastructure/settings/tavilyApiKeyFile"
-import { TEST_BACKEND_CONFIG } from "../../../support/backendConfig"
 import { createTestFastify } from "../../../support/fastifyTestApp"
 import {
   LOOK_UP_WORD_TOOL,
@@ -22,6 +21,11 @@ import {
   startTavilyServer,
   TEST_TAVILY_API_KEY
 } from "../../../support/tavilyServer"
+import {
+  answerWithBody,
+  findClosedVmoOrigin,
+  startVmoServer
+} from "../../../support/vmoServer"
 
 /** Path of the key check. */
 const KEY_CHECK_URL = "/api/v1/tools/web_search/key-check"
@@ -30,14 +34,31 @@ const KEY_CHECK_URL = "/api/v1/tools/web_search/key-check"
 const WEB_PAGE_ORIGIN = "https://attacker.example"
 
 /**
+ * Starts a fake vmo that answers its health route, so it can read pages.
+ *
+ * @returns The fake vmo's origin.
+ */
+async function startHealthyVmo(): Promise<string> {
+  const vmo = await startVmoServer(
+    answerWithBody(200, "text/plain; charset=utf-8", "ok\n")
+  )
+  return vmo.origin
+}
+
+/**
  * Registers the tool routes, behind the backend's HTTP transport, over a web
  * search provider whose key reads give one result and whose requests would
- * reach a fake Tavily server.
+ * reach a fake Tavily server, and a read-page tool that reads through vmo.
  *
  * @param keyRead - What every key read gives.
+ * @param vmoOrigin - Origin of vmo; a fake vmo that answers its health route
+ * when omitted.
  * @returns The application, and the server that records any request sent.
  */
-async function createToolRouteApp(keyRead: TavilyApiKeyRead) {
+async function createToolRouteApp(
+  keyRead: TavilyApiKeyRead,
+  vmoOrigin?: string
+) {
   const server = await startTavilyServer(answerWithJson({}))
   const webSearchToolProvider = new WebSearchToolProvider(
     () => Promise.resolve(keyRead),
@@ -49,7 +70,7 @@ async function createToolRouteApp(keyRead: TavilyApiKeyRead) {
   app.decorate("builtInTools", [
     ...createBuiltInTools(
       webSearchToolProvider,
-      `http://${TEST_BACKEND_CONFIG.vmoHost}:${TEST_BACKEND_CONFIG.vmoPort}`,
+      vmoOrigin ?? (await startHealthyVmo()),
       () => undefined
     ),
     {
@@ -95,6 +116,24 @@ describe("registerToolRoutes", () => {
 
       expect(response.json()).toMatchObject({ unavailableTools: [] })
       expect(response.body).not.toContain(TEST_TAVILY_API_KEY)
+    })
+
+    it("names read_page unavailable while vmo does not answer its health route", async () => {
+      const { app } = await createToolRouteApp(
+        { status: "configured", apiKey: TEST_TAVILY_API_KEY },
+        await findClosedVmoOrigin()
+      )
+
+      const response = await app.inject({ method: "GET", url: "/api/v1/tools" })
+
+      expect(response.json()).toMatchObject({
+        unavailableTools: [
+          { name: "read_page", reason: "page-reader-not-ready" }
+        ]
+      })
+      expect(
+        listBackendToolsApiResponseSchema.safeParse(response.json()).success
+      ).toBe(true)
     })
 
     it("registers the tools path for GET only", async () => {

@@ -396,6 +396,26 @@ describe("ToolGroupSection", () => {
     expect(screen.queryByRole("button", { name: "Open Secrets" })).toBeNull()
   })
 
+  it("shows read_page off and disabled while vmo isn't ready, pointing to the Runtime pane", async () => {
+    const proposals = startToolGroup({
+      listing: SEARCH_GROUP,
+      toolChoices: BACKEND_TOOLS_ON,
+      unavailableTools: new Map([["read_page", "page-reader-not-ready"]])
+    })
+    const user = userEvent.setup()
+
+    const toolSwitch = screen.getByRole("switch", { name: "Use read_page" })
+    await user.click(toolSwitch)
+
+    expect(proposals.onToolOnChange).not.toHaveBeenCalled()
+    expect(toolSwitch).not.toBeChecked()
+    expect(toolSwitch).toHaveAttribute("aria-disabled", "true")
+    expect(toolSwitch).toHaveAccessibleDescription(
+      "vmo, Lys's page reader, isn't ready. Start it in Settings → Runtime."
+    )
+    expect(screen.queryByRole("button", { name: "Open Secrets" })).toBeNull()
+  })
+
   it("disables every control while locked", async () => {
     const proposals = startToolGroup({
       expandedToolName: "read_text_file",

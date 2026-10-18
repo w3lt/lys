@@ -1,8 +1,8 @@
 import type {
-  BackendToolUnavailableReason,
   CheckWebSearchKeyApiResponse,
   TavilyCreditUsage,
-  WebSearchKeyCheckFailure
+  WebSearchKeyCheckFailure,
+  WebSearchKeyUnavailableReason
 } from "@lys/protocol"
 import { tavilyApiKeySchema, type TavilyApiKey } from "@lys/share"
 
@@ -106,7 +106,7 @@ const KEY_UNAVAILABLE_MESSAGES = Object.freeze({
     "The key in settings.json isn't valid · fix or remove secrets.tavilyApiKey there",
   "settings-unreadable":
     "Lys couldn't read settings.json · fix that file by hand"
-} satisfies Readonly<Record<BackendToolUnavailableReason, string>>)
+} satisfies Readonly<Record<WebSearchKeyUnavailableReason, string>>)
 
 /** Line shown while no key is saved and nothing is edited. */
 const NO_KEY_MESSAGE: TavilyKeyMessage = Object.freeze({

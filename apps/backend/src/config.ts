@@ -2,7 +2,9 @@ import {
   BACKEND_HOST,
   BACKEND_PORT,
   LMSTUDIO_HOST,
-  LMSTUDIO_PORT
+  LMSTUDIO_PORT,
+  VMO_HOST,
+  VMO_PORT
 } from "@lys/protocol"
 import { isAbsolute, join } from "node:path"
 import { readPrompt } from "./utils/prompts"
@@ -21,24 +23,6 @@ const TITLE_GENERATION_MAX_ATTEMPTS = 3
  * overrides it.
  */
 const GENERATED_TITLE_MAX_LENGTH = 100
-
-/**
- * IPv4 loopback address on which vmo, Lys's page reader, accepts
- * connections, applied as `vmoHost` by {@link loadBackendConfig}.
- *
- * @remarks It must equal the default host of vmo's `WebServer` in
- * `apps/vmo`, which vmo listens on.
- */
-const VMO_HOST = "127.0.0.1"
-
-/**
- * TCP port on which vmo accepts connections, applied as `vmoPort` by
- * {@link loadBackendConfig}.
- *
- * @remarks It must equal the default port of vmo's `WebServer` in
- * `apps/vmo`, which vmo listens on.
- */
-const VMO_PORT = 8080
 
 /** Validates a TCP port that names one fixed endpoint, from 1 to 65535 inclusive. */
 const tcpPortSchema = z.int().min(1).max(65_535)
@@ -101,8 +85,8 @@ export const backendConfigSchema = z
      *
      * @remarks vmo does not authenticate its callers, so it listens only on
      * loopback, and the backend never sends a page URL to another machine.
-     * The backend never starts vmo; when vmo is not running, each read fails
-     * and says so.
+     * The backend never starts vmo, which the desktop owns; while vmo does
+     * not answer its health route, `read_page` is unavailable.
      */
     vmoHost: z.ipv4().startsWith("127."),
     /** TCP port of vmo. */
@@ -156,8 +140,8 @@ export type BackendConfig = z.infer<typeof backendConfigSchema>
 
 /**
  * Loads the backend configuration from the `LYS_HOME` environment variable,
- * shared protocol constants, vmo's endpoint, backend limits, and the
- * maintained prompt files.
+ * shared protocol constants, which include vmo's endpoint, backend limits,
+ * and the maintained prompt files.
  *
  * @returns A frozen configuration snapshot that satisfies the complete backend
  * configuration schema, whose database path is `lys_db.sqlite` and whose

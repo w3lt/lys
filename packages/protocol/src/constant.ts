@@ -49,6 +49,26 @@ export const LMSTUDIO_HOST = "127.0.0.1"
  * operations would otherwise target a different listener.
  */
 export const LMSTUDIO_PORT = 1234
+/**
+ * Loopback interface on which vmo, Lys's page reader, listens.
+ *
+ * @remarks The backend sends every page read and health check to this host,
+ * and the desktop names it on vmo's card. It is not persisted. It must equal
+ * the default host of vmo's `WebServer` in `apps/vmo` and the host of
+ * `VMO_ADDRESS` in the desktop's Tauri host, which checks vmo's health;
+ * changing it requires changing all three together.
+ */
+export const VMO_HOST = "127.0.0.1"
+/**
+ * TCP port on which vmo, Lys's page reader, listens.
+ *
+ * @remarks The backend sends every page read and health check to this port,
+ * and the desktop names it on vmo's card. It is not persisted. It must equal
+ * the default port of vmo's `WebServer` in `apps/vmo` and the port of
+ * `VMO_ADDRESS` in the desktop's Tauri host; changing it requires changing
+ * all three together.
+ */
+export const VMO_PORT = 8080
 // ============== ENV CONFIG ============== //
 
 // ============== EXTERNAL SERVICES ============== //

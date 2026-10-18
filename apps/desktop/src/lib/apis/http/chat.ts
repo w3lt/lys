@@ -36,7 +36,9 @@ const BACKEND_TOOL_UNAVAILABLE_ADVICE = Object.freeze({
   "api-key-invalid":
     "the Tavily API key in settings.json isn't valid. Fix or remove secrets.tavilyApiKey in that file",
   "settings-unreadable":
-    "Lys couldn't read settings.json. Fix that file by hand"
+    "Lys couldn't read settings.json. Fix that file by hand",
+  "page-reader-not-ready":
+    "vmo, Lys's page reader, isn't ready. Start it in Settings → Runtime"
 } satisfies Readonly<Record<BackendToolUnavailableReason, string>>)
 
 /**

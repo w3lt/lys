@@ -2,7 +2,8 @@ export {
   backendToolUnavailableReasonSchema,
   unavailableBackendToolSchema,
   type BackendToolUnavailableReason,
-  type UnavailableBackendTool
+  type UnavailableBackendTool,
+  type WebSearchKeyUnavailableReason
 } from "./backendToolAvailability"
 export {
   checkWebSearchKeyApi,

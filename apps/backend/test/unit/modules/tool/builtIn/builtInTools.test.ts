@@ -15,7 +15,12 @@ import {
   ScriptedBuiltInTool
 } from "../../../support/scriptedBuiltInTool"
 import { ScriptedBuiltInToolProvider } from "../../../support/scriptedBuiltInToolProvider"
-import { findClosedVmoOrigin } from "../../../support/vmoServer"
+import {
+  answerWithBody,
+  findClosedVmoOrigin,
+  startVmoServer,
+  type VmoRoute
+} from "../../../support/vmoServer"
 
 /** Origin of a vmo no case reaches. */
 const UNUSED_VMO_ORIGIN = "http://127.0.0.1:9"
@@ -31,6 +36,13 @@ const UNAVAILABLE_PROVIDER = new ScriptedBuiltInToolProvider({
 
 /** Scripted look-up tool, always ready. */
 const LOOK_UP_TOOL = new ScriptedBuiltInTool()
+
+/** Answers vmo's health route with `200 OK`, so vmo can read pages. */
+const answerHealthy: VmoRoute = answerWithBody(
+  200,
+  "text/plain; charset=utf-8",
+  "ok\n"
+)
 
 /** Read page, web search (unavailable), then the scripted look-up tool. */
 const ENTRIES: readonly BuiltInToolEntry[] = Object.freeze([
@@ -64,10 +76,11 @@ describe("createBuiltInTools", () => {
     expect(Object.isFrozen(entries)).toBe(true)
   })
 
-  it("gives every turn the read-page tool, which refuses this machine", async () => {
+  it("gives a turn the read-page tool while vmo answers its health route, and the tool refuses this machine", async () => {
+    const vmo = await startVmoServer(answerHealthy)
     const [readPage] = createBuiltInTools(
       UNAVAILABLE_PROVIDER,
-      UNUSED_VMO_ORIGIN,
+      vmo.origin,
       IGNORE_PAGE_READER_FAILURE
     )
 
@@ -81,13 +94,32 @@ describe("createBuiltInTools", () => {
         ? lookup.tool.parseToolCall({ url: "http://[::1]/" })
         : undefined
     expect(parsed).toMatchObject({ status: "invalid" })
+    expect(vmo.receivedRequests).toMatchObject([{ path: "/health" }])
+  })
+
+  it("gives no turn the read-page tool while vmo does not answer its health route", async () => {
+    const [readPage] = createBuiltInTools(
+      UNAVAILABLE_PROVIDER,
+      await findClosedVmoOrigin(),
+      IGNORE_PAGE_READER_FAILURE
+    )
+
+    expect(await readPage?.provider.findTurnTool()).toEqual({
+      status: "unavailable",
+      reason: "page-reader-not-ready"
+    })
   })
 
   it("gives the read-page tool the vmo it is created with, and reports why it cannot be reached", async () => {
     const reportPageReaderFailure = vi.fn()
+    // vmo answers its health route, then drops the read's connection.
+    const vmo = await startVmoServer((request, response) => {
+      if (request.url === "/health") answerHealthy(request, response)
+      else request.socket.destroy()
+    })
     const [readPage] = createBuiltInTools(
       UNAVAILABLE_PROVIDER,
-      await findClosedVmoOrigin(),
+      vmo.origin,
       reportPageReaderFailure
     )
     const lookup = await readPage?.provider.findTurnTool()
@@ -105,7 +137,7 @@ describe("createBuiltInTools", () => {
     })
     expect(reportPageReaderFailure).toHaveBeenCalledTimes(1)
     expect(reportPageReaderFailure.mock.calls[0]?.[0]).toMatchObject({
-      code: "ECONNREFUSED"
+      code: "ECONNRESET"
     })
   })
 })
@@ -155,7 +187,13 @@ describe("findTurnBuiltInTools", () => {
   })
 
   it("finds every offered tool in offer order", async () => {
-    const entries = [ENTRIES[2], ENTRIES[0]].filter(
+    const vmo = await startVmoServer(answerHealthy)
+    const [readPage] = createBuiltInTools(
+      UNAVAILABLE_PROVIDER,
+      vmo.origin,
+      IGNORE_PAGE_READER_FAILURE
+    )
+    const entries = [ENTRIES[2], readPage].filter(
       (entry) => entry !== undefined
     )
 
@@ -171,7 +209,18 @@ describe("findTurnBuiltInTools", () => {
   })
 
   it("names the first offered tool that cannot run, with why", async () => {
-    expect(await findTurnBuiltInTools(ENTRIES)).toEqual({
+    const entries = createBuiltInTools(
+      UNAVAILABLE_PROVIDER,
+      await findClosedVmoOrigin(),
+      IGNORE_PAGE_READER_FAILURE
+    )
+
+    expect(await findTurnBuiltInTools(entries)).toEqual({
+      status: "unavailable",
+      toolName: "read_page",
+      reason: "page-reader-not-ready"
+    })
+    expect(await findTurnBuiltInTools(entries.slice(1))).toEqual({
       status: "unavailable",
       toolName: "web_search",
       reason: "api-key-missing"

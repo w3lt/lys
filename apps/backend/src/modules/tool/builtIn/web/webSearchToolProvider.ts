@@ -1,7 +1,7 @@
 import type {
-  BackendToolUnavailableReason,
   CheckWebSearchKeyApiResponse,
-  WebSearchKeyCheckFailure
+  WebSearchKeyCheckFailure,
+  WebSearchKeyUnavailableReason
 } from "@lys/protocol"
 import type { TavilyApiKeyRead } from "../../../../infrastructure/settings/tavilyApiKeyFile"
 import type { TurnToolLookup, BuiltInToolProvider } from "../builtInTool"
@@ -30,7 +30,7 @@ const UNAVAILABLE_REASONS = Object.freeze({
   invalid: "api-key-invalid",
   unreadable: "settings-unreadable"
 } satisfies Readonly<
-  Record<UnusableTavilyApiKeyRead["status"], BackendToolUnavailableReason>
+  Record<UnusableTavilyApiKeyRead["status"], WebSearchKeyUnavailableReason>
 >)
 
 /** Key-check answer of a rejected key. */

@@ -7,12 +7,13 @@ import type {
   BuiltInToolProvider,
   TurnBuiltInTool
 } from "./builtInTool"
-import ReadyBuiltInToolProvider from "./readyBuiltInToolProvider"
 import ReadPageTool, {
   buildReadPageDefinition,
   PAGE_READER_TIMEOUT_MS
 } from "./web/readPageTool"
+import ReadPageToolProvider from "./web/readPageToolProvider"
 import type { TavilyRequestDependencies } from "./web/tavilyRequest"
+import { VMO_HEALTH_TIMEOUT_MS } from "./web/vmoHealth"
 import { isBlockedAddress } from "./web/webAddresses"
 import { lookupDnsHostAddresses } from "./web/webConnection"
 import {
@@ -84,11 +85,11 @@ export function buildTavilyRequestDependencies(): TavilyRequestDependencies {
  * @param reportPageReaderFailure - Receives why vmo could not be reached,
  * gave an answer Lys does not understand, or did not answer in time, for
  * logging.
- * @returns A frozen list: the read-page tool, always ready, which resolves a
- * page's host name through the operating system, refuses it when it resolves
- * to a blocked address, and otherwise asks vmo to read the page, within 60
- * seconds; then the web search tool. Creating it reads, starts, and contacts
- * nothing.
+ * @returns A frozen list: the read-page tool, ready only while vmo answers
+ * its health route within one second, which resolves a page's host name
+ * through the operating system, refuses it when it resolves to a blocked
+ * address, and otherwise asks vmo to read the page, within 60 seconds; then
+ * the web search tool. Creating it reads, starts, and contacts nothing.
  */
 export function createBuiltInTools(
   webSearchToolProvider: BuiltInToolProvider,
@@ -104,7 +105,11 @@ export function createBuiltInTools(
   })
   const readPage: BuiltInToolEntry = Object.freeze({
     definition: buildReadPageDefinition(),
-    provider: new ReadyBuiltInToolProvider(readPageTool)
+    provider: new ReadPageToolProvider(
+      readPageTool,
+      vmoOrigin,
+      VMO_HEALTH_TIMEOUT_MS
+    )
   })
   const webSearch: BuiltInToolEntry = Object.freeze({
     definition: buildWebSearchDefinition(),

@@ -5,7 +5,8 @@ import {
   chatToolCallNotPendingProblemSchema,
   chatToolResultSchema,
   conversationAgentMissingProblemSchema,
-  createLlmServiceBusyProblem
+  createLlmServiceBusyProblem,
+  type BackendToolUnavailableReason
 } from "@lys/protocol"
 import { CALIGINIA_AGENT_CODE } from "@lys/share"
 import { describe, expect, it } from "vitest"
@@ -120,18 +121,20 @@ const CONVERSATION_AGENT_MISSING_PROBLEM =
  * Builds the problem the backend sends when an offered backend tool cannot
  * run now.
  *
+ * @param toolName - Tool that cannot run.
  * @param reason - Why the tool cannot run.
  * @returns The problem, validated by the shared schema.
  */
 function buildBackendToolUnavailableProblem(
-  reason: "api-key-missing" | "api-key-invalid" | "settings-unreadable"
+  toolName: string,
+  reason: BackendToolUnavailableReason
 ) {
   return chatBackendToolUnavailableProblemSchema.parse({
     type: "urn:lys:problem:chat:backend-tool-unavailable",
     title: "Backend tool unavailable",
     status: 409,
-    detail: "The offered tool web_search cannot run now.",
-    toolName: "web_search",
+    detail: `The offered tool ${toolName} cannot run now.`,
+    toolName,
     reason
   })
 }
@@ -269,23 +272,34 @@ describe("readChatEvents", () => {
 
   it.each([
     [
+      "web_search",
       "api-key-missing",
       "web_search is unavailable: no Tavily API key is saved. Add one in Settings → Secrets, or switch web_search off."
     ],
     [
+      "web_search",
       "api-key-invalid",
       "web_search is unavailable: the Tavily API key in settings.json isn't valid. Fix or remove secrets.tavilyApiKey in that file, or switch web_search off."
     ],
     [
+      "web_search",
       "settings-unreadable",
       "web_search is unavailable: Lys couldn't read settings.json. Fix that file by hand, or switch web_search off."
+    ],
+    [
+      "read_page",
+      "page-reader-not-ready",
+      "read_page is unavailable: vmo, Lys's page reader, isn't ready. Start it in Settings → Runtime, or switch read_page off."
     ]
   ] as const)(
-    "reports an offered tool that cannot run because of %s, with what to do",
-    async (reason, message) => {
+    "reports %s that cannot run because of %s, with what to do",
+    async (toolName, reason, message) => {
       startBackendFake({
         [CHAT_ROUTE]: () =>
-          buildJsonResponse(409, buildBackendToolUnavailableProblem(reason))
+          buildJsonResponse(
+            409,
+            buildBackendToolUnavailableProblem(toolName, reason)
+          )
       })
 
       const failure = await listStreamEvents(

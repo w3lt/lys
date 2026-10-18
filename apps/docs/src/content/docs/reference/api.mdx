@@ -264,7 +264,7 @@ order Settings shows them, and the listed tools that cannot run now:
 
 (Definitions shortened.) Every definition has `runner` `backend`. The
 definitions are fixed for one backend build: `read_page`, which reads one
-public web page in a headless browser, and `web_search`, which searches the web through Tavily
+public web page through vmo, and `web_search`, which searches the web through Tavily
 (both group and access `network`). Availability is read again on every
 request. `reason` is `api-key-missing` (no Tavily API key is saved),
 `api-key-invalid` (the saved key fails the key format), or

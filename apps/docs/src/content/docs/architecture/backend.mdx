@@ -28,7 +28,7 @@ the services together.
 | Conversation routes   | `src/modules/conversation/routes` | Lists, searches, retrieves, renames, and deletes stored conversations.                                                                                                                                                                                                                                    |
 | Agent routes          | `src/modules/agent/routes`        | Lists the built-in and stored agents, retrieves one, and creates, changes, and deletes stored agents; changing or deleting a built-in agent is refused.                                                                                                                                                   |
 | LLM routes            | `src/modules/llm/routes`          | Lists LM Studio models, checks loaded-model health, loads or unloads a model, and reports or refreshes the LM Studio connection.                                                                                                                                                                          |
-| Built-in tools        | `src/modules/tool/builtIn`        | Tools the backend runs once the desktop allows a call. `read_page` (`web/`) reads one public web page in a headless browser; `web_search` (`web/`) searches the web through Tavily.                                                                                                                       |
+| Built-in tools        | `src/modules/tool/builtIn`        | Tools the backend runs once the desktop allows a call. `read_page` (`web/`) reads one public web page through vmo, which loads it in a micro VM; `web_search` (`web/`) searches the web through Tavily.                                                                                                   |
 | Tool routes           | `src/modules/tool/routes`         | Lists the tools the backend runs.                                                                                                                                                                                                                                                                         |
 | Tool approval service | `src/modules/toolApproval`        | Reads the Just run choices saved in `settings.json` once per round of tool calls and decides, for client and backend tools alike, which calls the person must allow first; every call asks when the file cannot be read.                                                                                  |
 | Health route          | `src/modules/health/routes`       | Returns a simple `{ ok: true }` response.                                                                                                                                                                                                                                                                 |
@@ -244,63 +244,49 @@ flag; a character picked by a variation selector keeps its default shape.
 Its arguments are `url` and an
 optional `focus`. A URL longer than 2,048 characters, not absolute `http` or
 `https`, carrying a username or password, or naming this machine or a blocked
-IP address is answered at once. Once allowed, a read runs in a fresh
-headless browser (`web/pageRendering.ts`):
+IP address is answered at once. Once allowed, a read goes through vmo
+(`web/pageRendering.ts`), the page reader in `apps/vmo` that runs on the same
+machine:
 
-1. it checks that Chrome Headless Shell is installed at
-   `$LYS_HOME/runtime/chrome-headless-shell/chrome-headless-shell`, opens a
-   `PageProxy` (`web/pageProxy.ts`), and starts the browser through
-   `playwright-core` with that proxy, Chromium's sandbox on, WebRTC kept on
-   the proxy, popups blocked, and the page's scripts held to 1 GiB of memory,
-   past which the page crashes and the read fails. The proxy listens on a random port of
-   `127.0.0.1`, serves only the browser's random credentials, resolves every
-   host through the checked lookup, refuses a blocked IP address without
-   connecting to it, and checks every connected socket, so the address rule
-   in `webAddresses.ts` covers the page, every redirect, and everything the
-   page loads; the browser sends this machine's own addresses through the
-   proxy too. It refuses connections past 256 or past 64 MiB received;
-2. it opens the URL in a context that keeps no cookies, storage, or service
-   workers and accepts no download, without fetching images, fonts, or media.
-   The page's scripts run, and HTTP, `<meta>` refresh, and script redirects
-   are followed. Once the first document has arrived, it accepts only
-   `text/html`, `application/xhtml+xml`, and `text/plain` with a 2xx status,
-   and waits up to 10 seconds in all for the DOM to be ready and then for the
-   network to be quiet for 500 milliseconds; what has rendered by then is
-   read. When a later navigation of the page fails, such as a `<meta>`
-   refresh to a blocked address, the read fails with that navigation's
-   reason;
-3. it stops the page's scripts and reads the document the page ended on
-   (`web/pageDocument.ts`) with one script run in a script world of Lys's
-   own, which the page's scripts can neither reach nor interrupt: the
-   document's URL and media type, the HTTP status of its response, and its
-   HTML or text. When the page replaces its document before that script runs,
-   as a `<meta>` refresh can, it reads the new one, so a page that never holds
-   still times out. The document read, however the page reached it, must have
-   a URL that passes the URL rules and be HTML, XHTML, or plain text with a
-   2xx status. A document a script writes, as through a `javascript:` URL,
-   keeps the status of the document that wrote it. The HTML is written from the DOM as the page renders it: an open
-   shadow root's content inside its host and slotted content inside its slot,
-   without scripts, styles, `<noscript>`, templates, SVG, iframes, comments,
-   or the `hidden`, `aria-hidden`, and `style` attributes, so that the
-   main-text extraction keeps the elements they hide. Hidden text is read like
-   any other text. The script stops at 4 Mi UTF-16 code units and cuts every
-   text, and each element's attributes together, to what is left of that
-   limit before it escapes them, so no page can make Lys receive more, nor
-   make the script build more than a few times the limit at once from long
-   texts or many long attributes; the backend then cuts the result at the limit without
-   splitting a character. A closed shadow root cannot be read, so its host's
-   own children are written instead. A plain-text page is read as its body's
-   text, cut the same way;
-4. it extracts the main text with Mozilla Readability over a linkedom document,
-   refusing markup with more than 40,000 start tags before parsing it, and a
-   parsed page with more than 40,000 elements or a nesting depth sum above
-   400,000. A `<br>` or a nested block keeps the words around it apart;
+1. it looks up the URL's host name through the operating system and refuses
+   the read, without asking vmo, when the name has no address or any of its
+   addresses is blocked by the rule in `webAddresses.ts`. A host that is an IP
+   address is not looked up: the URL rules already checked it. The check
+   covers only the URL given: the page's redirects, what the page loads, and a
+   name that resolves differently inside vmo's micro VM are not checked;
+2. it sends `GET /web/read-page` to vmo at `127.0.0.1:8080`, with the URL
+   form-encoded as the `url` query parameter, on a connection of its own. vmo
+   creates a micro VM from the `ghcr.io/w3lt/lys-readpage` image, built from
+   `sandboxes/readpage`, whose reader loads the page in headless Chromium,
+   with the page's scripts running and its redirects followed, for up to 10
+   seconds of virtual time, in which the page's timers run without waiting.
+   The reader writes the HTML of the DOM it
+   ended on without scripts, styles, `<noscript>`, `<link>`, `<meta>`, or
+   `class` and `style` attributes, so text a stylesheet hides is read like any
+   other text. vmo deletes the VM before it answers and gives the read 30
+   seconds;
+3. it reads vmo's answer. Only a `200` body is read: JSON
+   `{ html, isTruncated }` of at most 16 MiB, whose HTML is cut to 4 Mi UTF-16
+   code units without splitting a character. A `400` or `431`, for a URL vmo
+   refuses, a `502`, for a page the reader could not load or that was empty,
+   and a `504`, for a read past vmo's 30 seconds, fail the read with that
+   reason. Any other status, or an answer that is not that JSON, fails it as
+   a failure of the page reader. A plain-text page arrives as the HTML
+   Chromium shows it in, its text inside a `<pre>`, and is read as one block
+   that keeps its line breaks;
+4. it extracts the main text with Mozilla Readability over a linkedom
+   document, after dropping the `hidden` and `aria-hidden` attributes so the
+   text they hide is read like any other text. It refuses markup with more
+   than 40,000 start tags before parsing it, and a parsed page with more than
+   40,000 elements or a nesting depth sum above 400,000. A `<br>` or a nested
+   block keeps the words around it apart;
 5. it splits the text into passages of at most 1,200 characters and keeps at
    most 12,000 characters: the whole page, the passages that best match
    `focus` by BM25, or the beginning;
 6. it frames the page's title, site, and date and the passages between
-   `<<<page content>>>` delimiters, with the final URL, a notice that the
-   content is untrusted, and an instruction to cite the page, and notes a page
+   `<<<page content>>>` delimiters, with the URL Lys was asked to read, a
+   notice that the content is untrusted, and an instruction to cite the
+   page, and notes a page
    with less than 200 characters of main text, which may ask the reader to
    sign in or check for automated readers. Every run of three or more `<` or
    `>` in page text is shortened to two, so no page can write a delimiter.
@@ -309,16 +295,19 @@ headless browser (`web/pageRendering.ts`):
    a run when they sit between its brackets, and are dropped with it, so they
    cannot hide a delimiter either.
 
-The whole read, the browser's start included, must finish within 30 seconds;
-the page's document must arrive in that time, after which Lys reads what has
-rendered. Stop and the time limit close the browser, and the browser and the
-proxy are closed whatever the outcome. Failures the model can act on, such as
-an HTTP error status, a non-HTML body, a blocked address, a crash, or a page
-without any main text, become the call's result. A missing browser, or one
-that cannot start, fails the read with whom to contact, and its cause goes
-to the backend log. A browser whose start runs out of time is killed by
-Playwright, which can finish a moment after the read ends. Lys reads what a
-signed-out visitor sees; it never signs in.
+The whole read, the host lookup and vmo's answer included, must finish within
+60 seconds, which leaves time for vmo to create, boot, and delete the VM
+around its own 30 seconds. Stop and the time limit end only Lys's request:
+vmo does not notice, and the VM runs until vmo's own limit ends it. vmo does
+not say where the page's redirects led, its HTTP status, or its media type,
+so the page is cited under the URL Lys was asked to read, and an error page
+is read like any other page. Failures the model can act on, such as a blocked
+address, a page that did not load, a page too large to read, or a page
+without any main text, become the call's result. A vmo that is not running,
+fails, answers outside its contract, or does not answer in time fails the
+read with whom to contact, and its cause goes to the backend log; vmo's own
+error output is never read. Lys reads what a signed-out visitor sees; it
+never signs in.
 
 ### `web_search`
 

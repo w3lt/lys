@@ -214,12 +214,12 @@ on how many run at once.
   end them; it applies from the next message. Each round sends the growing
   context to LM Studio again; the backend measures each round first and ends the
   reply when the round would not fit the loaded model's context length. On Just
-  run, a round of N `read_page` calls starts N headless browsers at once, each
-  behind its own proxy, with at most 256 connections and 64 MiB received each,
-  and each page's scripts holding at most 1 GiB beside the memory Chromium
-  itself takes; each read ends within 30 seconds and closes its browser, and
-  their extractions run one after another on the backend's thread, about a
-  second each at most. A round of N `web_search` calls sends N queries to Tavily
+  run, a round of N `read_page` calls asks vmo for N reads at once, and vmo
+  starts N micro VMs at once, with no limit on their connections or on what
+  they receive; each read ends within 60 seconds in the backend and 30 in
+  vmo, which deletes its VM, and the backend reads at most 16 MiB of each
+  answer. Their extractions run one after another on the backend's thread,
+  about a second each at most. A round of N `web_search` calls sends N queries to Tavily
   at once, each costing one Tavily credit, each ending within 15 seconds and
   reading at most 1 MiB.
 - **Removal condition:** [#136](https://github.com/w3lt/lys/issues/136) adds
@@ -290,9 +290,9 @@ I-3 and I-8.
   because it would hide a defect from the person.
 - **Risk and control:** the round rejects as soon as one run rejects, and the
   reply is stored as failed. The round's other backend runs keep going until
-  they end, for `read_page` a browser read of at most 30 seconds, 256
-  connections, and 64 MiB received, which closes its browser, plus an
-  extraction of about a second, for `web_search` a request of at most 15
+  they end, for `read_page` a read through vmo of at most 60 seconds and
+  16 MiB, whose VM vmo deletes within its own 30 seconds, plus an extraction
+  of about a second, for `web_search` a request of at most 15
   seconds and 1 MiB, and their results are discarded: nothing
   they produce is stored or shown. Calls still waiting for the person end
   when the failed reply task settles.

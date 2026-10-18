@@ -164,8 +164,8 @@ of the new turn's context.
    cancellation, whether or not a desktop follows the reply, and its result
    goes only to the model, cleaned of invisible characters when the tool
    reaches the network, as every network tool's result is. An allowed
-   `read_page` call reads the page in a fresh headless browser that follows
-   its redirects. An allowed `web_search` call sends one query to
+   `read_page` call asks vmo to read the page in headless Chromium in a fresh
+   micro VM, which follows its redirects. An allowed `web_search` call sends one query to
    `https://api.tavily.com` and gives the model the results framed as
    untrusted text; the model may then call `read_page` for a result's URL,
    which is shown again on Ask me. A rejected call runs nothing; the model

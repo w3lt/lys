@@ -45,33 +45,40 @@ repository root:
 The script stops at the first failing step. In order, it:
 
 1. Runs `pnpm install --frozen-lockfile`.
-2. Runs `pnpm run backend:build`, which bundles the backend into
+2. Builds vmo, the page reader `read_page` uses, in release with
+   `swift build -c release --package-path apps/vmo`. It stops first when the
+   Swift toolchain is missing. Nothing is installed yet, so a machine that
+   cannot build vmo keeps its current install.
+3. Runs `pnpm run backend:build`, which bundles the backend into
    `apps/backend/dist/backend.mjs` and copies its prompt files beside it.
-3. Creates `$LYS_HOME/runtime`, using `${LYS_HOME:-$HOME/.lys}`.
-4. Downloads the newest Node.js release in the major version named by
+4. Creates `$LYS_HOME/runtime`, using `${LYS_HOME:-$HOME/.lys}`.
+5. Downloads the newest Node.js release in the major version named by
    `.nvmrc`, or the latest LTS release when `.nvmrc` is absent, verifies it
    against that release's `SHASUMS256.txt`, and installs it at
    `$LYS_HOME/runtime/node`. A matching installed version is reused.
-5. Moves `apps/backend/dist` to `$LYS_HOME/runtime/backend`, replacing the
+6. Moves `apps/backend/dist` to `$LYS_HOME/runtime/backend`, replacing the
    previously installed backend.
-6. Runs `pnpm run desktop:build:ci` and `pnpm run desktop:bundle:ci`, which
+7. Replaces `$LYS_HOME/runtime/vmo` with a directory holding only the new
+   `vmo` executable, and signs it ad hoc with the virtualization entitlement
+   in `apps/vmo/vmo.entitlements`.
+8. Runs `pnpm run desktop:build:ci` and `pnpm run desktop:bundle:ci`, which
    build the Tauri app without bundling and then bundle only `Lys.app`.
-7. Removes any previously installed `/Applications/Lys.app`, then copies the
+9. Removes any previously installed `/Applications/Lys.app`, then copies the
    new `Lys.app` there with `ditto`. Without the removal, files from the old
    bundle would remain inside the new one.
 
-The script needs the toolchain from [Environment setup](/develop/setup/), plus
-`curl`, `jq`, and network access to `nodejs.org`. It neither builds nor starts
-vmo, which `read_page` needs; see
+The script needs the toolchain from [Environment setup](/develop/setup/),
+including the Swift toolchain, plus `curl`, `jq`, and network access to
+`nodejs.org`. vmo builds and runs only on Apple silicon with macOS 26; see
 [Runtime dependencies](/operate/dependencies/#backend).
 
 :::caution[Desktop runtime is still under development]
-Release builds of the desktop app start the backend from a runtime installed in
-the [Lys home directory](/reference/configuration/#lys-home-directory):
+Release builds of the desktop app start the backend and vmo from a runtime
+installed in the [Lys home directory](/reference/configuration/#lys-home-directory):
 `$LYS_HOME/runtime/node/bin/node` running
-`$LYS_HOME/runtime/backend/backend.mjs`. Only `build.sh` installs that runtime,
-and only on the machine that runs it, so a copied `Lys.app` cannot start its
-backend on a machine without it. The same reference explains why an app opened
+`$LYS_HOME/runtime/backend/backend.mjs`, and `$LYS_HOME/runtime/vmo/vmo`. Only
+`build.sh` installs that runtime, and only on the machine that runs it, so a
+copied `Lys.app` cannot start its backend or vmo on a machine without it. The same reference explains why an app opened
 from Finder or the Dock looks for the runtime under `~/.lys`.
 :::
 

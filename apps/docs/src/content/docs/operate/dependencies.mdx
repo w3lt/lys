@@ -27,6 +27,27 @@ The desktop application is a Tauri app. Its checked-in build config expects:
 For local development, the repository root script runs `pnpm --filter
 @lys/desktop run tauri dev`.
 
+## vmo
+
+vmo, in `apps/vmo`, is the page reader `read_page` uses. The desktop host owns
+it like the backend: it starts vmo when Lys opens if "Start vmo when Lys opens"
+is on, starts and stops it from Settings → Runtime, and stops it when Lys
+quits. Development builds run `bash run.sh` in `apps/vmo` of the checkout
+recorded at host compile time; `run.sh` builds vmo, signs it with the
+virtualization entitlement, and replaces itself with it. Release builds run
+`$LYS_HOME/runtime/vmo/vmo`, which `build.sh` builds with the Swift toolchain
+and installs; see [Packaging and releases](/operate/releases/).
+
+vmo listens at `127.0.0.1:8080` and needs:
+
+- macOS 26 on Apple silicon
+- network access to `ghcr.io`, from which it pulls the `vminit` and
+  `lys-readpage` images when it starts, so a first start can take minutes
+- for now, the Linux kernel that Apple's `container` tool installs at
+  `~/Library/Application Support/com.apple.container/kernels/vmlinux-6.18.35-197-debug`,
+  so vmo does not boot its VMs on a Mac without it
+  ([#200](https://github.com/w3lt/lys/issues/200))
+
 ## Backend
 
 In development builds, the desktop host launches `pnpm run dev` from the backend
@@ -52,16 +73,10 @@ The backend itself depends on:
   outbound HTTPS access for `web_search`; vmo's micro VM fetches the pages
   `read_page` reads. Nothing else needs the network, and a read or search that
   cannot connect becomes the tool call's result
-- for `read_page`, vmo listening at `127.0.0.1:8080`: the page reader in
-  `apps/vmo`, which neither the backend nor `build.sh` starts.
-  `apps/vmo/run.sh` builds it, signs it with the virtualization entitlement,
-  and starts it. vmo needs macOS 26 on Apple silicon, network access to
-  `ghcr.io`, from which it pulls the `vminit` and `lys-readpage` images when
-  it starts, and, for now, the Linux kernel that Apple's `container` tool
-  installs at
-  `~/Library/Application Support/com.apple.container/kernels/vmlinux-6.18.35-197-debug`
-  ([#190](https://github.com/w3lt/lys/issues/190)). Without vmo every read
-  fails and says whom to contact; nothing else needs it
+- for `read_page`, [vmo](#vmo) answering `GET /health` at
+  `127.0.0.1:8080`. The backend asks it on every tool lookup, so while vmo is
+  not ready `read_page` is unavailable and never offered; nothing else needs
+  it
 - for `web_search`, a Tavily Search API key (Tavily's free plan gives 1,000
   credits a month; a basic search costs one, and a key check two), saved in
   Settings → Secrets;

@@ -23,6 +23,11 @@ Toolchain versions, platform prerequisites, and first build.
 - **pnpm 11**: the root workspace pins `pnpm@11.17.0`.
 - **Rust and Cargo**: required because the desktop app uses Tauri and the
   repository validation list includes Cargo-based checks for the host code.
+- **Swift toolchain** (Xcode or the Command Line Tools): required to build
+  vmo, the page reader `read_page` uses, which the desktop starts with
+  `apps/vmo/run.sh` and `build.sh` installs. vmo builds and runs only on
+  macOS 26 on Apple silicon; see
+  [Runtime dependencies](/operate/dependencies/#vmo).
 - **LM Studio**: required for the local model inventory, model loading, chat,
   and title-generation paths. Lys starts without it and shows LM Studio as not
   reachable until it runs.
@@ -67,6 +72,7 @@ mkdir -p "$HOME/.lys"
 Desktop settings initialization creates the Lys home directory for the
 desktop-managed path. Choose one backend launch path: desktop auto-start is
 enabled by default, and starting another backend on the same port can conflict.
+The same holds for vmo, which the desktop starts by default.
 See [Running Lys locally](/develop/running/) for process ownership and
 readiness.
 
@@ -74,6 +80,7 @@ readiness.
 
 - The backend listens on `127.0.0.1:12345`.
 - The backend expects LM Studio on `127.0.0.1:1234`.
+- vmo listens on `127.0.0.1:8080`.
 
 Backend startup does not wait for LM Studio: the backend opens its HTTP
 listener, then tries once to connect. If LM Studio starts later, press

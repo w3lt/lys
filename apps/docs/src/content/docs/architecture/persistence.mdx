@@ -111,22 +111,21 @@ The settings JSON is a separate host-managed artifact. The backend reads only
 the Tavily API key and the Just run list (`tools.justRun`) from it, and never
 writes it. The desktop reaches it through Tauri commands.
 
-Generation, load configuration, and tool approval edits are saved
-automatically. Each save reads the document already on disk and replaces only
-its own part, preserving the rest: a generation save replaces the `generation`
-group, a load configuration save replaces `loadConfiguration.models` and keeps
-`loadConfiguration.default`, which only a hand edit changes, and a tool
-approval save replaces the `tools` group. Runtime edits, including auto-start and
-default-model selection, and `model.contextSize` edits remain session-only in
-the desktop.
+Generation, load configuration, tool approval, and runtime startup switch
+edits are saved automatically. Each save reads the document already on disk
+and replaces only its own part, preserving the rest: a generation save
+replaces the `generation` group, a load configuration save replaces
+`loadConfiguration.models` and keeps `loadConfiguration.default`, which only a
+hand edit changes, a tool approval save replaces the `tools` group, and a
+startup switch save replaces `runtime.autoStartBackend` and
+`runtime.autoStartVmo` and keeps the rest of `runtime`. The other runtime
+edits, such as default-model selection, and `model.contextSize` edits remain
+session-only in the desktop.
 See the [configuration reference](/reference/configuration/#persisted-settings-json)
 for the current shape and defaults.
 
 ## Current limitations
 
-- The current React Runtime settings tab does not persist its edited auto-start
-  value back through `save_settings`
-  ([#169](https://github.com/w3lt/lys/issues/169)).
 - Recovery, export, and import are not first-class app features yet.
 
 ## Coming soon

@@ -52,20 +52,72 @@ restarting it. The
 [model health endpoint](/operate/logging/#model-health-observation) can report
 loaded state; it does not test inference success.
 
+## vmo is not ready, so `read_page` is unavailable
+
+The backend offers `read_page` only while vmo answers `GET /health` at
+`127.0.0.1:8080`. Until then, the Tools pane shows `read_page` off and
+disabled, with "vmo, Lys's page reader, isn't ready. Start it in Settings →
+Runtime." The vmo card in Settings → Runtime says why:
+
+- **vmo starting**: the first start pulls the `vminit` and `lys-readpage`
+  images from `ghcr.io`, which can take a few minutes, and a development build
+  compiles vmo first. Lys waits up to ten minutes.
+- **vmo not responding**: the process stayed up for ten minutes without
+  answering. Press **Stop**, then **Start**. Check network access to
+  `ghcr.io`, and that the Mac meets
+  [vmo's requirements](/operate/dependencies/#vmo); vmo does not boot its VMs
+  without the kernel described there
+  ([#200](https://github.com/w3lt/lys/issues/200)).
+- **vmo stopped** right after Start: the process exited before it answered.
+  Another vmo usually holds port `8080`, for example one left by a Lys that
+  died without quitting; see
+  [A vmo or backend keeps running after Lys died](#a-vmo-or-backend-keeps-running-after-lys-died).
+- **Lys couldn't start vmo: Failed to run …/vmo: No such file or directory**:
+  vmo is not installed. Run `build.sh`; see
+  [Packaging and releases](/operate/releases/).
+
+## vmo was killed
+
+Stopping vmo sends it `SIGTERM` and waits up to 60 seconds while it deletes its
+VMs. When it has not exited by then, Lys kills it, and the vmo card says "vmo
+didn't stop within 60 seconds and was killed. It may have left VMs running."
+Lys cannot remove those VMs yet; a restart of the Mac ends them. Quitting Lys
+waits for vmo the same way, so quitting can take up to a minute.
+
+## A vmo or backend keeps running after Lys died
+
+Lys stops vmo and the backend when it quits. When it dies without quitting,
+after a crash, Force Quit, or `kill -9`, or when a development rebuild restarts
+the desktop host, both keep running
+([#202](https://github.com/w3lt/lys/issues/202)). The next Lys cannot start its
+own: its vmo card shows **vmo stopped** while `read_page` still works through
+the old vmo, and its backend card shows the old backend as running. Stop does
+not reach either.
+
+To end them, find each process by its port and send it `SIGTERM`:
+
+```sh
+lsof -nP -iTCP:8080 -sTCP:LISTEN    # vmo
+lsof -nP -iTCP:12345 -sTCP:LISTEN   # backend
+kill <pid>
+```
+
+Never use `kill -9` on vmo: only `SIGTERM` lets it delete its VMs before it
+exits, which can take up to a minute. Then press **Start** on each card.
+
 ## Lys forgets runtime settings
 
-The desktop host owns `$LYS_HOME/settings.json`, but the checked-in desktop UI
-currently loads settings without calling the Tauri save command after runtime
-setting edits. If runtime preferences do not survive a restart:
+The Runtime pane saves its two startup switches, "Start it when Lys opens" for
+the backend and "Start vmo when Lys opens", to `$LYS_HOME/settings.json`
+whenever either changes. When that save fails, the pane says "Lys couldn't save
+the startup switches. They apply to this session only." Then:
 
 - check whether `$LYS_HOME/settings.json` exists
 - if it exists, verify that it contains valid JSON
 - if it does not exist, the host should recreate it the next time settings are
   loaded
-- if the file exists but does not reflect a recent UI change, that matches the
-  current implementation gap: save wiring exists in Tauri, but not in the UI
 
-This limitation applies to runtime controls and the default-model selection.
+The default-model selection is not saved and lasts for the session only.
 Generation controls and load configurations autosave separately and expose a
 save failure with a retry action; those saves preserve the runtime and model
 values already on disk.

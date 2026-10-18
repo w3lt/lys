@@ -19,18 +19,19 @@ backend decides which calls ask; the desktop shows the prompts.
 
 ## Current trust boundaries
 
-| Boundary                     | Current state                                                                                                              |
-| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| React UI -> Tauri host       | Trusted application boundary using Tauri `invoke` commands.                                                                |
-| React UI -> Fastify backend  | Loopback HTTP and SSE only. No auth layer beyond local binding.                                                            |
-| Fastify backend -> LM Studio | Loopback connections to local LM Studio HTTP and WebSocket endpoints.                                                      |
-| Backend -> SQLite file       | Local filesystem access to `$LYS_HOME/lys_db.sqlite`.                                                                      |
-| Tauri host -> settings file  | Local filesystem access to `$LYS_HOME/settings.json`.                                                                      |
-| Tauri host -> user files     | File tools read any path the OS user running Lys can read.                                                                 |
-| Backend -> vmo               | Each `read_page` call sends the page's URL to vmo over loopback HTTP on `127.0.0.1:8080`, without authentication.          |
-| vmo -> micro VM -> web       | vmo reads the page in headless Chromium in a fresh micro VM, which loads the page, its redirects, and what it loads.       |
-| Backend -> Tavily            | `web_search` sends one query and the saved API key to `api.tavily.com` per allowed call.                                   |
-| Backend -> settings file     | Reads the Tavily API key and the saved Just run choices from `$LYS_HOME/settings.json`; the Tauri host is the only writer. |
+| Boundary                     | Current state                                                                                                                                                                                              |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| React UI -> Tauri host       | Trusted application boundary using Tauri `invoke` commands.                                                                                                                                                |
+| React UI -> Fastify backend  | Loopback HTTP and SSE only. No auth layer beyond local binding.                                                                                                                                            |
+| Fastify backend -> LM Studio | Loopback connections to local LM Studio HTTP and WebSocket endpoints.                                                                                                                                      |
+| Backend -> SQLite file       | Local filesystem access to `$LYS_HOME/lys_db.sqlite`.                                                                                                                                                      |
+| Tauri host -> settings file  | Local filesystem access to `$LYS_HOME/settings.json`.                                                                                                                                                      |
+| Tauri host -> user files     | File tools read any path the OS user running Lys can read.                                                                                                                                                 |
+| Tauri host -> vmo            | The host starts vmo as the OS user running Lys, ad hoc signed with the virtualization entitlement, stops it with `SIGTERM` and, after 60 seconds, `SIGKILL`, and asks its `GET /health` over loopback TCP. |
+| Backend -> vmo               | Each tool lookup sends `GET /health` to vmo, and each `read_page` call sends the page's URL, over loopback HTTP on `127.0.0.1:8080`, without authentication.                                               |
+| vmo -> micro VM -> web       | vmo reads the page in headless Chromium in a fresh micro VM, which loads the page, its redirects, and what it loads.                                                                                       |
+| Backend -> Tavily            | `web_search` sends one query and the saved API key to `api.tavily.com` per allowed call.                                                                                                                   |
+| Backend -> settings file     | Reads the Tavily API key and the saved Just run choices from `$LYS_HOME/settings.json`; the Tauri host is the only writer.                                                                                 |
 
 ## Current controls
 
@@ -94,6 +95,13 @@ backend decides which calls ask; the desktop shows the prompts.
   it to read a page. Stop and the backend's time limit do not stop the VM of
   a read, which runs until vmo's own 30 seconds end it, and nothing limits
   how many reads run at once.
+- Nor do the backend and the host authenticate vmo: whatever listens on
+  `127.0.0.1:8080` and answers `GET /health` with `200` makes `read_page`
+  available and receives the URL of every read. While vmo is stopped, any
+  local process can take that port.
+- A vmo killed after the 60-second stop timeout, or ended with `kill -9`, may
+  leave VMs running. A vmo or backend whose Lys died without quitting keeps
+  running ([#202](https://github.com/w3lt/lys/issues/202)).
 - Hidden text reaches the model. `read_page` reads everything a page holds,
   text it hides from view included, such as a closed accordion, text moved
   off-screen, or white text on white, because the content is what a read is

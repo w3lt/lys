@@ -73,13 +73,35 @@ when the host was compiled, so that checkout, installed dependencies, Node, and
 home it resolved at startup.
 
 `runtime.autoStartBackend` defaults to `true`; initialization starts the child
-when the loaded value is enabled. Runtime control edits remain session-only;
-generation controls have separate autosave wiring.
+when the loaded value is enabled. The Runtime pane's "Start it when Lys opens"
+switch saves it for the next launch; the other runtime edits remain
+session-only.
 
 Runtime status describes the owned child process. It does not discover a
 backend started separately in a terminal or prove HTTP readiness. Use
 `GET /api/v1/heath` to check the listener. Avoid launching a standalone watcher
 alongside desktop auto-start because both attempt to use port `12345`.
+
+## vmo in the desktop app
+
+The desktop also owns vmo, the page reader `read_page` uses. In development it
+runs `bash run.sh` in `apps/vmo` of the checkout recorded when the host was
+compiled: `run.sh` builds a debug vmo with `swift build`, signs it with the
+virtualization entitlement, and replaces itself with it through `exec`, so the
+host stops vmo itself. The first start compiles vmo and pulls its images,
+which can take several minutes; the vmo card shows **vmo starting** meanwhile.
+vmo needs macOS 26 on Apple silicon; see
+[Runtime dependencies](/operate/dependencies/#vmo).
+
+`runtime.autoStartVmo` defaults to `true`, and the Runtime pane's "Start vmo
+when Lys opens" switch saves it. Reloading the window
+keeps the vmo the host owns; quitting Lys stops it, waiting up to a minute
+while vmo deletes its VMs. A rebuild that restarts the host can end it without
+running its exit handler, and the backend and vmo it started then keep running
+([#202](https://github.com/w3lt/lys/issues/202)); end them as described in
+[troubleshooting](/operate/troubleshooting/#a-vmo-or-backend-keeps-running-after-lys-died).
+Running `apps/vmo/run.sh` by hand while the desktop owns a vmo fails, because
+port `8080` is taken.
 
 ## Using a scratch data directory
 

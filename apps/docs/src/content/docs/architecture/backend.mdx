@@ -204,10 +204,15 @@ defect.
 
 Each entry of the registry pairs a definition with a `BuiltInToolProvider`,
 whose `findTurnTool()` gives the tool for one turn or says why it cannot run
-now (`api-key-missing`, `api-key-invalid`, or `settings-unreadable`).
-`createBuiltInTools()` builds the list once at startup: `read_page`, always
-ready through `ReadyBuiltInToolProvider`, then `web_search`, found by
-`WebSearchToolProvider`. `GET /api/v1/tools` returns every definition and
+now (`page-reader-not-ready`, `api-key-missing`, `api-key-invalid`, or
+`settings-unreadable`). `createBuiltInTools()` builds the list once at
+startup: `read_page`, found by `ReadPageToolProvider`, then `web_search`,
+found by `WebSearchToolProvider`. `ReadPageToolProvider` sends vmo one
+`GET /health` per lookup (`web/vmoHealth.ts`), on a connection of its own, and
+gives the tool only for a `200` within one second; anything else, a refused
+connection or no answer in time included, is `page-reader-not-ready`, so a
+lookup waits at most one second for vmo. The backend never starts vmo, which
+the desktop owns. `GET /api/v1/tools` returns every definition and
 looks up every tool again to list the ones that cannot run now; the desktop
 offers the switched-on, available ones by name. The chat route looks up every
 offered backend tool before it looks up the agent and stores the turn, and
@@ -303,9 +308,10 @@ not say where the page's redirects led, its HTTP status, or its media type,
 so the page is cited under the URL Lys was asked to read, and an error page
 is read like any other page. Failures the model can act on, such as a blocked
 address, a page that did not load, a page too large to read, or a page
-without any main text, become the call's result. A vmo that is not running,
-fails, answers outside its contract, or does not answer in time fails the
-read with whom to contact, and its cause goes to the backend log; vmo's own
+without any main text, become the call's result. A turn offers `read_page`
+only while vmo answers its health route, but vmo can stop during the turn: a
+vmo that is not running, fails, answers outside its contract, or does not
+answer in time fails the read with whom to contact, and its cause goes to the backend log; vmo's own
 error output is never read. Lys reads what a signed-out visitor sees; it
 never signs in.
 

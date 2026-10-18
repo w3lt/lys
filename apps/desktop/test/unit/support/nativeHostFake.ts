@@ -59,7 +59,7 @@ export function startNativeHostFake(commands: NativeCommands): NativeHostFake {
     const handle = commands[command]
     if (handle === undefined) {
       unexpectedCommands.push(command)
-      throw `Unexpected native command: ${command}`
+      throw new Error(`Unexpected native command: ${command}`)
     }
     return handle(args)
   }

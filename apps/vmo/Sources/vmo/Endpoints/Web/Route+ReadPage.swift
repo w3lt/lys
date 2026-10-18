@@ -1,3 +1,9 @@
+private struct ReadPageResult : Encodable {
+    let output: String
+    let error: String
+    let exitCode: Int32
+}
+
 extension Route {
     /// `GET /web/read-page?url=…`: reads the page at `url` in a micro VM.
     ///
@@ -8,18 +14,34 @@ extension Route {
     /// - Returns: The route. It answers `400 Bad Request` when `url` is
     ///   missing.
     static func readPage(vmManager: VmManager) -> Route {
-        Route(method: .get, path: "/web/read-page") { request in
-            handleReadPageRequest(request, vmManager)
+        Route(method: .get, path: "/web/read-page") { request async in
+            do {
+                return try await handleReadPageRequest(request, vmManager)
+            } catch {
+                return HTTPResponse(status: .internalServerError)
+            }
         }
     }
 }
 
-private func handleReadPageRequest(_ request: HTTPRequest, _ vmManager: VmManager) -> HTTPResponse {
-    if let urlValue = request.query.first(where: { $0.name == "url" })?.value {
-        return HTTPResponse(status: .ok, text: "Would read \(urlValue)\n")
+private func handleReadPageRequest(_ request: HTTPRequest, _ vmManager: VmManager) async throws -> HTTPResponse {
+    guard let urlValue = request.query.first(where: { $0.name == "url" })?.value else {
+        return HTTPResponse(status: .badRequest, text: "url query param is missing.\n")
     }
     
+    let vmId = try await vmManager.createVm(command: ["/bin/echo", urlValue])
+    try await vmManager.startVm(containerId: vmId)
+    let result = try await vmManager.waitForCommandExit(containerId: vmId)
     
+    let ouput = String(decoding: result.stdout, as: UTF8.self)
+    let error = String(decoding: result.stderr, as: UTF8.self)
     
-    return HTTPResponse(status: .badRequest, text: "url query param is missing.\n")
+    return try HTTPResponse(
+        status: .ok,
+        json: ReadPageResult(
+            output: ouput,
+            error: error,
+            exitCode: result.exitCode
+        )
+    )
 }

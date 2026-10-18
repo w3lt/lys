@@ -18,6 +18,7 @@
     "desktop:build": "pnpm --filter @lys/desktop run tauri build",
     "desktop:build:ci": "pnpm --filter @lys/desktop run tauri build --no-bundle",
     "desktop:bundle:ci": "pnpm --filter @lys/desktop run tauri bundle --bundles app",
+    "vm:readpage:build": "docker build -f sandboxes/readpage/Dockerfile -t lys-readpage .",
     "prepare": "husky"
   },
   "devDependencies": {

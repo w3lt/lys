@@ -282,9 +282,6 @@ importers:
       openai:
         specifier: 6.49.0
         version: 6.49.0(ws@8.22.0)(zod@4.6.7)
-      playwright-core:
-        specifier: ^1.64.0
-        version: 1.64.0
       uuid:
         specifier: ^14.0.3
         version: 14.0.3
@@ -5708,14 +5705,6 @@ packages:
       }
     hasBin: true
 
-  playwright-core@1.64.0:
-    resolution:
-      {
-        integrity: sha512-T9r+MZkTECl2+oUcZ26YgZzTrYidTsIhYYkJix+6iDOymOb1FB2RLLSOxRGnZGv5DStt+aduIVbt+E8WygXYpg==
-      }
-    engines: { node: ">=20" }
-    hasBin: true
-
   postcss-nested@6.2.0:
     resolution:
       {
@@ -10518,8 +10507,6 @@ snapshots:
       safe-stable-stringify: 2.5.0
       sonic-boom: 4.2.1
       thread-stream: 4.2.0
-
-  playwright-core@1.64.0: {}
 
   postcss-nested@6.2.0(postcss@8.5.30):
     dependencies:

@@ -1,6 +1,7 @@
 import type { ReactElement } from "react"
 import LmStudioStatusCard from "./LmStudioStatusCard"
 import ModelRequestFeedback from "./ModelRequestFeedback"
+import VmoStatusCard from "./VmoStatusCard"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import {
@@ -69,35 +70,40 @@ function formatRuntimeAutoStartSaveStatus(
 }
 
 /**
- * Presents backend lifecycle controls, autostart, LM Studio status, and model
- * residency.
+ * Presents backend and vmo lifecycle controls, their autostart switches,
+ * LM Studio status, and model residency.
  *
  * @remarks The application store owns
- * backend status, the LM Studio status, and the start, stop, and LM Studio
- * connect commands; the settings context owns the persisted settings and the
- * model lifecycle requests. Start, Stop, and the LM Studio refresh
- * intentionally discard their command promises with `void`: failures are not
- * awaited or rendered here, so a rejection surfaces as an unhandled rejection
- * and backend status is not a completion owner when a command rejects. Stop is
- * available while the backend runs or is not responding. The autostart switch
- * proposes one patch per checked change, which the application store saves.
- * A polite status region named "Startup switches save" stays mounted and
- * says so when that save fails; it is empty otherwise.
+ * backend and vmo status, the LM Studio status, and the start, stop, and
+ * LM Studio connect commands; the settings context owns the persisted
+ * settings and the model lifecycle requests. Start, Stop, and the LM Studio
+ * refresh intentionally discard their command promises with `void`. The
+ * backend's failures are not awaited or rendered here, so a rejection
+ * surfaces as an unhandled rejection and backend status is not a completion
+ * owner when a command rejects; vmo's start and stop never reject and
+ * publish their problem in the vmo card. Stop is available while the backend
+ * runs or is not responding. Each autostart switch proposes one patch per
+ * checked change, which the application store saves. A polite status region
+ * named "Startup switches save" stays mounted under both cards and says so
+ * when that save fails; it is empty otherwise.
  *
- * The LM Studio card sits under the backend card and owns the only reconnect
- * action. The model card projects the settings context's residency state and
+ * The vmo card sits under the backend card, and the LM Studio card under
+ * them owns the only reconnect action. The model card projects the settings context's residency state and
  * is dimmed unless LM Studio is connected. While a transition is in flight the
  * card is marked busy and carries an indeterminate progress indicator: the API
  * reports completion without progress, so no percentage is claimed. Both
  * lifecycle actions are withheld during a transition and require a connected
  * LM Studio; Load additionally requires a chosen default model.
  *
- * @returns The runtime backend and model cards.
+ * @returns The runtime backend, vmo, LM Studio, and model cards.
  */
 export default function RuntimePaneContent(): ReactElement {
   const backendServerInfo = useLysStore((state) => state.backendServerInfo)
   const startBackend = useLysStore((state) => state.startBackend)
   const stopBackend = useLysStore((state) => state.stopBackend)
+  const vmoServerInfo = useLysStore((state) => state.vmoServerInfo)
+  const startVmo = useLysStore((state) => state.startVmo)
+  const stopVmo = useLysStore((state) => state.stopVmo)
   const runtimeAutoStartSave = useLysStore(
     (state) => state.runtimeAutoStartSave
   )
@@ -199,6 +205,20 @@ export default function RuntimePaneContent(): ReactElement {
           </div>
         </div>
       </section>
+
+      <VmoStatusCard
+        isAutoStartOn={settings.runtime.autoStartVmo}
+        onAutoStartVmoChange={(checked) =>
+          onRuntimeChange({ autoStartVmo: checked })
+        }
+        onStartVmo={() => {
+          void startVmo()
+        }}
+        onStopVmo={() => {
+          void stopVmo()
+        }}
+        vmoServerInfo={vmoServerInfo}
+      />
 
       <p
         aria-label="Startup switches save"

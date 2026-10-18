@@ -9,20 +9,26 @@ import {
   buildUserMessage,
   FIXTURE_CONVERSATION_ID
 } from "./support/conversationFixtures"
+import { buildJsonResponse, startBackendFake } from "./support/backendFake"
 import { startNativeHostFake } from "./support/nativeHostFake"
 import {
   createControlledPromise,
   waitForMicrotasks
 } from "./support/settlement"
 
-/** Saved settings that leave the backend stopped when Lys opens. */
+/** Saved settings that leave the backend and vmo stopped when Lys opens. */
 const MANUAL_START_SETTINGS: LysSettings = {
   ...initialSettingsState,
-  runtime: { ...initialSettingsState.runtime, autoStartBackend: false }
+  runtime: {
+    ...initialSettingsState.runtime,
+    autoStartBackend: false,
+    autoStartVmo: false
+  }
 }
 
 /**
- * Starts a native host whose backend process is stopped and stays stopped.
+ * Starts a native host whose backend process and vmo are stopped and stay
+ * stopped.
  *
  * @param loadSettings - Result of the settings read.
  * @returns The host observation handle.
@@ -32,7 +38,8 @@ function startStoppedDesktopHost(
 ) {
   return startNativeHostFake({
     load_settings: loadSettings,
-    get_backend_status: () => ({ running: false })
+    get_backend_status: () => ({ running: false }),
+    get_vmo_status: () => ({ status: "stopped" })
   })
 }
 
@@ -75,8 +82,47 @@ describe("App", () => {
     expect(screen.getByRole("banner")).toHaveTextContent("Lys")
     expect(host.commands.map((invoked) => invoked.command)).toEqual([
       "load_settings",
-      "get_backend_status"
+      "get_backend_status",
+      "get_vmo_status"
     ])
+  })
+
+  it("reads the tool list again when vmo starts running while mounted, and stops after unmount", async () => {
+    const host = startNativeHostFake({
+      load_settings: () => MANUAL_START_SETTINGS,
+      get_backend_status: () => ({ running: false }),
+      get_vmo_status: () => ({ status: "stopped" }),
+      list_tools: () => []
+    })
+    const backend = startBackendFake({
+      "GET /api/v1/tools": () =>
+        buildJsonResponse(200, { tools: [], unavailableTools: [] })
+    })
+    const { useLysStore, App } = await loadFreshApp()
+    // Settings shows no view that reads the backend on its own.
+    useLysStore.setState({ activeView: "settings" })
+    const { unmount } = render(<App />)
+    await screen.findByRole("main", { name: "Settings" })
+    useLysStore.setState({ backendServerInfo: { status: "running" } })
+
+    act(() => {
+      useLysStore.setState({
+        vmoServerInfo: { status: "running", problem: null }
+      })
+    })
+    await vi.waitFor(() => {
+      expect(backend.requests).toHaveLength(1)
+    })
+    unmount()
+    useLysStore.setState({
+      vmoServerInfo: { status: "stopped", problem: null }
+    })
+    await waitForMicrotasks()
+
+    expect(backend.requests).toHaveLength(1)
+    expect(
+      host.commands.filter((invoked) => invoked.command === "list_tools")
+    ).toHaveLength(1)
   })
 
   it("switches to Settings and back to the chat on Done", async () => {

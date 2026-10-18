@@ -198,9 +198,6 @@ describe("RuntimePaneContent", () => {
       )
     })
 
-    // Known defect (#169): the switch changes the setting only in memory, so
-    // the choice is lost before the next time Lys opens, the only time it
-    // applies.
     it("keeps the choice for the next time Lys opens", async () => {
       const saves: unknown[] = []
       startNativeHostFake({
@@ -248,6 +245,99 @@ describe("RuntimePaneContent", () => {
       expect(
         screen.getByRole("switch", { name: "Start it when Lys opens" })
       ).not.toBeChecked()
+    })
+  })
+
+  describe("vmo", () => {
+    it("shows vmo under the backend and above LM Studio", async () => {
+      await startRuntimePane()
+
+      const vmoCard = screen.getByRole("region", { name: "vmo page reader" })
+      const backendSwitch = screen.getByRole("switch", {
+        name: "Start it when Lys opens"
+      })
+      const lmStudioCard = screen.getByRole("region", {
+        name: "LM Studio connection"
+      })
+      expect(
+        backendSwitch.compareDocumentPosition(vmoCard) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
+      expect(
+        vmoCard.compareDocumentPosition(lmStudioCard) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
+      expect(
+        screen.getByRole("heading", { name: "vmo stopped" })
+      ).toBeInTheDocument()
+    })
+
+    it("starts a stopped vmo and stops it again", async () => {
+      let isRunning = false
+      const host = startNativeHostFake({
+        get_vmo_status: () =>
+          isRunning ? { status: "running", pid: 4343 } : { status: "stopped" },
+        start_vmo: () => {
+          isRunning = true
+          return { status: "running", pid: 4343 }
+        },
+        get_vmo_health: () => "ready",
+        stop_vmo: () => {
+          isRunning = false
+          return { status: "stopped" }
+        }
+      })
+      await startRuntimePane()
+      const user = userEvent.setup()
+
+      await user.click(screen.getByRole("button", { name: "Start vmo" }))
+      await waitForRenderedWork()
+      const afterStart = screen.getByRole("heading", { name: "vmo running" })
+      await user.click(screen.getByRole("button", { name: "Stop vmo" }))
+      await waitForRenderedWork()
+
+      expect(afterStart).toBeInTheDocument()
+      expect(
+        screen.getByRole("heading", { name: "vmo stopped" })
+      ).toBeInTheDocument()
+      expect(host.commands.map((invoked) => invoked.command)).toEqual([
+        "get_vmo_status",
+        "start_vmo",
+        "get_vmo_status",
+        "get_vmo_health",
+        "get_vmo_status",
+        "stop_vmo"
+      ])
+    })
+
+    it("keeps whether vmo starts when Lys opens for the next time Lys opens", async () => {
+      const saves: unknown[] = []
+      startNativeHostFake({
+        load_settings: () => FIRST_RUN_SETTINGS_DOCUMENT,
+        save_settings: (args) => {
+          saves.push(args)
+        }
+      })
+      const { useLysStore } = await startRuntimePane()
+      const user = userEvent.setup()
+      const autoStart = screen.getByRole("switch", {
+        name: "Start vmo when Lys opens"
+      })
+      expect(autoStart).toBeChecked()
+
+      await user.click(autoStart)
+      await waitForRenderedWork()
+
+      expect(autoStart).not.toBeChecked()
+      expect(useLysStore.getState().settings.runtime.autoStartVmo).toBe(false)
+      expect(saves).toContainEqual({
+        newSettings: expect.objectContaining({
+          runtime: expect.objectContaining({
+            autoStartBackend: true,
+            autoStartVmo: false
+          })
+        })
+      })
     })
   })
 

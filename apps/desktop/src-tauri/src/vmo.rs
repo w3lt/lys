@@ -209,7 +209,8 @@ impl Vmo {
     ///
     /// Returns an error while a stop is waiting for the previous child, which
     /// still holds vmo's port, when the owned child cannot be inspected, or
-    /// when `command` cannot be spawned.
+    /// when `command` cannot be spawned; that error names the program, so a
+    /// missing install shows where vmo was expected.
     pub fn start(&self, mut command: Command) -> Result<VmoProcessStatus, String> {
         let mut process = self.lock_process();
         match &mut *process {
@@ -226,10 +227,12 @@ impl Vmo {
             VmoProcess::Stopped => {}
         }
 
-        let child = command
-            .process_group(0)
-            .spawn()
-            .map_err(|err| format!("Failed to start vmo: {err}"))?;
+        let child = command.process_group(0).spawn().map_err(|err| {
+            format!(
+                "Failed to run {}: {err}",
+                Path::new(command.get_program()).display()
+            )
+        })?;
         let pid = child.id();
         *process = VmoProcess::Running(child);
         Ok(VmoProcessStatus::Running { pid })
@@ -749,6 +752,24 @@ mod tests {
         assert_eq!(second, Ok(VmoProcessStatus::Running { pid }));
         assert_eq!(vmo.status(), Ok(VmoProcessStatus::Running { pid }));
         assert_eq!(vmo.stop(), Ok(VmoStopOutcome::Stopped));
+    }
+
+    #[test]
+    fn start_names_the_program_it_cannot_run() {
+        let case = CaseDir::create("missing");
+        let missing = case.join("vmo");
+        let vmo = Vmo::new(SHORT_STOP_TIMEOUT);
+
+        let start = vmo.start(Command::new(&missing));
+
+        assert_eq!(
+            start,
+            Err(format!(
+                "Failed to run {}: No such file or directory (os error 2)",
+                missing.display()
+            ))
+        );
+        assert_eq!(vmo.status(), Ok(VmoProcessStatus::Stopped));
     }
 
     #[test]

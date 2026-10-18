@@ -5,6 +5,7 @@ import { create, type StoreApi, type UseBoundStore } from "zustand"
 import { listBackendTools, type BackendToolList } from "@/lib/apis/http/tools"
 import { listTools } from "@/lib/apis/tauri/tools"
 import { useLysStore } from "@/lib/store"
+import type { VmoServerStatus } from "@/lib/store/vmo-runtime"
 import { getToolApproval, type ToolApproval } from "@/lib/store/tool-settings"
 
 /** Choice the person made in the Tools pane for one tool. */
@@ -98,6 +99,18 @@ type ToolStoreActions = {
    * it.
    */
   loadTools: () => Promise<void>
+  /**
+   * Reads the desktop's tools and the backend's tools in a read that starts
+   * after the read in flight, if any, has settled.
+   *
+   * @returns A promise that resolves after the list or the failure is
+   * committed; it never rejects.
+   * @remarks Unlike {@link loadTools}, it never settles with a read that
+   * started before the call, so the list reflects what changed before it,
+   * such as vmo becoming ready. A read requested while it waits joins the
+   * same next read.
+   */
+  reloadTools: () => Promise<void>
   /**
    * Switches tool calls on or off for every agent.
    *
@@ -382,6 +395,18 @@ function createToolStore(
     }
 
     /**
+     * Reads both tool lists in a read that starts after the read in flight.
+     *
+     * @returns A promise that resolves after the list or the failure is
+     * committed.
+     */
+    async function reloadTools(): Promise<void> {
+      // A pending read never rejects; it commits its failure instead.
+      if (pendingListRead !== undefined) await pendingListRead
+      await loadTools()
+    }
+
+    /**
      * Switches one tool on or off for this session.
      *
      * @param tool - Definition of a listed tool.
@@ -398,6 +423,7 @@ function createToolStore(
       areToolCallsOn: true,
       toolSwitches: new Map(),
       loadTools,
+      reloadTools,
       updateToolCallsOn: (areToolCallsOn) => set({ areToolCallsOn }),
       updateToolOn
     }
@@ -425,3 +451,36 @@ export const useToolStore: UseBoundStore<StoreApi<ToolStore>> = createToolStore(
       listBackendTools({ backendUrl: useLysStore.getState().backendUrl })
   }
 )
+
+/**
+ * vmo states after which the backend may list `read_page` differently: vmo
+ * started answering, stopped, or stopped answering.
+ */
+const VMO_STATUSES_CHANGING_TOOLS: ReadonlySet<VmoServerStatus> = new Set([
+  "running",
+  "stopped",
+  "unresponsive"
+])
+
+/**
+ * Starts reading the tool list again whenever vmo's state may change whether
+ * the backend offers `read_page`.
+ *
+ * @returns The unsubscribe, which stops the refresh; calling it again does
+ * nothing.
+ * @remarks Subscribes to the application store. When vmo's status changes
+ * to running, stopped, or unresponsive while the backend runs,
+ * {@link ToolStoreActions.reloadTools} reads the list again, so the Tools
+ * pane locks or unlocks `read_page` without waiting for a refused turn. The
+ * application shell registers it once while it is mounted; nothing subscribes
+ * when this module is evaluated.
+ */
+export function registerVmoToolListRefresh(): () => void {
+  return useLysStore.subscribe((state, previousState) => {
+    const vmoStatus = state.vmoServerInfo.status
+    if (vmoStatus === previousState.vmoServerInfo.status) return
+    if (!VMO_STATUSES_CHANGING_TOOLS.has(vmoStatus)) return
+    if (state.backendServerInfo.status !== "running") return
+    void useToolStore.getState().reloadTools()
+  })
+}

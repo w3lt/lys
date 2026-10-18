@@ -14,6 +14,7 @@ import {
 } from "../../support/nativeHostFake"
 import {
   createControlledPromise,
+  createSettlementReader,
   waitForMicrotasks
 } from "../../support/settlement"
 import {
@@ -45,10 +46,20 @@ const DISK_SETTINGS: LysSettings = Object.freeze({
   runtime: DISK_RUNTIME_SETTINGS
 })
 
-/** Settings document on disk with autostart on. */
+/** Settings document on disk with backend autostart on. */
 const AUTOSTART_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
   ...DISK_SETTINGS_DOCUMENT,
   runtime: Object.freeze({ ...DISK_RUNTIME_SETTINGS, autoStartBackend: true })
+})
+
+/** Settings document on disk with backend and vmo autostart on. */
+const BOTH_AUTOSTART_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
+  ...DISK_SETTINGS_DOCUMENT,
+  runtime: Object.freeze({
+    ...DISK_RUNTIME_SETTINGS,
+    autoStartBackend: true,
+    autoStartVmo: true
+  })
 })
 
 /** Inventory listed once LM Studio is connected. */
@@ -78,7 +89,8 @@ async function loadFreshLysStore() {
 }
 
 /**
- * Starts a native host whose backend process is stopped until started.
+ * Starts a native host whose backend process and vmo are stopped until
+ * started; a started vmo answers its health route at once.
  *
  * @param settingsDocument - Settings document `load_settings` returns.
  * @param commands - Commands replacing the defaults.
@@ -89,6 +101,7 @@ function startDesktopHost(
   commands: NativeCommands = {}
 ) {
   let isRunning = false
+  let isVmoRunning = false
   return startNativeHostFake({
     load_settings: () => settingsDocument,
     get_backend_status: () => ({ running: isRunning }),
@@ -100,6 +113,13 @@ function startDesktopHost(
       isRunning = false
       return { running: false }
     },
+    get_vmo_status: () =>
+      isVmoRunning ? { status: "running", pid: 4343 } : { status: "stopped" },
+    start_vmo: () => {
+      isVmoRunning = true
+      return { status: "running", pid: 4343 }
+    },
+    get_vmo_health: () => "ready",
     ...commands
   })
 }
@@ -224,7 +244,7 @@ describe("useLysStore", () => {
   })
 
   describe("initialize", () => {
-    it("shows the shell with the loaded settings and leaves a stopped backend alone without autostart", async () => {
+    it("shows the shell with the loaded settings and leaves a stopped backend and vmo alone without autostart", async () => {
       const host = startDesktopHost(DISK_SETTINGS_DOCUMENT)
       const useLysStore = await loadFreshLysStore()
 
@@ -233,12 +253,100 @@ describe("useLysStore", () => {
       expect(useLysStore.getState()).toMatchObject({
         initializing: false,
         settings: DISK_SETTINGS,
-        backendServerInfo: { status: "stopped" }
+        backendServerInfo: { status: "stopped" },
+        vmoServerInfo: { status: "stopped", problem: null }
       })
       expect(listCommandNames(host)).toEqual([
         "load_settings",
-        "get_backend_status"
+        "get_backend_status",
+        "get_vmo_status"
       ])
+    })
+
+    it("starts vmo with its autostart alongside the backend, and the backend does not wait for vmo", async () => {
+      startBackendFake(CONNECTED_BACKEND)
+      const vmoHealth = createControlledPromise<unknown>()
+      const host = startDesktopHost(BOTH_AUTOSTART_SETTINGS_DOCUMENT, {
+        get_vmo_health: () => vmoHealth.promise
+      })
+      const useLysStore = await loadFreshLysStore()
+
+      const initialization = useLysStore.getState().initialize()
+      const getSettlement = createSettlementReader(initialization)
+      await vi.waitFor(() => {
+        expect(useLysStore.getState().backendServerInfo.status).toBe("running")
+      })
+      const whileVmoStarts = useLysStore.getState().vmoServerInfo
+      const settlementWhileVmoStarts = getSettlement()
+      vmoHealth.resolve("ready")
+      await initialization
+
+      expect(whileVmoStarts).toEqual({ status: "starting", problem: null })
+      expect(settlementWhileVmoStarts).toBe("pending")
+      expect(useLysStore.getState().vmoServerInfo).toEqual({
+        status: "running",
+        problem: null
+      })
+      expect(listCommandNames(host)).toContain("start_vmo")
+    })
+
+    it("starts vmo while the backend's start is still pending", async () => {
+      const backendStart = createControlledPromise<unknown>()
+      startBackendFake(CONNECTED_BACKEND)
+      startDesktopHost(BOTH_AUTOSTART_SETTINGS_DOCUMENT, {
+        start_backend: () => backendStart.promise
+      })
+      const useLysStore = await loadFreshLysStore()
+
+      const initialization = useLysStore.getState().initialize()
+      await vi.waitFor(() => {
+        expect(useLysStore.getState().vmoServerInfo.status).toBe("running")
+      })
+      const backendWhileVmoRuns = useLysStore.getState().backendServerInfo
+      backendStart.resolve({ pid: 4242, running: true })
+      await initialization
+
+      expect(backendWhileVmoRuns.status).toBe("starting")
+      expect(useLysStore.getState().backendServerInfo.status).toBe("running")
+    })
+
+    it("adopts a vmo the desktop already owns, without autostart", async () => {
+      const host = startDesktopHost(DISK_SETTINGS_DOCUMENT, {
+        get_vmo_status: () => ({ status: "running", pid: 4343 })
+      })
+      const useLysStore = await loadFreshLysStore()
+
+      await useLysStore.getState().initialize()
+
+      expect(useLysStore.getState().vmoServerInfo.status).toBe("running")
+      expect(listCommandNames(host)).not.toContain("start_vmo")
+    })
+
+    it("rejects with the backend's start rejection once vmo's start has settled too", async () => {
+      startDesktopHost(BOTH_AUTOSTART_SETTINGS_DOCUMENT, {
+        start_backend: () => Promise.reject(SPAWN_FAILURE)
+      })
+      const useLysStore = await loadFreshLysStore()
+
+      await expect(useLysStore.getState().initialize()).rejects.toBe(
+        SPAWN_FAILURE
+      )
+      expect(useLysStore.getState().vmoServerInfo.status).toBe("running")
+    })
+
+    it("rejects with the vmo status rejection when it cannot be read", async () => {
+      startDesktopHost(DISK_SETTINGS_DOCUMENT, {
+        get_vmo_status: () => Promise.reject("Failed to inspect vmo process")
+      })
+      const useLysStore = await loadFreshLysStore()
+
+      await expect(useLysStore.getState().initialize()).rejects.toBe(
+        "Failed to inspect vmo process"
+      )
+      expect(useLysStore.getState().vmoServerInfo).toEqual({
+        status: "stopped",
+        problem: null
+      })
     })
 
     it("starts the backend when autostart is on, showing the shell first", async () => {

@@ -19,24 +19,36 @@ struct VmManagerTests {
     }
 
     /// Verifies that a ready manager rejects an id it never returned.
-    @Test("Deleting a VM the manager didn't create fails as unknown")
+    @Test("Starting, waiting for, and deleting a VM the manager didn't create fail as unknown")
     func rejectsUnknownVm() async throws {
         let vmManager = VmManager(containerManager: try containerRoot.createContainerManager())
 
+        await #expect(throws: VmManagerError.unknownVm(containerId: "missing")) {
+            try await vmManager.startVm(containerId: "missing")
+        }
+        await #expect(throws: VmManagerError.unknownVm(containerId: "missing")) {
+            try await vmManager.waitForCommandExit(containerId: "missing")
+        }
         await #expect(throws: VmManagerError.unknownVm(containerId: "missing")) {
             try await vmManager.deleteVm(containerId: "missing")
         }
     }
 
     /// Verifies that closing stops admission before any VM work starts.
-    @Test("After close, creating and deleting VMs fail as closed")
+    @Test("After close, creating, starting, waiting for, and deleting VMs fail as closed")
     func rejectsOperationsAfterClose() async throws {
         let vmManager = VmManager(containerManager: try containerRoot.createContainerManager())
 
         try await vmManager.close()
 
         await #expect(throws: VmManagerError.closed) {
-            try await vmManager.createVm()
+            try await vmManager.createVm(command: ["/bin/true"])
+        }
+        await #expect(throws: VmManagerError.closed) {
+            try await vmManager.startVm(containerId: "missing")
+        }
+        await #expect(throws: VmManagerError.closed) {
+            try await vmManager.waitForCommandExit(containerId: "missing")
         }
         await #expect(throws: VmManagerError.closed) {
             try await vmManager.deleteVm(containerId: "missing")

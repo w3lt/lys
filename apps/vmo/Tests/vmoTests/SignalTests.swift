@@ -7,10 +7,9 @@ import Testing
 private let handledSignalCount = Atomic<Int>(0)
 
 /// Signal handler that counts its calls. It only updates an atomic, which is
-/// safe inside a signal handler.
-///
-/// - Parameter signalNumber: The signal received; not used.
-private func countSignal(_ signalNumber: Int32) {
+/// safe inside a signal handler. The C handler type requires the signal-number
+/// parameter; the count doesn't depend on which signal arrived.
+private func countSignal(_: Int32) {
     handledSignalCount.add(1, ordering: .relaxed)
 }
 

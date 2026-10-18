@@ -28,7 +28,7 @@ struct Services: Sendable {
 ///   ``CleanupAfterFailureError`` with both errors when `body` and closing
 ///   both fail.
 func withServices(
-    isolation: isolated (any Actor)? = #isolation,
+    isolation _: isolated (any Actor)? = #isolation,
     createContainerManager: () async throws -> ContainerManager = createProductionContainerManager,
     _ body: (Services) async throws -> Void
 ) async throws {

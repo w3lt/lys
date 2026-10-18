@@ -28,6 +28,7 @@ const BACKEND_URL = "http://127.0.0.1:12345"
 /** Runtime group on disk with autostart off and a listed default model. */
 const DISK_RUNTIME_SETTINGS: RuntimeSettings = Object.freeze({
   autoStartBackend: false,
+  autoStartVmo: false,
   defaultModel: "on-disk",
   backendAddress: BACKEND_URL
 })
@@ -542,14 +543,34 @@ describe("useLysStore", () => {
       })
     })
 
-    it("keeps runtime and model edits in memory without saving them", async () => {
+    it("saves a startup switch edit to disk and reports the save", async () => {
+      const host = startDesktopHost(DISK_SETTINGS_DOCUMENT, {
+        save_settings: () => null
+      })
+      const useLysStore = await loadFreshLysStore()
+      await useLysStore.getState().initialize()
+      const runtime = { ...DISK_RUNTIME_SETTINGS, autoStartVmo: true }
+
+      useLysStore.getState().setSettings({ ...DISK_SETTINGS, runtime })
+      await waitForMicrotasks()
+
+      expect(host.commands.at(-1)).toEqual({
+        command: "save_settings",
+        args: { newSettings: { ...DISK_SETTINGS_DOCUMENT, runtime } }
+      })
+      expect(useLysStore.getState().runtimeAutoStartSave).toEqual({
+        status: "saved"
+      })
+    })
+
+    it("keeps default model and model edits in memory without saving them", async () => {
       const host = startDesktopHost(DISK_SETTINGS_DOCUMENT)
       const useLysStore = await loadFreshLysStore()
       await useLysStore.getState().initialize()
 
       useLysStore.getState().setSettings({
         ...DISK_SETTINGS,
-        runtime: { ...DISK_RUNTIME_SETTINGS, autoStartBackend: true },
+        runtime: { ...DISK_RUNTIME_SETTINGS, defaultModel: "resident" },
         model: { contextSize: 8192 }
       })
       await waitForMicrotasks()

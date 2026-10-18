@@ -4,14 +4,16 @@ import type { ModelLoadConfiguration, TavilyApiKey } from "@lys/share"
  * Runtime process settings persisted under the `runtime` JSON object.
  *
  * @remarks Mirrors Rust's `RunTimeSettings`. Field names match the camelCase
- * wire representation, so a loaded value round-trips without mapping. Runtime
- * edits in the desktop UI remain session-only. For `autoStartBackend` that is
- * a known defect (#169): the value is read only when Lys opens, so an edit
- * never takes effect.
+ * wire representation, so a loaded value round-trips without mapping. The
+ * two startup switches are saved when the Runtime pane changes them and are
+ * read when Lys opens. Edits of `defaultModel` and `backendAddress` remain
+ * session-only.
  */
 export type RuntimeSettings = {
   /** Whether desktop initialization requests backend startup. */
   autoStartBackend: boolean
+  /** Whether desktop initialization starts vmo, Lys's page reader. */
+  autoStartVmo: boolean
   /**
    * Preferred chat model, or `null` when absent.
    *
@@ -22,6 +24,14 @@ export type RuntimeSettings = {
   /** Backend origin shown in runtime settings; HTTP consumers use shared protocol constants. */
   backendAddress: string
 }
+
+/**
+ * The two startup switches of the runtime group: the part of it the desktop
+ * saves.
+ */
+export type RuntimeAutoStartSettings = Readonly<
+  Pick<RuntimeSettings, "autoStartBackend" | "autoStartVmo">
+>
 
 /**
  * Local model context estimate persisted under the `model` JSON object.
@@ -198,6 +208,7 @@ const INITIAL_TOOL_SETTINGS: ToolSettings = Object.freeze({
 export const initialSettingsState: LysSettings = {
   runtime: {
     autoStartBackend: true,
+    autoStartVmo: true,
     defaultModel: null,
     backendAddress: "http://127.0.0.1:12345"
   },

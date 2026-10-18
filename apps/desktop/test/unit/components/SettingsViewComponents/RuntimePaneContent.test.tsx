@@ -201,7 +201,7 @@ describe("RuntimePaneContent", () => {
     // Known defect (#169): the switch changes the setting only in memory, so
     // the choice is lost before the next time Lys opens, the only time it
     // applies.
-    it.fails("keeps the choice for the next time Lys opens", async () => {
+    it("keeps the choice for the next time Lys opens", async () => {
       const saves: unknown[] = []
       startNativeHostFake({
         load_settings: () => FIRST_RUN_SETTINGS_DOCUMENT,
@@ -222,6 +222,32 @@ describe("RuntimePaneContent", () => {
           runtime: expect.objectContaining({ autoStartBackend: false })
         })
       })
+    })
+
+    it("says the startup switches apply to this session only when they cannot be saved", async () => {
+      startNativeHostFake({
+        load_settings: () => FIRST_RUN_SETTINGS_DOCUMENT,
+        save_settings: () => Promise.reject("Disk full")
+      })
+      await startRuntimePane()
+      const user = userEvent.setup()
+      const status = screen.getByRole("status", {
+        name: "Startup switches save"
+      })
+      const before = status.textContent
+
+      await user.click(
+        screen.getByRole("switch", { name: "Start it when Lys opens" })
+      )
+      await waitForRenderedWork()
+
+      expect(before).toBe("")
+      expect(status).toHaveTextContent(
+        "Lys couldn't save the startup switches. They apply to this session only."
+      )
+      expect(
+        screen.getByRole("switch", { name: "Start it when Lys opens" })
+      ).not.toBeChecked()
     })
   })
 

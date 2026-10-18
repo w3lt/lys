@@ -163,6 +163,37 @@ describe("createSettingsGroupSaves", () => {
     })
   })
 
+  it("applies a runtime startup save after a tools save sent before it, keeping both groups", async () => {
+    const { writes, readStoredDocument } = startSettingsFileHost()
+    const saves = createSettingsGroupSaves()
+
+    const toolsSave = saves.saveToolSettings({
+      justRunToolNames: new Set(["find_files"])
+    })
+    const runtimeSave = saves.saveRuntimeAutoStartSettings({
+      autoStartBackend: true,
+      autoStartVmo: true
+    })
+    await waitForMicrotasks()
+    const writesDuringFirst = writes.length
+    writes[0]?.resolve(null)
+    await toolsSave
+    await waitForMicrotasks()
+    writes[1]?.resolve(null)
+    await runtimeSave
+
+    expect(writesDuringFirst).toBe(1)
+    expect(readStoredDocument()).toEqual({
+      ...STORED_SETTINGS_DOCUMENT,
+      runtime: {
+        ...STORED_SETTINGS_DOCUMENT.runtime,
+        autoStartBackend: true,
+        autoStartVmo: true
+      },
+      tools: { justRun: ["find_files"] }
+    })
+  })
+
   it("rejects only the caller of a save that failed and still runs the saves sent after it", async () => {
     const { writes, readStoredDocument } = startSettingsFileHost()
     const saves = createSettingsGroupSaves()

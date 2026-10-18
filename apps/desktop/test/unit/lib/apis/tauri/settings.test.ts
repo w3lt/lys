@@ -4,6 +4,7 @@ import {
   loadSettings,
   saveGenerationSettings,
   saveLoadConfigurationSettings,
+  saveRuntimeAutoStartSettings,
   saveSecretsSettings,
   saveSettings,
   saveToolSettings
@@ -435,6 +436,69 @@ describe("saveToolSettings", () => {
 
     await expect(
       saveToolSettings({ justRunToolNames: new Set(["find_files"]) })
+    ).rejects.toBe("Disk full")
+  })
+})
+
+describe("saveRuntimeAutoStartSettings", () => {
+  it("replaces only the two startup switches, keeping the default model and backend address on disk", async () => {
+    const host = startNativeHostFake({
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => null
+    })
+
+    await saveRuntimeAutoStartSettings({
+      autoStartBackend: true,
+      autoStartVmo: true
+    })
+
+    expect(host.commands).toEqual([
+      { command: "load_settings", args: {} },
+      {
+        command: "save_settings",
+        args: {
+          newSettings: {
+            ...STORED_SETTINGS_DOCUMENT,
+            runtime: {
+              autoStartBackend: true,
+              autoStartVmo: true,
+              defaultModel: STORED_SETTINGS_DOCUMENT.runtime.defaultModel,
+              backendAddress: STORED_SETTINGS_DOCUMENT.runtime.backendAddress
+            }
+          }
+        }
+      }
+    ])
+  })
+
+  it("writes nothing when the document cannot be loaded", async () => {
+    const host = startNativeHostFake({
+      load_settings: () => Promise.reject("Failed to read settings.json"),
+      save_settings: () => null
+    })
+
+    await expect(
+      saveRuntimeAutoStartSettings({
+        autoStartBackend: true,
+        autoStartVmo: false
+      })
+    ).rejects.toBe("Failed to read settings.json")
+    expect(host.commands.map((invoked) => invoked.command)).toEqual([
+      "load_settings"
+    ])
+  })
+
+  it("rejects when the merged document cannot be written", async () => {
+    startNativeHostFake({
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => Promise.reject("Disk full")
+    })
+
+    await expect(
+      saveRuntimeAutoStartSettings({
+        autoStartBackend: true,
+        autoStartVmo: false
+      })
     ).rejects.toBe("Disk full")
   })
 })

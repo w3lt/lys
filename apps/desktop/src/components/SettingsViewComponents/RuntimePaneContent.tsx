@@ -18,6 +18,7 @@ import {
 } from "@/lib/models/model-residency"
 import { type BackendServerStatus, useLysStore } from "@/lib/store"
 import { isModelTransitionInFlight } from "@/lib/store/model-runtime"
+import type { RuntimeAutoStartSaveState } from "@/lib/store/runtime-autostart-settings"
 
 import { useSettingsContext } from "./SettingsContext"
 
@@ -49,6 +50,25 @@ function formatBackendMeta(
 }
 
 /**
+ * Formats the status line of the startup switches' save.
+ *
+ * @param save - Store-owned lifecycle of the latest save.
+ * @returns The failure sentence after a failed save, and nothing otherwise.
+ */
+function formatRuntimeAutoStartSaveStatus(
+  save: RuntimeAutoStartSaveState
+): string {
+  switch (save.status) {
+    case "failed":
+      return "Lys couldn't save the startup switches. They apply to this session only."
+    case "idle":
+    case "saving":
+    case "saved":
+      return ""
+  }
+}
+
+/**
  * Presents backend lifecycle controls, autostart, LM Studio status, and model
  * residency.
  *
@@ -60,7 +80,9 @@ function formatBackendMeta(
  * awaited or rendered here, so a rejection surfaces as an unhandled rejection
  * and backend status is not a completion owner when a command rejects. Stop is
  * available while the backend runs or is not responding. The autostart switch
- * proposes one patch per checked change.
+ * proposes one patch per checked change, which the application store saves.
+ * A polite status region named "Startup switches save" stays mounted and
+ * says so when that save fails; it is empty otherwise.
  *
  * The LM Studio card sits under the backend card and owns the only reconnect
  * action. The model card projects the settings context's residency state and
@@ -76,6 +98,9 @@ export default function RuntimePaneContent(): ReactElement {
   const backendServerInfo = useLysStore((state) => state.backendServerInfo)
   const startBackend = useLysStore((state) => state.startBackend)
   const stopBackend = useLysStore((state) => state.stopBackend)
+  const runtimeAutoStartSave = useLysStore(
+    (state) => state.runtimeAutoStartSave
+  )
   const lmStudioStatus = useLysStore((state) => state.lmStudioStatus)
   const connectLmStudio = useLysStore((state) => state.connectLmStudio)
   const uptimeMs = useBackendUptimeMs()
@@ -174,6 +199,15 @@ export default function RuntimePaneContent(): ReactElement {
           </div>
         </div>
       </section>
+
+      <p
+        aria-label="Startup switches save"
+        aria-live="polite"
+        className="settings-view__note"
+        role="status"
+      >
+        {formatRuntimeAutoStartSaveStatus(runtimeAutoStartSave)}
+      </p>
 
       <LmStudioStatusCard
         backendStatus={backendStatus}

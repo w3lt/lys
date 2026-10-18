@@ -1,9 +1,6 @@
 import Containerization
 import Foundation
 
-/// Image every VM runs.
-private let imageReference = "docker.io/library/alpine:3.24.2"
-
 /// Failures of ``VmManager`` that come from its own state rather than from
 /// the VM work.
 enum VmManagerError: Error, Equatable {
@@ -104,30 +101,35 @@ actor VmManager {
         return false
     }
 
-    /// Creates a VM whose main process is `command`. The VM stays until
-    /// ``deleteVm(containerId:)`` or ``close()`` deletes it.
+    /// Creates a VM that runs `imageReference` with `arguments`. The VM stays
+    /// until ``deleteVm(containerId:)`` or ``close()`` deletes it.
     ///
-    /// The VM gets 2 CPUs, 512 MiB of memory, and a 1 GiB root filesystem from
-    /// the Alpine Linux image, which is pulled when the image store doesn't
-    /// have it. The VM is not started, so `command` doesn't run yet; the
-    /// manager keeps everything it will write to standard output and
-    /// standard error.
+    /// The VM gets 2 CPUs, 512 MiB of memory, and a 1 GiB root filesystem
+    /// unpacked from the image, which is pulled when the image store doesn't
+    /// have it. Its command is the image's entrypoint and command followed by
+    /// `arguments`, and runs with the image's working directory, environment,
+    /// and user. The VM is not started, so the command doesn't run yet; the
+    /// manager keeps what it will write to standard output and standard
+    /// error, up to ``maximumKeptStreamByteCount`` bytes of each.
     ///
     /// Cancelling the caller cancels the creation as far as Containerization
-    /// observes cancellation.
+    /// observes cancellation. A creation that ends after the caller was
+    /// cancelled is deleted, so a cancelled caller never gets a VM.
     ///
-    /// - Parameter command: The program to run and its arguments, such as
-    ///   `["/bin/echo", "hello"]`. The program is looked up in the VM's `PATH`
-    ///   when it has no slash. The VM rejects an empty command when it
-    ///   starts.
+    /// - Parameters:
+    ///   - imageReference: Reference of the image to run, such as
+    ///     `docker.io/library/alpine:3.24.2`.
+    ///   - arguments: Arguments added after the image's entrypoint and
+    ///     command. The VM rejects an empty command when it starts.
     /// - Returns: The new VM's container id.
     /// - Throws: ``VmManagerError/closed`` when ``close()`` has begun, before
     ///   anything is created, or when it began while this VM was being
     ///   created; ``close()`` then deletes the VM. Containerization's error
-    ///   when creation fails, after deleting whatever the creation left. A
+    ///   when creation fails, or `CancellationError` when the caller was
+    ///   cancelled, after deleting whatever the creation left. A
     ///   ``CleanupAfterFailureError`` when that deletion fails too; the VM
     ///   then stays active, so ``close()`` tries again.
-    func createVm(command: [String]) async throws -> String {
+    func createVm(imageReference: String, arguments: [String]) async throws -> String {
         guard isReady else {
             throw VmManagerError.closed
         }
@@ -140,8 +142,11 @@ actor VmManager {
         do {
             container = try await manager.create(containerId, reference: imageReference, rootfsSizeInBytes: 1.gib()) {
                 @Sendable config in
-                configureVm(&config, command: command, buffers: buffers)
+                configureVm(&config, arguments: arguments, buffers: buffers)
             }
+            // Containerization may finish creating after the caller was
+            // cancelled, and that caller won't delete a VM it never gets.
+            try Task.checkCancellation()
         } catch {
             throw deleteFailedVm(containerId, creationError: error)
         }
@@ -158,8 +163,8 @@ actor VmManager {
     /// The command then runs until it exits or the VM is deleted; what it
     /// writes is kept for ``waitForCommandExit(containerId:)``.
     ///
-    /// - Parameter containerId: Container id that ``createVm(command:)``
-    ///   returned.
+    /// - Parameter containerId: Container id that
+    ///   ``createVm(imageReference:arguments:)`` returned.
     /// - Throws: ``VmManagerError/closed`` when ``close()`` has begun, before
     ///   anything is started, or when it began while this VM was starting;
     ///   ``close()`` then stops and deletes the VM.
@@ -230,8 +235,8 @@ actor VmManager {
     /// error, so the files and IP address are deleted even then. A VM whose
     /// stop failed may run until vmo exits.
     ///
-    /// - Parameter containerId: Container id that ``createVm(command:)``
-    ///   returned.
+    /// - Parameter containerId: Container id that
+    ///   ``createVm(imageReference:arguments:)`` returned.
     /// - Throws: ``VmManagerError/closed`` when ``close()`` has begun, which
     ///   deletes the VM instead. ``VmManagerError/unknownVm(containerId:)``
     ///   when no VM with this id is available.
@@ -395,9 +400,10 @@ actor VmManager {
     ///
     /// - Parameters:
     ///   - containerId: Container id of the VM whose creation failed.
-    ///   - creationError: Why the creation failed.
-    /// - Returns: The error for ``createVm(command:)`` to throw:
-    ///   `creationError` when nothing is left, or a
+    ///   - creationError: Why the creation failed, such as a
+    ///     `CancellationError` when the caller was cancelled.
+    /// - Returns: The error for ``createVm(imageReference:arguments:)`` to
+    ///   throw: `creationError` when nothing is left, or a
     ///   ``CleanupAfterFailureError`` when deletion fails, after which the VM
     ///   stays deleting so ``close()`` tries again.
     private func deleteFailedVm(_ containerId: String, creationError: any Error) -> any Error {
@@ -420,18 +426,19 @@ actor VmManager {
 /// Sets up a new VM's size and its command, whose output goes to `buffers`.
 ///
 /// - Parameters:
-///   - config: The VM's configuration, prefilled from the image.
-///   - command: The program to run and its arguments.
+///   - config: The VM's configuration, prefilled from the image: its command
+///     is the image's entrypoint and command, with the image's working
+///     directory, environment, and user.
+///   - arguments: Arguments added after the image's entrypoint and command.
 ///   - buffers: Where the command's standard output and standard error go.
 private func configureVm(
     _ config: inout LinuxContainer.Configuration,
-    command: [String],
+    arguments: [String],
     buffers: CommandOutputBuffers
 ) {
     config.cpus = 2
     config.memoryInBytes = 512.mib()
-    config.process.arguments = command
-    config.process.workingDirectory = "/"
+    config.process.arguments += arguments
     config.process.stdout = buffers.stdout
     config.process.stderr = buffers.stderr
 }

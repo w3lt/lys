@@ -4,7 +4,7 @@ import Testing
 
 /// Checks the parts of the VM manager's lifecycle that run without a VM.
 ///
-/// Creating a VM needs the Alpine image, a Linux kernel, and Virtualization
+/// Creating a VM needs an image, a Linux kernel, and Virtualization
 /// support, so no test here creates one.
 @Suite("VM manager lifecycle")
 struct VmManagerTests {
@@ -42,7 +42,7 @@ struct VmManagerTests {
         try await vmManager.close()
 
         await #expect(throws: VmManagerError.closed) {
-            try await vmManager.createVm(command: ["/bin/true"])
+            try await vmManager.createVm(imageReference: readPageImageReference, arguments: ["https://example.com/"])
         }
         await #expect(throws: VmManagerError.closed) {
             try await vmManager.startVm(containerId: "missing")

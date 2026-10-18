@@ -307,5 +307,32 @@ describe("createVmoRuntimeSlice", () => {
         })
       }
     )
+
+    it("shows vmo not responding, so Stop stays offered, when the stop fails and its status then cannot be read", async () => {
+      let hasStopFailed = false
+      startNativeHostFake({
+        get_vmo_status: () =>
+          hasStopFailed
+            ? Promise.reject("Failed to inspect vmo process: Resource busy")
+            : RUNNING_VMO,
+        stop_vmo: () => {
+          hasStopFailed = true
+          return Promise.reject(
+            "Failed to stop vmo process 4343: failed to inspect it"
+          )
+        }
+      })
+      const store = createVmoRuntimeStore()
+
+      await expect(store.getState().stopVmo()).resolves.toBeUndefined()
+
+      expect(store.getState().vmoServerInfo).toEqual({
+        status: "unresponsive",
+        problem: {
+          kind: "stop-failed",
+          message: "Failed to stop vmo process 4343: failed to inspect it"
+        }
+      })
+    })
   })
 })

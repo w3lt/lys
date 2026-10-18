@@ -152,7 +152,7 @@ main thread, so a stop never blocks the window.
 `127.0.0.1:8080` and answers `ready` only for a `HTTP/1.1 200` status line
 within one second. It runs in the host because vmo sends no CORS headers. It
 asks whatever listens on vmo's port, so the renderer reads `get_vmo_status`
-first.
+first, which keeps a vmo that has exited from counting as ready.
 
 On app exit, the host stops vmo and the backend together and waits for both,
 so quitting can take up to 60 seconds while vmo deletes its VMs. A failure or

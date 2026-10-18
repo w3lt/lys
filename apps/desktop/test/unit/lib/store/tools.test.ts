@@ -74,16 +74,16 @@ async function loadFreshToolStore() {
 
 /**
  * Loads a fresh tool store with the application store it reads and the
- * registration of the vmo tool-list refresh, all from one module graph.
+ * registration of the tool-list refresh, all from one module graph.
  *
  * @returns Both store hooks and the registration.
  */
 async function loadFreshToolStores() {
   vi.resetModules()
-  const { useToolStore, registerVmoToolListRefresh } =
+  const { useToolStore, registerToolListRefresh } =
     await import("@/lib/store/tools")
   const { useLysStore } = await import("@/lib/store")
-  return { useToolStore, useLysStore, registerVmoToolListRefresh }
+  return { useToolStore, useLysStore, registerToolListRefresh }
 }
 
 /**
@@ -468,7 +468,7 @@ describe("useToolStore", () => {
     expect(before.size).toBe(0)
   })
 
-  describe("reloadTools", () => {
+  describe("loadToolsAgain", () => {
     it("reads both lists again after a read in flight settles, so the list reflects the state after the call", async () => {
       const firstClientList = createControlledPromise<unknown>()
       let clientReads = 0
@@ -482,9 +482,9 @@ describe("useToolStore", () => {
       const useToolStore = await loadFreshToolStore()
 
       const first = useToolStore.getState().loadTools()
-      const reload = useToolStore.getState().reloadTools()
+      const again = useToolStore.getState().loadToolsAgain()
       firstClientList.resolve([])
-      await Promise.all([first, reload])
+      await Promise.all([first, again])
 
       expect(host.commands).toHaveLength(2)
       expect(backend.requests).toHaveLength(2)
@@ -500,14 +500,14 @@ describe("useToolStore", () => {
       const backend = startBackendOfferingReadPageFrom(1)
       const useToolStore = await loadFreshToolStore()
 
-      await useToolStore.getState().reloadTools()
+      await useToolStore.getState().loadToolsAgain()
 
       expect(backend.requests).toHaveLength(1)
       expect(useToolStore.getState().list.status).toBe("loaded")
     })
   })
 
-  describe("registerVmoToolListRefresh", () => {
+  describe("registerToolListRefresh", () => {
     /** vmo transitions in order, and whether each reads the list again. */
     const VMO_TRANSITIONS = [
       { vmoServerInfo: { status: "starting", problem: null }, reads: false },
@@ -522,25 +522,42 @@ describe("useToolStore", () => {
 
     /**
      * Starts the tool list's hosts, loads fresh stores with the backend in
-     * the given state, and registers the refresh until the case ends.
+     * the given state, and registers the refresh until the case ends,
+     * without reading the list.
      *
      * @param backendStatus - Backend lifecycle state to publish first.
      * @returns The stores, the backend observation handle, and the
      * unsubscribe the registration returned.
      */
-    async function startRefresh(backendStatus: BackendServerStatus) {
+    async function startRefreshOfUnreadList(
+      backendStatus: BackendServerStatus
+    ) {
       startNativeHostFake({ list_tools: () => [] })
       const backend = startBackendOfferingReadPageFrom(1)
       const stores = await loadFreshToolStores()
       stores.useLysStore.setState({
         backendServerInfo: { status: backendStatus }
       })
-      const unsubscribe = stores.registerVmoToolListRefresh()
+      const unsubscribe = stores.registerToolListRefresh()
       onTestFinished(unsubscribe)
       return { ...stores, backend, unsubscribe }
     }
 
-    it("reads the tool list again when vmo starts running, stops, or stops answering while the backend runs", async () => {
+    /**
+     * Starts the refresh as {@link startRefreshOfUnreadList} does, then reads
+     * the list once, so the backend has answered one read.
+     *
+     * @param backendStatus - Backend lifecycle state to publish first.
+     * @returns The stores, the backend observation handle, and the
+     * unsubscribe the registration returned.
+     */
+    async function startRefresh(backendStatus: BackendServerStatus) {
+      const refresh = await startRefreshOfUnreadList(backendStatus)
+      await refresh.useToolStore.getState().loadTools()
+      return refresh
+    }
+
+    it("reads a list already read again when vmo starts running, stops, or stops answering while the backend runs", async () => {
       const { useLysStore, useToolStore, backend } =
         await startRefresh("running")
       const readsAfterEach: number[] = []
@@ -553,18 +570,50 @@ describe("useToolStore", () => {
         readsAfterEach.push(backend.requests.length)
       }
 
-      expect(readsAfterEach).toEqual([0, 1, 1, 2, 3])
+      expect(readsAfterEach).toEqual([1, 2, 2, 3, 4])
+    })
+
+    it("reads a list already read again when the backend starts running", async () => {
+      const { useLysStore, useToolStore, backend } =
+        await startRefresh("starting")
+
+      useLysStore.setState({ backendServerInfo: { status: "running" } })
+      await vi.waitFor(() => {
+        expect(backend.requests).toHaveLength(2)
+        expect(useToolStore.getState().list.status).toBe("loaded")
+      })
+
+      expect(useToolStore.getState().list).toEqual({
+        status: "loaded",
+        tools: [READ_PAGE],
+        unavailableTools: ALL_TOOLS_AVAILABLE
+      })
     })
 
     it("reads nothing while the backend is not running", async () => {
       const { useLysStore, backend } = await startRefresh("stopped")
 
+      useLysStore.setState({ backendServerInfo: { status: "starting" } })
       for (const { vmoServerInfo } of VMO_TRANSITIONS) {
         useLysStore.setState({ vmoServerInfo })
       }
       await waitForMicrotasks()
 
+      expect(backend.requests).toHaveLength(1)
+    })
+
+    it("leaves a list never read alone, for whoever needs it first to read", async () => {
+      const { useLysStore, useToolStore, backend } =
+        await startRefreshOfUnreadList("stopped")
+
+      useLysStore.setState({ backendServerInfo: { status: "running" } })
+      useLysStore.setState({
+        vmoServerInfo: { status: "running", problem: null }
+      })
+      await waitForMicrotasks()
+
       expect(backend.requests).toHaveLength(0)
+      expect(useToolStore.getState().list.status).toBe("idle")
     })
 
     it("reads nothing once unsubscribed", async () => {
@@ -575,9 +624,11 @@ describe("useToolStore", () => {
       useLysStore.setState({
         vmoServerInfo: { status: "running", problem: null }
       })
+      useLysStore.setState({ backendServerInfo: { status: "stopped" } })
+      useLysStore.setState({ backendServerInfo: { status: "running" } })
       await waitForMicrotasks()
 
-      expect(backend.requests).toHaveLength(0)
+      expect(backend.requests).toHaveLength(1)
     })
   })
 })

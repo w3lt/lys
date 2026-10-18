@@ -110,7 +110,7 @@ type ToolStoreActions = {
    * such as vmo becoming ready. A read requested while it waits joins the
    * same next read.
    */
-  reloadTools: () => Promise<void>
+  loadToolsAgain: () => Promise<void>
   /**
    * Switches tool calls on or off for every agent.
    *
@@ -400,7 +400,7 @@ function createToolStore(
      * @returns A promise that resolves after the list or the failure is
      * committed.
      */
-    async function reloadTools(): Promise<void> {
+    async function loadToolsAgain(): Promise<void> {
       // A pending read never rejects; it commits its failure instead.
       if (pendingListRead !== undefined) await pendingListRead
       await loadTools()
@@ -423,7 +423,7 @@ function createToolStore(
       areToolCallsOn: true,
       toolSwitches: new Map(),
       loadTools,
-      reloadTools,
+      loadToolsAgain,
       updateToolCallsOn: (areToolCallsOn) => set({ areToolCallsOn }),
       updateToolOn
     }
@@ -462,25 +462,53 @@ const VMO_STATUSES_CHANGING_TOOLS: ReadonlySet<VmoServerStatus> = new Set([
   "unresponsive"
 ])
 
+/** Application state the tool-list refresh observes. */
+type ToolListRefreshState = Pick<
+  ReturnType<typeof useLysStore.getState>,
+  "backendServerInfo" | "vmoServerInfo"
+>
+
 /**
- * Starts reading the tool list again whenever vmo's state may change whether
- * the backend offers `read_page`.
+ * Answers whether an application state change can change the tools the
+ * running backend lists.
+ *
+ * @param state - Application state after the change.
+ * @param previousState - Application state before the change.
+ * @returns True when the backend started running, or when vmo started
+ * running, stopped, or stopped answering while the backend runs.
+ */
+function canChangeBackendToolList(
+  state: ToolListRefreshState,
+  previousState: ToolListRefreshState
+): boolean {
+  if (state.backendServerInfo.status !== "running") return false
+  if (previousState.backendServerInfo.status !== "running") return true
+  const vmoStatus = state.vmoServerInfo.status
+  return (
+    vmoStatus !== previousState.vmoServerInfo.status &&
+    VMO_STATUSES_CHANGING_TOOLS.has(vmoStatus)
+  )
+}
+
+/**
+ * Starts reading a tool list already read again whenever the backend's
+ * answer may have changed.
  *
  * @returns The unsubscribe, which stops the refresh; calling it again does
  * nothing.
- * @remarks Subscribes to the application store. When vmo's status changes
- * to running, stopped, or unresponsive while the backend runs,
- * {@link ToolStoreActions.reloadTools} reads the list again, so the Tools
- * pane locks or unlocks `read_page` without waiting for a refused turn. The
- * application shell registers it once while it is mounted; nothing subscribes
- * when this module is evaluated.
+ * @remarks Subscribes to the application store. When the backend starts
+ * running, or vmo starts running, stops, or stops answering while the
+ * backend runs, {@link ToolStoreActions.loadToolsAgain} reads the list
+ * again, so the Tools pane locks or unlocks `read_page` without waiting for
+ * a refused turn. A list never read is left alone: whoever needs it first
+ * reads it then. The application shell registers it once while it is
+ * mounted; nothing subscribes when this module is evaluated.
  */
-export function registerVmoToolListRefresh(): () => void {
+export function registerToolListRefresh(): () => void {
   return useLysStore.subscribe((state, previousState) => {
-    const vmoStatus = state.vmoServerInfo.status
-    if (vmoStatus === previousState.vmoServerInfo.status) return
-    if (!VMO_STATUSES_CHANGING_TOOLS.has(vmoStatus)) return
-    if (state.backendServerInfo.status !== "running") return
-    void useToolStore.getState().reloadTools()
+    if (!canChangeBackendToolList(state, previousState)) return
+    const toolStore = useToolStore.getState()
+    if (toolStore.list.status === "idle") return
+    void toolStore.loadToolsAgain()
   })
 }

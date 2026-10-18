@@ -112,13 +112,14 @@ const VMO_SERVER_INFO_BY_READINESS = Object.freeze({
 } satisfies Readonly<Record<VmoReadiness, VmoServerInfo>>)
 
 /**
- * Reads the reason a Tauri vmo command rejected with.
+ * Formats the reason a Tauri vmo command rejected with, for the card's
+ * problem line.
  *
  * @param rejection - Value the command rejected with: the host's error
  * string, or an error of the IPC layer.
  * @returns The non-empty reason, or a fallback sentence when it has none.
  */
-function readVmoCommandRejection(rejection: unknown): string {
+function formatVmoCommandRejection(rejection: unknown): string {
   if (typeof rejection === "string" && rejection !== "") return rejection
   if (rejection instanceof Error && rejection.message !== "") {
     return rejection.message
@@ -165,23 +166,26 @@ export function createVmoRuntimeSlice(
         status: "stopped",
         problem: {
           kind: "start-failed",
-          message: readVmoCommandRejection(rejection)
+          message: formatVmoCommandRejection(rejection)
         }
       })
     }
   }
 
   /**
-   * Answers whether the owned vmo still runs after a failed stop.
+   * Gets the status to show for the owned vmo after a failed stop.
    *
-   * @returns True while it runs or when its status cannot be read, so Stop
-   * stays offered.
+   * @returns `unresponsive` while it runs or when its status cannot be read,
+   * so Stop stays offered; `stopped` otherwise.
    */
-  async function isVmoRunningAfterFailedStop(): Promise<boolean> {
+  async function getVmoServerStatusAfterFailedStop(): Promise<
+    "unresponsive" | "stopped"
+  > {
     try {
-      return (await getVmoStatus()).status === "running"
+      const { status } = await getVmoStatus()
+      return status === "running" ? "unresponsive" : "stopped"
     } catch {
-      return true
+      return "unresponsive"
     }
   }
 
@@ -203,13 +207,10 @@ export function createVmoRuntimeSlice(
     } catch (rejection) {
       const problem: VmoStopFailure = {
         kind: "stop-failed",
-        message: readVmoCommandRejection(rejection)
+        message: formatVmoCommandRejection(rejection)
       }
-      set({
-        vmoServerInfo: (await isVmoRunningAfterFailedStop())
-          ? { status: "unresponsive", problem }
-          : { status: "stopped", problem }
-      })
+      const status = await getVmoServerStatusAfterFailedStop()
+      set({ vmoServerInfo: { status, problem } })
     }
   }
 

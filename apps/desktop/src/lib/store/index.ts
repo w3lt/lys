@@ -113,8 +113,8 @@ type LysActions = {
    * backend's status or start rejection, or else the vmo status rejection.
    * @remarks Each starts when its autostart switch is on or the desktop
    * already owns its process; either way readiness is established through
-   * its health route. Neither waits for the other, and vmo's start never
-   * rejects.
+   * its health route. A vmo stop still in progress is joined instead. Neither
+   * waits for the other, and vmo's start and stop never reject.
    */
   initialize: () => Promise<void>
   /**
@@ -269,15 +269,22 @@ export const useLysStore = create<LysStore>()((set, get) => {
   }
 
   /**
-   * Starts vmo when its autostart is on or the desktop already owns a vmo,
-   * which a reloaded window finds still running or stopping.
+   * Updates vmo for a launch: joins a stop that a reloaded window finds still
+   * in progress, and otherwise starts vmo when its autostart is on or adopts
+   * the running vmo the desktop already owns.
    *
    * @param isAutoStartOn - Whether the saved switch starts it with Lys.
-   * @returns A promise resolving after any start settles.
-   * @throws The Tauri status rejection; the start itself never rejects.
+   * @returns A promise resolving after any start or stop settles.
+   * @throws The Tauri status rejection; the start and the stop never reject.
+   * @remarks A stop in progress wins over the switch, so a window reloaded
+   * while vmo deletes its VMs shows the stop rather than a start the host
+   * refuses.
    */
-  async function startVmoWhenNeeded(isAutoStartOn: boolean): Promise<void> {
-    if (isAutoStartOn || (await getVmoStatus()).status !== "stopped") {
+  async function updateVmoForLaunch(isAutoStartOn: boolean): Promise<void> {
+    const { status } = await getVmoStatus()
+    if (status === "stopping") {
+      await get().stopVmo()
+    } else if (isAutoStartOn || status === "running") {
       await get().startVmo()
     }
   }
@@ -431,9 +438,9 @@ export const useLysStore = create<LysStore>()((set, get) => {
       set({ settings, initializing: false })
       const [backendStart, vmoStart] = await Promise.allSettled([
         startBackendWhenNeeded(settings.runtime.autoStartBackend),
-        startVmoWhenNeeded(settings.runtime.autoStartVmo)
+        updateVmoForLaunch(settings.runtime.autoStartVmo)
       ])
-      // vmo's start never rejects; only its status check can.
+      // vmo's start and stop never reject; only its status check can.
       if (backendStart.status === "rejected") throw backendStart.reason
       if (vmoStart.status === "rejected") throw vmoStart.reason
     }

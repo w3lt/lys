@@ -68,10 +68,9 @@ Runtime." The vmo card in Settings → Runtime says why:
   [vmo's requirements](/operate/dependencies/#vmo); vmo does not boot its VMs
   without the kernel described there
   ([#200](https://github.com/w3lt/lys/issues/200)).
-- **vmo stopped** right after Start: the process exited before it answered.
-  Another vmo usually holds port `8080`, for example one left by a Lys that
-  died without quitting; see
-  [A vmo or backend keeps running after Lys died](#a-vmo-or-backend-keeps-running-after-lys-died).
+- **vmo stopped** right after Start: the process exited before it answered,
+  for example because it could not pull its images. In development, vmo's
+  error output appears in the terminal that runs `pnpm dev`.
 - **Lys couldn't start vmo: Failed to run …/vmo: No such file or directory**:
   vmo is not installed. Run `build.sh`; see
   [Packaging and releases](/operate/releases/).
@@ -90,9 +89,10 @@ Lys stops vmo and the backend when it quits. When it dies without quitting,
 after a crash, Force Quit, or `kill -9`, or when a development rebuild restarts
 the desktop host, both keep running
 ([#202](https://github.com/w3lt/lys/issues/202)). The next Lys cannot start its
-own: its vmo card shows **vmo stopped** while `read_page` still works through
-the old vmo, and its backend card shows the old backend as running. Stop does
-not reach either.
+own: the vmo and backend it starts cannot listen and exit. Its cards still show
+**vmo running** and **Backend running**, because the old processes answer their
+health routes, and `read_page` works through the old vmo. Stop and quitting Lys
+do not reach either old process.
 
 To end them, find each process by its port and send it `SIGTERM`:
 

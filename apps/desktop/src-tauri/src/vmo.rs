@@ -212,7 +212,7 @@ impl Vmo {
     /// when `command` cannot be spawned; that error names the program, so a
     /// missing install shows where vmo was expected.
     pub fn start(&self, mut command: Command) -> Result<VmoProcessStatus, String> {
-        let mut process = self.lock_process();
+        let mut process = self.get_locked_process();
         match &mut *process {
             VmoProcess::Stopping { .. } => {
                 return Err(String::from(
@@ -247,7 +247,7 @@ impl Vmo {
     ///
     /// Returns an error when the operating system cannot inspect the child.
     pub fn status(&self) -> Result<VmoProcessStatus, String> {
-        let mut process = self.lock_process();
+        let mut process = self.get_locked_process();
         match &mut *process {
             VmoProcess::Stopped => Ok(VmoProcessStatus::Stopped),
             VmoProcess::Running(child) => Ok(find_running_vmo_pid(child)?
@@ -275,7 +275,7 @@ impl Vmo {
     /// waited for. The child is then killed and waited for as far as possible,
     /// and the owner holds no child afterwards.
     pub fn stop(&self) -> VmoStopResult {
-        let (child, settlement) = match self.admit_stop()? {
+        let (child, settlement) = match self.update_process_for_stop()? {
             VmoStopAdmission::NothingRunning => return Ok(VmoStopOutcome::Stopped),
             VmoStopAdmission::Joined(settlement) => return settlement.wait_for_result(),
             VmoStopAdmission::Admitted { child, settlement } => (child, settlement),
@@ -284,25 +284,27 @@ impl Vmo {
         let result = stop_vmo_child(child, self.stop_timeout);
         // Leave `Stopping` before publishing, so a caller woken by the result
         // can start vmo again at once.
-        *self.lock_process() = VmoProcess::Stopped;
+        *self.get_locked_process() = VmoProcess::Stopped;
         settlement.resolve(result.clone());
         result
     }
 
-    /// Takes the lock on the owned child, recovering a poisoned lock.
-    fn lock_process(&self) -> MutexGuard<'_, VmoProcess> {
+    /// Gets the owned child's state under its lock, recovering a poisoned
+    /// lock.
+    fn get_locked_process(&self) -> MutexGuard<'_, VmoProcess> {
         self.process.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Decides, within one lock, what a stop does: nothing, join the stop in
-    /// progress, or take the running child and enter `Stopping`.
+    /// Updates the owned child's state for a stop, within one lock, and says
+    /// what the stop does: nothing, join the stop in progress, or take the
+    /// running child, leaving the state `Stopping`.
     ///
     /// # Errors
     ///
     /// Returns an error when the owned child cannot be inspected; the child
     /// then stays owned as it was.
-    fn admit_stop(&self) -> Result<VmoStopAdmission, String> {
-        let mut process = self.lock_process();
+    fn update_process_for_stop(&self) -> Result<VmoStopAdmission, String> {
+        let mut process = self.get_locked_process();
         match std::mem::replace(&mut *process, VmoProcess::Stopped) {
             VmoProcess::Stopped => Ok(VmoStopAdmission::NothingRunning),
             VmoProcess::Stopping { pid, settlement } => {

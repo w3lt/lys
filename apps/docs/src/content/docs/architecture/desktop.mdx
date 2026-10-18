@@ -186,10 +186,13 @@ owns what the card shows: `starting`, `running`, `stopping`, `stopped`, or
 `unresponsive` (**vmo not responding**). A start asks the host to start vmo
 unless it owns a running one, then checks every second for up to ten minutes,
 long enough for a first start that pulls vmo's images. Each check reads the
-owned process first and asks vmo's health route only while it runs, so another
-vmo answering on the same port never makes the card say `running`. vmo shows
-`stopped` when its process exits before it answers, and `unresponsive` when it
-runs ten minutes without answering. A stop shows `stopping` while vmo deletes
+owned process first and asks vmo's health route only while it runs, so a vmo
+that has already exited never shows as `running`. The health route answers for
+whatever listens on vmo's port, though: while the owned vmo is still starting,
+another vmo there, such as one left by a Lys that died without quitting
+([#202](https://github.com/w3lt/lys/issues/202)), makes the card say
+`running`. vmo shows `stopped` when its process exits before it answers, and
+`unresponsive` when it runs ten minutes without answering. A stop shows `stopping` while vmo deletes
 its VMs, up to 60 seconds, and joins a stop already in progress.
 
 Start is offered only while vmo is stopped, and Stop while it runs or is not
@@ -445,10 +448,12 @@ A backend tool that cannot run now, such as `web_search` without a saved
 Tavily API key or `read_page` while vmo is not ready, keeps its row: its
 switch is disabled and shows off, a note under the row says why and what to
 do. For `read_page` it says "vmo, Lys's page reader, isn't ready. Start it in
-Settings → Runtime." While the app shell is mounted, the tool store reads both
-lists again whenever vmo becomes running, stopped, or not responding while the
-backend runs, so the row locks and unlocks without waiting for a refused
-request; the new read starts after any read in flight. For a missing key it says "Needs a
+Settings → Runtime." While the app shell is mounted, the tool store reads a
+list it has already read again whenever the backend starts running, or vmo
+becomes running, stopped, or not responding while the backend runs, so the row
+locks and unlocks without waiting for a refused request; the new read starts
+after any read in flight. A list never read is left for whoever needs it
+first. For a missing key it says "Needs a
 Tavily API key. Add one in Settings → Secrets." and Open Secrets selects the
 Secrets pane. For a key in `settings.json` that isn't valid, or a settings file
 that cannot be read, it says to fix `secrets.tavilyApiKey` or the file by hand

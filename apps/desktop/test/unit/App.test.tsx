@@ -87,7 +87,7 @@ describe("App", () => {
     ])
   })
 
-  it("reads the tool list again when vmo starts running while mounted, and stops after unmount", async () => {
+  it("reads a tool list already read again when vmo starts running while mounted, and stops after unmount", async () => {
     const host = startNativeHostFake({
       load_settings: () => MANUAL_START_SETTINGS,
       get_backend_status: () => ({ running: false }),
@@ -99,11 +99,13 @@ describe("App", () => {
         buildJsonResponse(200, { tools: [], unavailableTools: [] })
     })
     const { useLysStore, App } = await loadFreshApp()
+    const { useToolStore } = await import("@/lib/store/tools")
     // Settings shows no view that reads the backend on its own.
     useLysStore.setState({ activeView: "settings" })
     const { unmount } = render(<App />)
     await screen.findByRole("main", { name: "Settings" })
     useLysStore.setState({ backendServerInfo: { status: "running" } })
+    await useToolStore.getState().loadTools()
 
     act(() => {
       useLysStore.setState({
@@ -111,7 +113,7 @@ describe("App", () => {
       })
     })
     await vi.waitFor(() => {
-      expect(backend.requests).toHaveLength(1)
+      expect(backend.requests).toHaveLength(2)
     })
     unmount()
     useLysStore.setState({
@@ -119,10 +121,10 @@ describe("App", () => {
     })
     await waitForMicrotasks()
 
-    expect(backend.requests).toHaveLength(1)
+    expect(backend.requests).toHaveLength(2)
     expect(
       host.commands.filter((invoked) => invoked.command === "list_tools")
-    ).toHaveLength(1)
+    ).toHaveLength(2)
   })
 
   it("switches to Settings and back to the chat on Done", async () => {

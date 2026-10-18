@@ -77,10 +77,10 @@ export function createRuntimeAutoStartSettingsSlice(
   dependencies: Pick<SettingsGroupSaves, "saveRuntimeAutoStartSettings">
 ): RuntimeAutoStartSettingsSlice {
   /**
-   * Reads the startup switches the store holds now.
+   * Gets the startup switches the store holds now.
    * @returns A new frozen value holding only the two switches.
    */
-  function readRuntimeAutoStartSettings(): RuntimeAutoStartSettings {
+  function getRuntimeAutoStartSettings(): RuntimeAutoStartSettings {
     const { autoStartBackend, autoStartVmo } = get().settings.runtime
     return Object.freeze({ autoStartBackend, autoStartVmo })
   }
@@ -95,7 +95,7 @@ export function createRuntimeAutoStartSettingsSlice(
     const activeSave: RuntimeAutoStartSaveState = { status: "saving" }
     set({ runtimeAutoStartSave: activeSave })
     const status = await saveLatestSettingsGroup({
-      getCurrent: readRuntimeAutoStartSettings,
+      getCurrent: getRuntimeAutoStartSettings,
       isEqual: isRuntimeAutoStartSettingsEqual,
       save: dependencies.saveRuntimeAutoStartSettings
     })

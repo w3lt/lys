@@ -46,7 +46,8 @@ A manual Start follows steps 4–8.
    `stopped` when its process exits first, and `unresponsive` after ten
    minutes.
 5. When vmo becomes `running`, `stopped`, or `unresponsive` while the backend
-   runs, the tool store reads `GET /api/v1/tools` again. The backend asks
+   runs, or the backend starts running, a tool list already read is read
+   again from `GET /api/v1/tools`. The backend asks
    vmo's `GET /health` on that lookup and lists `read_page` as unavailable
    with `page-reader-not-ready` unless vmo answered.
 

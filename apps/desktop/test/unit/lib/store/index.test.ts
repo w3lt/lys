@@ -52,6 +52,12 @@ const AUTOSTART_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
   runtime: Object.freeze({ ...DISK_RUNTIME_SETTINGS, autoStartBackend: true })
 })
 
+/** Settings document on disk with only vmo autostart on. */
+const VMO_AUTOSTART_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
+  ...DISK_SETTINGS_DOCUMENT,
+  runtime: Object.freeze({ ...DISK_RUNTIME_SETTINGS, autoStartVmo: true })
+})
+
 /** Settings document on disk with backend and vmo autostart on. */
 const BOTH_AUTOSTART_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
   ...DISK_SETTINGS_DOCUMENT,
@@ -319,6 +325,23 @@ describe("useLysStore", () => {
       await useLysStore.getState().initialize()
 
       expect(useLysStore.getState().vmoServerInfo.status).toBe("running")
+      expect(listCommandNames(host)).not.toContain("start_vmo")
+    })
+
+    it("joins a vmo stop still in progress after a reload instead of starting vmo, even with its autostart on", async () => {
+      const host = startDesktopHost(VMO_AUTOSTART_SETTINGS_DOCUMENT, {
+        get_vmo_status: () => ({ status: "stopping", pid: 4343 }),
+        stop_vmo: () => ({ status: "stopped" })
+      })
+      const useLysStore = await loadFreshLysStore()
+
+      await useLysStore.getState().initialize()
+
+      expect(useLysStore.getState().vmoServerInfo).toEqual({
+        status: "stopped",
+        problem: null
+      })
+      expect(listCommandNames(host)).toContain("stop_vmo")
       expect(listCommandNames(host)).not.toContain("start_vmo")
     })
 

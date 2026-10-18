@@ -28,10 +28,12 @@ const VMO_READINESS_TIMEOUT_MS = 600_000
  * @throws The Tauri rejection when the process status or the health check
  * cannot be read.
  * @remarks Each check reads the owned process first and asks the health
- * route only while it runs, so a vmo the desktop does not own, which also
- * answers, never makes the owned one ready. Checks run every second for at
- * most ten minutes of monotonic time. The caller revalidates its own state
- * before publishing.
+ * route only while it runs, so a vmo that has already exited is never
+ * reported ready. The health route answers for whatever listens on vmo's
+ * port: while the owned vmo is still starting, another vmo there, such as
+ * one left by a Lys that died without quitting (#202), makes it ready.
+ * Checks run every second for at most ten minutes of monotonic time. The
+ * caller revalidates its own state before publishing.
  */
 export async function getVmoReadiness(): Promise<VmoReadiness> {
   const deadlineMs = performance.now() + VMO_READINESS_TIMEOUT_MS

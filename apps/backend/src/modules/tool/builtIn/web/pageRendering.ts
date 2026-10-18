@@ -1,44 +1,53 @@
-import { access, constants as fileConstants } from "node:fs/promises"
-import { performance } from "node:perf_hooks"
 import {
-  chromium,
-  errors as playwrightErrors,
-  type Browser,
-  type LaunchOptions,
-  type Page,
-  type Request,
-  type Response,
-  type Route
-} from "playwright-core"
+  request as requestHttp,
+  type IncomingMessage,
+  type RequestOptions
+} from "node:http"
+import { isIP } from "node:net"
+import * as z from "zod"
+import type { PageUrl } from "./pageUrl"
+import { formatCutText } from "./untrustedText"
 import {
-  findPageMediaType,
-  getPageDocument,
-  type PageDocument,
-  type PageMediaType
-} from "./pageDocument"
-import PageProxy, { type PageProxyLimits } from "./pageProxy"
-import {
-  getUrlPort,
-  parsePageUrl,
-  type PageUrl,
-  type PageUrlProblem
-} from "./pageUrl"
-import { formatSingleLineText } from "./untrustedText"
-import { hasErrorCode, type ConnectionAddressRule } from "./webConnection"
+  ConnectionAddressError,
+  hasErrorCode,
+  isJsonResponse,
+  listCheckedHostAddresses,
+  parseJsonBody,
+  readBoundedBody,
+  type ConnectionAddressRule
+} from "./webConnection"
 
-/** A page Lys read in the browser. */
+/**
+ * Most UTF-16 code units of a page's HTML Lys reads, inclusive. Longer HTML
+ * is cut, so only its beginning is read.
+ */
+export const MAXIMUM_PAGE_HTML_LENGTH = 4 * 1024 * 1024
+
+/**
+ * Most bytes of one answer from vmo that Lys reads, inclusive; it bounds the
+ * memory one read takes. HTML of {@link MAXIMUM_PAGE_HTML_LENGTH} code units
+ * takes at most 12 MiB as UTF-8, which leaves 4 MiB for what JSON escapes, so
+ * such HTML fits unless it is mostly quotes, slashes, or control characters.
+ * A page whose answer is longer fails as `too-large`; a shorter answer with
+ * longer HTML is read and cut.
+ */
+export const MAXIMUM_VMO_RESPONSE_BYTES = 16 * 1024 * 1024
+
+/** A page vmo read. */
 export type RenderedPage = Readonly<{
-  /** URL of the page as the browser showed it, after every redirect. */
-  url: PageUrl
-  /** Whether `text` is HTML or plain text. */
-  mediaType: PageMediaType
   /**
-   * For HTML, the HTML of the page's DOM once it rendered; for plain text,
-   * the page's text.
+   * URL Lys asked vmo to read. vmo does not say where the page's redirects
+   * led, so this is never the URL a redirect reached.
    */
-  text: string
+  url: PageUrl
   /**
-   * Whether the page was longer than the page text limit and only its
+   * HTML of the page's DOM once it rendered, without scripts, styles,
+   * `<noscript>`, `<link>`, `<meta>`, or `class` and `style` attributes; at
+   * most {@link MAXIMUM_PAGE_HTML_LENGTH} code units.
+   */
+  html: string
+  /**
+   * Whether the page's HTML was longer than Lys's or vmo's limit and only its
    * beginning was read.
    */
   isTruncated: boolean
@@ -47,105 +56,91 @@ export type RenderedPage = Readonly<{
 /** Receives the causes of read failures the model is told about only by kind. */
 export type PageRenderingFailureReporters = Readonly<{
   /**
-   * Receives why Lys's browser is missing or could not start; the read then
-   * fails as `browser-missing` or `browser-failed`.
+   * Receives why vmo could not be reached, gave an answer Lys does not
+   * understand, or did not answer in time; the read then fails as
+   * `reader-unreachable`, `reader-failed`, or `reader-timed-out`.
    */
-  reportBrowserFailure: (failure: unknown) => void
+  reportPageReaderFailure: (failure: unknown) => void
 }>
 
-/** What one browser read needs from its environment. */
+/** What one read through vmo needs from its environment. */
 export type PageRenderingDependencies = ConnectionAddressRule &
   PageRenderingFailureReporters &
   Readonly<{
-    /** Absolute path of the Chrome Headless Shell executable. */
-    browserExecutablePath: string
     /**
-     * Most milliseconds the whole read may take, the browser's start
-     * included; a positive integer.
+     * Origin of vmo, without a trailing slash: `http://127.0.0.1:8080` in
+     * production. Tests use a loopback origin of their own.
+     */
+    vmoOrigin: string
+    /**
+     * Most milliseconds the whole read may take, the host lookup and vmo's
+     * whole answer included; a positive integer.
      */
     readTimeoutMs: number
-    /**
-     * Most milliseconds the read waits, once the page's document has
-     * arrived, for its DOM to be ready and its network to go quiet; a
-     * positive integer. What has rendered by then is read.
-     */
-    settleTimeoutMs: number
   }>
 
-/** Why a page could not be read in the browser. */
+/** Why a page could not be read through vmo. */
 export type PageRenderingFailure =
   | Readonly<{
-      /** The browser's executable does not exist. */
-      kind: "browser-missing"
-    }>
-  | Readonly<{
-      /** The browser's executable exists but the browser could not start. */
-      kind: "browser-failed"
-    }>
-  | Readonly<{
       /**
-       * The address rule refused the page, or a page it redirected to: it
-       * belongs to this machine or a private network.
+       * The page's host is a name that resolves to this machine or a private
+       * network, so vmo was not asked.
        */
       kind: "blocked-address"
     }>
   | Readonly<{
-      /** The page's host, or a host it redirected to, has no address. */
+      /** The page's host name has no address, so vmo was not asked. */
       kind: "unresolvable-host"
     }>
   | Readonly<{
-      /** The read did not finish within its time limit. */
+      /**
+       * vmo refused the page's URL: it does not parse it as a page URL, or
+       * the request that names it is too long.
+       */
+      kind: "url-refused"
+    }>
+  | Readonly<{
+      /** The page did not load within vmo's own time limit. */
       kind: "timed-out"
     }>
   | Readonly<{
-      /** The browser could not load the page's document. */
-      kind: "transfer-failed"
-      /** Chromium network error, such as `ERR_CONNECTION_REFUSED`. */
-      code: string
+      /**
+       * The browser in vmo's micro VM could not load the page, or the page
+       * was empty.
+       */
+      kind: "not-loaded"
+    }>
+  | Readonly<{
+      /** vmo's answer is longer than {@link MAXIMUM_VMO_RESPONSE_BYTES}. */
+      kind: "too-large"
+    }>
+  | Readonly<{
+      /** vmo is not listening, or its connection broke. */
+      kind: "reader-unreachable"
     }>
   | Readonly<{
       /**
-       * The page's document, or the document it went on to, came with a
-       * status other than 2xx.
+       * vmo failed, or answered with a status, media type, or body its
+       * contract does not have.
        */
-      kind: "http-status"
-      /** HTTP status code of the document. */
-      status: number
+      kind: "reader-failed"
     }>
   | Readonly<{
-      /**
-       * The page's document, or the document it went on to, is not HTML or
-       * plain text.
-       */
-      kind: "unsupported-content-type"
-      /**
-       * Media type of the document, cleaned and cut to 100 characters;
-       * undefined when the server named none.
-       */
-      mediaType: string | undefined
-    }>
-  | Readonly<{
-      /** The browser ended on a URL that breaks the page URL rules. */
-      kind: "invalid-redirect"
-      /** Which rule the URL breaks. */
-      problem: PageUrlProblem
-    }>
-  | Readonly<{
-      /** The page crashed the browser while it loaded. */
-      kind: "crashed"
+      /** The whole read did not end within its time limit. */
+      kind: "reader-timed-out"
     }>
 
-/** Outcome of one browser read. */
+/** Outcome of one read through vmo. */
 export type PageRenderingResult =
   | Readonly<{
       /** The page was read. */
       status: "rendered"
-      /** What the browser showed. */
+      /** What vmo read. */
       page: RenderedPage
     }>
   | FailedRendering
 
-/** A failed outcome, which every step's result type includes. */
+/** A failed outcome. */
 type FailedRendering = Readonly<{
   /** The page could not be read. */
   status: "failed"
@@ -153,206 +148,54 @@ type FailedRendering = Readonly<{
   failure: PageRenderingFailure
 }>
 
-/** One read in progress, lent to each of its steps. */
-type PageRead = Readonly<{
-  /** Page to read. */
-  url: PageUrl
-  /** Stop of the reply; owned by the caller. */
-  abortSignal: AbortSignal
-  /** Browser, address rule, failure reporters, and time limits. */
-  dependencies: PageRenderingDependencies
-  /** Proxy the browser's traffic goes through; borrowed from the read. */
-  proxy: PageProxy
-  /** `performance.now()` value by which the read must end, in milliseconds. */
-  deadlineMs: number
-}>
+/** Validates vmo's `200 OK` answer to a page read, before Lys trusts it. */
+const vmoReadPageAnswerSchema = z
+  .strictObject({
+    /** HTML the page's reader wrote, as vmo decoded it from UTF-8. */
+    html: z.string(),
+    /** Whether vmo kept only the beginning of what the reader wrote. */
+    isTruncated: z.boolean()
+  })
+  .readonly()
 
-/** The one page of a read and what is known about how it loaded. */
-type ReadPage = Readonly<{
-  /** Page of the read, in the read's browser. */
-  page: Page
-  /** Last failed navigation of the page's own frame, for the whole read. */
-  navigationFailures: FailedNavigationRecorder
-  /**
-   * Aborts once the page crashes the browser, which a call waiting on the
-   * page's renderer would otherwise never learn.
-   */
-  crashSignal: AbortSignal
-}>
+/** vmo's answer to a page it read. */
+type VmoReadPageAnswer = z.infer<typeof vmoReadPageAnswerSchema>
 
-/** Why the browser's executable cannot run, and the system error that says so. */
-type BrowserExecutableProblem = Readonly<{
-  /** `browser-missing` or `browser-failed`. */
-  failure: PageRenderingFailure
-  /** File system error of the check. */
-  cause: NodeJS.ErrnoException
-}>
+/** Path of vmo's read-page route. */
+const VMO_READ_PAGE_PATH = "/web/read-page"
 
-/** Outcome of starting the browser. */
-type BrowserStartResult =
-  | Readonly<{
-      /** The browser started; the read owns it. */
-      status: "started"
-      /** The started browser. */
-      browser: Browser
-    }>
-  | FailedRendering
-
-/** Outcome of loading the page's document. */
-type DocumentLoadResult =
-  | Readonly<{
-      /** The document loaded. */
-      status: "loaded"
-      /** Response that delivered it, after every HTTP redirect. */
-      response: Response
-    }>
-  | FailedRendering
-
-/** Whether a loaded document can be read, and how. */
-type DocumentReadability =
-  | Readonly<{
-      /** The document is HTML or plain text with a 2xx status. */
-      status: "readable"
-      /** How it is read. */
-      mediaType: PageMediaType
-    }>
-  | FailedRendering
-
-/** Most work the proxy accepts for one read. */
-const PAGE_PROXY_LIMITS: PageProxyLimits = Object.freeze({
-  maximumConnections: 256,
-  maximumReceivedBytes: 64 * 1024 * 1024
+/** Headers of every request to vmo: JSON accepted, without compression. */
+const VMO_REQUEST_HEADERS: Readonly<Record<string, string>> = Object.freeze({
+  accept: "application/json",
+  "accept-encoding": "identity"
 })
 
-/**
- * Rule of Chromium's proxy bypass list that sends this machine's own
- * addresses through the proxy as well, so the address rule refuses them.
- * Playwright adds it by default but leaves it out when its environment says
- * so; Lys names it itself.
- */
-const PROXY_LOOPBACK_RULE = "<-loopback>"
+/** Failure of a URL vmo refused. */
+const URL_REFUSED: PageRenderingFailure = Object.freeze({ kind: "url-refused" })
 
-/** Load states the read waits for once the document has arrived, in order. */
-const SETTLE_LOAD_STATES = Object.freeze([
-  "domcontentloaded",
-  "networkidle"
-] as const)
+/** Failure of a page that did not load within vmo's time limit. */
+const TIMED_OUT: PageRenderingFailure = Object.freeze({ kind: "timed-out" })
 
-/** Scheme of the page Chromium shows when a navigation fails. */
-const BROWSER_ERROR_PAGE_SCHEME = "chrome-error:"
+/** Failure of a page the browser could not load. */
+const NOT_LOADED: PageRenderingFailure = Object.freeze({ kind: "not-loaded" })
 
-/** Milliseconds kept at the end of a read for reading the page's document. */
-const DOCUMENT_READ_RESERVE_MS = 2_000
+/** Failure of an answer over the size limit. */
+const TOO_LARGE: PageRenderingFailure = Object.freeze({ kind: "too-large" })
 
-/** Most characters of a media type a failure reports. */
-const MAXIMUM_REPORTED_MEDIA_TYPE_LENGTH = 100
-
-/** Lowest HTTP status of a document Lys reads, inclusive. */
-const MINIMUM_READABLE_STATUS = 200
-
-/** Highest HTTP status of a document Lys reads, inclusive. */
-const MAXIMUM_READABLE_STATUS = 299
-
-/**
- * Most mebibytes a page's scripts may hold, inclusive. A page that holds
- * more crashes its renderer, and the read fails as crashed, instead of
- * growing to the browser's own limit of several gibibytes.
- */
-const MAXIMUM_PAGE_SCRIPT_MEMORY_MIB = 1024
-
-/**
- * Chromium arguments of every read: WebRTC may not send UDP around the
- * proxy, no page may open another window, and a page's scripts may hold at
- * most {@link MAXIMUM_PAGE_SCRIPT_MEMORY_MIB}.
- */
-const BROWSER_LAUNCH_ARGUMENTS: readonly string[] = Object.freeze([
-  "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
-  "--block-new-web-contents",
-  `--js-flags=--max-old-space-size=${MAXIMUM_PAGE_SCRIPT_MEMORY_MIB}`
-])
-
-/** Resource types that carry no text, so the browser never fetches them. */
-const TEXTLESS_RESOURCE_TYPES: ReadonlySet<string> = new Set([
-  "font",
-  "image",
-  "media"
-])
-
-/** File error codes that mean the browser's executable does not exist. */
-const MISSING_FILE_CODES: ReadonlySet<string> = new Set(["ENOENT", "ENOTDIR"])
-
-/** Finds the error code in a Chromium network failure, such as `net::ERR_ABORTED`. */
-const NETWORK_ERROR_CODE_PATTERN = /^net::(ERR_[A-Z0-9_]+)$/
-
-/** Failure of a read that did not finish within its time limit. */
-const TIMED_OUT_FAILURE: PageRenderingFailure = Object.freeze({
-  kind: "timed-out"
+/** Failure of a vmo that cannot be reached. */
+const READER_UNREACHABLE: PageRenderingFailure = Object.freeze({
+  kind: "reader-unreachable"
 })
 
-/** Failure of a browser that exists but could not start. */
-const BROWSER_FAILED_FAILURE: PageRenderingFailure = Object.freeze({
-  kind: "browser-failed"
+/** Failure of a vmo that failed or broke its contract. */
+const READER_FAILED: PageRenderingFailure = Object.freeze({
+  kind: "reader-failed"
 })
 
-/**
- * Owns the last failed navigation of one page's own frame, recorded from
- * the page's request events, to tell why the page's document did not
- * arrive or why the page ended on the browser's error page.
- *
- * @remarks Invariant: holds the most recent failed navigation request of
- * the page's main frame since it was registered, or none. Its event
- * registration lasts as long as the borrowed page, which closes with the
- * read's browser, so it has no cleanup of its own. Concurrency model:
- * single-owner; Playwright delivers the page's events on the backend's event
- * loop, and only the read that registered it reads it.
- */
-class FailedNavigationRecorder {
-  /**
-   * Last failed navigation of the page's own frame, a borrowed Playwright
-   * record; undefined while none has failed.
-   */
-  #lastFailedNavigation: Request | undefined = undefined
-
-  /** Creates a recorder that has recorded nothing; only `register` does. */
-  private constructor() {}
-
-  /**
-   * Starts recording the failed navigations of a page.
-   *
-   * @param page - Page of the read, borrowed; it must stay open while the
-   * recorder is read.
-   * @returns A recorder whose handler is registered on the page's
-   * `requestfailed` event.
-   */
-  public static register(page: Page): FailedNavigationRecorder {
-    const recorder = new FailedNavigationRecorder()
-    page.on("requestfailed", (request) =>
-      recorder.#handleRequestFailed(request)
-    )
-    return recorder
-  }
-
-  /**
-   * Last failed navigation of the page's own frame.
-   *
-   * @returns The Playwright record of the request, or undefined when none
-   * has failed since registration.
-   */
-  public get lastFailedNavigation(): Request | undefined {
-    return this.#lastFailedNavigation
-  }
-
-  /**
-   * Keeps a failed request when it is a navigation of the page's own frame.
-   *
-   * @param request - Request that failed.
-   */
-  #handleRequestFailed(request: Request): void {
-    if (!request.isNavigationRequest()) return
-    if (request.frame().parentFrame() !== null) return
-    this.#lastFailedNavigation = request
-  }
-}
+/** Failure of a read that ran out of its time limit. */
+const READER_TIMED_OUT: PageRenderingFailure = Object.freeze({
+  kind: "reader-timed-out"
+})
 
 /**
  * Builds a failed outcome.
@@ -365,607 +208,258 @@ function buildFailedRendering(failure: PageRenderingFailure): FailedRendering {
 }
 
 /**
- * Gets the milliseconds left before a read must end.
+ * Finds why the page's host name may not be read.
  *
- * @param read - Read in progress.
- * @returns The whole milliseconds left, at least 0, by the monotonic
- * clock.
+ * @param url - Page to read.
+ * @param rule - Lookup and address rule.
+ * @returns `blocked-address` when any address of the host name is blocked,
+ * `unresolvable-host` when it has none, or undefined when vmo may be asked.
+ * A host that is an IP address is not looked up: the page URL rules already
+ * refused a blocked one.
+ * @throws A lookup failure without a system code, unchanged.
  */
-function getRemainingTimeMs(read: PageRead): number {
-  return Math.max(0, Math.floor(read.deadlineMs - performance.now()))
-}
-
-/**
- * Finds why the browser's executable cannot run.
- *
- * @param executablePath - Path of the executable.
- * @returns `browser-missing` when it does not exist, `browser-failed` when
- * it exists but is not executable, each with the error that says so; or
- * undefined when it can run.
- * @throws A failure of the check that carries no system error code.
- */
-async function findBrowserExecutableProblem(
-  executablePath: string
-): Promise<BrowserExecutableProblem | undefined> {
+async function findHostAddressFailure(
+  url: PageUrl,
+  rule: ConnectionAddressRule
+): Promise<PageRenderingFailure | undefined> {
+  const { hostname } = new URL(url)
+  if (hostname.startsWith("[") || isIP(hostname) !== 0) return undefined
   try {
-    await access(executablePath, fileConstants.X_OK)
+    await listCheckedHostAddresses(hostname, rule)
     return undefined
   } catch (error) {
-    if (!hasErrorCode(error)) throw error
-    const failure: PageRenderingFailure = Object.freeze({
-      kind: MISSING_FILE_CODES.has(error.code)
-        ? "browser-missing"
-        : "browser-failed"
-    })
-    return Object.freeze({ failure, cause: error })
+    if (!(error instanceof ConnectionAddressError)) throw error
+    return Object.freeze({ kind: error.kind })
   }
 }
 
 /**
- * Closes what a step used once the step has settled.
+ * Waits for the check of the page's host unless a signal aborts first.
  *
- * @param use - Step that uses the resource.
- * @param close - Closes the resource; called once, after `use` settles.
- * @returns What the step resolved with.
- * @throws What the step rejected with; when closing also fails, an
- * `AggregateError` holding both, the step's failure first. When only
- * closing fails, that failure.
- */
-async function closeAfterUse<TResult>(
-  use: Promise<TResult>,
-  close: () => Promise<void>
-): Promise<TResult> {
-  const [outcome] = await Promise.allSettled([use])
-  try {
-    await close()
-  } catch (closeError) {
-    if (outcome?.status !== "rejected") throw closeError
-    throw new AggregateError(
-      [outcome.reason, closeError],
-      "Reading the page failed, and closing what it used failed too",
-      { cause: closeError }
-    )
-  }
-  if (outcome?.status !== "fulfilled") throw outcome?.reason
-  return outcome.value
-}
-
-/**
- * Waits for a step of a read unless a signal aborts first.
- *
- * @param step - Step in progress.
+ * @param check - Check in progress.
  * @param signal - Ends the wait; it may already have aborted.
- * @returns What the step resolved with.
- * @throws The signal's reason once it aborts, or the step's failure. A step
- * left behind keeps running until its browser is closed; its later failure
- * is observed and ignored.
+ * @returns What the check found.
+ * @throws The signal's reason once it aborts, or the check's failure. The
+ * operating system's lookup cannot be interrupted, so a check left behind
+ * runs on until the resolver answers; its later failure is observed and
+ * ignored.
  */
-async function waitForReadStep<TResult>(
-  step: Promise<TResult>,
+async function waitForHostCheck(
+  check: Promise<PageRenderingFailure | undefined>,
   signal: AbortSignal
-): Promise<TResult> {
-  const { promise: stopped, reject } = Promise.withResolvers<never>()
-  const rejectStopped = () => reject(signal.reason)
-  signal.addEventListener("abort", rejectStopped, { once: true })
-  if (signal.aborted) rejectStopped()
+): Promise<PageRenderingFailure | undefined> {
+  const { promise: aborted, reject } = Promise.withResolvers<never>()
+  const rejectAborted = () => reject(signal.reason)
+  signal.addEventListener("abort", rejectAborted, { once: true })
+  if (signal.aborted) rejectAborted()
   try {
-    return await Promise.race([step, stopped])
+    return await Promise.race([check, aborted])
   } finally {
-    signal.removeEventListener("abort", rejectStopped)
+    signal.removeEventListener("abort", rejectAborted)
   }
 }
 
 /**
- * Builds how the browser starts for one read.
+ * Builds the URL of vmo's read of one page.
  *
- * @param read - Read in progress.
- * @param timeoutMs - Most milliseconds the start may take; a positive
- * integer.
- * @returns Launch options: the executable, headless, Chromium's sandbox on,
- * every request through the read's proxy with its credentials, this
- * machine's own addresses included, and the start timeout.
+ * @param url - Page to read.
+ * @param vmoOrigin - Origin of vmo.
+ * @returns vmo's read-page route with the page's URL as its `url` query
+ * parameter, form-encoded as vmo decodes it.
  */
-function buildLaunchOptions(read: PageRead, timeoutMs: number): LaunchOptions {
-  const proxy = Object.freeze({
-    server: read.proxy.url,
-    bypass: PROXY_LOOPBACK_RULE,
-    username: read.proxy.credentials.username,
-    password: read.proxy.credentials.password
+function buildVmoReadPageUrl(url: PageUrl, vmoOrigin: string): URL {
+  const target = new URL(VMO_READ_PAGE_PATH, vmoOrigin)
+  target.searchParams.set("url", url)
+  return target
+}
+
+/**
+ * Sends one read to vmo and waits for its response headers.
+ *
+ * @param target - URL of the read on vmo.
+ * @param signal - Aborts the request on Stop or when the read's time is up.
+ * @returns The response, whose body the caller owns and must consume or
+ * destroy.
+ * @throws The request's failure, such as `ECONNREFUSED` when vmo is not
+ * listening.
+ * @remarks Each read opens its own connection. vmo is on this machine, so the
+ * address rule does not apply to it.
+ */
+function openVmoResponse(
+  target: URL,
+  signal: AbortSignal
+): Promise<IncomingMessage> {
+  const options: RequestOptions = {
+    method: "GET",
+    headers: VMO_REQUEST_HEADERS,
+    agent: false,
+    signal
+  }
+  return new Promise((resolve, reject) => {
+    const outgoing = requestHttp(target, options, resolve)
+    // Stays attached: a failure after the response arrived, such as the
+    // socket closing when the body is destroyed, must not go unhandled. The
+    // promise is settled by then, so rejecting again changes nothing.
+    outgoing.on("error", reject)
+    outgoing.end()
   })
-  return {
-    executablePath: read.dependencies.browserExecutablePath,
-    headless: true,
-    chromiumSandbox: true,
-    timeout: timeoutMs,
-    proxy,
-    args: [...BROWSER_LAUNCH_ARGUMENTS]
+}
+
+/**
+ * Finds the read failure a status of vmo stands for.
+ *
+ * @param status - HTTP status of vmo's answer, other than 200.
+ * @returns `url-refused` for 400, which vmo gives a URL it does not parse,
+ * and 431, which it gives a request too long to read; `not-loaded` for 502,
+ * which it gives when the page's reader exits with an error; `timed-out` for
+ * 504, which it gives when its time limit passes; undefined for any other
+ * status.
+ */
+function findVmoStatusFailure(
+  status: number
+): PageRenderingFailure | undefined {
+  switch (status) {
+    case 400:
+    case 431:
+      return URL_REFUSED
+    case 502:
+      return NOT_LOADED
+    case 504:
+      return TIMED_OUT
+    default:
+      return undefined
   }
 }
 
 /**
- * Handles a browser start that failed: tells a start that ran out of time
- * from a broken browser, and reports the broken browser's cause.
+ * Handles an answer of vmo that its contract does not have: reports its
+ * cause and fails the read.
  *
- * @param error - What the start rejected with.
- * @param read - Read in progress, whose failure reporter receives the cause
- * of a start that failed for any reason other than time.
- * @returns `timed-out` when the start ran out of the read's time;
- * `browser-failed` otherwise.
+ * @param cause - What was wrong with the answer, without any of its body.
+ * @param dependencies - Failure reporter.
+ * @returns `reader-failed`.
  */
-function handleBrowserStartFailure(
-  error: unknown,
-  read: PageRead
+function handleUnexpectedVmoAnswer(
+  cause: Error,
+  dependencies: PageRenderingDependencies
 ): FailedRendering {
-  if (error instanceof playwrightErrors.TimeoutError) {
-    return buildFailedRendering(TIMED_OUT_FAILURE)
-  }
-  read.dependencies.reportBrowserFailure(error)
-  return buildFailedRendering(BROWSER_FAILED_FAILURE)
+  dependencies.reportPageReaderFailure(cause)
+  return buildFailedRendering(READER_FAILED)
 }
 
 /**
- * Starts the browser of one read.
+ * Builds the outcome of a page vmo read.
  *
- * @param read - Read in progress.
- * @returns The started browser, owned by the caller; `timed-out` when no
- * time is left or the start runs out of it; or `browser-failed`.
- * @throws The stop reason when the read was stopped while the browser
- * started; a browser that started anyway is closed first, and when closing
- * it fails, an `AggregateError` holding the stop reason and that failure. A
- * start that failed is still handled, its cause reported, before the stop
- * reason is thrown. Starting cannot be interrupted, so a stop waits for it,
- * at most the read's time limit.
+ * @param url - Page Lys asked vmo to read.
+ * @param answer - vmo's validated answer.
+ * @returns The page, its HTML cut to {@link MAXIMUM_PAGE_HTML_LENGTH} without
+ * splitting a character, truncated when vmo or Lys cut it.
  */
-async function startPageBrowser(read: PageRead): Promise<BrowserStartResult> {
-  const timeoutMs = getRemainingTimeMs(read)
-  if (timeoutMs === 0) return buildFailedRendering(TIMED_OUT_FAILURE)
-  const [start] = await Promise.allSettled([
-    chromium.launch(buildLaunchOptions(read, timeoutMs))
-  ])
-  if (start?.status !== "fulfilled") {
-    const failure = handleBrowserStartFailure(start?.reason, read)
-    read.abortSignal.throwIfAborted()
-    return failure
-  }
-  const browser = start.value
-  if (read.abortSignal.aborted) {
-    return closeAfterUse(Promise.reject<never>(read.abortSignal.reason), () =>
-      browser.close()
-    )
-  }
-  return Object.freeze({ status: "started", browser })
-}
-
-/**
- * Lets a request of the page through unless it fetches a resource that
- * carries no text.
- *
- * @param route - Request the page is about to send.
- * @returns A promise that settles once the request is let through or
- * aborted.
- */
-function handleResourceRoute(route: Route): Promise<void> {
-  return TEXTLESS_RESOURCE_TYPES.has(route.request().resourceType())
-    ? route.abort()
-    : route.continue()
-}
-
-/**
- * Opens the one page of a read in a fresh browser context.
- *
- * @param browser - Browser of the read.
- * @returns A page whose context keeps no service worker and accepts no
- * download, and that never fetches images, fonts, or media, with the
- * failed navigations of its own frame recorded, and its crash watched, from
- * now on.
- */
-async function openReadPage(browser: Browser): Promise<ReadPage> {
-  const context = await browser.newContext({
-    serviceWorkers: "block",
-    acceptDownloads: false
-  })
-  const page = await context.newPage()
-  await page.route("**/*", handleResourceRoute)
-  const navigationFailures = FailedNavigationRecorder.register(page)
-  const crash = new AbortController()
-  page.once("crash", () =>
-    crash.abort(new Error("The page crashed Lys's browser"))
-  )
-  return Object.freeze({ page, navigationFailures, crashSignal: crash.signal })
-}
-
-/**
- * Finds the media type a `Content-Type` value names.
- *
- * @param contentType - Untrusted header value, or undefined.
- * @returns The lowercase media type, or undefined when it names none.
- */
-function parseMediaType(contentType: string | undefined): string | undefined {
-  const mediaType = contentType?.split(";")[0]?.trim().toLowerCase()
-  return mediaType === "" ? undefined : mediaType
-}
-
-/**
- * Answers whether a document's status lets Lys read it.
- *
- * @param status - HTTP status of the document's response.
- * @returns True for 2xx only. A document a page's script writes, as through
- * a `javascript:` URL, keeps the status of the document that wrote it.
- */
-function isReadableStatus(status: number): boolean {
-  return status >= MINIMUM_READABLE_STATUS && status <= MAXIMUM_READABLE_STATUS
-}
-
-/**
- * Decides whether a document can be read.
- *
- * @param status - HTTP status of the document's response.
- * @param mediaType - Lowercase media type of the document, or undefined
- * when its server named none.
- * @returns How to read it, or why it cannot be read: its status, then its
- * media type, cleaned and cut for the failure.
- */
-function parseDocumentReadability(
-  status: number,
-  mediaType: string | undefined
-): DocumentReadability {
-  if (!isReadableStatus(status)) {
-    return buildFailedRendering(Object.freeze({ kind: "http-status", status }))
-  }
-  const pageMediaType =
-    mediaType === undefined ? undefined : findPageMediaType(mediaType)
-  if (pageMediaType !== undefined) {
-    return Object.freeze({ status: "readable", mediaType: pageMediaType })
-  }
-  const reportedMediaType =
-    mediaType === undefined
-      ? undefined
-      : formatSingleLineText(mediaType, MAXIMUM_REPORTED_MEDIA_TYPE_LENGTH)
-  return buildFailedRendering(
-    Object.freeze({
-      kind: "unsupported-content-type",
-      mediaType: reportedMediaType
-    })
-  )
-}
-
-/**
- * Decides whether the document a response delivered can be read.
- *
- * @param response - Untrusted response that delivered the document.
- * @returns How to read it, or why it cannot be read: its status or its
- * media type.
- */
-function parseDocumentResponse(response: Response): DocumentReadability {
-  return parseDocumentReadability(
-    response.status(),
-    parseMediaType(response.headers()["content-type"])
-  )
-}
-
-/**
- * Decides why a navigation request of the page failed.
- *
- * @param request - The failed navigation, possibly a redirect's target.
- * @param proxy - Proxy of the read, which knows what it refused.
- * @returns The proxy's refusal of the request's host; else the document's
- * status or media type when its response arrived, as for a download; else
- * the network error.
- * @throws When the failure is not a Chromium network error.
- */
-async function parseFailedNavigation(
-  request: Request,
-  proxy: PageProxy
-): Promise<FailedRendering> {
-  const target = new URL(request.url())
-  const refusal = proxy.findRefusal(target.hostname, getUrlPort(target))
-  if (refusal !== undefined) {
-    return buildFailedRendering(Object.freeze({ kind: refusal.kind }))
-  }
-  const response = await request.response()
-  const readability =
-    response === null ? undefined : parseDocumentResponse(response)
-  if (readability?.status === "failed") return readability
-  const errorText = request.failure()?.errorText ?? ""
-  const code = NETWORK_ERROR_CODE_PATTERN.exec(errorText)?.[1]
-  if (code === undefined) {
-    throw new Error(
-      `A page navigation failed in an unrecognized way: ${errorText}`
-    )
-  }
-  return buildFailedRendering(Object.freeze({ kind: "transfer-failed", code }))
-}
-
-/**
- * Decides why loading the page's document failed.
- *
- * @param error - What the navigation rejected with.
- * @param failedNavigation - Last failed navigation request, or undefined.
- * @param proxy - Proxy of the read.
- * @returns `timed-out`, or what the failed request shows.
- * @throws `error` when it is neither, a crash included.
- */
-async function parseDocumentLoadFailure(
-  error: unknown,
-  failedNavigation: Request | undefined,
-  proxy: PageProxy
-): Promise<FailedRendering> {
-  if (error instanceof playwrightErrors.TimeoutError) {
-    return buildFailedRendering(TIMED_OUT_FAILURE)
-  }
-  if (failedNavigation === undefined) throw error
-  return parseFailedNavigation(failedNavigation, proxy)
-}
-
-/**
- * Loads the page's document, following its HTTP redirects.
- *
- * @param readPage - Page of the read.
- * @param read - Read in progress.
- * @returns The response that delivered the document once the browser has
- * started showing it, or why it did not arrive.
- * @throws When the navigation failed in an unrecognized way.
- */
-async function loadPageDocument(
-  readPage: ReadPage,
-  read: PageRead
-): Promise<DocumentLoadResult> {
-  try {
-    const response = await readPage.page.goto(read.url, {
-      waitUntil: "commit",
-      timeout: getRemainingTimeMs(read)
-    })
-    if (response === null) {
-      throw new Error("Loading a page gave no response")
-    }
-    return Object.freeze({ status: "loaded", response })
-  } catch (error) {
-    return parseDocumentLoadFailure(
-      error,
-      readPage.navigationFailures.lastFailedNavigation,
-      read.proxy
-    )
-  }
-}
-
-/**
- * Waits for the page to reach one load state before a deadline.
- *
- * @param page - Page of the read.
- * @param state - Load state to wait for.
- * @param deadlineMs - `performance.now()` value by which to stop waiting.
- * @returns True once the state is reached; false when the deadline passes
- * first, which is not a failure.
- * @throws When waiting fails for another reason.
- */
-async function waitForLoadStateBefore(
-  page: Page,
-  state: (typeof SETTLE_LOAD_STATES)[number],
-  deadlineMs: number
-): Promise<boolean> {
-  const timeoutMs = Math.floor(deadlineMs - performance.now())
-  if (timeoutMs <= 0) return false
-  try {
-    await page.waitForLoadState(state, { timeout: timeoutMs })
-    return true
-  } catch (error) {
-    if (!(error instanceof playwrightErrors.TimeoutError)) throw error
-    return false
-  }
-}
-
-/**
- * Waits for the page's DOM to be ready, then for its network to have been
- * quiet for 500 milliseconds.
- *
- * @param page - Page whose document has arrived.
- * @param read - Read in progress.
- * @returns A promise that settles once both are reached, or once the settle
- * limit, or the read's time left minus the document read's reserve, is
- * reached; reaching it is not a failure, and what has rendered is read.
- * @throws When waiting fails for another reason.
- */
-async function waitForPageToSettle(page: Page, read: PageRead): Promise<void> {
-  const deadlineMs = Math.min(
-    performance.now() + read.dependencies.settleTimeoutMs,
-    read.deadlineMs - DOCUMENT_READ_RESERVE_MS
-  )
-  for (const state of SETTLE_LOAD_STATES) {
-    const isReached = await waitForLoadStateBefore(page, state, deadlineMs)
-    if (!isReached) return
-  }
-}
-
-/**
- * Decides why the page ended on the browser's error page.
- *
- * @param readPage - Page of the read, which shows that error page.
- * @param proxy - Proxy of the read.
- * @returns What the last failed navigation of the page shows: a later
- * navigation of its own, such as a `<meta>` refresh or a script, failed.
- * @throws When no navigation of the page failed, which the browser does not
- * do before it shows its error page.
- */
-async function parseBrowserErrorPage(
-  readPage: ReadPage,
-  proxy: PageProxy
-): Promise<FailedRendering> {
-  const failedNavigation = readPage.navigationFailures.lastFailedNavigation
-  if (failedNavigation === undefined) {
-    throw new Error("A page showed the browser's error page without failing")
-  }
-  return parseFailedNavigation(failedNavigation, proxy)
-}
-
-/**
- * Builds the outcome of reading the document a page ended on.
- *
- * @param readPage - Page of the read.
- * @param document - The document, as Lys read it.
- * @param proxy - Proxy of the read.
- * @returns The page; or why it cannot be read: why the page's last
- * navigation failed when the document is the browser's error page, the
- * rules the document's URL breaks, or the document's status or media type.
- * @throws When the page shows the browser's error page without a failed
- * navigation.
- */
-async function buildRenderedResult(
-  readPage: ReadPage,
-  document: PageDocument,
-  proxy: PageProxy
-): Promise<PageRenderingResult> {
-  if (document.url.startsWith(BROWSER_ERROR_PAGE_SCHEME)) {
-    return parseBrowserErrorPage(readPage, proxy)
-  }
-  const url = parsePageUrl(document.url)
-  if (url.status === "invalid") {
-    return buildFailedRendering(
-      Object.freeze({ kind: "invalid-redirect", problem: url.problem })
-    )
-  }
-  const readability = parseDocumentReadability(
-    document.responseStatus,
-    document.contentType
-  )
-  if (readability.status === "failed") return readability
+function buildRenderedResult(
+  url: PageUrl,
+  answer: VmoReadPageAnswer
+): PageRenderingResult {
+  const html = formatCutText(answer.html, MAXIMUM_PAGE_HTML_LENGTH)
   const page: RenderedPage = Object.freeze({
-    url: url.url,
-    mediaType: readability.mediaType,
-    text: document.text,
-    isTruncated: document.isTruncated
+    url,
+    html,
+    isTruncated: answer.isTruncated || html.length < answer.html.length
   })
   return Object.freeze({ status: "rendered", page })
 }
 
 /**
- * Reads the page once its document has arrived.
+ * Reads vmo's `200 OK` answer into the page.
  *
- * @param readPage - Page of the read.
- * @param response - Response that delivered the first document.
- * @param read - Read in progress.
- * @returns What the page shows once it settled, or why it cannot be read:
- * the first document's status or media type, why a later navigation of the
- * page failed, the rules the URL it ended on breaks, or the status or media
- * type of the document it ended on, however it got there. Each is judged
- * on the document Lys read.
+ * @param response - Response whose status is 200.
+ * @param url - Page Lys asked vmo to read.
+ * @param dependencies - Failure reporter.
+ * @returns The page; `too-large` for a body over
+ * {@link MAXIMUM_VMO_RESPONSE_BYTES}; `reader-failed`, reported, for a body
+ * that is not UTF-8 JSON or does not match vmo's answer.
+ * @throws A body read failure.
  */
-async function readLoadedDocument(
-  readPage: ReadPage,
-  response: Response,
-  read: PageRead
+async function readVmoPage(
+  response: IncomingMessage,
+  url: PageUrl,
+  dependencies: PageRenderingDependencies
 ): Promise<PageRenderingResult> {
-  const readability = parseDocumentResponse(response)
-  if (readability.status === "failed") return readability
-  await waitForPageToSettle(readPage.page, read)
-  const document = await getPageDocument(readPage.page)
-  return buildRenderedResult(readPage, document, read.proxy)
-}
-
-/**
- * Loads the page and reads it.
- *
- * @param readPage - Page of the read.
- * @param read - Read in progress.
- * @returns What the page shows, or why it cannot be read.
- * @throws Any failure Lys does not recognize, a crash included.
- */
-async function readOpenedPage(
-  readPage: ReadPage,
-  read: PageRead
-): Promise<PageRenderingResult> {
-  const load = await loadPageDocument(readPage, read)
-  if (load.status === "failed") return load
-  return readLoadedDocument(readPage, load.response, read)
-}
-
-/**
- * Reads the page in a started browser.
- *
- * @param read - Read in progress.
- * @param browser - Browser of the read, borrowed; the caller closes it.
- * @returns What the page shows, or why it cannot be read; `crashed` when the
- * page crashes the browser at any step, before or after its document
- * arrived, a step still waiting on the crashed page included.
- * @throws Any failure Lys does not recognize.
- * @remarks Playwright reports a page's crash before it rejects the calls
- * that waited on the page, so the crash ends the wait first, and the calls'
- * later failures are left behind with the step.
- */
-async function readInBrowser(
-  read: PageRead,
-  browser: Browser
-): Promise<PageRenderingResult> {
-  const readPage = await openReadPage(browser)
-  try {
-    return await waitForReadStep(
-      readOpenedPage(readPage, read),
-      readPage.crashSignal
+  if (!isJsonResponse(response)) {
+    return handleUnexpectedVmoAnswer(
+      new Error("vmo answered a page read with a body that is not JSON"),
+      dependencies
     )
-  } catch (error) {
-    if (error !== readPage.crashSignal.reason) throw error
-    return buildFailedRendering(Object.freeze({ kind: "crashed" }))
   }
+  const body = await readBoundedBody(response, MAXIMUM_VMO_RESPONSE_BYTES)
+  if (body.status === "too-large") return buildFailedRendering(TOO_LARGE)
+  const json = parseJsonBody(body.bytes)
+  const answer =
+    json.status === "parsed"
+      ? vmoReadPageAnswerSchema.safeParse(json.value)
+      : undefined
+  if (answer?.success !== true) {
+    return handleUnexpectedVmoAnswer(
+      new Error("vmo's answer to a page read is not the JSON it promises", {
+        cause: answer?.error
+      }),
+      dependencies
+    )
+  }
+  return buildRenderedResult(url, answer.data)
 }
 
 /**
- * Reads the page in a browser whose traffic goes through the read's proxy.
+ * Reads vmo's answer to one read.
  *
- * @param read - Read in progress.
- * @returns What the page shows, or why it cannot be read; `timed-out` only
- * when the read's time limit ended the wait.
- * @throws The stop reason once the read is stopped; any failure Lys does not
- * recognize, closing the browser included, and when both the read and
- * closing fail, an `AggregateError` holding both.
- * @remarks Stop or the read's time limit ends the wait at once; the browser
- * is then closed, which ends every step still running. The time limit's
- * timer and the link to the reply's Stop are released when the read ends.
+ * @param response - Response whose headers arrived; it is destroyed before
+ * this settles.
+ * @param url - Page Lys asked vmo to read.
+ * @param dependencies - Failure reporter.
+ * @returns The page for 200; the failure a status of vmo stands for; or
+ * `reader-failed`, reported, for any other status. Only a 200 body is read.
+ * @throws A body read failure.
  */
-async function readThroughProxy(read: PageRead): Promise<PageRenderingResult> {
-  const start = await startPageBrowser(read)
-  if (start.status === "failed") return start
-  const deadlineReason = new Error("The page read reached its time limit")
-  const readStop = new AbortController()
-  const deadlineTimer = setTimeout(
-    () => readStop.abort(deadlineReason),
-    getRemainingTimeMs(read)
-  )
-  const forwardStop = () => readStop.abort(read.abortSignal.reason)
-  read.abortSignal.addEventListener("abort", forwardStop, { once: true })
-  if (read.abortSignal.aborted) forwardStop()
+async function readVmoResponse(
+  response: IncomingMessage,
+  url: PageUrl,
+  dependencies: PageRenderingDependencies
+): Promise<PageRenderingResult> {
   try {
-    return await closeAfterUse(
-      waitForReadStep(readInBrowser(read, start.browser), readStop.signal),
-      () => start.browser.close()
+    const status = response.statusCode ?? 0
+    if (status === 200) return await readVmoPage(response, url, dependencies)
+    const failure = findVmoStatusFailure(status)
+    if (failure !== undefined) return buildFailedRendering(failure)
+    return handleUnexpectedVmoAnswer(
+      new Error(`vmo answered a page read with HTTP status ${status}`),
+      dependencies
     )
-  } catch (error) {
-    if (error !== deadlineReason) throw error
-    return buildFailedRendering(TIMED_OUT_FAILURE)
   } finally {
-    clearTimeout(deadlineTimer)
-    read.abortSignal.removeEventListener("abort", forwardStop)
+    response.destroy()
   }
 }
 
 /**
- * Reads one page in a fresh headless browser.
+ * Reads one page through vmo, which loads it in a fresh micro VM.
  *
  * @param url - Page to read, checked by the page URL rules.
  * @param abortSignal - Stops the read.
- * @param dependencies - Browser, address rule, failure reporters, and time
- * limits.
- * @returns What the browser showed: the HTML of the page, or a plain-text
- * page's text, and the URL it ended on; or why the page could not be read.
+ * @param dependencies - vmo's origin, address rule, failure reporter, and
+ * time limit.
+ * @returns The page's HTML, under the URL Lys asked for; or why the page
+ * could not be read.
  * @throws The stop reason once `abortSignal` aborts; nothing is started when
  * it already has. Any failure Lys does not recognize, which is a defect.
- * @remarks Starts a proxy that applies the address rule to every connection,
- * then Chromium with that proxy, Chromium's sandbox, and a context that keeps
- * nothing between reads. The page's scripts run and its redirects are
- * followed. Once its document has arrived, the read waits, up to the settle
- * limit, for its DOM to be ready and its network to go quiet, then reads
- * the document the page ended on, hidden text included, and checks that
- * document's status and media type, however the page reached it. The
- * browser and the proxy are closed whatever the outcome, Stop included, so
- * nothing keeps running after the read.
+ * @remarks First looks up the page's host name and refuses it when any of its
+ * addresses is blocked. That check covers only the URL given: the page's
+ * redirects, the resources it loads, and a name that resolves differently
+ * inside the micro VM are not checked. Then sends `GET /web/read-page` to
+ * vmo, which loads the page in headless Chromium in a micro VM of its own,
+ * with the page's scripts running and its redirects followed, for at most
+ * vmo's own time limit, and deletes the VM before it answers. The time limit
+ * covers the lookup and vmo's whole answer, whose body is bounded by
+ * {@link MAXIMUM_VMO_RESPONSE_BYTES}. Stop or the time limit only ends Lys's
+ * request: vmo does not notice, and its VM runs until vmo's own time limit
+ * ends it.
  */
 export async function getRenderedPage(
   url: PageUrl,
@@ -973,28 +467,26 @@ export async function getRenderedPage(
   dependencies: PageRenderingDependencies
 ): Promise<PageRenderingResult> {
   abortSignal.throwIfAborted()
-  const deadlineMs = performance.now() + dependencies.readTimeoutMs
-  const executableProblem = await findBrowserExecutableProblem(
-    dependencies.browserExecutablePath
-  )
-  if (executableProblem !== undefined) {
-    dependencies.reportBrowserFailure(executableProblem.cause)
-    return buildFailedRendering(executableProblem.failure)
+  const timeoutSignal = AbortSignal.timeout(dependencies.readTimeoutMs)
+  const readSignal = AbortSignal.any([abortSignal, timeoutSignal])
+  try {
+    const addressFailure = await waitForHostCheck(
+      findHostAddressFailure(url, dependencies),
+      readSignal
+    )
+    if (addressFailure !== undefined)
+      return buildFailedRendering(addressFailure)
+    const target = buildVmoReadPageUrl(url, dependencies.vmoOrigin)
+    const response = await openVmoResponse(target, readSignal)
+    return await readVmoResponse(response, url, dependencies)
+  } catch (error) {
+    if (abortSignal.aborted) throw abortSignal.reason
+    if (timeoutSignal.aborted) {
+      dependencies.reportPageReaderFailure(timeoutSignal.reason)
+      return buildFailedRendering(READER_TIMED_OUT)
+    }
+    if (!hasErrorCode(error)) throw error
+    dependencies.reportPageReaderFailure(error)
+    return buildFailedRendering(READER_UNREACHABLE)
   }
-  abortSignal.throwIfAborted()
-  const proxy = await PageProxy.open({
-    lookupHostAddresses: dependencies.lookupHostAddresses,
-    isBlockedAddress: dependencies.isBlockedAddress,
-    limits: PAGE_PROXY_LIMITS
-  })
-  const read: PageRead = Object.freeze({
-    url,
-    abortSignal,
-    dependencies,
-    proxy,
-    deadlineMs
-  })
-  return closeAfterUse(readThroughProxy(read), () =>
-    proxy[Symbol.asyncDispose]()
-  )
 }

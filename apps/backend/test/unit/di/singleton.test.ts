@@ -39,7 +39,7 @@ function createFailureReporters() {
     reportLlmRuntimeAcquisitionFailure: vi.fn(),
     reportLlmRuntimeAvailabilityCheckFailure: vi.fn()
   } satisfies LlmRuntimeFailureReporters
-  const pageRendering = { reportBrowserFailure: vi.fn() }
+  const pageRendering = { reportPageReaderFailure: vi.fn() }
   return { llmRuntime, pageRendering } satisfies SingletonFailureReporters
 }
 

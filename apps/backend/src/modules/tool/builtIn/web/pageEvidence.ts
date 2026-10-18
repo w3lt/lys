@@ -9,7 +9,10 @@ import {
 
 /** What the model is shown about one page it read. */
 export type PageEvidenceInput = Readonly<{
-  /** URL the page came from, after every redirect. */
+  /**
+   * URL Lys asked to read; where the page's redirects led, if anywhere, is
+   * not known.
+   */
   url: PageUrl
   /** Title, site, and publication date of the page. */
   article: PageArticle

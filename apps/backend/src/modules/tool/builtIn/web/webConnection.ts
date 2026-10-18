@@ -1,6 +1,8 @@
 import type { LookupAddress, LookupOptions } from "node:dns"
 import { lookup as lookupDns } from "node:dns/promises"
+import type { IncomingMessage } from "node:http"
 import type { LookupFunction, Socket } from "node:net"
+import type { Readable } from "node:stream"
 
 /** One address a host name resolves to. */
 export type HostAddress = Readonly<{
@@ -30,14 +32,50 @@ export type ConnectionAddressRule = Readonly<{
 export type ConnectionAddressFailureKind =
   "blocked-address" | "unresolvable-host"
 
+/** Outcome of reading a response body within a size limit. */
+export type BoundedBody =
+  | Readonly<{
+      /** The whole body fit. */
+      status: "read"
+      /** Its bytes. */
+      bytes: Uint8Array
+    }>
+  | Readonly<{
+      /** The body was longer than the limit; reading stopped. */
+      status: "too-large"
+    }>
+
+/** Outcome of parsing a response body as UTF-8 JSON. */
+export type JsonBody =
+  | Readonly<{
+      /** The body is UTF-8 JSON. */
+      status: "parsed"
+      /** Parsed value; untrusted until a schema accepts it. */
+      value: unknown
+    }>
+  | Readonly<{
+      /** The body is not UTF-8, or not valid JSON. */
+      status: "unreadable"
+    }>
+
 /**
  * User agent of every request Lys's own HTTP client sends to the web, which
  * is every request to Tavily: it names Lys and links to its source, in the
  * form sites expect from automated readers. Pages `read_page` reads are
- * requested by the browser, with the browser's own user agent.
+ * requested by the browser in vmo's micro VM, with the browser's own user
+ * agent.
  */
 export const LYS_USER_AGENT =
   "Mozilla/5.0 (compatible; Lys; +https://github.com/w3lt/lys)"
+
+/** Decoder that rejects bytes that are not UTF-8. */
+const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true })
+
+/** Body outcome of a body over the size limit. */
+const TOO_LARGE_BODY: BoundedBody = Object.freeze({ status: "too-large" })
+
+/** Body outcome of a body that is not UTF-8 JSON. */
+const UNREADABLE_JSON_BODY: JsonBody = Object.freeze({ status: "unreadable" })
 
 /**
  * A connection refused by the address rule or without any address, carried
@@ -119,6 +157,78 @@ export function parseResponseChunk(chunk: unknown): Uint8Array {
 }
 
 /**
+ * Answers whether one `Content-Type` parameter allows UTF-8 JSON.
+ *
+ * @param parameter - One parameter after the media type.
+ * @returns False only for a charset other than UTF-8.
+ */
+function isUtf8OrOtherParameter(parameter: string): boolean {
+  const [name = "", value = ""] = parameter.split("=")
+  if (name.trim().toLowerCase() !== "charset") return true
+  return value.trim().replace(/^"|"$/g, "").toLowerCase() === "utf-8"
+}
+
+/**
+ * Answers whether a response says its body is UTF-8 JSON without
+ * compression.
+ *
+ * @param response - Response whose headers arrived.
+ * @returns True for `application/json` with no charset or UTF-8, and no
+ * content encoding other than `identity`.
+ */
+export function isJsonResponse(response: IncomingMessage): boolean {
+  const [mediaType = "", ...parameters] = (
+    response.headers["content-type"] ?? ""
+  ).split(";")
+  const encoding = (response.headers["content-encoding"] ?? "identity")
+    .trim()
+    .toLowerCase()
+  if (mediaType.trim().toLowerCase() !== "application/json") return false
+  return encoding === "identity" && parameters.every(isUtf8OrOtherParameter)
+}
+
+/**
+ * Reads a response body up to a size limit.
+ *
+ * @param body - Body stream; leaving it early destroys it.
+ * @param maximumBytes - Most bytes read, inclusive; a positive integer.
+ * @returns The bytes, or `too-large` as soon as the body passes the limit.
+ * @throws The stream's failure, such as an aborted request.
+ */
+export async function readBoundedBody(
+  body: Readable,
+  maximumBytes: number
+): Promise<BoundedBody> {
+  const chunks: Uint8Array[] = []
+  let byteCount = 0
+  for await (const chunk of body) {
+    const bytes = parseResponseChunk(chunk)
+    const nextByteCount = byteCount + bytes.byteLength
+    if (nextByteCount > maximumBytes) return TOO_LARGE_BODY
+    chunks.push(bytes)
+    byteCount = nextByteCount
+  }
+  return Object.freeze({ status: "read", bytes: Buffer.concat(chunks) })
+}
+
+/**
+ * Parses response body bytes as UTF-8 JSON.
+ *
+ * @param bytes - Whole body.
+ * @returns `parsed` with the untrusted value, or `unreadable`.
+ * @remarks A decoding or parse failure is dropped, never kept, because its
+ * message can quote the body.
+ */
+export function parseJsonBody(bytes: Uint8Array): JsonBody {
+  try {
+    const value: unknown = JSON.parse(UTF8_DECODER.decode(bytes))
+    return Object.freeze({ status: "parsed", value })
+  } catch {
+    return UNREADABLE_JSON_BODY
+  }
+}
+
+/**
  * Resolves a host name and refuses it when any address is blocked.
  *
  * @param hostname - Host name the connection is for.
@@ -128,7 +238,7 @@ export function parseResponseChunk(chunk: unknown): Uint8Array {
  * or for a lookup failure with a system code; any other lookup failure
  * unchanged.
  */
-async function listCheckedHostAddresses(
+export async function listCheckedHostAddresses(
   hostname: string,
   rule: ConnectionAddressRule
 ): Promise<readonly HostAddress[]> {

@@ -32,18 +32,13 @@ function buildPageUrl(text: string): PageUrl {
 /**
  * Builds a rendered page for extraction.
  *
- * @param mediaType - How the page is read.
- * @param text - HTML or plain text of the page.
+ * @param html - HTML of the page.
  * @returns A page from https://moths.example/article.
  */
-function buildPage(
-  mediaType: RenderedPage["mediaType"],
-  text: string
-): RenderedPage {
+function buildPage(html: string): RenderedPage {
   return {
     url: buildPageUrl("https://moths.example/article"),
-    mediaType,
-    text,
+    html,
     isTruncated: false
   }
 }
@@ -77,7 +72,7 @@ describe("extractPageArticle", () => {
       <ul><li>Egg</li><li>Larva</li></ul>
     `)
 
-    const result = extractPageArticle(buildPage("text/html", html))
+    const result = extractPageArticle(buildPage(html))
 
     expect(result.status).toBe("extracted")
     if (result.status !== "extracted") return
@@ -100,7 +95,7 @@ describe("extractPageArticle", () => {
       <noscript>noscript text</noscript>
     `)
 
-    const result = extractPageArticle(buildPage("text/html", html))
+    const result = extractPageArticle(buildPage(html))
 
     expect(result.status).toBe("extracted")
     const text = JSON.stringify(result)
@@ -110,12 +105,26 @@ describe("extractPageArticle", () => {
     expect(text).not.toContain("noscript text")
   })
 
+  it("reads text the page hides with the hidden and aria-hidden attributes", () => {
+    const html = buildArticleHtml(
+      `<p>${ARTICLE_PARAGRAPH}</p><p hidden>Hidden note.</p><div aria-hidden="true"><p>Unannounced note.</p></div>`
+    )
+
+    const result = extractPageArticle(buildPage(html))
+
+    expect(result.status === "extracted" && result.article.blocks).toEqual([
+      { kind: "text", text: ARTICLE_PARAGRAPH },
+      { kind: "text", text: "Hidden note." },
+      { kind: "text", text: "Unannounced note." }
+    ])
+  })
+
   it("keeps the line breaks of preformatted text, <br> included", () => {
     const html = buildArticleHtml(
       `<p>${ARTICLE_PARAGRAPH}</p><pre>first line   \nsecond line<br>third line</pre>`
     )
 
-    const result = extractPageArticle(buildPage("text/html", html))
+    const result = extractPageArticle(buildPage(html))
 
     expect(
       result.status === "extracted" && result.article.blocks
@@ -130,7 +139,7 @@ describe("extractPageArticle", () => {
       `<p>${ARTICLE_PARAGRAPH}</p><p>Call us<br>Mon to Fri<br>9 to 5</p><ul><li>Parent<ul><li>Child</li></ul></li><li>Other</li></ul>`
     )
 
-    const result = extractPageArticle(buildPage("text/html", html))
+    const result = extractPageArticle(buildPage(html))
 
     expect(result.status === "extracted" && result.article.blocks).toEqual([
       { kind: "text", text: ARTICLE_PARAGRAPH },
@@ -145,7 +154,7 @@ describe("extractPageArticle", () => {
       `<div>${ARTICLE_PARAGRAPH}<div>Second part.</div>Third part.</div>`
     )
 
-    const result = extractPageArticle(buildPage("text/html", html))
+    const result = extractPageArticle(buildPage(html))
 
     expect(result.status === "extracted" && result.article.blocks).toEqual([
       { kind: "text", text: ARTICLE_PARAGRAPH },
@@ -162,7 +171,7 @@ describe("extractPageArticle", () => {
        <meta property="article:published_time" content="2026-07-01T09:00:00Z">`
     )
 
-    const result = extractPageArticle(buildPage("text/html", html))
+    const result = extractPageArticle(buildPage(html))
 
     expect(result).toMatchObject({
       status: "extracted",
@@ -176,7 +185,7 @@ describe("extractPageArticle", () => {
   it("titles a page without a title by its host", () => {
     const html = `<!doctype html><html><head></head><body><p>${ARTICLE_PARAGRAPH}</p></body></html>`
 
-    const result = extractPageArticle(buildPage("text/html", html))
+    const result = extractPageArticle(buildPage(html))
 
     expect(result).toMatchObject({
       status: "extracted",
@@ -189,9 +198,7 @@ describe("extractPageArticle", () => {
   })
 
   it("reads markup that has no <html> or <body> element", () => {
-    const result = extractPageArticle(
-      buildPage("text/html", `<p>${ARTICLE_PARAGRAPH}</p>`)
-    )
+    const result = extractPageArticle(buildPage(`<p>${ARTICLE_PARAGRAPH}</p>`))
 
     expect(result.status === "extracted" && result.article.blocks).toEqual([
       { kind: "text", text: ARTICLE_PARAGRAPH }
@@ -203,47 +210,45 @@ describe("extractPageArticle", () => {
       <div id="root"></div><noscript>You need to enable JavaScript to run this app.</noscript>
       <script src="/app.js"></script></body></html>`
 
-    expect(extractPageArticle(buildPage("text/html", html))).toEqual({
+    expect(extractPageArticle(buildPage(html))).toEqual({
       status: "no-readable-text"
     })
   })
 
   it("extracts a short page and reports a blank one as having no readable text", () => {
-    expect(extractPageArticle(buildPage("text/plain", "Moths."))).toMatchObject(
-      {
-        status: "extracted",
-        article: { blocks: [{ kind: "text", text: "Moths." }] }
-      }
-    )
-    expect(extractPageArticle(buildPage("text/plain", " \n\n \t"))).toEqual({
-      status: "no-readable-text"
+    expect(extractPageArticle(buildPage("<p>Moths.</p>"))).toMatchObject({
+      status: "extracted",
+      article: { blocks: [{ kind: "text", text: "Moths." }] }
     })
+    expect(
+      extractPageArticle(buildPage("<html><body> \n\n \t</body></html>"))
+    ).toEqual({ status: "no-readable-text" })
   })
 
   it("extracts the short text of a small HTML page", () => {
     const html =
       "<html><head><title>Example Domain</title></head><body><div><h1>Example Domain</h1><p>This domain is for use in documentation examples.</p></div></body></html>"
 
-    expect(extractPageArticle(buildPage("text/html", html))).toMatchObject({
+    expect(extractPageArticle(buildPage(html))).toMatchObject({
       status: "extracted",
       article: { title: "Example Domain" }
     })
   })
 
-  it("splits a plain-text page into paragraphs and titles it by its host", () => {
-    const text = `${ARTICLE_PARAGRAPH}\n\n  \n${ARTICLE_SENTENCE}\nstill the same paragraph`
+  it("reads a plain-text page, which the browser shows inside <pre>, as one block with its line breaks, titled by its host", () => {
+    const text = `${ARTICLE_PARAGRAPH}\n\n${ARTICLE_SENTENCE}\nthe next line`
+    const html = `<html><head></head><body><pre>${text}</pre></body></html>`
 
-    expect(extractPageArticle(buildPage("text/plain", text))).toEqual({
+    expect(extractPageArticle(buildPage(html))).toEqual({
       status: "extracted",
       article: {
         title: "moths.example",
         siteName: undefined,
         publishedTime: undefined,
         blocks: [
-          { kind: "text", text: ARTICLE_PARAGRAPH },
           {
             kind: "text",
-            text: `${ARTICLE_SENTENCE.trim()} still the same paragraph`
+            text: `${ARTICLE_PARAGRAPH}\n\n${ARTICLE_SENTENCE.trim()}\nthe next line`
           }
         ]
       }
@@ -255,9 +260,7 @@ describe("extractPageArticle", () => {
     const paragraphCount = MAXIMUM_PAGE_ELEMENTS - 3
     const html = `<!doctype html>${openingTags}${`<p>${ARTICLE_SENTENCE}</p>`.repeat(paragraphCount)}</body></html>`
 
-    expect(extractPageArticle(buildPage("text/html", html)).status).toBe(
-      "extracted"
-    )
+    expect(extractPageArticle(buildPage(html)).status).toBe("extracted")
   })
 
   it("refuses deeply nested markup past the element limit before parsing it", () => {
@@ -265,7 +268,7 @@ describe("extractPageArticle", () => {
     // test's time limit fails it if the markup is parsed.
     const html = `<!doctype html><html><body>${"<div>".repeat(320_000)}${ARTICLE_PARAGRAPH}</body></html>`
 
-    expect(extractPageArticle(buildPage("text/html", html))).toEqual({
+    expect(extractPageArticle(buildPage(html))).toEqual({
       status: "too-complex"
     })
   })
@@ -273,7 +276,7 @@ describe("extractPageArticle", () => {
   it("refuses a page with more elements than the limit", () => {
     const html = `<!doctype html><html><head></head><body>${"<span>x</span>".repeat(MAXIMUM_PAGE_ELEMENTS)}</body></html>`
 
-    expect(extractPageArticle(buildPage("text/html", html))).toEqual({
+    expect(extractPageArticle(buildPage(html))).toEqual({
       status: "too-complex"
     })
   })
@@ -283,7 +286,7 @@ describe("extractPageArticle", () => {
     const html = `<!doctype html><html><body>${"<div>".repeat(depth)}<p>${ARTICLE_PARAGRAPH}</p>${"</div>".repeat(depth)}</body></html>`
 
     expect(depth * depth).toBeGreaterThan(MAXIMUM_PAGE_DEPTH_SUM)
-    expect(extractPageArticle(buildPage("text/html", html))).toEqual({
+    expect(extractPageArticle(buildPage(html))).toEqual({
       status: "too-complex"
     })
   })

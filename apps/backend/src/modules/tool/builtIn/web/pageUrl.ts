@@ -9,8 +9,8 @@ declare const PAGE_URL_BRAND: unique symbol
  *
  * @remarks Only {@link parsePageUrl} produces it. It carries no username or
  * password, and its host is neither a local name nor a blocked IP address.
- * A host name can still resolve to a blocked address; the request checks
- * every resolved address before it connects.
+ * A host name can still resolve to a blocked address; a read looks the name
+ * up and refuses it when any address is blocked, before it asks vmo.
  */
 export type PageUrl = string & {
   /** Prevents an unchecked string from standing in for a checked URL. */
@@ -45,12 +45,6 @@ export type PageUrlResult =
       /** The first problem found. */
       problem: PageUrlProblem
     }>
-
-/** Port of an https URL that names none. */
-const DEFAULT_HTTPS_PORT = 443
-
-/** Port of an http URL that names none. */
-const DEFAULT_HTTP_PORT = 80
 
 /** Explanations the model reads for each URL problem, by problem. */
 const PAGE_URL_PROBLEM_MESSAGES = Object.freeze({
@@ -106,8 +100,7 @@ function findPageUrlProblem(url: URL): PageUrlProblem | undefined {
 /**
  * Parses a URL text into a URL Lys may request.
  *
- * @param text - Untrusted URL text, such as a model's argument or a redirect
- * target already resolved against the page that sent it.
+ * @param text - Untrusted URL text, such as a model's argument.
  * @returns `valid` with the normalized URL, or `invalid` with the first
  * problem: too long, not absolute, not `http` or `https`, carrying a
  * username or password, or naming this machine or a blocked IP address.
@@ -129,18 +122,6 @@ export function parsePageUrl(text: string): PageUrlResult {
   // The checks above prove every PageUrl invariant for this normalized text.
   const pageUrl = url.href as PageUrl
   return Object.freeze({ status: "valid", url: pageUrl })
-}
-
-/**
- * Gets the TCP port a URL connects to.
- *
- * @param url - Parsed http or https URL.
- * @returns The port the URL names; otherwise its scheme's default port, 443
- * for https and 80 for http.
- */
-export function getUrlPort(url: URL): number {
-  if (url.port !== "") return Number(url.port)
-  return url.protocol === "https:" ? DEFAULT_HTTPS_PORT : DEFAULT_HTTP_PORT
 }
 
 /**

@@ -138,7 +138,7 @@ type DatabaseServices = Pick<
  * @param config - LM Studio host and port used to derive local service endpoints,
  * the title-generation prompt and title length limit given to the chat
  * service, the built-in agents' system prompts given to the agent service,
- * and the browser executable given to the read-page tool.
+ * and vmo's host and port given to the read-page tool.
  * @param failureReporters - Receive the LLM runtime failures that no caller
  * observes and the causes of read failures the model learns only by kind,
  * for logging.
@@ -292,7 +292,7 @@ function createAgentService(
  * Creates the services that run, find, and approve tools.
  *
  * @param config - Settings file the web search key and the Just run choices
- * are read from, and the browser executable given to the read-page tool.
+ * are read from, and vmo's host and port given to the read-page tool.
  * @param pageRenderingFailureReporters - Receive the causes of read failures
  * the model learns only by kind.
  * @returns The web search tool provider, every built-in tool, and the tool
@@ -309,8 +309,8 @@ function createToolServices(
   )
   const builtInTools = createBuiltInTools(
     webSearchToolProvider,
-    config.browserExecutablePath,
-    pageRenderingFailureReporters.reportBrowserFailure
+    `http://${config.vmoHost}:${config.vmoPort}`,
+    pageRenderingFailureReporters.reportPageReaderFailure
   )
   const toolApprovalService = new ToolApprovalService(() =>
     readJustRunToolNames(config.settingsFilePath)

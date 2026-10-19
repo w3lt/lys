@@ -105,7 +105,9 @@ private enum InMemoryCommandRun {
 /// a held start and a wait for a running command suspend without holding up
 /// other operations, as ``ContainerizationReaderVmLifecycle``'s do. Its waits
 /// go through a ``CommandExit``, as that lifecycle's do, so cancelling a
-/// caller ends only that caller's wait.
+/// caller ends only that caller's wait. Each wait is kept in the turn that
+/// records its ``ReaderVmEvent/waitForCommandExit(containerId:)``, so an
+/// operation called after that event finds the wait kept.
 actor InMemoryReaderVmLifecycle: ReaderVmLifecycle {
     /// How the VMs behave.
     private let script: ReaderVmScript

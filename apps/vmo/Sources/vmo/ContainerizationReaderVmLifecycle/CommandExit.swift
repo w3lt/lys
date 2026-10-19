@@ -17,7 +17,9 @@ import Synchronization
 ///
 /// Concurrency model: concurrent. Any task can wait, be cancelled, or
 /// resolve the exit; one mutex guards the waits and the exit, and waits are
-/// resumed after it is released.
+/// resumed after it is released. A wait is kept in its caller's isolation
+/// before it first suspends, so an actor that waits has kept the wait by the
+/// time it runs anything else.
 final class CommandExit: Sendable {
     /// The waits for the exit, or the exit once it is resolved.
     private let state = Mutex(CommandExitState())
@@ -30,7 +32,8 @@ final class CommandExit: Sendable {
     ///
     /// Each call waits on its own. Cancelling the caller ends only that
     /// caller's wait, at once; the other waits and the exit stay as they
-    /// are. There is no time limit.
+    /// are. There is no time limit. The wait is kept in the caller's
+    /// isolation before the call first suspends.
     ///
     /// - Returns: The exit that ``resolve(with:)`` gave, the same for every
     ///   wait: what the command wrote and its exit code, or why waiting for
@@ -38,7 +41,7 @@ final class CommandExit: Sendable {
     /// - Throws: `CancellationError` when the caller is cancelled before the
     ///   exit reaches its wait, including before the wait began, also when
     ///   the exit is already resolved.
-    func waitForExit() async throws -> Result<CommandOutput, any Error> {
+    nonisolated(nonsending) func waitForExit() async throws -> Result<CommandOutput, any Error> {
         let waitId = state.withLock { $0.createWaitId() }
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in

@@ -499,8 +499,10 @@ struct ReaderVmLifecycleFailureContractTests {
     /// Verifies that cancelling one caller ends that caller's wait at once,
     /// while the command runs on and the other wait still gets its output.
     ///
-    /// The cancellation can reach the wait before or after the lifecycle
-    /// keeps it, and both must end it the same way;
+    /// The cancelled wait begins first. A lifecycle that keeps each wait
+    /// before it runs another operation, as ``InMemoryReaderVmLifecycle``
+    /// does, has kept it once the other wait begins, so the cancellation
+    /// reaches a kept wait, and the command's end reaches the other one;
     /// ``throwsCancellationForCancelledWait(harness:)`` checks a caller
     /// cancelled before its wait began.
     @Test(
@@ -511,8 +513,9 @@ struct ReaderVmLifecycleFailureContractTests {
         let subject = harness.createSubject(script: ReaderVmScript(command: .runsUntilResolved))
         let containerId = try await createReaderVm(in: subject)
         try await subject.lifecycle.startVm(containerId: containerId)
-        let wait = startCommandWait(for: containerId, in: subject)
         let cancelledWait = startCommandWait(for: containerId, in: subject)
+        try await subject.eventLog.waitForEvent(.waitForCommandExit(containerId: containerId))
+        let wait = startCommandWait(for: containerId, in: subject)
         try await subject.eventLog.waitForEvent(.waitForCommandExit(containerId: containerId), count: 2)
 
         cancelledWait.cancel()

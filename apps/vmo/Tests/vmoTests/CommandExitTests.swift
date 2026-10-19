@@ -10,34 +10,65 @@ private let commandOutput = CommandOutput(
     exitCode: 1
 )
 
-/// Container id under which the event log records the end of each wait. No
-/// VM exists; the log only needs a name for the waited command.
+/// Container id under which the event log records the start and end of each
+/// wait. No VM exists; the log only needs a name for the waited command.
 private let waitedVmId = ContainerId(text: "vm-1")
 
 /// Why waiting for the command failed, in the exit of the case that resolves
 /// the exit with a failure.
 private struct CommandWaitFailure: Error, Equatable {}
 
-/// Starts waiting for `commandExit` in a task of its own, which adds
-/// ``ReaderVmEvent/waitEnded(containerId:)`` to `eventLog` once the wait
-/// returns or throws, so the case can wait for it within its time limit.
+/// Waits for one ``CommandExit`` on an actor of its own, to give a case a
+/// point at which its waits are known to be kept, while recording in its
+/// event log when each wait starts and ends.
 ///
-/// - Parameters:
-///   - commandExit: The exit to wait for.
-///   - eventLog: Where the end of the wait is recorded.
-/// - Returns: The wait's task.
-private func startExitWait(
-    for commandExit: CommandExit,
-    recordingInto eventLog: ReaderVmEventLog
-) -> Task<Result<CommandOutput, any Error>, any Error> {
-    Task {
+/// ``CommandExit/waitForExit()`` keeps a wait in its caller's isolation, so
+/// each wait is kept in the turn that records its start. Once the waiter
+/// records another wait's start, or runs ``resolve(with:)``, every wait it
+/// started before is kept.
+///
+/// Concurrency model: actor-isolated. Its waits suspend without holding up
+/// its other calls.
+private actor CommandExitWaiter {
+    /// The exit that the waits wait for.
+    private let commandExit: CommandExit
+    /// Where the start and end of each wait are recorded.
+    private let eventLog: ReaderVmEventLog
+
+    /// Creates a waiter that has started no wait.
+    ///
+    /// - Parameters:
+    ///   - commandExit: The exit that the waits wait for.
+    ///   - eventLog: Where the start and end of each wait are recorded.
+    init(for commandExit: CommandExit, recordingInto eventLog: ReaderVmEventLog) {
+        self.commandExit = commandExit
+        self.eventLog = eventLog
+    }
+
+    /// Waits for the exit, adding ``ReaderVmEvent/waitForCommandExit(containerId:)``
+    /// to the event log when the wait starts and
+    /// ``ReaderVmEvent/waitEnded(containerId:)`` once it returns or throws,
+    /// so the case can wait for both within its time limit.
+    ///
+    /// - Returns: What ``CommandExit/waitForExit()`` returns.
+    /// - Throws: What ``CommandExit/waitForExit()`` throws.
+    func waitForExit() async throws -> Result<CommandOutput, any Error> {
+        eventLog.addEvent(.waitForCommandExit(containerId: waitedVmId))
         defer { eventLog.addEvent(.waitEnded(containerId: waitedVmId)) }
         return try await commandExit.waitForExit()
     }
+
+    /// Resolves the exit once every wait the waiter started before is kept.
+    ///
+    /// - Parameter exit: The command's exit.
+    func resolve(with exit: Result<CommandOutput, any Error>) {
+        commandExit.resolve(with: exit)
+    }
 }
 
-/// Starts waiting as ``startExitWait(for:recordingInto:)`` does, from a task
-/// that is cancelled before the wait begins.
+/// Starts waiting for `commandExit` from a task that is cancelled before the
+/// wait begins, which adds ``ReaderVmEvent/waitEnded(containerId:)`` to
+/// `eventLog` once the wait returns or throws.
 ///
 /// - Parameters:
 ///   - commandExit: The exit to wait for.
@@ -61,21 +92,23 @@ private func startCancelledExitWait(
 /// Checks that ``CommandExit`` gives every wait the one exit it is resolved
 /// with, and that cancelling a caller ends only that caller's wait.
 ///
-/// Each case waits for the ends of its waits through a ``ReaderVmEventLog``,
-/// which the time limit can cancel, before it awaits their tasks, whose
-/// results it can't.
+/// Each case waits for the starts and ends of its waits through a
+/// ``ReaderVmEventLog``, which the time limit can cancel, before it awaits
+/// their tasks, whose results it can't.
 @Suite("Command exit", .timeLimit(.minutes(1)))
 struct CommandExitTests {
-    /// Verifies that waits running while the exit is resolved and a wait
-    /// begun after it all get the same exit.
-    @Test("Every wait gets the exit, whether it ran while the exit was resolved or began after")
+    /// Verifies that waits kept while the exit is resolved and a wait begun
+    /// after it all get the same exit.
+    @Test("Every wait gets the exit, whether it was waiting when the exit was resolved or began after")
     func returnsExitToEveryWait() async throws {
         let commandExit = CommandExit()
         let eventLog = ReaderVmEventLog()
-        let firstWait = startExitWait(for: commandExit, recordingInto: eventLog)
-        let secondWait = startExitWait(for: commandExit, recordingInto: eventLog)
+        let waiter = CommandExitWaiter(for: commandExit, recordingInto: eventLog)
+        let firstWait = Task { try await waiter.waitForExit() }
+        let secondWait = Task { try await waiter.waitForExit() }
+        try await eventLog.waitForEvent(.waitForCommandExit(containerId: waitedVmId), count: 2)
 
-        commandExit.resolve(with: .success(commandOutput))
+        await waiter.resolve(with: .success(commandOutput))
         try await eventLog.waitForEvent(.waitEnded(containerId: waitedVmId), count: 2)
         let laterExit = try await commandExit.waitForExit()
 
@@ -96,22 +129,25 @@ struct CommandExitTests {
         #expect(throws: CommandWaitFailure()) { try exit.get() }
     }
 
-    /// Verifies that cancelling one caller ends its wait at once, before the
-    /// exit is resolved, and that the other wait still gets the exit.
+    /// Verifies that cancelling one caller ends its kept wait at once, before
+    /// the exit is resolved, and that the other wait still gets the exit.
     ///
-    /// The cancellation can reach the wait before or after it is kept, and
-    /// both must end it the same way; ``throwsCancellationForCancelledWait()``
-    /// checks a caller cancelled before its wait began.
+    /// The cancelled wait starts first, so it is kept once the other wait
+    /// starts; ``throwsCancellationForCancelledWait()`` checks a caller
+    /// cancelled before its wait began.
     @Test("Cancelling one wait ends only that wait, with CancellationError, and the other wait gets the exit")
     func endsOnlyCancelledWait() async throws {
         let commandExit = CommandExit()
         let eventLog = ReaderVmEventLog()
-        let wait = startExitWait(for: commandExit, recordingInto: eventLog)
-        let cancelledWait = startExitWait(for: commandExit, recordingInto: eventLog)
+        let waiter = CommandExitWaiter(for: commandExit, recordingInto: eventLog)
+        let cancelledWait = Task { try await waiter.waitForExit() }
+        try await eventLog.waitForEvent(.waitForCommandExit(containerId: waitedVmId))
+        let wait = Task { try await waiter.waitForExit() }
+        try await eventLog.waitForEvent(.waitForCommandExit(containerId: waitedVmId), count: 2)
 
         cancelledWait.cancel()
         try await eventLog.waitForEvent(.waitEnded(containerId: waitedVmId))
-        commandExit.resolve(with: .success(commandOutput))
+        await waiter.resolve(with: .success(commandOutput))
         try await eventLog.waitForEvent(.waitEnded(containerId: waitedVmId), count: 2)
 
         await #expect(throws: CancellationError.self) { try await cancelledWait.value }

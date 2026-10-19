@@ -8,7 +8,7 @@ import Testing
 private let pageUrlText = "https://example.com/search?q=hello%20world&filter[type]=article"
 
 /// Container id of each read's VM: the first VM its lifecycle creates.
-private let readerVmId = "vm-1"
+private let readerVmId = ContainerId(text: "vm-1")
 
 /// What the reader writes when it reads the page: the page's HTML, and exit
 /// code 0.

@@ -34,6 +34,6 @@ func createProductionContainerManager() async throws -> ContainerManager {
     // Pulled now, even when the store has it: `latest` moves to each main
     // build, and a stored image would never follow it. A read can't pull it
     // instead, because pulling takes longer than a read's time limit.
-    _ = try await manager.imageStore.pull(reference: readPageImageReference)
+    _ = try await manager.imageStore.pull(reference: readPageImageReference.text)
     return manager
 }

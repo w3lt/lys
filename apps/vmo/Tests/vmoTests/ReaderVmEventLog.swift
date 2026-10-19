@@ -6,21 +6,21 @@ import Synchronization
 /// the end of the read under test.
 enum ReaderVmEvent: Equatable, Sendable {
     /// ``ReaderVmLifecycle/createVm(imageReference:arguments:)`` was called.
-    case createVm(imageReference: String, arguments: [String])
+    case createVm(imageReference: ImageReference, arguments: [String])
     /// ``ReaderVmLifecycle/startVm(containerId:)`` was called.
-    case startVm(containerId: String)
+    case startVm(containerId: ContainerId)
     /// A call to ``ReaderVmLifecycle/startVm(containerId:)`` returned or
     /// threw.
-    case startEnded(containerId: String)
+    case startEnded(containerId: ContainerId)
     /// ``ReaderVmLifecycle/waitForCommandExit(containerId:)`` was called.
-    case waitForCommandExit(containerId: String)
+    case waitForCommandExit(containerId: ContainerId)
     /// ``ReaderVmLifecycle/deleteVm(containerId:)`` was called, from a task
     /// that was or wasn't cancelled.
-    case deleteVm(containerId: String, isCallerCancelled: Bool)
+    case deleteVm(containerId: ContainerId, isCallerCancelled: Bool)
     /// The VM's command exited on its own, because the test resolved it.
-    case commandExited(containerId: String)
+    case commandExited(containerId: ContainerId)
     /// A wait for the VM's command returned or threw.
-    case waitEnded(containerId: String)
+    case waitEnded(containerId: ContainerId)
     /// The read under test returned or threw. The test that runs the read
     /// records it, not the lifecycle.
     case readEnded

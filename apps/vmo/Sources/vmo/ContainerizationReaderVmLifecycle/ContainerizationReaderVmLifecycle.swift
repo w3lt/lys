@@ -7,7 +7,7 @@ struct VmCleanupError: Error {
     /// Why each VM could not be stopped or deleted, keyed by container id. A
     /// VM whose deletion failed may leave its files and IP address; one whose
     /// stop failed may run until vmo exits.
-    let failures: [String: any Error]
+    let failures: [ContainerId: any Error]
 }
 
 /// Owns the micro VMs it creates with Containerization to give each caller a
@@ -58,7 +58,7 @@ actor ContainerizationReaderVmLifecycle: ReaderVmLifecycle {
     private let containerManager: ContainerManager
     /// The VMs created, fully or partly, and not yet deleted, keyed by
     /// container id.
-    private var activeVms: [String: ActiveVm] = [:]
+    private var activeVms: [ContainerId: ActiveVm] = [:]
     /// VMs being created, started, or deleted, and the cleanup waiting for
     /// those operations to end.
     private var vmOperations = VmOperations()
@@ -94,29 +94,33 @@ actor ContainerizationReaderVmLifecycle: ReaderVmLifecycle {
     /// observes cancellation.
     ///
     /// - Parameters:
-    ///   - imageReference: Reference of the image to run, such as
-    ///     `docker.io/library/alpine:3.24.2`.
+    ///   - imageReference: Reference of the image to run, which is
+    ///     ``readPageImageReference``.
     ///   - arguments: Arguments added after the image's entrypoint and
     ///     command. The VM rejects an empty command when it starts.
-    /// - Returns: The new VM's container id, a fresh UUID.
+    /// - Returns: The new VM's container id, whose text is a fresh UUID.
     /// - Throws: The errors of the protocol operation, with Containerization's
     ///   error as the mechanism's. ``ReaderVmLifecycleError/closed`` when
     ///   ``close()`` has begun, before anything is created, or when it began
     ///   while this VM was being created; ``close()`` then deletes the VM.
     ///   When deleting what a failed creation left fails, the VM stays active,
     ///   so ``close()`` tries again.
-    func createVm(imageReference: String, arguments: [String]) async throws -> String {
+    func createVm(imageReference: ImageReference, arguments: [String]) async throws -> ContainerId {
         guard isReady else {
             throw ReaderVmLifecycleError.closed
         }
-        let containerId = UUID().uuidString
+        let containerId = ContainerId(text: UUID().uuidString)
         vmOperations.add(containerId)
         defer { vmOperations.remove(containerId) }
         let buffers = CommandOutputBuffers()
         var manager = containerManager
         let container: LinuxContainer
         do {
-            container = try await manager.create(containerId, reference: imageReference, rootfsSizeInBytes: 1.gib()) {
+            container = try await manager.create(
+                containerId.text,
+                reference: imageReference.text,
+                rootfsSizeInBytes: 1.gib()
+            ) {
                 @Sendable config in
                 configureVm(&config, arguments: arguments, buffers: buffers)
             }
@@ -146,7 +150,7 @@ actor ContainerizationReaderVmLifecycle: ReaderVmLifecycle {
     ///   ``ReaderVmLifecycleError/closed`` when ``close()`` has begun, before
     ///   anything is started, or when it began while this VM was starting;
     ///   ``close()`` then stops and deletes the VM.
-    func startVm(containerId: String) async throws {
+    func startVm(containerId: ContainerId) async throws {
         let vm = try activeVm(containerId)
         let (container, buffers) =
             switch vm {
@@ -188,7 +192,7 @@ actor ContainerizationReaderVmLifecycle: ReaderVmLifecycle {
     /// - Throws: The errors of the protocol operation, with Containerization's
     ///   error as the mechanism's. ``ReaderVmLifecycleError/closed`` when
     ///   ``close()`` has begun, before or during the wait.
-    func waitForCommandExit(containerId: String) async throws -> CommandOutput {
+    func waitForCommandExit(containerId: ContainerId) async throws -> CommandOutput {
         let output = try await commandExit(of: containerId).result
         // Deleting the VM or closing the lifecycle stops the command, which
         // then exits because it was killed, not on its own.
@@ -210,7 +214,7 @@ actor ContainerizationReaderVmLifecycle: ReaderVmLifecycle {
     ///   stop and delete errors as the mechanism's.
     ///   ``ReaderVmLifecycleError/closed`` when ``close()`` has begun, which
     ///   deletes the VM instead.
-    func deleteVm(containerId: String) async throws {
+    func deleteVm(containerId: ContainerId) async throws {
         switch try activeVm(containerId) {
         case .created, .started, .startFailed: try await deleteActiveVm(containerId)
         case .starting: throw ReaderVmLifecycleError.startInProgress(containerId: containerId)
@@ -265,7 +269,7 @@ actor ContainerizationReaderVmLifecycle: ReaderVmLifecycle {
     /// - Throws: ``VmCleanupError`` with each deletion that failed.
     private func deleteAllVms() async throws {
         await waitForVmOperations()
-        var failures: [String: any Error] = [:]
+        var failures: [ContainerId: any Error] = [:]
         for containerId in activeVms.keys {
             do {
                 try await deleteActiveVm(containerId)
@@ -298,7 +302,7 @@ actor ContainerizationReaderVmLifecycle: ReaderVmLifecycle {
     /// - Throws: ``ReaderVmLifecycleError/closed`` when ``close()`` has begun.
     ///   ``ReaderVmLifecycleError/unknownVm(containerId:)`` when the lifecycle
     ///   has no such VM.
-    private func activeVm(_ containerId: String) throws -> ActiveVm {
+    private func activeVm(_ containerId: ContainerId) throws -> ActiveVm {
         guard isReady else {
             throw ReaderVmLifecycleError.closed
         }
@@ -314,7 +318,7 @@ actor ContainerizationReaderVmLifecycle: ReaderVmLifecycle {
     /// - Returns: The task that ends when the command exits.
     /// - Throws: The errors of ``waitForCommandExit(containerId:)`` other than
     ///   Containerization's.
-    private func commandExit(of containerId: String) throws -> Task<CommandOutput, any Error> {
+    private func commandExit(of containerId: ContainerId) throws -> Task<CommandOutput, any Error> {
         let vm = try activeVm(containerId)
         return switch vm {
         case .started(_, let commandExit): commandExit
@@ -330,7 +334,7 @@ actor ContainerizationReaderVmLifecycle: ReaderVmLifecycle {
     ///   starting.
     /// - Throws: The errors of ``deleteVm(containerId:)`` that come from
     ///   Containerization. When deleting fails, the VM stays deleting.
-    private func deleteActiveVm(_ containerId: String) async throws {
+    private func deleteActiveVm(_ containerId: ContainerId) async throws {
         let vm = activeVms[containerId]
         activeVms[containerId] = .deleting
         vmOperations.add(containerId)
@@ -347,7 +351,7 @@ actor ContainerizationReaderVmLifecycle: ReaderVmLifecycle {
         }
         var manager = containerManager
         do {
-            try manager.delete(containerId)
+            try manager.delete(containerId.text)
         } catch {
             guard let stopError else {
                 throw error
@@ -371,10 +375,10 @@ actor ContainerizationReaderVmLifecycle: ReaderVmLifecycle {
     ///   throw: `creationError` when nothing is left, or a
     ///   ``CleanupAfterFailureError`` when deletion fails, after which the VM
     ///   stays deleting so ``close()`` tries again.
-    private func deleteFailedVm(_ containerId: String, creationError: any Error) -> any Error {
+    private func deleteFailedVm(_ containerId: ContainerId, creationError: any Error) -> any Error {
         var manager = containerManager
         do {
-            try manager.delete(containerId)
+            try manager.delete(containerId.text)
         } catch let error as CocoaError where error.code == .fileNoSuchFile {
             // The creation failed before making the VM's directory. In
             // Containerization 0.52.0, `delete` releases the IP address before
@@ -438,7 +442,7 @@ private enum ActiveVm {
 private struct VmOperations {
     /// Container ids of the VMs with an operation in progress. The lifecycle
     /// runs at most one operation per VM at a time.
-    private var containerIds: Set<String> = []
+    private var containerIds: Set<ContainerId> = []
     /// Cleanup suspended until `containerIds` is empty. It is set only while
     /// `containerIds` isn't empty.
     private var endWaiter: CheckedContinuation<Void, Never>?
@@ -451,7 +455,7 @@ private struct VmOperations {
     /// Adds a VM whose operation has begun.
     ///
     /// - Parameter containerId: Container id of that VM.
-    mutating func add(_ containerId: String) {
+    mutating func add(_ containerId: ContainerId) {
         containerIds.insert(containerId)
     }
 
@@ -459,7 +463,7 @@ private struct VmOperations {
     /// was the last one.
     ///
     /// - Parameter containerId: Container id of that VM.
-    mutating func remove(_ containerId: String) {
+    mutating func remove(_ containerId: ContainerId) {
         containerIds.remove(containerId)
         guard containerIds.isEmpty, let endWaiter else {
             return

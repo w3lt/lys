@@ -1,5 +1,23 @@
 import Foundation
 
+/// Reference of an image that a ``ReaderVmLifecycle`` runs VMs from: the
+/// registry, repository, and tag or digest by which the VM mechanism pulls
+/// the image, such as `ghcr.io/w3lt/lys-readpage:latest`.
+///
+/// Only the constants in this file create one, so every image a reader VM
+/// runs is one that vmo names in its source.
+struct ImageReference: Equatable, Sendable {
+    /// The reference's text, which the VM mechanism parses.
+    let text: String
+
+    /// Wraps the text of a reference that vmo names in its source.
+    ///
+    /// - Parameter text: The reference's text.
+    fileprivate init(text: String) {
+        self.text = text
+    }
+}
+
 /// Image of the VMs that read pages, built from `sandboxes/readpage`.
 ///
 /// Its entrypoint takes the page's URL as its only argument and accepts only
@@ -20,7 +38,7 @@ import Foundation
 /// each image it builds from `main`. ``createProductionContainerManager()``
 /// pulls the tag at every start, so vmo reads pages with the image that
 /// `latest` named when vmo started.
-let readPageImageReference = "ghcr.io/w3lt/lys-readpage:latest"
+let readPageImageReference = ImageReference(text: "ghcr.io/w3lt/lys-readpage:latest")
 
 /// How reading a page in a VM ended.
 enum ReadPageOutcome: Sendable {
@@ -32,6 +50,17 @@ enum ReadPageOutcome: Sendable {
     case timedOut
 }
 
+/// Id of a VM of one ``ReaderVmLifecycle``, which the lifecycle chooses when
+/// it creates the VM and never gives another of its VMs.
+///
+/// Any text is a valid id: one that the lifecycle didn't return names no VM,
+/// so operations on it fail with
+/// ``ReaderVmLifecycleError/unknownVm(containerId:)``.
+struct ContainerId: Hashable, Sendable {
+    /// The id's text, by which the VM mechanism names the VM.
+    let text: String
+}
+
 /// Failures of a ``ReaderVmLifecycle`` that come from its own state rather
 /// than from the VM mechanism.
 enum ReaderVmLifecycleError: Error, Equatable {
@@ -40,17 +69,17 @@ enum ReaderVmLifecycleError: Error, Equatable {
     case closed
     /// No VM with this id is available: the lifecycle didn't create it, or
     /// its deletion has begun.
-    case unknownVm(containerId: String)
+    case unknownVm(containerId: ContainerId)
     /// ``ReaderVmLifecycle/startVm(containerId:)`` was already called for
     /// this VM. A VM starts at most once, even when its start failed.
-    case alreadyStarted(containerId: String)
+    case alreadyStarted(containerId: ContainerId)
     /// The VM's command hasn't started:
     /// ``ReaderVmLifecycle/startVm(containerId:)`` wasn't called for it, is
     /// still starting it, or failed.
-    case notStarted(containerId: String)
+    case notStarted(containerId: ContainerId)
     /// ``ReaderVmLifecycle/startVm(containerId:)`` is starting this VM, so it
     /// can't be deleted until that start ends.
-    case startInProgress(containerId: String)
+    case startInProgress(containerId: ContainerId)
 }
 
 /// A reader VM lifecycle can take a VM that runs one command through its
@@ -98,7 +127,7 @@ protocol ReaderVmLifecycle: Sendable {
     ///   `CancellationError` when the caller was cancelled, after deleting
     ///   whatever the creation left. A ``CleanupAfterFailureError`` with both
     ///   errors when that deletion fails too.
-    func createVm(imageReference: String, arguments: [String]) async throws -> String
+    func createVm(imageReference: ImageReference, arguments: [String]) async throws -> ContainerId
 
     /// Boots a created VM and starts its command, without waiting for the
     /// command to exit.
@@ -114,7 +143,7 @@ protocol ReaderVmLifecycle: Sendable {
     ///   ``ReaderVmLifecycleError/alreadyStarted(containerId:)`` when this
     ///   VM's start was already called. The mechanism's error when booting the
     ///   VM or starting its command fails.
-    func startVm(containerId: String) async throws
+    func startVm(containerId: ContainerId) async throws
 
     /// Waits until a started VM's command exits, then returns what it wrote,
     /// up to ``maximumKeptStreamByteCount`` bytes of each stream
@@ -134,7 +163,7 @@ protocol ReaderVmLifecycle: Sendable {
     ///   VM with this id is available, or when its deletion began during the
     ///   wait. ``ReaderVmLifecycleError/notStarted(containerId:)`` when its
     ///   command hasn't started. The mechanism's error when waiting fails.
-    func waitForCommandExit(containerId: String) async throws -> CommandOutput
+    func waitForCommandExit(containerId: ContainerId) async throws -> CommandOutput
 
     /// Deletes a VM: stops it when its command was started, then deletes its
     /// files and address.
@@ -156,7 +185,7 @@ protocol ReaderVmLifecycle: Sendable {
     ///   delete error when deleting failed, or a ``CleanupAfterFailureError``
     ///   with both errors when stopping failed too; the VM is then no longer
     ///   available.
-    func deleteVm(containerId: String) async throws
+    func deleteVm(containerId: ContainerId) async throws
 }
 
 /// When a read must end, on the clock that measures it.
@@ -257,7 +286,7 @@ private func waitForReaderOrDeadline<DeadlineClock: Clock>(
 /// - Throws: The error of `firstEnd`, the deletion error, or a
 ///   ``CleanupAfterFailureError`` with both.
 private func deleteReaderVmAfterRead(
-    _ containerId: String,
+    _ containerId: ContainerId,
     _ vmLifecycle: some ReaderVmLifecycle,
     firstEnd: Result<ReadPageOutcome, any Error>
 ) async throws -> ReadPageOutcome {
@@ -281,7 +310,7 @@ private func deleteReaderVmAfterRead(
 ///   ``CleanupAfterFailureError`` with `failure` and the deletion error when
 ///   deleting failed too.
 private func deleteReaderVmAfterFailure(
-    _ containerId: String,
+    _ containerId: ContainerId,
     _ vmLifecycle: some ReaderVmLifecycle,
     failure: any Error
 ) async -> any Error {
@@ -302,6 +331,6 @@ private func deleteReaderVmAfterFailure(
 ///   - containerId: Container id of a reader VM that isn't starting.
 ///   - vmLifecycle: Lifecycle that created the VM.
 /// - Throws: The errors of ``ReaderVmLifecycle/deleteVm(containerId:)``.
-private func deleteReaderVm(_ containerId: String, _ vmLifecycle: some ReaderVmLifecycle) async throws {
+private func deleteReaderVm(_ containerId: ContainerId, _ vmLifecycle: some ReaderVmLifecycle) async throws {
     try await Task { try await vmLifecycle.deleteVm(containerId: containerId) }.value
 }

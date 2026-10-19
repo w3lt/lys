@@ -11,6 +11,9 @@ private let failedCommandOutput = CommandOutput(
     exitCode: 1
 )
 
+/// Container id of a VM that the lifecycle under test didn't create.
+private let unknownVmId = ContainerId(text: "missing")
+
 /// An implementation of ``ReaderVmLifecycle`` that the contract cases without
 /// a VM run against. Every implementation is one.
 enum ReaderVmLifecycleImplementation: CaseIterable, Sendable, CustomTestStringConvertible {
@@ -58,9 +61,9 @@ struct ReaderVmContractSubject: Sendable {
     let eventLog: ReaderVmEventLog
     /// Makes a VM's running command exit on its own, having written the
     /// output.
-    let resolveCommand: @Sendable (_ containerId: String, _ output: CommandOutput) async -> Void
+    let resolveCommand: @Sendable (_ containerId: ContainerId, _ output: CommandOutput) async -> Void
     /// Lets a VM's held start boot it.
-    let resolveStart: @Sendable (_ containerId: String) async -> Void
+    let resolveStart: @Sendable (_ containerId: ContainerId) async -> Void
 }
 
 /// An implementation of ``ReaderVmLifecycle`` that the contract cases with
@@ -118,7 +121,7 @@ private func createInMemorySubject(script: ReaderVmScript) -> ReaderVmContractSu
 /// - Parameter subject: Lifecycle to create the VM in.
 /// - Returns: The new VM's container id.
 /// - Throws: The errors of ``ReaderVmLifecycle/createVm(imageReference:arguments:)``.
-private func createReaderVm(in subject: ReaderVmContractSubject) async throws -> String {
+private func createReaderVm(in subject: ReaderVmContractSubject) async throws -> ContainerId {
     try await subject.lifecycle.createVm(imageReference: readPageImageReference, arguments: ["https://example.com/"])
 }
 
@@ -128,9 +131,9 @@ private func createReaderVm(in subject: ReaderVmContractSubject) async throws ->
 /// - Parameter subject: Lifecycle to create the VM in.
 /// - Returns: How the creation ended, or `nil` when the task group gave no
 ///   result.
-private func createReaderVmWhenCancelled(in subject: ReaderVmContractSubject) async -> Result<String, any Error>? {
+private func createReaderVmWhenCancelled(in subject: ReaderVmContractSubject) async -> Result<ContainerId, any Error>? {
     // A task added to a cancelled group starts cancelled.
-    await withThrowingTaskGroup(of: String.self) { group in
+    await withThrowingTaskGroup(of: ContainerId.self) { group in
         group.cancelAll()
         group.addTask { try await createReaderVm(in: subject) }
         return await group.nextResult()
@@ -144,7 +147,10 @@ private func createReaderVmWhenCancelled(in subject: ReaderVmContractSubject) as
 ///   - containerId: Container id of the VM.
 ///   - subject: Lifecycle that created the VM.
 /// - Returns: The wait's task.
-private func startCommandWait(for containerId: String, in subject: ReaderVmContractSubject) -> Task<CommandOutput, any Error> {
+private func startCommandWait(
+    for containerId: ContainerId,
+    in subject: ReaderVmContractSubject
+) -> Task<CommandOutput, any Error> {
     Task { try await subject.lifecycle.waitForCommandExit(containerId: containerId) }
 }
 
@@ -190,14 +196,14 @@ struct ReaderVmLifecycleContractTests {
     func rejectsUnknownVm(implementation: ReaderVmLifecycleImplementation) async throws {
         let lifecycle = try implementation.createLifecycle(in: containerRoot)
 
-        await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: "missing")) {
-            try await lifecycle.startVm(containerId: "missing")
+        await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: unknownVmId)) {
+            try await lifecycle.startVm(containerId: unknownVmId)
         }
-        await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: "missing")) {
-            try await lifecycle.waitForCommandExit(containerId: "missing")
+        await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: unknownVmId)) {
+            try await lifecycle.waitForCommandExit(containerId: unknownVmId)
         }
-        await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: "missing")) {
-            try await lifecycle.deleteVm(containerId: "missing")
+        await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: unknownVmId)) {
+            try await lifecycle.deleteVm(containerId: unknownVmId)
         }
     }
 }

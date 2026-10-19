@@ -2,6 +2,9 @@ import Foundation
 import Testing
 @testable import vmo
 
+/// Container id of a VM that no lifecycle here created.
+private let unknownVmId = ContainerId(text: "missing")
+
 /// Checks the part of ``ContainerizationReaderVmLifecycle`` that only it
 /// has, closing, without a VM. ``ReaderVmLifecycleContractTests`` checks it,
 /// like every ``ReaderVmLifecycle``, against the parts of that contract that
@@ -34,13 +37,13 @@ struct ContainerizationReaderVmLifecycleTests {
             try await lifecycle.createVm(imageReference: readPageImageReference, arguments: ["https://example.com/"])
         }
         await #expect(throws: ReaderVmLifecycleError.closed) {
-            try await lifecycle.startVm(containerId: "missing")
+            try await lifecycle.startVm(containerId: unknownVmId)
         }
         await #expect(throws: ReaderVmLifecycleError.closed) {
-            try await lifecycle.waitForCommandExit(containerId: "missing")
+            try await lifecycle.waitForCommandExit(containerId: unknownVmId)
         }
         await #expect(throws: ReaderVmLifecycleError.closed) {
-            try await lifecycle.deleteVm(containerId: "missing")
+            try await lifecycle.deleteVm(containerId: unknownVmId)
         }
     }
 
@@ -53,7 +56,7 @@ struct ContainerizationReaderVmLifecycleTests {
         try await lifecycle.close()
 
         await #expect(throws: ReaderVmLifecycleError.closed) {
-            try await lifecycle.deleteVm(containerId: "missing")
+            try await lifecycle.deleteVm(containerId: unknownVmId)
         }
     }
 
@@ -67,7 +70,7 @@ struct ContainerizationReaderVmLifecycleTests {
         _ = try await (firstClose, secondClose)
 
         await #expect(throws: ReaderVmLifecycleError.closed) {
-            try await lifecycle.deleteVm(containerId: "missing")
+            try await lifecycle.deleteVm(containerId: unknownVmId)
         }
     }
 }

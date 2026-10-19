@@ -109,11 +109,11 @@ actor InMemoryReaderVmLifecycle: ReaderVmLifecycle {
     /// Where the calls and what the VMs do are recorded.
     private let events: ReaderVmEventLog
     /// The VMs created and not deleted, keyed by container id.
-    private var vms: [String: InMemoryVmPhase] = [:]
+    private var vms: [ContainerId: InMemoryVmPhase] = [:]
     /// The command of every VM that started, keyed by container id.
-    private var commandRuns: [String: InMemoryCommandRun] = [:]
+    private var commandRuns: [ContainerId: InMemoryCommandRun] = [:]
     /// The held starts, keyed by container id.
-    private var startHolds: [String: CheckedContinuation<Void, Never>] = [:]
+    private var startHolds: [ContainerId: CheckedContinuation<Void, Never>] = [:]
     /// How many VMs creation has named.
     private var namedVmCount = 0
 
@@ -141,10 +141,10 @@ actor InMemoryReaderVmLifecycle: ReaderVmLifecycle {
     /// - Returns: The new VM's container id.
     /// - Throws: The errors of the protocol operation, with
     ///   ``ReaderVmStepFailure`` as the mechanism's.
-    func createVm(imageReference: String, arguments: [String]) throws -> String {
+    func createVm(imageReference: ImageReference, arguments: [String]) throws -> ContainerId {
         events.addEvent(.createVm(imageReference: imageReference, arguments: arguments))
         namedVmCount += 1
-        let containerId = "vm-\(namedVmCount)"
+        let containerId = ContainerId(text: "vm-\(namedVmCount)")
         if let creationError = findCreationError() {
             throw deleteFailedVm(containerId, creationError: creationError)
         }
@@ -162,7 +162,7 @@ actor InMemoryReaderVmLifecycle: ReaderVmLifecycle {
     /// - Parameter containerId: The protocol operation's container id.
     /// - Throws: The errors of the protocol operation, with
     ///   ``ReaderVmStepFailure`` as the mechanism's.
-    func startVm(containerId: String) async throws {
+    func startVm(containerId: ContainerId) async throws {
         events.addEvent(.startVm(containerId: containerId))
         defer { events.addEvent(.startEnded(containerId: containerId)) }
         switch vms[containerId] {
@@ -197,7 +197,7 @@ actor InMemoryReaderVmLifecycle: ReaderVmLifecycle {
     ///   ``resolveCommand(containerId:with:)`` gave it.
     /// - Throws: The errors of the protocol operation, with
     ///   ``ReaderVmStepFailure`` as the mechanism's.
-    func waitForCommandExit(containerId: String) async throws -> CommandOutput {
+    func waitForCommandExit(containerId: ContainerId) async throws -> CommandOutput {
         events.addEvent(.waitForCommandExit(containerId: containerId))
         defer { events.addEvent(.waitEnded(containerId: containerId)) }
         _ = try getCommandRun(of: containerId)
@@ -220,7 +220,7 @@ actor InMemoryReaderVmLifecycle: ReaderVmLifecycle {
     /// - Parameter containerId: The protocol operation's container id.
     /// - Throws: The errors of the protocol operation, with
     ///   ``ReaderVmStepFailure`` as the mechanism's.
-    func deleteVm(containerId: String) throws {
+    func deleteVm(containerId: ContainerId) throws {
         events.addEvent(.deleteVm(containerId: containerId, isCallerCancelled: Task.isCancelled))
         let phase = vms[containerId]
         switch phase {
@@ -254,7 +254,7 @@ actor InMemoryReaderVmLifecycle: ReaderVmLifecycle {
     ///   - containerId: Container id of the command's VM.
     ///   - output: What the command wrote, and its exit code.
     /// - Precondition: The command is running.
-    func resolveCommand(containerId: String, with output: CommandOutput) {
+    func resolveCommand(containerId: ContainerId, with output: CommandOutput) {
         events.addEvent(.commandExited(containerId: containerId))
         resolveCommandRun(of: containerId, with: .success(output))
     }
@@ -263,7 +263,7 @@ actor InMemoryReaderVmLifecycle: ReaderVmLifecycle {
     ///
     /// - Parameter containerId: Container id of the VM whose start is held.
     /// - Precondition: The script holds starts, and this VM's start is held.
-    func resolveStart(containerId: String) {
+    func resolveStart(containerId: ContainerId) {
         guard let startHold = startHolds.removeValue(forKey: containerId) else {
             preconditionFailure("resolveStart(containerId:) needs a held start")
         }
@@ -294,7 +294,7 @@ actor InMemoryReaderVmLifecycle: ReaderVmLifecycle {
     ///   nothing is left, or a ``CleanupAfterFailureError`` with the deletion
     ///   failure when the script makes ``ReaderVmStep/deletion`` fail, after
     ///   which the VM stays deleting.
-    private func deleteFailedVm(_ containerId: String, creationError: any Error) -> any Error {
+    private func deleteFailedVm(_ containerId: ContainerId, creationError: any Error) -> any Error {
         guard script.failingSteps.contains(.deletion) else {
             return creationError
         }
@@ -324,7 +324,7 @@ actor InMemoryReaderVmLifecycle: ReaderVmLifecycle {
     ///   VM with this id is available.
     ///   ``ReaderVmLifecycleError/notStarted(containerId:)`` when its command
     ///   hasn't started.
-    private func getCommandRun(of containerId: String) throws -> InMemoryCommandRun {
+    private func getCommandRun(of containerId: ContainerId) throws -> InMemoryCommandRun {
         switch vms[containerId] {
         case .started:
             guard let commandRun = commandRuns[containerId] else {
@@ -343,7 +343,7 @@ actor InMemoryReaderVmLifecycle: ReaderVmLifecycle {
     ///
     /// - Parameter containerId: Container id of a VM whose command started.
     /// - Returns: The command's output, or why waiting for it failed.
-    private func waitForCommandEnd(of containerId: String) async -> Result<CommandOutput, any Error> {
+    private func waitForCommandEnd(of containerId: ContainerId) async -> Result<CommandOutput, any Error> {
         switch commandRuns[containerId] {
         case .ended(let commandEnd):
             return commandEnd
@@ -362,7 +362,7 @@ actor InMemoryReaderVmLifecycle: ReaderVmLifecycle {
     ///   - containerId: Container id of the command's VM.
     ///   - commandEnd: How the command ended.
     /// - Precondition: The command is running.
-    private func resolveCommandRun(of containerId: String, with commandEnd: Result<CommandOutput, any Error>) {
+    private func resolveCommandRun(of containerId: ContainerId, with commandEnd: Result<CommandOutput, any Error>) {
         guard case .running(let waits) = commandRuns[containerId] else {
             preconditionFailure("Only a running command ends")
         }
@@ -377,7 +377,7 @@ actor InMemoryReaderVmLifecycle: ReaderVmLifecycle {
     /// - Returns: The stop failure when the script makes ``ReaderVmStep/stop``
     ///   fail, which leaves the command running; otherwise `nil`, with a
     ///   running command killed.
-    private func stopCommand(of containerId: String) -> ReaderVmStepFailure? {
+    private func stopCommand(of containerId: ContainerId) -> ReaderVmStepFailure? {
         guard !script.failingSteps.contains(.stop) else {
             return ReaderVmStepFailure(step: .stop)
         }

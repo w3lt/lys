@@ -55,6 +55,9 @@ const VMO_HEALTHY_STATUS_LINE_PREFIX: &[u8] = b"HTTP/1.1 200 ";
 /// It must equal `VMO_HOST` and `VMO_PORT` in
 /// `packages/protocol/src/constant.ts`, which the backend and the renderer
 /// use, and the default host and port of vmo's `WebServer` in `apps/vmo`.
+/// This copy is kept under an approved CONST-005 exception: a desktop unit
+/// test reads this line and fails when the three differ, and #207 removes the
+/// copy together with the host's health check.
 const VMO_ADDRESS: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 8080);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]

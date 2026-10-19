@@ -4,17 +4,23 @@ import Foundation
 ///
 /// Its entrypoint takes the page's URL as its only argument and accepts only
 /// URLs that start with `http://` or `https://`. It loads the page in
-/// headless Chromium, removes scripts, styles, and `class` and `style`
-/// attributes, and writes the remaining HTML to standard output. When it
-/// can't, it exits with a non-zero code and writes the reason to standard
-/// error.
+/// headless Chromium, takes the HTML of the DOM the page ends on, without its
+/// shadow trees (#209), removes every `script`, `style`, `noscript`, `link`,
+/// and `meta` element and every `class` and `style` attribute, and writes the
+/// remaining HTML to standard output. So until #208, a page's site name and
+/// publication date, which pages give in `meta` elements, don't reach Lys,
+/// and Readability can't use class names to leave out boilerplate.
 ///
-/// The reference is pinned by digest because a tag can move: it is the image
-/// tagged `sha-8fb8b94f84b185f9504a7c38945d05c75bcd6ca7`, built from commit
-/// 8fb8b94. vmo pulls it at startup. Reading pages with a newer image means
-/// changing this digest.
-let readPageImageReference =
-    "ghcr.io/w3lt/lys-readpage@sha256:2276b9af21c8467b608025897552601d22f361cdf880efeba97cb675a4fda13c"
+/// When the reader can't read the page, it exits with a non-zero code.
+/// Chromium's own messages are discarded, so the reader's standard error
+/// gives a reason only when its scripts find one, such as an unsupported URL
+/// or no HTML from Chromium.
+///
+/// The reference names the `latest` tag, which the image workflow moves to
+/// each image it builds from `main`. ``createProductionContainerManager()``
+/// pulls the tag at every start, so vmo reads pages with the image that
+/// `latest` named when vmo started.
+let readPageImageReference = "ghcr.io/w3lt/lys-readpage:latest"
 
 /// How reading a page in a VM ended.
 enum ReadPageOutcome: Sendable {

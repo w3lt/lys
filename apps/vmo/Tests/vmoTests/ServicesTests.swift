@@ -29,15 +29,15 @@ struct ServicesTests {
         var bodyServices: Services?
 
         try await withServices(createContainerManager: containerRoot.createContainerManager) { services in
-            await #expect(throws: VmManagerError.unknownVm(containerId: "missing")) {
-                try await services.vmManager.deleteVm(containerId: "missing")
+            await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: "missing")) {
+                try await services.readerVmLifecycle.deleteVm(containerId: "missing")
             }
             bodyServices = services
         }
 
         let services = try #require(bodyServices)
-        await #expect(throws: VmManagerError.closed) {
-            try await services.vmManager.deleteVm(containerId: "missing")
+        await #expect(throws: ReaderVmLifecycleError.closed) {
+            try await services.readerVmLifecycle.deleteVm(containerId: "missing")
         }
     }
 
@@ -55,8 +55,8 @@ struct ServicesTests {
         }
 
         let services = try #require(bodyServices)
-        await #expect(throws: VmManagerError.closed) {
-            try await services.vmManager.deleteVm(containerId: "missing")
+        await #expect(throws: ReaderVmLifecycleError.closed) {
+            try await services.readerVmLifecycle.deleteVm(containerId: "missing")
         }
     }
 

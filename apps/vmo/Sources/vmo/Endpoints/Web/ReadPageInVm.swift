@@ -32,6 +32,27 @@ enum ReadPageOutcome: Sendable {
     case timedOut
 }
 
+/// Failures of a ``ReaderVmLifecycle`` that come from its own state rather
+/// than from the VM mechanism.
+enum ReaderVmLifecycleError: Error, Equatable {
+    /// The lifecycle's owner has begun closing it, so it accepts no new
+    /// operation.
+    case closed
+    /// No VM with this id is available: the lifecycle didn't create it, or
+    /// its deletion has begun.
+    case unknownVm(containerId: String)
+    /// ``ReaderVmLifecycle/startVm(containerId:)`` was already called for
+    /// this VM. A VM starts at most once, even when its start failed.
+    case alreadyStarted(containerId: String)
+    /// The VM's command hasn't started:
+    /// ``ReaderVmLifecycle/startVm(containerId:)`` wasn't called for it, is
+    /// still starting it, or failed.
+    case notStarted(containerId: String)
+    /// ``ReaderVmLifecycle/startVm(containerId:)`` is starting this VM, so it
+    /// can't be deleted until that start ends.
+    case startInProgress(containerId: String)
+}
+
 /// A reader VM lifecycle can take a VM that runs one command through its
 /// life: creation, start, the command's exit, and deletion.
 ///
@@ -44,17 +65,18 @@ enum ReadPageOutcome: Sendable {
 /// to the caller until ``deleteVm(containerId:)`` deletes it. A VM whose
 /// deletion failed is no longer available to the caller; the implementation
 /// keeps it for its own cleanup. Once its owner closes an implementation,
-/// every operation fails with ``VmManagerError/closed`` before it touches a
-/// VM.
+/// every operation fails with ``ReaderVmLifecycleError/closed`` before it
+/// touches a VM.
 ///
 /// Concurrency model: concurrent. Operations on different VMs overlap, and
 /// waits overlap every other operation. An operation that a VM's phase
 /// doesn't allow, such as deleting the VM while it starts, fails with a
-/// ``VmManagerError`` instead of waiting for the phase to change.
+/// ``ReaderVmLifecycleError`` instead of waiting for the phase to change.
 ///
-/// Every implementation gives the results and the ``VmManagerError`` cases
-/// documented here for the same calls. Any other error is a failure of the VM
-/// mechanism, thrown unchanged; after one, the caller can only delete the VM.
+/// Every implementation gives the results and the ``ReaderVmLifecycleError``
+/// cases documented here for the same calls. Any other error is a failure of
+/// the VM mechanism, thrown unchanged; after one, the caller can only delete
+/// the VM.
 protocol ReaderVmLifecycle: Sendable {
     /// Creates a VM that will run `imageReference` with `arguments`, without
     /// starting it.
@@ -87,10 +109,11 @@ protocol ReaderVmLifecycle: Sendable {
     ///
     /// - Parameter containerId: Container id that
     ///   ``createVm(imageReference:arguments:)`` returned.
-    /// - Throws: ``VmManagerError/unknownVm(containerId:)`` when no VM with
-    ///   this id is available. ``VmManagerError/alreadyStarted(containerId:)``
-    ///   when this VM's start was already called. The mechanism's error when
-    ///   booting the VM or starting its command fails.
+    /// - Throws: ``ReaderVmLifecycleError/unknownVm(containerId:)`` when no
+    ///   VM with this id is available.
+    ///   ``ReaderVmLifecycleError/alreadyStarted(containerId:)`` when this
+    ///   VM's start was already called. The mechanism's error when booting the
+    ///   VM or starting its command fails.
     func startVm(containerId: String) async throws
 
     /// Waits until a started VM's command exits, then returns what it wrote,
@@ -107,10 +130,10 @@ protocol ReaderVmLifecycle: Sendable {
     ///   ``startVm(containerId:)`` started.
     /// - Returns: The command's output and exit code. A non-zero exit code is
     ///   returned, not thrown.
-    /// - Throws: ``VmManagerError/unknownVm(containerId:)`` when no VM with
-    ///   this id is available, or when its deletion began during the wait.
-    ///   ``VmManagerError/notStarted(containerId:)`` when its command hasn't
-    ///   started. The mechanism's error when waiting fails.
+    /// - Throws: ``ReaderVmLifecycleError/unknownVm(containerId:)`` when no
+    ///   VM with this id is available, or when its deletion began during the
+    ///   wait. ``ReaderVmLifecycleError/notStarted(containerId:)`` when its
+    ///   command hasn't started. The mechanism's error when waiting fails.
     func waitForCommandExit(containerId: String) async throws -> CommandOutput
 
     /// Deletes a VM: stops it when its command was started, then deletes its
@@ -125,10 +148,11 @@ protocol ReaderVmLifecycle: Sendable {
     ///
     /// - Parameter containerId: Container id that
     ///   ``createVm(imageReference:arguments:)`` returned.
-    /// - Throws: ``VmManagerError/unknownVm(containerId:)`` when no VM with
-    ///   this id is available. ``VmManagerError/startInProgress(containerId:)``
-    ///   while ``startVm(containerId:)`` starts it. The mechanism's stop error
-    ///   when only stopping failed; the VM is deleted anyway. The mechanism's
+    /// - Throws: ``ReaderVmLifecycleError/unknownVm(containerId:)`` when no
+    ///   VM with this id is available.
+    ///   ``ReaderVmLifecycleError/startInProgress(containerId:)`` while
+    ///   ``startVm(containerId:)`` starts it. The mechanism's stop error when
+    ///   only stopping failed; the VM is deleted anyway. The mechanism's
     ///   delete error when deleting failed, or a ``CleanupAfterFailureError``
     ///   with both errors when stopping failed too; the VM is then no longer
     ///   available.

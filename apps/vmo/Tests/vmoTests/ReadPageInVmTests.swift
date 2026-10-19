@@ -129,7 +129,7 @@ private struct ReadPageInVmHarness {
         in lifecycle: InMemoryReaderVmLifecycle,
         sourceLocation: SourceLocation = #_sourceLocation
     ) async {
-        await #expect(throws: VmManagerError.unknownVm(containerId: readerVmId), sourceLocation: sourceLocation) {
+        await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: readerVmId), sourceLocation: sourceLocation) {
             try await lifecycle.deleteVm(containerId: readerVmId)
         }
     }

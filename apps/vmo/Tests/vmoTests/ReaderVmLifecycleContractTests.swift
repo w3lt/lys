@@ -16,30 +16,31 @@ private let failedCommandOutput = CommandOutput(
 enum ReaderVmLifecycleImplementation: CaseIterable, Sendable, CustomTestStringConvertible {
     /// ``InMemoryReaderVmLifecycle``.
     case inMemory
-    /// ``VmManager``, over a container manager that can't boot a VM.
-    case vmManager
+    /// ``ContainerizationReaderVmLifecycle``, over a container manager that
+    /// can't boot a VM.
+    case containerization
 
     /// The implementation's name in test results.
     var testDescription: String {
         switch self {
         case .inMemory: "InMemoryReaderVmLifecycle"
-        case .vmManager: "VmManager"
+        case .containerization: "ContainerizationReaderVmLifecycle"
         }
     }
 
     /// Creates a lifecycle of this implementation, with no VMs.
     ///
-    /// - Parameter containerRoot: Directory that holds a ``VmManager``'s
-    ///   files.
+    /// - Parameter containerRoot: Directory that holds a
+    ///   ``ContainerizationReaderVmLifecycle``'s files.
     /// - Returns: The ready lifecycle.
-    /// - Throws: Containerization's error when a ``VmManager``'s image store
-    ///   can't be created.
+    /// - Throws: Containerization's error when a
+    ///   ``ContainerizationReaderVmLifecycle``'s image store can't be created.
     func createLifecycle(in containerRoot: TemporaryContainerRoot) throws -> any ReaderVmLifecycle {
         switch self {
         case .inMemory:
             InMemoryReaderVmLifecycle(script: ReaderVmScript(command: .runsUntilResolved), events: ReaderVmEventLog())
-        case .vmManager:
-            VmManager(containerManager: try containerRoot.createContainerManager())
+        case .containerization:
+            ContainerizationReaderVmLifecycle(containerManager: try containerRoot.createContainerManager())
         }
     }
 }
@@ -65,11 +66,12 @@ struct ReaderVmContractSubject: Sendable {
 /// An implementation of ``ReaderVmLifecycle`` that the contract cases with
 /// VMs run against, created with the test controls those cases need.
 ///
-/// ``VmManager`` isn't one. To run VMs in a test, it needs a Linux kernel,
-/// which vmo finds only on one developer's Mac until #200, and a test process
-/// signed with the `com.apple.security.virtualization` entitlement, which
-/// `swift test` doesn't give. The suites that use this list name the
-/// guarantees that stay unchecked for ``VmManager``.
+/// ``ContainerizationReaderVmLifecycle`` isn't one. To run VMs in a test, it
+/// needs a Linux kernel, which vmo finds only on one developer's Mac until
+/// #200, and a test process signed with the
+/// `com.apple.security.virtualization` entitlement, which `swift test`
+/// doesn't give. The suites that use this list name the guarantees that stay
+/// unchecked for ``ContainerizationReaderVmLifecycle``.
 enum ReaderVmLifecycleHarness: CaseIterable, Sendable, CustomTestStringConvertible {
     /// ``InMemoryReaderVmLifecycle``, whose own test controls bring about the
     /// outcomes.
@@ -169,7 +171,8 @@ private func expectOutput(
 /// the same assertions for every implementation.
 @Suite("Reader VM lifecycle contract without a VM")
 struct ReaderVmLifecycleContractTests {
-    /// Directory holding a ``VmManager``'s image store.
+    /// Directory holding a ``ContainerizationReaderVmLifecycle``'s image
+    /// store.
     private let containerRoot: TemporaryContainerRoot
 
     /// Creates this test's container directory.
@@ -187,13 +190,13 @@ struct ReaderVmLifecycleContractTests {
     func rejectsUnknownVm(implementation: ReaderVmLifecycleImplementation) async throws {
         let lifecycle = try implementation.createLifecycle(in: containerRoot)
 
-        await #expect(throws: VmManagerError.unknownVm(containerId: "missing")) {
+        await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: "missing")) {
             try await lifecycle.startVm(containerId: "missing")
         }
-        await #expect(throws: VmManagerError.unknownVm(containerId: "missing")) {
+        await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: "missing")) {
             try await lifecycle.waitForCommandExit(containerId: "missing")
         }
-        await #expect(throws: VmManagerError.unknownVm(containerId: "missing")) {
+        await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: "missing")) {
             try await lifecycle.deleteVm(containerId: "missing")
         }
     }
@@ -203,16 +206,16 @@ struct ReaderVmLifecycleContractTests {
 /// with the same assertions for every implementation that
 /// ``ReaderVmLifecycleHarness`` lists.
 ///
-/// These guarantees stay unchecked for ``VmManager``, because running its VMs
-/// in a test needs a Linux kernel, which vmo finds only on one developer's Mac
-/// until #200, and a test process signed with the virtualization entitlement,
-/// which `swift test` doesn't give: that each VM gets an id no other VM has
-/// had and runs nothing until it starts; that a command's output and exit code
-/// reach every wait, concurrent or later; that a VM starts once, and a failed
-/// start leaves a VM that only deletion ends; that deleting a VM while it
-/// starts fails at once; that deleting a VM ends every wait for it, also a
-/// cancelled caller's, and leaves an id that names no VM; and that a pending
-/// wait holds up no other operation.
+/// These guarantees stay unchecked for ``ContainerizationReaderVmLifecycle``,
+/// because running its VMs in a test needs a Linux kernel, which vmo finds only
+/// on one developer's Mac until #200, and a test process signed with the
+/// virtualization entitlement, which `swift test` doesn't give: that each VM
+/// gets an id no other VM has had and runs nothing until it starts; that a
+/// command's output and exit code reach every wait, concurrent or later; that a
+/// VM starts once, and a failed start leaves a VM that only deletion ends; that
+/// deleting a VM while it starts fails at once; that deleting a VM ends every
+/// wait for it, also a cancelled caller's, and leaves an id that names no VM;
+/// and that a pending wait holds up no other operation.
 @Suite("Reader VM lifecycle contract with VMs", .timeLimit(.minutes(1)))
 struct ReaderVmLifecycleVmContractTests {
     /// Verifies that ids aren't reused, also after a deletion, and that a
@@ -230,7 +233,7 @@ struct ReaderVmLifecycleVmContractTests {
         let thirdId = try await createReaderVm(in: subject)
 
         #expect(Set([firstId, secondId, thirdId]).count == 3)
-        await #expect(throws: VmManagerError.notStarted(containerId: secondId)) {
+        await #expect(throws: ReaderVmLifecycleError.notStarted(containerId: secondId)) {
             try await subject.lifecycle.waitForCommandExit(containerId: secondId)
         }
     }
@@ -267,7 +270,7 @@ struct ReaderVmLifecycleVmContractTests {
         let containerId = try await createReaderVm(in: subject)
         try await subject.lifecycle.startVm(containerId: containerId)
 
-        await #expect(throws: VmManagerError.alreadyStarted(containerId: containerId)) {
+        await #expect(throws: ReaderVmLifecycleError.alreadyStarted(containerId: containerId)) {
             try await subject.lifecycle.startVm(containerId: containerId)
         }
 
@@ -291,14 +294,14 @@ struct ReaderVmLifecycleVmContractTests {
             try await subject.lifecycle.startVm(containerId: containerId)
         }
 
-        await #expect(throws: VmManagerError.alreadyStarted(containerId: containerId)) {
+        await #expect(throws: ReaderVmLifecycleError.alreadyStarted(containerId: containerId)) {
             try await subject.lifecycle.startVm(containerId: containerId)
         }
-        await #expect(throws: VmManagerError.notStarted(containerId: containerId)) {
+        await #expect(throws: ReaderVmLifecycleError.notStarted(containerId: containerId)) {
             try await subject.lifecycle.waitForCommandExit(containerId: containerId)
         }
         try await subject.lifecycle.deleteVm(containerId: containerId)
-        await #expect(throws: VmManagerError.unknownVm(containerId: containerId)) {
+        await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: containerId)) {
             try await subject.lifecycle.deleteVm(containerId: containerId)
         }
     }
@@ -315,10 +318,10 @@ struct ReaderVmLifecycleVmContractTests {
         let start = Task { try await subject.lifecycle.startVm(containerId: containerId) }
         try await subject.eventLog.waitForEvent(.startVm(containerId: containerId))
 
-        await #expect(throws: VmManagerError.startInProgress(containerId: containerId)) {
+        await #expect(throws: ReaderVmLifecycleError.startInProgress(containerId: containerId)) {
             try await subject.lifecycle.deleteVm(containerId: containerId)
         }
-        await #expect(throws: VmManagerError.notStarted(containerId: containerId)) {
+        await #expect(throws: ReaderVmLifecycleError.notStarted(containerId: containerId)) {
             try await subject.lifecycle.waitForCommandExit(containerId: containerId)
         }
 
@@ -347,15 +350,15 @@ struct ReaderVmLifecycleVmContractTests {
         try await subject.lifecycle.deleteVm(containerId: containerId)
         try await subject.eventLog.waitForEvent(.waitEnded(containerId: containerId), count: 2)
 
-        await #expect(throws: VmManagerError.unknownVm(containerId: containerId)) { try await wait.value }
-        await #expect(throws: VmManagerError.unknownVm(containerId: containerId)) { try await cancelledWait.value }
-        await #expect(throws: VmManagerError.unknownVm(containerId: containerId)) {
+        await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: containerId)) { try await wait.value }
+        await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: containerId)) { try await cancelledWait.value }
+        await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: containerId)) {
             try await subject.lifecycle.startVm(containerId: containerId)
         }
-        await #expect(throws: VmManagerError.unknownVm(containerId: containerId)) {
+        await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: containerId)) {
             try await subject.lifecycle.waitForCommandExit(containerId: containerId)
         }
-        await #expect(throws: VmManagerError.unknownVm(containerId: containerId)) {
+        await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: containerId)) {
             try await subject.lifecycle.deleteVm(containerId: containerId)
         }
     }
@@ -382,7 +385,7 @@ struct ReaderVmLifecycleVmContractTests {
         expectOutput(otherOutput, toEqual: failedCommandOutput)
         try await subject.lifecycle.deleteVm(containerId: waitedId)
         try await subject.eventLog.waitForEvent(.waitEnded(containerId: waitedId))
-        await #expect(throws: VmManagerError.unknownVm(containerId: waitedId)) { try await wait.value }
+        await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: waitedId)) { try await wait.value }
     }
 }
 
@@ -391,18 +394,19 @@ struct ReaderVmLifecycleVmContractTests {
 /// implementation that ``ReaderVmLifecycleHarness`` lists. Each case makes the
 /// mechanism fail the steps it names, with a ``ReaderVmStepFailure``.
 ///
-/// These guarantees stay unchecked for ``VmManager``, because running its VMs
-/// in a test needs a Linux kernel, which vmo finds only on one developer's Mac
-/// until #200, and a test process signed with the virtualization entitlement,
-/// which `swift test` doesn't give: that a failed creation throws the
-/// mechanism's failure, or both failures when deleting what it left fails
-/// too; that a cancelled caller's creation throws `CancellationError`, or
-/// both failures, so the caller gets no VM; that a failed wait throws the
-/// mechanism's failure; and that a failed stop or deletion throws as
-/// documented and leaves the VM unavailable, a command whose stop failed
-/// ending its waits only when it exits. Checking most of them also needs a
-/// way to make a step of Containerization fail on demand. ``VmManagerTests``
-/// checks, without a VM, what ``VmManager`` does once closed.
+/// These guarantees stay unchecked for ``ContainerizationReaderVmLifecycle``,
+/// because running its VMs in a test needs a Linux kernel, which vmo finds only
+/// on one developer's Mac until #200, and a test process signed with the
+/// virtualization entitlement, which `swift test` doesn't give: that a failed
+/// creation throws the mechanism's failure, or both failures when deleting what
+/// it left fails too; that a cancelled caller's creation throws
+/// `CancellationError`, or both failures, so the caller gets no VM; that a
+/// failed wait throws the mechanism's failure; and that a failed stop or
+/// deletion throws as documented and leaves the VM unavailable, a command whose
+/// stop failed ending its waits only when it exits. Checking most of them also
+/// needs a way to make a step of Containerization fail on demand.
+/// ``ContainerizationReaderVmLifecycleTests`` checks, without a VM, what
+/// ``ContainerizationReaderVmLifecycle`` does once closed.
 @Suite("Reader VM lifecycle contract when the VM mechanism fails", .timeLimit(.minutes(1)))
 struct ReaderVmLifecycleFailureContractTests {
     /// Verifies that a creation failure reaches the caller unchanged.
@@ -509,13 +513,13 @@ struct ReaderVmLifecycleFailureContractTests {
         await #expect(throws: ReaderVmStepFailure(step: .stop)) {
             try await subject.lifecycle.deleteVm(containerId: containerId)
         }
-        await #expect(throws: VmManagerError.unknownVm(containerId: containerId)) {
+        await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: containerId)) {
             try await subject.lifecycle.deleteVm(containerId: containerId)
         }
         await subject.resolveCommand(containerId, failedCommandOutput)
         try await subject.eventLog.waitForEvent(.waitEnded(containerId: containerId))
 
-        await #expect(throws: VmManagerError.unknownVm(containerId: containerId)) { try await wait.value }
+        await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: containerId)) { try await wait.value }
         #expect(
             Array(subject.eventLog.events.suffix(2)) == [
                 .commandExited(containerId: containerId),
@@ -541,13 +545,13 @@ struct ReaderVmLifecycleFailureContractTests {
             try await subject.lifecycle.deleteVm(containerId: containerId)
         }
 
-        await #expect(throws: VmManagerError.unknownVm(containerId: containerId)) {
+        await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: containerId)) {
             try await subject.lifecycle.startVm(containerId: containerId)
         }
-        await #expect(throws: VmManagerError.unknownVm(containerId: containerId)) {
+        await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: containerId)) {
             try await subject.lifecycle.waitForCommandExit(containerId: containerId)
         }
-        await #expect(throws: VmManagerError.unknownVm(containerId: containerId)) {
+        await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: containerId)) {
             try await subject.lifecycle.deleteVm(containerId: containerId)
         }
     }
@@ -571,7 +575,7 @@ struct ReaderVmLifecycleFailureContractTests {
 
         #expect(error.operationError as? ReaderVmStepFailure == ReaderVmStepFailure(step: .stop))
         #expect(error.cleanupError as? ReaderVmStepFailure == ReaderVmStepFailure(step: .deletion))
-        await #expect(throws: VmManagerError.unknownVm(containerId: containerId)) {
+        await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: containerId)) {
             try await subject.lifecycle.deleteVm(containerId: containerId)
         }
     }

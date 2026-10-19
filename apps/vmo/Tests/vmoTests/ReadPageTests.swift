@@ -19,8 +19,9 @@ private struct ReadPageFailureBody: Decodable, Equatable {
 }
 
 /// Checks `GET /web/read-page` without a VM: through the router to a closed
-/// VM manager or to an in-memory reader VM lifecycle, and the responses built
-/// from how a read ended.
+/// ``ContainerizationReaderVmLifecycle`` or to an
+/// ``InMemoryReaderVmLifecycle``, and the responses built from how a read
+/// ended.
 ///
 /// In a test, reading a page in a real VM needs the read-page image, a Linux
 /// kernel, which vmo finds only on one developer's Mac until #200, and a
@@ -39,16 +40,17 @@ struct ReadPageTests {
         containerRoot = try TemporaryContainerRoot()
     }
 
-    /// Builds a router with only the read-page route, over a closed VM
-    /// manager: a request that reaches it fails before any VM work.
+    /// Builds a router with only the read-page route, over a closed
+    /// ``ContainerizationReaderVmLifecycle``: a request that reaches it fails
+    /// before any VM work.
     ///
     /// - Returns: The router.
     /// - Throws: Containerization's error when the image store can't be
     ///   created.
     private func buildRouter() async throws -> Router {
-        let vmManager = VmManager(containerManager: try containerRoot.createContainerManager())
-        try await vmManager.close()
-        return try Router(routes: [.readPage(vmLifecycle: vmManager)])
+        let lifecycle = ContainerizationReaderVmLifecycle(containerManager: try containerRoot.createContainerManager())
+        try await lifecycle.close()
+        return try Router(routes: [.readPage(vmLifecycle: lifecycle)])
     }
 
     /// Builds the read-page request for a `url` parameter.
@@ -70,8 +72,9 @@ struct ReadPageTests {
         #expect(response.body == Data("url query param is missing.\n".utf8))
     }
 
-    /// Verifies that values the reader can't read are rejected before the VM
-    /// manager is asked for a VM; asking the closed manager would answer 500.
+    /// Verifies that values the reader can't read are rejected before the
+    /// lifecycle is asked for a VM; asking the closed lifecycle would answer
+    /// 500.
     @Test(
         "GET /web/read-page with a url that isn't an absolute http or https URL answers 400 Bad Request",
         arguments: [
@@ -95,7 +98,7 @@ struct ReadPageTests {
         #expect(response.body == Data("url must be an absolute http or https URL with a host.\n".utf8))
     }
 
-    /// Verifies that a page URL reaches the VM manager, whose failure the
+    /// Verifies that a page URL reaches the lifecycle, whose failure the
     /// router answers as a server error.
     @Test("GET /web/read-page answers 500 Internal Server Error when no VM can be created")
     func failsWithoutVm() async throws {

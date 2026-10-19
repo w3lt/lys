@@ -59,7 +59,8 @@ struct ReaderVmScript: Sendable {
 }
 
 /// A VM of an ``InMemoryReaderVmLifecycle`` that hasn't been deleted, in the
-/// phase it has reached. The phases are those ``VmManager`` tracks.
+/// phase it has reached. The phases are those
+/// ``ContainerizationReaderVmLifecycle`` tracks.
 private enum InMemoryVmPhase: Equatable {
     /// Created and not started.
     case created
@@ -82,16 +83,16 @@ private enum InMemoryCommandRun {
 }
 
 /// Owns in-memory VMs that follow a test's script, to stand in for
-/// ``VmManager`` as a ``ReaderVmLifecycle``, while keeping every guarantee of
-/// that contract.
+/// ``ContainerizationReaderVmLifecycle`` as a ``ReaderVmLifecycle``, while
+/// keeping every guarantee of that contract.
 ///
 /// Its VMs boot nothing. Each VM's command does what the script's
 /// ``ReaderVmScript/command`` says, and each step in
 /// ``ReaderVmScript/failingSteps`` fails with a ``ReaderVmStepFailure``. It
-/// is never closed, so it never throws ``VmManagerError/closed``. It records
-/// every call, the end of every start and wait, and what its VMs do in its
-/// ``ReaderVmEventLog``, and names its VMs `vm-1`, `vm-2`, and so on, in the
-/// order their creation was called.
+/// is never closed, so it never throws ``ReaderVmLifecycleError/closed``. It
+/// records every call, the end of every start and wait, and what its VMs do
+/// in its ``ReaderVmEventLog``, and names its VMs `vm-1`, `vm-2`, and so on,
+/// in the order their creation was called.
 ///
 /// Invariant: `vms` holds the VMs created and not deleted, each in the phase
 /// it has reached. `commandRuns` holds the command of every VM that started,
@@ -101,7 +102,7 @@ private enum InMemoryCommandRun {
 ///
 /// Concurrency model: concurrent. The actor runs one state change at a time;
 /// a held start and a wait for a running command suspend without holding up
-/// other operations, as ``VmManager``'s do.
+/// other operations, as ``ContainerizationReaderVmLifecycle``'s do.
 actor InMemoryReaderVmLifecycle: ReaderVmLifecycle {
     /// How the VMs behave.
     private let script: ReaderVmScript
@@ -168,9 +169,9 @@ actor InMemoryReaderVmLifecycle: ReaderVmLifecycle {
         case .created:
             vms[containerId] = .starting
         case .starting, .started, .startFailed:
-            throw VmManagerError.alreadyStarted(containerId: containerId)
+            throw ReaderVmLifecycleError.alreadyStarted(containerId: containerId)
         case .deleting, nil:
-            throw VmManagerError.unknownVm(containerId: containerId)
+            throw ReaderVmLifecycleError.unknownVm(containerId: containerId)
         }
         if script.holdsStart {
             // Every other operation on a starting VM fails without changing
@@ -226,9 +227,9 @@ actor InMemoryReaderVmLifecycle: ReaderVmLifecycle {
         case .created, .started, .startFailed:
             vms[containerId] = .deleting
         case .starting:
-            throw VmManagerError.startInProgress(containerId: containerId)
+            throw ReaderVmLifecycleError.startInProgress(containerId: containerId)
         case .deleting, nil:
-            throw VmManagerError.unknownVm(containerId: containerId)
+            throw ReaderVmLifecycleError.unknownVm(containerId: containerId)
         }
         let stopFailure = phase == .started ? stopCommand(of: containerId) : nil
         guard !script.failingSteps.contains(.deletion) else {
@@ -269,8 +270,9 @@ actor InMemoryReaderVmLifecycle: ReaderVmLifecycle {
         startHold.resume()
     }
 
-    /// Finds why a creation fails, as ``VmManager`` learns it: from the
-    /// mechanism, then from cancellation once the mechanism is done.
+    /// Finds why a creation fails, as ``ContainerizationReaderVmLifecycle``
+    /// learns it: from the mechanism, then from cancellation once the
+    /// mechanism is done.
     ///
     /// - Returns: The creation failure when the script makes
     ///   ``ReaderVmStep/creation`` fail; otherwise `CancellationError` when
@@ -318,9 +320,10 @@ actor InMemoryReaderVmLifecycle: ReaderVmLifecycle {
     ///
     /// - Parameter containerId: Container id of the VM.
     /// - Returns: The VM's command.
-    /// - Throws: ``VmManagerError/unknownVm(containerId:)`` when no VM with
-    ///   this id is available. ``VmManagerError/notStarted(containerId:)``
-    ///   when its command hasn't started.
+    /// - Throws: ``ReaderVmLifecycleError/unknownVm(containerId:)`` when no
+    ///   VM with this id is available.
+    ///   ``ReaderVmLifecycleError/notStarted(containerId:)`` when its command
+    ///   hasn't started.
     private func getCommandRun(of containerId: String) throws -> InMemoryCommandRun {
         switch vms[containerId] {
         case .started:
@@ -329,9 +332,9 @@ actor InMemoryReaderVmLifecycle: ReaderVmLifecycle {
             }
             return commandRun
         case .created, .starting, .startFailed:
-            throw VmManagerError.notStarted(containerId: containerId)
+            throw ReaderVmLifecycleError.notStarted(containerId: containerId)
         case .deleting, nil:
-            throw VmManagerError.unknownVm(containerId: containerId)
+            throw ReaderVmLifecycleError.unknownVm(containerId: containerId)
         }
     }
 
@@ -381,7 +384,7 @@ actor InMemoryReaderVmLifecycle: ReaderVmLifecycle {
         if case .running = commandRuns[containerId] {
             // A killed command didn't exit on its own, so its waits find the
             // VM deleting and fail as an unknown VM.
-            resolveCommandRun(of: containerId, with: .failure(VmManagerError.unknownVm(containerId: containerId)))
+            resolveCommandRun(of: containerId, with: .failure(ReaderVmLifecycleError.unknownVm(containerId: containerId)))
         }
         return nil
     }

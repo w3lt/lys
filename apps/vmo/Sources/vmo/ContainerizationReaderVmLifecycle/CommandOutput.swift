@@ -14,7 +14,7 @@ struct CommandOutput: Sendable {
     /// What the command wrote to standard error.
     let stderr: CommandStreamOutput
     /// The command's exit code. A non-zero code is the command's own failure,
-    /// not the manager's.
+    /// not the lifecycle's.
     let exitCode: Int32
 }
 
@@ -44,8 +44,8 @@ struct CommandOutputBuffers: Sendable {
     }
 }
 
-/// Owns the bytes one output stream of a VM's command writes, so the manager
-/// can read them once the command exits.
+/// Owns the bytes one output stream of a VM's command writes, so
+/// ``ContainerizationReaderVmLifecycle`` can read them once the command exits.
 ///
 /// Invariant: `contents.bytes` holds the first bytes written before the buffer
 /// was closed, in write order, up to ``maximumKeptStreamByteCount``.
@@ -56,7 +56,8 @@ struct CommandOutputBuffers: Sendable {
 /// readable.
 ///
 /// Concurrency model: thread-safe. Containerization writes from its own
-/// threads while the manager reads; a mutex serializes both.
+/// threads while ``ContainerizationReaderVmLifecycle`` reads; a mutex
+/// serializes both.
 final class CommandOutputBuffer: Writer {
     /// The bytes kept so far, and whether the stream has ended.
     private struct Contents {

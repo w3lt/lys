@@ -480,7 +480,8 @@ struct ReadPageInVmFailureTests {
 
 /// Checks how ``readPageInVm(_:_:deadline:)`` ends when its caller is
 /// cancelled: with `CancellationError`, after deleting its VM from a task
-/// that isn't cancelled, so the deletion can still stop the reader.
+/// that isn't cancelled, so the deletion can still stop the reader, and only
+/// once the reader can no longer run.
 ///
 /// The reads run as in ``ReadPageInVmOutcomeTests``.
 @Suite("Cancelling a page read in a VM", .timeLimit(.minutes(1)))
@@ -566,6 +567,40 @@ struct ReadPageInVmCancellationTests {
                 .startEnded(containerId: readerVmId),
                 .waitForCommandExit(containerId: readerVmId),
                 .deleteVm(containerId: readerVmId, isCallerCancelled: false),
+                .waitEnded(containerId: readerVmId),
+                .readEnded,
+            ]
+        )
+    }
+
+    /// Verifies that a reader whose stop failed holds a cancelled read until
+    /// it exits, so the read never returns while its reader still runs: the
+    /// read's cancellation doesn't end its wait for the reader.
+    ///
+    /// This schedule fixes the order for a correct read, as in
+    /// ``ReadPageInVmFailureTests/throwsStopFailureOnceReaderExits()``.
+    @Test("Cancelling a read whose reader can't be stopped throws both failures once the reader exits")
+    func throwsCancellationAndStopFailureOnceReaderExits() async throws {
+        let lifecycle = harness.createLifecycle(ReaderVmScript(command: .runsUntilResolved, failingSteps: [.stop]))
+        let read = harness.startRead(through: lifecycle, until: harness.deadline)
+        try await harness.eventLog.waitForEvent(.waitForCommandExit(containerId: readerVmId))
+        read.cancel()
+        try await harness.eventLog.waitForEvent(.deleteVm(containerId: readerVmId, isCallerCancelled: false))
+
+        await lifecycle.resolveCommand(containerId: readerVmId, with: readerOutput)
+        let result = try await harness.waitForReadEnd(read)
+
+        let error = try #require(throws: CleanupAfterFailureError.self) { try result.get() }
+        #expect(error.operationError is CancellationError)
+        #expect(error.cleanupError as? ReaderVmStepFailure == ReaderVmStepFailure(step: .stop))
+        #expect(
+            harness.eventLog.events == [
+                readerVmCreation,
+                .startVm(containerId: readerVmId),
+                .startEnded(containerId: readerVmId),
+                .waitForCommandExit(containerId: readerVmId),
+                .deleteVm(containerId: readerVmId, isCallerCancelled: false),
+                .commandExited(containerId: readerVmId),
                 .waitEnded(containerId: readerVmId),
                 .readEnded,
             ]

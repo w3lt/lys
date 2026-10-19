@@ -154,6 +154,26 @@ private func startCommandWait(
     Task { try await subject.lifecycle.waitForCommandExit(containerId: containerId) }
 }
 
+/// Waits for a VM's command as ``startCommandWait(for:in:)`` does, from a
+/// task that is cancelled before the wait begins.
+///
+/// - Parameters:
+///   - containerId: Container id of the VM.
+///   - subject: Lifecycle that created the VM.
+/// - Returns: How the wait ended, or `nil` when the task group gave no
+///   result.
+private func waitForCommandExitWhenCancelled(
+    for containerId: ContainerId,
+    in subject: ReaderVmContractSubject
+) async -> Result<CommandOutput, any Error>? {
+    // A task added to a cancelled group starts cancelled.
+    await withThrowingTaskGroup(of: CommandOutput.self) { group in
+        group.cancelAll()
+        group.addTask { try await subject.lifecycle.waitForCommandExit(containerId: containerId) }
+        return await group.nextResult()
+    }
+}
+
 /// Checks that a wait returned `expected`: the same bytes and truncation flag
 /// of each stream, and the same exit code. ``CommandOutput`` has no equality
 /// of its own.
@@ -163,7 +183,7 @@ private func startCommandWait(
 ///   - expected: What the command wrote and its exit code.
 ///   - sourceLocation: Where a failed check is reported; the caller's line by
 ///     default.
-private func expectOutput(
+func expectOutput(
     _ output: CommandOutput,
     toEqual expected: CommandOutput,
     sourceLocation: SourceLocation = #_sourceLocation
@@ -220,8 +240,8 @@ struct ReaderVmLifecycleContractTests {
 /// command's output and exit code reach every wait, concurrent or later; that a
 /// VM starts once, and a failed start leaves a VM that only deletion ends; that
 /// deleting a VM while it starts fails at once; that deleting a VM ends every
-/// wait for it, also a cancelled caller's, and leaves an id that names no VM;
-/// and that a pending wait holds up no other operation.
+/// wait for it and leaves an id that names no VM; and that a pending wait holds
+/// up no other operation.
 @Suite("Reader VM lifecycle contract with VMs", .timeLimit(.minutes(1)))
 struct ReaderVmLifecycleVmContractTests {
     /// Verifies that ids aren't reused, also after a deletion, and that a
@@ -338,26 +358,24 @@ struct ReaderVmLifecycleVmContractTests {
     }
 
     /// Verifies that deleting a started VM ends every wait for its command,
-    /// even a cancelled caller's, which cancellation alone doesn't end, and
-    /// that afterwards the VM's id names no VM.
+    /// and that afterwards the VM's id names no VM.
     @Test(
-        "Deleting a started VM ends every wait for it, a cancelled caller's too, and leaves an id that names no VM",
+        "Deleting a started VM ends every wait for it and leaves an id that names no VM",
         arguments: ReaderVmLifecycleHarness.allCases
     )
     func endsWaitsOnDeletion(harness: ReaderVmLifecycleHarness) async throws {
         let subject = harness.createSubject(script: ReaderVmScript(command: .runsUntilResolved))
         let containerId = try await createReaderVm(in: subject)
         try await subject.lifecycle.startVm(containerId: containerId)
-        let wait = startCommandWait(for: containerId, in: subject)
-        let cancelledWait = startCommandWait(for: containerId, in: subject)
+        let firstWait = startCommandWait(for: containerId, in: subject)
+        let secondWait = startCommandWait(for: containerId, in: subject)
         try await subject.eventLog.waitForEvent(.waitForCommandExit(containerId: containerId), count: 2)
-        cancelledWait.cancel()
 
         try await subject.lifecycle.deleteVm(containerId: containerId)
         try await subject.eventLog.waitForEvent(.waitEnded(containerId: containerId), count: 2)
 
-        await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: containerId)) { try await wait.value }
-        await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: containerId)) { try await cancelledWait.value }
+        await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: containerId)) { try await firstWait.value }
+        await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: containerId)) { try await secondWait.value }
         await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: containerId)) {
             try await subject.lifecycle.startVm(containerId: containerId)
         }
@@ -407,6 +425,8 @@ struct ReaderVmLifecycleVmContractTests {
 /// creation throws the mechanism's failure, or both failures when deleting what
 /// it left fails too; that a cancelled caller's creation throws
 /// `CancellationError`, or both failures, so the caller gets no VM; that a
+/// cancelled caller's wait throws `CancellationError`, also after the command
+/// exited, and leaves the command and the other waits running; that a
 /// failed wait throws the mechanism's failure; and that a failed stop or
 /// deletion throws as documented and leaves the VM unavailable, a command whose
 /// stop failed ending its waits only when it exits. Checking most of them also
@@ -474,6 +494,53 @@ struct ReaderVmLifecycleFailureContractTests {
         let error = try #require(throws: CleanupAfterFailureError.self) { try result.get() }
         #expect(error.operationError is CancellationError)
         #expect(error.cleanupError as? ReaderVmStepFailure == ReaderVmStepFailure(step: .deletion))
+    }
+
+    /// Verifies that cancelling one caller ends that caller's wait at once,
+    /// while the command runs on and the other wait still gets its output.
+    ///
+    /// The cancellation can reach the wait before or after the lifecycle
+    /// keeps it, and both must end it the same way;
+    /// ``throwsCancellationForCancelledWait(harness:)`` checks a caller
+    /// cancelled before its wait began.
+    @Test(
+        "Cancelling one wait for a command ends only that wait, with CancellationError, and the other wait gets the output",
+        arguments: ReaderVmLifecycleHarness.allCases
+    )
+    func endsOnlyCancelledWait(harness: ReaderVmLifecycleHarness) async throws {
+        let subject = harness.createSubject(script: ReaderVmScript(command: .runsUntilResolved))
+        let containerId = try await createReaderVm(in: subject)
+        try await subject.lifecycle.startVm(containerId: containerId)
+        let wait = startCommandWait(for: containerId, in: subject)
+        let cancelledWait = startCommandWait(for: containerId, in: subject)
+        try await subject.eventLog.waitForEvent(.waitForCommandExit(containerId: containerId), count: 2)
+
+        cancelledWait.cancel()
+        try await subject.eventLog.waitForEvent(.waitEnded(containerId: containerId))
+        await subject.resolveCommand(containerId, failedCommandOutput)
+        try await subject.eventLog.waitForEvent(.waitEnded(containerId: containerId), count: 2)
+
+        await #expect(throws: CancellationError.self) { try await cancelledWait.value }
+        expectOutput(try await wait.value, toEqual: failedCommandOutput)
+    }
+
+    /// Verifies that a caller cancelled before it waits gets
+    /// `CancellationError` instead of the output of a command that has
+    /// already exited, and that the output stays for a later wait.
+    @Test(
+        "A wait whose caller is already cancelled throws CancellationError, also when the command has exited",
+        arguments: ReaderVmLifecycleHarness.allCases
+    )
+    func throwsCancellationForCancelledWait(harness: ReaderVmLifecycleHarness) async throws {
+        let subject = harness.createSubject(script: ReaderVmScript(command: .exitsAtStart(failedCommandOutput)))
+        let containerId = try await createReaderVm(in: subject)
+        try await subject.lifecycle.startVm(containerId: containerId)
+
+        let result = try #require(await waitForCommandExitWhenCancelled(for: containerId, in: subject))
+
+        #expect(throws: CancellationError.self) { try result.get() }
+        let laterOutput = try await subject.lifecycle.waitForCommandExit(containerId: containerId)
+        expectOutput(laterOutput, toEqual: failedCommandOutput)
     }
 
     /// Verifies that a failed wait reaches the caller unchanged, after which

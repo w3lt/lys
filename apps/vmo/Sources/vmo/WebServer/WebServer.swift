@@ -27,6 +27,10 @@ final class WebServer: Sendable {
 
     /// Creates a server that is not listening yet.
     ///
+    /// The default host and port are where Lys's backend and desktop look for
+    /// vmo; a desktop unit test checks them against `VMO_HOST` and `VMO_PORT`
+    /// in `@lys/protocol`.
+    ///
     /// - Parameters:
     ///   - router: Routes that answer requests.
     ///   - host: Local address to bind. Defaults to the IPv4 loopback address,

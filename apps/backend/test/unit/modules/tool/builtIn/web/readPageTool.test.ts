@@ -140,6 +140,14 @@ describe("buildReadPageDefinition", () => {
     )
     expect(description).toContain("longer than 12000 characters")
   })
+
+  it("states the URL limit to the model, as typed and once percent-encoded", () => {
+    const [urlArgument] = buildReadPageDefinition().arguments
+
+    expect(urlArgument?.description).toBe(
+      "Absolute http or https URL of the page, at most 2048 characters, as typed and once percent-encoded."
+    )
+  })
 })
 
 describe("ReadPageTool", () => {
@@ -185,9 +193,11 @@ describe("ReadPageTool", () => {
       })
     })
 
-    it("explains a URL longer than the limit", () => {
+    it.each([
+      ["as typed", `https://example.com/${"a".repeat(2_048)}`],
+      ["once percent-encoded", `https://example.com/${"蛾".repeat(300)}`]
+    ])("explains a URL longer than the limit %s", (_label, url) => {
       const tool = new ReadPageTool(buildVmoReadDependencies(UNUSED_VMO_ORIGIN))
-      const url = `https://example.com/${"a".repeat(2_048)}`
 
       const parsed = tool.parseToolCall({ url })
 

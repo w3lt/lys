@@ -1,4 +1,4 @@
-import { parsePageUrl, type PageUrl, type PageUrlResult } from "./pageUrl"
+import { parsePageUrl, type PageUrl } from "./pageUrl"
 import {
   MAXIMUM_SEARCH_QUERY_LENGTH,
   type TavilySearchResult
@@ -88,20 +88,6 @@ function buildShownResult(
 }
 
 /**
- * Parses a result's URL as `read_page` will parse the URL that is shown.
- *
- * @param text - URL text Tavily gave.
- * @returns The page URL rules applied to the text, then again to its
- * normalized form, which can be longer than the text given (a path of
- * non-ASCII characters is percent-encoded); `valid` only when the URL shown
- * passes them.
- */
-function parseShownResultUrl(text: string): PageUrlResult {
-  const parsed = parsePageUrl(text)
-  return parsed.status === "valid" ? parsePageUrl(parsed.url) : parsed
-}
-
-/**
  * Selects the results shown to the model.
  *
  * @param results - Results Tavily gave, in its order.
@@ -116,7 +102,7 @@ function selectShownResults(
   const shownUrls = new Set<string>()
   let leftOutCount = 0
   for (const result of results) {
-    const parsedUrl = parseShownResultUrl(result.url)
+    const parsedUrl = parsePageUrl(result.url)
     if (parsedUrl.status === "invalid") {
       leftOutCount += 1
       continue

@@ -122,7 +122,7 @@ export function buildReadPageDefinition(): ToolDefinition {
       {
         type: "string",
         name: "url",
-        description: `Absolute http or https URL of the page, at most ${MAXIMUM_PAGE_URL_LENGTH} characters.`
+        description: `Absolute http or https URL of the page, at most ${MAXIMUM_PAGE_URL_LENGTH} characters, as typed and once percent-encoded.`
       },
       {
         type: "string",

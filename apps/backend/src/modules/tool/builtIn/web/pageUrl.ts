@@ -18,8 +18,13 @@ export type PageUrl = string & {
 }
 
 /**
- * Most UTF-16 code units a page URL may have, inclusive, counted on the text
- * as given.
+ * Most UTF-16 code units a page URL may have, inclusive, counted both on the
+ * text as given and on its normalized form, where characters outside ASCII
+ * and spaces are percent-encoded.
+ *
+ * @remarks Lys sends the normalized form to vmo, encoded once more as a query
+ * parameter, so this bound keeps the request head of one read under vmo's
+ * 8 KiB limit.
  */
 export const MAXIMUM_PAGE_URL_LENGTH = 2_048
 
@@ -48,7 +53,7 @@ export type PageUrlResult =
 
 /** Explanations the model reads for each URL problem, by problem. */
 const PAGE_URL_PROBLEM_MESSAGES = Object.freeze({
-  "too-long": `The URL is longer than ${MAXIMUM_PAGE_URL_LENGTH} characters.`,
+  "too-long": `The URL is longer than ${MAXIMUM_PAGE_URL_LENGTH} characters, as typed or once percent-encoded.`,
   "not-absolute":
     "The URL is not an absolute URL, such as https://example.com/page.",
   "unsupported-scheme": "Only http and https URLs can be read.",
@@ -102,8 +107,9 @@ function findPageUrlProblem(url: URL): PageUrlProblem | undefined {
  *
  * @param text - Untrusted URL text, such as a model's argument.
  * @returns `valid` with the normalized URL, or `invalid` with the first
- * problem: too long, not absolute, not `http` or `https`, carrying a
- * username or password, or naming this machine or a blocked IP address.
+ * problem: too long as given or once normalized, not absolute, not `http` or
+ * `https`, carrying a username or password, or naming this machine or a
+ * blocked IP address.
  * @remarks The URL parser normalizes odd spellings of an IP address, such as
  * `http://2130706433/`, before the host is checked.
  */
@@ -114,6 +120,9 @@ export function parsePageUrl(text: string): PageUrlResult {
   const url = URL.parse(text)
   if (url === null) {
     return Object.freeze({ status: "invalid", problem: "not-absolute" })
+  }
+  if (url.href.length > MAXIMUM_PAGE_URL_LENGTH) {
+    return Object.freeze({ status: "invalid", problem: "too-long" })
   }
   const problem = findPageUrlProblem(url)
   if (problem !== undefined) {

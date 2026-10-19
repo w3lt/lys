@@ -80,7 +80,8 @@ export function createChatToolCallNotPendingProblem(
 const BACKEND_TOOL_UNAVAILABLE_CLAUSES = Object.freeze({
   "api-key-missing": "no Tavily API key is saved.",
   "api-key-invalid": "the saved Tavily API key is not valid.",
-  "settings-unreadable": "Lys could not read its settings file."
+  "settings-unreadable": "Lys could not read its settings file.",
+  "page-reader-not-ready": "vmo, Lys's page reader, is not ready."
 } satisfies Readonly<Record<BackendToolUnavailableReason, string>>)
 
 /**

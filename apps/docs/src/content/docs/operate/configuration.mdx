@@ -36,9 +36,11 @@ and the TypeScript settings projection use the same camelCase field names. See
 the [configuration reference](/reference/configuration/) for the complete field
 list, defaults, and accepted values.
 
-The stored `model.contextSize` is a local token budget used by the composer and
-generation controls. It is separate from the context length a model is loaded
-with, which belongs to that model's load configuration.
+The stored `model.contextSize` is a local token budget used by the generation
+controls and the agent editor's prompt measure. It is separate from the
+context length a model is loaded with, which belongs to that model's load
+configuration. The composer's context meter does not use it: it shows the
+context length the loaded model reports.
 
 The `tools` group lists, in `justRun`, the tools set to Just run in Settings →
 Tools; every other tool asks before each call. The backend reads the list when
@@ -61,7 +63,9 @@ paragraph above and [Tavily API key](#tavily-api-key) describe. A save from a
 settings pane writes the values Lys holds over a hand edit of its group made
 while Lys runs: the Generation pane replaces `generation`, the Model pane
 replaces `loadConfiguration.models` and leaves `default` as it is in the file,
-the Secrets pane replaces `secrets`, and the Tools pane replaces `tools`.
+the Secrets pane replaces `secrets`, the Tools pane replaces `tools`, and the
+Runtime pane replaces `runtime.autoStartBackend` and `runtime.autoStartVmo`
+and leaves the rest of `runtime` as it is in the file.
 
 Missing groups and fields receive their Rust defaults; the `loadConfiguration`
 default is empty. Invalid JSON or invalid typed values fail loading; for
@@ -110,11 +114,15 @@ only the `loadConfiguration` group, and the Model pane offers the same retry
 action. The Secrets pane saves the Tavily API key only on Save or Enter,
 replacing only the `secrets` group. Choosing Ask me or Just run in the Tools
 pane autosaves the same way, replacing only the `tools` group, and the Tools
-pane offers the same retry action.
+pane offers the same retry action. Changing either startup switch in the
+Runtime pane, for the backend or for vmo, autosaves both switches and keeps
+the rest of the `runtime` group as it is on disk; after a failed save, the
+pane says that the next launch follows the switches last saved, and changing a
+switch tries the save again.
 
-Runtime edits and `model.contextSize` edits remain session-only. Changing those
-controls does not persist them, and a later automatic save does not save their
-in-memory values.
+The other runtime edits, such as the default model, and `model.contextSize`
+edits remain session-only. Changing those controls does not persist them, and
+a later automatic save does not save their in-memory values.
 
 ## Fixed runtime addresses
 
@@ -123,6 +131,7 @@ documented user-editable configuration source:
 
 - backend HTTP address: `127.0.0.1:12345`
 - LM Studio address used by the backend: `127.0.0.1:1234`
+- vmo address, used by the backend and the desktop host: `127.0.0.1:8080`
 
 The desktop store also derives its backend base URL from those same protocol
 constants. The persisted `runtime.backendAddress` is used in status copy;

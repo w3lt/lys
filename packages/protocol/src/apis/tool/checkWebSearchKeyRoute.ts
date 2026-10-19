@@ -1,5 +1,5 @@
 import * as z from "zod"
-import { backendToolUnavailableReasonSchema } from "./backendToolAvailability"
+import { webSearchKeyUnavailableReasonSchema } from "./backendToolAvailability"
 import { apiWebSearchKeyCheckRoute } from "./routes"
 
 /**
@@ -56,7 +56,7 @@ export const checkWebSearchKeyApiResponseSchema = z
     z.strictObject({
       status: z.literal("unavailable"),
       /** Why no key was sent. */
-      reason: backendToolUnavailableReasonSchema
+      reason: webSearchKeyUnavailableReasonSchema
     }),
     z.strictObject({
       status: z.literal("failed"),

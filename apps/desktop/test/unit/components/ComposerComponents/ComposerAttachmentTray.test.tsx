@@ -54,25 +54,6 @@ describe("ComposerAttachmentTray", () => {
     expect(onRemove).toHaveBeenCalledExactlyOnceWith("attachment-export")
   })
 
-  it("names the file blamed for an overflowing window in its remove button", () => {
-    render(
-      <ComposerAttachmentTray
-        attachments={[NOTES, EXPORT]}
-        onRemove={vi.fn()}
-        overflowingAttachmentId="attachment-export"
-      />
-    )
-
-    expect(
-      screen.getByRole("button", {
-        name: "Remove export.csv from context; it does not fit the window"
-      })
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole("button", { name: "Remove notes.md from context" })
-    ).toBeInTheDocument()
-  })
-
   it("renders an empty list when given no files", () => {
     render(<ComposerAttachmentTray attachments={[]} onRemove={vi.fn()} />)
 

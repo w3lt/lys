@@ -1,3 +1,4 @@
+import type { BackendToolUnavailableReason } from "@lys/protocol"
 import type { ComponentProps } from "react"
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
@@ -65,6 +66,10 @@ const BACKEND_TOOLS_ON = buildToolChoices(
   { read_page: true, web_search: true },
   ["read_page"]
 )
+
+/** `read_page` unavailable while vmo, Lys's page reader, isn't ready. */
+const PAGE_READER_NOT_READY: ReadonlyMap<string, BackendToolUnavailableReason> =
+  new Map([["read_page", "page-reader-not-ready"]])
 
 /**
  * Renders the group with spies for every proposal.
@@ -392,6 +397,26 @@ describe("ToolGroupSection", () => {
       screen.getByRole("switch", { name: "Use web_search" })
     ).toHaveAccessibleDescription(
       "Lys couldn't read settings.json. Fix that file by hand."
+    )
+    expect(screen.queryByRole("button", { name: "Open Secrets" })).toBeNull()
+  })
+
+  it("shows read_page off and disabled while vmo isn't ready, pointing to the Runtime pane", async () => {
+    const proposals = startToolGroup({
+      listing: SEARCH_GROUP,
+      toolChoices: BACKEND_TOOLS_ON,
+      unavailableTools: PAGE_READER_NOT_READY
+    })
+    const user = userEvent.setup()
+
+    const toolSwitch = screen.getByRole("switch", { name: "Use read_page" })
+    await user.click(toolSwitch)
+
+    expect(proposals.onToolOnChange).not.toHaveBeenCalled()
+    expect(toolSwitch).not.toBeChecked()
+    expect(toolSwitch).toHaveAttribute("aria-disabled", "true")
+    expect(toolSwitch).toHaveAccessibleDescription(
+      "vmo, Lys's page reader, isn't ready. See Settings → Runtime."
     )
     expect(screen.queryByRole("button", { name: "Open Secrets" })).toBeNull()
   })

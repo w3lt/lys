@@ -1,28 +1,43 @@
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
+import type { BackendServerInfo } from "@/lib/store"
 import { createStoredChatViewConversation } from "@/lib/store/chat-view/conversation-transitions"
-import { initialSettingsState, type LysSettings } from "@/lib/store/settings"
+import {
+  initialSettingsState,
+  type LysSettings,
+  type RuntimeSettings
+} from "@/lib/store/settings"
+import type { VmoServerInfo } from "@/lib/store/vmo-runtime"
 import {
   buildCompletedAssistantMessage,
   buildConversation,
   buildUserMessage,
   FIXTURE_CONVERSATION_ID
 } from "./support/conversationFixtures"
+import { buildJsonResponse, startBackendFake } from "./support/backendFake"
 import { startNativeHostFake } from "./support/nativeHostFake"
 import {
   createControlledPromise,
   waitForMicrotasks
 } from "./support/settlement"
 
-/** Saved settings that leave the backend stopped when Lys opens. */
-const MANUAL_START_SETTINGS: LysSettings = {
+/** Runtime group with both startup switches off. */
+const MANUAL_START_RUNTIME_SETTINGS: RuntimeSettings = Object.freeze({
+  ...initialSettingsState.runtime,
+  autoStartBackend: false,
+  autoStartVmo: false
+})
+
+/** Saved settings that leave the backend and vmo stopped when Lys opens. */
+const MANUAL_START_SETTINGS: LysSettings = Object.freeze({
   ...initialSettingsState,
-  runtime: { ...initialSettingsState.runtime, autoStartBackend: false }
-}
+  runtime: MANUAL_START_RUNTIME_SETTINGS
+})
 
 /**
- * Starts a native host whose backend process is stopped and stays stopped.
+ * Starts a native host whose backend process and vmo are stopped and stay
+ * stopped.
  *
  * @param loadSettings - Result of the settings read.
  * @returns The host observation handle.
@@ -32,7 +47,8 @@ function startStoppedDesktopHost(
 ) {
   return startNativeHostFake({
     load_settings: loadSettings,
-    get_backend_status: () => ({ running: false })
+    get_backend_status: () => ({ running: false }),
+    get_vmo_status: () => ({ status: "stopped" })
   })
 }
 
@@ -75,8 +91,48 @@ describe("App", () => {
     expect(screen.getByRole("banner")).toHaveTextContent("Lys")
     expect(host.commands.map((invoked) => invoked.command)).toEqual([
       "load_settings",
-      "get_backend_status"
+      "get_backend_status",
+      "get_vmo_status"
     ])
+  })
+
+  it("reads a tool list already read again when vmo starts running while mounted, and stops after unmount", async () => {
+    const host = startNativeHostFake({
+      load_settings: () => MANUAL_START_SETTINGS,
+      get_backend_status: () => ({ running: false }),
+      get_vmo_status: () => ({ status: "stopped" }),
+      list_tools: () => []
+    })
+    const backend = startBackendFake({
+      "GET /api/v1/tools": () =>
+        buildJsonResponse(200, { tools: [], unavailableTools: [] })
+    })
+    const { useLysStore, App } = await loadFreshApp()
+    const { useToolStore } = await import("@/lib/store/tools")
+    // Settings shows no view that reads the backend on its own.
+    useLysStore.setState({ activeView: "settings" })
+    const { unmount } = render(<App />)
+    await screen.findByRole("main", { name: "Settings" })
+    const runningBackend: BackendServerInfo = { status: "running" }
+    useLysStore.setState({ backendServerInfo: runningBackend })
+    await useToolStore.getState().loadTools()
+
+    const runningVmo: VmoServerInfo = { status: "running", problem: null }
+    act(() => {
+      useLysStore.setState({ vmoServerInfo: runningVmo })
+    })
+    await vi.waitFor(() => {
+      expect(backend.requests).toHaveLength(2)
+    })
+    unmount()
+    const stoppedVmo: VmoServerInfo = { status: "stopped", problem: null }
+    useLysStore.setState({ vmoServerInfo: stoppedVmo })
+    await waitForMicrotasks()
+
+    expect(backend.requests).toHaveLength(2)
+    expect(
+      host.commands.filter((invoked) => invoked.command === "list_tools")
+    ).toHaveLength(2)
   })
 
   it("switches to Settings and back to the chat on Done", async () => {

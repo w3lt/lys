@@ -12,13 +12,21 @@ preference.
 
 ## Shared constants
 
-| Constant        | Value       | Used by                                      |
-| --------------- | ----------- | -------------------------------------------- |
-| `API_PREFIX_V1` | `/api/v1`   | Route path composition                       |
-| `BACKEND_HOST`  | `127.0.0.1` | Backend bind host and desktop backend URL    |
-| `BACKEND_PORT`  | `12345`     | Backend bind port and desktop backend URL    |
-| `LMSTUDIO_HOST` | `127.0.0.1` | Backend LM Studio HTTP and WebSocket clients |
-| `LMSTUDIO_PORT` | `1234`      | Backend LM Studio HTTP and WebSocket clients |
+| Constant        | Value       | Used by                                                |
+| --------------- | ----------- | ------------------------------------------------------ |
+| `API_PREFIX_V1` | `/api/v1`   | Route path composition                                 |
+| `BACKEND_HOST`  | `127.0.0.1` | Backend bind host and desktop backend URL              |
+| `BACKEND_PORT`  | `12345`     | Backend bind port and desktop backend URL              |
+| `LMSTUDIO_HOST` | `127.0.0.1` | Backend LM Studio HTTP and WebSocket clients           |
+| `LMSTUDIO_PORT` | `1234`      | Backend LM Studio HTTP and WebSocket clients           |
+| `VMO_HOST`      | `127.0.0.1` | Backend page reads and health checks, desktop vmo card |
+| `VMO_PORT`      | `8080`      | Backend page reads and health checks, desktop vmo card |
+
+The Tauri host's health check of vmo and vmo's own listener are Rust and
+Swift, so they declare `127.0.0.1:8080` again. A desktop unit test fails when
+either copy differs from `VMO_HOST` and `VMO_PORT`, so changing vmo's address
+means changing all three; see the
+[vmo address copy exception](/reference/standard-application/#vmo-address-copy-exception).
 
 ## Lys home directory
 
@@ -38,13 +46,13 @@ A rejected value stops the desktop app before any window opens and prints
 `Lys cannot start: …` to standard error. The host does not create the directory
 at startup; loading settings creates it when `settings.json` is missing.
 
-| Path under `$LYS_HOME`                                | Used by        | Contents                                                |
-| ----------------------------------------------------- | -------------- | ------------------------------------------------------- |
-| `settings.json`                                       | Tauri host     | [Persisted settings JSON](#persisted-settings-json)     |
-| `lys_db.sqlite`                                       | Backend        | Conversation database                                   |
-| `runtime/node/bin/node`                               | Release builds | Node.js executable that runs the backend                |
-| `runtime/backend/backend.mjs`                         | Release builds | Backend bundle that the release Node.js executable runs |
-| `runtime/chrome-headless-shell/chrome-headless-shell` | Backend        | Browser `read_page` reads every page in                 |
+| Path under `$LYS_HOME`        | Used by        | Contents                                                                            |
+| ----------------------------- | -------------- | ----------------------------------------------------------------------------------- |
+| `settings.json`               | Tauri host     | [Persisted settings JSON](#persisted-settings-json)                                 |
+| `lys_db.sqlite`               | Backend        | Conversation database                                                               |
+| `runtime/node/bin/node`       | Release builds | Node.js executable that runs the backend                                            |
+| `runtime/backend/backend.mjs` | Release builds | Backend bundle that the release Node.js executable runs                             |
+| `runtime/vmo/vmo`             | Release builds | vmo, the page reader the desktop starts, signed with the virtualization entitlement |
 
 On macOS, `build.sh` installs the three `runtime/` entries under
 `${LYS_HOME:-$HOME/.lys}`. It treats an empty value as unset but does not reject
@@ -55,7 +63,7 @@ uses an absolute path as given. It stops with `LYS_HOME is not set` when the
 variable is unset or empty. A relative path, including an unexpanded `~/…`,
 stops it with `LYS_HOME must be an absolute path, got "…"`, quoting the value.
 The desktop host sets `LYS_HOME` to its resolved Lys home for the
-backend it starts, in development and release builds. The root `backend:dev`
+backend it starts, in development and release builds. vmo does not read it. The root `backend:dev`
 script sets `LYS_HOME` to `$HOME/.lys`.
 
 :::caution[Apps opened from Finder or the Dock]
@@ -67,19 +75,19 @@ not find a runtime that `build.sh` installed under another directory.
 
 ## Backend-composed values
 
-| Value                          | Current source                                                                                                                                                             |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Backend listen address         | `BACKEND_HOST` and `BACKEND_PORT`                                                                                                                                          |
-| LM Studio HTTP base URL        | `http://${LMSTUDIO_HOST}:${LMSTUDIO_PORT}/v1`                                                                                                                              |
-| LM Studio WebSocket base URL   | `ws://${LMSTUDIO_HOST}:${LMSTUDIO_PORT}`                                                                                                                                   |
-| SQLite path                    | `$LYS_HOME/lys_db.sqlite`; see [Lys home directory](#lys-home-directory)                                                                                                   |
-| Settings file path             | `$LYS_HOME/settings.json`, as `settingsFilePath`; read for the Tavily API key                                                                                              |
-| Browser executable path        | `$LYS_HOME/runtime/chrome-headless-shell/chrome-headless-shell`, as `browserExecutablePath`; the Chrome Headless Shell `build.sh` installs and every `read_page` read runs |
-| Caliginia system prompt        | `src/utils/prompts/caliginia.txt`, as `caliginiaSystemPrompt`                                                                                                              |
-| Lysiptera system prompt        | `src/utils/prompts/lysiptera.txt`, as `lysipteraSystemPrompt`                                                                                                              |
-| Title-generation prompt        | `src/utils/prompts/title-generation.txt`, as `titleGenerationPrompt`                                                                                                       |
-| Title-generation attempt limit | `3`, from `titleGenerationMaxAttempts` in `src/config.ts`; must be a positive integer                                                                                      |
-| Generated title length limit   | `100`, from `generatedTitleMaxLength` in `src/config.ts`; must be a positive integer                                                                                       |
+| Value                          | Current source                                                                                                                                                                                                    |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Backend listen address         | `BACKEND_HOST` and `BACKEND_PORT`                                                                                                                                                                                 |
+| LM Studio HTTP base URL        | `http://${LMSTUDIO_HOST}:${LMSTUDIO_PORT}/v1`                                                                                                                                                                     |
+| LM Studio WebSocket base URL   | `ws://${LMSTUDIO_HOST}:${LMSTUDIO_PORT}`                                                                                                                                                                          |
+| SQLite path                    | `$LYS_HOME/lys_db.sqlite`; see [Lys home directory](#lys-home-directory)                                                                                                                                          |
+| Settings file path             | `$LYS_HOME/settings.json`, as `settingsFilePath`; read for the Tavily API key                                                                                                                                     |
+| vmo endpoint                   | `127.0.0.1:8080`, as `vmoHost` and `vmoPort`, from `VMO_HOST` and `VMO_PORT` in `@lys/protocol`; where vmo listens. It reads every `read_page` page, and its `GET /health` decides whether `read_page` is offered |
+| Caliginia system prompt        | `src/utils/prompts/caliginia.txt`, as `caliginiaSystemPrompt`                                                                                                                                                     |
+| Lysiptera system prompt        | `src/utils/prompts/lysiptera.txt`, as `lysipteraSystemPrompt`                                                                                                                                                     |
+| Title-generation prompt        | `src/utils/prompts/title-generation.txt`, as `titleGenerationPrompt`                                                                                                                                              |
+| Title-generation attempt limit | `3`, from `titleGenerationMaxAttempts` in `src/config.ts`; must be a positive integer                                                                                                                             |
+| Generated title length limit   | `100`, from `generatedTitleMaxLength` in `src/config.ts`; must be a positive integer                                                                                                                              |
 
 `loadBackendConfig()` builds these values once when the backend starts, so a
 changed `LYS_HOME`, prompt file, or limit takes effect after a restart. The
@@ -97,9 +105,10 @@ and no defaults are applied.
 | Key                                                                       | Accepted values                                                                               |
 | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | `backendHost`                                                             | An IPv4 loopback address (`127.x.x.x`); the backend does not authenticate non-browser callers |
-| `backendPort`, `lmstudioPort`                                             | An integer from 1 to 65535                                                                    |
+| `backendPort`, `lmstudioPort`, `vmoPort`                                  | An integer from 1 to 65535                                                                    |
 | `lmstudioHost`                                                            | A host name or IPv4 address, used unbracketed in the `http://` and `ws://` URLs               |
-| `databaseFilePath`, `settingsFilePath`, `browserExecutablePath`           | An absolute path                                                                              |
+| `vmoHost`                                                                 | An IPv4 loopback address (`127.x.x.x`); vmo does not authenticate its callers                 |
+| `databaseFilePath`, `settingsFilePath`                                    | An absolute path                                                                              |
 | `caliginiaSystemPrompt`, `lysipteraSystemPrompt`, `titleGenerationPrompt` | Non-empty text without leading or trailing whitespace                                         |
 | `titleGenerationMaxAttempts`, `generatedTitleMaxLength`                   | A positive integer                                                                            |
 
@@ -117,6 +126,7 @@ defaults:
 {
   "runtime": {
     "autoStartBackend": true,
+    "autoStartVmo": true,
     "defaultModel": null,
     "backendAddress": "http://127.0.0.1:12345"
   },
@@ -143,6 +153,7 @@ defaults:
 | Key                        | Type                    | Meaning                                                                                                          |
 | -------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | `runtime.autoStartBackend` | `boolean`               | Whether desktop initialization should ask Tauri to start the backend automatically                               |
+| `runtime.autoStartVmo`     | `boolean`               | Whether desktop initialization should ask Tauri to start vmo, the page reader `read_page` uses                   |
 | `runtime.defaultModel`     | `string \| null`        | Preferred model used when it is loaded; otherwise the first loaded inventory entry is the fallback               |
 | `runtime.backendAddress`   | `string`                | Backend address displayed in settings; HTTP clients still target the fixed loopback address                      |
 | `model.contextSize`        | unsigned 32-bit integer | Context-size estimate displayed in the Model pane; not forwarded by the load API                                 |
@@ -288,9 +299,18 @@ calls keep following the choices last saved, and the pane exposes a retry
 action. Tool calls on or off and each tool's switch remain session-only and
 apply to the next chat request.
 
-Runtime edits, including auto-start and default-model selection, remain in memory
-for the current session. Edits to `model.contextSize` also remain session-only.
-A generation or load configuration save does not persist those unsaved groups.
+The Runtime pane's two startup switches, "Start it when Lys opens" for the
+backend and "Start vmo when Lys opens", are saved automatically the same way
+whenever either changes. The save writes both switches and keeps the rest of
+the `runtime` group as it is in the file; the latest switches win. They apply
+the next time Lys opens, or the window reloads, because both read them from
+the file. After a failed save, that next launch follows the switches last
+saved, the pane says so, and changing a switch tries the save again. A file
+saved before `autoStartVmo` existed loads with it on.
+
+The other runtime edits, such as default-model selection, remain in memory for
+the current session. Edits to `model.contextSize` also remain session-only.
+A save of another group does not persist those unsaved edits.
 
 ## Desktop theme preference
 
@@ -300,18 +320,23 @@ the value is missing, invalid, or unavailable.
 
 ## Current caveats
 
-- The React shell loads runtime settings from Tauri, but runtime and model edits,
-  including `runtime.defaultModel`, are not persisted back through `save_settings`.
-- `model.contextSize` is still a separate local estimate. The composer's
-  context meter uses it and does not follow the context length a model is
-  loaded with.
+- The React shell loads runtime settings from Tauri, but runtime edits other
+  than the two startup switches, including `runtime.defaultModel`, and model
+  edits are not persisted back through `save_settings`.
+- `model.contextSize` is still a separate local estimate, used by the
+  generation controls and the agent editor's prompt measure. It does not
+  follow the context length a model is loaded with. The composer's context
+  meter does not use it: it shows the context length the loaded model reports
+  through [`POST /api/v1/chat/context`](/reference/api/#chat-context-measurement).
 - LM Studio applies its own settings when it loads a model by itself, for
   example when a chat request names a model that is not loaded. The load
-  configuration applies only to loads Lys starts.
+  configuration applies only to loads Lys starts. The backend checks that the
+  model is loaded before each reply round and each title request, so this
+  happens only when the model is unloaded between that check and the request.
 
 ## Coming soon
 
-- Persisting runtime and model edits back to `settings.json`
+- Persisting the default model and model edits back to `settings.json`
 - Release-mode configuration beyond the current loopback defaults
 
 ## Related pages

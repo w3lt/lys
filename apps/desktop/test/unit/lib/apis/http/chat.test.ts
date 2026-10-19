@@ -4,12 +4,15 @@ import {
   chatToolApprovalAnswerSchema,
   chatToolCallNotPendingProblemSchema,
   chatToolResultSchema,
-  conversationAgentMissingProblemSchema
+  conversationAgentMissingProblemSchema,
+  createLlmServiceBusyProblem,
+  type BackendToolUnavailableReason
 } from "@lys/protocol"
 import { CALIGINIA_AGENT_CODE } from "@lys/share"
 import { describe, expect, it } from "vitest"
 import {
   BackendToolUnavailableError,
+  getChatContextMeasurement,
   readChatEvents,
   readChatReplyEvents,
   sendChatToolApproval,
@@ -36,6 +39,10 @@ import {
   createFixtureUuidV7,
   FIXTURE_CONVERSATION_ID
 } from "../../../support/conversationFixtures"
+import {
+  CHAT_CONTEXT_ROUTE,
+  FIXTURE_CHAT_CONTEXT_MEASUREMENT
+} from "../../../support/chatContextFixtures"
 import {
   buildToolCall,
   buildToolDefinition
@@ -115,18 +122,20 @@ const CONVERSATION_AGENT_MISSING_PROBLEM =
  * Builds the problem the backend sends when an offered backend tool cannot
  * run now.
  *
+ * @param toolName - Tool that cannot run.
  * @param reason - Why the tool cannot run.
  * @returns The problem, validated by the shared schema.
  */
 function buildBackendToolUnavailableProblem(
-  reason: "api-key-missing" | "api-key-invalid" | "settings-unreadable"
+  toolName: string,
+  reason: BackendToolUnavailableReason
 ) {
   return chatBackendToolUnavailableProblemSchema.parse({
     type: "urn:lys:problem:chat:backend-tool-unavailable",
     title: "Backend tool unavailable",
     status: 409,
-    detail: "The offered tool web_search cannot run now.",
-    toolName: "web_search",
+    detail: `The offered tool ${toolName} cannot run now.`,
+    toolName,
     reason
   })
 }
@@ -275,23 +284,34 @@ describe("readChatEvents", () => {
 
   it.each([
     [
+      "web_search",
       "api-key-missing",
       "web_search is unavailable: no Tavily API key is saved. Add one in Settings → Secrets, or switch web_search off."
     ],
     [
+      "web_search",
       "api-key-invalid",
       "web_search is unavailable: the Tavily API key in settings.json isn't valid. Fix or remove secrets.tavilyApiKey in that file, or switch web_search off."
     ],
     [
+      "web_search",
       "settings-unreadable",
       "web_search is unavailable: Lys couldn't read settings.json. Fix that file by hand, or switch web_search off."
+    ],
+    [
+      "read_page",
+      "page-reader-not-ready",
+      "read_page is unavailable: vmo, Lys's page reader, isn't ready. See Settings → Runtime, or switch read_page off."
     ]
   ] as const)(
-    "reports an offered tool that cannot run because of %s, with what to do",
-    async (reason, message) => {
+    "reports %s that cannot run because of %s, with what to do",
+    async (toolName, reason, message) => {
       startBackendFake({
         [CHAT_ROUTE]: () =>
-          buildJsonResponse(409, buildBackendToolUnavailableProblem(reason))
+          buildJsonResponse(
+            409,
+            buildBackendToolUnavailableProblem(toolName, reason)
+          )
       })
 
       const failure = await listStreamEvents(
@@ -695,5 +715,155 @@ describe("sendChatToolApproval", () => {
         backendUrl: FIXTURE_BACKEND_URL
       })
     ).rejects.toMatchObject({ cause: transportFailure })
+  })
+})
+
+describe("getChatContextMeasurement", () => {
+  /** Measurement request of a new conversation Caliginia answers. */
+  const MEASUREMENT_REQUEST = Object.freeze({
+    conversation: { kind: "new", agentCode: CALIGINIA_AGENT_CODE },
+    model: "qwen3-8b"
+  } as const)
+
+  it("sends the request to the caller's backend with its signal, uncached, and returns the measurement", async () => {
+    const backend = startBackendFake({
+      [CHAT_CONTEXT_ROUTE]: () =>
+        buildJsonResponse(200, FIXTURE_CHAT_CONTEXT_MEASUREMENT)
+    })
+    const { signal } = new AbortController()
+
+    await expect(
+      getChatContextMeasurement(MEASUREMENT_REQUEST, {
+        backendUrl: FIXTURE_BACKEND_URL,
+        signal
+      })
+    ).resolves.toEqual({
+      status: "measured",
+      measurement: FIXTURE_CHAT_CONTEXT_MEASUREMENT
+    })
+    expect(backend.requests[0]).toMatchObject({
+      url: `${FIXTURE_BACKEND_URL}/api/v1/chat/context`,
+      body: MEASUREMENT_REQUEST,
+      cache: "no-store",
+      signal
+    })
+  })
+
+  it("reports a model LM Studio has not loaded", async () => {
+    startBackendFake({
+      [CHAT_CONTEXT_ROUTE]: () =>
+        buildJsonResponse(503, {
+          type: "urn:lys:problem:llm:model-not-loaded",
+          title: "Model not loaded",
+          status: 503,
+          detail: "The model is not loaded in LM Studio."
+        })
+    })
+
+    await expect(
+      getChatContextMeasurement(MEASUREMENT_REQUEST, {
+        backendUrl: FIXTURE_BACKEND_URL,
+        signal: new AbortController().signal
+      })
+    ).resolves.toEqual({ status: "model-not-loaded" })
+  })
+
+  it.each([
+    ["a busy model-operation queue", createLlmServiceBusyProblem()],
+    [
+      "an unreachable LM Studio",
+      {
+        type: "urn:lys:problem:llm:runtime-unavailable",
+        title: "LLM runtime unavailable",
+        status: 503,
+        detail:
+          "LM Studio is not reachable. Start LM Studio, then refresh its status in Lys."
+      }
+    ]
+  ])("rejects with the backend's sentence for %s", async (_label, problem) => {
+    startBackendFake({
+      [CHAT_CONTEXT_ROUTE]: () => buildJsonResponse(503, problem)
+    })
+
+    await expect(
+      getChatContextMeasurement(MEASUREMENT_REQUEST, {
+        backendUrl: FIXTURE_BACKEND_URL,
+        signal: new AbortController().signal
+      })
+    ).rejects.toThrow(problem.detail)
+  })
+
+  it.each([
+    ["an undeclared problem", 404, { detail: "Not Found" }],
+    ["a server failure", 500, { detail: "boom" }]
+  ])("rejects %s with its status", async (_label, status, body) => {
+    startBackendFake({
+      [CHAT_CONTEXT_ROUTE]: () => buildJsonResponse(status, body)
+    })
+
+    await expect(
+      getChatContextMeasurement(MEASUREMENT_REQUEST, {
+        backendUrl: FIXTURE_BACKEND_URL,
+        signal: new AbortController().signal
+      })
+    ).rejects.toThrow(
+      `The context could not be measured (HTTP ${String(status)}).`
+    )
+  })
+
+  it("rejects a measurement that does not match the contract, keeping the reason as its cause", async () => {
+    startBackendFake({
+      [CHAT_CONTEXT_ROUTE]: () =>
+        buildJsonResponse(200, {
+          ...FIXTURE_CHAT_CONTEXT_MEASUREMENT,
+          contextLength: 0
+        })
+    })
+
+    await expect(
+      getChatContextMeasurement(MEASUREMENT_REQUEST, {
+        backendUrl: FIXTURE_BACKEND_URL,
+        signal: new AbortController().signal
+      })
+    ).rejects.toMatchObject({
+      message: "The backend sent an invalid context measurement.",
+      cause: expect.any(Error)
+    })
+  })
+
+  it("rejects when the backend cannot be reached and keeps the transport failure as its cause", async () => {
+    const transportFailure = createTransportFailure()
+    startBackendFake({
+      [CHAT_CONTEXT_ROUTE]: () => {
+        throw transportFailure
+      }
+    })
+
+    await expect(
+      getChatContextMeasurement(MEASUREMENT_REQUEST, {
+        backendUrl: FIXTURE_BACKEND_URL,
+        signal: new AbortController().signal
+      })
+    ).rejects.toMatchObject({
+      message: "The backend could not be reached.",
+      cause: transportFailure
+    })
+  })
+
+  it("rejects with the abort reason when the signal aborts", async () => {
+    startBackendFake({
+      [CHAT_CONTEXT_ROUTE]: () =>
+        buildJsonResponse(200, FIXTURE_CHAT_CONTEXT_MEASUREMENT)
+    })
+    const controller = new AbortController()
+    const reason = new Error("The composer moved on.")
+    controller.abort(reason)
+
+    await expect(
+      getChatContextMeasurement(MEASUREMENT_REQUEST, {
+        backendUrl: FIXTURE_BACKEND_URL,
+        signal: controller.signal
+      })
+    ).rejects.toBe(reason)
   })
 })

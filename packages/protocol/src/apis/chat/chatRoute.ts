@@ -47,7 +47,7 @@ export const messageGenerationOptionsSchema = z.strictObject({
  * or stored agent that answers it; a continued conversation keeps the agent
  * it was started with, so it names none.
  */
-const chatConversationTargetSchema = z.discriminatedUnion("kind", [
+export const chatConversationTargetSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     /** The turn starts a new conversation. */
     kind: z.literal("new"),
@@ -146,7 +146,7 @@ function hasDistinctOfferedToolNames(offer: ChatToolOfferCandidate): boolean {
  * offered backend tool that cannot run now (409). Offered only to a model
  * trained for tool use.
  */
-const chatToolOfferSchema = chatToolOfferListsSchema
+export const chatToolOfferSchema = chatToolOfferListsSchema
   .refine(hasOfferedTool, "A tool offer names at least one tool.")
   .refine(
     hasDistinctOfferedToolNames,

@@ -3,37 +3,9 @@ import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import ComposerContextMeter from "@/components/ComposerComponents/ComposerContextMeter"
 import {
-  calculateContextUsage,
-  type ComposerAttachment
+  buildContextMeterState,
+  type ContextMeterState
 } from "@/components/ComposerComponents/composer-context"
-
-/**
- * Builds turns whose text estimates to the given token counts.
- *
- * @param lengths - Text lengths, oldest first; 37 characters estimate to 10
- * tokens.
- * @returns The turns.
- */
-function buildTurns(...lengths: number[]) {
-  return lengths.map((length, index) => ({
-    id: `turn-${index}`,
-    text: "x".repeat(length)
-  }))
-}
-
-/**
- * Builds one staged attachment.
- *
- * @param name - File name.
- * @param estimatedTokens - Estimated tokens it occupies.
- * @returns The attachment.
- */
-function buildAttachment(
-  name: string,
-  estimatedTokens: number
-): ComposerAttachment {
-  return { id: `attachment-${name}`, name, kind: "txt", estimatedTokens }
-}
 
 /**
  * Statements that turns were, are, or will be compacted into a recap sent in
@@ -45,35 +17,50 @@ function buildAttachment(
 const COMPACTION_CLAIM =
   /compacted into a recap|sent in their place|(?:are|were|will be) compacted|\d+ compacted/i
 
-/** A window that still fits a two-turn conversation (126 of 8,192 tokens). */
-const FITTING_USAGE = calculateContextUsage({
-  budget: 8192,
-  reserve: 1024,
-  turns: buildTurns(37, 74),
-  attachments: []
+/** Measurement of a conversation with four earlier messages and tools. */
+const MEASUREMENT = Object.freeze({
+  contextLength: 8192,
+  systemPromptTokens: 2260,
+  toolTokens: 410,
+  historyTokens: 1000,
+  historyMessageCount: 4,
+  messageMarkupTokens: 8
 })
 
-/** A window whose oldest turn no longer fits (944 of 1,000 tokens). */
-const COMPACTED_USAGE = calculateContextUsage({
-  budget: 1000,
-  reserve: 0,
-  turns: buildTurns(740, 1110, 1850),
-  attachments: []
-})
+/**
+ * A window that fits: 3,688 measured and estimated tokens and a 1,024-token
+ * reserve of 8,192; the 37-character draft estimates to 10 tokens, plus 8 for
+ * the markup around it.
+ */
+const FITTING_METER = buildContextMeterState(
+  { status: "measured", measurement: MEASUREMENT },
+  { draft: "x".repeat(37), reserve: 1024 }
+)
 
-/** Attachments that overflow the window by 196 tokens. */
-const OVERFLOW_ATTACHMENTS = [
-  buildAttachment("small.txt", 100),
-  buildAttachment("large.txt", 800)
-]
+/** A window the conversation and the reserve overflow by 512 tokens. */
+const OVERFLOWING_METER = buildContextMeterState(
+  {
+    status: "measured",
+    measurement: { ...MEASUREMENT, historyTokens: 4992 }
+  },
+  { draft: "x".repeat(37), reserve: 1024 }
+)
 
-/** A window the staged attachments overflow. */
-const OVERFLOW_USAGE = calculateContextUsage({
-  budget: 1000,
-  reserve: 200,
-  turns: [],
-  attachments: OVERFLOW_ATTACHMENTS
-})
+/**
+ * Renders the meter on its own.
+ *
+ * @param meter - What is known about the window.
+ * @param hasStagedFiles - Whether files are staged; none by default.
+ */
+function renderMeter(meter: ContextMeterState, hasStagedFiles = false): void {
+  render(
+    <ComposerContextMeter
+      hasStagedFiles={hasStagedFiles}
+      meter={meter}
+      onChangeWindow={vi.fn()}
+    />
+  )
+}
 
 /**
  * Opens the meter's panel by pressing its trigger.
@@ -107,138 +94,103 @@ function listBreakdownRows(panel: HTMLElement): string[] {
 
 describe("ComposerContextMeter", () => {
   it("names the window's use and keeps its panel closed until asked", () => {
-    render(
-      <ComposerContextMeter
-        attachments={[]}
-        onChangeWindow={vi.fn()}
-        usage={FITTING_USAGE}
-      />
-    )
+    renderMeter(FITTING_METER)
 
     const trigger = screen.getByRole("button", {
-      name: "Context window · 126 / 8.2k"
+      name: "Context window · 3.7k / 8.2k"
     })
     expect(trigger).toHaveAttribute("aria-expanded", "false")
     expect(screen.queryByText("window")).not.toBeInTheDocument()
   })
 
-  it("breaks a fitting window down into estimates", async () => {
+  it("breaks a measured window down in send order, with the window the model is loaded with", async () => {
     const user = userEvent.setup()
-    render(
-      <ComposerContextMeter
-        attachments={[]}
-        onChangeWindow={vi.fn()}
-        usage={FITTING_USAGE}
-      />
-    )
+    renderMeter(FITTING_METER)
 
     const { trigger, panel } = await openMeterPanel(user)
 
     expect(trigger).toHaveAttribute("aria-expanded", "true")
     expect(panel).toHaveTextContent("8.2k tokens")
     expect(listBreakdownRows(panel)).toEqual([
-      "Backend preamble: ~96",
-      "Attached files: none",
-      "2 turns in the window: ~30",
-      "Room left: ~7.0k",
+      "Agent instructions: ~2.3k",
+      "Tool definitions: ~410",
+      "4 earlier messages: ~1.0k",
+      "Your message: ~18",
+      "Room left: ~3.5k",
       "Reserved for the reply: ~1.0k"
     ])
+    expect(panel).toHaveTextContent(
+      "Counted with the model's tokenizer; your message is estimated. Lys sends every earlier message with each new one and never shortens them."
+    )
   })
 
-  it("counts one kept turn in the singular", async () => {
+  it("shows no tools and no earlier messages for a new conversation without tools", async () => {
     const user = userEvent.setup()
-    render(
-      <ComposerContextMeter
-        attachments={[]}
-        onChangeWindow={vi.fn()}
-        usage={calculateContextUsage({
-          budget: 8192,
-          reserve: 0,
-          turns: buildTurns(37),
-          attachments: []
-        })}
-      />
+    renderMeter(
+      buildContextMeterState(
+        {
+          status: "measured",
+          measurement: {
+            ...MEASUREMENT,
+            toolTokens: 0,
+            historyTokens: 0,
+            historyMessageCount: 0
+          }
+        },
+        { draft: "", reserve: 0 }
+      )
     )
 
     const { panel } = await openMeterPanel(user)
 
-    expect(listBreakdownRows(panel)).toContain("1 turn in the window: ~10")
+    expect(listBreakdownRows(panel)).toEqual([
+      "Agent instructions: ~2.3k",
+      "Tool definitions: none",
+      "Earlier messages: none",
+      "Your message: ~8",
+      "Room left: ~5.9k",
+      "Reserved for the reply: ~0"
+    ])
   })
 
-  it("names the overflow and the largest attachment causing it", async () => {
+  it("counts one earlier message in the singular", async () => {
     const user = userEvent.setup()
-    render(
-      <ComposerContextMeter
-        attachments={OVERFLOW_ATTACHMENTS}
-        largestAttachment={OVERFLOW_ATTACHMENTS[1]}
-        onChangeWindow={vi.fn()}
-        usage={OVERFLOW_USAGE}
-      />
+    renderMeter(
+      buildContextMeterState(
+        {
+          status: "measured",
+          measurement: { ...MEASUREMENT, historyMessageCount: 1 }
+        },
+        { draft: "", reserve: 0 }
+      )
     )
+
+    const { panel } = await openMeterPanel(user)
+
+    expect(listBreakdownRows(panel)).toContain("1 earlier message: ~1.0k")
+  })
+
+  it("names the overflow and what to do about it", async () => {
+    const user = userEvent.setup()
+    renderMeter(OVERFLOWING_METER)
 
     const { trigger, panel } = await openMeterPanel(user)
 
-    expect(trigger).toHaveAccessibleName("Context window · over by ~196")
-    expect(listBreakdownRows(panel)).toEqual([
-      "Backend preamble: ~96",
-      "Attached files: ~900",
-      "0 turns in the window: ~0",
-      "Over the window: ~196",
-      "Reserved for the reply: ~200"
-    ])
+    expect(trigger).toHaveAccessibleName("Context window · over by ~512")
+    expect(listBreakdownRows(panel)).toContain("Over the window: ~512")
     expect(panel).toHaveTextContent(
-      "“large.txt” is ~800 on its own — remove it, or raise the window past 1.2k."
+      "This message would not fit. Lys sends every earlier message with each new one and never shortens them, so start a new conversation, shorten your message, or load the model with a longer context."
     )
   })
 
-  it("asks to remove an attachment or raise the window when no attachment is named", async () => {
-    const user = userEvent.setup()
-    render(
-      <ComposerContextMeter
-        attachments={OVERFLOW_ATTACHMENTS}
-        onChangeWindow={vi.fn()}
-        usage={OVERFLOW_USAGE}
-      />
-    )
-
-    const { panel } = await openMeterPanel(user)
-
-    expect(panel).toHaveTextContent("Remove an attachment or raise the window.")
-  })
-
-  // Known defect, tracked by #29: the meter promises that the oldest turns
-  // will be compacted into a recap, which Lys does not do.
-  it.fails(
-    "describes a fitting window without promising compaction (#29)",
-    async () => {
+  it.each([
+    ["a window that fits", FITTING_METER],
+    ["a window that overflows", OVERFLOWING_METER]
+  ])(
+    "describes %s without claiming or promising compaction (#29)",
+    async (_scenario, meter) => {
       const user = userEvent.setup()
-      render(
-        <ComposerContextMeter
-          attachments={[]}
-          onChangeWindow={vi.fn()}
-          usage={FITTING_USAGE}
-        />
-      )
-
-      const { panel } = await openMeterPanel(user)
-
-      expect(panel).not.toHaveTextContent(COMPACTION_CLAIM)
-    }
-  )
-
-  // Known defect, tracked by #29: the meter says turns were compacted into a
-  // recap that is sent in their place; no recap is made or sent.
-  it.fails(
-    "describes turns beyond the window without claiming a recap is sent (#29)",
-    async () => {
-      const user = userEvent.setup()
-      render(
-        <ComposerContextMeter
-          attachments={[]}
-          onChangeWindow={vi.fn()}
-          usage={COMPACTED_USAGE}
-        />
-      )
+      renderMeter(meter)
 
       const { trigger, panel } = await openMeterPanel(user)
 
@@ -247,14 +199,57 @@ describe("ComposerContextMeter", () => {
     }
   )
 
+  it("says staged files are not counted while files are staged", async () => {
+    const user = userEvent.setup()
+    renderMeter(FITTING_METER, true)
+
+    const { panel } = await openMeterPanel(user)
+
+    expect(panel).toHaveTextContent(
+      "Staged files are not sent yet, so they are not counted."
+    )
+  })
+
+  it("says it is measuring before the first measurement settles", async () => {
+    const user = userEvent.setup()
+    renderMeter({ status: "measuring" })
+
+    const { panel } = await openMeterPanel(user)
+
+    expect(
+      screen.getByRole("button", { name: "Context window · measuring…" })
+    ).toBeInTheDocument()
+    expect(within(panel).queryAllByRole("term")).toEqual([])
+    expect(panel).toHaveTextContent(
+      "Measuring what your next message would be sent with."
+    )
+  })
+
+  it("says why the window is unknown and that sending still checks it", async () => {
+    const user = userEvent.setup()
+    renderMeter({
+      status: "unknown",
+      reason: "The backend could not be reached."
+    })
+
+    const { panel } = await openMeterPanel(user)
+
+    expect(
+      screen.getByRole("button", { name: "Context window · window unknown" })
+    ).toBeInTheDocument()
+    expect(panel).toHaveTextContent(
+      "The backend could not be reached. Sending still checks that the conversation fits the model."
+    )
+  })
+
   it("asks to change the window once per press", async () => {
     const onChangeWindow = vi.fn()
     const user = userEvent.setup()
     render(
       <ComposerContextMeter
-        attachments={[]}
+        hasStagedFiles={false}
+        meter={FITTING_METER}
         onChangeWindow={onChangeWindow}
-        usage={FITTING_USAGE}
       />
     )
     await openMeterPanel(user)
@@ -268,9 +263,9 @@ describe("ComposerContextMeter", () => {
     const user = userEvent.setup()
     render(
       <ComposerContextMeter
-        attachments={[]}
+        hasStagedFiles={false}
+        meter={FITTING_METER}
         onChangeWindow={vi.fn()}
-        usage={FITTING_USAGE}
       />
     )
     const { trigger } = await openMeterPanel(user)
@@ -290,9 +285,9 @@ describe("ComposerContextMeter", () => {
     render(
       <>
         <ComposerContextMeter
-          attachments={[]}
+          hasStagedFiles={false}
+          meter={FITTING_METER}
           onChangeWindow={vi.fn()}
-          usage={FITTING_USAGE}
         />
         <p>Elsewhere</p>
       </>
@@ -311,9 +306,9 @@ describe("ComposerContextMeter", () => {
     render(
       <>
         <ComposerContextMeter
-          attachments={[]}
+          hasStagedFiles={false}
+          meter={FITTING_METER}
           onChangeWindow={vi.fn()}
-          usage={FITTING_USAGE}
         />
         <button type="button">Elsewhere</button>
       </>
@@ -332,9 +327,9 @@ describe("ComposerContextMeter", () => {
     const user = userEvent.setup()
     render(
       <ComposerContextMeter
-        attachments={[]}
+        hasStagedFiles={false}
+        meter={FITTING_METER}
         onChangeWindow={vi.fn()}
-        usage={FITTING_USAGE}
       />
     )
     const { trigger } = await openMeterPanel(user)

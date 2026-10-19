@@ -10,7 +10,10 @@ import {
 
 /** What the model is shown about one page it read. */
 export type PageEvidenceInput = Readonly<{
-  /** URL the page came from, after every redirect. */
+  /**
+   * URL Lys asked to read; where the page's redirects led, if anywhere, is
+   * not known.
+   */
   url: PageUrl
   /** Number Lys gave the page as a source of the conversation. */
   sourceNumber: number
@@ -67,7 +70,8 @@ function formatPageField(text: string): string {
 /**
  * Builds the source a page read shows, before it is numbered.
  *
- * @param url - URL the page came from, after every redirect.
+ * @param url - URL Lys asked to read; where the page's redirects led, if
+ * anywhere, is not known.
  * @param article - Article whose title the page stated.
  * @returns The URL and the title as the model sees it, or the URL's host
  * when the title has nothing left to show.

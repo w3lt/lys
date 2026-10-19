@@ -1,180 +1,115 @@
 import type { ReactElement } from "react"
+import BackendStatusCard from "./BackendStatusCard"
 import LmStudioStatusCard from "./LmStudioStatusCard"
 import ModelRequestFeedback from "./ModelRequestFeedback"
-import { Button } from "@/components/ui/button"
-import { Switch } from "@/components/ui/switch"
-import {
-  calculateBackendStatusTone,
-  formatBackendStatusLabel,
-  formatUptime,
-  useBackendUptimeMs
-} from "@/lib/hooks/backendRuntime"
+import ModelResidencyCard from "./ModelResidencyCard"
+import StartupSwitchSaveStatus from "./StartupSwitchSaveStatus"
+import VmoStatusCard from "./VmoStatusCard"
+import { useBackendUptimeMs } from "@/lib/hooks/backendRuntime"
 import { calculateModelRuntimeAvailability } from "@/lib/models/lm-studio-connection"
-import {
-  formatModelResidencyHeading,
-  formatModelResidencyMeta,
-  readLoadedModelKey,
-  readModelResidencyTone
-} from "@/lib/models/model-residency"
-import { type BackendServerStatus, useLysStore } from "@/lib/store"
-import { isModelTransitionInFlight } from "@/lib/store/model-runtime"
+import { useLysStore } from "@/lib/store"
 
 import { useSettingsContext } from "./SettingsContext"
 
 /**
- * Formats the address and lifecycle detail shown under the backend status.
+ * Presents the cards of the two processes the desktop host runs for Lys, the
+ * backend and then vmo, and under them the save status of their startup
+ * switches.
  *
- * @param status - Store-owned backend lifecycle state.
- * @param backendAddress - Persisted backend origin.
- * @param uptimeMs - Current process uptime in milliseconds.
- * @returns The visible address and lifecycle detail line.
+ * @remarks The application store owns both processes' status, their start
+ * and stop commands, and the save of the switches; the settings context owns
+ * the switches and the backend address. Start and Stop intentionally discard
+ * their command promises with `void`. The backend's failures are not awaited
+ * or rendered here, so a rejection surfaces as an unhandled rejection and
+ * backend status is not a completion owner when a command rejects; vmo's
+ * start and stop never reject and publish their problem in the vmo card.
+ * Each startup switch proposes one runtime patch per change, which the
+ * application store saves. The backend's uptime ticks each second, which
+ * re-renders this group but not the model runtime cards. The group renders
+ * no host of its own, so each card takes its place in the pane's stack.
+ * @returns The backend card, the vmo card, and the save status.
  */
-function formatBackendMeta(
-  status: BackendServerStatus,
-  backendAddress: string,
-  uptimeMs: number
-): string {
-  switch (status) {
-    case "running":
-      return `${backendAddress} · up ${formatUptime(uptimeMs)}`
-    case "starting":
-      return `${backendAddress} · starting`
-    case "stopping":
-      return `${backendAddress} · stopping`
-    case "stopped":
-      return `${backendAddress} · not running`
-    case "unresponsive":
-      return `${backendAddress} · process is up but not answering`
-  }
+function ProcessCardGroup(): ReactElement {
+  const backendStatus = useLysStore((state) => state.backendServerInfo.status)
+  const startBackend = useLysStore((state) => state.startBackend)
+  const stopBackend = useLysStore((state) => state.stopBackend)
+  const vmoServerInfo = useLysStore((state) => state.vmoServerInfo)
+  const startVmo = useLysStore((state) => state.startVmo)
+  const stopVmo = useLysStore((state) => state.stopVmo)
+  const runtimeAutoStartSave = useLysStore(
+    (state) => state.runtimeAutoStartSave
+  )
+  const uptimeMs = useBackendUptimeMs()
+  const { settings, onRuntimeChange } = useSettingsContext()
+
+  return (
+    <>
+      <BackendStatusCard
+        backendAddress={settings.runtime.backendAddress}
+        backendStatus={backendStatus}
+        isAutoStartOn={settings.runtime.autoStartBackend}
+        onIsAutoStartOnChange={(isAutoStartOn) =>
+          onRuntimeChange({ autoStartBackend: isAutoStartOn })
+        }
+        onStartBackend={() => {
+          void startBackend()
+        }}
+        onStopBackend={() => {
+          void stopBackend()
+        }}
+        uptimeMs={uptimeMs}
+      />
+      <VmoStatusCard
+        isAutoStartOn={settings.runtime.autoStartVmo}
+        onIsAutoStartOnChange={(isAutoStartOn) =>
+          onRuntimeChange({ autoStartVmo: isAutoStartOn })
+        }
+        onStartVmo={() => {
+          void startVmo()
+        }}
+        onStopVmo={() => {
+          void stopVmo()
+        }}
+        vmoServerInfo={vmoServerInfo}
+      />
+      <StartupSwitchSaveStatus autoStartSave={runtimeAutoStartSave} />
+    </>
+  )
 }
 
 /**
- * Presents backend lifecycle controls, autostart, LM Studio status, and model
- * residency.
+ * Presents the LM Studio card and, under it, the model card with the model
+ * request feedback.
  *
- * @remarks The application store owns
- * backend status, the LM Studio status, and the start, stop, and LM Studio
- * connect commands; the settings context owns the persisted settings and the
- * model lifecycle requests. Start, Stop, and the LM Studio refresh
- * intentionally discard their command promises with `void`: failures are not
- * awaited or rendered here, so a rejection surfaces as an unhandled rejection
- * and backend status is not a completion owner when a command rejects. Stop is
- * available while the backend runs or is not responding. The autostart switch
- * proposes one patch per checked change.
- *
- * The LM Studio card sits under the backend card and owns the only reconnect
- * action. The model card projects the settings context's residency state and
- * is dimmed unless LM Studio is connected. While a transition is in flight the
- * card is marked busy and carries an indeterminate progress indicator: the API
- * reports completion without progress, so no percentage is claimed. Both
- * lifecycle actions are withheld during a transition and require a connected
- * LM Studio; Load additionally requires a chosen default model.
- *
- * @returns The runtime backend and model cards.
+ * @remarks The application store owns the backend and LM Studio status and
+ * the LM Studio connect command; the settings context owns the default
+ * model, the model state, and the load and unload requests, and must be
+ * provided. Refresh, Load, and Unload intentionally discard their promises
+ * with `void`; their stores own each request's completion, and the model
+ * request feedback, rendered last in the model card, reports the model
+ * requests. The group renders no host of its own, so each card takes its
+ * place in the pane's stack.
+ * @returns The LM Studio and model cards.
  */
-export default function RuntimePaneContent(): ReactElement {
-  const backendServerInfo = useLysStore((state) => state.backendServerInfo)
-  const startBackend = useLysStore((state) => state.startBackend)
-  const stopBackend = useLysStore((state) => state.stopBackend)
+function ModelRuntimeCardGroup(): ReactElement {
+  const backendStatus = useLysStore((state) => state.backendServerInfo.status)
   const lmStudioStatus = useLysStore((state) => state.lmStudioStatus)
   const connectLmStudio = useLysStore((state) => state.connectLmStudio)
-  const uptimeMs = useBackendUptimeMs()
   const {
     settings,
     modelRuntime,
     modelRequest,
     modelInventory,
-    onRuntimeChange,
     onLoadModel,
     onUnloadModel
   } = useSettingsContext()
-
-  const backendStatus = backendServerInfo.status
-  const isRunning = backendStatus === "running"
-  const isStoppable = isRunning || backendStatus === "unresponsive"
   const availability = calculateModelRuntimeAvailability(
     backendStatus,
     lmStudioStatus
   )
-  const isModelRuntimeAvailable = availability === "available"
-  const autoStart = settings.runtime.autoStartBackend
-  const defaultModel = settings.runtime.defaultModel
-  const loadedModelKey = readLoadedModelKey(modelRuntime)
-  const isTransitioning = isModelTransitionInFlight(modelRuntime)
-  const isModelBusy = modelRequest.status !== "idle"
-  const defaultEntry =
-    modelInventory.status === "ready"
-      ? modelInventory.models.find((model) => model.modelKey === defaultModel)
-      : undefined
-  const residencyHeading = formatModelResidencyHeading(modelRuntime)
 
   return (
-    <div className="settings-view__stack">
-      <section className="settings-view__card">
-        <div className="settings-view__card-row">
-          <div className="settings-view__identity">
-            <span
-              aria-hidden="true"
-              className="settings-view__status-dot"
-              data-tone={calculateBackendStatusTone(backendStatus)}
-            />
-            <div className="settings-view__identity-lines">
-              <h2>{formatBackendStatusLabel(backendStatus)}</h2>
-              <p className="settings-view__meta">
-                {formatBackendMeta(
-                  backendStatus,
-                  settings.runtime.backendAddress,
-                  uptimeMs
-                )}
-              </p>
-            </div>
-          </div>
-          <div className="settings-view__actions">
-            <Button
-              disabled={backendStatus !== "stopped"}
-              onClick={() => {
-                void startBackend()
-              }}
-              type="button"
-              variant={backendStatus === "stopped" ? "default" : "outline"}
-            >
-              Start
-            </Button>
-            <Button
-              disabled={!isStoppable}
-              onClick={() => {
-                void stopBackend()
-              }}
-              type="button"
-              variant="outline"
-            >
-              Stop
-            </Button>
-          </div>
-        </div>
-
-        <div className="settings-view__card-divider" />
-
-        <div className="settings-view__card-row">
-          <div className="settings-view__identity-lines">
-            <h2>Start it when Lys opens</h2>
-            <p>Off means the first thing you do here is press start.</p>
-          </div>
-          <div className="settings-view__toggle-state">
-            {/* The switch already announces its state; this is for the eye. */}
-            <span aria-hidden="true">{autoStart ? "on" : "off"}</span>
-            <Switch
-              aria-label="Start it when Lys opens"
-              checked={autoStart}
-              onCheckedChange={(checked) =>
-                onRuntimeChange({ autoStartBackend: checked })
-              }
-              size="lg"
-            />
-          </div>
-        </div>
-      </section>
-
+    <>
       <LmStudioStatusCard
         backendStatus={backendStatus}
         lmStudioStatus={lmStudioStatus}
@@ -182,84 +117,42 @@ export default function RuntimePaneContent(): ReactElement {
           void connectLmStudio()
         }}
       />
-
-      <section
-        aria-busy={isTransitioning}
-        className="settings-view__card"
-        data-dimmed={isModelRuntimeAvailable ? undefined : ""}
+      <ModelResidencyCard
+        availability={availability}
+        defaultModel={settings.runtime.defaultModel}
+        modelInventory={modelInventory}
+        modelRequest={modelRequest}
+        modelRuntime={modelRuntime}
+        onLoadModel={(modelKey) => {
+          void onLoadModel(modelKey)
+        }}
+        onUnloadModel={(modelKey) => {
+          void onUnloadModel(modelKey)
+        }}
       >
-        <div className="settings-view__card-row">
-          <div className="settings-view__identity">
-            <span
-              aria-hidden="true"
-              className="settings-view__status-dot"
-              data-tone={readModelResidencyTone(modelRuntime)}
-            />
-            <div className="settings-view__identity-lines">
-              <h2>{residencyHeading}</h2>
-              <p className="settings-view__meta">
-                {formatModelResidencyMeta(
-                  modelRuntime,
-                  availability,
-                  defaultModel
-                )}
-              </p>
-            </div>
-          </div>
-          <div className="settings-view__actions">
-            <Button
-              disabled={
-                !isModelRuntimeAvailable ||
-                isModelBusy ||
-                !defaultEntry ||
-                defaultEntry.loaded
-              }
-              onClick={() => {
-                if (defaultModel) void onLoadModel(defaultModel)
-              }}
-              type="button"
-              variant="default"
-            >
-              Load
-            </Button>
-            <Button
-              disabled={
-                !isModelRuntimeAvailable ||
-                isModelBusy ||
-                loadedModelKey === null
-              }
-              onClick={() => {
-                if (loadedModelKey) void onUnloadModel(loadedModelKey)
-              }}
-              type="button"
-              variant="outline"
-            >
-              Unload
-            </Button>
-          </div>
-        </div>
-
-        {isTransitioning ? (
-          /*
-           * The backend acknowledges completion without percentage progress, so
-           * the native bar stays indeterminate. It carries the semantics while
-           * the track draws the sweep, which a native bar cannot render.
-           */
-          <div className="settings-view__progress">
-            <progress aria-label={residencyHeading} className="sr-only" />
-            <span aria-hidden="true" className="settings-view__progress-fill" />
-          </div>
-        ) : null}
-
-        <div className="settings-view__card-divider" />
-
-        <p className="settings-view__card-note">
-          Loading and unloading use LM Studio through the backend. This summary
-          prefers the loaded default; manage every loaded model in Model
-          settings.
-        </p>
         <ModelRequestFeedback />
-      </section>
+      </ModelResidencyCard>
+    </>
+  )
+}
+
+/**
+ * Presents the Runtime pane: Lys's backend and vmo with their startup
+ * switches, then LM Studio and the model weights.
+ *
+ * @remarks The pane accepts no props and is loaded lazily by the settings
+ * view, under the settings context. It owns the stack and the order of its
+ * parts: the backend card, the vmo card under it, the save status of both
+ * startup switches, the LM Studio card, which owns the only reconnect
+ * action, and the model card. Each group selects only the application store
+ * and settings context state its cards show.
+ * @returns The Runtime pane body.
+ */
+export default function RuntimePaneContent(): ReactElement {
+  return (
+    <div className="settings-view__stack">
+      <ProcessCardGroup />
+      <ModelRuntimeCardGroup />
     </div>
   )
 }

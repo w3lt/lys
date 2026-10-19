@@ -7,6 +7,7 @@ import { buildBuiltInAgents } from "../modules/agent/builtInAgents"
 import ChatService, {
   type ChatServiceCreationOptions
 } from "../modules/chat/chatService"
+import LlmReplyContextMeter from "../modules/chat/llmReplyContextMeter"
 import OpenAiReplyModel from "../modules/chat/openAiReplyModel"
 import SqliteConversationRecordEditor from "../infrastructure/database/conversations/sqliteConversationRecordEditor"
 import SqliteConversationRecordReader from "../infrastructure/database/conversations/sqliteConversationRecordReader"
@@ -145,7 +146,7 @@ type DatabaseServices = Pick<
  * @param config - LM Studio host and port used to derive local service endpoints,
  * the title-generation prompt and title length limit given to the chat
  * service, the built-in agents' system prompts given to the agent service,
- * and the browser executable given to the read-page tool.
+ * and vmo's host and port given to the read-page tool.
  * @param failureReporters - Receive the LLM runtime failures that no caller
  * observes and the causes of read failures the model learns only by kind,
  * for logging.
@@ -162,8 +163,9 @@ type DatabaseServices = Pick<
  * runtime service. The conversation services and the Sqlite records they
  * wrap are created over the database before the runtime service, turn
  * persistence first, so its startup recovery runs before any history is
- * read. The agent service is created next, over its Sqlite records and the
- * chat service; it reads nothing at creation and owns nothing to release.
+ * read. The agent service is created after the LLM runtime service, over its
+ * Sqlite records, the chat service, and the LLM service; it reads nothing at
+ * creation and owns nothing to release.
  * The web search tool provider, the built-in tools, and the tool approval
  * service are created last; they read and contact nothing at creation and
  * own nothing to release.
@@ -190,11 +192,6 @@ export async function createSingletonServices(
     )
     serviceLifetime.defer(databaseAcquisition.closeService)
     const databaseServices = createDatabaseServices(databaseAcquisition.service)
-    const agentService = createAgentService(
-      config,
-      databaseAcquisition.service,
-      chatService
-    )
 
     const llmRuntimeServiceAcquisition = factories.createLlmRuntimeService(
       `ws://${config.lmstudioHost}:${config.lmstudioPort}`,
@@ -204,6 +201,14 @@ export async function createSingletonServices(
     const llmService = new LlmService({
       llmEngineOperationQueue: llmRuntimeServiceAcquisition.service
     })
+    const agentService = createAgentService(
+      config,
+      databaseAcquisition.service,
+      {
+        chatService,
+        llmService
+      }
+    )
     const toolServices = createToolServices(
       config,
       failureReporters.pageRendering
@@ -251,21 +256,29 @@ function buildChatServiceOptions(
   }
 }
 
+/** Model services every agent borrows, lent for the agent service's lifetime. */
+type AgentModelServices = Readonly<{
+  /** Chat service the agents answer through. */
+  chatService: ChatService
+  /** LLM service that measures each context against the loaded model. */
+  llmService: LlmService
+}>
+
 /**
- * Creates the agent service over the shared database and the chat service.
+ * Creates the agent service over the shared database and the model services.
  *
  * @param config - System prompts of the built-in agents.
  * @param database - Shared database lent to the agent records; the caller
  * keeps ownership and closes it.
- * @param chatService - Chat service the agents answer through, lent for the
- * service's lifetime.
+ * @param modelServices - Chat and LLM services the agents answer and measure
+ * through.
  * @returns The agent service, which reads nothing at creation and owns
  * nothing to release.
  */
 function createAgentService(
   config: BackendConfig,
   database: SqliteDatabase,
-  chatService: ChatService
+  { chatService, llmService }: AgentModelServices
 ): AgentService {
   const builtInAgents = buildBuiltInAgents({
     caliginia: config.caliginiaSystemPrompt,
@@ -276,6 +289,9 @@ function createAgentService(
     builtInAgents,
     replyModel: new OpenAiReplyModel((options) =>
       chatService.completeChatStream(options)
+    ),
+    replyContextMeter: new LlmReplyContextMeter((model, texts) =>
+      llmService.findLlmContextMeasurement(model, texts)
     )
   })
 }
@@ -284,7 +300,7 @@ function createAgentService(
  * Creates the services that run, find, and approve tools.
  *
  * @param config - Settings file the web search key and the Just run choices
- * are read from, and the browser executable given to the read-page tool.
+ * are read from, and vmo's host and port given to the read-page tool.
  * @param pageRenderingFailureReporters - Receive the causes of read failures
  * the model learns only by kind.
  * @returns The web search tool provider, every built-in tool, and the tool
@@ -301,8 +317,8 @@ function createToolServices(
   )
   const builtInTools = createBuiltInTools(
     webSearchToolProvider,
-    config.browserExecutablePath,
-    pageRenderingFailureReporters.reportBrowserFailure
+    `http://${config.vmoHost}:${config.vmoPort}`,
+    pageRenderingFailureReporters.reportPageReaderFailure
   )
   const toolApprovalService = new ToolApprovalService(() =>
     readJustRunToolNames(config.settingsFilePath)

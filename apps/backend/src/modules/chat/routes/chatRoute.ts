@@ -1,11 +1,7 @@
 import {
   chatApi,
-  type AgentNotFoundProblem,
-  type ChatApiRequestBody,
   type ChatApiRoute,
   type ChatApiStreamEvent,
-  type ConversationAgentMissingProblem,
-  type ConversationNotFoundProblem,
   type MessageGenerationOptions
 } from "@lys/protocol"
 import type { ToolDefinition } from "@lys/share"
@@ -13,22 +9,16 @@ import type { FastifyBaseLogger, FastifyInstance } from "fastify"
 import type { BackendConfig } from "../../../config"
 import type Agent from "../../agent/agent"
 import type { AgentTurn } from "../../agent/agent"
-import {
-  createAgentNotFoundProblem,
-  createConversationAgentMissingProblem
-} from "../../agent/routes/agentProblems"
 import type {
   BuiltInToolEntry,
   TurnBuiltInTool
 } from "../../tool/builtIn/builtInTool"
 import {
-  findBuiltInTools,
   findTurnBuiltInTools,
   type TurnToolSetLookup
 } from "../../tool/builtIn/builtInTools"
 import type ToolApprovalService from "../../toolApproval/toolApprovalService"
 import type { TitleGenerationOptions } from "../chatService"
-import { createConversationNotFoundProblem } from "../../conversation/routes/notFound"
 import type {
   ConversationTurn,
   ConversationTurnWriter,
@@ -50,6 +40,12 @@ import {
   type ChatRouteRequest
 } from "./share"
 import createTitleGenerationTask from "../titleGenerationTask"
+import {
+  findRequestedAgent,
+  findRequestedBuiltInTools,
+  sendUnansweredTurnProblem,
+  type TurnAgentLookups
+} from "./turnRequest"
 
 /** Backend settings the chat route applies to every request. */
 export type ChatRouteOptions = Pick<BackendConfig, "titleGenerationMaxAttempts">
@@ -61,35 +57,35 @@ export type ChatRouteRegistration = ChatRouteOptions &
     generations: ReplyGenerationRegistry
   }>
 
-/** Capabilities and settings borrowed for the lifetime of a registered chat route. */
-type ChatRouteDependencies = Readonly<{
-  /** Turn persistence whose lifetime outlives all active generations. */
-  turns: ConversationTurnWriter
-  /** Reply-part persistence whose lifetime outlives all active generations. */
-  replyParts: ReplyPartWriter
-  /** Conditional generated-title persistence borrowed for the route lifetime. */
-  titleWriter: GeneratedConversationTitleWriter
-  /**
-   * Agent lookup of the agent service, borrowed for the route lifetime;
-   * undefined means no built-in or stored agent has the code.
-   */
-  findChatAgent: (code: string) => Agent | undefined
-  /**
-   * Agent code lookup of a stored conversation, borrowed for the route
-   * lifetime; undefined means the conversation is not stored.
-   */
-  findConversationAgentCode: (conversationId: string) => string | undefined
-  /** Bound title operation retained separately from chat completion. */
-  generateTitle: (options: TitleGenerationOptions) => Promise<string>
-  /** Inclusive maximum number of title requests permitted for one turn. */
-  titleGenerationMaxAttempts: number
-  /** Registry that owns every generation this route starts. */
-  generations: ReplyGenerationRegistry
-  /** Every tool the backend runs, which a request may offer by name. */
-  builtInTools: readonly BuiltInToolEntry[]
-  /** Approval gateway every tool call of every turn passes. */
-  toolApprovals: ToolApprovalService
-}>
+/**
+ * Capabilities and settings borrowed for the lifetime of a registered chat
+ * route, including the agent lookups.
+ */
+type ChatRouteDependencies = TurnAgentLookups &
+  Readonly<{
+    /** Turn persistence whose lifetime outlives all active generations. */
+    turns: ConversationTurnWriter
+    /** Reply-part persistence whose lifetime outlives all active generations. */
+    replyParts: ReplyPartWriter
+    /** Conditional generated-title persistence borrowed for the route lifetime. */
+    titleWriter: GeneratedConversationTitleWriter
+    /** Bound title operation retained separately from chat completion. */
+    generateTitle: (options: TitleGenerationOptions) => Promise<string>
+    /**
+     * Context length a model is loaded with, observed through the
+     * model-operation queue without loading it; undefined when it is not
+     * loaded.
+     */
+    findLoadedContextLength: (model: string) => Promise<number | undefined>
+    /** Inclusive maximum number of title requests permitted for one turn. */
+    titleGenerationMaxAttempts: number
+    /** Registry that owns every generation this route starts. */
+    generations: ReplyGenerationRegistry
+    /** Every tool the backend runs, which a request may offer by name. */
+    builtInTools: readonly BuiltInToolEntry[]
+    /** Approval gateway every tool call of every turn passes. */
+    toolApprovals: ToolApprovalService
+  }>
 
 /** Warning logged when a round's calls all ask because the choices are unreadable. */
 const UNREADABLE_JUST_RUN_CHOICES_MESSAGE =
@@ -97,69 +93,6 @@ const UNREADABLE_JUST_RUN_CHOICES_MESSAGE =
 
 /** Client tools of a request that offered none. */
 const NO_REQUESTED_TOOLS: readonly ToolDefinition[] = Object.freeze([])
-
-/**
- * Chat request naming a backend tool the backend does not run, mapped by
- * Fastify to a caller-safe HTTP 400.
- *
- * @remarks The subclass preserves the native `Error` contract and always
- * reports status 400. It owns no mutable state and is constructed once per
- * rejected request.
- */
-class UnknownBackendToolError extends Error {
-  /**
-   * Creates the error for one request.
-   *
-   * @param toolNames - Offered names that belong to no backend tool.
-   */
-  public constructor(toolNames: readonly string[]) {
-    super(
-      `The request offers backend tools the backend does not run: ${toolNames.join(", ")}`
-    )
-  }
-
-  /**
-   * HTTP status consumed by Fastify's error boundary.
-   *
-   * @returns The invalid-input status.
-   */
-  public get statusCode(): number {
-    return 400
-  }
-}
-
-/** Outcome of looking up the agent that answers a requested turn. */
-type RequestedAgentOutcome =
-  | Readonly<{
-      /** An agent answers the turn. */
-      status: "found"
-      /** Agent that answers, with the system prompt it has now. */
-      agent: Agent
-    }>
-  | Readonly<{
-      /** A new conversation names a code no built-in or stored agent has. */
-      status: "agent-not-found"
-      /** Code the request names. */
-      agentCode: string
-    }>
-  | Readonly<{
-      /** The continued conversation is not stored. */
-      status: "conversation-not-found"
-      /** Identifier the request names. */
-      conversationId: string
-    }>
-  | Readonly<{
-      /** The agent of the continued conversation no longer exists. */
-      status: "conversation-agent-missing"
-      /** Code stored with the conversation. */
-      agentCode: string
-    }>
-
-/** Outcome in which no agent answers the requested turn. */
-type UnansweredTurnOutcome = Exclude<
-  RequestedAgentOutcome,
-  Readonly<{ status: "found" }>
->
 
 /** Values one turn's tasks keep after the request that started them ended. */
 type TurnGenerationInput = Readonly<{
@@ -204,6 +137,9 @@ export default function updateFastifyWithChatRoute(
       app.conversationHistoryReader.getConversation(conversationId)?.agentCode,
     generateTitle: (options: TitleGenerationOptions) =>
       app.chatService.generateTitle(options),
+    findLoadedContextLength: async (model: string) =>
+      (await app.llmService.findLlmContextMeasurement(model, []))
+        ?.contextLength,
     titleGenerationMaxAttempts,
     generations,
     builtInTools: app.builtInTools,
@@ -227,7 +163,7 @@ export default function updateFastifyWithChatRoute(
  * @param reply - SSE or pre-stream error response owner.
  * @param dependencies - Borrowed persistence, agents, and registry.
  * @returns Settlement after the stream ends, or after a problem response.
- * @throws An {@link UnknownBackendToolError}, before anything is stored,
+ * @throws An `UnknownBackendToolError`, before anything is stored,
  * when the request offers a backend tool the backend does not run; and
  * unexpected failures before the stream starts, for Fastify's HTTP error
  * boundary. An offered backend tool that cannot run now is answered with a
@@ -247,7 +183,10 @@ async function handleChatRequest(
   reply: ChatRouteReply,
   dependencies: ChatRouteDependencies
 ): Promise<void> {
-  const offeredBuiltInTools = findRequestedBuiltInTools(request, dependencies)
+  const offeredBuiltInTools = findRequestedBuiltInTools(
+    dependencies.builtInTools,
+    request.body.tools
+  )
   const builtInTools = await findTurnBuiltInTools(offeredBuiltInTools)
   if (builtInTools.status === "unavailable") {
     sendBackendToolUnavailableProblem(reply, builtInTools, request.url)
@@ -284,105 +223,6 @@ async function handleChatRequest(
     subscription.handleStreamEvent(event)
   generation.openSubscription(subscription)
   await openReplyEventStream(reply.sse, subscription)
-}
-
-/**
- * Finds the backend tools a request offers.
- *
- * @param request - Validated chat input.
- * @param dependencies - Every tool the backend runs.
- * @returns The offered backend tools in offer order; empty when the request
- * offers none.
- * @throws An {@link UnknownBackendToolError} naming every offered name that
- * belongs to no backend tool.
- */
-function findRequestedBuiltInTools(
-  request: ChatRouteRequest,
-  dependencies: ChatRouteDependencies
-): readonly BuiltInToolEntry[] {
-  const selection = findBuiltInTools(
-    dependencies.builtInTools,
-    request.body.tools?.backendToolNames
-  )
-  switch (selection.status) {
-    case "found":
-      return selection.entries
-    case "unknown":
-      throw new UnknownBackendToolError(selection.toolNames)
-  }
-}
-
-/**
- * Finds the agent that answers the requested turn.
- *
- * @param conversation - Conversation the validated request starts or
- * continues.
- * @param dependencies - Borrowed agent and conversation lookups.
- * @returns The agent, or why no agent answers: a new conversation names a
- * code no agent has, a continued conversation is not stored, or its agent no
- * longer exists. Nothing is stored or sent.
- * @throws Any persistence failure of a lookup.
- */
-function findRequestedAgent(
-  conversation: ChatApiRequestBody["conversation"],
-  dependencies: ChatRouteDependencies
-): RequestedAgentOutcome {
-  if (conversation.kind === "new") {
-    const agent = dependencies.findChatAgent(conversation.agentCode)
-    return agent === undefined
-      ? { status: "agent-not-found", agentCode: conversation.agentCode }
-      : { status: "found", agent }
-  }
-
-  const agentCode = dependencies.findConversationAgentCode(conversation.id)
-  if (agentCode === undefined)
-    return { status: "conversation-not-found", conversationId: conversation.id }
-  const agent = dependencies.findChatAgent(agentCode)
-  return agent === undefined
-    ? { status: "conversation-agent-missing", agentCode }
-    : { status: "found", agent }
-}
-
-/**
- * Builds the problem that says why no agent answers a requested turn.
- *
- * @param outcome - Lookup outcome without an agent.
- * @param instance - Request path identifying this occurrence.
- * @returns The missing-agent problem for a new conversation's unknown code,
- * the missing-conversation problem for a conversation that is not stored, and
- * the conversation agent missing problem for one whose agent no longer exists.
- */
-function buildUnansweredTurnProblem(
-  outcome: UnansweredTurnOutcome,
-  instance: string
-):
-  | AgentNotFoundProblem
-  | ConversationNotFoundProblem
-  | ConversationAgentMissingProblem {
-  switch (outcome.status) {
-    case "agent-not-found":
-      return createAgentNotFoundProblem(outcome.agentCode, instance)
-    case "conversation-not-found":
-      return createConversationNotFoundProblem(outcome.conversationId, instance)
-    case "conversation-agent-missing":
-      return createConversationAgentMissingProblem(outcome.agentCode, instance)
-  }
-}
-
-/**
- * Sends the problem response for a requested turn no agent answers.
- *
- * @param reply - Response owner; the response has not started.
- * @param outcome - Lookup outcome without an agent.
- * @param instance - Request path identifying this occurrence.
- */
-function sendUnansweredTurnProblem(
-  reply: ChatRouteReply,
-  outcome: UnansweredTurnOutcome,
-  instance: string
-): void {
-  const problem = buildUnansweredTurnProblem(outcome, instance)
-  reply.type("application/problem+json").code(problem.status).send(problem)
 }
 
 /**
@@ -497,8 +337,10 @@ async function createTurnReplyTask(
  * sender, and approval prompt sender.
  * @returns The agent turn, whose parts and final state go to the stored
  * reply, which numbers new sources after the conversation's stored ones, and
- * whose tool calls pass the approval gateway; an unreadable settings file is
- * logged as a warning with the request's logger.
+ * whose tool calls pass the approval gateway. With the request's logger, an
+ * unreadable settings file is logged as a warning; a cancelled reply, and a
+ * round that was not sent because it did not fit or its model was not
+ * loaded, at debug level; and any other reply failure as an error.
  */
 function buildAgentTurn(
   input: TurnGenerationInput,
@@ -544,6 +386,12 @@ function buildAgentTurn(
     reportReplyCancellation: (failure) => {
       input.logger.debug({ err: failure }, "Chat completion was cancelled")
     },
+    reportReplyRefusal: (failure) => {
+      input.logger.debug(
+        { err: failure },
+        "Chat round was not sent to the model"
+      )
+    },
     reportReplyFailure: (failure) => {
       input.logger.error({ err: failure }, "Chat completion stream failed")
     }
@@ -586,6 +434,7 @@ function createTurnTitleTask(
   const { turn, dependencies } = input
   return createTitleGenerationTask({
     generateTitle: dependencies.generateTitle,
+    findLoadedContextLength: dependencies.findLoadedContextLength,
     userMessageContent: turn.userMessage.content,
     model: input.model,
     abortSignal,

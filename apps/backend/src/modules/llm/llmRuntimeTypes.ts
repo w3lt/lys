@@ -1,9 +1,5 @@
 import type { LlmInfo } from "@lys/protocol"
 
-/** Runtime phases exposed by synchronous lifecycle observation. */
-export type LlmRuntimeLifecycleStatus =
-  "ready" | "active" | "closing" | "closed"
-
 /** Result of one admitted provider readiness query. */
 export type LlmRuntimeAvailability = "available" | "unavailable"
 
@@ -22,4 +18,21 @@ export type LoadedLlmModelInstance = Readonly<{
   modelKey: string
   /** Non-empty opaque instance identifier accepted by this runtime's stop operation. */
   modelIdentifier: string
+}>
+
+/**
+ * Measure of texts against one loaded model, by that model's own tokenizer.
+ *
+ * @remarks Counts are tokens of each text on its own, without the chat
+ * template the engine wraps a request in.
+ */
+export type LlmContextMeasurement = Readonly<{
+  /**
+   * Context length the model is loaded with, in tokens; a positive integer.
+   * When several instances of the model are loaded, the smallest of their
+   * context lengths.
+   */
+  contextLength: number
+  /** Token count of each measured text, in text order; whole numbers ≥ 0. */
+  textTokenCounts: readonly number[]
 }>

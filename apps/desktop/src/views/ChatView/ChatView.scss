@@ -129,7 +129,7 @@
 }
 
 .chat-view__eyebrow {
-  margin-top: 16px !important;
+  margin-top: 16px;
   color: var(--app-text-faint);
   letter-spacing: 0.14em;
 }
@@ -156,13 +156,23 @@
   line-height: 1.5;
 }
 
+/*
+ * The starter prompts are a fieldset that names their group. A fieldset is not
+ * a dependable grid container in every WebKit version, so the stack inside it
+ * owns the layout, and its min-content width is reset so a long prompt cannot
+ * widen it.
+ */
 .chat-view__starters {
-  display: grid;
   width: 100%;
+  min-inline-size: 0;
   max-width: 580px;
   margin-top: 48px;
-  gap: 8px;
   animation: chat-view-starter-fade-in 360ms var(--ease-standard) 300ms both;
+}
+
+.chat-view__starter-stack {
+  display: grid;
+  gap: 8px;
 }
 
 .chat-view__starter {

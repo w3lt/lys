@@ -48,6 +48,35 @@ describe("parsePageUrl", () => {
     )
   })
 
+  it("applies the length limit to the normalized URL as well", () => {
+    // Each 蛾 is one character as typed and nine once percent-encoded.
+    const normalizedAtLimit = `https://example.com/${"%E8%9B%BE".repeat(225)}aaa`
+    expect(normalizedAtLimit).toHaveLength(MAXIMUM_PAGE_URL_LENGTH)
+
+    expect(parsePageUrl(`https://example.com/${"蛾".repeat(225)}aaa`)).toEqual({
+      status: "valid",
+      url: normalizedAtLimit
+    })
+    expect(parsePageUrl(`https://example.com/${"蛾".repeat(225)}aaaa`)).toEqual(
+      { status: "invalid", problem: "too-long" }
+    )
+  })
+
+  it.each([
+    ["characters outside ASCII", `https://example.com/${"蛾".repeat(300)}`],
+    ["spaces", `https://example.com/a${" ".repeat(1_000)}b`]
+  ])(
+    "rejects a short URL text whose %s grow it past the limit once percent-encoded",
+    (_label, text) => {
+      expect(text.length).toBeLessThan(MAXIMUM_PAGE_URL_LENGTH)
+
+      expect(parsePageUrl(text)).toEqual({
+        status: "invalid",
+        problem: "too-long"
+      })
+    }
+  )
+
   it.each([
     ["a relative path", "/page"],
     ["a host without a scheme", "example.com/page"],
@@ -105,7 +134,10 @@ describe("parsePageUrl", () => {
 
 describe("formatPageUrlProblem", () => {
   it.each<[PageUrlProblem, string]>([
-    ["too-long", "The URL is longer than 2048 characters."],
+    [
+      "too-long",
+      "The URL is longer than 2048 characters, as typed or once percent-encoded."
+    ],
     [
       "not-absolute",
       "The URL is not an absolute URL, such as https://example.com/page."

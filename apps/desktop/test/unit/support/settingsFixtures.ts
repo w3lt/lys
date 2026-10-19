@@ -56,6 +56,7 @@ export const FIRST_RUN_LOAD_CONFIGURATION = Object.freeze({
 /** Runtime group on disk, distinct from every default. */
 const STORED_RUNTIME_SETTINGS: RuntimeSettings = Object.freeze({
   autoStartBackend: false,
+  autoStartVmo: false,
   defaultModel: "qwen3-8b",
   backendAddress: "http://127.0.0.1:23456"
 })

@@ -23,7 +23,9 @@ import {
 import SqliteDatabase from "../../../src/infrastructure/database/sqliteDatabase"
 import { TEST_BACKEND_CONFIG } from "../support/backendConfig"
 import { createFixtureUuidV7 } from "../support/conversationFixtures"
+import { createFakeLlmRuntime } from "../support/fakeLlmRuntime"
 import { writeSettingsFile } from "../support/settingsFile"
+import { answerWithBody, startVmoServer } from "../support/vmoServer"
 
 /** Name of each acquisition whose release the bundle owns. */
 type AcquisitionName = "chat" | "database" | "llm-runtime"
@@ -38,7 +40,7 @@ function createFailureReporters() {
     reportLlmRuntimeAcquisitionFailure: vi.fn(),
     reportLlmRuntimeAvailabilityCheckFailure: vi.fn()
   } satisfies LlmRuntimeFailureReporters
-  const pageRendering = { reportBrowserFailure: vi.fn() }
+  const pageRendering = { reportPageReaderFailure: vi.fn() }
   return { llmRuntime, pageRendering } satisfies SingletonFailureReporters
 }
 
@@ -161,6 +163,28 @@ describe("createSingletonServices", () => {
     })
   })
 
+  it("offers read_page once vmo at the configured host and port answers its health route", async () => {
+    const { factories } = createRecordedFactories()
+    const vmo = await startVmoServer(
+      answerWithBody(200, "text/plain; charset=utf-8", "ok\n")
+    )
+    const vmoPort = Number(new URL(vmo.origin).port)
+
+    const services = await createSingletonServices(
+      { ...TEST_BACKEND_CONFIG, vmoPort },
+      createFailureReporters(),
+      factories
+    )
+    onTestFinished(async () => await closeSingletonServices(services))
+
+    expect(
+      await services.builtInTools[0]?.provider.findTurnTool()
+    ).toMatchObject({ status: "ready" })
+    expect(vmo.receivedRequests).toMatchObject([
+      { method: "GET", path: "/health" }
+    ])
+  })
+
   it("decides tool approvals from the Just run choices in the configured settings file", async () => {
     const { factories } = createRecordedFactories()
     const settingsFilePath = await writeSettingsFile(
@@ -278,7 +302,7 @@ describe("createSingletonServices", () => {
     ["caliginia", TEST_BACKEND_CONFIG.caliginiaSystemPrompt],
     ["lysiptera", TEST_BACKEND_CONFIG.lysipteraSystemPrompt]
   ])(
-    "builds the built-in agent %s from its configured prompt over the acquired chat service",
+    "builds the built-in agent %s from its configured prompt over the acquired chat and LLM services",
     async (agentCode, systemPrompt) => {
       const { factories, acquisitions } = createRecordedFactories()
       const services = await createSingletonServices(
@@ -287,6 +311,17 @@ describe("createSingletonServices", () => {
         factories
       )
       onTestFinished(async () => await closeSingletonServices(services))
+      const engine = createFakeLlmRuntime()
+      engine.findLlmContextMeasurement.mockImplementation(
+        async (_model, texts) => ({
+          contextLength: 1_000_000,
+          textTokenCounts: texts.map(() => 1)
+        })
+      )
+      vi.spyOn(
+        acquisitions.llmRuntime.service,
+        "handleLlmEngineOperationRequest"
+      ).mockImplementation(async (operation) => await operation(engine))
       const completeChatStream = vi
         .spyOn(acquisitions.chat.service, "completeChatStream")
         .mockRejectedValue(new Error("model not loaded"))
@@ -308,9 +343,14 @@ describe("createSingletonServices", () => {
         sendClientToolCall: vi.fn(),
         createToolCallGate: vi.fn(),
         reportReplyCancellation: vi.fn(),
+        reportReplyRefusal: vi.fn(),
         reportReplyFailure: vi.fn()
       })
 
+      expect(engine.findLlmContextMeasurement).toHaveBeenCalledWith(
+        "qwen/qwen3-8b",
+        [systemPrompt, "Hello"]
+      )
       expect(completeChatStream).toHaveBeenCalledWith(
         expect.objectContaining({
           messages: [

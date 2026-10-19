@@ -64,26 +64,24 @@ export default function StarterView({
         One model, one conversation at a time. The transcripts stay on this
         machine.
       </p>
-      <div
-        aria-label="Starter prompts"
-        className="chat-view__starters"
-        role="group"
-      >
-        {STARTER_PROMPTS.map((prompt) => (
-          <Button
-            className="chat-view__starter lys-wingline"
-            data-lys-wingline="primary"
-            key={prompt}
-            onClick={() => onSendStarterPrompt(prompt)}
-            size="lg"
-            type="button"
-            variant="outline"
-          >
-            <span>{prompt}</span>
-            <ArrowRight aria-hidden="true" />
-          </Button>
-        ))}
-      </div>
+      <fieldset aria-label="Starter prompts" className="chat-view__starters">
+        <div className="chat-view__starter-stack">
+          {STARTER_PROMPTS.map((prompt) => (
+            <Button
+              className="chat-view__starter lys-wingline"
+              data-lys-wingline="primary"
+              key={prompt}
+              onClick={() => onSendStarterPrompt(prompt)}
+              size="lg"
+              type="button"
+              variant="outline"
+            >
+              <span>{prompt}</span>
+              <ArrowRight aria-hidden="true" />
+            </Button>
+          ))}
+        </div>
+      </fieldset>
     </div>
   )
 }

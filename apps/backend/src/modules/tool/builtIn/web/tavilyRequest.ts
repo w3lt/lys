@@ -2,13 +2,14 @@ import type { TavilyApiKey } from "@lys/share"
 import { request as requestHttp, type IncomingMessage } from "node:http"
 import { request as requestHttps, type RequestOptions } from "node:https"
 import type { Socket } from "node:net"
-import type { Readable } from "node:stream"
 import {
   ConnectionAddressError,
   createCheckedLookup,
   hasErrorCode,
+  isJsonResponse,
   LYS_USER_AGENT,
-  parseResponseChunk,
+  parseJsonBody,
+  readBoundedBody,
   watchConnectedAddress,
   type ConnectionAddressRule
 } from "./webConnection"
@@ -115,22 +116,6 @@ export type TavilyRequestResult =
       failure: TavilyRequestFailure
     }>
 
-/** Outcome of reading a body within the size limit. */
-type BoundedBody =
-  | Readonly<{
-      /** The whole body fit. */
-      status: "read"
-      /** Its bytes. */
-      bytes: Uint8Array
-    }>
-  | Readonly<{
-      /** The body was longer than the limit; reading stopped. */
-      status: "too-large"
-    }>
-
-/** Decoder that rejects bytes that are not UTF-8. */
-const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true })
-
 /** Finds a `Retry-After` value given in whole seconds. */
 const RETRY_AFTER_SECONDS_PATTERN = /^\d{1,6}$/
 
@@ -145,9 +130,6 @@ const UNREADABLE: TavilyRequestFailure = Object.freeze({ kind: "unreadable" })
 
 /** Failure of a body over the size limit. */
 const TOO_LARGE: TavilyRequestFailure = Object.freeze({ kind: "too-large" })
-
-/** Body outcome of a body over the size limit. */
-const TOO_LARGE_BODY: BoundedBody = Object.freeze({ status: "too-large" })
 
 /**
  * Builds a failed outcome.
@@ -270,79 +252,12 @@ function findTavilyStatusFailure(
 }
 
 /**
- * Answers whether one `Content-Type` parameter allows UTF-8 JSON.
- *
- * @param parameter - One parameter after the media type.
- * @returns False only for a charset other than UTF-8.
- */
-function isUtf8OrOtherParameter(parameter: string): boolean {
-  const [name = "", value = ""] = parameter.split("=")
-  if (name.trim().toLowerCase() !== "charset") return true
-  return value.trim().replace(/^"|"$/g, "").toLowerCase() === "utf-8"
-}
-
-/**
- * Answers whether a response says its body is UTF-8 JSON without
- * compression.
- *
- * @param response - Response whose headers arrived.
- * @returns True for `application/json` with no charset or UTF-8, and no
- * content encoding other than `identity`.
- */
-function isTavilyJsonResponse(response: IncomingMessage): boolean {
-  const [mediaType = "", ...parameters] = (
-    response.headers["content-type"] ?? ""
-  ).split(";")
-  const encoding = (response.headers["content-encoding"] ?? "identity")
-    .trim()
-    .toLowerCase()
-  if (mediaType.trim().toLowerCase() !== "application/json") return false
-  return encoding === "identity" && parameters.every(isUtf8OrOtherParameter)
-}
-
-/**
- * Reads a body up to {@link MAXIMUM_TAVILY_RESPONSE_BYTES}.
- *
- * @param body - Body stream; leaving it early destroys it.
- * @returns The bytes, or `too-large` as soon as the body passes the limit.
- * @throws The stream's failure, such as an aborted request.
- */
-async function readBoundedBody(body: Readable): Promise<BoundedBody> {
-  const chunks: Uint8Array[] = []
-  let byteCount = 0
-  for await (const chunk of body) {
-    const bytes = parseResponseChunk(chunk)
-    const nextByteCount = byteCount + bytes.byteLength
-    if (nextByteCount > MAXIMUM_TAVILY_RESPONSE_BYTES) return TOO_LARGE_BODY
-    chunks.push(bytes)
-    byteCount = nextByteCount
-  }
-  return Object.freeze({ status: "read", bytes: Buffer.concat(chunks) })
-}
-
-/**
- * Parses body bytes as UTF-8 JSON.
- *
- * @param bytes - Whole body.
- * @returns `succeeded` with the parsed value, or `unreadable`.
- * @remarks A decoding or parse failure is dropped, never kept, because its
- * message can quote the body.
- */
-function parseJsonBody(bytes: Uint8Array): TavilyRequestResult {
-  try {
-    const body: unknown = JSON.parse(UTF8_DECODER.decode(bytes))
-    return Object.freeze({ status: "succeeded", body })
-  } catch {
-    return buildFailedResult(UNREADABLE)
-  }
-}
-
-/**
  * Reads a response into a JSON answer.
  *
  * @param response - Response whose headers arrived; it is destroyed before
  * this settles.
- * @returns The answer, or why there is none.
+ * @returns The answer, or why there is none: a body over
+ * {@link MAXIMUM_TAVILY_RESPONSE_BYTES} is `too-large`.
  * @throws A body read failure.
  */
 async function readTavilyResponse(
@@ -351,10 +266,12 @@ async function readTavilyResponse(
   try {
     const statusFailure = findTavilyStatusFailure(response)
     if (statusFailure !== undefined) return buildFailedResult(statusFailure)
-    if (!isTavilyJsonResponse(response)) return buildFailedResult(UNREADABLE)
-    const body = await readBoundedBody(response)
+    if (!isJsonResponse(response)) return buildFailedResult(UNREADABLE)
+    const body = await readBoundedBody(response, MAXIMUM_TAVILY_RESPONSE_BYTES)
     if (body.status === "too-large") return buildFailedResult(TOO_LARGE)
-    return parseJsonBody(body.bytes)
+    const json = parseJsonBody(body.bytes)
+    if (json.status === "unreadable") return buildFailedResult(UNREADABLE)
+    return Object.freeze({ status: "succeeded", body: json.value })
   } finally {
     response.destroy()
   }

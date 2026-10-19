@@ -79,6 +79,25 @@ describe("FailureRecordingLlmEngine", () => {
       )
       expect(recorder.hasRecordedFailure).toBe(false)
     })
+
+    it("forwards the model selection, the texts, and the measurement unchanged", async () => {
+      const { recorder, engine } = createRecordingEngine()
+      const texts = Object.freeze(["You are Lys.", "Hello"])
+      const measurement = Object.freeze({
+        contextLength: 8192,
+        textTokenCounts: Object.freeze([4, 1])
+      })
+      engine.findLlmContextMeasurement.mockResolvedValue(measurement)
+
+      await expect(
+        recorder.findLlmContextMeasurement("qwen/qwen3-8b", texts)
+      ).resolves.toBe(measurement)
+      expect(engine.findLlmContextMeasurement).toHaveBeenCalledExactlyOnceWith(
+        "qwen/qwen3-8b",
+        texts
+      )
+      expect(recorder.hasRecordedFailure).toBe(false)
+    })
   })
 
   describe("failure recording", () => {
@@ -102,6 +121,11 @@ describe("FailureRecordingLlmEngine", () => {
         "stopLoadedLlmModelInstance",
         (recorder: FailureRecordingLlmEngine) =>
           recorder.stopLoadedLlmModelInstance("qwen/qwen3-8b:1")
+      ],
+      [
+        "findLlmContextMeasurement",
+        (recorder: FailureRecordingLlmEngine) =>
+          recorder.findLlmContextMeasurement("qwen/qwen3-8b", ["Hello"])
       ]
     ] as const)(
       "forwards the original %s rejection and records it",

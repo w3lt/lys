@@ -32,6 +32,7 @@ import {
   type AgentCreatorHarness
 } from "../../support/agentCreatorContract"
 import { openTestDatabase } from "../../support/conversationDatabase"
+import { createRoomyReplyContextMeter } from "../../support/replyContextMeterFakes"
 
 /** Time the clock reads when a case starts. */
 const NOW = "2026-05-06T07:08:09.123Z"
@@ -82,7 +83,8 @@ function createAgentService(
   return new AgentService({
     recordStore: new SqliteAgentRecordStore(openTestDatabase()),
     builtInAgents: BUILT_IN_AGENTS,
-    replyModel
+    replyModel,
+    replyContextMeter: createRoomyReplyContextMeter()
   })
 }
 
@@ -110,6 +112,7 @@ async function createHelloReply(agent: Agent): Promise<void> {
     sendClientToolCall: vi.fn(),
     createToolCallGate: vi.fn(),
     reportReplyCancellation: vi.fn(),
+    reportReplyRefusal: vi.fn(),
     reportReplyFailure: vi.fn()
   })
 }
@@ -232,7 +235,8 @@ function createAgentServiceHarness(): AgentServiceHarness {
   const agentService = new AgentService({
     recordStore,
     builtInAgents: BUILT_IN_AGENTS,
-    replyModel: createFinishingReplyModel()
+    replyModel: createFinishingReplyModel(),
+    replyContextMeter: createRoomyReplyContextMeter()
   })
   return {
     agentCreator: agentService,

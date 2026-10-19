@@ -135,3 +135,19 @@ export function buildAgentContext(
     { role: "user", content: userMessageContent }
   ]
 }
+
+/**
+ * Counts the stored messages a turn's context includes.
+ * @param history - Stored transcript before the turn, in conversation order.
+ * @returns How many of its messages {@link buildAgentContext} sends: every
+ * user message, and each completed or interrupted reply with a round that
+ * sends text or a tool call with a result. A reply counts once, however many
+ * context messages its rounds and tool results become.
+ */
+export function countAgentContextHistoryMessages(
+  history: readonly ConversationMessage[]
+): number {
+  return history.filter(
+    (message) => buildStoredContextMessages(message).length > 0
+  ).length
+}

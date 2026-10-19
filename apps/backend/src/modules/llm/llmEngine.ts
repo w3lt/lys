@@ -1,6 +1,7 @@
 import type { ModelLoadConfiguration } from "@lys/share"
 import type {
   DownloadedLlmModel,
+  LlmContextMeasurement,
   LoadedLlmModelInstance
 } from "./llmRuntimeTypes"
 
@@ -71,4 +72,24 @@ export interface LlmEngine {
    * promised. The service reconciles final model-key state through fresh inventory.
    */
   stopLoadedLlmModelInstance(modelIdentifier: string): Promise<void>
+
+  /**
+   * Measures texts with the tokenizer of a loaded model and observes the
+   * context length it is loaded with, without changing model state.
+   *
+   * @param model - Model selection as a chat request names it: a loaded
+   * instance's identifier or a loaded model's canonical key.
+   * @param texts - Texts to count, each on its own; may be empty.
+   * @returns A frozen measurement whose context length is the smallest among
+   * the loaded instances the selection names, with one count per text in
+   * text order; undefined when no loaded instance matches the selection.
+   * @throws The shared closed/busy failures, or
+   * `The LLM runtime could not measure the context.` for a failed query or a
+   * malformed engine answer.
+   * @remarks Never loads a model.
+   */
+  findLlmContextMeasurement(
+    model: string,
+    texts: readonly string[]
+  ): Promise<LlmContextMeasurement | undefined>
 }

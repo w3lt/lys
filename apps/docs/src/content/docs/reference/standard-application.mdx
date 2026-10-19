@@ -26,7 +26,7 @@ In `packages/protocol/src/apis/`, primary payload contracts such as request bodi
 
 Endpoint descriptors, status-to-schema maps, reply maps, and framework route wrappers MAY use ordinary objects and TypeScript types that compose the primary contracts. They do not require Zod schemas solely for type derivation. Avoid handwritten mirrors of an inferable schema-map or descriptor shape. Use `z.infer`, `z.input`, or `z.output` only with an actual Zod schema, never with a plain descriptor or schema map.
 
-## LLM runtime surface and unresolved review
+## LLM runtime surface and review history
 
 The current runtime surface maps to
 [IFACE-006 and IFACE-026](https://github.com/w3lt/lys/blob/main/docs/code_standards/INTERFACE.md)
@@ -37,8 +37,8 @@ disposal, and the class's public static factory.
 
 | Declaration                    | Effective surface                                                                                  | Count |
 | ------------------------------ | -------------------------------------------------------------------------------------------------- | ----: |
-| `LlmEngine`                    | Downloaded inventory, loaded-instance inventory, load, and stop                                    |     4 |
-| `LlmRuntimeLifecycle`          | `lifecycleStatus`, `getRuntimeAvailability()`, and `[Symbol.asyncDispose]()`                       |     3 |
+| `LlmEngine`                    | Downloaded inventory, loaded-instance inventory, load, stop, and context measurement               |     5 |
+| `LlmRuntimeLifecycle`          | `getRuntimeAvailability()` and `[Symbol.asyncDispose]()`                                           |     2 |
 | `LlmRuntime`                   | All inherited `LlmEngine` and `LlmRuntimeLifecycle` operations; no additional declarations         |     7 |
 | `LmStudioRuntime`              | The seven runtime operations plus public static `create()`; its private constructor does not count |     8 |
 | `LlmEngineOperationQueue`      | `handleLlmEngineOperationRequest()`                                                                |     1 |
@@ -53,38 +53,44 @@ The declarations are in [engine capability](https://github.com/w3lt/lys/blob/mai
 [runtime capabilities](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/llm/llmRuntimeCapabilities.ts),
 and [runtime service](https://github.com/w3lt/lys/blob/main/apps/backend/src/modules/llm/llmRuntimeService.ts).
 
-`LlmRuntimeService` consumes the full `LlmRuntime`: the four engine operations
+`LlmRuntimeService` consumes the full `LlmRuntime`: the five engine operations
 on behalf of `LlmService`, `getRuntimeAvailability()` for probes, and disposal.
 [Singleton composition](https://github.com/w3lt/lys/blob/main/apps/backend/src/di/singleton.ts)
 supplies `create()` as the runtime service's acquisition capability; each
 acquired instance transfers to the runtime service, which releases it when it
-drops the connection or cleans up. Source inspection found no production calls
-to `lifecycleStatus`. The factory's readiness check calls the SDK directly, so
-it does not establish a consumer of the public availability method.
+drops the connection or cleans up. The factory's readiness check calls the SDK
+directly, so it does not establish a consumer of the public availability method.
+
+[Issue #140](https://github.com/w3lt/lys/issues/140) added
+`findLlmContextMeasurement` to `LlmEngine` and removed the `lifecycleStatus`
+getter, which had no production consumer, so the composite's and the class's
+counts did not change. Counting tokens and reading the loaded context length
+need the LM Studio SDK client, which `LmStudioRuntime` owns privately and which
+only the runtime service's queue may reach.
 
 The seven-operation composite and eight-operation class exceed their default
-limits. Shared resource identity alone does not satisfy the exception criteria:
-the inspected production owner uses six of the seven operations, and no actual
-consumer or approved public contract was established for `lifecycleStatus`.
-No valid exception approval was established in the inspected repository and PR
-review evidence. [Issue #37](https://github.com/w3lt/lys/issues/37) remains unresolved;
-recording these facts does not approve an exception or change the implementation.
+limits. Shared resource identity alone does not satisfy the exception criteria,
+although the production owner now uses every operation. No valid exception
+approval was established in the inspected repository and PR review evidence.
+Recording these facts does not approve an exception or change the
+implementation.
 
 Historically, [review finding I-8 on PR #23](https://github.com/w3lt/lys/pull/23#issuecomment-5633082465)
 identified a missing design record and approval behind source-level exception
 claims. Those claims were subsequently removed from source documentation. The
 missing record was not present in the inspected repository or its path history,
 and the inspected PR review list was empty; this describes the inspected evidence,
-not proof that no discussion could have occurred elsewhere. Moving the review
-mapping here does not close the finding's underlying surface-compliance issue.
+not proof that no discussion could have occurred elsewhere.
+[Issue #37](https://github.com/w3lt/lys/issues/37) tracked the finding, and the
+maintainer closed it as completed on 2026-09-29.
 
 A separate implementation decision can reduce the surface or provide the evidence
 and explicit reviewer approval required by the
 [exception process](https://github.com/w3lt/lys/blob/main/CONTRIBUTING.md).
-Removing both currently unused observations would leave five interface operations
-and six public class operations including `create()`. That is a proposed change,
-not an implemented compatibility decision. Behavioral coverage remains separate
-work tracked in [issue #25](https://github.com/w3lt/lys/issues/25).
+With `lifecycleStatus` removed, every operation of the composite has a
+production consumer, so bringing it within its limit needs a split of the
+runtime's capabilities or an approved exception. Behavioral coverage remains
+separate work tracked in [issue #25](https://github.com/w3lt/lys/issues/25).
 
 ## Agent editor error discovery exception
 
@@ -180,7 +186,13 @@ maintainer on 2026-10-09 for [PR #128](https://github.com/w3lt/lys/pull/128).
 On 2026-10-11 the maintainer extended it, for
 [PR #157](https://github.com/w3lt/lys/pull/157), to the backend's own tools:
 the allowed calls of one round run in the backend in parallel, with no limit
-on how many run at once.
+on how many run at once. On 2026-10-19 the maintainer approved its current
+risk and control text for [PR #203](https://github.com/w3lt/lys/pull/203),
+following finding I-9 of its
+[second review](https://github.com/w3lt/lys/pull/203#issuecomment-6267044781):
+`read_page` reads through vmo, which starts one micro VM per read with no
+limit on that VM's connections or on what it receives, until
+[#196](https://github.com/w3lt/lys/issues/196).
 
 - **Scope:** the tool loop of `Agent.createReply`, including the backend tool
   runs of one round, and the `tools` offer of `POST /api/v1/chat`. Every
@@ -206,16 +218,18 @@ on how many run at once.
   itself (a prompt it cannot show, or a call it cannot run). Such calls repeat
   until the person presses Stop. Switching a tool or tool calls off does not
   end them; it applies from the next message. Each round sends the growing
-  context to LM Studio again, which refuses a request beyond the model's
-  context length unless its context overflow setting truncates the context
-  instead. On Just run, a round of N `read_page` calls starts N headless browsers
-  at once, each behind its own proxy, with at most 256 connections and 64 MiB
-  received each, and each page's scripts holding at most 1 GiB beside the
-  memory Chromium itself takes; each read ends within
-  30 seconds and closes its browser, and their extractions run one after
-  another on the backend's thread, about a second each at most. A round of N `web_search` calls sends
-  N queries to Tavily at once, each costing one Tavily credit, each ending
-  within 15 seconds and reading at most 1 MiB.
+  context to LM Studio again; the backend measures each round first and ends the
+  reply when the round would not fit the loaded model's context length. On Just
+  run, a round of N `read_page` calls asks vmo for N reads at once, and vmo
+  starts N micro VMs at once, with no limit on their connections or on what
+  they receive ([#196](https://github.com/w3lt/lys/issues/196)). Each read
+  ends within 60 seconds in the backend, which reads at most 16 MiB of each
+  answer. vmo deletes each VM after at most 30 seconds, or, when creating and
+  booting it alone take longer, as soon as they end. Their extractions run one
+  after another on the backend's thread, about a second each at most. A round
+  of N `web_search` calls sends N queries to Tavily
+  at once, each costing one Tavily credit, each ending within 15 seconds and
+  reading at most 1 MiB.
 - **Removal condition:** [#136](https://github.com/w3lt/lys/issues/136) adds
   the limit back, which also bounds how many backend tool calls of a round
   run at once.
@@ -264,7 +278,12 @@ and [ERROR-029](https://github.com/w3lt/lys/blob/main/docs/code_standards/ERROR.
 when one backend tool's run rejects, the reply fails while the round's other
 calls keep going. The exception was approved by the maintainer on 2026-10-11
 for [PR #157](https://github.com/w3lt/lys/pull/157), following review findings
-I-3 and I-8.
+I-3 and I-8. On 2026-10-19 the maintainer approved its current risk and
+control text for [PR #203](https://github.com/w3lt/lys/pull/203), following
+finding I-9 of its
+[second review](https://github.com/w3lt/lys/pull/203#issuecomment-6267044781):
+a `read_page` run that keeps going is a read through vmo, bounded by the
+backend's 60 seconds and 16 MiB, whose VM vmo deletes.
 
 - **Scope:** `handleToolCallRound` and `handleBuiltInToolCall` in
   `apps/backend/src/modules/agent/toolCallRound.ts`, and only a run that
@@ -284,9 +303,10 @@ I-3 and I-8.
   because it would hide a defect from the person.
 - **Risk and control:** the round rejects as soon as one run rejects, and the
   reply is stored as failed. The round's other backend runs keep going until
-  they end, for `read_page` a browser read of at most 30 seconds, 256
-  connections, and 64 MiB received, which closes its browser, plus an
-  extraction of about a second, for `web_search` a request of at most 15
+  they end, for `read_page` a read through vmo of at most 60 seconds and
+  16 MiB, whose VM vmo deletes after at most 30 seconds, or, when creating and
+  booting it alone take longer, as soon as they end, plus an extraction of
+  about a second, for `web_search` a request of at most 15
   seconds and 1 MiB, and their results are discarded: nothing
   they produce is stored or shown. Calls still waiting for the person end
   when the failed reply task settles.
@@ -438,9 +458,9 @@ from a scan of each function's body, before and after the pull request.
   - The `singletonPlugin` callback in
     [di/fastify.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/di/fastify.ts):
     33 → 34, for one `decorate` call.
-  - Test helpers: `getAgentReplyOutcome` in `agent.test.ts` (47 → 49),
+  - Test helpers: `getAgentReplyOutcome` in `agent.test.ts` (53 → 55),
     `registerBuiltInToolContractSuite` in `builtInToolContract.ts` (41 → 55),
-    `createChatRouteTestApp` in `chatRouteTestApp.ts` (55 → 57), and the
+    `createChatRouteTestApp` in `chatRouteTestApp.ts` (70 → 72), and the
     contract-suite registrars in `conversationRecordsContract.ts`, which grew
     with their new cases, and the new
     `registerReplyPartRecordWriterContractSuite` there (299), written like
@@ -463,6 +483,135 @@ from a scan of each function's body, before and after the pull request.
   only return, and the added test cases are independent.
 - **Removal condition:** a change that splits these functions to within the
   limit removes this exception. No issue tracks that split.
+
+## vmo address copy exception
+
+vmo's address has an approved exception to
+[CONST-005](https://github.com/w3lt/lys/blob/main/docs/code_standards/CONSTANT.md):
+`VMO_HOST` and `VMO_PORT` in `@lys/protocol` define it, but the Tauri host and
+vmo declare `127.0.0.1:8080` again, because Rust and Swift cannot import a
+TypeScript constant. The exception was approved by the maintainer on
+2026-10-19 for [PR #203](https://github.com/w3lt/lys/pull/203), following
+finding I-8 of its
+[first review](https://github.com/w3lt/lys/pull/203#issuecomment-6265470863)
+and question Q3 of its
+[second](https://github.com/w3lt/lys/pull/203#issuecomment-6267044781).
+
+- **Scope:** only `VMO_ADDRESS` in
+  [vmo.rs](https://github.com/w3lt/lys/blob/main/apps/desktop/src-tauri/src/vmo.rs),
+  where the host checks vmo's health, and the default `host` and `port` of
+  `WebServer.init` in
+  [WebServer.swift](https://github.com/w3lt/lys/blob/main/apps/vmo/Sources/vmo/WebServer/WebServer.swift),
+  where vmo listens. The backend and the renderer import the protocol
+  constants.
+- **Constraint:** the host's health check and vmo's listener are Rust and
+  Swift, which cannot read `@lys/protocol`, and vmo run on its own, through
+  `run.sh` or `swift run`, needs an address to listen on.
+- **Alternatives considered:**
+  - Moving the health check from the host to the renderer, which imports the
+    constants, removes the Rust copy. It is deferred to
+    [#207](https://github.com/w3lt/lys/issues/207).
+  - Passing the address to vmo when the host starts it was not taken: the
+    host would still declare it to pass it, and vmo run on its own would
+    still need a default.
+- **Risk and control:** a changed protocol constant would leave the host
+  checking, or vmo listening on, the old address, so `read_page` would stay
+  unavailable. The desktop unit test
+  [vmo-address.test.ts](https://github.com/w3lt/lys/blob/main/apps/desktop/test/unit/lib/apis/tauri/vmo-address.test.ts),
+  which CI runs on every pull request, fails when either copy differs from
+  `VMO_HOST` and `VMO_PORT`, when it does not find exactly one of each
+  declaration, or when either file moves.
+- **Removal condition:** [#207](https://github.com/w3lt/lys/issues/207)
+  removes the Rust copy. vmo's default stays under this exception, guarded by
+  the same test.
+
+## Reader VM lifecycle contract exception
+
+vmo's reader VM lifecycle has an approved exception to
+[IFACE-032](https://github.com/w3lt/lys/blob/main/docs/code_standards/INTERFACE.md):
+`ContainerizationReaderVmLifecycle`, the production `ReaderVmLifecycle`, runs
+only the contract cases that need no VM, while `InMemoryReaderVmLifecycle`,
+its reusable fake, runs every case. The exception was approved by the
+maintainer on 2026-10-19 for [PR #203](https://github.com/w3lt/lys/pull/203),
+following finding I-10 of its
+[second review](https://github.com/w3lt/lys/pull/203#issuecomment-6267044781).
+
+- **Scope:** only the production lifecycle's cases in the "Reader VM
+  lifecycle contract with VMs" and "Reader VM lifecycle contract when the VM
+  mechanism fails" suites of
+  [ReaderVmLifecycleContractTests.swift](https://github.com/w3lt/lys/blob/main/apps/vmo/Tests/vmoTests/ReaderVmLifecycleContractTests.swift).
+  It runs the suite without a VM, for ids it never returned, and
+  `ContainerizationReaderVmLifecycleTests` checks it once closed.
+- **Constraint:** the production lifecycle boots real VMs, which need two
+  things no test run has. One is a Linux kernel, which only one developer's
+  Mac has until [#200](https://github.com/w3lt/lys/issues/200). The other is
+  a process signed with the `com.apple.security.virtualization` entitlement,
+  as `run.sh` and `build.sh` sign vmo; `swift test` runs the tests in a
+  process without it, so Virtualization.framework refuses to boot a VM there.
+  Six of the eight cases of the failure suite also need a Containerization
+  step to fail on demand, which neither provides. CI runs no `swift` tests.
+- **Alternatives considered:**
+  - Running the production lifecycle's VM cases only when a kernel and the
+    entitlement are found was rejected: everywhere else they would pass
+    while checking nothing.
+  - Replacing Containerization under the production lifecycle with a fake
+    was rejected: it would add a seam only for tests, and the cases would
+    check the fake, not the VMs.
+- **Risk and control:** for the production lifecycle, the guarantees that the
+  two suites' documentation lists stay unchecked: unique ids and nothing run
+  before a start, a command's output reaching every wait, a single start and
+  what a failed start leaves, deletion refused while a VM starts, deletion
+  ending every wait, waits that hold up no other VM, and how the VM
+  mechanism's failures and a cancelled caller reach the caller. A change that
+  breaks one of them passes the tests. `readPageInVm` is tested against
+  `InMemoryReaderVmLifecycle`, which runs every case, so the read flow is
+  checked against the same contract.
+- **Removal condition:** a test run that can boot vmo's VMs, which needs a
+  kernel on every Mac ([#200](https://github.com/w3lt/lys/issues/200)) and a
+  test executable signed with the virtualization entitlement, and a test-only
+  harness that makes Containerization's steps fail on demand. No issue tracks
+  the last two yet. The production lifecycle then joins
+  `ReaderVmLifecycleHarness`, which runs the two suites, and this exception is
+  removed.
+
+## Reader VM wait cancellation exception
+
+vmo's wait for a reader VM's command has an approved exception to
+[IFACE-018](https://github.com/w3lt/lys/blob/main/docs/code_standards/INTERFACE.md):
+`waitForCommandExit(containerId:)` of `ReaderVmLifecycle` doesn't end when its
+caller is cancelled. The exception was approved by the maintainer on
+2026-10-19 for [PR #203](https://github.com/w3lt/lys/pull/203), which added
+the protocol for finding I-10 of its
+[second review](https://github.com/w3lt/lys/pull/203#issuecomment-6267044781).
+
+- **Scope:** only `waitForCommandExit(containerId:)` in
+  [ReadPageInVm.swift](https://github.com/w3lt/lys/blob/main/apps/vmo/Sources/vmo/Endpoints/Web/ReadPageInVm.swift)
+  and its implementations in `ContainerizationReaderVmLifecycle` and
+  `InMemoryReaderVmLifecycle`. The lifecycle's other operations observe
+  cancellation as documented.
+- **Constraint:** a read must not return while its reader may still run.
+  When deleting the VM fails to stop the reader, the wait that is already
+  running is the only way to learn when the reader exits, because once the
+  deletion began, the VM's id names no VM and a new wait fails. So
+  `readPageInVm` cancels its wait when the deadline passes or its caller is
+  cancelled, and relies on that wait to end only when the deletion stops the
+  reader or the reader exits.
+- **Alternatives considered:**
+  - A wait that each caller can cancel, with `readPageInVm` keeping a wait of
+    its own that neither its deadline nor its caller ends, is deferred to
+    [#212](https://github.com/w3lt/lys/issues/212).
+  - Starting a new wait after a failed stop is not possible: the VM's id no
+    longer names a VM.
+- **Risk and control:** a cancelled caller keeps waiting until the VM's
+  command exits or the VM is deleted. `readPageInVm`, the only caller,
+  deletes the VM as soon as its deadline passes or its caller is cancelled,
+  so its wait ends when the deletion stops the reader. When stopping fails,
+  the read waits until the reader exits, with no time limit in vmo; the
+  backend stops waiting for the answer after its own 60 seconds, and the
+  reader gives Chromium at most 30 seconds.
+- **Removal condition:** [#212](https://github.com/w3lt/lys/issues/212) makes
+  the wait end when its caller is cancelled, and this exception is removed
+  with it.
 
 ## API boundaries
 
@@ -542,16 +691,16 @@ Canonical rules: [CONFIG-021 through CONFIG-030](https://github.com/w3lt/lys/blo
 
 These examples identify boundaries in the current source; they do not certify those implementations as compliant with the linked standard or every active standard. Existing limitations are not exceptions for new or modified code.
 
-| Observed boundary                                                                                                                               | Configuration distinction                                                                                                                                                                                            |
-| ----------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Backend composition uses a configuration object assembled from protocol constants and a database path under the `LYS_HOME` environment variable | A startup check that rejects an unset, empty, or relative value does not verify that the directory exists or is usable; the desktop host also checks that its Lys home is absolute before passing it to the backend. |
-| Native settings loading parses an existing document and creates defaults only when the file is missing                                          | Absence, decoding failure, and initial persistence are separate outcomes.                                                                                                                                            |
-| Renderer and native settings both represent runtime, model, generation, and load configuration groups                                           | Matching field names alone do not prove matching domains, defaults, or validation. The renderer holds the per-model load settings as a map; its adapter converts them from and to the document's object.             |
-| The renderer applies settings in memory and automatically saves generation and load configuration edits through the native command              | Runtime and model edits remain session-only. The adapter sends the settings document as `newSettings`, matching Rust's `new_settings` parameter; write failure remains distinct from local application.              |
-| A chat request reads temperature and reply ceiling once from a narrow settings projection                                                       | The request has a concrete sampling point; a later edit can affect a subsequent request without changing the admitted request.                                                                                       |
-| A backend-address setting exists while the chat transport uses a fixed address                                                                  | Storing or displaying a setting does not prove that its intended consumer applies it.                                                                                                                                |
-| Theme application and its browser-storage write have separate failure behavior                                                                  | A locally applied appearance is distinct from an acknowledged saved preference. This does not authorize silent recovery from invalid required configuration.                                                         |
-| Backend composition derives endpoints and a database path before passing them to service factories                                              | The source exposes a configuration boundary to verify; it does not establish that a test has executed the factory inputs, external parsing, or persistence.                                                          |
+| Observed boundary                                                                                                                                                   | Configuration distinction                                                                                                                                                                                                                                                                           |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Backend composition uses a configuration object assembled from protocol constants and a database path under the `LYS_HOME` environment variable                     | A startup check that rejects an unset, empty, or relative value does not verify that the directory exists or is usable; the desktop host also checks that its Lys home is absolute before passing it to the backend.                                                                                |
+| Native settings loading parses an existing document and creates defaults only when the file is missing                                                              | Absence, decoding failure, and initial persistence are separate outcomes.                                                                                                                                                                                                                           |
+| Renderer and native settings both represent runtime, model, generation, and load configuration groups                                                               | Matching field names alone do not prove matching domains, defaults, or validation. The renderer holds the per-model load settings as a map; its adapter converts them from and to the document's object.                                                                                            |
+| The renderer applies settings in memory and automatically saves generation and load configuration edits and the runtime startup switches through the native command | The other runtime edits and model edits remain session-only; a startup switch save keeps the rest of the runtime group as it is on disk. The adapter sends the settings document as `newSettings`, matching Rust's `new_settings` parameter; write failure remains distinct from local application. |
+| A chat request reads temperature and reply ceiling once from a narrow settings projection                                                                           | The request has a concrete sampling point; a later edit can affect a subsequent request without changing the admitted request.                                                                                                                                                                      |
+| A backend-address setting exists while the chat transport uses a fixed address                                                                                      | Storing or displaying a setting does not prove that its intended consumer applies it.                                                                                                                                                                                                               |
+| Theme application and its browser-storage write have separate failure behavior                                                                                      | A locally applied appearance is distinct from an acknowledged saved preference. This does not authorize silent recovery from invalid required configuration.                                                                                                                                        |
+| Backend composition derives endpoints and a database path before passing them to service factories                                                                  | The source exposes a configuration boundary to verify; it does not establish that a test has executed the factory inputs, external parsing, or persistence.                                                                                                                                         |
 
 The relevant sources are the [backend configuration declaration](https://github.com/w3lt/lys/blob/main/apps/backend/src/config.ts), [backend startup](https://github.com/w3lt/lys/blob/main/apps/backend/src/index.ts), [service composition](https://github.com/w3lt/lys/blob/main/apps/backend/src/di/singleton.ts), [native settings loading and persistence](https://github.com/w3lt/lys/blob/main/apps/desktop/src-tauri/src/settings.rs), [native settings commands](https://github.com/w3lt/lys/blob/main/apps/desktop/src-tauri/src/settings/commands.rs), [renderer settings types and initial values](https://github.com/w3lt/lys/blob/main/apps/desktop/src/lib/store/settings.ts), [renderer settings adapter](https://github.com/w3lt/lys/blob/main/apps/desktop/src/lib/apis/tauri/settings.ts), [application settings state](https://github.com/w3lt/lys/blob/main/apps/desktop/src/lib/store/index.ts), [chat request sampling](https://github.com/w3lt/lys/blob/main/apps/desktop/src/lib/store/chat-view/index.ts), [chat transport](https://github.com/w3lt/lys/blob/main/apps/desktop/src/lib/apis/http/chat.ts), and [theme behavior](https://github.com/w3lt/lys/blob/main/apps/desktop/src/app/theme.ts).
 

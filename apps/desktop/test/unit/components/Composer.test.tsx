@@ -15,19 +15,26 @@ import {
   LYSIPTERA_AGENT_CODE,
   type Conversation
 } from "@lys/share"
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { DELETED_CONVERSATION_AGENT_MESSAGE } from "@/lib/conversation-agent-messages"
 import { createStoredChatViewConversation } from "@/lib/store/chat-view/conversation-transitions"
 import type { HeldToolCall } from "@/lib/store/tool-calls"
 import { buildAgentListPage, buildBuiltInAgent } from "../support/agentFixtures"
 import {
   buildJsonResponse,
+  createControlledRoute,
   listRouteKeys,
   startBackendEventStream,
   startBackendFake,
   type BackendEventStream,
   type BackendRoutes
 } from "../support/backendFake"
+import {
+  CHAT_CONTEXT_ROUTE,
+  FIXTURE_CHAT_CONTEXT_MEASUREMENT,
+  listRequestsBesideMeasurements,
+  MEASURING_BACKEND_ROUTES
+} from "../support/chatContextFixtures"
 import {
   buildConversation,
   buildConversationListPage,
@@ -239,6 +246,7 @@ function startChatBackend(routes: BackendRoutes = {}) {
   const streams: BackendEventStream[] = []
   const replyFollows: BackendEventStream[] = []
   const backend = startBackendFake({
+    ...MEASURING_BACKEND_ROUTES,
     [CHAT_ROUTE]: () => {
       const stream = startBackendEventStream()
       streams.push(stream)
@@ -285,17 +293,19 @@ function isTextInChatBody(body: unknown, text: string): boolean {
 
 /**
  * Lists the route keys of the requests a backend received, in order, other
- * than the tool-call store's follows of {@link REPLY}.
+ * than the tool-call store's follows of {@link REPLY} and the composer's
+ * context measurements.
  *
  * @param backend - Backend observation handle.
- * @returns `<METHOD> <path>` of each request except a follow, which runs on
- * its own connection in no order the composer fixes.
+ * @returns `<METHOD> <path>` of each request except a follow or a
+ * measurement, which run in no order the composer's sending fixes.
  */
 function listRouteKeysWithoutReplyFollows(
   backend: ReturnType<typeof startBackendFake>
 ) {
   return listRouteKeys(backend).filter(
-    (routeKey) => routeKey !== REPLY_EVENTS_ROUTE
+    (routeKey) =>
+      routeKey !== REPLY_EVENTS_ROUTE && routeKey !== CHAT_CONTEXT_ROUTE
   )
 }
 
@@ -427,6 +437,11 @@ function sendFileDrop(target: Element, files: readonly File[]): void {
 }
 
 describe("Composer", () => {
+  // A ready composer measures what its next message would be sent with.
+  beforeEach(() => {
+    startBackendFake(MEASURING_BACKEND_ROUTES)
+  })
+
   describe("drafting and sending", () => {
     it("keeps Send disabled until the draft has text, which the chat store owns", async () => {
       const { useChatViewStore, Composer } = await loadFreshComposer()
@@ -496,7 +511,7 @@ describe("Composer", () => {
       await waitForRenderedWork()
 
       expect(getMessageField()).toHaveValue("Hello\nthere")
-      expect(backend.requests).toEqual([])
+      expect(listRequestsBesideMeasurements(backend)).toEqual([])
     })
 
     it("neither sends nor adds a line on Enter with a blank draft", async () => {
@@ -511,7 +526,7 @@ describe("Composer", () => {
       await waitForRenderedWork()
 
       expect(getMessageField()).toHaveValue("  ")
-      expect(backend.requests).toEqual([])
+      expect(listRequestsBesideMeasurements(backend)).toEqual([])
     })
 
     it("sends the draft when Send is pressed", async () => {
@@ -981,7 +996,7 @@ describe("Composer", () => {
       expect(useChatViewStore.getState().conversation?.id).toBe(
         FIXTURE_CONVERSATION_ID
       )
-      expect(backend.requests).toEqual([])
+      expect(listRequestsBesideMeasurements(backend)).toEqual([])
     })
 
     it("lets the unavailable banner stand in for the deleted-agent notice", async () => {
@@ -1015,6 +1030,7 @@ describe("Composer", () => {
     it("allows the call on Enter while the draft is empty, instead of sending a message", async () => {
       const host = startNativeHostFake({ read_text_file: () => "Buy milk." })
       const backend = startBackendFake({
+        ...MEASURING_BACKEND_ROUTES,
         [READ_APPROVAL_ROUTE]: () => new Response(null, { status: 204 })
       })
       const { Composer } = await loadFreshComposerWithWaitingCall()
@@ -1027,8 +1043,12 @@ describe("Composer", () => {
       await waitForRenderedWork()
 
       expect(host.commands).toEqual([])
-      expect(listRouteKeys(backend)).toEqual([READ_APPROVAL_ROUTE])
-      expect(backend.requests[0]?.body).toEqual({ status: "allowed" })
+      expect(listRouteKeysWithoutReplyFollows(backend)).toEqual([
+        READ_APPROVAL_ROUTE
+      ])
+      expect(listRequestsBesideMeasurements(backend)[0]?.body).toEqual({
+        status: "allowed"
+      })
       expect(
         screen.queryByRole("group", {
           name: "Tool call waiting for your answer"
@@ -1044,6 +1064,7 @@ describe("Composer", () => {
       async (_key, keys) => {
         startNativeHostFake({})
         const backend = startBackendFake({
+          ...MEASURING_BACKEND_ROUTES,
           [READ_APPROVAL_ROUTE]: () => new Response(null, { status: 204 })
         })
         const { Composer } = await loadFreshComposerWithWaitingCall()
@@ -1058,8 +1079,10 @@ describe("Composer", () => {
         await user.type(getMessageField(), `Not that file${keys}`)
         await waitForRenderedWork()
 
-        expect(listRouteKeys(backend)).toEqual([READ_APPROVAL_ROUTE])
-        expect(backend.requests[0]?.body).toEqual({
+        expect(listRouteKeysWithoutReplyFollows(backend)).toEqual([
+          READ_APPROVAL_ROUTE
+        ])
+        expect(listRequestsBesideMeasurements(backend)[0]?.body).toEqual({
           status: "rejected",
           reason: "declined",
           content: "The person declined this call. They said: Not that file"
@@ -1071,6 +1094,7 @@ describe("Composer", () => {
     it("rejects the call without a reason on Escape while the draft is empty", async () => {
       startNativeHostFake({})
       const backend = startBackendFake({
+        ...MEASURING_BACKEND_ROUTES,
         [READ_APPROVAL_ROUTE]: () => new Response(null, { status: 204 })
       })
       const { Composer } = await loadFreshComposerWithWaitingCall()
@@ -1082,7 +1106,9 @@ describe("Composer", () => {
       await user.type(getMessageField(), "{Escape}")
       await waitForRenderedWork()
 
-      expect(backend.requests.map((request) => request.body)).toEqual([
+      expect(
+        listRequestsBesideMeasurements(backend).map((request) => request.body)
+      ).toEqual([
         {
           status: "rejected",
           reason: "declined",
@@ -1094,6 +1120,7 @@ describe("Composer", () => {
     it("rejects the call with the draft from the card's Reject button, and clears the draft", async () => {
       startNativeHostFake({})
       const backend = startBackendFake({
+        ...MEASURING_BACKEND_ROUTES,
         [READ_APPROVAL_ROUTE]: () => new Response(null, { status: 204 })
       })
       const { useChatViewStore, Composer } =
@@ -1107,7 +1134,9 @@ describe("Composer", () => {
       await user.click(screen.getByRole("button", { name: "Reject" }))
       await waitForRenderedWork()
 
-      expect(backend.requests.map((request) => request.body)).toEqual([
+      expect(
+        listRequestsBesideMeasurements(backend).map((request) => request.body)
+      ).toEqual([
         {
           status: "rejected",
           reason: "declined",
@@ -1120,7 +1149,7 @@ describe("Composer", () => {
 
     it("adds a line on Shift+Enter and leaves the call waiting", async () => {
       startNativeHostFake({})
-      const backend = startBackendFake({})
+      const backend = startBackendFake(MEASURING_BACKEND_ROUTES)
       const { Composer } = await loadFreshComposerWithWaitingCall()
       const user = userEvent.setup()
       render(
@@ -1131,7 +1160,7 @@ describe("Composer", () => {
       await waitForRenderedWork()
 
       expect(getMessageField()).toHaveValue("Wait\n")
-      expect(backend.requests).toEqual([])
+      expect(listRequestsBesideMeasurements(backend)).toEqual([])
       expect(
         screen.getByRole("group", { name: "Tool call waiting for your answer" })
       ).toBeInTheDocument()
@@ -1139,7 +1168,7 @@ describe("Composer", () => {
 
     it("leaves Escape to the field while only an answer that failed to send is shown", async () => {
       startNativeHostFake({})
-      const backend = startBackendFake({})
+      const backend = startBackendFake(MEASURING_BACKEND_ROUTES)
       const { useChatViewStore, Composer } =
         await loadFreshComposerWithWaitingCall()
       const { useToolCallStore } = await import("@/lib/store/tool-calls")
@@ -1167,7 +1196,7 @@ describe("Composer", () => {
       await waitForRenderedWork()
 
       expect(getMessageField()).toHaveValue("Keep this")
-      expect(backend.requests).toEqual([])
+      expect(listRequestsBesideMeasurements(backend)).toEqual([])
       expect(
         screen.getByRole("group", { name: "Tool answer not sent" })
       ).toBeInTheDocument()
@@ -1182,6 +1211,7 @@ describe("Composer", () => {
       async (key) => {
         startNativeHostFake({})
         const backend = startBackendFake({
+          ...MEASURING_BACKEND_ROUTES,
           [READ_APPROVAL_ROUTE]: () => new Response(null, { status: 204 })
         })
         const { useChatViewStore, Composer } =
@@ -1197,7 +1227,9 @@ describe("Composer", () => {
         fireEvent.keyDown(getMessageField(), { key, isComposing: true })
         await waitForRenderedWork()
 
-        expect(backend.requests.map((request) => request.body)).toEqual([])
+        expect(
+          listRequestsBesideMeasurements(backend).map((request) => request.body)
+        ).toEqual([])
       }
     )
 
@@ -1217,6 +1249,7 @@ describe("Composer", () => {
   describe("session controls", () => {
     it("opens past conversations and closes them again, stating which", async () => {
       startBackendFake({
+        ...MEASURING_BACKEND_ROUTES,
         [HISTORY_ROUTE]: () =>
           buildJsonResponse(200, buildConversationListPage([]))
       })
@@ -1319,6 +1352,120 @@ describe("Composer", () => {
     })
   })
 
+  describe("context meter", () => {
+    it("measures a new conversation with the loaded model and shows the window it is loaded with", async () => {
+      const { backend } = startChatBackend()
+      const { Composer } = await loadFreshComposer()
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
+
+      await waitForRenderedWork()
+
+      expect(
+        backend.requests
+          .filter((request) => request.routeKey === CHAT_CONTEXT_ROUTE)
+          .map((request) => request.body)
+      ).toEqual([
+        {
+          conversation: { kind: "new", agentCode: CALIGINIA_AGENT_CODE },
+          model: "qwen3-8b"
+        }
+      ])
+      expect(
+        screen.getByRole("button", { name: "Context window · 2.3k / 8.2k" })
+      ).toBeInTheDocument()
+    })
+
+    it("refuses to send while the conversation, the draft, and the reply reserve exceed the window", async () => {
+      const { backend } = startChatBackend({
+        [CHAT_CONTEXT_ROUTE]: () =>
+          buildJsonResponse(200, {
+            ...FIXTURE_CHAT_CONTEXT_MEASUREMENT,
+            historyTokens: 5000,
+            historyMessageCount: 4
+          })
+      })
+      const { Composer } = await loadFreshComposer()
+      const user = userEvent.setup()
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
+
+      await user.type(getMessageField(), "Summarize this{Enter}")
+      await waitForRenderedWork()
+
+      expect(listChatBodies(backend)).toEqual([])
+      expect(getMessageField()).toHaveValue("Summarize this")
+      expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
+      expect(
+        screen.getByRole("button", { name: "Context window · over by ~1.1k" })
+      ).toBeInTheDocument()
+    })
+
+    it("lets the person send while a newer measurement is pending, whatever the earlier one found", async () => {
+      const { route, responses } = createControlledRoute()
+      startChatBackend({ [CHAT_CONTEXT_ROUTE]: route })
+      const { useChatViewStore, Composer } = await loadFreshComposer()
+      const user = userEvent.setup()
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
+      await user.type(getMessageField(), "Summarize this")
+      await waitForRenderedWork()
+      await act(async () => {
+        responses[0]?.resolve(
+          buildJsonResponse(200, {
+            ...FIXTURE_CHAT_CONTEXT_MEASUREMENT,
+            historyTokens: 5000,
+            historyMessageCount: 4
+          })
+        )
+      })
+      await waitForRenderedWork()
+      expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
+
+      act(() => {
+        useChatViewStore.getState().selectAgent(LYSIPTERA_AGENT_CODE)
+      })
+      await waitForRenderedWork()
+
+      expect(responses).toHaveLength(2)
+      expect(screen.getByRole("button", { name: "Send" })).toBeEnabled()
+    })
+
+    it("lets the person send when the window cannot be measured, and says why", async () => {
+      startChatBackend({
+        [CHAT_CONTEXT_ROUTE]: () =>
+          buildJsonResponse(503, {
+            type: "urn:lys:problem:llm:runtime-unavailable",
+            title: "LLM runtime unavailable",
+            status: 503,
+            detail:
+              "LM Studio is not reachable. Start LM Studio, then refresh its status in Lys."
+          })
+      })
+      const { Composer } = await loadFreshComposer()
+      const user = userEvent.setup()
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
+
+      await user.type(getMessageField(), "Hello")
+      await waitForRenderedWork()
+      await user.click(
+        screen.getByRole("button", { name: "Context window · window unknown" })
+      )
+
+      expect(screen.getByRole("button", { name: "Send" })).toBeEnabled()
+      expect(
+        screen.getByText(
+          "LM Studio is not reachable. Start LM Studio, then refresh its status in Lys. Sending still checks that the conversation fits the model."
+        )
+      ).toBeInTheDocument()
+    })
+  })
+
   describe("attachments", () => {
     it("stages chosen files, marks the add action, and removes a file on request", async () => {
       const { Composer } = await loadFreshComposer()
@@ -1414,8 +1561,8 @@ describe("Composer", () => {
       expect(listStagedNames(["dropped.txt"])).toEqual([])
     })
 
-    it("refuses to send while a staged file overflows the window, until it is removed", async () => {
-      const { backend } = startChatBackend()
+    it("does not count a staged file against the window, because it is not sent", async () => {
+      startChatBackend()
       const { Composer } = await loadFreshComposer()
       const user = userEvent.setup()
       const { container } = render(
@@ -1427,23 +1574,12 @@ describe("Composer", () => {
         getFileInput(container),
         new File(["x".repeat(130_000)], "export.csv")
       )
-      await user.type(getMessageField(), "{Enter}")
       await waitForRenderedWork()
 
-      expect(backend.requests).toEqual([])
-      expect(getMessageField()).toHaveValue("Summarize this")
-      expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
-      expect(
-        screen.getByRole("button", { name: /^Context window · over by ~/ })
-      ).toBeInTheDocument()
-
-      await user.click(
-        screen.getByRole("button", {
-          name: "Remove export.csv from context; it does not fit the window"
-        })
-      )
-
       expect(screen.getByRole("button", { name: "Send" })).toBeEnabled()
+      expect(
+        screen.getByRole("button", { name: "Context window · 2.3k / 8.2k" })
+      ).toBeInTheDocument()
     })
 
     // Known defect, tracked by #27 and #105: the composer lists a chosen file

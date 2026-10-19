@@ -69,7 +69,9 @@ const TOOL_UNAVAILABLE_NOTES = Object.freeze({
   "api-key-invalid":
     "The Tavily API key in settings.json isn't valid. Fix or remove secrets.tavilyApiKey in that file.",
   "settings-unreadable":
-    "Lys couldn't read settings.json. Fix that file by hand."
+    "Lys couldn't read settings.json. Fix that file by hand.",
+  "page-reader-not-ready":
+    "vmo, Lys's page reader, isn't ready. See Settings → Runtime."
 } satisfies Readonly<Record<BackendToolUnavailableReason, string>>)
 
 /** Lowercase heading text of every tool group; a new group must add one. */
@@ -415,7 +417,8 @@ export function formatToolUnavailableNote(
  * @returns True only for a missing key. An invalid key or an unreadable
  * settings file is fixed in settings.json by hand: the desktop cannot load
  * either at startup, and a save from the pane would replace the file with the
- * settings it loaded earlier.
+ * settings it loaded earlier. A page reader that isn't ready is started in
+ * the Runtime pane.
  */
 export function isFixedInSecretsPane(
   reason: BackendToolUnavailableReason

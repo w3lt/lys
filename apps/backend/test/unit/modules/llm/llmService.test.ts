@@ -72,7 +72,11 @@ function createServiceWithEngine(options: LlmServiceTestOptions = {}) {
 /** Public model operations that each enter the borrowed queue. */
 type QueuedLlmServiceOperationName = keyof Pick<
   LlmService,
-  "listLlmModels" | "loadLlmModel" | "getLlmModelHealth" | "stopLlmModelsByKey"
+  | "listLlmModels"
+  | "loadLlmModel"
+  | "getLlmModelHealth"
+  | "stopLlmModelsByKey"
+  | "findLlmContextMeasurement"
 >
 
 /**
@@ -95,6 +99,8 @@ async function sendLlmServiceRequest(
       return await service.getLlmModelHealth("a/model")
     case "stopLlmModelsByKey":
       return await service.stopLlmModelsByKey("a/model")
+    case "findLlmContextMeasurement":
+      return await service.findLlmContextMeasurement("a/model", ["Hello"])
   }
 }
 
@@ -337,12 +343,45 @@ describe("LlmService", () => {
     })
   })
 
+  describe("findLlmContextMeasurement", () => {
+    it("measures the texts through the queued engine and returns its measurement", async () => {
+      const { service, engine, requests } = createServiceWithEngine()
+      const measurement = Object.freeze({
+        contextLength: 8192,
+        textTokenCounts: Object.freeze([4, 1])
+      })
+      engine.findLlmContextMeasurement.mockResolvedValue(measurement)
+
+      await expect(
+        service.findLlmContextMeasurement("qwen/qwen3-8b", [
+          "You are Lys.",
+          "Hello"
+        ])
+      ).resolves.toBe(measurement)
+      expect(engine.findLlmContextMeasurement).toHaveBeenCalledExactlyOnceWith(
+        "qwen/qwen3-8b",
+        ["You are Lys.", "Hello"]
+      )
+      expect(requests).toHaveBeenCalledOnce()
+    })
+
+    it("resolves to undefined when the engine finds no loaded instance", async () => {
+      const { service, engine } = createServiceWithEngine()
+      engine.findLlmContextMeasurement.mockResolvedValue(undefined)
+
+      await expect(
+        service.findLlmContextMeasurement("qwen/qwen3-8b", ["Hello"])
+      ).resolves.toBeUndefined()
+    })
+  })
+
   describe("queue rejection", () => {
     it.each([
       "listLlmModels",
       "loadLlmModel",
       "getLlmModelHealth",
-      "stopLlmModelsByKey"
+      "stopLlmModelsByKey",
+      "findLlmContextMeasurement"
     ] as const)(
       "propagates the queue's rejection from %s without engine work",
       async (operationName) => {
@@ -358,6 +397,7 @@ describe("LlmService", () => {
         expect(engine.listLoadedLlmModelInstances).not.toHaveBeenCalled()
         expect(engine.loadLlmModel).not.toHaveBeenCalled()
         expect(engine.stopLoadedLlmModelInstance).not.toHaveBeenCalled()
+        expect(engine.findLlmContextMeasurement).not.toHaveBeenCalled()
       }
     )
   })

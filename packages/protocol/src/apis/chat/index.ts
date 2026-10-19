@@ -11,6 +11,14 @@ export {
   type ChatToolOffer,
   type MessageGenerationOptions
 } from "./chatRoute"
+export {
+  chatContextApi,
+  chatContextApiRequestBodySchema,
+  chatContextApiResponseSchema,
+  type ChatContextApiRequestBody,
+  type ChatContextApiResponse,
+  type ChatContextApiRoute
+} from "./chatContextRoute"
 export type {
   ChatGenerationEvent,
   ChatReplyPathParams,

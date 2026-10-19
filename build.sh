@@ -11,6 +11,17 @@ fi
 # Step 1: Run pnpm install --frozen-lockfile
 pnpm install --frozen-lockfile
 
+# Step 2: Build vmo, Lys's page reader, in release. It runs before anything
+# is installed, so a machine that cannot build it keeps its current install.
+# vmo needs the Swift toolchain and builds only on Apple silicon with macOS 26
+# or later.
+if ! command -v swift >/dev/null 2>&1; then
+  echo "Lys needs the Swift toolchain (Xcode or the Command Line Tools) to build vmo, its page reader." >&2
+  exit 1
+fi
+swift build -c release --package-path apps/vmo
+VMO_BUILD_DIR=$(swift build -c release --package-path apps/vmo --show-bin-path)
+
 # Step 3: Build backend
 pnpm run backend:build
 
@@ -128,16 +139,21 @@ mkdir -p "$BACKEND_DIR"
 rm -r "$BACKEND_DIR"
 mv apps/backend/dist "$BACKEND_DIR"
 
-# Step 9. Install the browser read_page reads every page in
-scripts/install-chrome-headless-shell.sh "$LYS_HOME/runtime/chrome-headless-shell"
+# Step 8b. Install vmo to $LYS_HOME/runtime/vmo, where the desktop starts it,
+# and sign it with the entitlement it needs to run virtual machines
+VMO_DIR="$LYS_HOME/runtime/vmo"
+rm -rf "$VMO_DIR"
+mkdir -p "$VMO_DIR"
+cp "$VMO_BUILD_DIR/vmo" "$VMO_DIR/vmo"
+codesign --force --sign - --entitlements apps/vmo/vmo.entitlements "$VMO_DIR/vmo"
 
-# Step 10. Build the desktop app
+# Step 9. Build the desktop app
 pnpm run desktop:build:ci
 
-# Step 11. Bundle the desktop app
+# Step 10. Bundle the desktop app
 pnpm run desktop:bundle:ci
 
-# Step 12. Install the desktop app
+# Step 11. Install the desktop app
 APP_BUNDLE="apps/desktop/src-tauri/target/release/bundle/macos/Lys.app"
 [[ -d "$APP_BUNDLE" ]] || {
   echo "App bundle not found: $APP_BUNDLE" >&2

@@ -1,14 +1,14 @@
 ---
 title: Tauri host and lifecycle
-description: Window bootstrap, backend process ownership, file-backed settings commands, and client tools.
+description: Window bootstrap, backend and vmo process ownership, file-backed settings commands, and client tools.
 docType: architecture
 sidebar:
   order: 3
 ---
 
 The Tauri layer is a small native host. It does not implement the backend API
-itself; it starts the backend process and exposes a few native commands to the
-React UI.
+itself; it starts the backend and vmo, the page reader `read_page` uses, and
+exposes a few native commands to the React UI.
 
 ## Registered commands
 
@@ -17,6 +17,10 @@ React UI.
 | `start_backend`      | Starts the backend for the current build mode with the Lys home and stores the child handle.  |
 | `stop_backend`       | Kills the backend process group and waits for shutdown.                                       |
 | `get_backend_status` | Reports whether the stored child process is still running.                                    |
+| `start_vmo`          | Starts vmo for the current build mode unless the owned vmo runs, and reports its status.      |
+| `stop_vmo`           | Sends vmo `SIGTERM`, waits up to 60 seconds for it to exit, then kills it, and reports which. |
+| `get_vmo_status`     | Reports whether the owned vmo is stopped, running, or stopping.                               |
+| `get_vmo_health`     | Asks vmo's `GET /health` at `127.0.0.1:8080` whether it can read pages, within one second.    |
 | `load_settings`      | Reads `$LYS_HOME/settings.json`, creating a default file if needed.                           |
 | `save_settings`      | Replaces `$LYS_HOME/settings.json` atomically, owner-only, with a new settings JSON document. |
 | `read_text_file`     | Returns the complete text of one UTF-8 file of at most 1 MiB.                                 |
@@ -81,7 +85,7 @@ reads nothing and never fails.
 Before building the application, the host resolves the
 [Lys home directory](/reference/configuration/#lys-home-directory) once from the
 `LYS_HOME` environment variable and manages it as application state. The
-settings and backend commands receive that value instead of reading the
+settings, backend, and vmo commands receive that value instead of reading the
 environment again. An invalid `LYS_HOME` stops the app before any window opens.
 
 ## Backend process ownership
@@ -112,11 +116,55 @@ home the host resolved, so the backend uses the same directory as the host.
 When the direct child is still running, stopping the backend sends `SIGKILL`
 to its whole process group and waits for that child. If the direct child has
 already exited, the host clears its handle without killing any surviving
-descendants. Tauri attempts this same cleanup on app exit.
+descendants. On app exit, the host stops the backend while it stops vmo; see
+[vmo process ownership](#vmo-process-ownership).
 
 The checked-in process supervisor currently uses Unix process-group APIs and
 the `nix` crate. The repository does not yet demonstrate equivalent lifecycle
 behavior on Windows.
+
+## vmo process ownership
+
+The host owns one `Vmo` state object (`src/vmo.rs`). vmo starts when the
+desktop's initialization or the Runtime pane asks for it, never on its own.
+The child depends on the build mode:
+
+- Development builds run `bash run.sh` in `apps/vmo` of the checkout recorded
+  at compile time. `run.sh` builds vmo, signs it, and replaces itself with it
+  through `exec`, so the child the host owns is vmo itself.
+- Release builds run `$LYS_HOME/runtime/vmo/vmo`, which `build.sh` installs.
+
+vmo runs in a process group of its own. The host does not set `LYS_HOME`
+for vmo, which does not read it.
+`start_vmo` checks and spawns under one lock, so two starts never spawn two
+children; it leaves a running vmo alone and refuses while a stop still waits
+for the previous one, which holds vmo's port. A spawn failure names the
+program it tried to run.
+
+vmo deletes its VMs when it receives `SIGTERM`, and a second `SIGTERM` would
+end it before it finishes. A stop therefore sends `SIGTERM` to vmo's process
+group once and checks every 100 ms whether vmo has exited. A stop that arrives
+meanwhile joins it and gets the same result, without another signal. When vmo
+still runs after 60 seconds, the stop sends `SIGKILL` and reports `killed`:
+vmo may then have left VMs running. When `SIGTERM` or a check fails, the stop
+sends `SIGKILL` at once and reports the failure. It sends `SIGKILL` at most
+once and does not repeat a failed one, because by then the group's identifier
+may name another group. `stop_vmo` and `get_vmo_health` run off the main
+thread, so a stop never blocks the window.
+
+`get_vmo_health` sends `GET /health` over a plain TCP connection to
+`127.0.0.1:8080` and answers `ready` only for a `HTTP/1.1 200` status line
+within one second. It runs in the host because vmo sends no CORS headers. It
+asks whatever listens on vmo's port, so the renderer reads `get_vmo_status`
+first, which keeps a vmo that has exited from counting as ready.
+
+On app exit, the host stops vmo and the backend together and waits for both,
+so quitting can take up to 60 seconds while vmo deletes its VMs. A failure or
+a killed vmo is written to standard error and does not stop the exit. When the
+app dies without running its exit handler, after a crash, Force Quit, or
+`kill -9`, vmo and the backend keep running
+([#202](https://github.com/w3lt/lys/issues/202)); see
+[troubleshooting](/operate/troubleshooting/#a-vmo-or-backend-keeps-running-after-lys-died).
 
 ## Settings file
 
@@ -126,6 +174,7 @@ The host creates the following defaults when the settings file is missing:
 {
   "runtime": {
     "autoStartBackend": true,
+    "autoStartVmo": true,
     "defaultModel": null,
     "backendAddress": "http://127.0.0.1:12345"
   },
@@ -142,6 +191,9 @@ The host creates the following defaults when the settings file is missing:
   },
   "secrets": {
     "tavilyApiKey": null
+  },
+  "tools": {
+    "justRun": []
   }
 }
 ```
@@ -175,11 +227,14 @@ The desktop automatically saves generation edits by reading this document,
 replacing its generation group, and saving the complete document. Load
 configuration edits are saved the same way, and so are each tool's Ask me or
 Just run choice and the Tavily API key when the person saves or removes it in
-the Secrets pane. Runtime edits and
-`model.contextSize` edits in the UI remain session-only; the automatic saves
-preserve those groups as already stored on disk. The local context size
-supports composer estimates and is separate from the context length a model is
-loaded with.
+the Secrets pane. A change of either startup switch in the Runtime pane saves
+`autoStartBackend` and `autoStartVmo` and keeps the rest of the `runtime`
+group as stored; a file without `autoStartVmo` loads it as `true`. The other
+runtime edits and `model.contextSize` edits in the UI remain session-only; the
+automatic saves preserve those values as already stored on disk. The local context size
+supports the generation controls and the agent editor's prompt measure, and is
+separate from the context length a model is loaded with, which the composer's
+context meter shows.
 
 ## What the host does not currently do
 
@@ -187,12 +242,14 @@ loaded with.
 - It does not read the operating-system keychain.
 - It does not proxy HTTP requests to LM Studio.
 - It does not replay prior conversations into the window.
+- It does not stop vmo or the backend when it dies without running its exit
+  handler ([#202](https://github.com/w3lt/lys/issues/202)).
 
 ## Coming soon
 
 - Credential management and secure secret storage
-- Richer native tooling beyond backend lifecycle, settings I/O, and the file
-  tools
+- Richer native tooling beyond backend and vmo lifecycle, settings I/O, and
+  the file tools
 - Portable backend lifecycle support beyond the current Unix implementation
 
 ## Related pages

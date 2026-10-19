@@ -1,16 +1,27 @@
-import { LMStudioClient, type LLMLoadModelConfig } from "@lmstudio/sdk"
+import {
+  LMStudioClient,
+  type LLM,
+  type LLMLoadModelConfig
+} from "@lmstudio/sdk"
 import type { ModelLoadConfiguration } from "@lys/share"
+import * as z from "zod"
 import type { LlmRuntime } from "../llmRuntime"
 import type {
   DownloadedLlmModel,
+  LlmContextMeasurement,
   LlmRuntimeAvailability,
-  LlmRuntimeLifecycleStatus,
   LoadedLlmModelInstance
 } from "../llmRuntimeTypes"
 import {
   createDownloadedLlmModelSnapshot,
   createLoadedLlmModelInstanceSnapshot
 } from "./lmStudioModelSnapshots"
+
+/** Validates a context length LM Studio reports for a loaded instance. */
+const lmStudioContextLengthSchema = z.int().positive()
+
+/** Validates the token count LM Studio returns for one text. */
+const lmStudioTokenCountSchema = z.int().nonnegative()
 
 /** Admission and cleanup state owned exclusively by one LM Studio runtime. */
 type LmStudioRuntimeState =
@@ -58,15 +69,6 @@ export default class LmStudioRuntime implements LlmRuntime {
 
   /** Authoritative operational admission and terminal cleanup state. */
   #state: LmStudioRuntimeState = Object.freeze({ status: "ready" })
-
-  /**
-   * Observes the current runtime admission and cleanup phase.
-   *
-   * @returns The authoritative phase at the instant of access.
-   */
-  public get lifecycleStatus(): LlmRuntimeLifecycleStatus {
-    return this.#state.status
-  }
 
   /**
    * Retains an already protected SDK client without starting external work.
@@ -245,6 +247,38 @@ export default class LmStudioRuntime implements LlmRuntime {
   }
 
   /**
+   * Implements {@link LlmRuntime.findLlmContextMeasurement} through loaded SDK handles.
+   *
+   * @param model - Interface-defined model selection.
+   * @param texts - Interface-defined texts to count.
+   * @returns The interface-defined measurement, or undefined when no loaded
+   * instance matches.
+   * @throws The interface-defined admission or measurement failure; a failed
+   * SDK query or an invalid answer is kept as the cause.
+   */
+  public async findLlmContextMeasurement(
+    model: string,
+    texts: readonly string[]
+  ): Promise<LlmContextMeasurement | undefined> {
+    const operation = this.#startRuntimeOperation()
+    try {
+      const loadedModels = await this.#client.llm.listLoaded()
+      return await findLoadedLlmContextMeasurement(
+        loadedModels.filter((loadedModel) =>
+          isSelectedLoadedModel(loadedModel, model)
+        ),
+        texts
+      )
+    } catch (cause) {
+      throw new Error("The LLM runtime could not measure the context.", {
+        cause
+      })
+    } finally {
+      this.#handleRuntimeOperationCompletion(operation)
+    }
+  }
+
+  /**
    * Implements the {@link LlmRuntime} disposal contract for the owned SDK client.
    *
    * @returns The shared cleanup outcome after active work and SDK release settle.
@@ -325,6 +359,53 @@ export default class LmStudioRuntime implements LlmRuntime {
       })
     }
   }
+}
+
+/**
+ * Answers whether a chat request naming a model reaches a loaded instance.
+ *
+ * @param loadedModel - Loaded instance handle.
+ * @param model - Model selection as a chat request names it.
+ * @returns True when the selection is the instance's identifier or its
+ * canonical model key.
+ */
+function isSelectedLoadedModel(loadedModel: LLM, model: string): boolean {
+  return loadedModel.identifier === model || loadedModel.modelKey === model
+}
+
+/**
+ * Measures texts with the tokenizer of the selected loaded instances.
+ *
+ * @param selectedModels - Loaded instances of one model; may be empty.
+ * @param texts - Texts to count, each on its own.
+ * @returns A frozen measurement with the smallest reported context length and
+ * one count per text; undefined when no instance is selected.
+ * @throws If a query fails, or an answer is not a positive whole context
+ * length or a whole token count ≥ 0.
+ * @remarks Instances of one model share its tokenizer, so the first one
+ * counts the texts, with one concurrent query per text that returns only its
+ * count. No text means no tokenizer query.
+ */
+async function findLoadedLlmContextMeasurement(
+  selectedModels: readonly LLM[],
+  texts: readonly string[]
+): Promise<LlmContextMeasurement | undefined> {
+  const [tokenizingModel] = selectedModels
+  if (tokenizingModel === undefined) return undefined
+  const contextLengths = await Promise.all(
+    selectedModels.map(async (loadedModel) =>
+      lmStudioContextLengthSchema.parse(await loadedModel.getContextLength())
+    )
+  )
+  const textTokenCounts = await Promise.all(
+    texts.map(async (text) =>
+      lmStudioTokenCountSchema.parse(await tokenizingModel.countTokens(text))
+    )
+  )
+  return Object.freeze({
+    contextLength: Math.min(...contextLengths),
+    textTokenCounts: Object.freeze(textTokenCounts)
+  })
 }
 
 /**

@@ -45,6 +45,10 @@ export type FakeLmStudioOperations = Readonly<{
   ) => Promise<unknown>
   /** Unloads one instance by identifier. */
   unload: (identifier: string) => Promise<void>
+  /** Answers a loaded handle's `getContextLength()` for its identifier. */
+  getContextLength: (identifier: string) => Promise<number>
+  /** Answers a loaded handle's `countTokens(text)` for its identifier. */
+  countTokens: (identifier: string, text: string) => Promise<number>
   /** Releases the resources of one client. */
   disposeClient: () => Promise<void>
 }>
@@ -60,6 +64,18 @@ type FakeLmStudioLlmNamespace = Pick<
   FakeLmStudioOperations,
   "listLoaded" | "load" | "unload"
 >
+
+/** SDK handle the default `listLoaded` returns for one loaded instance. */
+export type FakeLmStudioLoadedHandle = FakeLoadedLlmHandle &
+  Readonly<{
+    /** Forwards to the engine's `getContextLength` operation. */
+    getContextLength: () => Promise<number>
+    /** Forwards to the engine's `countTokens` operation. */
+    countTokens: (text: string) => Promise<number>
+  }>
+
+/** Context length the default `getContextLength` reports for every instance. */
+export const FAKE_LOADED_CONTEXT_LENGTH = 4096
 
 /** Inventory of an engine with no downloaded or loaded model. */
 const EMPTY_LM_STUDIO_INVENTORY: FakeLmStudioInventory = Object.freeze({
@@ -77,9 +93,12 @@ const EMPTY_LM_STUDIO_INVENTORY: FakeLmStudioInventory = Object.freeze({
  * Default operations keep the inventory in memory: `load` accepts only an
  * exact downloaded key, ignores its options, and adds a handle whose
  * identifier is the key, suffixed `:<n>` for later instances; `unload` rejects
- * an unknown identifier. Client
- * construction and disposal have no default effect, so a case that observes
- * them replaces those operations with spies. Invariant: the inventory, frozen
+ * an unknown identifier; `listLoaded` returns SDK-like handles whose
+ * `getContextLength()` and `countTokens()` reach the engine's operations of
+ * the same names, which by default report {@link FAKE_LOADED_CONTEXT_LENGTH}
+ * and one token per UTF-16 code unit. Client construction and disposal have
+ * no default effect, so a case that observes them replaces those operations
+ * with spies. Invariant: the inventory, frozen
  * together with every record and handle it holds, and the operations are each
  * one complete frozen value owned by the engine; every change replaces the
  * whole value, so no reader observes a partial update. Each case must call
@@ -160,14 +179,41 @@ class FakeLmStudioEngine {
         Promise.resolve({ version: "0.3.30", build: 1 }),
       listDownloadedModels: (domain: string) =>
         Promise.resolve(this.#listDownloadedModels(domain)),
-      listLoaded: () => Promise.resolve([...this.#inventory.loadedModels]),
+      listLoaded: () =>
+        Promise.resolve(
+          this.#inventory.loadedModels.map((handle) =>
+            this.#buildSdkHandle(handle)
+          )
+        ),
       load: (modelKey: string) => Promise.resolve(this.#loadModel(modelKey)),
       unload: (identifier: string) =>
         new Promise<void>((resolve) => {
           this.#stopLoadedModelInstance(identifier)
           resolve()
         }),
-      disposeClient: () => Promise.resolve()
+      disposeClient: () => Promise.resolve(),
+      getContextLength: () => Promise.resolve(FAKE_LOADED_CONTEXT_LENGTH),
+      countTokens: (_identifier: string, text: string) =>
+        Promise.resolve(text.length)
+    })
+  }
+
+  /**
+   * Builds the SDK handle of one loaded instance.
+   *
+   * @param handle - Engine-owned frozen handle data.
+   * @returns A frozen handle with the instance's key and identifier whose
+   * methods reach the engine's current operations on every call.
+   */
+  #buildSdkHandle(handle: FakeLoadedLlmHandle): FakeLmStudioLoadedHandle {
+    const { identifier } = handle
+    return Object.freeze({
+      modelKey: handle.modelKey,
+      identifier,
+      getContextLength: async () =>
+        await this.#operations.getContextLength(identifier),
+      countTokens: async (text: string) =>
+        await this.#operations.countTokens(identifier, text)
     })
   }
 

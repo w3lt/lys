@@ -26,7 +26,7 @@ describe("registerToolRoutes against the Tavily API", () => {
         "builtInTools",
         createBuiltInTools(
           webSearchToolProvider,
-          TEST_BACKEND_CONFIG.browserExecutablePath,
+          `http://${TEST_BACKEND_CONFIG.vmoHost}:${TEST_BACKEND_CONFIG.vmoPort}`,
           () => undefined
         )
       )

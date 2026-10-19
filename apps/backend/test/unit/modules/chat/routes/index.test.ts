@@ -1,4 +1,9 @@
-import { chatApi, chatReplyEventsApi, stopChatReplyApi } from "@lys/protocol"
+import {
+  chatApi,
+  chatContextApi,
+  chatReplyEventsApi,
+  stopChatReplyApi
+} from "@lys/protocol"
 import { describe, expect, it } from "vitest"
 import registerChatRoutes from "../../../../../src/modules/chat/routes"
 import { createChatRouteTestApp } from "../../../support/chatRouteTestApp"
@@ -6,6 +11,7 @@ import { createChatRouteTestApp } from "../../../support/chatRouteTestApp"
 describe("registerChatRoutes", () => {
   it.each([
     ["chat", chatApi],
+    ["chat-context", chatContextApi],
     ["reply-events", chatReplyEventsApi],
     ["reply-stop", stopChatReplyApi]
   ])("installs the %s endpoint", async (_label, endpoint) => {

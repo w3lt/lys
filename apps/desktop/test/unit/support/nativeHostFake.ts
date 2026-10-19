@@ -1,11 +1,21 @@
 import { mockIPC } from "@tauri-apps/api/mocks"
 import { expect, onTestFinished } from "vitest"
 
+/**
+ * Arguments the renderer's `invoke` passes, and the host double records, for
+ * a command invoked without any: an empty object.
+ */
+export const NO_NATIVE_COMMAND_ARGS: Readonly<Record<string, never>> =
+  Object.freeze({})
+
 /** One native command the renderer invoked through Tauri IPC. */
 export type ObservedNativeCommand = Readonly<{
   /** Registered command name. */
   command: string
-  /** Arguments as invoked, or undefined when the command took none. */
+  /**
+   * Arguments as invoked; equal to {@link NO_NATIVE_COMMAND_ARGS} when the
+   * command took none.
+   */
   args: unknown
 }>
 
@@ -48,7 +58,8 @@ export function startNativeHostFake(commands: NativeCommands): NativeHostFake {
    * Handles one command the renderer invoked, as the native host.
    *
    * @param command - Invoked command name.
-   * @param args - Arguments as invoked, or undefined when it took none.
+   * @param args - Arguments as invoked; equal to
+   * {@link NO_NATIVE_COMMAND_ARGS} when it took none.
    * @returns The result the case declared for the command.
    * @throws A string naming the command when the case declared none for it,
    * which rejects the invoke call as a Rust `Err` does. A declared command
@@ -59,7 +70,7 @@ export function startNativeHostFake(commands: NativeCommands): NativeHostFake {
     const handle = commands[command]
     if (handle === undefined) {
       unexpectedCommands.push(command)
-      throw `Unexpected native command: ${command}`
+      throw new Error(`Unexpected native command: ${command}`)
     }
     return handle(args)
   }

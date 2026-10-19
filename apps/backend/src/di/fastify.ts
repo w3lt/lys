@@ -39,10 +39,10 @@ const singletonPlugin: FastifyPluginAsync<
     }
   }
   const pageRendering: PageRenderingFailureReporters = {
-    reportBrowserFailure: (failure) => {
+    reportPageReaderFailure: (failure) => {
       app.log.error(
         { err: failure },
-        "read_page's browser is missing or could not start"
+        "read_page's reader, vmo, could not be reached, failed, or did not answer in time"
       )
     }
   }

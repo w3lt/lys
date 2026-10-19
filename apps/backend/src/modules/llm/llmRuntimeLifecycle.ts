@@ -1,7 +1,4 @@
-import type {
-  LlmRuntimeAvailability,
-  LlmRuntimeLifecycleStatus
-} from "./llmRuntimeTypes"
+import type { LlmRuntimeAvailability } from "./llmRuntimeTypes"
 
 /**
  * Observes and closes one exclusively owned LLM runtime.
@@ -14,14 +11,6 @@ import type {
  * status after cleanup settles.
  */
 export interface LlmRuntimeLifecycle {
-  /**
-   * Observes the runtime's current admission and cleanup phase synchronously.
-   *
-   * @returns The authoritative lifecycle phase at the instant of access.
-   * @remarks Inspection remains available while ready, active, closing, and closed.
-   */
-  get lifecycleStatus(): LlmRuntimeLifecycleStatus
-
   /**
    * Checks whether the attached engine answers a provider readiness query.
    *

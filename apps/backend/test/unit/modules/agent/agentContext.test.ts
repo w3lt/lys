@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest"
-import { buildAgentContext } from "../../../../src/modules/agent/agentContext"
+import {
+  buildAgentContext,
+  countAgentContextHistoryMessages
+} from "../../../../src/modules/agent/agentContext"
 import {
   createAssistantMessage,
   createFixtureUuidV7,
@@ -252,5 +255,43 @@ describe("buildAgentContext", () => {
         }
       ]
     })
+  })
+})
+
+describe("countAgentContextHistoryMessages", () => {
+  it("counts each stored message the context sends once, a reply with several rounds and results included", () => {
+    const history = [
+      createUserMessage(1, "Find moths"),
+      createAssistantMessage(
+        2,
+        [
+          createTextPart(20, 0, "Searching."),
+          SUCCEEDED_SEARCH,
+          FAILED_READ,
+          createTextPart(23, 1, "Moths fly at night.")
+        ],
+        { status: "completed", finishReason: "stop" }
+      ),
+      createUserMessage(3, "Why?")
+    ]
+
+    expect(buildAgentContext("You are Lys.", history, "Go on")).toHaveLength(8)
+    expect(countAgentContextHistoryMessages(history)).toBe(3)
+  })
+
+  it("counts no reply the context leaves out", () => {
+    const history = [
+      createUserMessage(1, "Question"),
+      createAssistantMessage(2, [createTextPart(12, 0, "Failed text")], {
+        status: "failed"
+      }),
+      createAssistantMessage(3, [createReasoningPart(13, 0, "Hmm.")], {
+        status: "completed",
+        finishReason: "stop"
+      }),
+      createAssistantMessage(4, [], { status: "interrupted" })
+    ]
+
+    expect(countAgentContextHistoryMessages(history)).toBe(1)
   })
 })

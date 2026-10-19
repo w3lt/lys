@@ -32,6 +32,7 @@ route definitions.
 | `GET`    | `/api/v1/tools`                                                                   | none                                                                               | `{ tools: ToolDefinition[], unavailableTools }`                        |
 | `POST`   | `/api/v1/tools/web_search/key-check`                                              | `{}`                                                                               | `{ status: "accepted" \| "rejected" \| "unavailable" \| "failed", … }` |
 | `POST`   | `/api/v1/chat`                                                                    | `conversation`, `message`, `model`, required `generationOptions`, optional `tools` | `text/event-stream`                                                    |
+| `POST`   | `/api/v1/chat/context`                                                            | `conversation`, `model`, optional `tools`                                          | `ChatContextMeasurement`, or typed Problem Details                     |
 | `GET`    | `/api/v1/chat/:conversationId/replies/:assistantMessageId/events`                 | none                                                                               | `text/event-stream` (reply snapshot, then live events)                 |
 | `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/stop`                   | none                                                                               | Bodyless `204`, or `409` Problem Details                               |
 | `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/tool-results/:callId`   | `{ status, reason?, content? }`                                                    | Bodyless `204`, or `409` Problem Details                               |
@@ -40,7 +41,7 @@ route definitions.
 `/api/v1/heath` is the current spelling in both the shared protocol package and
 the Fastify route registration.
 
-List, load, health, and unload requests answer `503` with
+List, load, health, unload, and chat-context requests answer `503` with
 `urn:lys:problem:llm:runtime-unavailable` while the backend has no connected
 LM Studio runtime. The runtime-status route never contacts LM Studio; the
 runtime-connect route waits for one shared connection attempt.
@@ -151,7 +152,7 @@ optional. Together they offer at least one tool, and no name appears in both.
 A request that breaks these rules, or names a backend tool the backend does
 not run, returns `400` before anything is stored. A request that offers a
 backend tool that cannot run now, such as `web_search` without a usable
-Tavily API key, returns `409` with
+Tavily API key or `read_page` while vmo is not ready, returns `409` with
 `urn:lys:problem:chat:backend-tool-unavailable` before anything is stored; see
 [an offered tool that cannot run](#an-offered-tool-that-cannot-run). The model is offered client
 tools first, then backend tools, each in request order. Without `tools`, the
@@ -185,6 +186,74 @@ generation runs. A missing conversation
 returns the conversation-not-found problem and a missing reply returns `404`
 with `urn:lys:problem:chat:reply-not-found`.
 
+## Chat context measurement
+
+`POST /api/v1/chat/context` reports how much of the loaded model's context
+window a conversation takes before its next message. The composer's context
+meter calls it; nothing is stored and the model generates nothing.
+
+```json
+{
+  "conversation": {
+    "kind": "existing",
+    "id": "01992f3a-5b6c-7d8e-9f01-23456789abcd"
+  },
+  "model": "google/gemma-4-12b-qat",
+  "tools": { "definitions": [], "backendToolNames": ["web_search"] }
+}
+```
+
+`conversation`, `model`, and `tools` follow the
+[chat request body](#chat-request-body); there is no `message` and no
+`generationOptions`. The backend builds the context a turn's first round would
+send, with an empty new message in place of the text: the answering agent's
+current system prompt, the stored messages a turn includes, the empty message,
+and the offered tools, client tools first. It counts them with the loaded
+model's tokenizer and answers `200`:
+
+```json
+{
+  "contextLength": 8192,
+  "systemPromptTokens": 2268,
+  "toolTokens": 412,
+  "historyTokens": 1032,
+  "historyMessageCount": 4,
+  "messageMarkupTokens": 8
+}
+```
+
+| Field                 | Meaning                                                                       |
+| --------------------- | ----------------------------------------------------------------------------- |
+| `contextLength`       | Context length the model is loaded with; the smallest of its loaded instances |
+| `systemPromptTokens`  | Tokens of the agent's system prompt                                           |
+| `toolTokens`          | Tokens of the offered tool definitions; `0` when none are offered             |
+| `historyTokens`       | Tokens of the stored messages the next turn would include                     |
+| `historyMessageCount` | Number of those messages                                                      |
+| `messageMarkupTokens` | Tokens the new message takes without its text; a client adds the text's count |
+
+- Each count is the text's tokens plus a fixed allowance for the chat
+  template's markup: 8 tokens per message, 16 per tool call of an earlier
+  round, and 160 once when tools are offered. The backend does not render the
+  model's template.
+- Messages a turn leaves out, failed and empty replies, are not counted.
+- An offered backend tool is measured whether or not it can run now; the chat
+  request refuses one that cannot.
+- The model is matched like a chat request names it: a loaded instance's
+  identifier or a loaded model's key. A model that is not loaded is never
+  loaded; the route answers `503` with `urn:lys:problem:llm:model-not-loaded`.
+- The measurement runs through the
+  [model operation queue](#model-operation-admission), so it waits behind a
+  load in progress, and a full queue answers `503` with
+  `urn:lys:problem:llm:service-busy`.
+- A new conversation naming an unknown agent, a conversation that is not
+  stored, and a conversation whose agent was deleted get the same `404` and
+  `409` problems as the chat request. A backend tool name the backend does not
+  run is refused with `400`.
+- Every response carries `Cache-Control: no-store`.
+
+The chat request makes the same measurement before every round of a reply; see
+[the context window check](/architecture/backend/#context-window-check).
+
 ## Tool list
 
 `GET /api/v1/tools` lists every tool the backend runs, each name once, in the
@@ -199,13 +268,16 @@ order Settings shows them, and the listed tools that cannot run now:
 
 (Definitions shortened.) Every definition has `runner` `backend`. The
 definitions are fixed for one backend build: `read_page`, which reads one
-public web page in a headless browser, and `web_search`, which searches the web through Tavily
+public web page through vmo, and `web_search`, which searches the web through Tavily
 (both group and access `network`). Availability is read again on every
-request. `reason` is `api-key-missing` (no Tavily API key is saved),
-`api-key-invalid` (the saved key fails the key format), or
+request. For `web_search`, `reason` is `api-key-missing` (no Tavily API key is
+saved), `api-key-invalid` (the saved key fails the key format), or
 `settings-unreadable` (the settings file cannot be read as a settings
-document). Each name in `unavailableTools` is a listed tool, once. The list
-reads the settings file but contacts nothing, and never contains the key.
+document). For `read_page`, it is `page-reader-not-ready`: vmo did not answer
+`GET /health` at `127.0.0.1:8080` with `200` within one second. Each name in
+`unavailableTools` is a listed tool, once. The list reads the settings file
+and asks vmo's health route, contacts nothing else, and never contains the
+key.
 
 ### Key check
 
@@ -224,7 +296,7 @@ one of:
 | ------------- | --------------------------------------------------------------------------------------------- | ---------------------------------------------- |
 | `accepted`    | `credits`: `{ used, limit }` or `null`                                                        | Tavily accepted the key just now               |
 | `rejected`    | none                                                                                          | Tavily refused the key (HTTP 401 or 403)       |
-| `unavailable` | `reason`, as in the tool list                                                                 | No usable key is saved; nothing was sent       |
+| `unavailable` | `reason`: `api-key-missing`, `api-key-invalid`, or `settings-unreadable`, as in the tool list | No usable key is saved; nothing was sent       |
 | `failed`      | `reason`: `rate-limited`, `timed-out`, `unreachable`, `provider-error`, or `invalid-response` | The check could not tell whether the key works |
 
 `credits` comes from the account's plan usage and limit when Tavily reports
@@ -504,6 +576,9 @@ such tool in offer order. `toolName` and `reason` are extension members.
   "reason": "api-key-missing"
 }
 ```
+
+For `page-reader-not-ready`, `detail` is "read_page is unavailable: vmo,
+Lys's page reader, is not ready."
 
 The desktop shows the error and reads the tool list again, so its next
 request leaves the tool out.

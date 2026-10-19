@@ -109,9 +109,9 @@ async function answerBackendRoute(
 ): Promise<Response> {
   try {
     return await route(request)
-  } catch (failure) {
-    if (!isTransportFailure(failure)) recordRouteFailure(failure)
-    throw failure
+  } catch (error) {
+    if (!isTransportFailure(error)) recordRouteFailure(error)
+    throw error
   }
 }
 

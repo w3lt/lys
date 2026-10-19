@@ -292,6 +292,7 @@ mod tests {
         json!({
             "runtime": {
                 "autoStartBackend": false,
+                "autoStartVmo": false,
                 "defaultModel": "qwen/qwen3-8b",
                 "backendAddress": "http://127.0.0.1:23456"
             },
@@ -392,6 +393,23 @@ mod tests {
             fs::read_to_string(&path).expect("read the settings file"),
             stored_text
         );
+    }
+
+    #[test]
+    fn starts_vmo_at_launch_for_a_file_saved_before_the_vmo_switch() {
+        let directory = TestDirectory::create("settings-without-vmo-switch");
+        let mut stored = get_complete_settings();
+        stored["runtime"]
+            .as_object_mut()
+            .expect("a runtime group")
+            .remove("autoStartVmo");
+        let path = directory.create_file("settings.json", stored.to_string());
+
+        let settings = load_settings_file(&path).expect("settings for an older file");
+
+        let runtime = &get_settings_json(&settings)["runtime"];
+        assert_eq!(runtime["autoStartVmo"], json!(true));
+        assert_eq!(runtime["autoStartBackend"], json!(false));
     }
 
     #[test]

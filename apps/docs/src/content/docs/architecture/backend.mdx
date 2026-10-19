@@ -28,7 +28,7 @@ the services together.
 | Conversation routes   | `src/modules/conversation/routes` | Lists, searches, retrieves, renames, and deletes stored conversations.                                                                                                                                                                                                                                    |
 | Agent routes          | `src/modules/agent/routes`        | Lists the built-in and stored agents, retrieves one, and creates, changes, and deletes stored agents; changing or deleting a built-in agent is refused.                                                                                                                                                   |
 | LLM routes            | `src/modules/llm/routes`          | Lists LM Studio models, checks loaded-model health, loads or unloads a model, and reports or refreshes the LM Studio connection.                                                                                                                                                                          |
-| Built-in tools        | `src/modules/tool/builtIn`        | Tools the backend runs once the desktop allows a call. `read_page` (`web/`) reads one public web page in a headless browser; `web_search` (`web/`) searches the web through Tavily.                                                                                                                       |
+| Built-in tools        | `src/modules/tool/builtIn`        | Tools the backend runs once the desktop allows a call. `read_page` (`web/`) reads one public web page through vmo, which loads it in a micro VM; `web_search` (`web/`) searches the web through Tavily.                                                                                                   |
 | Tool routes           | `src/modules/tool/routes`         | Lists the tools the backend runs.                                                                                                                                                                                                                                                                         |
 | Tool approval service | `src/modules/toolApproval`        | Reads the Just run choices saved in `settings.json` once per round of tool calls and decides, for client and backend tools alike, which calls the person must allow first; every call asks when the file cannot be read.                                                                                  |
 | Health route          | `src/modules/health/routes`       | Returns a simple `{ ok: true }` response.                                                                                                                                                                                                                                                                 |
@@ -77,6 +77,39 @@ the services together.
 7. Chat generation errors become `error` events for every follower; a reply
    that ends early becomes `interrupted`; title-generation failures are logged
    instead.
+
+### Context window check
+
+Before each round, the agent measures the round's context and offered tools
+against the model the turn names. `LlmReplyContextMeter` gives `LlmService`
+the text the model reads for each message (its content, and the name and
+argument text of each tool call it carries) and each offered tool's JSON;
+`LlmService` counts them with the loaded model's tokenizer through the model
+operation queue and reports the context length the model is loaded with. The
+meter adds a fixed allowance for the chat template's markup: 8 tokens per
+message, 16 per tool call of an earlier round, and 160 once when tools are
+offered.
+
+A round is sent only when its tokens and the reply ceiling (or zero without
+one) together stay within that context length. Otherwise the round is not
+sent: the reply is stored `failed`, keeping the parts earlier rounds stored,
+and its `error` event names the tokens needed and the context length. A model
+that is not loaded is never loaded for the round; the reply fails with an
+`error` that asks to load it. A measurement that fails, because LM Studio is
+not connected or the queue is full, also fails the reply, with the general
+sentence. Without this check, LM Studio's context overflow setting could keep
+the start of the conversation, drop its middle, and let the model answer an
+earlier message. With the reply ceiling off, nothing is held back for the
+reply, so a reply that grows past the window is still handled by that
+setting.
+
+`POST /api/v1/chat/context` makes the same measurement for the composer's
+context meter. It resolves the agent and the conversation as the chat route
+does, through the same lookups, reads a continued conversation once, and
+asks the agent's `findContextMeasurement` for the system prompt, tools, and
+stored messages a turn's first round would send, with an empty new message
+that measures the markup around the text. See the
+[route contract](/reference/api/#chat-context-measurement).
 
 Each completion receives the system prompt of the conversation's agent, prior
 user messages, the rounds of completed or interrupted replies, and the current
@@ -147,12 +180,15 @@ for a turn whose conversation has no stored title, unless an earlier turn of
 that conversation is still generating one, and uses that turn's user message.
 A conversation that remains untitled after an earlier task failed or was
 cancelled gets another try on its next turn after that task ended. It uses a
-separate chat
-completion request with a JSON-schema response format that limits the title to
-`generatedTitleMaxLength` Unicode code points (100 by default), then validates the
-reply; JSON wrapped in one Markdown code fence is accepted. Only a reply that
-cannot be used as a title leads to another attempt, up to
-`titleGenerationMaxAttempts` attempts per turn (three by default). An HTTP,
+separate chat completion request with a JSON-schema response format that limits
+the title to `generatedTitleMaxLength` Unicode code points (100 by default),
+then validates the reply; JSON wrapped in one Markdown code fence is accepted.
+Only a reply that cannot be used as a title leads to another attempt, up to
+`titleGenerationMaxAttempts` attempts per turn (three by default). Before each
+attempt, the task asks the model-operation queue whether the model is loaded,
+without loading it. When it is not, the turn requests no title, logs
+`model-not-loaded` at debug level, and the next turn tries again, so a title
+request does not make LM Studio load the model with its own settings. An HTTP,
 connection, or cancellation failure ends title generation for the turn, after
 the OpenAI SDK has retried a connection failure, timeout, or 408, 409, 429, or
 5xx response up to two more times within the attempt. A generated title is
@@ -221,10 +257,17 @@ reason or a defect.
 
 Each entry of the registry pairs a definition with a `BuiltInToolProvider`,
 whose `findTurnTool()` gives the tool for one turn or says why it cannot run
-now (`api-key-missing`, `api-key-invalid`, or `settings-unreadable`).
-`createBuiltInTools()` builds the list once at startup: `read_page`, always
-ready through `ReadyBuiltInToolProvider`, then `web_search`, found by
-`WebSearchToolProvider`. `GET /api/v1/tools` returns every definition and
+now (`page-reader-not-ready`, `api-key-missing`, `api-key-invalid`, or
+`settings-unreadable`). `createBuiltInTools()` builds the list once at
+startup: `read_page`, found by `ReadPageToolProvider`, then `web_search`,
+found by `WebSearchToolProvider`. `ReadPageToolProvider` sends vmo one
+`GET /health` per lookup (`web/vmoHealth.ts`), on a connection of its own, and
+gives the tool only for a `200` within one second. Any other status, a refused
+or broken connection, an answer that is not HTTP, or no answer in time is
+`page-reader-not-ready`, so a lookup waits at most one second for vmo. Any
+other failure, such as a vmo address that is not a URL, is a defect and
+rejects the lookup. The backend never starts vmo, which
+the desktop owns. `GET /api/v1/tools` returns every definition and
 looks up every tool again to list the ones that cannot run now; the desktop
 offers the switched-on, available ones by name. The chat route looks up every
 offered backend tool before it looks up the agent and stores the turn, and
@@ -259,66 +302,64 @@ flag; a character picked by a variation selector keeps its default shape.
 ### `read_page`
 
 Its arguments are `url` and an
-optional `focus`. A URL longer than 2,048 characters, not absolute `http` or
-`https`, carrying a username or password, or naming this machine or a blocked
-IP address is answered at once. Once allowed, a read runs in a fresh
-headless browser (`web/pageRendering.ts`):
+optional `focus`. A URL longer than 2,048 characters, as given or once
+normalized and percent-encoded, not absolute `http` or `https`, carrying a
+username or password, or naming this machine or a blocked IP address is
+answered at once. Once allowed, a read goes through vmo
+(`web/pageRendering.ts`), the page reader in `apps/vmo` that runs on the same
+machine:
 
-1. it checks that Chrome Headless Shell is installed at
-   `$LYS_HOME/runtime/chrome-headless-shell/chrome-headless-shell`, opens a
-   `PageProxy` (`web/pageProxy.ts`), and starts the browser through
-   `playwright-core` with that proxy, Chromium's sandbox on, WebRTC kept on
-   the proxy, popups blocked, and the page's scripts held to 1 GiB of memory,
-   past which the page crashes and the read fails. The proxy listens on a random port of
-   `127.0.0.1`, serves only the browser's random credentials, resolves every
-   host through the checked lookup, refuses a blocked IP address without
-   connecting to it, and checks every connected socket, so the address rule
-   in `webAddresses.ts` covers the page, every redirect, and everything the
-   page loads; the browser sends this machine's own addresses through the
-   proxy too. It refuses connections past 256 or past 64 MiB received;
-2. it opens the URL in a context that keeps no cookies, storage, or service
-   workers and accepts no download, without fetching images, fonts, or media.
-   The page's scripts run, and HTTP, `<meta>` refresh, and script redirects
-   are followed. Once the first document has arrived, it accepts only
-   `text/html`, `application/xhtml+xml`, and `text/plain` with a 2xx status,
-   and waits up to 10 seconds in all for the DOM to be ready and then for the
-   network to be quiet for 500 milliseconds; what has rendered by then is
-   read. When a later navigation of the page fails, such as a `<meta>`
-   refresh to a blocked address, the read fails with that navigation's
-   reason;
-3. it stops the page's scripts and reads the document the page ended on
-   (`web/pageDocument.ts`) with one script run in a script world of Lys's
-   own, which the page's scripts can neither reach nor interrupt: the
-   document's URL and media type, the HTTP status of its response, and its
-   HTML or text. When the page replaces its document before that script runs,
-   as a `<meta>` refresh can, it reads the new one, so a page that never holds
-   still times out. The document read, however the page reached it, must have
-   a URL that passes the URL rules and be HTML, XHTML, or plain text with a
-   2xx status. A document a script writes, as through a `javascript:` URL,
-   keeps the status of the document that wrote it. The HTML is written from the DOM as the page renders it: an open
-   shadow root's content inside its host and slotted content inside its slot,
-   without scripts, styles, `<noscript>`, templates, SVG, iframes, comments,
-   or the `hidden`, `aria-hidden`, and `style` attributes, so that the
-   main-text extraction keeps the elements they hide. Hidden text is read like
-   any other text. The script stops at 4 Mi UTF-16 code units and cuts every
-   text, and each element's attributes together, to what is left of that
-   limit before it escapes them, so no page can make Lys receive more, nor
-   make the script build more than a few times the limit at once from long
-   texts or many long attributes; the backend then cuts the result at the limit without
-   splitting a character. A closed shadow root cannot be read, so its host's
-   own children are written instead. A plain-text page is read as its body's
-   text, cut the same way;
-4. it extracts the main text with Mozilla Readability over a linkedom document,
-   refusing markup with more than 40,000 start tags before parsing it, and a
-   parsed page with more than 40,000 elements or a nesting depth sum above
-   400,000. A `<br>` or a nested block keeps the words around it apart;
+1. it looks up the URL's host name through the operating system and refuses
+   the read, without asking vmo, when the name has no address or any of its
+   addresses is blocked by the rule in `webAddresses.ts`. A host that is an IP
+   address is not looked up: the URL rules already checked it. The check
+   covers only the URL given: the page's redirects, what the page loads, and a
+   name that resolves differently inside vmo's micro VM are not checked;
+2. it sends `GET /web/read-page` to vmo at `127.0.0.1:8080`, with the URL
+   form-encoded as the `url` query parameter, on a connection of its own. vmo
+   checks that the URL is absolute `http` or `https` with a host, and passes
+   it to the reader as given. It creates a micro VM from the
+   `ghcr.io/w3lt/lys-readpage` image, built from `sandboxes/readpage`, whose
+   `latest` tag the image workflow moves to each build on `main` and vmo
+   fetches at each start. The reader loads the page in headless Chromium,
+   with the page's scripts running and its redirects followed, for up to 10
+   seconds of virtual time, in which the page's timers run without waiting.
+   It writes the HTML of the DOM it ended on, without shadow trees, so text
+   inside a web component's shadow root is not read
+   ([#209](https://github.com/w3lt/lys/issues/209)). It leaves out scripts,
+   styles, `<noscript>`, `<link>`, `<meta>`, and `class` and `style`
+   attributes. With no stylesheet left, text a stylesheet hides is read like
+   any other text. Without `<meta>`, Readability finds no site or publication
+   date, and without `class` it cannot use class names to drop boilerplate
+   such as share bars and comment threads
+   ([#208](https://github.com/w3lt/lys/issues/208)). vmo deletes the VM
+   before it answers and gives the read 30 seconds;
+3. it reads vmo's answer. Only a `200` body is read: JSON
+   `{ html, isTruncated }` of at most 16 MiB, whose HTML is cut to 4 Mi UTF-16
+   code units without splitting a character. A `400` or `431`, for a URL vmo
+   refuses, a `502`, for a page the reader could not load or that was empty,
+   and a `504`, for a read past vmo's 30 seconds, fail the read with that
+   reason. Any other status, or an answer that is not that JSON, fails it as
+   a failure of the page reader. A plain-text page arrives as the HTML
+   Chromium shows it in, its text inside a `<pre>`, and is read as one block
+   that keeps its line breaks;
+4. it extracts the main text with Mozilla Readability over a linkedom
+   document, after removing `<template>`, `<script>`, `<noscript>`, `<style>`,
+   and `<svg>` elements, whose text is not page text, and dropping the
+   `hidden` and `aria-hidden` attributes so the text they hide is read like
+   any other text. It refuses markup with more
+   than 40,000 start tags before parsing it, and a parsed page with more than
+   40,000 elements or a nesting depth sum above 400,000. A `<br>` or a nested
+   block keeps the words around it apart;
 5. it splits the text into passages of at most 1,200 characters and keeps at
    most 12,000 characters: the whole page, the passages that best match
    `focus` by BM25, or the beginning;
-6. it frames the page's title, site, and date and the passages between
-   `<<<page content>>>` delimiters, with the final URL, a notice that the
-   content is untrusted, the page's source number, and an instruction to cite
-   it by that number, and notes a page
+6. it frames the page's title, its site and date when the page's metadata
+   gives them, which vmo's reader does not pass on yet
+   ([#208](https://github.com/w3lt/lys/issues/208)), and the passages between
+   `<<<page content>>>` delimiters, with the URL Lys was asked to read, a
+   notice that the content is untrusted, the page's source number, and an
+   instruction to cite it by that number, and notes a page
    with less than 200 characters of main text, which may ask the reader to
    sign in or check for automated readers. Every run of three or more `<` or
    `>` in page text is shortened to two, so no page can write a delimiter.
@@ -327,16 +368,20 @@ headless browser (`web/pageRendering.ts`):
    a run when they sit between its brackets, and are dropped with it, so they
    cannot hide a delimiter either.
 
-The whole read, the browser's start included, must finish within 30 seconds;
-the page's document must arrive in that time, after which Lys reads what has
-rendered. Stop and the time limit close the browser, and the browser and the
-proxy are closed whatever the outcome. Failures the model can act on, such as
-an HTTP error status, a non-HTML body, a blocked address, a crash, or a page
-without any main text, become the call's result. A missing browser, or one
-that cannot start, fails the read with whom to contact, and its cause goes
-to the backend log. A browser whose start runs out of time is killed by
-Playwright, which can finish a moment after the read ends. Lys reads what a
-signed-out visitor sees; it never signs in.
+The whole read, the host lookup and vmo's answer included, must finish within
+60 seconds, which leaves time for vmo to create, boot, and delete the VM
+around its own 30 seconds. Stop and the time limit end only Lys's request:
+vmo does not notice, and the VM runs until vmo's own limit ends it. vmo does
+not say where the page's redirects led, its HTTP status, or its media type,
+so the page is cited under the URL Lys was asked to read, and an error page
+is read like any other page. Failures the model can act on, such as a blocked
+address, a page that did not load, a page too large to read, or a page
+without any main text, become the call's result. A turn offers `read_page`
+only while vmo answers its health route, but vmo can stop during the turn: a
+vmo that is not running, fails, answers outside its contract, or does not
+answer in time fails the read with whom to contact, and its cause goes to the backend log; vmo's own
+error output is never read. Lys reads what a signed-out visitor sees; it
+never signs in.
 
 ### `web_search`
 
@@ -438,12 +483,13 @@ conversation's next turn. The chat module's `OpenAiReplyModel` implements `Reply
 over `ChatService`'s streaming completion, using only choice 0 and refusing
 finish reasons other than `stop` and `length`. The chat route passes the agent
 the turn's history, its reply writes, its event sender, its Stop signal, and
-two reporters that log a cancelled reply at debug level and a failed one at
-error level with the request's logger. A new conversation must name a
-built-in or stored agent, or the chat route answers `404` before storing
-anything. When a stored conversation's agent no longer exists, the chat route
-answers `409` and stores nothing, so the conversation stays readable and
-accepts messages again once an agent has that code.
+three reporters that log with the request's logger: a cancelled reply and a
+round that was not sent, because it did not fit or its model was not loaded,
+at debug level, and any other failed reply at error level. A new
+conversation must name a built-in or stored agent, or the chat route answers
+`404` before storing anything. When a stored conversation's agent no longer
+exists, the chat route answers `409` and stores nothing, so the conversation
+stays readable and accepts messages again once an agent has that code.
 Version 4 preserves activity
 timestamps on rename, version 5 preserves them on status-only message updates,
 version 6 adds the `agents` table, version 7 replaces the stored system prompt
@@ -459,12 +505,12 @@ inserts and `content` updates.
 
 Chat generation and model management use separate integration boundaries:
 
-| Service             | Backend dependency        | Current use                                                                                                              |
-| ------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `ChatService`       | `openai` SDK              | Streams chat completions and generates titles through LM Studio's OpenAI-compatible HTTP interface.                      |
-| `LlmService`        | `LlmEngineOperationQueue` | Applies inventory, loaded-model health, loading, and stop-by-key policy to operations serialized by the runtime service. |
-| `LlmRuntimeService` | `LlmRuntime`              | Owns the LM Studio runtime, its connection status, and the serialized model-operation queue; connects on demand.         |
-| `LmStudioRuntime`   | `@lmstudio/sdk`           | Verifies engine availability, implements model operations and lifecycle inspection, and owns SDK client cleanup.         |
+| Service             | Backend dependency        | Current use                                                                                                      |
+| ------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `ChatService`       | `openai` SDK              | Streams chat completions and generates titles through LM Studio's OpenAI-compatible HTTP interface.              |
+| `LlmService`        | `LlmEngineOperationQueue` | Runs inventory, health, load, stop-by-key, and context measurement through the serialized queue.                 |
+| `LlmRuntimeService` | `LlmRuntime`              | Owns the LM Studio runtime, its connection status, and the serialized model-operation queue; connects on demand. |
+| `LmStudioRuntime`   | `@lmstudio/sdk`           | Verifies engine availability, implements model operations and lifecycle inspection, and owns SDK client cleanup. |
 
 Fastify exposes the application-scoped `llmService` and `llmRuntimeService`.
 Model routes use provider-neutral capabilities of `LlmService`; the runtime
@@ -516,6 +562,8 @@ See the [health response contract](/reference/api/#model-health-responses).
 | LM Studio is not connected                                                             | List, load, unload, and health requests receive `503` with `urn:lys:problem:llm:runtime-unavailable` before acceptance.                  |
 | A runtime call fails and LM Studio stopped answering                                   | The runtime is released, the status becomes `unreachable`, and a rejected request receives the runtime-unavailable `503`.                |
 | A request resolves after a failed runtime call; the probe or release then fails        | The response keeps its result; the backend logs the probe or release failure at `error`.                                                 |
+| A reply round does not fit the loaded model, or its model is not loaded                | The round is not sent; the reply is stored failed and followers receive an `error` that says why.                                        |
+| A reply round cannot be measured (LM Studio not connected, queue full)                 | The round is not sent; the reply is stored failed and followers receive the general `error`.                                             |
 | Model stream ends without a finish reason                                              | The route treats it as an error and may emit `error`.                                                                                    |
 | Assistant row was deleted or already finalized                                         | Late writes return false without recreating data.                                                                                        |
 | Assistant terminal state cannot be persisted                                           | The task aggregates the original and storage failures, plus a failed fallback's, and rejects; the generation logs it. No final event.    |

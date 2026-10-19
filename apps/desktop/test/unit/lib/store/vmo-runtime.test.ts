@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { createStore } from "zustand/vanilla"
 import {
   createVmoRuntimeSlice,
-  type VmoRuntimeSlice
+  type VmoRuntimeSlice,
+  type VmoServerInfo
 } from "@/lib/store/vmo-runtime"
 import { startNativeHostFake } from "../../support/nativeHostFake"
 import {
@@ -15,6 +16,18 @@ const RUNNING_VMO = Object.freeze({ status: "running", pid: 4343 })
 
 /** Status while no vmo is owned. */
 const STOPPED_VMO = Object.freeze({ status: "stopped" })
+
+/** Status while a stop waits for the owned vmo to exit. */
+const STOPPING_VMO = Object.freeze({ status: "stopping", pid: 4343 })
+
+/** Outcome of a stop that ended vmo within the stop timeout. */
+const STOPPED_OUTCOME = Object.freeze({ status: "stopped" })
+
+/** Problem of a vmo killed after the stop timeout. */
+const KILLED_PROBLEM = Object.freeze({ kind: "killed" })
+
+/** Host's reason for a stop that failed. */
+const STOP_FAILURE = "Failed to stop vmo process 4343: failed to inspect it"
 
 /**
  * Creates a store owning one vmo runtime slice.
@@ -139,24 +152,136 @@ describe("createVmoRuntimeSlice", () => {
     })
 
     it("shows vmo stopped with the host's reason when it cannot be started, without rejecting", async () => {
+      const reason =
+        "Failed to run /Users/test/.lys/runtime/vmo/vmo: No such file or directory (os error 2)"
       startNativeHostFake({
         get_vmo_status: () => STOPPED_VMO,
-        start_vmo: () =>
-          Promise.reject(
-            "Failed to run /Users/test/.lys/runtime/vmo/vmo: No such file or directory (os error 2)"
-          )
+        start_vmo: () => Promise.reject(reason)
       })
       const store = createVmoRuntimeStore()
 
       await expect(store.getState().startVmo()).resolves.toBeUndefined()
 
+      const problem = { kind: "start-failed", message: reason }
       expect(store.getState().vmoServerInfo).toEqual({
         status: "stopped",
-        problem: {
-          kind: "start-failed",
-          message:
-            "Failed to run /Users/test/.lys/runtime/vmo/vmo: No such file or directory (os error 2)"
+        problem
+      })
+    })
+
+    it("shows vmo not responding, so Stop stays offered, when the start is refused because the host still stops vmo", async () => {
+      const reason = "vmo is still stopping; start it again once it has stopped"
+      startNativeHostFake({
+        get_vmo_status: () => STOPPING_VMO,
+        start_vmo: () => Promise.reject(reason)
+      })
+      const store = createVmoRuntimeStore()
+
+      await store.getState().startVmo()
+
+      const problem = { kind: "start-failed", message: reason }
+      expect(store.getState().vmoServerInfo).toEqual({
+        status: "unresponsive",
+        problem
+      })
+    })
+
+    it.each([
+      {
+        shape: "an error",
+        createRejection: () => new Error("IPC channel closed"),
+        message: "IPC channel closed"
+      },
+      {
+        shape: "an error without a message",
+        createRejection: () => new Error(""),
+        message: "the host gave no reason"
+      },
+      {
+        shape: "an empty string",
+        createRejection: () => "",
+        message: "the host gave no reason"
+      },
+      {
+        shape: "no value",
+        createRejection: () => undefined,
+        message: "the host gave no reason"
+      }
+    ])(
+      "shows a start rejected with $shape with a presentable reason",
+      async ({ createRejection, message }) => {
+        startNativeHostFake({
+          get_vmo_status: () => STOPPED_VMO,
+          start_vmo: () => Promise.reject(createRejection())
+        })
+        const store = createVmoRuntimeStore()
+
+        await store.getState().startVmo()
+
+        const problem = { kind: "start-failed", message }
+        expect(store.getState().vmoServerInfo).toEqual({
+          status: "stopped",
+          problem
+        })
+      }
+    )
+
+    it("shows vmo not responding with the host's reason when its health check fails after it was spawned", async () => {
+      const reason = "The vmo health check ended unexpectedly: task 7 panicked"
+      startHostSpawningVmo(() => Promise.reject(reason))
+      const store = createVmoRuntimeStore()
+
+      await expect(store.getState().startVmo()).resolves.toBeUndefined()
+
+      const problem = { kind: "start-failed", message: reason }
+      expect(store.getState().vmoServerInfo).toEqual({
+        status: "unresponsive",
+        problem
+      })
+    })
+
+    it("shows vmo not responding with the host's reason when its status cannot be read after it was spawned", async () => {
+      const reason =
+        "Failed to inspect vmo process: Interrupted system call (os error 4)"
+      let isRunning = false
+      startNativeHostFake({
+        get_vmo_status: () =>
+          isRunning ? Promise.reject(reason) : STOPPED_VMO,
+        start_vmo: () => {
+          isRunning = true
+          return RUNNING_VMO
         }
+      })
+      const store = createVmoRuntimeStore()
+
+      await expect(store.getState().startVmo()).resolves.toBeUndefined()
+
+      const problem = { kind: "start-failed", message: reason }
+      expect(store.getState().vmoServerInfo).toEqual({
+        status: "unresponsive",
+        problem
+      })
+    })
+
+    it("shows vmo not responding, so Stop stays offered, when the start fails and its status then cannot be read", async () => {
+      const reason = "Failed to inspect vmo process: Resource busy"
+      let hasStartFailed = false
+      startNativeHostFake({
+        get_vmo_status: () =>
+          hasStartFailed ? Promise.reject(reason) : STOPPED_VMO,
+        start_vmo: () => {
+          hasStartFailed = true
+          return Promise.reject(reason)
+        }
+      })
+      const store = createVmoRuntimeStore()
+
+      await expect(store.getState().startVmo()).resolves.toBeUndefined()
+
+      const problem = { kind: "start-failed", message: reason }
+      expect(store.getState().vmoServerInfo).toEqual({
+        status: "unresponsive",
+        problem
       })
     })
 
@@ -168,7 +293,7 @@ describe("createVmoRuntimeSlice", () => {
         get_vmo_health: () => health.promise,
         stop_vmo: () => {
           isRunning = false
-          return { status: "stopped" }
+          return STOPPED_OUTCOME
         }
       })
       const store = createVmoRuntimeStore()
@@ -181,6 +306,76 @@ describe("createVmoRuntimeSlice", () => {
 
       expect(store.getState().vmoServerInfo).toEqual({
         status: "stopped",
+        problem: null
+      })
+    })
+
+    it("publishes nothing when its check fails after a stop took over", async () => {
+      const health = createControlledPromise<string>()
+      let isRunning = true
+      startNativeHostFake({
+        get_vmo_status: () => (isRunning ? RUNNING_VMO : STOPPED_VMO),
+        get_vmo_health: () => health.promise,
+        stop_vmo: () => {
+          isRunning = false
+          return STOPPED_OUTCOME
+        }
+      })
+      const store = createVmoRuntimeStore()
+
+      const start = store.getState().startVmo()
+      await waitForMicrotasks()
+      await store.getState().stopVmo()
+      health.reject("The vmo health check ended unexpectedly: task cancelled")
+      await start
+
+      expect(store.getState().vmoServerInfo).toEqual({
+        status: "stopped",
+        problem: null
+      })
+    })
+
+    it("publishes nothing from a start that a stop and a newer start replaced", async () => {
+      vi.useFakeTimers()
+      let isRunning = false
+      let health = "not-ready"
+      let heldStatus: Promise<unknown> | undefined
+      const newerStartStatus = createControlledPromise<unknown>()
+      startNativeHostFake({
+        get_vmo_status: () => {
+          const status = heldStatus ?? (isRunning ? RUNNING_VMO : STOPPED_VMO)
+          heldStatus = undefined
+          return status
+        },
+        start_vmo: () => {
+          isRunning = true
+          return RUNNING_VMO
+        },
+        get_vmo_health: () => health,
+        stop_vmo: () => {
+          isRunning = false
+          return STOPPED_OUTCOME
+        }
+      })
+      const store = createVmoRuntimeStore()
+      const replacedStart = store.getState().startVmo()
+      await waitForMicrotasks()
+      await store.getState().stopVmo()
+      heldStatus = newerStartStatus.promise
+      const newerStart = store.getState().startVmo()
+      await waitForMicrotasks()
+
+      // The replaced start's next check finds vmo stopped while the newer
+      // start still waits for its first status read.
+      await vi.advanceTimersByTimeAsync(1_000)
+      const afterReplacedCheck = store.getState().vmoServerInfo
+      health = "ready"
+      newerStartStatus.resolve(STOPPED_VMO)
+      await Promise.all([replacedStart, newerStart])
+
+      expect(afterReplacedCheck).toEqual({ status: "starting", problem: null })
+      expect(store.getState().vmoServerInfo).toEqual({
+        status: "running",
         problem: null
       })
     })
@@ -256,7 +451,7 @@ describe("createVmoRuntimeSlice", () => {
 
       expect(store.getState().vmoServerInfo).toEqual({
         status: "stopped",
-        problem: { kind: "killed" }
+        problem: KILLED_PROBLEM
       })
     })
 
@@ -265,9 +460,11 @@ describe("createVmoRuntimeSlice", () => {
         get_vmo_status: () => STOPPED_VMO
       })
       const store = createVmoRuntimeStore()
-      store.setState({
-        vmoServerInfo: { status: "unresponsive", problem: null }
-      })
+      const vmoServerInfo: VmoServerInfo = {
+        status: "unresponsive",
+        problem: null
+      }
+      store.setState({ vmoServerInfo })
 
       await store.getState().stopVmo()
 
@@ -280,30 +477,27 @@ describe("createVmoRuntimeSlice", () => {
 
     it.each([
       { statusAfter: RUNNING_VMO, shownStatus: "unresponsive" },
+      { statusAfter: STOPPING_VMO, shownStatus: "unresponsive" },
       { statusAfter: STOPPED_VMO, shownStatus: "stopped" }
     ])(
-      "shows vmo $shownStatus with the host's reason when the stop fails, without rejecting",
+      "shows vmo $shownStatus with the host's reason when the stop fails and vmo is then $statusAfter.status, without rejecting",
       async ({ statusAfter, shownStatus }) => {
         let hasStopFailed = false
         startNativeHostFake({
           get_vmo_status: () => (hasStopFailed ? statusAfter : RUNNING_VMO),
           stop_vmo: () => {
             hasStopFailed = true
-            return Promise.reject(
-              "Failed to stop vmo process 4343: failed to inspect it"
-            )
+            return Promise.reject(STOP_FAILURE)
           }
         })
         const store = createVmoRuntimeStore()
 
         await expect(store.getState().stopVmo()).resolves.toBeUndefined()
 
+        const problem = { kind: "stop-failed", message: STOP_FAILURE }
         expect(store.getState().vmoServerInfo).toEqual({
           status: shownStatus,
-          problem: {
-            kind: "stop-failed",
-            message: "Failed to stop vmo process 4343: failed to inspect it"
-          }
+          problem
         })
       }
     )
@@ -317,21 +511,17 @@ describe("createVmoRuntimeSlice", () => {
             : RUNNING_VMO,
         stop_vmo: () => {
           hasStopFailed = true
-          return Promise.reject(
-            "Failed to stop vmo process 4343: failed to inspect it"
-          )
+          return Promise.reject(STOP_FAILURE)
         }
       })
       const store = createVmoRuntimeStore()
 
       await expect(store.getState().stopVmo()).resolves.toBeUndefined()
 
+      const problem = { kind: "stop-failed", message: STOP_FAILURE }
       expect(store.getState().vmoServerInfo).toEqual({
         status: "unresponsive",
-        problem: {
-          kind: "stop-failed",
-          message: "Failed to stop vmo process 4343: failed to inspect it"
-        }
+        problem
       })
     })
   })

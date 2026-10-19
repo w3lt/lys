@@ -13,8 +13,9 @@ import { getVmoReadiness, type VmoReadiness } from "./vmo-readiness"
  *
  * @remarks `running` means vmo answered its health route, so the backend
  * offers `read_page`. `unresponsive` means the process stayed alive without
- * answering within the readiness timeout, or a stop failed while it still
- * ran; stopping it is the recovery path.
+ * answering within the readiness timeout, or a start or stop failed while it
+ * still ran or while its status could not be read; stopping it is the
+ * recovery path.
  */
 export type VmoServerStatus =
   "running" | "starting" | "stopping" | "stopped" | "unresponsive"
@@ -39,14 +40,18 @@ export type VmoProblem =
       readonly message: string
     }
 
-/** Problem of a stop that failed. */
-type VmoStopFailure = Extract<VmoProblem, { readonly kind: "stop-failed" }>
+/** Problem of a start or a stop that failed. */
+type VmoCommandFailure = Extract<
+  VmoProblem,
+  { readonly kind: "start-failed" | "stop-failed" }
+>
 
 /**
  * vmo lifecycle state and the problem of the last start or stop, which lasts
  * until the next start or stop.
  *
- * @remarks Only a stopped or unresponsive vmo has a problem.
+ * @remarks Only a stopped or unresponsive vmo has a problem, and an
+ * unresponsive one only the failure of a start or a stop.
  */
 export type VmoServerInfo =
   | {
@@ -59,7 +64,7 @@ export type VmoServerInfo =
     }
   | {
       readonly status: "unresponsive"
-      readonly problem: VmoStopFailure | null
+      readonly problem: VmoCommandFailure | null
     }
 
 /** vmo lifecycle state and actions composed into the application store. */
@@ -72,7 +77,8 @@ export type VmoRuntimeSlice = {
    *
    * @returns Resolves after `running`, `unresponsive`, or `stopped` is
    * published, or after a newer transition superseded the start; never
-   * rejects. A failed start publishes `stopped` with `start-failed`.
+   * rejects. A failed start publishes `start-failed` with `stopped`, or with
+   * `unresponsive` while vmo still runs or its status cannot be read.
    */
   readonly startVmo: () => Promise<void>
   /**
@@ -86,12 +92,6 @@ export type VmoRuntimeSlice = {
   readonly stopVmo: () => Promise<void>
 }
 
-/** Published while a start waits for vmo. */
-const STARTING_VMO: VmoServerInfo = Object.freeze({
-  status: "starting",
-  problem: null
-})
-
 /** Published while a stop waits for vmo. */
 const STOPPING_VMO: VmoServerInfo = Object.freeze({
   status: "stopping",
@@ -104,10 +104,31 @@ const STOPPED_VMO: VmoServerInfo = Object.freeze({
   problem: null
 })
 
+/** Published for a vmo that answers its health route. */
+const RUNNING_VMO: VmoServerInfo = Object.freeze({
+  status: "running",
+  problem: null
+})
+
+/** Published for a vmo that runs without answering its health route. */
+const UNRESPONSIVE_VMO: VmoServerInfo = Object.freeze({
+  status: "unresponsive",
+  problem: null
+})
+
+/** Problem of a vmo killed after the stop timeout. */
+const KILLED_VMO_PROBLEM: VmoProblem = Object.freeze({ kind: "killed" })
+
+/** Published for a vmo killed after the stop timeout. */
+const KILLED_VMO: VmoServerInfo = Object.freeze({
+  status: "stopped",
+  problem: KILLED_VMO_PROBLEM
+})
+
 /** State published for each readiness outcome of a start. */
 const VMO_SERVER_INFO_BY_READINESS = Object.freeze({
-  ready: Object.freeze({ status: "running", problem: null }),
-  unresponsive: Object.freeze({ status: "unresponsive", problem: null }),
+  ready: RUNNING_VMO,
+  unresponsive: UNRESPONSIVE_VMO,
   exited: STOPPED_VMO
 } satisfies Readonly<Record<VmoReadiness, VmoServerInfo>>)
 
@@ -128,17 +149,18 @@ function formatVmoCommandRejection(rejection: unknown): string {
 }
 
 /**
- * Gets the status to show for the owned vmo after a failed stop.
+ * Gets the status to show for the owned vmo after a failed start or stop.
  *
- * @returns `unresponsive` while it runs or when its status cannot be read,
- * so Stop stays offered; `stopped` otherwise.
+ * @returns `unresponsive` while its process is alive, running or still
+ * stopping, or when its status cannot be read, so Stop stays offered and
+ * joins a stop in progress; `stopped` once the host owns no running vmo.
  */
-async function getVmoServerStatusAfterFailedStop(): Promise<
+async function getVmoServerStatusAfterFailure(): Promise<
   "unresponsive" | "stopped"
 > {
   try {
     const { status } = await getVmoStatus()
-    return status === "running" ? "unresponsive" : "stopped"
+    return status === "stopped" ? "stopped" : "unresponsive"
   } catch {
     return "unresponsive"
   }
@@ -151,41 +173,54 @@ async function getVmoServerStatusAfterFailedStop(): Promise<
  * @param get - Framework reader for the current state.
  * @returns The initial stopped state and its actions.
  * @remarks The Tauri host owns the vmo process; this slice owns what the
- * renderer shows about it. A start publishes its readiness only while its
- * `starting` is still current, so a stop that took over wins. Neither action
- * rejects: the Runtime pane shows a failure as the problem.
+ * renderer shows about it. A start publishes its outcome only while the
+ * `starting` state it published is still current, so a stop or a newer start
+ * that took over wins. Neither action rejects: the Runtime pane shows a
+ * failure as the problem.
  */
 export function createVmoRuntimeSlice(
   set: StoreApi<VmoRuntimeSlice>["setState"],
   get: StoreApi<VmoRuntimeSlice>["getState"]
 ): VmoRuntimeSlice {
   /**
-   * Publishes `info` unless a newer transition superseded the start.
+   * Publishes `info` unless a newer transition replaced the start.
    *
+   * @param starting - State the start published when it began; it is never
+   * shared with another start, so any later transition replaces it.
    * @param info - State the start settled on.
    */
-  function updateStartedVmoServerInfo(info: VmoServerInfo): void {
-    if (get().vmoServerInfo.status !== "starting") return
+  function updateStartedVmoServerInfo(
+    starting: VmoServerInfo,
+    info: VmoServerInfo
+  ): void {
+    if (get().vmoServerInfo !== starting) return
     set({ vmoServerInfo: info })
   }
 
   /** Implements {@link VmoRuntimeSlice.startVmo}. */
   async function startVmo(): Promise<void> {
-    set({ vmoServerInfo: STARTING_VMO })
+    const starting: VmoServerInfo = Object.freeze({
+      status: "starting",
+      problem: null
+    })
+    set({ vmoServerInfo: starting })
     try {
       const isProcessRunning =
         (await getVmoStatus()).status === "running" ||
         (await startVmoProcess()).status === "running"
       const readiness = isProcessRunning ? await getVmoReadiness() : "exited"
-      updateStartedVmoServerInfo(VMO_SERVER_INFO_BY_READINESS[readiness])
+      updateStartedVmoServerInfo(
+        starting,
+        VMO_SERVER_INFO_BY_READINESS[readiness]
+      )
     } catch (error) {
-      updateStartedVmoServerInfo({
-        status: "stopped",
-        problem: {
-          kind: "start-failed",
-          message: formatVmoCommandRejection(error)
-        }
-      })
+      const problem: VmoCommandFailure = {
+        kind: "start-failed",
+        message: formatVmoCommandRejection(error)
+      }
+      const status = await getVmoServerStatusAfterFailure()
+      const info: VmoServerInfo = { status, problem }
+      updateStartedVmoServerInfo(starting, info)
     }
   }
 
@@ -199,18 +234,16 @@ export function createVmoRuntimeSlice(
       set({ vmoServerInfo: STOPPING_VMO })
       const outcome = await stopVmoProcess()
       set({
-        vmoServerInfo:
-          outcome.status === "killed"
-            ? { status: "stopped", problem: { kind: "killed" } }
-            : STOPPED_VMO
+        vmoServerInfo: outcome.status === "killed" ? KILLED_VMO : STOPPED_VMO
       })
     } catch (error) {
-      const problem: VmoStopFailure = {
+      const problem: VmoCommandFailure = {
         kind: "stop-failed",
         message: formatVmoCommandRejection(error)
       }
-      const status = await getVmoServerStatusAfterFailedStop()
-      set({ vmoServerInfo: { status, problem } })
+      const status = await getVmoServerStatusAfterFailure()
+      const vmoServerInfo: VmoServerInfo = { status, problem }
+      set({ vmoServerInfo })
     }
   }
 

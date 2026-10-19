@@ -92,9 +92,10 @@ const NESTED_BLOCK_SEPARATOR = " "
 
 /**
  * Elements removed before the page is read: code, styles, and inert
- * templates, whose text is never shown as page content.
+ * templates, whose text is never shown as page content, and inline SVG,
+ * whose text is icon titles and chart labels rather than the page's prose.
  */
-const NON_CONTENT_SELECTOR = "template, script, noscript, style"
+const NON_CONTENT_SELECTOR = "template, script, noscript, style, svg"
 
 /**
  * Attributes that hide an element from readers. They are removed before the
@@ -643,16 +644,24 @@ function hasMoreStartTagsThanElementLimit(html: string): boolean {
 }
 
 /**
- * Removes what is never read as page content and shows what the page hides.
+ * Removes the elements that are never read as page content.
  *
- * @param document - Parsed page, changed in place: the elements of
- * {@link NON_CONTENT_SELECTOR} are removed, and so is every attribute of
- * {@link HIDING_ATTRIBUTES}.
+ * @param document - Parsed page, changed in place: every element of
+ * {@link NON_CONTENT_SELECTOR} is removed with its content.
  */
-function removeNonContent(document: LinkedomDocument): void {
+function removeNonContentElements(document: LinkedomDocument): void {
   for (const element of document.querySelectorAll(NON_CONTENT_SELECTOR)) {
     element.remove()
   }
+}
+
+/**
+ * Removes the attributes that hide elements, so the text they hide is read.
+ *
+ * @param document - Parsed page, changed in place: every attribute of
+ * {@link HIDING_ATTRIBUTES} is removed from each element that carries it.
+ */
+function removeHidingAttributes(document: LinkedomDocument): void {
   for (const element of document.querySelectorAll(HIDDEN_ELEMENT_SELECTOR)) {
     for (const name of HIDING_ATTRIBUTES) element.removeAttribute(name)
   }
@@ -670,21 +679,22 @@ function removeNonContent(document: LinkedomDocument): void {
  * @throws When the markup makes linkedom or Readability fail; the page is
  * then not read.
  * @remarks Markup with more start tags than {@link MAXIMUM_PAGE_ELEMENTS} is
- * refused before it is parsed. Then scripts, styles, `<noscript>`, and
- * `<template>` elements are removed, the `hidden` and `aria-hidden`
- * attributes are dropped so the text they hide is read, the parsed page's
- * size is checked, and Readability selects the main content. Extraction runs no script of the
- * page. The work is synchronous; the limits keep it to about a second on
- * current hardware, deeply nested markup included. Markup that puts its text
- * outside `<body>` reads as having no text. A page without a title is titled
- * by its host.
+ * refused before it is parsed. Then scripts, styles, `<noscript>`,
+ * `<template>`, and inline `<svg>` elements are removed, the `hidden` and
+ * `aria-hidden` attributes are dropped so the text they hide is read, the
+ * parsed page's size is checked, and Readability selects the main content.
+ * Extraction runs no script of the page. The work is synchronous; the limits
+ * keep it to about a second on current hardware, deeply nested markup
+ * included. Markup that puts its text outside `<body>` reads as having no
+ * text. A page without a title is titled by its host.
  */
 export function extractPageArticle(page: RenderedPage): PageExtractionResult {
   if (hasMoreStartTagsThanElementLimit(page.html)) {
     return Object.freeze({ status: "too-complex" })
   }
   const document = parsePageDocument(page.html)
-  removeNonContent(document)
+  removeNonContentElements(document)
+  removeHidingAttributes(document)
   if (!isPageStructureReadable(document)) {
     return Object.freeze({ status: "too-complex" })
   }

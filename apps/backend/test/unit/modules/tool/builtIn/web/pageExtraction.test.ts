@@ -105,6 +105,21 @@ describe("extractPageArticle", () => {
     expect(text).not.toContain("noscript text")
   })
 
+  it("leaves out the text of inline SVG, such as icon titles and chart labels", () => {
+    const html = buildArticleHtml(`
+      <p>${ARTICLE_PARAGRAPH}</p>
+      <p><svg viewBox="0 0 10 10"><title>Search icon</title></svg>Moth wings are covered in scales.</p>
+      <svg viewBox="0 0 100 50"><text x="0" y="10">Wingspan in millimetres</text><foreignObject><p>Chart note.</p></foreignObject></svg>
+    `)
+
+    const result = extractPageArticle(buildPage(html))
+
+    expect(result.status === "extracted" && result.article.blocks).toEqual([
+      { kind: "text", text: ARTICLE_PARAGRAPH },
+      { kind: "text", text: "Moth wings are covered in scales." }
+    ])
+  })
+
   it("reads text the page hides with the hidden and aria-hidden attributes", () => {
     const html = buildArticleHtml(
       `<p>${ARTICLE_PARAGRAPH}</p><p hidden>Hidden note.</p><div aria-hidden="true"><p>Unannounced note.</p></div>`

@@ -186,7 +186,13 @@ maintainer on 2026-10-09 for [PR #128](https://github.com/w3lt/lys/pull/128).
 On 2026-10-11 the maintainer extended it, for
 [PR #157](https://github.com/w3lt/lys/pull/157), to the backend's own tools:
 the allowed calls of one round run in the backend in parallel, with no limit
-on how many run at once.
+on how many run at once. On 2026-10-19 the maintainer approved its current
+risk and control text for [PR #203](https://github.com/w3lt/lys/pull/203),
+following finding I-9 of its
+[second review](https://github.com/w3lt/lys/pull/203#issuecomment-6267044781):
+`read_page` reads through vmo, which starts one micro VM per read with no
+limit on that VM's connections or on what it receives, until
+[#196](https://github.com/w3lt/lys/issues/196).
 
 - **Scope:** the tool loop of `Agent.createReply`, including the backend tool
   runs of one round, and the `tools` offer of `POST /api/v1/chat`. Every
@@ -216,10 +222,12 @@ on how many run at once.
   reply when the round would not fit the loaded model's context length. On Just
   run, a round of N `read_page` calls asks vmo for N reads at once, and vmo
   starts N micro VMs at once, with no limit on their connections or on what
-  they receive; each read ends within 60 seconds in the backend and 30 in
-  vmo, which deletes its VM, and the backend reads at most 16 MiB of each
-  answer. Their extractions run one after another on the backend's thread,
-  about a second each at most. A round of N `web_search` calls sends N queries to Tavily
+  they receive ([#196](https://github.com/w3lt/lys/issues/196)). Each read
+  ends within 60 seconds in the backend, which reads at most 16 MiB of each
+  answer. vmo deletes each VM after at most 30 seconds, or, when creating and
+  booting it alone take longer, as soon as they end. Their extractions run one
+  after another on the backend's thread, about a second each at most. A round
+  of N `web_search` calls sends N queries to Tavily
   at once, each costing one Tavily credit, each ending within 15 seconds and
   reading at most 1 MiB.
 - **Removal condition:** [#136](https://github.com/w3lt/lys/issues/136) adds
@@ -270,7 +278,12 @@ and [ERROR-029](https://github.com/w3lt/lys/blob/main/docs/code_standards/ERROR.
 when one backend tool's run rejects, the reply fails while the round's other
 calls keep going. The exception was approved by the maintainer on 2026-10-11
 for [PR #157](https://github.com/w3lt/lys/pull/157), following review findings
-I-3 and I-8.
+I-3 and I-8. On 2026-10-19 the maintainer approved its current risk and
+control text for [PR #203](https://github.com/w3lt/lys/pull/203), following
+finding I-9 of its
+[second review](https://github.com/w3lt/lys/pull/203#issuecomment-6267044781):
+a `read_page` run that keeps going is a read through vmo, bounded by the
+backend's 60 seconds and 16 MiB, whose VM vmo deletes.
 
 - **Scope:** `handleToolCallRound` and `handleBuiltInToolCall` in
   `apps/backend/src/modules/agent/toolCallRound.ts`, and only a run that
@@ -291,8 +304,9 @@ I-3 and I-8.
 - **Risk and control:** the round rejects as soon as one run rejects, and the
   reply is stored as failed. The round's other backend runs keep going until
   they end, for `read_page` a read through vmo of at most 60 seconds and
-  16 MiB, whose VM vmo deletes within its own 30 seconds, plus an extraction
-  of about a second, for `web_search` a request of at most 15
+  16 MiB, whose VM vmo deletes after at most 30 seconds, or, when creating and
+  booting it alone take longer, as soon as they end, plus an extraction of
+  about a second, for `web_search` a request of at most 15
   seconds and 1 MiB, and their results are discarded: nothing
   they produce is stored or shown. Calls still waiting for the person end
   when the failed reply task settles.
@@ -418,6 +432,135 @@ PR #152, following review finding I-7.
   hook, so the two functions hold no agent logic of their own.
 - **Removal condition:** a change that splits `Composer` and `ChatView` to
   within the limit removes this exception. No issue tracks that split.
+
+## vmo address copy exception
+
+vmo's address has an approved exception to
+[CONST-005](https://github.com/w3lt/lys/blob/main/docs/code_standards/CONSTANT.md):
+`VMO_HOST` and `VMO_PORT` in `@lys/protocol` define it, but the Tauri host and
+vmo declare `127.0.0.1:8080` again, because Rust and Swift cannot import a
+TypeScript constant. The exception was approved by the maintainer on
+2026-10-19 for [PR #203](https://github.com/w3lt/lys/pull/203), following
+finding I-8 of its
+[first review](https://github.com/w3lt/lys/pull/203#issuecomment-6265470863)
+and question Q3 of its
+[second](https://github.com/w3lt/lys/pull/203#issuecomment-6267044781).
+
+- **Scope:** only `VMO_ADDRESS` in
+  [vmo.rs](https://github.com/w3lt/lys/blob/main/apps/desktop/src-tauri/src/vmo.rs),
+  where the host checks vmo's health, and the default `host` and `port` of
+  `WebServer.init` in
+  [WebServer.swift](https://github.com/w3lt/lys/blob/main/apps/vmo/Sources/vmo/WebServer/WebServer.swift),
+  where vmo listens. The backend and the renderer import the protocol
+  constants.
+- **Constraint:** the host's health check and vmo's listener are Rust and
+  Swift, which cannot read `@lys/protocol`, and vmo run on its own, through
+  `run.sh` or `swift run`, needs an address to listen on.
+- **Alternatives considered:**
+  - Moving the health check from the host to the renderer, which imports the
+    constants, removes the Rust copy. It is deferred to
+    [#207](https://github.com/w3lt/lys/issues/207).
+  - Passing the address to vmo when the host starts it was not taken: the
+    host would still declare it to pass it, and vmo run on its own would
+    still need a default.
+- **Risk and control:** a changed protocol constant would leave the host
+  checking, or vmo listening on, the old address, so `read_page` would stay
+  unavailable. The desktop unit test
+  [vmo-address.test.ts](https://github.com/w3lt/lys/blob/main/apps/desktop/test/unit/lib/apis/tauri/vmo-address.test.ts),
+  which CI runs on every pull request, fails when either copy differs from
+  `VMO_HOST` and `VMO_PORT`, when it does not find exactly one of each
+  declaration, or when either file moves.
+- **Removal condition:** [#207](https://github.com/w3lt/lys/issues/207)
+  removes the Rust copy. vmo's default stays under this exception, guarded by
+  the same test.
+
+## Reader VM lifecycle contract exception
+
+vmo's reader VM lifecycle has an approved exception to
+[IFACE-032](https://github.com/w3lt/lys/blob/main/docs/code_standards/INTERFACE.md):
+`ContainerizationReaderVmLifecycle`, the production `ReaderVmLifecycle`, runs
+only the contract cases that need no VM, while `InMemoryReaderVmLifecycle`,
+its reusable fake, runs every case. The exception was approved by the
+maintainer on 2026-10-19 for [PR #203](https://github.com/w3lt/lys/pull/203),
+following finding I-10 of its
+[second review](https://github.com/w3lt/lys/pull/203#issuecomment-6267044781).
+
+- **Scope:** only the production lifecycle's cases in the "Reader VM
+  lifecycle contract with VMs" and "Reader VM lifecycle contract when the VM
+  mechanism fails" suites of
+  [ReaderVmLifecycleContractTests.swift](https://github.com/w3lt/lys/blob/main/apps/vmo/Tests/vmoTests/ReaderVmLifecycleContractTests.swift).
+  It runs the suite without a VM, for ids it never returned, and
+  `ContainerizationReaderVmLifecycleTests` checks it once closed.
+- **Constraint:** the production lifecycle boots real VMs, which need two
+  things no test run has. One is a Linux kernel, which only one developer's
+  Mac has until [#200](https://github.com/w3lt/lys/issues/200). The other is
+  a process signed with the `com.apple.security.virtualization` entitlement,
+  as `run.sh` and `build.sh` sign vmo; `swift test` runs the tests in a
+  process without it, so Virtualization.framework refuses to boot a VM there.
+  Six of the eight cases of the failure suite also need a Containerization
+  step to fail on demand, which neither provides. CI runs no `swift` tests.
+- **Alternatives considered:**
+  - Running the production lifecycle's VM cases only when a kernel and the
+    entitlement are found was rejected: everywhere else they would pass
+    while checking nothing.
+  - Replacing Containerization under the production lifecycle with a fake
+    was rejected: it would add a seam only for tests, and the cases would
+    check the fake, not the VMs.
+- **Risk and control:** for the production lifecycle, the guarantees that the
+  two suites' documentation lists stay unchecked: unique ids and nothing run
+  before a start, a command's output reaching every wait, a single start and
+  what a failed start leaves, deletion refused while a VM starts, deletion
+  ending every wait, waits that hold up no other VM, and how the VM
+  mechanism's failures and a cancelled caller reach the caller. A change that
+  breaks one of them passes the tests. `readPageInVm` is tested against
+  `InMemoryReaderVmLifecycle`, which runs every case, so the read flow is
+  checked against the same contract.
+- **Removal condition:** a test run that can boot vmo's VMs, which needs a
+  kernel on every Mac ([#200](https://github.com/w3lt/lys/issues/200)) and a
+  test executable signed with the virtualization entitlement, and a test-only
+  harness that makes Containerization's steps fail on demand. No issue tracks
+  the last two yet. The production lifecycle then joins
+  `ReaderVmLifecycleHarness`, which runs the two suites, and this exception is
+  removed.
+
+## Reader VM wait cancellation exception
+
+vmo's wait for a reader VM's command has an approved exception to
+[IFACE-018](https://github.com/w3lt/lys/blob/main/docs/code_standards/INTERFACE.md):
+`waitForCommandExit(containerId:)` of `ReaderVmLifecycle` doesn't end when its
+caller is cancelled. The exception was approved by the maintainer on
+2026-10-19 for [PR #203](https://github.com/w3lt/lys/pull/203), which added
+the protocol for finding I-10 of its
+[second review](https://github.com/w3lt/lys/pull/203#issuecomment-6267044781).
+
+- **Scope:** only `waitForCommandExit(containerId:)` in
+  [ReadPageInVm.swift](https://github.com/w3lt/lys/blob/main/apps/vmo/Sources/vmo/Endpoints/Web/ReadPageInVm.swift)
+  and its implementations in `ContainerizationReaderVmLifecycle` and
+  `InMemoryReaderVmLifecycle`. The lifecycle's other operations observe
+  cancellation as documented.
+- **Constraint:** a read must not return while its reader may still run.
+  When deleting the VM fails to stop the reader, the wait that is already
+  running is the only way to learn when the reader exits, because once the
+  deletion began, the VM's id names no VM and a new wait fails. So
+  `readPageInVm` cancels its wait when the deadline passes or its caller is
+  cancelled, and relies on that wait to end only when the deletion stops the
+  reader or the reader exits.
+- **Alternatives considered:**
+  - A wait that each caller can cancel, with `readPageInVm` keeping a wait of
+    its own that neither its deadline nor its caller ends, is deferred to
+    [#212](https://github.com/w3lt/lys/issues/212).
+  - Starting a new wait after a failed stop is not possible: the VM's id no
+    longer names a VM.
+- **Risk and control:** a cancelled caller keeps waiting until the VM's
+  command exits or the VM is deleted. `readPageInVm`, the only caller,
+  deletes the VM as soon as its deadline passes or its caller is cancelled,
+  so its wait ends when the deletion stops the reader. When stopping fails,
+  the read waits until the reader exits, with no time limit in vmo; the
+  backend stops waiting for the answer after its own 60 seconds, and the
+  reader gives Chromium at most 30 seconds.
+- **Removal condition:** [#212](https://github.com/w3lt/lys/issues/212) makes
+  the wait end when its caller is cancelled, and this exception is removed
+  with it.
 
 ## API boundaries
 

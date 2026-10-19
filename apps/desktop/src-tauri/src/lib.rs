@@ -84,29 +84,97 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    app.run(|app_handle, event| {
-        if let tauri::RunEvent::Exit = event {
-            let backend = app_handle.state::<backend::Backend>();
-            let vmo = app_handle.state::<vmo::Vmo>().inner();
+    app.run(handle_run_event);
+}
 
-            // vmo can take up to a minute to delete its VMs, so the backend
-            // stops while it does rather than after it.
-            thread::scope(|scope| {
-                let vmo_stop = scope.spawn(|| vmo.stop());
+/// Handles one event of the running application: on `Exit`, it stops the
+/// managed backend and vmo, and it leaves every other event to Tauri.
+fn handle_run_event(app_handle: &tauri::AppHandle, event: tauri::RunEvent) {
+    if let tauri::RunEvent::Exit = event {
+        stop_runtime_processes_at_exit(app_handle);
+    }
+}
 
-                if let Err(error) = backend.stop() {
-                    eprintln!("Failed to stop backend during app exit: {error}");
-                }
+/// Stops the managed backend and vmo during application exit, writing each
+/// failure and a killed vmo to stderr.
+///
+/// vmo can take up to [`vmo::VMO_STOP_TIMEOUT`] to delete its VMs, so its stop
+/// runs on a scoped thread while the backend stops, rather than after it. The
+/// call returns once both stops have ended.
+fn stop_runtime_processes_at_exit(app_handle: &tauri::AppHandle) {
+    let backend = app_handle.state::<backend::Backend>();
+    let vmo = app_handle.state::<vmo::Vmo>().inner();
+    let vmo_stop = thread::scope(|scope| {
+        let vmo_stop = scope.spawn(|| vmo.stop());
+        stop_backend_at_exit(&backend);
+        vmo_stop.join()
+    });
+    if let Some(problem) = format_vmo_stop_problem_at_exit(vmo_stop) {
+        eprintln!("{problem}");
+    }
+}
 
-                match vmo_stop.join() {
-                    Ok(Ok(vmo::VmoStopOutcome::Stopped)) => {}
-                    Ok(Ok(vmo::VmoStopOutcome::Killed)) => eprintln!(
-                        "vmo did not stop in time during app exit and was killed; it may have left VMs running"
-                    ),
-                    Ok(Err(error)) => eprintln!("Failed to stop vmo during app exit: {error}"),
-                    Err(_panic) => eprintln!("Failed to stop vmo during app exit: the stop panicked"),
-                }
-            });
-        }
-    })
+/// Stops the managed backend during application exit, writing a failure to
+/// stderr.
+fn stop_backend_at_exit(backend: &backend::Backend) {
+    if let Err(error) = backend.stop() {
+        eprintln!("Failed to stop backend during app exit: {error}");
+    }
+}
+
+/// Formats what went wrong when vmo stopped during application exit, or
+/// returns `None` when vmo exited within its stop timeout.
+///
+/// `stop` is the joined stop thread's result, whose outer error means that the
+/// stop panicked.
+fn format_vmo_stop_problem_at_exit(
+    stop: thread::Result<Result<vmo::VmoStopOutcome, String>>,
+) -> Option<String> {
+    match stop {
+        Ok(Ok(vmo::VmoStopOutcome::Stopped)) => None,
+        Ok(Ok(vmo::VmoStopOutcome::Killed)) => Some(String::from(
+            "vmo did not stop in time during app exit and was killed; it may have left VMs running",
+        )),
+        Ok(Err(error)) => Some(format!("Failed to stop vmo during app exit: {error}")),
+        Err(_panic) => Some(String::from(
+            "Failed to stop vmo during app exit: the stop panicked",
+        )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::any::Any;
+
+    use super::format_vmo_stop_problem_at_exit;
+    use crate::vmo::VmoStopOutcome;
+
+    #[test]
+    fn a_vmo_that_stopped_in_time_at_exit_is_not_reported() {
+        assert_eq!(
+            format_vmo_stop_problem_at_exit(Ok(Ok(VmoStopOutcome::Stopped))),
+            None
+        );
+    }
+
+    #[test]
+    fn a_killed_failed_or_panicked_vmo_stop_at_exit_is_reported() {
+        let panic: Box<dyn Any + Send> = Box::new("stop panicked");
+
+        assert_eq!(
+            format_vmo_stop_problem_at_exit(Ok(Ok(VmoStopOutcome::Killed))).as_deref(),
+            Some("vmo did not stop in time during app exit and was killed; it may have left VMs running")
+        );
+        assert_eq!(
+            format_vmo_stop_problem_at_exit(Ok(Err(String::from(
+                "Failed to inspect vmo process: Interrupted system call (os error 4)"
+            ))))
+            .as_deref(),
+            Some("Failed to stop vmo during app exit: Failed to inspect vmo process: Interrupted system call (os error 4)")
+        );
+        assert_eq!(
+            format_vmo_stop_problem_at_exit(Err(panic)).as_deref(),
+            Some("Failed to stop vmo during app exit: the stop panicked")
+        );
+    }
 }

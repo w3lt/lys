@@ -19,7 +19,7 @@ use std::{
     os::unix::process::CommandExt,
     path::{Path, PathBuf},
     process::{Child, Command},
-    sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError},
+    sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError},
     thread,
     time::{Duration, Instant},
 };
@@ -102,40 +102,11 @@ pub enum VmoHealth {
 /// Result of one stop, shared by its caller and every stop that joined it.
 type VmoStopResult = Result<VmoStopOutcome, String>;
 
-#[derive(Default)]
-/// Result of one stop, published once to every caller waiting for it.
+/// Where one stop publishes its result, once, for every stop that joined it.
 ///
-/// A poisoned lock is recovered: the result is written in one assignment, so
-/// a panic cannot leave it half written.
-struct VmoStopSettlement {
-    /// The stop's result once it has settled; `None` before.
-    result: Mutex<Option<VmoStopResult>>,
-    /// Notified once `result` is set.
-    settled: Condvar,
-}
-
-impl VmoStopSettlement {
-    /// Publishes the stop's result and wakes every caller waiting for it.
-    fn resolve(&self, result: VmoStopResult) {
-        let mut settled_result = self.result.lock().unwrap_or_else(PoisonError::into_inner);
-        *settled_result = Some(result);
-        self.settled.notify_all();
-    }
-
-    /// Waits until the stop has settled and returns a copy of its result.
-    fn wait_for_result(&self) -> VmoStopResult {
-        let mut settled_result = self.result.lock().unwrap_or_else(PoisonError::into_inner);
-        loop {
-            if let Some(result) = settled_result.as_ref() {
-                return result.clone();
-            }
-            settled_result = self
-                .settled
-                .wait(settled_result)
-                .unwrap_or_else(PoisonError::into_inner);
-        }
-    }
-}
+/// Only the stop that took the child sets it; a joined stop blocks in
+/// [`OnceLock::wait`] until then and returns a copy.
+type VmoStopSettlement = OnceLock<VmoStopResult>;
 
 /// The vmo child the desktop owns, by lifecycle stage.
 enum VmoProcess {
@@ -271,13 +242,16 @@ impl Vmo {
     ///
     /// # Errors
     ///
-    /// Returns an error when the child cannot be inspected, signalled, or
-    /// waited for. The child is then killed and waited for as far as possible,
-    /// and the owner holds no child afterwards.
+    /// Returns an error when the child cannot be inspected before the stop
+    /// takes it; the child then stays owned as it was. Once the stop has taken
+    /// the child, it returns an error when the child cannot be signalled,
+    /// inspected, or waited for: after a failed `SIGTERM` or check, the group
+    /// is sent `SIGKILL` once and the child waited for, a failed `SIGKILL` or
+    /// wait is not repeated, and the owner holds no child afterwards.
     pub fn stop(&self) -> VmoStopResult {
         let (child, settlement) = match self.update_process_for_stop()? {
             VmoStopAdmission::NothingRunning => return Ok(VmoStopOutcome::Stopped),
-            VmoStopAdmission::Joined(settlement) => return settlement.wait_for_result(),
+            VmoStopAdmission::Joined(settlement) => return settlement.wait().clone(),
             VmoStopAdmission::Admitted { child, settlement } => (child, settlement),
         };
 
@@ -285,7 +259,9 @@ impl Vmo {
         // Leave `Stopping` before publishing, so a caller woken by the result
         // can start vmo again at once.
         *self.get_locked_process() = VmoProcess::Stopped;
-        settlement.resolve(result.clone());
+        settlement
+            .set(result.clone())
+            .expect("only the stop that took the child publishes its result");
         result
     }
 
@@ -315,7 +291,7 @@ impl Vmo {
             VmoProcess::Running(mut child) => match child.try_wait() {
                 Ok(Some(_exit_status)) => Ok(VmoStopAdmission::NothingRunning),
                 Ok(None) => {
-                    let settlement = Arc::new(VmoStopSettlement::default());
+                    let settlement = Arc::new(VmoStopSettlement::new());
                     *process = VmoProcess::Stopping {
                         pid: child.id(),
                         settlement: Arc::clone(&settlement),
@@ -347,37 +323,41 @@ fn find_running_vmo_pid(child: &mut Child) -> Result<Option<u32>, String> {
 }
 
 /// Stops one vmo child: `SIGTERM` to its process group, up to `stop_timeout`
-/// for it to exit, then `SIGKILL` to the group and a wait for the child.
+/// for it to exit, and `SIGKILL` to the group with a wait for the child when
+/// it still runs then.
+///
+/// `SIGKILL` is sent at most once: after the timeout, or after `SIGTERM` or a
+/// check failed. A failed `SIGKILL` or wait is not repeated, because the
+/// group's identifier may already name another group by then.
 ///
 /// # Errors
 ///
 /// Returns an error when the group cannot be signalled for a reason other
-/// than being gone, or the child cannot be inspected or waited for. The group
-/// is then sent `SIGKILL` and the child waited for, and a failure of that is
-/// added to the error.
+/// than being gone, or the child cannot be inspected or waited for. After a
+/// failed `SIGTERM` or check, the group is sent `SIGKILL` and the child waited
+/// for, and a failure of that is added to the error.
 fn stop_vmo_child(mut child: Child, stop_timeout: Duration) -> VmoStopResult {
     let pid = child.id();
-    send_sigterm_and_wait_for_vmo(&mut child, stop_timeout)
-        .map_err(|error| match send_sigkill_and_wait_for_vmo(&mut child) {
-            Ok(()) => error,
-            Err(cleanup_error) => format!("{error}; {cleanup_error}"),
-        })
-        .map_err(|error| format!("Failed to stop vmo process {pid}: {error}"))
+    let has_exited = send_vmo_signal(pid, Signal::SIGTERM)
+        .and_then(|()| wait_for_vmo_exit(&mut child, stop_timeout));
+    let outcome = match has_exited {
+        Ok(true) => Ok(VmoStopOutcome::Stopped),
+        Ok(false) => send_sigkill_and_wait_for_vmo(&mut child).map(|()| VmoStopOutcome::Killed),
+        Err(error) => Err(format_vmo_stop_failure(
+            error,
+            send_sigkill_and_wait_for_vmo(&mut child),
+        )),
+    };
+    outcome.map_err(|error| format!("Failed to stop vmo process {pid}: {error}"))
 }
 
-/// Sends `SIGTERM` to the child's process group and waits up to
-/// `stop_timeout` for the child to exit, then kills it if it still runs.
-///
-/// # Errors
-///
-/// Returns an error when signalling, inspecting, or waiting fails.
-fn send_sigterm_and_wait_for_vmo(child: &mut Child, stop_timeout: Duration) -> VmoStopResult {
-    send_vmo_signal(child.id(), Signal::SIGTERM)?;
-    if wait_for_vmo_exit(child, stop_timeout)? {
-        return Ok(VmoStopOutcome::Stopped);
+/// Formats the failure of a stop that ended before its `SIGKILL`, adding the
+/// failure of the `SIGKILL` sent after it when that failed too.
+fn format_vmo_stop_failure(error: String, kill: Result<(), String>) -> String {
+    match kill {
+        Ok(()) => error,
+        Err(kill_error) => format!("{error}; {kill_error}"),
     }
-    send_sigkill_and_wait_for_vmo(child)?;
-    Ok(VmoStopOutcome::Killed)
 }
 
 /// Sends `SIGKILL` to the child's process group and waits for the child.
@@ -448,7 +428,7 @@ fn wait_for_vmo_exit(child: &mut Child, timeout: Duration) -> Result<bool, Strin
 /// `timeout`. Only the status line is read; a refused connection, a timeout,
 /// or any other status means vmo is not ready.
 fn send_vmo_health_check(address: SocketAddr, timeout: Duration) -> VmoHealth {
-    match read_vmo_health_status_line(address, timeout) {
+    match send_vmo_health_request(address, timeout) {
         Ok(status_line) if status_line.starts_with(VMO_HEALTHY_STATUS_LINE_PREFIX) => {
             VmoHealth::Ready
         }
@@ -456,7 +436,7 @@ fn send_vmo_health_check(address: SocketAddr, timeout: Duration) -> VmoHealth {
     }
 }
 
-/// Sends `GET /health` to `address` and reads the answer's status line.
+/// Sends `GET /health` to `address` and returns the answer's status line.
 ///
 /// Returns at most [`MAX_VMO_STATUS_LINE_BYTES`] bytes, ending with `\r\n`
 /// unless the answer ended or the limit was reached first.
@@ -465,7 +445,7 @@ fn send_vmo_health_check(address: SocketAddr, timeout: Duration) -> VmoHealth {
 ///
 /// Returns the I/O error of connecting, sending, or reading, including a
 /// timeout once `timeout` has passed since the call began.
-fn read_vmo_health_status_line(address: SocketAddr, timeout: Duration) -> std::io::Result<Vec<u8>> {
+fn send_vmo_health_request(address: SocketAddr, timeout: Duration) -> std::io::Result<Vec<u8>> {
     let deadline = Instant::now() + timeout;
     let mut stream = TcpStream::connect_timeout(&address, timeout)?;
     stream.set_write_timeout(Some(find_remaining_time(deadline)?))?;
@@ -621,7 +601,10 @@ mod tests {
     use nix::{sys::signal::kill, unistd::Pid};
     use serde_json::{json, to_value};
 
-    use super::{send_vmo_health_check, Vmo, VmoHealth, VmoProcessStatus, VmoStopOutcome};
+    use super::{
+        format_vmo_stop_failure, send_vmo_health_check, Vmo, VmoHealth, VmoProcessStatus,
+        VmoStopOutcome,
+    };
     use crate::tools::test_directory::TestDirectory;
 
     /// Stop timeout of the cases whose child ignores `SIGTERM`.
@@ -763,6 +746,22 @@ mod tests {
         );
         assert_eq!(to_value(VmoHealth::Ready).unwrap(), json!("ready"));
         assert_eq!(to_value(VmoHealth::NotReady).unwrap(), json!("not-ready"));
+    }
+
+    #[test]
+    fn a_failure_before_sigkill_is_kept_and_a_failed_sigkill_is_added() {
+        let error = String::from("failed to inspect it: Interrupted system call (os error 4)");
+
+        assert_eq!(format_vmo_stop_failure(error.clone(), Ok(())), error);
+        assert_eq!(
+            format_vmo_stop_failure(
+                error.clone(),
+                Err(String::from(
+                    "failed to wait for it: No child processes (os error 10)"
+                ))
+            ),
+            format!("{error}; failed to wait for it: No child processes (os error 10)")
+        );
     }
 
     #[test]

@@ -8,9 +8,9 @@ import * as z from "zod"
  * the saved key fails the key format. `settings-unreadable`: the settings
  * file cannot be read, is too large, or is not a JSON object.
  * `page-reader-not-ready`: vmo, Lys's page reader, did not answer its health
- * route with `200 OK` in time, because it is not running or is still
- * starting. Adding a reason is a compatibility change for every consumer that
- * branches on it.
+ * route with `200 OK` in time, for example because it is stopped, still
+ * starting, stopping, or not responding. Adding a reason is a compatibility
+ * change for every consumer that branches on it.
  */
 export const backendToolUnavailableReasonSchema = z.enum([
   "api-key-missing",

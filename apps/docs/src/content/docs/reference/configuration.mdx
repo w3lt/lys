@@ -12,13 +12,21 @@ preference.
 
 ## Shared constants
 
-| Constant        | Value       | Used by                                      |
-| --------------- | ----------- | -------------------------------------------- |
-| `API_PREFIX_V1` | `/api/v1`   | Route path composition                       |
-| `BACKEND_HOST`  | `127.0.0.1` | Backend bind host and desktop backend URL    |
-| `BACKEND_PORT`  | `12345`     | Backend bind port and desktop backend URL    |
-| `LMSTUDIO_HOST` | `127.0.0.1` | Backend LM Studio HTTP and WebSocket clients |
-| `LMSTUDIO_PORT` | `1234`      | Backend LM Studio HTTP and WebSocket clients |
+| Constant        | Value       | Used by                                                |
+| --------------- | ----------- | ------------------------------------------------------ |
+| `API_PREFIX_V1` | `/api/v1`   | Route path composition                                 |
+| `BACKEND_HOST`  | `127.0.0.1` | Backend bind host and desktop backend URL              |
+| `BACKEND_PORT`  | `12345`     | Backend bind port and desktop backend URL              |
+| `LMSTUDIO_HOST` | `127.0.0.1` | Backend LM Studio HTTP and WebSocket clients           |
+| `LMSTUDIO_PORT` | `1234`      | Backend LM Studio HTTP and WebSocket clients           |
+| `VMO_HOST`      | `127.0.0.1` | Backend page reads and health checks, desktop vmo card |
+| `VMO_PORT`      | `8080`      | Backend page reads and health checks, desktop vmo card |
+
+The Tauri host's health check of vmo and vmo's own listener are Rust and
+Swift, so they declare `127.0.0.1:8080` again. A desktop unit test fails when
+either copy differs from `VMO_HOST` and `VMO_PORT`, so changing vmo's address
+means changing all three; see the
+[vmo address copy exception](/reference/standard-application/#vmo-address-copy-exception).
 
 ## Lys home directory
 
@@ -295,9 +303,10 @@ The Runtime pane's two startup switches, "Start it when Lys opens" for the
 backend and "Start vmo when Lys opens", are saved automatically the same way
 whenever either changes. The save writes both switches and keeps the rest of
 the `runtime` group as it is in the file; the latest switches win. They apply
-the next time Lys opens. After a failed save, the switches apply to this
-session only, and the pane says so. A file saved before `autoStartVmo`
-existed loads with it on.
+the next time Lys opens, or the window reloads, because both read them from
+the file. After a failed save, that next launch follows the switches last
+saved, the pane says so, and changing a switch tries the save again. A file
+saved before `autoStartVmo` existed loads with it on.
 
 The other runtime edits, such as default-model selection, remain in memory for
 the current session. Edits to `model.contextSize` also remain session-only.

@@ -56,21 +56,25 @@ loaded state; it does not test inference success.
 
 The backend offers `read_page` only while vmo answers `GET /health` at
 `127.0.0.1:8080`. Until then, the Tools pane shows `read_page` off and
-disabled, with "vmo, Lys's page reader, isn't ready. Start it in Settings →
-Runtime." The vmo card in Settings → Runtime says why:
+disabled, with "vmo, Lys's page reader, isn't ready. See Settings → Runtime."
+The vmo card in Settings → Runtime says why:
 
-- **vmo starting**: the first start pulls the `vminit` and `lys-readpage`
-  images from `ghcr.io`, which can take a few minutes, and a development build
-  compiles vmo first. Lys waits up to ten minutes.
+- **vmo starting**: every start fetches the `lys-readpage` image's `latest`
+  tag from `ghcr.io`, and the first start, or the first after a new reader
+  image, downloads the `vminit` or `lys-readpage` image, which can take a few
+  minutes. A development build compiles vmo first. Lys waits up to ten
+  minutes.
 - **vmo not responding**: the process stayed up for ten minutes without
-  answering. Press **Stop**, then **Start**. Check network access to
-  `ghcr.io`, and that the Mac meets
+  answering, or a start or stop failed while vmo still ran or its status could
+  not be read; the card then shows that failure. Press **Stop**, then
+  **Start**. Check network access to `ghcr.io`, and that the Mac meets
   [vmo's requirements](/operate/dependencies/#vmo); vmo does not boot its VMs
   without the kernel described there
   ([#200](https://github.com/w3lt/lys/issues/200)).
 - **vmo stopped** right after Start: the process exited before it answered,
-  for example because it could not pull its images. In development, vmo's
-  error output appears in the terminal that runs `pnpm dev`.
+  for example because it could not reach `ghcr.io` for its images, or, in a
+  development build, because vmo did not compile. In development, vmo's build
+  and error output appear in the terminal that runs `pnpm dev`.
 - **Lys couldn't start vmo: Failed to run …/vmo: No such file or directory**:
   vmo is not installed. Run `build.sh`; see
   [Packaging and releases](/operate/releases/).
@@ -79,7 +83,7 @@ Runtime." The vmo card in Settings → Runtime says why:
 
 Stopping vmo sends it `SIGTERM` and waits up to 60 seconds while it deletes its
 VMs. When it has not exited by then, Lys kills it, and the vmo card says "vmo
-didn't stop within 60 seconds and was killed. It may have left VMs running."
+didn't stop in time and was killed. It may have left VMs running."
 Lys cannot remove those VMs yet; a restart of the Mac ends them. Quitting Lys
 waits for vmo the same way, so quitting can take up to a minute.
 
@@ -103,14 +107,18 @@ kill <pid>
 ```
 
 Never use `kill -9` on vmo: only `SIGTERM` lets it delete its VMs before it
-exits, which can take up to a minute. Then press **Start** on each card.
+exits, which can take up to a minute. Once `lsof` shows nothing on a port,
+press **Stop** and then **Start** on that process's card, or quit and reopen
+Lys. The cards still show the old processes as running, so **Start** stays
+unavailable until **Stop**.
 
 ## Lys forgets runtime settings
 
 The Runtime pane saves its two startup switches, "Start it when Lys opens" for
 the backend and "Start vmo when Lys opens", to `$LYS_HOME/settings.json`
 whenever either changes. When that save fails, the pane says "Lys couldn't save
-the startup switches. They apply to this session only." Then:
+the startup switches. The next launch follows the switches last saved; changing
+a switch tries again." Then:
 
 - check whether `$LYS_HOME/settings.json` exists
 - if it exists, verify that it contains valid JSON

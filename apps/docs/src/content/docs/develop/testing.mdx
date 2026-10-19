@@ -79,6 +79,13 @@ contracts, schemas, or behavior that crosses package boundaries.
   failures that name the defect and fail the run once it is fixed. Its
   [coverage inventory](https://github.com/w3lt/lys/blob/main/apps/desktop/test/unit/COVERAGE.md)
   lists what each test file covers and what it cannot prove.
+- `apps/vmo/Tests/vmoTests` contains a Swift Testing suite for vmo. Run it
+  with `swift test --package-path apps/vmo`. It boots no VM: reads run
+  against `InMemoryReaderVmLifecycle`, and
+  `ContainerizationReaderVmLifecycle`, which boots vmo's real VMs, runs only
+  the lifecycle contract's cases that need no VM, under an
+  [approved exception](/reference/standard-application/#reader-vm-lifecycle-contract-exception).
+  No workflow runs it.
 - The `Desktop unit tests` workflow runs that typecheck and the desktop suite on
   every pull request and on every push to `main`.
 - The `Backend unit tests` workflow runs

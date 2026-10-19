@@ -63,9 +63,8 @@ repository today; it is not a promise of unreleased work.
 - A chat offers the switched-on tools to a model trained for tool use and
   answers its tool calls: file tools run in the desktop, `read_page` asks vmo
   to read one public web page in headless Chromium inside a micro VM, running
-  its scripts, following its redirects, and leaving out text a person cannot
-  see,
-  and `web_search` searches the web through
+  its scripts, following its redirects, and reading all of its text, hidden
+  text included, and `web_search` searches the web through
   Tavily in the backend, unavailable until a Tavily API key is saved;
   `read_page` is likewise unavailable until vmo answers its health route. Each call
   asks the person first unless its tool is set to Just run, which the backend

@@ -209,9 +209,11 @@ now (`page-reader-not-ready`, `api-key-missing`, `api-key-invalid`, or
 startup: `read_page`, found by `ReadPageToolProvider`, then `web_search`,
 found by `WebSearchToolProvider`. `ReadPageToolProvider` sends vmo one
 `GET /health` per lookup (`web/vmoHealth.ts`), on a connection of its own, and
-gives the tool only for a `200` within one second; anything else, a refused
-connection or no answer in time included, is `page-reader-not-ready`, so a
-lookup waits at most one second for vmo. The backend never starts vmo, which
+gives the tool only for a `200` within one second. Any other status, a refused
+or broken connection, an answer that is not HTTP, or no answer in time is
+`page-reader-not-ready`, so a lookup waits at most one second for vmo. Any
+other failure, such as a vmo address that is not a URL, is a defect and
+rejects the lookup. The backend never starts vmo, which
 the desktop owns. `GET /api/v1/tools` returns every definition and
 looks up every tool again to list the ones that cannot run now; the desktop
 offers the switched-on, available ones by name. The chat route looks up every
@@ -247,9 +249,10 @@ flag; a character picked by a variation selector keeps its default shape.
 ### `read_page`
 
 Its arguments are `url` and an
-optional `focus`. A URL longer than 2,048 characters, not absolute `http` or
-`https`, carrying a username or password, or naming this machine or a blocked
-IP address is answered at once. Once allowed, a read goes through vmo
+optional `focus`. A URL longer than 2,048 characters, as given or once
+normalized and percent-encoded, not absolute `http` or `https`, carrying a
+username or password, or naming this machine or a blocked IP address is
+answered at once. Once allowed, a read goes through vmo
 (`web/pageRendering.ts`), the page reader in `apps/vmo` that runs on the same
 machine:
 
@@ -261,15 +264,23 @@ machine:
    name that resolves differently inside vmo's micro VM are not checked;
 2. it sends `GET /web/read-page` to vmo at `127.0.0.1:8080`, with the URL
    form-encoded as the `url` query parameter, on a connection of its own. vmo
-   creates a micro VM from the `ghcr.io/w3lt/lys-readpage` image, built from
-   `sandboxes/readpage`, whose reader loads the page in headless Chromium,
+   checks that the URL is absolute `http` or `https` with a host, and passes
+   it to the reader as given. It creates a micro VM from the
+   `ghcr.io/w3lt/lys-readpage` image, built from `sandboxes/readpage`, whose
+   `latest` tag the image workflow moves to each build on `main` and vmo
+   fetches at each start. The reader loads the page in headless Chromium,
    with the page's scripts running and its redirects followed, for up to 10
    seconds of virtual time, in which the page's timers run without waiting.
-   The reader writes the HTML of the DOM it
-   ended on without scripts, styles, `<noscript>`, `<link>`, `<meta>`, or
-   `class` and `style` attributes, so text a stylesheet hides is read like any
-   other text. vmo deletes the VM before it answers and gives the read 30
-   seconds;
+   It writes the HTML of the DOM it ended on, without shadow trees, so text
+   inside a web component's shadow root is not read
+   ([#209](https://github.com/w3lt/lys/issues/209)). It leaves out scripts,
+   styles, `<noscript>`, `<link>`, `<meta>`, and `class` and `style`
+   attributes. With no stylesheet left, text a stylesheet hides is read like
+   any other text. Without `<meta>`, Readability finds no site or publication
+   date, and without `class` it cannot use class names to drop boilerplate
+   such as share bars and comment threads
+   ([#208](https://github.com/w3lt/lys/issues/208)). vmo deletes the VM
+   before it answers and gives the read 30 seconds;
 3. it reads vmo's answer. Only a `200` body is read: JSON
    `{ html, isTruncated }` of at most 16 MiB, whose HTML is cut to 4 Mi UTF-16
    code units without splitting a character. A `400` or `431`, for a URL vmo
@@ -280,15 +291,19 @@ machine:
    Chromium shows it in, its text inside a `<pre>`, and is read as one block
    that keeps its line breaks;
 4. it extracts the main text with Mozilla Readability over a linkedom
-   document, after dropping the `hidden` and `aria-hidden` attributes so the
-   text they hide is read like any other text. It refuses markup with more
+   document, after removing `<template>`, `<script>`, `<noscript>`, `<style>`,
+   and `<svg>` elements, whose text is not page text, and dropping the
+   `hidden` and `aria-hidden` attributes so the text they hide is read like
+   any other text. It refuses markup with more
    than 40,000 start tags before parsing it, and a parsed page with more than
    40,000 elements or a nesting depth sum above 400,000. A `<br>` or a nested
    block keeps the words around it apart;
 5. it splits the text into passages of at most 1,200 characters and keeps at
    most 12,000 characters: the whole page, the passages that best match
    `focus` by BM25, or the beginning;
-6. it frames the page's title, site, and date and the passages between
+6. it frames the page's title, its site and date when the page's metadata
+   gives them, which vmo's reader does not pass on yet
+   ([#208](https://github.com/w3lt/lys/issues/208)), and the passages between
    `<<<page content>>>` delimiters, with the URL Lys was asked to read, a
    notice that the content is untrusted, and an instruction to cite the
    page, and notes a page

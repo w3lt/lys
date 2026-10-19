@@ -84,8 +84,11 @@ backend decides which calls ask; the desktop shows the prompts.
 - `read_page` runs the scripts of pages the model chooses in Chromium inside
   vmo's micro VM, with Chromium's own sandbox off, so the VM alone confines
   them. The browser is the Alpine `chromium-headless-shell` package of the
-  `lys-readpage` image vmo pins by digest: it gets security fixes only when
-  the image is rebuilt and vmo's pinned digest is updated.
+  `lys-readpage` image, whose `latest` tag vmo fetches at each start. It gets
+  security fixes only when the image is rebuilt on `main`, by a change under
+  `sandboxes/readpage` or a manual run of its workflow, and vmo uses the new
+  build from its next start. Whoever can publish that tag decides which reader
+  the next vmo start runs.
 - The address rule covers only the URL Lys is asked to read. vmo applies no
   rule of its own, so a redirect, a request the page's scripts make, or a
   name that resolves differently inside the VM can reach any address the
@@ -106,8 +109,8 @@ backend decides which calls ask; the desktop shows the prompts.
   text it hides from view included, such as a closed accordion, text moved
   off-screen, or white text on white, because the content is what a read is
   for. Instructions a page hides from the person therefore reach the model as
-  page content, inside the untrusted framing. The content of a shadow root or
-  an iframe is not read.
+  page content, inside the untrusted framing. The content of a shadow root
+  ([#209](https://github.com/w3lt/lys/issues/209)) or an iframe is not read.
 - Removing invisible characters removes a few visible signs too, such as the
   Arabic number signs (U+0600–U+0605) and the end-of-ayah sign (U+06DD),
   turns the England, Scotland, and Wales flags into a plain black flag, and
@@ -131,9 +134,11 @@ names the page. The protections are about which pages a read may ask for and
 what reaches the model:
 
 - **Arguments.** A URL that is not absolute `http` or `https`, is longer than
-  2,048 characters, carries a username or password, or names `localhost` or a
-  blocked IP address is answered without asking. The WHATWG URL parser
-  normalizes odd spellings of an address, such as `http://2130706433/`, first.
+  2,048 characters as given or once normalized and percent-encoded, carries a
+  username or password, or names `localhost` or a blocked IP address is
+  answered without asking. The WHATWG URL parser normalizes odd spellings of
+  an address, such as `http://2130706433/`, first, and vmo passes the
+  normalized URL to the reader unchanged.
 - **Connections.** Before it asks vmo, the backend looks up the URL's host
   name through the operating system and refuses the read when any address is
   blocked; IPv4-mapped IPv6 addresses are matched against the IPv4 rules.
@@ -145,10 +150,10 @@ what reaches the model:
   cites the URL Lys was asked to read, and the page there is read whatever
   its HTTP status or media type.
 - **Isolation.** Each read runs in a fresh micro VM that vmo creates from the
-  pinned `lys-readpage` image and deletes before it answers, so cookies or
-  storage a page sets last for that read only. Chromium runs as a user
-  without root inside the VM, with its own sandbox off. Lys never signs in,
-  so it reads what a signed-out visitor sees. Requests carry the browser's
+  `lys-readpage` image it fetched at its start and deletes before it answers,
+  so cookies or storage a page sets last for that read only. Chromium runs as
+  a user without root inside the VM, with its own sandbox off. Lys never signs
+  in, so it reads what a signed-out visitor sees. Requests carry the browser's
   own `User-Agent`.
 - **Bounds.** vmo gives one read 30 seconds, and the backend gives the whole
   read, the host lookup and vmo's answer included, 60 seconds. The backend
@@ -159,9 +164,10 @@ what reaches the model:
   makes, the bytes it receives, or the memory its scripts hold beyond what
   the VM has.
 - **Hidden and invisible text.** Lys reads hidden text like any other text:
-  the reader in the VM drops styles and `class` and `style` attributes, and
-  the backend drops the `hidden` and `aria-hidden` attributes before it
-  extracts the main text. The result, like every network tool's result, then loses format and control
+  the reader in the VM drops styles, `<link>` elements, and `style`
+  attributes, so no stylesheet applies, and the backend drops the `hidden` and
+  `aria-hidden` attributes before it extracts the main text. The result, like
+  every network tool's result, then loses format and control
   characters other than tabs and line breaks, and every variation selector
   except one emoji- or text-style selector after a visible character, and
   says how many it removed; a zero-width joiner or non-joiner stays only

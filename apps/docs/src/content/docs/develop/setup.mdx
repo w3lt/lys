@@ -23,7 +23,7 @@ Toolchain versions, platform prerequisites, and first build.
 - **pnpm 11**: the root workspace pins `pnpm@11.17.0`.
 - **Rust and Cargo**: required because the desktop app uses Tauri and the
   repository validation list includes Cargo-based checks for the host code.
-- **Swift toolchain** (Xcode or the Command Line Tools): required to build
+- **Swift 6.3 or later** (Xcode or the Command Line Tools): required to build
   vmo, the page reader `read_page` uses, which the desktop starts with
   `apps/vmo/run.sh` and `build.sh` installs. vmo builds and runs only on
   macOS 26 on Apple silicon; see

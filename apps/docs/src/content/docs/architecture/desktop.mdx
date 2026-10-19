@@ -163,10 +163,12 @@ The shell store tracks three facts separately. The Tauri host reports whether
 the backend process exists. The store reports the backend as `running` only
 after `GET /api/v1/heath` answers: it checks every 250 ms, each check bounded
 to one second, for up to 30 seconds, and shows **Backend not responding**
-(`unresponsive`) when the process stays alive without answering. Once the
-backend runs, the store reads `GET /api/v1/llm/runtime`, joining the backend's
-startup attempt through `POST /api/v1/llm/runtime/connect` while it is still
-`connecting`.
+(`unresponsive`) when the process stays alive without answering. On the
+backend card, the heading is a polite status region, "Backend status"; the
+address and uptime line sits outside it, so the uptime is not announced every
+second. Once the backend runs, the store reads `GET /api/v1/llm/runtime`,
+joining the backend's startup attempt through
+`POST /api/v1/llm/runtime/connect` while it is still `connecting`.
 
 The Runtime pane's LM Studio card shows `unknown`, `connecting`, `connected`,
 or `unreachable` with the address `127.0.0.1:1234`. Its **Refresh** button is
@@ -176,7 +178,10 @@ polling. The composer banner names the first missing prerequisite—the
 backend, LM Studio, or model weights—and opens the settings pane that fixes
 it. `initialize` shows the shell as soon as settings load; the backend and vmo
 then start in the background, together and without waiting for each other,
-each when its startup switch is on or the host already owns its process.
+each when its startup switch is on or the host already owns its process. A
+vmo the host is still stopping, as after a window reload during Stop, is
+joined instead: the card shows the stop, and vmo stays stopped whatever its
+switch says.
 
 ## vmo status
 
@@ -185,31 +190,45 @@ under the backend card. The Tauri host owns the process; the store's vmo slice
 owns what the card shows: `starting`, `running`, `stopping`, `stopped`, or
 `unresponsive` (**vmo not responding**). A start asks the host to start vmo
 unless it owns a running one, then checks every second for up to ten minutes,
-long enough for a first start that pulls vmo's images. Each check reads the
-owned process first and asks vmo's health route only while it runs, so a vmo
-that has already exited never shows as `running`. The health route answers for
-whatever listens on vmo's port, though: while the owned vmo is still starting,
-another vmo there, such as one left by a Lys that died without quitting
+long enough for a first start that pulls vmo's images; every start fetches the
+reader image's `latest` tag. Each check reads the owned process first and asks
+vmo's health route only while it runs, so a vmo that has already exited never
+shows as `running`. The health route answers for whatever listens on vmo's
+port, though: while the owned vmo is still starting, another vmo there, such as
+one left by a Lys that died without quitting
 ([#202](https://github.com/w3lt/lys/issues/202)), makes the card say
 `running`. vmo shows `stopped` when its process exits before it answers, and
-`unresponsive` when it runs ten minutes without answering. A stop shows `stopping` while vmo deletes
-its VMs, up to 60 seconds, and joins a stop already in progress.
+`unresponsive` when it runs ten minutes without answering. A stop shows
+`stopping` while vmo deletes its VMs, up to 60 seconds, and joins a stop
+already in progress.
 
 Start is offered only while vmo is stopped, and Stop while it runs or is not
-responding, as on the backend card; the buttons are named "Start vmo" and
-"Stop vmo" for assistive technology. The vmo actions never reject: a kill
-after the stop timeout ("vmo didn't stop within 60 seconds and was killed. It
-may have left VMs running."), a failed start, and a failed stop show as a
-problem line on the card until the next start or stop. A failed stop whose
-status cannot be read shows **vmo not responding**, so Stop stays offered.
+responding, as on the backend card. Both cards' buttons show "Start" and
+"Stop"; for assistive technology they are named "Start vmo" and "Stop vmo"
+here, and "Start backend" and "Stop backend" on the backend card. The vmo
+actions never reject: a kill after the stop timeout ("vmo didn't stop in time
+and was killed. It may have left VMs running."), a failed start, and a failed
+stop show as a problem line on the card until the next start or stop. The
+heading, the address line, and the problem line form one polite, atomic status
+region, "vmo status", that stays mounted, so a change of status and its
+problem are announced as one message. After a failed start or stop the
+store reads vmo's status again: while vmo's process is alive, running or still
+stopping, or when its status cannot be read, the card shows **vmo not
+responding** with the failure, so Stop stays offered and joins a stop in
+progress; otherwise it shows **vmo stopped** with it.
 Once vmo is `running`, the card stops checking, as the backend card does: a
 vmo that stops answering later is noticed when a turn offers `read_page`.
 
 The switches "Start it when Lys opens" and "Start vmo when Lys opens" change
 the settings at once and save both to the `runtime` group of `settings.json`,
 serialized with the other group saves; the latest switches win. A status line
-under the two cards says "Lys couldn't save the startup switches. They apply
-to this session only." when the save fails.
+under the two cards says "Lys couldn't save the startup switches. The next
+launch follows the switches last saved; changing a switch tries again." when
+the save fails. The line is a polite status region that stays mounted and
+empties when a later save starts. Under each switch's heading, the line saying
+what off means is the switch's accessible description. The switches are read
+from disk at each launch and each window reload, so an unsaved switch applies
+to no later session.
 
 ## Model settings
 
@@ -447,7 +466,7 @@ whose list could not be read, is kept and has no effect.
 A backend tool that cannot run now, such as `web_search` without a saved
 Tavily API key or `read_page` while vmo is not ready, keeps its row: its
 switch is disabled and shows off, a note under the row says why and what to
-do. For `read_page` it says "vmo, Lys's page reader, isn't ready. Start it in
+do. For `read_page` it says "vmo, Lys's page reader, isn't ready. See
 Settings → Runtime." While the app shell is mounted, the tool store reads a
 list it has already read again whenever the backend starts running, or vmo
 becomes running, stopped, or not responding while the backend runs, so the row

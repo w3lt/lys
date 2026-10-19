@@ -35,12 +35,15 @@ A manual Start follows steps 4–8.
 
 1. During `initialize`, if `autoStartVmo` is enabled, or the host already owns
    a vmo, the store starts or checks vmo in the background, without waiting
-   for the backend.
+   for the backend. When the host is still stopping vmo, as after a window
+   reload during Stop, the store joins that stop instead, and vmo stays
+   stopped.
 2. The store sets `starting` and reads `get_vmo_status`. For a stopped vmo it
    calls `start_vmo`, and the Tauri host runs `bash run.sh` in `apps/vmo` for
    development builds, or `$LYS_HOME/runtime/vmo/vmo` for release builds.
-3. vmo pulls its images, which on a first start can take minutes, then listens
-   at `127.0.0.1:8080`.
+3. vmo fetches the reader image's `latest` tag and pulls the images it does
+   not have yet, which on a first start can take minutes, then listens at
+   `127.0.0.1:8080`.
 4. Every second, for up to ten minutes, the store reads `get_vmo_status` and,
    while vmo runs, `get_vmo_health`. vmo becomes `running` once it answers,
    `stopped` when its process exits first, and `unresponsive` after ten

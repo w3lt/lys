@@ -90,6 +90,9 @@ compiled: `run.sh` builds a debug vmo with `swift build`, signs it with the
 virtualization entitlement, and replaces itself with it through `exec`, so the
 host stops vmo itself. The first start compiles vmo and pulls its images,
 which can take several minutes; the vmo card shows **vmo starting** meanwhile.
+Every start fetches the reader image's `latest` tag. When `swift build` fails,
+`run.sh` stops and vmo does not start: the card shows **vmo stopped**, and the
+build error appears in the terminal that runs `pnpm dev`.
 vmo needs macOS 26 on Apple silicon; see
 [Runtime dependencies](/operate/dependencies/#vmo).
 

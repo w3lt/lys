@@ -134,7 +134,8 @@ The child depends on the build mode:
   through `exec`, so the child the host owns is vmo itself.
 - Release builds run `$LYS_HOME/runtime/vmo/vmo`, which `build.sh` installs.
 
-vmo runs in a process group of its own and does not receive `LYS_HOME`.
+vmo runs in a process group of its own. The host does not set `LYS_HOME`
+for vmo, which does not read it.
 `start_vmo` checks and spawns under one lock, so two starts never spawn two
 children; it leaves a running vmo alone and refuses while a stop still waits
 for the previous one, which holds vmo's port. A spawn failure names the
@@ -145,8 +146,11 @@ end it before it finishes. A stop therefore sends `SIGTERM` to vmo's process
 group once and checks every 100 ms whether vmo has exited. A stop that arrives
 meanwhile joins it and gets the same result, without another signal. When vmo
 still runs after 60 seconds, the stop sends `SIGKILL` and reports `killed`:
-vmo may then have left VMs running. `stop_vmo` and `get_vmo_health` run off the
-main thread, so a stop never blocks the window.
+vmo may then have left VMs running. When `SIGTERM` or a check fails, the stop
+sends `SIGKILL` at once and reports the failure. It sends `SIGKILL` at most
+once and does not repeat a failed one, because by then the group's identifier
+may name another group. `stop_vmo` and `get_vmo_health` run off the main
+thread, so a stop never blocks the window.
 
 `get_vmo_health` sends `GET /health` over a plain TCP connection to
 `127.0.0.1:8080` and answers `ready` only for a `HTTP/1.1 200` status line

@@ -69,8 +69,9 @@ The script stops at the first failing step. In order, it:
 
 The script needs the toolchain from [Environment setup](/develop/setup/),
 including the Swift toolchain, plus `curl`, `jq`, and network access to
-`nodejs.org`. vmo builds and runs only on Apple silicon with macOS 26; see
-[Runtime dependencies](/operate/dependencies/#backend).
+`nodejs.org`, and to `github.com` for vmo's Swift packages until
+`apps/vmo/.build` holds them. vmo builds and runs only on Apple silicon with
+macOS 26; see [Runtime dependencies](/operate/dependencies/#vmo).
 
 :::caution[Desktop runtime is still under development]
 Release builds of the desktop app start the backend and vmo from a runtime

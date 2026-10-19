@@ -41,8 +41,16 @@ and installs; see [Packaging and releases](/operate/releases/).
 vmo listens at `127.0.0.1:8080` and needs:
 
 - macOS 26 on Apple silicon
-- network access to `ghcr.io`, from which it pulls the `vminit` and
-  `lys-readpage` images when it starts, so a first start can take minutes
+- network access to `ghcr.io` at every start: vmo fetches the
+  `lys-readpage` image's `latest` tag, the build of `main`'s reader, and
+  pulls `vminit` and any reader image it does not have yet, so a first start,
+  or the first after a new reader image, can take minutes. A start that
+  cannot reach `ghcr.io` fails
+- disk space for those images in Containerization's image store,
+  `~/Library/Application Support/com.apple.containerization`. vmo does not
+  delete a reader image that `latest` no longer names, so the store grows by
+  about 283 MB with each new reader image
+  ([#213](https://github.com/w3lt/lys/issues/213))
 - for now, the Linux kernel that Apple's `container` tool installs at
   `~/Library/Application Support/com.apple.container/kernels/vmlinux-6.18.35-197-debug`,
   so vmo does not boot its VMs on a Mac without it

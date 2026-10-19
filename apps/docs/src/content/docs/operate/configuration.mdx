@@ -117,7 +117,8 @@ pane autosaves the same way, replacing only the `tools` group, and the Tools
 pane offers the same retry action. Changing either startup switch in the
 Runtime pane, for the backend or for vmo, autosaves both switches and keeps
 the rest of the `runtime` group as it is on disk; after a failed save, the
-pane says the switches apply to this session only.
+pane says that the next launch follows the switches last saved, and changing a
+switch tries the save again.
 
 The other runtime edits, such as the default model, and `model.contextSize`
 edits remain session-only. Changing those controls does not persist them, and

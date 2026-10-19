@@ -43,13 +43,14 @@ const VMO_STATUS_TONES = Object.freeze({
  * Formats the problem line of the last start or stop of vmo.
  *
  * @param problem - Problem the store published, or null.
- * @returns One sentence, or nothing without a problem.
+ * @returns One sentence, or nothing without a problem. A kill names no
+ * timeout, which the host owns.
  */
 function formatVmoProblem(problem: VmoProblem | null): string {
   if (problem === null) return ""
   switch (problem.kind) {
     case "killed":
-      return "vmo didn't stop within 60 seconds and was killed. It may have left VMs running."
+      return "vmo didn't stop in time and was killed. It may have left VMs running."
     case "start-failed":
       return `Lys couldn't start vmo: ${problem.message}.`
     case "stop-failed":

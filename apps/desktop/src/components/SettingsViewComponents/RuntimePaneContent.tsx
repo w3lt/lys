@@ -61,7 +61,7 @@ function formatRuntimeAutoStartSaveStatus(
 ): string {
   switch (save.status) {
     case "failed":
-      return "Lys couldn't save the startup switches. They apply to this session only."
+      return "Lys couldn't save the startup switches. The next launch follows the switches last saved; changing a switch tries again."
     case "idle":
     case "saving":
     case "saved":

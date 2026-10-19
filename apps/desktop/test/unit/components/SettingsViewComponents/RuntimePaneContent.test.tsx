@@ -221,7 +221,7 @@ describe("RuntimePaneContent", () => {
       })
     })
 
-    it("says the startup switches apply to this session only when they cannot be saved", async () => {
+    it("says the next launch follows the switches last saved when they cannot be saved", async () => {
       startNativeHostFake({
         load_settings: () => FIRST_RUN_SETTINGS_DOCUMENT,
         save_settings: () => Promise.reject("Disk full")
@@ -240,7 +240,7 @@ describe("RuntimePaneContent", () => {
 
       expect(before).toBe("")
       expect(status).toHaveTextContent(
-        "Lys couldn't save the startup switches. They apply to this session only."
+        "Lys couldn't save the startup switches. The next launch follows the switches last saved; changing a switch tries again."
       )
       expect(
         screen.getByRole("switch", { name: "Start it when Lys opens" })

@@ -134,7 +134,7 @@ describe("VmoStatusCard", () => {
   it.each([
     {
       vmoServerInfo: { status: "stopped", problem: { kind: "killed" } },
-      line: "vmo didn't stop within 60 seconds and was killed. It may have left VMs running."
+      line: "vmo didn't stop in time and was killed. It may have left VMs running."
     },
     {
       vmoServerInfo: {

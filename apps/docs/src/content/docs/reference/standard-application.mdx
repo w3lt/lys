@@ -523,45 +523,6 @@ following finding I-10 of its
   `ReaderVmLifecycleHarness`, which runs the two suites, and this exception is
   removed.
 
-## Reader VM wait cancellation exception
-
-vmo's wait for a reader VM's command has an approved exception to
-[IFACE-018](https://github.com/w3lt/lys/blob/main/docs/code_standards/INTERFACE.md):
-`waitForCommandExit(containerId:)` of `ReaderVmLifecycle` doesn't end when its
-caller is cancelled. The exception was approved by the maintainer on
-2026-10-19 for [PR #203](https://github.com/w3lt/lys/pull/203), which added
-the protocol for finding I-10 of its
-[second review](https://github.com/w3lt/lys/pull/203#issuecomment-6267044781).
-
-- **Scope:** only `waitForCommandExit(containerId:)` in
-  [ReadPageInVm.swift](https://github.com/w3lt/lys/blob/main/apps/vmo/Sources/vmo/Endpoints/Web/ReadPageInVm.swift)
-  and its implementations in `ContainerizationReaderVmLifecycle` and
-  `InMemoryReaderVmLifecycle`. The lifecycle's other operations observe
-  cancellation as documented.
-- **Constraint:** a read must not return while its reader may still run.
-  When deleting the VM fails to stop the reader, the wait that is already
-  running is the only way to learn when the reader exits, because once the
-  deletion began, the VM's id names no VM and a new wait fails. So
-  `readPageInVm` cancels its wait when the deadline passes or its caller is
-  cancelled, and relies on that wait to end only when the deletion stops the
-  reader or the reader exits.
-- **Alternatives considered:**
-  - A wait that each caller can cancel, with `readPageInVm` keeping a wait of
-    its own that neither its deadline nor its caller ends, is deferred to
-    [#212](https://github.com/w3lt/lys/issues/212).
-  - Starting a new wait after a failed stop is not possible: the VM's id no
-    longer names a VM.
-- **Risk and control:** a cancelled caller keeps waiting until the VM's
-  command exits or the VM is deleted. `readPageInVm`, the only caller,
-  deletes the VM as soon as its deadline passes or its caller is cancelled,
-  so its wait ends when the deletion stops the reader. When stopping fails,
-  the read waits until the reader exits, with no time limit in vmo; the
-  backend stops waiting for the answer after its own 60 seconds, and the
-  reader gives Chromium at most 30 seconds.
-- **Removal condition:** [#212](https://github.com/w3lt/lys/issues/212) makes
-  the wait end when its caller is cancelled, and this exception is removed
-  with it.
-
 ## API boundaries
 
 Canonical rules: [API-004, API-020, API-034](https://github.com/w3lt/lys/blob/main/docs/code_standards/API.md).

@@ -611,14 +611,18 @@ mod tests {
         fs,
         io::{Read, Write},
         net::{SocketAddr, TcpListener, TcpStream},
-        path::PathBuf,
+        path::Path,
         process::{Command, Stdio},
-        sync::{mpsc, Arc},
+        sync::{mpsc, Arc, Barrier},
         thread,
         time::{Duration, Instant},
     };
 
+    use nix::{sys::signal::kill, unistd::Pid};
+    use serde_json::{json, to_value};
+
     use super::{send_vmo_health_check, Vmo, VmoHealth, VmoProcessStatus, VmoStopOutcome};
+    use crate::tools::test_directory::TestDirectory;
 
     /// Stop timeout of the cases whose child ignores `SIGTERM`.
     const SHORT_STOP_TIMEOUT: Duration = Duration::from_millis(300);
@@ -626,34 +630,38 @@ mod tests {
     /// Stop timeout of the cases whose child exits on `SIGTERM`; never reached.
     const LONG_STOP_TIMEOUT: Duration = Duration::from_secs(30);
 
+    /// Stop timeout of the joined-stop case: the margin within which the
+    /// joining stop has to reach the owner after the first stop's `SIGTERM`.
+    const JOINED_STOP_TIMEOUT: Duration = Duration::from_secs(5);
+
     /// Longest any case waits for a condition before it fails.
     const CONDITION_LIMIT: Duration = Duration::from_secs(10);
 
     /// Script of a child that exits on `SIGTERM`.
     const EXITS_ON_SIGTERM: &str = "trap 'exit 0' TERM; while :; do sleep 0.02; done";
 
-    /// Directory of one case, removed when dropped.
-    struct CaseDir(PathBuf);
+    /// Stops the case's vmo child when dropped, so that a failed assertion or
+    /// setup step leaves no shell running after the test.
+    ///
+    /// A stop failure fails the test unless the test is already failing, so
+    /// that the original failure stays the reported one.
+    struct VmoStopGuard(Arc<Vmo>);
 
-    impl CaseDir {
-        /// Creates an empty directory named after the case and this process.
-        fn create(case: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!("lys-vmo-{case}-{}", std::process::id()));
-            let _ = fs::remove_dir_all(&dir);
-            fs::create_dir_all(&dir).expect("create the case directory");
-            Self(dir)
-        }
-
-        /// Returns the path of `name` inside the directory.
-        fn join(&self, name: &str) -> PathBuf {
-            self.0.join(name)
+    impl Drop for VmoStopGuard {
+        /// Stops the case's vmo child and waits until it has exited.
+        fn drop(&mut self) {
+            if let Err(error) = self.0.stop() {
+                assert!(thread::panicking(), "stop the case's vmo child: {error}");
+            }
         }
     }
 
-    impl Drop for CaseDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
+    /// Creates an owner with `stop_timeout` together with the guard that stops
+    /// its child when the case ends, before the case starts anything.
+    fn create_guarded_vmo(stop_timeout: Duration) -> (Arc<Vmo>, VmoStopGuard) {
+        let vmo = Arc::new(Vmo::new(stop_timeout));
+        let guard = VmoStopGuard(Arc::clone(&vmo));
+        (vmo, guard)
     }
 
     /// Builds a command that runs `script` with `sh`, discarding what the
@@ -677,31 +685,84 @@ mod tests {
         }
     }
 
-    /// Counts the lines of `path`, or zero while it does not exist.
-    fn count_lines(path: &PathBuf) -> usize {
+    /// Reads the number of lines of `path`, or zero while it does not exist.
+    fn read_line_count(path: &Path) -> usize {
         fs::read_to_string(path).map_or(0, |text| text.lines().count())
     }
 
-    /// Starts a child that runs `trap_action` on `SIGTERM` and keeps running
-    /// otherwise, and waits until it has set that trap: a signal sent before
-    /// would end it at once. Returns the child's pid.
-    fn start_trapping_child(vmo: &Vmo, case: &CaseDir, trap_action: &str) -> u32 {
-        let ready = case.join("ready");
-        let script = format!(
-            "trap '{trap_action}' TERM; : > \"{}\"; while :; do sleep 0.02; done",
-            ready.display()
-        );
-        let pid = read_running_pid(vmo.start(build_shell_command(&script)).unwrap());
-        wait_for_condition("the child has set its trap", || ready.exists());
-        pid
+    /// Reads the process identifier that a case's script wrote to `path`.
+    fn read_pid_file(path: &Path) -> i32 {
+        fs::read_to_string(path)
+            .expect("read the pid file")
+            .trim()
+            .parse()
+            .expect("a process identifier in the pid file")
     }
 
-    /// Reads the pid of a running status.
-    fn read_running_pid(status: VmoProcessStatus) -> u32 {
+    /// Answers whether a process with identifier `pid` still exists.
+    fn is_process_alive(pid: i32) -> bool {
+        kill(Pid::from_raw(pid), None).is_ok()
+    }
+
+    /// Starts a child that runs `trap_action` on `SIGTERM` and keeps running
+    /// otherwise, with a background `sleep` in its process group, and waits
+    /// until it has set that trap: a signal sent before would end it at once.
+    ///
+    /// The `sleep` starts after the trap is set, so it inherits an ignored
+    /// `SIGTERM` but not a trap's action. Returns the child's pid and the
+    /// `sleep`'s.
+    fn start_trapping_child(vmo: &Vmo, case: &TestDirectory, trap_action: &str) -> (u32, i32) {
+        let ready = case.path().join("ready");
+        let descendant = case.path().join("descendant.pid");
+        let script = format!(
+            "trap '{trap_action}' TERM; sleep 30 & echo $! > \"{}\"; : > \"{}\"; while :; do sleep 0.02; done",
+            descendant.display(),
+            ready.display()
+        );
+        let pid = get_running_pid(vmo.start(build_shell_command(&script)).unwrap());
+        wait_for_condition("the child has set its trap", || ready.exists());
+        (pid, read_pid_file(&descendant))
+    }
+
+    /// Gets the pid of a running status.
+    fn get_running_pid(status: VmoProcessStatus) -> u32 {
         match status {
             VmoProcessStatus::Running { pid } => pid,
             other => panic!("expected a running vmo, got {other:?}"),
         }
+    }
+
+    /// Waits at `barrier` for the other start, then starts a child that exits
+    /// on `SIGTERM` and returns the pid of the child that runs.
+    fn start_child_after_barrier(vmo: &Vmo, barrier: &Barrier) -> u32 {
+        barrier.wait();
+        get_running_pid(vmo.start(build_shell_command(EXITS_ON_SIGTERM)).unwrap())
+    }
+
+    #[test]
+    fn ipc_answers_have_the_shapes_the_renderer_reads() {
+        assert_eq!(
+            to_value(VmoProcessStatus::Stopped).unwrap(),
+            json!({ "status": "stopped" })
+        );
+        assert_eq!(
+            to_value(VmoProcessStatus::Running { pid: 7 }).unwrap(),
+            json!({ "status": "running", "pid": 7 })
+        );
+        assert_eq!(
+            to_value(VmoProcessStatus::Stopping { pid: 7 }).unwrap(),
+            json!({ "status": "stopping", "pid": 7 })
+        );
+        assert_eq!(
+            to_value(VmoStopOutcome::Stopped).unwrap(),
+            json!({ "status": "stopped" })
+        );
+        assert_eq!(
+            to_value(VmoStopOutcome::Killed).unwrap(),
+            json!({ "status": "killed" })
+        );
+        assert_eq!(to_value(VmoHealth::Ready).unwrap(), json!("ready"));
+        assert_eq!(to_value(VmoHealth::NotReady).unwrap(), json!("not-ready"));
     }
 
     #[test]
@@ -713,29 +774,37 @@ mod tests {
     }
 
     #[test]
-    fn stop_ends_a_child_that_exits_on_sigterm() {
-        let vmo = Vmo::new(LONG_STOP_TIMEOUT);
-        read_running_pid(vmo.start(build_shell_command(EXITS_ON_SIGTERM)).unwrap());
+    fn stop_ends_the_process_group_of_a_child_that_exits_on_sigterm() {
+        let case = TestDirectory::create("vmo-sigterm");
+        let (vmo, _stop) = create_guarded_vmo(LONG_STOP_TIMEOUT);
+        let (_pid, descendant) = start_trapping_child(&vmo, &case, "exit 0");
 
         assert_eq!(vmo.stop(), Ok(VmoStopOutcome::Stopped));
         assert_eq!(vmo.status(), Ok(VmoProcessStatus::Stopped));
+        wait_for_condition("the child's background sleep has exited", || {
+            !is_process_alive(descendant)
+        });
     }
 
     #[test]
-    fn stop_kills_a_child_still_running_after_the_timeout() {
-        let case = CaseDir::create("kill");
-        let vmo = Vmo::new(SHORT_STOP_TIMEOUT);
-        // `sleep` inherits the ignored `SIGTERM`, so the whole group outlives it.
-        start_trapping_child(&vmo, &case, "");
+    fn stop_kills_the_process_group_of_a_child_still_running_after_the_timeout() {
+        let case = TestDirectory::create("vmo-kill");
+        let (vmo, _stop) = create_guarded_vmo(SHORT_STOP_TIMEOUT);
+        // The child and its background `sleep` ignore `SIGTERM`, so the whole
+        // group outlives it and only `SIGKILL` ends it.
+        let (_pid, descendant) = start_trapping_child(&vmo, &case, "");
 
         assert_eq!(vmo.stop(), Ok(VmoStopOutcome::Killed));
         assert_eq!(vmo.status(), Ok(VmoProcessStatus::Stopped));
+        wait_for_condition("the child's background sleep has exited", || {
+            !is_process_alive(descendant)
+        });
     }
 
     #[test]
     fn a_child_that_exited_on_its_own_reads_and_stops_as_stopped() {
-        let vmo = Vmo::new(SHORT_STOP_TIMEOUT);
-        read_running_pid(vmo.start(build_shell_command("exit 0")).unwrap());
+        let (vmo, _stop) = create_guarded_vmo(SHORT_STOP_TIMEOUT);
+        get_running_pid(vmo.start(build_shell_command("exit 0")).unwrap());
 
         wait_for_condition("the child has exited", || {
             vmo.status() == Ok(VmoProcessStatus::Stopped)
@@ -745,9 +814,28 @@ mod tests {
     }
 
     #[test]
+    fn start_replaces_a_child_that_exited_on_its_own() {
+        let case = TestDirectory::create("vmo-replace");
+        let spawned = case.path().join("spawned");
+        let (vmo, _stop) = create_guarded_vmo(LONG_STOP_TIMEOUT);
+        let first = get_running_pid(vmo.start(build_shell_command("exit 0")).unwrap());
+        wait_for_condition("the first child has exited", || {
+            vmo.status() == Ok(VmoProcessStatus::Stopped)
+        });
+        let script = format!(": > \"{}\"; {EXITS_ON_SIGTERM}", spawned.display());
+
+        let second = get_running_pid(vmo.start(build_shell_command(&script)).unwrap());
+
+        assert_ne!(first, second);
+        assert_eq!(vmo.status(), Ok(VmoProcessStatus::Running { pid: second }));
+        wait_for_condition("the second child has run", || spawned.exists());
+        assert_eq!(vmo.stop(), Ok(VmoStopOutcome::Stopped));
+    }
+
+    #[test]
     fn start_while_running_keeps_the_running_child() {
-        let vmo = Vmo::new(LONG_STOP_TIMEOUT);
-        let pid = read_running_pid(vmo.start(build_shell_command(EXITS_ON_SIGTERM)).unwrap());
+        let (vmo, _stop) = create_guarded_vmo(LONG_STOP_TIMEOUT);
+        let pid = get_running_pid(vmo.start(build_shell_command(EXITS_ON_SIGTERM)).unwrap());
 
         let second = vmo.start(build_shell_command(EXITS_ON_SIGTERM));
 
@@ -757,10 +845,30 @@ mod tests {
     }
 
     #[test]
+    fn two_starts_released_together_spawn_one_child() {
+        let (vmo, _stop) = create_guarded_vmo(LONG_STOP_TIMEOUT);
+        // The barrier releases both starts together. The case asserts that
+        // whichever start runs second gets the first one's child; it cannot
+        // force both into the check and the spawn at once, which the owner's
+        // lock makes one step.
+        let barrier = Arc::new(Barrier::new(2));
+        let other_start = {
+            let (vmo, barrier) = (Arc::clone(&vmo), Arc::clone(&barrier));
+            thread::spawn(move || start_child_after_barrier(&vmo, &barrier))
+        };
+
+        let pid = start_child_after_barrier(&vmo, &barrier);
+
+        assert_eq!(other_start.join().unwrap(), pid);
+        assert_eq!(vmo.status(), Ok(VmoProcessStatus::Running { pid }));
+        assert_eq!(vmo.stop(), Ok(VmoStopOutcome::Stopped));
+    }
+
+    #[test]
     fn start_names_the_program_it_cannot_run() {
-        let case = CaseDir::create("missing");
-        let missing = case.join("vmo");
-        let vmo = Vmo::new(SHORT_STOP_TIMEOUT);
+        let case = TestDirectory::create("vmo-missing");
+        let missing = case.path().join("vmo");
+        let (vmo, _stop) = create_guarded_vmo(SHORT_STOP_TIMEOUT);
 
         let start = vmo.start(Command::new(&missing));
 
@@ -776,11 +884,11 @@ mod tests {
 
     #[test]
     fn start_after_a_stop_spawns_a_new_child() {
-        let vmo = Vmo::new(LONG_STOP_TIMEOUT);
-        let first = read_running_pid(vmo.start(build_shell_command(EXITS_ON_SIGTERM)).unwrap());
+        let (vmo, _stop) = create_guarded_vmo(LONG_STOP_TIMEOUT);
+        let first = get_running_pid(vmo.start(build_shell_command(EXITS_ON_SIGTERM)).unwrap());
         vmo.stop().unwrap();
 
-        let second = read_running_pid(vmo.start(build_shell_command(EXITS_ON_SIGTERM)).unwrap());
+        let second = get_running_pid(vmo.start(build_shell_command(EXITS_ON_SIGTERM)).unwrap());
 
         assert_ne!(first, second);
         assert_eq!(vmo.stop(), Ok(VmoStopOutcome::Stopped));
@@ -788,35 +896,35 @@ mod tests {
 
     #[test]
     fn a_stop_in_progress_is_joined_without_a_second_sigterm() {
-        let case = CaseDir::create("join");
-        let term_log = case.join("term.log");
+        let case = TestDirectory::create("vmo-join");
+        let term_log = case.path().join("term.log");
         // The child logs SIGTERM and keeps running, so the first stop waits
         // the whole timeout and kills it; a joined stop shares that outcome.
-        let vmo = Arc::new(Vmo::new(Duration::from_secs(2)));
-        let pid = start_trapping_child(
+        let (vmo, _stop) = create_guarded_vmo(JOINED_STOP_TIMEOUT);
+        let (pid, _descendant) = start_trapping_child(
             &vmo,
             &case,
             &format!("echo term >> \"{}\"", term_log.display()),
         );
-
         let first_stop = {
             let vmo = Arc::clone(&vmo);
             thread::spawn(move || vmo.stop())
         };
         wait_for_condition("the child has logged SIGTERM", || {
-            count_lines(&term_log) == 1
+            read_line_count(&term_log) == 1
         });
-
         assert_eq!(vmo.status(), Ok(VmoProcessStatus::Stopping { pid }));
         assert!(vmo.start(build_shell_command(EXITS_ON_SIGTERM)).is_err());
-        let joined_stop = {
-            let vmo = Arc::clone(&vmo);
-            thread::spawn(move || vmo.stop())
-        };
 
+        // Joined on this thread right after `Stopping` was seen, so the join
+        // reaches the owner a few statements later, far within the first
+        // stop's timeout. Nothing outside `Vmo` can observe a joined stop, so
+        // that margin is the one timing assumption left in this case.
+        let joined_stop = vmo.stop();
+
+        assert_eq!(joined_stop, Ok(VmoStopOutcome::Killed));
         assert_eq!(first_stop.join().unwrap(), Ok(VmoStopOutcome::Killed));
-        assert_eq!(joined_stop.join().unwrap(), Ok(VmoStopOutcome::Killed));
-        assert_eq!(count_lines(&term_log), 1);
+        assert_eq!(read_line_count(&term_log), 1);
         assert_eq!(vmo.status(), Ok(VmoProcessStatus::Stopped));
     }
 
@@ -830,16 +938,26 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind a loopback port");
         let address = listener.local_addr().expect("read the bound address");
         let (sender, receiver) = mpsc::channel();
-        let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().expect("accept the health check");
-            let request = read_request_head(&mut stream);
-            sender.send(request).expect("report the request");
-            match answer {
-                Some(answer) => stream.write_all(answer.as_bytes()).expect("answer"),
-                None => thread::sleep(Duration::from_millis(600)),
-            }
-        });
+        let server =
+            thread::spawn(move || handle_health_check_connection(&listener, &sender, answer));
         (address, receiver, server)
+    }
+
+    /// Accepts one health check on `listener`, sends its request head to
+    /// `sender`, and answers it with `answer`, or holds the connection open
+    /// for 600 ms without answering when `answer` is `None`.
+    fn handle_health_check_connection(
+        listener: &TcpListener,
+        sender: &mpsc::Sender<String>,
+        answer: Option<&'static str>,
+    ) {
+        let (mut stream, _) = listener.accept().expect("accept the health check");
+        let request = read_request_head(&mut stream);
+        sender.send(request).expect("report the request");
+        match answer {
+            Some(answer) => stream.write_all(answer.as_bytes()).expect("answer"),
+            None => thread::sleep(Duration::from_millis(600)),
+        }
     }
 
     /// Reads a request head, up to the blank line that ends it.

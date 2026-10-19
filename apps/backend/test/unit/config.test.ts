@@ -29,8 +29,8 @@ const VALID_RAW_CONFIG = Object.freeze({
   lmstudioPort: LMSTUDIO_PORT,
   databaseFilePath: "/test-home/lys/lys_db.sqlite",
   settingsFilePath: "/test-home/lys/settings.json",
-  browserExecutablePath:
-    "/test-home/lys/runtime/chrome-headless-shell/chrome-headless-shell",
+  vmoHost: "127.0.0.1",
+  vmoPort: 8080,
   caliginiaSystemPrompt: "Fixture Caliginia prompt",
   lysipteraSystemPrompt: "Fixture Lysiptera prompt",
   titleGenerationPrompt: "Fixture title prompt",
@@ -107,7 +107,7 @@ describe("loadBackendConfig", () => {
     vi.mocked(readPrompt).mockImplementation((type) => FIXTURE_PROMPTS[type])
   })
 
-  it("resolves the shared endpoints, the Lys home database path, the browser read_page runs, every prompt, and the fixed title limits", () => {
+  it("resolves the shared endpoints, the Lys home database path, vmo's endpoint, every prompt, and the fixed title limits", () => {
     expect(loadBackendConfig()).toEqual({
       backendHost: BACKEND_HOST,
       backendPort: BACKEND_PORT,
@@ -115,8 +115,8 @@ describe("loadBackendConfig", () => {
       lmstudioPort: LMSTUDIO_PORT,
       databaseFilePath: "/test-home/lys/lys_db.sqlite",
       settingsFilePath: "/test-home/lys/settings.json",
-      browserExecutablePath:
-        "/test-home/lys/runtime/chrome-headless-shell/chrome-headless-shell",
+      vmoHost: "127.0.0.1",
+      vmoPort: 8080,
       caliginiaSystemPrompt: "Fixture Caliginia prompt",
       lysipteraSystemPrompt: "Fixture Lysiptera prompt",
       titleGenerationPrompt: "Fixture title prompt",
@@ -179,15 +179,20 @@ describe("backendConfigSchema", () => {
   it.each([
     [
       "the lowest ports",
-      { ...VALID_RAW_CONFIG, backendPort: 1, lmstudioPort: 1 }
+      { ...VALID_RAW_CONFIG, backendPort: 1, lmstudioPort: 1, vmoPort: 1 }
     ],
     [
       "the highest ports",
-      { ...VALID_RAW_CONFIG, backendPort: 65_535, lmstudioPort: 65_535 }
+      {
+        ...VALID_RAW_CONFIG,
+        backendPort: 65_535,
+        lmstudioPort: 65_535,
+        vmoPort: 65_535
+      }
     ],
     [
-      "another IPv4 loopback backend host",
-      { ...VALID_RAW_CONFIG, backendHost: "127.0.0.2" }
+      "other IPv4 loopback backend and vmo hosts",
+      { ...VALID_RAW_CONFIG, backendHost: "127.0.0.2", vmoHost: "127.1.2.3" }
     ],
     [
       "an IPv4 LM Studio host",
@@ -279,13 +284,21 @@ describe("backendConfigSchema", () => {
       { ...VALID_RAW_CONFIG, settingsFilePath: "settings.json" },
       "settingsFilePath"
     ],
+    ["a vmo port of 0", { ...VALID_RAW_CONFIG, vmoPort: 0 }, "vmoPort"],
     [
-      "a relative browser executable path",
-      {
-        ...VALID_RAW_CONFIG,
-        browserExecutablePath: "chrome-headless-shell/chrome-headless-shell"
-      },
-      "browserExecutablePath"
+      "a vmo port of 65536",
+      { ...VALID_RAW_CONFIG, vmoPort: 65_536 },
+      "vmoPort"
+    ],
+    [
+      "a host name as the vmo host",
+      { ...VALID_RAW_CONFIG, vmoHost: "localhost" },
+      "vmoHost"
+    ],
+    [
+      "a non-loopback IPv4 vmo host",
+      { ...VALID_RAW_CONFIG, vmoHost: "192.168.1.20" },
+      "vmoHost"
     ],
     [
       "a Caliginia prompt with leading whitespace",

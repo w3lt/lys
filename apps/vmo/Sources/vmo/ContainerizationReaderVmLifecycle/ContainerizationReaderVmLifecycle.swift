@@ -1,42 +1,20 @@
 import Containerization
 import Foundation
 
-/// Image every VM runs.
-private let imageReference = "docker.io/library/alpine:3.24.2"
-
-/// Failures of ``VmManager`` that come from its own state rather than from
-/// the VM work.
-enum VmManagerError: Error, Equatable {
-    /// ``VmManager/close()`` has begun, so the manager accepts no new
-    /// operation.
-    case closed
-    /// No VM with this id is available: the manager didn't create it, or its
-    /// deletion has begun.
-    case unknownVm(containerId: String)
-    /// ``VmManager/startVm(containerId:)`` was already called for this VM. A
-    /// VM starts at most once, even when its start failed.
-    case alreadyStarted(containerId: String)
-    /// The VM's command hasn't started: ``VmManager/startVm(containerId:)``
-    /// wasn't called for it, is still starting it, or failed.
-    case notStarted(containerId: String)
-    /// ``VmManager/startVm(containerId:)`` is starting this VM, so it can't be
-    /// deleted until that start ends.
-    case startInProgress(containerId: String)
-}
-
-/// VMs that ``VmManager/close()`` could not stop or delete.
+/// VMs that ``ContainerizationReaderVmLifecycle/close()`` could not stop or
+/// delete.
 struct VmCleanupError: Error {
     /// Why each VM could not be stopped or deleted, keyed by container id. A
     /// VM whose deletion failed may leave its files and IP address; one whose
     /// stop failed may run until vmo exits.
-    let failures: [String: any Error]
+    let failures: [ContainerId: any Error]
 }
 
-/// Owns the micro VMs it creates to give each caller a VM of its own that
-/// runs one command, while guaranteeing that ``close()`` deletes every VM
-/// that is still active.
+/// Owns the micro VMs it creates with Containerization to give each caller a
+/// VM of its own that runs one command, while guaranteeing that ``close()``
+/// deletes every VM that is still active.
 ///
-/// Invariant: `activeVms` holds exactly the VMs this manager created, fully
+/// Invariant: `activeVms` holds exactly the VMs this lifecycle created, fully
 /// or partly, whose deletion hasn't succeeded, each in the phase it has
 /// reached. `vmOperations` holds the VMs being created, started, or deleted.
 ///
@@ -51,18 +29,19 @@ struct VmCleanupError: Error {
 ///
 /// Lifecycle: ready → closing → closed. Every operation but ``close()``
 /// works only while ready. Once ``close()`` begins, they throw
-/// ``VmManagerError/closed`` before touching any VM. A failed cleanup still
-/// ends closed.
+/// ``ReaderVmLifecycleError/closed`` before touching any VM. A failed cleanup
+/// still ends closed.
 ///
 /// Concurrency model: concurrent. The actor runs one state change at a time.
 /// Creating, starting, and deleting a VM suspend while Containerization
 /// works, so they overlap one another, waits, and ``close()``. Each operation
 /// records its VM's new phase before it suspends, so an overlapping operation
-/// on the same VM fails with a ``VmManagerError`` instead of interleaving.
-/// ``waitForCommandExit(containerId:)`` suspends until the command exits
-/// without holding up other operations.
-actor VmManager {
-    /// Where the manager is in its lifecycle.
+/// on the same VM fails with a ``ReaderVmLifecycleError`` instead of
+/// interleaving. ``waitForCommandExit(containerId:)`` suspends until the
+/// command exits without holding up other operations.
+actor ContainerizationReaderVmLifecycle: ReaderVmLifecycle {
+    /// How far ``close()`` has got, which decides whether operations are
+    /// accepted.
     private enum Lifecycle {
         /// Operations are accepted.
         case ready
@@ -79,23 +58,23 @@ actor VmManager {
     private let containerManager: ContainerManager
     /// The VMs created, fully or partly, and not yet deleted, keyed by
     /// container id.
-    private var activeVms: [String: ActiveVm] = [:]
+    private var activeVms: [ContainerId: ActiveVm] = [:]
     /// VMs being created, started, or deleted, and the cleanup waiting for
     /// those operations to end.
     private var vmOperations = VmOperations()
-    /// Where the manager is in its lifecycle.
+    /// How far ``close()`` has got.
     private var lifecycle = Lifecycle.ready
 
-    /// Creates a manager with no VMs, ready for use.
+    /// Creates a lifecycle with no VMs, ready for use.
     ///
     /// - Parameter containerManager: Creates and deletes the VMs. Its network
-    ///   must be a ``SharedNetwork`` or none, because the manager works on
+    ///   must be a ``SharedNetwork`` or none, because the lifecycle works on
     ///   copies of it.
     init(containerManager: ContainerManager) {
         self.containerManager = containerManager
     }
 
-    /// Whether the manager accepts operations, because ``close()`` hasn't
+    /// Whether the lifecycle accepts operations, because ``close()`` hasn't
     /// begun.
     private var isReady: Bool {
         if case .ready = lifecycle {
@@ -104,77 +83,80 @@ actor VmManager {
         return false
     }
 
-    /// Creates a VM whose main process is `command`. The VM stays until
-    /// ``deleteVm(containerId:)`` or ``close()`` deletes it.
+    /// Implements ``ReaderVmLifecycle/createVm(imageReference:arguments:)``
+    /// with a micro VM, which stays until ``deleteVm(containerId:)`` or
+    /// ``close()`` deletes it.
     ///
-    /// The VM gets 2 CPUs, 512 MiB of memory, and a 1 GiB root filesystem from
-    /// the Alpine Linux image, which is pulled when the image store doesn't
-    /// have it. The VM is not started, so `command` doesn't run yet; the
-    /// manager keeps everything it will write to standard output and
-    /// standard error.
-    ///
-    /// Cancelling the caller cancels the creation as far as Containerization
+    /// The VM gets 2 CPUs, 512 MiB of memory, and a 1 GiB root filesystem
+    /// unpacked from the image, which is pulled when the image store doesn't
+    /// have it. Its command runs with the image's working directory,
+    /// environment, and user. Containerization decides how far the creation
     /// observes cancellation.
     ///
-    /// - Parameter command: The program to run and its arguments, such as
-    ///   `["/bin/echo", "hello"]`. The program is looked up in the VM's `PATH`
-    ///   when it has no slash. The VM rejects an empty command when it
-    ///   starts.
-    /// - Returns: The new VM's container id.
-    /// - Throws: ``VmManagerError/closed`` when ``close()`` has begun, before
-    ///   anything is created, or when it began while this VM was being
-    ///   created; ``close()`` then deletes the VM. Containerization's error
-    ///   when creation fails, after deleting whatever the creation left. A
-    ///   ``CleanupAfterFailureError`` when that deletion fails too; the VM
-    ///   then stays active, so ``close()`` tries again.
-    func createVm(command: [String]) async throws -> String {
+    /// - Parameters:
+    ///   - imageReference: Reference of the image to run, which is
+    ///     ``readPageImageReference``.
+    ///   - arguments: Arguments added after the image's entrypoint and
+    ///     command. The VM rejects an empty command when it starts.
+    /// - Returns: The new VM's container id, whose text is a fresh UUID.
+    /// - Throws: The errors of the protocol operation, with Containerization's
+    ///   error as the mechanism's. ``ReaderVmLifecycleError/closed`` when
+    ///   ``close()`` has begun, before anything is created, or when it began
+    ///   while this VM was being created; ``close()`` then deletes the VM.
+    ///   When deleting what a failed creation left fails, the VM stays active,
+    ///   so ``close()`` tries again.
+    func createVm(imageReference: ImageReference, arguments: [String]) async throws -> ContainerId {
         guard isReady else {
-            throw VmManagerError.closed
+            throw ReaderVmLifecycleError.closed
         }
-        let containerId = UUID().uuidString
+        let containerId = ContainerId(text: UUID().uuidString)
         vmOperations.add(containerId)
         defer { vmOperations.remove(containerId) }
         let buffers = CommandOutputBuffers()
         var manager = containerManager
         let container: LinuxContainer
         do {
-            container = try await manager.create(containerId, reference: imageReference, rootfsSizeInBytes: 1.gib()) {
+            container = try await manager.create(
+                containerId.text,
+                reference: imageReference.text,
+                rootfsSizeInBytes: 1.gib()
+            ) {
                 @Sendable config in
-                configureVm(&config, command: command, buffers: buffers)
+                configureVm(&config, arguments: arguments, buffers: buffers)
             }
+            // Containerization may finish creating after the caller was
+            // cancelled, and that caller won't delete a VM it never gets.
+            try Task.checkCancellation()
         } catch {
             throw deleteFailedVm(containerId, creationError: error)
         }
         activeVms[containerId] = .created(container, buffers: buffers)
         guard isReady else {
-            throw VmManagerError.closed
+            throw ReaderVmLifecycleError.closed
         }
         return containerId
     }
 
-    /// Boots a created VM and starts its command, without waiting for the
-    /// command to exit.
+    /// Implements ``ReaderVmLifecycle/startVm(containerId:)`` by booting the
+    /// micro VM and starting its command in it.
     ///
-    /// The command then runs until it exits or the VM is deleted; what it
-    /// writes is kept for ``waitForCommandExit(containerId:)``.
+    /// What the command writes is kept for
+    /// ``waitForCommandExit(containerId:)``.
     ///
-    /// - Parameter containerId: Container id that ``createVm(command:)``
-    ///   returned.
-    /// - Throws: ``VmManagerError/closed`` when ``close()`` has begun, before
+    /// - Parameter containerId: Container id that
+    ///   ``createVm(imageReference:arguments:)`` returned.
+    /// - Throws: The errors of the protocol operation, with Containerization's
+    ///   error as the mechanism's; Containerization has then stopped the VM.
+    ///   ``ReaderVmLifecycleError/closed`` when ``close()`` has begun, before
     ///   anything is started, or when it began while this VM was starting;
     ///   ``close()`` then stops and deletes the VM.
-    ///   ``VmManagerError/unknownVm(containerId:)`` when no VM with this id is
-    ///   available. ``VmManagerError/alreadyStarted(containerId:)`` when this
-    ///   VM's start was already called. Containerization's error when booting
-    ///   or starting fails; Containerization has then stopped the VM, which
-    ///   can only be deleted.
-    func startVm(containerId: String) async throws {
+    func startVm(containerId: ContainerId) async throws {
         let vm = try activeVm(containerId)
         let (container, buffers) =
             switch vm {
             case .created(let container, let buffers): (container, buffers)
-            case .starting, .started, .startFailed: throw VmManagerError.alreadyStarted(containerId: containerId)
-            case .deleting: throw VmManagerError.unknownVm(containerId: containerId)
+            case .starting, .started, .startFailed: throw ReaderVmLifecycleError.alreadyStarted(containerId: containerId)
+            case .deleting: throw ReaderVmLifecycleError.unknownVm(containerId: containerId)
             }
         activeVms[containerId] = .starting
         vmOperations.add(containerId)
@@ -192,64 +174,55 @@ actor VmManager {
         }
         activeVms[containerId] = .started(container, commandExit: commandExit)
         guard isReady else {
-            throw VmManagerError.closed
+            throw ReaderVmLifecycleError.closed
         }
     }
 
-    /// Waits until a started VM's command exits, then returns everything it
-    /// wrote and its exit code.
+    /// Implements ``ReaderVmLifecycle/waitForCommandExit(containerId:)`` for
+    /// a micro VM's command.
     ///
-    /// Concurrent and repeated calls share one wait, so they return the same
-    /// output. There is no time limit and no output limit. After the command
-    /// exits, Containerization 0.52.0 waits at most 3 seconds for its output
-    /// to arrive; output arriving later is not included. Cancelling the caller
-    /// doesn't end the wait; deleting the VM does, unless stopping it fails.
+    /// After the command exits, Containerization 0.52.0 waits at most 3
+    /// seconds for its output to arrive; output arriving later is not
+    /// included. Closing the lifecycle ends the wait, as deleting the VM does.
     ///
     /// - Parameter containerId: Container id of a VM that
     ///   ``startVm(containerId:)`` started.
-    /// - Returns: The command's output and exit code. A non-zero exit code is
-    ///   returned, not thrown.
-    /// - Throws: ``VmManagerError/closed`` when ``close()`` has begun, before
-    ///   or during the wait. ``VmManagerError/unknownVm(containerId:)`` when
-    ///   no VM with this id is available, or when its deletion began during
-    ///   the wait. ``VmManagerError/notStarted(containerId:)`` when its
-    ///   command hasn't started. Containerization's error when waiting fails.
-    func waitForCommandExit(containerId: String) async throws -> CommandOutput {
+    /// - Returns: The command's output and exit code, as the protocol
+    ///   operation returns them.
+    /// - Throws: The errors of the protocol operation, with Containerization's
+    ///   error as the mechanism's. ``ReaderVmLifecycleError/closed`` when
+    ///   ``close()`` has begun, before or during the wait.
+    func waitForCommandExit(containerId: ContainerId) async throws -> CommandOutput {
         let output = try await commandExit(of: containerId).result
-        // Deleting the VM or closing the manager stops the command, which
+        // Deleting the VM or closing the lifecycle stops the command, which
         // then exits because it was killed, not on its own.
         _ = try commandExit(of: containerId)
         return try output.get()
     }
 
-    /// Deletes an active VM: stops it when its command was started, then
-    /// deletes its files and IP address.
+    /// Implements ``ReaderVmLifecycle/deleteVm(containerId:)`` for a micro VM,
+    /// whose address is an IP address.
     ///
-    /// Stopping kills the command and ends any wait for it. A failed stop
-    /// can't be retried, because Containerization then keeps throwing its
-    /// error, so the files and IP address are deleted even then. A VM whose
-    /// stop failed may run until vmo exits.
+    /// A failed stop can't be retried, because Containerization then keeps
+    /// throwing its error, so the files and IP address are deleted even then.
+    /// A VM whose stop failed may run until vmo exits. A VM whose deletion
+    /// failed stays active and unavailable, so ``close()`` tries again.
     ///
-    /// - Parameter containerId: Container id that ``createVm(command:)``
-    ///   returned.
-    /// - Throws: ``VmManagerError/closed`` when ``close()`` has begun, which
-    ///   deletes the VM instead. ``VmManagerError/unknownVm(containerId:)``
-    ///   when no VM with this id is available.
-    ///   ``VmManagerError/startInProgress(containerId:)`` while
-    ///   ``startVm(containerId:)`` starts it. Containerization's stop error
-    ///   when only stopping fails; the VM is still deleted. Containerization's
-    ///   delete error when deleting fails, or a ``CleanupAfterFailureError``
-    ///   when stopping failed too; the VM then stays active and unavailable,
-    ///   so ``close()`` tries again.
-    func deleteVm(containerId: String) async throws {
+    /// - Parameter containerId: Container id that
+    ///   ``createVm(imageReference:arguments:)`` returned.
+    /// - Throws: The errors of the protocol operation, with Containerization's
+    ///   stop and delete errors as the mechanism's.
+    ///   ``ReaderVmLifecycleError/closed`` when ``close()`` has begun, which
+    ///   deletes the VM instead.
+    func deleteVm(containerId: ContainerId) async throws {
         switch try activeVm(containerId) {
         case .created, .started, .startFailed: try await deleteActiveVm(containerId)
-        case .starting: throw VmManagerError.startInProgress(containerId: containerId)
-        case .deleting: throw VmManagerError.unknownVm(containerId: containerId)
+        case .starting: throw ReaderVmLifecycleError.startInProgress(containerId: containerId)
+        case .deleting: throw ReaderVmLifecycleError.unknownVm(containerId: containerId)
         }
     }
 
-    /// Closes the manager: it stops accepting operations, waits for the VMs
+    /// Closes the lifecycle: it stops accepting operations, waits for the VMs
     /// being created, started, or deleted, then stops and deletes every
     /// active VM.
     ///
@@ -260,7 +233,7 @@ actor VmManager {
     /// cleanup, and the call still returns only when the cleanup has ended.
     ///
     /// - Throws: ``VmCleanupError`` listing the VMs that could not be stopped
-    ///   or deleted. The manager is closed either way.
+    ///   or deleted. The lifecycle is closed either way.
     func close() async throws {
         let cleanup = startCleanup()
         // Awaiting a task's value doesn't end early when the caller is
@@ -269,7 +242,8 @@ actor VmManager {
         try await cleanup.value
     }
 
-    /// Returns the manager's cleanup, starting it when the manager is ready.
+    /// Returns the cleanup of ``close()``, starting it when the lifecycle is
+    /// ready.
     ///
     /// The cleanup runs in its own task, so it doesn't inherit any caller's
     /// cancellation.
@@ -295,7 +269,7 @@ actor VmManager {
     /// - Throws: ``VmCleanupError`` with each deletion that failed.
     private func deleteAllVms() async throws {
         await waitForVmOperations()
-        var failures: [String: any Error] = [:]
+        var failures: [ContainerId: any Error] = [:]
         for containerId in activeVms.keys {
             do {
                 try await deleteActiveVm(containerId)
@@ -321,19 +295,19 @@ actor VmManager {
         }
     }
 
-    /// Returns an active VM, while the manager accepts operations.
+    /// Returns an active VM, while the lifecycle accepts operations.
     ///
     /// - Parameter containerId: Container id of the VM.
     /// - Returns: The VM in its current phase.
-    /// - Throws: ``VmManagerError/closed`` when ``close()`` has begun.
-    ///   ``VmManagerError/unknownVm(containerId:)`` when the manager has no
-    ///   such VM.
-    private func activeVm(_ containerId: String) throws -> ActiveVm {
+    /// - Throws: ``ReaderVmLifecycleError/closed`` when ``close()`` has begun.
+    ///   ``ReaderVmLifecycleError/unknownVm(containerId:)`` when the lifecycle
+    ///   has no such VM.
+    private func activeVm(_ containerId: ContainerId) throws -> ActiveVm {
         guard isReady else {
-            throw VmManagerError.closed
+            throw ReaderVmLifecycleError.closed
         }
         guard let vm = activeVms[containerId] else {
-            throw VmManagerError.unknownVm(containerId: containerId)
+            throw ReaderVmLifecycleError.unknownVm(containerId: containerId)
         }
         return vm
     }
@@ -344,12 +318,12 @@ actor VmManager {
     /// - Returns: The task that ends when the command exits.
     /// - Throws: The errors of ``waitForCommandExit(containerId:)`` other than
     ///   Containerization's.
-    private func commandExit(of containerId: String) throws -> Task<CommandOutput, any Error> {
+    private func commandExit(of containerId: ContainerId) throws -> Task<CommandOutput, any Error> {
         let vm = try activeVm(containerId)
         return switch vm {
         case .started(_, let commandExit): commandExit
-        case .created, .starting, .startFailed: throw VmManagerError.notStarted(containerId: containerId)
-        case .deleting: throw VmManagerError.unknownVm(containerId: containerId)
+        case .created, .starting, .startFailed: throw ReaderVmLifecycleError.notStarted(containerId: containerId)
+        case .deleting: throw ReaderVmLifecycleError.unknownVm(containerId: containerId)
         }
     }
 
@@ -360,7 +334,7 @@ actor VmManager {
     ///   starting.
     /// - Throws: The errors of ``deleteVm(containerId:)`` that come from
     ///   Containerization. When deleting fails, the VM stays deleting.
-    private func deleteActiveVm(_ containerId: String) async throws {
+    private func deleteActiveVm(_ containerId: ContainerId) async throws {
         let vm = activeVms[containerId]
         activeVms[containerId] = .deleting
         vmOperations.add(containerId)
@@ -377,7 +351,7 @@ actor VmManager {
         }
         var manager = containerManager
         do {
-            try manager.delete(containerId)
+            try manager.delete(containerId.text)
         } catch {
             guard let stopError else {
                 throw error
@@ -395,15 +369,16 @@ actor VmManager {
     ///
     /// - Parameters:
     ///   - containerId: Container id of the VM whose creation failed.
-    ///   - creationError: Why the creation failed.
-    /// - Returns: The error for ``createVm(command:)`` to throw:
-    ///   `creationError` when nothing is left, or a
+    ///   - creationError: Why the creation failed, such as a
+    ///     `CancellationError` when the caller was cancelled.
+    /// - Returns: The error for ``createVm(imageReference:arguments:)`` to
+    ///   throw: `creationError` when nothing is left, or a
     ///   ``CleanupAfterFailureError`` when deletion fails, after which the VM
     ///   stays deleting so ``close()`` tries again.
-    private func deleteFailedVm(_ containerId: String, creationError: any Error) -> any Error {
+    private func deleteFailedVm(_ containerId: ContainerId, creationError: any Error) -> any Error {
         var manager = containerManager
         do {
-            try manager.delete(containerId)
+            try manager.delete(containerId.text)
         } catch let error as CocoaError where error.code == .fileNoSuchFile {
             // The creation failed before making the VM's directory. In
             // Containerization 0.52.0, `delete` releases the IP address before
@@ -420,31 +395,33 @@ actor VmManager {
 /// Sets up a new VM's size and its command, whose output goes to `buffers`.
 ///
 /// - Parameters:
-///   - config: The VM's configuration, prefilled from the image.
-///   - command: The program to run and its arguments.
+///   - config: The VM's configuration, prefilled from the image: its command
+///     is the image's entrypoint and command, with the image's working
+///     directory, environment, and user.
+///   - arguments: Arguments added after the image's entrypoint and command.
 ///   - buffers: Where the command's standard output and standard error go.
 private func configureVm(
     _ config: inout LinuxContainer.Configuration,
-    command: [String],
+    arguments: [String],
     buffers: CommandOutputBuffers
 ) {
     config.cpus = 2
     config.memoryInBytes = 512.mib()
-    config.process.arguments = command
-    config.process.workingDirectory = "/"
+    config.process.arguments += arguments
     config.process.stdout = buffers.stdout
     config.process.stderr = buffers.stderr
 }
 
-/// A VM the manager created, fully or partly, and hasn't deleted, in the
+/// A VM the lifecycle created, fully or partly, and hasn't deleted, in the
 /// phase it has reached. Each phase holds only what the next operations on
 /// the VM need.
 private enum ActiveVm {
-    /// Created and not booted; ``VmManager/startVm(containerId:)`` may start
+    /// Created and not booted;
+    /// ``ContainerizationReaderVmLifecycle/startVm(containerId:)`` may start
     /// it. `buffers` will receive its command's output.
     case created(LinuxContainer, buffers: CommandOutputBuffers)
-    /// ``VmManager/startVm(containerId:)`` is booting it and starting its
-    /// command.
+    /// ``ContainerizationReaderVmLifecycle/startVm(containerId:)`` is booting
+    /// it and starting its command.
     case starting
     /// Its command started. `commandExit` ends when the command exits or the
     /// VM stops, with what the command wrote.
@@ -453,7 +430,7 @@ private enum ActiveVm {
     /// files and IP address remains.
     case startFailed
     /// A deletion is in progress, or failed and left the VM for
-    /// ``VmManager/close()`` to try again.
+    /// ``ContainerizationReaderVmLifecycle/close()`` to try again.
     case deleting
 }
 
@@ -463,9 +440,9 @@ private enum ActiveVm {
 /// One value, because the waiter must be resumed exactly when the last
 /// operation ends.
 private struct VmOperations {
-    /// Container ids of the VMs with an operation in progress. The manager
+    /// Container ids of the VMs with an operation in progress. The lifecycle
     /// runs at most one operation per VM at a time.
-    private var containerIds: Set<String> = []
+    private var containerIds: Set<ContainerId> = []
     /// Cleanup suspended until `containerIds` is empty. It is set only while
     /// `containerIds` isn't empty.
     private var endWaiter: CheckedContinuation<Void, Never>?
@@ -478,7 +455,7 @@ private struct VmOperations {
     /// Adds a VM whose operation has begun.
     ///
     /// - Parameter containerId: Container id of that VM.
-    mutating func add(_ containerId: String) {
+    mutating func add(_ containerId: ContainerId) {
         containerIds.insert(containerId)
     }
 
@@ -486,7 +463,7 @@ private struct VmOperations {
     /// was the last one.
     ///
     /// - Parameter containerId: Container id of that VM.
-    mutating func remove(_ containerId: String) {
+    mutating func remove(_ containerId: ContainerId) {
         containerIds.remove(containerId)
         guard containerIds.isEmpty, let endWaiter else {
             return
@@ -499,7 +476,7 @@ private struct VmOperations {
     ///
     /// - Parameter waiter: The suspended cleanup.
     /// - Precondition: An operation is in progress and no waiter is
-    ///   registered. Only the manager's one cleanup task waits.
+    ///   registered. Only the lifecycle's one cleanup task waits.
     mutating func registerEndWaiter(_ waiter: CheckedContinuation<Void, Never>) {
         precondition(!containerIds.isEmpty && endWaiter == nil, "VmOperations accepts one waiter while operations run")
         endWaiter = waiter

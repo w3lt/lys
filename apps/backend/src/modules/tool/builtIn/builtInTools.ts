@@ -7,13 +7,13 @@ import type {
   BuiltInToolProvider,
   TurnBuiltInTool
 } from "./builtInTool"
-import ReadyBuiltInToolProvider from "./readyBuiltInToolProvider"
 import ReadPageTool, {
   buildReadPageDefinition,
-  PAGE_READ_TIMEOUT_MS,
-  PAGE_SETTLE_TIMEOUT_MS
+  PAGE_READER_TIMEOUT_MS
 } from "./web/readPageTool"
+import ReadPageToolProvider from "./web/readPageToolProvider"
 import type { TavilyRequestDependencies } from "./web/tavilyRequest"
+import { VMO_HEALTH_TIMEOUT_MS } from "./web/vmoHealth"
 import { isBlockedAddress } from "./web/webAddresses"
 import { lookupDnsHostAddresses } from "./web/webConnection"
 import {
@@ -80,31 +80,36 @@ export function buildTavilyRequestDependencies(): TavilyRequestDependencies {
  *
  * @param webSearchToolProvider - Provider of the web search tool, lent for
  * the backend's lifetime.
- * @param browserExecutablePath - Absolute path of the Chrome Headless Shell
- * the read-page tool runs.
- * @param reportBrowserFailure - Receives why that browser is missing or
- * could not start, for logging.
- * @returns A frozen list: the read-page tool, always ready, which reads each
- * page in that browser, resolves names through the operating system, and
- * never connects to a blocked address; then the web search tool. Creating it
- * reads, starts, and contacts nothing.
+ * @param vmoOrigin - Origin of vmo, the page reader the read-page tool asks,
+ * such as `http://127.0.0.1:8080`.
+ * @param reportPageReaderFailure - Receives why vmo could not be reached,
+ * gave an answer Lys does not understand, or did not answer in time, for
+ * logging.
+ * @returns A frozen list: the read-page tool, ready only while vmo answers
+ * its health route within one second, which resolves a page's host name
+ * through the operating system, refuses it when it resolves to a blocked
+ * address, and otherwise asks vmo to read the page, within 60 seconds; then
+ * the web search tool. Creating it reads, starts, and contacts nothing.
  */
 export function createBuiltInTools(
   webSearchToolProvider: BuiltInToolProvider,
-  browserExecutablePath: string,
-  reportBrowserFailure: (failure: unknown) => void
+  vmoOrigin: string,
+  reportPageReaderFailure: (failure: unknown) => void
 ): readonly BuiltInToolEntry[] {
   const readPageTool = new ReadPageTool({
     lookupHostAddresses: lookupDnsHostAddresses,
     isBlockedAddress,
-    reportBrowserFailure,
-    browserExecutablePath,
-    readTimeoutMs: PAGE_READ_TIMEOUT_MS,
-    settleTimeoutMs: PAGE_SETTLE_TIMEOUT_MS
+    reportPageReaderFailure,
+    vmoOrigin,
+    readTimeoutMs: PAGE_READER_TIMEOUT_MS
   })
   const readPage: BuiltInToolEntry = Object.freeze({
     definition: buildReadPageDefinition(),
-    provider: new ReadyBuiltInToolProvider(readPageTool)
+    provider: new ReadPageToolProvider(
+      readPageTool,
+      vmoOrigin,
+      VMO_HEALTH_TIMEOUT_MS
+    )
   })
   const webSearch: BuiltInToolEntry = Object.freeze({
     definition: buildWebSearchDefinition(),

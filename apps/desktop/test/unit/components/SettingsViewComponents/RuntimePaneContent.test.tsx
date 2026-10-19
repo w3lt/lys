@@ -35,6 +35,10 @@ const BACKEND_ADDRESS = initialSettingsState.runtime.backendAddress
 /** Wall-clock time at which the uptime case reads the backend's uptime. */
 const UPTIME_READ_AT_MS = Date.UTC(2026, 9, 9, 12, 0, 0)
 
+/** What the Runtime pane says after a failed save of the startup switches. */
+const FAILED_SAVE_LINE =
+  "Lys couldn't save the startup switches. The next launch follows the switches last saved; changing a switch tries again."
+
 /** LM Studio connected, the chosen default on disk and nothing loaded. */
 const NOTHING_LOADED: RuntimeArrangement = {
   ...READY_RUNTIME,
@@ -124,14 +128,12 @@ describe("RuntimePaneContent", () => {
         expect(
           screen.getByRole("heading", { name: heading })
         ).toBeInTheDocument()
-        expect(screen.getByRole("button", { name: "Start" })).toHaveProperty(
-          "disabled",
-          !canStart
-        )
-        expect(screen.getByRole("button", { name: "Stop" })).toHaveProperty(
-          "disabled",
-          !canStop
-        )
+        expect(
+          screen.getByRole("button", { name: "Start backend" })
+        ).toHaveProperty("disabled", !canStart)
+        expect(
+          screen.getByRole("button", { name: "Stop backend" })
+        ).toHaveProperty("disabled", !canStop)
       }
     )
 
@@ -144,7 +146,7 @@ describe("RuntimePaneContent", () => {
       await startRuntimePane(buildUnreachableRuntime("stopped"))
       const user = userEvent.setup()
 
-      await user.click(screen.getByRole("button", { name: "Start" }))
+      await user.click(screen.getByRole("button", { name: "Start backend" }))
       await waitForRenderedWork()
 
       expect(
@@ -170,7 +172,7 @@ describe("RuntimePaneContent", () => {
       await startRuntimePane()
       const user = userEvent.setup()
 
-      await user.click(screen.getByRole("button", { name: "Stop" }))
+      await user.click(screen.getByRole("button", { name: "Stop backend" }))
       await waitForRenderedWork()
 
       expect(host.commands.map((invoked) => invoked.command)).toEqual([
@@ -198,10 +200,7 @@ describe("RuntimePaneContent", () => {
       )
     })
 
-    // Known defect (#169): the switch changes the setting only in memory, so
-    // the choice is lost before the next time Lys opens, the only time it
-    // applies.
-    it.fails("keeps the choice for the next time Lys opens", async () => {
+    it("keeps the choice for the next time Lys opens", async () => {
       const saves: unknown[] = []
       startNativeHostFake({
         load_settings: () => FIRST_RUN_SETTINGS_DOCUMENT,
@@ -222,6 +221,159 @@ describe("RuntimePaneContent", () => {
           runtime: expect.objectContaining({ autoStartBackend: false })
         })
       })
+    })
+
+    it("says the next launch follows the switches last saved when they cannot be saved", async () => {
+      startNativeHostFake({
+        load_settings: () => FIRST_RUN_SETTINGS_DOCUMENT,
+        save_settings: () => Promise.reject("Disk full")
+      })
+      await startRuntimePane()
+      const user = userEvent.setup()
+      const status = screen.getByRole("status", {
+        name: "Startup switches save"
+      })
+      const before = status.textContent
+
+      await user.click(
+        screen.getByRole("switch", { name: "Start it when Lys opens" })
+      )
+      await waitForRenderedWork()
+
+      expect(before).toBe("")
+      expect(status).toHaveTextContent(FAILED_SAVE_LINE)
+      expect(
+        screen.getByRole("switch", { name: "Start it when Lys opens" })
+      ).not.toBeChecked()
+    })
+
+    it("clears the failed save once the switches are saved again, without moving focus", async () => {
+      const failedSave = createControlledPromise<void>()
+      const nextSave = createControlledPromise<void>()
+      const saveResults = [failedSave.promise, nextSave.promise]
+      startNativeHostFake({
+        load_settings: () => FIRST_RUN_SETTINGS_DOCUMENT,
+        save_settings: () => saveResults.shift()
+      })
+      await startRuntimePane()
+      const user = userEvent.setup()
+      const status = screen.getByRole("status", {
+        name: "Startup switches save"
+      })
+      const autoStart = screen.getByRole("switch", {
+        name: "Start it when Lys opens"
+      })
+
+      await user.click(autoStart)
+      failedSave.reject("Disk full")
+      await waitForRenderedWork()
+      const afterFailure = status.textContent
+      await user.click(autoStart)
+      await waitForRenderedWork()
+      const whileSaving = status.textContent
+      nextSave.resolve()
+      await waitForRenderedWork()
+
+      expect(afterFailure).toBe(FAILED_SAVE_LINE)
+      expect(whileSaving).toBe("")
+      expect(saveResults).toEqual([])
+      expect(
+        screen.getByRole("status", { name: "Startup switches save" })
+      ).toBe(status)
+      expect(status).toBeEmptyDOMElement()
+      expect(autoStart).toBeChecked()
+      expect(autoStart).toHaveFocus()
+    })
+  })
+
+  describe("vmo", () => {
+    it("shows vmo under the backend and above LM Studio", async () => {
+      await startRuntimePane()
+
+      const vmoCard = screen.getByRole("region", { name: "vmo page reader" })
+      const backendSwitch = screen.getByRole("switch", {
+        name: "Start it when Lys opens"
+      })
+      const lmStudioCard = screen.getByRole("region", {
+        name: "LM Studio connection"
+      })
+      expect(
+        backendSwitch.compareDocumentPosition(vmoCard) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
+      expect(
+        vmoCard.compareDocumentPosition(lmStudioCard) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
+      expect(
+        screen.getByRole("heading", { name: "vmo stopped" })
+      ).toBeInTheDocument()
+    })
+
+    it("starts a stopped vmo and stops it again", async () => {
+      let isRunning = false
+      const host = startNativeHostFake({
+        get_vmo_status: () =>
+          isRunning ? { status: "running", pid: 4343 } : { status: "stopped" },
+        start_vmo: () => {
+          isRunning = true
+          return { status: "running", pid: 4343 }
+        },
+        get_vmo_health: () => "ready",
+        stop_vmo: () => {
+          isRunning = false
+          return { status: "stopped" }
+        }
+      })
+      await startRuntimePane()
+      const user = userEvent.setup()
+
+      await user.click(screen.getByRole("button", { name: "Start vmo" }))
+      await waitForRenderedWork()
+      const afterStart = screen.getByRole("heading", { name: "vmo running" })
+      await user.click(screen.getByRole("button", { name: "Stop vmo" }))
+      await waitForRenderedWork()
+
+      expect(afterStart).toBeInTheDocument()
+      expect(
+        screen.getByRole("heading", { name: "vmo stopped" })
+      ).toBeInTheDocument()
+      expect(host.commands.map((invoked) => invoked.command)).toEqual([
+        "get_vmo_status",
+        "start_vmo",
+        "get_vmo_status",
+        "get_vmo_health",
+        "get_vmo_status",
+        "stop_vmo"
+      ])
+    })
+
+    it("keeps whether vmo starts when Lys opens for the next time Lys opens", async () => {
+      const saves: unknown[] = []
+      startNativeHostFake({
+        load_settings: () => FIRST_RUN_SETTINGS_DOCUMENT,
+        save_settings: (args) => {
+          saves.push(args)
+        }
+      })
+      const { useLysStore } = await startRuntimePane()
+      const user = userEvent.setup()
+      const autoStart = screen.getByRole("switch", {
+        name: "Start vmo when Lys opens"
+      })
+      expect(autoStart).toBeChecked()
+
+      await user.click(autoStart)
+      await waitForRenderedWork()
+
+      expect(autoStart).not.toBeChecked()
+      expect(useLysStore.getState().settings.runtime.autoStartVmo).toBe(false)
+      const savedRuntime = expect.objectContaining({
+        autoStartBackend: true,
+        autoStartVmo: false
+      })
+      const savedSettings = expect.objectContaining({ runtime: savedRuntime })
+      expect(saves).toContainEqual({ newSettings: savedSettings })
     })
   })
 

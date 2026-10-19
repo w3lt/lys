@@ -21,7 +21,8 @@ export {
   type ListBackendToolsApiRoute,
   type TavilyCreditUsage,
   type UnavailableBackendTool,
-  type WebSearchKeyCheckFailure
+  type WebSearchKeyCheckFailure,
+  type WebSearchKeyUnavailableReason
 } from "./tool"
 export {
   deleteConversationApi,

@@ -5,6 +5,7 @@ import type {
   LoadConfigurationSettings,
   LysSettings,
   ModelSettings,
+  RuntimeAutoStartSettings,
   RuntimeSettings,
   SecretsSettings,
   ToolSettings
@@ -266,4 +267,31 @@ export async function saveSecretsSettings(
 export async function saveToolSettings(tools: ToolSettings): Promise<void> {
   const persistedSettings = await loadSettings()
   await saveSettings({ ...persistedSettings, tools })
+}
+
+/**
+ * Persists the two startup switches while preserving everything else already
+ * on disk.
+ * @param autoStart - Startup switches sampled by the application autosave
+ * owner.
+ * @returns Resolves after the merged settings document is written by Tauri.
+ * @throws The native load or save rejection; no replacement is written if
+ * loading fails.
+ * @remarks The runtime group is written with the given switches and the
+ * default model and backend address as they are on disk: the store's copies
+ * of those two are session-only. The application store serializes this
+ * read-modify-write operation with the other settings-group saves, so that
+ * overlapping saves cannot write back each other's stale group.
+ */
+export async function saveRuntimeAutoStartSettings(
+  autoStart: RuntimeAutoStartSettings
+): Promise<void> {
+  const persistedSettings = await loadSettings()
+  const runtime: RuntimeSettings = {
+    autoStartBackend: autoStart.autoStartBackend,
+    autoStartVmo: autoStart.autoStartVmo,
+    defaultModel: persistedSettings.runtime.defaultModel,
+    backendAddress: persistedSettings.runtime.backendAddress
+  }
+  await saveSettings({ ...persistedSettings, runtime })
 }

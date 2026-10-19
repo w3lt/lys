@@ -149,7 +149,7 @@ optional. Together they offer at least one tool, and no name appears in both.
 A request that breaks these rules, or names a backend tool the backend does
 not run, returns `400` before anything is stored. A request that offers a
 backend tool that cannot run now, such as `web_search` without a usable
-Tavily API key, returns `409` with
+Tavily API key or `read_page` while vmo is not ready, returns `409` with
 `urn:lys:problem:chat:backend-tool-unavailable` before anything is stored; see
 [an offered tool that cannot run](#an-offered-tool-that-cannot-run). The model is offered client
 tools first, then backend tools, each in request order. Without `tools`, the
@@ -264,13 +264,16 @@ order Settings shows them, and the listed tools that cannot run now:
 
 (Definitions shortened.) Every definition has `runner` `backend`. The
 definitions are fixed for one backend build: `read_page`, which reads one
-public web page in a headless browser, and `web_search`, which searches the web through Tavily
+public web page through vmo, and `web_search`, which searches the web through Tavily
 (both group and access `network`). Availability is read again on every
-request. `reason` is `api-key-missing` (no Tavily API key is saved),
-`api-key-invalid` (the saved key fails the key format), or
+request. For `web_search`, `reason` is `api-key-missing` (no Tavily API key is
+saved), `api-key-invalid` (the saved key fails the key format), or
 `settings-unreadable` (the settings file cannot be read as a settings
-document). Each name in `unavailableTools` is a listed tool, once. The list
-reads the settings file but contacts nothing, and never contains the key.
+document). For `read_page`, it is `page-reader-not-ready`: vmo did not answer
+`GET /health` at `127.0.0.1:8080` with `200` within one second. Each name in
+`unavailableTools` is a listed tool, once. The list reads the settings file
+and asks vmo's health route, contacts nothing else, and never contains the
+key.
 
 ### Key check
 
@@ -289,7 +292,7 @@ one of:
 | ------------- | --------------------------------------------------------------------------------------------- | ---------------------------------------------- |
 | `accepted`    | `credits`: `{ used, limit }` or `null`                                                        | Tavily accepted the key just now               |
 | `rejected`    | none                                                                                          | Tavily refused the key (HTTP 401 or 403)       |
-| `unavailable` | `reason`, as in the tool list                                                                 | No usable key is saved; nothing was sent       |
+| `unavailable` | `reason`: `api-key-missing`, `api-key-invalid`, or `settings-unreadable`, as in the tool list | No usable key is saved; nothing was sent       |
 | `failed`      | `reason`: `rate-limited`, `timed-out`, `unreachable`, `provider-error`, or `invalid-response` | The check could not tell whether the key works |
 
 `credits` comes from the account's plan usage and limit when Tavily reports
@@ -562,6 +565,9 @@ such tool in offer order. `toolName` and `reason` are extension members.
   "reason": "api-key-missing"
 }
 ```
+
+For `page-reader-not-ready`, `detail` is "read_page is unavailable: vmo,
+Lys's page reader, is not ready."
 
 The desktop shows the error and reads the tool list again, so its next
 request leaves the tool out.

@@ -49,37 +49,48 @@ repository today; it is not a promise of unreleased work.
 - Interrupted streaming rows are recovered on backend startup.
 - Runtime, Model, Generation, Agents, Tools, and Secrets settings panes are
   available.
-  Model controls refresh inventory, load and unload weights, and check
+  The Runtime pane starts and stops the backend and vmo, shows whether each
+  is ready, and saves whether each starts when Lys opens; Lys stops both when
+  it quits. Model controls refresh inventory, load and unload weights, and check
   loaded-state health. The Agents pane lists the built-in agents, Caliginia
   and Lysiptera, which can be read and duplicated but not changed or deleted,
   and creates, edits, duplicates, and deletes the user's agents through the
   backend. The Tools pane lists the desktop's file tools and the backend's
   `read_page` and `web_search`; each tool's Ask me or Just run choice is
-  saved, and the other switches last for the session only. The
+  saved, and the other switches last for the session only. `read_page` is
+  off and cannot be switched on while vmo is not ready. The
   Secrets pane saves the Tavily API key `web_search` needs, and checks it.
 - A chat offers the switched-on tools to a model trained for tool use and
-  answers its tool calls: file tools run in the desktop, `read_page` reads one
-  public web page in a headless browser the backend starts, running its
-  scripts, following its redirects, and leaving out text a person cannot see,
-  and `web_search` searches the web through
-  Tavily in the backend, unavailable until a Tavily API key is saved. Each call
+  answers its tool calls: file tools run in the desktop, `read_page` asks vmo
+  to read one public web page in headless Chromium inside a micro VM, running
+  its scripts, following its redirects, and reading all of its text, hidden
+  text included, and `web_search` searches the web through
+  Tavily in the backend, unavailable until a Tavily API key is saved;
+  `read_page` is likewise unavailable until vmo answers its health route. Each call
   asks the person first unless its tool is set to Just run, which the backend
   decides for every tool from the saved choices; both web tools start off. Lys's instructions do not
   give her today's date yet
   ([#148](https://github.com/w3lt/lys/issues/148)).
 - Generation controls apply to future chat requests and save automatically
   through Tauri to `$LYS_HOME/settings.json`, which contains runtime, model,
-  generation, load configuration, secrets, and tools groups. Runtime edits remain session-only.
+  generation, load configuration, secrets, and tools groups. The runtime
+  group's two startup switches are saved when changed; the other runtime
+  edits remain session-only.
 - Every model load Lys starts sends that model's load configuration: context
   length, eval batch size, flash attention, KV cache placement, and active
   experts. The Model pane edits it for the selected default model and saves it
   automatically.
 - The Composer label, send eligibility, and each chat request use the loaded
   runtime projection described in [desktop model settings](/architecture/desktop/#model-settings).
-- On macOS, `build.sh` builds the desktop app from a source checkout, installs
-  its backend runtime and the browser `read_page` uses under
-  `$LYS_HOME/runtime`, and copies `Lys.app` to
-  `/Applications`. See [Packaging and releases](/operate/releases/).
+- On macOS, `build.sh` builds the desktop app from a source checkout, builds
+  vmo in release, installs the backend runtime and vmo under
+  `$LYS_HOME/runtime`, and copies `Lys.app` to `/Applications`. See
+  [Packaging and releases](/operate/releases/). vmo boots its VMs only on a
+  Mac with the kernel described in
+  [Runtime dependencies](/operate/dependencies/#vmo)
+  ([#200](https://github.com/w3lt/lys/issues/200)), and a vmo or backend whose
+  Lys died without quitting keeps running
+  ([#202](https://github.com/w3lt/lys/issues/202)).
 
 ## Coming soon
 

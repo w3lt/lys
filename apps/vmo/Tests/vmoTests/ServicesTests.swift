@@ -8,6 +8,9 @@ private struct BodyError: Error, Equatable {}
 /// Failure thrown by a container manager factory in these tests.
 private struct ContainerManagerCreationError: Error, Equatable {}
 
+/// Container id of a VM that the services' lifecycle didn't create.
+private let unknownVmId = ContainerId(text: "missing")
+
 /// Checks that `withServices` creates the services, passes them to its body,
 /// and always closes them.
 @Suite("Services lifetime")
@@ -29,15 +32,15 @@ struct ServicesTests {
         var bodyServices: Services?
 
         try await withServices(createContainerManager: containerRoot.createContainerManager) { services in
-            await #expect(throws: VmManagerError.unknownVm(containerId: "missing")) {
-                try await services.vmManager.deleteVm(containerId: "missing")
+            await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: unknownVmId)) {
+                try await services.readerVmLifecycle.deleteVm(containerId: unknownVmId)
             }
             bodyServices = services
         }
 
         let services = try #require(bodyServices)
-        await #expect(throws: VmManagerError.closed) {
-            try await services.vmManager.deleteVm(containerId: "missing")
+        await #expect(throws: ReaderVmLifecycleError.closed) {
+            try await services.readerVmLifecycle.deleteVm(containerId: unknownVmId)
         }
     }
 
@@ -55,8 +58,8 @@ struct ServicesTests {
         }
 
         let services = try #require(bodyServices)
-        await #expect(throws: VmManagerError.closed) {
-            try await services.vmManager.deleteVm(containerId: "missing")
+        await #expect(throws: ReaderVmLifecycleError.closed) {
+            try await services.readerVmLifecycle.deleteVm(containerId: unknownVmId)
         }
     }
 

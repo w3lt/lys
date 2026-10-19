@@ -1,6 +1,7 @@
 import {
   saveGenerationSettings,
   saveLoadConfigurationSettings,
+  saveRuntimeAutoStartSettings,
   saveSecretsSettings,
   saveToolSettings
 } from "@/lib/apis/tauri/settings"
@@ -8,6 +9,7 @@ import {
 import type {
   GenerationSettings,
   LoadConfigurationSettings,
+  RuntimeAutoStartSettings,
   SecretsSettings,
   ToolSettings
 } from "./settings"
@@ -55,6 +57,18 @@ export type SettingsGroupSaves = {
    * the native load or save rejection.
    */
   readonly saveToolSettings: (tools: ToolSettings) => Promise<void>
+  /**
+   * Saves the two startup switches of the runtime group after every save
+   * sent earlier has settled.
+   *
+   * @param autoStart - Startup switches to persist. The rest of the runtime
+   * group is written as it is on disk.
+   * @returns Resolves after the settings file is written, and rejects with
+   * the native load or save rejection.
+   */
+  readonly saveRuntimeAutoStartSettings: (
+    autoStart: RuntimeAutoStartSettings
+  ) => Promise<void>
 }
 
 /** One settings group whose latest value is to be saved. */
@@ -112,7 +126,9 @@ export function createSettingsGroupSaves(): SettingsGroupSaves {
     saveSecretsSettings: (secrets) =>
       saveSettingsGroupInOrder(() => saveSecretsSettings(secrets)),
     saveToolSettings: (tools) =>
-      saveSettingsGroupInOrder(() => saveToolSettings(tools))
+      saveSettingsGroupInOrder(() => saveToolSettings(tools)),
+    saveRuntimeAutoStartSettings: (autoStart) =>
+      saveSettingsGroupInOrder(() => saveRuntimeAutoStartSettings(autoStart))
   }
 }
 

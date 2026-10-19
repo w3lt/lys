@@ -1,6 +1,6 @@
 ---
 title: Security and trust boundaries
-description: "The current local trust boundary: loopback services, schema validation, approved web reads in a headless browser and searches, a plain-text search key, and file-backed settings without credential management."
+description: "The current local trust boundary: loopback services, schema validation, approved web reads in a micro VM and searches, a plain-text search key, and file-backed settings without credential management."
 docType: architecture
 sidebar:
   order: 8
@@ -9,27 +9,29 @@ sidebar:
 The current security posture is intentionally simple and local. The backend and
 LM Studio both run on loopback, request and event payloads are validated with
 Zod, and there is no credential-management subsystem yet. There are two
-outbound connections, and both start off: the `read_page` tool reads a public
-web page in a headless browser, which also loads what the page needs from
-public hosts, and the `web_search` tool sends a query and the person's Tavily
+outbound connections, and both start off: the `read_page` tool asks vmo, a
+page reader on the same machine, to read a public web page in a headless
+browser inside a micro VM, which also loads what the page needs, and the
+`web_search` tool sends a query and the person's Tavily
 API key to Tavily's search service. Each runs after the person allows the call, or
 at once when the person set that tool to Just run, a choice Lys saves. The
 backend decides which calls ask; the desktop shows the prompts.
 
 ## Current trust boundaries
 
-| Boundary                     | Current state                                                                                                              |
-| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| React UI -> Tauri host       | Trusted application boundary using Tauri `invoke` commands.                                                                |
-| React UI -> Fastify backend  | Loopback HTTP and SSE only. No auth layer beyond local binding.                                                            |
-| Fastify backend -> LM Studio | Loopback connections to local LM Studio HTTP and WebSocket endpoints.                                                      |
-| Backend -> SQLite file       | Local filesystem access to `$LYS_HOME/lys_db.sqlite`.                                                                      |
-| Tauri host -> settings file  | Local filesystem access to `$LYS_HOME/settings.json`.                                                                      |
-| Tauri host -> user files     | File tools read any path the OS user running Lys can read.                                                                 |
-| Backend -> browser           | Each `read_page` call starts Chrome Headless Shell, which runs the page's scripts.                                         |
-| Browser -> public web        | The page, its redirects, and what it loads, only through the read's proxy.                                                 |
-| Backend -> Tavily            | `web_search` sends one query and the saved API key to `api.tavily.com` per allowed call.                                   |
-| Backend -> settings file     | Reads the Tavily API key and the saved Just run choices from `$LYS_HOME/settings.json`; the Tauri host is the only writer. |
+| Boundary                     | Current state                                                                                                                                                                                              |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| React UI -> Tauri host       | Trusted application boundary using Tauri `invoke` commands.                                                                                                                                                |
+| React UI -> Fastify backend  | Loopback HTTP and SSE only. No auth layer beyond local binding.                                                                                                                                            |
+| Fastify backend -> LM Studio | Loopback connections to local LM Studio HTTP and WebSocket endpoints.                                                                                                                                      |
+| Backend -> SQLite file       | Local filesystem access to `$LYS_HOME/lys_db.sqlite`.                                                                                                                                                      |
+| Tauri host -> settings file  | Local filesystem access to `$LYS_HOME/settings.json`.                                                                                                                                                      |
+| Tauri host -> user files     | File tools read any path the OS user running Lys can read.                                                                                                                                                 |
+| Tauri host -> vmo            | The host starts vmo as the OS user running Lys, ad hoc signed with the virtualization entitlement, stops it with `SIGTERM` and, after 60 seconds, `SIGKILL`, and asks its `GET /health` over loopback TCP. |
+| Backend -> vmo               | Each tool lookup sends `GET /health` to vmo, and each `read_page` call sends the page's URL, over loopback HTTP on `127.0.0.1:8080`, without authentication.                                               |
+| vmo -> micro VM -> web       | vmo reads the page in headless Chromium in a fresh micro VM, which loads the page, its redirects, and what it loads.                                                                                       |
+| Backend -> Tavily            | `web_search` sends one query and the saved API key to `api.tavily.com` per allowed call.                                                                                                                   |
+| Backend -> settings file     | Reads the Tavily API key and the saved Just run choices from `$LYS_HOME/settings.json`; the Tauri host is the only writer.                                                                                 |
 
 ## Current controls
 
@@ -41,8 +43,8 @@ backend decides which calls ask; the desktop shows the prompts.
 | Route-local abort handling  | Closing the SSE connection aborts the backend chat task.                                                                                                                                                                                                                                                    |
 | Approval gateway            | The backend's tool approval service decides every tool call, client and backend tools alike: a tool asks first unless it is saved as Just run in `settings.json`, and every call asks when that file cannot be read. The desktop shows the prompts and runs only the client tools' calls the backend sends. |
 | Approval of web reads       | `read_page` runs only once the person allows the call on the card (full URL), or at once on Just run. Allowing a read lets the page load what it needs from public hosts. It starts off.                                                                                                                    |
-| Address rule                | No connection of a read, the page's own or one its scripts or redirects make, reaches loopback, private, link-local, shared, documentation, benchmarking, multicast, or reserved addresses.                                                                                                                 |
-| Browser isolation           | A fresh Chromium profile per read with its sandbox on; nothing is kept between reads, and the browser is closed when the read ends.                                                                                                                                                                         |
+| Address rule                | A read whose URL names, or whose host name resolves to, a loopback, private, link-local, shared, documentation, benchmarking, multicast, or reserved address is refused before vmo is asked. Only that URL is checked; see [Web reads](#web-reads).                                                         |
+| VM isolation                | Each read runs in a fresh micro VM that vmo deletes before it answers; nothing is kept between reads.                                                                                                                                                                                                       |
 | Invisible character removal | Every network tool's result loses Unicode format and control characters, such as zero-width, direction, and tag characters, and every variation selector but one emoji- or text-style selector after a visible character, and says how many it lost.                                                        |
 | Untrusted page framing      | Page text and the page's title, site, and date reach the model between delimiters it cannot forge, with a notice never to obey them.                                                                                                                                                                        |
 | Approval of searches        | `web_search` runs only once the person allows the call on the card (full query and "Sends the query to Tavily (api.tavily.com)"), or at once on Just run. It starts off.                                                                                                                                    |
@@ -79,16 +81,36 @@ backend decides which calls ask; the desktop shows the prompts.
   the stored reply, which can quote it, is readable through the same API. This
   stays open until callers are authenticated
   ([#171](https://github.com/w3lt/lys/issues/171)).
-- `read_page` runs the scripts of pages the model chooses in Chromium. Its
-  sandbox confines them, but the browser is the build `playwright-core` pins:
-  it gets security fixes only when Lys updates that dependency and `build.sh`
-  installs the matching browser again.
+- `read_page` runs the scripts of pages the model chooses in Chromium inside
+  vmo's micro VM, with Chromium's own sandbox off, so the VM alone confines
+  them. The browser is the Alpine `chromium-headless-shell` package of the
+  `lys-readpage` image, whose `latest` tag vmo fetches at each start. It gets
+  security fixes only when the image is rebuilt on `main`, by a change under
+  `sandboxes/readpage` or a manual run of its workflow, and vmo uses the new
+  build from its next start. Whoever can publish that tag decides which reader
+  the next vmo start runs.
+- The address rule covers only the URL Lys is asked to read. vmo applies no
+  rule of its own, so a redirect, a request the page's scripts make, or a
+  name that resolves differently inside the VM can reach any address the
+  VM's network reaches, a private network the machine is on included, and
+  the HTML of what it reached then goes to the model.
+- vmo does not authenticate its callers: any process on the machine can ask
+  it to read a page. Stop and the backend's time limit do not stop the VM of
+  a read, which runs until vmo's own 30 seconds end it, and nothing limits
+  how many reads run at once.
+- Nor do the backend and the host authenticate vmo: whatever listens on
+  `127.0.0.1:8080` and answers `GET /health` with `200` makes `read_page`
+  available and receives the URL of every read. While vmo is stopped, any
+  local process can take that port.
+- A vmo killed after the 60-second stop timeout, or ended with `kill -9`, may
+  leave VMs running. A vmo or backend whose Lys died without quitting keeps
+  running ([#202](https://github.com/w3lt/lys/issues/202)).
 - Hidden text reaches the model. `read_page` reads everything a page holds,
   text it hides from view included, such as a closed accordion, text moved
   off-screen, or white text on white, because the content is what a read is
   for. Instructions a page hides from the person therefore reach the model as
-  page content, inside the untrusted framing. The content of a closed shadow
-  root is not read.
+  page content, inside the untrusted framing. The content of a shadow root
+  ([#209](https://github.com/w3lt/lys/issues/209)) or an iframe is not read.
 - Removing invisible characters removes a few visible signs too, such as the
   Arabic number signs (U+0600–U+0605) and the end-of-ayah sign (U+06DD),
   turns the England, Scotland, and Wales flags into a plain black flag, and
@@ -107,47 +129,45 @@ backend decides which calls ask; the desktop shows the prompts.
 `read_page` reads any public URL the model chooses: there is no allow list,
 because the person approves the calls, each one on Ask me or all of them on
 Just run, which Lys saves until the person switches the tool back. Allowing a
-read lets the page load what it needs from public hosts, as any browser visit
-does; the card names the page. The protections are about where a read may
-connect
-and what reaches the model:
+read lets the page load what it needs, as any browser visit does; the card
+names the page. The protections are about which pages a read may ask for and
+what reaches the model:
 
 - **Arguments.** A URL that is not absolute `http` or `https`, is longer than
-  2,048 characters, carries a username or password, or names `localhost` or a
-  blocked IP address is answered without asking. The WHATWG URL parser
-  normalizes odd spellings of an address, such as `http://2130706433/`, first.
-- **Connections.** The browser reaches the network only through a proxy the
-  read opens on a random port of `127.0.0.1`, which serves only that
-  browser's random credentials. The proxy resolves every host through the
-  lookup it connects with, so a name cannot resolve differently between the
-  check and the connection, refuses a blocked IP address without connecting
-  to it, and checks the address every socket reached. Chromium is told to
-  send this machine's own addresses through the proxy as well, whatever
-  Playwright's environment says. IPv4-mapped IPv6 addresses are matched
-  against the IPv4 rules. This holds for the page, every redirect, and every request
-  its scripts make; WebRTC may not send UDP around the proxy, and service
-  workers are blocked.
+  2,048 characters as given or once normalized and percent-encoded, carries a
+  username or password, or names `localhost` or a blocked IP address is
+  answered without asking. The WHATWG URL parser normalizes odd spellings of
+  an address, such as `http://2130706433/`, first, and vmo passes the
+  normalized URL to the reader unchanged.
+- **Connections.** Before it asks vmo, the backend looks up the URL's host
+  name through the operating system and refuses the read when any address is
+  blocked; IPv4-mapped IPv6 addresses are matched against the IPv4 rules.
+  Nothing else a read connects to is checked: vmo applies no address rule, so
+  a redirect, a request the page's scripts make, or a name that resolves
+  differently inside the VM can reach any address the VM's network reaches.
 - **Redirects.** HTTP, `<meta>` refresh, and script redirects are followed
-  to any public host, each connection checked like the first. The result
-  cites the URL the browser ended on, which must pass the URL rules too, and
-  the document there must be HTML or plain text with a 2xx status, however
-  the page reached it.
-- **Isolation.** Each read starts Chrome Headless Shell with a fresh profile
-  and Chromium's sandbox on, refuses downloads and popups, and closes the
-  browser when it ends, on Stop and on failure included. Cookies or storage a
-  page sets last for that read only; Lys never signs in, so it reads what a
-  signed-out visitor sees. Requests carry the browser's own `User-Agent`.
-- **Bounds.** One read takes at most 30 seconds, the browser's start
-  included, at most 256 connections, at most 64 MiB received, and at most
-  1 GiB held by the page's scripts. Images,
-  fonts, and media are not fetched. The page's HTML or text is cut at 4 Mi
-  UTF-16 code units inside the page, before it leaves the browser, so no page
-  can make the backend receive more; markup with more than 40,000 start tags,
-  or a parsed page with more than 40,000 elements or a nesting depth sum
-  above 400,000, is refused before Readability runs.
-- **Hidden and invisible text.** Lys reads hidden text like any other text,
-  from a script world of its own that the page's scripts cannot reach. The
-  result, like every network tool's result, then loses format and control
+  to any host, unchecked. vmo does not say where they led, so the result
+  cites the URL Lys was asked to read, and the page there is read whatever
+  its HTTP status or media type.
+- **Isolation.** Each read runs in a fresh micro VM that vmo creates from the
+  `lys-readpage` image it fetched at its start and deletes before it answers,
+  so cookies or storage a page sets last for that read only. Chromium runs as
+  a user without root inside the VM, with its own sandbox off. Lys never signs
+  in, so it reads what a signed-out visitor sees. Requests carry the browser's
+  own `User-Agent`.
+- **Bounds.** vmo gives one read 30 seconds, and the backend gives the whole
+  read, the host lookup and vmo's answer included, 60 seconds. The backend
+  reads at most 16 MiB of vmo's answer and cuts the page's HTML at 4 Mi
+  UTF-16 code units; markup with more than 40,000 start tags, or a parsed
+  page with more than 40,000 elements or a nesting depth sum above 400,000,
+  is refused before Readability runs. Nothing limits the connections a page
+  makes, the bytes it receives, or the memory its scripts hold beyond what
+  the VM has.
+- **Hidden and invisible text.** Lys reads hidden text like any other text:
+  the reader in the VM drops styles, `<link>` elements, and `style`
+  attributes, so no stylesheet applies, and the backend drops the `hidden` and
+  `aria-hidden` attributes before it extracts the main text. The result, like
+  every network tool's result, then loses format and control
   characters other than tabs and line breaks, and every variation selector
   except one emoji- or text-style selector after a visible character, and
   says how many it removed; a zero-width joiner or non-joiner stays only
@@ -161,9 +181,8 @@ and what reaches the model:
   card shown. The pane says so for every `network` tool on Just run, and Ask
   me stays the default for every tool.
 
-The backend starts the browser, so a backend that runs on another machine
-reads from that machine's network position. Today the backend runs on the
-same machine as the desktop.
+vmo runs on the backend's machine and reads from that machine's network
+position. Today the backend runs on the same machine as the desktop.
 
 ## Web searches
 

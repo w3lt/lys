@@ -49,6 +49,29 @@ export const LMSTUDIO_HOST = "127.0.0.1"
  * operations would otherwise target a different listener.
  */
 export const LMSTUDIO_PORT = 1234
+/**
+ * Loopback interface on which vmo, Lys's page reader, listens.
+ *
+ * @remarks The backend sends every page read and health check to this host,
+ * and the desktop names it on vmo's card. It is not persisted. vmo's
+ * `WebServer` in `apps/vmo` declares it again as its default host, and
+ * `VMO_ADDRESS` in the desktop's Tauri host, which checks vmo's health, as
+ * its host, under an approved CONST-005 exception: Swift and Rust cannot
+ * import it. The desktop unit test `vmo-address.test.ts` fails when either
+ * copy differs, so changing it requires changing all three together.
+ */
+export const VMO_HOST = "127.0.0.1"
+/**
+ * TCP port on which vmo, Lys's page reader, listens.
+ *
+ * @remarks The backend sends every page read and health check to this port,
+ * and the desktop names it on vmo's card. It is not persisted. vmo's
+ * `WebServer` in `apps/vmo` declares it again as its default port, and
+ * `VMO_ADDRESS` in the desktop's Tauri host as its port, under the same
+ * CONST-005 exception as {@link VMO_HOST}, checked by the same test, so
+ * changing it requires changing all three together.
+ */
+export const VMO_PORT = 8080
 // ============== ENV CONFIG ============== //
 
 // ============== EXTERNAL SERVICES ============== //

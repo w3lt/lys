@@ -117,6 +117,10 @@ describe("formatToolUnavailableNote", () => {
     [
       "settings-unreadable",
       "Lys couldn't read settings.json. Fix that file by hand."
+    ],
+    [
+      "page-reader-not-ready",
+      "vmo, Lys's page reader, isn't ready. See Settings → Runtime."
     ]
   ] as const)("says what to do when the reason is %s", (reason, note) => {
     expect(formatToolUnavailableNote(reason)).toBe(note)
@@ -128,6 +132,7 @@ describe("isFixedInSecretsPane", () => {
     expect(isFixedInSecretsPane("api-key-missing")).toBe(true)
     expect(isFixedInSecretsPane("api-key-invalid")).toBe(false)
     expect(isFixedInSecretsPane("settings-unreadable")).toBe(false)
+    expect(isFixedInSecretsPane("page-reader-not-ready")).toBe(false)
   })
 })
 

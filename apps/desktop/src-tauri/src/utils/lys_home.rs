@@ -79,8 +79,8 @@ impl LysHome {
         &self.0
     }
 
-    /// Returns the `runtime` directory that holds the Node.js runtime and
-    /// backend bundle started by release builds.
+    /// Returns the `runtime` directory that holds the Node.js runtime, the
+    /// backend bundle, and the vmo binary started by release builds.
     ///
     /// `build.sh` installs the release runtime into this directory; the paths
     /// derived from it must stay in step with that installer's layout.
@@ -98,6 +98,12 @@ impl LysHome {
     /// `runtime/backend/backend.mjs` under the Lys home.
     pub fn backend_script_path(&self) -> PathBuf {
         self.prod_runtime_dir().join("backend/backend.mjs")
+    }
+
+    /// Returns the vmo binary that release builds run as Lys's page reader,
+    /// `runtime/vmo/vmo` under the Lys home.
+    pub fn vmo_executable_path(&self) -> PathBuf {
+        self.prod_runtime_dir().join("vmo/vmo")
     }
 
     /// Returns the desktop settings file, `settings.json` under the Lys home.

@@ -11,21 +11,21 @@ presentation state, not durable conversation storage.
 
 ## Main responsibilities
 
-| Area                | Current implementation                                                                                                                                                  |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| App shell           | `App.tsx` swaps between chat and settings views and runs startup initialization.                                                                                        |
-| Chat UI             | `ChatView` renders the transcript, composer, jump-to-latest controls, and the past-conversations dialog.                                                                |
-| Message rendering   | `MarkdownMessage` renders assistant replies as Markdown with KaTeX math and highlighted, copyable code blocks.                                                          |
-| Chat state          | `src/lib/store/chat-view` owns the active conversation, the agent selected for a new one, request lifecycle, conversation opening, and error presentation.              |
-| History state       | `src/lib/store/conversation-history` owns the past-conversations dialog, its search and pages, and rename and delete calls.                                             |
-| Agent state         | `src/lib/store/agents` owns the list of built-in and stored agents, the Agents pane's editor and draft, and the agent create, update, and delete calls.                 |
-| Tool state          | `src/lib/store/tools.ts` owns the Tools pane's list of every tool, the app's and the backend's, and the session-only switches that decide which tools a request offers. |
-| Tool calls          | `src/lib/store/tool-calls` follows each running reply, shows the backend's approval prompts, runs the client tools' calls the backend sends, and sends every answer.    |
-| Tool approvals      | `src/lib/store/tool-settings.ts` owns each tool's Ask me or Just run, saved as the `tools` group of `settings.json` for the backend to read, and its automatic save.    |
-| Shell/runtime state | `src/lib/store/index.ts` tracks which view is open, whether the backend is running, and settings loaded from Tauri.                                                     |
-| Model lifecycle     | `src/lib/store/model-actions.ts` owns real inventory, load, unload, and health requests shared by settings and the composer.                                            |
-| SSE consumption     | `src/lib/apis/http/chat.ts` opens chat and reply-events SSE streams, validates events with Zod, and sends reply stops, approval answers, and tool results.              |
-| Theme               | `src/app/theme.ts` applies light or dark mode and stores the choice as `lys.theme` in WebView `localStorage`.                                                           |
+| Area                | Current implementation                                                                                                                                                                                                                             |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| App shell           | `App.tsx` swaps between chat and settings views and runs startup initialization.                                                                                                                                                                   |
+| Chat UI             | `ChatView` renders the transcript, composer, jump-to-latest controls, and the past-conversations dialog.                                                                                                                                           |
+| Message rendering   | `MarkdownMessage` renders assistant replies as Markdown with KaTeX math and highlighted, copyable code blocks.                                                                                                                                     |
+| Chat state          | `src/lib/store/chat-view` owns the active conversation, the agent selected for a new one, request lifecycle, conversation opening, and error presentation.                                                                                         |
+| History state       | `src/lib/store/conversation-history` owns the past-conversations dialog, its search and pages, and rename and delete calls.                                                                                                                        |
+| Agent state         | `src/lib/store/agents` owns the list of built-in and stored agents, the Agents pane's editor and draft, and the agent create, update, and delete calls.                                                                                            |
+| Tool state          | `src/lib/store/tools.ts` owns the Tools pane's list of every tool, the app's and the backend's, and the session-only switches that decide which tools a request offers.                                                                            |
+| Tool calls          | `src/lib/store/tool-calls` follows each running reply, shows the backend's approval prompts, runs the client tools' calls the backend sends, and sends every answer.                                                                               |
+| Tool approvals      | `src/lib/store/tool-settings.ts` owns each tool's Ask me or Just run, saved as the `tools` group of `settings.json` for the backend to read, and its automatic save.                                                                               |
+| Shell/runtime state | `src/lib/store/index.ts` tracks which view is open, whether the backend and vmo run, and settings loaded from Tauri; `vmo-runtime.ts` owns vmo's state and its start and stop, and `runtime-autostart-settings.ts` saves the two startup switches. |
+| Model lifecycle     | `src/lib/store/model-actions.ts` owns real inventory, load, unload, and health requests shared by settings and the composer.                                                                                                                       |
+| SSE consumption     | `src/lib/apis/http/chat.ts` opens chat and reply-events SSE streams, validates events with Zod, and sends reply stops, approval answers, and tool results.                                                                                         |
+| Theme               | `src/app/theme.ts` applies light or dark mode and stores the choice as `lys.theme` in WebView `localStorage`.                                                                                                                                      |
 
 ## Chat state split
 
@@ -163,10 +163,12 @@ The shell store tracks three facts separately. The Tauri host reports whether
 the backend process exists. The store reports the backend as `running` only
 after `GET /api/v1/heath` answers: it checks every 250 ms, each check bounded
 to one second, for up to 30 seconds, and shows **Backend not responding**
-(`unresponsive`) when the process stays alive without answering. Once the
-backend runs, the store reads `GET /api/v1/llm/runtime`, joining the backend's
-startup attempt through `POST /api/v1/llm/runtime/connect` while it is still
-`connecting`.
+(`unresponsive`) when the process stays alive without answering. On the
+backend card, the heading is a polite status region, "Backend status"; the
+address and uptime line sits outside it, so the uptime is not announced every
+second. Once the backend runs, the store reads `GET /api/v1/llm/runtime`,
+joining the backend's startup attempt through
+`POST /api/v1/llm/runtime/connect` while it is still `connecting`.
 
 The Runtime pane's LM Studio card shows `unknown`, `connecting`, `connected`,
 or `unreachable` with the address `127.0.0.1:1234`. Its **Refresh** button is
@@ -174,8 +176,59 @@ the only control that asks the backend to reconnect. A failed model request
 re-reads the status, so a lost LM Studio appears as not reachable without
 polling. The composer banner names the first missing prerequisite—the
 backend, LM Studio, or model weights—and opens the settings pane that fixes
-it. `initialize` shows the shell as soon as settings load; the backend starts
-in the background.
+it. `initialize` shows the shell as soon as settings load; the backend and vmo
+then start in the background, together and without waiting for each other,
+each when its startup switch is on or the host already owns its process. A
+vmo the host is still stopping, as after a window reload during Stop, is
+joined instead: the card shows the stop, and vmo stays stopped whatever its
+switch says.
+
+## vmo status
+
+vmo, the page reader `read_page` uses, has its own card in the Runtime pane,
+under the backend card. The Tauri host owns the process; the store's vmo slice
+owns what the card shows: `starting`, `running`, `stopping`, `stopped`, or
+`unresponsive` (**vmo not responding**). A start asks the host to start vmo
+unless it owns a running one, then checks every second for up to ten minutes,
+long enough for a first start that pulls vmo's images; every start fetches the
+reader image's `latest` tag. Each check reads the owned process first and asks
+vmo's health route only while it runs, so a vmo that has already exited never
+shows as `running`. The health route answers for whatever listens on vmo's
+port, though: while the owned vmo is still starting, another vmo there, such as
+one left by a Lys that died without quitting
+([#202](https://github.com/w3lt/lys/issues/202)), makes the card say
+`running`. vmo shows `stopped` when its process exits before it answers, and
+`unresponsive` when it runs ten minutes without answering. A stop shows
+`stopping` while vmo deletes its VMs, up to 60 seconds, and joins a stop
+already in progress.
+
+Start is offered only while vmo is stopped, and Stop while it runs or is not
+responding, as on the backend card. Both cards' buttons show "Start" and
+"Stop"; for assistive technology they are named "Start vmo" and "Stop vmo"
+here, and "Start backend" and "Stop backend" on the backend card. The vmo
+actions never reject: a kill after the stop timeout ("vmo didn't stop in time
+and was killed. It may have left VMs running."), a failed start, and a failed
+stop show as a problem line on the card until the next start or stop. The
+heading, the address line, and the problem line form one polite, atomic status
+region, "vmo status", that stays mounted, so a change of status and its
+problem are announced as one message. After a failed start or stop the
+store reads vmo's status again: while vmo's process is alive, running or still
+stopping, or when its status cannot be read, the card shows **vmo not
+responding** with the failure, so Stop stays offered and joins a stop in
+progress; otherwise it shows **vmo stopped** with it.
+Once vmo is `running`, the card stops checking, as the backend card does: a
+vmo that stops answering later is noticed when a turn offers `read_page`.
+
+The switches "Start it when Lys opens" and "Start vmo when Lys opens" change
+the settings at once and save both to the `runtime` group of `settings.json`,
+serialized with the other group saves; the latest switches win. A status line
+under the two cards says "Lys couldn't save the startup switches. The next
+launch follows the switches last saved; changing a switch tries again." when
+the save fails. The line is a polite status region that stays mounted and
+empties when a later save starts. Under each switch's heading, the line saying
+what off means is the switch's accessible description. The switches are read
+from disk at each launch and each window reload, so an unsaved switch applies
+to no later session.
 
 ## Model settings
 
@@ -411,8 +464,15 @@ saving. A name in the list that Lys does not list now, such as a backend tool
 whose list could not be read, is kept and has no effect.
 
 A backend tool that cannot run now, such as `web_search` without a saved
-Tavily API key, keeps its row: its switch is disabled and shows off, a note
-under the row says why and what to do. For a missing key it says "Needs a
+Tavily API key or `read_page` while vmo is not ready, keeps its row: its
+switch is disabled and shows off, a note under the row says why and what to
+do. For `read_page` it says "vmo, Lys's page reader, isn't ready. See
+Settings → Runtime." While the app shell is mounted, the tool store reads a
+list it has already read again whenever the backend starts running, or vmo
+becomes running, stopped, or not responding while the backend runs, so the row
+locks and unlocks without waiting for a refused request; the new read starts
+after any read in flight. A list never read is left for whoever needs it
+first. For a missing key it says "Needs a
 Tavily API key. Add one in Settings → Secrets." and Open Secrets selects the
 Secrets pane. For a key in `settings.json` that isn't valid, or a settings file
 that cannot be read, it says to fix `secrets.tavilyApiKey` or the file by hand
@@ -512,9 +572,13 @@ are gone and the reply is marked interrupted when the backend next starts.
 
 ## Current limitations
 
-- Runtime edits and `model.contextSize` edits remain session-only. Generation
-  settings and load configurations save automatically; a failed save leaves the
-  edits available for the current session.
+- Runtime edits other than the two startup switches, and `model.contextSize`
+  edits, remain session-only. Generation settings, load configurations, and
+  the startup switches save automatically; a failed save leaves the edits
+  available for the current session.
+- The vmo card stops checking once vmo is `running`, so a vmo that crashes
+  later still shows `running` until it is stopped or restarted; `read_page`
+  is then refused when a turn offers it, and the tool list is read again.
 - The retained local context budget, `model.contextSize`, still sets the
   reply ceiling slider's usual range and the agent editor's prompt measure. It
   is separate from the context length in a model's load configuration and does

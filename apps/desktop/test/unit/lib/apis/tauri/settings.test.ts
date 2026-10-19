@@ -4,6 +4,7 @@ import {
   loadSettings,
   saveGenerationSettings,
   saveLoadConfigurationSettings,
+  saveRuntimeAutoStartSettings,
   saveSecretsSettings,
   saveSettings,
   saveToolSettings
@@ -12,7 +13,10 @@ import type {
   LoadConfigurationSettings,
   LysSettings
 } from "@/lib/store/settings"
-import { startNativeHostFake } from "../../../support/nativeHostFake"
+import {
+  NO_NATIVE_COMMAND_ARGS,
+  startNativeHostFake
+} from "../../../support/nativeHostFake"
 import {
   createControlledPromise,
   createSettlementReader,
@@ -435,6 +439,67 @@ describe("saveToolSettings", () => {
 
     await expect(
       saveToolSettings({ justRunToolNames: new Set(["find_files"]) })
+    ).rejects.toBe("Disk full")
+  })
+})
+
+describe("saveRuntimeAutoStartSettings", () => {
+  it("replaces only the two startup switches, keeping the default model and backend address on disk", async () => {
+    const host = startNativeHostFake({
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => null
+    })
+
+    await saveRuntimeAutoStartSettings({
+      autoStartBackend: true,
+      autoStartVmo: true
+    })
+
+    const savedRuntime: SettingsDocument["runtime"] = {
+      autoStartBackend: true,
+      autoStartVmo: true,
+      defaultModel: STORED_SETTINGS_DOCUMENT.runtime.defaultModel,
+      backendAddress: STORED_SETTINGS_DOCUMENT.runtime.backendAddress
+    }
+    const newSettings: SettingsDocument = {
+      ...STORED_SETTINGS_DOCUMENT,
+      runtime: savedRuntime
+    }
+    const saveSettingsArgs = { newSettings }
+    expect(host.commands).toEqual([
+      { command: "load_settings", args: NO_NATIVE_COMMAND_ARGS },
+      { command: "save_settings", args: saveSettingsArgs }
+    ])
+  })
+
+  it("writes nothing when the document cannot be loaded", async () => {
+    const host = startNativeHostFake({
+      load_settings: () => Promise.reject("Failed to read settings.json"),
+      save_settings: () => null
+    })
+
+    await expect(
+      saveRuntimeAutoStartSettings({
+        autoStartBackend: true,
+        autoStartVmo: false
+      })
+    ).rejects.toBe("Failed to read settings.json")
+    expect(host.commands.map((invoked) => invoked.command)).toEqual([
+      "load_settings"
+    ])
+  })
+
+  it("rejects when the merged document cannot be written", async () => {
+    startNativeHostFake({
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => Promise.reject("Disk full")
+    })
+
+    await expect(
+      saveRuntimeAutoStartSettings({
+        autoStartBackend: true,
+        autoStartVmo: false
+      })
     ).rejects.toBe("Disk full")
   })
 })

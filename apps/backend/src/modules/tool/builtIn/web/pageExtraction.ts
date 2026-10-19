@@ -92,9 +92,23 @@ const NESTED_BLOCK_SEPARATOR = " "
 
 /**
  * Elements removed before the page is read: code, styles, and inert
- * templates, whose text is never shown as page content.
+ * templates, whose text is never shown as page content, and inline SVG,
+ * whose text is icon titles and chart labels rather than the page's prose.
  */
-const NON_CONTENT_SELECTOR = "template, script, noscript, style"
+const NON_CONTENT_SELECTOR = "template, script, noscript, style, svg"
+
+/**
+ * Attributes that hide an element from readers. They are removed before the
+ * page is read, so Readability keeps the text they hide: hidden text is read
+ * like any other text.
+ */
+const HIDING_ATTRIBUTES: readonly string[] = Object.freeze([
+  "hidden",
+  "aria-hidden"
+])
+
+/** Elements that carry an attribute of {@link HIDING_ATTRIBUTES}. */
+const HIDDEN_ELEMENT_SELECTOR = "[hidden], [aria-hidden]"
 
 /** Elements whose text forms a heading block. */
 const HEADING_ELEMENTS: ReadonlySet<string> = new Set([
@@ -171,6 +185,12 @@ interface LinkedomElement extends LinkedomNode {
   get localName(): string
   /** Removes the element from its parent. */
   remove(): void
+  /**
+   * Removes an attribute from the element.
+   *
+   * @param name - Attribute name; nothing happens when the element has none.
+   */
+  removeAttribute(name: string): void
 }
 
 /** Document linkedom builds, as far as this adapter reads it. */
@@ -624,20 +644,57 @@ function hasMoreStartTagsThanElementLimit(html: string): boolean {
 }
 
 /**
- * Extracts the main text of an HTML page.
+ * Removes the elements that are never read as page content.
  *
- * @param page - HTML page Lys read.
- * @returns The article, `no-readable-text`, or `too-complex`.
- * @throws When linkedom or Readability fail on the markup.
+ * @param document - Parsed page, changed in place: every element of
+ * {@link NON_CONTENT_SELECTOR} is removed with its content.
  */
-function extractHtmlArticle(page: RenderedPage): PageExtractionResult {
-  if (hasMoreStartTagsThanElementLimit(page.text)) {
-    return Object.freeze({ status: "too-complex" })
-  }
-  const document = parsePageDocument(page.text)
+function removeNonContentElements(document: LinkedomDocument): void {
   for (const element of document.querySelectorAll(NON_CONTENT_SELECTOR)) {
     element.remove()
   }
+}
+
+/**
+ * Removes the attributes that hide elements, so the text they hide is read.
+ *
+ * @param document - Parsed page, changed in place: every attribute of
+ * {@link HIDING_ATTRIBUTES} is removed from each element that carries it.
+ */
+function removeHidingAttributes(document: LinkedomDocument): void {
+  for (const element of document.querySelectorAll(HIDDEN_ELEMENT_SELECTOR)) {
+    for (const name of HIDING_ATTRIBUTES) element.removeAttribute(name)
+  }
+}
+
+/**
+ * Extracts the main text of a page Lys read.
+ *
+ * @param page - Page vmo read: the HTML of its DOM once it rendered, which a
+ * plain-text page has too, its text inside a `<pre>`.
+ * @returns The page's title, site, publication date, and main text as
+ * blocks; `no-readable-text` when the page has no main text; or
+ * `too-complex` when the page passes {@link MAXIMUM_PAGE_ELEMENTS} or
+ * {@link MAXIMUM_PAGE_DEPTH_SUM}.
+ * @throws When the markup makes linkedom or Readability fail; the page is
+ * then not read.
+ * @remarks Markup with more start tags than {@link MAXIMUM_PAGE_ELEMENTS} is
+ * refused before it is parsed. Then scripts, styles, `<noscript>`,
+ * `<template>`, and inline `<svg>` elements are removed, the `hidden` and
+ * `aria-hidden` attributes are dropped so the text they hide is read, the
+ * parsed page's size is checked, and Readability selects the main content.
+ * Extraction runs no script of the page. The work is synchronous; the limits
+ * keep it to about a second on current hardware, deeply nested markup
+ * included. Markup that puts its text outside `<body>` reads as having no
+ * text. A page without a title is titled by its host.
+ */
+export function extractPageArticle(page: RenderedPage): PageExtractionResult {
+  if (hasMoreStartTagsThanElementLimit(page.html)) {
+    return Object.freeze({ status: "too-complex" })
+  }
+  const document = parsePageDocument(page.html)
+  removeNonContentElements(document)
+  removeHidingAttributes(document)
   if (!isPageStructureReadable(document)) {
     return Object.freeze({ status: "too-complex" })
   }
@@ -655,68 +712,6 @@ function extractHtmlArticle(page: RenderedPage): PageExtractionResult {
     siteName: normalizeArticleField(parsed.siteName),
     publishedTime: normalizeArticleField(parsed.publishedTime),
     blocks
-  })
-  return buildExtractionResult(article)
-}
-
-/**
- * Builds the text blocks of a plain-text page.
- *
- * @param text - Page text.
- * @returns One block per paragraph, paragraphs being separated by blank
- * lines.
- */
-function buildPlainTextBlocks(text: string): readonly PageBlock[] {
-  return Object.freeze(
-    text
-      .split(/\n\s*\n/)
-      .map(normalizeBlockText)
-      .filter((paragraph) => paragraph !== "")
-      .map((paragraph) => Object.freeze({ kind: "text", text: paragraph }))
-  )
-}
-
-/**
- * Extracts the main text of a page Lys read.
- *
- * @param page - Page the browser rendered: the HTML Lys writes from the
- * page's DOM when it reads the page's document, or a plain-text page's text.
- * @returns The page's title, site, publication date, and main text as
- * blocks; `no-readable-text` when the page has no main text; or, for
- * HTML, `too-complex` when the page passes {@link MAXIMUM_PAGE_ELEMENTS} or
- * {@link MAXIMUM_PAGE_DEPTH_SUM}.
- * @throws When the markup makes linkedom or Readability fail; the page is
- * then not read.
- * @remarks For HTML, markup with more start tags than
- * {@link MAXIMUM_PAGE_ELEMENTS} is refused before it is parsed. Then
- * scripts, styles, `<noscript>`, and `<template>` elements are removed, the
- * parsed page's size is checked, and Readability selects the main content.
- * Extraction runs no script of the page. The work is synchronous; the limits keep
- * it to about a second on current hardware, deeply nested markup included.
- * Markup that puts its text outside `<body>` reads as having no text. A
- * plain-text page is titled by its host.
- */
-export function extractPageArticle(page: RenderedPage): PageExtractionResult {
-  switch (page.mediaType) {
-    case "text/html":
-      return extractHtmlArticle(page)
-    case "text/plain":
-      return extractPlainTextArticle(page)
-  }
-}
-
-/**
- * Extracts the text of a plain-text page.
- *
- * @param page - Plain-text page Lys read.
- * @returns The article, titled by the page's host, or `no-readable-text`.
- */
-function extractPlainTextArticle(page: RenderedPage): PageExtractionResult {
-  const article: PageArticle = Object.freeze({
-    title: new URL(page.url).host,
-    siteName: undefined,
-    publishedTime: undefined,
-    blocks: buildPlainTextBlocks(page.text)
   })
   return buildExtractionResult(article)
 }

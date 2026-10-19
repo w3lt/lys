@@ -25,6 +25,7 @@ import { TEST_BACKEND_CONFIG } from "../support/backendConfig"
 import { createFixtureUuidV7 } from "../support/conversationFixtures"
 import { createFakeLlmRuntime } from "../support/fakeLlmRuntime"
 import { writeSettingsFile } from "../support/settingsFile"
+import { answerWithBody, startVmoServer } from "../support/vmoServer"
 
 /** Name of each acquisition whose release the bundle owns. */
 type AcquisitionName = "chat" | "database" | "llm-runtime"
@@ -39,7 +40,7 @@ function createFailureReporters() {
     reportLlmRuntimeAcquisitionFailure: vi.fn(),
     reportLlmRuntimeAvailabilityCheckFailure: vi.fn()
   } satisfies LlmRuntimeFailureReporters
-  const pageRendering = { reportBrowserFailure: vi.fn() }
+  const pageRendering = { reportPageReaderFailure: vi.fn() }
   return { llmRuntime, pageRendering } satisfies SingletonFailureReporters
 }
 
@@ -160,6 +161,28 @@ describe("createSingletonServices", () => {
       status: "unavailable",
       reason: "api-key-missing"
     })
+  })
+
+  it("offers read_page once vmo at the configured host and port answers its health route", async () => {
+    const { factories } = createRecordedFactories()
+    const vmo = await startVmoServer(
+      answerWithBody(200, "text/plain; charset=utf-8", "ok\n")
+    )
+    const vmoPort = Number(new URL(vmo.origin).port)
+
+    const services = await createSingletonServices(
+      { ...TEST_BACKEND_CONFIG, vmoPort },
+      createFailureReporters(),
+      factories
+    )
+    onTestFinished(async () => await closeSingletonServices(services))
+
+    expect(
+      await services.builtInTools[0]?.provider.findTurnTool()
+    ).toMatchObject({ status: "ready" })
+    expect(vmo.receivedRequests).toMatchObject([
+      { method: "GET", path: "/health" }
+    ])
   })
 
   it("decides tool approvals from the Just run choices in the configured settings file", async () => {

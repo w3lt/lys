@@ -4,7 +4,7 @@ import Containerization
 /// them.
 struct Services: Sendable {
     /// Creates and deletes the micro VMs that routes do their work in.
-    let vmManager: VmManager
+    let readerVmLifecycle: ContainerizationReaderVmLifecycle
 }
 
 /// Creates vmo's services, runs `body` with them, and closes them when `body`
@@ -18,9 +18,9 @@ struct Services: Sendable {
 /// - Parameters:
 ///   - isolation: Actor that `createContainerManager` and `body` run on: the
 ///     caller's, by default.
-///   - createContainerManager: Creates the container manager the VM manager
-///     uses. Defaults to ``createProductionContainerManager()``; tests pass
-///     one that needs no image or vmnet.
+///   - createContainerManager: Creates the container manager the reader VM
+///     lifecycle uses. Defaults to ``createProductionContainerManager()``;
+///     tests pass one that needs no image or vmnet.
 ///   - body: Work that uses the services, such as serving HTTP. It must not
 ///     keep them after it returns.
 /// - Throws: The error of `createContainerManager`, before `body` runs. The
@@ -32,7 +32,9 @@ func withServices(
     createContainerManager: () async throws -> ContainerManager = createProductionContainerManager,
     _ body: (Services) async throws -> Void
 ) async throws {
-    let services = Services(vmManager: VmManager(containerManager: try await createContainerManager()))
+    let services = Services(
+        readerVmLifecycle: ContainerizationReaderVmLifecycle(containerManager: try await createContainerManager())
+    )
     var bodyError: (any Error)?
     do {
         try await body(services)
@@ -51,7 +53,7 @@ func withServices(
 ///   returned. A ``CleanupAfterFailureError`` when both failed.
 private func closeServices(_ services: Services, after bodyError: (any Error)?) async throws {
     do {
-        try await services.vmManager.close()
+        try await services.readerVmLifecycle.close()
     } catch {
         guard let bodyError else {
             throw error

@@ -21,6 +21,7 @@ const SettingsView = lazy(() => import("@/views/SettingsView/SettingsView"))
 
 import "./App.scss"
 import { useLysStore } from "./lib/store"
+import { registerToolListRefresh } from "./lib/store/tools"
 
 /**
  * Composes the initialized desktop shell and switches between its main views.
@@ -28,7 +29,9 @@ import { useLysStore } from "./lib/store"
  * @remarks The application store owns
  * initialization and the active view; the reducer owns chat scroll state. The
  * component renders intentionally blank while initialization is pending, then
- * renders the title bar and one lazily loaded child view. The initialization
+ * renders the title bar and one lazily loaded child view. While mounted, it
+ * keeps the tool list in step with the backend and vmo through
+ * {@link registerToolListRefresh}, unsubscribing on unmount. The initialization
  * promise is detached from the effect, so a rejected initialization is
  * unhandled by this component. Only a failed settings load leaves the store in
  * its blank initializing state; a rejected backend start or status check
@@ -42,6 +45,7 @@ export default function App() {
   useEffect(() => {
     void initialize()
   }, [initialize])
+  useEffect(() => registerToolListRefresh(), [])
 
   const { activeView, setActiveView } = useLysStore((state) => state)
 

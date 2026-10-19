@@ -13,6 +13,11 @@ import {
   type LoadConfigurationSettingsSlice
 } from "./load-configuration-settings"
 import {
+  createRuntimeAutoStartSettingsSlice,
+  isRuntimeAutoStartSettingsEqual,
+  type RuntimeAutoStartSettingsSlice
+} from "./runtime-autostart-settings"
+import {
   createSecretsSettingsSlice,
   type SecretsSettingsSlice
 } from "./secrets-settings"
@@ -23,6 +28,7 @@ import {
   type ToolSettingsSlice
 } from "./tool-settings"
 import { getBackendReadiness, type BackendReadiness } from "./backend-readiness"
+import { createVmoRuntimeSlice, type VmoRuntimeSlice } from "./vmo-runtime"
 import {
   createLmStudioStatusSlice,
   type LmStudioStatus,
@@ -31,6 +37,7 @@ import {
 import { create } from "zustand"
 import { BACKEND_HOST, BACKEND_PORT } from "@lys/protocol"
 import { getBackendStatus, startBackend, stopBackend } from "../apis"
+import { getVmoStatus } from "@/lib/apis/tauri/vmo"
 import { sendWebSearchKeyCheck } from "../apis/http/tools"
 import { isLoadConfigurationSettingsEqual } from "../models/model-load-configuration"
 
@@ -89,20 +96,25 @@ type LysActions = {
   setSettingsPane: (pane: SettingsPane) => void
   /**
    * Replaces store-owned settings and automatically persists generation, load
-   * configuration, and tools edits.
+   * configuration, tools, and startup switch edits.
    *
    * @param settings - Complete settings value applied in memory immediately.
-   * Runtime and model edits remain session-only; generationSave,
-   * loadConfigurationSave, and toolSettingsSave report persistence.
+   * Default model, backend address, and model edits remain session-only;
+   * generationSave, loadConfigurationSave, toolSettingsSave, and
+   * runtimeAutoStartSave report persistence.
    */
   setSettings: (settings: LysSettings) => void
   /**
-   * Loads settings, shows the shell, then starts or checks the backend.
+   * Loads settings, shows the shell, then starts or checks the backend and
+   * vmo at once.
    *
-   * @returns A promise resolving after settings load and any backend start settles.
-   * @throws The settings or backend Tauri rejection.
-   * @remarks The backend starts when autostart is on or a process already
-   * runs; either way readiness is established through the health route.
+   * @returns A promise resolving after settings load and both starts settle.
+   * @throws The settings Tauri rejection; otherwise, after both settle, the
+   * backend's status or start rejection, or else the vmo status rejection.
+   * @remarks Each starts when its autostart switch is on or the desktop
+   * already owns its process; either way readiness is established through
+   * its health route. A vmo stop still in progress is joined instead. Neither
+   * waits for the other, and vmo's start and stop never reject.
    */
   initialize: () => Promise<void>
   /**
@@ -141,6 +153,8 @@ type LysStore = LysState &
   LoadConfigurationSettingsSlice &
   SecretsSettingsSlice &
   ToolSettingsSlice &
+  RuntimeAutoStartSettingsSlice &
+  VmoRuntimeSlice &
   LmStudioStatusSlice
 
 /** Initial renderer-side store state before Tauri initialization. */
@@ -158,15 +172,15 @@ const initialState: LysState = {
 }
 
 /**
- * Zustand hook and store for application view, settings, backend lifecycle,
- * and LM Studio status.
+ * Zustand hook and store for application view, settings, backend and vmo
+ * lifecycles, and LM Studio status.
  *
  * @remarks Initialization and process actions are application-owned
  * asynchronous transitions. Tauri errors propagate from the returned promises;
  * settings are edited in memory by setSettings, and tool approvals by
- * updateToolApproval. The generation, load configuration, and tool-settings
- * slices own automatic saves and retain their completion or failure state
- * across pane changes; the store runs every group's writes one at a time, so
+ * updateToolApproval. The generation, load configuration, tool-settings, and
+ * runtime-autostart slices own automatic saves and retain their completion or
+ * failure state across pane changes; the store runs every group's writes one at a time, so
  * one group's save never writes back another group's older value.
  *
  * Model requests are owned by the model slice, use the shared HTTP protocol,
@@ -242,6 +256,40 @@ export const useLysStore = create<LysStore>()((set, get) => {
   }
 
   /**
+   * Starts the backend when its autostart is on or its process already runs.
+   *
+   * @param isAutoStartOn - Whether the saved switch starts it with Lys.
+   * @returns A promise resolving after any start settles.
+   * @throws The Tauri status or start rejection.
+   */
+  async function startBackendWhenNeeded(isAutoStartOn: boolean): Promise<void> {
+    if (isAutoStartOn || (await getBackendStatus()).running) {
+      await get().startBackend()
+    }
+  }
+
+  /**
+   * Updates vmo for a launch: joins a stop that a reloaded window finds still
+   * in progress, and otherwise starts vmo when its autostart is on or adopts
+   * the running vmo the desktop already owns.
+   *
+   * @param isAutoStartOn - Whether the saved switch starts it with Lys.
+   * @returns A promise resolving after any start or stop settles.
+   * @throws The Tauri status rejection; the start and the stop never reject.
+   * @remarks A stop in progress wins over the switch, so a window reloaded
+   * while vmo deletes its VMs shows the stop rather than a start the host
+   * refuses.
+   */
+  async function updateVmoForLaunch(isAutoStartOn: boolean): Promise<void> {
+    const { status } = await getVmoStatus()
+    if (status === "stopping") {
+      await get().stopVmo()
+    } else if (isAutoStartOn || status === "running") {
+      await get().startVmo()
+    }
+  }
+
+  /**
    * Refreshes model observations when LM Studio connects and releases them otherwise.
    *
    * @param lmStudioStatus - Newly published LM Studio status.
@@ -259,6 +307,8 @@ export const useLysStore = create<LysStore>()((set, get) => {
     ...createGenerationSettingsSlice(set, get, settingsGroupSaves),
     ...createLoadConfigurationSettingsSlice(set, get, settingsGroupSaves),
     ...createToolSettingsSlice(set, get, settingsGroupSaves),
+    ...createRuntimeAutoStartSettingsSlice(set, get, settingsGroupSaves),
+    ...createVmoRuntimeSlice(set, get),
     ...createSecretsSettingsSlice(set, get, {
       saveSecretsSettings: settingsGroupSaves.saveSecretsSettings,
       sendWebSearchKeyCheck: () =>
@@ -321,11 +371,16 @@ export const useLysStore = create<LysStore>()((set, get) => {
         get().settings.tools,
         settings.tools
       )
+      const hasRuntimeAutoStartChanged = !isRuntimeAutoStartSettingsEqual(
+        get().settings.runtime,
+        settings.runtime
+      )
       set({ settings, modelRuntime, generationSave, loadConfigurationSave })
       if (hasGenerationChanged) void get().saveGenerationSettings()
       if (hasLoadConfigurationChanged)
         void get().saveLoadConfigurationSettings()
       if (hasToolsChanged) void get().saveToolSettings()
+      if (hasRuntimeAutoStartChanged) void get().saveRuntimeAutoStartSettings()
     },
 
     startBackend: async () => {
@@ -381,12 +436,13 @@ export const useLysStore = create<LysStore>()((set, get) => {
     initialize: async () => {
       const settings = await loadSettings()
       set({ settings, initializing: false })
-      if (
-        settings.runtime.autoStartBackend ||
-        (await getBackendStatus()).running
-      ) {
-        await get().startBackend()
-      }
+      const [backendStart, vmoStart] = await Promise.allSettled([
+        startBackendWhenNeeded(settings.runtime.autoStartBackend),
+        updateVmoForLaunch(settings.runtime.autoStartVmo)
+      ])
+      // vmo's start and stop never reject; only its status check can.
+      if (backendStart.status === "rejected") throw backendStart.reason
+      if (vmoStart.status === "rejected") throw vmoStart.reason
     }
   }
 })

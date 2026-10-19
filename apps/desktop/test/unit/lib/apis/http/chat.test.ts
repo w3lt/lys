@@ -289,7 +289,7 @@ describe("readChatEvents", () => {
     [
       "read_page",
       "page-reader-not-ready",
-      "read_page is unavailable: vmo, Lys's page reader, isn't ready. Start it in Settings → Runtime, or switch read_page off."
+      "read_page is unavailable: vmo, Lys's page reader, isn't ready. See Settings → Runtime, or switch read_page off."
     ]
   ] as const)(
     "reports %s that cannot run because of %s, with what to do",

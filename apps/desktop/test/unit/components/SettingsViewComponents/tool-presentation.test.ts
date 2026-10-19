@@ -120,7 +120,7 @@ describe("formatToolUnavailableNote", () => {
     ],
     [
       "page-reader-not-ready",
-      "vmo, Lys's page reader, isn't ready. Start it in Settings → Runtime."
+      "vmo, Lys's page reader, isn't ready. See Settings → Runtime."
     ]
   ] as const)("says what to do when the reason is %s", (reason, note) => {
     expect(formatToolUnavailableNote(reason)).toBe(note)

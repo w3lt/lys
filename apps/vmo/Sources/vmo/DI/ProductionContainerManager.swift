@@ -10,9 +10,10 @@ private let initfsReference = "ghcr.io/apple/containerization/vminit:0.52.0"
 /// It pulls the vminit image when Containerization's default image store
 /// doesn't have it yet, and pulls the ``readPageImageReference`` image at
 /// every start, so vmo reads pages with the image its `latest` tag names at
-/// that time. It creates a vmnet network in shared mode. The network is a
-/// ``SharedNetwork``, so every copy of the manager allocates addresses from
-/// one record.
+/// that time. Until #213, an image that `latest` no longer names stays in the
+/// store, so the store grows with each new reader image. It creates a vmnet
+/// network in shared mode. The network is a ``SharedNetwork``, so every copy
+/// of the manager allocates addresses from one record.
 ///
 /// - Returns: A manager that stores images and VM files in Containerization's
 ///   default image store.

@@ -151,9 +151,9 @@ protocol ReaderVmLifecycle: Sendable {
     /// its exit code.
     ///
     /// Concurrent and repeated calls share one wait, so they return the same
-    /// output. There is no time limit. Cancelling the caller doesn't end the
-    /// wait. Deleting the VM does: at once when the deletion stops the
-    /// command, or when the command exits after stopping it failed.
+    /// output. There is no time limit. Until #212, cancelling the caller
+    /// doesn't end the wait. Deleting the VM does: at once when the deletion
+    /// stops the command, or when the command exits after stopping it failed.
     ///
     /// - Parameter containerId: Container id of a VM that
     ///   ``startVm(containerId:)`` started.

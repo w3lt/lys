@@ -21,7 +21,7 @@ private let initfsReference = "ghcr.io/apple/containerization/vminit:0.52.0"
 ///   then doesn't start, even when an earlier pull left the reader image in
 ///   the store.
 func createProductionContainerManager() async throws -> ContainerManager {
-    // TODO(#190): this kernel path only exists on the author's machine, so
+    // TODO(#200): this kernel path only exists on the author's machine, so
     // read-page can't boot its VMs on any other Mac. vmo needs another way to
     // get its kernel.
     let kernelPath = FileManager.default.homeDirectoryForCurrentUser

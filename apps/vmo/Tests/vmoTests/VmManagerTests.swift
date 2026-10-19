@@ -2,10 +2,15 @@ import Foundation
 import Testing
 @testable import vmo
 
-/// Checks the parts of the VM manager's lifecycle that run without a VM.
+/// Checks the parts of the VM manager's lifecycle that only it has, closing,
+/// without a VM. ``ReaderVmLifecycleContractTests`` checks it, like every
+/// ``ReaderVmLifecycle``, against the parts of that contract that hold
+/// without a VM.
 ///
-/// Creating a VM needs an image, a Linux kernel, and Virtualization
-/// support, so no test here creates one.
+/// In a test, creating and booting a VM needs an image, a Linux kernel, which
+/// vmo finds only on one developer's Mac until #200, and a process signed
+/// with the virtualization entitlement, which `swift test` doesn't give, so
+/// no test here creates one.
 @Suite("VM manager lifecycle")
 struct VmManagerTests {
     /// Directory holding this test's image store.
@@ -16,22 +21,6 @@ struct VmManagerTests {
     /// - Throws: The file system's error when the directory can't be created.
     init() throws {
         containerRoot = try TemporaryContainerRoot()
-    }
-
-    /// Verifies that a ready manager rejects an id it never returned.
-    @Test("Starting, waiting for, and deleting a VM the manager didn't create fail as unknown")
-    func rejectsUnknownVm() async throws {
-        let vmManager = VmManager(containerManager: try containerRoot.createContainerManager())
-
-        await #expect(throws: VmManagerError.unknownVm(containerId: "missing")) {
-            try await vmManager.startVm(containerId: "missing")
-        }
-        await #expect(throws: VmManagerError.unknownVm(containerId: "missing")) {
-            try await vmManager.waitForCommandExit(containerId: "missing")
-        }
-        await #expect(throws: VmManagerError.unknownVm(containerId: "missing")) {
-            try await vmManager.deleteVm(containerId: "missing")
-        }
     }
 
     /// Verifies that closing stops admission before any VM work starts.

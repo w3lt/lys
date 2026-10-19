@@ -18,11 +18,15 @@ private struct ReadPageFailureBody: Decodable, Equatable {
     let error: String
 }
 
-/// Checks `GET /web/read-page` without a VM: through the router up to the VM
-/// manager, and the responses built from how a read ended.
+/// Checks `GET /web/read-page` without a VM: through the router to a closed
+/// VM manager or to an in-memory reader VM lifecycle, and the responses built
+/// from how a read ended.
 ///
-/// Reading a page needs the read-page image, a Linux kernel, and
-/// Virtualization support, so no test here reads one.
+/// In a test, reading a page in a real VM needs the read-page image, a Linux
+/// kernel, which vmo finds only on one developer's Mac until #200, and a
+/// process signed with the virtualization entitlement, which `swift test`
+/// doesn't give, so no test here does. ``ReadPageInVmOutcomeTests`` and the
+/// suites beside it check every way a read in a VM ends.
 @Suite("Read-page endpoint")
 struct ReadPageTests {
     /// Directory holding this test's image store.
@@ -44,7 +48,7 @@ struct ReadPageTests {
     private func buildRouter() async throws -> Router {
         let vmManager = VmManager(containerManager: try containerRoot.createContainerManager())
         try await vmManager.close()
-        return try Router(routes: [.readPage(vmManager: vmManager)])
+        return try Router(routes: [.readPage(vmLifecycle: vmManager)])
     }
 
     /// Builds the read-page request for a `url` parameter.
@@ -100,6 +104,30 @@ struct ReadPageTests {
         let response = await router.handleRequest(buildRequest(url: "https://example.com/"))
 
         #expect(response.status == .internalServerError)
+    }
+
+    /// Verifies that the route reads the page the request names: the reader
+    /// VM gets the URL's text unchanged, and the reader's HTML is the answer.
+    /// Foundation would encode this URL's `%20` again because of the
+    /// brackets.
+    @Test("GET /web/read-page reads the requested URL in a reader VM and answers 200 OK with its HTML", .timeLimit(.minutes(1)))
+    func answersHtmlOfRequestedUrl() async throws {
+        let output = CommandOutput(
+            stdout: CommandStreamOutput(bytes: Data("<p>Hi</p>\n".utf8), isTruncated: false),
+            stderr: CommandStreamOutput(bytes: Data(), isTruncated: false),
+            exitCode: 0
+        )
+        let eventLog = ReaderVmEventLog()
+        let lifecycle = InMemoryReaderVmLifecycle(script: ReaderVmScript(command: .exitsAtStart(output)), events: eventLog)
+        let router = try Router(routes: [.readPage(vmLifecycle: lifecycle)])
+        let url = "https://example.com/search?q=hello%20world&filter[type]=article"
+
+        let response = await router.handleRequest(buildRequest(url: url))
+
+        #expect(response.status == .ok)
+        let body = try JSONDecoder().decode(ReadPageResultBody.self, from: response.body)
+        #expect(body == ReadPageResultBody(html: "<p>Hi</p>\n", isTruncated: false))
+        #expect(eventLog.events.first == .createVm(imageReference: readPageImageReference, arguments: [url]))
     }
 
     /// Verifies which URLs are accepted, and that the reader gets their text

@@ -8,19 +8,21 @@ extension Route {
     /// `GET /web/read-page?url=…`: reads the page at `url` in a micro VM of
     /// its own, which is deleted before the response is sent.
     ///
-    /// The read takes at most 30 seconds, unless creating and booting the VM
-    /// alone take longer; ``readPageInVm(_:_:deadline:)`` describes how the
-    /// VM is run and deleted.
+    /// The read takes at most 30 seconds, measured on `ContinuousClock`,
+    /// unless creating and booting the VM alone take longer;
+    /// ``readPageInVm(_:_:deadline:)`` describes how the VM is run and
+    /// deleted.
     ///
-    /// - Parameter vmManager: Creates and deletes the VMs pages are read in.
+    /// - Parameter vmLifecycle: Creates, starts, waits for, and deletes the
+    ///   VMs pages are read in.
     /// - Returns: The route. It answers `400 Bad Request` when `url` is
     ///   missing or ``parsePageUrl(_:)`` rejects it, the response of
     ///   ``buildReadPageResponse(for:)`` when the read ends, and `500 Internal
     ///   Server Error` when vmo can't create, start, wait for, or delete the
     ///   VM.
-    static func readPage(vmManager: VmManager) -> Route {
+    static func readPage(vmLifecycle: some ReaderVmLifecycle) -> Route {
         Route(method: .get, path: "/web/read-page") { request in
-            try await handleReadPageRequest(request, vmManager)
+            try await handleReadPageRequest(request, vmLifecycle)
         }
     }
 }
@@ -49,20 +51,28 @@ private struct ReadPageFailure: Encodable {
 ///
 /// - Parameters:
 ///   - request: A `GET /web/read-page` request.
-///   - vmManager: Creates and deletes the VM the page is read in.
+///   - vmLifecycle: Creates, starts, waits for, and deletes the VM the page is
+///     read in.
 /// - Returns: `400 Bad Request` as plain text when `url` is missing or isn't
 ///   a page URL, without creating a VM; otherwise the response of
 ///   ``buildReadPageResponse(for:)``.
 /// - Throws: The errors of ``readPageInVm(_:_:deadline:)`` and
 ///   ``buildReadPageResponse(for:)``.
-private func handleReadPageRequest(_ request: HTTPRequest, _ vmManager: VmManager) async throws -> HTTPResponse {
+private func handleReadPageRequest(
+    _ request: HTTPRequest,
+    _ vmLifecycle: some ReaderVmLifecycle
+) async throws -> HTTPResponse {
     guard let urlValue = request.query.first(where: { $0.name == "url" })?.value else {
         return HTTPResponse(status: .badRequest, text: "url query param is missing.\n")
     }
     guard let url = parsePageUrl(urlValue) else {
         return HTTPResponse(status: .badRequest, text: "url must be an absolute http or https URL with a host.\n")
     }
-    let outcome = try await readPageInVm(url, vmManager, deadline: .now + readPageTimeLimit)
+    // The continuous clock keeps counting while the Mac sleeps, so a read
+    // that a sleep interrupts still ends at its deadline.
+    let clock = ContinuousClock()
+    let deadline = ReadDeadline(instant: clock.now + readPageTimeLimit, clock: clock)
+    let outcome = try await readPageInVm(url, vmLifecycle, deadline: deadline)
     return try buildReadPageResponse(for: outcome)
 }
 

@@ -66,23 +66,43 @@ private func handleReadPageRequest(_ request: HTTPRequest, _ vmManager: VmManage
     return try buildReadPageResponse(for: outcome)
 }
 
+/// URL of a page to read, as the caller sent it, checked to be an absolute
+/// `http` or `https` URL with a host.
+///
+/// Only ``parsePageUrl(_:)`` creates one, so holding one means the check
+/// passed.
+struct PageUrl: Equatable, Sendable {
+    /// The URL's text, unchanged. The reader loads it as given, so the page
+    /// it reads is the one the caller validated and cites.
+    let text: String
+
+    /// Wraps text that ``parsePageUrl(_:)`` checked.
+    ///
+    /// - Parameter text: The checked URL text.
+    fileprivate init(text: String) {
+        self.text = text
+    }
+}
+
 /// Parses the URL of a page to read.
 ///
 /// The reader accepts only URLs that start with `http://` or `https://`, so
-/// the scheme must be lower case. Characters that a URL can't hold, such as
-/// spaces, are percent-encoded.
+/// the scheme must be lower case. The text is checked with Foundation's URL
+/// parser but not rewritten: Foundation would encode every `%` again in a
+/// path or query that also holds a character it doesn't allow, such as `[` or
+/// `|`, and the reader would then load another page.
 ///
 /// - Parameter value: The decoded `url` query parameter.
-/// - Returns: The URL when `value` is an absolute `http` or `https` URL with
-///   a non-empty host; otherwise `nil`.
-func parsePageUrl(_ value: String) -> URL? {
+/// - Returns: The URL, with `value` as its text, when `value` is an absolute
+///   `http` or `https` URL with a non-empty host; otherwise `nil`.
+func parsePageUrl(_ value: String) -> PageUrl? {
     guard let url = URL(string: value), let scheme = url.scheme, ["http", "https"].contains(scheme) else {
         return nil
     }
     guard let host = url.host(percentEncoded: true), !host.isEmpty else {
         return nil
     }
-    return url
+    return PageUrl(text: value)
 }
 
 /// Builds the response for a read that ended.

@@ -102,19 +102,28 @@ struct ReadPageTests {
         #expect(response.status == .internalServerError)
     }
 
-    /// Verifies which URLs are accepted, and the form passed to the reader.
+    /// Verifies which URLs are accepted, and that the reader gets their text
+    /// as the caller sent it. Foundation would encode `%` again in a
+    /// component that also holds a character it doesn't allow, such as `[`
+    /// or `|`, so the reader would load another page than the one cited.
     @Test(
-        "Parses absolute http and https URLs, percent-encoding characters a URL can't hold",
+        "Parses absolute http and https URLs and keeps their text unchanged",
         arguments: [
-            ("https://example.com/", "https://example.com/"),
-            ("http://example.com:8080/a?b=c#d", "http://example.com:8080/a?b=c#d"),
-            ("https://example.com/a b", "https://example.com/a%20b"),
+            "https://example.com/",
+            "http://example.com:8080/a?b=c#d",
+            "https://example.com/a b",
+            "https://example.com/search?q=hello%20world&filter[type]=article",
+            "https://example.com/search?q=caf%C3%A9|th%C3%A9",
+            "https://example.com/caf%C3%A9/a[1]",
+            "https://example.com/a|b?q=hello%20world",
+            "https://example.com/p?q=hello%20world#x|y",
+            "https://example.com/%zz",
         ]
     )
-    func parsesPageUrl(value: String, expectedUrl: String) throws {
+    func parsesPageUrl(value: String) throws {
         let url = try #require(parsePageUrl(value))
 
-        #expect(url.absoluteString == expectedUrl)
+        #expect(url.text == value)
     }
 
     /// Verifies the response for a reader that wrote the page's HTML.

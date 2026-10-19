@@ -29,9 +29,9 @@ enum ReadPageOutcome {
 /// Reads the page at `url` in a VM of its own, which is deleted before this
 /// returns or throws.
 ///
-/// The VM runs ``readPageImageReference`` with `url` as its argument.
-/// `deadline` covers the whole read, but only the reader's run can be cut
-/// short: when the deadline passes, deleting the VM kills the reader.
+/// The VM runs ``readPageImageReference`` with the text of `url` as its
+/// argument. `deadline` covers the whole read, but only the reader's run can
+/// be cut short: when the deadline passes, deleting the VM kills the reader.
 /// Creating and booting the VM aren't interrupted; when they end after the
 /// deadline, the VM is deleted at once.
 ///
@@ -42,7 +42,7 @@ enum ReadPageOutcome {
 /// returns only when it exits.
 ///
 /// - Parameters:
-///   - url: Absolute `http` or `https` URL of the page.
+///   - url: The page to read.
 ///   - vmManager: Creates and deletes the VM.
 ///   - deadline: When the read must end.
 /// - Returns: How the read ended.
@@ -52,13 +52,13 @@ enum ReadPageOutcome {
 ///   after another failure. When deleting fails, ``VmManager/close()`` tries
 ///   again.
 func readPageInVm(
-    _ url: URL,
+    _ url: PageUrl,
     _ vmManager: VmManager,
     deadline: ContinuousClock.Instant
 ) async throws -> ReadPageOutcome {
     let containerId = try await vmManager.createVm(
         imageReference: readPageImageReference,
-        arguments: [url.absoluteString]
+        arguments: [url.text]
     )
     guard ContinuousClock.now < deadline else {
         try await deleteReaderVm(containerId, vmManager)

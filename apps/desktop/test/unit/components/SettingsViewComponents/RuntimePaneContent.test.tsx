@@ -35,6 +35,10 @@ const BACKEND_ADDRESS = initialSettingsState.runtime.backendAddress
 /** Wall-clock time at which the uptime case reads the backend's uptime. */
 const UPTIME_READ_AT_MS = Date.UTC(2026, 9, 9, 12, 0, 0)
 
+/** What the Runtime pane says after a failed save of the startup switches. */
+const FAILED_SAVE_LINE =
+  "Lys couldn't save the startup switches. The next launch follows the switches last saved; changing a switch tries again."
+
 /** LM Studio connected, the chosen default on disk and nothing loaded. */
 const NOTHING_LOADED: RuntimeArrangement = {
   ...READY_RUNTIME,
@@ -124,14 +128,12 @@ describe("RuntimePaneContent", () => {
         expect(
           screen.getByRole("heading", { name: heading })
         ).toBeInTheDocument()
-        expect(screen.getByRole("button", { name: "Start" })).toHaveProperty(
-          "disabled",
-          !canStart
-        )
-        expect(screen.getByRole("button", { name: "Stop" })).toHaveProperty(
-          "disabled",
-          !canStop
-        )
+        expect(
+          screen.getByRole("button", { name: "Start backend" })
+        ).toHaveProperty("disabled", !canStart)
+        expect(
+          screen.getByRole("button", { name: "Stop backend" })
+        ).toHaveProperty("disabled", !canStop)
       }
     )
 
@@ -144,7 +146,7 @@ describe("RuntimePaneContent", () => {
       await startRuntimePane(buildUnreachableRuntime("stopped"))
       const user = userEvent.setup()
 
-      await user.click(screen.getByRole("button", { name: "Start" }))
+      await user.click(screen.getByRole("button", { name: "Start backend" }))
       await waitForRenderedWork()
 
       expect(
@@ -170,7 +172,7 @@ describe("RuntimePaneContent", () => {
       await startRuntimePane()
       const user = userEvent.setup()
 
-      await user.click(screen.getByRole("button", { name: "Stop" }))
+      await user.click(screen.getByRole("button", { name: "Stop backend" }))
       await waitForRenderedWork()
 
       expect(host.commands.map((invoked) => invoked.command)).toEqual([
@@ -239,12 +241,48 @@ describe("RuntimePaneContent", () => {
       await waitForRenderedWork()
 
       expect(before).toBe("")
-      expect(status).toHaveTextContent(
-        "Lys couldn't save the startup switches. The next launch follows the switches last saved; changing a switch tries again."
-      )
+      expect(status).toHaveTextContent(FAILED_SAVE_LINE)
       expect(
         screen.getByRole("switch", { name: "Start it when Lys opens" })
       ).not.toBeChecked()
+    })
+
+    it("clears the failed save once the switches are saved again, without moving focus", async () => {
+      const failedSave = createControlledPromise<void>()
+      const nextSave = createControlledPromise<void>()
+      const saveResults = [failedSave.promise, nextSave.promise]
+      startNativeHostFake({
+        load_settings: () => FIRST_RUN_SETTINGS_DOCUMENT,
+        save_settings: () => saveResults.shift()
+      })
+      await startRuntimePane()
+      const user = userEvent.setup()
+      const status = screen.getByRole("status", {
+        name: "Startup switches save"
+      })
+      const autoStart = screen.getByRole("switch", {
+        name: "Start it when Lys opens"
+      })
+
+      await user.click(autoStart)
+      failedSave.reject("Disk full")
+      await waitForRenderedWork()
+      const afterFailure = status.textContent
+      await user.click(autoStart)
+      await waitForRenderedWork()
+      const whileSaving = status.textContent
+      nextSave.resolve()
+      await waitForRenderedWork()
+
+      expect(afterFailure).toBe(FAILED_SAVE_LINE)
+      expect(whileSaving).toBe("")
+      expect(saveResults).toEqual([])
+      expect(
+        screen.getByRole("status", { name: "Startup switches save" })
+      ).toBe(status)
+      expect(status).toBeEmptyDOMElement()
+      expect(autoStart).toBeChecked()
+      expect(autoStart).toHaveFocus()
     })
   })
 
@@ -330,14 +368,12 @@ describe("RuntimePaneContent", () => {
 
       expect(autoStart).not.toBeChecked()
       expect(useLysStore.getState().settings.runtime.autoStartVmo).toBe(false)
-      expect(saves).toContainEqual({
-        newSettings: expect.objectContaining({
-          runtime: expect.objectContaining({
-            autoStartBackend: true,
-            autoStartVmo: false
-          })
-        })
+      const savedRuntime = expect.objectContaining({
+        autoStartBackend: true,
+        autoStartVmo: false
       })
+      const savedSettings = expect.objectContaining({ runtime: savedRuntime })
+      expect(saves).toContainEqual({ newSettings: savedSettings })
     })
   })
 

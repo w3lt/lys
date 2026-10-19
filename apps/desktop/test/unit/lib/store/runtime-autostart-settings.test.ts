@@ -15,7 +15,8 @@ import {
 } from "../../support/settlement"
 import {
   STORED_SETTINGS,
-  STORED_SETTINGS_DOCUMENT
+  STORED_SETTINGS_DOCUMENT,
+  type SettingsDocument
 } from "../../support/settingsFixtures"
 
 /** Store state the slice borrows: the current settings and the slice. */
@@ -48,12 +49,14 @@ function applyStartupSwitches(
   store: ReturnType<typeof createRuntimeAutoStartStore>,
   switches: Pick<RuntimeSettings, "autoStartBackend" | "autoStartVmo">
 ): void {
-  store.setState((state) => ({
-    settings: {
-      ...state.settings,
-      runtime: { ...state.settings.runtime, ...switches }
-    }
-  }))
+  const { settings } = store.getState()
+  const runtime: RuntimeSettings = {
+    ...settings.runtime,
+    autoStartBackend: switches.autoStartBackend,
+    autoStartVmo: switches.autoStartVmo
+  }
+  const nextSettings: LysSettings = { ...settings, runtime }
+  store.setState({ settings: nextSettings })
 }
 
 /**
@@ -99,16 +102,16 @@ function listSettingsWrites(
  * @returns The expected `save_settings` arguments.
  */
 function buildRuntimeWrite(autoStartBackend: boolean, autoStartVmo: boolean) {
-  return {
-    newSettings: {
-      ...STORED_SETTINGS_DOCUMENT,
-      runtime: {
-        ...STORED_SETTINGS_DOCUMENT.runtime,
-        autoStartBackend,
-        autoStartVmo
-      }
-    }
+  const runtime: RuntimeSettings = {
+    ...STORED_SETTINGS_DOCUMENT.runtime,
+    autoStartBackend,
+    autoStartVmo
   }
+  const newSettings: SettingsDocument = {
+    ...STORED_SETTINGS_DOCUMENT,
+    runtime
+  }
+  return { newSettings }
 }
 
 describe("isRuntimeAutoStartSettingsEqual", () => {

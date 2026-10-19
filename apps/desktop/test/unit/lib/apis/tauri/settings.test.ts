@@ -13,7 +13,10 @@ import type {
   LoadConfigurationSettings,
   LysSettings
 } from "@/lib/store/settings"
-import { startNativeHostFake } from "../../../support/nativeHostFake"
+import {
+  NO_NATIVE_COMMAND_ARGS,
+  startNativeHostFake
+} from "../../../support/nativeHostFake"
 import {
   createControlledPromise,
   createSettlementReader,
@@ -452,22 +455,20 @@ describe("saveRuntimeAutoStartSettings", () => {
       autoStartVmo: true
     })
 
+    const savedRuntime: SettingsDocument["runtime"] = {
+      autoStartBackend: true,
+      autoStartVmo: true,
+      defaultModel: STORED_SETTINGS_DOCUMENT.runtime.defaultModel,
+      backendAddress: STORED_SETTINGS_DOCUMENT.runtime.backendAddress
+    }
+    const newSettings: SettingsDocument = {
+      ...STORED_SETTINGS_DOCUMENT,
+      runtime: savedRuntime
+    }
+    const saveSettingsArgs = { newSettings }
     expect(host.commands).toEqual([
-      { command: "load_settings", args: {} },
-      {
-        command: "save_settings",
-        args: {
-          newSettings: {
-            ...STORED_SETTINGS_DOCUMENT,
-            runtime: {
-              autoStartBackend: true,
-              autoStartVmo: true,
-              defaultModel: STORED_SETTINGS_DOCUMENT.runtime.defaultModel,
-              backendAddress: STORED_SETTINGS_DOCUMENT.runtime.backendAddress
-            }
-          }
-        }
-      }
+      { command: "load_settings", args: NO_NATIVE_COMMAND_ARGS },
+      { command: "save_settings", args: saveSettingsArgs }
     ])
   })
 

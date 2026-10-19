@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
+import type { BackendServerInfo } from "@/lib/store"
 import type { LysSettings, RuntimeSettings } from "@/lib/store/settings"
+import type { VmoServerInfo } from "@/lib/store/vmo-runtime"
 import {
   buildJsonResponse,
   createTransportFailure,
@@ -46,26 +48,41 @@ const DISK_SETTINGS: LysSettings = Object.freeze({
   runtime: DISK_RUNTIME_SETTINGS
 })
 
+/** Runtime group on disk with backend autostart on. */
+const BACKEND_AUTOSTART_RUNTIME_SETTINGS: RuntimeSettings = Object.freeze({
+  ...DISK_RUNTIME_SETTINGS,
+  autoStartBackend: true
+})
+
 /** Settings document on disk with backend autostart on. */
 const AUTOSTART_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
   ...DISK_SETTINGS_DOCUMENT,
-  runtime: Object.freeze({ ...DISK_RUNTIME_SETTINGS, autoStartBackend: true })
+  runtime: BACKEND_AUTOSTART_RUNTIME_SETTINGS
+})
+
+/** Runtime group on disk with only vmo autostart on. */
+const VMO_AUTOSTART_RUNTIME_SETTINGS: RuntimeSettings = Object.freeze({
+  ...DISK_RUNTIME_SETTINGS,
+  autoStartVmo: true
 })
 
 /** Settings document on disk with only vmo autostart on. */
 const VMO_AUTOSTART_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
   ...DISK_SETTINGS_DOCUMENT,
-  runtime: Object.freeze({ ...DISK_RUNTIME_SETTINGS, autoStartVmo: true })
+  runtime: VMO_AUTOSTART_RUNTIME_SETTINGS
+})
+
+/** Runtime group on disk with backend and vmo autostart on. */
+const BOTH_AUTOSTART_RUNTIME_SETTINGS: RuntimeSettings = Object.freeze({
+  ...DISK_RUNTIME_SETTINGS,
+  autoStartBackend: true,
+  autoStartVmo: true
 })
 
 /** Settings document on disk with backend and vmo autostart on. */
 const BOTH_AUTOSTART_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
   ...DISK_SETTINGS_DOCUMENT,
-  runtime: Object.freeze({
-    ...DISK_RUNTIME_SETTINGS,
-    autoStartBackend: true,
-    autoStartVmo: true
-  })
+  runtime: BOTH_AUTOSTART_RUNTIME_SETTINGS
 })
 
 /** Inventory listed once LM Studio is connected. */
@@ -256,11 +273,13 @@ describe("useLysStore", () => {
 
       await useLysStore.getState().initialize()
 
+      const stoppedBackend: BackendServerInfo = { status: "stopped" }
+      const stoppedVmo: VmoServerInfo = { status: "stopped", problem: null }
       expect(useLysStore.getState()).toMatchObject({
         initializing: false,
         settings: DISK_SETTINGS,
-        backendServerInfo: { status: "stopped" },
-        vmoServerInfo: { status: "stopped", problem: null }
+        backendServerInfo: stoppedBackend,
+        vmoServerInfo: stoppedVmo
       })
       expect(listCommandNames(host)).toEqual([
         "load_settings",
@@ -685,9 +704,14 @@ describe("useLysStore", () => {
       useLysStore.getState().setSettings({ ...DISK_SETTINGS, runtime })
       await waitForMicrotasks()
 
+      const newSettings: SettingsDocument = {
+        ...DISK_SETTINGS_DOCUMENT,
+        runtime
+      }
+      const saveSettingsArgs = { newSettings }
       expect(host.commands.at(-1)).toEqual({
         command: "save_settings",
-        args: { newSettings: { ...DISK_SETTINGS_DOCUMENT, runtime } }
+        args: saveSettingsArgs
       })
       expect(useLysStore.getState().runtimeAutoStartSave).toEqual({
         status: "saved"
@@ -699,11 +723,12 @@ describe("useLysStore", () => {
       const useLysStore = await loadFreshLysStore()
       await useLysStore.getState().initialize()
 
-      useLysStore.getState().setSettings({
-        ...DISK_SETTINGS,
-        runtime: { ...DISK_RUNTIME_SETTINGS, defaultModel: "resident" },
-        model: { contextSize: 8192 }
-      })
+      const runtime: RuntimeSettings = {
+        ...DISK_RUNTIME_SETTINGS,
+        defaultModel: "resident"
+      }
+      const model: LysSettings["model"] = { contextSize: 8192 }
+      useLysStore.getState().setSettings({ ...DISK_SETTINGS, runtime, model })
       await waitForMicrotasks()
 
       expect(useLysStore.getState().settings.model.contextSize).toBe(8192)

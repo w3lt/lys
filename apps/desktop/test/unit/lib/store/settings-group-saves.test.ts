@@ -4,7 +4,10 @@ import {
   saveLatestSettingsGroup,
   type LatestSettingsGroupSave
 } from "@/lib/store/settings-group-saves"
-import type { LoadConfigurationSettings } from "@/lib/store/settings"
+import type {
+  LoadConfigurationSettings,
+  RuntimeSettings
+} from "@/lib/store/settings"
 import { startNativeHostFake } from "../../support/nativeHostFake"
 import {
   createControlledPromise,
@@ -12,7 +15,10 @@ import {
   waitForMicrotasks,
   type ControlledPromise
 } from "../../support/settlement"
-import { STORED_SETTINGS_DOCUMENT } from "../../support/settingsFixtures"
+import {
+  STORED_SETTINGS_DOCUMENT,
+  type SettingsDocument
+} from "../../support/settingsFixtures"
 
 /** Generation controls the group-save cases write. */
 const EDITED_GENERATION = Object.freeze({ temperature: 0.9, replyCeiling: 0 })
@@ -167,9 +173,8 @@ describe("createSettingsGroupSaves", () => {
     const { writes, readStoredDocument } = startSettingsFileHost()
     const saves = createSettingsGroupSaves()
 
-    const toolsSave = saves.saveToolSettings({
-      justRunToolNames: new Set(["find_files"])
-    })
+    const justRunToolNames = new Set(["find_files"])
+    const toolsSave = saves.saveToolSettings({ justRunToolNames })
     const runtimeSave = saves.saveRuntimeAutoStartSettings({
       autoStartBackend: true,
       autoStartVmo: true
@@ -182,15 +187,17 @@ describe("createSettingsGroupSaves", () => {
     writes[1]?.resolve(null)
     await runtimeSave
 
+    const runtime: RuntimeSettings = {
+      ...STORED_SETTINGS_DOCUMENT.runtime,
+      autoStartBackend: true,
+      autoStartVmo: true
+    }
+    const tools: SettingsDocument["tools"] = { justRun: ["find_files"] }
     expect(writesDuringFirst).toBe(1)
     expect(readStoredDocument()).toEqual({
       ...STORED_SETTINGS_DOCUMENT,
-      runtime: {
-        ...STORED_SETTINGS_DOCUMENT.runtime,
-        autoStartBackend: true,
-        autoStartVmo: true
-      },
-      tools: { justRun: ["find_files"] }
+      runtime,
+      tools
     })
   })
 

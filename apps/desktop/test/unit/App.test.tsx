@@ -1,8 +1,14 @@
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
+import type { BackendServerInfo } from "@/lib/store"
 import { createStoredChatViewConversation } from "@/lib/store/chat-view/conversation-transitions"
-import { initialSettingsState, type LysSettings } from "@/lib/store/settings"
+import {
+  initialSettingsState,
+  type LysSettings,
+  type RuntimeSettings
+} from "@/lib/store/settings"
+import type { VmoServerInfo } from "@/lib/store/vmo-runtime"
 import {
   buildCompletedAssistantMessage,
   buildConversation,
@@ -16,15 +22,18 @@ import {
   waitForMicrotasks
 } from "./support/settlement"
 
+/** Runtime group with both startup switches off. */
+const MANUAL_START_RUNTIME_SETTINGS: RuntimeSettings = Object.freeze({
+  ...initialSettingsState.runtime,
+  autoStartBackend: false,
+  autoStartVmo: false
+})
+
 /** Saved settings that leave the backend and vmo stopped when Lys opens. */
-const MANUAL_START_SETTINGS: LysSettings = {
+const MANUAL_START_SETTINGS: LysSettings = Object.freeze({
   ...initialSettingsState,
-  runtime: {
-    ...initialSettingsState.runtime,
-    autoStartBackend: false,
-    autoStartVmo: false
-  }
-}
+  runtime: MANUAL_START_RUNTIME_SETTINGS
+})
 
 /**
  * Starts a native host whose backend process and vmo are stopped and stay
@@ -104,21 +113,20 @@ describe("App", () => {
     useLysStore.setState({ activeView: "settings" })
     const { unmount } = render(<App />)
     await screen.findByRole("main", { name: "Settings" })
-    useLysStore.setState({ backendServerInfo: { status: "running" } })
+    const runningBackend: BackendServerInfo = { status: "running" }
+    useLysStore.setState({ backendServerInfo: runningBackend })
     await useToolStore.getState().loadTools()
 
+    const runningVmo: VmoServerInfo = { status: "running", problem: null }
     act(() => {
-      useLysStore.setState({
-        vmoServerInfo: { status: "running", problem: null }
-      })
+      useLysStore.setState({ vmoServerInfo: runningVmo })
     })
     await vi.waitFor(() => {
       expect(backend.requests).toHaveLength(2)
     })
     unmount()
-    useLysStore.setState({
-      vmoServerInfo: { status: "stopped", problem: null }
-    })
+    const stoppedVmo: VmoServerInfo = { status: "stopped", problem: null }
+    useLysStore.setState({ vmoServerInfo: stoppedVmo })
     await waitForMicrotasks()
 
     expect(backend.requests).toHaveLength(2)

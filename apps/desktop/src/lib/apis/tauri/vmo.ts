@@ -43,9 +43,10 @@ export type VmoHealth = "ready" | "not-ready"
  * @returns A promise resolving to the process status once vmo is spawned or
  * found running; vmo answers its health route only later.
  * @throws The Tauri invoke rejection while a stop is still waiting for the
- * previous vmo, or when vmo cannot be inspected or spawned.
+ * previous vmo, or when the development vmo directory cannot be resolved or
+ * vmo cannot be inspected or spawned.
  */
-export async function startVmo() {
+export async function startVmo(): Promise<VmoProcessStatus> {
   return await invoke<VmoProcessStatus>("start_vmo")
 }
 
@@ -55,9 +56,10 @@ export async function startVmo() {
  * @returns A promise resolving to how vmo ended, after up to one minute
  * while vmo deletes its VMs; a stop already in progress is joined.
  * @throws The Tauri invoke rejection when vmo cannot be inspected,
- * signalled, or waited for.
+ * signalled, or waited for, or when the host's blocking stop task ends
+ * unexpectedly.
  */
-export async function stopVmo() {
+export async function stopVmo(): Promise<VmoStopOutcome> {
   return await invoke<VmoStopOutcome>("stop_vmo")
 }
 
@@ -67,7 +69,7 @@ export async function stopVmo() {
  * @returns A promise resolving to the process status at invocation time.
  * @throws The Tauri invoke rejection when the process cannot be inspected.
  */
-export async function getVmoStatus() {
+export async function getVmoStatus(): Promise<VmoProcessStatus> {
   return await invoke<VmoProcessStatus>("get_vmo_status")
 }
 
@@ -79,6 +81,6 @@ export async function getVmoStatus() {
  * asks whatever listens on vmo's port, also a vmo the desktop does not own.
  * @throws The Tauri invoke rejection when the host's check ends unexpectedly.
  */
-export async function getVmoHealth() {
+export async function getVmoHealth(): Promise<VmoHealth> {
   return await invoke<VmoHealth>("get_vmo_health")
 }

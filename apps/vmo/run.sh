@@ -1,4 +1,6 @@
 #!/bin/bash
+# A failed build or signature ends the script, so a stale vmo never runs.
+set -euo pipefail
 
 swift build
 codesign --force --sign - --entitlements vmo.entitlements "$(swift build --show-bin-path)/vmo"

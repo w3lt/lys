@@ -46,11 +46,11 @@ vmo listens at `127.0.0.1:8080` and needs:
   pulls `vminit` and any reader image it does not have yet, so a first start,
   or the first after a new reader image, can take minutes. A start that
   cannot reach `ghcr.io` fails
-- disk space for those images in Containerization's image store,
-  `~/Library/Application Support/com.apple.containerization`. vmo does not
-  delete a reader image that `latest` no longer names, so the store grows by
-  about 283 MB with each new reader image
-  ([#213](https://github.com/w3lt/lys/issues/213))
+- disk space for those images in vmo's own image store,
+  `~/Library/Application Support/com.w3lt.lys-vmo`: `vminit` and one reader
+  image, about 283 MB for today's. After each start's pull, vmo deletes every
+  other image there, such as the reader image `latest` named before; see
+  [vmo's image store](/operate/data/#vmos-image-store)
 - for now, the Linux kernel that Apple's `container` tool installs at
   `~/Library/Application Support/com.apple.container/kernels/vmlinux-6.18.35-197-debug`,
   so vmo does not boot its VMs on a Mac without it

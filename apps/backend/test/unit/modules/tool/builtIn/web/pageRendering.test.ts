@@ -277,22 +277,24 @@ describe("getRenderedPage", () => {
     }
   )
 
-  it.each([
-    ["an HTML body", "text/html; charset=utf-8", {}],
-    ["JSON in another charset", "application/json; charset=iso-8859-1", {}],
-    ["compressed JSON", "application/json", { "content-encoding": "gzip" }]
+  it.each<[string, Readonly<Record<string, string>>]>([
+    ["an HTML body", { "content-type": "text/html; charset=utf-8" }],
+    [
+      "JSON in another charset",
+      { "content-type": "application/json; charset=iso-8859-1" }
+    ],
+    [
+      "compressed JSON",
+      { "content-type": "application/json", "content-encoding": "gzip" }
+    ]
   ])(
     "fails a 200 answer with %s as reader-failed and reports it",
-    async (_label, contentType, headers) => {
+    async (_label, headers) => {
       const reportPageReaderFailure = vi.fn()
-      const server = await startVmoServer(
-        answerWithBody(
-          200,
-          contentType,
-          JSON.stringify({ html: PAGE_HTML, isTruncated: false }),
-          headers
-        )
-      )
+      const server = await startVmoServer((_request, response) => {
+        response.writeHead(200, headers)
+        response.end(JSON.stringify({ html: PAGE_HTML, isTruncated: false }))
+      })
 
       const result = await getRenderedPage(
         PAGE_URL,
@@ -407,7 +409,8 @@ describe("getRenderedPage", () => {
     })
   })
 
-  it("fails as reader-timed-out when vmo's answer stops in the middle", async () => {
+  it("fails as reader-timed-out and reports it when vmo's answer stops in the middle", async () => {
+    const reportPageReaderFailure = vi.fn()
     const server = await startVmoServer((_request, response) => {
       response.writeHead(200, { "content-type": VMO_JSON_CONTENT_TYPE })
       response.write('{"html":"<p>Moths')
@@ -416,10 +419,17 @@ describe("getRenderedPage", () => {
     const result = await getRenderedPage(
       PAGE_URL,
       new AbortController().signal,
-      buildVmoReadDependencies(server.origin, { readTimeoutMs: 100 })
+      buildVmoReadDependencies(server.origin, {
+        readTimeoutMs: 100,
+        reportPageReaderFailure
+      })
     )
 
     expect(result).toEqual(buildFailure("reader-timed-out"))
+    expect(reportPageReaderFailure).toHaveBeenCalledTimes(1)
+    expect(reportPageReaderFailure.mock.calls[0]?.[0]).toMatchObject({
+      name: "TimeoutError"
+    })
   })
 
   it("fails as reader-timed-out without asking vmo when the host lookup takes too long", async () => {
@@ -474,6 +484,25 @@ describe("getRenderedPage", () => {
     await expect(read).rejects.toBe(defect)
     expect(server.receivedRequests).toHaveLength(0)
   })
+
+  it.each([
+    ["is not a URL", "not a url", "ERR_INVALID_URL"],
+    ["is not an http URL", "ftp://127.0.0.1:8080", "ERR_INVALID_PROTOCOL"]
+  ])(
+    "rejects, as a defect and unreported, a vmo origin that %s",
+    async (_label, vmoOrigin, code) => {
+      const reportPageReaderFailure = vi.fn()
+
+      const read = getRenderedPage(
+        PAGE_URL,
+        new AbortController().signal,
+        buildVmoReadDependencies(vmoOrigin, { reportPageReaderFailure })
+      )
+
+      await expect(read).rejects.toMatchObject({ code })
+      expect(reportPageReaderFailure).not.toHaveBeenCalled()
+    }
+  )
 
   it.each([
     "https://93.184.216.34/moths",

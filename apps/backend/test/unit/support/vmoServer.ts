@@ -5,7 +5,6 @@ import {
   type Server,
   type ServerResponse
 } from "node:http"
-import type { AddressInfo } from "node:net"
 import { onTestFinished } from "vitest"
 import type { PageRenderingDependencies } from "../../../src/modules/tool/builtIn/web/pageRendering"
 import {
@@ -76,6 +75,22 @@ export const listTestHostAddresses: HostAddressLookup = (hostname) => {
 }
 
 /**
+ * Gets the TCP port a listening server is bound to.
+ *
+ * @param server - HTTP server.
+ * @returns The port.
+ * @throws When the server is not listening, or listens on a pipe instead of
+ * a TCP port.
+ */
+function getServerPort(server: Server): number {
+  const address = server.address()
+  if (address === null || typeof address === "string") {
+    throw new Error("The test server does not listen on a TCP port")
+  }
+  return address.port
+}
+
+/**
  * Listens on a free loopback port, closing the server with its connections
  * when the current test finishes.
  *
@@ -88,7 +103,7 @@ async function listenOnLoopback(server: Server): Promise<number> {
     await new Promise<void>((resolve) => server.close(() => resolve()))
   })
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
-  return (server.address() as AddressInfo).port
+  return getServerPort(server)
 }
 
 /**
@@ -123,9 +138,11 @@ export async function startVmoServer(route: VmoRoute): Promise<VmoServer> {
 export async function findClosedVmoOrigin(): Promise<string> {
   const server = createServer()
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
-  const { port } = server.address() as AddressInfo
-  await new Promise<void>((resolve) => server.close(() => resolve()))
-  return `http://127.0.0.1:${port}`
+  try {
+    return `http://127.0.0.1:${getServerPort(server)}`
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  }
 }
 
 /**
@@ -167,22 +184,18 @@ export function buildTestPageUrl(text: string): PageUrl {
  * Builds a route that answers with a body.
  *
  * @param status - HTTP status.
- * @param contentType - `Content-Type` header.
+ * @param contentType - `Content-Type` header, the answer's only header besides
+ * those Node adds.
  * @param body - Body bytes or text.
- * @param headers - Extra or replacing headers.
  * @returns The route.
  */
 export function answerWithBody(
   status: number,
   contentType: string,
-  body: string | Uint8Array,
-  headers: Readonly<Record<string, string>> = {}
+  body: string | Uint8Array
 ): VmoRoute {
   return (_request, response) => {
-    response.statusCode = status
-    response.setHeader("content-type", contentType)
-    for (const [name, value] of Object.entries(headers))
-      response.setHeader(name, value)
+    response.writeHead(status, { "content-type": contentType })
     response.end(body)
   }
 }

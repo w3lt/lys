@@ -1,4 +1,4 @@
-import { request as requestHttp, type RequestOptions } from "node:http"
+import { openVmoResponse } from "./vmoRequest"
 import { hasErrorCode } from "./webConnection"
 
 /**
@@ -24,62 +24,39 @@ const VMO_HEALTH_REQUEST_HEADERS: Readonly<Record<string, string>> =
 export type VmoHealth = "ready" | "not-ready"
 
 /**
- * Sends one health check to vmo and waits for the answer's status.
- *
- * @param target - URL of vmo's health route.
- * @param signal - Ends the check when its time is up.
- * @returns The HTTP status of vmo's answer, whose body is destroyed unread.
- * @throws The request's failure, such as `ECONNREFUSED` when nothing listens
- * on vmo's port, or the abort once `signal` aborts.
- */
-function readVmoHealthStatus(
-  target: URL,
-  signal: AbortSignal
-): Promise<number> {
-  const options: RequestOptions = {
-    method: "GET",
-    headers: VMO_HEALTH_REQUEST_HEADERS,
-    agent: false,
-    signal
-  }
-  return new Promise((resolve, reject) => {
-    const outgoing = requestHttp(target, options, (response) => {
-      resolve(response.statusCode ?? 0)
-      response.destroy()
-    })
-    // Stays attached: destroying the body can fail the request after the
-    // status settled the promise, and rejecting again changes nothing.
-    outgoing.on("error", reject)
-    outgoing.end()
-  })
-}
-
-/**
  * Asks vmo, Lys's page reader, whether it can read pages.
  *
  * @param vmoOrigin - Origin of vmo, such as `http://127.0.0.1:8080`.
  * @param timeoutMs - Time limit of the check, in milliseconds.
  * @returns `ready` when vmo answers `GET /health` with `200 OK` within the
  * time limit; `not-ready` for any other status, a refused or broken
- * connection, or no answer in time. vmo listens only once it can read pages,
- * so an answer means it is ready.
- * @throws Any failure without a system error code, which is a defect.
- * @remarks Each check opens its own connection and reads no body. vmo is on
- * this machine, so the address rule for web pages does not apply to it.
+ * connection, an answer that is not HTTP, or no answer in time. vmo listens
+ * only once it can read pages, so an answer means it is ready.
+ * @throws A defect: an origin that is not an `http` URL, or a failure of the
+ * request that has no `code`.
+ * @remarks Each check opens its own connection, which it closes once the
+ * status arrived or the time limit passed, and reads no body. vmo is on this
+ * machine, so the address rule for web pages does not apply to it.
  */
 export async function sendVmoHealthCheck(
   vmoOrigin: string,
   timeoutMs: number
 ): Promise<VmoHealth> {
+  const target = new URL(VMO_HEALTH_PATH, vmoOrigin)
   const timeoutSignal = AbortSignal.timeout(timeoutMs)
+  const opening = openVmoResponse(
+    target,
+    VMO_HEALTH_REQUEST_HEADERS,
+    timeoutSignal
+  )
   try {
-    const status = await readVmoHealthStatus(
-      new URL(VMO_HEALTH_PATH, vmoOrigin),
-      timeoutSignal
-    )
-    return status === 200 ? "ready" : "not-ready"
+    const response = await opening
+    response.destroy()
+    return response.statusCode === 200 ? "ready" : "not-ready"
   } catch (error) {
-    if (timeoutSignal.aborted || hasErrorCode(error)) return "not-ready"
+    // Only failures of the sent request arrive here. Node gives each a code:
+    // a system error, an HTTP parser error, or the time limit's abort.
+    if (hasErrorCode(error)) return "not-ready"
     throw error
   }
 }

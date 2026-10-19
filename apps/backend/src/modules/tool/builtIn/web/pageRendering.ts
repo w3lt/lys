@@ -1,12 +1,10 @@
-import {
-  request as requestHttp,
-  type IncomingMessage,
-  type RequestOptions
-} from "node:http"
+import type { IncomingMessage } from "node:http"
 import { isIP } from "node:net"
 import * as z from "zod"
+import { waitForSettlementOrAbort } from "../../../../utils/abort"
 import type { PageUrl } from "./pageUrl"
 import { formatCutText } from "./untrustedText"
+import { openVmoResponse } from "./vmoRequest"
 import {
   ConnectionAddressError,
   hasErrorCode,
@@ -164,11 +162,12 @@ type VmoReadPageAnswer = z.infer<typeof vmoReadPageAnswerSchema>
 /** Path of vmo's read-page route. */
 const VMO_READ_PAGE_PATH = "/web/read-page"
 
-/** Headers of every request to vmo: JSON accepted, without compression. */
-const VMO_REQUEST_HEADERS: Readonly<Record<string, string>> = Object.freeze({
-  accept: "application/json",
-  "accept-encoding": "identity"
-})
+/** Headers of every read sent to vmo: JSON accepted, without compression. */
+const VMO_READ_PAGE_REQUEST_HEADERS: Readonly<Record<string, string>> =
+  Object.freeze({
+    accept: "application/json",
+    "accept-encoding": "identity"
+  })
 
 /** Failure of a URL vmo refused. */
 const URL_REFUSED: PageRenderingFailure = Object.freeze({ kind: "url-refused" })
@@ -234,32 +233,6 @@ async function findHostAddressFailure(
 }
 
 /**
- * Waits for the check of the page's host unless a signal aborts first.
- *
- * @param check - Check in progress.
- * @param signal - Ends the wait; it may already have aborted.
- * @returns What the check found.
- * @throws The signal's reason once it aborts, or the check's failure. The
- * operating system's lookup cannot be interrupted, so a check left behind
- * runs on until the resolver answers; its later failure is observed and
- * ignored.
- */
-async function waitForHostCheck(
-  check: Promise<PageRenderingFailure | undefined>,
-  signal: AbortSignal
-): Promise<PageRenderingFailure | undefined> {
-  const { promise: aborted, reject } = Promise.withResolvers<never>()
-  const rejectAborted = () => reject(signal.reason)
-  signal.addEventListener("abort", rejectAborted, { once: true })
-  if (signal.aborted) rejectAborted()
-  try {
-    return await Promise.race([check, aborted])
-  } finally {
-    signal.removeEventListener("abort", rejectAborted)
-  }
-}
-
-/**
  * Builds the URL of vmo's read of one page.
  *
  * @param url - Page to read.
@@ -271,38 +244,6 @@ function buildVmoReadPageUrl(url: PageUrl, vmoOrigin: string): URL {
   const target = new URL(VMO_READ_PAGE_PATH, vmoOrigin)
   target.searchParams.set("url", url)
   return target
-}
-
-/**
- * Sends one read to vmo and waits for its response headers.
- *
- * @param target - URL of the read on vmo.
- * @param signal - Aborts the request on Stop or when the read's time is up.
- * @returns The response, whose body the caller owns and must consume or
- * destroy.
- * @throws The request's failure, such as `ECONNREFUSED` when vmo is not
- * listening.
- * @remarks Each read opens its own connection. vmo is on this machine, so the
- * address rule does not apply to it.
- */
-function openVmoResponse(
-  target: URL,
-  signal: AbortSignal
-): Promise<IncomingMessage> {
-  const options: RequestOptions = {
-    method: "GET",
-    headers: VMO_REQUEST_HEADERS,
-    agent: false,
-    signal
-  }
-  return new Promise((resolve, reject) => {
-    const outgoing = requestHttp(target, options, resolve)
-    // Stays attached: a failure after the response arrived, such as the
-    // socket closing when the body is destroyed, must not go unhandled. The
-    // promise is settled by then, so rejecting again changes nothing.
-    outgoing.on("error", reject)
-    outgoing.end()
-  })
 }
 
 /**
@@ -439,6 +380,53 @@ async function readVmoResponse(
 }
 
 /**
+ * Answers whether a read failed because its time limit passed.
+ *
+ * @param error - Failure of the read.
+ * @param timeoutSignal - Time limit of the read.
+ * @returns True once the time limit has passed when the failure is its
+ * reason, as the wait for the host check rejects, or an error whose `cause`
+ * is that reason, as the request to vmo and the read of its answer reject.
+ * False for any other failure, even one that arrives after the limit.
+ */
+function isCausedByTimeout(
+  error: unknown,
+  timeoutSignal: AbortSignal
+): boolean {
+  if (!timeoutSignal.aborted) return false
+  const reason: unknown = timeoutSignal.reason
+  return error === reason || (error instanceof Error && error.cause === reason)
+}
+
+/**
+ * Handles a failed step of a read that was not stopped: reports the failure
+ * and fails the read with its kind.
+ *
+ * @param error - Failure of the host check's wait, of the request to vmo, or
+ * of the read of its answer.
+ * @param timeoutSignal - Time limit of the read.
+ * @param reporters - Failure reporter.
+ * @returns `reader-timed-out`, reported with the time limit's reason, when
+ * the time limit caused the failure; otherwise `reader-unreachable`,
+ * reported, for a failure with a Node.js error code, as a refused or broken
+ * connection has.
+ * @throws The failure unchanged when it is neither, which is a defect.
+ */
+function handleFailedReadStep(
+  error: unknown,
+  timeoutSignal: AbortSignal,
+  reporters: PageRenderingFailureReporters
+): FailedRendering {
+  if (isCausedByTimeout(error, timeoutSignal)) {
+    reporters.reportPageReaderFailure(timeoutSignal.reason)
+    return buildFailedRendering(READER_TIMED_OUT)
+  }
+  if (!hasErrorCode(error)) throw error
+  reporters.reportPageReaderFailure(error)
+  return buildFailedRendering(READER_UNREACHABLE)
+}
+
+/**
  * Reads one page through vmo, which loads it in a fresh micro VM.
  *
  * @param url - Page to read, checked by the page URL rules.
@@ -448,7 +436,8 @@ async function readVmoResponse(
  * @returns The page's HTML, under the URL Lys asked for; or why the page
  * could not be read.
  * @throws The stop reason once `abortSignal` aborts; nothing is started when
- * it already has. Any failure Lys does not recognize, which is a defect.
+ * it already has. Any failure Lys does not recognize, which is a defect, such
+ * as a `vmoOrigin` that is not an `http` URL.
  * @remarks First looks up the page's host name and refuses it when any of its
  * addresses is blocked. That check covers only the URL given: the page's
  * redirects, the resources it loads, and a name that resolves differently
@@ -467,26 +456,31 @@ export async function getRenderedPage(
   dependencies: PageRenderingDependencies
 ): Promise<PageRenderingResult> {
   abortSignal.throwIfAborted()
+  const target = buildVmoReadPageUrl(url, dependencies.vmoOrigin)
   const timeoutSignal = AbortSignal.timeout(dependencies.readTimeoutMs)
   const readSignal = AbortSignal.any([abortSignal, timeoutSignal])
   try {
-    const addressFailure = await waitForHostCheck(
+    const addressFailure = await waitForSettlementOrAbort(
       findHostAddressFailure(url, dependencies),
       readSignal
     )
     if (addressFailure !== undefined)
       return buildFailedRendering(addressFailure)
-    const target = buildVmoReadPageUrl(url, dependencies.vmoOrigin)
-    const response = await openVmoResponse(target, readSignal)
-    return await readVmoResponse(response, url, dependencies)
   } catch (error) {
     if (abortSignal.aborted) throw abortSignal.reason
-    if (timeoutSignal.aborted) {
-      dependencies.reportPageReaderFailure(timeoutSignal.reason)
-      return buildFailedRendering(READER_TIMED_OUT)
-    }
-    if (!hasErrorCode(error)) throw error
-    dependencies.reportPageReaderFailure(error)
-    return buildFailedRendering(READER_UNREACHABLE)
+    return handleFailedReadStep(error, timeoutSignal, dependencies)
+  }
+  // Created outside the catch below: Node throws here, before sending, when
+  // it cannot build the request, which is a defect, not a failed read.
+  const opening = openVmoResponse(
+    target,
+    VMO_READ_PAGE_REQUEST_HEADERS,
+    readSignal
+  )
+  try {
+    return await readVmoResponse(await opening, url, dependencies)
+  } catch (error) {
+    if (abortSignal.aborted) throw abortSignal.reason
+    return handleFailedReadStep(error, timeoutSignal, dependencies)
   }
 }

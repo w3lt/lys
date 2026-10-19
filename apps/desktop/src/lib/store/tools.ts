@@ -107,8 +107,9 @@ type ToolStoreActions = {
    * committed; it never rejects.
    * @remarks Unlike {@link loadTools}, it never settles with a read that
    * started before the call, so the list reflects what changed before it,
-   * such as vmo becoming ready. A read requested while it waits joins the
-   * same next read.
+   * such as vmo becoming ready. A further call made while it waits joins the
+   * same next read; {@link loadTools} called meanwhile joins the read in
+   * flight.
    */
   loadToolsAgain: () => Promise<void>
   /**
@@ -491,6 +492,25 @@ function canChangeBackendToolList(
 }
 
 /**
+ * Reads a tool list already read again after an application state change
+ * that can change the tools the running backend lists.
+ *
+ * @param state - Application state after the change.
+ * @param previousState - Application state before the change.
+ * @remarks A list never read is left alone. The read is not awaited: it
+ * never rejects and commits its own outcome to the list.
+ */
+function handleApplicationStateChange(
+  state: ToolListRefreshState,
+  previousState: ToolListRefreshState
+): void {
+  if (!canChangeBackendToolList(state, previousState)) return
+  const toolStore = useToolStore.getState()
+  if (toolStore.list.status === "idle") return
+  void toolStore.loadToolsAgain()
+}
+
+/**
  * Starts reading a tool list already read again whenever the backend's
  * answer may have changed.
  *
@@ -505,10 +525,5 @@ function canChangeBackendToolList(
  * mounted; nothing subscribes when this module is evaluated.
  */
 export function registerToolListRefresh(): () => void {
-  return useLysStore.subscribe((state, previousState) => {
-    if (!canChangeBackendToolList(state, previousState)) return
-    const toolStore = useToolStore.getState()
-    if (toolStore.list.status === "idle") return
-    void toolStore.loadToolsAgain()
-  })
+  return useLysStore.subscribe(handleApplicationStateChange)
 }

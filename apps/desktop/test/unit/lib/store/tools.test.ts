@@ -4,13 +4,14 @@ import type {
 } from "@lys/protocol"
 import type { ToolDefinition } from "@lys/share"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
-import type { BackendServerStatus } from "@/lib/store"
+import type { BackendServerInfo, BackendServerStatus } from "@/lib/store"
 import {
   buildChatToolOffer,
   getToolChoice,
   isToolOn,
   type ToolListState
 } from "@/lib/store/tools"
+import type { VmoProblem, VmoServerInfo } from "@/lib/store/vmo-runtime"
 import {
   buildJsonResponse,
   startBackendFake,
@@ -19,6 +20,7 @@ import {
 import { startNativeHostFake } from "../../support/nativeHostFake"
 import {
   createControlledPromise,
+  createSettlementReader,
   waitForMicrotasks
 } from "../../support/settlement"
 import {
@@ -44,6 +46,12 @@ const ALL_TOOLS_AVAILABLE: ReadonlyMap<string, BackendToolUnavailableReason> =
 
 /** Route key of the backend's tool list. */
 const BACKEND_TOOLS_ROUTE = "GET /api/v1/tools"
+
+/** `read_page` as the backend lists it while vmo cannot read pages yet. */
+const READ_PAGE_NOT_READY: UnavailableBackendTool = Object.freeze({
+  name: "read_page",
+  reason: "page-reader-not-ready"
+})
 
 /**
  * Builds the backend's tool-list route.
@@ -100,10 +108,7 @@ function startBackendOfferingReadPageFrom(firstReadyRead: number) {
       reads += 1
       return buildJsonResponse(200, {
         tools: [READ_PAGE],
-        unavailableTools:
-          reads >= firstReadyRead
-            ? []
-            : [{ name: "read_page", reason: "page-reader-not-ready" }]
+        unavailableTools: reads >= firstReadyRead ? [] : [READ_PAGE_NOT_READY]
       })
     }
   })
@@ -495,6 +500,47 @@ describe("useToolStore", () => {
       })
     })
 
+    it("joins a further call made while it waits into the same next read, while loadTools joins the read in flight", async () => {
+      const firstClientList = createControlledPromise<unknown>()
+      const nextClientList = createControlledPromise<unknown>()
+      let clientReads = 0
+      const host = startNativeHostFake({
+        list_tools: () => {
+          clientReads += 1
+          return clientReads === 1
+            ? firstClientList.promise
+            : nextClientList.promise
+        }
+      })
+      const backend = startBackendOfferingReadPageFrom(2)
+      const useToolStore = await loadFreshToolStore()
+      const toolStore = useToolStore.getState()
+
+      const first = toolStore.loadTools()
+      const waitingCalls = Promise.all([
+        toolStore.loadToolsAgain(),
+        toolStore.loadToolsAgain()
+      ])
+      const readJoiningFirst = createSettlementReader(toolStore.loadTools())
+      const waitingSettlement = createSettlementReader(waitingCalls)
+      firstClientList.resolve([])
+      await first
+      await waitForMicrotasks()
+      const settlementsAfterFirstRead = {
+        readJoiningFirst: readJoiningFirst(),
+        waitingCalls: waitingSettlement()
+      }
+      nextClientList.resolve([])
+      await waitingCalls
+
+      expect(settlementsAfterFirstRead).toEqual({
+        readJoiningFirst: "fulfilled",
+        waitingCalls: "pending"
+      })
+      expect(host.commands).toHaveLength(2)
+      expect(backend.requests).toHaveLength(2)
+    })
+
     it("reads at once when no read is in flight", async () => {
       startNativeHostFake({ list_tools: () => [] })
       const backend = startBackendOfferingReadPageFrom(1)
@@ -508,16 +554,61 @@ describe("useToolStore", () => {
   })
 
   describe("registerToolListRefresh", () => {
+    /** Backend whose start is pending. */
+    const STARTING_BACKEND: BackendServerInfo = Object.freeze({
+      status: "starting"
+    })
+
+    /** Backend whose health route answered. */
+    const RUNNING_BACKEND: BackendServerInfo = Object.freeze({
+      status: "running"
+    })
+
+    /** Backend that does not run. */
+    const STOPPED_BACKEND: BackendServerInfo = Object.freeze({
+      status: "stopped"
+    })
+
+    /** vmo while its start is pending. */
+    const STARTING_VMO: VmoServerInfo = Object.freeze({
+      status: "starting",
+      problem: null
+    })
+
+    /** vmo answering its health route. */
+    const RUNNING_VMO: VmoServerInfo = Object.freeze({
+      status: "running",
+      problem: null
+    })
+
+    /** vmo while a stop waits for it to exit. */
+    const STOPPING_VMO: VmoServerInfo = Object.freeze({
+      status: "stopping",
+      problem: null
+    })
+
+    /** Problem of a vmo killed after the stop timeout. */
+    const KILLED_PROBLEM: VmoProblem = Object.freeze({ kind: "killed" })
+
+    /** vmo killed after the stop timeout. */
+    const KILLED_VMO: VmoServerInfo = Object.freeze({
+      status: "stopped",
+      problem: KILLED_PROBLEM
+    })
+
+    /** vmo that runs without answering its health route. */
+    const UNRESPONSIVE_VMO: VmoServerInfo = Object.freeze({
+      status: "unresponsive",
+      problem: null
+    })
+
     /** vmo transitions in order, and whether each reads the list again. */
     const VMO_TRANSITIONS = [
-      { vmoServerInfo: { status: "starting", problem: null }, reads: false },
-      { vmoServerInfo: { status: "running", problem: null }, reads: true },
-      { vmoServerInfo: { status: "stopping", problem: null }, reads: false },
-      {
-        vmoServerInfo: { status: "stopped", problem: { kind: "killed" } },
-        reads: true
-      },
-      { vmoServerInfo: { status: "unresponsive", problem: null }, reads: true }
+      { vmoServerInfo: STARTING_VMO, reads: false },
+      { vmoServerInfo: RUNNING_VMO, reads: true },
+      { vmoServerInfo: STOPPING_VMO, reads: false },
+      { vmoServerInfo: KILLED_VMO, reads: true },
+      { vmoServerInfo: UNRESPONSIVE_VMO, reads: true }
     ] as const
 
     /**
@@ -534,13 +625,13 @@ describe("useToolStore", () => {
     ) {
       startNativeHostFake({ list_tools: () => [] })
       const backend = startBackendOfferingReadPageFrom(1)
-      const stores = await loadFreshToolStores()
-      stores.useLysStore.setState({
-        backendServerInfo: { status: backendStatus }
-      })
-      const unsubscribe = stores.registerToolListRefresh()
+      const { useToolStore, useLysStore, registerToolListRefresh } =
+        await loadFreshToolStores()
+      const backendServerInfo: BackendServerInfo = { status: backendStatus }
+      useLysStore.setState({ backendServerInfo })
+      const unsubscribe = registerToolListRefresh()
       onTestFinished(unsubscribe)
-      return { ...stores, backend, unsubscribe }
+      return { useToolStore, useLysStore, backend, unsubscribe }
     }
 
     /**
@@ -577,7 +668,7 @@ describe("useToolStore", () => {
       const { useLysStore, useToolStore, backend } =
         await startRefresh("starting")
 
-      useLysStore.setState({ backendServerInfo: { status: "running" } })
+      useLysStore.setState({ backendServerInfo: RUNNING_BACKEND })
       await vi.waitFor(() => {
         expect(backend.requests).toHaveLength(2)
         expect(useToolStore.getState().list.status).toBe("loaded")
@@ -593,7 +684,7 @@ describe("useToolStore", () => {
     it("reads nothing while the backend is not running", async () => {
       const { useLysStore, backend } = await startRefresh("stopped")
 
-      useLysStore.setState({ backendServerInfo: { status: "starting" } })
+      useLysStore.setState({ backendServerInfo: STARTING_BACKEND })
       for (const { vmoServerInfo } of VMO_TRANSITIONS) {
         useLysStore.setState({ vmoServerInfo })
       }
@@ -606,10 +697,8 @@ describe("useToolStore", () => {
       const { useLysStore, useToolStore, backend } =
         await startRefreshOfUnreadList("stopped")
 
-      useLysStore.setState({ backendServerInfo: { status: "running" } })
-      useLysStore.setState({
-        vmoServerInfo: { status: "running", problem: null }
-      })
+      useLysStore.setState({ backendServerInfo: RUNNING_BACKEND })
+      useLysStore.setState({ vmoServerInfo: RUNNING_VMO })
       await waitForMicrotasks()
 
       expect(backend.requests).toHaveLength(0)
@@ -621,11 +710,9 @@ describe("useToolStore", () => {
         await startRefresh("running")
 
       unsubscribe()
-      useLysStore.setState({
-        vmoServerInfo: { status: "running", problem: null }
-      })
-      useLysStore.setState({ backendServerInfo: { status: "stopped" } })
-      useLysStore.setState({ backendServerInfo: { status: "running" } })
+      useLysStore.setState({ vmoServerInfo: RUNNING_VMO })
+      useLysStore.setState({ backendServerInfo: STOPPED_BACKEND })
+      useLysStore.setState({ backendServerInfo: RUNNING_BACKEND })
       await waitForMicrotasks()
 
       expect(backend.requests).toHaveLength(1)

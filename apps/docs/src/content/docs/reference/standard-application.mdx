@@ -26,6 +26,22 @@ In `packages/protocol/src/apis/`, primary payload contracts such as request bodi
 
 Endpoint descriptors, status-to-schema maps, reply maps, and framework route wrappers MAY use ordinary objects and TypeScript types that compose the primary contracts. They do not require Zod schemas solely for type derivation. Avoid handwritten mirrors of an inferable schema-map or descriptor shape. Use `z.infer`, `z.input`, or `z.output` only with an actual Zod schema, never with a plain descriptor or schema map.
 
+## Cancellation in vmo's Swift code
+
+This policy applies
+[IFACE-018](https://github.com/w3lt/lys/blob/main/docs/code_standards/INTERFACE.md)
+to vmo, which is written in Swift. The maintainer approved it on 2026-10-20
+for [PR #220](https://github.com/w3lt/lys/pull/220), answering question 1 of
+its [review](https://github.com/w3lt/lys/pull/220#issuecomment-6288232844).
+
+Swift's concurrency carries cancellation with the task rather than as a
+value. In vmo, the caller's task is the application stack's explicit
+cancellation value that IFACE-018 names: cancelling the task that calls an
+operation cancels that operation, so a cancellable operation takes no token
+parameter or input field. Its documentation states what cancelling the
+caller does, and a caller that must not cancel an operation calls it from a
+task that isn't cancelled.
+
 ## LLM runtime surface and review history
 
 The current runtime surface maps to
@@ -497,7 +513,7 @@ following finding I-10 of its
   a process signed with the `com.apple.security.virtualization` entitlement,
   as `run.sh` and `build.sh` sign vmo; `swift test` runs the tests in a
   process without it, so Virtualization.framework refuses to boot a VM there.
-  Six of the eight cases of the failure suite also need a Containerization
+  Eight of the eleven cases of the failure suite also need a Containerization
   step to fail on demand, which neither provides. CI runs no `swift` tests.
 - **Alternatives considered:**
   - Running the production lifecycle's VM cases only when a kernel and the

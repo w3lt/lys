@@ -155,19 +155,27 @@ protocol ReaderVmLifecycle: Sendable {
     /// ends its wait at once, without stopping the command or ending any
     /// other wait for it; a caller that must learn when the command exits
     /// waits from a task that isn't cancelled. Deleting the VM ends every
-    /// wait: at once when the deletion stops the command, or when the command
-    /// exits after stopping it failed.
+    /// wait, also one that begins after the deletion began: at once when the
+    /// deletion stops the command, or when the command exits after stopping
+    /// it failed. So a wait whose caller isn't cancelled never ends while the
+    /// command still runs.
     ///
     /// - Parameter containerId: Container id of a VM that
     ///   ``startVm(containerId:)`` started.
     /// - Returns: The command's output and exit code. A non-zero exit code is
     ///   returned, not thrown.
     /// - Throws: ``ReaderVmLifecycleError/unknownVm(containerId:)`` when no
-    ///   VM with this id is available, or when its deletion began during the
-    ///   wait. ``ReaderVmLifecycleError/notStarted(containerId:)`` when its
-    ///   command hasn't started. `CancellationError` when the caller is
-    ///   cancelled before the command's exit reaches its wait, also when the
-    ///   command had already exited. The mechanism's error when waiting fails.
+    ///   VM with this id is available: at once when the lifecycle didn't
+    ///   create it or its command can no longer run, and otherwise, because
+    ///   its deletion began before or during the wait, once its command can
+    ///   no longer run. ``ReaderVmLifecycleError/notStarted(containerId:)``
+    ///   when its command hasn't started. `CancellationError` when the caller
+    ///   is cancelled before the command's exit reaches its wait, also when
+    ///   the command had already exited. The mechanism's error when waiting
+    ///   fails. The VM is checked before the caller's cancellation, so a
+    ///   cancelled caller gets the ``ReaderVmLifecycleError`` that ends a
+    ///   wait at once, when there is one, and `CancellationError` only when
+    ///   there is a command to wait for.
     func waitForCommandExit(containerId: ContainerId) async throws -> CommandOutput
 
     /// Deletes a VM: stops it when its command was started, then deletes its
@@ -256,6 +264,11 @@ func readPageInVm<DeadlineClock: Clock>(
 /// the read doesn't end the wait: it ends only when the reader exits or
 /// deleting its VM stops it. The read's task group joins it before the read
 /// returns.
+///
+/// The task may reach `vmLifecycle` after the read has begun deleting the
+/// VM, when the deadline passed or the read was cancelled while the VM
+/// started. The lifecycle's wait then still ends only once the reader can no
+/// longer run.
 ///
 /// - Parameters:
 ///   - containerId: Container id of the started reader VM.

@@ -98,8 +98,9 @@ private enum InMemoryCommandRun {
 /// Invariant: `vms` holds the VMs created and not deleted, each in the phase
 /// it has reached. `commandRuns` holds the command of every VM that started,
 /// running or ended, also after its VM is deleted, because a command whose
-/// stop failed runs on. `startHolds` holds the held starts, whose VMs are
-/// starting. It owns no resource.
+/// stop failed runs on, and a wait that begins after the deletion waits for
+/// it. `startHolds` holds the held starts, whose VMs are starting. It owns no
+/// resource.
 ///
 /// Concurrency model: concurrent. The actor runs one state change at a time;
 /// a held start and a wait for a running command suspend without holding up
@@ -205,7 +206,7 @@ actor InMemoryReaderVmLifecycle: ReaderVmLifecycle {
     func waitForCommandExit(containerId: ContainerId) async throws -> CommandOutput {
         events.addEvent(.waitForCommandExit(containerId: containerId))
         defer { events.addEvent(.waitEnded(containerId: containerId)) }
-        let exit = try await getCommandExit(of: containerId).waitForExit()
+        let exit = try await getWaitedCommandExit(of: containerId).waitForExit()
         // Deleting the VM stops the command, which then ended because it was
         // killed, not on its own.
         _ = try getCommandExit(of: containerId)
@@ -345,6 +346,28 @@ actor InMemoryReaderVmLifecycle: ReaderVmLifecycle {
             throw ReaderVmLifecycleError.notStarted(containerId: containerId)
         case .deleting, nil:
             throw ReaderVmLifecycleError.unknownVm(containerId: containerId)
+        }
+    }
+
+    /// Gets the exit that a wait for a VM's command waits for: the exit of a
+    /// started VM's command, or of a command that runs on after its VM's
+    /// deletion, because stopping it failed.
+    ///
+    /// - Parameter containerId: Container id of the VM.
+    /// - Returns: The exit of the VM's command, which may not be resolved yet.
+    /// - Throws: ``ReaderVmLifecycleError/unknownVm(containerId:)`` when no
+    ///   VM with this id is available and no command of a VM with this id
+    ///   runs. ``ReaderVmLifecycleError/notStarted(containerId:)`` when its
+    ///   command hasn't started.
+    private func getWaitedCommandExit(of containerId: ContainerId) throws -> CommandExit {
+        switch vms[containerId] {
+        case .created, .starting, .started, .startFailed:
+            return try getCommandExit(of: containerId)
+        case .deleting, nil:
+            guard case .running(let commandExit) = commandRuns[containerId] else {
+                throw ReaderVmLifecycleError.unknownVm(containerId: containerId)
+            }
+            return commandExit
         }
     }
 

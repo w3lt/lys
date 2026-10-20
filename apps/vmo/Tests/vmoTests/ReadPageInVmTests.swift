@@ -133,6 +133,35 @@ private struct ReadPageInVmHarness {
             try await lifecycle.deleteVm(containerId: readerVmId)
         }
     }
+
+    /// Checks the events of a read that began deleting its VM as soon as the
+    /// start ended, and whose reader, whose stop failed, then exited: the
+    /// wait for the reader and the deletion, in either order, then the
+    /// reader's exit, and only then the end of the wait and of the read.
+    ///
+    /// - Parameter sourceLocation: Where a failed check is reported; the
+    ///   caller's line by default.
+    func expectReadEndedAfterUnstoppedReader(sourceLocation: SourceLocation = #_sourceLocation) {
+        let events = eventLog.events
+        let readerStart: [ReaderVmEvent] = [
+            readerVmCreation,
+            .startVm(containerId: readerVmId),
+            .startEnded(containerId: readerVmId),
+        ]
+        let waitAndDeletion: [ReaderVmEvent] = [
+            .waitForCommandExit(containerId: readerVmId),
+            .deleteVm(containerId: readerVmId, isCallerCancelled: false),
+        ]
+        let readerEnd: [ReaderVmEvent] = [
+            .commandExited(containerId: readerVmId),
+            .waitEnded(containerId: readerVmId),
+            .readEnded,
+        ]
+        #expect(Array(events.prefix(3)) == readerStart, sourceLocation: sourceLocation)
+        let middle = Array(events.dropFirst(3).dropLast(3))
+        #expect(middle == waitAndDeletion || middle == waitAndDeletion.reversed(), sourceLocation: sourceLocation)
+        #expect(Array(events.suffix(3)) == readerEnd, sourceLocation: sourceLocation)
+    }
 }
 
 /// Checks how ``readPageInVm(_:_:deadline:)`` ends when no step of its VM
@@ -476,6 +505,34 @@ struct ReadPageInVmFailureTests {
             ]
         )
     }
+
+    /// Verifies that a reader whose stop failed holds the read until it
+    /// exits also when the deadline passed while its VM started, so the read
+    /// begins deleting the VM as soon as the start ends.
+    ///
+    /// Once the start ends, the wait for the reader and the deletion run
+    /// concurrently, so either may reach the lifecycle first, and the read
+    /// must end after its reader in both orders.
+    /// ``ReaderVmLifecycleFailureContractTests/endsLateWaitWhenCommandExits(harness:)``
+    /// checks the order in which the deletion comes first.
+    @Test("When the deadline passes while the VM starts and the reader can't be stopped, the read throws the stop failure once the reader exits")
+    func throwsStopFailureOnceReaderExitsAfterLateStart() async throws {
+        let lifecycle = harness.createLifecycle(
+            ReaderVmScript(command: .runsUntilResolved, failingSteps: [.stop], holdsStart: true)
+        )
+        let read = harness.startRead(through: lifecycle, until: harness.deadline)
+        try await harness.eventLog.waitForEvent(.startVm(containerId: readerVmId))
+        harness.clock.updateNow(to: harness.deadline.instant)
+        await lifecycle.resolveStart(containerId: readerVmId)
+        try await harness.eventLog.waitForEvent(.deleteVm(containerId: readerVmId, isCallerCancelled: false))
+        try await harness.eventLog.waitForEvent(.waitForCommandExit(containerId: readerVmId))
+
+        await lifecycle.resolveCommand(containerId: readerVmId, with: readerOutput)
+        let result = try await harness.waitForReadEnd(read)
+
+        #expect(throws: ReaderVmStepFailure(step: .stop)) { try result.get() }
+        harness.expectReadEndedAfterUnstoppedReader()
+    }
 }
 
 /// Checks how ``readPageInVm(_:_:deadline:)`` ends when its caller is
@@ -605,5 +662,33 @@ struct ReadPageInVmCancellationTests {
                 .readEnded,
             ]
         )
+    }
+
+    /// Verifies that a reader whose stop failed holds a read cancelled while
+    /// its VM started until it exits, although the read begins deleting the
+    /// VM as soon as the start ends.
+    ///
+    /// The wait for the reader and the deletion may reach the lifecycle in
+    /// either order, as in
+    /// ``ReadPageInVmFailureTests/throwsStopFailureOnceReaderExitsAfterLateStart()``.
+    @Test("Cancelling a read while its VM starts, when the reader can't be stopped, throws both failures once the reader exits")
+    func throwsCancellationAndStopFailureOnceReaderExitsAfterLateStart() async throws {
+        let lifecycle = harness.createLifecycle(
+            ReaderVmScript(command: .runsUntilResolved, failingSteps: [.stop], holdsStart: true)
+        )
+        let read = harness.startRead(through: lifecycle, until: harness.deadline)
+        try await harness.eventLog.waitForEvent(.startVm(containerId: readerVmId))
+        read.cancel()
+        await lifecycle.resolveStart(containerId: readerVmId)
+        try await harness.eventLog.waitForEvent(.deleteVm(containerId: readerVmId, isCallerCancelled: false))
+        try await harness.eventLog.waitForEvent(.waitForCommandExit(containerId: readerVmId))
+
+        await lifecycle.resolveCommand(containerId: readerVmId, with: readerOutput)
+        let result = try await harness.waitForReadEnd(read)
+
+        let error = try #require(throws: CleanupAfterFailureError.self) { try result.get() }
+        #expect(error.operationError is CancellationError)
+        #expect(error.cleanupError as? ReaderVmStepFailure == ReaderVmStepFailure(step: .stop))
+        harness.expectReadEndedAfterUnstoppedReader()
     }
 }

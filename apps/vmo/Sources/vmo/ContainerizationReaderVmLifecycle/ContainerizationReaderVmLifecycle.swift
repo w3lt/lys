@@ -17,15 +17,20 @@ struct VmCleanupError: Error {
 /// Invariant: `activeVms` holds exactly the VMs this lifecycle created, fully
 /// or partly, whose deletion hasn't succeeded, each in the phase it has
 /// reached. `vmOperations` holds the VMs being created, started, or deleted.
+/// `runningCommandExits` holds the exit of every command that started, from
+/// its start until the exit is resolved, also once its VM's deletion has
+/// begun or succeeded, so that a wait that begins after the deletion began
+/// still ends only once the command can no longer run.
 ///
 /// A VM's phases: created → starting → started, or startFailed when the
 /// start fails. A VM starts at most once. Deletion moves a VM in any phase
 /// but starting to deleting. The VM leaves `activeVms` when its deletion
 /// succeeds, and stays deleting for ``close()`` to try again when it fails.
 ///
-/// Resources: the VMs are owned, and so is each started VM's wait for its
-/// command to exit. The container manager is a value that the composition
-/// root passes in; its image store and network need no explicit release.
+/// Resources: the VMs are owned, and so is each started VM's task that waits
+/// for its command to exit and resolves the command's ``CommandExit``. The
+/// container manager is a value that the composition root passes in; its
+/// image store and network need no explicit release.
 ///
 /// Lifecycle: ready → closing → closed. Every operation but ``close()``
 /// works only while ready. Once ``close()`` begins, they throw
@@ -38,7 +43,8 @@ struct VmCleanupError: Error {
 /// records its VM's new phase before it suspends, so an overlapping operation
 /// on the same VM fails with a ``ReaderVmLifecycleError`` instead of
 /// interleaving. ``waitForCommandExit(containerId:)`` suspends until the
-/// command exits without holding up other operations.
+/// command exits or its caller is cancelled, without holding up other
+/// operations.
 actor ContainerizationReaderVmLifecycle: ReaderVmLifecycle {
     /// How far ``close()`` has got, which decides whether operations are
     /// accepted.
@@ -62,6 +68,10 @@ actor ContainerizationReaderVmLifecycle: ReaderVmLifecycle {
     /// VMs being created, started, or deleted, and the cleanup waiting for
     /// those operations to end.
     private var vmOperations = VmOperations()
+    /// The exits of the commands that started and may still run, keyed by
+    /// container id, kept after their VM's deletion began: the deletion may
+    /// still be stopping the command, or have failed to stop it.
+    private var runningCommandExits: [ContainerId: CommandExit] = [:]
     /// How far ``close()`` has got.
     private var lifecycle = Lifecycle.ready
 
@@ -168,11 +178,15 @@ actor ContainerizationReaderVmLifecycle: ReaderVmLifecycle {
             activeVms[containerId] = .startFailed
             throw error
         }
-        let commandExit = Task {
-            let exitStatus = try await container.wait()
-            return buffers.output(exitCode: exitStatus.exitCode)
+        let commandExit = CommandExit()
+        let exitResolution = Task {
+            await resolveCommandExit(commandExit, of: container, buffers: buffers)
+            // The command can no longer run, so a wait that begins after its
+            // VM's deletion began no longer needs its exit.
+            self.runningCommandExits[containerId] = nil
         }
-        activeVms[containerId] = .started(container, commandExit: commandExit)
+        runningCommandExits[containerId] = commandExit
+        activeVms[containerId] = .started(container, commandExit: commandExit, exitResolution: exitResolution)
         guard isReady else {
             throw ReaderVmLifecycleError.closed
         }
@@ -193,11 +207,11 @@ actor ContainerizationReaderVmLifecycle: ReaderVmLifecycle {
     ///   error as the mechanism's. ``ReaderVmLifecycleError/closed`` when
     ///   ``close()`` has begun, before or during the wait.
     func waitForCommandExit(containerId: ContainerId) async throws -> CommandOutput {
-        let output = try await commandExit(of: containerId).result
+        let exit = try await getWaitedCommandExit(of: containerId).waitForExit()
         // Deleting the VM or closing the lifecycle stops the command, which
         // then exits because it was killed, not on its own.
-        _ = try commandExit(of: containerId)
-        return try output.get()
+        _ = try getStartedCommandExit(of: containerId)
+        return try exit.get()
     }
 
     /// Implements ``ReaderVmLifecycle/deleteVm(containerId:)`` for a micro VM,
@@ -312,18 +326,49 @@ actor ContainerizationReaderVmLifecycle: ReaderVmLifecycle {
         return vm
     }
 
-    /// Returns the wait for a started VM's command to exit.
+    /// Returns the exit of a started VM's command.
     ///
     /// - Parameter containerId: Container id of the VM.
-    /// - Returns: The task that ends when the command exits.
+    /// - Returns: The exit, which is resolved when the command exits.
     /// - Throws: The errors of ``waitForCommandExit(containerId:)`` other than
-    ///   Containerization's.
-    private func commandExit(of containerId: ContainerId) throws -> Task<CommandOutput, any Error> {
+    ///   Containerization's and `CancellationError`.
+    private func getStartedCommandExit(of containerId: ContainerId) throws -> CommandExit {
         let vm = try activeVm(containerId)
         return switch vm {
-        case .started(_, let commandExit): commandExit
+        case .started(_, let commandExit, _): commandExit
         case .created, .starting, .startFailed: throw ReaderVmLifecycleError.notStarted(containerId: containerId)
         case .deleting: throw ReaderVmLifecycleError.unknownVm(containerId: containerId)
+        }
+    }
+
+    /// Returns the exit that a wait for a VM's command waits for: the exit
+    /// of a started VM's command, or of a command that may still run after
+    /// its VM's deletion began.
+    ///
+    /// - Parameter containerId: Container id of the VM.
+    /// - Returns: The exit, which is resolved when the command exits or the
+    ///   VM stops.
+    /// - Throws: ``ReaderVmLifecycleError/closed`` when ``close()`` has begun.
+    ///   ``ReaderVmLifecycleError/notStarted(containerId:)`` when the VM's
+    ///   command hasn't started.
+    ///   ``ReaderVmLifecycleError/unknownVm(containerId:)`` when the lifecycle
+    ///   has no such VM and no running command of a VM with this id.
+    private func getWaitedCommandExit(of containerId: ContainerId) throws -> CommandExit {
+        guard isReady else {
+            throw ReaderVmLifecycleError.closed
+        }
+        switch activeVms[containerId] {
+        case .started(_, let commandExit, _):
+            return commandExit
+        case .created, .starting, .startFailed:
+            throw ReaderVmLifecycleError.notStarted(containerId: containerId)
+        case .deleting, nil:
+            // The deletion may still be stopping the command, or have failed
+            // to stop it.
+            guard let commandExit = runningCommandExits[containerId] else {
+                throw ReaderVmLifecycleError.unknownVm(containerId: containerId)
+            }
+            return commandExit
         }
     }
 
@@ -340,11 +385,12 @@ actor ContainerizationReaderVmLifecycle: ReaderVmLifecycle {
         vmOperations.add(containerId)
         defer { vmOperations.remove(containerId) }
         var stopError: (any Error)?
-        if case .started(let container, let commandExit) = vm {
+        if case .started(let container, _, let exitResolution) = vm {
             do {
                 try await container.stop()
-                // The stop ends the wait; its result is discarded with the VM.
-                _ = await commandExit.result
+                // The stop ends the command, whose exit is discarded with the
+                // VM once the task that resolves it has ended.
+                await exitResolution.value
             } catch {
                 stopError = error
             }
@@ -412,6 +458,28 @@ private func configureVm(
     config.process.stderr = buffers.stderr
 }
 
+/// Waits until a started VM's command exits, then resolves its exit.
+///
+/// The wait ends when the command exits on its own or the VM stops. Nothing
+/// cancels it: the lifecycle runs it in a task of its own.
+///
+/// - Parameters:
+///   - commandExit: The command's exit, which this resolves once.
+///   - container: The started VM.
+///   - buffers: What the command wrote.
+private func resolveCommandExit(
+    _ commandExit: CommandExit,
+    of container: LinuxContainer,
+    buffers: CommandOutputBuffers
+) async {
+    do {
+        let exitStatus = try await container.wait()
+        commandExit.resolve(with: .success(buffers.output(exitCode: exitStatus.exitCode)))
+    } catch {
+        commandExit.resolve(with: .failure(error))
+    }
+}
+
 /// A VM the lifecycle created, fully or partly, and hasn't deleted, in the
 /// phase it has reached. Each phase holds only what the next operations on
 /// the VM need.
@@ -423,9 +491,10 @@ private enum ActiveVm {
     /// ``ContainerizationReaderVmLifecycle/startVm(containerId:)`` is booting
     /// it and starting its command.
     case starting
-    /// Its command started. `commandExit` ends when the command exits or the
-    /// VM stops, with what the command wrote.
-    case started(LinuxContainer, commandExit: Task<CommandOutput, any Error>)
+    /// Its command started. `commandExit` is resolved when the command exits
+    /// or the VM stops, with what the command wrote, by `exitResolution`,
+    /// which then removes it from the lifecycle's running commands and ends.
+    case started(LinuxContainer, commandExit: CommandExit, exitResolution: Task<Void, Never>)
     /// Its start failed and Containerization stopped it, so only deleting its
     /// files and IP address remains.
     case startFailed

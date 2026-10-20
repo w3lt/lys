@@ -150,19 +150,32 @@ protocol ReaderVmLifecycle: Sendable {
     /// (``CommandStreamOutput/isTruncated`` says when more was dropped), and
     /// its exit code.
     ///
-    /// Concurrent and repeated calls share one wait, so they return the same
-    /// output. There is no time limit. Until #212, cancelling the caller
-    /// doesn't end the wait. Deleting the VM does: at once when the deletion
-    /// stops the command, or when the command exits after stopping it failed.
+    /// Every call waits for the same exit, so concurrent and repeated calls
+    /// return the same output. There is no time limit. Cancelling the caller
+    /// ends its wait at once, without stopping the command or ending any
+    /// other wait for it; a caller that must learn when the command exits
+    /// waits from a task that isn't cancelled. Deleting the VM ends every
+    /// wait, also one that begins after the deletion began: at once when the
+    /// deletion stops the command, or when the command exits after stopping
+    /// it failed. So a wait whose caller isn't cancelled never ends while the
+    /// command still runs.
     ///
     /// - Parameter containerId: Container id of a VM that
     ///   ``startVm(containerId:)`` started.
     /// - Returns: The command's output and exit code. A non-zero exit code is
     ///   returned, not thrown.
     /// - Throws: ``ReaderVmLifecycleError/unknownVm(containerId:)`` when no
-    ///   VM with this id is available, or when its deletion began during the
-    ///   wait. ``ReaderVmLifecycleError/notStarted(containerId:)`` when its
-    ///   command hasn't started. The mechanism's error when waiting fails.
+    ///   VM with this id is available: at once when the lifecycle didn't
+    ///   create it or its command can no longer run, and otherwise, because
+    ///   its deletion began before or during the wait, once its command can
+    ///   no longer run. ``ReaderVmLifecycleError/notStarted(containerId:)``
+    ///   when its command hasn't started. `CancellationError` when the caller
+    ///   is cancelled before the command's exit reaches its wait, also when
+    ///   the command had already exited. The mechanism's error when waiting
+    ///   fails. The VM is checked before the caller's cancellation, so a
+    ///   cancelled caller gets the ``ReaderVmLifecycleError`` that ends a
+    ///   wait at once, when there is one, and `CancellationError` only when
+    ///   there is a command to wait for.
     func waitForCommandExit(containerId: ContainerId) async throws -> CommandOutput
 
     /// Deletes a VM: stops it when its command was started, then deletes its
@@ -211,8 +224,9 @@ struct ReadDeadline<DeadlineClock: Clock>: Sendable {
 /// Cancelling the caller cancels the creation as far as `vmLifecycle`
 /// observes cancellation, and deletes a VM already created. The deletion
 /// itself isn't cancelled, because an interrupted stop could leave the reader
-/// running. When stopping the VM fails, the reader may run on, and this
-/// returns only when it exits.
+/// running. Neither is the wait for the reader, so neither the deadline nor
+/// the caller ends it: when stopping the VM fails, the reader may run on, and
+/// this returns only when it exits.
 ///
 /// - Parameters:
 ///   - url: The page to read.
@@ -240,17 +254,41 @@ func readPageInVm<DeadlineClock: Clock>(
         throw await deleteReaderVmAfterFailure(containerId, vmLifecycle, failure: error)
     }
     return try await withThrowingTaskGroup(of: ReadPageOutcome.self) { group in
-        group.addTask { .readerExited(try await vmLifecycle.waitForCommandExit(containerId: containerId)) }
+        group.addTask { .readerExited(try await waitForReaderExit(containerId, vmLifecycle)) }
         let firstEnd = await waitForReaderOrDeadline(in: &group, deadline: deadline)
         return try await deleteReaderVmAfterRead(containerId, vmLifecycle, firstEnd: firstEnd)
     }
 }
 
+/// Waits until the reader exits, from a task of its own, so that cancelling
+/// the read doesn't end the wait: it ends only when the reader exits or
+/// deleting its VM stops it. The read's task group joins it before the read
+/// returns.
+///
+/// The task may reach `vmLifecycle` after the read has begun deleting the
+/// VM, when the deadline passed or the read was cancelled while the VM
+/// started. The lifecycle's wait then still ends only once the reader can no
+/// longer run.
+///
+/// - Parameters:
+///   - containerId: Container id of the started reader VM.
+///   - vmLifecycle: Lifecycle that created the VM.
+/// - Returns: The reader's output and exit code.
+/// - Throws: The errors of ``ReaderVmLifecycle/waitForCommandExit(containerId:)``,
+///   whose caller here is a task that nothing cancels.
+private func waitForReaderExit(
+    _ containerId: ContainerId,
+    _ vmLifecycle: some ReaderVmLifecycle
+) async throws -> CommandOutput {
+    try await Task { try await vmLifecycle.waitForCommandExit(containerId: containerId) }.value
+}
+
 /// Adds a timer that ends at the deadline to `group`, which holds the wait
 /// for the reader to exit, and waits for the first of the two to end.
 ///
-/// Both are then cancelled. The timer ends at once; the wait doesn't observe
-/// cancellation and ends only when the reader exits or its VM is deleted.
+/// Both are then cancelled. The timer ends at once; the wait for the reader
+/// runs in a task that the cancellation doesn't reach, so it ends only when
+/// the reader exits or its VM is deleted.
 ///
 /// - Parameters:
 ///   - group: Task group holding only the wait for the reader to exit.

@@ -1,9 +1,10 @@
 import Synchronization
 @testable import vmo
 
-/// One thing that happened in a test of an ``InMemoryReaderVmLifecycle``: a
-/// call to it, the end of a call that can suspend, something its VMs did, or
-/// the end of the read under test.
+/// One thing that happened in a test of an ``InMemoryReaderVmLifecycle`` or
+/// of a ``CommandExit``: a call to the lifecycle, the end of a call that can
+/// suspend, something its VMs did, the start or end of a wait for a command
+/// exit, or the end of the read under test.
 enum ReaderVmEvent: Equatable, Sendable {
     /// ``ReaderVmLifecycle/createVm(imageReference:arguments:)`` was called.
     case createVm(imageReference: ImageReference, arguments: [String])
@@ -12,24 +13,27 @@ enum ReaderVmEvent: Equatable, Sendable {
     /// A call to ``ReaderVmLifecycle/startVm(containerId:)`` returned or
     /// threw.
     case startEnded(containerId: ContainerId)
-    /// ``ReaderVmLifecycle/waitForCommandExit(containerId:)`` was called.
+    /// ``ReaderVmLifecycle/waitForCommandExit(containerId:)`` was called. In
+    /// a test of a ``CommandExit``, a wait for the exit began, and the id
+    /// names the waited command, not a VM.
     case waitForCommandExit(containerId: ContainerId)
     /// ``ReaderVmLifecycle/deleteVm(containerId:)`` was called, from a task
     /// that was or wasn't cancelled.
     case deleteVm(containerId: ContainerId, isCallerCancelled: Bool)
     /// The VM's command exited on its own, because the test resolved it.
     case commandExited(containerId: ContainerId)
-    /// A wait for the VM's command returned or threw.
+    /// A wait for the VM's command returned or threw. In a test of a
+    /// ``CommandExit``, a wait for the exit did.
     case waitEnded(containerId: ContainerId)
     /// The read under test returned or threw. The test that runs the read
     /// records it, not the lifecycle.
     case readEnded
 }
 
-/// Owns the events of one test of an ``InMemoryReaderVmLifecycle`` in the
-/// order they happened, to let the test assert them and wait for them, while
-/// guaranteeing that every wait ends once its events are added or its task is
-/// cancelled.
+/// Owns the events of one test of an ``InMemoryReaderVmLifecycle`` or of a
+/// ``CommandExit`` in the order they happened, to let the test assert them
+/// and wait for them, while guaranteeing that every wait ends once its events
+/// are added or its task is cancelled.
 ///
 /// Concurrency model: concurrent. Any task can add events, read them, or wait
 /// for them; one mutex guards the events and the waits, and waits are resumed

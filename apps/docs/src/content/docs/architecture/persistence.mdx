@@ -85,14 +85,15 @@ On startup the database owner:
 
 The conversation services are then created over SQLite records on the open
 database. Turn persistence comes first: in one write transaction it changes
-remaining streaming assistants, and their waiting and running tool calls, to
-interrupted with a fresh timestamp, without changing conversation activity
-time. The record reader then registers
+remaining streaming assistants to interrupted with a fresh timestamp, and
+their waiting and running tool calls to interrupted with their own
+timestamps kept, without changing conversation activity time. The record reader then registers
 its search function, and the agent service is created over its records.
 
-The current migrations create the three conversation tables, add a message
-index,
-and install triggers that keep `conversations.updated_at` current. Historical
+The current migrations create the three conversation tables, add two
+message indexes (one for each conversation's history order, and a unique one
+for the positions of each reply's parts), and install triggers that keep
+`conversations.updated_at` current. Historical
 migrations remain unchanged; version 4 restricts the conversation timestamp
 trigger to explicit activity updates, so title edits preserve ordering, and
 version 5 restricts the message-update trigger to text changes, so status-only

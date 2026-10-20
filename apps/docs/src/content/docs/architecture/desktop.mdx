@@ -121,16 +121,20 @@ Ns` afterwards, the seconds the reasoning parts took. It holds every
   reasoning part's text.
 - **Steps**: the rounds that called tools, in one disclosure, closed at first,
   labelled with the number of steps and tool calls and, once the reply ended,
-  `Worked for Ns`: the time from the reply's start to the end of its last
-  part's work. A call stopped by the reply's end counts until it was made,
-  so time Lys spent closed before startup recovery ended the reply is not
-  counted. The steps are a list named `Steps`, and each step shows the text
-  its round wrote and its calls, in a list named `Tool calls`.
+  `Worked for Ns`: the time from the reply's start to the latest change of
+  any of its parts. Time a call waited for approval counts. A call still
+  open when the reply ended, because the person stopped it or the turn
+  failed, counts until that end. A call that startup recovery interrupted
+  keeps the time of its last change before Lys stopped, so time Lys spent
+  closed is not counted. The steps are a list named `Steps`, and each step
+  shows the text its round wrote and its calls, in a list named `Tool calls`.
   Each call (`ToolCallStep`) is a disclosure naming the tool, what the call is
   about (its first text argument), and its state: Waiting for approval,
   Running, Done, Failed, Rejected, or Stopped. Open, it shows the arguments
   as named values, or as written when they are not a JSON object, and the
-  plain text of the result, labelled `Rejection` for a rejected call.
+  plain text of the result, labelled `Rejection` for a rejected call. The
+  store parses a call's arguments once, when the call arrives
+  (`reply-parts.ts`), not on every render.
 - **Answer**: the text of the last round when that round called no tools,
   rendered as Markdown. While a round streams, its text is shown here until
   its calls arrive and move it into the steps.
@@ -140,20 +144,39 @@ Ns` afterwards, the seconds the reasoning parts took. It holds every
   without citing, each with the tool that found it. With nothing cited there
   is no cited list, and the disclosure reads `Sources · N found`. Only the
   answer's `[n]` markers count as cited: a step's text shows no links. The
-  sources are a plain group, not a landmark; the cited list is named by its
-  heading.
+  cited numbers come from the same Markdown tree, parsed with the same
+  syntax extensions, that the citation links are made from
+  (`citation-markers.ts`), so a source is listed as cited exactly when a
+  marker in the answer links to it. The sources are a plain group, not a
+  landmark; the cited list is named by its heading.
 
-A reply links and lists only the sources numbered up to the highest number
-that its own calls or an earlier reply's calls showed. A conversation
-numbers its sources in the order its calls show them, so a higher number was
-found by a later reply, and an earlier reply's `[n]` never links to it.
+Each disclosure's accessible name is its visible label followed by the
+reply's position, such as `Thought for 3s, reply 2`, so the same control of
+two replies has different names. A call's result, and its arguments when they
+are shown as written, scroll within a bounded height; each is a focusable
+region named by its label, its call, and its reply, such as `Result of
+web_search night moths, reply 2`, which a keyboard reaches with Tab and
+scrolls with the arrow keys.
+
+A reply links and lists only the sources its model read: those its own
+succeeded calls showed, and those the calls of an earlier completed or
+interrupted reply showed. A failed reply is left out of later turns'
+context, so the sources only it showed can be cited in that reply alone.
+
+The transcript keys every message, the streaming reply included, by its
+identifier, so when a reply ends the same elements update in place: the
+disclosures the person opened stay open and focus stays where it was. A
+reply whose own sources did not change is not rendered again when another
+reply finds sources.
 
 `MarkdownMessage` renders the answer with `react-markdown`. Each `[n]` marker
-in prose whose number is one of the sources the reply may cite becomes a
-small numbered link to that source (`markdown-citations.ts`), named `n,
-source: title`, which shows the source's title and site while the pointer
-rests on it; markers in code, math, and links, and markers of other numbers,
-stay as written. Links open in a new tab without a referrer. `remark-math` and `rehype-katex` render
+in prose, with `n` written without leading zeros, whose number is one of the
+sources the reply may cite becomes a small numbered link to that source
+(`markdown-citations.ts`), named `n, source: title`, which shows the source's
+title and site while the pointer rests on it. Markers in code, math, links,
+and link references, and markers of other numbers, stay as written; an
+escaped marker such as `\[1\]` reads as the prose `[1]`, so it is linked and
+counted. Links open in a new tab without a referrer. `remark-math` and `rehype-katex` render
 `$…$` inline math and `$$…$$` display math with KaTeX, whose stylesheet
 `src/index.css` imports.
 
@@ -168,7 +191,8 @@ highlighting. Copy writes the block's plain text without its final newline,
 never the highlighting markup.
 
 Rendering is asynchronous. Until a message's first pass finishes, it shows
-plain Markdown without the link, math, and code-block handling; the first
+plain GitHub Flavored Markdown without citation links, link handling, math,
+and code-block handling; the first
 reply in a session also waits for Shiki to start. While a reply streams, the
 previous rendering stays visible until the new text is processed.
 
@@ -657,12 +681,6 @@ are gone and the reply is marked interrupted when the backend next starts.
   a view of its own. The reasoning summary shows `Thinking` without a running
   count of seconds, and a citation's hover shows the source's title and site,
   not the passage it supports.
-- `Sources · N cited` finds the answer's `[n]` markers in its Markdown
-  source, while citation links are made from the rendered text, so the two
-  can differ. A marker inside code, math, a link's text or address, or a
-  reference definition is counted although it stays unlinked. A marker
-  written with escapes, such as `\[1\]` or `&#91;1&#93;`, is linked but not
-  counted, so its source is listed as found beside a link to it.
 
 ## Related pages
 

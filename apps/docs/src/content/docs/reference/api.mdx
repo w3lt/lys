@@ -435,9 +435,9 @@ survive failure or cancellation, and a reply's waiting and running calls are
 stored as interrupted when it ends. Title generation runs only for an untitled conversation
 without a title task already running, and publishes a title only if the
 conditional database write succeeds. On startup,
-remaining streaming assistants and their waiting and running calls become
-interrupted with refreshed timestamps; conversation activity time and history
-order do not change.
+remaining streaming assistants become interrupted with refreshed
+timestamps, and their waiting and running calls become interrupted with their
+timestamps kept; conversation activity time and history order do not change.
 
 ## Agents
 

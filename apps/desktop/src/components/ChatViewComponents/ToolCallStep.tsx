@@ -46,14 +46,13 @@ function ToolCallText({
   return (
     <>
       <p className="chat-view__call-label">{label}</p>
-      <pre
+      <section
         aria-label={`${label} of ${callName}`}
         className="chat-view__call-text"
-        role="region"
         tabIndex={0}
       >
-        {text}
-      </pre>
+        <pre>{text}</pre>
+      </section>
     </>
   )
 }

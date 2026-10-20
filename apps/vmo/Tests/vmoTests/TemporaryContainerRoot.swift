@@ -2,9 +2,9 @@ import Containerization
 import Foundation
 import Testing
 
-/// Owns one test's temporary directory to hold the files of container managers
-/// created in it, while guaranteeing that the directory is removed when the
-/// test releases it.
+/// Owns one test's temporary directory to hold the files of the container
+/// managers, image stores, and image layouts created in it, while
+/// guaranteeing that the directory is removed when the test releases it.
 ///
 /// Concurrency model: single-owner. One test creates, uses, and releases it.
 final class TemporaryContainerRoot {

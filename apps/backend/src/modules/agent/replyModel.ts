@@ -36,8 +36,8 @@ export type ReplyContextMessage =
       /** Text sent to the model as written; empty for a round of calls only. */
       content: string
       /**
-       * Calls the agent made after the text, in its order; empty for a
-       * stored reply.
+       * Calls the agent made after the text, in its order; for a stored
+       * round, only the calls that have a result.
        */
       toolCalls: readonly ContextToolCall[]
     }>
@@ -66,6 +66,12 @@ export type ReplyStreamRequest = Readonly<{
 
 /** One event of a reply stream, in the order the model produced it. */
 export type ReplyStreamEvent =
+  | Readonly<{
+      /** The model produced more reasoning, apart from its reply text. */
+      type: "reasoning"
+      /** Nonempty reasoning that follows the earlier reasoning. */
+      content: string
+    }>
   | Readonly<{
       /** The model produced more reply text. */
       type: "text"

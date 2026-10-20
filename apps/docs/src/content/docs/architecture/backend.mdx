@@ -68,8 +68,9 @@ the services together.
    allowed client tool's call is sent to the desktop as a `tool-call` event
    and answered through the tool-result route; an allowed backend tool runs in
    the backend under the reply's cancellation. Every call has an answer before
-   the next round. It persists each delta before sending it to every stream
-   following the reply, and stores completion before emitting `done`.
+   the next round. [Reply parts](#reply-parts-and-sources) describes how each
+   part is stored before it is sent to every stream following the reply; the
+   agent stores completion before emitting `done`.
 6. When the conversation has no stored title, `createTitleGenerationTask` runs
    in parallel and emits a `title` event only after a conditional write wins the
    first assignment.
@@ -91,7 +92,7 @@ offered.
 
 A round is sent only when its tokens and the reply ceiling (or zero without
 one) together stay within that context length. Otherwise the round is not
-sent: the reply is stored `failed`, keeping the text earlier rounds wrote,
+sent: the reply is stored `failed`, keeping the parts earlier rounds stored,
 and its `error` event names the tokens needed and the context length. A model
 that is not loaded is never loaded for the round; the reply fails with an
 `error` that asks to load it. A measurement that fails, because LM Studio is
@@ -111,15 +112,75 @@ that measures the markup around the text. See the
 [route contract](/reference/api/#chat-context-measurement).
 
 Each completion receives the system prompt of the conversation's agent, prior
-user messages, non-empty
-completed or interrupted assistant replies, and the current user message once.
-Failed and empty assistant replies are excluded from model context. A reply
+user messages, the rounds of completed or interrupted replies, and the current
+user message once. `buildAgentContext` sends each stored round as one
+assistant message with the round's text and its tool calls that have a
+result, followed by one tool message per result. Reasoning is never sent
+back, nor are calls without a result; a round with neither text nor such a
+call is left out. Failed replies are excluded from model context. A reply
 still streaming when the next turn is created becomes interrupted first, so its
-partial text is included.
+partial rounds are included. Within one turn, a round's reasoning is not sent
+to the next round either ([#185](https://github.com/w3lt/lys/issues/185)).
 The required `generationOptions` controls supply sampling temperature and an
 optional completion-token ceiling; the [API reference](/reference/api/#chat-request-body)
-defines their limits. Partial assistant content remains available in history
+defines their limits. Partial reply parts remain available in history
 after cancellation or failure.
+
+### Reply parts and sources
+
+A reply is a list of parts: reasoning, text, and tool calls with their
+results, each in the model round it belongs to. `OpenAiReplyModel` yields a
+round's reasoning from the stream's `delta.reasoning` field, which LM Studio
+0.4 sends, or else from `delta.reasoning_content`, before the chunk's text.
+Reasoning a model writes between `<think>` tags in its text stays text
+([#183](https://github.com/w3lt/lys/issues/183)).
+
+`ReplyPartSequence` (`src/modules/agent/replyPartSequence.ts`) owns the
+reply's open part. A reasoning or text fragment extends the last part when it
+is of the same kind and round; otherwise it starts a new part. Every part,
+fragment, and tool call change is stored first, through the turn's
+`ReplyPartWriter` capabilities, and sent as a `reply-part` or
+`reply-part-delta` event in the same synchronous step, so a follower that
+reads a snapshot sees both or neither. A refused write means the reply was
+superseded, deleted, or finalized, and ends it as interrupted.
+
+The tool-call round stores each call as a part in the model's order, under
+the UUIDv7 it sends: a call of an unknown tool, or with arguments that do not
+match, as `failed` with the message the model reads; a checked call as
+`running` when the gate allows it at once, or otherwise as
+`awaiting-approval` before its prompt is sent, in the same step. A call the
+store refuses because its reply has ended is never prompted. An allowed call
+becomes `running`, a rejected one
+`rejected` with the rejection the model reads, and a call that ran
+`succeeded` or `failed` with its result. A network tool's result is cleaned
+before it is stored, so the stored result is what the model read.
+
+`SourceCatalog` (`src/modules/agent/sourceCatalog.ts`) numbers the web
+sources of one conversation during a turn, seeded with the sources the
+conversation stored. A backend tool's run receives `addWebSources`, which
+gives each candidate URL the number it already has, or the next one. A
+title in which a person sees nothing, only whitespace and default-ignorable
+code points such as Hangul fillers, is replaced by the URL's host, both in
+the result the model reads and in the source. Any other title becomes the
+source's title cleaned of the characters a person cannot see, as a network
+tool's result is, and trimmed, so a citation never shows an empty or
+disguised title.
+`web_search` labels each result `Source [n]`, and `read_page` adds a
+`Source number: [n]` line; the citation rule tells the model to cite those
+numbers in square brackets and to write no list of sources. A succeeded call
+stores the numbers its result shows with the sources themselves, then a
+`sources` event precedes its `reply-part` event. A number given to a call
+whose result is never stored, because the reply ended first, is not kept:
+the next turn gives the numbers above every stored number again, so a gap is
+left only below the highest stored number. Only web pages are sources today;
+files a tool reads are not ([#184](https://github.com/w3lt/lys/issues/184)).
+
+`StoredReplyParts` (`src/modules/conversation/replyParts.ts`) implements
+`ReplyPartWriter` over `SqliteReplyPartRecordWriter`, reading the clock once
+per operation; reasoning and text parts get a new UUIDv7. Each write is one
+transaction guarded by the reply still streaming. Ending a reply, a newer
+turn superseding it, and startup recovery mark its `awaiting-approval` and
+`running` calls `interrupted` in the same transaction as the reply.
 
 The Lys system prompt and the title-generation prompt are read once, when
 `loadBackendConfig()` builds the backend configuration at startup.
@@ -179,11 +240,15 @@ read (`settingsFile.ts`) with the Tavily key reader: at most 1 MiB, UTF-8,
 parse failures dropped unread. A missing file, `tools` group, or `justRun`
 list means no tool is on Just run.
 
-For each checked call, in the model's order, the gate either lets a call of a
-tool on Just run go on at once, or sends a `tool-approval` event and waits for
-the person's answer through the tool-approval route, with no timer. Both
-happen in the same synchronous step, so a round's prompts and the run
-requests of calls allowed at once keep the model's order. When the settings
+For each checked call, in the model's order, the gate's `startToolCall`
+stores the call and decides how it goes on. A call of a tool on Just run is
+stored as `running` and goes on at once. Any other call is stored as
+`awaiting-approval` first; the gate then sends a `tool-approval` event, and
+the round waits for the person's answer through the tool-approval route,
+with no timer. A call the store refuses is never prompted. Storing and
+prompting happen in the same synchronous step, so a follower that sees the
+prompt can read the call, and a round's prompts and the run requests of
+calls allowed at once keep the model's order. When the settings
 file cannot be read, or `tools`, `justRun`, or a name in it is invalid, no
 tool is on Just run, every call of the round asks, and the chat route logs a
 warning with the request's logger. A choice the desktop saves applies from
@@ -199,8 +264,10 @@ from the next message.
 A built-in tool implements `BuiltInTool` (`src/modules/tool/builtIn/builtInTool.ts`):
 `parseToolCall` checks a call's arguments before the person is asked and
 returns either an explanation the model reads or a run function. The run
-returns the text the model reads, or rejects only with the Stop reason or a
-defect.
+receives the reply's Stop signal and `addWebSources`, which numbers the web
+sources it is about to show. It returns the text the model reads, with the
+numbered sources a succeeded result shows, or rejects only with the Stop
+reason or a defect.
 
 Each entry of the registry pairs a definition with a `BuiltInToolProvider`,
 whose `findTurnTool()` gives the tool for one turn or says why it cannot run
@@ -305,8 +372,8 @@ machine:
    gives them, which vmo's reader does not pass on yet
    ([#208](https://github.com/w3lt/lys/issues/208)), and the passages between
    `<<<page content>>>` delimiters, with the URL Lys was asked to read, a
-   notice that the content is untrusted, and an instruction to cite the
-   page, and notes a page
+   notice that the content is untrusted, the page's source number, and an
+   instruction to cite it by that number, and notes a page
    with less than 200 characters of main text, which may ask the reader to
    sign in or check for automated readers. Every run of three or more `<` or
    `>` in page text is shortened to two, so no page can write a delimiter.
@@ -367,7 +434,8 @@ applies too.
   passes `read_page`'s URL rules, once per URL; titles are cut to 300
   characters and snippets to 500, flattened onto one line. The query line,
   the result count, and an untrusted-content notice precede the results,
-  which sit between `<<<search results>>>` delimiters; a closing note says a
+  which sit between `<<<search results>>>` delimiters, each labelled with its
+  source number; a closing note says a
   snippet is only an excerpt to read before relying on it and repeats the
   citation rule. No results produce a plain statement that nothing was found.
 - **Failures.** A rejected key (401/403), rate limiting (429, with its
@@ -395,19 +463,21 @@ The backend stores conversations and agent definitions in SQLite at
 `$LYS_HOME/lys_db.sqlite`, in the
 [Lys home directory](/reference/configuration/#lys-home-directory).
 
-| Table                   | Purpose                                                                                      |
-| ----------------------- | -------------------------------------------------------------------------------------------- |
-| `conversations`         | Stores conversation metadata: title, agent code, and timestamps.                             |
-| `conversation_messages` | Stores ordered user and assistant messages, assistant status, finish reason, and timestamps. |
-| `agents`                | Stores agent definitions: code, name, bio, system prompt, and timestamps.                    |
+| Table                   | Purpose                                                                                                      |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `conversations`         | Stores conversation metadata: title, agent code, and timestamps.                                             |
+| `conversation_messages` | Stores ordered user messages and replies with status, finish reason, and timestamps, and each reply's parts. |
+| `conversation_sources`  | Stores each conversation's numbered web sources.                                                             |
+| `agents`                | Stores agent definitions: code, name, bio, system prompt, and timestamps.                                    |
 
 The backend's database owner, `SqliteDatabase` in `src/infrastructure/database/`,
 opens the file once, applies the schema from `migrations.ts` using
 `PRAGMA user_version`, and is the only owner that closes it. Stores borrow read
 and write transactions that expose neither connection closing nor transaction
 control; the SQLite conversation records in `conversations/` are built on them
-and hold every conversation query. The history-reading, history-editing, and
-turn services wrap those records, and each is its own application service.
+and hold every conversation query. The history-reading, history-editing,
+turn, and reply-part services wrap those records, and each is its own
+application service.
 The agent service `AgentService` (`src/modules/agent/agentService.ts`) owns
 agent management. It uses the SQLite agent records in `agents/` for stored
 agents, but it is not one of the database services: it also owns the built-in
@@ -438,10 +508,12 @@ Version 4 preserves activity
 timestamps on rename, version 5 preserves them on status-only message updates,
 version 6 adds the `agents` table, version 7 replaces the stored system prompt
 with the conversation's agent code, version 8 moves every conversation stored
-under the former built-in code `lys` to `caliginia`, and turn persistence's
-startup recovers streaming assistants without reordering history.
-Two triggers keep `conversations.updated_at` in sync with message inserts and
-message text updates.
+under the former built-in code `lys` to `caliginia`, version 9 stores each
+reply's parts as rows of their own and adds the conversation sources, and
+turn persistence's startup recovers streaming assistants and their open tool
+calls without reordering history.
+Two triggers keep `conversations.updated_at` in sync with message and part
+inserts and `content` updates.
 
 ## LM Studio integration
 

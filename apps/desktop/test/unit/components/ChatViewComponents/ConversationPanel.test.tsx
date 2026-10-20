@@ -5,8 +5,8 @@ import { describe, expect, it, vi } from "vitest"
 import { STARTER_PROMPTS } from "@/app/content"
 import ConversationPanel from "@/components/ChatViewComponents/ConversationPanel"
 import {
-  buildCompletedAssistantMessage,
-  buildStreamingAssistantMessage,
+  buildCompletedChatViewReply,
+  buildStreamingChatViewReply,
   buildUserMessage
 } from "../../support/conversationFixtures"
 
@@ -14,7 +14,7 @@ import {
 const QUESTION = buildUserMessage(1, "What is Lys?")
 
 /** Completed reply to {@link QUESTION}. */
-const ANSWER = buildCompletedAssistantMessage(2, "A local chat app.")
+const ANSWER = buildCompletedChatViewReply(2, "A local chat app.")
 
 /** Name of the agent that answers, which the parent supplies. */
 const AGENT_NAME = "Caliginia"
@@ -23,8 +23,8 @@ const AGENT_NAME = "Caliginia"
  * Builds the parent-owned controls of an idle, pinned panel answered by
  * {@link AGENT_NAME}.
  *
- * @returns Fresh callback spies, the transcript ref, the agent's name, and
- * idle state.
+ * @returns Fresh callback spies, the transcript ref, the agent's name, no
+ * sources, and idle state.
  */
 function buildPanelControls() {
   return {
@@ -34,6 +34,7 @@ function buildPanelControls() {
     onJumpToLatest: vi.fn(),
     onSendMessage: vi.fn(() => Promise.resolve()),
     onTranscriptScroll: vi.fn(),
+    sources: [],
     transcriptRef: createRef<HTMLDivElement>()
   }
 }
@@ -99,7 +100,7 @@ describe("ConversationPanel", () => {
         {...buildPanelControls()}
         completedMessages={[QUESTION]}
         kind="streaming-tail"
-        streamingMessage={buildStreamingAssistantMessage(2, "A local")}
+        streamingMessage={buildStreamingChatViewReply(2, "A local")}
       />
     )
 

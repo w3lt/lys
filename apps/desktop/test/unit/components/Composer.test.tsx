@@ -39,6 +39,7 @@ import {
   buildConversation,
   buildConversationListPage,
   buildConversationMetadata,
+  buildTextPart,
   buildStreamingAssistantMessage,
   buildUserMessage,
   FIXTURE_CONVERSATION_ID
@@ -81,6 +82,7 @@ const REPLY_SNAPSHOT = chatReplyEventSchema.parse({
   type: "reply-snapshot",
   conversationTitle: null,
   assistantMessage: REPLY,
+  sources: [],
   pendingToolCalls: [],
   pendingToolApprovals: []
 })
@@ -663,7 +665,7 @@ describe("Composer", () => {
       await sendStreamEvents(streams[0], NEW_TURN_EVENT)
       await sendReplyEvents(
         { streams, replyFollows },
-        { type: "delta", content: "Hi" }
+        { type: "reply-part", part: buildTextPart(40, 0, "Hi") }
       )
       expect(getMessageField()).toHaveValue("")
 
@@ -694,7 +696,7 @@ describe("Composer", () => {
       await sendStreamEvents(streams[0], NEW_TURN_EVENT)
       await sendReplyEvents(
         { streams, replyFollows },
-        { type: "delta", content: "Hi" },
+        { type: "reply-part", part: buildTextPart(40, 0, "Hi") },
         { type: "done", finishReason: "stop" }
       )
       await user.type(getMessageField(), "Thanks")

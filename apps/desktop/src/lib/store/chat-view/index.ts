@@ -44,9 +44,11 @@ import {
   findStreamingReply,
   isStreamingConversationAssistantMessage,
   startConversationTurn,
-  updateAssistantReplyContent,
+  updateAssistantReplyPart,
+  updateAssistantReplyPartContent,
   updateAssistantReplyStatus,
   updateAssistantReplyWithSnapshot,
+  updateConversationSources,
   updateConversationTitle
 } from "./conversation-transitions"
 
@@ -128,7 +130,10 @@ export type ChatViewStoreDependencies = {
   readonly stopChatReply: ChatReplyStopper
   /** Reads a stored conversation; the store supplies its owned abort signal. */
   readonly getConversation: StoredConversationReader
-  /** Creates the ISO timestamp recorded on each immutable transition. */
+  /**
+   * Creates the ISO timestamp a reply's ending records; parts and fragments
+   * carry the times the backend stored them.
+   */
   readonly createTimestamp: () => string
   /**
    * Finds the loaded model eligible to answer the next request.
@@ -177,8 +182,8 @@ export type ChatViewStoreDependencies = {
  * stream event and private transport resource. `reply-completed` is entered
  * once the reply is final — after `done`, `interrupted`, or `error`, or a
  * snapshot of a final reply — and still permits title events; no later
- * request state accepts deltas again. A new request may replace a
- * `reply-completed` one, which ends following its stream.
+ * request state accepts parts, fragments, or sources again. A new request
+ * may replace a `reply-completed` one, which ends following its stream.
  */
 export type ChatRequestState =
   | {
@@ -194,7 +199,7 @@ export type ChatRequestState =
       readonly submittedComposerDraft?: string
     }
   | {
-      /** The backend-identified assistant reply is accepting content. */
+      /** The backend-identified reply is accepting parts and fragments. */
       readonly status: "reply-streaming"
       /** Token authorizing this request to mutate chat state. */
       readonly token: number
@@ -393,6 +398,26 @@ type ChatTurnStartEvent = Extract<
 /** Non-idle observable request state carrying phase-specific metadata. */
 type OwnedChatRequestState = Exclude<ChatRequestState, { status: "idle" }>
 
+/** Generation events of a reply that the tool-call store owns. */
+type ToolCallStoreEvent = Extract<
+  ChatGenerationEvent,
+  { type: "tool-approval" | "tool-call" }
+>
+
+/**
+ * Answers whether the tool-call store owns a generation event.
+ *
+ * @param event - Generation event of a chat or followed-reply stream.
+ * @returns True for `tool-approval` and `tool-call`: the tool-call store
+ * follows the reply itself and owns its prompts and calls, so the chat view
+ * leaves them to it.
+ */
+function isToolCallStoreEvent(
+  event: ChatGenerationEvent
+): event is ToolCallStoreEvent {
+  return event.type === "tool-approval" || event.type === "tool-call"
+}
+
 /** Store-private transport resource correlated with one active request. */
 type ChatRequestResource = {
   /** Token correlating this resource with observable request state. */
@@ -417,7 +442,7 @@ type StoredReplyFollow = {
   readonly target: ChatReplyPathParams
 }
 
-/** Request state whose backend-identified reply is accepting deltas. */
+/** Request state whose backend-identified reply accepts parts and fragments. */
 type StreamingChatReplyState = Extract<
   ChatRequestState,
   { status: "reply-streaming" }
@@ -495,8 +520,9 @@ function formatReplyStopErrorMessage(error: unknown): string {
  *
  * @param events - Events of one reply-events stream.
  * @returns The same events in order, completing when the source completes.
- * @throws If the first event is not a `reply-snapshot`, because later deltas
- * continue only from the snapshot's content.
+ * @throws If the first event is not a `reply-snapshot`, because later parts,
+ * fragments, and sources continue only from the snapshot's parts and
+ * sources.
  */
 async function* readSnapshotFirstReplyEvents(
   events: AsyncIterable<ChatReplyEvent>
@@ -812,25 +838,69 @@ export function createChatViewStore(
     }
 
     /**
-     * Handles one authorized content delta for the streaming assistant reply.
+     * Handles one new or changed part of the streaming assistant reply.
      *
-     * @param event - Delta event emitted by the backend stream.
+     * @param event - Part event emitted by the backend stream.
      * @param token - Token expected to own the started reply.
      * @throws If the event is out of order or its assistant is absent.
      */
-    function handleChatDeltaEvent(
-      event: Extract<ChatApiStreamEvent, { type: "delta" }>,
+    function handleChatReplyPartEvent(
+      event: Extract<ChatGenerationEvent, { type: "reply-part" }>,
       token: number
     ): void {
       const request = getStreamingReply(token)
-      const conversation = getActiveConversation()
 
       set({
-        conversation: updateAssistantReplyContent(conversation, {
+        conversation: updateAssistantReplyPart(getActiveConversation(), {
           assistantMessageId: request.assistantMessageId,
-          content: event.content,
-          timestamp: dependencies.createTimestamp()
+          part: event.part
         })
+      })
+    }
+
+    /**
+     * Handles one fragment of a reasoning or text part of the streaming
+     * assistant reply.
+     *
+     * @param event - Fragment event emitted by the backend stream.
+     * @param token - Token expected to own the started reply.
+     * @throws If the event is out of order, or its assistant or part is
+     * absent.
+     */
+    function handleChatReplyPartDeltaEvent(
+      event: Extract<ChatGenerationEvent, { type: "reply-part-delta" }>,
+      token: number
+    ): void {
+      const request = getStreamingReply(token)
+
+      set({
+        conversation: updateAssistantReplyPartContent(getActiveConversation(), {
+          assistantMessageId: request.assistantMessageId,
+          partId: event.partId,
+          content: event.content,
+          updatedAt: event.updatedAt
+        })
+      })
+    }
+
+    /**
+     * Handles the numbered sources a tool call of the streaming reply stored.
+     *
+     * @param event - Sources event emitted by the backend stream.
+     * @param token - Token expected to own the started reply.
+     * @throws If the event is out of order or the conversation is absent.
+     */
+    function handleChatSourcesEvent(
+      event: Extract<ChatGenerationEvent, { type: "sources" }>,
+      token: number
+    ): void {
+      getStreamingReply(token)
+
+      set({
+        conversation: updateConversationSources(
+          getActiveConversation(),
+          event.sources
+        )
       })
     }
 
@@ -925,7 +995,8 @@ export function createChatViewStore(
     /**
      * Applies the stored snapshot that starts a followed reply's stream.
      *
-     * @param event - Snapshot of the followed reply and its conversation title.
+     * @param event - Snapshot of the followed reply, its conversation's title,
+     * and the sources the conversation stored.
      * @param token - Token expected to own the followed reply.
      * @throws If the snapshot names another reply or the reply is terminal.
      */
@@ -938,9 +1009,12 @@ export function createChatViewStore(
         throw new Error("Reply snapshot did not match the followed reply")
       }
 
-      const withReply = updateAssistantReplyWithSnapshot(
-        getActiveConversation(),
-        event.assistantMessage
+      const withReply = updateConversationSources(
+        updateAssistantReplyWithSnapshot(
+          getActiveConversation(),
+          event.assistantMessage
+        ),
+        event.sources
       )
       const conversation =
         event.conversationTitle === null
@@ -992,23 +1066,32 @@ export function createChatViewStore(
     /**
      * Applies one generation event shared by chat and followed-reply streams.
      *
-     * @param event - Title, delta, tool-approval, tool-call, final, or error
-     * event of the reply.
+     * @param event - Title, part, fragment, sources, tool-approval, tool-call,
+     * final, or error event of the reply.
      * @param token - Token whose ownership authorizes event side effects.
      * @throws If an in-order handler detects an invariant violation.
      * @remarks Exactly one of `done`, `interrupted`, or `error` ends the
-     * reply; the backend sends nothing but a possible `title` after it.
+     * reply; the backend sends nothing but a possible `title` after it. The
+     * events {@link isToolCallStoreEvent} names are left to the tool-call
+     * store.
      */
     function handleChatGenerationEvent(
       event: ChatGenerationEvent,
       token: number
     ): void {
+      if (isToolCallStoreEvent(event)) return
       switch (event.type) {
         case "title":
           handleChatTitleEvent(event, token)
           return
-        case "delta":
-          handleChatDeltaEvent(event, token)
+        case "reply-part":
+          handleChatReplyPartEvent(event, token)
+          return
+        case "reply-part-delta":
+          handleChatReplyPartDeltaEvent(event, token)
+          return
+        case "sources":
+          handleChatSourcesEvent(event, token)
           return
         case "done":
           handleChatDoneEvent(event, token)
@@ -1018,11 +1101,6 @@ export function createChatViewStore(
           return
         case "error":
           handleChatErrorEvent(event, token)
-          return
-        case "tool-approval":
-        case "tool-call":
-          // The tool-call store follows this reply itself and owns its
-          // prompts and calls.
           return
       }
     }
@@ -1048,7 +1126,9 @@ export function createChatViewStore(
           handleChatTurnStartEvent(event, token)
           return
         case "title":
-        case "delta":
+        case "reply-part":
+        case "reply-part-delta":
+        case "sources":
         case "done":
         case "interrupted":
         case "error":
@@ -1075,7 +1155,9 @@ export function createChatViewStore(
           handleChatReplySnapshotEvent(event, token)
           return
         case "title":
-        case "delta":
+        case "reply-part":
+        case "reply-part-delta":
+        case "sources":
         case "done":
         case "interrupted":
         case "error":
@@ -1526,8 +1608,9 @@ export function createChatViewStore(
      *
      * @param follow - Follow started by {@link startStoredReplyFollowing}.
      * @returns Settlement after the stream ends, fails, or is superseded.
-     * @remarks The snapshot replaces the stored content, so later deltas are
-     * neither lost nor repeated. An early end shows the reply interrupted,
+     * @remarks The snapshot replaces the stored reply's parts and adds the
+     * sources it lists, so later parts, fragments, and sources are neither
+     * lost nor repeated. An early end shows the reply interrupted,
      * because the store only stopped following it.
      */
     async function readStoredReplyStream(

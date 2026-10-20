@@ -1,9 +1,42 @@
 import { describe, expect, it } from "vitest"
-import { buildAgentContext } from "../../../../src/modules/agent/agentContext"
+import {
+  buildAgentContext,
+  calculateAgentContextHistoryMessageCount
+} from "../../../../src/modules/agent/agentContext"
 import {
   createAssistantMessage,
+  createFixtureUuidV7,
+  createReasoningPart,
+  createTextPart,
+  createToolCallPart,
   createUserMessage
 } from "../../support/conversationFixtures"
+
+/** A stored web search call in round 0 that succeeded. */
+const SUCCEEDED_SEARCH = createToolCallPart(
+  {
+    sequence: 21,
+    round: 0,
+    toolName: "web_search",
+    argumentText: '{"query":"moths"}'
+  },
+  {
+    status: "succeeded",
+    result: "Source [1]\nTitle: Moths",
+    sourceNumbers: [1]
+  }
+)
+
+/** A stored page read in round 0 that failed. */
+const FAILED_READ = createToolCallPart(
+  {
+    sequence: 22,
+    round: 0,
+    toolName: "read_page",
+    argumentText: '{"url":"https://moths.example/"}'
+  },
+  { status: "failed", result: "The page did not answer." }
+)
 
 describe("buildAgentContext", () => {
   it("sends the system prompt first and the new message last", () => {
@@ -16,17 +49,43 @@ describe("buildAgentContext", () => {
   it("keeps earlier user messages and usable replies in transcript order", () => {
     const history = [
       createUserMessage(1, "First question"),
-      createAssistantMessage(2, "Completed answer", {
-        status: "completed",
-        finishReason: "stop"
-      }),
+      createAssistantMessage(
+        2,
+        [
+          createTextPart({
+            sequence: 12,
+            round: 0,
+            content: "Completed answer"
+          })
+        ],
+        {
+          status: "completed",
+          finishReason: "stop"
+        }
+      ),
       createUserMessage(3, "Second question"),
-      createAssistantMessage(4, "Truncated answer", {
-        status: "completed",
-        finishReason: "length"
-      }),
+      createAssistantMessage(
+        4,
+        [
+          createTextPart({
+            sequence: 14,
+            round: 0,
+            content: "Truncated answer"
+          })
+        ],
+        {
+          status: "completed",
+          finishReason: "length"
+        }
+      ),
       createUserMessage(5, "Third question"),
-      createAssistantMessage(6, "Partial answer", { status: "interrupted" })
+      createAssistantMessage(
+        6,
+        [createTextPart({ sequence: 16, round: 0, content: "Partial answer" })],
+        {
+          status: "interrupted"
+        }
+      )
     ]
 
     expect(
@@ -43,22 +102,185 @@ describe("buildAgentContext", () => {
     ])
   })
 
+  it("sends each round of a reply as its text and answered calls, then each call's result", () => {
+    const history = [
+      createUserMessage(1, "Tell me about moths"),
+      createAssistantMessage(
+        2,
+        [
+          createTextPart({ sequence: 20, round: 0, content: "Let me " }),
+          createTextPart({ sequence: 23, round: 0, content: "look." }),
+          SUCCEEDED_SEARCH,
+          FAILED_READ,
+          createTextPart({
+            sequence: 24,
+            round: 1,
+            content: "Moths fly at night [1]."
+          })
+        ],
+        { status: "completed", finishReason: "stop" }
+      )
+    ]
+
+    expect(buildAgentContext("You are Lys.", history, "More?")).toEqual([
+      { role: "system", content: "You are Lys." },
+      { role: "user", content: "Tell me about moths" },
+      {
+        role: "assistant",
+        content: "Let me look.",
+        toolCalls: [
+          {
+            id: SUCCEEDED_SEARCH.id,
+            toolName: "web_search",
+            argumentText: '{"query":"moths"}'
+          },
+          {
+            id: FAILED_READ.id,
+            toolName: "read_page",
+            argumentText: '{"url":"https://moths.example/"}'
+          }
+        ]
+      },
+      {
+        role: "tool",
+        toolCallId: SUCCEEDED_SEARCH.id,
+        content: "Source [1]\nTitle: Moths"
+      },
+      {
+        role: "tool",
+        toolCallId: FAILED_READ.id,
+        content: "The page did not answer."
+      },
+      { role: "assistant", content: "Moths fly at night [1].", toolCalls: [] },
+      { role: "user", content: "More?" }
+    ])
+  })
+
+  it("sends a rejected call with the rejection the model read, and a round of calls without text", () => {
+    const rejected = createToolCallPart(
+      { sequence: 21, round: 0, toolName: "read_page", argumentText: "{}" },
+      { status: "rejected", result: "The person did not allow this call." }
+    )
+    const history = [
+      createAssistantMessage(2, [rejected], { status: "interrupted" })
+    ]
+
+    expect(buildAgentContext("You are Lys.", history, "Why?")).toEqual([
+      { role: "system", content: "You are Lys." },
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [
+          { id: rejected.id, toolName: "read_page", argumentText: "{}" }
+        ]
+      },
+      {
+        role: "tool",
+        toolCallId: rejected.id,
+        content: "The person did not allow this call."
+      },
+      { role: "user", content: "Why?" }
+    ])
+  })
+
+  it("leaves out reasoning, calls without a result, and rounds left with nothing to send", () => {
+    const interrupted = createToolCallPart(
+      { sequence: 25, round: 1, toolName: "web_search", argumentText: "{}" },
+      { status: "interrupted" }
+    )
+    const history = [
+      createAssistantMessage(
+        2,
+        [
+          createReasoningPart(20, 0, "Search first."),
+          createTextPart({ sequence: 23, round: 0, content: "Searching." }),
+          createReasoningPart(24, 1, "Then read."),
+          interrupted
+        ],
+        { status: "interrupted" }
+      )
+    ]
+
+    expect(buildAgentContext("You are Lys.", history, "Go on")).toEqual([
+      { role: "system", content: "You are Lys." },
+      { role: "assistant", content: "Searching.", toolCalls: [] },
+      { role: "user", content: "Go on" }
+    ])
+  })
+
+  it("sends only the answered call of a stopped round whose other call was waiting for approval", () => {
+    const stoppedRead = createToolCallPart(
+      {
+        sequence: 22,
+        round: 0,
+        toolName: "read_text_file",
+        argumentText: '{"path":"/notes/moths.md"}'
+      },
+      { status: "interrupted" }
+    )
+    const history = [
+      createAssistantMessage(
+        2,
+        [
+          createTextPart({ sequence: 20, round: 0, content: "Searching." }),
+          SUCCEEDED_SEARCH,
+          stoppedRead
+        ],
+        { status: "interrupted" }
+      )
+    ]
+
+    expect(buildAgentContext("You are Lys.", history, "Go on")).toEqual([
+      { role: "system", content: "You are Lys." },
+      {
+        role: "assistant",
+        content: "Searching.",
+        toolCalls: [
+          {
+            id: createFixtureUuidV7(21),
+            toolName: "web_search",
+            argumentText: '{"query":"moths"}'
+          }
+        ]
+      },
+      {
+        role: "tool",
+        toolCallId: createFixtureUuidV7(21),
+        content: "Source [1]\nTitle: Moths"
+      },
+      { role: "user", content: "Go on" }
+    ])
+  })
+
   it.each([
     [
       "a failed reply",
-      createAssistantMessage(2, "Failed text", { status: "failed" })
+      createAssistantMessage(
+        2,
+        [
+          createTextPart({ sequence: 12, round: 0, content: "Failed text" }),
+          SUCCEEDED_SEARCH
+        ],
+        { status: "failed" }
+      )
     ],
     [
       "a reply still streaming",
-      createAssistantMessage(2, "Streaming text", { status: "streaming" })
+      createAssistantMessage(
+        2,
+        [createTextPart({ sequence: 12, round: 0, content: "Streaming text" })],
+        {
+          status: "streaming"
+        }
+      )
     ],
     [
-      "an empty interrupted reply",
-      createAssistantMessage(2, "", { status: "interrupted" })
+      "an interrupted reply without parts",
+      createAssistantMessage(2, [], { status: "interrupted" })
     ],
     [
-      "an empty completed reply",
-      createAssistantMessage(2, "", {
+      "a completed reply with only reasoning",
+      createAssistantMessage(2, [createReasoningPart(12, 0, "Hmm.")], {
         status: "completed",
         finishReason: "stop"
       })
@@ -77,12 +299,16 @@ describe("buildAgentContext", () => {
     ])
   })
 
-  it("sends only the role and text of each stored message, and no tool calls for a reply", () => {
+  it("sends only the fields the model reads, without stored identities, times, or source numbers", () => {
     const history = [
-      createAssistantMessage(2, "Answer", {
-        status: "completed",
-        finishReason: "stop"
-      })
+      createAssistantMessage(
+        2,
+        [createTextPart({ sequence: 12, round: 0, content: "Answer" })],
+        {
+          status: "completed",
+          finishReason: "stop"
+        }
+      )
     ]
 
     expect(buildAgentContext("You are Lys.", history, "Next")).toStrictEqual([
@@ -90,5 +316,73 @@ describe("buildAgentContext", () => {
       { role: "assistant", content: "Answer", toolCalls: [] },
       { role: "user", content: "Next" }
     ])
+    expect(
+      buildAgentContext(
+        "You are Lys.",
+        [
+          createAssistantMessage(2, [SUCCEEDED_SEARCH], {
+            status: "completed",
+            finishReason: "stop"
+          })
+        ],
+        "Next"
+      )[1]
+    ).toStrictEqual({
+      role: "assistant",
+      content: "",
+      toolCalls: [
+        {
+          id: createFixtureUuidV7(21),
+          toolName: "web_search",
+          argumentText: '{"query":"moths"}'
+        }
+      ]
+    })
+  })
+})
+
+describe("calculateAgentContextHistoryMessageCount", () => {
+  it("counts each stored message the context sends once, a reply with several rounds and results included", () => {
+    const history = [
+      createUserMessage(1, "Find moths"),
+      createAssistantMessage(
+        2,
+        [
+          createTextPart({ sequence: 20, round: 0, content: "Searching." }),
+          SUCCEEDED_SEARCH,
+          FAILED_READ,
+          createTextPart({
+            sequence: 23,
+            round: 1,
+            content: "Moths fly at night."
+          })
+        ],
+        { status: "completed", finishReason: "stop" }
+      ),
+      createUserMessage(3, "Why?")
+    ]
+
+    expect(buildAgentContext("You are Lys.", history, "Go on")).toHaveLength(8)
+    expect(calculateAgentContextHistoryMessageCount(history)).toBe(3)
+  })
+
+  it("counts no reply the context leaves out", () => {
+    const history = [
+      createUserMessage(1, "Question"),
+      createAssistantMessage(
+        2,
+        [createTextPart({ sequence: 12, round: 0, content: "Failed text" })],
+        {
+          status: "failed"
+        }
+      ),
+      createAssistantMessage(3, [createReasoningPart(13, 0, "Hmm.")], {
+        status: "completed",
+        finishReason: "stop"
+      }),
+      createAssistantMessage(4, [], { status: "interrupted" })
+    ]
+
+    expect(calculateAgentContextHistoryMessageCount(history)).toBe(1)
   })
 })

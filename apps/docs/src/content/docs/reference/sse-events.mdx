@@ -6,26 +6,28 @@ sidebar:
   order: 2
 ---
 
-The chat route emits exactly nine SSE payload variants, defined by
+The chat route emits exactly eleven SSE payload variants, defined by
 `chatApiStreamEventSchema` in `@lys/protocol`. The reply-events route emits
-`reply-snapshot` followed by the seven generation variants (`title`, `delta`,
-`done`, `interrupted`, `error`, `tool-approval`, `tool-call`), defined by
-`chatReplyEventSchema`.
+`reply-snapshot` followed by the nine generation variants (`title`,
+`reply-part`, `reply-part-delta`, `sources`, `done`, `interrupted`, `error`,
+`tool-approval`, `tool-call`), defined by `chatReplyEventSchema`.
 
 ## Event variants
 
-| Event name                         | Payload fields                                                                      | Meaning                                                                                              |
-| ---------------------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `start-new-conversation-turn`      | `conversation`, `userMessage`, `assistantMessage`                                   | The backend created a new conversation and persisted the first turn.                                 |
-| `start-existing-conversation-turn` | `userMessage`, `assistantMessage`                                                   | The backend persisted a new turn on an existing conversation.                                        |
-| `title`                            | `title`                                                                             | The persisted conversation title, generated or reconciled.                                           |
-| `delta`                            | `content`                                                                           | One non-empty assistant text fragment.                                                               |
-| `done`                             | `finishReason`                                                                      | Successful assistant completion with `stop` or `length`.                                             |
-| `interrupted`                      | none                                                                                | The reply ended before the model finished.                                                           |
-| `error`                            | `message`                                                                           | A user-presentable chat generation error string.                                                     |
-| `tool-approval`                    | `call`                                                                              | The reply waits for the person to allow or reject this tool call.                                    |
-| `tool-call`                        | `call`                                                                              | The reply waits for the client to run this call of a client tool.                                    |
-| `reply-snapshot`                   | `conversationTitle`, `assistantMessage`, `pendingToolCalls`, `pendingToolApprovals` | Reply-events route only: the stored reply and its unanswered calls and prompts when following began. |
+| Event name                         | Payload fields                                                                                 | Meaning                                                                                                                                   |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `start-new-conversation-turn`      | `conversation`, `userMessage`, `assistantMessage`                                              | The backend created a new conversation and persisted the first turn.                                                                      |
+| `start-existing-conversation-turn` | `userMessage`, `assistantMessage`                                                              | The backend persisted a new turn on an existing conversation.                                                                             |
+| `title`                            | `title`                                                                                        | The persisted conversation title, generated or reconciled.                                                                                |
+| `reply-part`                       | `part`                                                                                         | A new part of the reply, or a tool call that changed state, as stored.                                                                    |
+| `reply-part-delta`                 | `partId`, `content`, `updatedAt`                                                               | One non-empty fragment appended to a stored reasoning or text part.                                                                       |
+| `sources`                          | `sources`                                                                                      | Numbered sources a tool call's result shows, stored with the call.                                                                        |
+| `done`                             | `finishReason`                                                                                 | Successful assistant completion with `stop` or `length`.                                                                                  |
+| `interrupted`                      | none                                                                                           | The reply ended before the model finished.                                                                                                |
+| `error`                            | `message`                                                                                      | A user-presentable chat generation error string.                                                                                          |
+| `tool-approval`                    | `call`                                                                                         | The reply waits for the person to allow or reject this tool call.                                                                         |
+| `tool-call`                        | `call`                                                                                         | The reply waits for the client to run this call of a client tool.                                                                         |
+| `reply-snapshot`                   | `conversationTitle`, `assistantMessage`, `sources`, `pendingToolCalls`, `pendingToolApprovals` | Reply-events route only: the stored reply, the conversation's sources, and the reply's unanswered calls and prompts when following began. |
 
 ## Payload details
 
@@ -74,10 +76,56 @@ running requests none and receives no `title` event. If a title was saved but it
 delivered, a later existing turn sends the stored title again. The backend logs
 title-task failures instead of sending an `error` event.
 
-### `delta`
+### `reply-part`
 
-Carries one non-empty `content` fragment. The desktop appends it to the current
-streaming assistant message.
+Carries one stored part of the reply, complete as of this event, in the
+`ReplyPart` shape of the [stored data](/reference/schema/#reply-parts): `kind`
+(`reasoning`, `text`, or `tool-call`), `id`, `round`, `createdAt`,
+`updatedAt`, and either `content` or the call's `toolName`, `argumentText`,
+`status`, and, once it has one, `result`, with a succeeded call's
+`sourceNumbers`.
+
+The backend sends it when it stores a new part, and again each time a tool
+call changes state: stored as `running` or `awaiting-approval` when the round
+ends, then `running` once allowed, and `succeeded`, `failed`, or `rejected`
+with the result the model reads. A call that cannot run, such as one naming a
+tool that was not offered, arrives once, already `failed`. A client replaces
+the part it holds under the same `id`, or adds the part after the reply's
+other parts. A reasoning or text part starts with its first fragment; later
+fragments that directly follow it, with the same kind and round, arrive as
+`reply-part-delta` events.
+
+```json
+{
+  "type": "reply-part",
+  "part": {
+    "kind": "tool-call",
+    "id": "0199c8a1-2f4e-7c3b-9a1d-5e6f7a8b9c0d",
+    "round": 0,
+    "toolName": "web_search",
+    "argumentText": "{\"query\":\"why do moths fly at night\"}",
+    "status": "succeeded",
+    "result": "Search: \"why do moths fly at night\" …",
+    "sourceNumbers": [1, 2],
+    "createdAt": "2026-10-15T10:00:02.000Z",
+    "updatedAt": "2026-10-15T10:00:04.000Z"
+  }
+}
+```
+
+### `reply-part-delta`
+
+Carries one non-empty `content` fragment of the reasoning or text part
+`partId`, and `updatedAt`, the time the fragment was stored, which is the
+part's new update time. The client appends the fragment to that part.
+
+### `sources`
+
+Carries the numbered sources (`number`, `url`, `title`) a tool call's result
+shows, in the order it shows them. It is sent right before the `reply-part`
+event of the call whose result shows them, and only when there is at least
+one. A number keeps its source for the whole conversation, so a client merges
+the sources by number. Today only `web_search` and `read_page` number sources.
 
 ### `done`
 
@@ -97,16 +145,20 @@ The only accepted `finishReason` values are `stop` and `length`.
 Carries no fields. Sent when the reply was stopped, superseded by a newer turn
 in its conversation, deleted with its conversation, or cancelled by backend
 shutdown. The stored reply, if it still exists, is `interrupted` with exactly
-the content delivered before this event. No `delta` or `done` follows it; a
-`title` can.
+the parts delivered before this event, and its calls that were waiting or
+running are stored as `interrupted`. No `reply-part`, `reply-part-delta`,
+`sources`, or `done` follows it; a `title` can. A client marks the waiting and
+running calls of a reply that ended, by any final event, as `interrupted`
+too.
 
 ### `tool-approval`
 
 Carries one tool call the backend shows to the person before anything runs,
 in the same shape as a `tool-call` event's `call`. The backend's tool approval
 service sends it for every call of a tool that is not saved as Just run,
-client and backend tools alike; a call of a tool on Just run gets no prompt.
-The client shows the call and answers with the
+client and backend tools alike, right after the call's `reply-part` stored it
+as `awaiting-approval`; a call of a tool on Just run gets no prompt. The
+client shows the call and answers with the
 [tool-approval route](/reference/api/#tool-approvals). After `allowed`, a
 backend tool runs in the backend, and a client tool's call comes back as a
 `tool-call` event under the same `id`. The event is live only: a client that
@@ -143,16 +195,18 @@ prompt. The client runs it without asking again and answers with the
 arrive, their prompts and the run requests of calls that need no prompt are
 sent in the model's order; the next round starts once every call has an
 answer. The model's text in a round that calls tools is streamed and stored
-like any other text. The event is live only: nothing stores it, and a client
-that was not following when it was sent finds the call in the next
-`reply-snapshot`'s `pendingToolCalls`.
+as a text part of that round. The event itself is live only: a client that
+was not following when it was sent finds the call in the next
+`reply-snapshot`'s `pendingToolCalls`. The call is also stored as a
+`tool-call` part, which `reply-part` events report.
 
 ### `reply-snapshot`
 
 The first event of every reply-events stream. `assistantMessage` is the stored
-reply, including every delta sent before this event, so later `delta` events
-continue from exactly its content. `conversationTitle` is the stored title, or
-`null`. `pendingToolCalls` lists the calls sent to run and not yet answered
+reply, including every part and fragment sent before this event, so later
+`reply-part` and `reply-part-delta` events continue from exactly its parts.
+`sources` holds every source the conversation stored, by number.
+`conversationTitle` is the stored title, or `null`. `pendingToolCalls` lists the calls sent to run and not yet answered
 with their result, and `pendingToolApprovals` the prompts not yet answered,
 each in the order sent and in the same shape as an event's `call`; both are
 empty when the reply is not generating. Each reaches a follower once, either
@@ -182,7 +236,6 @@ The message is one of three sentences, never upstream text:
 - No `session_id`
 - No `emitted_at`
 - No replay marker such as `stream.resumed`
-- No tool results, and no record of which tools ran
 
 ## Event ordering today
 
@@ -190,12 +243,12 @@ Every valid chat stream begins with one turn-start event. After that:
 
 1. `start-new-conversation-turn` or `start-existing-conversation-turn`
 2. for a titled existing conversation, its stored `title` event arrives next
-3. zero or more rounds: each round's text as `delta` events, then, when the
-   round calls tools, its `tool-approval` and `tool-call` events in the
-   model's order, and the `tool-call` event of each allowed client tool's call
-   when its answer arrives. When an
-   earlier round sent text, a later round's first `delta` starts with a blank
-   line (`\n\n`)
+3. zero or more rounds: each round's reasoning and text as `reply-part` and
+   `reply-part-delta` events in the order the model writes them, then, when
+   the round calls tools, each call's `reply-part` with its `tool-approval` or
+   `tool-call` event in the model's order, the `tool-call` event of each
+   allowed client tool's call when its answer arrives, and each call's later
+   `reply-part` events, a succeeded call's `sources` event first
 4. exactly one of `done`, `interrupted`, or `error`
 5. for a conversation without a stored title, a generated `title` may arrive
    before, during, or after the chat events
@@ -218,8 +271,8 @@ returns the stored state.
 
 - Replay of missed events (following a reply today starts from a fresh
   snapshot instead)
-- Streamed and stored reply parts: thoughts, each round's text, tool calls,
-  and tool results, kept apart instead of one text
+- Reasoning that a model writes between `<think>` tags in its text
+  ([#183](https://github.com/w3lt/lys/issues/183))
 - Stronger protocol versioning around additive event growth
 
 ## Related pages

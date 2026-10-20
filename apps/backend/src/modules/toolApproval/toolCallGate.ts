@@ -10,43 +10,54 @@ export type SendToolApprovalPrompt = (
 ) => Promise<ChatToolApprovalAnswer | undefined>
 
 /**
- * What asking the gate about one call did.
- *
- * @remarks `allowed`: the tool is on Just run, nothing was sent, and the call
- * may go on in the same step. `prompted`: the call was shown to the person
- * in the same step, and `answer` settles with their answer.
+ * Stores one checked call in the state the gate chose for it: `running` when
+ * it may run at once, `awaiting-approval` when the person is asked. Answers
+ * false when the reply refused to store it, because the reply has ended.
  */
-export type ToolApprovalRequest =
+export type StoreStartedToolCall = (
+  status: "awaiting-approval" | "running"
+) => boolean
+
+/** What starting one checked call led to. */
+export type ToolCallStart =
   | Readonly<{
-      /** The call may go on without asking the person. */
+      /** The call is stored as running and may run now. */
       status: "allowed"
     }>
   | Readonly<{
-      /** The call was shown to the person. */
+      /** The call is stored as awaiting approval, and the person was asked. */
       status: "prompted"
       /**
-       * Resolves with the person's answer, or with undefined when the reply
+       * Settles with the person's answer, or with undefined when the reply
        * was stopped while the prompt waited; never rejects.
        */
       answer: Promise<ChatToolApprovalAnswer | undefined>
     }>
+  | Readonly<{
+      /** The reply refused to store the call; nobody was asked. */
+      status: "ended"
+    }>
 
-/** Request outcome of a call whose tool is on Just run. */
-const ALLOWED_TOOL_APPROVAL_REQUEST: ToolApprovalRequest = Object.freeze({
+/** Start of a call that may run at once. */
+const ALLOWED_TOOL_CALL_START: ToolCallStart = Object.freeze({
   status: "allowed"
 })
 
+/** Start of a call the reply refused to store. */
+const ENDED_TOOL_CALL_START: ToolCallStart = Object.freeze({ status: "ended" })
+
 /**
  * Owns the Just run choices read for one model round and the reply's prompt
- * sender to decide, for each call of the round, whether the person is asked
- * first.
+ * sender to start each checked call of the round: stored as running when it
+ * may go on without the person, or stored as awaiting approval and shown to
+ * the person.
  *
  * @remarks The invariant is that a call goes on without the person only when
- * its tool's name was saved as Just run when the round's calls arrived;
- * every other call waits for the person's answer. The choices never change
- * after construction, so a change saved later applies from the next round.
- * Concurrency model: single-owner, on the backend's event loop, like the
- * reply's waits that the prompt sender borrows.
+ * its tool's name was saved as Just run when the round's calls arrived, and
+ * that no prompt is sent for a call that is not stored. The choices never
+ * change after construction, so a change saved later applies from the next
+ * round. Concurrency model: single-owner, on the backend's event loop, like
+ * the reply's waits that the prompt sender borrows.
  */
 export default class ToolCallGate {
   /** Names of the tools on Just run for this round; owned, never changed. */
@@ -71,20 +82,28 @@ export default class ToolCallGate {
   }
 
   /**
-   * Decides whether one checked call may go on, prompting the person when
-   * the tool is not on Just run.
+   * Starts one checked call: stores it in the state the saved choices give
+   * it and, when it may not go on without the person, shows it to them, in
+   * one synchronous step.
    *
    * @param toolCall - Checked call of an offered tool.
-   * @returns `allowed` when the tool is on Just run, without sending
-   * anything; otherwise `prompted`, after the prompt was sent, with the
-   * person's answer to come.
-   * @remarks Both outcomes are decided in the same synchronous step, so a
-   * caller that goes on with an allowed call at once keeps the order of a
-   * round's prompts and run requests.
+   * @param storeToolCall - Stores the call in the state given; borrowed for
+   * this call.
+   * @returns `allowed` once the call is stored as running, when its tool was
+   * saved as Just run; `prompted` with the person's answer once it is stored
+   * as awaiting approval and the prompt is sent; `ended` when the store
+   * refused the call, which sends no prompt.
+   * @remarks The call is stored before its prompt is sent, so a client that
+   * sees the prompt can read the call it asks about.
    */
-  public sendToolApprovalRequest(toolCall: ChatToolCall): ToolApprovalRequest {
-    if (this.#justRunToolNames.has(toolCall.toolName))
-      return ALLOWED_TOOL_APPROVAL_REQUEST
+  public startToolCall(
+    toolCall: ChatToolCall,
+    storeToolCall: StoreStartedToolCall
+  ): ToolCallStart {
+    const isAllowedAtOnce = this.#justRunToolNames.has(toolCall.toolName)
+    if (!storeToolCall(isAllowedAtOnce ? "running" : "awaiting-approval"))
+      return ENDED_TOOL_CALL_START
+    if (isAllowedAtOnce) return ALLOWED_TOOL_CALL_START
     return Object.freeze({
       status: "prompted",
       answer: this.#sendToolApprovalPrompt(toolCall)

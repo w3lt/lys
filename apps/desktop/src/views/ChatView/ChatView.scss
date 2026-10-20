@@ -265,6 +265,231 @@
   margin-top: 12px;
 }
 
+.chat-view__reasoning,
+.chat-view__steps {
+  margin-top: 12px;
+}
+
+.chat-view__disclosure {
+  width: fit-content;
+  color: var(--app-text-muted);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.chat-view__disclosure:focus-visible,
+.chat-view__call-summary:focus-visible,
+.chat-view__call-text:focus-visible {
+  border-radius: var(--radius-sm);
+  outline: 2px solid var(--app-focus);
+  outline-offset: 2px;
+}
+
+.chat-view__reasoning-text {
+  margin: 8px 0 0;
+  padding-left: 12px;
+  border-left: 1px solid var(--app-border-subtle);
+  color: var(--app-text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.chat-view__step-list,
+.chat-view__call-list,
+.chat-view__source-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chat-view__step-list {
+  display: grid;
+  margin-top: 8px;
+  padding-left: 12px;
+  border-left: 1px solid var(--app-border-subtle);
+  gap: 12px;
+}
+
+.chat-view__step-text {
+  margin: 0 0 6px;
+  color: var(--app-text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.chat-view__call-list {
+  display: grid;
+  gap: 4px;
+}
+
+.chat-view__call-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--app-text);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.chat-view__call-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.chat-view__call-target {
+  overflow: hidden;
+  min-width: 0;
+  color: var(--app-text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-view__call-status {
+  margin-left: auto;
+  color: var(--app-text-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.chat-view__call[data-status="failed"] .chat-view__call-status,
+.chat-view__call[data-status="rejected"] .chat-view__call-status {
+  color: var(--app-text-danger-muted);
+}
+
+.chat-view__call-detail {
+  margin: 6px 0 8px;
+  padding: 8px 12px;
+  border-radius: var(--radius-surface);
+  background: var(--app-surface-code);
+}
+
+.chat-view__call-label {
+  margin: 0 0 4px;
+  color: var(--app-text-faint);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.chat-view__call-label:not(:first-child) {
+  margin-top: 8px;
+}
+
+.chat-view__call-arguments {
+  display: grid;
+  margin: 0;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.chat-view__call-arguments div {
+  display: flex;
+  gap: 8px;
+}
+
+.chat-view__call-arguments dt {
+  color: var(--app-text-muted);
+  font-family: var(--font-mono);
+}
+
+.chat-view__call-arguments dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.chat-view__call-text {
+  overflow: auto;
+  max-height: 240px;
+}
+
+.chat-view__call-text pre {
+  margin: 0;
+  color: var(--app-text-code);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-view__sources {
+  margin-top: 16px;
+}
+
+.chat-view__sources-heading {
+  margin: 0 0 6px;
+  color: var(--app-text-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.chat-view__source-list {
+  display: grid;
+  gap: 4px;
+}
+
+.chat-view__sources-more {
+  margin-top: 6px;
+}
+
+.chat-view__sources-more .chat-view__source-list {
+  margin-top: 6px;
+}
+
+.chat-view__source {
+  display: inline-flex;
+  align-items: baseline;
+  max-width: 100%;
+  gap: 8px;
+  color: var(--app-text);
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.chat-view__source:hover .chat-view__source-title {
+  text-decoration: underline;
+}
+
+.chat-view__source:focus-visible {
+  border-radius: var(--radius-sm);
+  outline: 2px solid var(--app-focus);
+  outline-offset: 2px;
+}
+
+.chat-view__source-number {
+  color: var(--app-text-link);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.chat-view__source-title {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-view__source-site,
+.chat-view__source-via {
+  color: var(--app-text-faint);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.chat-view__source-via {
+  margin-left: 8px;
+}
+
 .chat-view__jump {
   position: absolute;
   right: 24px;

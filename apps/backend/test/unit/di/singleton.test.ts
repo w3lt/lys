@@ -3,10 +3,12 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { backendConfigSchema } from "../../../src/config"
+import type { AgentTurn } from "../../../src/modules/agent/agent"
 import AgentService from "../../../src/modules/agent/agentService"
 import ChatService from "../../../src/modules/chat/chatService"
 import StoredConversationHistoryEditor from "../../../src/modules/conversation/historyEditor"
 import StoredConversationHistoryReader from "../../../src/modules/conversation/historyReader"
+import StoredReplyParts from "../../../src/modules/conversation/replyParts"
 import StoredConversationTurns from "../../../src/modules/conversation/turns"
 import LlmRuntimeService, {
   type LlmRuntimeFailureReporters
@@ -63,6 +65,38 @@ function createAcquisition<Service>(
       closeLog.push(name)
     })
   } satisfies SingletonServiceAcquisition<Service>
+}
+
+/**
+ * Builds a turn that says `Hello` to `qwen/qwen3-8b` without history,
+ * sources, or tools.
+ *
+ * @returns The turn: it accepts the reply's final state, its part writes
+ * are spies that store nothing, which the turn contract reads as a refused
+ * write, and its senders and reporters are spies. The cases that use it read
+ * only what the model was sent.
+ */
+function buildHelloAgentTurn(): AgentTurn {
+  return {
+    history: [],
+    sources: [],
+    userMessageContent: "Hello",
+    model: "qwen/qwen3-8b",
+    generationOptions: { temperature: 0.4 },
+    clientTools: [],
+    builtInTools: [],
+    abortSignal: new AbortController().signal,
+    updateAssistantMessageState: () => true,
+    createReplyPart: vi.fn(),
+    updateReplyPartContent: vi.fn(),
+    updateReplyToolCall: vi.fn(),
+    sendEvent: vi.fn(),
+    sendClientToolCall: vi.fn(),
+    createToolCallGate: vi.fn(),
+    reportReplyCancellation: vi.fn(),
+    reportReplyRefusal: vi.fn(),
+    reportReplyFailure: vi.fn()
+  }
 }
 
 /**
@@ -205,20 +239,20 @@ describe("createSingletonServices", () => {
       vi.fn()
     )
 
-    expect(
-      gate.sendToolApprovalRequest({
-        id: createFixtureUuidV7(1),
-        toolName: "read_page",
-        arguments: { url: "https://example.com/" }
-      })
-    ).toEqual({ status: "allowed" })
-    expect(
-      gate.sendToolApprovalRequest({
-        id: createFixtureUuidV7(2),
-        toolName: "web_search",
-        arguments: { query: "lys" }
-      }).status
-    ).toBe("prompted")
+    const pageCall = {
+      id: createFixtureUuidV7(1),
+      toolName: "read_page",
+      arguments: { url: "https://example.com/" }
+    }
+    const searchCall = {
+      id: createFixtureUuidV7(2),
+      toolName: "web_search",
+      arguments: { query: "lys" }
+    }
+
+    expect(gate.startToolCall(pageCall, () => true).status).toBe("allowed")
+    expect(gate.startToolCall(searchCall, () => true).status).toBe("prompted")
+    expect(sendToolApprovalPrompt.mock.calls).toEqual([[searchCall]])
   })
 
   it("returns a frozen bundle of the services", async () => {
@@ -234,6 +268,7 @@ describe("createSingletonServices", () => {
     expect(Object.isFrozen(services)).toBe(true)
     expect(services.chatService).toBe(acquisitions.chat.service)
     expect(services.conversationTurns).toBeInstanceOf(StoredConversationTurns)
+    expect(services.replyParts).toBeInstanceOf(StoredReplyParts)
     expect(services.conversationHistoryReader).toBeInstanceOf(
       StoredConversationHistoryReader
     )
@@ -263,10 +298,18 @@ describe("createSingletonServices", () => {
       turn.conversation.id,
       "Greeting"
     )
+    const part = services.replyParts.createReplyPart(turn.assistantMessage.id, {
+      kind: "text",
+      round: 0,
+      content: "Hi"
+    })
 
     expect(
       services.conversationHistoryReader.getConversation(turn.conversation.id)
-    ).toMatchObject({ title: "Greeting" })
+    ).toMatchObject({
+      title: "Greeting",
+      messages: [turn.userMessage, { parts: [part] }]
+    })
     acquisitions.database.service[Symbol.dispose]()
     expect(() =>
       services.conversationHistoryReader.getConversation(turn.conversation.id)
@@ -326,23 +369,9 @@ describe("createSingletonServices", () => {
         .spyOn(acquisitions.chat.service, "completeChatStream")
         .mockRejectedValue(new Error("model not loaded"))
 
-      await services.agentService.findChatAgent(agentCode)?.createReply({
-        history: [],
-        userMessageContent: "Hello",
-        model: "qwen/qwen3-8b",
-        generationOptions: { temperature: 0.4 },
-        clientTools: [],
-        builtInTools: [],
-        abortSignal: new AbortController().signal,
-        updateAssistantMessageContent: () => true,
-        updateAssistantMessageState: () => true,
-        sendEvent: vi.fn(),
-        sendClientToolCall: vi.fn(),
-        createToolCallGate: vi.fn(),
-        reportReplyCancellation: vi.fn(),
-        reportReplyRefusal: vi.fn(),
-        reportReplyFailure: vi.fn()
-      })
+      await services.agentService
+        .findChatAgent(agentCode)
+        ?.createReply(buildHelloAgentTurn())
 
       expect(engine.findLlmContextMeasurement).toHaveBeenCalledWith(
         "qwen/qwen3-8b",

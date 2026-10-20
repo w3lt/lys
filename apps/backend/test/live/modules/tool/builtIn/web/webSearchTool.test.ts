@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import { buildTavilyRequestDependencies } from "../../../../../../src/modules/tool/builtIn/builtInTools"
 import WebSearchTool from "../../../../../../src/modules/tool/builtIn/web/webSearchTool"
 import { getLiveTavilyApiKey } from "../../../../support/liveTavily"
+import { createRecordedRunContext } from "../../../../../unit/support/builtInToolContract"
 
 describe("WebSearchTool against the Tavily API", () => {
   it("frames real results under the trimmed query, without the key", async () => {
@@ -10,7 +11,9 @@ describe("WebSearchTool against the Tavily API", () => {
     const parsed = tool.parseToolCall({ query: "  night moths\n " })
     if (parsed.status !== "parsed") throw new Error(parsed.message)
 
-    const result = await parsed.runToolCall(new AbortController().signal)
+    const result = await parsed.runToolCall(
+      createRecordedRunContext(new AbortController().signal).context
+    )
 
     // Checked first, and as a Boolean, so no later failure can print a key.
     expect(result.content.includes(apiKey)).toBe(false)

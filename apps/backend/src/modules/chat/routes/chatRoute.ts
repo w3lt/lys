@@ -22,7 +22,8 @@ import type { TitleGenerationOptions } from "../chatService"
 import type {
   ConversationTurn,
   ConversationTurnWriter,
-  GeneratedConversationTitleWriter
+  GeneratedConversationTitleWriter,
+  ReplyPartWriter
 } from "../persistence"
 import ReplyEventSubscription from "../replyEventSubscription"
 import { createChatBackendToolUnavailableProblem } from "./replyProblems"
@@ -64,6 +65,8 @@ type ChatRouteDependencies = TurnAgentLookups &
   Readonly<{
     /** Turn persistence whose lifetime outlives all active generations. */
     turns: ConversationTurnWriter
+    /** Reply-part persistence whose lifetime outlives all active generations. */
+    replyParts: ReplyPartWriter
     /** Conditional generated-title persistence borrowed for the route lifetime. */
     titleWriter: GeneratedConversationTitleWriter
     /** Bound title operation retained separately from chat completion. */
@@ -127,6 +130,7 @@ export default function updateFastifyWithChatRoute(
   const turns = app.conversationTurns
   const dependencies = {
     turns,
+    replyParts: app.replyParts,
     titleWriter: turns,
     findChatAgent: (code: string) => app.agentService.findChatAgent(code),
     findConversationAgentCode: (conversationId: string) =>
@@ -331,8 +335,9 @@ async function createTurnReplyTask(
  * keeps.
  * @param context - Generation-owned cancellation, event sender, tool call
  * sender, and approval prompt sender.
- * @returns The agent turn, whose writes go to the stored reply and whose
- * tool calls pass the approval gateway. With the request's logger, an
+ * @returns The agent turn, whose parts and final state go to the stored
+ * reply, which numbers new sources after the conversation's stored ones, and
+ * whose tool calls pass the approval gateway. With the request's logger, an
  * unreadable settings file is logged as a warning; a cancelled reply, and a
  * round that was not sent because it did not fit or its model was not
  * loaded, at debug level; and any other reply failure as an error.
@@ -347,20 +352,23 @@ function buildAgentTurn(
   }: ReplyTaskContext
 ): AgentTurn {
   const { turn, dependencies } = input
+  const { replyParts } = dependencies
   const assistantMessageId = turn.assistantMessage.id
   return {
     history: turn.conversation.messages,
+    sources: turn.conversation.sources,
     userMessageContent: turn.userMessage.content,
     model: input.model,
     generationOptions: input.generationOptions,
     clientTools: input.clientTools,
     builtInTools: input.builtInTools,
     abortSignal,
-    updateAssistantMessageContent: (content) =>
-      dependencies.turns.updateAssistantMessageContent(
-        assistantMessageId,
-        content
-      ),
+    createReplyPart: (draft) =>
+      replyParts.createReplyPart(assistantMessageId, draft),
+    updateReplyPartContent: (partId, content) =>
+      replyParts.updateReplyPartContent(assistantMessageId, partId, content),
+    updateReplyToolCall: (toolCallId, change) =>
+      replyParts.updateReplyToolCall(assistantMessageId, toolCallId, change),
     updateAssistantMessageState: (completion) =>
       dependencies.turns.updateAssistantMessageState(
         assistantMessageId,

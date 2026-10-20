@@ -118,6 +118,28 @@
   text-underline-offset: 3px;
 }
 
+.markdown-message .markdown-message__citation {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5em;
+  margin-left: 2px;
+  padding: 0 4px;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--app-surface-code);
+  color: var(--app-text-link);
+  font-family: var(--font-mono);
+  font-size: 0.75em;
+  line-height: 1.5;
+  text-decoration: none;
+  vertical-align: 0.1em;
+}
+
+.markdown-message .markdown-message__citation:hover {
+  background: var(--app-surface-code-header);
+}
+
 .markdown-message code:not(.markdown-message__block-code),
 .markdown-message > code {
   background: var(--app-surface-code);

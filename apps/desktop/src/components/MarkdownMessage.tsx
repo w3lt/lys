@@ -14,12 +14,20 @@ import ReactMarkdown, {
 import { Copy } from "lucide-react"
 import { upperFirst } from "lodash"
 import { Button } from "@/components/ui/button"
+import { Tooltip } from "@/components/ui/tooltip"
+import type { ConversationSource } from "@lys/share"
 import rehypeShiki from "@shikijs/rehype"
 import remarkMath from "remark-math"
 import remarkGfm from "remark-gfm"
 import rehypeKatex from "rehype-katex"
 import { toString } from "hast-util-to-string"
 
+import {
+  buildCitationTransformer,
+  CITATION_PROPERTY,
+  type CitationOptions,
+  formatSourceSite
+} from "./markdown-citations"
 import "./MarkdownMessage.scss"
 
 /** Properties accepted by {@link MarkdownMessage}. */
@@ -30,6 +38,11 @@ type MarkdownMessageProps = {
   readonly streaming: boolean
   /** Status the caret announces while generation remains active. */
   readonly generatingLabel: string
+  /**
+   * Numbered sources the text may cite with `[n]` markers; each marker of a
+   * listed number becomes a link to its source.
+   */
+  readonly sources: readonly ConversationSource[]
 }
 
 /** Properties react-markdown supplies to the `code` element inside a `pre`. */
@@ -195,18 +208,33 @@ function isFragmentHref(href: string | undefined): boolean {
 }
 
 /**
+ * Formats the description a citation shows while the pointer rests on it.
+ *
+ * @param title - Title of the cited source.
+ * @param href - Address of the cited source.
+ * @returns The title and the source's site.
+ */
+function formatCitationDescription(title: string, href: string): string {
+  return `${title} · ${formatSourceSite(href)}`
+}
+
+/**
  * Adapts react-markdown links to the navigation their destination needs.
  *
  * @remarks A fragment link, such as a footnote reference or its
  * back-reference, stays in the current document: it keeps its `id`,
  * `aria-label`, and `aria-describedby`, which those links use to name and
- * reach each other. Every other link opens in a new tab without a referrer and
- * renders only the destination and title a Markdown link can carry. In both
- * cases the source node the renderer supplies never becomes a DOM attribute.
+ * reach each other. A citation, marked by {@link buildCitationTransformer},
+ * opens its source in a new tab without a referrer, is named by its number
+ * and then its source's title, as `1, source: Night moths`, and
+ * shows the source's title and site while the pointer rests on it. Every
+ * other link opens in a new tab without a referrer and renders only the
+ * destination and title a Markdown link can carry. In every case the source
+ * node the renderer supplies never becomes a DOM attribute.
  * @param props - Renderer-provided link children, destination, title,
  * footnote identity and accessible relationships, and the hast node they were
  * rendered from.
- * @returns The in-document or external link.
+ * @returns The in-document, citation, or external link.
  */
 function MarkdownLink({
   "aria-describedby": ariaDescribedBy,
@@ -214,8 +242,26 @@ function MarkdownLink({
   children,
   href,
   id,
+  node,
   title
 }: ComponentProps<"a"> & ExtraProps) {
+  const citation = node?.properties[CITATION_PROPERTY]
+  if (citation !== undefined && href !== undefined && title !== undefined) {
+    return (
+      <Tooltip description={formatCitationDescription(title, href)}>
+        <a
+          aria-label={`${String(citation)}, source: ${title}`}
+          className="markdown-message__citation"
+          href={href}
+          rel="noreferrer"
+          target="_blank"
+        >
+          {children}
+        </a>
+      </Tooltip>
+    )
+  }
+
   if (isFragmentHref(href)) {
     return (
       <a
@@ -235,6 +281,18 @@ function MarkdownLink({
       {children}
     </a>
   )
+}
+
+/**
+ * Builds the remark plugin entry that links a message's citations.
+ *
+ * @param sources - Sources the message may cite.
+ * @returns {@link buildCitationTransformer} with its settings.
+ */
+function buildCitationPlugin(
+  sources: readonly ConversationSource[]
+): [typeof buildCitationTransformer, CitationOptions] {
+  return [buildCitationTransformer, { sources }]
 }
 
 /**
@@ -262,6 +320,9 @@ const markdownComponents: Components = {
  * its own message's note even when several messages number their notes the
  * same way. The visually hidden "Footnotes" heading keeps remark-rehype's
  * fixed `footnote-label` id, so every message with footnotes repeats it.
+ * Each `[n]` marker in prose whose number is in `sources` becomes a numbered
+ * link to that source; markers in code, math, and links, and markers of
+ * other numbers, stay as written.
  * Markdown links receive the configured navigation attributes,
  * `$…$` and `$$…$$` math renders through KaTeX, code blocks receive the copy
  * interaction, and the streaming caret is a polite status announcement,
@@ -274,25 +335,28 @@ const markdownComponents: Components = {
  * case-sensitively, renders as plain `text`; a fence without a language stays
  * unhighlighted. Processing is asynchronous: until a message's first pass
  * resolves, it renders as GitHub Flavored Markdown without the link, math,
- * and code-block handling. Later passes keep the previous output visible until
- * the new text is processed.
- * @param props - Markdown source, current streaming presentation state, and
- * the caret's announcement.
+ * citation, and code-block handling, so a `[n]` marker, even one inside
+ * math, stays text until then. Later passes keep the previous output visible
+ * until the new text is processed.
+ * @param props - Markdown source, current streaming presentation state, the
+ * caret's announcement, and the sources the text may cite.
  * @returns The rendered Markdown body and optional generation caret.
  */
 export function MarkdownMessage({
   text,
   streaming,
-  generatingLabel
+  generatingLabel,
+  sources
 }: MarkdownMessageProps) {
   const instanceId = useId()
   const footnoteRehypeOptions = { clobberPrefix: `${instanceId}-` }
+  const citationPlugin = buildCitationPlugin(sources)
 
   return (
     <div className="markdown-message">
       <MarkdownHooks
         components={markdownComponents}
-        remarkPlugins={[remarkMath, remarkGfm]}
+        remarkPlugins={[remarkMath, remarkGfm, citationPlugin]}
         remarkRehypeOptions={footnoteRehypeOptions}
         rehypePlugins={[
           // Display math arrives as `pre > code`, so KaTeX must claim it

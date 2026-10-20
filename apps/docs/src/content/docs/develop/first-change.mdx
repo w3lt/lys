@@ -42,12 +42,13 @@ The backend chat route:
 
 1. creates or resumes a conversation
 2. persists the user message
-3. persists an empty streaming assistant message
+3. persists a streaming assistant message without parts
 4. emits the start event
-5. streams assistant deltas and a final done or error event
+5. streams the reply's parts (reasoning, text, and tool calls) and a final
+   done or error event
 
-The backend persists each assistant delta before emitting it, then stores terminal
-status and finish reason before completion. Continuation uses the current prompt
+The backend persists each reply part and fragment before emitting it, then
+stores terminal status and finish reason before completion. Continuation uses the current prompt
 of the conversation's agent and the eligible transcript; title generation runs
 only while the title is absent.
 
@@ -67,7 +68,8 @@ The desktop store consumes the typed stream events and updates the current
 conversation state. A turn-start event comes first; after that:
 
 - for an existing titled conversation, the stored `title` event arrives next
-- zero or more `delta` events precede a successful `done`
+- zero or more `reply-part`, `reply-part-delta`, and `sources` events precede
+  a successful `done`
 - for a conversation without a stored title, `title` may arrive before, during,
   or after those chat events because title generation runs concurrently
 - `error` reports a chat generation failure; a `title` event can still follow it

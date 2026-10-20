@@ -16,7 +16,31 @@ export {
   type AgentDefinitionCandidate,
   type BuiltInAgent
 } from "./agent"
-export * from "./conversation"
+export {
+  conversationAssistantMessageSchema,
+  conversationMessageSchema,
+  conversationMetadataSchema,
+  conversationSchema,
+  conversationSourceSchema,
+  conversationUserMessageSchema,
+  isAnsweredToolCall,
+  isAnsweredToolCallStatus,
+  replyPartSchema,
+  toolCallReplyPartStatusSchema,
+  type AnsweredToolCallReplyPart,
+  type AnsweredToolCallReplyPartStatus,
+  type Conversation,
+  type ConversationAssistantMessage,
+  type ConversationAssistantMessageFinishReason,
+  type ConversationAssistantMessageStatus,
+  type ConversationMessage,
+  type ConversationMetadata,
+  type ConversationSource,
+  type ConversationUserMessage,
+  type ReplyPart,
+  type ToolCallReplyPart,
+  type ToolCallReplyPartStatus
+} from "./conversation"
 export {
   MAXIMUM_MODEL_LOAD_SETTING_VALUE,
   modelLoadConfigurationSchema,

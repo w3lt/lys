@@ -31,14 +31,14 @@ presentation state, not durable conversation storage.
 
 The desktop currently has six separate state systems:
 
-| Store                   | Owns                                                                                                                                                                 |
-| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Chat Zustand store      | Active conversation, the agent selected for a new conversation, request and open tokens, local abort controllers, streamed assistant deltas, inline error text       |
-| History Zustand store   | Dialog visibility, search query, displayed conversation pages, the row being renamed or confirmed, pending renames and deletes                                       |
-| Agent Zustand store     | Every listed built-in and stored agent, the open editor or read-only view and its draft, the save attempt, the pending save or delete, the most recently saved agent |
-| Tool Zustand store      | The tool list read from the desktop and the backend, tool calls on or off, each tool's switch                                                                        |
-| Tool-call Zustand store | Every approval prompt and tool call held until the backend takes its answer, and the reply follows that deliver them                                                 |
-| Shell Zustand store     | Active top-level view, loaded settings (each tool's saved approval included), backend process status, startup progress                                               |
+| Store                   | Owns                                                                                                                                                                  |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Chat Zustand store      | Active conversation, the agent selected for a new conversation, request and open tokens, local abort controllers, streamed reply parts and sources, inline error text |
+| History Zustand store   | Dialog visibility, search query, displayed conversation pages, the row being renamed or confirmed, pending renames and deletes                                        |
+| Agent Zustand store     | Every listed built-in and stored agent, the open editor or read-only view and its draft, the save attempt, the pending save or delete, the most recently saved agent  |
+| Tool Zustand store      | The tool list read from the desktop and the backend, tool calls on or off, each tool's switch                                                                         |
+| Tool-call Zustand store | Every approval prompt and tool call held until the backend takes its answer, and the reply follows that deliver them                                                  |
+| Shell Zustand store     | Active top-level view, loaded settings (each tool's saved approval included), backend process status, startup progress                                                |
 
 The transcript shown in the window is built from backend events for the current
 request, or from the stored transcript read when a past conversation is opened.
@@ -52,10 +52,15 @@ Shell state such as backend status is managed independently.
    for tool use.
 3. The desktop parses SSE frames with `EventSourceParserStream`.
 4. Each payload is validated against `chatApiStreamEventSchema`.
-5. The store applies `start-*`, `delta`, `done`, `interrupted`, `title`, or
-   `error` events to local immutable conversation state, and hands the reply
-   to the tool-call store, which answers its `tool-approval` and `tool-call`
-   events.
+5. The store applies `start-*`, `reply-part`, `reply-part-delta`, `sources`,
+   `done`, `interrupted`, `title`, or `error` events to local immutable
+   conversation state, and hands the reply to the tool-call store, which
+   answers its `tool-approval` and `tool-call` events. A `reply-part` replaces
+   the part with the same `id` or is added after the others, a
+   `reply-part-delta` extends its part, and `sources` merge into the
+   conversation's sources by number. When the reply ends, by any final event,
+   its waiting and running calls are shown as stopped, as the backend stores
+   them.
 
 The composer shows Stop while the turn is awaited or the reply streams, and
 Send otherwise. After `done`, `interrupted`, or `error`, the stream can stay
@@ -69,7 +74,7 @@ The desktop keeps no replay log and does not reconnect a dropped stream on its
 own. Showing a conversation whose reply is still generating, after an open or a
 failed open, follows that reply again from a stored `reply-snapshot`. Quitting
 the app also ends the backend; a reply still generating then keeps its
-persisted text and is marked interrupted when the backend next starts.
+persisted parts and is marked interrupted when the backend next starts.
 
 ## Context meter
 
@@ -108,8 +113,70 @@ configuration sets the context length for its next load.
 
 ## Assistant message rendering
 
-`MarkdownMessage` renders each assistant reply with `react-markdown`. Links
-open in a new tab without a referrer. `remark-math` and `rehype-katex` render
+`LysMessage` lays a reply out from its parts (`reply-presentation.ts`):
+
+- **Reasoning**, when the reply has any: one disclosure, closed at first,
+  labelled `Thinking` while the reply streams its reasoning and `Thought for
+Ns` afterwards, the seconds the reasoning parts took. It holds every
+  reasoning part's text.
+- **Steps**: the rounds that called tools, in one disclosure, closed at first,
+  labelled with the number of steps and tool calls and, once the reply ended,
+  `Worked for Ns`: the time from the reply's start to the latest change of
+  any of its parts. Time a call waited for approval counts. A call still
+  open when the reply ended, because the person stopped it or the turn
+  failed, counts until that end. A call that startup recovery interrupted
+  keeps the time of its last change before Lys stopped, so time Lys spent
+  closed is not counted. The steps are a list named `Steps`, and each step
+  shows the text its round wrote and its calls, in a list named `Tool calls`.
+  Each call (`ToolCallStep`) is a disclosure naming the tool, what the call is
+  about (its first text argument), and its state: Waiting for approval,
+  Running, Done, Failed, Rejected, or Stopped. Open, it shows the arguments
+  as named values, or as written when they are not a JSON object, and the
+  plain text of the result, labelled `Rejection` for a rejected call. The
+  store parses a call's arguments once, when the call arrives
+  (`reply-parts.ts`), not on every render.
+- **Answer**: the text of the last round when that round called no tools,
+  rendered as Markdown. While a round streams, its text is shown here until
+  its calls arrive and move it into the steps.
+- **Sources** (`ReplySourceList`), when there are any: the sources the
+  answer cites, in the order it first cites them, under `Sources · N cited`,
+  then, in a closed `N more` disclosure, the sources its succeeded calls found
+  without citing, each with the tool that found it. With nothing cited there
+  is no cited list, and the disclosure reads `Sources · N found`. Only the
+  answer's `[n]` markers count as cited: a step's text shows no links. The
+  cited numbers come from the same Markdown tree, parsed with the same
+  syntax extensions, that the citation links are made from
+  (`citation-markers.ts`), so a source is listed as cited exactly when a
+  marker in the answer links to it. The sources are a plain group, not a
+  landmark; the cited list is named by its heading.
+
+Each disclosure's accessible name is its visible label followed by the
+reply's position, such as `Thought for 3s, reply 2`, so the same control of
+two replies has different names. A call's result, and its arguments when they
+are shown as written, scroll within a bounded height; each is a focusable
+region named by its label, its call, and its reply, such as `Result of
+web_search night moths, reply 2`, which a keyboard reaches with Tab and
+scrolls with the arrow keys.
+
+A reply links and lists only the sources its model read: those its own
+succeeded calls showed, and those the calls of an earlier completed or
+interrupted reply showed. A failed reply is left out of later turns'
+context, so the sources only it showed can be cited in that reply alone.
+
+The transcript keys every message, the streaming reply included, by its
+identifier, so when a reply ends the same elements update in place: the
+disclosures the person opened stay open and focus stays where it was. A
+reply whose own sources did not change is not rendered again when another
+reply finds sources.
+
+`MarkdownMessage` renders the answer with `react-markdown`. Each `[n]` marker
+in prose, with `n` written without leading zeros, whose number is one of the
+sources the reply may cite becomes a small numbered link to that source
+(`markdown-citations.ts`), named `n, source: title`, which shows the source's
+title and site while the pointer rests on it. Markers in code, math, links,
+and link references, and markers of other numbers, stay as written; an
+escaped marker such as `\[1\]` reads as the prose `[1]`, so it is linked and
+counted. Links open in a new tab without a referrer. `remark-math` and `rehype-katex` render
 `$…$` inline math and `$$…$$` display math with KaTeX, whose stylesheet
 `src/index.css` imports.
 
@@ -124,7 +191,8 @@ highlighting. Copy writes the block's plain text without its final newline,
 never the highlighting markup.
 
 Rendering is asynchronous. Until a message's first pass finishes, it shows
-plain Markdown without the link, math, and code-block handling; the first
+plain GitHub Flavored Markdown without citation links, link handling, math,
+and code-block handling; the first
 reply in a session also waits for Shiki to start. While a reply streams, the
 previous rendering stays visible until the new text is processed.
 
@@ -557,7 +625,11 @@ Several calls wait in the model's order, one card at a time.
 
 A read sends the file's text, a search sends its report as JSON, and a
 declared tool failure sends the failure as JSON. A backend tool's result goes
-from the backend to the model; the desktop never sees it. Approval answers go
+from the backend to the model; the desktop receives it only as part of the
+stored call, in a `reply-part` event while the reply streams and in the
+reply's parts of a `reply-snapshot` or of the stored conversation, and shows
+it in the reply's steps.
+Approval answers go
 to the [tool-approval route](/reference/api/#tool-approvals) and results to
 the [tool-result route](/reference/api/#tool-results). When an answer cannot
 be sent, the card says so and Try again sends the same answer without running
@@ -605,9 +677,10 @@ are gone and the reply is marked interrupted when the backend next starts.
 - There is no "Allow for this chat": each call on Ask me is asked about.
 - Switching a tool or tool calls off does not stop a reply already running;
   it applies from the next message.
-- Tool calls leave no trace in the transcript: a call on Just run shows
-  nothing, and an answered call's card disappears. Steps and saved citations
-  are planned in [#154](https://github.com/w3lt/lys/issues/154).
+- The reply's steps show each call's result as plain text only; no tool has
+  a view of its own. The reasoning summary shows `Thinking` without a running
+  count of seconds, and a citation's hover shows the source's title and site,
+  not the passage it supports.
 
 ## Related pages
 

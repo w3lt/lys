@@ -1,7 +1,8 @@
 import type { ChatToolApprovalAnswer, ChatToolCall } from "@lys/protocol"
 import { describe, expect, it, vi } from "vitest"
 import ToolCallGate, {
-  type SendToolApprovalPrompt
+  type SendToolApprovalPrompt,
+  type StoreStartedToolCall
 } from "../../../../src/modules/toolApproval/toolCallGate"
 import { createFixtureUuidV7 } from "../../support/conversationFixtures"
 
@@ -37,32 +38,47 @@ function createPromptSender(answer: ChatToolApprovalAnswer | undefined) {
   return vi.fn<SendToolApprovalPrompt>(async () => answer)
 }
 
+/**
+ * Creates a store step that answers every call with one outcome.
+ *
+ * @param isStored - Whether the reply accepts the call.
+ * @returns A spy recording the state each call was stored in.
+ */
+function createStore(isStored: boolean) {
+  return vi.fn<StoreStartedToolCall>(() => isStored)
+}
+
 describe("ToolCallGate", () => {
-  it("allows a call of a tool on Just run in the same step, without prompting the person", () => {
+  it("stores a call of a tool on Just run as running and allows it without prompting the person", () => {
     const sendToolApprovalPrompt = createPromptSender(undefined)
     const gate = new ToolCallGate(
       new Set(["read_page"]),
       sendToolApprovalPrompt
     )
+    const storeToolCall = createStore(true)
 
-    const request = gate.sendToolApprovalRequest(PAGE_CALL)
-
-    expect(request).toEqual({ status: "allowed" })
+    expect(gate.startToolCall(PAGE_CALL, storeToolCall)).toEqual({
+      status: "allowed"
+    })
+    expect(storeToolCall.mock.calls).toEqual([["running"]])
     expect(sendToolApprovalPrompt).not.toHaveBeenCalled()
   })
 
-  it("prompts the person in the same step for a tool on Ask me", async () => {
-    const sendToolApprovalPrompt = createPromptSender({ status: "allowed" })
-    const gate = new ToolCallGate(
-      new Set(["read_page"]),
-      sendToolApprovalPrompt
-    )
+  it("stores a call of a tool on Ask me as awaiting approval, then prompts the person in the same step", async () => {
+    const steps: string[] = []
+    const gate = new ToolCallGate(new Set(["read_page"]), async (toolCall) => {
+      steps.push(`prompt ${toolCall.toolName}`)
+      return { status: "allowed" }
+    })
 
-    const request = gate.sendToolApprovalRequest(READ_CALL)
+    const start = gate.startToolCall(READ_CALL, (status) => {
+      steps.push(`store ${status}`)
+      return true
+    })
 
-    expect(request.status).toBe("prompted")
-    expect(sendToolApprovalPrompt.mock.calls).toEqual([[READ_CALL]])
-    if (request.status === "prompted") await request.answer
+    expect(steps).toEqual(["store awaiting-approval", "prompt read_text_file"])
+    expect(start.status).toBe("prompted")
+    if (start.status === "prompted") await start.answer
   })
 
   it.each<[string, ChatToolApprovalAnswer | undefined]>([
@@ -70,26 +86,48 @@ describe("ToolCallGate", () => {
     ["a rejected call", DECLINED_ANSWER],
     ["a reply stopped while the prompt waited", undefined]
   ])(
-    "resolves the prompt with the person's answer for %s",
+    "settles the prompted call's answer with the person's answer for %s",
     async (_label, answer) => {
       const gate = new ToolCallGate(new Set(), createPromptSender(answer))
 
-      const request = gate.sendToolApprovalRequest(READ_CALL)
+      const start = gate.startToolCall(READ_CALL, createStore(true))
 
-      if (request.status !== "prompted") throw new Error("Expected a prompt.")
-      expect(await request.answer).toEqual(answer)
+      expect(start.status).toBe("prompted")
+      if (start.status === "prompted")
+        expect(await start.answer).toEqual(answer)
+    }
+  )
+
+  it.each([
+    ["on Just run", PAGE_CALL],
+    ["on Ask me", READ_CALL]
+  ])(
+    "ends a call of a tool %s that the reply refuses to store, without prompting the person",
+    (_label, toolCall) => {
+      const sendToolApprovalPrompt = createPromptSender({ status: "allowed" })
+      const gate = new ToolCallGate(
+        new Set(["read_page"]),
+        sendToolApprovalPrompt
+      )
+
+      expect(gate.startToolCall(toolCall, createStore(false))).toEqual({
+        status: "ended"
+      })
+      expect(sendToolApprovalPrompt).not.toHaveBeenCalled()
     }
   )
 
   it("keeps the choices it was created with when the given set changes later", () => {
     const justRunToolNames = new Set<string>()
-    const sendToolApprovalPrompt = createPromptSender({ status: "allowed" })
-    const gate = new ToolCallGate(justRunToolNames, sendToolApprovalPrompt)
+    const gate = new ToolCallGate(
+      justRunToolNames,
+      createPromptSender({ status: "allowed" })
+    )
     justRunToolNames.add("read_text_file")
+    const storeToolCall = createStore(true)
 
-    const request = gate.sendToolApprovalRequest(READ_CALL)
+    gate.startToolCall(READ_CALL, storeToolCall)
 
-    expect(request.status).toBe("prompted")
-    expect(sendToolApprovalPrompt).toHaveBeenCalledOnce()
+    expect(storeToolCall.mock.calls).toEqual([["awaiting-approval"]])
   })
 })

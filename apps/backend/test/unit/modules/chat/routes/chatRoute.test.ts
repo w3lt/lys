@@ -6,6 +6,7 @@ import {
   conversationAgentMissingProblemSchema,
   conversationNotFoundProblemSchema
 } from "@lys/protocol"
+import type { LightMyRequestResponse } from "fastify"
 import { describe, expect, it, vi } from "vitest"
 import type ReplyGeneration from "../../../../../src/modules/chat/replyGeneration"
 import updateFastifyWithChatRoute, {
@@ -94,6 +95,19 @@ async function startWebResearcherConversation(
   if (start.type !== "start-new-conversation-turn")
     throw new Error("The chat route did not start a new conversation")
   return start.conversation.id
+}
+
+/**
+ * Creates a stream of fixed chat completion chunks.
+ *
+ * @param chunks - Chunks yielded in order.
+ * @returns An iterator that yields each chunk in order and ends after the
+ * last one.
+ */
+async function* createChunkStream(
+  ...chunks: ReturnType<typeof createChatCompletionChunk>[]
+): AsyncGenerator<ReturnType<typeof createChatCompletionChunk>> {
+  yield* chunks
 }
 
 describe("updateFastifyWithChatRoute", () => {
@@ -329,10 +343,20 @@ describe("updateFastifyWithChatRoute", () => {
         })
       )
       const replyEvents = parseSseEvents(response.body).filter(
-        ({ event }) => event === "delta" || event === "done"
+        ({ event }) => event === "reply-part" || event === "done"
       )
       expect(replyEvents).toEqual([
-        { event: "delta", data: { type: "delta", content: "Hi" } },
+        {
+          event: "reply-part",
+          data: {
+            type: "reply-part",
+            part: expect.objectContaining({
+              kind: "text",
+              round: 0,
+              content: "Hi"
+            })
+          }
+        },
         { event: "done", data: { type: "done", finishReason: "stop" } }
       ])
     }
@@ -807,6 +831,142 @@ describe("updateFastifyWithChatRoute", () => {
           msg: expect.stringContaining("Just run")
         })
       )
+    })
+  })
+
+  describe("web sources", () => {
+    /** Tools each turn of these cases offers: the backend look-up tool. */
+    const LOOK_UP_TOOLS = Object.freeze({
+      definitions: [],
+      backendToolNames: ["look_up_word"]
+    })
+
+    /**
+     * Adds the model streams of one turn that looks up a word, then says
+     * `Done`.
+     *
+     * @param testApp - Test application whose model the turn uses.
+     * @param word - Word the model looks up.
+     */
+    function addLookUpTurnStreams(
+      testApp: ChatRouteTestApp,
+      word: string
+    ): void {
+      const callChunk = createChatCompletionChunk({
+        toolCalls: [
+          {
+            index: 0,
+            id: "call_0",
+            type: "function",
+            function: {
+              name: "look_up_word",
+              arguments: JSON.stringify({ word })
+            }
+          }
+        ]
+      })
+      testApp.completeChatStream
+        .mockImplementationOnce(async () =>
+          createChunkStream(
+            callChunk,
+            createChatCompletionChunk({ finishReason: "tool_calls" })
+          )
+        )
+        .mockImplementationOnce(async () =>
+          createChunkStream(
+            createChatCompletionChunk({
+              content: "Done [1]",
+              finishReason: "stop"
+            })
+          )
+        )
+    }
+
+    /**
+     * Registers the chat route on a test application whose turns are stored
+     * for real and whose look-up tool is saved as Just run.
+     *
+     * @returns The test application.
+     */
+    async function createSourceNumberingApp(): Promise<ChatRouteTestApp> {
+      const testApp = await createChatRouteTestApp()
+      testApp.createConversationTurn.mockRestore()
+      testApp.generateTitle.mockResolvedValue("Moths")
+      testApp.readJustRunToolNames.mockResolvedValue({
+        status: "read",
+        toolNames: new Set(["look_up_word"])
+      })
+      updateFastifyWithChatRoute(testApp.app, {
+        ...CHAT_ROUTE_OPTIONS,
+        generations: testApp.generations
+      })
+      return testApp
+    }
+
+    /**
+     * Sends one turn whose model looks up a word, then says `Done [1]`.
+     *
+     * @param testApp - Test application from
+     * {@link createSourceNumberingApp}.
+     * @param word - Word the model looks up.
+     * @param conversation - Conversation the turn starts or adds to.
+     * @returns The turn's finished response.
+     */
+    async function sendLookUpTurn(
+      testApp: ChatRouteTestApp,
+      word: string,
+      conversation: Readonly<Record<string, unknown>>
+    ): Promise<LightMyRequestResponse> {
+      addLookUpTurnStreams(testApp, word)
+      return await sendChatRequest(testApp.app, {
+        ...NEW_CONVERSATION_REQUEST,
+        conversation,
+        message: `What is a ${word}?`,
+        tools: LOOK_UP_TOOLS
+      })
+    }
+
+    it("numbers a later turn's new sources after the ones the conversation stored, keeping a known URL's number", async () => {
+      const testApp = await createSourceNumberingApp()
+      const first = await sendLookUpTurn(
+        testApp,
+        "moth",
+        NEW_CONVERSATION_REQUEST.conversation
+      )
+      const start = chatApiStreamEventSchema.parse(
+        parseSseEvents(first.body)[0]?.data
+      )
+      if (start.type !== "start-new-conversation-turn")
+        throw new Error("The chat route did not start a new conversation")
+      const conversation = { kind: "existing", id: start.conversation.id }
+
+      const second = await sendLookUpTurn(testApp, "lamp", conversation)
+      const third = await sendLookUpTurn(testApp, "moth", conversation)
+
+      const moth = {
+        number: 1,
+        url: "https://words.example/moth",
+        title: "Dictionary: moth"
+      }
+      const lamp = {
+        number: 2,
+        url: "https://words.example/lamp",
+        title: "Dictionary: lamp"
+      }
+      for (const [response, sources] of [
+        [first, [moth]],
+        [second, [lamp]],
+        [third, [moth]]
+      ] as const)
+        expect(parseSseEvents(response.body)).toContainEqual({
+          event: "sources",
+          data: { type: "sources", sources }
+        })
+      expect(
+        testApp.app.conversationHistoryReader.getConversation(
+          start.conversation.id
+        )?.sources
+      ).toEqual([moth, lamp])
     })
   })
 })

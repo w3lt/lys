@@ -8,6 +8,7 @@ import type { BackendConfig } from "../../src/config"
 import AgentService from "../../src/modules/agent/agentService"
 import StoredConversationHistoryEditor from "../../src/modules/conversation/historyEditor"
 import StoredConversationHistoryReader from "../../src/modules/conversation/historyReader"
+import StoredReplyParts from "../../src/modules/conversation/replyParts"
 import StoredConversationTurns from "../../src/modules/conversation/turns"
 import { TEST_BACKEND_CONFIG } from "./support/backendConfig"
 import {
@@ -112,6 +113,28 @@ describe("buildApp", () => {
       storedCount: 0,
       nextCursor: null
     })
+  })
+
+  it("decorates the reply part store over the configured database", async () => {
+    const app = await buildApp({ config: createOwnedBackendConfig() })
+    onTestFinished(async () => await app.close())
+    await app.ready()
+    const turn = app.conversationTurns.createConversationTurn({
+      conversation: { kind: "new", agentCode: "caliginia" },
+      userMessageContent: "Hello",
+      model: "qwen/qwen3-8b"
+    })
+
+    const part = app.replyParts.createReplyPart(turn.assistantMessage.id, {
+      kind: "text",
+      round: 0,
+      content: "Hi"
+    })
+
+    expect(app.replyParts).toBeInstanceOf(StoredReplyParts)
+    expect(
+      app.conversationHistoryReader.getConversation(turn.conversation.id)
+    ).toMatchObject({ messages: [turn.userMessage, { parts: [part] }] })
   })
 
   it("accepts a request body at the limit and refuses a larger one before the route runs", async () => {

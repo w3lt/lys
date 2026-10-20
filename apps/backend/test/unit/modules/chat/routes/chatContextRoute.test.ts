@@ -16,7 +16,10 @@ import {
   saveConversationRow,
   saveUserMessageRow
 } from "../../../support/conversationDatabase"
-import { createFixtureUuidV7 } from "../../../support/conversationFixtures"
+import {
+  createFixtureUuidV7,
+  createTextPart
+} from "../../../support/conversationFixtures"
 import { createTestFastify } from "../../../support/fastifyTestApp"
 import { createRoomyReplyContextMeter } from "../../../support/replyContextMeterFakes"
 import {
@@ -46,6 +49,28 @@ const UNUSED_REPLY_MODEL = Object.freeze({
 
 /** Conversation every continued-conversation case stores. */
 const STORED_CONVERSATION_ID = createFixtureUuidV7(1)
+
+/** Text of the stored conversation's completed reply. */
+const EARLIER_ANSWER_PART = createTextPart({
+  sequence: 13,
+  round: 0,
+  content: "Earlier answer",
+  times: {
+    createdAt: "2026-10-15T10:00:02.000Z",
+    updatedAt: "2026-10-15T10:00:03.000Z"
+  }
+})
+
+/** Text of the stored conversation's failed reply. */
+const FAILED_ANSWER_PART = createTextPart({
+  sequence: 15,
+  round: 0,
+  content: "Failed answer",
+  times: {
+    createdAt: "2026-10-15T10:00:05.000Z",
+    updatedAt: "2026-10-15T10:00:06.000Z"
+  }
+})
 
 /**
  * Creates an application with the chat-context route over a real agent
@@ -123,7 +148,7 @@ function saveStoredConversation(
     id: createFixtureUuidV7(3),
     conversationId: STORED_CONVERSATION_ID,
     model: MODEL,
-    content: "Earlier answer",
+    parts: [EARLIER_ANSWER_PART],
     status: "completed",
     finishReason: "stop",
     createdAt: "2026-10-15T10:00:02.000Z",
@@ -139,7 +164,7 @@ function saveStoredConversation(
     id: createFixtureUuidV7(5),
     conversationId: STORED_CONVERSATION_ID,
     model: MODEL,
-    content: "Failed answer",
+    parts: [FAILED_ANSWER_PART],
     status: "failed",
     finishReason: null,
     createdAt: "2026-10-15T10:00:05.000Z",

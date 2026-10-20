@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest"
 import { createConversationPresentation } from "@/components/ChatViewComponents/conversation-presentation"
 import {
-  buildCompletedAssistantMessage,
-  buildEndedAssistantMessage,
-  buildStreamingAssistantMessage,
+  buildCompletedChatViewReply,
+  buildEndedChatViewReply,
+  buildStreamingChatViewReply,
   buildUserMessage
 } from "../../support/conversationFixtures"
 
@@ -11,7 +11,7 @@ import {
 const QUESTION = buildUserMessage(1, "What is Lys?")
 
 /** Completed reply to {@link QUESTION}. */
-const ANSWER = buildCompletedAssistantMessage(2, "A local chat app.")
+const ANSWER = buildCompletedChatViewReply(2, "A local chat app.")
 
 /** Follow-up user message. */
 const FOLLOW_UP = buildUserMessage(3, "And offline?")
@@ -25,7 +25,7 @@ describe("createConversationPresentation", () => {
   })
 
   it("keeps a transcript of final messages completed-only, in order and by identity", () => {
-    const interrupted = buildEndedAssistantMessage(4, "Partly", "interrupted")
+    const interrupted = buildEndedChatViewReply(4, "Partly", "interrupted")
 
     const presentation = createConversationPresentation([
       QUESTION,
@@ -42,7 +42,7 @@ describe("createConversationPresentation", () => {
   })
 
   it("splits a streaming final reply into the streaming tail", () => {
-    const streaming = buildStreamingAssistantMessage(4, "Yes, it")
+    const streaming = buildStreamingChatViewReply(4, "Yes, it")
 
     const presentation = createConversationPresentation([
       QUESTION,
@@ -62,7 +62,7 @@ describe("createConversationPresentation", () => {
   })
 
   it("rejects a streaming reply that is not the final message", () => {
-    const streaming = buildStreamingAssistantMessage(2, "")
+    const streaming = buildStreamingChatViewReply(2, "")
 
     expect(() =>
       createConversationPresentation([QUESTION, streaming, FOLLOW_UP])

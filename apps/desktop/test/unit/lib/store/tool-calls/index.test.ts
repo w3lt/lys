@@ -19,6 +19,7 @@ import {
 } from "../../../support/backendFake"
 import {
   buildCompletedAssistantMessage,
+  buildTextPart,
   buildStreamingAssistantMessage,
   createFixtureUuidV7,
   FIXTURE_CONVERSATION_ID
@@ -108,6 +109,28 @@ function handleAnsweredToolCallStateChange(state: {
   if (state.heldCalls[0]?.answer.status === "answered") throw LISTENER_FAILURE
 }
 
+/** Event that sends a text part of {@link REPLY}, which the follow ignores. */
+const READING_PART_EVENT = Object.freeze({
+  type: "reply-part",
+  part: buildTextPart(40, 0, "Reading")
+})
+
+/** Fragment the reply appends to the part of {@link READING_PART_EVENT}. */
+const READING_DELTA_EVENT = Object.freeze({
+  type: "reply-part-delta",
+  partId: READING_PART_EVENT.part.id,
+  content: " notes",
+  updatedAt: "2026-01-02T03:04:06.000Z"
+})
+
+/** Sources a call of the reply showed. */
+const SOURCES_EVENT = Object.freeze({
+  type: "sources",
+  sources: [
+    { number: 1, url: "https://example.com/docs", title: "Example docs" }
+  ]
+})
+
 /**
  * Builds the snapshot that starts every stream of {@link REPLY} while it is
  * generating.
@@ -124,6 +147,7 @@ function buildStreamingSnapshot(
     type: "reply-snapshot",
     conversationTitle: null,
     assistantMessage: REPLY,
+    sources: [],
     pendingToolCalls,
     pendingToolApprovals
   }
@@ -513,13 +537,15 @@ describe("useToolCallStore", () => {
       expect(listToolAnswers(backend)).toEqual([])
     })
 
-    it("holds the prompts a snapshot lists, then later prompts, in arrival order", async () => {
+    it("holds the prompts a snapshot lists, then later prompts, in arrival order, while parts, fragments, sources, and titles arrive between them", async () => {
       const { replyStreams } = startReplyBackend()
       const { useToolCallStore } = await loadFreshToolCallStore()
 
       await startFollowWithEvents(useToolCallStore, replyStreams, [
         buildStreamingSnapshot([READ_CALL, PAGE_CALL]),
-        { type: "delta", content: "Reading" },
+        READING_PART_EVENT,
+        READING_DELTA_EVENT,
+        SOURCES_EVENT,
         { type: "title", title: "Notes" },
         buildApprovalEvent(SECOND_READ_CALL)
       ])
@@ -763,6 +789,7 @@ describe("useToolCallStore", () => {
             type: "reply-snapshot",
             conversationTitle: null,
             assistantMessage: buildCompletedAssistantMessage(3, "Done."),
+            sources: [],
             pendingToolCalls: [],
             pendingToolApprovals: []
           }
@@ -863,7 +890,7 @@ describe("useToolCallStore", () => {
       await waitForMicrotasks()
 
       replyStreams[1]?.sendEvent(buildStreamingSnapshot())
-      replyStreams[1]?.sendEvent({ type: "delta", content: "Reading" })
+      replyStreams[1]?.sendEvent(READING_PART_EVENT)
       replyStreams[1]?.close()
       await waitForMicrotasks()
       replyStreams[2]?.sendEvent(buildStreamingSnapshot())
@@ -938,6 +965,7 @@ describe("useToolCallStore", () => {
         type: "reply-snapshot",
         conversationTitle: null,
         assistantMessage: otherReply,
+        sources: [],
         pendingToolCalls: [],
         pendingToolApprovals: [SECOND_READ_CALL]
       })

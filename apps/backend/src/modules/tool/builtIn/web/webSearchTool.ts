@@ -11,10 +11,15 @@ import type {
   BuiltInTool,
   BuiltInToolCallArguments,
   BuiltInToolResult,
+  BuiltInToolRunContext,
   ParsedBuiltInToolCall
 } from "../builtInTool"
 import { READ_PAGE_TOOL_NAME } from "./readPageTool"
-import { formatSearchEvidence } from "./searchEvidence"
+import {
+  formatSearchEvidence,
+  listSearchSourceCandidates,
+  listShownSearchResults
+} from "./searchEvidence"
 import {
   MAXIMUM_SEARCH_QUERY_LENGTH,
   MAXIMUM_SEARCH_RESULTS,
@@ -182,16 +187,18 @@ function formatTavilyFailure(
  * Runs one search and builds what the model reads about it.
  *
  * @param searchRequest - Query and key.
- * @param abortSignal - Stops the search.
+ * @param context - Stops the search and numbers the results shown as
+ * sources.
  * @param dependencies - Origin, address rule, and time limit.
- * @returns The search evidence, which says plainly when nothing was found, or
- * why the search failed.
- * @throws The abort reason once `abortSignal` aborts, and any failure Lys
- * does not recognize.
+ * @returns The search evidence, which shows each result's source number and
+ * says plainly when nothing was found, with the numbered results; or why the
+ * search failed.
+ * @throws The abort reason once the context's signal aborts, and any failure
+ * Lys does not recognize.
  */
 async function runWebSearch(
   searchRequest: TavilySearchRequest,
-  abortSignal: AbortSignal,
+  { abortSignal, addWebSources }: BuiltInToolRunContext,
   dependencies: TavilyRequestDependencies
 ): Promise<BuiltInToolResult> {
   const outcome = await sendTavilySearchRequest(
@@ -209,11 +216,14 @@ async function runWebSearch(
       content: `Lys could not search the web: ${reason}`
     })
   }
+  const selection = listShownSearchResults(outcome.results)
+  const sources = addWebSources(listSearchSourceCandidates(selection))
   const content = formatSearchEvidence({
     query: searchRequest.query,
-    results: outcome.results
+    selection,
+    sources
   })
-  return Object.freeze({ status: "succeeded", content })
+  return Object.freeze({ status: "succeeded", content, sources })
 }
 
 /**
@@ -270,8 +280,8 @@ export default class WebSearchTool implements BuiltInTool {
     const dependencies = this.#requestDependencies
     return Object.freeze({
       status: "parsed",
-      runToolCall: (abortSignal: AbortSignal) =>
-        runWebSearch(searchRequest, abortSignal, dependencies)
+      runToolCall: (context: BuiltInToolRunContext) =>
+        runWebSearch(searchRequest, context, dependencies)
     })
   }
 }

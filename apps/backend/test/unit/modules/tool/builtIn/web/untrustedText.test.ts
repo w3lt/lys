@@ -3,7 +3,9 @@ import {
   CITATION_MARKER_RULE,
   formatDelimiterFreeText,
   formatExcerptText,
-  formatSingleLineText
+  formatShownSourceTitle,
+  formatSingleLineText,
+  formatVisibleTitle
 } from "../../../../../../src/modules/tool/builtIn/web/untrustedText"
 
 describe("formatDelimiterFreeText", () => {
@@ -99,10 +101,46 @@ describe("formatExcerptText", () => {
   })
 })
 
+describe("formatShownSourceTitle", () => {
+  it("keeps a title a person can read, with the invisible characters the result's cleaning removes and counts", () => {
+    expect(
+      formatShownSourceTitle("Moth\u200B guide", "https://moths.example/a")
+    ).toBe("Moth\u200B guide")
+  })
+
+  it.each([
+    ["no character", ""],
+    ["only spaces", " "],
+    ["zero-width and tag characters", "\u200B\u{E0041}"],
+    ["zero-width, direction, and word-joiner characters", "\u200B\u202E\u2060"],
+    ["a Hangul filler", "\u3164"],
+    ["Hangul choseong and jungseong fillers", "\u115F\u1160"],
+    ["a halfwidth Hangul filler", "\uFFA0"],
+    ["a combining grapheme joiner", "\u034F"],
+    ["Khmer inherent vowels", "\u17B4\u17B5"],
+    ["an unassigned default-ignorable code point", "\u2065"],
+    ["a joiner shielded by variation selectors", "\uFE00\u200D\uFE00"],
+    ["fillers and spaces", " \u3164 \u200B "]
+  ])("gives the URL's host for a title holding %s", (_label, title) => {
+    expect(formatShownSourceTitle(title, "https://moths.example:8443/a")).toBe(
+      "moths.example:8443"
+    )
+  })
+})
+
+describe("formatVisibleTitle", () => {
+  it.each([
+    ["direction and tag characters", "\u{E0041}Moth\u202E guide", "Moth guide"],
+    ["spaces left beside them", "\u200B Moths \u200F", "Moths"]
+  ])("formats a title holding %s", (_label, title, expected) => {
+    expect(formatVisibleTitle(title)).toBe(expected)
+  })
+})
+
 describe("CITATION_MARKER_RULE", () => {
-  it("names the marker and the source list format", () => {
+  it("asks for the source numbers Lys shows and no list of sources", () => {
     expect(CITATION_MARKER_RULE).toBe(
-      "a numbered marker such as [1], numbering sources in the order you first use them, and list each source you used under your answer as: [n] Title — URL."
+      "its source number in square brackets, such as [3], right after what it supports. Use only the numbers Lys shows, and do not write a list of sources: Lys lists the sources you cite under your answer."
     )
   })
 })

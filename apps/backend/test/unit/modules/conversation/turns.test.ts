@@ -1,3 +1,4 @@
+import type { ReplyPart } from "@lys/share"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import * as z from "zod"
 import StoredConversationTurns from "../../../../src/modules/conversation/turns"
@@ -13,7 +14,11 @@ import {
   saveConversationRow,
   saveUserMessageRow
 } from "../../support/conversationDatabase"
-import { createFixtureUuidV7 } from "../../support/conversationFixtures"
+import {
+  createFixtureUuidV7,
+  createTextPart,
+  createToolCallPart
+} from "../../support/conversationFixtures"
 
 /** Wall-clock time observed by every case until it advances the clock. */
 const NOW = "2026-03-04T05:06:07.890Z"
@@ -24,17 +29,27 @@ const LATER = "2026-03-04T05:06:09.123Z"
 /** Conversation stored before a recovery case creates the turn access. */
 const CONVERSATION_ID = createFixtureUuidV7(1)
 
+/** Text a stored reply holds before a recovery case. */
+const PARTIAL_TEXT = createTextPart({
+  sequence: 12,
+  round: 0,
+  content: "Partial"
+})
+
 /**
  * Stores a conversation whose last activity is a reply in the given state.
  *
  * @param database - Migrated test database.
  * @param reply - Stored state of the reply.
+ * @param parts - The reply's parts, valid for its state; {@link PARTIAL_TEXT}
+ * alone when omitted.
  */
 function saveConversationWithReply(
   database: SqliteDatabase,
   reply:
     | Readonly<{ status: "streaming" | "failed" }>
-    | Readonly<{ status: "completed"; finishReason: "stop" }>
+    | Readonly<{ status: "completed"; finishReason: "stop" }>,
+  parts: readonly ReplyPart[] = [PARTIAL_TEXT]
 ): void {
   saveConversationRow(database, {
     id: CONVERSATION_ID,
@@ -52,7 +67,7 @@ function saveConversationWithReply(
     id: createFixtureUuidV7(11),
     conversationId: CONVERSATION_ID,
     model: "qwen/qwen3-8b",
-    content: "Partial",
+    parts,
     finishReason: null,
     ...reply,
     createdAt: "2025-01-01T00:00:02.000Z",
@@ -95,19 +110,47 @@ describe("StoredConversationTurns", () => {
   })
 
   describe("create", () => {
-    it("marks a reply left streaming as interrupted without changing activity time", () => {
+    it("marks a reply left streaming and its open tool calls as interrupted, keeping the calls' update times and the activity time", () => {
       const database = openTestDatabase()
-      saveConversationWithReply(database, { status: "streaming" })
+      const finishedCall = createToolCallPart(
+        { sequence: 13, round: 0, toolName: "web_search", argumentText: "{}" },
+        { status: "failed", result: "Tavily is down." }
+      )
+      const openCalls = [
+        createToolCallPart(
+          {
+            sequence: 14,
+            round: 1,
+            toolName: "web_search",
+            argumentText: "{}"
+          },
+          { status: "running" }
+        ),
+        createToolCallPart(
+          { sequence: 15, round: 1, toolName: "read_page", argumentText: "{}" },
+          { status: "awaiting-approval" }
+        )
+      ]
+      saveConversationWithReply(database, { status: "streaming" }, [
+        PARTIAL_TEXT,
+        finishedCall,
+        ...openCalls
+      ])
+      const activityTime = findStoredConversation(database)?.updatedAt
 
       createTurns(database)
 
       expect(findStoredConversation(database)).toMatchObject({
-        updatedAt: "2025-01-01T00:00:02.000Z",
+        updatedAt: activityTime,
         messages: [
           { content: "Hello" },
           {
             id: createFixtureUuidV7(11),
-            content: "Partial",
+            parts: [
+              PARTIAL_TEXT,
+              finishedCall,
+              ...openCalls.map((call) => ({ ...call, status: "interrupted" }))
+            ],
             status: "interrupted",
             finishReason: null,
             updatedAt: NOW
@@ -157,7 +200,8 @@ describe("StoredConversationTurns", () => {
         agentCode: "lys",
         createdAt: NOW,
         updatedAt: expect.any(String),
-        messages: [turn.userMessage, turn.assistantMessage]
+        messages: [turn.userMessage, turn.assistantMessage],
+        sources: []
       })
     })
 
@@ -196,82 +240,6 @@ describe("StoredConversationTurns", () => {
       expect(
         history.listConversations(parseConversationListOptions()).conversations
       ).toEqual([expect.objectContaining({ id: turn.conversation.id })])
-    })
-  })
-
-  describe("updateAssistantMessageContent", () => {
-    it("appends deltas to a streaming reply in call order", () => {
-      const { turns, history } = openConversationTestServices()
-      const turn = turns.createConversationTurn({
-        conversation: { kind: "new", agentCode: "lys" },
-        userMessageContent: "Hello",
-        model: "qwen/qwen3-8b"
-      })
-
-      expect(
-        turns.updateAssistantMessageContent(turn.assistantMessage.id, "Hi")
-      ).toBe(true)
-      vi.setSystemTime(new Date(LATER))
-      expect(
-        turns.updateAssistantMessageContent(turn.assistantMessage.id, " there")
-      ).toBe(true)
-
-      expect(
-        history.getConversation(turn.conversation.id)?.messages[1]
-      ).toMatchObject({
-        content: "Hi there",
-        status: "streaming",
-        updatedAt: LATER
-      })
-    })
-
-    it("returns false for a reply that is already finalized and keeps its text", () => {
-      const { turns, history } = openConversationTestServices()
-      const turn = turns.createConversationTurn({
-        conversation: { kind: "new", agentCode: "lys" },
-        userMessageContent: "Hello",
-        model: "qwen/qwen3-8b"
-      })
-      turns.updateAssistantMessageContent(turn.assistantMessage.id, "Hi")
-      turns.updateAssistantMessageState(turn.assistantMessage.id, {
-        status: "interrupted"
-      })
-
-      expect(
-        turns.updateAssistantMessageContent(turn.assistantMessage.id, " late")
-      ).toBe(false)
-
-      expect(
-        history.getConversation(turn.conversation.id)?.messages[1]?.content
-      ).toBe("Hi")
-    })
-
-    it("returns false for a reply that is not stored", () => {
-      const { turns } = openConversationTestServices()
-
-      expect(
-        turns.updateAssistantMessageContent(createFixtureUuidV7(9), "Hi")
-      ).toBe(false)
-    })
-
-    it("rejects an empty delta without changing the reply", () => {
-      const { turns, history } = openConversationTestServices()
-      const turn = turns.createConversationTurn({
-        conversation: { kind: "new", agentCode: "lys" },
-        userMessageContent: "Hello",
-        model: "qwen/qwen3-8b"
-      })
-
-      expect(() =>
-        turns.updateAssistantMessageContent(turn.assistantMessage.id, "")
-      ).toThrow()
-
-      expect(
-        history.getConversation(turn.conversation.id)?.messages[1]
-      ).toEqual(turn.assistantMessage)
-      expect(
-        turns.updateAssistantMessageContent(turn.assistantMessage.id, "Hi")
-      ).toBe(true)
     })
   })
 
@@ -324,6 +292,36 @@ describe("StoredConversationTurns", () => {
         ).toMatchObject({ status, finishReason: null, updatedAt: LATER })
       }
     )
+
+    it("interrupts the reply's open tool calls at the time it finalizes the reply", () => {
+      const { turns, replyParts, history } = openConversationTestServices()
+      const turn = turns.createConversationTurn({
+        conversation: { kind: "new", agentCode: "lys" },
+        userMessageContent: "Hello",
+        model: "qwen/qwen3-8b"
+      })
+      const call = replyParts.createReplyPart(turn.assistantMessage.id, {
+        kind: "tool-call",
+        id: createFixtureUuidV7(20),
+        round: 0,
+        toolName: "web_search",
+        argumentText: '{"query":"moths"}',
+        status: "running"
+      })
+      vi.setSystemTime(new Date(LATER))
+
+      turns.updateAssistantMessageState(turn.assistantMessage.id, {
+        status: "completed",
+        finishReason: "stop"
+      })
+
+      expect(
+        history.getConversation(turn.conversation.id)?.messages[1]
+      ).toMatchObject({
+        status: "completed",
+        parts: [{ ...call, status: "interrupted", updatedAt: LATER }]
+      })
+    })
 
     it("finalizes a reply only once", () => {
       const { turns, history } = openConversationTestServices()
@@ -433,9 +431,6 @@ describe("StoredConversationTurns", () => {
       model: "qwen/qwen3-8b"
     })
     expect(
-      turns.updateAssistantMessageContent(turn.assistantMessage.id, "Hi")
-    ).toBe(true)
-    expect(
       turns.updateAssistantMessageState(turn.assistantMessage.id, {
         status: "failed"
       })
@@ -452,9 +447,6 @@ describe("StoredConversationTurns", () => {
         userMessageContent: "Hello",
         model: "qwen/qwen3-8b"
       })
-    ).toThrow("Database is closed")
-    expect(() =>
-      turns.updateAssistantMessageContent(turn.assistantMessage.id, "Hi")
     ).toThrow("Database is closed")
     expect(() =>
       turns.updateAssistantMessageState(turn.assistantMessage.id, {

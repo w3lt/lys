@@ -41,6 +41,7 @@ import {
   buildConversationListPage,
   buildConversationMetadata,
   buildConversationSummary,
+  buildTextPart,
   buildStreamingAssistantMessage,
   buildUserMessage,
   createFixtureUuidV7,
@@ -126,6 +127,7 @@ function buildCompletedNewTurnReplyEvents(): Response {
     type: "reply-snapshot",
     conversationTitle: null,
     assistantMessage: buildCompletedAssistantMessage(3, "I am Lys."),
+    sources: [],
     pendingToolCalls: [],
     pendingToolApprovals: []
   })
@@ -675,9 +677,10 @@ describe("ChatView", () => {
       ).toBeInTheDocument()
       expect(region).toHaveAttribute("aria-busy", "false")
 
+      const answer = buildTextPart(40, 0, "I am Lys.")
       await act(async () => {
         streams[0]?.sendEvent(NEW_TURN_EVENT)
-        streams[0]?.sendEvent({ type: "delta", content: "I am Lys." })
+        streams[0]?.sendEvent({ type: "reply-part", part: answer })
         streams[0]?.sendEvent({ type: "done", finishReason: "stop" })
         await waitForMicrotasks()
       })

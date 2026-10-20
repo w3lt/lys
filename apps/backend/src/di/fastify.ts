@@ -62,6 +62,7 @@ const singletonPlugin: FastifyPluginAsync<
   app.decorate("llmService", singletonServices.llmService)
   app.decorate("llmRuntimeService", singletonServices.llmRuntimeService)
   app.decorate("conversationTurns", singletonServices.conversationTurns)
+  app.decorate("replyParts", singletonServices.replyParts)
   app.decorate(
     "conversationHistoryReader",
     singletonServices.conversationHistoryReader

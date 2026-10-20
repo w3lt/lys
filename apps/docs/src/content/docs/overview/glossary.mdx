@@ -44,7 +44,12 @@ Terms that mean something specific inside Lys.
   It answers chats with the system prompt it has when each turn starts.
 - **User message**: a persisted message with role `user` and non-empty content.
 - **Assistant message**: a persisted message with role `assistant`, a model
-  name, lifecycle status, and an optional finish reason.
+  name, lifecycle status, an optional finish reason, and its parts.
+- **Reply part**: one piece of a reply in the model round it belongs to:
+  reasoning, text, or a tool call with its state and, once answered, its
+  result.
+- **Source**: a web page a tool call's result showed, numbered once per
+  conversation; a reply cites it as `[n]`.
 - **Finish reason**: the terminal model reason currently supported by the
   protocol: `stop` or `length`.
 - **System prompt**: the instructions an agent sends first in the context of
@@ -58,7 +63,10 @@ Terms that mean something specific inside Lys.
   and emits typed lifecycle events.
 - **Start event**: the first event in a chat turn, either
   `start-new-conversation-turn` or `start-existing-conversation-turn`.
-- **Delta event**: a streamed assistant text fragment.
+- **Reply-part event**: a new reply part, or a tool call that changed state,
+  as stored.
+- **Reply-part-delta event**: a stored fragment appended to a reasoning or
+  text part.
 - **Done event**: the terminal assistant lifecycle event carrying the finish
   reason.
 - **Title event**: the event that publishes a newly assigned or reconciled

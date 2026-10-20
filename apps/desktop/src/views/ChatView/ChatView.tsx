@@ -1,3 +1,4 @@
+import type { ConversationSource } from "@lys/share"
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import type { ReactElement, RefObject } from "react"
 
@@ -24,6 +25,11 @@ import { useConversationHistoryStore } from "@/lib/store/conversation-history"
 /** Immutable empty transcript used before a conversation has started. */
 const EMPTY_CONVERSATION_MESSAGES: readonly ReadonlyConversationMessage[] =
   Object.freeze([])
+
+/** Immutable empty source list used before a conversation has started. */
+const EMPTY_CONVERSATION_SOURCES: readonly ConversationSource[] = Object.freeze(
+  []
+)
 
 /** Properties accepted by {@link ChatView}. */
 export type ChatViewProps = {
@@ -273,6 +279,7 @@ export default function ChatView({
         onJumpToLatest={handleJumpToLatest}
         onSendMessage={sendMessage}
         onTranscriptScroll={handleTranscriptScroll}
+        sources={conversation?.sources ?? EMPTY_CONVERSATION_SOURCES}
         transcriptRef={transcriptRef}
       />
       {historyVisibility.status === "open" ? (

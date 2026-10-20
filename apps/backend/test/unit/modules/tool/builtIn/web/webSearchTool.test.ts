@@ -5,6 +5,7 @@ import WebSearchTool, {
 } from "../../../../../../src/modules/tool/builtIn/web/webSearchTool"
 import type { TavilyRequestDependencies } from "../../../../../../src/modules/tool/builtIn/web/tavilyRequest"
 import {
+  createRecordedRunContext,
   registerBuiltInToolContractSuite,
   type BuiltInToolHarness
 } from "../../../../support/builtInToolContract"
@@ -70,8 +71,9 @@ async function runSearch(
   })
   const parsed = tool.parseToolCall({ query: query as string })
   if (parsed.status !== "parsed") throw new Error(parsed.message)
-  const result = await parsed.runToolCall(new AbortController().signal)
-  return { result, server }
+  const recorded = createRecordedRunContext(new AbortController().signal)
+  const result = await parsed.runToolCall(recorded.context)
+  return { result, server, numberedSources: recorded.numberedSources }
 }
 
 /**
@@ -204,6 +206,40 @@ describe("WebSearchTool", () => {
   })
 
   describe("a run", () => {
+    it("numbers each result it shows through the turn and returns them as its sources", async () => {
+      const { result, numberedSources } = await runSearch(
+        answerWithJson({
+          results: [
+            {
+              title: "Moths",
+              url: "https://moths.example/",
+              content: "Moths fly at night."
+            },
+            { title: "Bad", url: "file:///etc/passwd", content: "x" },
+            {
+              title: "Lamps",
+              url: "https://lamps.example/",
+              content: "Moths seek light."
+            }
+          ]
+        }),
+        "moths"
+      )
+
+      const sources = [
+        { number: 1, url: "https://moths.example/", title: "Moths" },
+        { number: 2, url: "https://lamps.example/", title: "Lamps" }
+      ]
+      expect(numberedSources).toEqual(sources)
+      expect(result).toMatchObject({ status: "succeeded", sources })
+      expect(result.content).toContain(
+        "Source [1]\nTitle: Moths\nURL: https://moths.example/"
+      )
+      expect(result.content).toContain(
+        "Source [2]\nTitle: Lamps\nURL: https://lamps.example/"
+      )
+    })
+
     it("tells the model plainly when nothing was found", async () => {
       const { result } = await runSearch(
         answerWithJson({ results: [] }),
@@ -213,7 +249,8 @@ describe("WebSearchTool", () => {
       expect(result).toEqual({
         status: "succeeded",
         content:
-          'The search for "zzqx" found no results. Say that you found nothing instead of guessing; you can try another query.'
+          'The search for "zzqx" found no results. Say that you found nothing instead of guessing; you can try another query.',
+        sources: []
       })
     })
 
@@ -353,9 +390,11 @@ describe("WebSearchTool", () => {
       })
       if (parsed.status !== "parsed") throw new Error("Expected a parsed call")
 
-      await expect(parsed.runToolCall(abortController.signal)).rejects.toBe(
-        stopReason
-      )
+      await expect(
+        parsed.runToolCall(
+          createRecordedRunContext(abortController.signal).context
+        )
+      ).rejects.toBe(stopReason)
     })
   })
 })

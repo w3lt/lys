@@ -10,10 +10,10 @@ Lys currently shares contracts through two TypeScript workspace packages.
 
 ## Shared packages
 
-| Package         | Owns                                                                                                                                                       |
-| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@lys/protocol` | API prefix constants, loopback host and port constants, route paths, request bodies, response schemas, Problem Details bodies, and chat SSE event variants |
-| `@lys/share`    | Conversation, conversation metadata, and conversation message schemas shared between backend and desktop, the agent schemas, and tool definitions          |
+| Package         | Owns                                                                                                                                                                               |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@lys/protocol` | API prefix constants, loopback host and port constants, route paths, request bodies, response schemas, Problem Details bodies, and chat SSE event variants                         |
+| `@lys/share`    | Conversation, conversation metadata, conversation message, reply part, and conversation source schemas shared between backend and desktop, the agent schemas, and tool definitions |
 
 ## Current protocol surface
 
@@ -47,7 +47,7 @@ the same schemas when reading backend event payloads.
 - Contracts are source-level TypeScript and Zod definitions inside the monorepo.
 - The desktop and backend are built from the same workspace source; there is no
   negotiated protocol version or feature-capability handshake.
-- The only current chat event variants are the eight chat-route variants and
+- The only current chat event variants are the eleven chat-route variants and
   the reply-events `reply-snapshot` documented in
   [SSE events](/reference/sse-events/).
 

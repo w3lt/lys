@@ -35,8 +35,9 @@ const MAXIMUM_CONVERSATION_LIST_CURSOR_LENGTH = 2048
 const listConversationsApiQuerySchema = z
   .strictObject({
     /**
-     * Case-insensitive substring searched in conversation titles and message
-     * content; omission lists every stored conversation.
+     * Case-insensitive substring searched in conversation titles, the
+     * person's messages, and each text part of a reply; reasoning and tool
+     * calls are not searched. Omission lists every stored conversation.
      */
     query: z
       .string()
@@ -66,18 +67,19 @@ const listConversationsApiQuerySchema = z
 /**
  * Validates the message summarized beneath one listed conversation's title.
  *
- * @remarks Without a search query, the backend selects the most recent message
- * with non-empty content. With a query, it selects the most recent message
- * whose content contains the query under the same case-insensitive comparison
- * used for matching, falling back to the most recent message when only the
- * title matched. `content` is the complete stored message text; clients
- * derive any shortened excerpt themselves.
+ * @remarks The backend previews one of the person's messages or one text part
+ * of a reply, never reasoning or a tool call. Without a search query, it
+ * selects the most recent of them. With a query, it selects the most recent
+ * one whose text contains the query under the same case-insensitive
+ * comparison used for matching, falling back to the most recent one when
+ * only the title matched. `content` is that message's or part's complete
+ * stored text; clients derive any shortened excerpt themselves.
  */
 const conversationPreviewSchema = z
   .strictObject({
     /** Author of the previewed message. */
     role: z.enum(["user", "assistant"]),
-    /** Complete, non-empty stored content of the previewed message. */
+    /** Complete, non-empty stored text of the previewed message or part. */
     content: z.string().min(1)
   })
   .readonly()
@@ -92,7 +94,10 @@ const conversationPreviewSchema = z
 const conversationSummarySchema = conversationMetadataSchema
   .pick({ id: true, title: true, createdAt: true, updatedAt: true })
   .extend({
-    /** Message shown beneath the title, or null when none has content. */
+    /**
+     * Message or reply text shown beneath the title, or null when the
+     * conversation has neither.
+     */
     preview: conversationPreviewSchema.nullable()
   })
   .readonly()

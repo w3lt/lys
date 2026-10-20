@@ -1,12 +1,21 @@
-import { toolDefinitionSchema, type ToolDefinition } from "@lys/share"
+import {
+  toolDefinitionSchema,
+  type ConversationSource,
+  type ToolDefinition
+} from "@lys/share"
 import type {
   BuiltInTool,
   BuiltInToolCallArguments,
   BuiltInToolResult,
+  BuiltInToolRunContext,
   ParsedBuiltInToolCall
 } from "../builtInTool"
-import { formatPageEvidence } from "./pageEvidence"
-import { extractPageArticle, type PageExtractionResult } from "./pageExtraction"
+import { buildPageSourceCandidate, formatPageEvidence } from "./pageEvidence"
+import {
+  extractPageArticle,
+  type PageArticle,
+  type PageExtractionResult
+} from "./pageExtraction"
 import {
   getRenderedPage,
   type PageRenderingDependencies,
@@ -168,35 +177,61 @@ function formatPageRenderingFailure(
   return `Lys's page reader did not finish within ${readTimeoutMs / MILLISECONDS_PER_SECOND} seconds. ${READER_HELP_SENTENCES}`
 }
 
+/** A page's main text and the source the conversation numbered it as. */
+type NumberedPageArticle = Readonly<{
+  /** Article extracted from the page. */
+  article: PageArticle
+  /** The page as a source of the conversation, with its number. */
+  source: ConversationSource
+}>
+
 /**
- * Builds what the model reads about a page Lys read.
+ * Builds the evidence of a numbered page with main text: the passages that
+ * matter, under the page's source number.
  *
  * @param page - Page Lys read.
- * @param extraction - Main text extracted from it.
+ * @param numberedArticle - Its article and the source it was numbered as.
  * @param focus - What the model wants to learn, or undefined.
- * @returns The page evidence, or why the page has nothing to read.
+ * @returns The page evidence, which shows the page's source number, with the
+ * numbered page as its one source.
  */
-function buildPageReadResult(
+function buildPageEvidenceResult(
   page: RenderedPage,
-  extraction: PageExtractionResult,
+  { article, source }: NumberedPageArticle,
   focus: string | undefined
 ): BuiltInToolResult {
-  switch (extraction.status) {
+  const selection = selectPagePassages(
+    calculatePagePassages(article.blocks),
+    focus
+  )
+  const content = formatPageEvidence({
+    url: page.url,
+    sourceNumber: source.number,
+    article,
+    selection,
+    isTruncated: page.isTruncated
+  })
+  return Object.freeze({
+    status: "succeeded",
+    content,
+    sources: Object.freeze([source])
+  })
+}
+
+/**
+ * Formats why a page without usable main text cannot be read.
+ *
+ * @param status - Why the extraction found no usable main text.
+ * @returns A clause for {@link buildFailedReadResult}.
+ */
+function formatUnreadablePageReason(
+  status: Exclude<PageExtractionResult["status"], "extracted">
+): string {
+  switch (status) {
     case "no-readable-text":
-      return buildFailedReadResult(page.url, "the page has no readable text.")
+      return "the page has no readable text."
     case "too-complex":
-      return buildFailedReadResult(page.url, TOO_COMPLEX_PAGE_REASON)
-    case "extracted": {
-      const passages = calculatePagePassages(extraction.article.blocks)
-      const selection = selectPagePassages(passages, focus)
-      const content = formatPageEvidence({
-        url: page.url,
-        article: extraction.article,
-        selection,
-        isTruncated: page.isTruncated
-      })
-      return Object.freeze({ status: "succeeded", content })
-    }
+      return TOO_COMPLEX_PAGE_REASON
   }
 }
 
@@ -204,16 +239,18 @@ function buildPageReadResult(
  * Reads one page and builds what the model reads about it.
  *
  * @param input - Page and focus.
- * @param abortSignal - Stops the read.
+ * @param context - Stops the read and numbers the page as a source.
  * @param dependencies - vmo's origin, address rule, failure reporter, and
  * time limit.
- * @returns The page evidence, or why the page could not be read.
- * @throws The abort reason once `abortSignal` aborts, and any failure Lys
- * does not recognize.
+ * @returns The page evidence, or why the page could not be read; only a
+ * page with main text is numbered as a source.
+ * @throws The abort reason once the context's signal aborts, any failure Lys
+ * does not recognize, and an error when the numbering returns no source for
+ * the page, which breaks its contract.
  */
 async function runPageRead(
   input: PageReadInput,
-  abortSignal: AbortSignal,
+  { abortSignal, addWebSources }: BuiltInToolRunContext,
   dependencies: PageRenderingDependencies
 ): Promise<BuiltInToolResult> {
   const rendering = await getRenderedPage(input.url, abortSignal, dependencies)
@@ -224,8 +261,17 @@ async function runPageRead(
     )
   }
   abortSignal.throwIfAborted()
-  const extraction = extractPageArticle(rendering.page)
-  return buildPageReadResult(rendering.page, extraction, input.focus)
+  const { page } = rendering
+  const extraction = extractPageArticle(page)
+  if (extraction.status !== "extracted")
+    return buildFailedReadResult(
+      page.url,
+      formatUnreadablePageReason(extraction.status)
+    )
+  const { article } = extraction
+  const [source] = addWebSources([buildPageSourceCandidate(page.url, article)])
+  if (source === undefined) throw new Error("The page was not numbered")
+  return buildPageEvidenceResult(page, { article, source }, input.focus)
 }
 
 /** Outcome of parsing a read's focus. */
@@ -355,8 +401,8 @@ export default class ReadPageTool implements BuiltInTool {
     const dependencies = this.#pageRenderingDependencies
     return Object.freeze({
       status: "parsed",
-      runToolCall: (abortSignal: AbortSignal) =>
-        runPageRead(parsed.input, abortSignal, dependencies)
+      runToolCall: (context: BuiltInToolRunContext) =>
+        runPageRead(parsed.input, context, dependencies)
     })
   }
 }

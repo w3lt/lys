@@ -1,6 +1,8 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest"
 import { MarkdownMessage } from "@/components/MarkdownMessage"
+import { formatSourceSite } from "@/components/markdown-citations"
+import { startHover } from "../support/rendering"
 import { waitForMicrotasks } from "../support/settlement"
 
 /** Fenced TypeScript block whose copyable text is two lines. */
@@ -75,6 +77,7 @@ async function startCodeBlock(text: string) {
   const { unmount } = render(
     <MarkdownMessage
       generatingLabel={GENERATING_LABEL}
+      sources={NO_SOURCES}
       streaming={false}
       text={text}
     />
@@ -87,11 +90,15 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
+/** Sources of a conversation that has none. */
+const NO_SOURCES = Object.freeze([])
+
 describe("MarkdownMessage", () => {
   it("renders Markdown structure", async () => {
     render(
       <MarkdownMessage
         generatingLabel={GENERATING_LABEL}
+        sources={NO_SOURCES}
         streaming={false}
         text={"# Plan\n\n- one\n- **two**\n\nDone."}
       />
@@ -105,10 +112,121 @@ describe("MarkdownMessage", () => {
     expect(screen.getByText("Done.")).toBeInTheDocument()
   })
 
+  describe("citations", () => {
+    /** Sources the cited message may link to. */
+    const CITED_SOURCES = Object.freeze([
+      {
+        number: 1,
+        url: "https://www.moths.example/night",
+        title: "Night moths"
+      },
+      { number: 3, url: "https://lamps.example/", title: "Lamps" }
+    ])
+
+    /**
+     * Renders cited Markdown and waits until its citations are links.
+     *
+     * @param text - Markdown citing {@link CITED_SOURCES}.
+     * @param linkName - Accessible name of a link the resolved pass renders.
+     */
+    async function startCitedMessage(text: string, linkName: string) {
+      render(
+        <MarkdownMessage
+          generatingLabel={GENERATING_LABEL}
+          sources={CITED_SOURCES}
+          streaming={false}
+          text={text}
+        />
+      )
+      await waitForProcessedPass(linkName)
+    }
+
+    it("links each marker of a known source to it, showing its number and named by it", async () => {
+      await startCitedMessage(
+        "Moths fly at night [1][3], not by day [2].",
+        "1, source: Night moths"
+      )
+
+      const first = screen.getByRole("link", { name: "1, source: Night moths" })
+      expect(first).toHaveTextContent(/^1$/)
+      expect(first).toHaveAttribute("href", "https://www.moths.example/night")
+      expect(first).toHaveAttribute("rel", "noreferrer")
+      expect(first).not.toHaveAttribute("title")
+      expect(
+        screen.getByRole("link", { name: "3, source: Lamps" })
+      ).toHaveTextContent(/^3$/)
+      expect(screen.getByText(/not by day \[2\]\./)).toBeInTheDocument()
+    })
+
+    it("links markers inside emphasis and list items", async () => {
+      await startCitedMessage(
+        "- Moths **fly [1]**\n- Lamps *glow [3]*",
+        "1, source: Night moths"
+      )
+
+      const items = screen.getAllByRole("listitem")
+      expect(
+        within(items[0] ?? document.body).getByRole("link", {
+          name: "1, source: Night moths"
+        })
+      ).toBeVisible()
+      expect(
+        within(items[1] ?? document.body).getByRole("link", {
+          name: "3, source: Lamps"
+        })
+      ).toBeVisible()
+    })
+
+    it("leaves markers in code and inside links as written", async () => {
+      await startCitedMessage(
+        "Code `[1]` and [the [1] page](https://x.example/).",
+        "the [1] page"
+      )
+
+      expect(screen.queryByRole("link", { name: /, source: / })).toBeNull()
+      expect(screen.getByText("[1]").tagName).toBe("CODE")
+    })
+
+    it("links no marker inside math, in either pass", async () => {
+      render(
+        <MarkdownMessage
+          generatingLabel={GENERATING_LABEL}
+          sources={CITED_SOURCES}
+          streaming={false}
+          text="Take $x[1]$ under lamps [3]."
+        />
+      )
+      const firstPassLinks = screen.queryAllByRole("link")
+
+      await waitForProcessedPass("3, source: Lamps")
+
+      expect(firstPassLinks).toEqual([])
+      expect(screen.getAllByRole("link")).toEqual([
+        screen.getByRole("link", { name: "3, source: Lamps" })
+      ])
+    })
+
+    it("shows the cited source's title and site while the pointer rests on it", async () => {
+      await startCitedMessage("Moths [1].", "1, source: Night moths")
+      const link = screen.getByRole("link", { name: "1, source: Night moths" })
+      vi.useFakeTimers()
+
+      startHover(link)
+      act(() => {
+        vi.advanceTimersByTime(600)
+      })
+
+      expect(
+        screen.getByText("Night moths · moths.example")
+      ).toBeInTheDocument()
+    })
+  })
+
   it("opens links in a new tab without sending the referrer", async () => {
     render(
       <MarkdownMessage
         generatingLabel={GENERATING_LABEL}
+        sources={NO_SOURCES}
         streaming={false}
         text={'See [the docs](https://example.com/docs "Lys docs").'}
       />
@@ -139,6 +257,7 @@ describe("MarkdownMessage", () => {
     render(
       <MarkdownMessage
         generatingLabel={GENERATING_LABEL}
+        sources={NO_SOURCES}
         streaming={false}
         text={"Area $a^2$ and\n\n$$\nE = mc^2\n$$\n"}
       />
@@ -154,6 +273,7 @@ describe("MarkdownMessage", () => {
     render(
       <MarkdownMessage
         generatingLabel={GENERATING_LABEL}
+        sources={NO_SOURCES}
         streaming={false}
         text={MODEL_TABLE}
       />
@@ -176,6 +296,7 @@ describe("MarkdownMessage", () => {
     render(
       <MarkdownMessage
         generatingLabel={GENERATING_LABEL}
+        sources={NO_SOURCES}
         streaming={false}
         text={MODEL_TABLE}
       />
@@ -196,6 +317,7 @@ describe("MarkdownMessage", () => {
       <>
         <MarkdownMessage
           generatingLabel={GENERATING_LABEL}
+          sources={NO_SOURCES}
           streaming={false}
           text={
             "First claim.[^1]\n\n[^1]: [First source](https://example.com/1)"
@@ -203,6 +325,7 @@ describe("MarkdownMessage", () => {
         />
         <MarkdownMessage
           generatingLabel={GENERATING_LABEL}
+          sources={NO_SOURCES}
           streaming={false}
           text={
             "Second claim.[^1]\n\n[^1]: [Second source](https://example.com/2)"
@@ -231,6 +354,7 @@ describe("MarkdownMessage", () => {
     render(
       <MarkdownMessage
         generatingLabel={GENERATING_LABEL}
+        sources={NO_SOURCES}
         streaming={false}
         text={
           "- [x] Installed [LM Studio](https://example.com/lms)\n- [ ] Configured the context\n"
@@ -330,6 +454,7 @@ describe("MarkdownMessage", () => {
     const { rerender } = render(
       <MarkdownMessage
         generatingLabel={GENERATING_LABEL}
+        sources={NO_SOURCES}
         streaming
         text="Partial"
       />
@@ -342,6 +467,7 @@ describe("MarkdownMessage", () => {
     rerender(
       <MarkdownMessage
         generatingLabel={GENERATING_LABEL}
+        sources={NO_SOURCES}
         streaming={false}
         text="Partial answer"
       />
@@ -354,6 +480,7 @@ describe("MarkdownMessage", () => {
     const { rerender } = render(
       <MarkdownMessage
         generatingLabel={GENERATING_LABEL}
+        sources={NO_SOURCES}
         streaming
         text="First"
       />
@@ -363,11 +490,22 @@ describe("MarkdownMessage", () => {
     rerender(
       <MarkdownMessage
         generatingLabel={GENERATING_LABEL}
+        sources={NO_SOURCES}
         streaming
         text="First and second"
       />
     )
 
     expect(await screen.findByText("First and second")).toBeInTheDocument()
+  })
+})
+
+describe("formatSourceSite", () => {
+  it.each([
+    ["https://www.moths.example/night", "moths.example"],
+    ["https://lamps.example:8443/a?b", "lamps.example:8443"],
+    ["http://wwwmoths.example/", "wwwmoths.example"]
+  ])("shows %s as %s", (url, site) => {
+    expect(formatSourceSite(url)).toBe(site)
   })
 })

@@ -449,6 +449,87 @@ PR #152, following review finding I-7.
 - **Removal condition:** a change that splits `Composer` and `ChatView` to
   within the limit removes this exception. No issue tracks that split.
 
+## Reply parts size exception
+
+Functions that were already over the size limits of
+[FUNC-013](https://github.com/w3lt/lys/blob/main/docs/code_standards/FUNCTION.md)
+before [PR #186](https://github.com/w3lt/lys/pull/186), and that the pull
+request made a little longer or changed without bringing within them, have an
+approved exception. The maintainer approved it on 2026-10-20 for PR #186,
+following review finding I-9, added two changed registrars the same day, and
+asked for these functions to be split later. Counts below are physical lines
+with code in each function's body, nested callbacks included, from a scan
+before and after the pull request.
+
+- **Scope:** only these functions, and only the limits named for each. Their
+  other FUNC-013 limits are not excepted, and every function PR #186 added
+  follows FUNC-013.
+  - `ConversationPanel` in
+    [ConversationPanel.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ChatViewComponents/ConversationPanel.tsx),
+    lines: 62 → 65, for the conversation's sources it passes to the
+    transcript.
+  - `ChatView` in
+    [ChatView.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/views/ChatView/ChatView.tsx),
+    lines: 85 → 86, for the conversation's sources it passes to the panel.
+    The maintainer chose not to split `ChatView` in PR #186, rather than
+    decide whether the
+    [Composer and chat view size exception](#composer-and-chat-view-size-exception)
+    covers it.
+  - `createChatViewStore` and `createChatViewStoreState` in
+    [chat-view/index.ts](https://github.com/w3lt/lys/blob/main/apps/desktop/src/lib/store/chat-view/index.ts),
+    lines: 529 → 557 and 499 → 527, for the `reply-part`, `reply-part-delta`,
+    and `sources` handlers that replace the `delta` handler. The events the
+    tool-call store owns are left out before the generation-event `switch`,
+    so `handleChatGenerationEvent` stays within FUNC-013.
+  - `createToolCallStore` and `createToolCallStoreState` in
+    [tool-calls/index.ts](https://github.com/w3lt/lys/blob/main/apps/desktop/src/lib/store/tool-calls/index.ts),
+    lines: 228 → 230 and 210 → 212; and its `handleFollowedReplyEvent`,
+    decision points: 10 → 12. Both come from the new event names in one
+    exhaustive `switch`, whose new arms only return.
+  - Backend test helpers and cases:
+    - `getAgentReplyOutcome` in `agent.test.ts`, lines: 53 → 55.
+    - The case "answers overlapping turns independently" in `agent.test.ts`,
+      lines: 42 → 50, for the turn fields the reply parts added.
+    - `registerBuiltInToolContractSuite` in `builtInToolContract.ts`, lines:
+      41 → 47, for the run context its cases now pass.
+    - `createChatRouteTestApp` in `chatRouteTestApp.ts`, lines: 70 → 72.
+    - `registerConversationRecordEditorContractSuite` and
+      `registerConversationTurnTransactionContractSuite` in
+      `conversationRecordsContract.ts`, lines: 87 → 101 and 191 → 201, for
+      cases that now also check parts, sources, and open calls.
+    - `registerConversationTurnRecordWriterContractSuite` and
+      `registerConversationRecordReaderContractSuite` in
+      `conversationRecordsContract.ts`, lines: 371 → 375 and 345 → 331.
+      Their cases now store parts instead of a reply's text, and the turn
+      writer's has two new cases for open calls. The maintainer added them
+      after the re-review asked whether a changed registrar still over the
+      limit needs the exception.
+    - Part of the growth of the editor, transaction, and turn writer
+      registrars is the input object that `createTextPart` takes, which
+      Prettier wraps onto more lines than the earlier positional arguments.
+- **Constraint:** each function was over the limit before PR #186. The store
+  factories hold every event handler as a closure over the store's `set` and
+  token checks, so a new event handler is written inside them, as the
+  `delta` handler was; the transition logic itself is in
+  `conversation-transitions.ts`. A contract-suite registrar holds its cases,
+  as every registrar of its file did before PR #186. New cases went into new
+  registrars that follow FUNC-013, except two in
+  `registerConversationTurnRecordWriterContractSuite`; the other registrars
+  listed above changed only in existing cases.
+- **Alternatives considered:**
+  - Splitting the store factories, the panel, and `ChatView` within PR #186
+    was not taken. It moves the request, stop, open, and follow handling,
+    which is outside the pull request's purpose.
+  - Moving the grown cases out of the legacy registrars was not taken. Each
+    case changed with the contract it checks, and moving it would only lower a
+    count without splitting the registrar.
+- **Risk and control:** a long function is harder to review and to change
+  safely. The added handlers delegate to named transitions, the new `switch`
+  arms only return, and the added test lines are independent arrange and
+  assert steps.
+- **Removal condition:** a change that splits these functions to within the
+  limits removes this exception. No issue tracks that split.
+
 ## vmo address copy exception
 
 vmo's address has an approved exception to
@@ -702,7 +783,7 @@ These examples identify boundaries in the current source; they do not certify th
 
 | Observed boundary                                                                                                                                                                                                                                               | Schema and migration distinction                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Conversation storage keeps an ordered array of SQL migrations and uses its position as the version                                                                                                                                                              | Array order is persistent history; changing an applied entry can make fresh and upgraded stores disagree.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Conversation storage keeps an ordered array of migration steps and uses its position as the version                                                                                                                                                             | Array order is persistent history; changing an applied entry can make fresh and upgraded stores disagree.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | The migration runner acquires a write transaction before reading the version, applies pending changes, updates the marker, and commits                                                                                                                          | Coordination, schema changes, and version recording have a concrete boundary; this does not prove general application writes or external effects are atomic.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | The database owner rejects a newer version before publishing borrowed transactions                                                                                                                                                                              | Supported opening versions and dependent access are explicit concerns; the open factory owns acquisition and failure cleanup.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Conversation tables define role checks, correlated assistant status and finish reason, indexes, and timestamp triggers                                                                                                                                          | A storage schema contains behavioral invariants beyond its column names. Copying rows alone would not preserve the complete contract.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |

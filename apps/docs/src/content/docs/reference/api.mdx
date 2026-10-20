@@ -21,7 +21,7 @@ route definitions.
 | `GET`    | `/api/v1/llm/runtime`                                                             | none                                                                               | `{ status: "connecting" \| "connected" \| "unreachable" }`             |
 | `POST`   | `/api/v1/llm/runtime/connect`                                                     | none                                                                               | Settled `{ status }`, or service-busy Problem Details                  |
 | `GET`    | `/api/v1/conversations`                                                           | none; optional `query`, `cursor`, `limit` query parameters                         | Conversation list page                                                 |
-| `GET`    | `/api/v1/conversations/:conversationId`                                           | none                                                                               | Conversation with ordered messages                                     |
+| `GET`    | `/api/v1/conversations/:conversationId`                                           | none                                                                               | Conversation with ordered messages and numbered sources                |
 | `PATCH`  | `/api/v1/conversations/:conversationId`                                           | `{ title: string }`                                                                | Conversation metadata                                                  |
 | `DELETE` | `/api/v1/conversations/:conversationId`                                           | none                                                                               | Bodyless `204`                                                         |
 | `GET`    | `/api/v1/agents`                                                                  | none; optional `cursor`, `limit` query parameters                                  | Built-in agents and a page of stored agents                            |
@@ -89,11 +89,14 @@ selects one of two forms:
 `message` and `model` must be non-empty strings. Every turn sends the system
 prompt its agent has when the turn starts, so editing a stored agent changes
 its conversations from their next message. Continuation
-uses the system prompt of the conversation's agent, prior user messages, non-empty completed or
-interrupted assistant messages, then the current user message exactly once.
-Failed and empty assistant messages are excluded from context. A reply still
-streaming in the conversation becomes interrupted when the new turn is created,
-so its partial text is included.
+uses the system prompt of the conversation's agent, prior user messages, the
+rounds of completed and interrupted replies, then the current user message
+exactly once. Each round sends its text and the tool calls that have a
+result, followed by those results; reasoning and calls without a result are
+never sent back, and a round with neither text nor such a call is left out.
+Failed replies are excluded from context. A reply still streaming in the
+conversation becomes interrupted when the new turn is created, so its partial
+rounds are included.
 
 `generationOptions` is required and has no protocol-level default:
 
@@ -177,8 +180,9 @@ generation is running for the reply it answers `409` with
 
 To follow a reply again, open
 `GET /api/v1/chat/:conversationId/replies/:assistantMessageId/events`. Its
-first event is a `reply-snapshot` with the stored reply and conversation
-title; live events follow while the generation runs. A missing conversation
+first event is a `reply-snapshot` with the stored reply, the conversation
+title, and the conversation's sources; live events follow while the
+generation runs. A missing conversation
 returns the conversation-not-found problem and a missing reply returns `404`
 with `urn:lys:problem:chat:reply-not-found`.
 
@@ -320,9 +324,10 @@ where `callId` is the `id` of the event's call or of its entry in
 }
 ```
 
-After `allowed`, the backend runs a backend tool itself and hands its result
-only to the model, or sends a client tool's call to run with a `tool-call`
-event under the same `id`. After `rejected`, nothing runs and the model reads
+After `allowed`, the backend runs a backend tool itself, stores its result
+with the call, and gives it to the model; the client sees that result in the
+call's `reply-part` event. For a client tool, it sends the call to run with a
+`tool-call` event under the same `id`. After `rejected`, nothing runs and the model reads
 `content`. `reason` is not shown to the model: `declined` when the person
 rejected the call, and `showFailed` when the client could not show it, such as
 a tool it does not list or arguments it cannot describe.
@@ -380,28 +385,33 @@ List responses have exactly `conversations`, `storedCount`, `matchCount`, and
 `nextCursor`. Counts include all stored conversations and all matches before
 pagination, respectively. Each summary contains `id`, nullable `title`,
 `createdAt`, `updatedAt`, and nullable `preview`; it does not expose `agentCode`.
-A preview contains only `role` and full `content`.
+A preview contains only `role` and full `content`: a user message, or one text
+part of a reply shown with the role `assistant`.
 
-| Parameter | Contract                                                                                                                                                                         |
-| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `query`   | Optional; trimmed to 1–200 UTF-16 code units when supplied. Blank queries are rejected. Unicode case-insensitive literal substring search covers titles and all message content. |
-| `limit`   | Integer from 1–50; defaults to 30.                                                                                                                                               |
-| `cursor`  | Opaque, at most 2048 characters; reuse with the same trimmed query. Malformed, unsupported, or differently bound cursors return `400`.                                           |
+| Parameter | Contract                                                                                                                                                                                               |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `query`   | Optional; trimmed to 1–200 UTF-16 code units when supplied. Blank queries are rejected. Unicode case-insensitive literal substring search covers titles, user messages, and the text parts of replies. |
+| `limit`   | Integer from 1–50; defaults to 30.                                                                                                                                                                     |
+| `cursor`  | Opaque, at most 2048 characters; reuse with the same trimmed query. Malformed, unsupported, or differently bound cursors return `400`.                                                                 |
 
 Results are ordered by `updatedAt DESC, id DESC`, with keyset pagination. The
 next cursor is `null` at the end. Each response reads counts, page, and previews
 from one snapshot; subsequent pages reflect later database changes.
-Search previews select the latest non-empty matching message, falling back to
-the latest non-empty message for a title-only match. Unfiltered lists select the
-latest non-empty message; conversations without one have `preview: null`.
+Search previews select the latest matching user message or reply text part,
+falling back to the latest one for a title-only match. Unfiltered lists select
+the latest user message or reply text part; conversations without one have
+`preview: null`. Reasoning and tool calls are never searched or previewed.
 
 `GET` by identifier returns conversation metadata, including `agentCode`, the
-code of the agent that answers it, and
-messages ordered by creation time then identifier. The code stays after its
+code of the agent that answers it,
+messages ordered by creation time then identifier, each reply with its `parts`
+in stored order, and `sources`, the conversation's numbered sources in number
+order. The code stays after its
 agent is deleted, so it may name no agent. `PATCH` accepts
 only `title`, trims it to 1–120 UTF-16 code units, and returns updated metadata. Repeating
 a rename is idempotent; renaming never changes activity time or list position.
-`DELETE` cascades to messages and returns `204` without a body. Late generation
+`DELETE` cascades to messages, reply parts, and sources and returns `204`
+without a body. Late generation
 writes after deletion do not recreate the conversation. Allowed development and
 Tauri origins support DELETE preflights.
 
@@ -418,14 +428,16 @@ with `Content-Type: application/problem+json`:
 }
 ```
 
-Chat creates its user/assistant pair atomically, persists each delta before
-sending it to every stream following the reply, and stores a terminal status
-before `done`. Partial content survives
-failure or cancellation. Title generation runs only for an untitled conversation
+Chat creates its user/assistant pair atomically, persists each reply part,
+fragment, tool call change, and source before sending it to every stream
+following the reply, and stores a terminal status before `done`. Partial parts
+survive failure or cancellation, and a reply's waiting and running calls are
+stored as interrupted when it ends. Title generation runs only for an untitled conversation
 without a title task already running, and publishes a title only if the
 conditional database write succeeds. On startup,
-remaining streaming assistants become interrupted with refreshed message
-timestamps; conversation activity time and history order do not change.
+remaining streaming assistants become interrupted with refreshed
+timestamps, and their waiting and running calls become interrupted with their
+timestamps kept; conversation activity time and history order do not change.
 
 ## Agents
 

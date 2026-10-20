@@ -50,7 +50,10 @@ vmo listens at `127.0.0.1:8080` and needs:
   `~/Library/Application Support/com.w3lt.lys-vmo`: `vminit` and one reader
   image, about 283 MB for today's. After each start's pull, vmo deletes every
   other image there, such as the reader image `latest` named before; see
-  [vmo's image store](/operate/data/#vmos-image-store)
+  [vmo's image store](/operate/data/#vmos-image-store). Because the old reader
+  image goes only after the new one's pull, the first start after a new reader
+  image needs room for a second one; without it, that pull fails, and so does
+  every later start's until there is room
 - for now, the Linux kernel that Apple's `container` tool installs at
   `~/Library/Application Support/com.apple.container/kernels/vmlinux-6.18.35-197-debug`,
   so vmo does not boot its VMs on a Mac without it

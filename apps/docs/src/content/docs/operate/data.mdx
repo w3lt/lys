@@ -71,8 +71,10 @@ VMs in `~/Library/Application Support/com.w3lt.lys-vmo`, outside the Lys home,
 because vmo does not read `LYS_HOME`. Containerization creates and lays out
 the directory at vmo's first start, and only vmo writes it.
 
-- it holds the `vminit` image and `initfs.ext4`, unpacked from it, the reader
-  image that `ghcr.io/w3lt/lys-readpage:latest` named at vmo's last start, and,
+- it holds the `vminit` image; `initfs.ext4`, unpacked from the first
+  `vminit` vmo pulled into the store and not replaced when a later vmo pins
+  another ([#218](https://github.com/w3lt/lys/issues/218)); the reader image
+  that `ghcr.io/w3lt/lys-readpage:latest` named at vmo's last start; and,
   while a read runs, that read's VM under `containers/`
 - at each start, after it fetches `latest`, vmo deletes every other image in
   the store and the files that only those images used, so a reader image that

@@ -128,13 +128,28 @@ private func hasContent(_ image: Image, digest: String) async throws -> Bool {
     }
 }
 
+/// Makes `directory` writable again, as a test that made it read-only must
+/// before ``TemporaryContainerRoot`` removes it.
+///
+/// - Parameter directory: A directory the test made read-only. A test issue
+///   is recorded when its permissions can't be set.
+private func restoreWritePermission(of directory: URL) {
+    do {
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: directory.path)
+    } catch {
+        Issue.record(error, "Could not make \(directory.path) writable again")
+    }
+}
+
 /// Checks that ``ImageStore/deleteImages(except:)`` leaves a store holding
-/// the kept images and nothing else.
+/// the kept images and nothing else, and what it leaves when deleting fails.
 ///
 /// Images enter each store through `ImageStore.load(from:)`, which stores an
 /// image the way a pull does: it ingests the blobs, then sets the reference,
 /// moving it when the store already names another image by it. The store is
-/// a real Containerization image store in a temporary directory.
+/// a real Containerization image store in a temporary directory. Tests that
+/// make deleting fail make a directory of the store read-only, so they need a
+/// user whom file permissions apply to, not root.
 @Suite("Deleting unused images")
 struct UnusedImagesTests {
     /// Directory holding this test's image store and image layouts.
@@ -240,6 +255,56 @@ struct UnusedImagesTests {
 
         #expect(error?.isCode(.internalError) == true)
         try state.write(to: stateFile)
+        #expect(try await imageStore.calculateOrphanedBlobsSize() == orphanedBytes)
+    }
+
+    /// Verifies that when deleting blobs fails after the unused images are
+    /// deleted, the failure is reported, those images stay deleted, and the
+    /// kept images keep every blob they use.
+    @Test("A failed blob deletion throws and keeps the deleted images deleted")
+    func keepsDeletedImagesWhenBlobDeletionFails() async throws {
+        let vminit = try await saveImage(FixtureImage(reference: vminitReference, configText: "vminit config", layerTexts: ["vminit layer"]))
+        _ = try await saveImage(FixtureImage(reference: readerReference, configText: "old reader config", layerTexts: ["old reader layer"]))
+        let newReader = try await saveImage(FixtureImage(reference: readerReference, configText: "new reader config", layerTexts: ["new reader layer"]))
+        _ = try await saveImage(FixtureImage(reference: "example.com/other:1", configText: "other config", layerTexts: ["other layer"]))
+        // Containerization keeps every blob as a file in this directory, and
+        // no file can be removed from a read-only directory.
+        let blobs = imageStore.path.appending(path: "content/blobs/sha256", directoryHint: .isDirectory)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: blobs.path)
+        defer { restoreWritePermission(of: blobs) }
+
+        let error = await #expect(throws: CocoaError.self) {
+            try await imageStore.deleteImages(except: [vminitReference, readerReference])
+        }
+
+        #expect(error?.code == .fileWriteNoPermission)
+        #expect(try await listImageDigests() == [vminitReference: vminit.digest, readerReference: newReader.digest])
+        #expect(try await imageStore.calculateOrphanedBlobsSize() > 0)
+        #expect(try await listMissingDigests(of: vminit).isEmpty)
+        #expect(try await listMissingDigests(of: newReader).isEmpty)
+    }
+
+    /// Verifies that when deleting an unused image fails, the failure is
+    /// reported before any blob is deleted, so the store keeps its images and
+    /// the blobs no image uses.
+    @Test("A failed image deletion throws before any blob is deleted")
+    func deletesNoBlobWhenImageDeletionFails() async throws {
+        _ = try await saveImage(FixtureImage(reference: readerReference, configText: "old reader config", layerTexts: ["old reader layer"]))
+        let reader = try await saveImage(FixtureImage(reference: readerReference, configText: "new reader config", layerTexts: ["new reader layer"]))
+        let other = try await saveImage(FixtureImage(reference: "example.com/other:1", configText: "other config", layerTexts: ["other layer"]))
+        let orphanedBytes = try await imageStore.calculateOrphanedBlobsSize()
+        #expect(orphanedBytes > 0)
+        // Deleting an image rewrites `state.json` atomically, through a new
+        // file in the store's directory, which a read-only directory refuses.
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: imageStore.path.path)
+        defer { restoreWritePermission(of: imageStore.path) }
+
+        let error = await #expect(throws: CocoaError.self) {
+            try await imageStore.deleteImages(except: [readerReference])
+        }
+
+        #expect(error?.code == .fileWriteNoPermission)
+        #expect(try await listImageDigests() == ["example.com/other:1": other.digest, readerReference: reader.digest])
         #expect(try await imageStore.calculateOrphanedBlobsSize() == orphanedBytes)
     }
 }

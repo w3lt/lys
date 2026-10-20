@@ -105,8 +105,8 @@ type ToolCallHandling = Readonly<{
   sourceCatalog: SourceCatalog
 }>
 
-/** What storing a call that cannot run needs: the round and the parts. */
-type FailedToolCallHandling = Pick<ToolCallHandling, "round" | "replyParts">
+/** What storing a call needs: the round and the parts. */
+type ToolCallPartHandling = Pick<ToolCallHandling, "round" | "replyParts">
 
 /** What starting a checked call needs: the gate, the round, and the parts. */
 type ToolCallStartHandling = Pick<
@@ -495,8 +495,33 @@ async function runBuiltInToolCall(
 }
 
 /**
- * Stores one checked call as the round's gate decides, then prompts the
- * person when the gate asks for it, in one synchronous step.
+ * Stores one checked call in the state the round's gate chose for it.
+ *
+ * @param toolCall - Checked call.
+ * @param status - `running` when the gate allows it at once,
+ * `awaiting-approval` when the person is asked.
+ * @param handling - The round's index and the reply's part sequence.
+ * @returns True once stored and sent; false when the reply refused it.
+ */
+function createStartedToolCall(
+  toolCall: CheckedToolCall,
+  status: "awaiting-approval" | "running",
+  handling: ToolCallPartHandling
+): boolean {
+  return handling.replyParts.createReplyToolCall({
+    kind: "tool-call",
+    id: toolCall.call.id,
+    round: handling.round,
+    toolName: toolCall.call.toolName,
+    argumentText: toolCall.call.argumentText,
+    status
+  })
+}
+
+/**
+ * Starts one checked call through the round's gate, which stores it and
+ * prompts the person when it may not go on without them, in one synchronous
+ * step.
  *
  * @param toolCall - Checked call.
  * @param handling - The round's gate and index, and the reply's part
@@ -505,32 +530,32 @@ async function runBuiltInToolCall(
  * approval the person's answer leads to, once the call is stored as awaiting
  * approval and the prompt is sent; `ended` when the reply refused to store
  * the call, which sends no prompt.
- * @remarks The call is stored before its prompt is sent, so a follower that
- * sees the prompt can read the call. A call allowed at once is stored as
- * running in that step, and the caller goes on without awaiting, so its run
- * request keeps the model's order among the round's sends.
+ * @remarks A call allowed at once is stored as running in that step, and the
+ * caller goes on without awaiting, so its run request keeps the model's
+ * order among the round's sends.
  */
 function startToolCall(
   toolCall: CheckedToolCall,
   handling: ToolCallStartHandling
 ): StartedToolCall {
-  const { gate, replyParts } = handling
-  const isAllowedAtOnce = gate.isToolCallAllowedAtOnce(toolCall.checkedCall)
-  const isStored = replyParts.createReplyToolCall({
-    kind: "tool-call",
-    id: toolCall.call.id,
-    round: handling.round,
-    toolName: toolCall.call.toolName,
-    argumentText: toolCall.call.argumentText,
-    status: isAllowedAtOnce ? "running" : "awaiting-approval"
-  })
-  if (!isStored) return ENDED_TOOL_CALL_APPROVAL
-  if (isAllowedAtOnce) return ALLOWED_TOOL_CALL_APPROVAL
-  const answer = gate.sendToolApprovalPrompt(toolCall.checkedCall)
-  return Object.freeze({
-    status: "waiting",
-    approval: handleToolCallApprovalAnswer(toolCall, answer, replyParts)
-  })
+  const start = handling.gate.startToolCall(toolCall.checkedCall, (status) =>
+    createStartedToolCall(toolCall, status, handling)
+  )
+  switch (start.status) {
+    case "allowed":
+      return ALLOWED_TOOL_CALL_APPROVAL
+    case "ended":
+      return ENDED_TOOL_CALL_APPROVAL
+    case "prompted":
+      return Object.freeze({
+        status: "waiting",
+        approval: handleToolCallApprovalAnswer(
+          toolCall,
+          start.answer,
+          handling.replyParts
+        )
+      })
+  }
 }
 
 /**
@@ -639,7 +664,7 @@ function updateFinishedToolCall(
 function createFailedToolCall(
   toolCall: HandledToolCall,
   message: string,
-  handling: FailedToolCallHandling
+  handling: ToolCallPartHandling
 ): ToolResultMessage | undefined {
   const result = formatToolCallResult(toolCall.tool, message)
   const isStored = handling.replyParts.createReplyToolCall({

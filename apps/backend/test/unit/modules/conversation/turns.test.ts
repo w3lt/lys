@@ -30,13 +30,19 @@ const LATER = "2026-03-04T05:06:09.123Z"
 const CONVERSATION_ID = createFixtureUuidV7(1)
 
 /** Text a stored reply holds before a recovery case. */
-const PARTIAL_TEXT = createTextPart(12, 0, "Partial")
+const PARTIAL_TEXT = createTextPart({
+  sequence: 12,
+  round: 0,
+  content: "Partial"
+})
 
 /**
  * Stores a conversation whose last activity is a reply in the given state.
  *
  * @param database - Migrated test database.
  * @param reply - Stored state of the reply.
+ * @param parts - The reply's parts, valid for its state; {@link PARTIAL_TEXT}
+ * alone when omitted.
  */
 function saveConversationWithReply(
   database: SqliteDatabase,
@@ -104,7 +110,7 @@ describe("StoredConversationTurns", () => {
   })
 
   describe("create", () => {
-    it("marks a reply left streaming and its open tool calls as interrupted without changing activity time", () => {
+    it("marks a reply left streaming and its open tool calls as interrupted, keeping the calls' update times and the activity time", () => {
       const database = openTestDatabase()
       const finishedCall = createToolCallPart(
         { sequence: 13, round: 0, toolName: "web_search", argumentText: "{}" },
@@ -143,11 +149,7 @@ describe("StoredConversationTurns", () => {
             parts: [
               PARTIAL_TEXT,
               finishedCall,
-              ...openCalls.map((call) => ({
-                ...call,
-                status: "interrupted",
-                updatedAt: NOW
-              }))
+              ...openCalls.map((call) => ({ ...call, status: "interrupted" }))
             ],
             status: "interrupted",
             finishReason: null,

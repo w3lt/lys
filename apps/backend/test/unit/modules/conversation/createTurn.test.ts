@@ -56,9 +56,14 @@ function saveExistingConversation(records: ConversationRecordsHarness): void {
     conversationId: EXISTING_CONVERSATION_ID,
     model: "qwen/qwen3-8b",
     parts: [
-      createTextPart(511, 0, "Earlier answer", {
-        createdAt: "2026-01-01T00:00:02.000Z",
-        updatedAt: "2026-01-01T00:00:03.000Z"
+      createTextPart({
+        sequence: 511,
+        round: 0,
+        content: "Earlier answer",
+        times: {
+          createdAt: "2026-01-01T00:00:02.000Z",
+          updatedAt: "2026-01-01T00:00:03.000Z"
+        }
       })
     ],
     status: "completed",
@@ -159,9 +164,14 @@ describe("createConversationTurn", () => {
       conversationId: EXISTING_CONVERSATION_ID,
       model: "qwen/qwen3-8b",
       parts: [
-        createTextPart(512, 0, "Partial", {
-          createdAt: "2026-01-01T00:00:04.000Z",
-          updatedAt: "2026-01-01T00:00:04.000Z"
+        createTextPart({
+          sequence: 512,
+          round: 0,
+          content: "Partial",
+          times: {
+            createdAt: "2026-01-01T00:00:04.000Z",
+            updatedAt: "2026-01-01T00:00:04.000Z"
+          }
         })
       ],
       status: "streaming",
@@ -200,9 +210,14 @@ describe("createConversationTurn", () => {
       conversationId: otherConversationId,
       model: "qwen/qwen3-8b",
       parts: [
-        createTextPart(520, 0, "Other partial", {
-          createdAt: "2026-01-01T00:00:05.000Z",
-          updatedAt: "2026-01-01T00:00:05.000Z"
+        createTextPart({
+          sequence: 520,
+          round: 0,
+          content: "Other partial",
+          times: {
+            createdAt: "2026-01-01T00:00:05.000Z",
+            updatedAt: "2026-01-01T00:00:05.000Z"
+          }
         })
       ],
       status: "streaming",
@@ -256,9 +271,14 @@ describe("createConversationTurn", () => {
       conversationId: EXISTING_CONVERSATION_ID,
       model: "qwen/qwen3-8b",
       parts: [
-        createTextPart(512, 0, "Partial", {
-          createdAt: "2026-01-01T00:00:04.000Z",
-          updatedAt: "2026-01-01T00:00:04.000Z"
+        createTextPart({
+          sequence: 512,
+          round: 0,
+          content: "Partial",
+          times: {
+            createdAt: "2026-01-01T00:00:04.000Z",
+            updatedAt: "2026-01-01T00:00:04.000Z"
+          }
         })
       ],
       status: "streaming",

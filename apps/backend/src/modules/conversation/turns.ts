@@ -43,7 +43,9 @@ export default class StoredConversationTurns
    * @throws If the store is closed or the recovery write fails; a failed
    * recovery changes nothing.
    * @remarks Marks every reply still streaming as interrupted at the current
-   * time, without changing its conversation's activity time or history order.
+   * time, without changing its conversation's activity time or history order;
+   * its waiting and running calls become interrupted and keep their update
+   * time.
    * Create one instance per process, before any reply streams: a later
    * creation would also interrupt the replies streaming at that moment.
    */

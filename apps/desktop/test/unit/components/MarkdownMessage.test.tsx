@@ -187,15 +187,31 @@ describe("MarkdownMessage", () => {
       expect(screen.getByText("[1]").tagName).toBe("CODE")
     })
 
+    it("links no marker inside math, in either pass", async () => {
+      render(
+        <MarkdownMessage
+          generatingLabel={GENERATING_LABEL}
+          sources={CITED_SOURCES}
+          streaming={false}
+          text="Take $x[1]$ under lamps [3]."
+        />
+      )
+      const firstPassLinks = screen.queryAllByRole("link")
+
+      await waitForProcessedPass("3, source: Lamps")
+
+      expect(firstPassLinks).toEqual([])
+      expect(screen.getAllByRole("link")).toEqual([
+        screen.getByRole("link", { name: "3, source: Lamps" })
+      ])
+    })
+
     it("shows the cited source's title and site while the pointer rests on it", async () => {
       await startCitedMessage("Moths [1].", "1, source: Night moths")
-      const trigger = screen.getByRole("link", {
-        name: "1, source: Night moths"
-      }).parentElement
-      if (trigger === null) throw new Error("The citation has no trigger")
+      const link = screen.getByRole("link", { name: "1, source: Night moths" })
       vi.useFakeTimers()
 
-      startHover(trigger)
+      startHover(link)
       act(() => {
         vi.advanceTimersByTime(600)
       })

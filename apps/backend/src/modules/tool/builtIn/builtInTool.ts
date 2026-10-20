@@ -12,8 +12,9 @@ export type WebSourceCandidate = Readonly<{
    */
   url: string
   /**
-   * Non-empty title shown to the model, flattened onto one line and without
-   * the characters a person cannot see.
+   * Title shown to the model as it reads it: flattened onto one line,
+   * without the characters a person cannot see, and trimmed; the URL's host
+   * when the result or page gave no title a person can see. Never empty.
    */
   title: string
 }>
@@ -23,8 +24,10 @@ export type WebSourceCandidate = Readonly<{
  *
  * @param candidates - Sources the result is about to show, in its order.
  * @returns Each candidate numbered, in the same order: a URL the conversation
- * has numbered already keeps its number and stored title, and a new URL gets
- * the next number. Bounded synchronous work; it never throws.
+ * stored, or one numbered earlier in the turn, keeps its number and title;
+ * a new URL gets the next number. A number given to a call whose result is
+ * never stored is not kept, so a later turn can give it to another URL.
+ * Bounded synchronous work; it never throws.
  */
 export type AddWebSources = (
   candidates: readonly WebSourceCandidate[]

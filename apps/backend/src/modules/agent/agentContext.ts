@@ -1,16 +1,11 @@
-import type {
-  ConversationAssistantMessage,
-  ConversationMessage,
-  ReplyPart,
-  ToolCallReplyPart
+import {
+  isAnsweredToolCall,
+  type AnsweredToolCallReplyPart,
+  type ConversationAssistantMessage,
+  type ConversationMessage,
+  type ReplyPart
 } from "@lys/share"
 import type { ContextToolCall, ReplyContextMessage } from "./replyModel"
-
-/** A stored tool call that has the result the model read. */
-type AnsweredToolCallReplyPart = Extract<
-  ToolCallReplyPart,
-  { status: "succeeded" | "failed" | "rejected" }
->
 
 /**
  * Selects stored replies that can supply conversation context.
@@ -25,12 +20,13 @@ function isContextReply(message: ConversationAssistantMessage): boolean {
 /**
  * Answers whether a stored part is a tool call with a result.
  * @param part - One part of a stored reply.
- * @returns True for a call that succeeded, failed, or was rejected.
+ * @returns True for a tool call that {@link isAnsweredToolCall} answers true
+ * for: one that succeeded, failed, or was rejected.
  */
-function isAnsweredToolCall(
+function isAnsweredToolCallPart(
   part: ReplyPart
 ): part is AnsweredToolCallReplyPart {
-  return part.kind === "tool-call" && "result" in part
+  return part.kind === "tool-call" && isAnsweredToolCall(part)
 }
 
 /**
@@ -79,7 +75,7 @@ function buildStoredRoundContextMessages(
   const text = parts
     .flatMap((part) => (part.kind === "text" ? [part.content] : []))
     .join("")
-  const answeredCalls = parts.filter(isAnsweredToolCall)
+  const answeredCalls = parts.filter(isAnsweredToolCallPart)
   if (text === "" && answeredCalls.length === 0) return []
   const assistantMessage: ReplyContextMessage = {
     role: "assistant",

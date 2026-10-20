@@ -22,7 +22,12 @@ const BARK = Object.freeze({
 
 describe("ReplySourceList", () => {
   it("lists the cited sources in citation order as links to them, each with its number, title, and site", () => {
-    render(<ReplySourceList sources={{ cited: [MOTHS, LAMPS], found: [] }} />)
+    render(
+      <ReplySourceList
+        replyNumber={1}
+        sources={{ cited: [MOTHS, LAMPS], found: [] }}
+      />
+    )
 
     const list = screen.getByRole("list", { name: "Sources · 2 cited" })
     const links = within(list).getAllByRole("link")
@@ -41,6 +46,7 @@ describe("ReplySourceList", () => {
     const user = userEvent.setup()
     render(
       <ReplySourceList
+        replyNumber={2}
         sources={{
           cited: [MOTHS],
           found: [{ source: BARK, toolName: "web_search" }]
@@ -51,7 +57,7 @@ describe("ReplySourceList", () => {
     const whileCollapsed = found
 
     expect(whileCollapsed).not.toBeVisible()
-    await user.click(screen.getByText("1 more"))
+    await user.click(screen.getByLabelText("1 more, reply 2"))
 
     expect(found).toBeVisible()
     expect(screen.getByText("via web_search")).toBeVisible()
@@ -61,6 +67,7 @@ describe("ReplySourceList", () => {
     const user = userEvent.setup()
     render(
       <ReplySourceList
+        replyNumber={1}
         sources={{
           cited: [],
           found: [

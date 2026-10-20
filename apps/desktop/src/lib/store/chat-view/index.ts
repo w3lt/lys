@@ -398,6 +398,26 @@ type ChatTurnStartEvent = Extract<
 /** Non-idle observable request state carrying phase-specific metadata. */
 type OwnedChatRequestState = Exclude<ChatRequestState, { status: "idle" }>
 
+/** Generation events of a reply that the tool-call store owns. */
+type ToolCallStoreEvent = Extract<
+  ChatGenerationEvent,
+  { type: "tool-approval" | "tool-call" }
+>
+
+/**
+ * Answers whether the tool-call store owns a generation event.
+ *
+ * @param event - Generation event of a chat or followed-reply stream.
+ * @returns True for `tool-approval` and `tool-call`: the tool-call store
+ * follows the reply itself and owns its prompts and calls, so the chat view
+ * leaves them to it.
+ */
+function isToolCallStoreEvent(
+  event: ChatGenerationEvent
+): event is ToolCallStoreEvent {
+  return event.type === "tool-approval" || event.type === "tool-call"
+}
+
 /** Store-private transport resource correlated with one active request. */
 type ChatRequestResource = {
   /** Token correlating this resource with observable request state. */
@@ -1051,12 +1071,15 @@ export function createChatViewStore(
      * @param token - Token whose ownership authorizes event side effects.
      * @throws If an in-order handler detects an invariant violation.
      * @remarks Exactly one of `done`, `interrupted`, or `error` ends the
-     * reply; the backend sends nothing but a possible `title` after it.
+     * reply; the backend sends nothing but a possible `title` after it. The
+     * events {@link isToolCallStoreEvent} names are left to the tool-call
+     * store.
      */
     function handleChatGenerationEvent(
       event: ChatGenerationEvent,
       token: number
     ): void {
+      if (isToolCallStoreEvent(event)) return
       switch (event.type) {
         case "title":
           handleChatTitleEvent(event, token)
@@ -1078,11 +1101,6 @@ export function createChatViewStore(
           return
         case "error":
           handleChatErrorEvent(event, token)
-          return
-        case "tool-approval":
-        case "tool-call":
-          // The tool-call store follows this reply itself and owns its
-          // prompts and calls.
           return
       }
     }

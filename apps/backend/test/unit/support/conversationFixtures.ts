@@ -63,29 +63,36 @@ const FIXTURE_PART_TIMES: PartFixtureTimes = Object.freeze({
   updatedAt: FIXTURE_TIMESTAMP
 })
 
+/** Values that distinguish one text-part fixture from another. */
+export type TextPartFixture = Readonly<{
+  /** Identity sequence of the part. */
+  sequence: number
+  /** Zero-based round of the part. */
+  round: number
+  /** Non-empty text. */
+  content: string
+  /**
+   * When the part was stored and last changed; the fixture time when
+   * omitted.
+   */
+  times?: PartFixtureTimes
+}>
+
 /**
  * Creates a stored text part.
  *
- * @param sequence - Identity sequence of the part.
- * @param round - Zero-based round of the part.
- * @param content - Non-empty text.
- * @param times - When the part was stored and last changed; the fixture
- * time by default.
+ * @param fixture - Identity, round, text, and times of the part.
  * @returns A valid text part.
  */
-export function createTextPart(
-  sequence: number,
-  round: number,
-  content: string,
-  times: PartFixtureTimes = FIXTURE_PART_TIMES
-): ReplyPart {
+export function createTextPart(fixture: TextPartFixture): ReplyPart {
+  const times = fixture.times ?? FIXTURE_PART_TIMES
   return {
     kind: "text",
-    id: createFixtureUuidV7(sequence),
-    round,
+    id: createFixtureUuidV7(fixture.sequence),
+    round: fixture.round,
     createdAt: times.createdAt,
     updatedAt: times.updatedAt,
-    content
+    content: fixture.content
   }
 }
 
@@ -139,23 +146,39 @@ export type ToolCallPartFixture = Readonly<{
 }>
 
 /**
+ * State of one tool-call part fixture: its status, with its result when the
+ * status has one and the numbers of the sources a succeeded result shows.
+ */
+export type ToolCallPartFixtureState =
+  | Readonly<{
+      /** A call without a result. */
+      status: "awaiting-approval" | "running" | "interrupted"
+    }>
+  | Readonly<{
+      /** A call that ran and returned its output. */
+      status: "succeeded"
+      /** Text the model read; may be empty. */
+      result: string
+      /** Numbers of the sources the result shows, in its order. */
+      sourceNumbers: readonly number[]
+    }>
+  | Readonly<{
+      /** A call that ended without output. */
+      status: "failed" | "rejected"
+      /** Non-empty explanation the model read. */
+      result: string
+    }>
+
+/**
  * Creates a stored tool call.
  *
  * @param fixture - Identity, round, tool, and arguments.
- * @param state - The call's state, with its result when the state has one
- * and the numbers of the sources a succeeded result shows.
+ * @param state - The call's state.
  * @returns A valid tool-call part stored at the fixture time.
  */
 export function createToolCallPart(
   fixture: ToolCallPartFixture,
-  state:
-    | Readonly<{ status: "awaiting-approval" | "running" | "interrupted" }>
-    | Readonly<{
-        status: "succeeded"
-        result: string
-        sourceNumbers: readonly number[]
-      }>
-    | Readonly<{ status: "failed" | "rejected"; result: string }>
+  state: ToolCallPartFixtureState
 ): ToolCallReplyPart {
   const common = {
     id: createFixtureUuidV7(fixture.sequence),

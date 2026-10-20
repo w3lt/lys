@@ -25,6 +25,14 @@ const CONTROL_CHARACTER_PATTERN = /\p{Cc}/gu
 /** Finds a high surrogate, the code unit that opens a pair, ending a text. */
 const TRAILING_HIGH_SURROGATE_PATTERN = /[\uD800-\uDBFF]$/
 
+/**
+ * Matches a text in which a person sees nothing: one holding only whitespace
+ * and Unicode default-ignorable code points, such as Hangul fillers, the
+ * combining grapheme joiner, and a joiner or variation selector left on its
+ * own, or no character at all.
+ */
+const NOTHING_VISIBLE_PATTERN = /^[\s\p{Default_Ignorable_Code_Point}]*$/u
+
 /** Character that ends an excerpt cut short. */
 const EXCERPT_ELLIPSIS = "…"
 
@@ -109,13 +117,31 @@ export function formatSingleLineText(
 }
 
 /**
- * Formats a web source's title as a citation shows it.
+ * Formats a web source's title as the model is shown it.
  *
- * @param title - Title already flattened onto one line, as the model reads
+ * @param title - Title already flattened onto one line.
+ * @param url - Absolute `http` or `https` address of the source.
+ * @returns The title itself when, once cleaned of the characters a person
+ * cannot see as a network tool's result is, it still has a character other
+ * than whitespace and the Unicode default-ignorable code points; otherwise
+ * the URL's host. A title kept this way still holds its invisible
+ * characters, so the cleaning of the tool's result removes and counts them.
+ */
+export function formatShownSourceTitle(title: string, url: string): string {
+  return NOTHING_VISIBLE_PATTERN.test(formatVisibleText(title))
+    ? new URL(url).host
+    : title
+}
+
+/**
+ * Formats a web source's title as the model reads it and its citation shows
  * it.
+ *
+ * @param title - Title as the model is shown it, as
+ * {@link formatShownSourceTitle} formats it.
  * @returns The title without the characters a person cannot see, then
- * trimmed, so spaces that sat beside them are not left at its edges; empty
- * when nothing visible is left.
+ * trimmed, so spaces that sat beside them are not left at its edges; it
+ * keeps a character a person can see.
  */
 export function formatVisibleTitle(title: string): string {
   return formatVisibleText(title).trim()

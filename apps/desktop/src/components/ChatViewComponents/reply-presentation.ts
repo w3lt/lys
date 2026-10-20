@@ -1,11 +1,21 @@
 import type {
+  AnsweredToolCallReplyPart,
+  ConversationAssistantMessageStatus,
   ConversationSource,
   ReplyPart,
   ToolCallReplyPart,
   ToolCallReplyPartStatus
 } from "@lys/share"
 
-import { CITATION_MARKER_PATTERN } from "../markdown-citations"
+import {
+  buildReplyAnswer,
+  buildReplyPartRounds,
+  buildRoundText,
+  isAnswerRound,
+  isToolCallPart,
+  type ChatViewReplyPart,
+  type ChatViewToolCallReplyPart
+} from "@/lib/store/chat-view/reply-parts"
 
 /** What a reply's reasoning shows. */
 export type ReplyReasoningPresentation = Readonly<{
@@ -24,7 +34,7 @@ export type ReplyStepPresentation = Readonly<{
   /** Text the round wrote before its calls; empty when it wrote none. */
   text: string
   /** The round's calls in the model's order. */
-  calls: readonly ToolCallReplyPart[]
+  calls: readonly ChatViewToolCallReplyPart[]
 }>
 
 /** How one reply's parts are laid out. */
@@ -56,12 +66,6 @@ export type ReplySourcesPresentation = Readonly<{
   found: readonly FoundSourcePresentation[]
 }>
 
-/** A stored tool call that has the result the model read. */
-export type AnsweredToolCallReplyPart = Extract<
-  ToolCallReplyPart,
-  { status: "succeeded" | "failed" | "rejected" }
->
-
 /** A stored tool call that ran and returned its output. */
 type SucceededToolCallReplyPart = Extract<
   ToolCallReplyPart,
@@ -81,6 +85,8 @@ export type ReplySourceScopeMessage = Readonly<
       id: string
       /** An assistant reply. */
       role: "assistant"
+      /** Lifecycle state of the reply, as the chat view shows it. */
+      status: ConversationAssistantMessageStatus
       /** The reply's parts in stored order. */
       parts: readonly ReplyPart[]
     }
@@ -97,46 +103,6 @@ export type ReplyWorkTimes = Readonly<{
 }>
 
 /**
- * Builds the rounds of a reply from its parts, in stored order.
- *
- * @param parts - Parts whose rounds never decrease.
- * @returns Each round's parts, rounds in order.
- */
-function buildReplyPartRounds(
-  parts: readonly ReplyPart[]
-): readonly (readonly ReplyPart[])[] {
-  const rounds: ReplyPart[][] = []
-  for (const part of parts) {
-    const lastRound = rounds.at(-1)
-    if (lastRound?.[0]?.round === part.round) lastRound.push(part)
-    else rounds.push([part])
-  }
-  return rounds
-}
-
-/**
- * Builds the text a round wrote.
- *
- * @param parts - The round's parts.
- * @returns The content of its text parts, joined in order.
- */
-function buildRoundText(parts: readonly ReplyPart[]): string {
-  return parts
-    .flatMap((part) => (part.kind === "text" ? [part.content] : []))
-    .join("")
-}
-
-/**
- * Answers whether a part is a tool call.
- *
- * @param part - Part of a reply.
- * @returns True for a tool call.
- */
-function isToolCallPart(part: ReplyPart): part is ToolCallReplyPart {
-  return part.kind === "tool-call"
-}
-
-/**
  * Answers whether a part is a tool call that ran and returned its output.
  *
  * @param part - Part of a reply.
@@ -146,22 +112,6 @@ function isSucceededToolCallPart(
   part: ReplyPart
 ): part is SucceededToolCallReplyPart {
   return part.kind === "tool-call" && part.status === "succeeded"
-}
-
-/**
- * Answers whether a call has the result the model read.
- *
- * @param call - Stored call.
- * @returns True for a `succeeded`, `failed`, or `rejected` call.
- */
-export function isAnsweredToolCall(
-  call: ToolCallReplyPart
-): call is AnsweredToolCallReplyPart {
-  return (
-    call.status === "succeeded" ||
-    call.status === "failed" ||
-    call.status === "rejected"
-  )
 }
 
 /**
@@ -206,13 +156,13 @@ function createReasoningPresentation(
  * round's text as the answer when that round called no tools.
  */
 export function createReplyPresentation(
-  parts: readonly ReplyPart[],
+  parts: readonly ChatViewReplyPart[],
   isStreaming: boolean
 ): ReplyPresentation {
   const rounds = buildReplyPartRounds(parts)
-  const lastRound = rounds.at(-1) ?? []
-  const isAnswerRound = !lastRound.some(isToolCallPart)
-  const stepRounds = isAnswerRound ? rounds.slice(0, -1) : rounds
+  const stepRounds = isAnswerRound(rounds.at(-1) ?? [])
+    ? rounds.slice(0, -1)
+    : rounds
   return Object.freeze({
     reasoning: createReasoningPresentation(parts, isStreaming),
     steps: Object.freeze(
@@ -224,7 +174,7 @@ export function createReplyPresentation(
         })
       )
     ),
-    answer: isAnswerRound ? buildRoundText(lastRound) : ""
+    answer: buildReplyAnswer(parts)
   })
 }
 
@@ -283,6 +233,56 @@ export function formatReplyStepsLabel(
 }
 
 /**
+ * Formats the accessible name of one of a reply's controls.
+ *
+ * @param label - The control's visible text.
+ * @param replyNumber - One-based position of the reply among the
+ * transcript's replies.
+ * @returns The visible text, then the reply, such as `Thought for 3s,
+ * reply 2`, so the same control of different replies has different names.
+ */
+export function formatReplyControlName(
+  label: string,
+  replyNumber: number
+): string {
+  return `${label}, reply ${replyNumber}`
+}
+
+/**
+ * Formats the name of a tool call: its tool and what it is about.
+ *
+ * @param toolName - Name the model called; possibly empty.
+ * @param target - What the call is about; possibly empty.
+ * @returns Both, separated by a space, leaving out an empty one, such as
+ * `web_search night moths`.
+ */
+export function formatToolCallName(toolName: string, target: string): string {
+  return [toolName, target].filter((text) => text !== "").join(" ")
+}
+
+/**
+ * Formats the outcome a reply announces once it has ended.
+ *
+ * @param status - The reply's lifecycle state.
+ * @returns `Stopped` for an interrupted reply and `Failed` for a failed one;
+ * undefined for a reply that streams or completed, which announces no
+ * outcome.
+ */
+export function formatReplyOutcome(
+  status: ConversationAssistantMessageStatus
+): string | undefined {
+  switch (status) {
+    case "interrupted":
+      return "Stopped"
+    case "failed":
+      return "Failed"
+    case "streaming":
+    case "completed":
+      return undefined
+  }
+}
+
+/**
  * Formats the state of a tool call for the person.
  *
  * @param status - The call's stored state.
@@ -332,140 +332,57 @@ export function formatToolCallResultLabel(
 }
 
 /**
- * Calculates the last moment a part shows the reply working.
- *
- * @param part - Stored part.
- * @returns Its update time in milliseconds since the epoch; for an
- * interrupted call, its creation time, because the reply's ending, not its
- * work, set the call's update time.
- */
-function calculatePartWorkEnd(part: ReplyPart): number {
-  const isInterruptedCall =
-    part.kind === "tool-call" && part.status === "interrupted"
-  return Date.parse(isInterruptedCall ? part.createdAt : part.updatedAt)
-}
-
-/**
  * Calculates how long an ended reply worked.
  *
  * @param reply - Times and parts of the reply.
- * @returns Milliseconds from its creation to the latest part's work end, as
- * {@link calculatePartWorkEnd} measures it; to its update time when it has
- * no parts. Time the reply spent waiting after its last part, such as while
- * Lys was closed before startup recovery interrupted it, is not counted.
+ * @returns Milliseconds from its creation to the latest update time of any
+ * of its parts, whichever part that is; to its own update time when it has
+ * no parts. A call that waited for the person counts until it was answered,
+ * or until the reply was stopped while it waited. Time after the last
+ * part's update, such as while Lys was closed before startup recovery
+ * interrupted the reply, is not counted: recovery keeps each open call's
+ * update time.
  */
 export function calculateReplyWorkDuration(reply: ReplyWorkTimes): number {
   const workEnd =
     reply.parts.length === 0
       ? Date.parse(reply.updatedAt)
-      : Math.max(...reply.parts.map(calculatePartWorkEnd))
+      : Math.max(...reply.parts.map((part) => Date.parse(part.updatedAt)))
   return workEnd - Date.parse(reply.createdAt)
-}
-
-/**
- * Formats one argument value for display.
- *
- * @param value - Value parsed from the call's argument text.
- * @returns Text as it is; any other value as compact JSON.
- */
-function formatArgumentValue(value: unknown): string {
-  return typeof value === "string" ? value : JSON.stringify(value)
-}
-
-/**
- * Parses a call's argument text as a JSON object.
- *
- * @param argumentText - The model's argument text, which may be invalid.
- * @returns The object's entries in written order, or undefined when the text
- * is not a JSON object.
- */
-function parseArgumentEntries(
-  argumentText: string
-): readonly (readonly [string, unknown])[] | undefined {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(argumentText)
-  } catch {
-    return undefined
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
-    return undefined
-  return Object.entries(parsed)
-}
-
-/**
- * Parses a call's argument text into named values for display.
- *
- * @param argumentText - The model's argument text, which may be invalid.
- * @returns Each argument's name and displayed value in written order, or
- * undefined when the text is not a JSON object.
- */
-export function parseToolCallArguments(
-  argumentText: string
-): readonly (readonly [string, string])[] | undefined {
-  const entries = parseArgumentEntries(argumentText)
-  if (entries === undefined) return undefined
-  return Object.freeze(
-    entries.map(([name, value]) => [name, formatArgumentValue(value)] as const)
-  )
-}
-
-/**
- * Formats what a call is about, such as its query or address.
- *
- * @param call - Stored call.
- * @returns The value of its first text argument, or empty text when its
- * argument text is not a JSON object or has no text argument.
- */
-export function formatToolCallTarget(call: ToolCallReplyPart): string {
-  const target = parseArgumentEntries(call.argumentText)?.find(
-    (entry): entry is readonly [string, string] => typeof entry[1] === "string"
-  )
-  return target?.[1] ?? ""
-}
-
-/**
- * Lists the source numbers text cites.
- *
- * @param text - Text written by the model.
- * @returns Each number in a `[n]` marker, once, in first-cited order.
- */
-export function listCitedSourceNumbers(text: string): readonly number[] {
-  const numbers = Array.from(text.matchAll(CITATION_MARKER_PATTERN), (match) =>
-    Number(match[1])
-  )
-  return Object.freeze([...new Set(numbers)])
 }
 
 /**
  * Creates the sources listed under one reply.
  *
  * @param parts - The reply's parts.
- * @param answer - The reply's answer, as {@link createReplyPresentation}
- * lays it out; the text of its steps cites nothing, since it shows no links.
- * @param sources - Sources the reply may cite.
- * @returns The sources the answer cites, and those its succeeded calls
- * showed without being cited, each with the first tool that showed it.
- * Numbers without a source are left out.
+ * @param citedNumbers - Numbers its answer's prose cites, in first-cited
+ * order, as the store lists them; the text of its steps cites nothing, since
+ * it shows no links.
+ * @param sources - Sources the reply may cite, as {@link listReplySources}
+ * lists them.
+ * @returns The sources the answer cites, which its citation links open, and
+ * those its succeeded calls showed without being cited, each with the first
+ * tool that showed it. A cited number the reply may not cite is left out,
+ * since its marker is no link.
  */
 export function createReplySourcesPresentation(
   parts: readonly ReplyPart[],
-  answer: string,
+  citedNumbers: readonly number[],
   sources: readonly ConversationSource[]
 ): ReplySourcesPresentation {
   const sourcesByNumber = new Map(
     sources.map((source) => [source.number, source])
   )
-  const citedNumbers = listCitedSourceNumbers(answer)
   const cited = citedNumbers.flatMap((number) => {
     const source = sourcesByNumber.get(number)
     return source === undefined ? [] : [source]
   })
+  const citedSourceNumbers = new Set(cited.map((source) => source.number))
   const found = new Map<number, FoundSourcePresentation>()
   for (const call of parts.filter(isSucceededToolCallPart)) {
     for (const number of call.sourceNumbers) {
       const source = sourcesByNumber.get(number)
-      if (source === undefined || citedNumbers.includes(number)) continue
+      if (source === undefined || citedSourceNumbers.has(number)) continue
       if (!found.has(number))
         found.set(number, Object.freeze({ source, toolName: call.toolName }))
     }
@@ -477,58 +394,86 @@ export function createReplySourcesPresentation(
 }
 
 /**
- * Calculates the highest source number a reply's own calls showed.
+ * Lists the source numbers a reply's own calls showed.
  *
  * @param parts - The reply's parts.
- * @returns The highest number among its succeeded calls' sources; 0 when
- * they showed none.
+ * @returns The numbers its succeeded calls' results show, in call order;
+ * a number may repeat.
  */
-function calculateHighestShownSourceNumber(
+function listShownSourceNumbers(
   parts: readonly ReplyPart[]
-): number {
-  return Math.max(
-    0,
-    ...parts
-      .filter(isSucceededToolCallPart)
-      .flatMap((call) => call.sourceNumbers)
-  )
+): readonly number[] {
+  return parts
+    .filter(isSucceededToolCallPart)
+    .flatMap((call) => call.sourceNumbers)
 }
 
 /**
- * Calculates the highest source number each reply of a transcript may cite.
+ * Answers whether the backend sends a reply in this state to the model of
+ * later turns.
+ *
+ * @param status - Lifecycle state of a reply, as the chat view shows it.
+ * @returns True for `completed` and `interrupted`, whose answered calls and
+ * results later turns read; false for `failed`, which is left out of later
+ * turns, and for `streaming`, the turn still being written.
+ */
+function isContextReplyStatus(
+  status: ConversationAssistantMessageStatus
+): boolean {
+  switch (status) {
+    case "completed":
+    case "interrupted":
+      return true
+    case "failed":
+    case "streaming":
+      return false
+  }
+}
+
+/**
+ * Calculates the source numbers each reply of a transcript may cite: those
+ * its model read.
  *
  * @param messages - Transcript messages in conversation order.
- * @returns For each reply's identifier, the highest number its own calls or
- * an earlier reply's calls showed; 0 when none did. A conversation numbers
- * its sources in the order its calls show them, so a source above that
- * number was found by a later reply, which the reply could not have read.
+ * @returns For each reply's identifier, the numbers its own succeeded calls
+ * showed, together with those the succeeded calls of earlier completed or
+ * interrupted replies showed, which the backend sends to the model as
+ * context. A failed reply is left out of later turns, so the sources only it
+ * showed stay its own; a later reply's sources were found after the reply.
  */
-export function calculateReplySourceNumberLimits(
+export function calculateReplyCitableSourceNumbers(
   messages: readonly ReplySourceScopeMessage[]
-): ReadonlyMap<string, number> {
-  const limits = new Map<string, number>()
-  let limit = 0
+): ReadonlyMap<string, ReadonlySet<number>> {
+  const citableNumbers = new Map<string, ReadonlySet<number>>()
+  const contextNumbers = new Set<number>()
   for (const message of messages) {
     if (message.role === "user") continue
-    limit = Math.max(limit, calculateHighestShownSourceNumber(message.parts))
-    limits.set(message.id, limit)
+    const shownNumbers = listShownSourceNumbers(message.parts)
+    citableNumbers.set(
+      message.id,
+      new Set([...contextNumbers, ...shownNumbers])
+    )
+    if (!isContextReplyStatus(message.status)) continue
+    for (const number of shownNumbers) contextNumbers.add(number)
   }
-  return limits
+  return citableNumbers
 }
 
 /**
  * Lists the sources one reply may cite.
  *
  * @param sources - The conversation's sources, in number order.
- * @param sourceNumberLimit - Highest number the reply may cite, as
- * {@link calculateReplySourceNumberLimits} gives it.
- * @returns The sources numbered up to the limit, in number order.
+ * @param citableNumbers - Numbers the reply may cite, as
+ * {@link calculateReplyCitableSourceNumbers} gives them.
+ * @returns The sources with those numbers, in number order, keeping each
+ * source object, so the list holds the same objects while the reply's
+ * sources stay the same.
  */
 export function listReplySources(
   sources: readonly ConversationSource[],
-  sourceNumberLimit: number
+  citableNumbers: ReadonlySet<number>
 ): readonly ConversationSource[] {
   return Object.freeze(
-    sources.filter((source) => source.number <= sourceNumberLimit)
+    sources.filter((source) => citableNumbers.has(source.number))
   )
 }

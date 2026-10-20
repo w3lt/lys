@@ -43,7 +43,11 @@ const CONVERSATION_ID = createFixtureUuidV7(1)
 const USER_MESSAGE = createUserMessage(2, "Plan my trip")
 
 /** Text part {@link ASSISTANT_MESSAGE} has stored so far. */
-const STREAMED_TEXT_PART = createTextPart(4, 0, "Here is")
+const STREAMED_TEXT_PART = createTextPart({
+  sequence: 4,
+  round: 0,
+  content: "Here is"
+})
 
 /** Stored reply of {@link CONVERSATION} that the routes address. */
 const ASSISTANT_MESSAGE = createAssistantMessage(3, [STREAMED_TEXT_PART], {

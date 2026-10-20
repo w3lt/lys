@@ -43,7 +43,7 @@ describe("SqliteReplyPartRecordWriter", () => {
       agentCode: "lys",
       createdAt: "2025-01-01T00:00:00.000Z"
     })
-    const part = createTextPart(12, 0, "Hel")
+    const part = createTextPart({ sequence: 12, round: 0, content: "Hel" })
     records.saveAssistantMessage({
       id: REPLY_ID,
       conversationId: CONVERSATION_ID,

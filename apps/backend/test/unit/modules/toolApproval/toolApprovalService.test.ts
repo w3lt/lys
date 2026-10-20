@@ -51,10 +51,9 @@ describe("ToolApprovalService", () => {
       sendToolApprovalPrompt,
       vi.fn()
     )
-    await gate.sendToolApprovalPrompt(SEARCH_CALL)
 
-    expect(gate.isToolCallAllowedAtOnce(PAGE_CALL)).toBe(true)
-    expect(gate.isToolCallAllowedAtOnce(SEARCH_CALL)).toBe(false)
+    expect(gate.startToolCall(PAGE_CALL, () => true).status).toBe("allowed")
+    expect(gate.startToolCall(SEARCH_CALL, () => true).status).toBe("prompted")
     expect(sendToolApprovalPrompt.mock.calls).toEqual([[SEARCH_CALL]])
   })
 
@@ -68,8 +67,8 @@ describe("ToolApprovalService", () => {
       createAllowingPromptSender(),
       vi.fn()
     )
-    gate.isToolCallAllowedAtOnce(PAGE_CALL)
-    gate.isToolCallAllowedAtOnce(SEARCH_CALL)
+    gate.startToolCall(PAGE_CALL, () => true)
+    gate.startToolCall(SEARCH_CALL, () => true)
 
     expect(readJustRunToolNames).toHaveBeenCalledOnce()
   })
@@ -81,17 +80,17 @@ describe("ToolApprovalService", () => {
       if (read === undefined) throw new Error("Read more often than expected.")
       return read
     })
-    const decisions: boolean[] = []
+    const decisions: string[] = []
 
     for (let round = 0; round < 3; round += 1) {
       const gate = await service.createToolCallGate(
         createAllowingPromptSender(),
         vi.fn()
       )
-      decisions.push(gate.isToolCallAllowedAtOnce(PAGE_CALL))
+      decisions.push(gate.startToolCall(PAGE_CALL, () => true).status)
     }
 
-    expect(decisions).toEqual([false, true, false])
+    expect(decisions).toEqual(["prompted", "allowed", "prompted"])
   })
 
   it("allows no tool at once and reports once when the saved choices cannot be read", async () => {
@@ -105,8 +104,8 @@ describe("ToolApprovalService", () => {
       reportSettingsUnreadable
     )
 
-    expect(gate.isToolCallAllowedAtOnce(PAGE_CALL)).toBe(false)
-    expect(gate.isToolCallAllowedAtOnce(SEARCH_CALL)).toBe(false)
+    expect(gate.startToolCall(PAGE_CALL, () => true).status).toBe("prompted")
+    expect(gate.startToolCall(SEARCH_CALL, () => true).status).toBe("prompted")
     expect(reportSettingsUnreadable).toHaveBeenCalledOnce()
   })
 

@@ -8,6 +8,7 @@ import {
 import {
   CITATION_MARKER_RULE,
   formatExcerptText,
+  formatShownSourceTitle,
   formatSingleLineText,
   formatVisibleTitle
 } from "./untrustedText"
@@ -25,7 +26,7 @@ export const MAXIMUM_SEARCH_SNIPPET_LENGTH = 500
 type ShownSearchResult = Readonly<{
   /**
    * Flattened, bounded title, or the URL's host when the title has nothing
-   * a person can see.
+   * a person can see, as {@link formatShownSourceTitle} formats it.
    */
   title: string
   /** Checked, normalized URL. */
@@ -92,7 +93,7 @@ function buildShownResult(
     MAXIMUM_SEARCH_SNIPPET_LENGTH
   )
   return Object.freeze({
-    title: formatVisibleTitle(title) === "" ? new URL(url).host : title,
+    title: formatShownSourceTitle(title, url),
     url,
     snippet: snippet === "" ? NO_SNIPPET : snippet
   })

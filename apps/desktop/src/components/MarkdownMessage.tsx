@@ -335,8 +335,9 @@ const markdownComponents: Components = {
  * case-sensitively, renders as plain `text`; a fence without a language stays
  * unhighlighted. Processing is asynchronous: until a message's first pass
  * resolves, it renders as GitHub Flavored Markdown without the link, math,
- * and code-block handling. Later passes keep the previous output visible until
- * the new text is processed.
+ * citation, and code-block handling, so a `[n]` marker, even one inside
+ * math, stays text until then. Later passes keep the previous output visible
+ * until the new text is processed.
  * @param props - Markdown source, current streaming presentation state, the
  * caret's announcement, and the sources the text may cite.
  * @returns The rendered Markdown body and optional generation caret.
@@ -378,7 +379,7 @@ export function MarkdownMessage({
         ]}
         fallback={
           <ReactMarkdown
-            remarkPlugins={[remarkGfm, citationPlugin]}
+            remarkPlugins={[remarkGfm]}
             remarkRehypeOptions={footnoteRehypeOptions}
           >
             {text}

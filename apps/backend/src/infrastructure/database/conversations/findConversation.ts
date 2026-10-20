@@ -3,7 +3,9 @@ import {
   conversationMetadataSchema,
   conversationMessageSchema,
   conversationSourceSchema,
+  isAnsweredToolCallStatus,
   replyPartSchema,
+  toolCallReplyPartStatusSchema,
   type Conversation,
   type ConversationMetadata,
   type ConversationMessage,
@@ -13,13 +15,6 @@ import {
 
 /** One stored row as SQLite returns it, before validation. */
 type StoredRow = Record<string, unknown>
-
-/** Tool-call statuses whose part carries the result the model read. */
-const RESULT_TOOL_CALL_STATUSES: ReadonlySet<unknown> = new Set([
-  "succeeded",
-  "failed",
-  "rejected"
-])
 
 /** Parts of each reply of one conversation, by reply identity. */
 type StoredReplyParts = ReadonlyMap<unknown, readonly ReplyPart[]>
@@ -45,6 +40,19 @@ function findConversationMetadata(
 }
 
 /**
+ * Answers whether a stored call's status is one whose part carries the result
+ * the model read.
+ * @param status - Untrusted stored status.
+ * @returns True for a status {@link isAnsweredToolCallStatus} answers true
+ * for; false for any other status, and for a value that is no status, which
+ * the part schema then refuses.
+ */
+function hasStoredToolCallResult(status: unknown): boolean {
+  const parsedStatus = toolCallReplyPartStatusSchema.safeParse(status)
+  return parsedStatus.success && isAnsweredToolCallStatus(parsedStatus.data)
+}
+
+/**
  * Projects the columns of one stored tool call into its part shape.
  * @param row - Untrusted stored tool-call row.
  * @returns The untrusted projection: the result only for a status that has
@@ -63,7 +71,7 @@ function buildToolCallPart(row: StoredRow): unknown {
     argumentText: row.toolArguments,
     status: row.status
   }
-  const part = RESULT_TOOL_CALL_STATUSES.has(row.status)
+  const part = hasStoredToolCallResult(row.status)
     ? { ...common, result: row.content }
     : common
   if (row.status !== "succeeded") return part

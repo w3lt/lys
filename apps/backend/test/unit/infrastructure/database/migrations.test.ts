@@ -581,10 +581,23 @@ describe("migrateDatabase", () => {
       /CHECK constraint failed/
     ],
     [
+      "an empty user message",
+      {
+        role: "'user'",
+        replyId: "NULL",
+        position: "NULL",
+        round: "NULL",
+        content: "''",
+        updatedAt: "NULL"
+      },
+      /CHECK constraint failed/
+    ],
+    [
       "a text piece without its reply",
       { replyId: "NULL" },
       /CHECK constraint failed/
     ],
+    ["an empty text piece", { content: "''" }, /CHECK constraint failed/],
     [
       "an empty reasoning piece",
       { role: "'reasoning'", content: "''" },
@@ -618,6 +631,17 @@ describe("migrateDatabase", () => {
         role: "'tool_call'",
         content: "''",
         status: "'failed'",
+        toolName: "'read_page'",
+        toolArguments: "'{}'"
+      },
+      /CHECK constraint failed/
+    ],
+    [
+      "a rejected call without a result",
+      {
+        role: "'tool_call'",
+        content: "''",
+        status: "'rejected'",
         toolName: "'read_page'",
         toolArguments: "'{}'"
       },
@@ -690,6 +714,7 @@ describe("migrateDatabase", () => {
       toolName: "NULL",
       toolArguments: "NULL",
       sourceNumbers: "NULL",
+      updatedAt: "'2026-01-03T00:00:00.000Z'",
       ...change
     }
 
@@ -697,7 +722,7 @@ describe("migrateDatabase", () => {
       database.exec(
         `INSERT INTO conversation_messages
         (id, conversation_id, role, reply_id, position, round, model, content, status, finish_reason, tool_name, tool_arguments, source_numbers, created_at, updated_at)
-        VALUES ('p2', 'c1', ${row.role}, ${row.replyId}, ${row.position}, ${row.round}, ${row.model}, ${row.content}, ${row.status}, ${row.finishReason}, ${row.toolName}, ${row.toolArguments}, ${row.sourceNumbers}, '2026-01-03T00:00:00.000Z', '2026-01-03T00:00:00.000Z')`
+        VALUES ('p2', 'c1', ${row.role}, ${row.replyId}, ${row.position}, ${row.round}, ${row.model}, ${row.content}, ${row.status}, ${row.finishReason}, ${row.toolName}, ${row.toolArguments}, ${row.sourceNumbers}, '2026-01-03T00:00:00.000Z', ${row.updatedAt})`
       )
     ).toThrow(failure)
     expect(

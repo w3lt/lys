@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util"
 import type {
   ChatGenerationEvent,
   ChatToolApprovalAnswer,
@@ -12,7 +13,15 @@ import {
   type ReplyPart,
   type ToolDefinition
 } from "@lys/share"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type Mock
+} from "vitest"
 import Agent, {
   type AgentTurn,
   type AssistantMessageCompletion
@@ -92,6 +101,25 @@ const TURN_REQUEST = Object.freeze({
   model: "qwen/qwen3-8b",
   generationOptions: { temperature: 0.4, replyCeiling: 128 }
 })
+
+/**
+ * History of an answered question followed by a failed reply; a turn sends
+ * the question and its answer, not the failed reply.
+ */
+const ANSWERED_THEN_FAILED_HISTORY: readonly ConversationMessage[] =
+  Object.freeze([
+    createUserMessage(1, "Earlier question"),
+    createAssistantMessage(
+      2,
+      [createTextPart({ sequence: 12, round: 0, content: "Earlier answer" })],
+      { status: "completed", finishReason: "stop" }
+    ),
+    createAssistantMessage(
+      3,
+      [createTextPart({ sequence: 13, round: 0, content: "Failed answer" })],
+      { status: "failed" }
+    )
+  ])
 
 /** The stored conversation and streaming reply a case's agent writes. */
 type AgentTurnStore = Readonly<{
@@ -287,66 +315,74 @@ function createRoundStreams(...rounds: (readonly ReplyStreamEvent[])[]) {
 /** One step of a scripted stream: an event to yield, or an action to run. */
 type ScriptedStreamStep = ReplyStreamEvent | (() => void)
 
-/** Whether a scripted stream was released by its reader. */
-type StreamRelease = { isReleased: boolean }
-
-/**
- * Yields a scripted stream's events, running its actions between them, and
- * records when the reader releases the stream.
- *
- * @param steps - Events and actions in order.
- * @param release - Set once the stream is released, early or at its end.
- * @yields Each event of `steps`.
- */
-async function* createScriptedEventStream(
-  steps: readonly ScriptedStreamStep[],
-  release: StreamRelease
-): AsyncGenerator<ReplyStreamEvent> {
-  try {
-    for (const step of steps) {
-      if (typeof step === "function") step()
-      else yield step
-    }
-  } finally {
-    release.isReleased = true
-  }
-}
+/** A model whose one stream follows a script, and whether it was released. */
+type ScriptedStream = Readonly<{
+  /** Opens the scripted stream; records each request. */
+  openReplyStream: Mock<OpenReplyStream>
+  /**
+   * Answers whether the reader released the stream, early or at its end.
+   */
+  isReleased: () => boolean
+}>
 
 /**
  * Creates a model whose one stream follows a script and reports its release.
  *
  * @param steps - Events to yield and actions to run between them.
- * @returns A stream opener recording its requests, and the stream's release.
+ * @returns A stream opener recording its requests, and whether the stream
+ * was released.
  */
-function createScriptedStream(...steps: ScriptedStreamStep[]) {
-  const release: StreamRelease = { isReleased: false }
+function createScriptedStream(...steps: ScriptedStreamStep[]): ScriptedStream {
+  let isReleased = false
+  /**
+   * Creates the scripted stream.
+   *
+   * @returns An iterator that yields each event of `steps`, runs each action
+   * between them, and ends after the last step; once the reader releases it,
+   * early or at its end, the stream counts as released.
+   */
+  async function* createScriptedEventStream(): AsyncGenerator<ReplyStreamEvent> {
+    try {
+      for (const step of steps) {
+        if (typeof step === "function") step()
+        else yield step
+      }
+    } finally {
+      isReleased = true
+    }
+  }
   const openReplyStream = vi.fn<OpenReplyStream>(async () =>
-    createScriptedEventStream(steps, release)
+    createScriptedEventStream()
   )
-  return { openReplyStream, release }
+  return { openReplyStream, isReleased: () => isReleased }
 }
 
 /**
- * Checks that each event's part or fragment was already stored when the
+ * Answers whether an event's part or fragment was already stored when the
  * event was sent.
  *
  * @param event - Sent event.
  * @param storedParts - The reply's parts as stored when it was sent.
+ * @returns For `reply-part`, whether the stored part equals the sent one;
+ * for `reply-part-delta`, whether the stored reasoning or text part ends
+ * with the fragment; true for an event that carries no part.
  */
-function expectStoredBeforeSent(
+function isStoredBeforeSent(
   event: ChatGenerationEvent,
   storedParts: readonly ReplyPart[]
-): void {
+): boolean {
   if (event.type === "reply-part")
-    expect(storedParts.find((part) => part.id === event.part.id)).toEqual(
+    return isDeepStrictEqual(
+      storedParts.find((part) => part.id === event.part.id),
       event.part
     )
-  if (event.type !== "reply-part-delta") return
+  if (event.type !== "reply-part-delta") return true
   const storedPart = storedParts.find((part) => part.id === event.partId)
-  expect(
-    storedPart?.kind !== "tool-call" &&
-      storedPart?.content.endsWith(event.content)
-  ).toBe(true)
+  return (
+    storedPart !== undefined &&
+    storedPart.kind !== "tool-call" &&
+    storedPart.content.endsWith(event.content)
+  )
 }
 
 /** Client tool that reaches the network, whose answers are cleaned. */
@@ -623,16 +659,7 @@ describe("Agent", () => {
     await getAgentReplyOutcome({
       openReplyStream,
       abortSignal,
-      history: [
-        createUserMessage(1, "Earlier question"),
-        createAssistantMessage(2, [createTextPart(12, 0, "Earlier answer")], {
-          status: "completed",
-          finishReason: "stop"
-        }),
-        createAssistantMessage(3, [createTextPart(13, 0, "Failed answer")], {
-          status: "failed"
-        })
-      ]
+      history: ANSWERED_THEN_FAILED_HISTORY
     })
 
     expect(openReplyStream).toHaveBeenCalledWith({
@@ -720,9 +747,12 @@ describe("Agent", () => {
       )
     })
 
-    run.events.forEach((event, index) => {
-      expectStoredBeforeSent(event, run.storedPartsAtEvents[index] ?? [])
-    })
+    expect(
+      run.events.filter(
+        (event, index) =>
+          !isStoredBeforeSent(event, run.storedPartsAtEvents[index] ?? [])
+      )
+    ).toEqual([])
     expect(run.events).toHaveLength(5)
   })
 
@@ -770,7 +800,7 @@ describe("Agent", () => {
       INTERRUPTED_EVENT
     ])
     expect(run.persistedStates).toEqual([{ status: "interrupted" }])
-    expect(stream.release.isReleased).toBe(true)
+    expect(stream.isReleased()).toBe(true)
     expect(run.settlement).toEqual({ status: "resolved" })
   })
 
@@ -838,7 +868,7 @@ describe("Agent", () => {
     ])
     expect(run.persistedStates).toEqual([{ status: "interrupted" }])
     expect(run.reply.status).toBe("interrupted")
-    expect(stream.release.isReleased).toBe(true)
+    expect(stream.isReleased()).toBe(true)
   })
 
   it("interrupts when the stream ends after cancellation", async () => {
@@ -1400,16 +1430,7 @@ describe("Agent", () => {
       )
 
       const measurement = await agent.findContextMeasurement({
-        history: [
-          createUserMessage(1, "Earlier question"),
-          createAssistantMessage(2, [createTextPart(12, 0, "Earlier answer")], {
-            status: "completed",
-            finishReason: "stop"
-          }),
-          createAssistantMessage(3, [createTextPart(13, 0, "Failed answer")], {
-            status: "failed"
-          })
-        ],
+        history: ANSWERED_THEN_FAILED_HISTORY,
         model: TURN_REQUEST.model,
         tools: [READ_TEXT_FILE_TOOL, LOOK_UP_WORD_TOOL]
       })
@@ -1464,9 +1485,13 @@ describe("Agent", () => {
           createAssistantMessage(
             2,
             [
-              createTextPart(12, 0, "Let me look."),
+              createTextPart({
+                sequence: 12,
+                round: 0,
+                content: "Let me look."
+              }),
               readCall,
-              createTextPart(14, 1, "Buy milk.")
+              createTextPart({ sequence: 14, round: 1, content: "Buy milk." })
             ],
             { status: "completed", finishReason: "stop" }
           )

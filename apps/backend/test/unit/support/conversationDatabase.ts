@@ -1,5 +1,9 @@
 import { onTestFinished } from "vitest"
-import type { ConversationSource, ReplyPart } from "@lys/share"
+import {
+  isAnsweredToolCall,
+  type ConversationSource,
+  type ReplyPart
+} from "@lys/share"
 import StoredConversationHistoryEditor from "../../../src/modules/conversation/historyEditor"
 import StoredConversationHistoryReader from "../../../src/modules/conversation/historyReader"
 import StoredReplyParts from "../../../src/modules/conversation/replyParts"
@@ -217,7 +221,7 @@ function buildPartRowValues(
     reply.id,
     position,
     part.round,
-    "result" in part ? part.result : "",
+    isAnsweredToolCall(part) ? part.result : "",
     part.status,
     part.toolName,
     part.argumentText,

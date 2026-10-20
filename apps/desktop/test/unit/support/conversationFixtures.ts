@@ -26,6 +26,12 @@ import {
   type ReplyPart,
   type ToolCallReplyPart
 } from "@lys/share"
+import {
+  buildChatViewReplyPart,
+  listAnswerCitationNumbers,
+  type ChatViewReplyPart,
+  type ChatViewToolCallReplyPart
+} from "@/lib/store/chat-view/reply-parts"
 
 /**
  * Creates a syntactically valid UUIDv7 whose last group encodes `sequence`.
@@ -109,24 +115,29 @@ type FragmentPartFixture = Readonly<{
   content: string
 }>
 
+/** A stored reasoning or text part, which the chat view holds as it is. */
+export type FragmentReplyPart = Exclude<ReplyPart, { kind: "tool-call" }>
+
 /**
  * Builds a stored reasoning or text part.
  *
  * @param fixture - Kind, identity sequence, round, and text of the part.
  * @returns A frozen part stored at {@link FIXTURE_TIMESTAMP}, validated by the
  * shared schema.
+ * @throws If the shared schema reads the fixture as a tool call.
  */
-function buildFragmentPart(fixture: FragmentPartFixture): ReplyPart {
-  return Object.freeze(
-    replyPartSchema.parse({
-      kind: fixture.kind,
-      id: createFixtureUuidV7(fixture.sequence),
-      round: fixture.round,
-      createdAt: FIXTURE_TIMESTAMP,
-      updatedAt: FIXTURE_TIMESTAMP,
-      content: fixture.content
-    })
-  )
+function buildFragmentPart(fixture: FragmentPartFixture): FragmentReplyPart {
+  const part = replyPartSchema.parse({
+    kind: fixture.kind,
+    id: createFixtureUuidV7(fixture.sequence),
+    round: fixture.round,
+    createdAt: FIXTURE_TIMESTAMP,
+    updatedAt: FIXTURE_TIMESTAMP,
+    content: fixture.content
+  })
+  if (part.kind === "tool-call")
+    throw new Error("A reasoning or text fixture was read as a tool call")
+  return Object.freeze(part)
 }
 
 /**
@@ -142,7 +153,7 @@ export function buildTextPart(
   sequence: number,
   round: number,
   content: string
-): ReplyPart {
+): FragmentReplyPart {
   return buildFragmentPart({ kind: "text", sequence, round, content })
 }
 
@@ -159,7 +170,7 @@ export function buildReasoningPart(
   sequence: number,
   round: number,
   content: string
-): ReplyPart {
+): FragmentReplyPart {
   return buildFragmentPart({ kind: "reasoning", sequence, round, content })
 }
 
@@ -207,6 +218,22 @@ export function buildToolCallPart(
   })
   if (part.kind !== "tool-call") throw new Error("Expected a tool-call part")
   return Object.freeze(part)
+}
+
+/**
+ * Builds a tool call as the chat view holds it.
+ *
+ * @param call - Stored call, as {@link buildToolCallPart} builds it.
+ * @returns The copy {@link buildChatViewReplyPart} builds, which carries the
+ * call's parsed arguments.
+ * @throws If the copy is not a tool call.
+ */
+export function buildChatViewToolCallPart(
+  call: ToolCallReplyPart
+): ChatViewToolCallReplyPart {
+  const part = buildChatViewReplyPart(call)
+  if (part.kind !== "tool-call") throw new Error("Expected a tool-call part")
+  return part
 }
 
 /**
@@ -308,6 +335,97 @@ export function buildEndedAssistantMessage(
     status,
     finishReason: null
   })
+}
+
+/** An assistant message fixture as the chat view holds it. */
+export type ChatViewAssistantMessageFixture<
+  Message extends ConversationAssistantMessage
+> = Readonly<
+  Omit<Message, "parts"> & {
+    /** The reply's parts as the chat view's store builds them. */
+    parts: readonly ChatViewReplyPart[]
+    /** Numbers the reply's answer cites, as the store lists them. */
+    answerCitationNumbers: readonly number[]
+  }
+>
+
+/**
+ * Builds the chat view's copy of an assistant message fixture, as its store
+ * builds one from a stored or streamed reply.
+ *
+ * @param message - Assistant message validated by the shared schema.
+ * @returns A frozen copy whose parts {@link buildChatViewReplyPart} built,
+ * so a tool call carries its parsed arguments, with the numbers its answer
+ * cites as {@link listAnswerCitationNumbers} lists them.
+ */
+export function buildChatViewAssistantMessage<
+  Message extends ConversationAssistantMessage
+>(message: Readonly<Message>): ChatViewAssistantMessageFixture<Message> {
+  const parts = Object.freeze(message.parts.map(buildChatViewReplyPart))
+  return Object.freeze({
+    ...message,
+    parts,
+    answerCitationNumbers: listAnswerCitationNumbers(parts)
+  })
+}
+
+/**
+ * Builds a streaming reply as the chat view holds it.
+ *
+ * @param sequence - Identity sequence of the message.
+ * @param body - Parts received so far, or their text as one text part;
+ * possibly empty.
+ * @returns {@link buildStreamingAssistantMessage}'s reply, as
+ * {@link buildChatViewAssistantMessage} copies it.
+ */
+export function buildStreamingChatViewReply(
+  sequence: number,
+  body: string | readonly ReplyPart[]
+): ChatViewAssistantMessageFixture<AssistantMessageFixture<"streaming", null>> {
+  return buildChatViewAssistantMessage(
+    buildStreamingAssistantMessage(sequence, body)
+  )
+}
+
+/**
+ * Builds a completed reply as the chat view holds it.
+ *
+ * @param sequence - Identity sequence of the message.
+ * @param body - The reply's parts, or its text as one text part.
+ * @returns {@link buildCompletedAssistantMessage}'s reply, which the model
+ * stopped, as {@link buildChatViewAssistantMessage} copies it.
+ */
+export function buildCompletedChatViewReply(
+  sequence: number,
+  body: string | readonly ReplyPart[]
+): ChatViewAssistantMessageFixture<
+  AssistantMessageFixture<"completed", "stop" | "length">
+> {
+  return buildChatViewAssistantMessage(
+    buildCompletedAssistantMessage(sequence, body)
+  )
+}
+
+/**
+ * Builds a reply that ended without completing, as the chat view holds it.
+ *
+ * @param sequence - Identity sequence of the message.
+ * @param body - Parts stored before it ended, or their text as one text
+ * part.
+ * @param status - Whether the reply was interrupted or failed.
+ * @returns {@link buildEndedAssistantMessage}'s reply, as
+ * {@link buildChatViewAssistantMessage} copies it.
+ */
+export function buildEndedChatViewReply(
+  sequence: number,
+  body: string | readonly ReplyPart[],
+  status: "interrupted" | "failed"
+): ChatViewAssistantMessageFixture<
+  AssistantMessageFixture<"interrupted" | "failed", null>
+> {
+  return buildChatViewAssistantMessage(
+    buildEndedAssistantMessage(sequence, body, status)
+  )
 }
 
 /**

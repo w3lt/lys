@@ -1,3 +1,4 @@
+import type { ConversationSource } from "@lys/share"
 import { describe, expect, it } from "vitest"
 import SourceCatalog from "../../../../src/modules/agent/sourceCatalog"
 
@@ -88,9 +89,7 @@ describe("SourceCatalog", () => {
   })
 
   it("keeps a stored source as it was given, though the caller changes its object later", () => {
-    const storedSource: { number: number; url: string; title: string } = {
-      ...STORED_SOURCE
-    }
+    const storedSource: ConversationSource = { ...STORED_SOURCE }
     const catalog = new SourceCatalog([storedSource])
     storedSource.number = 99
     storedSource.title = "Changed"

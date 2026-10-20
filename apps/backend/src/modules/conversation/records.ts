@@ -243,8 +243,9 @@ export interface ConversationTurnRecordWriter {
    * @param updatedAt - Message timestamp stored on each interrupted reply.
    * @remarks Keeps each reply's parts, has no finish reason, and changes no
    * conversation's activity time. Each such reply's tool calls still waiting
-   * for approval or running become interrupted too. Repeating the call
-   * changes nothing more.
+   * for approval or running become interrupted too, keeping their
+   * `updatedAt`: the reply stopped working when the earlier process ended,
+   * not now. Repeating the call changes nothing more.
    * @throws If the store is closed or the write fails.
    */
   updateAllStreamingAssistantMessagesToInterrupted(updatedAt: string): void
@@ -322,9 +323,10 @@ export interface ReplyPartRecordWriter {
    * not stored, or the call is not one of its calls in a state the change
    * follows (`running` and `rejected` follow `awaiting-approval`;
    * `succeeded` and `failed` follow `running`), which changes nothing.
-   * @throws If the store is closed, the write fails, or a source's number is
-   * stored for another URL in the conversation. A source whose URL the
-   * conversation already stores keeps its stored row.
+   * @throws If the store is closed, the write fails, or the conversation
+   * stores a source's number for another URL or its URL under another
+   * number; nothing is then changed. A source whose number and URL the
+   * conversation already stores together keeps its stored row and title.
    */
   updateReplyToolCall(
     input: UpdateReplyToolCallInput

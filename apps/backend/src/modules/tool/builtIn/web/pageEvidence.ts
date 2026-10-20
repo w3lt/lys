@@ -5,6 +5,7 @@ import type { PassageCoverage, PassageSelection } from "./passageDistillation"
 import {
   CITATION_MARKER_RULE,
   formatDelimiterFreeText,
+  formatShownSourceTitle,
   formatSingleLineText,
   formatVisibleTitle
 } from "./untrustedText"
@@ -69,21 +70,36 @@ function formatPageField(text: string): string {
 }
 
 /**
+ * Formats the page's title as the model is shown it.
+ *
+ * @param url - URL Lys asked to read.
+ * @param article - Article whose title the page stated.
+ * @returns The title as {@link formatPageField} formats it, or the URL's
+ * host when it has nothing a person can see, as
+ * {@link formatShownSourceTitle} decides.
+ */
+function formatShownPageTitle(url: PageUrl, article: PageArticle): string {
+  return formatShownSourceTitle(formatPageField(article.title), url)
+}
+
+/**
  * Builds the source a page read shows, before it is numbered.
  *
  * @param url - URL Lys asked to read; where the page's redirects led, if
  * anywhere, is not known.
  * @param article - Article whose title the page stated.
- * @returns The URL and the title as the model reads it, as
- * {@link formatVisibleTitle} formats it; or the URL's host when the title has
- * nothing a person can see.
+ * @returns The URL and the title shown to the model, as
+ * {@link formatVisibleTitle} formats it from the title
+ * {@link formatShownPageTitle} gives.
  */
 export function buildPageSourceCandidate(
   url: PageUrl,
   article: PageArticle
 ): WebSourceCandidate {
-  const title = formatVisibleTitle(formatPageField(article.title))
-  return Object.freeze({ url, title: title === "" ? new URL(url).host : title })
+  return Object.freeze({
+    url,
+    title: formatVisibleTitle(formatShownPageTitle(url, article))
+  })
 }
 
 /**
@@ -173,12 +189,14 @@ function formatReadLines(input: PageEvidenceInput): string {
 /**
  * Formats the lines that give what the page says about itself.
  *
+ * @param url - URL Lys asked to read.
  * @param article - Article whose title, site, and date the page stated.
- * @returns The title, and the site and date when the page states them, one
- * per line, each flattened and cut by {@link formatPageField}.
+ * @returns The title as {@link formatShownPageTitle} gives it, and the site
+ * and date when the page states them, one per line, each flattened and cut
+ * by {@link formatPageField}.
  */
-function formatPageFieldLines(article: PageArticle): string {
-  const lines = [`Page: ${formatPageField(article.title)}`]
+function formatPageFieldLines(url: PageUrl, article: PageArticle): string {
+  const lines = [`Page: ${formatShownPageTitle(url, article)}`]
   if (article.siteName !== undefined) {
     lines.push(`Site: ${formatPageField(article.siteName)}`)
   }
@@ -205,7 +223,7 @@ export function formatPageEvidence(input: PageEvidenceInput): string {
     formatReadLines(input),
     UNTRUSTED_CONTENT_NOTICE,
     PAGE_CONTENT_START,
-    formatPageFieldLines(input.article),
+    formatPageFieldLines(input.url, input.article),
     formatPassageText(input.selection),
     PAGE_CONTENT_END,
     `Cite this page with ${CITATION_MARKER_RULE}`

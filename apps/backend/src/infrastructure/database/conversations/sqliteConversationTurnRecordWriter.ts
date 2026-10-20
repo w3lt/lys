@@ -27,9 +27,10 @@ const UPDATE_CONVERSATION_OPEN_TOOL_CALLS_TO_INTERRUPTED_SQL = `UPDATE conversat
 
 /**
  * Marks the waiting and running tool calls of every streaming reply as
- * interrupted; bound to the timestamp.
+ * interrupted, keeping each call's update time: the last time the call
+ * changed while the reply worked.
  */
-const UPDATE_ALL_OPEN_TOOL_CALLS_TO_INTERRUPTED_SQL = `UPDATE conversation_messages SET status = 'interrupted', updated_at = ?
+const UPDATE_ALL_OPEN_TOOL_CALLS_TO_INTERRUPTED_SQL = `UPDATE conversation_messages SET status = 'interrupted'
       WHERE role = 'tool_call' AND status IN ('awaiting-approval', 'running')
         AND reply_id IN (SELECT id FROM conversation_messages
           WHERE role = 'assistant' AND status = 'streaming')`
@@ -47,15 +48,14 @@ const UPDATE_REPLY_OPEN_TOOL_CALLS_TO_INTERRUPTED_SQL = `UPDATE conversation_mes
  * interrupted.
  *
  * @param statements - Compilation lent to the running write operation.
- * @param updatedAt - Timestamp stored on every changed row.
+ * @param updatedAt - Timestamp stored on every interrupted reply; each call
+ * keeps its own update time.
  */
 function updateAllStreamingRepliesToInterrupted(
   statements: DatabaseStatementCompiler,
   updatedAt: string
 ): void {
-  statements
-    .getStatement(UPDATE_ALL_OPEN_TOOL_CALLS_TO_INTERRUPTED_SQL)
-    .run(updatedAt)
+  statements.getStatement(UPDATE_ALL_OPEN_TOOL_CALLS_TO_INTERRUPTED_SQL).run()
   statements
     .getStatement(
       `UPDATE conversation_messages SET status = 'interrupted', updated_at = ?

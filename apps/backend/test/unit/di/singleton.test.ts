@@ -71,8 +71,10 @@ function createAcquisition<Service>(
  * Builds a turn that says `Hello` to `qwen/qwen3-8b` without history,
  * sources, or tools.
  *
- * @returns The turn, whose storage accepts every write and whose senders and
- * reporters are spies.
+ * @returns The turn: it accepts the reply's final state, its part writes
+ * are spies that store nothing, which the turn contract reads as a refused
+ * write, and its senders and reporters are spies. The cases that use it read
+ * only what the model was sent.
  */
 function buildHelloAgentTurn(): AgentTurn {
   return {
@@ -237,20 +239,20 @@ describe("createSingletonServices", () => {
       vi.fn()
     )
 
-    expect(
-      gate.isToolCallAllowedAtOnce({
-        id: createFixtureUuidV7(1),
-        toolName: "read_page",
-        arguments: { url: "https://example.com/" }
-      })
-    ).toBe(true)
-    expect(
-      gate.isToolCallAllowedAtOnce({
-        id: createFixtureUuidV7(2),
-        toolName: "web_search",
-        arguments: { query: "lys" }
-      })
-    ).toBe(false)
+    const pageCall = {
+      id: createFixtureUuidV7(1),
+      toolName: "read_page",
+      arguments: { url: "https://example.com/" }
+    }
+    const searchCall = {
+      id: createFixtureUuidV7(2),
+      toolName: "web_search",
+      arguments: { query: "lys" }
+    }
+
+    expect(gate.startToolCall(pageCall, () => true).status).toBe("allowed")
+    expect(gate.startToolCall(searchCall, () => true).status).toBe("prompted")
+    expect(sendToolApprovalPrompt.mock.calls).toEqual([[searchCall]])
   })
 
   it("returns a frozen bundle of the services", async () => {

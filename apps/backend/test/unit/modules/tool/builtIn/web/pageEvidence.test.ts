@@ -330,11 +330,28 @@ describe("buildPageSourceCandidate", () => {
 
   it.each([
     ["invisible characters", "\u200B\u{E0041}"],
-    ["invisible characters and spaces", "\u200B \u200B"]
-  ])("names a page whose title shows only %s by its host", (_label, title) => {
-    expect(buildPageSourceCandidate(PAGE_URL, { ...ARTICLE, title })).toEqual({
-      url: "https://moths.example/article",
-      title: "moths.example"
-    })
-  })
+    ["invisible characters and spaces", "\u200B \u200B"],
+    ["zero-width, direction, and word-joiner characters", "\u200B\u202E\u2060"],
+    ["a Hangul filler", "\u3164"],
+    ["a joiner shielded by variation selectors", "\uFE00\u200D\uFE00"]
+  ])(
+    "names a page whose title shows only %s by its host, in the candidate and the evidence alike",
+    (_label, title) => {
+      const article = { ...ARTICLE, title }
+
+      expect(buildPageSourceCandidate(PAGE_URL, article)).toEqual({
+        url: "https://moths.example/article",
+        title: "moths.example"
+      })
+      expect(
+        formatPageEvidence({
+          url: PAGE_URL,
+          sourceNumber: 3,
+          article,
+          selection: COMPLETE_SELECTION,
+          isTruncated: false
+        })
+      ).toContain("<<<page content>>>\n\nPage: moths.example\nSite:")
+    }
+  )
 })

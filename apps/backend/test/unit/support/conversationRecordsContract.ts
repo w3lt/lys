@@ -129,7 +129,7 @@ const CHANGED_AT = "2026-03-04T05:06:07.890Z"
  */
 const EVERY_KIND_OF_REPLY_PART = Object.freeze([
   createReasoningPart(12, 0, "They ask about moths"),
-  createTextPart(13, 0, "Let me look"),
+  createTextPart({ sequence: 13, round: 0, content: "Let me look" }),
   createToolCallPart(
     {
       sequence: 14,
@@ -160,7 +160,7 @@ const EVERY_KIND_OF_REPLY_PART = Object.freeze([
     { sequence: 17, round: 0, toolName: "", argumentText: "" },
     { status: "interrupted" }
   ),
-  createTextPart(18, 1, "Moths are insects [1].")
+  createTextPart({ sequence: 18, round: 1, content: "Moths are insects [1]." })
 ])
 
 /** First page of every stored conversation at the default page size. */
@@ -330,8 +330,11 @@ function registerStoredPartAndSourceRejectionCases(
     saveConversationWithReply(harness, CONVERSATION_ID, {
       sequence: 11,
       parts: [
-        createTextPart(12, 0, "Kept"),
-        { ...createTextPart(13, 0, "Bad"), id: "not-a-uuid" }
+        createTextPart({ sequence: 12, round: 0, content: "Kept" }),
+        {
+          ...createTextPart({ sequence: 13, round: 0, content: "Bad" }),
+          id: "not-a-uuid"
+        }
       ],
       status: "completed",
       finishReason: "stop"
@@ -433,12 +436,12 @@ function registerReplyPreviewCases(
       harness,
       [
         createReasoningPart(151, 0, "Thinking"),
-        createTextPart(152, 0, "First"),
+        createTextPart({ sequence: 152, round: 0, content: "First" }),
         createToolCallPart(
           { sequence: 153, round: 0, toolName: "web_search", argumentText: "" },
           { status: "succeeded", result: "Tool output", sourceNumbers: [] }
         ),
-        createTextPart(154, 1, "Final answer"),
+        createTextPart({ sequence: 154, round: 1, content: "Final answer" }),
         createReasoningPart(155, 1, "Afterthought")
       ],
       "completed"
@@ -488,7 +491,7 @@ function registerReplyPartSearchCases(
           { sequence: 152, round: 0, toolName: "web_search", argumentText: "" },
           { status: "succeeded", result: "A toolword", sourceNumbers: [] }
         ),
-        createTextPart(153, 1, "A textword")
+        createTextPart({ sequence: 153, round: 1, content: "A textword" })
       ],
       "completed"
     )
@@ -1070,7 +1073,9 @@ export function registerConversationRecordEditorContractSuite(
         const harness = createHarness()
         saveConversationWithReply(harness, CONVERSATION_ID, {
           sequence: 11,
-          parts: [createTextPart(1011, 0, "Partial")],
+          parts: [
+            createTextPart({ sequence: 1011, round: 0, content: "Partial" })
+          ],
           status: "streaming",
           finishReason: null
         })
@@ -1324,9 +1329,13 @@ export function registerConversationTurnRecordWriterContractSuite(
     })
 
     describe("updateAllStreamingAssistantMessagesToInterrupted", () => {
-      it("interrupts every streaming reply and its waiting and running calls, keeping its parts and the activity time", () => {
+      it("interrupts every streaming reply and its waiting and running calls, keeping its parts, the calls' update times, and the activity time", () => {
         const harness = createHarness()
-        const text = createTextPart(1011, 0, "Partial")
+        const text = createTextPart({
+          sequence: 1011,
+          round: 0,
+          content: "Partial"
+        })
         const waitingCall = createSearchCall(1012, "awaiting-approval")
         const runningCall = createSearchCall(1013, "running")
         const finishedCall = createToolCallPart(
@@ -1358,8 +1367,8 @@ export function registerConversationTurnRecordWriterContractSuite(
           {
             parts: [
               text,
-              { ...waitingCall, status: "interrupted", updatedAt: CHANGED_AT },
-              { ...runningCall, status: "interrupted", updatedAt: CHANGED_AT },
+              { ...waitingCall, status: "interrupted" },
+              { ...runningCall, status: "interrupted" },
               finishedCall
             ],
             status: "interrupted",
@@ -1379,7 +1388,9 @@ export function registerConversationTurnRecordWriterContractSuite(
         const harness = createHarness()
         saveConversationWithReply(harness, CONVERSATION_ID, {
           sequence: 11,
-          parts: [createTextPart(1011, 0, "Partial")],
+          parts: [
+            createTextPart({ sequence: 1011, round: 0, content: "Partial" })
+          ],
           status: "streaming",
           finishReason: null
         })
@@ -1405,7 +1416,9 @@ export function registerConversationTurnRecordWriterContractSuite(
         const harness = createHarness()
         saveConversationWithReply(harness, CONVERSATION_ID, {
           sequence: 11,
-          parts: [createTextPart(1011, 0, "Done")],
+          parts: [
+            createTextPart({ sequence: 1011, round: 0, content: "Done" })
+          ],
           ...state
         })
 
@@ -1424,7 +1437,7 @@ export function registerConversationTurnRecordWriterContractSuite(
         const harness = createHarness()
         saveConversationWithReply(harness, CONVERSATION_ID, {
           sequence: 11,
-          parts: [createTextPart(1011, 0, "Hi")],
+          parts: [createTextPart({ sequence: 1011, round: 0, content: "Hi" })],
           status: "streaming",
           finishReason: null
         })
@@ -1445,7 +1458,9 @@ export function registerConversationTurnRecordWriterContractSuite(
         ).toMatchObject({
           messages: [
             {
-              parts: [createTextPart(1011, 0, "Hi")],
+              parts: [
+                createTextPart({ sequence: 1011, round: 0, content: "Hi" })
+              ],
               status: "completed",
               finishReason: "length",
               updatedAt: CHANGED_AT
@@ -1545,7 +1560,9 @@ export function registerConversationTurnRecordWriterContractSuite(
           const harness = createHarness()
           saveConversationWithReply(harness, CONVERSATION_ID, {
             sequence: 11,
-            parts: [createTextPart(1011, 0, "Hi")],
+            parts: [
+              createTextPart({ sequence: 1011, round: 0, content: "Hi" })
+            ],
             status: "streaming",
             finishReason: null
           })
@@ -1568,7 +1585,9 @@ export function registerConversationTurnRecordWriterContractSuite(
         const harness = createHarness()
         saveConversationWithReply(harness, CONVERSATION_ID, {
           sequence: 11,
-          parts: [createTextPart(1011, 0, "Done")],
+          parts: [
+            createTextPart({ sequence: 1011, round: 0, content: "Done" })
+          ],
           status: "completed",
           finishReason: "stop"
         })
@@ -1911,7 +1930,11 @@ export function registerConversationTurnTransactionContractSuite(
 
     it("interrupts only the addressed conversation's streaming replies and their open calls", () => {
       const harness = createHarness()
-      const text = createTextPart(1011, 0, "Partial")
+      const text = createTextPart({
+        sequence: 1011,
+        round: 0,
+        content: "Partial"
+      })
       const runningCall = createSearchCall(1012, "running")
       const otherWaitingCall = createSearchCall(1022, "awaiting-approval")
       saveConversationWithReply(harness, CONVERSATION_ID, {
@@ -1961,7 +1984,7 @@ export function registerConversationTurnTransactionContractSuite(
       const harness = createHarness()
       saveConversationWithReply(harness, CONVERSATION_ID, {
         sequence: 11,
-        parts: [createTextPart(1011, 0, "Done")],
+        parts: [createTextPart({ sequence: 1011, round: 0, content: "Done" })],
         status: "completed",
         finishReason: "stop"
       })
@@ -2118,11 +2141,15 @@ function registerCreateReplyPartStorageCases(
 ): void {
   it("stores each part after the reply's earlier ones, exactly as given", () => {
     const harness = createHarness()
-    const earlier = createTextPart(1001, 0, "Earlier")
+    const earlier = createTextPart({
+      sequence: 1001,
+      round: 0,
+      content: "Earlier"
+    })
     saveReplyWithParts(harness, [earlier])
     const created = [
       createReasoningPart(1002, 1, "Thinking"),
-      createTextPart(1003, 1, "Looking"),
+      createTextPart({ sequence: 1003, round: 1, content: "Looking" }),
       createSearchCall(1004, "awaiting-approval"),
       createToolCallPart(
         { sequence: 1005, round: 1, toolName: "nope", argumentText: "x" },
@@ -2141,7 +2168,7 @@ function registerCreateReplyPartStorageCases(
     saveReplyWithParts(harness, [])
 
     createTestReplyPart(harness, {
-      ...createTextPart(1001, 0, "Text"),
+      ...createTextPart({ sequence: 1001, round: 0, content: "Text" }),
       createdAt: CHANGED_AT,
       updatedAt: CHANGED_AT
     })
@@ -2163,25 +2190,35 @@ function registerCreateReplyPartRefusalCases(
     const harness = createHarness()
     saveReplyWithParts(harness, [], "interrupted")
 
-    expect(createTestReplyPart(harness, createTextPart(1001, 0, "Late"))).toBe(
-      false
-    )
+    expect(
+      createTestReplyPart(
+        harness,
+        createTextPart({ sequence: 1001, round: 0, content: "Late" })
+      )
+    ).toBe(false)
     expect(readReplyParts(harness)).toEqual([])
   })
 
   it("returns false for a reply that is not stored", () => {
     const harness = createHarness()
 
-    expect(createTestReplyPart(harness, createTextPart(1001, 0, "Text"))).toBe(
-      false
-    )
+    expect(
+      createTestReplyPart(
+        harness,
+        createTextPart({ sequence: 1001, round: 0, content: "Text" })
+      )
+    ).toBe(false)
   })
 
   it("refuses a part whose identity is already stored and keeps the stored one", () => {
     const harness = createHarness()
-    const stored = createTextPart(1001, 0, "Stored")
+    const stored = createTextPart({
+      sequence: 1001,
+      round: 0,
+      content: "Stored"
+    })
     saveReplyWithParts(harness, [stored])
-    const again = createTextPart(1001, 0, "Again")
+    const again = createTextPart({ sequence: 1001, round: 0, content: "Again" })
 
     expect(() => createTestReplyPart(harness, again)).toThrow()
     expect(readReplyParts(harness)).toEqual([stored])
@@ -2199,7 +2236,11 @@ function registerUpdateReplyPartContentStorageCases(
 ): void {
   it.each([
     ["reasoning", createReasoningPart(1001, 0, "Think"), "Think a b"],
-    ["text", createTextPart(1001, 0, "Hi"), "Hi a b"]
+    [
+      "text",
+      createTextPart({ sequence: 1001, round: 0, content: "Hi" }),
+      "Hi a b"
+    ]
   ])(
     "appends fragments to a %s part in call order",
     (_label, part, content) => {
@@ -2219,7 +2260,7 @@ function registerUpdateReplyPartContentStorageCases(
 
   it("moves the conversation's activity time forward with each fragment", () => {
     const harness = createHarness()
-    const part = createTextPart(1001, 0, "Hi")
+    const part = createTextPart({ sequence: 1001, round: 0, content: "Hi" })
     saveReplyWithParts(harness, [part])
     const beforeFragments = getActivityTime(harness)
 
@@ -2240,7 +2281,7 @@ function registerUpdateReplyPartContentRefusalCases(
 ): void {
   it("returns false for a finalized reply and keeps the part", () => {
     const harness = createHarness()
-    const part = createTextPart(1001, 0, "Done")
+    const part = createTextPart({ sequence: 1001, round: 0, content: "Done" })
     saveReplyWithParts(harness, [part], "interrupted")
 
     expect(updateTestReplyPartContent(harness, part.id, " late")).toBe(false)
@@ -2253,7 +2294,7 @@ function registerUpdateReplyPartContentRefusalCases(
     saveReplyWithParts(harness, [call])
     saveConversationWithReply(harness, OTHER_CONVERSATION_ID, {
       sequence: 21,
-      parts: [createTextPart(1021, 0, "Other")],
+      parts: [createTextPart({ sequence: 1021, round: 0, content: "Other" })],
       status: "streaming",
       finishReason: null
     })
@@ -2466,32 +2507,47 @@ function registerUpdateReplyToolCallReplyRefusalCases(
   )
 }
 
+/** Source the conversation stores before a source-refusal case. */
+const STORED_SOURCE: ConversationSource = Object.freeze({
+  number: 1,
+  url: "https://stored.example/",
+  title: "A"
+})
+
 /**
- * Registers the {@link ReplyPartRecordWriter.updateReplyToolCall} case that
- * refuses a source numbered for another URL.
+ * Registers the {@link ReplyPartRecordWriter.updateReplyToolCall} cases that
+ * refuse a source in conflict with a stored one.
  *
  * @param createHarness - Creates the records over an empty store per case.
  */
-function registerUpdateReplyToolCallSourceRefusalCase(
+function registerUpdateReplyToolCallSourceRefusalCases(
   createHarness: ConversationRecordsHarnessFactory
 ): void {
-  it("refuses a source whose number the conversation stores for another URL and changes nothing", () => {
+  it.each([
+    [
+      "whose number the conversation stores for another URL",
+      { number: 1, url: "https://other.example/", title: "B" }
+    ],
+    [
+      "whose URL the conversation stores under another number",
+      { number: 2, url: STORED_SOURCE.url, title: "B" }
+    ]
+  ] as const)("refuses a source %s and changes nothing", (_label, source) => {
     const harness = createHarness()
     const call = createSearchCall(1001, "running")
     saveReplyWithParts(harness, [call])
-    const stored = { number: 1, url: "https://stored.example/", title: "A" }
-    harness.saveSource(CONVERSATION_ID, stored)
+    harness.saveSource(CONVERSATION_ID, STORED_SOURCE)
     const success = {
       status: "succeeded",
       result: "Results",
-      sources: [{ number: 1, url: "https://other.example/", title: "B" }]
+      sources: [source]
     } as const
 
     expect(() => updateTestReplyToolCall(harness, call.id, success)).toThrow()
     expect(readReplyParts(harness)).toEqual([call])
     expect(
       harness.recordReader.findConversation(CONVERSATION_ID)?.sources
-    ).toEqual([stored])
+    ).toEqual([STORED_SOURCE])
   })
 }
 
@@ -2520,7 +2576,7 @@ export function registerReplyPartRecordWriterContractSuite(
       registerUpdateReplyToolCallSuccessCases(createHarness)
       registerUpdateReplyToolCallStateRefusalCases(createHarness)
       registerUpdateReplyToolCallReplyRefusalCases(createHarness)
-      registerUpdateReplyToolCallSourceRefusalCase(createHarness)
+      registerUpdateReplyToolCallSourceRefusalCases(createHarness)
     })
 
     it("rejects every operation after the store closes", () => {
@@ -2529,7 +2585,10 @@ export function registerReplyPartRecordWriterContractSuite(
       const partId = createFixtureUuidV7(1001)
 
       expect(() =>
-        createTestReplyPart(harness, createTextPart(1001, 0, "Text"))
+        createTestReplyPart(
+          harness,
+          createTextPart({ sequence: 1001, round: 0, content: "Text" })
+        )
       ).toThrow("Database is closed")
       expect(() => updateTestReplyPartContent(harness, partId, "Text")).toThrow(
         "Database is closed"

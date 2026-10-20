@@ -12,8 +12,8 @@ export type SourceLinkProps = {
 /**
  * Presents one numbered source as a link to it.
  *
- * @remarks Presentational. Shows the source's number, title, and site; the
- * link opens the source in a new tab without a referrer.
+ * @remarks Shows the source's number, title, and site; the link opens the
+ * source in a new tab without a referrer.
  * @param props - The numbered source.
  * @returns The source link.
  */

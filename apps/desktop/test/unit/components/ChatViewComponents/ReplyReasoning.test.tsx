@@ -13,13 +13,14 @@ describe("ReplyReasoning", () => {
           isThinking: false,
           durationMs: 4_200
         }}
+        replyNumber={3}
       />
     )
     const reasoningText = screen.getByText(/They greet me\./)
 
     const whileCollapsed = reasoningText
     expect(whileCollapsed).not.toBeVisible()
-    await user.click(screen.getByText("Thought for 4s"))
+    await user.click(screen.getByLabelText("Thought for 4s, reply 3"))
 
     expect(reasoningText).toBeVisible()
     expect(reasoningText.textContent).toBe("They greet me.\n\nGreet back.")
@@ -29,6 +30,7 @@ describe("ReplyReasoning", () => {
     render(
       <ReplyReasoning
         reasoning={{ text: "Hmm", isThinking: true, durationMs: 0 }}
+        replyNumber={1}
       />
     )
 

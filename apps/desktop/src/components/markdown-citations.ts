@@ -1,78 +1,22 @@
 import type { ConversationSource } from "@lys/share"
 
+import {
+  CITATION_MARKER_PATTERN,
+  isCitableParentNode,
+  isMarkdownParentNode,
+  isMarkdownTextNode,
+  type MarkdownParentNode,
+  type MarkdownTextNode
+} from "@/lib/citation-markers"
+
 /** Settings of {@link buildCitationTransformer}. */
 export type CitationOptions = Readonly<{
   /** Numbered sources a `[n]` marker may cite; other numbers stay text. */
   sources: readonly ConversationSource[]
 }>
 
-/** Markdown text node, as remark builds it. */
-type MarkdownTextNode = Readonly<{
-  /** Node kind. */
-  type: "text"
-  /** The text. */
-  value: string
-}>
-
-/** Markdown node with children, as remark builds it. */
-type MarkdownParentNode = {
-  /** Node kind. */
-  readonly type: string
-  /** Child nodes, replaced when citations are found among them. */
-  children: unknown[]
-}
-
-/** Parent nodes whose text is already a link, so it cites nothing. */
-const LINK_NODE_TYPES: ReadonlySet<string> = new Set(["link", "linkReference"])
-
-/**
- * Finds each `[n]` citation marker in text; its group is the number. Use it
- * with `matchAll`, which copies it, so its `lastIndex` never changes.
- */
-export const CITATION_MARKER_PATTERN = /\[(\d+)\]/g
-
 /** Data property that marks a link as a citation of a numbered source. */
 export const CITATION_PROPERTY = "dataCitation"
-
-/**
- * Answers whether a value is an object node of the Markdown tree.
- *
- * @param node - Value from the Markdown tree.
- * @returns True for a non-null object.
- */
-function isMarkdownNode(
-  node: unknown
-): node is Readonly<Record<string, unknown>> {
-  return typeof node === "object" && node !== null
-}
-
-/**
- * Answers whether a value is a Markdown node with children.
- *
- * @param node - Value from the Markdown tree.
- * @returns True for a node with a text `type` and a `children` array.
- */
-function isMarkdownParentNode(node: unknown): node is MarkdownParentNode {
-  return (
-    isMarkdownNode(node) &&
-    typeof node.type === "string" &&
-    Array.isArray(node.children)
-  )
-}
-
-/**
- * Answers whether a value is a Markdown text node.
- *
- * @param node - Value from the Markdown tree.
- * @returns True for a `text` node holding text.
- */
-function isMarkdownTextNode(node: unknown): node is MarkdownTextNode {
-  return (
-    isMarkdownNode(node) &&
-    node.type === "text" &&
-    typeof node.value === "string"
-  )
-}
 
 /**
  * Builds the link that one citation marker becomes.
@@ -117,18 +61,6 @@ function buildCitedTextNodes(
   if (textStart === 0) return [node]
   nodes.push({ type: "text", value: node.value.slice(textStart) })
   return nodes
-}
-
-/**
- * Answers whether the text under a node may cite sources.
- *
- * @param node - Value from the Markdown tree.
- * @returns True for a node with children that is not a link; code and math
- * nodes hold their text as a value, not as text children, so they never
- * match.
- */
-function isCitableParentNode(node: unknown): node is MarkdownParentNode {
-  return isMarkdownParentNode(node) && !LINK_NODE_TYPES.has(node.type)
 }
 
 /**

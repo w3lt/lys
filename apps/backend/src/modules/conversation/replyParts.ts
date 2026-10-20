@@ -44,11 +44,15 @@ function buildReplyPart(draft: ReplyPartDraft, now: string): ReplyPart {
  * replies and the sources their tool calls read.
  *
  * @remarks Each operation reads the current time once and passes it to
- * everything it stores; nothing it calls reads the clock. Every operation is
- * one write transaction that commits before it returns. Owns no resource:
- * the records' owner closes the store, after which every operation fails with
- * `Database is closed`. Concurrency model: single-owner, synchronous on the
- * backend's event loop. Implements {@link ReplyPartWriter}.
+ * everything it stores, so every timestamp it writes on a part comes from
+ * that one reading. The conversation's activity time is the exception: when
+ * a part's content changes, as an appended fragment or a call's result does,
+ * the schema's message-update trigger sets it from SQLite's own clock. Every
+ * operation is one write transaction that commits before it returns. Owns no
+ * resource: the records' owner closes the store, after which every operation
+ * fails with `Database is closed`. Concurrency model: single-owner,
+ * synchronous on the backend's event loop. Implements
+ * {@link ReplyPartWriter}.
  */
 export default class StoredReplyParts implements ReplyPartWriter {
   /** Borrowed records for every part change. */

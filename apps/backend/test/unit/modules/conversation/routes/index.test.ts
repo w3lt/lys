@@ -52,7 +52,7 @@ const CONVERSATION = Object.freeze({
           },
           { status: "succeeded", result: "Results", sourceNumbers: [1] }
         ),
-        createTextPart(6, 1, "Here is a plan [1]")
+        createTextPart({ sequence: 6, round: 1, content: "Here is a plan [1]" })
       ],
       { status: "completed", finishReason: "stop" }
     )

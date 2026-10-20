@@ -7,16 +7,48 @@ import type {
   ConversationMetadata,
   ConversationSource,
   ConversationUserMessage,
-  ReplyPart
+  ReplyPart,
+  ToolCallReplyPartStatus
 } from "@lys/share"
+
+import {
+  buildChatViewReplyPart,
+  listAnswerCitationNumbers,
+  type ChatViewReplyPart,
+  type ChatViewToolCallReplyPart
+} from "./reply-parts"
 
 /** Immutable user message published by the chat-view store. */
 export type ReadonlyConversationUserMessage = Readonly<ConversationUserMessage>
 
 /** Immutable shared assistant fields independent of lifecycle state. */
 type ReadonlyConversationAssistantMessageBase = Readonly<
-  Omit<ConversationAssistantMessage, "status" | "finishReason">
->
+  Omit<ConversationAssistantMessage, "status" | "finishReason" | "parts">
+> & {
+  /** The reply's parts in stored order, as the chat view holds them. */
+  readonly parts: readonly ChatViewReplyPart[]
+  /**
+   * Numbers the reply's answer cites in its prose, once each, in first-cited
+   * order, as {@link listAnswerCitationNumbers} lists them when the parts
+   * change, so rendering never parses the answer to count them.
+   */
+  readonly answerCitationNumbers: readonly number[]
+}
+
+/** Validated assistant record, as the backend sent it, that is streaming. */
+export type StreamingAssistantMessageRecord =
+  Readonly<ConversationAssistantMessage> & {
+    /** Active lifecycle state accepting parts and fragments. */
+    readonly status: "streaming"
+    /** Streaming replies do not yet have a completion reason. */
+    readonly finishReason: null
+  }
+
+/** A tool call that is still open: waiting for the person or running. */
+type OpenToolCallReplyPart = ChatViewToolCallReplyPart & {
+  /** State of a call that has not ended. */
+  readonly status: "awaiting-approval" | "running"
+}
 
 /** Immutable assistant message that can accept new parts and fragments. */
 export type StreamingConversationAssistantMessage =
@@ -77,7 +109,7 @@ export type StartConversationTurnOptions = {
   /** Persisted user message acknowledged by the backend. */
   readonly userMessage: ConversationUserMessage
   /** Persisted assistant message that will receive streamed parts. */
-  readonly assistantMessage: StreamingConversationAssistantMessage
+  readonly assistantMessage: StreamingAssistantMessageRecord
 }
 
 /** Inputs required to add or replace one part of a streaming reply. */
@@ -129,12 +161,13 @@ export type UpdateAssistantReplyStatusOptions =
 /**
  * Determines whether a package-valid assistant can begin reply streaming.
  *
- * @param message - Protocol-validated assistant received at turn start.
+ * @param message - Protocol-validated assistant received at turn start, or a
+ * stored or snapshot reply.
  * @returns Whether the assistant is streaming without a completion reason.
  */
 export function isStreamingConversationAssistantMessage(
   message: Readonly<ConversationAssistantMessage>
-): message is StreamingConversationAssistantMessage {
+): message is StreamingAssistantMessageRecord {
   return message.status === "streaming" && message.finishReason === null
 }
 
@@ -236,17 +269,19 @@ function getStreamingAssistantMessage(
  * @param conversation - Conversation containing the streaming reply.
  * @param assistantMessage - The streaming reply before the change.
  * @param parts - The reply's parts after the change.
- * @returns A new frozen conversation with only that reply replaced; the
- * reply's own update time is kept, as the backend keeps it.
+ * @returns A new frozen conversation with only that reply replaced, its
+ * answer's citations listed again; the reply's own update time is kept, as
+ * the backend keeps it.
  */
 function buildConversationWithReplyParts(
   conversation: ChatViewConversation,
   assistantMessage: StreamingConversationAssistantMessage,
-  parts: readonly ReplyPart[]
+  parts: readonly ChatViewReplyPart[]
 ): ChatViewConversation {
   const updatedAssistantMessage = Object.freeze({
     ...assistantMessage,
-    parts: Object.freeze(parts)
+    parts: Object.freeze(parts),
+    answerCitationNumbers: listAnswerCitationNumbers(parts)
   } satisfies StreamingConversationAssistantMessage)
   const messages = Object.freeze(
     conversation.messages.map((message) =>
@@ -274,7 +309,7 @@ export function updateAssistantReplyPart(
     conversation,
     options.assistantMessageId
   )
-  const part = Object.freeze({ ...options.part })
+  const part = buildChatViewReplyPart(options.part)
   const isKnownPart = assistantMessage.parts.some(({ id }) => id === part.id)
   const parts = isKnownPart
     ? assistantMessage.parts.map((storedPart) =>
@@ -329,19 +364,21 @@ export function updateAssistantReplyPartContent(
  * @param conversation - Conversation the sources belong to.
  * @param sources - Protocol-validated sources the backend stored.
  * @returns A new conversation holding every source once per number, in
- * number order; a source under a number already held replaces it, which
- * changes nothing because a number never changes its source.
+ * number order. A source under a number already held is not taken, because
+ * a number never changes its source: the held object is kept, so a reply
+ * whose sources did not change gets the same objects.
  */
 export function updateConversationSources(
   conversation: ChatViewConversation,
   sources: readonly ConversationSource[]
 ): ChatViewConversation {
   const sourcesByNumber = new Map(
-    [...conversation.sources, ...sources].map((source) => [
-      source.number,
-      Object.freeze({ ...source })
-    ])
+    conversation.sources.map((source) => [source.number, source])
   )
+  for (const source of sources) {
+    if (!sourcesByNumber.has(source.number))
+      sourcesByNumber.set(source.number, Object.freeze({ ...source }))
+  }
   const mergedSources = Object.freeze(
     [...sourcesByNumber.values()].sort(
       (first, second) => first.number - second.number
@@ -351,22 +388,76 @@ export function updateConversationSources(
 }
 
 /**
+ * Answers whether a tool call in this state is still open.
+ *
+ * @param status - State of a tool call.
+ * @returns True for `awaiting-approval` and `running`; false for every state
+ * that ends a call.
+ */
+function isOpenToolCallStatus(status: ToolCallReplyPartStatus): boolean {
+  switch (status) {
+    case "awaiting-approval":
+    case "running":
+      return true
+    case "interrupted":
+    case "succeeded":
+    case "failed":
+    case "rejected":
+      return false
+  }
+}
+
+/**
+ * Answers whether a part is a tool call that is still open.
+ *
+ * @param part - Part of a reply.
+ * @returns True for a tool call {@link isOpenToolCallStatus} calls open.
+ */
+function isOpenToolCall(
+  part: ChatViewReplyPart
+): part is OpenToolCallReplyPart {
+  return part.kind === "tool-call" && isOpenToolCallStatus(part.status)
+}
+
+/**
  * Builds the parts of a reply that ended: a waiting or running tool call
- * becomes interrupted, as the backend stores it when the reply ends.
+ * becomes interrupted at the time the reply ended, as the backend stores it
+ * when the reply ends.
  *
  * @param parts - The reply's parts when it ended.
- * @param updatedAt - Update time of each interrupted call.
+ * @param updatedAt - Time the reply ended, each interrupted call's update
+ * time.
  * @returns Frozen parts; every other part is kept by identity.
  */
 function buildEndedReplyParts(
-  parts: readonly ReplyPart[],
+  parts: readonly ChatViewReplyPart[],
   updatedAt: string
-): readonly ReplyPart[] {
+): readonly ChatViewReplyPart[] {
   return Object.freeze(
-    parts.map((part): ReplyPart =>
-      part.kind === "tool-call" &&
-      (part.status === "awaiting-approval" || part.status === "running")
+    parts.map((part): ChatViewReplyPart =>
+      isOpenToolCall(part)
         ? Object.freeze({ ...part, status: "interrupted", updatedAt })
+        : part
+    )
+  )
+}
+
+/**
+ * Builds the parts of a stored reply that is streaming but can no longer
+ * be written: a waiting or running tool call becomes interrupted and keeps
+ * its own update time, as startup recovery stores it, since nothing records
+ * when its generation stopped.
+ *
+ * @param parts - Schema-validated parts in stored order.
+ * @returns Frozen copies of the parts.
+ */
+function buildAbandonedReplyParts(
+  parts: readonly ReplyPart[]
+): readonly ChatViewReplyPart[] {
+  return Object.freeze(
+    buildStoredReplyParts(parts).map((part): ChatViewReplyPart =>
+      isOpenToolCall(part)
+        ? Object.freeze({ ...part, status: "interrupted" })
         : part
     )
   )
@@ -380,7 +471,8 @@ function buildEndedReplyParts(
  * @returns A frozen assistant in the requested valid terminal state.
  * @remarks The transition preserves the streaming message identity and
  * parts while replacing status, finish reason, and update timestamp; a
- * waiting or running tool call becomes interrupted at that timestamp.
+ * waiting or running tool call becomes interrupted at that timestamp. No
+ * text changes, so the answer's citations are kept.
  */
 function createTerminalConversationAssistantMessage(
   assistantMessage: StreamingConversationAssistantMessage,
@@ -463,8 +555,8 @@ export function updateAssistantReplyStatus(
  * @remarks A stored `streaming` status here belongs to a reply that does not
  * end the transcript, so no generation can still be writing it for this view;
  * it is presented as interrupted with the parts stored so far, its waiting
- * and running tool calls presented as interrupted too. The stored record
- * itself is not changed.
+ * and running tool calls presented as interrupted too, each at its own
+ * update time. The stored record itself is not changed.
  */
 function createStoredAssistantMessage(
   message: ConversationAssistantMessage
@@ -476,7 +568,7 @@ function createStoredAssistantMessage(
         createdAt: message.createdAt,
         model: message.model,
         role: message.role,
-        parts: buildEndedReplyParts(message.parts, message.updatedAt),
+        ...buildStoredReplyContent(buildAbandonedReplyParts(message.parts)),
         status: "interrupted",
         finishReason: null,
         updatedAt: message.updatedAt
@@ -490,7 +582,7 @@ function createStoredAssistantMessage(
         createdAt: message.createdAt,
         model: message.model,
         role: message.role,
-        parts: buildStoredReplyParts(message.parts),
+        ...buildStoredReplyContent(buildStoredReplyParts(message.parts)),
         status: message.status,
         finishReason: message.finishReason,
         updatedAt: message.updatedAt
@@ -505,7 +597,7 @@ function createStoredAssistantMessage(
         createdAt: message.createdAt,
         model: message.model,
         role: message.role,
-        parts: buildStoredReplyParts(message.parts),
+        ...buildStoredReplyContent(buildStoredReplyParts(message.parts)),
         status: message.status,
         finishReason: message.finishReason,
         updatedAt: message.updatedAt
@@ -517,12 +609,29 @@ function createStoredAssistantMessage(
  * Builds the immutable parts of a stored or snapshot reply.
  *
  * @param parts - Schema-validated parts in stored order.
- * @returns A frozen copy holding frozen copies of the parts.
+ * @returns A frozen copy holding the chat view's frozen copies of the parts,
+ * as {@link buildChatViewReplyPart} builds them.
  */
 function buildStoredReplyParts(
   parts: readonly ReplyPart[]
-): readonly ReplyPart[] {
-  return Object.freeze(parts.map((part) => Object.freeze({ ...part })))
+): readonly ChatViewReplyPart[] {
+  return Object.freeze(parts.map(buildChatViewReplyPart))
+}
+
+/**
+ * Builds a stored reply's parts with its answer's citations.
+ *
+ * @param parts - The chat view's frozen parts of the reply.
+ * @returns The parts and the numbers their answer cites, as
+ * {@link listAnswerCitationNumbers} lists them.
+ */
+function buildStoredReplyContent(
+  parts: readonly ChatViewReplyPart[]
+): Pick<
+  StreamingConversationAssistantMessage,
+  "parts" | "answerCitationNumbers"
+> {
+  return { parts, answerCitationNumbers: listAnswerCitationNumbers(parts) }
 }
 
 /**
@@ -556,14 +665,14 @@ function createStoredConversationMessage(
  * update time.
  */
 function createStreamingAssistantMessage(
-  message: StreamingConversationAssistantMessage
+  message: StreamingAssistantMessageRecord
 ): StreamingConversationAssistantMessage {
   return Object.freeze({
     id: message.id,
     createdAt: message.createdAt,
     model: message.model,
     role: message.role,
-    parts: buildStoredReplyParts(message.parts),
+    ...buildStoredReplyContent(buildStoredReplyParts(message.parts)),
     status: message.status,
     finishReason: message.finishReason,
     updatedAt: message.updatedAt

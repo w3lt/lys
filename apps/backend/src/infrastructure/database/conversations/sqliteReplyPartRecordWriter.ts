@@ -1,7 +1,8 @@
-import type {
-  ConversationSource,
-  ReplyPart,
-  ToolCallReplyPart
+import {
+  isAnsweredToolCall,
+  type ConversationSource,
+  type ReplyPart,
+  type ToolCallReplyPart
 } from "@lys/share"
 import type {
   CreateReplyPartInput,
@@ -80,13 +81,17 @@ const UPDATE_REPLY_TOOL_CALL_RESULT_SQL = `UPDATE conversation_messages
       WHERE r.id = ? AND r.role = 'assistant' AND r.status = 'streaming')`
 
 /**
- * Stores one source in the call's conversation unless its URL is stored
- * there already.
+ * Stores one source in the call's conversation unless the conversation
+ * already stores the same number for the same URL; bound to the number, URL,
+ * title, and call, then the number and URL again. Any other conflict, the
+ * number stored for another URL or the URL under another number, fails the
+ * insert.
  */
 const CREATE_CONVERSATION_SOURCE_SQL = `INSERT INTO conversation_sources
   (conversation_id, number, url, title)
-  SELECT conversation_id, ?, ?, ? FROM conversation_messages WHERE id = ?
-  ON CONFLICT (conversation_id, url) DO NOTHING`
+  SELECT m.conversation_id, ?, ?, ? FROM conversation_messages m
+  WHERE m.id = ? AND NOT EXISTS (SELECT 1 FROM conversation_sources s
+    WHERE s.conversation_id = m.conversation_id AND s.number = ? AND s.url = ?)`
 
 /** Reads one stored tool call. */
 const FIND_TOOL_CALL_SQL = `SELECT id, role, round, content, status,
@@ -128,7 +133,7 @@ function buildReplyPartColumns(part: ReplyPart): ReplyPartColumns {
     case "tool-call":
       return {
         role: "tool_call",
-        content: "result" in part ? part.result : "",
+        content: isAnsweredToolCall(part) ? part.result : "",
         status: part.status,
         toolName: part.toolName,
         toolArguments: part.argumentText,
@@ -194,8 +199,9 @@ function getToolCallPart(
  * @param change - The input's result change.
  * @returns True when the call was in the state the change follows and the
  * reply is streaming; false otherwise, which changes nothing.
- * @throws If a source's number is stored for another URL in the
- * conversation, or the write fails; the caller's transaction then rolls back.
+ * @throws If the conversation stores a source's number for another URL or
+ * its URL under another number, or the write fails; the caller's transaction
+ * then rolls back.
  */
 function updateToolCallResult(
   statements: DatabaseStatementCompiler,
@@ -219,7 +225,14 @@ function updateToolCallResult(
   if (!isUpdated) return false
   const createSource = statements.getStatement(CREATE_CONVERSATION_SOURCE_SQL)
   for (const source of sources)
-    createSource.run(source.number, source.url, source.title, input.toolCallId)
+    createSource.run(
+      source.number,
+      source.url,
+      source.title,
+      input.toolCallId,
+      source.number,
+      source.url
+    )
   return true
 }
 
@@ -230,8 +243,9 @@ function updateToolCallResult(
  * @param input - Reply, call, change, and part timestamp.
  * @returns True when stored; false when the reply or the call's state refused
  * it.
- * @throws If a source's number is stored for another URL in the
- * conversation, or the write fails; the caller's transaction then rolls back.
+ * @throws If the conversation stores a source's number for another URL or
+ * its URL under another number, or the write fails; the caller's transaction
+ * then rolls back.
  */
 function updateToolCall(
   statements: DatabaseStatementCompiler,

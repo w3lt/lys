@@ -2,11 +2,11 @@ import { render, screen, within } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 import LysMessage from "@/components/ChatViewComponents/LysMessage"
 import {
-  buildCompletedAssistantMessage,
-  buildEndedAssistantMessage,
+  buildCompletedChatViewReply,
+  buildEndedChatViewReply,
   buildReasoningPart,
   buildTextPart,
-  buildStreamingAssistantMessage,
+  buildStreamingChatViewReply,
   buildToolCallPart
 } from "../../support/conversationFixtures"
 import { startDecodedImageHost } from "../../support/imageHostFake"
@@ -22,8 +22,8 @@ describe("LysMessage", () => {
     render(
       <LysMessage
         kind="terminal"
-        message={buildCompletedAssistantMessage(2, "A **local** chat app.")}
-        sourceNumberLimit={0}
+        message={buildCompletedChatViewReply(2, "A **local** chat app.")}
+        replyNumber={1}
         sources={NO_SOURCES}
         speakerName={SPEAKER_NAME}
       />
@@ -47,8 +47,8 @@ describe("LysMessage", () => {
       render(
         <LysMessage
           kind="terminal"
-          message={buildEndedAssistantMessage(2, "Partial answer", status)}
-          sourceNumberLimit={0}
+          message={buildEndedChatViewReply(2, "Partial answer", status)}
+          replyNumber={1}
           sources={NO_SOURCES}
           speakerName={SPEAKER_NAME}
         />
@@ -65,8 +65,8 @@ describe("LysMessage", () => {
     render(
       <LysMessage
         kind="streaming"
-        message={buildStreamingAssistantMessage(2, "Thinking")}
-        sourceNumberLimit={0}
+        message={buildStreamingChatViewReply(2, "Thinking")}
+        replyNumber={1}
         sources={NO_SOURCES}
         speakerName={SPEAKER_NAME}
       />
@@ -84,8 +84,8 @@ describe("LysMessage", () => {
     const { container } = render(
       <LysMessage
         kind="terminal"
-        message={buildCompletedAssistantMessage(2, "Hi")}
-        sourceNumberLimit={0}
+        message={buildCompletedChatViewReply(2, "Hi")}
+        replyNumber={1}
         sources={NO_SOURCES}
         speakerName={SPEAKER_NAME}
       />
@@ -114,7 +114,7 @@ describe("LysMessage", () => {
 
     it("shows its reasoning and its steps collapsed, its last round's text as the cited answer, and its sources", async () => {
       const reply = {
-        ...buildCompletedAssistantMessage(2, [
+        ...buildCompletedChatViewReply(2, [
           buildReasoningPart(20, 0, "Search first."),
           buildTextPart(22, 0, "Let me search."),
           SEARCH,
@@ -130,7 +130,7 @@ describe("LysMessage", () => {
         <LysMessage
           kind="terminal"
           message={reply}
-          sourceNumberLimit={2}
+          replyNumber={1}
           sources={SOURCES}
           speakerName={SPEAKER_NAME}
         />
@@ -150,16 +150,13 @@ describe("LysMessage", () => {
       expect(screen.getByText("1 more")).toBeVisible()
     })
 
-    it("links and lists no source above its limit, which only a later reply found", async () => {
+    it("links and lists only the sources it may cite, keeping other markers as text", async () => {
       render(
         <LysMessage
           kind="terminal"
-          message={buildCompletedAssistantMessage(
-            2,
-            "Moths [1] like lamps [2]."
-          )}
-          sourceNumberLimit={1}
-          sources={SOURCES}
+          message={buildCompletedChatViewReply(2, "Moths [1] like lamps [2].")}
+          replyNumber={1}
+          sources={SOURCES.slice(0, 1)}
           speakerName={SPEAKER_NAME}
         />
       )
@@ -174,18 +171,63 @@ describe("LysMessage", () => {
       ).toBeVisible()
     })
 
+    it.each([
+      ["inline code", "Run `python x.py` and read `sys.argv[1]`.", []],
+      ["a code block", "```\nitems[1]\n```", []],
+      ["a link's text", "See [the page [1]](https://a.example/).", []],
+      ["a reference link", "See [1].\n\n[1]: https://model.example/", []],
+      ["math", "Take $x[1]$.", []],
+      ["a leading zero", "See [01].", []],
+      ["an escaped marker", String.raw`Escaped \[1\] marker.`, [1]]
+    ] as const)(
+      "lists as cited exactly the sources its answer links, with %s",
+      async (_label, answer, linkedNumbers) => {
+        render(
+          <LysMessage
+            kind="terminal"
+            message={buildCompletedChatViewReply(2, [
+              SEARCH,
+              buildTextPart(23, 1, `${answer}\n\nLamps glow [2].`)
+            ])}
+            replyNumber={1}
+            sources={SOURCES}
+            speakerName={SPEAKER_NAME}
+          />
+        )
+
+        await screen.findByRole("link", { name: "2, source: Lamps" })
+
+        const linkedUrls = [...linkedNumbers, 2].map(
+          (number) => SOURCES[number - 1]?.url
+        )
+        expect(
+          screen
+            .getAllByRole("link", { name: /, source: / })
+            .map((link) => link.getAttribute("href"))
+        ).toEqual(linkedUrls)
+        const cited = screen.getByRole("list", {
+          name: `Sources · ${String(linkedUrls.length)} cited`
+        })
+        expect(
+          within(cited)
+            .getAllByRole("link")
+            .map((link) => link.getAttribute("href"))
+        ).toEqual(linkedUrls)
+      }
+    )
+
     it("shows its steps without an answer while its last round's calls run, and says it is still working", () => {
       render(
         <LysMessage
           kind="streaming"
-          message={buildStreamingAssistantMessage(2, [
+          message={buildStreamingChatViewReply(2, [
             buildToolCallPart(21, 0, {
               toolName: "web_search",
               argumentText: '{"query":"moths"}',
               status: "running"
             })
           ])}
-          sourceNumberLimit={2}
+          replyNumber={1}
           sources={SOURCES}
           speakerName={SPEAKER_NAME}
         />
@@ -202,10 +244,10 @@ describe("LysMessage", () => {
       render(
         <LysMessage
           kind="streaming"
-          message={buildStreamingAssistantMessage(2, [
+          message={buildStreamingChatViewReply(2, [
             buildReasoningPart(20, 0, "Hmm")
           ])}
-          sourceNumberLimit={2}
+          replyNumber={1}
           sources={SOURCES}
           speakerName={SPEAKER_NAME}
         />
@@ -218,8 +260,8 @@ describe("LysMessage", () => {
       render(
         <LysMessage
           kind="terminal"
-          message={buildCompletedAssistantMessage(2, "Just text.")}
-          sourceNumberLimit={2}
+          message={buildCompletedChatViewReply(2, "Just text.")}
+          replyNumber={1}
           sources={SOURCES}
           speakerName={SPEAKER_NAME}
         />

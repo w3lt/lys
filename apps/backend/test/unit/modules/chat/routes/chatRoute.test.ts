@@ -98,10 +98,11 @@ async function startWebResearcherConversation(
 }
 
 /**
- * Streams fixed chat completion chunks.
+ * Creates a stream of fixed chat completion chunks.
  *
  * @param chunks - Chunks yielded in order.
- * @yields Each chunk.
+ * @returns An iterator that yields each chunk in order and ends after the
+ * last one.
  */
 async function* createChunkStream(
   ...chunks: ReturnType<typeof createChatCompletionChunk>[]

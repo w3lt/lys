@@ -1,34 +1,35 @@
 import { describe, expect, it } from "vitest"
-import type { ReplyPart } from "@lys/share"
+import { isAnsweredToolCall, type ReplyPart } from "@lys/share"
 import {
-  calculateReplySourceNumberLimits,
+  calculateReplyCitableSourceNumbers,
   calculateReplyWorkDuration,
   createReplyPresentation,
   createReplySourcesPresentation,
   formatFoundSourcesLabel,
   formatReasoningLabel,
+  formatReplyControlName,
   formatReplyDuration,
+  formatReplyOutcome,
   formatReplyStepsLabel,
+  formatToolCallName,
   formatToolCallResultLabel,
   formatToolCallStatus,
-  formatToolCallTarget,
-  isAnsweredToolCall,
-  listCitedSourceNumbers,
-  listReplySources,
-  parseToolCallArguments
+  listReplySources
 } from "@/components/ChatViewComponents/reply-presentation"
 import {
-  buildCompletedAssistantMessage,
+  buildChatViewToolCallPart,
+  buildCompletedChatViewReply,
+  buildEndedChatViewReply,
   buildReasoningPart,
-  buildStreamingAssistantMessage,
+  buildStreamingChatViewReply,
   buildTextPart,
   buildToolCallPart,
   buildUserMessage,
   FIXTURE_TIMESTAMP
 } from "../../support/conversationFixtures"
 
-/** Web search call of round 0 that found sources 1 and 2. */
-const SEARCH_CALL = buildToolCallPart(20, 0, {
+/** Stored web search call of round 0 that found sources 1 and 2. */
+const STORED_SEARCH_CALL = buildToolCallPart(20, 0, {
   toolName: "web_search",
   argumentText: '{"query":"moths"}',
   status: "succeeded",
@@ -36,14 +37,20 @@ const SEARCH_CALL = buildToolCallPart(20, 0, {
   sourceNumbers: [1, 2]
 })
 
-/** Page read of round 1 that showed source 3. */
-const READ_CALL = buildToolCallPart(21, 1, {
+/** Stored page read of round 1 that showed source 3. */
+const STORED_READ_CALL = buildToolCallPart(21, 1, {
   toolName: "read_page",
   argumentText: '{"url":"https://c.example/"}',
   status: "succeeded",
   result: "Page",
   sourceNumbers: [3]
 })
+
+/** {@link STORED_SEARCH_CALL} as the chat view holds it. */
+const SEARCH_CALL = buildChatViewToolCallPart(STORED_SEARCH_CALL)
+
+/** {@link STORED_READ_CALL} as the chat view holds it. */
+const READ_CALL = buildChatViewToolCallPart(STORED_READ_CALL)
 
 /** Sources of the fixture conversation. */
 const SOURCES = Object.freeze([
@@ -181,6 +188,15 @@ describe("labels", () => {
     expect(formatReplyDuration(durationMs)).toBe(label)
   })
 
+  it.each([
+    ["interrupted", "Stopped"],
+    ["failed", "Failed"],
+    ["streaming", undefined],
+    ["completed", undefined]
+  ] as const)("announces a %s reply's outcome as %s", (status, outcome) => {
+    expect(formatReplyOutcome(status)).toBe(outcome)
+  })
+
   it("says Thinking while reasoning streams, then how long it took", () => {
     expect(
       formatReasoningLabel({ text: "x", isThinking: true, durationMs: 9_000 })
@@ -230,21 +246,18 @@ describe("labels", () => {
     expect(formatToolCallResultLabel(SEARCH_CALL)).toBe("Result")
   })
 
-  it.each([
-    ["awaiting-approval", { status: "awaiting-approval" }, false],
-    ["running", { status: "running" }, false],
-    ["interrupted", { status: "interrupted" }, false],
-    ["succeeded", { status: "succeeded", result: "", sourceNumbers: [] }, true],
-    ["failed", { status: "failed", result: "Not run." }, true],
-    ["rejected", { status: "rejected", result: "Not now." }, true]
-  ] as const)("says whether a %s call has its result", (_label, state, has) => {
-    const call = buildToolCallPart(22, 0, {
-      toolName: "read_page",
-      argumentText: "{}",
-      ...state
-    })
+  it("names a reply's control by its visible text, then the reply", () => {
+    expect(formatReplyControlName("Thought for 3s", 2)).toBe(
+      "Thought for 3s, reply 2"
+    )
+  })
 
-    expect(isAnsweredToolCall(call)).toBe(has)
+  it.each([
+    ["web_search", "night moths", "web_search night moths"],
+    ["web_search", "", "web_search"],
+    ["", "night moths", "night moths"]
+  ])("names a call to %o about %o as %o", (toolName, target, name) => {
+    expect(formatToolCallName(toolName, target)).toBe(name)
   })
 
   it.each([
@@ -274,8 +287,44 @@ describe("calculateReplyWorkDuration", () => {
     ).toBe(12_500)
   })
 
-  it("leaves out the time before startup recovery interrupted the reply's open call", () => {
-    const runningCall = buildToolCallPart(23, 1, {
+  it("ends at the latest update of any part, which need not be the last part", () => {
+    expect(
+      calculateReplyWorkDuration({
+        createdAt: FIXTURE_TIMESTAMP,
+        updatedAt: calculateTimeAfterFixture(30_000),
+        parts: [
+          buildTimedPart(READ_CALL, 50_000),
+          buildTimedPart(SEARCH_CALL, 10_000)
+        ]
+      })
+    ).toBe(50_000)
+  })
+
+  it("counts a call that ran or waited for approval until the person pressed Stop", () => {
+    const stoppedCall = buildToolCallPart(23, 1, {
+      toolName: "read_page",
+      argumentText: "{}",
+      status: "interrupted"
+    })
+
+    expect(
+      calculateReplyWorkDuration({
+        createdAt: FIXTURE_TIMESTAMP,
+        updatedAt: calculateTimeAfterFixture(3_600_000),
+        parts: [
+          buildTimedPart(SEARCH_CALL, 9_000),
+          {
+            ...stoppedCall,
+            createdAt: calculateTimeAfterFixture(9_500),
+            updatedAt: calculateTimeAfterFixture(3_600_000)
+          }
+        ]
+      })
+    ).toBe(3_600_000)
+  })
+
+  it("leaves out the time before startup recovery interrupted the reply, which keeps its open call's time", () => {
+    const recoveredCall = buildToolCallPart(23, 1, {
       toolName: "read_page",
       argumentText: "{}",
       status: "interrupted"
@@ -288,13 +337,13 @@ describe("calculateReplyWorkDuration", () => {
         parts: [
           buildTimedPart(SEARCH_CALL, 9_000),
           {
-            ...runningCall,
+            ...recoveredCall,
             createdAt: calculateTimeAfterFixture(9_500),
-            updatedAt: calculateTimeAfterFixture(86_400_000)
+            updatedAt: calculateTimeAfterFixture(9_800)
           }
         ]
       })
-    ).toBe(9_500)
+    ).toBe(9_800)
   })
 
   it("measures a reply without parts to its update time", () => {
@@ -308,58 +357,11 @@ describe("calculateReplyWorkDuration", () => {
   })
 })
 
-describe("tool call arguments", () => {
-  it("lists a JSON object's arguments in written order, other values as JSON", () => {
-    expect(
-      parseToolCallArguments('{"query":"moths","limit":5,"tags":["a"]}')
-    ).toEqual([
-      ["query", "moths"],
-      ["limit", "5"],
-      ["tags", '["a"]']
-    ])
-  })
-
-  it.each(["{", "[1,2]", "null", '"text"'])(
-    "has no named arguments for %s",
-    (argumentText) => {
-      expect(parseToolCallArguments(argumentText)).toBeUndefined()
-    }
-  )
-
-  it("names a call by its first text argument, or nothing", () => {
-    expect(formatToolCallTarget(SEARCH_CALL)).toBe("moths")
-    expect(
-      formatToolCallTarget(
-        buildToolCallPart(23, 0, {
-          toolName: "count",
-          argumentText: '{"n":1,"label":"x"}',
-          status: "running"
-        })
-      )
-    ).toBe("x")
-    expect(
-      formatToolCallTarget(
-        buildToolCallPart(24, 0, {
-          toolName: "count",
-          argumentText: "not json",
-          status: "running"
-        })
-      )
-    ).toBe("")
-  })
-})
-
 describe("sources", () => {
-  it("lists each cited number once, in first-cited order", () => {
-    expect(
-      listCitedSourceNumbers("A [2], B [10][2], code `[x]`, [1].")
-    ).toEqual([2, 10, 1])
-  })
-
   it("lists the sources the answer cites, then those its calls found without citing, with the first tool that found them", () => {
     const presentation = createReplySourcesPresentation(
       [SEARCH_CALL, READ_CALL],
-      "Moths [3] fly [9]. Also [1].",
+      [3, 9, 1],
       SOURCES
     )
 
@@ -369,30 +371,9 @@ describe("sources", () => {
     })
   })
 
-  it("counts only the answer's citations, not those in the text of its steps, which shows no links", () => {
-    const parts = [
-      buildTextPart(10, 0, "Per [2], I will read more."),
-      SEARCH_CALL,
-      buildTextPart(12, 1, "Done.")
-    ]
-    const answer = createReplyPresentation(parts, false).answer
-
-    const presentation = createReplySourcesPresentation(parts, answer, SOURCES)
-
-    expect(presentation.cited).toEqual([])
-    expect(presentation.found).toEqual([
-      { source: SOURCES[0], toolName: "web_search" },
-      { source: SOURCES[1], toolName: "web_search" }
-    ])
-  })
-
   it("leaves out numbers that have no source among those the reply may cite", () => {
     expect(
-      createReplySourcesPresentation(
-        [SEARCH_CALL],
-        "See [1] and [3].",
-        SOURCES.slice(0, 2)
-      )
+      createReplySourcesPresentation([SEARCH_CALL], [1, 3], SOURCES.slice(0, 2))
     ).toEqual({
       cited: [SOURCES[0]],
       found: [{ source: SOURCES[1], toolName: "web_search" }]
@@ -403,7 +384,7 @@ describe("sources", () => {
     expect(
       createReplySourcesPresentation(
         [buildTextPart(10, 0, "No sources.")],
-        "No sources.",
+        [],
         SOURCES
       )
     ).toEqual({ cited: [], found: [] })
@@ -412,12 +393,16 @@ describe("sources", () => {
 
 describe("source scope of each reply", () => {
   it("lets a reply cite the sources its own and earlier replies' calls showed, not those a later reply found", () => {
-    const earlier = buildCompletedAssistantMessage(2, "Moths like lamps [3].")
-    const searching = buildCompletedAssistantMessage(4, [SEARCH_CALL])
-    const reading = buildCompletedAssistantMessage(6, [READ_CALL])
-    const answering = buildStreamingAssistantMessage(8, "Lamps [3].")
+    const earlier = buildCompletedChatViewReply(2, "Moths like lamps [3].")
+    const searching = buildCompletedChatViewReply(4, [STORED_SEARCH_CALL])
+    const reading = buildEndedChatViewReply(
+      6,
+      [STORED_READ_CALL],
+      "interrupted"
+    )
+    const answering = buildStreamingChatViewReply(8, "Lamps [3].")
 
-    const limits = calculateReplySourceNumberLimits([
+    const citable = calculateReplyCitableSourceNumbers([
       buildUserMessage(1, "Moths?"),
       earlier,
       buildUserMessage(3, "Search."),
@@ -428,13 +413,40 @@ describe("source scope of each reply", () => {
       answering
     ])
 
-    expect([...limits]).toEqual([
-      [earlier.id, 0],
-      [searching.id, 2],
-      [reading.id, 3],
-      [answering.id, 3]
+    expect(
+      [...citable].map(([id, numbers]) => [id, [...numbers].sort()])
+    ).toEqual([
+      [earlier.id, []],
+      [searching.id, [1, 2]],
+      [reading.id, [1, 2, 3]],
+      [answering.id, [1, 2, 3]]
     ])
-    expect(listReplySources(SOURCES, limits.get(earlier.id) ?? 0)).toEqual([])
-    expect(listReplySources(SOURCES, 2)).toEqual(SOURCES.slice(0, 2))
+  })
+
+  it("keeps the sources only a failed reply showed to that reply, since later turns leave it out", () => {
+    const failed = buildEndedChatViewReply(2, [STORED_SEARCH_CALL], "failed")
+    const later = buildCompletedChatViewReply(4, [
+      STORED_READ_CALL,
+      buildTextPart(41, 2, "Lamps [1].")
+    ])
+
+    const citable = calculateReplyCitableSourceNumbers([
+      buildUserMessage(1, "Moths?"),
+      failed,
+      buildUserMessage(3, "Again."),
+      later
+    ])
+
+    expect([...(citable.get(failed.id) ?? [])].sort()).toEqual([1, 2])
+    expect([...(citable.get(later.id) ?? [])]).toEqual([3])
+  })
+
+  it("lists the sources whose numbers a reply may cite, keeping each source object", () => {
+    const sources = listReplySources(SOURCES, new Set([1, 3]))
+
+    expect(sources).toEqual([SOURCES[0], SOURCES[2]])
+    expect(sources[0]).toBe(SOURCES[0])
+    expect(sources[1]).toBe(SOURCES[2])
+    expect(listReplySources(SOURCES, new Set())).toEqual([])
   })
 })

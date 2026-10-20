@@ -1,12 +1,14 @@
 import { render, screen, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { CALIGINIA_AGENT_CODE, type ToolCallReplyPart } from "@lys/share"
 import { describe, expect, it } from "vitest"
 import ConversationTranscript, {
   type ConversationTranscriptProps
 } from "@/components/ChatViewComponents/ConversationTranscript"
 import {
-  buildCompletedAssistantMessage,
-  buildStreamingAssistantMessage,
+  buildCompletedChatViewReply,
+  buildReasoningPart,
+  buildStreamingChatViewReply,
   buildTextPart,
   buildToolCallPart,
   buildUserMessage
@@ -16,7 +18,7 @@ import {
 const QUESTION = buildUserMessage(1, "What is Lys?")
 
 /** Completed reply to {@link QUESTION}. */
-const ANSWER = buildCompletedAssistantMessage(2, "A local chat app.")
+const ANSWER = buildCompletedChatViewReply(2, "A local chat app.")
 
 /** Follow-up user message. */
 const FOLLOW_UP = buildUserMessage(3, "Does it work offline?")
@@ -64,7 +66,7 @@ function buildSearchPart(
  * Reply whose search showed source 1 and that also cites 2, a number only a
  * later reply's search shows.
  */
-const EARLIER_CITING_REPLY = buildCompletedAssistantMessage(2, [
+const EARLIER_CITING_REPLY = buildCompletedChatViewReply(2, [
   buildSearchPart(20, 1),
   buildTextPart(21, 1, "Moths [1] like lamps [2].")
 ])
@@ -73,6 +75,29 @@ const EARLIER_CITING_REPLY = buildCompletedAssistantMessage(2, [
 const LATER_CITING_REPLY_PARTS = Object.freeze([
   buildSearchPart(40, 2),
   buildTextPart(41, 1, "Lamps [2].")
+])
+
+/**
+ * Parts of a reply that reasoned, searched, and answered citing source 1, so
+ * it shows every disclosure a reply has.
+ */
+const TOOL_REPLY_PARTS = Object.freeze([
+  buildReasoningPart(20, 0, "Search first."),
+  buildTextPart(21, 0, "Let me search."),
+  buildToolCallPart(22, 0, {
+    toolName: "web_search",
+    argumentText: '{"query":"moths"}',
+    status: "succeeded",
+    result: "Results",
+    sourceNumbers: [1, 2]
+  }),
+  buildTextPart(23, 1, "Moths [1].")
+])
+
+/** Sources the search of {@link TOOL_REPLY_PARTS} showed. */
+const TOOL_REPLY_SOURCES = Object.freeze([
+  { number: 1, url: "https://moths.example/", title: "Moths" },
+  { number: 2, url: "https://lamps.example/", title: "Lamps" }
 ])
 
 /** The messages of a transcript, in either of its kinds. */
@@ -112,7 +137,7 @@ describe("ConversationTranscript", () => {
         kind="streaming-tail"
         speakerName={SPEAKER_NAME}
         sources={NO_SOURCES}
-        streamingMessage={buildStreamingAssistantMessage(4, "Yes, it")}
+        streamingMessage={buildStreamingChatViewReply(4, "Yes, it")}
       />
     )
 
@@ -129,7 +154,7 @@ describe("ConversationTranscript", () => {
         kind="streaming-tail"
         sources={NO_SOURCES}
         speakerName={CALIGINIA_AGENT_CODE}
-        streamingMessage={buildStreamingAssistantMessage(4, "Yes, it")}
+        streamingMessage={buildStreamingChatViewReply(4, "Yes, it")}
       />
     )
     expect(listRenderedMessages()[1]).toBe("caliginiaA local chat app.")
@@ -140,7 +165,7 @@ describe("ConversationTranscript", () => {
         kind="streaming-tail"
         speakerName={SPEAKER_NAME}
         sources={NO_SOURCES}
-        streamingMessage={buildStreamingAssistantMessage(4, "Yes, it")}
+        streamingMessage={buildStreamingChatViewReply(4, "Yes, it")}
       />
     )
 
@@ -164,7 +189,7 @@ describe("ConversationTranscript", () => {
           QUESTION,
           EARLIER_CITING_REPLY,
           FOLLOW_UP,
-          buildCompletedAssistantMessage(4, LATER_CITING_REPLY_PARTS)
+          buildCompletedChatViewReply(4, LATER_CITING_REPLY_PARTS)
         ]
       }
     ],
@@ -173,7 +198,7 @@ describe("ConversationTranscript", () => {
       {
         kind: "streaming-tail",
         completedMessages: [QUESTION, EARLIER_CITING_REPLY, FOLLOW_UP],
-        streamingMessage: buildStreamingAssistantMessage(
+        streamingMessage: buildStreamingChatViewReply(
           4,
           LATER_CITING_REPLY_PARTS
         )
@@ -236,7 +261,7 @@ describe("ConversationTranscript", () => {
         kind="streaming-tail"
         speakerName={SPEAKER_NAME}
         sources={NO_SOURCES}
-        streamingMessage={buildStreamingAssistantMessage(2, "A local")}
+        streamingMessage={buildStreamingChatViewReply(2, "A local")}
       />
     )
     const [question] = screen.getAllByRole("article")
@@ -251,6 +276,51 @@ describe("ConversationTranscript", () => {
     )
 
     expect(screen.getAllByRole("article")[0]).toBe(question)
+  })
+
+  it("keeps the reply's open disclosures open and its focused link focused, on the same elements, when the reply ends", async () => {
+    const user = userEvent.setup()
+    const { rerender } = render(
+      <ConversationTranscript
+        completedMessages={[QUESTION]}
+        kind="streaming-tail"
+        speakerName={SPEAKER_NAME}
+        sources={TOOL_REPLY_SOURCES}
+        streamingMessage={buildStreamingChatViewReply(2, TOOL_REPLY_PARTS)}
+      />
+    )
+    const link = await screen.findByRole("link", { name: "1, source: Moths" })
+    for (const name of [
+      /^(Thinking|Thought for \d+s), reply 1$/,
+      "1 step · 1 tool call, reply 1",
+      "web_search moths Done, reply 1",
+      "1 more, reply 1"
+    ])
+      await user.click(screen.getByLabelText(name))
+    link.focus()
+    const disclosures = screen.getAllByRole("group")
+
+    rerender(
+      <ConversationTranscript
+        completedMessages={[
+          QUESTION,
+          buildCompletedChatViewReply(2, TOOL_REPLY_PARTS)
+        ]}
+        kind="completed-only"
+        speakerName={SPEAKER_NAME}
+        sources={TOOL_REPLY_SOURCES}
+      />
+    )
+
+    const ended = screen.getAllByRole("group")
+    expect(ended).toHaveLength(4)
+    expect(
+      ended.map((disclosure, index) => disclosure === disclosures[index])
+    ).toEqual([true, true, true, true])
+    for (const disclosure of ended) expect(disclosure).toHaveAttribute("open")
+    expect(screen.getByLabelText(/^Worked for /)).toBeInTheDocument()
+    expect(link).toBeInTheDocument()
+    expect(link).toHaveFocus()
   })
 
   it("renders a new message element when another message takes a position", () => {
@@ -268,7 +338,7 @@ describe("ConversationTranscript", () => {
       <ConversationTranscript
         completedMessages={[
           buildUserMessage(11, "Another conversation"),
-          buildCompletedAssistantMessage(12, "Another reply")
+          buildCompletedChatViewReply(12, "Another reply")
         ]}
         kind="completed-only"
         speakerName={SPEAKER_NAME}

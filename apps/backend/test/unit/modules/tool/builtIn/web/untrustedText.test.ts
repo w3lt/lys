@@ -3,6 +3,7 @@ import {
   CITATION_MARKER_RULE,
   formatDelimiterFreeText,
   formatExcerptText,
+  formatShownSourceTitle,
   formatSingleLineText,
   formatVisibleTitle
 } from "../../../../../../src/modules/tool/builtIn/web/untrustedText"
@@ -100,11 +101,37 @@ describe("formatExcerptText", () => {
   })
 })
 
+describe("formatShownSourceTitle", () => {
+  it("keeps a title a person can read, with the invisible characters the result's cleaning removes and counts", () => {
+    expect(
+      formatShownSourceTitle("Moth\u200B guide", "https://moths.example/a")
+    ).toBe("Moth\u200B guide")
+  })
+
+  it.each([
+    ["no character", ""],
+    ["only spaces", " "],
+    ["zero-width and tag characters", "\u200B\u{E0041}"],
+    ["zero-width, direction, and word-joiner characters", "\u200B\u202E\u2060"],
+    ["a Hangul filler", "\u3164"],
+    ["Hangul choseong and jungseong fillers", "\u115F\u1160"],
+    ["a halfwidth Hangul filler", "\uFFA0"],
+    ["a combining grapheme joiner", "\u034F"],
+    ["Khmer inherent vowels", "\u17B4\u17B5"],
+    ["an unassigned default-ignorable code point", "\u2065"],
+    ["a joiner shielded by variation selectors", "\uFE00\u200D\uFE00"],
+    ["fillers and spaces", " \u3164 \u200B "]
+  ])("gives the URL's host for a title holding %s", (_label, title) => {
+    expect(formatShownSourceTitle(title, "https://moths.example:8443/a")).toBe(
+      "moths.example:8443"
+    )
+  })
+})
+
 describe("formatVisibleTitle", () => {
   it.each([
     ["direction and tag characters", "\u{E0041}Moth\u202E guide", "Moth guide"],
-    ["spaces left beside them", "\u200B Moths \u200F", "Moths"],
-    ["nothing visible but spaces", "\u200B \u200B", ""]
+    ["spaces left beside them", "\u200B Moths \u200F", "Moths"]
   ])("formats a title holding %s", (_label, title, expected) => {
     expect(formatVisibleTitle(title)).toBe(expected)
   })

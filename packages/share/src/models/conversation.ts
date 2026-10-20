@@ -69,7 +69,9 @@ const replyPartBase = {
   createdAt: timestampSchema,
   /**
    * Time of the part's latest change: its last fragment, or a tool call's
-   * latest state.
+   * latest state. A call interrupted when its reply ended keeps the time the
+   * reply ended; one that startup recovery interrupted keeps the time of its
+   * last change before Lys stopped.
    */
   updatedAt: timestampSchema
 }
@@ -107,23 +109,40 @@ const toolCallReplyPartBase = {
 }
 
 /**
+ * Validates the state of one tool call of a reply.
+ *
+ * @remarks `awaiting-approval`: shown to the person, who has not answered;
+ * `running`: allowed and running in the desktop or the backend;
+ * `interrupted`: the reply ended while the call waited or ran;
+ * `succeeded`: it ran and returned its output; `failed`: the call was
+ * invalid or the tool failed; `rejected`: the person did not allow it.
+ */
+export const toolCallReplyPartStatusSchema = z.enum([
+  "awaiting-approval",
+  "running",
+  "interrupted",
+  "succeeded",
+  "failed",
+  "rejected"
+])
+
+/**
  * Validates a tool call that has no result: waiting for the person's
  * approval, running, or interrupted before it had one.
  */
 const pendingToolCallReplyPartSchema = z.strictObject({
   ...toolCallReplyPartBase,
-  /**
-   * `awaiting-approval`: shown to the person, who has not answered;
-   * `running`: allowed and running in the desktop or the backend;
-   * `interrupted`: the reply ended while the call waited or ran.
-   */
-  status: z.enum(["awaiting-approval", "running", "interrupted"])
+  status: toolCallReplyPartStatusSchema.extract([
+    "awaiting-approval",
+    "running",
+    "interrupted"
+  ])
 })
 
 /** Validates a tool call that ran and returned its output. */
 const succeededToolCallReplyPartSchema = z.strictObject({
   ...toolCallReplyPartBase,
-  status: z.literal("succeeded"),
+  status: toolCallReplyPartStatusSchema.extract(["succeeded"]),
   /** Text the model read as the result; empty when the tool returned nothing. */
   result: z.string(),
   /**
@@ -139,11 +158,7 @@ const succeededToolCallReplyPartSchema = z.strictObject({
  */
 const unsuccessfulToolCallReplyPartSchema = z.strictObject({
   ...toolCallReplyPartBase,
-  /**
-   * `failed`: the call was invalid or the tool failed; `rejected`: the
-   * person did not allow it.
-   */
-  status: z.enum(["failed", "rejected"]),
+  status: toolCallReplyPartStatusSchema.extract(["failed", "rejected"]),
   /** Non-empty explanation the model read instead of a result. */
   result: z.string().min(1)
 })
@@ -241,7 +256,54 @@ export type ReplyPart = z.infer<typeof replyPartSchema>
 export type ToolCallReplyPart = Extract<ReplyPart, { kind: "tool-call" }>
 
 /** State of one tool call of a reply. */
-export type ToolCallReplyPartStatus = ToolCallReplyPart["status"]
+export type ToolCallReplyPartStatus = z.infer<
+  typeof toolCallReplyPartStatusSchema
+>
+
+/** A tool call of a reply that has the result the model read. */
+export type AnsweredToolCallReplyPart = Extract<
+  ToolCallReplyPart,
+  { status: "succeeded" | "failed" | "rejected" }
+>
+
+/** State of a tool call that has the result the model read. */
+export type AnsweredToolCallReplyPartStatus =
+  AnsweredToolCallReplyPart["status"]
+
+/**
+ * Answers whether a tool call in this state has the result the model read.
+ *
+ * @param status - State of a tool call.
+ * @returns True for `succeeded`, `failed`, and `rejected`; false for
+ * `awaiting-approval`, `running`, and `interrupted`.
+ */
+export function isAnsweredToolCallStatus(
+  status: ToolCallReplyPartStatus
+): status is AnsweredToolCallReplyPartStatus {
+  switch (status) {
+    case "succeeded":
+    case "failed":
+    case "rejected":
+      return true
+    case "awaiting-approval":
+    case "running":
+    case "interrupted":
+      return false
+  }
+}
+
+/**
+ * Answers whether a tool call has the result the model read.
+ *
+ * @param call - Tool call of a reply.
+ * @returns True when {@link isAnsweredToolCallStatus} answers true for its
+ * status.
+ */
+export function isAnsweredToolCall(
+  call: ToolCallReplyPart
+): call is AnsweredToolCallReplyPart {
+  return isAnsweredToolCallStatus(call.status)
+}
 
 /** One numbered web source of a conversation. */
 export type ConversationSource = z.infer<typeof conversationSourceSchema>

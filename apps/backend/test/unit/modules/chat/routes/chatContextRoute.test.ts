@@ -50,6 +50,28 @@ const UNUSED_REPLY_MODEL = Object.freeze({
 /** Conversation every continued-conversation case stores. */
 const STORED_CONVERSATION_ID = createFixtureUuidV7(1)
 
+/** Text of the stored conversation's completed reply. */
+const EARLIER_ANSWER_PART = createTextPart({
+  sequence: 13,
+  round: 0,
+  content: "Earlier answer",
+  times: {
+    createdAt: "2026-10-15T10:00:02.000Z",
+    updatedAt: "2026-10-15T10:00:03.000Z"
+  }
+})
+
+/** Text of the stored conversation's failed reply. */
+const FAILED_ANSWER_PART = createTextPart({
+  sequence: 15,
+  round: 0,
+  content: "Failed answer",
+  times: {
+    createdAt: "2026-10-15T10:00:05.000Z",
+    updatedAt: "2026-10-15T10:00:06.000Z"
+  }
+})
+
 /**
  * Creates an application with the chat-context route over a real agent
  * service and conversation reader on an in-memory database owned by the
@@ -126,12 +148,7 @@ function saveStoredConversation(
     id: createFixtureUuidV7(3),
     conversationId: STORED_CONVERSATION_ID,
     model: MODEL,
-    parts: [
-      createTextPart(13, 0, "Earlier answer", {
-        createdAt: "2026-10-15T10:00:02.000Z",
-        updatedAt: "2026-10-15T10:00:03.000Z"
-      })
-    ],
+    parts: [EARLIER_ANSWER_PART],
     status: "completed",
     finishReason: "stop",
     createdAt: "2026-10-15T10:00:02.000Z",
@@ -147,12 +164,7 @@ function saveStoredConversation(
     id: createFixtureUuidV7(5),
     conversationId: STORED_CONVERSATION_ID,
     model: MODEL,
-    parts: [
-      createTextPart(15, 0, "Failed answer", {
-        createdAt: "2026-10-15T10:00:05.000Z",
-        updatedAt: "2026-10-15T10:00:06.000Z"
-      })
-    ],
+    parts: [FAILED_ANSWER_PART],
     status: "failed",
     finishReason: null,
     createdAt: "2026-10-15T10:00:05.000Z",

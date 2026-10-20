@@ -49,19 +49,43 @@ describe("buildAgentContext", () => {
   it("keeps earlier user messages and usable replies in transcript order", () => {
     const history = [
       createUserMessage(1, "First question"),
-      createAssistantMessage(2, [createTextPart(12, 0, "Completed answer")], {
-        status: "completed",
-        finishReason: "stop"
-      }),
+      createAssistantMessage(
+        2,
+        [
+          createTextPart({
+            sequence: 12,
+            round: 0,
+            content: "Completed answer"
+          })
+        ],
+        {
+          status: "completed",
+          finishReason: "stop"
+        }
+      ),
       createUserMessage(3, "Second question"),
-      createAssistantMessage(4, [createTextPart(14, 0, "Truncated answer")], {
-        status: "completed",
-        finishReason: "length"
-      }),
+      createAssistantMessage(
+        4,
+        [
+          createTextPart({
+            sequence: 14,
+            round: 0,
+            content: "Truncated answer"
+          })
+        ],
+        {
+          status: "completed",
+          finishReason: "length"
+        }
+      ),
       createUserMessage(5, "Third question"),
-      createAssistantMessage(6, [createTextPart(16, 0, "Partial answer")], {
-        status: "interrupted"
-      })
+      createAssistantMessage(
+        6,
+        [createTextPart({ sequence: 16, round: 0, content: "Partial answer" })],
+        {
+          status: "interrupted"
+        }
+      )
     ]
 
     expect(
@@ -84,11 +108,15 @@ describe("buildAgentContext", () => {
       createAssistantMessage(
         2,
         [
-          createTextPart(20, 0, "Let me "),
-          createTextPart(23, 0, "look."),
+          createTextPart({ sequence: 20, round: 0, content: "Let me " }),
+          createTextPart({ sequence: 23, round: 0, content: "look." }),
           SUCCEEDED_SEARCH,
           FAILED_READ,
-          createTextPart(24, 1, "Moths fly at night [1].")
+          createTextPart({
+            sequence: 24,
+            round: 1,
+            content: "Moths fly at night [1]."
+          })
         ],
         { status: "completed", finishReason: "stop" }
       )
@@ -165,7 +193,7 @@ describe("buildAgentContext", () => {
         2,
         [
           createReasoningPart(20, 0, "Search first."),
-          createTextPart(23, 0, "Searching."),
+          createTextPart({ sequence: 23, round: 0, content: "Searching." }),
           createReasoningPart(24, 1, "Then read."),
           interrupted
         ],
@@ -193,7 +221,11 @@ describe("buildAgentContext", () => {
     const history = [
       createAssistantMessage(
         2,
-        [createTextPart(20, 0, "Searching."), SUCCEEDED_SEARCH, stoppedRead],
+        [
+          createTextPart({ sequence: 20, round: 0, content: "Searching." }),
+          SUCCEEDED_SEARCH,
+          stoppedRead
+        ],
         { status: "interrupted" }
       )
     ]
@@ -225,15 +257,22 @@ describe("buildAgentContext", () => {
       "a failed reply",
       createAssistantMessage(
         2,
-        [createTextPart(12, 0, "Failed text"), SUCCEEDED_SEARCH],
+        [
+          createTextPart({ sequence: 12, round: 0, content: "Failed text" }),
+          SUCCEEDED_SEARCH
+        ],
         { status: "failed" }
       )
     ],
     [
       "a reply still streaming",
-      createAssistantMessage(2, [createTextPart(12, 0, "Streaming text")], {
-        status: "streaming"
-      })
+      createAssistantMessage(
+        2,
+        [createTextPart({ sequence: 12, round: 0, content: "Streaming text" })],
+        {
+          status: "streaming"
+        }
+      )
     ],
     [
       "an interrupted reply without parts",
@@ -262,10 +301,14 @@ describe("buildAgentContext", () => {
 
   it("sends only the fields the model reads, without stored identities, times, or source numbers", () => {
     const history = [
-      createAssistantMessage(2, [createTextPart(12, 0, "Answer")], {
-        status: "completed",
-        finishReason: "stop"
-      })
+      createAssistantMessage(
+        2,
+        [createTextPart({ sequence: 12, round: 0, content: "Answer" })],
+        {
+          status: "completed",
+          finishReason: "stop"
+        }
+      )
     ]
 
     expect(buildAgentContext("You are Lys.", history, "Next")).toStrictEqual([
@@ -305,10 +348,14 @@ describe("calculateAgentContextHistoryMessageCount", () => {
       createAssistantMessage(
         2,
         [
-          createTextPart(20, 0, "Searching."),
+          createTextPart({ sequence: 20, round: 0, content: "Searching." }),
           SUCCEEDED_SEARCH,
           FAILED_READ,
-          createTextPart(23, 1, "Moths fly at night.")
+          createTextPart({
+            sequence: 23,
+            round: 1,
+            content: "Moths fly at night."
+          })
         ],
         { status: "completed", finishReason: "stop" }
       ),
@@ -322,9 +369,13 @@ describe("calculateAgentContextHistoryMessageCount", () => {
   it("counts no reply the context leaves out", () => {
     const history = [
       createUserMessage(1, "Question"),
-      createAssistantMessage(2, [createTextPart(12, 0, "Failed text")], {
-        status: "failed"
-      }),
+      createAssistantMessage(
+        2,
+        [createTextPart({ sequence: 12, round: 0, content: "Failed text" })],
+        {
+          status: "failed"
+        }
+      ),
       createAssistantMessage(3, [createReasoningPart(13, 0, "Hmm.")], {
         status: "completed",
         finishReason: "stop"

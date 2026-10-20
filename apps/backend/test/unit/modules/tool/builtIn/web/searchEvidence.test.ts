@@ -312,7 +312,9 @@ describe("listSearchSourceCandidates", () => {
 
   it.each([
     ["invisible characters", "\u200B\u{E0041}"],
-    ["invisible characters and spaces", "\u200B \u200B"]
+    ["invisible characters and spaces", "\u200B \u200B"],
+    ["a Hangul filler", "\u3164"],
+    ["a joiner shielded by variation selectors", "\uFE00\u200D\uFE00"]
   ])(
     "names a result whose title shows only %s by its host, in the evidence and the candidate alike",
     (_label, title) => {

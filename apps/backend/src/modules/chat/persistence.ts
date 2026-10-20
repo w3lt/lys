@@ -141,8 +141,8 @@ export interface ReplyPartWriter {
    * @param change - The call's next state.
    * @returns The call as stored, or undefined when the reply is no longer
    * streaming or the call is not in the state the change follows.
-   * @throws If persistence fails, including when a source's number is
-   * stored for another URL in the conversation.
+   * @throws If persistence fails, including when the conversation stores a
+   * source's number for another URL or its URL under another number.
    */
   updateReplyToolCall(
     assistantMessageId: string,

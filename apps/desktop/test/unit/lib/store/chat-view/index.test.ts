@@ -25,6 +25,7 @@ import {
   type BackendRoutes
 } from "../../../support/backendFake"
 import {
+  buildChatViewAssistantMessage,
   buildCompletedAssistantMessage,
   buildConversation,
   buildConversationMetadata,
@@ -513,15 +514,17 @@ describe("createChatViewStore", () => {
 
       expect(afterDone).toMatchObject({ status: "reply-completed" })
       expect(store.getState().request).toEqual({ status: "idle" })
-      expect(store.getState().conversation?.messages.at(-1)).toEqual({
-        ...FIRST_REPLY,
-        parts: [
-          { ...textEvent.part, content: "Hi there", updatedAt: FRAGMENT_TIME }
-        ],
-        status: "completed",
-        finishReason: "length",
-        updatedAt: NOW
-      })
+      expect(store.getState().conversation?.messages.at(-1)).toEqual(
+        buildChatViewAssistantMessage({
+          ...FIRST_REPLY,
+          parts: [
+            { ...textEvent.part, content: "Hi there", updatedAt: FRAGMENT_TIME }
+          ],
+          status: "completed",
+          finishReason: "length",
+          updatedAt: NOW
+        })
+      )
       expect(store.getState().error).toBeUndefined()
     })
 

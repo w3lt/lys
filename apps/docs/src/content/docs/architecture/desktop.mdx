@@ -121,7 +121,11 @@ Ns` afterwards, the seconds the reasoning parts took. It holds every
   reasoning part's text.
 - **Steps**: the rounds that called tools, in one disclosure, closed at first,
   labelled with the number of steps and tool calls and, once the reply ended,
-  `Worked for Ns`. Each step shows the text its round wrote and its calls.
+  `Worked for Ns`: the time from the reply's start to the end of its last
+  part's work. A call stopped by the reply's end counts until it was made,
+  so time Lys spent closed before startup recovery ended the reply is not
+  counted. The steps are a list named `Steps`, and each step shows the text
+  its round wrote and its calls, in a list named `Tool calls`.
   Each call (`ToolCallStep`) is a disclosure naming the tool, what the call is
   about (its first text argument), and its state: Waiting for approval,
   Running, Done, Failed, Rejected, or Stopped. Open, it shows the arguments
@@ -130,17 +134,26 @@ Ns` afterwards, the seconds the reasoning parts took. It holds every
 - **Answer**: the text of the last round when that round called no tools,
   rendered as Markdown. While a round streams, its text is shown here until
   its calls arrive and move it into the steps.
-- **Sources** (`ReplySourceList`), when there are any: the conversation
-  sources the reply's text cites, in the order it first cites them, under
-  `Sources · N cited`, then, in a closed `N more` disclosure, the sources its
-  calls found without citing, each with the tool that found it.
+- **Sources** (`ReplySourceList`), when there are any: the sources the
+  answer cites, in the order it first cites them, under `Sources · N cited`,
+  then, in a closed `N more` disclosure, the sources its succeeded calls found
+  without citing, each with the tool that found it. With nothing cited there
+  is no cited list, and the disclosure reads `Sources · N found`. Only the
+  answer's `[n]` markers count as cited: a step's text shows no links. The
+  sources are a plain group, not a landmark; the cited list is named by its
+  heading.
+
+A reply links and lists only the sources numbered up to the highest number
+that its own calls or an earlier reply's calls showed. A conversation
+numbers its sources in the order its calls show them, so a higher number was
+found by a later reply, and an earlier reply's `[n]` never links to it.
 
 `MarkdownMessage` renders the answer with `react-markdown`. Each `[n]` marker
-in prose whose number is one of the conversation's sources becomes a small
-numbered link to that source (`markdown-citations.ts`), named `Source n:
-title`, which shows the source's title and site while the pointer rests on
-it; markers in code, math, and links, and markers of other numbers, stay as
-written. Links open in a new tab without a referrer. `remark-math` and `rehype-katex` render
+in prose whose number is one of the sources the reply may cite becomes a
+small numbered link to that source (`markdown-citations.ts`), named `n,
+source: title`, which shows the source's title and site while the pointer
+rests on it; markers in code, math, and links, and markers of other numbers,
+stay as written. Links open in a new tab without a referrer. `remark-math` and `rehype-katex` render
 `$…$` inline math and `$$…$$` display math with KaTeX, whose stylesheet
 `src/index.css` imports.
 
@@ -588,7 +601,11 @@ Several calls wait in the model's order, one card at a time.
 
 A read sends the file's text, a search sends its report as JSON, and a
 declared tool failure sends the failure as JSON. A backend tool's result goes
-from the backend to the model; the desktop never sees it. Approval answers go
+from the backend to the model; the desktop receives it only as part of the
+stored call, in a `reply-part` event while the reply streams and in the
+reply's parts of a `reply-snapshot` or of the stored conversation, and shows
+it in the reply's steps.
+Approval answers go
 to the [tool-approval route](/reference/api/#tool-approvals) and results to
 the [tool-result route](/reference/api/#tool-results). When an answer cannot
 be sent, the card says so and Try again sends the same answer without running
@@ -640,6 +657,12 @@ are gone and the reply is marked interrupted when the backend next starts.
   a view of its own. The reasoning summary shows `Thinking` without a running
   count of seconds, and a citation's hover shows the source's title and site,
   not the passage it supports.
+- `Sources · N cited` finds the answer's `[n]` markers in its Markdown
+  source, while citation links are made from the rendered text, so the two
+  can differ. A marker inside code, math, a link's text or address, or a
+  reference definition is counted although it stays unlinked. A marker
+  written with escapes, such as `\[1\]` or `&#91;1&#93;`, is linked but not
+  counted, so its source is listed as found beside a link to it.
 
 ## Related pages
 

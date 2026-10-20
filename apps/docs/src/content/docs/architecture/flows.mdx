@@ -154,8 +154,8 @@ desktop from following the stream; the backend keeps generating and storing
 the reply and its title.
 
 If the next message reaches the backend before the stopped reply is finalized,
-creating the new turn interrupts that reply first, so its partial text is part
-of the new turn's context.
+creating the new turn interrupts that reply first, so the text and answered
+calls it stored are part of the new turn's context.
 
 ## Answer a tool call
 
@@ -178,9 +178,11 @@ of the new turn's context.
    change of it is stored and sent as a `reply-part` event.
 4. The backend's tool approval service reads the Just run choices from the
    settings file once for the round. For each valid call, in the model's order:
-   a tool saved as Just run goes on at once; any other tool's call is shown to
-   the person with a `tool-approval` event. If the settings file cannot be
-   read, every call is shown and the backend logs a warning.
+   a tool saved as Just run goes on at once; any other tool's call is stored
+   as `awaiting-approval` and then shown to the person with a `tool-approval`
+   event, in the same step. A call the store refuses, because the reply has
+   ended, is never shown. If the settings file cannot be read, every call is
+   shown and the backend logs a warning.
 5. The desktop's tool-call store, which follows the reply on its own
    connection, shows each prompt above the composer, or answers it
    `showFailed` at once when it cannot describe the call. Allow once and
@@ -209,7 +211,7 @@ of the new turn's context.
    first round that makes no tool calls, even one that writes no text, then
    `done`. The desktop shows the rounds that called tools as the reply's
    steps, the last round's text as the answer with its `[n]` citations
-   linked, and the cited sources under it.
+   linked, and the sources the answer cites under it.
 
 The backend sets no time limit on a prompt or a pending call. It waits until
 the call is answered, the reply is stopped, or the backend shuts down; a newer

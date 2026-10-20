@@ -324,9 +324,10 @@ where `callId` is the `id` of the event's call or of its entry in
 }
 ```
 
-After `allowed`, the backend runs a backend tool itself and hands its result
-only to the model, or sends a client tool's call to run with a `tool-call`
-event under the same `id`. After `rejected`, nothing runs and the model reads
+After `allowed`, the backend runs a backend tool itself, stores its result
+with the call, and gives it to the model; the client sees that result in the
+call's `reply-part` event. For a client tool, it sends the call to run with a
+`tool-call` event under the same `id`. After `rejected`, nothing runs and the model reads
 `content`. `reason` is not shown to the model: `declined` when the person
 rejected the call, and `showFailed` when the client could not show it, such as
 a tool it does not list or arguments it cannot describe.

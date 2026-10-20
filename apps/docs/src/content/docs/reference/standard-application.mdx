@@ -435,54 +435,72 @@ PR #152, following review finding I-7.
 
 ## Reply parts size exception
 
-**Proposed, not yet approved.** [PR #186](https://github.com/w3lt/lys/pull/186)
-asks for an exception to the size limit of
-[FUNC-013](https://github.com/w3lt/lys/blob/main/docs/code_standards/FUNCTION.md),
-40 executable lines, for functions that were already over it and that the
-pull request made a little longer. Counts below are physical lines with code,
-from a scan of each function's body, before and after the pull request.
+Functions that were already over the size limits of
+[FUNC-013](https://github.com/w3lt/lys/blob/main/docs/code_standards/FUNCTION.md)
+before [PR #186](https://github.com/w3lt/lys/pull/186), and that the pull
+request made a little longer, have an approved exception. The maintainer
+approved it on 2026-10-20 for PR #186, following review finding I-9, and
+asked for these functions to be split later. Counts below are physical lines
+with code in each function's body, nested callbacks included, from a scan
+before and after the pull request.
 
-- **Scope:** only the line counts of these functions. Their other FUNC-013
-  limits are not excepted, and every function the pull request added follows
-  FUNC-013, except `registerReplyPartRecordWriterContractSuite`, listed below.
+- **Scope:** only these functions, and only the limits named for each. Their
+  other FUNC-013 limits are not excepted, and every function PR #186 added
+  follows FUNC-013.
   - `ConversationPanel` in
-    [ConversationPanel.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ChatViewComponents/ConversationPanel.tsx):
-    62 → 65, for the conversation's sources it passes to the transcript.
+    [ConversationPanel.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ChatViewComponents/ConversationPanel.tsx),
+    lines: 59 → 62, for the conversation's sources it passes to the
+    transcript.
+  - `ChatView` in
+    [ChatView.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/views/ChatView/ChatView.tsx),
+    lines: 85 → 86, for the conversation's sources it passes to the panel.
+    The maintainer chose not to split `ChatView` in PR #186, rather than
+    decide whether the
+    [Composer and chat view size exception](#composer-and-chat-view-size-exception)
+    covers it.
   - `createChatViewStore` and `createChatViewStoreState` in
-    [chat-view/index.ts](https://github.com/w3lt/lys/blob/main/apps/desktop/src/lib/store/chat-view/index.ts):
-    533 → 563 and 502 → 532, for the `reply-part`, `reply-part-delta`, and
-    `sources` handlers that replace the `delta` handler.
+    [chat-view/index.ts](https://github.com/w3lt/lys/blob/main/apps/desktop/src/lib/store/chat-view/index.ts),
+    lines: 529 → 559 and 499 → 529, for the `reply-part`, `reply-part-delta`,
+    and `sources` handlers that replace the `delta` handler.
   - `createToolCallStore` and `createToolCallStoreState` in
-    [tool-calls/index.ts](https://github.com/w3lt/lys/blob/main/apps/desktop/src/lib/store/tool-calls/index.ts):
-    228 → 230 and 210 → 212, for the new event names in one `switch`.
-  - The `singletonPlugin` callback in
-    [di/fastify.ts](https://github.com/w3lt/lys/blob/main/apps/backend/src/di/fastify.ts):
-    33 → 34, for one `decorate` call.
-  - Test helpers: `getAgentReplyOutcome` in `agent.test.ts` (53 → 55),
-    `registerBuiltInToolContractSuite` in `builtInToolContract.ts` (41 → 55),
-    `createChatRouteTestApp` in `chatRouteTestApp.ts` (70 → 72), and the
-    contract-suite registrars in `conversationRecordsContract.ts`, which grew
-    with their new cases, and the new
-    `registerReplyPartRecordWriterContractSuite` there (299), written like
-    the other registrars of that file.
+    [tool-calls/index.ts](https://github.com/w3lt/lys/blob/main/apps/desktop/src/lib/store/tool-calls/index.ts),
+    lines: 228 → 230 and 210 → 212; and its `handleFollowedReplyEvent`,
+    decision points: 10 → 12. Both come from the new event names in one
+    exhaustive `switch`, whose new arms only return.
+  - Backend test helpers and cases:
+    - `getAgentReplyOutcome` in `agent.test.ts`, lines: 53 → 55.
+    - The case "answers overlapping turns independently" in `agent.test.ts`,
+      lines: 42 → 50, for the turn fields the reply parts added.
+    - `registerBuiltInToolContractSuite` in `builtInToolContract.ts`, lines:
+      41 → 47, for the run context its cases now pass.
+    - `createChatRouteTestApp` in `chatRouteTestApp.ts`, lines: 70 → 72.
+    - `registerConversationRecordEditorContractSuite` and
+      `registerConversationTurnTransactionContractSuite` in
+      `conversationRecordsContract.ts`, lines: 87 → 100 and 191 → 198, for
+      cases that now also check parts, sources, and open calls.
 - **Constraint:** each function was over the limit before PR #186. The store
   factories hold every event handler as a closure over the store's `set` and
   token checks, so a new event handler is written inside them, as the
   `delta` handler was; the transition logic itself is in
-  `conversation-transitions.ts`. A contract-suite registrar holds its
-  `describe` and `it` cases, as every registrar in the file does.
+  `conversation-transitions.ts`. A contract-suite registrar holds its cases,
+  as every registrar of its file did before PR #186. New cases went into new
+  registrars that follow FUNC-013, except two in
+  `registerConversationTurnRecordWriterContractSuite`, which is shorter than
+  before PR #186 and so needs no exception; the registrars listed above grew
+  only in existing cases.
 - **Alternatives considered:**
-  - Splitting the store factories or the panel within PR #186 was not taken.
-    It moves the request, stop, open, and follow handling, which is outside
-    the pull request's purpose.
-  - Splitting the new contract-suite registrar into one registrar per
-    operation was not taken. Each part would still hold its cases, and the
-    file's other registrars stay as they are.
+  - Splitting the store factories, the panel, and `ChatView` within PR #186
+    was not taken. It moves the request, stop, open, and follow handling,
+    which is outside the pull request's purpose.
+  - Moving the grown cases out of the legacy registrars was not taken. Each
+    case changed with the contract it checks, and moving it would only lower a
+    count without splitting the registrar.
 - **Risk and control:** a long function is harder to review and to change
-  safely. The added handlers delegate to named transitions, the switch arms
-  only return, and the added test cases are independent.
+  safely. The added handlers delegate to named transitions, the new `switch`
+  arms only return, and the added test lines are independent arrange and
+  assert steps.
 - **Removal condition:** a change that splits these functions to within the
-  limit removes this exception. No issue tracks that split.
+  limits removes this exception. No issue tracks that split.
 
 ## vmo address copy exception
 
@@ -776,7 +794,7 @@ These examples identify boundaries in the current source; they do not certify th
 
 | Observed boundary                                                                                                                                                                                                                                               | Schema and migration distinction                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Conversation storage keeps an ordered array of SQL migrations and uses its position as the version                                                                                                                                                              | Array order is persistent history; changing an applied entry can make fresh and upgraded stores disagree.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Conversation storage keeps an ordered array of migration steps and uses its position as the version                                                                                                                                                             | Array order is persistent history; changing an applied entry can make fresh and upgraded stores disagree.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | The migration runner acquires a write transaction before reading the version, applies pending changes, updates the marker, and commits                                                                                                                          | Coordination, schema changes, and version recording have a concrete boundary; this does not prove general application writes or external effects are atomic.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | The database owner rejects a newer version before publishing borrowed transactions                                                                                                                                                                              | Supported opening versions and dependent access are explicit concerns; the open factory owns acquisition and failure cleanup.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Conversation tables define role checks, correlated assistant status and finish reason, indexes, and timestamp triggers                                                                                                                                          | A storage schema contains behavioral invariants beyond its column names. Copying rows alone would not preserve the complete contract.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |

@@ -147,8 +147,10 @@ superseded, deleted, or finalized, and ends it as interrupted.
 The tool-call round stores each call as a part in the model's order, under
 the UUIDv7 it sends: a call of an unknown tool, or with arguments that do not
 match, as `failed` with the message the model reads; a checked call as
-`running` when the gate allows it at once, or as `awaiting-approval` in the
-step the prompt is sent. An allowed call becomes `running`, a rejected one
+`running` when the gate allows it at once, or otherwise as
+`awaiting-approval` before its prompt is sent, in the same step. A call the
+store refuses because its reply has ended is never prompted. An allowed call
+becomes `running`, a rejected one
 `rejected` with the rejection the model reads, and a call that ran
 `succeeded` or `failed` with its result. A network tool's result is cleaned
 before it is stored, so the stored result is what the model read.
@@ -156,13 +158,19 @@ before it is stored, so the stored result is what the model read.
 `SourceCatalog` (`src/modules/agent/sourceCatalog.ts`) numbers the web
 sources of one conversation during a turn, seeded with the sources the
 conversation stored. A backend tool's run receives `addWebSources`, which
-gives each candidate URL the number it already has, or the next one.
+gives each candidate URL the number it already has, or the next one. A
+candidate's title is cleaned of the characters a person cannot see, as a
+network tool's result is, and trimmed; a title left with nothing visible is
+replaced by the URL's host, so a citation never shows an empty or disguised
+title.
 `web_search` labels each result `Source [n]`, and `read_page` adds a
 `Source number: [n]` line; the citation rule tells the model to cite those
 numbers in square brackets and to write no list of sources. A succeeded call
 stores the numbers its result shows with the sources themselves, then a
 `sources` event precedes its `reply-part` event. A number given to a call
-whose result is never stored leaves a gap. Only web pages are sources today;
+whose result is never stored, because the reply ended first, is not kept:
+the next turn gives the numbers above every stored number again, so a gap is
+left only below the highest stored number. Only web pages are sources today;
 files a tool reads are not ([#184](https://github.com/w3lt/lys/issues/184)).
 
 `StoredReplyParts` (`src/modules/conversation/replyParts.ts`) implements
@@ -230,11 +238,13 @@ read (`settingsFile.ts`) with the Tavily key reader: at most 1 MiB, UTF-8,
 parse failures dropped unread. A missing file, `tools` group, or `justRun`
 list means no tool is on Just run.
 
-For each checked call, in the model's order, the gate either lets a call of a
-tool on Just run go on at once, or sends a `tool-approval` event and waits for
-the person's answer through the tool-approval route, with no timer. Both
-happen in the same synchronous step, so a round's prompts and the run
-requests of calls allowed at once keep the model's order. When the settings
+For each checked call, in the model's order, the gate answers whether its
+tool is on Just run. Such a call goes on at once. Any other call is stored as
+`awaiting-approval` first; the gate then sends a `tool-approval` event and
+waits for the person's answer through the tool-approval route, with no
+timer. Storing and prompting happen in the same synchronous step, so a
+follower that sees the prompt can read the call, and a round's prompts and
+the run requests of calls allowed at once keep the model's order. When the settings
 file cannot be read, or `tools`, `justRun`, or a name in it is invalid, no
 tool is on Just run, every call of the round asks, and the chat route logs a
 warning with the request's logger. A choice the desktop saves applies from

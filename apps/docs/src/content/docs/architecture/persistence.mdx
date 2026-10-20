@@ -13,7 +13,7 @@ definitions, a small JSON settings file, and one desktop theme preference.
 
 | Artifact         | Owner           | Location                                | Purpose                                                                        |
 | ---------------- | --------------- | --------------------------------------- | ------------------------------------------------------------------------------ |
-| Backend database | Fastify backend | `$LYS_HOME/lys_db.sqlite`               | Stores conversation metadata, conversation messages, and agent definitions.    |
+| Backend database | Fastify backend | `$LYS_HOME/lys_db.sqlite`               | Stores conversations, their messages and reply parts, sources, and agents.     |
 | Settings JSON    | Tauri host      | `$LYS_HOME/settings.json`               | Stores the runtime, model, generation, load, secrets, and tools groups.        |
 | Theme preference | Desktop UI      | WebView `localStorage`, key `lys.theme` | Stores `dark` or `light`; invalid or unavailable storage falls back to `dark`. |
 
@@ -37,16 +37,17 @@ transaction the connection refuses every change
 (`PRAGMA query_only`), so a read cannot write and a statement kept beyond its
 operation cannot change data.
 
-| Table                   | Owned by                    | Notes                                                                                                                   |
-| ----------------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `conversations`         | SQLite conversation records | One row per conversation, including `title`, `agent_code`, `created_at`, and `updated_at`.                              |
-| `conversation_messages` | SQLite conversation records | Ordered user and assistant messages, including assistant `status`, `finish_reason`, and `model`.                        |
-| `agents`                | SQLite agent records        | One row per agent definition, keyed by its `code`, with `name`, `bio`, `system_prompt`, `created_at`, and `updated_at`. |
+| Table                   | Owned by                    | Notes                                                                                                                                                                |
+| ----------------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `conversations`         | SQLite conversation records | One row per conversation, including `title`, `agent_code`, `created_at`, and `updated_at`.                                                                           |
+| `conversation_messages` | SQLite conversation records | Ordered user messages and replies, with each reply's `status`, `finish_reason`, and `model`, and each reply's reasoning, text, and tool-call parts as rows under it. |
+| `conversation_sources`  | SQLite conversation records | One row per numbered web source of a conversation: `number`, `url`, and `title`, each number and URL once.                                                           |
+| `agents`                | SQLite agent records        | One row per agent definition, keyed by its `code`, with `name`, `bio`, `system_prompt`, `created_at`, and `updated_at`.                                              |
 
 The desktop does not query SQLite directly and the Tauri host does not proxy
-conversation SQL. The backend creates three SQLite record providers over the
-shared database, for history reading, history editing, and turns, and wraps each
-in a conversation service in `src/modules/conversation/`. Each
+conversation SQL. The backend creates four SQLite record providers over the
+shared database, for history reading, history editing, turns, and reply parts,
+and wraps each in a conversation service in `src/modules/conversation/`. Each
 service keeps the decisions (identities, timestamps, validation, superseding a
 streaming reply, list cursors) behind records it declares in `records.ts`, and
 contains no SQL. Each service is exposed as its own application service.
@@ -87,7 +88,8 @@ interrupted with a fresh timestamp, without changing conversation activity
 time. The record reader then registers
 its search function, and the agent service is created over its records.
 
-The current migrations create the two conversation tables, add a message index,
+The current migrations create the three conversation tables, add a message
+index,
 and install triggers that keep `conversations.updated_at` current. Historical
 migrations remain unchanged; version 4 restricts the conversation timestamp
 trigger to explicit activity updates, so title edits preserve ordering, and

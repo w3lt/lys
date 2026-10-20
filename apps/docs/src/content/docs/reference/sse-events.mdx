@@ -82,7 +82,8 @@ Carries one stored part of the reply, complete as of this event, in the
 `ReplyPart` shape of the [stored data](/reference/schema/#reply-parts): `kind`
 (`reasoning`, `text`, or `tool-call`), `id`, `round`, `createdAt`,
 `updatedAt`, and either `content` or the call's `toolName`, `argumentText`,
-`status`, `sourceNumbers`, and, once it has one, `result`.
+`status`, and, once it has one, `result`, with a succeeded call's
+`sourceNumbers`.
 
 The backend sends it when it stores a new part, and again each time a tool
 call changes state: stored as `running` or `awaiting-approval` when the round
@@ -91,7 +92,8 @@ with the result the model reads. A call that cannot run, such as one naming a
 tool that was not offered, arrives once, already `failed`. A client replaces
 the part it holds under the same `id`, or adds the part after the reply's
 other parts. A reasoning or text part starts with its first fragment; later
-fragments of the same kind and round arrive as `reply-part-delta` events.
+fragments that directly follow it, with the same kind and round, arrive as
+`reply-part-delta` events.
 
 ```json
 {
@@ -154,8 +156,9 @@ too.
 Carries one tool call the backend shows to the person before anything runs,
 in the same shape as a `tool-call` event's `call`. The backend's tool approval
 service sends it for every call of a tool that is not saved as Just run,
-client and backend tools alike; a call of a tool on Just run gets no prompt.
-The client shows the call and answers with the
+client and backend tools alike, right after the call's `reply-part` stored it
+as `awaiting-approval`; a call of a tool on Just run gets no prompt. The
+client shows the call and answers with the
 [tool-approval route](/reference/api/#tool-approvals). After `allowed`, a
 backend tool runs in the backend, and a client tool's call comes back as a
 `tool-call` event under the same `id`. The event is live only: a client that

@@ -85,6 +85,10 @@ number keeps its source for the whole conversation. The table is `STRICT`.
   running, and interrupted calls have empty content; failed and rejected calls
   have non-empty content; only succeeded calls may have `source_numbers`,
   which must be valid JSON.
+- The content checks of user rows, reasoning and text parts, and failed and
+  rejected calls compare the content with `''`, so text that starts with a NUL
+  character counts as non-empty. SQLite's `length()` stops at that character,
+  so a check built on it would refuse such text.
 - Sources must have a number of at least 1 and a non-empty URL and title; a
   conversation holds each number and each URL once.
 - Conversation rows must have a non-empty `agent_code`; SQLite checks only
@@ -116,8 +120,9 @@ interruption.
 
 The shared `ReplyPart` type reads these rows: `kind` (`reasoning`, `text`, or
 `tool-call`), `id`, `round`, `createdAt`, `updatedAt`, and `content` for
-reasoning and text; `toolName`, `argumentText`, `status`, `sourceNumbers`, and,
-for a succeeded, failed, or rejected call, `result` for a tool call. A reply's
+reasoning and text; `toolName`, `argumentText`, and `status` for a tool call,
+with `result` for a succeeded, failed, or rejected call and `sourceNumbers`
+for a succeeded one. A reply's
 `parts` are its rows in `position` order, and a conversation's `sources` are
 its source rows in `number` order.
 
@@ -133,8 +138,10 @@ its source rows in `number` order.
 
 ## Migration strategy
 
-The backend applies schema changes from an ordered array of SQL strings and
-tracks the applied version with `PRAGMA user_version`. Version 4 replaces only the
+The backend applies schema changes from an ordered array of steps, each an
+SQL string or, for version 9, a function that runs its statements and moves
+the stored reply text inside the same transaction, and tracks the applied
+version with `PRAGMA user_version`. Version 4 replaces only the
 conversation timestamp trigger. Version 5 replaces only the message-update
 trigger so that it fires on `content` changes; status-only updates no longer
 count as conversation activity. Version 6 adds the `agents` table and changes

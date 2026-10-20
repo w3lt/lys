@@ -42,7 +42,10 @@ replaces only its own part and preserves the rest already on disk, including a
 ## `$LYS_HOME/lys_db.sqlite`
 
 The backend stores conversations and agent definitions in a SQLite database at
-`$LYS_HOME/lys_db.sqlite`.
+`$LYS_HOME/lys_db.sqlite`. A conversation holds its messages, each reply's
+reasoning, text, and tool calls, and the web sources its replies cite. Each
+tool call is stored with its arguments and its full result, such as the text
+of a file `read_text_file` read, until the conversation is deleted.
 
 The database runs in write-ahead-log mode, so `lys_db.sqlite-wal` and
 `lys_db.sqlite-shm` sit beside it. They usually remain after the app quits,

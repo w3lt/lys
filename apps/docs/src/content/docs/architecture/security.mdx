@@ -77,9 +77,14 @@ backend decides which calls ask; the desktop shows the prompts.
   For `read_text_file` and `search_files`, the desktop then runs the call with
   the person's account on a reply it follows, including one it starts
   following when the person opens the conversation, and even while the call's
-  card still waits for the person. The model reads what the call returns, and
-  the stored reply, which can quote it, is readable through the same API. This
-  stays open until callers are authenticated
+  card still waits for the person. The model reads what the call returns.
+  This stays open until callers are authenticated
+  ([#171](https://github.com/w3lt/lys/issues/171)).
+- Every tool call's full result is stored with its reply: the text of a file
+  `read_text_file` read, the matches of `search_files`, and the evidence of
+  `web_search` and `read_page`. Any caller that reaches the backend can read
+  it through the conversation and reply-event routes until the conversation is
+  deleted, so a call answered as above exposes the file's text to that caller
   ([#171](https://github.com/w3lt/lys/issues/171)).
 - `read_page` runs the scripts of pages the model chooses in Chromium inside
   vmo's micro VM, with Chromium's own sandbox off, so the VM alone confines

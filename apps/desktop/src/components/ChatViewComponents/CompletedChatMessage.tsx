@@ -12,8 +12,10 @@ export type CompletedChatMessageProps = {
   readonly message: CompletedConversationMessage
   /** Name of the agent that answers the conversation. */
   readonly speakerName: string
-  /** Numbered sources of the conversation, which replies may cite. */
+  /** Numbered sources of the conversation, in number order. */
   readonly sources: readonly ConversationSource[]
+  /** Highest source number an assistant reply may cite; see {@link LysMessage}. */
+  readonly sourceNumberLimit: number
 }
 
 /**
@@ -21,15 +23,18 @@ export type CompletedChatMessageProps = {
  *
  * @remarks The shared message object is
  * immutable; memoization skips body work while its identity, the speaker's
- * name, and the identity of the conversation's sources are unchanged.
+ * name, the identity of the conversation's sources, and the reply's source
+ * number limit are unchanged.
  * @param props - Stable completed message selected by the transcript, the
- * name its assistant replies are shown under, and the conversation's sources.
+ * name its assistant replies are shown under, the conversation's sources, and
+ * the highest source number the reply may cite.
  * @returns The rendered role-specific transcript message.
  */
 function CompletedChatMessage({
   message,
   speakerName,
-  sources
+  sources,
+  sourceNumberLimit
 }: CompletedChatMessageProps): ReactElement {
   if (message.role === "user") {
     return <UserMessage message={message} />
@@ -39,6 +44,7 @@ function CompletedChatMessage({
     <LysMessage
       kind="terminal"
       message={message}
+      sourceNumberLimit={sourceNumberLimit}
       sources={sources}
       speakerName={speakerName}
     />

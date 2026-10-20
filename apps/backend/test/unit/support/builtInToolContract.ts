@@ -1,10 +1,10 @@
 import type { ConversationSource } from "@lys/share"
 import { describe, expect, it } from "vitest"
+import SourceCatalog from "../../../src/modules/agent/sourceCatalog"
 import type {
   BuiltInTool,
   BuiltInToolCallArguments,
-  BuiltInToolRunContext,
-  WebSourceCandidate
+  BuiltInToolRunContext
 } from "../../../src/modules/tool/builtIn/builtInTool"
 
 /** One ready built-in tool with arguments it can and cannot run. */
@@ -34,44 +34,52 @@ type RecordedRunContext = Readonly<{
 }>
 
 /**
- * Creates a run context that numbers sources from 1, a new number per call
- * of the numbering, and records what it returned.
+ * Creates a run context that numbers sources as a turn of a conversation
+ * without stored sources does, and records what it returned.
  *
  * @param abortSignal - Signal the run observes.
  * @returns The context and the live record of numbered sources.
+ * @remarks Numbering starts at 1, gives each new URL the next number, and
+ * keeps a known URL's number, through the production {@link SourceCatalog}.
  */
 export function createRecordedRunContext(
   abortSignal: AbortSignal
 ): RecordedRunContext {
   const numberedSources: ConversationSource[] = []
+  const sourceCatalog = new SourceCatalog([])
   return {
     context: {
       abortSignal,
-      addWebSources: (candidates) =>
-        addRecordedSources(numberedSources, candidates)
+      addWebSources: (candidates) => {
+        const sources = sourceCatalog.addWebSources(candidates)
+        numberedSources.push(...sources)
+        return sources
+      }
     },
     numberedSources
   }
 }
 
 /**
- * Numbers candidates after every source numbered before and records them.
+ * Registers the {@link BuiltInTool} case about the sources a run shows.
  *
- * @param numberedSources - Sources numbered so far; extended in place.
- * @param candidates - Sources a run is about to show.
- * @returns The candidates numbered in order.
+ * @param createHarness - Creates a fresh tool for each case.
  */
-function addRecordedSources(
-  numberedSources: ConversationSource[],
-  candidates: readonly WebSourceCandidate[]
-): readonly ConversationSource[] {
-  const sources = candidates.map((candidate, index) => ({
-    number: numberedSources.length + index + 1,
-    url: candidate.url,
-    title: candidate.title
-  }))
-  numberedSources.push(...sources)
-  return sources
+function registerBuiltInToolSourceCase(
+  createHarness: BuiltInToolHarnessFactory
+): void {
+  it("shows only sources the turn numbered for it", async () => {
+    const harness = await createHarness()
+    const parsed = harness.tool.parseToolCall(harness.runnableArguments)
+    if (parsed.status !== "parsed") throw new Error("Expected a parsed call")
+    const recorded = createRecordedRunContext(new AbortController().signal)
+
+    const result = await parsed.runToolCall(recorded.context)
+
+    if (result.status !== "succeeded") throw new Error("Expected a success")
+    for (const source of result.sources)
+      expect(recorded.numberedSources).toContainEqual(source)
+  })
 }
 
 /**
@@ -116,18 +124,7 @@ export function registerBuiltInToolContractSuite(
       expect(harness.countStartedWork()).toBe(1)
     })
 
-    it("shows only sources the turn numbered for it", async () => {
-      const harness = await createHarness()
-      const parsed = harness.tool.parseToolCall(harness.runnableArguments)
-      if (parsed.status !== "parsed") throw new Error("Expected a parsed call")
-      const recorded = createRecordedRunContext(new AbortController().signal)
-
-      const result = await parsed.runToolCall(recorded.context)
-
-      if (result.status !== "succeeded") throw new Error("Expected a success")
-      for (const source of result.sources)
-        expect(recorded.numberedSources).toContainEqual(source)
-    })
+    registerBuiltInToolSourceCase(createHarness)
 
     it("runs each invocation of a parsed call independently", async () => {
       const harness = await createHarness()

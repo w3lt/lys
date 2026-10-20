@@ -48,7 +48,7 @@ const conversationSourceNumberSchema = z.int().min(1)
  * @remarks A conversation stores each URL once, under one number that never
  * changes; a later read of the same URL reuses it. The title is the one
  * shown to the model when the source was first numbered, flattened onto one
- * line.
+ * line and without the characters a person cannot see.
  */
 export const conversationSourceSchema = z.strictObject({
   /** Number the model cites the source by; unique within the conversation. */
@@ -103,12 +103,7 @@ const toolCallReplyPartBase = {
    */
   toolName: z.string(),
   /** Argument text as the model wrote it; possibly not valid JSON. */
-  argumentText: z.string(),
-  /**
-   * Numbers of the conversation's sources the result shows, in the order it
-   * shows them; empty when it shows none.
-   */
-  sourceNumbers: z.array(conversationSourceNumberSchema).readonly()
+  argumentText: z.string()
 }
 
 /**
@@ -130,7 +125,12 @@ const succeededToolCallReplyPartSchema = z.strictObject({
   ...toolCallReplyPartBase,
   status: z.literal("succeeded"),
   /** Text the model read as the result; empty when the tool returned nothing. */
-  result: z.string()
+  result: z.string(),
+  /**
+   * Numbers of the conversation's sources the result shows, in the order it
+   * shows them; empty when it shows none.
+   */
+  sourceNumbers: z.array(conversationSourceNumberSchema).readonly()
 })
 
 /**
@@ -186,7 +186,10 @@ export const conversationAssistantMessageSchema = z.strictObject({
   status: conversationAssistantMessageStatusSchema,
   /** Null while the reply is streaming, interrupted, or failed. */
   finishReason: conversationAssistantMessageFinishReasonSchema.nullable(),
-  /** Last modification time, updated as the reply's parts or state change. */
+  /**
+   * Time of the reply's latest state change: its creation, or the write that
+   * ended it. Writing a part changes the part's own `updatedAt`, not this.
+   */
   updatedAt: timestampSchema
 })
 

@@ -23,10 +23,10 @@ import rehypeKatex from "rehype-katex"
 import { toString } from "hast-util-to-string"
 
 import {
+  buildCitationTransformer,
   CITATION_PROPERTY,
   type CitationOptions,
-  formatSourceSite,
-  remarkCitations
+  formatSourceSite
 } from "./markdown-citations"
 import "./MarkdownMessage.scss"
 
@@ -224,8 +224,9 @@ function formatCitationDescription(title: string, href: string): string {
  * @remarks A fragment link, such as a footnote reference or its
  * back-reference, stays in the current document: it keeps its `id`,
  * `aria-label`, and `aria-describedby`, which those links use to name and
- * reach each other. A citation, marked by {@link remarkCitations}, opens its
- * source in a new tab without a referrer, is named `Source n: title`, and
+ * reach each other. A citation, marked by {@link buildCitationTransformer},
+ * opens its source in a new tab without a referrer, is named by its number
+ * and then its source's title, as `1, source: Night moths`, and
  * shows the source's title and site while the pointer rests on it. Every
  * other link opens in a new tab without a referrer and renders only the
  * destination and title a Markdown link can carry. In every case the source
@@ -249,7 +250,7 @@ function MarkdownLink({
     return (
       <Tooltip description={formatCitationDescription(title, href)}>
         <a
-          aria-label={`Source ${String(citation)}: ${title}`}
+          aria-label={`${String(citation)}, source: ${title}`}
           className="markdown-message__citation"
           href={href}
           rel="noreferrer"
@@ -286,12 +287,12 @@ function MarkdownLink({
  * Builds the remark plugin entry that links a message's citations.
  *
  * @param sources - Sources the message may cite.
- * @returns {@link remarkCitations} with its settings.
+ * @returns {@link buildCitationTransformer} with its settings.
  */
 function buildCitationPlugin(
   sources: readonly ConversationSource[]
-): [typeof remarkCitations, CitationOptions] {
-  return [remarkCitations, { sources }]
+): [typeof buildCitationTransformer, CitationOptions] {
+  return [buildCitationTransformer, { sources }]
 }
 
 /**

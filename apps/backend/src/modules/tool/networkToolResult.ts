@@ -26,6 +26,21 @@ const STRAY_VARIATION_SELECTOR_PATTERN =
   /[\p{Variation_Selector}--[\uFE0E\uFE0F]]|(?<=^|[\s\p{Variation_Selector}\u200C\u200D])[\uFE0E\uFE0F]/gv
 
 /**
+ * Formats untrusted text without the characters a person cannot see.
+ *
+ * @param text - Text that carries what a remote server sent.
+ * @returns The text without the characters {@link formatNetworkToolResult}
+ * removes, otherwise unchanged: whitespace that sat beside them is kept, so
+ * the text can be blank without being empty.
+ */
+export function formatVisibleText(text: string): string {
+  return text
+    .replace(INVISIBLE_CHARACTER_PATTERN, "")
+    .replace(STRAY_JOINER_PATTERN, "")
+    .replace(STRAY_VARIATION_SELECTOR_PATTERN, "")
+}
+
+/**
  * Formats the result of a tool that reaches the network for the model.
  *
  * @param content - Text the tool produced, which carries what a remote
@@ -42,10 +57,7 @@ const STRAY_VARIATION_SELECTOR_PATTERN =
  * into a delimiter.
  */
 export function formatNetworkToolResult(content: string): string {
-  const visibleText = content
-    .replace(INVISIBLE_CHARACTER_PATTERN, "")
-    .replace(STRAY_JOINER_PATTERN, "")
-    .replace(STRAY_VARIATION_SELECTOR_PATTERN, "")
+  const visibleText = formatVisibleText(content)
   const removedCount =
     Array.from(content).length - Array.from(visibleText).length
   if (removedCount === 0) return content

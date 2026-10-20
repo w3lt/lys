@@ -8,7 +8,8 @@ import {
 import {
   CITATION_MARKER_RULE,
   formatExcerptText,
-  formatSingleLineText
+  formatSingleLineText,
+  formatVisibleTitle
 } from "./untrustedText"
 
 /** Most UTF-16 code units of a result title shown to the model, inclusive. */
@@ -22,7 +23,10 @@ export const MAXIMUM_SEARCH_SNIPPET_LENGTH = 500
 
 /** One result shown to the model. */
 type ShownSearchResult = Readonly<{
-  /** Flattened, bounded title, or the URL's host when the title is empty. */
+  /**
+   * Flattened, bounded title, or the URL's host when the title has nothing
+   * a person can see.
+   */
   title: string
   /** Checked, normalized URL. */
   url: PageUrl
@@ -88,21 +92,21 @@ function buildShownResult(
     MAXIMUM_SEARCH_SNIPPET_LENGTH
   )
   return Object.freeze({
-    title: title === "" ? new URL(url).host : title,
+    title: formatVisibleTitle(title) === "" ? new URL(url).host : title,
     url,
     snippet: snippet === "" ? NO_SNIPPET : snippet
   })
 }
 
 /**
- * Selects the results shown to the model.
+ * Lists the results shown to the model.
  *
  * @param results - Results Tavily gave, in its order; untrusted.
  * @returns Each result whose URL passes the page URL rules, so the model can
  * ask `read_page` to read it, once per normalized URL; and how many were
  * left out for their URL. Duplicates are dropped without being counted.
  */
-export function selectShownSearchResults(
+export function listShownSearchResults(
   results: readonly TavilySearchResult[]
 ): SearchResultSelection {
   const shown: ShownSearchResult[] = []
@@ -170,14 +174,18 @@ function formatSearchLines(
  * Builds the sources a search shows, before they are numbered.
  *
  * @param selection - Results shown.
- * @returns Each shown result's URL and title, in the same order.
+ * @returns Each shown result's URL and its title as the model reads it, as
+ * {@link formatVisibleTitle} formats it, in the same order.
  */
 export function listSearchSourceCandidates(
   selection: SearchResultSelection
 ): readonly WebSourceCandidate[] {
   return Object.freeze(
     selection.shown.map((result) =>
-      Object.freeze({ url: result.url, title: result.title })
+      Object.freeze({
+        url: result.url,
+        title: formatVisibleTitle(result.title)
+      })
     )
   )
 }

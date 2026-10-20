@@ -46,8 +46,7 @@ function createScriptedPart(
   draft: ReplyPartDraft,
   sequence: number
 ): ReplyPart {
-  if (draft.kind === "tool-call")
-    return { ...RUNNING_CALL, ...draft, sourceNumbers: [] }
+  if (draft.kind === "tool-call") return { ...RUNNING_CALL, ...draft }
   return {
     ...draft,
     id: createFixtureUuidV7(sequence),
@@ -192,7 +191,7 @@ describe("ReplyPartSequence", () => {
     ])
     expect(run.events[1]).toEqual({
       type: "reply-part",
-      part: { ...RUNNING_CALL, ...draft, sourceNumbers: [] }
+      part: { ...RUNNING_CALL, ...draft }
     })
   })
 
@@ -308,14 +307,7 @@ describe("ReplyPartSequence", () => {
       .fn<ReplyPartSequenceDependencies["createReplyPart"]>()
       .mockReturnValueOnce(undefined)
     const run = createSequence({ createReplyPart })
-    createReplyPart.mockImplementation((draft) => ({
-      kind: "text",
-      id: createFixtureUuidV7(9),
-      round: draft.round,
-      content: draft.kind === "tool-call" ? "" : draft.content,
-      createdAt: FIXTURE_TIMESTAMP,
-      updatedAt: FIXTURE_TIMESTAMP
-    }))
+    createReplyPart.mockImplementation((draft) => createScriptedPart(draft, 9))
 
     run.sequence.updateReplyText(0, "Refused")
     run.sequence.updateReplyText(0, "Stored")

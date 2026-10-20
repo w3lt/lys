@@ -306,4 +306,35 @@ describe("buildPageSourceCandidate", () => {
       buildPageSourceCandidate(PAGE_URL, { ...ARTICLE, title: " \n\t " })
     ).toEqual({ url: "https://moths.example/article", title: "moths.example" })
   })
+
+  it("gives the title without the direction, zero-width, and tag characters the model never reads", () => {
+    expect(
+      buildPageSourceCandidate(PAGE_URL, {
+        ...ARTICLE,
+        title: "Moth guide \u202Emoc.knabtsurt\u200B\u{E0041}"
+      })
+    ).toEqual({
+      url: "https://moths.example/article",
+      title: "Moth guide moc.knabtsurt"
+    })
+  })
+
+  it("trims the spaces left beside the characters it removes", () => {
+    expect(
+      buildPageSourceCandidate(PAGE_URL, {
+        ...ARTICLE,
+        title: "\u200B Night moths \u200F"
+      })
+    ).toEqual({ url: "https://moths.example/article", title: "Night moths" })
+  })
+
+  it.each([
+    ["invisible characters", "\u200B\u{E0041}"],
+    ["invisible characters and spaces", "\u200B \u200B"]
+  ])("names a page whose title shows only %s by its host", (_label, title) => {
+    expect(buildPageSourceCandidate(PAGE_URL, { ...ARTICLE, title })).toEqual({
+      url: "https://moths.example/article",
+      title: "moths.example"
+    })
+  })
 })

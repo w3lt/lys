@@ -98,7 +98,6 @@ describe("StoredReplyParts", () => {
         toolName: "web_search",
         argumentText: '{"query":"moths"}',
         status: "awaiting-approval",
-        sourceNumbers: [],
         createdAt: NOW,
         updatedAt: NOW
       })

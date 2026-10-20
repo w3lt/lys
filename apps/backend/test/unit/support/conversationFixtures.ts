@@ -180,8 +180,7 @@ export function createToolCallPart(
         kind: "tool-call",
         ...common,
         status: state.status,
-        result: state.result,
-        sourceNumbers: []
+        result: state.result
       }
     case "awaiting-approval":
     case "running":
@@ -189,8 +188,7 @@ export function createToolCallPart(
       return {
         kind: "tool-call",
         ...common,
-        status: state.status,
-        sourceNumbers: []
+        status: state.status
       }
   }
 }

@@ -31,7 +31,7 @@ import {
 import {
   buildStreamingAssistantMessage,
   buildConversationMetadata,
-  buildFragmentPart,
+  buildTextPart,
   buildConversationNotFoundProblem,
   buildReplyNotFoundProblem,
   buildReplyNotGeneratingProblem,
@@ -235,7 +235,7 @@ describe("readChatEvents", () => {
   it("yields each event in order, parts, sources, and tool calls included, until the backend ends the stream", async () => {
     const stream = startBackendEventStream()
     startBackendFake({ [CHAT_ROUTE]: () => stream.response })
-    const text = buildFragmentPart("text", 40, 0, "Let me")
+    const text = buildTextPart(40, 0, "Let me")
     const events = [
       NEW_CONVERSATION_START_EVENT,
       { type: "reply-part", part: text },
@@ -250,7 +250,7 @@ describe("readChatEvents", () => {
         type: "sources",
         sources: [{ number: 1, url: "https://moths.example/", title: "Moths" }]
       },
-      { type: "reply-part", part: buildFragmentPart("text", 41, 1, "Hi") },
+      { type: "reply-part", part: buildTextPart(41, 1, "Hi") },
       { type: "title", title: "Greeting" },
       { type: "done", finishReason: "stop" }
     ]
@@ -444,7 +444,7 @@ describe("readChatReplyEvents", () => {
       },
       { type: "tool-approval", call: buildToolCall(7, "find_files") },
       { type: "tool-call", call: buildToolCall(5, "find_files") },
-      { type: "reply-part", part: buildFragmentPart("text", 41, 1, "There") },
+      { type: "reply-part", part: buildTextPart(41, 1, "There") },
       { type: "done", finishReason: "length" }
     ]
     sendStreamEvents(stream, events)

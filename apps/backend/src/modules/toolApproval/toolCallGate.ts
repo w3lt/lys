@@ -10,43 +10,17 @@ export type SendToolApprovalPrompt = (
 ) => Promise<ChatToolApprovalAnswer | undefined>
 
 /**
- * What asking the gate about one call did.
- *
- * @remarks `allowed`: the tool is on Just run, nothing was sent, and the call
- * may go on in the same step. `prompted`: the call was shown to the person
- * in the same step, and `answer` settles with their answer.
- */
-export type ToolApprovalRequest =
-  | Readonly<{
-      /** The call may go on without asking the person. */
-      status: "allowed"
-    }>
-  | Readonly<{
-      /** The call was shown to the person. */
-      status: "prompted"
-      /**
-       * Resolves with the person's answer, or with undefined when the reply
-       * was stopped while the prompt waited; never rejects.
-       */
-      answer: Promise<ChatToolApprovalAnswer | undefined>
-    }>
-
-/** Request outcome of a call whose tool is on Just run. */
-const ALLOWED_TOOL_APPROVAL_REQUEST: ToolApprovalRequest = Object.freeze({
-  status: "allowed"
-})
-
-/**
  * Owns the Just run choices read for one model round and the reply's prompt
- * sender to decide, for each call of the round, whether the person is asked
- * first.
+ * sender to tell, for each call of the round, whether it may go on without
+ * the person, and to ask the person about a call that may not.
  *
- * @remarks The invariant is that a call goes on without the person only when
- * its tool's name was saved as Just run when the round's calls arrived;
- * every other call waits for the person's answer. The choices never change
- * after construction, so a change saved later applies from the next round.
- * Concurrency model: single-owner, on the backend's event loop, like the
- * reply's waits that the prompt sender borrows.
+ * @remarks The invariant is that a call is allowed at once only when its
+ * tool's name was saved as Just run when the round's calls arrived. The
+ * choices never change after construction, so a change saved later applies
+ * from the next round. The round's caller asks the person about every other
+ * call and waits for the answer. Concurrency model: single-owner, on the
+ * backend's event loop, like the reply's waits that the prompt sender
+ * borrows.
  */
 export default class ToolCallGate {
   /** Names of the tools on Just run for this round; owned, never changed. */
@@ -71,23 +45,29 @@ export default class ToolCallGate {
   }
 
   /**
-   * Decides whether one checked call may go on, prompting the person when
-   * the tool is not on Just run.
+   * Answers whether one checked call may go on without asking the person.
    *
    * @param toolCall - Checked call of an offered tool.
-   * @returns `allowed` when the tool is on Just run, without sending
-   * anything; otherwise `prompted`, after the prompt was sent, with the
-   * person's answer to come.
-   * @remarks Both outcomes are decided in the same synchronous step, so a
-   * caller that goes on with an allowed call at once keeps the order of a
-   * round's prompts and run requests.
+   * @returns True only when the call's tool was saved as Just run when the
+   * round's calls arrived. Sends nothing.
    */
-  public sendToolApprovalRequest(toolCall: ChatToolCall): ToolApprovalRequest {
-    if (this.#justRunToolNames.has(toolCall.toolName))
-      return ALLOWED_TOOL_APPROVAL_REQUEST
-    return Object.freeze({
-      status: "prompted",
-      answer: this.#sendToolApprovalPrompt(toolCall)
-    })
+  public isToolCallAllowedAtOnce(toolCall: ChatToolCall): boolean {
+    return this.#justRunToolNames.has(toolCall.toolName)
+  }
+
+  /**
+   * Shows one checked call to the person and waits for their answer.
+   *
+   * @param toolCall - Checked call that is not allowed at once.
+   * @returns Resolves with the person's answer, or with undefined when the
+   * reply was stopped while the prompt waited; never rejects.
+   * @remarks The prompt is sent in the same synchronous step. The caller
+   * stores the call as awaiting approval first, so a client that sees the
+   * prompt can read the call it asks about.
+   */
+  public sendToolApprovalPrompt(
+    toolCall: ChatToolCall
+  ): Promise<ChatToolApprovalAnswer | undefined> {
+    return this.#sendToolApprovalPrompt(toolCall)
   }
 }

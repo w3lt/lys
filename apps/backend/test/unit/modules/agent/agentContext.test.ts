@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   buildAgentContext,
-  countAgentContextHistoryMessages
+  calculateAgentContextHistoryMessageCount
 } from "../../../../src/modules/agent/agentContext"
 import {
   createAssistantMessage,
@@ -180,6 +180,46 @@ describe("buildAgentContext", () => {
     ])
   })
 
+  it("sends only the answered call of a stopped round whose other call was waiting for approval", () => {
+    const stoppedRead = createToolCallPart(
+      {
+        sequence: 22,
+        round: 0,
+        toolName: "read_text_file",
+        argumentText: '{"path":"/notes/moths.md"}'
+      },
+      { status: "interrupted" }
+    )
+    const history = [
+      createAssistantMessage(
+        2,
+        [createTextPart(20, 0, "Searching."), SUCCEEDED_SEARCH, stoppedRead],
+        { status: "interrupted" }
+      )
+    ]
+
+    expect(buildAgentContext("You are Lys.", history, "Go on")).toEqual([
+      { role: "system", content: "You are Lys." },
+      {
+        role: "assistant",
+        content: "Searching.",
+        toolCalls: [
+          {
+            id: createFixtureUuidV7(21),
+            toolName: "web_search",
+            argumentText: '{"query":"moths"}'
+          }
+        ]
+      },
+      {
+        role: "tool",
+        toolCallId: createFixtureUuidV7(21),
+        content: "Source [1]\nTitle: Moths"
+      },
+      { role: "user", content: "Go on" }
+    ])
+  })
+
   it.each([
     [
       "a failed reply",
@@ -258,7 +298,7 @@ describe("buildAgentContext", () => {
   })
 })
 
-describe("countAgentContextHistoryMessages", () => {
+describe("calculateAgentContextHistoryMessageCount", () => {
   it("counts each stored message the context sends once, a reply with several rounds and results included", () => {
     const history = [
       createUserMessage(1, "Find moths"),
@@ -276,7 +316,7 @@ describe("countAgentContextHistoryMessages", () => {
     ]
 
     expect(buildAgentContext("You are Lys.", history, "Go on")).toHaveLength(8)
-    expect(countAgentContextHistoryMessages(history)).toBe(3)
+    expect(calculateAgentContextHistoryMessageCount(history)).toBe(3)
   })
 
   it("counts no reply the context leaves out", () => {
@@ -292,6 +332,6 @@ describe("countAgentContextHistoryMessages", () => {
       createAssistantMessage(4, [], { status: "interrupted" })
     ]
 
-    expect(countAgentContextHistoryMessages(history)).toBe(1)
+    expect(calculateAgentContextHistoryMessageCount(history)).toBe(1)
   })
 })

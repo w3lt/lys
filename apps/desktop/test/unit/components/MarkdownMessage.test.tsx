@@ -144,18 +144,37 @@ describe("MarkdownMessage", () => {
     it("links each marker of a known source to it, showing its number and named by it", async () => {
       await startCitedMessage(
         "Moths fly at night [1][3], not by day [2].",
-        "Source 1: Night moths"
+        "1, source: Night moths"
       )
 
-      const first = screen.getByRole("link", { name: "Source 1: Night moths" })
+      const first = screen.getByRole("link", { name: "1, source: Night moths" })
       expect(first).toHaveTextContent(/^1$/)
       expect(first).toHaveAttribute("href", "https://www.moths.example/night")
       expect(first).toHaveAttribute("rel", "noreferrer")
       expect(first).not.toHaveAttribute("title")
       expect(
-        screen.getByRole("link", { name: "Source 3: Lamps" })
+        screen.getByRole("link", { name: "3, source: Lamps" })
       ).toHaveTextContent(/^3$/)
       expect(screen.getByText(/not by day \[2\]\./)).toBeInTheDocument()
+    })
+
+    it("links markers inside emphasis and list items", async () => {
+      await startCitedMessage(
+        "- Moths **fly [1]**\n- Lamps *glow [3]*",
+        "1, source: Night moths"
+      )
+
+      const items = screen.getAllByRole("listitem")
+      expect(
+        within(items[0] ?? document.body).getByRole("link", {
+          name: "1, source: Night moths"
+        })
+      ).toBeVisible()
+      expect(
+        within(items[1] ?? document.body).getByRole("link", {
+          name: "3, source: Lamps"
+        })
+      ).toBeVisible()
     })
 
     it("leaves markers in code and inside links as written", async () => {
@@ -164,14 +183,14 @@ describe("MarkdownMessage", () => {
         "the [1] page"
       )
 
-      expect(screen.queryByRole("link", { name: /^Source/ })).toBeNull()
+      expect(screen.queryByRole("link", { name: /, source: / })).toBeNull()
       expect(screen.getByText("[1]").tagName).toBe("CODE")
     })
 
     it("shows the cited source's title and site while the pointer rests on it", async () => {
-      await startCitedMessage("Moths [1].", "Source 1: Night moths")
+      await startCitedMessage("Moths [1].", "1, source: Night moths")
       const trigger = screen.getByRole("link", {
-        name: "Source 1: Night moths"
+        name: "1, source: Night moths"
       }).parentElement
       if (trigger === null) throw new Error("The citation has no trigger")
       vi.useFakeTimers()

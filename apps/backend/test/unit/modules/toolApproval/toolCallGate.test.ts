@@ -38,31 +38,36 @@ function createPromptSender(answer: ChatToolApprovalAnswer | undefined) {
 }
 
 describe("ToolCallGate", () => {
-  it("allows a call of a tool on Just run in the same step, without prompting the person", () => {
+  it("allows a call of a tool on Just run at once, without prompting the person", () => {
     const sendToolApprovalPrompt = createPromptSender(undefined)
     const gate = new ToolCallGate(
       new Set(["read_page"]),
       sendToolApprovalPrompt
     )
 
-    const request = gate.sendToolApprovalRequest(PAGE_CALL)
-
-    expect(request).toEqual({ status: "allowed" })
+    expect(gate.isToolCallAllowedAtOnce(PAGE_CALL)).toBe(true)
     expect(sendToolApprovalPrompt).not.toHaveBeenCalled()
   })
 
-  it("prompts the person in the same step for a tool on Ask me", async () => {
-    const sendToolApprovalPrompt = createPromptSender({ status: "allowed" })
+  it("does not allow a call of a tool on Ask me at once, and sends nothing to decide it", () => {
+    const sendToolApprovalPrompt = createPromptSender(undefined)
     const gate = new ToolCallGate(
       new Set(["read_page"]),
       sendToolApprovalPrompt
     )
 
-    const request = gate.sendToolApprovalRequest(READ_CALL)
+    expect(gate.isToolCallAllowedAtOnce(READ_CALL)).toBe(false)
+    expect(sendToolApprovalPrompt).not.toHaveBeenCalled()
+  })
 
-    expect(request.status).toBe("prompted")
+  it("prompts the person in the same step", async () => {
+    const sendToolApprovalPrompt = createPromptSender({ status: "allowed" })
+    const gate = new ToolCallGate(new Set(), sendToolApprovalPrompt)
+
+    const answer = gate.sendToolApprovalPrompt(READ_CALL)
+
     expect(sendToolApprovalPrompt.mock.calls).toEqual([[READ_CALL]])
-    if (request.status === "prompted") await request.answer
+    await answer
   })
 
   it.each<[string, ChatToolApprovalAnswer | undefined]>([
@@ -74,22 +79,18 @@ describe("ToolCallGate", () => {
     async (_label, answer) => {
       const gate = new ToolCallGate(new Set(), createPromptSender(answer))
 
-      const request = gate.sendToolApprovalRequest(READ_CALL)
-
-      if (request.status !== "prompted") throw new Error("Expected a prompt.")
-      expect(await request.answer).toEqual(answer)
+      expect(await gate.sendToolApprovalPrompt(READ_CALL)).toEqual(answer)
     }
   )
 
   it("keeps the choices it was created with when the given set changes later", () => {
     const justRunToolNames = new Set<string>()
-    const sendToolApprovalPrompt = createPromptSender({ status: "allowed" })
-    const gate = new ToolCallGate(justRunToolNames, sendToolApprovalPrompt)
+    const gate = new ToolCallGate(
+      justRunToolNames,
+      createPromptSender({ status: "allowed" })
+    )
     justRunToolNames.add("read_text_file")
 
-    const request = gate.sendToolApprovalRequest(READ_CALL)
-
-    expect(request.status).toBe("prompted")
-    expect(sendToolApprovalPrompt).toHaveBeenCalledOnce()
+    expect(gate.isToolCallAllowedAtOnce(READ_CALL)).toBe(false)
   })
 })

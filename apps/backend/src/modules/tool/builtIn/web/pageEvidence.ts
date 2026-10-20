@@ -5,7 +5,8 @@ import type { PassageCoverage, PassageSelection } from "./passageDistillation"
 import {
   CITATION_MARKER_RULE,
   formatDelimiterFreeText,
-  formatSingleLineText
+  formatSingleLineText,
+  formatVisibleTitle
 } from "./untrustedText"
 
 /** What the model is shown about one page it read. */
@@ -73,14 +74,15 @@ function formatPageField(text: string): string {
  * @param url - URL Lys asked to read; where the page's redirects led, if
  * anywhere, is not known.
  * @param article - Article whose title the page stated.
- * @returns The URL and the title as the model sees it, or the URL's host
- * when the title has nothing left to show.
+ * @returns The URL and the title as the model reads it, as
+ * {@link formatVisibleTitle} formats it; or the URL's host when the title has
+ * nothing a person can see.
  */
 export function buildPageSourceCandidate(
   url: PageUrl,
   article: PageArticle
 ): WebSourceCandidate {
-  const title = formatPageField(article.title)
+  const title = formatVisibleTitle(formatPageField(article.title))
   return Object.freeze({ url, title: title === "" ? new URL(url).host : title })
 }
 

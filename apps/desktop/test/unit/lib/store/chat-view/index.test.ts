@@ -29,7 +29,7 @@ import {
   buildConversation,
   buildConversationMetadata,
   buildConversationNotFoundProblem,
-  buildFragmentPart,
+  buildTextPart,
   buildReplyNotGeneratingProblem,
   buildStreamingAssistantMessage,
   buildToolCallPart,
@@ -66,7 +66,7 @@ const FRAGMENT_TIME = "2026-07-08T09:10:10.000Z"
 function buildTextPartEvent(sequence: number, round: number, content: string) {
   return {
     type: "reply-part",
-    part: buildFragmentPart("text", sequence, round, content)
+    part: buildTextPart(sequence, round, content)
   } as const
 }
 
@@ -576,18 +576,18 @@ describe("createChatViewStore", () => {
 
     it("replaces a changed tool call in place and merges the sources it stored into the conversation", async () => {
       const { store, streams, send } = await startStreamingReply()
-      const running = buildToolCallPart(
-        40,
-        0,
-        { toolName: "web_search", argumentText: '{"query":"moths"}' },
-        { status: "running" }
-      )
-      const succeeded = buildToolCallPart(
-        40,
-        0,
-        { toolName: "web_search", argumentText: '{"query":"moths"}' },
-        { status: "succeeded", result: "Source [1]", sourceNumbers: [1] }
-      )
+      const running = buildToolCallPart(40, 0, {
+        toolName: "web_search",
+        argumentText: '{"query":"moths"}',
+        status: "running"
+      })
+      const succeeded = buildToolCallPart(40, 0, {
+        toolName: "web_search",
+        argumentText: '{"query":"moths"}',
+        status: "succeeded",
+        result: "Source [1]",
+        sourceNumbers: [1]
+      })
       const source = {
         number: 1,
         url: "https://moths.example/",
@@ -612,12 +612,11 @@ describe("createChatViewStore", () => {
 
     it("marks a call still running interrupted when the backend interrupts the reply", async () => {
       const { store, streams, send } = await startStreamingReply()
-      const running = buildToolCallPart(
-        40,
-        0,
-        { toolName: "web_search", argumentText: "{}" },
-        { status: "running" }
-      )
+      const running = buildToolCallPart(40, 0, {
+        toolName: "web_search",
+        argumentText: "{}",
+        status: "running"
+      })
 
       await sendStreamEvents(
         streams[0],
@@ -1157,6 +1156,42 @@ describe("following a stored reply", () => {
     replyStreams[0]?.close()
     await open
 
+    expect(whileFollowing?.sources).toEqual([source])
+  })
+
+  it("adds the parts and sources the reply stores after its snapshot", async () => {
+    const { replyStreams } = startFollowBackend(
+      buildStoredConversationRoutes(GENERATING_CONVERSATION)
+    )
+    const { store } = createChatHarness()
+    const open = store.getState().openConversation(GENERATING_ID)
+    await waitForMicrotasks()
+    const search = buildToolCallPart(33, 0, {
+      toolName: "web_search",
+      argumentText: '{"query":"moths"}',
+      status: "succeeded",
+      result: "Source [1]",
+      sourceNumbers: [1]
+    })
+    const source = { number: 1, url: "https://moths.example/", title: "Moths" }
+
+    await sendStreamEvents(
+      replyStreams[0],
+      GENERATING_SNAPSHOT_EVENT,
+      { type: "reply-part", part: search },
+      { type: "sources", sources: [source] }
+    )
+    const whileFollowing = store.getState().conversation
+    await sendStreamEvents(replyStreams[0], {
+      type: "done",
+      finishReason: "stop"
+    })
+    replyStreams[0]?.close()
+    await open
+
+    expect(whileFollowing?.messages.at(-1)).toMatchObject({
+      parts: [{ content: "Partial answer" }, search]
+    })
     expect(whileFollowing?.sources).toEqual([source])
   })
 

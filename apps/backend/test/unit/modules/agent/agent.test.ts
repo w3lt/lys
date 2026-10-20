@@ -51,7 +51,7 @@ import {
   createUnloadedReplyContextMeter
 } from "../../support/replyContextMeterFakes"
 import {
-  answerWithWordSource,
+  runLookUpWordWithSource,
   LOOK_UP_WORD_FORMAT,
   LOOK_UP_WORD_TOOL,
   ScriptedBuiltInTool,
@@ -229,6 +229,22 @@ function getStoredReply(store: AgentTurnStore): Readonly<{
 }
 
 /**
+ * Ends a stored turn's reply as interrupted, as a newer turn or a deletion
+ * ends a reply while its agent still works on it.
+ *
+ * @param store - Stored turn whose reply streams.
+ * @throws If the reply is no longer streaming.
+ */
+function updateStoredReplyToInterrupted(store: AgentTurnStore): void {
+  if (
+    !store.services.turns.updateAssistantMessageState(store.replyId, {
+      status: "interrupted"
+    })
+  )
+    throw new Error("The case's reply was no longer streaming")
+}
+
+/**
  * Creates a model whose stream yields fixed events.
  *
  * @param events - Events yielded in order.
@@ -282,7 +298,7 @@ type StreamRelease = { isReleased: boolean }
  * @param release - Set once the stream is released, early or at its end.
  * @yields Each event of `steps`.
  */
-async function* yieldScriptedStream(
+async function* createScriptedEventStream(
   steps: readonly ScriptedStreamStep[],
   release: StreamRelease
 ): AsyncGenerator<ReplyStreamEvent> {
@@ -305,7 +321,7 @@ async function* yieldScriptedStream(
 function createScriptedStream(...steps: ScriptedStreamStep[]) {
   const release: StreamRelease = { isReleased: false }
   const openReplyStream = vi.fn<OpenReplyStream>(async () =>
-    yieldScriptedStream(steps, release)
+    createScriptedEventStream(steps, release)
   )
   return { openReplyStream, release }
 }
@@ -545,24 +561,24 @@ async function getAgentReplyOutcome(scenario: AgentReplyScenario) {
 }
 
 /**
- * Matches the event that sends a new part.
+ * Builds a matcher of the event that sends a new part.
  *
  * @param part - Fields the part has.
  * @returns A matcher of the `reply-part` event.
  */
-function matchReplyPartEvent(part: Readonly<Record<string, unknown>>) {
+function buildReplyPartEventMatcher(part: Readonly<Record<string, unknown>>) {
   return { type: "reply-part", part: expect.objectContaining(part) }
 }
 
 /**
- * Matches a stored reasoning or text part of this case's turn.
+ * Builds a matcher of a stored reasoning or text part of this case's turn.
  *
  * @param kind - Kind of the part.
  * @param round - Round of the part.
  * @param content - Its whole text.
  * @returns A matcher of the stored part.
  */
-function matchStoredFragmentPart(
+function buildStoredFragmentPartMatcher(
   kind: "reasoning" | "text",
   round: number,
   content: string
@@ -642,7 +658,9 @@ describe("Agent", () => {
       )
     })
 
-    expect(run.parts).toEqual([matchStoredFragmentPart("text", 0, "Hi there")])
+    expect(run.parts).toEqual([
+      buildStoredFragmentPartMatcher("text", 0, "Hi there")
+    ])
     expect(run.events).toEqual([
       { type: "reply-part", part: { ...run.parts[0], content: "Hi" } },
       {
@@ -676,10 +694,10 @@ describe("Agent", () => {
     })
 
     expect(run.parts).toEqual([
-      matchStoredFragmentPart("reasoning", 0, "They say hello."),
-      matchStoredFragmentPart("text", 0, "Hi!"),
-      matchStoredFragmentPart("reasoning", 0, "Add more?"),
-      matchStoredFragmentPart("text", 0, " Welcome.")
+      buildStoredFragmentPartMatcher("reasoning", 0, "They say hello."),
+      buildStoredFragmentPartMatcher("text", 0, "Hi!"),
+      buildStoredFragmentPartMatcher("reasoning", 0, "Add more?"),
+      buildStoredFragmentPartMatcher("text", 0, " Welcome.")
     ])
     expect(run.events.map((event) => event.type)).toEqual([
       "reply-part",
@@ -717,7 +735,7 @@ describe("Agent", () => {
     })
 
     expect(run.events).toEqual([
-      matchReplyPartEvent({ kind: "text", content: "Cut" }),
+      buildReplyPartEventMatcher({ kind: "text", content: "Cut" }),
       { type: "done", finishReason: "length" }
     ])
     expect(run.persistedStates).toEqual([
@@ -746,9 +764,9 @@ describe("Agent", () => {
     expect(run.storage.updateReplyPartContent.mock.calls).toEqual([
       [run.parts[0]?.id, " refused"]
     ])
-    expect(run.parts).toEqual([matchStoredFragmentPart("text", 0, "Hi")])
+    expect(run.parts).toEqual([buildStoredFragmentPartMatcher("text", 0, "Hi")])
     expect(run.events).toEqual([
-      matchReplyPartEvent({ kind: "text", content: "Hi" }),
+      buildReplyPartEventMatcher({ kind: "text", content: "Hi" }),
       INTERRUPTED_EVENT
     ])
     expect(run.persistedStates).toEqual([{ status: "interrupted" }])
@@ -775,7 +793,7 @@ describe("Agent", () => {
       { status: "completed", finishReason: "stop" }
     ])
     expect(run.events).toEqual([
-      matchReplyPartEvent({ kind: "text", content: "Hi" }),
+      buildReplyPartEventMatcher({ kind: "text", content: "Hi" }),
       INTERRUPTED_EVENT
     ])
     expect(run.reply.status).toBe("interrupted")
@@ -811,9 +829,11 @@ describe("Agent", () => {
       openReplyStream: stream.openReplyStream
     })
 
-    expect(run.parts).toEqual([matchStoredFragmentPart("text", 0, "Partial")])
+    expect(run.parts).toEqual([
+      buildStoredFragmentPartMatcher("text", 0, "Partial")
+    ])
     expect(run.events).toEqual([
-      matchReplyPartEvent({ kind: "text", content: "Partial" }),
+      buildReplyPartEventMatcher({ kind: "text", content: "Partial" }),
       INTERRUPTED_EVENT
     ])
     expect(run.persistedStates).toEqual([{ status: "interrupted" }])
@@ -835,7 +855,7 @@ describe("Agent", () => {
 
     expect(run.persistedStates).toEqual([{ status: "interrupted" }])
     expect(run.events).toEqual([
-      matchReplyPartEvent({ kind: "text", content: "Partial" }),
+      buildReplyPartEventMatcher({ kind: "text", content: "Partial" }),
       INTERRUPTED_EVENT
     ])
   })
@@ -888,7 +908,7 @@ describe("Agent", () => {
 
     expect(run.persistedStates).toEqual([{ status: "interrupted" }])
     expect(run.events).toEqual([
-      matchReplyPartEvent({ kind: "text", content: "Partial" }),
+      buildReplyPartEventMatcher({ kind: "text", content: "Partial" }),
       INTERRUPTED_EVENT
     ])
     expect(run.reportedCancellations).toEqual([
@@ -924,13 +944,13 @@ describe("Agent", () => {
     })
 
     expect(run.parts).toEqual([
-      matchStoredFragmentPart("reasoning", 0, "Hmm"),
-      matchStoredFragmentPart("text", 0, "Partial")
+      buildStoredFragmentPartMatcher("reasoning", 0, "Hmm"),
+      buildStoredFragmentPartMatcher("text", 0, "Partial")
     ])
     expect(run.persistedStates).toEqual([{ status: "failed" }])
     expect(run.events).toEqual([
-      matchReplyPartEvent({ kind: "reasoning", content: "Hmm" }),
-      matchReplyPartEvent({ kind: "text", content: "Partial" }),
+      buildReplyPartEventMatcher({ kind: "reasoning", content: "Hmm" }),
+      buildReplyPartEventMatcher({ kind: "text", content: "Partial" }),
       CHAT_FAILURE_EVENT
     ])
   })
@@ -940,10 +960,12 @@ describe("Agent", () => {
       openReplyStream: createEventStream({ type: "text", content: "Partial" })
     })
 
-    expect(run.parts).toEqual([matchStoredFragmentPart("text", 0, "Partial")])
+    expect(run.parts).toEqual([
+      buildStoredFragmentPartMatcher("text", 0, "Partial")
+    ])
     expect(run.persistedStates).toEqual([{ status: "failed" }])
     expect(run.events).toEqual([
-      matchReplyPartEvent({ kind: "text", content: "Partial" }),
+      buildReplyPartEventMatcher({ kind: "text", content: "Partial" }),
       CHAT_FAILURE_EVENT
     ])
     expect(run.reportedFailures).toEqual([
@@ -992,10 +1014,10 @@ describe("Agent", () => {
 
     expect(run.persistedStates).toEqual([{ status: "failed" }])
     expect(run.events).toEqual([
-      matchReplyPartEvent({ kind: "text", content: "Hi" }),
+      buildReplyPartEventMatcher({ kind: "text", content: "Hi" }),
       CHAT_FAILURE_EVENT
     ])
-    expect(run.parts).toEqual([matchStoredFragmentPart("text", 0, "Hi")])
+    expect(run.parts).toEqual([buildStoredFragmentPartMatcher("text", 0, "Hi")])
   })
 
   it("fails after the sent text when the completed state cannot be stored", async () => {
@@ -1016,7 +1038,7 @@ describe("Agent", () => {
       { status: "failed" }
     ])
     expect(run.events).toEqual([
-      matchReplyPartEvent({ kind: "text", content: "Hi" }),
+      buildReplyPartEventMatcher({ kind: "text", content: "Hi" }),
       CHAT_FAILURE_EVENT
     ])
     expect(run.reportedFailures).toEqual([persistenceFailure])
@@ -1125,18 +1147,18 @@ describe("Agent", () => {
     await firstReply
 
     expect(firstEvents).toEqual([
-      matchReplyPartEvent({ kind: "text", content: "Re: First" }),
+      buildReplyPartEventMatcher({ kind: "text", content: "Re: First" }),
       { type: "done", finishReason: "stop" }
     ])
     expect(secondEvents).toEqual([
-      matchReplyPartEvent({ kind: "text", content: "Re: Second" }),
+      buildReplyPartEventMatcher({ kind: "text", content: "Re: Second" }),
       { type: "done", finishReason: "stop" }
     ])
     expect(getStoredReply(firstStore).reply.parts).toEqual([
-      matchStoredFragmentPart("text", 0, "Re: First")
+      buildStoredFragmentPartMatcher("text", 0, "Re: First")
     ])
     expect(getStoredReply(secondStore).reply.parts).toEqual([
-      matchStoredFragmentPart("text", 0, "Re: Second")
+      buildStoredFragmentPartMatcher("text", 0, "Re: Second")
     ])
   })
 
@@ -1258,7 +1280,7 @@ describe("Agent", () => {
 
       expect(openReplyStream).toHaveBeenCalledOnce()
       expect(run.parts).toEqual([
-        matchStoredFragmentPart("text", 0, "Let me read it."),
+        buildStoredFragmentPartMatcher("text", 0, "Let me read it."),
         expect.objectContaining({
           kind: "tool-call",
           round: 0,
@@ -1548,9 +1570,7 @@ describe("Agent", () => {
         { role: "tool", toolCallId: firstCall?.id, content: "text of /a" },
         { role: "tool", toolCallId: secondCall?.id, content: "text of /b" }
       ])
-      expect(run.events.at(-2)).toEqual(
-        matchReplyPartEvent({ kind: "text", round: 1, content: "Both read." })
-      )
+      expect(run.parts.at(-1)).toMatchObject({ content: "Both read." })
       expect(run.events.at(-1)).toEqual({ type: "done", finishReason: "stop" })
     })
 
@@ -1570,19 +1590,19 @@ describe("Agent", () => {
         round: 0,
         toolName: "read_text_file",
         argumentText: '{"path":"/a"}',
-        sourceNumbers: [],
         createdAt: NOW,
         updatedAt: NOW
       }
-      expect(run.parts).toEqual([
-        { ...call, status: "succeeded", result: "Buy milk" }
-      ])
+      const succeeded = {
+        ...call,
+        status: "succeeded",
+        result: "Buy milk",
+        sourceNumbers: []
+      }
+      expect(run.parts).toEqual([succeeded])
       expect(run.events).toEqual([
         { type: "reply-part", part: { ...call, status: "running" } },
-        {
-          type: "reply-part",
-          part: { ...call, status: "succeeded", result: "Buy milk" }
-        },
+        { type: "reply-part", part: succeeded },
         { type: "done", finishReason: "stop" }
       ])
       expect(run.storage.updateReplyToolCall).toHaveBeenCalledWith(
@@ -1684,11 +1704,14 @@ describe("Agent", () => {
         })
       ])
       expect(run.events.slice(0, 2)).toEqual([
-        matchReplyPartEvent({
+        buildReplyPartEventMatcher({
           toolName: "delete_everything",
           status: "failed"
         }),
-        matchReplyPartEvent({ toolName: "read_text_file", status: "failed" })
+        buildReplyPartEventMatcher({
+          toolName: "read_text_file",
+          status: "failed"
+        })
       ])
     })
 
@@ -1721,14 +1744,14 @@ describe("Agent", () => {
       })
 
       expect(run.parts).toEqual([
-        matchStoredFragmentPart("text", 0, "Let me look."),
+        buildStoredFragmentPartMatcher("text", 0, "Let me look."),
         expect.objectContaining({
           kind: "tool-call",
           round: 0,
           status: "succeeded"
         }),
-        matchStoredFragmentPart("reasoning", 1, "It says milk."),
-        matchStoredFragmentPart("text", 1, "Found it. Buy milk.")
+        buildStoredFragmentPartMatcher("reasoning", 1, "It says milk."),
+        buildStoredFragmentPartMatcher("text", 1, "Found it. Buy milk.")
       ])
       expect(openReplyStream.mock.calls[1]?.[0].messages.at(-2)).toMatchObject({
         role: "assistant",
@@ -1837,13 +1860,13 @@ describe("Agent", () => {
 
       expect(openReplyStream).toHaveBeenCalledOnce()
       expect(run.parts).toEqual([
-        matchStoredFragmentPart("text", 0, "Let me look."),
+        buildStoredFragmentPartMatcher("text", 0, "Let me look."),
         expect.objectContaining({ kind: "tool-call", status: "interrupted" })
       ])
       expect(run.persistedStates).toEqual([{ status: "interrupted" }])
       expect(run.events).toEqual([
-        matchReplyPartEvent({ kind: "text", content: "Let me look." }),
-        matchReplyPartEvent({ kind: "tool-call", status: "running" }),
+        buildReplyPartEventMatcher({ kind: "text", content: "Let me look." }),
+        buildReplyPartEventMatcher({ kind: "tool-call", status: "running" }),
         INTERRUPTED_EVENT
       ])
     })
@@ -2028,19 +2051,34 @@ describe("Agent", () => {
         toolCallId: promptedCallId,
         content: "moth: a night insect"
       })
+      expect(run.events.at(-1)).toEqual({ type: "done", finishReason: "stop" })
+    })
+
+    it("sends an allowed backend call's states, then the next round's text", async () => {
+      const run = await getAgentReplyOutcome({
+        openReplyStream: createRoundStreams(LOOK_UP_MOTH_ROUND, [
+          { type: "text", content: "A moth is a night insect." },
+          { type: "finish", finishReason: "stop" }
+        ]),
+        builtInTools: [createLookUpWordTool().entry],
+        justRunToolNames: [],
+        sendToolApprovalPrompt: createAllowingPromptSender()
+      })
+
+      const callId = run.parts[0]?.id
       expect(run.events).toEqual([
-        matchReplyPartEvent({
-          id: promptedCallId,
+        buildReplyPartEventMatcher({
+          id: callId,
           toolName: "look_up_word",
           status: "awaiting-approval"
         }),
-        matchReplyPartEvent({ id: promptedCallId, status: "running" }),
-        matchReplyPartEvent({
-          id: promptedCallId,
+        buildReplyPartEventMatcher({ id: callId, status: "running" }),
+        buildReplyPartEventMatcher({
+          id: callId,
           status: "succeeded",
-          result: "moth: a night insect"
+          result: "moth: a definition"
         }),
-        matchReplyPartEvent({
+        buildReplyPartEventMatcher({
           kind: "text",
           round: 1,
           content: "A moth is a night insect."
@@ -2147,7 +2185,7 @@ describe("Agent", () => {
       expect(openReplyStream).toHaveBeenCalledOnce()
       expect(run.persistedStates).toEqual([{ status: "interrupted" }])
       expect(run.events).toEqual([
-        matchReplyPartEvent({ status: "awaiting-approval" }),
+        buildReplyPartEventMatcher({ status: "awaiting-approval" }),
         INTERRUPTED_EVENT
       ])
       expect(run.parts).toEqual([
@@ -2173,7 +2211,7 @@ describe("Agent", () => {
       expect(openReplyStream).toHaveBeenCalledOnce()
       expect(run.persistedStates).toEqual([{ status: "interrupted" }])
       expect(run.events).toEqual([
-        matchReplyPartEvent({ status: "running" }),
+        buildReplyPartEventMatcher({ status: "running" }),
         INTERRUPTED_EVENT
       ])
       expect(run.parts).toEqual([
@@ -2196,7 +2234,7 @@ describe("Agent", () => {
 
       expect(run.persistedStates).toEqual([{ status: "failed" }])
       expect(run.events).toEqual([
-        matchReplyPartEvent({ status: "running" }),
+        buildReplyPartEventMatcher({ status: "running" }),
         CHAT_FAILURE_EVENT
       ])
       expect(run.reportedFailures).toEqual([defect])
@@ -2213,7 +2251,7 @@ describe("Agent", () => {
         url: "https://earlier.example/",
         title: "Earlier"
       }
-      const { entry } = createLookUpWordTool(answerWithWordSource)
+      const { entry } = createLookUpWordTool(runLookUpWordWithSource)
       const openReplyStream = createRoundStreams(
         LOOK_UP_MOTH_ROUND,
         FINISH_ROUND
@@ -2231,9 +2269,9 @@ describe("Agent", () => {
         title: "Dictionary: moth"
       }
       expect(run.events).toEqual([
-        matchReplyPartEvent({ status: "running" }),
+        buildReplyPartEventMatcher({ status: "running" }),
         { type: "sources", sources: [newSource] },
-        matchReplyPartEvent({ status: "succeeded", sourceNumbers: [5] }),
+        buildReplyPartEventMatcher({ status: "succeeded", sourceNumbers: [5] }),
         { type: "done", finishReason: "stop" }
       ])
       expect(run.sources).toEqual([earlierSource, newSource])
@@ -2249,7 +2287,7 @@ describe("Agent", () => {
         url: "https://words.example/moth",
         title: "Moths, the stored title"
       }
-      const { entry } = createLookUpWordTool(answerWithWordSource)
+      const { entry } = createLookUpWordTool(runLookUpWordWithSource)
 
       const run = await getAgentReplyOutcome({
         store: openAgentTurnStore([knownSource]),
@@ -2271,7 +2309,7 @@ describe("Agent", () => {
     })
 
     it("gives a URL one number across the calls and rounds of a turn", async () => {
-      const { entry } = createLookUpWordTool(answerWithWordSource)
+      const { entry } = createLookUpWordTool(runLookUpWordWithSource)
 
       const run = await getAgentReplyOutcome({
         openReplyStream: createRoundStreams(
@@ -2292,7 +2330,9 @@ describe("Agent", () => {
 
       expect(
         run.parts.map((part) =>
-          part.kind === "tool-call" ? part.sourceNumbers : []
+          part.kind === "tool-call" && part.status === "succeeded"
+            ? part.sourceNumbers
+            : []
         )
       ).toEqual([[1], [2], [1]])
       expect(run.sources.map((source) => source.url)).toEqual([
@@ -2317,6 +2357,45 @@ describe("Agent", () => {
   })
 
   describe("tool call approval", () => {
+    it("stores a call as awaiting approval before its prompt is sent", async () => {
+      const store = openAgentTurnStore()
+      const storedAtPrompt: (readonly ReplyPart[])[] = []
+
+      await getAgentReplyOutcome({
+        store,
+        openReplyStream: createRoundStreams(READ_A_ROUND, FINISH_ROUND),
+        clientTools: [READ_TEXT_FILE_TOOL],
+        justRunToolNames: [],
+        sendToolApprovalPrompt: async () => {
+          storedAtPrompt.push(getStoredReply(store).reply.parts)
+          return { status: "allowed" }
+        },
+        sendClientToolCall: async () => ({ status: "succeeded", content: "" })
+      })
+
+      expect(storedAtPrompt).toEqual([
+        [expect.objectContaining({ status: "awaiting-approval" })]
+      ])
+    })
+
+    it("sends no prompt for a call the store refused because a newer turn ended the reply", async () => {
+      const store = openAgentTurnStore()
+      const sendToolApprovalPrompt = vi.fn<SendToolApprovalPrompt>()
+
+      const run = await getAgentReplyOutcome({
+        store,
+        openReplyStream: createRoundStreams(READ_A_ROUND),
+        clientTools: [READ_TEXT_FILE_TOOL],
+        createToolCallGate: async () => {
+          updateStoredReplyToInterrupted(store)
+          return new ToolCallGate(new Set(), sendToolApprovalPrompt)
+        }
+      })
+
+      expect(sendToolApprovalPrompt).not.toHaveBeenCalled()
+      expect(run.events).toEqual([INTERRUPTED_EVENT])
+    })
+
     it("prompts the person for a client tool on Ask me and sends the call to run once allowed, under the prompt's identifier", async () => {
       const sent: string[] = []
       const sendToolApprovalPrompt = vi.fn<SendToolApprovalPrompt>(
@@ -2472,6 +2551,108 @@ describe("Agent", () => {
       expect(run.persistedStates).toEqual([{ status: "failed" }])
       expect(run.events).toEqual([CHAT_FAILURE_EVENT])
       expect(run.reportedFailures).toEqual([failure])
+    })
+  })
+
+  describe("a reply that another writer ended while its calls were handled", () => {
+    it("never runs a call the person allows after the reply ended while the prompt waited", async () => {
+      const store = openAgentTurnStore()
+      const { tool, entry } = createLookUpWordTool()
+      const openReplyStream = createRoundStreams(LOOK_UP_MOTH_ROUND)
+
+      const run = await getAgentReplyOutcome({
+        store,
+        openReplyStream,
+        builtInTools: [entry],
+        justRunToolNames: [],
+        sendToolApprovalPrompt: async () => {
+          updateStoredReplyToInterrupted(store)
+          return { status: "allowed" }
+        }
+      })
+
+      expect(tool.startedWords).toEqual([])
+      expect(openReplyStream).toHaveBeenCalledOnce()
+      expect(run.parts).toEqual([
+        expect.objectContaining({ status: "interrupted" })
+      ])
+      expect(run.events).toEqual([
+        buildReplyPartEventMatcher({ status: "awaiting-approval" }),
+        INTERRUPTED_EVENT
+      ])
+    })
+
+    it("asks the model nothing more when the person rejects a call after the reply ended while the prompt waited", async () => {
+      const store = openAgentTurnStore()
+      const openReplyStream = createRoundStreams(LOOK_UP_MOTH_ROUND)
+
+      const run = await getAgentReplyOutcome({
+        store,
+        openReplyStream,
+        builtInTools: [createLookUpWordTool().entry],
+        justRunToolNames: [],
+        sendToolApprovalPrompt: async () => {
+          updateStoredReplyToInterrupted(store)
+          return DECLINED_APPROVAL
+        }
+      })
+
+      expect(openReplyStream).toHaveBeenCalledOnce()
+      expect(run.parts).toEqual([
+        expect.objectContaining({ status: "interrupted" })
+      ])
+      expect(run.events).toEqual([
+        buildReplyPartEventMatcher({ status: "awaiting-approval" }),
+        INTERRUPTED_EVENT
+      ])
+    })
+
+    it("asks the model nothing more when the reply ended while a backend tool ran", async () => {
+      const store = openAgentTurnStore()
+      const { entry } = createLookUpWordTool(async () => {
+        updateStoredReplyToInterrupted(store)
+        return { status: "succeeded", content: "A moth", sources: [] }
+      })
+      const openReplyStream = createRoundStreams(LOOK_UP_MOTH_ROUND)
+
+      const run = await getAgentReplyOutcome({
+        store,
+        openReplyStream,
+        builtInTools: [entry]
+      })
+
+      expect(openReplyStream).toHaveBeenCalledOnce()
+      expect(run.parts).toEqual([
+        expect.objectContaining({ status: "interrupted" })
+      ])
+      expect(run.events).toEqual([
+        buildReplyPartEventMatcher({ status: "running" }),
+        INTERRUPTED_EVENT
+      ])
+    })
+
+    it("asks the model nothing more when the reply ended before a call of an unknown tool was stored", async () => {
+      const store = openAgentTurnStore()
+      const openReplyStream = createRoundStreams([
+        {
+          type: "tool-calls",
+          toolCalls: [{ toolName: "missing_tool", argumentText: "{}" }]
+        }
+      ])
+
+      const run = await getAgentReplyOutcome({
+        store,
+        openReplyStream,
+        clientTools: [READ_TEXT_FILE_TOOL],
+        createToolCallGate: async () => {
+          updateStoredReplyToInterrupted(store)
+          return new ToolCallGate(new Set(), vi.fn())
+        }
+      })
+
+      expect(openReplyStream).toHaveBeenCalledOnce()
+      expect(run.parts).toEqual([])
+      expect(run.events).toEqual([INTERRUPTED_EVENT])
     })
   })
 })

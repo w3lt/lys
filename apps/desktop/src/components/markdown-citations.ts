@@ -1,6 +1,6 @@
 import type { ConversationSource } from "@lys/share"
 
-/** Settings of {@link remarkCitations}. */
+/** Settings of {@link buildCitationTransformer}. */
 export type CitationOptions = Readonly<{
   /** Numbered sources a `[n]` marker may cite; other numbers stay text. */
   sources: readonly ConversationSource[]
@@ -120,44 +120,58 @@ function buildCitedTextNodes(
 }
 
 /**
- * Builds the nodes one child becomes, turning citation markers in its text
- * into links.
+ * Answers whether the text under a node may cite sources.
  *
- * @param child - Child node of a parent.
+ * @param node - Value from the Markdown tree.
+ * @returns True for a node with children that is not a link; code and math
+ * nodes hold their text as a value, not as text children, so they never
+ * match.
+ */
+function isCitableParentNode(node: unknown): node is MarkdownParentNode {
+  return isMarkdownParentNode(node) && !LINK_NODE_TYPES.has(node.type)
+}
+
+/**
+ * Builds the nodes one child becomes once the markers in its own text are
+ * links.
+ *
+ * @param child - Child node of a parent; not changed.
  * @param sourcesByNumber - Sources that markers may cite.
- * @returns The nodes that replace the child; a parent child is changed in
- * place unless it is a link.
+ * @returns The nodes {@link buildCitedTextNodes} builds for a text node; the
+ * child itself otherwise.
  */
 function buildCitedChildNodes(
   child: unknown,
   sourcesByNumber: ReadonlyMap<number, ConversationSource>
 ): unknown[] {
-  if (isMarkdownTextNode(child))
-    return buildCitedTextNodes(child, sourcesByNumber)
-  if (isMarkdownParentNode(child) && !LINK_NODE_TYPES.has(child.type))
-    updateCitationLinks(child, sourcesByNumber)
-  return [child]
+  return isMarkdownTextNode(child)
+    ? buildCitedTextNodes(child, sourcesByNumber)
+    : [child]
 }
 
 /**
  * Turns the citation markers under a node into links.
  *
- * @param node - Parent node; its children are replaced in place, as remark
- * transformers change the tree they receive.
+ * @param node - Parent node; its children, and those of every node below it
+ * that may cite sources, are replaced in place, as remark transformers change
+ * the tree they receive.
  * @param sourcesByNumber - Sources that markers may cite.
  */
 function updateCitationLinks(
   node: MarkdownParentNode,
   sourcesByNumber: ReadonlyMap<number, ConversationSource>
 ): void {
+  for (const child of node.children) {
+    if (isCitableParentNode(child)) updateCitationLinks(child, sourcesByNumber)
+  }
   node.children = node.children.flatMap((child) =>
     buildCitedChildNodes(child, sourcesByNumber)
   )
 }
 
 /**
- * Remark plugin that turns each `[n]` marker citing a known source into a
- * link to that source.
+ * Builds the remark transformer that turns each `[n]` marker citing a known
+ * source into a link to that source; used as a remark plugin.
  *
  * @param options - Sources the markers may cite.
  * @returns A transformer that changes the Markdown tree in place: markers in
@@ -165,7 +179,7 @@ function updateCitationLinks(
  * {@link CITATION_PROPERTY}; markers in code, math, and existing links, and
  * markers of numbers without a source, stay as they are.
  */
-export function remarkCitations(
+export function buildCitationTransformer(
   options: CitationOptions
 ): (tree: unknown) => void {
   const sourcesByNumber = new Map(

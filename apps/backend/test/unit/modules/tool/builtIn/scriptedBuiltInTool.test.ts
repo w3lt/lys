@@ -5,7 +5,7 @@ import {
   registerBuiltInToolContractSuite
 } from "../../../support/builtInToolContract"
 import {
-  answerWithWordSource,
+  runLookUpWordWithSource,
   ScriptedBuiltInTool
 } from "../../../support/scriptedBuiltInTool"
 
@@ -61,7 +61,7 @@ describe("ScriptedBuiltInTool", () => {
   })
 
   it("numbers the word's dictionary page through the run's numbering when its script cites it", async () => {
-    const tool = new ScriptedBuiltInTool(answerWithWordSource)
+    const tool = new ScriptedBuiltInTool(runLookUpWordWithSource)
     const call = tool.parseToolCall({ word: "moth" })
     if (call.status !== "parsed") throw new Error("Expected a parsed call")
     const recorded = createRecordedRunContext(new AbortController().signal)

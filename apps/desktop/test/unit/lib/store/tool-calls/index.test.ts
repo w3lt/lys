@@ -19,7 +19,7 @@ import {
 } from "../../../support/backendFake"
 import {
   buildCompletedAssistantMessage,
-  buildFragmentPart,
+  buildTextPart,
   buildStreamingAssistantMessage,
   createFixtureUuidV7,
   FIXTURE_CONVERSATION_ID
@@ -112,7 +112,23 @@ function handleAnsweredToolCallStateChange(state: {
 /** Event that sends a text part of {@link REPLY}, which the follow ignores. */
 const READING_PART_EVENT = Object.freeze({
   type: "reply-part",
-  part: buildFragmentPart("text", 40, 0, "Reading")
+  part: buildTextPart(40, 0, "Reading")
+})
+
+/** Fragment the reply appends to the part of {@link READING_PART_EVENT}. */
+const READING_DELTA_EVENT = Object.freeze({
+  type: "reply-part-delta",
+  partId: READING_PART_EVENT.part.id,
+  content: " notes",
+  updatedAt: "2026-01-02T03:04:06.000Z"
+})
+
+/** Sources a call of the reply showed. */
+const SOURCES_EVENT = Object.freeze({
+  type: "sources",
+  sources: [
+    { number: 1, url: "https://example.com/docs", title: "Example docs" }
+  ]
 })
 
 /**
@@ -521,13 +537,15 @@ describe("useToolCallStore", () => {
       expect(listToolAnswers(backend)).toEqual([])
     })
 
-    it("holds the prompts a snapshot lists, then later prompts, in arrival order", async () => {
+    it("holds the prompts a snapshot lists, then later prompts, in arrival order, while parts, fragments, sources, and titles arrive between them", async () => {
       const { replyStreams } = startReplyBackend()
       const { useToolCallStore } = await loadFreshToolCallStore()
 
       await startFollowWithEvents(useToolCallStore, replyStreams, [
         buildStreamingSnapshot([READ_CALL, PAGE_CALL]),
         READING_PART_EVENT,
+        READING_DELTA_EVENT,
+        SOURCES_EVENT,
         { type: "title", title: "Notes" },
         buildApprovalEvent(SECOND_READ_CALL)
       ])

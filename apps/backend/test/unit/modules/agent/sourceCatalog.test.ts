@@ -83,6 +83,20 @@ describe("SourceCatalog", () => {
       { number: 4, url: "https://new.example/", title: "New" }
     ])
     expect(Object.isFrozen(sources)).toBe(true)
+    expect(Object.isFrozen(sources[0])).toBe(true)
     expect(Object.isFrozen(sources[1])).toBe(true)
+  })
+
+  it("keeps a stored source as it was given, though the caller changes its object later", () => {
+    const storedSource: { number: number; url: string; title: string } = {
+      ...STORED_SOURCE
+    }
+    const catalog = new SourceCatalog([storedSource])
+    storedSource.number = 99
+    storedSource.title = "Changed"
+
+    expect(
+      catalog.addWebSources([{ url: STORED_SOURCE.url, title: "Moths" }])
+    ).toEqual([STORED_SOURCE])
   })
 })

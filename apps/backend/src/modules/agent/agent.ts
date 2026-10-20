@@ -16,7 +16,7 @@ import { waitForSettlementOrAbort } from "../../utils/abort"
 import { ChatCompletionCancelledError } from "../../utils/errors"
 import {
   buildAgentContext,
-  countAgentContextHistoryMessages
+  calculateAgentContextHistoryMessageCount
 } from "./agentContext"
 import {
   findReplyRoundFitFailure,
@@ -176,6 +176,12 @@ type ReplyRound =
       status: "ended"
     }>
 
+/** A reasoning or text fragment the model streamed. */
+type ReplyFragmentEvent = Extract<
+  ReplyStreamEvent,
+  { type: "reasoning" | "text" }
+>
+
 /** Round outcome after cancellation, supersession, or deletion. */
 const ENDED_REPLY_ROUND = Object.freeze({
   status: "ended"
@@ -316,7 +322,7 @@ export default class Agent {
       ? undefined
       : buildAgentContextMeasurement(
           measurement,
-          countAgentContextHistoryMessages(input.history)
+          calculateAgentContextHistoryMessageCount(input.history)
         )
   }
 
@@ -332,8 +338,9 @@ export default class Agent {
    * @throws An `AggregateError` holding the failure that ended the reply
    * followed by the persistence failure, when the failed or interrupted state
    * cannot be stored after that failure; the generation reports that
-   * rejection. A delta, completion, or interrupted-state write that throws
-   * before that point is itself handled as the failure that ended the reply.
+   * rejection. A part, fragment, call, completion, or interrupted-state write
+   * that throws before that point is itself handled as the failure that
+   * ended the reply.
    * @remarks When the reply settles without throwing it has sent exactly one
    * final event: `done` after a stored completion; `interrupted` after
    * cancellation, or when a newer turn or a deletion ended the reply; `error`
@@ -415,13 +422,13 @@ export default class Agent {
       turn.userMessageContent
     )
     const round = await this.#createReplyRound(state, { messages, round: 0 })
-    return this.#continueReply(state, messages, round)
+    return this.#handleReplyRoundEnd(state, messages, round)
   }
 
   /**
-   * Continues a reply after one of its rounds ended: has the round's tool
-   * calls answered and asks the model for the next round, until a round
-   * finishes the reply or the reply ends.
+   * Handles the end of one of a reply's rounds: has the round's tool calls
+   * answered and asks the model for the next round, until a round finishes
+   * the reply or the reply ends.
    *
    * @param state - The reply's turn, tools, part sequence, and catalog.
    * @param messages - Context the ended round answered, in send order.
@@ -432,7 +439,7 @@ export default class Agent {
    * @remarks Each round needs the results of the round before it, so the
    * rounds run one after another.
    */
-  async #continueReply(
+  async #handleReplyRoundEnd(
     state: ReplyRoundState,
     messages: readonly ReplyContextMessage[],
     round: ReplyRound
@@ -454,7 +461,7 @@ export default class Agent {
       messages: nextMessages,
       round: round.round + 1
     })
-    return this.#continueReply(state, nextMessages, nextRound)
+    return this.#handleReplyRoundEnd(state, nextMessages, nextRound)
   }
 
   /**
@@ -483,24 +490,13 @@ export default class Agent {
     let roundText = ""
     for await (const event of stream) {
       if (turn.abortSignal.aborted) return ENDED_REPLY_ROUND
-      switch (event.type) {
-        case "finish":
-          return { status: "finished", finishReason: event.finishReason }
-        case "tool-calls":
-          return buildToolCallReplyRound(
-            input.round,
-            roundText,
-            event.toolCalls
-          )
-        case "reasoning":
-          if (!replyParts.updateReplyReasoning(input.round, event.content))
-            return ENDED_REPLY_ROUND
-          break
-        case "text":
-          if (!replyParts.updateReplyText(input.round, event.content))
-            return ENDED_REPLY_ROUND
-          roundText += event.content
-      }
+      if (event.type === "finish")
+        return { status: "finished", finishReason: event.finishReason }
+      if (event.type === "tool-calls")
+        return buildToolCallReplyRound(input.round, roundText, event.toolCalls)
+      if (!updateReplyFragment(replyParts, input.round, event))
+        return ENDED_REPLY_ROUND
+      if (event.type === "text") roundText += event.content
     }
     if (turn.abortSignal.aborted) return ENDED_REPLY_ROUND
     throw new Error("Model stream ended without a finish reason")
@@ -585,6 +581,24 @@ function buildAgentContextMeasurement(
     historyMessageCount,
     messageMarkupTokens
   })
+}
+
+/**
+ * Stores and sends one reasoning or text fragment as a part of its round.
+ *
+ * @param replyParts - The reply's part sequence.
+ * @param round - Zero-based index of the fragment's round.
+ * @param event - The fragment the model streamed.
+ * @returns True once stored and sent; false when the reply refused it.
+ */
+function updateReplyFragment(
+  replyParts: ReplyPartSequence,
+  round: number,
+  event: ReplyFragmentEvent
+): boolean {
+  return event.type === "reasoning"
+    ? replyParts.updateReplyReasoning(round, event.content)
+    : replyParts.updateReplyText(round, event.content)
 }
 
 /**

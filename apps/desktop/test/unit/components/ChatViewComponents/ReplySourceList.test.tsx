@@ -24,8 +24,7 @@ describe("ReplySourceList", () => {
   it("lists the cited sources in citation order as links to them, each with its number, title, and site", () => {
     render(<ReplySourceList sources={{ cited: [MOTHS, LAMPS], found: [] }} />)
 
-    const list = screen.getByRole("region", { name: "Sources" })
-    expect(within(list).getByText("Sources · 2 cited")).toBeInTheDocument()
+    const list = screen.getByRole("list", { name: "Sources · 2 cited" })
     const links = within(list).getAllByRole("link")
     expect(links.map((link) => link.textContent)).toEqual([
       "2Night mothsmoths.example",
@@ -34,7 +33,8 @@ describe("ReplySourceList", () => {
     expect(links[0]).toHaveAttribute("href", MOTHS.url)
     expect(links[0]).toHaveAttribute("target", "_blank")
     expect(links[0]).toHaveAttribute("rel", "noreferrer")
-    expect(within(list).queryByText(/more$/)).toBeNull()
+    expect(screen.queryByText(/more$/)).toBeNull()
+    expect(screen.queryByRole("region")).toBeNull()
   })
 
   it("keeps the sources the reply found without citing under a collapsed count, each with the tool that found it", async () => {
@@ -55,5 +55,28 @@ describe("ReplySourceList", () => {
 
     expect(found).toBeVisible()
     expect(screen.getByText("via web_search")).toBeVisible()
+  })
+
+  it("shows only the found sources, under their count, when the reply cites none", async () => {
+    const user = userEvent.setup()
+    render(
+      <ReplySourceList
+        sources={{
+          cited: [],
+          found: [
+            { source: BARK, toolName: "web_search" },
+            { source: LAMPS, toolName: "read_page" }
+          ]
+        }}
+      />
+    )
+
+    expect(screen.queryByText(/cited$/)).toBeNull()
+    await user.click(screen.getByText("Sources · 2 found"))
+
+    expect(screen.getAllByRole("list")).toHaveLength(1)
+    expect(screen.getAllByRole("link").map((link) => link.textContent)).toEqual(
+      ["3Barkbark.example", "1Lampslamps.example"]
+    )
   })
 })

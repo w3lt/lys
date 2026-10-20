@@ -197,6 +197,70 @@ function createVersion7Database(): DatabaseSync {
 const VERSION_8_MESSAGE_COLUMNS =
   "id, conversation_id, role, model, status, finish_reason, created_at, updated_at"
 
+/**
+ * Lists the user and assistant rows of the message table, which versions 8
+ * and 9 store alike.
+ *
+ * @param database - Open connection at version 8 or later.
+ * @param columns - Columns to read: the version-8 columns, with or without
+ * `content`, which version 9 empties on replies.
+ * @returns The rows in identity order.
+ */
+function listMessageRows(
+  database: DatabaseSync,
+  columns: "version-8" | "version-8 and content"
+): unknown[] {
+  const selected =
+    columns === "version-8"
+      ? VERSION_8_MESSAGE_COLUMNS
+      : `${VERSION_8_MESSAGE_COLUMNS}, content`
+  return database
+    .prepare(
+      `SELECT ${selected} FROM conversation_messages
+      WHERE role IN ('user', 'assistant') ORDER BY id`
+    )
+    .all()
+}
+
+/**
+ * Lists the reply pieces of the message table.
+ *
+ * @param database - Open connection at version 9.
+ * @returns Each piece's identity, place, text, and times, in reply order.
+ */
+function listReplyPartRows(database: DatabaseSync): Record<string, unknown>[] {
+  return database
+    .prepare(
+      `SELECT id, conversation_id AS conversationId, role, reply_id AS replyId,
+      position, round, content, status, tool_name AS toolName,
+      created_at AS createdAt, updated_at AS updatedAt
+      FROM conversation_messages WHERE reply_id IS NOT NULL ORDER BY reply_id`
+    )
+    .all()
+}
+
+/**
+ * Stores, in a version-8 database, one conversation with a user message and
+ * a completed, a failed, and a streaming reply.
+ *
+ * @param database - Connection at `user_version` 8.
+ * @remarks The completed reply holds two rounds' text joined by a blank
+ * line, the failed one no text, and the streaming one partial text; each
+ * reply's update time differs from its creation time.
+ */
+function saveVersion8Conversation(database: DatabaseSync): void {
+  database.exec(`
+    INSERT INTO conversations (id, title, agent_code, created_at, updated_at)
+    VALUES ('c1', 'Title', 'caliginia', '2026-01-01T00:00:00.000Z', '2026-01-09T00:00:00.000Z');
+    INSERT INTO conversation_messages (id, conversation_id, role, model, content, status, finish_reason, created_at, updated_at)
+    VALUES
+      ('u1', 'c1', 'user', NULL, 'Hello', NULL, NULL, '2026-01-02T00:00:00.000Z', NULL),
+      ('a1', 'c1', 'assistant', 'model', 'First round' || char(10) || char(10) || 'Answer', 'completed', 'stop', '2026-01-03T00:00:00.000Z', '2026-01-04T00:00:00.000Z'),
+      ('a2', 'c1', 'assistant', 'model', '', 'failed', NULL, '2026-01-05T00:00:00.000Z', '2026-01-05T00:00:01.000Z'),
+      ('a3', 'c1', 'assistant', 'model', 'Partial', 'streaming', NULL, '2026-01-06T00:00:00.000Z', '2026-01-06T00:00:02.000Z')
+  `)
+}
+
 describe("migrateDatabase", () => {
   it("creates the current schema in an empty database", () => {
     const database = openEmptyDatabase()
@@ -281,11 +345,7 @@ describe("migrateDatabase", () => {
     const conversationsBefore = database
       .prepare("SELECT id, title, created_at, updated_at FROM conversations")
       .all()
-    const messagesBefore = database
-      .prepare(
-        `SELECT ${VERSION_8_MESSAGE_COLUMNS}, content FROM conversation_messages`
-      )
-      .all()
+    const messagesBefore = listMessageRows(database, "version-8 and content")
 
     migrateDatabase(database)
 
@@ -307,13 +367,9 @@ describe("migrateDatabase", () => {
         .prepare("SELECT agent_code AS agentCode FROM conversations")
         .all()
     ).toEqual([{ agentCode: "caliginia" }])
-    expect(
-      database
-        .prepare(
-          `SELECT ${VERSION_8_MESSAGE_COLUMNS}, content FROM conversation_messages`
-        )
-        .all()
-    ).toEqual(messagesBefore)
+    expect(listMessageRows(database, "version-8 and content")).toEqual(
+      messagesBefore
+    )
   })
 
   it("upgrades a version-7 database by moving every conversation Lys answered to Caliginia and changing nothing else", () => {
@@ -334,11 +390,7 @@ describe("migrateDatabase", () => {
         "SELECT id, title, created_at, updated_at FROM conversations ORDER BY id"
       )
       .all()
-    const messagesBefore = database
-      .prepare(
-        `SELECT ${VERSION_8_MESSAGE_COLUMNS}, content FROM conversation_messages`
-      )
-      .all()
+    const messagesBefore = listMessageRows(database, "version-8 and content")
     const agentsBefore = database.prepare("SELECT * FROM agents").all()
 
     migrateDatabase(database)
@@ -362,48 +414,24 @@ describe("migrateDatabase", () => {
         )
         .all()
     ).toEqual(conversationsBefore)
-    expect(
-      database
-        .prepare(
-          `SELECT ${VERSION_8_MESSAGE_COLUMNS}, content FROM conversation_messages`
-        )
-        .all()
-    ).toEqual(messagesBefore)
+    expect(listMessageRows(database, "version-8 and content")).toEqual(
+      messagesBefore
+    )
     expect(database.prepare("SELECT * FROM agents").all()).toEqual(agentsBefore)
   })
 
-  it("upgrades a version-8 database by moving each reply's text into one text piece and keeping every message", () => {
+  it("upgrades a version-8 database by keeping every message and its conversation's activity time, without reply text", () => {
     const database = createVersion8Database()
-    database.exec(`
-      INSERT INTO conversations (id, title, agent_code, created_at, updated_at)
-      VALUES ('c1', 'Title', 'caliginia', '2026-01-01T00:00:00.000Z', '2026-01-09T00:00:00.000Z');
-      INSERT INTO conversation_messages (id, conversation_id, role, model, content, status, finish_reason, created_at, updated_at)
-      VALUES
-        ('u1', 'c1', 'user', NULL, 'Hello', NULL, NULL, '2026-01-02T00:00:00.000Z', NULL),
-        ('a1', 'c1', 'assistant', 'model', 'First round' || char(10) || char(10) || 'Answer', 'completed', 'stop', '2026-01-03T00:00:00.000Z', '2026-01-04T00:00:00.000Z'),
-        ('a2', 'c1', 'assistant', 'model', '', 'failed', NULL, '2026-01-05T00:00:00.000Z', '2026-01-05T00:00:01.000Z'),
-        ('a3', 'c1', 'assistant', 'model', 'Partial', 'streaming', NULL, '2026-01-06T00:00:00.000Z', '2026-01-06T00:00:02.000Z')
-    `)
+    saveVersion8Conversation(database)
     const activityTimeBefore = database
       .prepare("SELECT updated_at AS updatedAt FROM conversations")
       .get()
-    const messagesBefore = database
-      .prepare(
-        `SELECT ${VERSION_8_MESSAGE_COLUMNS} FROM conversation_messages ORDER BY id`
-      )
-      .all()
+    const messagesBefore = listMessageRows(database, "version-8")
 
     migrateDatabase(database)
 
     expect(readUserVersion(database)).toBe(CURRENT_SCHEMA_VERSION)
-    expect(
-      database
-        .prepare(
-          `SELECT ${VERSION_8_MESSAGE_COLUMNS} FROM conversation_messages
-          WHERE role IN ('user', 'assistant') ORDER BY id`
-        )
-        .all()
-    ).toEqual(messagesBefore)
+    expect(listMessageRows(database, "version-8")).toEqual(messagesBefore)
     expect(
       database
         .prepare(
@@ -417,14 +445,25 @@ describe("migrateDatabase", () => {
       { id: "a3", content: "" },
       { id: "u1", content: "Hello" }
     ])
-    const parts = database
-      .prepare(
-        `SELECT id, conversation_id AS conversationId, role, reply_id AS replyId,
-        position, round, content, status, tool_name AS toolName,
-        created_at AS createdAt, updated_at AS updatedAt
-        FROM conversation_messages WHERE reply_id IS NOT NULL ORDER BY reply_id`
-      )
-      .all()
+    expect(
+      database
+        .prepare("SELECT updated_at AS updatedAt FROM conversations")
+        .get()
+    ).toEqual(activityTimeBefore)
+    expect(listSchemaObjects(database, "trigger")).toEqual([
+      "update_conversation_after_message_insert",
+      "update_conversation_after_message_update",
+      "update_conversation_updated_at"
+    ])
+  })
+
+  it("upgrades a version-8 database by moving each reply's text into one text piece of round 0 with the reply's times", () => {
+    const database = createVersion8Database()
+    saveVersion8Conversation(database)
+
+    migrateDatabase(database)
+
+    const parts = listReplyPartRows(database)
     expect(parts).toEqual([
       {
         id: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-7/),
@@ -459,16 +498,27 @@ describe("migrateDatabase", () => {
       16
     )
     expect(firstPartTime).toBe(Date.parse("2026-01-03T00:00:00.000Z"))
+  })
+
+  it("upgrades a version-8 database holding a reply whose text starts with a NUL character", () => {
+    const database = createVersion8Database()
+    database.exec(`
+      INSERT INTO conversations (id, title, agent_code, created_at, updated_at)
+      VALUES ('c1', NULL, 'caliginia', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+      INSERT INTO conversation_messages (id, conversation_id, role, model, content, status, finish_reason, created_at, updated_at)
+      VALUES ('a1', 'c1', 'assistant', 'model', char(0) || 'Hi', 'completed', 'stop', '2026-01-02T00:00:00.000Z', '2026-01-02T00:00:00.000Z')
+    `)
+
+    migrateDatabase(database)
+
+    expect(readUserVersion(database)).toBe(CURRENT_SCHEMA_VERSION)
     expect(
       database
-        .prepare("SELECT updated_at AS updatedAt FROM conversations")
-        .get()
-    ).toEqual(activityTimeBefore)
-    expect(listSchemaObjects(database, "trigger")).toEqual([
-      "update_conversation_after_message_insert",
-      "update_conversation_after_message_update",
-      "update_conversation_updated_at"
-    ])
+        .prepare(
+          "SELECT reply_id AS replyId, content FROM conversation_messages WHERE role = 'text'"
+        )
+        .all()
+    ).toEqual([{ replyId: "a1", content: "\u0000Hi" }])
   })
 
   it("keeps a version-8 database unchanged when migration 9 fails", () => {
@@ -853,6 +903,37 @@ describe("migrateDatabase", () => {
     expect(
       database.prepare("SELECT COUNT(*) AS count FROM agents").get()
     ).toEqual({ count: 0 })
+  })
+
+  it("stores reply text, a user message, and a failed call's result that start with a NUL character", () => {
+    const database = openEmptyDatabase()
+    migrateDatabase(database)
+    database.exec(`
+      INSERT INTO conversations (id, title, agent_code, created_at, updated_at)
+      VALUES ('c1', NULL, 'caliginia', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+      INSERT INTO conversation_messages (id, conversation_id, role, model, content, status, finish_reason, created_at, updated_at)
+      VALUES
+        ('u1', 'c1', 'user', NULL, char(0) || 'Hello', NULL, NULL, '2026-01-02T00:00:00.000Z', NULL),
+        ('a1', 'c1', 'assistant', 'model', '', 'streaming', NULL, '2026-01-02T00:00:00.000Z', '2026-01-02T00:00:00.000Z');
+      INSERT INTO conversation_messages (id, conversation_id, role, reply_id, position, round, content, status, tool_name, tool_arguments, created_at, updated_at)
+      VALUES
+        ('p0', 'c1', 'reasoning', 'a1', 0, 0, char(0) || 'Thinking', NULL, NULL, NULL, '2026-01-02T00:00:00.000Z', '2026-01-02T00:00:00.000Z'),
+        ('p1', 'c1', 'text', 'a1', 1, 0, char(0) || 'Answer', NULL, NULL, NULL, '2026-01-02T00:00:00.000Z', '2026-01-02T00:00:00.000Z'),
+        ('p2', 'c1', 'tool_call', 'a1', 2, 0, char(0) || 'Failed', 'failed', 'read_page', '{}', '2026-01-02T00:00:00.000Z', '2026-01-02T00:00:00.000Z')
+    `)
+
+    expect(
+      database
+        .prepare(
+          "SELECT id, content FROM conversation_messages WHERE id <> 'a1' ORDER BY id"
+        )
+        .all()
+    ).toEqual([
+      { id: "p0", content: "\u0000Thinking" },
+      { id: "p1", content: "\u0000Answer" },
+      { id: "p2", content: "\u0000Failed" },
+      { id: "u1", content: "\u0000Hello" }
+    ])
   })
 
   it("stores agent text that starts with a NUL character", () => {

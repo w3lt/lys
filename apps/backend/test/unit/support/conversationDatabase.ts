@@ -221,7 +221,9 @@ function buildPartRowValues(
     part.status,
     part.toolName,
     part.argumentText,
-    part.sourceNumbers.length === 0 ? null : JSON.stringify(part.sourceNumbers),
+    part.status === "succeeded" && part.sourceNumbers.length > 0
+      ? JSON.stringify(part.sourceNumbers)
+      : null,
     ...times
   ]
 }

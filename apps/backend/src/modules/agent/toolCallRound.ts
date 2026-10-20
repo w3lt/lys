@@ -17,7 +17,6 @@ import type {
 import { formatNetworkToolResult } from "../tool/networkToolResult"
 import AgentTool from "../tool/tool"
 import type ToolCallGate from "../toolApproval/toolCallGate"
-import type { ToolApprovalRequest } from "../toolApproval/toolCallGate"
 import type ReplyPartSequence from "./replyPartSequence"
 import type {
   ContextToolCall,
@@ -105,6 +104,29 @@ type ToolCallHandling = Readonly<{
   /** Numbers the web sources a backend tool's result shows. */
   sourceCatalog: SourceCatalog
 }>
+
+/** What storing a call that cannot run needs: the round and the parts. */
+type FailedToolCallHandling = Pick<ToolCallHandling, "round" | "replyParts">
+
+/** What starting a checked call needs: the gate, the round, and the parts. */
+type ToolCallStartHandling = Pick<
+  ToolCallHandling,
+  "gate" | "round" | "replyParts"
+>
+
+/** What handling a checked call of a client tool needs. */
+type ClientToolCallHandling = ToolCallStartHandling &
+  Pick<ToolCallHandling, "sendClientToolCall">
+
+/** What handling a checked call of a backend tool needs. */
+type BuiltInToolCallHandling = ToolCallStartHandling &
+  Pick<ToolCallHandling, "abortSignal" | "sourceCatalog">
+
+/** What running an allowed backend call needs: cancellation and numbering. */
+type BuiltInToolRunHandling = Pick<
+  ToolCallHandling,
+  "abortSignal" | "sourceCatalog"
+>
 
 /** One call being handled: as the model wrote it, and the tool it names. */
 type HandledToolCall = Readonly<{
@@ -271,13 +293,14 @@ export function buildDefinedToolOffer(
  * of unknown tools and calls whose arguments do not match are stored as
  * failed with the message the model reads; nobody is asked about them.
  * Every other call passes the round's gate: one created once for the round,
- * so the saved choices are read once. The gate's prompts, the parts of the
- * calls they ask about, and the run requests of calls allowed at once are
- * sent before the first wait, in the model's order, because each call's
- * handling runs synchronously up to its first send. Nothing runs before its
- * call is allowed. Every result the model reads is stored with its call
- * first; a network tool's result is cleaned of invisible characters before
- * that, whichever side answered and however the call ended.
+ * so the saved choices are read once. The calls' parts, the gate's prompts,
+ * each after the part of the call it asks about, and the run requests of
+ * calls allowed at once are sent before the first wait, in the model's
+ * order, because each call's handling runs synchronously up to its first
+ * send. Nothing runs before its call is allowed. Every result the model
+ * reads is stored with its call first; a network tool's result is cleaned of
+ * invisible characters before that, whichever side answered and however the
+ * call ended.
  */
 export async function handleToolCallRound(
   round: ToolCallRound,
@@ -389,15 +412,15 @@ async function handleToolCall(
  * Has one checked call of a client tool allowed, then has the client run it.
  *
  * @param toolCall - Checked call.
- * @param handling - The round's gate, the client call sender, and the
- * reply's part sequence.
+ * @param handling - The round's gate and index, the client call sender, and
+ * the reply's part sequence.
  * @returns The message carrying the client's result, or the person's
  * rejection; or undefined when the reply was stopped while the call waited,
  * or refused to store the call.
  */
 async function handleClientToolCall(
   toolCall: CheckedToolCall,
-  handling: ToolCallHandling
+  handling: ClientToolCallHandling
 ): Promise<ToolResultMessage | undefined> {
   const startedCall = startToolCall(toolCall, handling)
   const approval =
@@ -410,7 +433,7 @@ async function handleClientToolCall(
     result.status === "succeeded"
       ? { status: "succeeded", content: result.content, sources: NO_SOURCES }
       : { status: "failed", content: result.content }
-  return updateFinishedToolCall(toolCall, outcome, handling)
+  return updateFinishedToolCall(toolCall, outcome, handling.replyParts)
 }
 
 /**
@@ -418,8 +441,8 @@ async function handleClientToolCall(
  *
  * @param toolCall - Checked call.
  * @param builtInTool - Backend tool the call names.
- * @param handling - The round's gate, the reply's cancellation and part
- * sequence, and the source catalog.
+ * @param handling - The round's gate and index, the reply's cancellation
+ * and part sequence, and the source catalog.
  * @returns The message carrying the run's text, the tool's explanation of
  * arguments it cannot run, or the person's rejection; or undefined when the
  * reply was stopped while the call waited or ran, or refused to store the
@@ -431,7 +454,7 @@ async function handleClientToolCall(
 async function handleBuiltInToolCall(
   toolCall: CheckedToolCall,
   builtInTool: BuiltInTool,
-  handling: ToolCallHandling
+  handling: BuiltInToolCallHandling
 ): Promise<ToolResultMessage | undefined> {
   const parsedCall = builtInTool.parseToolCall(toolCall.checkedCall.arguments)
   if (parsedCall.status === "invalid")
@@ -443,7 +466,7 @@ async function handleBuiltInToolCall(
   if (approval.status === "rejected") return approval.message
   const outcome = await runBuiltInToolCall(parsedCall.runToolCall, handling)
   if (outcome === undefined) return undefined
-  return updateFinishedToolCall(toolCall, outcome, handling)
+  return updateFinishedToolCall(toolCall, outcome, handling.replyParts)
 }
 
 /**
@@ -457,7 +480,7 @@ async function handleBuiltInToolCall(
  */
 async function runBuiltInToolCall(
   runToolCall: BuiltInToolCallRun,
-  handling: ToolCallHandling
+  handling: BuiltInToolRunHandling
 ): Promise<ToolCallRunOutcome | undefined> {
   const { sourceCatalog } = handling
   try {
@@ -472,39 +495,41 @@ async function runBuiltInToolCall(
 }
 
 /**
- * Asks the round's gate about one checked call and stores the call, in one
- * synchronous step.
+ * Stores one checked call as the round's gate decides, then prompts the
+ * person when the gate asks for it, in one synchronous step.
  *
  * @param toolCall - Checked call.
  * @param handling - The round's gate and index, and the reply's part
  * sequence.
  * @returns `allowed` once the call is stored as running; `waiting` with the
  * approval the person's answer leads to, once the call is stored as awaiting
- * approval; `ended` when the reply refused to store the call.
- * @remarks The gate sends a prompt, when it asks, in the same step as the
- * call is stored, so the call is stored before any follower can read it. A
- * call allowed at once is stored as running in that step, and the caller goes
- * on without awaiting, so its run request keeps the model's order among the
- * round's sends.
+ * approval and the prompt is sent; `ended` when the reply refused to store
+ * the call, which sends no prompt.
+ * @remarks The call is stored before its prompt is sent, so a follower that
+ * sees the prompt can read the call. A call allowed at once is stored as
+ * running in that step, and the caller goes on without awaiting, so its run
+ * request keeps the model's order among the round's sends.
  */
 function startToolCall(
   toolCall: CheckedToolCall,
-  handling: ToolCallHandling
+  handling: ToolCallStartHandling
 ): StartedToolCall {
-  const request = handling.gate.sendToolApprovalRequest(toolCall.checkedCall)
-  const isStored = handling.replyParts.createReplyToolCall({
+  const { gate, replyParts } = handling
+  const isAllowedAtOnce = gate.isToolCallAllowedAtOnce(toolCall.checkedCall)
+  const isStored = replyParts.createReplyToolCall({
     kind: "tool-call",
     id: toolCall.call.id,
     round: handling.round,
     toolName: toolCall.call.toolName,
     argumentText: toolCall.call.argumentText,
-    status: isToolCallAllowedAtOnce(request) ? "running" : "awaiting-approval"
+    status: isAllowedAtOnce ? "running" : "awaiting-approval"
   })
   if (!isStored) return ENDED_TOOL_CALL_APPROVAL
-  if (isToolCallAllowedAtOnce(request)) return ALLOWED_TOOL_CALL_APPROVAL
+  if (isAllowedAtOnce) return ALLOWED_TOOL_CALL_APPROVAL
+  const answer = gate.sendToolApprovalPrompt(toolCall.checkedCall)
   return Object.freeze({
     status: "waiting",
-    approval: handleToolCallApprovalAnswer(toolCall, request.answer, handling)
+    approval: handleToolCallApprovalAnswer(toolCall, answer, replyParts)
   })
 }
 
@@ -515,7 +540,7 @@ function startToolCall(
  * @param toolCall - Checked call, stored as awaiting approval.
  * @param answer - Settles with the person's answer, or with undefined when
  * the reply was stopped while the prompt waited; never rejects.
- * @param handling - The reply's part sequence.
+ * @param replyParts - The reply's part sequence.
  * @returns `allowed` once the call is stored as running; `rejected` with the
  * rejection the model reads, once stored; `ended` when the reply was stopped
  * while the prompt waited, or refused to store the answer.
@@ -523,27 +548,28 @@ function startToolCall(
 async function handleToolCallApprovalAnswer(
   toolCall: CheckedToolCall,
   answer: Promise<ChatToolApprovalAnswer | undefined>,
-  handling: ToolCallHandling
+  replyParts: ReplyPartSequence
 ): Promise<ToolCallApproval> {
   const settledAnswer = await answer
   if (settledAnswer === undefined) return ENDED_TOOL_CALL_APPROVAL
   return settledAnswer.status === "allowed"
-    ? updateAllowedToolCall(toolCall, handling)
-    : updateRejectedToolCall(toolCall, settledAnswer.content, handling)
+    ? updateAllowedToolCall(toolCall, replyParts)
+    : updateRejectedToolCall(toolCall, settledAnswer.content, replyParts)
 }
 
 /**
  * Stores a waiting call the person allowed as running.
  *
  * @param toolCall - Checked call.
- * @param handling - The reply's part sequence.
- * @returns `allowed` once stored; `ended` when the reply refused it.
+ * @param replyParts - The reply's part sequence.
+ * @returns `allowed` once stored; `ended` when the reply refused it, so the
+ * call never runs.
  */
 function updateAllowedToolCall(
   toolCall: CheckedToolCall,
-  handling: ToolCallHandling
+  replyParts: ReplyPartSequence
 ): ToolCallApproval {
-  return handling.replyParts.updateReplyToolCall(toolCall.call.id, {
+  return replyParts.updateReplyToolCall(toolCall.call.id, {
     status: "running"
   })
     ? ALLOWED_TOOL_CALL_APPROVAL
@@ -555,17 +581,17 @@ function updateAllowedToolCall(
  *
  * @param toolCall - Checked call.
  * @param content - Rejection the model reads, as the client sent it.
- * @param handling - The reply's part sequence.
+ * @param replyParts - The reply's part sequence.
  * @returns `rejected` with the message once stored; `ended` when the reply
  * refused it. A network tool's rejection is cleaned first.
  */
 function updateRejectedToolCall(
   toolCall: CheckedToolCall,
   content: string,
-  handling: ToolCallHandling
+  replyParts: ReplyPartSequence
 ): ToolCallApproval {
   const result = formatToolCallResult(toolCall.tool, content)
-  const isStored = handling.replyParts.updateReplyToolCall(toolCall.call.id, {
+  const isStored = replyParts.updateReplyToolCall(toolCall.call.id, {
     status: "rejected",
     result
   })
@@ -581,7 +607,7 @@ function updateRejectedToolCall(
  *
  * @param toolCall - Checked call.
  * @param outcome - How the run ended.
- * @param handling - The reply's part sequence.
+ * @param replyParts - The reply's part sequence.
  * @returns The message carrying the text the model reads, once stored; or
  * undefined when the reply refused it. A network tool's result is cleaned
  * first.
@@ -589,10 +615,10 @@ function updateRejectedToolCall(
 function updateFinishedToolCall(
   toolCall: CheckedToolCall,
   outcome: ToolCallRunOutcome,
-  handling: ToolCallHandling
+  replyParts: ReplyPartSequence
 ): ToolResultMessage | undefined {
   const result = formatToolCallResult(toolCall.tool, outcome.content)
-  const isStored = handling.replyParts.updateReplyToolCall(
+  const isStored = replyParts.updateReplyToolCall(
     toolCall.call.id,
     outcome.status === "succeeded"
       ? { status: "succeeded", result, sources: outcome.sources }
@@ -613,7 +639,7 @@ function updateFinishedToolCall(
 function createFailedToolCall(
   toolCall: HandledToolCall,
   message: string,
-  handling: ToolCallHandling
+  handling: FailedToolCallHandling
 ): ToolResultMessage | undefined {
   const result = formatToolCallResult(toolCall.tool, message)
   const isStored = handling.replyParts.createReplyToolCall({
@@ -643,20 +669,6 @@ function formatToolCallResult(
   return tool?.agentTool.access === "network"
     ? formatNetworkToolResult(content)
     : content
-}
-
-/**
- * Answers whether the gate allowed a call without prompting the person.
- *
- * @param request - What asking the gate about the call did.
- * @returns True for `allowed`. The caller then goes on without awaiting, so
- * the call's run request is sent in the same step and keeps the model's
- * order among the round's sends.
- */
-function isToolCallAllowedAtOnce(
-  request: ToolApprovalRequest
-): request is Extract<ToolApprovalRequest, { status: "allowed" }> {
-  return request.status === "allowed"
 }
 
 /**

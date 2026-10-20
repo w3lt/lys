@@ -122,7 +122,14 @@ export const chatInterruptedEventSchema = z.strictObject({
   type: z.literal("interrupted")
 })
 
-/** Validates the event reporting a reply generation failure. */
+/**
+ * Validates the event reporting a reply generation failure.
+ *
+ * @remarks The stored reply, unless a newer turn or a deletion ended it
+ * first, is `failed` with exactly the parts delivered before this event, and
+ * its tool calls that were still waiting for approval or running are
+ * `interrupted`.
+ */
 export const chatErrorEventSchema = z.strictObject({
   type: z.literal("error"),
   /** Non-empty user-presentable stream failure message. */

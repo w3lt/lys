@@ -17,7 +17,7 @@ import { createChatSseTestApp } from "./chatSseRoute"
 import { openConversationTestServices } from "./conversationDatabase"
 import type { TestFastify } from "./fastifyTestApp"
 import {
-  answerWithWordSource,
+  runLookUpWordWithSource,
   CHECK_SPELLING_TOOL,
   LOOK_UP_WORD_TOOL,
   ScriptedBuiltInTool
@@ -173,7 +173,7 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
         definition: LOOK_UP_WORD_TOOL,
         provider: new ScriptedBuiltInToolProvider({
           status: "ready",
-          tool: new ScriptedBuiltInTool(answerWithWordSource)
+          tool: new ScriptedBuiltInTool(runLookUpWordWithSource)
         })
       }),
       Object.freeze({

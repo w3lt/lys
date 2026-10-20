@@ -17,7 +17,8 @@ import type { ReplyPartRecordWriter } from "./records"
  * @param draft - Part the agent asks to store.
  * @param now - Time of the operation, stored as both of the part's times.
  * @returns The validated part; a reasoning or text part gets a new UUIDv7, a
- * tool call keeps its own identifier and shows no sources yet.
+ * tool call keeps its own identifier. No draft is a succeeded call, so none
+ * shows sources.
  * @throws If the draft breaks the part contract, such as empty text or an
  * empty failure message.
  */
@@ -33,7 +34,6 @@ function buildReplyPart(draft: ReplyPartDraft, now: string): ReplyPart {
     })
   return replyPartSchema.parse({
     ...draft,
-    sourceNumbers: [],
     createdAt: now,
     updatedAt: now
   })

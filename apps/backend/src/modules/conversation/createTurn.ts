@@ -55,9 +55,9 @@ function createConversation(
  * streaming in an existing conversation becomes interrupted before the
  * snapshot is read, so the new turn supersedes it. A stopped request can
  * finalize its reply after the client has already sent the next turn.
- * Interrupting it here keeps its partial text in the new turn's context, and
- * the streaming-only write guards then reject every later write from the
- * superseded generation.
+ * Interrupting it here keeps its stored text and answered calls in the new
+ * turn's context, and the streaming-only write guards then reject every
+ * later write from the superseded generation.
  */
 export function createConversationTurn(
   transaction: ConversationTurnTransaction,

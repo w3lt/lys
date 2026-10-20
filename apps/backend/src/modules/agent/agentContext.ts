@@ -38,7 +38,7 @@ function isAnsweredToolCall(
  * @param parts - Parts in stored order, whose rounds never decrease.
  * @returns Each round's parts in stored order, rounds in order.
  */
-function groupReplyPartsByRound(
+function buildReplyPartRounds(
   parts: readonly ReplyPart[]
 ): readonly (readonly ReplyPart[])[] {
   const rounds: ReplyPart[][] = []
@@ -107,7 +107,7 @@ function buildStoredContextMessages(
   if (message.role === "user")
     return [{ role: "user", content: message.content }]
   if (!isContextReply(message)) return []
-  return groupReplyPartsByRound(message.parts).flatMap(
+  return buildReplyPartRounds(message.parts).flatMap(
     buildStoredRoundContextMessages
   )
 }
@@ -144,7 +144,7 @@ export function buildAgentContext(
  * sends text or a tool call with a result. A reply counts once, however many
  * context messages its rounds and tool results become.
  */
-export function countAgentContextHistoryMessages(
+export function calculateAgentContextHistoryMessageCount(
   history: readonly ConversationMessage[]
 ): number {
   return history.filter(

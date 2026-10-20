@@ -19,7 +19,10 @@ type DatabaseMigrationStep = (database: DatabaseSync) => void
  * hold one stretch of a round's text, and `tool_call` one call, keyed by the
  * call's identifier, with the result text the model read in `content`. A
  * comparison with NULL makes a CHECK pass in SQLite, so every comparison on
- * a nullable column is guarded by `IS NOT NULL`.
+ * a nullable column is guarded by `IS NOT NULL`. Non-empty text is checked
+ * as `content <> ''`, which compares every byte; `length()` stops at a NUL
+ * character, so text that starts with one would count as empty, and a
+ * version-8 reply holding such text could never be copied.
  */
 const CREATE_REPLY_PART_MESSAGES_SQL = `
   CREATE TABLE new_conversation_messages (
@@ -68,7 +71,7 @@ const CREATE_REPLY_PART_MESSAGES_SQL = `
       (
         role = 'user'
         AND model IS NULL
-        AND length(content) > 0
+        AND content <> ''
         AND status IS NULL
         AND finish_reason IS NULL
         AND updated_at IS NULL
@@ -97,7 +100,7 @@ const CREATE_REPLY_PART_MESSAGES_SQL = `
       OR
       (
         role IN ('reasoning', 'text')
-        AND length(content) > 0
+        AND content <> ''
         AND status IS NULL
         AND tool_name IS NULL
         AND tool_arguments IS NULL
@@ -120,7 +123,7 @@ const CREATE_REPLY_PART_MESSAGES_SQL = `
           OR
           (
             status IN ('failed', 'rejected')
-            AND length(content) > 0
+            AND content <> ''
             AND source_numbers IS NULL
           )
         )
@@ -196,6 +199,8 @@ const REPLACE_MESSAGES_WITH_REPLY_PARTS_SQL = `
  * text gets no piece. The new identities are made here, so a migration that
  * fails and runs again makes new ones; nothing outside the transaction has
  * seen the first ones.
+ * @throws If a selected reply has a value that is not text, or a piece
+ * breaks a version-9 rule; the caller's transaction then rolls back.
  */
 function createReplyTextParts(database: DatabaseSync): void {
   const replies = database
@@ -276,6 +281,9 @@ function parseVersion8ReplyText(
  * foreign-key pause. Every message keeps its identity, times, and order;
  * only reply text changes rows. Builds that support only version 8 refuse
  * the result, and it cannot be turned back.
+ * @throws If a stored message breaks a version-9 rule, a reply has a value
+ * that is not text, or a version-9 object already exists; the caller's
+ * transaction then rolls back.
  */
 function migrateRepliesToParts(database: DatabaseSync): void {
   database.exec(CREATE_REPLY_PART_MESSAGES_SQL)

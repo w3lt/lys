@@ -4,7 +4,8 @@ import LysMessage from "@/components/ChatViewComponents/LysMessage"
 import {
   buildCompletedAssistantMessage,
   buildEndedAssistantMessage,
-  buildFragmentPart,
+  buildReasoningPart,
+  buildTextPart,
   buildStreamingAssistantMessage,
   buildToolCallPart
 } from "../../support/conversationFixtures"
@@ -22,8 +23,9 @@ describe("LysMessage", () => {
       <LysMessage
         kind="terminal"
         message={buildCompletedAssistantMessage(2, "A **local** chat app.")}
-        speakerName={SPEAKER_NAME}
+        sourceNumberLimit={0}
         sources={NO_SOURCES}
+        speakerName={SPEAKER_NAME}
       />
     )
 
@@ -46,8 +48,9 @@ describe("LysMessage", () => {
         <LysMessage
           kind="terminal"
           message={buildEndedAssistantMessage(2, "Partial answer", status)}
-          speakerName={SPEAKER_NAME}
+          sourceNumberLimit={0}
           sources={NO_SOURCES}
+          speakerName={SPEAKER_NAME}
         />
       )
 
@@ -63,8 +66,9 @@ describe("LysMessage", () => {
       <LysMessage
         kind="streaming"
         message={buildStreamingAssistantMessage(2, "Thinking")}
-        speakerName={SPEAKER_NAME}
+        sourceNumberLimit={0}
         sources={NO_SOURCES}
+        speakerName={SPEAKER_NAME}
       />
     )
 
@@ -81,8 +85,9 @@ describe("LysMessage", () => {
       <LysMessage
         kind="terminal"
         message={buildCompletedAssistantMessage(2, "Hi")}
-        speakerName={SPEAKER_NAME}
+        sourceNumberLimit={0}
         sources={NO_SOURCES}
+        speakerName={SPEAKER_NAME}
       />
     )
 
@@ -99,28 +104,33 @@ describe("LysMessage", () => {
     ])
 
     /** Search of round 0 that found both sources. */
-    const SEARCH = buildToolCallPart(
-      21,
-      0,
-      { toolName: "web_search", argumentText: '{"query":"moths"}' },
-      { status: "succeeded", result: "Results", sourceNumbers: [1, 2] }
-    )
+    const SEARCH = buildToolCallPart(21, 0, {
+      toolName: "web_search",
+      argumentText: '{"query":"moths"}',
+      status: "succeeded",
+      result: "Results",
+      sourceNumbers: [1, 2]
+    })
 
     it("shows its reasoning and its steps collapsed, its last round's text as the cited answer, and its sources", async () => {
       const reply = {
         ...buildCompletedAssistantMessage(2, [
-          buildFragmentPart("reasoning", 20, 0, "Search first."),
-          buildFragmentPart("text", 22, 0, "Let me search."),
+          buildReasoningPart(20, 0, "Search first."),
+          buildTextPart(22, 0, "Let me search."),
           SEARCH,
-          buildFragmentPart("text", 23, 1, "Moths fly at night [1].")
+          {
+            ...buildTextPart(23, 1, "Moths fly at night [1]."),
+            updatedAt: "2026-01-02T03:04:14.678Z"
+          }
         ]),
-        updatedAt: "2026-01-02T03:04:14.678Z"
+        updatedAt: "2026-01-02T03:05:05.678Z"
       }
 
       render(
         <LysMessage
           kind="terminal"
           message={reply}
+          sourceNumberLimit={2}
           sources={SOURCES}
           speakerName={SPEAKER_NAME}
         />
@@ -133,11 +143,35 @@ describe("LysMessage", () => {
       ).toBeInTheDocument()
       expect(screen.getByText("Let me search.")).not.toBeVisible()
       expect(
-        await screen.findByRole("link", { name: "Source 1: Moths" })
+        await screen.findByRole("link", { name: "1, source: Moths" })
       ).toBeVisible()
-      const sources = screen.getByRole("region", { name: "Sources" })
-      expect(within(sources).getByText("Sources · 1 cited")).toBeVisible()
-      expect(within(sources).getByText("1 more")).toBeVisible()
+      const cited = screen.getByRole("list", { name: "Sources · 1 cited" })
+      expect(within(cited).getByRole("link", { name: /Moths/ })).toBeVisible()
+      expect(screen.getByText("1 more")).toBeVisible()
+    })
+
+    it("links and lists no source above its limit, which only a later reply found", async () => {
+      render(
+        <LysMessage
+          kind="terminal"
+          message={buildCompletedAssistantMessage(
+            2,
+            "Moths [1] like lamps [2]."
+          )}
+          sourceNumberLimit={1}
+          sources={SOURCES}
+          speakerName={SPEAKER_NAME}
+        />
+      )
+
+      expect(
+        await screen.findByRole("link", { name: "1, source: Moths" })
+      ).toBeVisible()
+      expect(screen.getByText(/like lamps \[2\]\./)).toBeVisible()
+      expect(screen.queryByRole("link", { name: /Lamps/ })).toBeNull()
+      expect(
+        screen.getByRole("list", { name: "Sources · 1 cited" })
+      ).toBeVisible()
     })
 
     it("shows its steps without an answer while its last round's calls run, and says it is still working", () => {
@@ -145,13 +179,13 @@ describe("LysMessage", () => {
         <LysMessage
           kind="streaming"
           message={buildStreamingAssistantMessage(2, [
-            buildToolCallPart(
-              21,
-              0,
-              { toolName: "web_search", argumentText: '{"query":"moths"}' },
-              { status: "running" }
-            )
+            buildToolCallPart(21, 0, {
+              toolName: "web_search",
+              argumentText: '{"query":"moths"}',
+              status: "running"
+            })
           ])}
+          sourceNumberLimit={2}
           sources={SOURCES}
           speakerName={SPEAKER_NAME}
         />
@@ -161,7 +195,7 @@ describe("LysMessage", () => {
       expect(
         screen.getByRole("status", { name: "Caliginia is generating" })
       ).toBeInTheDocument()
-      expect(screen.queryByRole("region", { name: "Sources" })).toBeNull()
+      expect(screen.queryByText(/^Sources/)).toBeNull()
     })
 
     it("says it is thinking while it streams its reasoning", () => {
@@ -169,8 +203,9 @@ describe("LysMessage", () => {
         <LysMessage
           kind="streaming"
           message={buildStreamingAssistantMessage(2, [
-            buildFragmentPart("reasoning", 20, 0, "Hmm")
+            buildReasoningPart(20, 0, "Hmm")
           ])}
+          sourceNumberLimit={2}
           sources={SOURCES}
           speakerName={SPEAKER_NAME}
         />
@@ -184,6 +219,7 @@ describe("LysMessage", () => {
         <LysMessage
           kind="terminal"
           message={buildCompletedAssistantMessage(2, "Just text.")}
+          sourceNumberLimit={2}
           sources={SOURCES}
           speakerName={SPEAKER_NAME}
         />
@@ -191,7 +227,7 @@ describe("LysMessage", () => {
 
       expect(screen.getByRole("article")).toHaveTextContent("Just text.")
       expect(screen.queryByText(/^Thought for|^Thinking$|tool call/)).toBeNull()
-      expect(screen.queryByRole("region", { name: "Sources" })).toBeNull()
+      expect(screen.queryByText(/^Sources/)).toBeNull()
     })
   })
 })

@@ -39,7 +39,7 @@ import {
   buildConversation,
   buildConversationListPage,
   buildConversationMetadata,
-  buildFragmentPart,
+  buildTextPart,
   buildStreamingAssistantMessage,
   buildUserMessage,
   FIXTURE_CONVERSATION_ID
@@ -665,7 +665,7 @@ describe("Composer", () => {
       await sendStreamEvents(streams[0], NEW_TURN_EVENT)
       await sendReplyEvents(
         { streams, replyFollows },
-        { type: "reply-part", part: buildFragmentPart("text", 40, 0, "Hi") }
+        { type: "reply-part", part: buildTextPart(40, 0, "Hi") }
       )
       expect(getMessageField()).toHaveValue("")
 
@@ -696,7 +696,7 @@ describe("Composer", () => {
       await sendStreamEvents(streams[0], NEW_TURN_EVENT)
       await sendReplyEvents(
         { streams, replyFollows },
-        { type: "reply-part", part: buildFragmentPart("text", 40, 0, "Hi") },
+        { type: "reply-part", part: buildTextPart(40, 0, "Hi") },
         { type: "done", finishReason: "stop" }
       )
       await user.type(getMessageField(), "Thanks")

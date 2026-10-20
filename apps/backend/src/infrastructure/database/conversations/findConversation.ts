@@ -48,12 +48,11 @@ function findConversationMetadata(
  * Projects the columns of one stored tool call into its part shape.
  * @param row - Untrusted stored tool-call row.
  * @returns The untrusted projection: the result only for a status that has
- * one, and the stored source numbers decoded, or none when absent.
+ * one, and for a succeeded call its stored source numbers decoded, or none
+ * when absent.
  * @throws If stored source numbers are not JSON.
  */
 function buildToolCallPart(row: StoredRow): unknown {
-  const sourceNumbers =
-    typeof row.sourceNumbers === "string" ? JSON.parse(row.sourceNumbers) : []
   const common = {
     kind: "tool-call",
     id: row.id,
@@ -62,12 +61,15 @@ function buildToolCallPart(row: StoredRow): unknown {
     updatedAt: row.updatedAt,
     toolName: row.toolName,
     argumentText: row.toolArguments,
-    sourceNumbers,
     status: row.status
   }
-  return RESULT_TOOL_CALL_STATUSES.has(row.status)
+  const part = RESULT_TOOL_CALL_STATUSES.has(row.status)
     ? { ...common, result: row.content }
     : common
+  if (row.status !== "succeeded") return part
+  const sourceNumbers: unknown =
+    typeof row.sourceNumbers === "string" ? JSON.parse(row.sourceNumbers) : []
+  return { ...part, sourceNumbers }
 }
 
 /**

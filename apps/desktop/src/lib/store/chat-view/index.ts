@@ -130,7 +130,10 @@ export type ChatViewStoreDependencies = {
   readonly stopChatReply: ChatReplyStopper
   /** Reads a stored conversation; the store supplies its owned abort signal. */
   readonly getConversation: StoredConversationReader
-  /** Creates the ISO timestamp recorded on each immutable transition. */
+  /**
+   * Creates the ISO timestamp a reply's ending records; parts and fragments
+   * carry the times the backend stored them.
+   */
   readonly createTimestamp: () => string
   /**
    * Finds the loaded model eligible to answer the next request.
@@ -179,8 +182,8 @@ export type ChatViewStoreDependencies = {
  * stream event and private transport resource. `reply-completed` is entered
  * once the reply is final — after `done`, `interrupted`, or `error`, or a
  * snapshot of a final reply — and still permits title events; no later
- * request state accepts deltas again. A new request may replace a
- * `reply-completed` one, which ends following its stream.
+ * request state accepts parts, fragments, or sources again. A new request
+ * may replace a `reply-completed` one, which ends following its stream.
  */
 export type ChatRequestState =
   | {
@@ -196,7 +199,7 @@ export type ChatRequestState =
       readonly submittedComposerDraft?: string
     }
   | {
-      /** The backend-identified assistant reply is accepting content. */
+      /** The backend-identified reply is accepting parts and fragments. */
       readonly status: "reply-streaming"
       /** Token authorizing this request to mutate chat state. */
       readonly token: number
@@ -419,7 +422,7 @@ type StoredReplyFollow = {
   readonly target: ChatReplyPathParams
 }
 
-/** Request state whose backend-identified reply is accepting deltas. */
+/** Request state whose backend-identified reply accepts parts and fragments. */
 type StreamingChatReplyState = Extract<
   ChatRequestState,
   { status: "reply-streaming" }
@@ -497,8 +500,9 @@ function formatReplyStopErrorMessage(error: unknown): string {
  *
  * @param events - Events of one reply-events stream.
  * @returns The same events in order, completing when the source completes.
- * @throws If the first event is not a `reply-snapshot`, because later deltas
- * continue only from the snapshot's content.
+ * @throws If the first event is not a `reply-snapshot`, because later parts,
+ * fragments, and sources continue only from the snapshot's parts and
+ * sources.
  */
 async function* readSnapshotFirstReplyEvents(
   events: AsyncIterable<ChatReplyEvent>
@@ -971,7 +975,8 @@ export function createChatViewStore(
     /**
      * Applies the stored snapshot that starts a followed reply's stream.
      *
-     * @param event - Snapshot of the followed reply and its conversation title.
+     * @param event - Snapshot of the followed reply, its conversation's title,
+     * and the sources the conversation stored.
      * @param token - Token expected to own the followed reply.
      * @throws If the snapshot names another reply or the reply is terminal.
      */
@@ -1585,8 +1590,9 @@ export function createChatViewStore(
      *
      * @param follow - Follow started by {@link startStoredReplyFollowing}.
      * @returns Settlement after the stream ends, fails, or is superseded.
-     * @remarks The snapshot replaces the stored content, so later deltas are
-     * neither lost nor repeated. An early end shows the reply interrupted,
+     * @remarks The snapshot replaces the stored reply's parts and adds the
+     * sources it lists, so later parts, fragments, and sources are neither
+     * lost nor repeated. An early end shows the reply interrupted,
      * because the store only stopped following it.
      */
     async function readStoredReplyStream(

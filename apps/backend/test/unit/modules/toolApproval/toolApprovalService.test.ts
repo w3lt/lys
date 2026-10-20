@@ -41,7 +41,7 @@ function createAllowingPromptSender() {
 }
 
 describe("ToolApprovalService", () => {
-  it("runs the tools saved as Just run and prompts for every other tool", async () => {
+  it("allows the tools saved as Just run at once and prompts through the given sender for every other tool", async () => {
     const service = new ToolApprovalService(async () =>
       buildRead(["read_page"])
     )
@@ -51,9 +51,10 @@ describe("ToolApprovalService", () => {
       sendToolApprovalPrompt,
       vi.fn()
     )
-    gate.sendToolApprovalRequest(PAGE_CALL)
-    gate.sendToolApprovalRequest(SEARCH_CALL)
+    await gate.sendToolApprovalPrompt(SEARCH_CALL)
 
+    expect(gate.isToolCallAllowedAtOnce(PAGE_CALL)).toBe(true)
+    expect(gate.isToolCallAllowedAtOnce(SEARCH_CALL)).toBe(false)
     expect(sendToolApprovalPrompt.mock.calls).toEqual([[SEARCH_CALL]])
   })
 
@@ -67,8 +68,8 @@ describe("ToolApprovalService", () => {
       createAllowingPromptSender(),
       vi.fn()
     )
-    gate.sendToolApprovalRequest(PAGE_CALL)
-    gate.sendToolApprovalRequest(SEARCH_CALL)
+    gate.isToolCallAllowedAtOnce(PAGE_CALL)
+    gate.isToolCallAllowedAtOnce(SEARCH_CALL)
 
     expect(readJustRunToolNames).toHaveBeenCalledOnce()
   })
@@ -80,37 +81,32 @@ describe("ToolApprovalService", () => {
       if (read === undefined) throw new Error("Read more often than expected.")
       return read
     })
-    const sendToolApprovalPrompt = createAllowingPromptSender()
+    const decisions: boolean[] = []
 
     for (let round = 0; round < 3; round += 1) {
       const gate = await service.createToolCallGate(
-        sendToolApprovalPrompt,
+        createAllowingPromptSender(),
         vi.fn()
       )
-      gate.sendToolApprovalRequest(PAGE_CALL)
+      decisions.push(gate.isToolCallAllowedAtOnce(PAGE_CALL))
     }
 
-    expect(sendToolApprovalPrompt).toHaveBeenCalledTimes(2)
+    expect(decisions).toEqual([false, true, false])
   })
 
-  it("prompts for every tool and reports once when the saved choices cannot be read", async () => {
+  it("allows no tool at once and reports once when the saved choices cannot be read", async () => {
     const service = new ToolApprovalService(async () => ({
       status: "unreadable"
     }))
-    const sendToolApprovalPrompt = createAllowingPromptSender()
     const reportSettingsUnreadable = vi.fn<() => void>()
 
     const gate = await service.createToolCallGate(
-      sendToolApprovalPrompt,
+      createAllowingPromptSender(),
       reportSettingsUnreadable
     )
-    gate.sendToolApprovalRequest(PAGE_CALL)
-    gate.sendToolApprovalRequest(SEARCH_CALL)
 
-    expect(sendToolApprovalPrompt.mock.calls).toEqual([
-      [PAGE_CALL],
-      [SEARCH_CALL]
-    ])
+    expect(gate.isToolCallAllowedAtOnce(PAGE_CALL)).toBe(false)
+    expect(gate.isToolCallAllowedAtOnce(SEARCH_CALL)).toBe(false)
     expect(reportSettingsUnreadable).toHaveBeenCalledOnce()
   })
 

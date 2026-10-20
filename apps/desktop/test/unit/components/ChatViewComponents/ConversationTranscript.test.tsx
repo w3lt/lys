@@ -1,10 +1,14 @@
-import { render, screen } from "@testing-library/react"
-import { CALIGINIA_AGENT_CODE } from "@lys/share"
+import { render, screen, within } from "@testing-library/react"
+import { CALIGINIA_AGENT_CODE, type ToolCallReplyPart } from "@lys/share"
 import { describe, expect, it } from "vitest"
-import ConversationTranscript from "@/components/ChatViewComponents/ConversationTranscript"
+import ConversationTranscript, {
+  type ConversationTranscriptProps
+} from "@/components/ChatViewComponents/ConversationTranscript"
 import {
   buildCompletedAssistantMessage,
   buildStreamingAssistantMessage,
+  buildTextPart,
+  buildToolCallPart,
   buildUserMessage
 } from "../../support/conversationFixtures"
 
@@ -35,6 +39,52 @@ function listRenderedMessages(): string[] {
 
 /** Sources of a conversation that has none. */
 const NO_SOURCES = Object.freeze([])
+
+/**
+ * Builds a round-0 search that showed one source.
+ *
+ * @param sequence - Sequence of the part.
+ * @param sourceNumber - Number of the source the search showed.
+ * @returns The succeeded search part.
+ */
+function buildSearchPart(
+  sequence: number,
+  sourceNumber: number
+): ToolCallReplyPart {
+  return buildToolCallPart(sequence, 0, {
+    toolName: "web_search",
+    argumentText: '{"query":"moths"}',
+    status: "succeeded",
+    result: "Results",
+    sourceNumbers: [sourceNumber]
+  })
+}
+
+/**
+ * Reply whose search showed source 1 and that also cites 2, a number only a
+ * later reply's search shows.
+ */
+const EARLIER_CITING_REPLY = buildCompletedAssistantMessage(2, [
+  buildSearchPart(20, 1),
+  buildTextPart(21, 1, "Moths [1] like lamps [2].")
+])
+
+/** Parts of the later reply, whose search shows source 2. */
+const LATER_CITING_REPLY_PARTS = Object.freeze([
+  buildSearchPart(40, 2),
+  buildTextPart(41, 1, "Lamps [2].")
+])
+
+/** The messages of a transcript, in either of its kinds. */
+type TranscriptMessages =
+  | Pick<
+      Extract<ConversationTranscriptProps, { kind: "completed-only" }>,
+      "kind" | "completedMessages"
+    >
+  | Pick<
+      Extract<ConversationTranscriptProps, { kind: "streaming-tail" }>,
+      "kind" | "completedMessages" | "streamingMessage"
+    >
 
 describe("ConversationTranscript", () => {
   it("renders completed messages in order with their speakers", () => {
@@ -104,6 +154,58 @@ describe("ConversationTranscript", () => {
       screen.getByRole("status", { name: "Caliginia is generating" })
     ).toBeInTheDocument()
   })
+
+  it.each<[string, TranscriptMessages]>([
+    [
+      "a finished conversation",
+      {
+        kind: "completed-only",
+        completedMessages: [
+          QUESTION,
+          EARLIER_CITING_REPLY,
+          FOLLOW_UP,
+          buildCompletedAssistantMessage(4, LATER_CITING_REPLY_PARTS)
+        ]
+      }
+    ],
+    [
+      "a conversation whose later reply streams",
+      {
+        kind: "streaming-tail",
+        completedMessages: [QUESTION, EARLIER_CITING_REPLY, FOLLOW_UP],
+        streamingMessage: buildStreamingAssistantMessage(
+          4,
+          LATER_CITING_REPLY_PARTS
+        )
+      }
+    ]
+  ])(
+    "links each reply's citations only to sources its own or an earlier reply's calls showed, in %s",
+    async (_label, messages) => {
+      render(
+        <ConversationTranscript
+          {...messages}
+          speakerName={SPEAKER_NAME}
+          sources={[
+            { number: 1, url: "https://moths.example/", title: "Moths" },
+            { number: 2, url: "https://lamps.example/", title: "Lamps" }
+          ]}
+        />
+      )
+      const [, earlier, , later] = screen
+        .getAllByRole("article")
+        .map((article) => within(article))
+
+      expect(
+        await later?.findByRole("link", { name: "2, source: Lamps" })
+      ).toBeVisible()
+      expect(
+        earlier?.getByRole("link", { name: "1, source: Moths" })
+      ).toBeVisible()
+      expect(earlier?.getByText(/like lamps \[2\]\./)).toBeVisible()
+      expect(earlier?.queryByRole("link", { name: /Lamps/ })).toBeNull()
+    }
+  )
 
   it("announces a lifecycle error after the messages", () => {
     render(

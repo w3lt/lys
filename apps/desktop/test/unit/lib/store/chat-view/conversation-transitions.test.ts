@@ -22,8 +22,9 @@ import {
   buildCompletedAssistantMessage,
   buildConversation,
   buildConversationMetadata,
+  buildConversationWithSources,
   buildEndedAssistantMessage,
-  buildFragmentPart,
+  buildTextPart,
   buildStreamingAssistantMessage,
   buildToolCallPart,
   buildUserMessage,
@@ -41,15 +42,14 @@ const EARLIER_TURN = [
 ] as const
 
 /** Text part the streaming reply holds. */
-const STREAMED_TEXT = buildFragmentPart("text", 50, 0, "Part")
+const STREAMED_TEXT = buildTextPart(50, 0, "Part")
 
 /** Web search call the streaming reply is running. */
-const RUNNING_CALL = buildToolCallPart(
-  51,
-  0,
-  { toolName: "web_search", argumentText: '{"query":"moths"}' },
-  { status: "running" }
-)
+const RUNNING_CALL = buildToolCallPart(51, 0, {
+  toolName: "web_search",
+  argumentText: '{"query":"moths"}',
+  status: "running"
+})
 
 /** Reply streaming at the end of the fixture conversation. */
 const STREAMING_REPLY = buildStreamingAssistantMessage(5, [STREAMED_TEXT])
@@ -205,17 +205,26 @@ describe("updateAssistantReplyPart", () => {
     expect(Object.isFrozen(conversation.messages.at(-1))).toBe(true)
   })
 
-  it("replaces the part stored under the same identifier in place", () => {
-    const withCall = updateAssistantReplyPart(STREAMING_CONVERSATION, {
-      assistantMessageId: STREAMING_REPLY.id,
-      part: RUNNING_CALL
+  it("replaces the part stored under the same identifier in place, before the parts that follow it", () => {
+    const laterCall = buildToolCallPart(52, 0, {
+      toolName: "read_page",
+      argumentText: '{"url":"https://moths.example/"}',
+      status: "running"
     })
-    const succeeded = buildToolCallPart(
-      51,
-      0,
-      { toolName: "web_search", argumentText: '{"query":"moths"}' },
-      { status: "succeeded", result: "Results", sourceNumbers: [1] }
+    const withCall = updateAssistantReplyPart(
+      updateAssistantReplyPart(STREAMING_CONVERSATION, {
+        assistantMessageId: STREAMING_REPLY.id,
+        part: RUNNING_CALL
+      }),
+      { assistantMessageId: STREAMING_REPLY.id, part: laterCall }
     )
+    const succeeded = buildToolCallPart(51, 0, {
+      toolName: "web_search",
+      argumentText: '{"query":"moths"}',
+      status: "succeeded",
+      result: "Results",
+      sourceNumbers: [1]
+    })
 
     const conversation = updateAssistantReplyPart(withCall, {
       assistantMessageId: STREAMING_REPLY.id,
@@ -225,7 +234,8 @@ describe("updateAssistantReplyPart", () => {
     const reply = conversation.messages.at(-1)
     expect(reply?.role === "assistant" && reply.parts).toEqual([
       STREAMED_TEXT,
-      succeeded
+      succeeded,
+      laterCall
     ])
   })
 
@@ -307,21 +317,38 @@ describe("updateAssistantReplyPartContent", () => {
 })
 
 describe("updateConversationSources", () => {
-  it("adds new sources in number order and keeps the transcript by identity", () => {
+  /** Sources a later call showed, out of number order. */
+  const THIRD = Object.freeze({
+    number: 3,
+    url: "https://c.example/",
+    title: "C"
+  })
+  const SECOND = Object.freeze({
+    number: 2,
+    url: "https://b.example/",
+    title: "B"
+  })
+
+  it("adds a call's own sources to those held, in number order, and keeps the transcript by identity", () => {
     const withStored = buildChatViewConversation(EARLIER_TURN, [STORED_SOURCE])
-    const third = { number: 3, url: "https://c.example/", title: "C" }
-    const second = { number: 2, url: "https://b.example/", title: "B" }
 
-    const conversation = updateConversationSources(withStored, [
-      third,
-      STORED_SOURCE,
-      second
-    ])
+    const conversation = updateConversationSources(withStored, [THIRD, SECOND])
 
-    expect(conversation.sources).toEqual([STORED_SOURCE, second, third])
+    expect(conversation.sources).toEqual([STORED_SOURCE, SECOND, THIRD])
     expect(conversation.messages).toBe(withStored.messages)
     expect(withStored.sources).toEqual([STORED_SOURCE])
     expect(Object.isFrozen(conversation.sources)).toBe(true)
+  })
+
+  it("keeps one source for a number it already holds", () => {
+    const withStored = buildChatViewConversation(EARLIER_TURN, [STORED_SOURCE])
+
+    const conversation = updateConversationSources(withStored, [
+      THIRD,
+      STORED_SOURCE
+    ])
+
+    expect(conversation.sources).toEqual([STORED_SOURCE, THIRD])
   })
 })
 
@@ -364,18 +391,17 @@ describe("updateAssistantReplyStatus", () => {
   it.each(["completed", "interrupted", "failed"] as const)(
     "marks the reply's waiting and running calls interrupted at the time it ends as %s, as the backend does",
     (status) => {
-      const finishedCall = buildToolCallPart(
-        52,
-        0,
-        { toolName: "read_page", argumentText: "{}" },
-        { status: "failed", result: "Unreadable" }
-      )
-      const waitingCall = buildToolCallPart(
-        53,
-        1,
-        { toolName: "read_page", argumentText: "{}" },
-        { status: "awaiting-approval" }
-      )
+      const finishedCall = buildToolCallPart(52, 0, {
+        toolName: "read_page",
+        argumentText: "{}",
+        status: "failed",
+        result: "Unreadable"
+      })
+      const waitingCall = buildToolCallPart(53, 1, {
+        toolName: "read_page",
+        argumentText: "{}",
+        status: "awaiting-approval"
+      })
       const reply = buildStreamingAssistantMessage(5, [
         STREAMED_TEXT,
         RUNNING_CALL,
@@ -448,10 +474,8 @@ describe("updateAssistantReplyStatus", () => {
 
 describe("createStoredChatViewConversation", () => {
   it("presents a stored conversation in stored order with its sources, frozen", () => {
-    const stored = buildConversation(
-      FIXTURE_CONVERSATION_ID,
-      "Stored",
-      EARLIER_TURN,
+    const stored = buildConversationWithSources(
+      buildConversation(FIXTURE_CONVERSATION_ID, "Stored", EARLIER_TURN),
       [STORED_SOURCE]
     )
 
@@ -479,7 +503,7 @@ describe("createStoredChatViewConversation", () => {
 
   it("presents an earlier streaming reply as interrupted with its stored parts, its open calls interrupted", () => {
     const abandoned = buildStreamingAssistantMessage(3, [
-      buildFragmentPart("text", 30, 0, "Half an ans"),
+      buildTextPart(30, 0, "Half an ans"),
       RUNNING_CALL
     ])
     const stored = buildConversation(FIXTURE_CONVERSATION_ID, null, [

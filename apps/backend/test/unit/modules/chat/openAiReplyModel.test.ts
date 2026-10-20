@@ -414,6 +414,25 @@ describe("OpenAiReplyModel", () => {
     ])
   })
 
+  it("yields a chunk's reasoning, then its text, then the finish reason it carries", async () => {
+    const chunk = createReasoningChunk({ reasoning: "Short.", content: "Hi" })
+    const finishingChunk: ChatCompletionChunk = {
+      ...chunk,
+      choices: chunk.choices.map((choice) => ({
+        ...choice,
+        finish_reason: "stop"
+      }))
+    }
+
+    const run = await listReplyStreamEvents(createChunkStream(finishingChunk))
+
+    expect(run.events).toEqual([
+      { type: "reasoning", content: "Short." },
+      { type: "text", content: "Hi" },
+      { type: "finish", finishReason: "stop" }
+    ])
+  })
+
   it("reads reasoning_content when a delta has no reasoning text, and prefers reasoning when it has both", async () => {
     const run = await listReplyStreamEvents(
       createChunkStream(

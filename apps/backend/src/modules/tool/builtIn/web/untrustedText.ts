@@ -1,3 +1,5 @@
+import { formatVisibleText } from "../../networkToolResult"
+
 /**
  * Finds each run of three or more `<`, or of three or more `>`: the brackets
  * that open and close every content delimiter Lys writes around web text.
@@ -104,6 +106,19 @@ export function formatSingleLineText(
   maximumLength: number
 ): string {
   return formatCutText(formatFlatText(text), maximumLength)
+}
+
+/**
+ * Formats a web source's title as a citation shows it.
+ *
+ * @param title - Title already flattened onto one line, as the model reads
+ * it.
+ * @returns The title without the characters a person cannot see, then
+ * trimmed, so spaces that sat beside them are not left at its edges; empty
+ * when nothing visible is left.
+ */
+export function formatVisibleTitle(title: string): string {
+  return formatVisibleText(title).trim()
 }
 
 /**

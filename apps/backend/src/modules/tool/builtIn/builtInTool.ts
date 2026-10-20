@@ -6,9 +6,15 @@ export type BuiltInToolCallArguments = ChatToolCall["arguments"]
 
 /** One web page or search result a tool shows the model, before numbering. */
 export type WebSourceCandidate = Readonly<{
-  /** Normalized `http` or `https` address the source was read from. */
+  /**
+   * Normalized `http` or `https` address the search returned, or the one
+   * Lys was asked to read; where a page's redirects led is not known.
+   */
   url: string
-  /** Non-empty title shown to the model, flattened onto one line. */
+  /**
+   * Non-empty title shown to the model, flattened onto one line and without
+   * the characters a person cannot see.
+   */
   title: string
 }>
 

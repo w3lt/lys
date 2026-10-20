@@ -24,8 +24,9 @@ export type ConversationListBoundary = Readonly<{
 /** Selection of one page of conversation summaries. */
 export type ListConversationsInput = Readonly<{
   /**
-   * Normalized search text matched case-insensitively against titles and
-   * message content; empty matches every conversation.
+   * Normalized search text matched case-insensitively against titles, the
+   * person's messages, and each text part of a reply, but not reasoning or
+   * tool calls; empty matches every conversation.
    */
   query: string
   /** Last conversation of the previous page; undefined for the first page. */
@@ -149,8 +150,9 @@ export interface ConversationRecordReader {
    * Reads one page of conversation summaries and both counts.
    *
    * @param input - Search text, page boundary, and page size.
-   * @returns The page; each summary previews its latest matching message with
-   * content, or its latest message with content when only the title matches.
+   * @returns The page; each summary previews its latest matching user
+   * message or reply text part, or its latest one when only the title
+   * matches; reasoning and tool calls are never previewed.
    * @throws If the store is closed or a stored value violates the summary
    * contract; the records stay usable.
    */

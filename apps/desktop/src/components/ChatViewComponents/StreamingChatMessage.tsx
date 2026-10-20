@@ -11,8 +11,10 @@ export type StreamingChatMessageProps = {
   readonly message: StreamingConversationAssistantMessage
   /** Name of the agent that answers the conversation. */
   readonly speakerName: string
-  /** Numbered sources of the conversation, which replies may cite. */
+  /** Numbered sources of the conversation, in number order. */
   readonly sources: readonly ConversationSource[]
+  /** Highest source number the reply may cite; see {@link LysMessage}. */
+  readonly sourceNumberLimit: number
 }
 
 /**
@@ -24,19 +26,21 @@ export type StreamingChatMessageProps = {
  * cancellation must stay reachable in active phases that have no assistant
  * message. Terminal Stopped/Failed announcements are rendered by
  * {@link LysMessage} after the parent supplies a terminal message.
- * @param props - Active assistant message to present, its speaker, and the
- * conversation's sources.
+ * @param props - Active assistant message to present, its speaker, the
+ * conversation's sources, and the highest source number the reply may cite.
  * @returns The streaming assistant message presentation.
  */
 export default function StreamingChatMessage({
   message,
   speakerName,
-  sources
+  sources,
+  sourceNumberLimit
 }: StreamingChatMessageProps): ReactElement {
   return (
     <LysMessage
       kind="streaming"
       message={message}
+      sourceNumberLimit={sourceNumberLimit}
       sources={sources}
       speakerName={speakerName}
     />

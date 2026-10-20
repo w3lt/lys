@@ -3,7 +3,8 @@ import {
   CITATION_MARKER_RULE,
   formatDelimiterFreeText,
   formatExcerptText,
-  formatSingleLineText
+  formatSingleLineText,
+  formatVisibleTitle
 } from "../../../../../../src/modules/tool/builtIn/web/untrustedText"
 
 describe("formatDelimiterFreeText", () => {
@@ -96,6 +97,16 @@ describe("formatExcerptText", () => {
 
   it("gives an empty text for a text without visible content", () => {
     expect(formatExcerptText(" \n\u0000 ", 5)).toBe("")
+  })
+})
+
+describe("formatVisibleTitle", () => {
+  it.each([
+    ["direction and tag characters", "\u{E0041}Moth\u202E guide", "Moth guide"],
+    ["spaces left beside them", "\u200B Moths \u200F", "Moths"],
+    ["nothing visible but spaces", "\u200B \u200B", ""]
+  ])("formats a title holding %s", (_label, title, expected) => {
+    expect(formatVisibleTitle(title)).toBe(expected)
   })
 })
 

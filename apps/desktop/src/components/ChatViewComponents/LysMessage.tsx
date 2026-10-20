@@ -10,7 +10,8 @@ import type {
 import {
   calculateReplyWorkDuration,
   createReplyPresentation,
-  createReplySourcesPresentation
+  createReplySourcesPresentation,
+  listReplySources
 } from "./reply-presentation"
 import ReplyReasoning from "./ReplyReasoning"
 import ReplySourceList from "./ReplySourceList"
@@ -21,8 +22,13 @@ import SpeakerAvatar from "./SpeakerAvatar"
 type LysMessageCommonProps = {
   /** Name of the agent that answers the conversation, shown as the speaker. */
   readonly speakerName: string
-  /** Numbered sources of the conversation, which the reply may cite. */
+  /** Numbered sources of the conversation, in number order. */
   readonly sources: readonly ConversationSource[]
+  /**
+   * Highest source number the reply may cite: the highest one its own calls
+   * or an earlier reply's calls showed; 0 when none did.
+   */
+  readonly sourceNumberLimit: number
 }
 
 /** Properties accepted by {@link LysMessage}. */
@@ -53,9 +59,10 @@ export type LysMessageProps = LysMessageCommonProps &
  * steps, shown only when the reply has them, start collapsed; the steps say
  * how long the reply worked once it ended. The answer is the text of the
  * reply's last round when that round called no tools, rendered as Markdown
- * whose `[n]` markers link to the conversation's sources. The sources the
- * reply cites, and those its calls found without citing, are listed under
- * the answer when there are any.
+ * whose `[n]` markers link to the sources the reply may cite: those numbered
+ * up to `sourceNumberLimit`, so a marker never links to a source a later
+ * reply found. The sources the answer cites, and those its calls found
+ * without citing, are listed under the answer when there are any.
  * This component exposes no interruption capability: cancellation is reachable
  * while a reply is awaited or streams, including while the turn is awaited and
  * no assistant message exists, so the composer owns the single Stop control.
@@ -63,14 +70,20 @@ export type LysMessageProps = LysMessageCommonProps &
  * `Failed` status text respectively; those statuses are output only after the
  * corresponding terminal message variant is rendered.
  * @param props - Lifecycle-refined assistant presentation to render, the
- * conversation's sources, and the speaker's name.
+ * conversation's sources with the highest number the reply may cite, and the
+ * speaker's name.
  * @returns The rendered assistant transcript message.
  */
 export default function LysMessage(props: LysMessageProps): ReactElement {
-  const { message, speakerName, sources } = props
+  const { message, speakerName } = props
   const isStreaming = props.kind === "streaming"
   const reply = createReplyPresentation(message.parts, isStreaming)
-  const replySources = createReplySourcesPresentation(message.parts, sources)
+  const sources = listReplySources(props.sources, props.sourceNumberLimit)
+  const replySources = createReplySourcesPresentation(
+    message.parts,
+    reply.answer,
+    sources
+  )
   const hasReplySources =
     replySources.cited.length > 0 || replySources.found.length > 0
 

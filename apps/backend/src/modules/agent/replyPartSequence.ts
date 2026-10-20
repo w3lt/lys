@@ -31,9 +31,9 @@ type ReplyToolCallDraftBase = Readonly<{
  * One new part of a reply, as the agent asks to store it; the store gives a
  * reasoning or text part its identity and every part its times.
  *
- * @remarks A tool call starts `awaiting-approval` when its prompt was shown,
- * `running` when it may run at once, or `failed` with the message the model
- * reads when it cannot run at all.
+ * @remarks A tool call starts `awaiting-approval` when the person will be
+ * asked, before the prompt is sent; `running` when it may run at once; or
+ * `failed` with the message the model reads when it cannot run at all.
  */
 export type ReplyPartDraft =
   | (ReplyFragmentDraft & Readonly<{ kind: "reasoning" }>)

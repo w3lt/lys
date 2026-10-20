@@ -375,7 +375,7 @@ function buildEndedReplyParts(
 /**
  * Creates one immutable terminal assistant from its streaming predecessor.
  *
- * @param assistantMessage - Active assistant accepting reply deltas.
+ * @param assistantMessage - Active assistant accepting parts and fragments.
  * @param options - Exact terminal lifecycle transition to publish.
  * @returns A frozen assistant in the requested valid terminal state.
  * @remarks The transition preserves the streaming message identity and

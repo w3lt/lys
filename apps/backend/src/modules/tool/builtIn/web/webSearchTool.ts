@@ -18,7 +18,7 @@ import { READ_PAGE_TOOL_NAME } from "./readPageTool"
 import {
   formatSearchEvidence,
   listSearchSourceCandidates,
-  selectShownSearchResults
+  listShownSearchResults
 } from "./searchEvidence"
 import {
   MAXIMUM_SEARCH_QUERY_LENGTH,
@@ -216,7 +216,7 @@ async function runWebSearch(
       content: `Lys could not search the web: ${reason}`
     })
   }
-  const selection = selectShownSearchResults(outcome.results)
+  const selection = listShownSearchResults(outcome.results)
   const sources = addWebSources(listSearchSourceCandidates(selection))
   const content = formatSearchEvidence({
     query: searchRequest.query,

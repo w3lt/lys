@@ -41,7 +41,7 @@ import {
   buildConversationListPage,
   buildConversationMetadata,
   buildConversationSummary,
-  buildFragmentPart,
+  buildTextPart,
   buildStreamingAssistantMessage,
   buildUserMessage,
   createFixtureUuidV7,
@@ -677,7 +677,7 @@ describe("ChatView", () => {
       ).toBeInTheDocument()
       expect(region).toHaveAttribute("aria-busy", "false")
 
-      const answer = buildFragmentPart("text", 40, 0, "I am Lys.")
+      const answer = buildTextPart(40, 0, "I am Lys.")
       await act(async () => {
         streams[0]?.sendEvent(NEW_TURN_EVENT)
         streams[0]?.sendEvent({ type: "reply-part", part: answer })

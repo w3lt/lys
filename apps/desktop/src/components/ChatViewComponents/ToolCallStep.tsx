@@ -5,6 +5,7 @@ import {
   formatToolCallResultLabel,
   formatToolCallStatus,
   formatToolCallTarget,
+  isAnsweredToolCall,
   parseToolCallArguments
 } from "./reply-presentation"
 
@@ -19,10 +20,10 @@ export type ToolCallStepProps = {
  *
  * @remarks Presentational. The summary names the tool, what the call is
  * about, and its state; opening it shows the call's arguments, as named
- * values when the model wrote a JSON object and as written otherwise, and the
- * plain text of its result once it has one: the output it gave, why it
- * failed, or the person's rejection. The native disclosure owns whether it is
- * open.
+ * values when the model wrote a JSON object and as written otherwise, and,
+ * for a `succeeded`, `failed`, or `rejected` call, the plain text of its
+ * result: the output it gave, why it failed, or the person's rejection. The
+ * native disclosure owns whether it is open.
  * @param props - The stored call.
  * @returns The call disclosure.
  */
@@ -57,7 +58,7 @@ export default function ToolCallStep({
             ))}
           </dl>
         )}
-        {"result" in call && (
+        {isAnsweredToolCall(call) && (
           <>
             <p className="chat-view__call-label">
               {formatToolCallResultLabel(call)}

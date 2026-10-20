@@ -50,19 +50,59 @@ export type FoundSourcePresentation = Readonly<{
 
 /** Sources listed under one reply. */
 export type ReplySourcesPresentation = Readonly<{
-  /** Sources the reply's text cites, in the order it first cites them. */
+  /** Sources the reply's answer cites, in the order it first cites them. */
   cited: readonly ConversationSource[]
-  /** Sources the reply's calls showed and its text does not cite. */
+  /** Sources the reply's calls showed and its answer does not cite. */
   found: readonly FoundSourcePresentation[]
 }>
 
+/** A stored tool call that has the result the model read. */
+export type AnsweredToolCallReplyPart = Extract<
+  ToolCallReplyPart,
+  { status: "succeeded" | "failed" | "rejected" }
+>
+
+/** A stored tool call that ran and returned its output. */
+type SucceededToolCallReplyPart = Extract<
+  ToolCallReplyPart,
+  { status: "succeeded" }
+>
+
+/** What source scoping reads of one transcript message. */
+export type ReplySourceScopeMessage = Readonly<
+  | {
+      /** Identifier of the message. */
+      id: string
+      /** A user message, which shows no sources. */
+      role: "user"
+    }
+  | {
+      /** Identifier of the reply. */
+      id: string
+      /** An assistant reply. */
+      role: "assistant"
+      /** The reply's parts in stored order. */
+      parts: readonly ReplyPart[]
+    }
+>
+
+/** Times and parts of an ended reply, as its work time is measured. */
+export type ReplyWorkTimes = Readonly<{
+  /** Time the reply was created. */
+  createdAt: string
+  /** Time of the reply's latest state change. */
+  updatedAt: string
+  /** The reply's parts in stored order. */
+  parts: readonly ReplyPart[]
+}>
+
 /**
- * Groups a reply's parts by round, in stored order.
+ * Builds the rounds of a reply from its parts, in stored order.
  *
  * @param parts - Parts whose rounds never decrease.
  * @returns Each round's parts, rounds in order.
  */
-function groupReplyPartsByRound(
+function buildReplyPartRounds(
   parts: readonly ReplyPart[]
 ): readonly (readonly ReplyPart[])[] {
   const rounds: ReplyPart[][] = []
@@ -94,6 +134,34 @@ function buildRoundText(parts: readonly ReplyPart[]): string {
  */
 function isToolCallPart(part: ReplyPart): part is ToolCallReplyPart {
   return part.kind === "tool-call"
+}
+
+/**
+ * Answers whether a part is a tool call that ran and returned its output.
+ *
+ * @param part - Part of a reply.
+ * @returns True for a `succeeded` call, the only state that shows sources.
+ */
+function isSucceededToolCallPart(
+  part: ReplyPart
+): part is SucceededToolCallReplyPart {
+  return part.kind === "tool-call" && part.status === "succeeded"
+}
+
+/**
+ * Answers whether a call has the result the model read.
+ *
+ * @param call - Stored call.
+ * @returns True for a `succeeded`, `failed`, or `rejected` call.
+ */
+export function isAnsweredToolCall(
+  call: ToolCallReplyPart
+): call is AnsweredToolCallReplyPart {
+  return (
+    call.status === "succeeded" ||
+    call.status === "failed" ||
+    call.status === "rejected"
+  )
 }
 
 /**
@@ -141,7 +209,7 @@ export function createReplyPresentation(
   parts: readonly ReplyPart[],
   isStreaming: boolean
 ): ReplyPresentation {
-  const rounds = groupReplyPartsByRound(parts)
+  const rounds = buildReplyPartRounds(parts)
   const lastRound = rounds.at(-1) ?? []
   const isAnswerRound = !lastRound.some(isToolCallPart)
   const stepRounds = isAnswerRound ? rounds.slice(0, -1) : rounds
@@ -238,27 +306,60 @@ export function formatToolCallStatus(status: ToolCallReplyPartStatus): string {
 }
 
 /**
+ * Formats the summary of the sources a reply's calls found without citing.
+ *
+ * @param sources - The reply's cited and found sources.
+ * @returns `N more` when the reply cites sources; otherwise
+ * `Sources · N found`, which names the list on its own.
+ */
+export function formatFoundSourcesLabel(
+  sources: ReplySourcesPresentation
+): string {
+  const count = sources.found.length
+  return sources.cited.length > 0 ? `${count} more` : `Sources · ${count} found`
+}
+
+/**
  * Formats the label of a call's result.
  *
  * @param call - Stored call with a result.
  * @returns `Rejection` for a rejected call, else `Result`.
  */
 export function formatToolCallResultLabel(
-  call: Extract<ToolCallReplyPart, { result: string }>
+  call: AnsweredToolCallReplyPart
 ): string {
   return call.status === "rejected" ? "Rejection" : "Result"
 }
 
 /**
+ * Calculates the last moment a part shows the reply working.
+ *
+ * @param part - Stored part.
+ * @returns Its update time in milliseconds since the epoch; for an
+ * interrupted call, its creation time, because the reply's ending, not its
+ * work, set the call's update time.
+ */
+function calculatePartWorkEnd(part: ReplyPart): number {
+  const isInterruptedCall =
+    part.kind === "tool-call" && part.status === "interrupted"
+  return Date.parse(isInterruptedCall ? part.createdAt : part.updatedAt)
+}
+
+/**
  * Calculates how long an ended reply worked.
  *
- * @param reply - Times of the reply.
- * @returns Its update time minus its creation time, in milliseconds.
+ * @param reply - Times and parts of the reply.
+ * @returns Milliseconds from its creation to the latest part's work end, as
+ * {@link calculatePartWorkEnd} measures it; to its update time when it has
+ * no parts. Time the reply spent waiting after its last part, such as while
+ * Lys was closed before startup recovery interrupted it, is not counted.
  */
-export function calculateReplyWorkDuration(
-  reply: Readonly<{ createdAt: string; updatedAt: string }>
-): number {
-  return Date.parse(reply.updatedAt) - Date.parse(reply.createdAt)
+export function calculateReplyWorkDuration(reply: ReplyWorkTimes): number {
+  const workEnd =
+    reply.parts.length === 0
+      ? Date.parse(reply.updatedAt)
+      : Math.max(...reply.parts.map(calculatePartWorkEnd))
+  return workEnd - Date.parse(reply.createdAt)
 }
 
 /**
@@ -340,25 +441,28 @@ export function listCitedSourceNumbers(text: string): readonly number[] {
  * Creates the sources listed under one reply.
  *
  * @param parts - The reply's parts.
- * @param sources - The conversation's sources.
- * @returns The conversation sources the reply's text cites, and those its
- * calls showed without being cited, each with the first tool that showed it.
- * Numbers the conversation has no source for are left out.
+ * @param answer - The reply's answer, as {@link createReplyPresentation}
+ * lays it out; the text of its steps cites nothing, since it shows no links.
+ * @param sources - Sources the reply may cite.
+ * @returns The sources the answer cites, and those its succeeded calls
+ * showed without being cited, each with the first tool that showed it.
+ * Numbers without a source are left out.
  */
 export function createReplySourcesPresentation(
   parts: readonly ReplyPart[],
+  answer: string,
   sources: readonly ConversationSource[]
 ): ReplySourcesPresentation {
   const sourcesByNumber = new Map(
     sources.map((source) => [source.number, source])
   )
-  const citedNumbers = listCitedSourceNumbers(buildRoundText(parts))
+  const citedNumbers = listCitedSourceNumbers(answer)
   const cited = citedNumbers.flatMap((number) => {
     const source = sourcesByNumber.get(number)
     return source === undefined ? [] : [source]
   })
   const found = new Map<number, FoundSourcePresentation>()
-  for (const call of parts.filter(isToolCallPart)) {
+  for (const call of parts.filter(isSucceededToolCallPart)) {
     for (const number of call.sourceNumbers) {
       const source = sourcesByNumber.get(number)
       if (source === undefined || citedNumbers.includes(number)) continue
@@ -370,4 +474,61 @@ export function createReplySourcesPresentation(
     cited: Object.freeze(cited),
     found: Object.freeze([...found.values()])
   })
+}
+
+/**
+ * Calculates the highest source number a reply's own calls showed.
+ *
+ * @param parts - The reply's parts.
+ * @returns The highest number among its succeeded calls' sources; 0 when
+ * they showed none.
+ */
+function calculateHighestShownSourceNumber(
+  parts: readonly ReplyPart[]
+): number {
+  return Math.max(
+    0,
+    ...parts
+      .filter(isSucceededToolCallPart)
+      .flatMap((call) => call.sourceNumbers)
+  )
+}
+
+/**
+ * Calculates the highest source number each reply of a transcript may cite.
+ *
+ * @param messages - Transcript messages in conversation order.
+ * @returns For each reply's identifier, the highest number its own calls or
+ * an earlier reply's calls showed; 0 when none did. A conversation numbers
+ * its sources in the order its calls show them, so a source above that
+ * number was found by a later reply, which the reply could not have read.
+ */
+export function calculateReplySourceNumberLimits(
+  messages: readonly ReplySourceScopeMessage[]
+): ReadonlyMap<string, number> {
+  const limits = new Map<string, number>()
+  let limit = 0
+  for (const message of messages) {
+    if (message.role === "user") continue
+    limit = Math.max(limit, calculateHighestShownSourceNumber(message.parts))
+    limits.set(message.id, limit)
+  }
+  return limits
+}
+
+/**
+ * Lists the sources one reply may cite.
+ *
+ * @param sources - The conversation's sources, in number order.
+ * @param sourceNumberLimit - Highest number the reply may cite, as
+ * {@link calculateReplySourceNumberLimits} gives it.
+ * @returns The sources numbered up to the limit, in number order.
+ */
+export function listReplySources(
+  sources: readonly ConversationSource[],
+  sourceNumberLimit: number
+): readonly ConversationSource[] {
+  return Object.freeze(
+    sources.filter((source) => source.number <= sourceNumberLimit)
+  )
 }

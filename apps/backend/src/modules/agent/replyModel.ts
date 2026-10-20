@@ -36,8 +36,8 @@ export type ReplyContextMessage =
       /** Text sent to the model as written; empty for a round of calls only. */
       content: string
       /**
-       * Calls the agent made after the text, in its order; empty for a
-       * stored reply.
+       * Calls the agent made after the text, in its order; for a stored
+       * round, only the calls that have a result.
        */
       toolCalls: readonly ContextToolCall[]
     }>

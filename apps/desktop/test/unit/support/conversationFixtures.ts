@@ -97,32 +97,70 @@ function buildValidatedAssistantMessage<T extends ConversationAssistantMessage>(
 /** Sequence offset of the text part a reply built from text holds. */
 const TEXT_PART_SEQUENCE_OFFSET = 0x10000
 
+/** Kind, identity, round, and text of a reasoning or text part fixture. */
+type FragmentPartFixture = Readonly<{
+  /** Kind of the part. */
+  kind: "reasoning" | "text"
+  /** Identity sequence of the part. */
+  sequence: number
+  /** Zero-based round of the part. */
+  round: number
+  /** Non-empty text of the part. */
+  content: string
+}>
+
 /**
  * Builds a stored reasoning or text part.
  *
- * @param kind - Kind of the part.
- * @param sequence - Identity sequence of the part.
- * @param round - Zero-based round of the part.
- * @param content - Non-empty text of the part.
+ * @param fixture - Kind, identity sequence, round, and text of the part.
  * @returns A frozen part stored at {@link FIXTURE_TIMESTAMP}, validated by the
  * shared schema.
  */
-export function buildFragmentPart(
-  kind: "reasoning" | "text",
+function buildFragmentPart(fixture: FragmentPartFixture): ReplyPart {
+  return Object.freeze(
+    replyPartSchema.parse({
+      kind: fixture.kind,
+      id: createFixtureUuidV7(fixture.sequence),
+      round: fixture.round,
+      createdAt: FIXTURE_TIMESTAMP,
+      updatedAt: FIXTURE_TIMESTAMP,
+      content: fixture.content
+    })
+  )
+}
+
+/**
+ * Builds a stored text part.
+ *
+ * @param sequence - Identity sequence of the part.
+ * @param round - Zero-based round of the part.
+ * @param content - Non-empty text the model wrote.
+ * @returns A frozen part stored at {@link FIXTURE_TIMESTAMP}, validated by the
+ * shared schema.
+ */
+export function buildTextPart(
   sequence: number,
   round: number,
   content: string
 ): ReplyPart {
-  return Object.freeze(
-    replyPartSchema.parse({
-      kind,
-      id: createFixtureUuidV7(sequence),
-      round,
-      createdAt: FIXTURE_TIMESTAMP,
-      updatedAt: FIXTURE_TIMESTAMP,
-      content
-    })
-  )
+  return buildFragmentPart({ kind: "text", sequence, round, content })
+}
+
+/**
+ * Builds a stored reasoning part.
+ *
+ * @param sequence - Identity sequence of the part.
+ * @param round - Zero-based round of the part.
+ * @param content - Non-empty reasoning the model sent.
+ * @returns A frozen part stored at {@link FIXTURE_TIMESTAMP}, validated by the
+ * shared schema.
+ */
+export function buildReasoningPart(
+  sequence: number,
+  round: number,
+  content: string
+): ReplyPart {
+  return buildFragmentPart({ kind: "reasoning", sequence, round, content })
 }
 
 /** State-dependent fields of a tool-call fixture. */
@@ -135,22 +173,29 @@ export type ToolCallPartFixtureState =
     }>
   | Readonly<{ status: "failed" | "rejected"; result: string }>
 
+/** The call a tool-call fixture holds, in the state it is in. */
+export type ToolCallPartFixture = Readonly<{
+  /** Name the model called. */
+  toolName: string
+  /** Argument text as the model wrote it. */
+  argumentText: string
+}> &
+  ToolCallPartFixtureState
+
 /**
  * Builds a stored tool call.
  *
  * @param sequence - Identity sequence of the call.
  * @param round - Zero-based round of the call.
- * @param call - Tool name and the model's argument text.
- * @param state - State of the call, with its result and source numbers when
- * the state has them.
+ * @param call - Tool name, the model's argument text, and the call's state,
+ * with its result and source numbers when the state has them.
  * @returns A frozen call stored at {@link FIXTURE_TIMESTAMP}, validated by the
  * shared schema.
  */
 export function buildToolCallPart(
   sequence: number,
   round: number,
-  call: Readonly<{ toolName: string; argumentText: string }>,
-  state: ToolCallPartFixtureState
+  call: ToolCallPartFixture
 ): ToolCallReplyPart {
   const part = replyPartSchema.parse({
     kind: "tool-call",
@@ -158,10 +203,7 @@ export function buildToolCallPart(
     round,
     createdAt: FIXTURE_TIMESTAMP,
     updatedAt: FIXTURE_TIMESTAMP,
-    toolName: call.toolName,
-    argumentText: call.argumentText,
-    sourceNumbers: [],
-    ...state
+    ...call
   })
   if (part.kind !== "tool-call") throw new Error("Expected a tool-call part")
   return Object.freeze(part)
@@ -183,7 +225,7 @@ function buildReplyParts(
   if (typeof body !== "string") return Object.freeze([...body])
   if (body === "") return Object.freeze([])
   return Object.freeze([
-    buildFragmentPart("text", TEXT_PART_SEQUENCE_OFFSET + sequence, 0, body)
+    buildTextPart(TEXT_PART_SEQUENCE_OFFSET + sequence, 0, body)
   ])
 }
 
@@ -297,22 +339,37 @@ export function buildConversationMetadata(
  * @param id - Conversation identity.
  * @param title - Stored title, or null before title generation saves one.
  * @param messages - Transcript in stored order.
- * @param sources - Numbered sources of the conversation; none by default.
- * @returns A frozen conversation validated by the shared schema.
+ * @returns A frozen conversation without sources, validated by the shared
+ * schema.
  */
 export function buildConversation(
   id: string,
   title: string | null,
-  messages: readonly ConversationMessage[],
-  sources: readonly ConversationSource[] = []
+  messages: readonly ConversationMessage[]
 ): Conversation {
   return Object.freeze(
     conversationSchema.parse({
       ...buildConversationMetadata(id, title),
       messages,
-      sources
+      sources: []
     })
   )
+}
+
+/**
+ * Builds a stored conversation that holds numbered sources.
+ *
+ * @param conversation - The conversation, such as {@link buildConversation}
+ * builds it.
+ * @param sources - Numbered sources the conversation stored, in number order.
+ * @returns A frozen copy of the conversation holding the sources, validated
+ * by the shared schema.
+ */
+export function buildConversationWithSources(
+  conversation: Conversation,
+  sources: readonly ConversationSource[]
+): Conversation {
+  return Object.freeze(conversationSchema.parse({ ...conversation, sources }))
 }
 
 /**

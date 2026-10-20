@@ -21,7 +21,7 @@ type ToolCallResultChange = Exclude<
   { status: "running" }
 >
 
-/** Column values of one stored piece that differ by kind. */
+/** Column values of one stored piece that differ by kind and state. */
 type ReplyPartColumns = Readonly<{
   /** Stored role of the piece. */
   role: "reasoning" | "text" | "tool_call"
@@ -33,7 +33,10 @@ type ReplyPartColumns = Readonly<{
   toolName: string | null
   /** Model's argument text, or null for reasoning and text. */
   toolArguments: string | null
-  /** JSON array of source numbers, or null when the piece shows none. */
+  /**
+   * JSON array of a succeeded call's source numbers, or null when the piece
+   * shows none.
+   */
   sourceNumbers: string | null
 }>
 
@@ -92,12 +95,15 @@ const FIND_TOOL_CALL_SQL = `SELECT id, role, round, content, status,
   FROM conversation_messages WHERE id = ? AND role = 'tool_call'`
 
 /**
- * Encodes a list of source numbers for storage.
+ * Builds the stored form of a succeeded call's source numbers.
  *
- * @param sourceNumbers - Numbers a piece shows.
- * @returns A JSON array, or null when the list is empty.
+ * @param sourceNumbers - Numbers the call's result shows.
+ * @returns The `source_numbers` column value: a JSON array, or null when the
+ * list is empty.
  */
-function formatSourceNumbers(sourceNumbers: readonly number[]): string | null {
+function buildSourceNumbersColumn(
+  sourceNumbers: readonly number[]
+): string | null {
   return sourceNumbers.length === 0 ? null : JSON.stringify(sourceNumbers)
 }
 
@@ -126,7 +132,10 @@ function buildReplyPartColumns(part: ReplyPart): ReplyPartColumns {
         status: part.status,
         toolName: part.toolName,
         toolArguments: part.argumentText,
-        sourceNumbers: formatSourceNumbers(part.sourceNumbers)
+        sourceNumbers:
+          part.status === "succeeded"
+            ? buildSourceNumbersColumn(part.sourceNumbers)
+            : null
       }
   }
 }
@@ -185,6 +194,8 @@ function getToolCallPart(
  * @param change - The input's result change.
  * @returns True when the call was in the state the change follows and the
  * reply is streaming; false otherwise, which changes nothing.
+ * @throws If a source's number is stored for another URL in the
+ * conversation, or the write fails; the caller's transaction then rolls back.
  */
 function updateToolCallResult(
   statements: DatabaseStatementCompiler,
@@ -198,7 +209,7 @@ function updateToolCallResult(
       .run(
         change.status,
         change.result,
-        formatSourceNumbers(sources.map((source) => source.number)),
+        buildSourceNumbersColumn(sources.map((source) => source.number)),
         input.updatedAt,
         input.toolCallId,
         input.assistantMessageId,
@@ -219,6 +230,8 @@ function updateToolCallResult(
  * @param input - Reply, call, change, and part timestamp.
  * @returns True when stored; false when the reply or the call's state refused
  * it.
+ * @throws If a source's number is stored for another URL in the
+ * conversation, or the write fails; the caller's transaction then rolls back.
  */
 function updateToolCall(
   statements: DatabaseStatementCompiler,
@@ -233,6 +246,67 @@ function updateToolCall(
       .run(
         input.updatedAt,
         input.toolCallId,
+        input.assistantMessageId,
+        input.assistantMessageId
+      ).changes === 1
+  )
+}
+
+/**
+ * Stores one piece after its reply's last piece.
+ *
+ * @param statements - Statement compilation lent to the caller's transaction.
+ * @param input - Reply and the complete part.
+ * @returns True when stored; false when the reply is not streaming or not
+ * stored, which changes nothing.
+ * @throws If the write fails, including when the part's identity is already
+ * stored; the caller's transaction then rolls back.
+ */
+function createStoredReplyPart(
+  statements: DatabaseStatementCompiler,
+  input: CreateReplyPartInput
+): boolean {
+  const { part } = input
+  const columns = buildReplyPartColumns(part)
+  return (
+    statements
+      .getStatement(CREATE_REPLY_PART_SQL)
+      .run(
+        part.id,
+        columns.role,
+        part.round,
+        columns.content,
+        columns.status,
+        columns.toolName,
+        columns.toolArguments,
+        columns.sourceNumbers,
+        part.createdAt,
+        part.updatedAt,
+        input.assistantMessageId
+      ).changes === 1
+  )
+}
+
+/**
+ * Appends a fragment to a reasoning or text piece of a streaming reply.
+ *
+ * @param statements - Statement compilation lent to the caller's transaction.
+ * @param input - Reply, part, fragment, and part timestamp.
+ * @returns True when appended; false when the reply is not streaming, or the
+ * part is not one of its reasoning or text pieces, which changes nothing.
+ * @throws If the write fails; the caller's transaction then rolls back.
+ */
+function updateStoredReplyPartContent(
+  statements: DatabaseStatementCompiler,
+  input: UpdateReplyPartContentInput
+): boolean {
+  return (
+    statements
+      .getStatement(UPDATE_REPLY_PART_CONTENT_SQL)
+      .run(
+        input.content,
+        input.updatedAt,
+        input.partId,
         input.assistantMessageId,
         input.assistantMessageId
       ).changes === 1
@@ -269,25 +343,8 @@ export default class SqliteReplyPartRecordWriter implements ReplyPartRecordWrite
    * @throws The interface-defined closed and write failures.
    */
   public createReplyPart(input: CreateReplyPartInput): boolean {
-    const { part } = input
-    const columns = buildReplyPartColumns(part)
-    return this.#databaseWriter.handleDatabaseWriteRequest(
-      (statements) =>
-        statements
-          .getStatement(CREATE_REPLY_PART_SQL)
-          .run(
-            part.id,
-            columns.role,
-            part.round,
-            columns.content,
-            columns.status,
-            columns.toolName,
-            columns.toolArguments,
-            columns.sourceNumbers,
-            part.createdAt,
-            part.updatedAt,
-            input.assistantMessageId
-          ).changes === 1
+    return this.#databaseWriter.handleDatabaseWriteRequest((statements) =>
+      createStoredReplyPart(statements, input)
     )
   }
 
@@ -299,17 +356,8 @@ export default class SqliteReplyPartRecordWriter implements ReplyPartRecordWrite
    * @throws The interface-defined closed and write failures.
    */
   public updateReplyPartContent(input: UpdateReplyPartContentInput): boolean {
-    return this.#databaseWriter.handleDatabaseWriteRequest(
-      (statements) =>
-        statements
-          .getStatement(UPDATE_REPLY_PART_CONTENT_SQL)
-          .run(
-            input.content,
-            input.updatedAt,
-            input.partId,
-            input.assistantMessageId,
-            input.assistantMessageId
-          ).changes === 1
+    return this.#databaseWriter.handleDatabaseWriteRequest((statements) =>
+      updateStoredReplyPartContent(statements, input)
     )
   }
 

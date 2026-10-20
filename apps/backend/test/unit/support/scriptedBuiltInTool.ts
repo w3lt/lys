@@ -82,7 +82,7 @@ export function answerWithWordDefinition(
  * @returns A settled promise of a succeeded result citing the page by its
  * number, with the numbered page as its source.
  */
-export function answerWithWordSource(
+export function runLookUpWordWithSource(
   word: string,
   context: BuiltInToolRunContext
 ): Promise<BuiltInToolResult> {

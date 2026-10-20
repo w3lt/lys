@@ -56,8 +56,9 @@ export interface ConversationTurnWriter {
    * @returns Independent prior transcript and newly committed pair.
    * @throws If the target is absent, validation fails, or persistence is closed/unavailable; no partial turn remains.
    * @remarks The new turn supersedes a reply still streaming in the same
-   * conversation: that reply becomes interrupted with its text retained, and
-   * later writes for it return false.
+   * conversation: that reply becomes interrupted with its stored parts kept
+   * and its waiting and running calls interrupted, and later writes for it
+   * return false.
    */
   createConversationTurn(
     options: CreateConversationTurnOptions

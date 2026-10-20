@@ -14,13 +14,14 @@ describe("ToolCallStep", () => {
   it("names the tool, what the call is about, and its state, collapsed", () => {
     render(
       <ToolCallStep
-        call={buildToolCallPart(20, 0, SEARCH, { status: "running" })}
+        call={buildToolCallPart(20, 0, { ...SEARCH, status: "running" })}
       />
     )
 
-    const summary = screen.getByText("web_search").parentElement
-    if (summary === null) throw new Error("The call has no summary")
-    expect(summary).toHaveTextContent("web_searchnight mothsRunning")
+    expect(screen.getByRole("group")).toHaveTextContent(
+      /^web_searchnight mothsRunningArguments/
+    )
+    expect(screen.getByText("Running")).toBeVisible()
     expect(screen.getByText("Arguments")).not.toBeVisible()
   })
 
@@ -28,7 +29,8 @@ describe("ToolCallStep", () => {
     const user = userEvent.setup()
     render(
       <ToolCallStep
-        call={buildToolCallPart(20, 0, SEARCH, {
+        call={buildToolCallPart(20, 0, {
+          ...SEARCH,
           status: "succeeded",
           result: "Source [1]\nTitle: Moths",
           sourceNumbers: [1]
@@ -55,12 +57,12 @@ describe("ToolCallStep", () => {
     const user = userEvent.setup()
     render(
       <ToolCallStep
-        call={buildToolCallPart(
-          20,
-          0,
-          { toolName: "web_search", argumentText: '{"query":' },
-          { status: "failed", result: "The arguments are not valid JSON." }
-        )}
+        call={buildToolCallPart(20, 0, {
+          toolName: "web_search",
+          argumentText: '{"query":',
+          status: "failed",
+          result: "The arguments are not valid JSON."
+        })}
       />
     )
 
@@ -74,7 +76,8 @@ describe("ToolCallStep", () => {
     const user = userEvent.setup()
     render(
       <ToolCallStep
-        call={buildToolCallPart(20, 0, SEARCH, {
+        call={buildToolCallPart(20, 0, {
+          ...SEARCH,
           status: "rejected",
           result: "The person declined this call."
         })}
@@ -92,7 +95,9 @@ describe("ToolCallStep", () => {
     ["interrupted", "Stopped"]
   ] as const)("shows no result for a %s call", async (status, label) => {
     const user = userEvent.setup()
-    render(<ToolCallStep call={buildToolCallPart(20, 0, SEARCH, { status })} />)
+    render(
+      <ToolCallStep call={buildToolCallPart(20, 0, { ...SEARCH, status })} />
+    )
 
     await user.click(screen.getByText(label))
 

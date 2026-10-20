@@ -4,7 +4,7 @@ import {
   listSearchSourceCandidates,
   MAXIMUM_SEARCH_SNIPPET_LENGTH,
   MAXIMUM_SEARCH_TITLE_LENGTH,
-  selectShownSearchResults
+  listShownSearchResults
 } from "../../../../../../src/modules/tool/builtIn/web/searchEvidence"
 import type { TavilySearchResult } from "../../../../../../src/modules/tool/builtIn/web/tavilyApi"
 
@@ -28,7 +28,7 @@ function formatNumberedSearchEvidence(
   search: SearchFixture,
   firstNumber = 1
 ): string {
-  const selection = selectShownSearchResults(search.results)
+  const selection = listShownSearchResults(search.results)
   const sources = listSearchSourceCandidates(selection).map(
     (candidate, index) => ({ number: firstNumber + index, ...candidate })
   )
@@ -256,7 +256,7 @@ describe("formatSearchEvidence", () => {
   })
 
   it("refuses to format a shown result without its source number", () => {
-    const selection = selectShownSearchResults([
+    const selection = listShownSearchResults([
       { title: "A", url: "https://a.example/", content: "x" }
     ])
 
@@ -268,7 +268,7 @@ describe("formatSearchEvidence", () => {
 
 describe("listSearchSourceCandidates", () => {
   it("gives each shown result's URL and title as shown to the model, in order", () => {
-    const selection = selectShownSearchResults([
+    const selection = listShownSearchResults([
       { title: "Bad", url: "file:///etc/passwd", content: "x" },
       {
         title: "Moths\nat night",
@@ -283,4 +283,50 @@ describe("listSearchSourceCandidates", () => {
       { url: "https://lamps.example/", title: "lamps.example" }
     ])
   })
+
+  it("gives each title without the direction, zero-width, and tag characters the model never reads", () => {
+    const selection = listShownSearchResults([
+      {
+        title: "Moth guide \u202Emoc.knabtsurt",
+        url: "https://evil.example/x",
+        content: "x"
+      },
+      {
+        title: "\u{E0041}Lam\u200Bps",
+        url: "https://lamps.example/",
+        content: "y"
+      },
+      {
+        title: "\u200B Night moths \u200F",
+        url: "https://moths.example/b",
+        content: "z"
+      }
+    ])
+
+    expect(listSearchSourceCandidates(selection)).toEqual([
+      { url: "https://evil.example/x", title: "Moth guide moc.knabtsurt" },
+      { url: "https://lamps.example/", title: "Lamps" },
+      { url: "https://moths.example/b", title: "Night moths" }
+    ])
+  })
+
+  it.each([
+    ["invisible characters", "\u200B\u{E0041}"],
+    ["invisible characters and spaces", "\u200B \u200B"]
+  ])(
+    "names a result whose title shows only %s by its host, in the evidence and the candidate alike",
+    (_label, title) => {
+      const search = {
+        query: "lamps",
+        results: [{ title, url: "https://lamps.example/", content: "y" }]
+      }
+
+      expect(
+        listSearchSourceCandidates(listShownSearchResults(search.results))
+      ).toEqual([{ url: "https://lamps.example/", title: "lamps.example" }])
+      expect(formatNumberedSearchEvidence(search)).toContain(
+        "Source [1]\nTitle: lamps.example\nURL: https://lamps.example/"
+      )
+    }
+  )
 })

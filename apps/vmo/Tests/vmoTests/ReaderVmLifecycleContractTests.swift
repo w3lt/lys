@@ -154,6 +154,26 @@ private func startCommandWait(
     Task { try await subject.lifecycle.waitForCommandExit(containerId: containerId) }
 }
 
+/// Waits for a VM's command as ``startCommandWait(for:in:)`` does, from a
+/// task that is cancelled before the wait begins.
+///
+/// - Parameters:
+///   - containerId: Container id of the VM.
+///   - lifecycle: Lifecycle that created the VM, or didn't.
+/// - Returns: How the wait ended, or `nil` when the task group gave no
+///   result.
+private func waitForCommandExitWhenCancelled(
+    for containerId: ContainerId,
+    in lifecycle: any ReaderVmLifecycle
+) async -> Result<CommandOutput, any Error>? {
+    // A task added to a cancelled group starts cancelled.
+    await withThrowingTaskGroup(of: CommandOutput.self) { group in
+        group.cancelAll()
+        group.addTask { try await lifecycle.waitForCommandExit(containerId: containerId) }
+        return await group.nextResult()
+    }
+}
+
 /// Checks that a wait returned `expected`: the same bytes and truncation flag
 /// of each stream, and the same exit code. ``CommandOutput`` has no equality
 /// of its own.
@@ -163,7 +183,7 @@ private func startCommandWait(
 ///   - expected: What the command wrote and its exit code.
 ///   - sourceLocation: Where a failed check is reported; the caller's line by
 ///     default.
-private func expectOutput(
+func expectOutput(
     _ output: CommandOutput,
     toEqual expected: CommandOutput,
     sourceLocation: SourceLocation = #_sourceLocation
@@ -206,6 +226,20 @@ struct ReaderVmLifecycleContractTests {
             try await lifecycle.deleteVm(containerId: unknownVmId)
         }
     }
+
+    /// Verifies that a wait checks the VM before its caller's cancellation,
+    /// so a cancelled caller learns that the id names no VM.
+    @Test(
+        "A cancelled caller's wait for a VM the lifecycle didn't create fails as unknown, not as cancelled",
+        arguments: ReaderVmLifecycleImplementation.allCases
+    )
+    func rejectsUnknownVmBeforeCancellation(implementation: ReaderVmLifecycleImplementation) async throws {
+        let lifecycle = try implementation.createLifecycle(in: containerRoot)
+
+        let result = try #require(await waitForCommandExitWhenCancelled(for: unknownVmId, in: lifecycle))
+
+        #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: unknownVmId)) { try result.get() }
+    }
 }
 
 /// Checks the contract of ``ReaderVmLifecycle`` for VMs and their commands,
@@ -220,8 +254,8 @@ struct ReaderVmLifecycleContractTests {
 /// command's output and exit code reach every wait, concurrent or later; that a
 /// VM starts once, and a failed start leaves a VM that only deletion ends; that
 /// deleting a VM while it starts fails at once; that deleting a VM ends every
-/// wait for it, also a cancelled caller's, and leaves an id that names no VM;
-/// and that a pending wait holds up no other operation.
+/// wait for it and leaves an id that names no VM; and that a pending wait holds
+/// up no other operation.
 @Suite("Reader VM lifecycle contract with VMs", .timeLimit(.minutes(1)))
 struct ReaderVmLifecycleVmContractTests {
     /// Verifies that ids aren't reused, also after a deletion, and that a
@@ -338,26 +372,24 @@ struct ReaderVmLifecycleVmContractTests {
     }
 
     /// Verifies that deleting a started VM ends every wait for its command,
-    /// even a cancelled caller's, which cancellation alone doesn't end, and
-    /// that afterwards the VM's id names no VM.
+    /// and that afterwards the VM's id names no VM.
     @Test(
-        "Deleting a started VM ends every wait for it, a cancelled caller's too, and leaves an id that names no VM",
+        "Deleting a started VM ends every wait for it and leaves an id that names no VM",
         arguments: ReaderVmLifecycleHarness.allCases
     )
     func endsWaitsOnDeletion(harness: ReaderVmLifecycleHarness) async throws {
         let subject = harness.createSubject(script: ReaderVmScript(command: .runsUntilResolved))
         let containerId = try await createReaderVm(in: subject)
         try await subject.lifecycle.startVm(containerId: containerId)
-        let wait = startCommandWait(for: containerId, in: subject)
-        let cancelledWait = startCommandWait(for: containerId, in: subject)
+        let firstWait = startCommandWait(for: containerId, in: subject)
+        let secondWait = startCommandWait(for: containerId, in: subject)
         try await subject.eventLog.waitForEvent(.waitForCommandExit(containerId: containerId), count: 2)
-        cancelledWait.cancel()
 
         try await subject.lifecycle.deleteVm(containerId: containerId)
         try await subject.eventLog.waitForEvent(.waitEnded(containerId: containerId), count: 2)
 
-        await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: containerId)) { try await wait.value }
-        await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: containerId)) { try await cancelledWait.value }
+        await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: containerId)) { try await firstWait.value }
+        await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: containerId)) { try await secondWait.value }
         await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: containerId)) {
             try await subject.lifecycle.startVm(containerId: containerId)
         }
@@ -407,10 +439,13 @@ struct ReaderVmLifecycleVmContractTests {
 /// creation throws the mechanism's failure, or both failures when deleting what
 /// it left fails too; that a cancelled caller's creation throws
 /// `CancellationError`, or both failures, so the caller gets no VM; that a
+/// cancelled caller's wait throws `CancellationError`, also after the command
+/// exited, and leaves the command and the other waits running; that a
 /// failed wait throws the mechanism's failure; and that a failed stop or
 /// deletion throws as documented and leaves the VM unavailable, a command whose
-/// stop failed ending its waits only when it exits. Checking most of them also
-/// needs a way to make a step of Containerization fail on demand.
+/// stop failed ending its waits only when it exits, also the waits that begin
+/// after the stop failed. Checking most of them also needs a way to make a
+/// step of Containerization fail on demand.
 /// ``ContainerizationReaderVmLifecycleTests`` checks, without a VM, what
 /// ``ContainerizationReaderVmLifecycle`` does once closed.
 @Suite("Reader VM lifecycle contract when the VM mechanism fails", .timeLimit(.minutes(1)))
@@ -476,6 +511,56 @@ struct ReaderVmLifecycleFailureContractTests {
         #expect(error.cleanupError as? ReaderVmStepFailure == ReaderVmStepFailure(step: .deletion))
     }
 
+    /// Verifies that cancelling one caller ends that caller's wait at once,
+    /// while the command runs on and the other wait still gets its output.
+    ///
+    /// The cancelled wait begins first. A lifecycle that keeps each wait
+    /// before it runs another operation, as ``InMemoryReaderVmLifecycle``
+    /// does, has kept it once the other wait begins, so the cancellation
+    /// reaches a kept wait, and the command's end reaches the other one;
+    /// ``throwsCancellationForCancelledWait(harness:)`` checks a caller
+    /// cancelled before its wait began.
+    @Test(
+        "Cancelling one wait for a command ends only that wait, with CancellationError, and the other wait gets the output",
+        arguments: ReaderVmLifecycleHarness.allCases
+    )
+    func endsOnlyCancelledWait(harness: ReaderVmLifecycleHarness) async throws {
+        let subject = harness.createSubject(script: ReaderVmScript(command: .runsUntilResolved))
+        let containerId = try await createReaderVm(in: subject)
+        try await subject.lifecycle.startVm(containerId: containerId)
+        let cancelledWait = startCommandWait(for: containerId, in: subject)
+        try await subject.eventLog.waitForEvent(.waitForCommandExit(containerId: containerId))
+        let wait = startCommandWait(for: containerId, in: subject)
+        try await subject.eventLog.waitForEvent(.waitForCommandExit(containerId: containerId), count: 2)
+
+        cancelledWait.cancel()
+        try await subject.eventLog.waitForEvent(.waitEnded(containerId: containerId))
+        await subject.resolveCommand(containerId, failedCommandOutput)
+        try await subject.eventLog.waitForEvent(.waitEnded(containerId: containerId), count: 2)
+
+        await #expect(throws: CancellationError.self) { try await cancelledWait.value }
+        expectOutput(try await wait.value, toEqual: failedCommandOutput)
+    }
+
+    /// Verifies that a caller cancelled before it waits gets
+    /// `CancellationError` instead of the output of a command that has
+    /// already exited, and that the output stays for a later wait.
+    @Test(
+        "A wait whose caller is already cancelled throws CancellationError, also when the command has exited",
+        arguments: ReaderVmLifecycleHarness.allCases
+    )
+    func throwsCancellationForCancelledWait(harness: ReaderVmLifecycleHarness) async throws {
+        let subject = harness.createSubject(script: ReaderVmScript(command: .exitsAtStart(failedCommandOutput)))
+        let containerId = try await createReaderVm(in: subject)
+        try await subject.lifecycle.startVm(containerId: containerId)
+
+        let result = try #require(await waitForCommandExitWhenCancelled(for: containerId, in: subject.lifecycle))
+
+        #expect(throws: CancellationError.self) { try result.get() }
+        let laterOutput = try await subject.lifecycle.waitForCommandExit(containerId: containerId)
+        expectOutput(laterOutput, toEqual: failedCommandOutput)
+    }
+
     /// Verifies that a failed wait reaches the caller unchanged, after which
     /// the VM can still be deleted.
     @Test(
@@ -528,6 +613,41 @@ struct ReaderVmLifecycleFailureContractTests {
         await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: containerId)) { try await wait.value }
         #expect(
             Array(subject.eventLog.events.suffix(2)) == [
+                .commandExited(containerId: containerId),
+                .waitEnded(containerId: containerId),
+            ]
+        )
+    }
+
+    /// Verifies that a wait that begins after a failed stop, once the VM is
+    /// deleted, still ends only when the command, which runs on, exits.
+    ///
+    /// The wait begins after the deletion returned, so it can't have been
+    /// kept before the deletion began. One that ended at once would record
+    /// its end before the command's exit.
+    @Test(
+        "A wait that begins after a failed stop ends only when the command exits, and fails as an unknown VM",
+        arguments: ReaderVmLifecycleHarness.allCases
+    )
+    func endsLateWaitWhenCommandExits(harness: ReaderVmLifecycleHarness) async throws {
+        let subject = harness.createSubject(
+            script: ReaderVmScript(command: .runsUntilResolved, failingSteps: [.stop])
+        )
+        let containerId = try await createReaderVm(in: subject)
+        try await subject.lifecycle.startVm(containerId: containerId)
+        await #expect(throws: ReaderVmStepFailure(step: .stop)) {
+            try await subject.lifecycle.deleteVm(containerId: containerId)
+        }
+
+        let wait = startCommandWait(for: containerId, in: subject)
+        try await subject.eventLog.waitForEvent(.waitForCommandExit(containerId: containerId))
+        await subject.resolveCommand(containerId, failedCommandOutput)
+        try await subject.eventLog.waitForEvent(.waitEnded(containerId: containerId))
+
+        await #expect(throws: ReaderVmLifecycleError.unknownVm(containerId: containerId)) { try await wait.value }
+        #expect(
+            Array(subject.eventLog.events.suffix(3)) == [
+                .waitForCommandExit(containerId: containerId),
                 .commandExited(containerId: containerId),
                 .waitEnded(containerId: containerId),
             ]

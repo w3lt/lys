@@ -69,6 +69,31 @@ SQLite `PRAGMA user_version` tracks the applied migration level. On startup the
 backend applies any missing forward migrations and refuses to open a database
 whose version is newer than the binary understands.
 
+## vmo's image store
+
+vmo, the page reader `read_page` uses, keeps its images and the files of its
+VMs in `~/Library/Application Support/com.w3lt.lys-vmo`, outside the Lys home,
+because vmo does not read `LYS_HOME`. Containerization creates and lays out
+the directory at vmo's first start, and only vmo writes it.
+
+- it holds the `vminit` image; `initfs.ext4`, unpacked from the first
+  `vminit` vmo pulled into the store and not replaced when a later vmo pins
+  another ([#218](https://github.com/w3lt/lys/issues/218)); the reader image
+  that `ghcr.io/w3lt/lys-readpage:latest` named at vmo's last start; and,
+  while a read runs, that read's VM under `containers/`
+- at each start, after it fetches `latest`, vmo deletes every other image in
+  the store and the files that only those images used, so a reader image that
+  `latest` no longer names does not stay
+- deleting the directory while vmo is stopped loses nothing else; the next
+  start downloads both images again
+
+Before [#213](https://github.com/w3lt/lys/issues/213), vmo kept its images in
+Containerization's default image store,
+`~/Library/Application Support/com.apple.containerization`, which other tools
+built on Containerization can share. vmo no longer uses that directory and
+does not delete what it left there. If no other tool uses it, deleting it frees
+that space.
+
 ## Lifecycle notes
 
 - The settings file is created by the Tauri host on first settings load.

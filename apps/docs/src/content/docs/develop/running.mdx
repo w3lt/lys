@@ -104,7 +104,11 @@ running its exit handler, and the backend and vmo it started then keep running
 ([#202](https://github.com/w3lt/lys/issues/202)); end them as described in
 [troubleshooting](/operate/troubleshooting/#a-vmo-or-backend-keeps-running-after-lys-died).
 Running `apps/vmo/run.sh` by hand while the desktop owns a vmo fails, because
-port `8080` is taken.
+port `8080` is taken, but only after its start has pulled `latest` and deleted
+unused images in [vmo's image store](/operate/data/#vmos-image-store), which
+the desktop's vmo uses too. While the desktop's vmo is still starting, the two
+can delete each other's images
+([#216](https://github.com/w3lt/lys/issues/216)).
 
 ## Using a scratch data directory
 

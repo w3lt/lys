@@ -41,9 +41,10 @@ A manual Start follows steps 4–8.
 2. The store sets `starting` and reads `get_vmo_status`. For a stopped vmo it
    calls `start_vmo`, and the Tauri host runs `bash run.sh` in `apps/vmo` for
    development builds, or `$LYS_HOME/runtime/vmo/vmo` for release builds.
-3. vmo fetches the reader image's `latest` tag and pulls the images it does
-   not have yet, which on a first start can take minutes, then listens at
-   `127.0.0.1:8080`.
+3. vmo fetches the reader image's `latest` tag, pulls the images it does not
+   have yet, which on a first start can take minutes, and deletes every other
+   image in [its image store](/operate/data/#vmos-image-store). It then listens
+   at `127.0.0.1:8080`, or exits when a pull or the deletion fails.
 4. Every second, for up to ten minutes, the store reads `get_vmo_status` and,
    while vmo runs, `get_vmo_health`. vmo becomes `running` once it answers,
    `stopped` when its process exits first, and `unresponsive` after ten

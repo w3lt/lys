@@ -8,10 +8,11 @@ extension Route {
     /// `GET /web/read-page?url=…`: reads the page at `url` in a micro VM of
     /// its own, which is deleted before the response is sent.
     ///
-    /// The read takes at most 30 seconds, measured on `ContinuousClock`,
-    /// unless creating and booting the VM alone take longer;
-    /// ``readPageInVm(_:_:deadline:)`` describes how the VM is run and
-    /// deleted.
+    /// The read takes at most 30 seconds, measured on `ContinuousClock`, with
+    /// two exceptions: creating and booting the VM alone may take longer, and
+    /// when stopping the VM fails, the read lasts until the reader exits on
+    /// its own. ``readPageInVm(_:_:deadline:)`` describes how the VM is run
+    /// and deleted.
     ///
     /// - Parameter vmLifecycle: Creates, starts, waits for, and deletes the
     ///   VMs pages are read in.

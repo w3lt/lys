@@ -74,12 +74,13 @@ private enum InMemoryVmPhase: Equatable {
     case deleting
 }
 
-/// The command of a VM that started.
+/// The command of a VM that started, with the exit that every wait for it
+/// waits for.
 private enum InMemoryCommandRun {
-    /// It runs; these waits are suspended until it ends.
-    case running(waits: [CheckedContinuation<Result<CommandOutput, any Error>, Never>])
-    /// It ended; every wait for it gets this.
-    case ended(Result<CommandOutput, any Error>)
+    /// It runs; its exit is resolved when it ends.
+    case running(CommandExit)
+    /// It ended, and its exit is resolved.
+    case ended(CommandExit)
 }
 
 /// Owns in-memory VMs that follow a test's script, to stand in for
@@ -97,12 +98,17 @@ private enum InMemoryCommandRun {
 /// Invariant: `vms` holds the VMs created and not deleted, each in the phase
 /// it has reached. `commandRuns` holds the command of every VM that started,
 /// running or ended, also after its VM is deleted, because a command whose
-/// stop failed runs on. `startHolds` holds the held starts, whose VMs are
-/// starting. It owns no resource.
+/// stop failed runs on, and a wait that begins after the deletion waits for
+/// it. `startHolds` holds the held starts, whose VMs are starting. It owns no
+/// resource.
 ///
 /// Concurrency model: concurrent. The actor runs one state change at a time;
 /// a held start and a wait for a running command suspend without holding up
-/// other operations, as ``ContainerizationReaderVmLifecycle``'s do.
+/// other operations, as ``ContainerizationReaderVmLifecycle``'s do. Its waits
+/// go through a ``CommandExit``, as that lifecycle's do, so cancelling a
+/// caller ends only that caller's wait. Each wait is kept in the turn that
+/// records its ``ReaderVmEvent/waitForCommandExit(containerId:)``, so an
+/// operation called after that event finds the wait kept.
 actor InMemoryReaderVmLifecycle: ReaderVmLifecycle {
     /// How the VMs behave.
     private let script: ReaderVmScript
@@ -200,12 +206,11 @@ actor InMemoryReaderVmLifecycle: ReaderVmLifecycle {
     func waitForCommandExit(containerId: ContainerId) async throws -> CommandOutput {
         events.addEvent(.waitForCommandExit(containerId: containerId))
         defer { events.addEvent(.waitEnded(containerId: containerId)) }
-        _ = try getCommandRun(of: containerId)
-        let commandEnd = await waitForCommandEnd(of: containerId)
+        let exit = try await getWaitedCommandExit(of: containerId).waitForExit()
         // Deleting the VM stops the command, which then ended because it was
         // killed, not on its own.
-        _ = try getCommandRun(of: containerId)
-        return try commandEnd.get()
+        _ = try getCommandExit(of: containerId)
+        return try exit.get()
     }
 
     /// Implements ``ReaderVmLifecycle/deleteVm(containerId:)`` in memory.
@@ -304,33 +309,39 @@ actor InMemoryReaderVmLifecycle: ReaderVmLifecycle {
 
     /// Builds the command of a VM that just started, as the script says.
     ///
-    /// - Returns: A command whose waits fail at once when the script makes
-    ///   ``ReaderVmStep/wait`` fail; otherwise the script's command.
+    /// - Returns: A command whose exit is a failure at once when the script
+    ///   makes ``ReaderVmStep/wait`` fail; otherwise the script's command.
     private func buildCommandRun() -> InMemoryCommandRun {
+        let commandExit = CommandExit()
         guard !script.failingSteps.contains(.wait) else {
-            return .ended(.failure(ReaderVmStepFailure(step: .wait)))
+            commandExit.resolve(with: .failure(ReaderVmStepFailure(step: .wait)))
+            return .ended(commandExit)
         }
-        return switch script.command {
-        case .exitsAtStart(let output): .ended(.success(output))
-        case .runsUntilResolved: .running(waits: [])
+        switch script.command {
+        case .exitsAtStart(let output):
+            commandExit.resolve(with: .success(output))
+            return .ended(commandExit)
+        case .runsUntilResolved:
+            return .running(commandExit)
         }
     }
 
-    /// Gets the command of a VM that started and hasn't been deleted.
+    /// Gets the exit of the command of a VM that started and hasn't been
+    /// deleted.
     ///
     /// - Parameter containerId: Container id of the VM.
-    /// - Returns: The VM's command.
+    /// - Returns: The exit of the VM's command, which may not be resolved yet.
     /// - Throws: ``ReaderVmLifecycleError/unknownVm(containerId:)`` when no
     ///   VM with this id is available.
     ///   ``ReaderVmLifecycleError/notStarted(containerId:)`` when its command
     ///   hasn't started.
-    private func getCommandRun(of containerId: ContainerId) throws -> InMemoryCommandRun {
+    private func getCommandExit(of containerId: ContainerId) throws -> CommandExit {
         switch vms[containerId] {
         case .started:
-            guard let commandRun = commandRuns[containerId] else {
-                preconditionFailure("A started VM's command has a run")
+            switch commandRuns[containerId] {
+            case .running(let commandExit), .ended(let commandExit): return commandExit
+            case nil: preconditionFailure("A started VM's command has a run")
             }
-            return commandRun
         case .created, .starting, .startFailed:
             throw ReaderVmLifecycleError.notStarted(containerId: containerId)
         case .deleting, nil:
@@ -338,36 +349,41 @@ actor InMemoryReaderVmLifecycle: ReaderVmLifecycle {
         }
     }
 
-    /// Suspends until the command of a VM that started ends, and returns how
-    /// it ended. Cancellation doesn't end the wait.
+    /// Gets the exit that a wait for a VM's command waits for: the exit of a
+    /// started VM's command, or of a command that runs on after its VM's
+    /// deletion, because stopping it failed.
     ///
-    /// - Parameter containerId: Container id of a VM whose command started.
-    /// - Returns: The command's output, or why waiting for it failed.
-    private func waitForCommandEnd(of containerId: ContainerId) async -> Result<CommandOutput, any Error> {
-        switch commandRuns[containerId] {
-        case .ended(let commandEnd):
-            return commandEnd
-        case .running(let waits):
-            return await withCheckedContinuation { wait in
-                commandRuns[containerId] = .running(waits: waits + [wait])
+    /// - Parameter containerId: Container id of the VM.
+    /// - Returns: The exit of the VM's command, which may not be resolved yet.
+    /// - Throws: ``ReaderVmLifecycleError/unknownVm(containerId:)`` when no
+    ///   VM with this id is available and no command of a VM with this id
+    ///   runs. ``ReaderVmLifecycleError/notStarted(containerId:)`` when its
+    ///   command hasn't started.
+    private func getWaitedCommandExit(of containerId: ContainerId) throws -> CommandExit {
+        switch vms[containerId] {
+        case .created, .starting, .started, .startFailed:
+            return try getCommandExit(of: containerId)
+        case .deleting, nil:
+            guard case .running(let commandExit) = commandRuns[containerId] else {
+                throw ReaderVmLifecycleError.unknownVm(containerId: containerId)
             }
-        case nil:
-            preconditionFailure("Only the command of a VM that started is waited for")
+            return commandExit
         }
     }
 
-    /// Ends a running command and resumes every wait for it.
+    /// Ends a running command and resolves its exit, which ends every wait
+    /// for it.
     ///
     /// - Parameters:
     ///   - containerId: Container id of the command's VM.
     ///   - commandEnd: How the command ended.
     /// - Precondition: The command is running.
     private func resolveCommandRun(of containerId: ContainerId, with commandEnd: Result<CommandOutput, any Error>) {
-        guard case .running(let waits) = commandRuns[containerId] else {
+        guard case .running(let commandExit) = commandRuns[containerId] else {
             preconditionFailure("Only a running command ends")
         }
-        commandRuns[containerId] = .ended(commandEnd)
-        waits.forEach { $0.resume(returning: commandEnd) }
+        commandRuns[containerId] = .ended(commandExit)
+        commandExit.resolve(with: commandEnd)
     }
 
     /// Stops a started VM's command, as its deletion does first.

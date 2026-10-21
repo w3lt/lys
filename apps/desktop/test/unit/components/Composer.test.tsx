@@ -149,6 +149,10 @@ const LONG_PASTE = Array.from(
 /** Content of a file the user attaches; no character in it is escaped. */
 const NOTES_CONTENT = "Renew the passport before March."
 
+/** Sentence the meter panel's note ends with while a text file is staged. */
+const READ_ON_REQUEST_NOTE =
+  "Attached files are read on request, so they are not counted."
+
 /**
  * {@link READY_RUNTIME} with a loaded `qwen3-8b` that sees images and was
  * trained for tool use, so both kinds of file can be staged.
@@ -402,6 +406,24 @@ function getMessageField(): HTMLElement {
  */
 function listStatusTexts(): string[] {
   return screen.getAllByRole("status").map((status) => status.textContent ?? "")
+}
+
+/**
+ * Gets the status region that announces a sentence.
+ *
+ * @param sentence - The announced sentence.
+ * @returns The region whose whole text is the sentence.
+ * @throws When no single status region says exactly that.
+ */
+function getStatusRegion(sentence: string): HTMLElement {
+  const regions = screen
+    .getAllByRole("status")
+    .filter((region) => region.textContent === sentence)
+  const [region] = regions
+  if (region === undefined || regions.length > 1) {
+    throw new Error(`${regions.length} status regions say "${sentence}"`)
+  }
+  return region
 }
 
 /**
@@ -1574,6 +1596,60 @@ describe("Composer", () => {
       )
     })
 
+    it("announces a refusal in a status region that existed before it, and leaves focus where it was", async () => {
+      const { Composer } = await loadFreshAttachingComposer()
+      const user = userEvent.setup()
+      const { container } = render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
+      const regionsBefore = screen.getAllByRole("status")
+      await user.upload(
+        getFileInput(container),
+        buildTextFile("notes.md", "# Notes")
+      )
+      await waitForRenderedWork()
+      const field = getMessageField()
+      field.focus()
+
+      sendFileDrop(field, [buildTextFile("notes.md", "# Notes again")])
+      await waitForRenderedWork()
+
+      expect(regionsBefore).toContain(
+        getStatusRegion("The file notes.md is already uploaded")
+      )
+      expect(field).toHaveFocus()
+    })
+
+    it("announces a repeated refusal again from the same status region", async () => {
+      const { Composer } = await loadFreshAttachingComposer()
+      const user = userEvent.setup()
+      const { container } = render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
+      const sentence = "The file notes.md is already uploaded"
+      await user.upload(
+        getFileInput(container),
+        buildTextFile("notes.md", "# Notes")
+      )
+      await waitForRenderedWork()
+      await user.upload(
+        getFileInput(container),
+        buildTextFile("notes.md", "# Notes again")
+      )
+      await waitForRenderedWork()
+      const regionAfterFirst = getStatusRegion(sentence)
+      const announcementAfterFirst = screen.getByText(sentence)
+
+      await user.upload(
+        getFileInput(container),
+        buildTextFile("notes.md", "# Notes once more")
+      )
+      await waitForRenderedWork()
+
+      expect(getStatusRegion(sentence)).toBe(regionAfterFirst)
+      expect(screen.getByText(sentence)).not.toBe(announcementAfterFirst)
+    })
+
     it("refuses an image for a model without vision and lists nothing", async () => {
       const { Composer } = await loadFreshComposer()
       const user = userEvent.setup()
@@ -1675,6 +1751,48 @@ describe("Composer", () => {
       expect(
         screen.getByRole("button", { name: "Context window · 2.7k / 8.2k" })
       ).toBeInTheDocument()
+    })
+
+    it("says in the meter that attached files are read on request while a text file is staged", async () => {
+      startChatBackend()
+      const { Composer } = await loadFreshAttachingComposer()
+      const user = userEvent.setup()
+      const { container } = render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
+      await user.upload(
+        getFileInput(container),
+        buildTextFile("notes.md", "# Notes")
+      )
+      await waitForRenderedWork()
+
+      await user.click(
+        screen.getByRole("button", { name: /^Context window · / })
+      )
+
+      expect(
+        screen.getByText(READ_ON_REQUEST_NOTE, { exact: false })
+      ).toBeInTheDocument()
+    })
+
+    it("says nothing about reading on request while only an image is staged", async () => {
+      startChatBackend()
+      const { Composer } = await loadFreshAttachingComposer()
+      const user = userEvent.setup()
+      const { container } = render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
+      await user.upload(getFileInput(container), buildPngFile("photo.png"))
+      await waitForRenderedWork()
+
+      await user.click(
+        screen.getByRole("button", { name: /^Context window · / })
+      )
+
+      expect(listStagedNames(["photo.png"])).toEqual(["photo.png"])
+      expect(
+        screen.queryByText(READ_ON_REQUEST_NOTE, { exact: false })
+      ).toBeNull()
     })
 
     it("sends the content of the files it lists as attached to the message", async () => {

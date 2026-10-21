@@ -9,7 +9,10 @@ import {
   conversationNotFoundProblemSchema,
   type LlmInfo
 } from "@lys/protocol"
-import { MAXIMUM_ATTACHMENT_BYTES } from "@lys/share"
+import {
+  MAXIMUM_ATTACHMENT_BYTES,
+  MAXIMUM_MESSAGE_ATTACHMENT_BYTES
+} from "@lys/share"
 import type { LightMyRequestResponse } from "fastify"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
@@ -72,17 +75,18 @@ function buildTextAttachmentPayload(
 }
 
 /**
- * Builds the request form of a zero-filled file of a given size.
+ * Builds the request form of a text file of a given size, filled with
+ * spaces, so only its size can refuse it.
  *
  * @param name - Attachment name.
  * @param sizeBytes - Size of the file.
  * @returns The attachment as a chat request carries it.
  */
-function buildBinaryAttachmentPayload(
+function buildSizedTextAttachmentPayload(
   name: string,
   sizeBytes: number
 ): { name: string; content: string } {
-  return { name, content: buildAttachmentContent(new Uint8Array(sizeBytes)) }
+  return buildTextAttachmentPayload(name, " ".repeat(sizeBytes))
 }
 
 /** Definition of the stored agent that answers some cases' conversations. */
@@ -352,10 +356,27 @@ describe("updateFastifyWithChatRoute", () => {
       }
     ],
     [
+      "two attachments whose names differ only in a letter that folds to two",
+      {
+        ...NEW_CONVERSATION_REQUEST,
+        attachments: [
+          buildTextAttachmentPayload("Stra\u00dfe.md", "a"),
+          buildTextAttachmentPayload("STRASSE.md", "b")
+        ]
+      }
+    ],
+    [
       "an attachment whose name holds a slash",
       {
         ...NEW_CONVERSATION_REQUEST,
         attachments: [buildTextAttachmentPayload("notes/../x.md", "a")]
+      }
+    ],
+    [
+      "an attachment whose name holds a control character",
+      {
+        ...NEW_CONVERSATION_REQUEST,
+        attachments: [buildTextAttachmentPayload("notes\u0007.md", "a")]
       }
     ],
     [
@@ -373,22 +394,25 @@ describe("updateFastifyWithChatRoute", () => {
       }
     ],
     [
-      "an attachment larger than the per-file limit",
+      "a text attachment one byte larger than the per-file limit",
       {
         ...NEW_CONVERSATION_REQUEST,
         attachments: [
-          buildBinaryAttachmentPayload("big.bin", MAXIMUM_ATTACHMENT_BYTES + 1)
+          buildSizedTextAttachmentPayload(
+            "big.txt",
+            MAXIMUM_ATTACHMENT_BYTES + 1
+          )
         ]
       }
     ],
     [
-      "attachments that together pass the per-message limit",
+      "text attachments that together pass the per-message limit by one byte",
       {
         ...NEW_CONVERSATION_REQUEST,
         attachments: [
-          buildBinaryAttachmentPayload("one.bin", MAXIMUM_ATTACHMENT_BYTES),
-          buildBinaryAttachmentPayload("two.bin", MAXIMUM_ATTACHMENT_BYTES),
-          buildBinaryAttachmentPayload("three.bin", 1)
+          buildSizedTextAttachmentPayload("one.txt", MAXIMUM_ATTACHMENT_BYTES),
+          buildSizedTextAttachmentPayload("two.txt", MAXIMUM_ATTACHMENT_BYTES),
+          buildSizedTextAttachmentPayload("three.txt", 1)
         ]
       }
     ]
@@ -1242,6 +1266,125 @@ describe("updateFastifyWithChatRoute", () => {
     })
 
     it.each([
+      [
+        "a client tool",
+        { definitions: [{ ...READ_TEXT_FILE_TOOL, name: "read_attachment" }] }
+      ],
+      [
+        "a backend tool",
+        { definitions: [], backendToolNames: ["read_attachment"] }
+      ]
+    ])(
+      "refuses a request that offers the attachment reader's name as %s, saying the backend adds the reader itself",
+      async (_label, tools) => {
+        const testApp = await createChatRouteTestApp()
+        registerStoringChatRoute(testApp)
+
+        const response = await sendChatRequest(testApp.app, {
+          ...NOTES_REQUEST,
+          tools
+        })
+
+        expect(response.statusCode).toBe(400)
+        expect(response.json()).toMatchObject({
+          message: expect.stringContaining(
+            "A request does not offer read_attachment; the backend adds it to a turn itself."
+          )
+        })
+        expect(testApp.listLlmModels).not.toHaveBeenCalled()
+        expect(testApp.completeChatStream).not.toHaveBeenCalled()
+        expect(readdirSync(testApp.attachmentsDirectoryPath)).toEqual([])
+      }
+    )
+
+    it.each([
+      [
+        "one byte over the per-file limit",
+        [
+          buildSizedTextAttachmentPayload(
+            "big.txt",
+            MAXIMUM_ATTACHMENT_BYTES + 1
+          )
+        ],
+        `An attachment has at most ${MAXIMUM_ATTACHMENT_BYTES} bytes.`
+      ],
+      [
+        "one byte over the per-message limit together",
+        [
+          buildSizedTextAttachmentPayload("one.txt", MAXIMUM_ATTACHMENT_BYTES),
+          buildSizedTextAttachmentPayload("two.txt", MAXIMUM_ATTACHMENT_BYTES),
+          buildSizedTextAttachmentPayload("three.txt", 1)
+        ],
+        `A message's attachments have at most ${MAXIMUM_MESSAGE_ATTACHMENT_BYTES} bytes together.`
+      ]
+    ])(
+      "refuses text attachments %s, saying so, before reading the inventory or storing anything",
+      async (_label, attachments, message) => {
+        const testApp = await createChatRouteTestApp()
+        registerStoringChatRoute(testApp)
+
+        const response = await sendChatRequest(testApp.app, {
+          ...NEW_CONVERSATION_REQUEST,
+          attachments
+        })
+
+        expect(response.statusCode).toBe(400)
+        expect(response.json()).toMatchObject({
+          message: expect.stringContaining(message)
+        })
+        expect(testApp.listLlmModels).not.toHaveBeenCalled()
+        expect(testApp.completeChatStream).not.toHaveBeenCalled()
+        expect(readdirSync(testApp.attachmentsDirectoryPath)).toEqual([])
+      }
+    )
+
+    it("stores a text attachment of exactly the per-file limit", async () => {
+      const testApp = await createChatRouteTestApp()
+      registerStoringChatRoute(testApp)
+      testApp.listLlmModels.mockResolvedValue([TEXT_MODEL_INFO])
+
+      const response = await sendChatRequest(testApp.app, {
+        ...NEW_CONVERSATION_REQUEST,
+        attachments: [
+          buildSizedTextAttachmentPayload("full.txt", MAXIMUM_ATTACHMENT_BYTES)
+        ]
+      })
+
+      expect(response.statusCode).toBe(200)
+      const start = readNewConversationStart(response)
+      expect(start.userMessage.attachments).toEqual([
+        {
+          kind: "text",
+          number: 1,
+          name: "full.txt",
+          sizeBytes: MAXIMUM_ATTACHMENT_BYTES
+        }
+      ])
+      const [filePath] = listStoredFiles(testApp)
+      expect(filePath).toMatch(/\/full\.txt$/)
+      expect(
+        statSync(join(testApp.attachmentsDirectoryPath, filePath ?? "")).size
+      ).toBe(MAXIMUM_ATTACHMENT_BYTES)
+    })
+
+    it("refuses a body over the chat route's limit with a 413, before reading the inventory or storing anything", async () => {
+      const testApp = await createChatRouteTestApp()
+      registerStoringChatRoute(testApp)
+
+      const response = await sendChatRequest(testApp.app, {
+        ...NEW_CONVERSATION_REQUEST,
+        attachments: [
+          { name: "huge.txt", content: "A".repeat(chatApi.bodyLimitBytes) }
+        ]
+      })
+
+      expect(response.statusCode).toBe(413)
+      expect(testApp.listLlmModels).not.toHaveBeenCalled()
+      expect(testApp.completeChatStream).not.toHaveBeenCalled()
+      expect(readdirSync(testApp.attachmentsDirectoryPath)).toEqual([])
+    })
+
+    it.each([
       ["a model that cannot see images", [TEXT_MODEL_INFO]],
       ["a model the inventory does not list", []]
     ])(
@@ -1302,7 +1445,7 @@ describe("updateFastifyWithChatRoute", () => {
       }
     )
 
-    it("does not read the inventory for a turn without attachments in a conversation without any", async () => {
+    it("does not read the inventory, and creates no folder, for a turn without attachments in a conversation without any", async () => {
       const testApp = await createChatRouteTestApp()
       registerStoringChatRoute(testApp)
 
@@ -1314,7 +1457,102 @@ describe("updateFastifyWithChatRoute", () => {
       expect(response.statusCode).toBe(200)
       expect(testApp.listLlmModels).not.toHaveBeenCalled()
       expect(listOfferedToolNames(testApp, 0)).toEqual([])
-      expect(listStoredFiles(testApp)).toEqual([])
+      expect(readdirSync(testApp.attachmentsDirectoryPath)).toEqual([])
+    })
+
+    it("refuses a turn whose conversation was deleted while the inventory was read, and leaves no file of it", async () => {
+      const testApp = await createChatRouteTestApp()
+      registerStoringChatRoute(testApp)
+      testApp.listLlmModels.mockResolvedValue([TEXT_MODEL_INFO])
+      const first = await sendChatRequest(testApp.app, NOTES_REQUEST)
+      const conversationId = readNewConversationStart(first).conversation.id
+      testApp.listLlmModels.mockImplementationOnce(async () => {
+        testApp.app.conversationHistoryEditor.deleteConversation(conversationId)
+        return [TEXT_MODEL_INFO]
+      })
+
+      const second = await sendChatRequest(testApp.app, {
+        ...NEW_CONVERSATION_REQUEST,
+        conversation: { kind: "existing", id: conversationId },
+        message: "One more",
+        attachments: [buildTextAttachmentPayload("plan.txt", "Go")]
+      })
+
+      expect(second.statusCode).toBe(404)
+      expect(
+        conversationNotFoundProblemSchema.safeParse(second.json()).success
+      ).toBe(true)
+      expect(readdirSync(testApp.attachmentsDirectoryPath)).toEqual([])
+      expect(testApp.completeChatStream).toHaveBeenCalledTimes(1)
+    })
+
+    it("refuses a turn whose agent was deleted while the inventory was read, keeping the conversation's other files", async () => {
+      const testApp = await createChatRouteTestApp()
+      registerStoringChatRoute(testApp)
+      testApp.listLlmModels.mockResolvedValue([TEXT_MODEL_INFO])
+      testApp.app.agentService.createAgent(WEB_RESEARCHER_DEFINITION)
+      const first = await sendChatRequest(testApp.app, {
+        ...WEB_RESEARCHER_REQUEST,
+        attachments: [NOTES_ATTACHMENT]
+      })
+      const conversationId = readNewConversationStart(first).conversation.id
+      const storedFiles = listStoredFiles(testApp)
+      testApp.listLlmModels.mockImplementationOnce(async () => {
+        testApp.app.agentService.deleteAgent(WEB_RESEARCHER_DEFINITION.code)
+        return [TEXT_MODEL_INFO]
+      })
+
+      const second = await sendChatRequest(testApp.app, {
+        ...NEW_CONVERSATION_REQUEST,
+        conversation: { kind: "existing", id: conversationId },
+        message: "One more",
+        attachments: [buildTextAttachmentPayload("plan.txt", "Go")]
+      })
+
+      expect(second.statusCode).toBe(409)
+      expect(
+        conversationAgentMissingProblemSchema.safeParse(second.json()).success
+      ).toBe(true)
+      expect(storedFiles).toHaveLength(1)
+      expect(listStoredFiles(testApp)).toEqual(storedFiles)
+      expect(
+        testApp.app.conversationHistoryReader.getConversation(conversationId)
+          ?.messages
+      ).toHaveLength(2)
+      expect(testApp.completeChatStream).toHaveBeenCalledTimes(1)
+    })
+
+    it("sends an image a model saw as a sentence to a later turn's model that cannot see images", async () => {
+      const testApp = await createChatRouteTestApp()
+      registerStoringChatRoute(testApp)
+      const textOnlyModel = "qwen/qwen3-8b-text"
+      testApp.listLlmModels.mockResolvedValue([
+        VISION_MODEL_INFO,
+        { ...TEXT_MODEL_INFO, modelKey: textOnlyModel }
+      ])
+
+      const first = await sendChatRequest(testApp.app, PHOTO_REQUEST)
+      const start = readNewConversationStart(first)
+      const second = await sendChatRequest(testApp.app, {
+        ...NEW_CONVERSATION_REQUEST,
+        conversation: { kind: "existing", id: start.conversation.id },
+        message: "And now?",
+        model: textOnlyModel
+      })
+
+      expect(first.statusCode).toBe(200)
+      expect(second.statusCode).toBe(200)
+      expect(
+        testApp.completeChatStream.mock.calls[1]?.[0].messages.slice(1)
+      ).toEqual([
+        {
+          role: "user",
+          content:
+            "Plan my trip\n\nAttached files:\n[attachment 1] photo.png (image/png, 64×32, 33 bytes)\n[attachment 1] photo.png is an image that this model cannot see."
+        },
+        { role: "assistant", content: "Hi" },
+        { role: "user", content: "And now?" }
+      ])
     })
 
     it("stores a text file with the message, lists it for the model, and lets the model read it through the reader without asking the person", async () => {
@@ -1512,7 +1750,7 @@ describe("updateFastifyWithChatRoute", () => {
       const response = await sendChatRequest(testApp.app, NOTES_REQUEST)
 
       expect(response.statusCode).toBe(500)
-      expect(listStoredFiles(testApp)).toEqual([])
+      expect(readdirSync(testApp.attachmentsDirectoryPath)).toEqual([])
       expect(testApp.logs).toContainEqual(
         expect.objectContaining({
           level: "error",
@@ -1520,6 +1758,35 @@ describe("updateFastifyWithChatRoute", () => {
         })
       )
       expect(testApp.completeChatStream).not.toHaveBeenCalled()
+    })
+
+    it("deletes only the message's files when a continued conversation's turn cannot be stored", async () => {
+      const testApp = await createChatRouteTestApp()
+      registerStoringChatRoute(testApp)
+      testApp.listLlmModels.mockResolvedValue([TEXT_MODEL_INFO])
+      const first = await sendChatRequest(testApp.app, NOTES_REQUEST)
+      const conversationId = readNewConversationStart(first).conversation.id
+      const storedFiles = listStoredFiles(testApp)
+      vi.spyOn(
+        testApp.app.conversationTurns,
+        "createConversationTurn"
+      ).mockImplementationOnce(() => {
+        throw new Error("database is locked")
+      })
+
+      const second = await sendChatRequest(testApp.app, {
+        ...NEW_CONVERSATION_REQUEST,
+        conversation: { kind: "existing", id: conversationId },
+        message: "One more",
+        attachments: [buildTextAttachmentPayload("plan.txt", "Go")]
+      })
+
+      expect(second.statusCode).toBe(500)
+      expect(storedFiles).toHaveLength(1)
+      expect(listStoredFiles(testApp)).toEqual(storedFiles)
+      expect(
+        readdirSync(join(testApp.attachmentsDirectoryPath, conversationId))
+      ).toHaveLength(1)
     })
 
     it("responds with a server error holding both failures when the written files cannot be deleted after the turn cannot be stored", async () => {
@@ -1531,7 +1798,7 @@ describe("updateFastifyWithChatRoute", () => {
       })
       vi.spyOn(
         testApp.app.attachmentFileStore,
-        "deleteMessageAttachments"
+        "deleteConversationAttachments"
       ).mockRejectedValue(deletionFailure)
       testApp.listLlmModels.mockResolvedValue([TEXT_MODEL_INFO])
       updateFastifyWithChatRoute(testApp.app, {

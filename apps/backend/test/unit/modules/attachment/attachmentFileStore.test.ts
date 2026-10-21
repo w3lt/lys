@@ -1,11 +1,16 @@
 import { mkdtempSync, rmSync } from "node:fs"
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises"
+import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { describe, expect, it, onTestFinished } from "vitest"
+import { describe, expect, it, onTestFinished, vi } from "vitest"
 import * as z from "zod"
 import AttachmentFileStore from "../../../../src/modules/attachment/attachmentFileStore"
 import { createFixtureUuidV7 } from "../../support/conversationFixtures"
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<Readonly<{ rm: typeof rm }>>()
+  return { ...actual, rm: vi.fn(actual.rm) }
+})
 
 /** Conversation most cases write under. */
 const CONVERSATION_ID = createFixtureUuidV7(1)
@@ -143,6 +148,44 @@ describe("AttachmentFileStore", () => {
 
       expect(await exists(messageFolder)).toBe(false)
       expect(await readdir(join(directory, CONVERSATION_ID))).toEqual([])
+    })
+
+    it("throws the first failure in message order when several files cannot be created", async () => {
+      const { store } = createOwnedStore()
+
+      await expect(
+        store.saveMessageAttachments(CONVERSATION_ID, MESSAGE_ID, [
+          { name: "photo.png", content: PHOTO },
+          { name: "photo.png", content: PHOTO },
+          { name: "notes.md", content: NOTES },
+          { name: "notes.md", content: NOTES }
+        ])
+      ).rejects.toMatchObject({
+        code: "EEXIST",
+        path: expect.stringMatching(/photo\.png$/)
+      })
+    })
+
+    it("throws both failures when the message's folder cannot be deleted after a file could not be created", async () => {
+      const { store, messageFolder } = createOwnedStore()
+      const deletionFailure = new Error("EPERM: operation not permitted")
+      vi.mocked(rm).mockRejectedValueOnce(deletionFailure)
+
+      await expect(
+        store.saveMessageAttachments(CONVERSATION_ID, MESSAGE_ID, [
+          { name: "notes.md", content: NOTES },
+          { name: "notes.md", content: PHOTO }
+        ])
+      ).rejects.toSatisfy(
+        (error: unknown) =>
+          error instanceof AggregateError &&
+          error.errors.length === 2 &&
+          error.errors[0] instanceof Error &&
+          error.errors[0].message.includes("EEXIST") &&
+          error.errors[1] === deletionFailure &&
+          error.cause === deletionFailure
+      )
+      expect(await exists(messageFolder)).toBe(true)
     })
 
     it.each([

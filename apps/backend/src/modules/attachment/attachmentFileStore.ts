@@ -93,16 +93,16 @@ export default class AttachmentFileStore {
     messageId: string,
     files: readonly AttachmentFile[]
   ): Promise<void> {
-    const folderPath = this.#resolveMessageFolder(conversationId, messageId)
+    const folderPath = this.#buildMessageFolderPath(conversationId, messageId)
     const filePaths = files.map((file) => ({
-      path: this.#resolveFilePath({
+      path: this.#buildAttachmentFilePath({
         conversationId,
         messageId,
         name: file.name
       }),
       content: file.content
     }))
-    await mkdir(this.#resolveConversationFolder(conversationId), {
+    await mkdir(this.#buildConversationFolderPath(conversationId), {
       recursive: true
     })
     await mkdir(folderPath)
@@ -128,7 +128,7 @@ export default class AttachmentFileStore {
   public async readAttachment(
     location: StoredAttachmentLocation
   ): Promise<Uint8Array | undefined> {
-    const filePath = this.#resolveFilePath(location)
+    const filePath = this.#buildAttachmentFilePath(location)
     try {
       return await readFile(filePath)
     } catch (error) {
@@ -150,7 +150,7 @@ export default class AttachmentFileStore {
     conversationId: string,
     messageId: string
   ): Promise<void> {
-    await rm(this.#resolveMessageFolder(conversationId, messageId), {
+    await rm(this.#buildMessageFolderPath(conversationId, messageId), {
       recursive: true,
       force: true
     })
@@ -168,48 +168,48 @@ export default class AttachmentFileStore {
   public async deleteConversationAttachments(
     conversationId: string
   ): Promise<void> {
-    await rm(this.#resolveConversationFolder(conversationId), {
+    await rm(this.#buildConversationFolderPath(conversationId), {
       recursive: true,
       force: true
     })
   }
 
   /**
-   * Resolves one conversation's folder.
+   * Builds the path of one conversation's folder.
    *
    * @param conversationId - Untrusted conversation identifier.
    * @returns The folder's absolute path under the attachments directory.
    * @throws A Zod error when the identifier is not a UUIDv7.
    */
-  #resolveConversationFolder(conversationId: string): string {
-    return this.#resolveUnderRoot(folderIdentitySchema.parse(conversationId))
+  #buildConversationFolderPath(conversationId: string): string {
+    return this.#buildRootedPath(folderIdentitySchema.parse(conversationId))
   }
 
   /**
-   * Resolves one message's folder.
+   * Builds the path of one message's folder.
    *
    * @param conversationId - Untrusted conversation identifier.
    * @param messageId - Untrusted message identifier.
    * @returns The folder's absolute path under the conversation's folder.
    * @throws A Zod error when an identifier is not a UUIDv7.
    */
-  #resolveMessageFolder(conversationId: string, messageId: string): string {
-    return this.#resolveUnderRoot(
+  #buildMessageFolderPath(conversationId: string, messageId: string): string {
+    return this.#buildRootedPath(
       folderIdentitySchema.parse(conversationId),
       folderIdentitySchema.parse(messageId)
     )
   }
 
   /**
-   * Resolves one attachment's file.
+   * Builds the path of one attachment's file.
    *
    * @param location - Untrusted conversation, message, and name.
    * @returns The file's absolute path under the message's folder.
    * @throws A Zod error when an identifier is not a UUIDv7 or the name
    * breaks the attachment name rules.
    */
-  #resolveFilePath(location: StoredAttachmentLocation): string {
-    return this.#resolveUnderRoot(
+  #buildAttachmentFilePath(location: StoredAttachmentLocation): string {
+    return this.#buildRootedPath(
       folderIdentitySchema.parse(location.conversationId),
       folderIdentitySchema.parse(location.messageId),
       attachmentNameSchema.parse(location.name)
@@ -217,14 +217,14 @@ export default class AttachmentFileStore {
   }
 
   /**
-   * Joins validated path segments under the attachments directory.
+   * Builds a path from validated segments under the attachments directory.
    *
    * @param segments - Validated segments, each one entry of its folder.
    * @returns The absolute path.
    * @throws If the joined path leaves the attachments directory, which the
    * validated segments cannot cause; the check stands in case a rule changes.
    */
-  #resolveUnderRoot(...segments: readonly string[]): string {
+  #buildRootedPath(...segments: readonly string[]): string {
     const path = join(this.#rootPath, ...segments)
     const relativePath = relative(this.#rootPath, path)
     if (

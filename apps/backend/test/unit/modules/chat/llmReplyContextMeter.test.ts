@@ -1,4 +1,4 @@
-import { estimateImageTokens } from "@lys/share"
+import { calculateImageTokens } from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
 import type { ReplyContextMessage } from "../../../../src/modules/agent/replyModel"
 import LlmReplyContextMeter from "../../../../src/modules/chat/llmReplyContextMeter"
@@ -147,11 +147,11 @@ describe("LlmReplyContextMeter", () => {
       "You are Lys.".length + MESSAGE_TEMPLATE_TOKENS,
       "Look".length +
         MESSAGE_TEMPLATE_TOKENS +
-        estimateImageTokens(640, 480) +
-        estimateImageTokens(4000, 3000)
+        calculateImageTokens(640, 480) +
+        calculateImageTokens(4000, 3000)
     ])
-    expect(estimateImageTokens(640, 480)).toBe(23 * 18)
-    expect(estimateImageTokens(4000, 3000)).toBe(1280)
+    expect(calculateImageTokens(640, 480)).toBe(23 * 18)
+    expect(calculateImageTokens(4000, 3000)).toBe(1280)
   })
 
   it("counts no tool tokens when no tool is offered", async () => {

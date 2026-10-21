@@ -54,10 +54,29 @@ export type AgentContextUserMessage = Pick<
   "content" | "attachments"
 >
 
-/** Context images of a model without vision. */
-const UNSEEN_CONTEXT_IMAGES = Object.freeze({
+/**
+ * Context images of a model without vision: no file is read, and each image
+ * becomes a sentence saying the model cannot see it.
+ */
+export const UNSEEN_CONTEXT_IMAGES: AgentContextImages = Object.freeze({
   status: "unseen"
-} satisfies AgentContextImages)
+})
+
+/** What the context an agent sends to its model for one turn is built from. */
+export type AgentContextSource = Readonly<{
+  /** The agent's own instructions, sent first. */
+  systemPrompt: string
+  /** Stored transcript before the turn, in conversation order. */
+  history: readonly ConversationMessage[]
+  /** Text and attachments of the message the turn answers, sent last. */
+  userMessage: AgentContextUserMessage
+  /**
+   * The images the context sends: {@link UNSEEN_CONTEXT_IMAGES} for a model
+   * without vision, otherwise as {@link readAgentContextImages} read them for
+   * the history and the new message.
+   */
+  images: AgentContextImages
+}>
 
 /**
  * Selects stored replies that can supply conversation context.
@@ -230,25 +249,22 @@ function buildStoredContextMessages(
 }
 
 /**
- * Loads the images a turn's context sends.
+ * Reads the images a turn's context sends to a model that sees images.
  * @param messages - Stored messages the context is built from, in
  * conversation order, the turn's own user message last.
- * @param canSeeImages - Whether the model sees images.
  * @param findAttachmentImage - Reads one image's bytes; borrowed until the
  * returned promise settles.
- * @returns A promise resolving to `unseen` when the model cannot see images,
- * without reading any file; otherwise to `loaded` with the bytes of each
- * image attachment whose file was found, by attachment number. The files are
- * read together, requested in conversation order.
+ * @returns A promise resolving to `loaded` with the bytes of each image
+ * attachment whose file was found, by attachment number. The files are read
+ * together, requested in conversation order. A model without vision gets
+ * {@link UNSEEN_CONTEXT_IMAGES} instead, without a read.
  * @throws The reader's failure, for a file that cannot be read although it
  * is not missing.
  */
-export async function loadAgentContextImages(
+export async function readAgentContextImages(
   messages: readonly ConversationMessage[],
-  canSeeImages: boolean,
   findAttachmentImage: FindAttachmentImage
 ): Promise<AgentContextImages> {
-  if (!canSeeImages) return UNSEEN_CONTEXT_IMAGES
   const loaded = await Promise.all(
     listImageAttachments(messages).map(
       async ({ messageId, attachment }) =>
@@ -288,13 +304,8 @@ function listImageAttachments(
 
 /**
  * Builds the context an agent sends to its model for one turn.
- * @param systemPrompt - The agent's own instructions, sent first.
- * @param history - Stored transcript before the turn, in conversation order.
- * @param userMessage - Text and attachments of the message the turn answers,
- * sent last.
- * @param images - The images the context sends, as
- * {@link loadAgentContextImages} loaded them for the history and the new
- * message.
+ * @param source - The system prompt, the history, the new message, and the
+ * images the context sends.
  * @returns The system prompt, then the history's user messages and the rounds
  * of its completed and interrupted replies in order, then the new message
  * once. Each user message sends its text, the list of its attachments when it
@@ -305,17 +316,15 @@ function listImageAttachments(
  * out, and failed and streaming replies are left out whole.
  */
 export function buildAgentContext(
-  systemPrompt: string,
-  history: readonly ConversationMessage[],
-  userMessage: AgentContextUserMessage,
-  images: AgentContextImages
+  source: AgentContextSource
 ): readonly ReplyContextMessage[] {
+  const { images } = source
   return [
-    { role: "system", content: systemPrompt },
-    ...history.flatMap((message) =>
+    { role: "system", content: source.systemPrompt },
+    ...source.history.flatMap((message) =>
       buildStoredContextMessages(message, images)
     ),
-    buildUserContextMessage(userMessage, images)
+    buildUserContextMessage(source.userMessage, images)
   ]
 }
 

@@ -42,12 +42,12 @@ function createConversation(
 }
 
 /**
- * Finds the number the next attachment of a conversation gets.
+ * Calculates the number the next attachment of a conversation gets.
  * @param conversation - Snapshot of the conversation before the turn.
  * @returns One more than the highest number its attachments have; 1 when it
  * has none.
  */
-function findNextAttachmentNumber(conversation: Conversation): number {
+function calculateNextAttachmentNumber(conversation: Conversation): number {
   let highestNumber = 0
   for (const message of conversation.messages) {
     if (message.role !== "user") continue
@@ -99,7 +99,7 @@ function buildNumberedUserMessage(
   conversation: Conversation
 ): ConversationUserMessage {
   if (userMessage.attachments.length === 0) return userMessage
-  const offset = findNextAttachmentNumber(conversation) - 1
+  const offset = calculateNextAttachmentNumber(conversation) - 1
   return {
     ...userMessage,
     attachments: userMessage.attachments.map((attachment) => ({

@@ -1,8 +1,9 @@
 import {
   attachmentNameSchema,
+  buildAttachmentDraft,
   buildAttachmentNameKey,
   parseAttachmentContent,
-  estimateImageTokens,
+  calculateImageTokens,
   MAXIMUM_ATTACHMENT_BYTES,
   MAXIMUM_MESSAGE_ATTACHMENT_BYTES,
   MAXIMUM_MESSAGE_ATTACHMENT_COUNT,
@@ -21,8 +22,10 @@ import type { AttachmentModelSupport } from "@/lib/models/attachment-model-suppo
  * file is read, then by content and by what the loaded model can take once
  * the admitted files are read. Each file is admitted on its own, so a refused
  * file does not keep the others of its selection out, and every refusal is
- * one sentence the composer shows; the first refusal of a selection is the
- * one reported.
+ * one sentence the composer shows. Each step reports the first refusal it
+ * made, in selection order; the store that runs both steps reports the first
+ * step's refusal over the second's, and a file that cannot be read keeps the
+ * whole selection out of the tray.
  */
 
 /** One file staged for the next message. */
@@ -194,8 +197,7 @@ function findFileRefusal(file: File, tray: TrayAccount): string | undefined {
  * Parses a selection by the name and size rules, before any file is read.
  *
  * @param staged - Files the tray holds.
- * @param files - Files chosen, dropped, or pasted by the person, in
- * selection order.
+ * @param files - Files chosen or dropped by the person, in selection order.
  * @returns The admitted files in selection order, each counted against the
  * tray and the files admitted before it, and the first refusal.
  */
@@ -230,52 +232,30 @@ export function parseAttachmentSelection(
 }
 
 /**
- * Builds the attachment the backend would store for a candidate.
- *
- * @param candidate - A read file.
- * @returns An image draft with the media type and sides read from the bytes,
- * a text draft, or undefined when the content is neither.
- */
-function buildAttachmentDraft(
-  candidate: AttachmentCandidate
-): ConversationAttachmentDraft | undefined {
-  const { name, sizeBytes, content } = candidate
-  switch (content.kind) {
-    case "image":
-      return {
-        kind: "image",
-        name,
-        sizeBytes,
-        mediaType: content.mediaType,
-        width: content.width,
-        height: content.height
-      }
-    case "text":
-      return { kind: "text", name, sizeBytes }
-    case "unsupported":
-      return undefined
-  }
-}
-
-/**
  * Parses one read file by its content and by what the loaded model can take.
  *
  * @param candidate - A read file.
  * @param support - What the loaded model can take.
- * @returns The staged attachment, or the refusal: content that is neither
- * text nor an image Lys sends, an image for a model without vision, or a
- * text file for a model not trained for tool use.
+ * @returns The staged attachment, whose draft is the attachment the backend
+ * stores for the file; or the refusal: content that is neither text nor an
+ * image Lys sends, an image for a model without vision, or a text file for a
+ * model not trained for tool use.
  */
 function parseAttachmentCandidate(
   candidate: AttachmentCandidate,
   support: AttachmentModelSupport
 ): AttachmentCandidateParse {
-  const draft = buildAttachmentDraft(candidate)
-  if (draft === undefined) {
+  const { content } = candidate
+  if (content.kind === "unsupported") {
     return {
       refusal: `The file ${candidate.name} is not a text file or an image Lys can send`
     }
   }
+  const draft = buildAttachmentDraft(
+    candidate.name,
+    candidate.sizeBytes,
+    content
+  )
   if (draft.kind === "image" && !support.vision) {
     return { refusal: IMAGE_NEEDS_VISION_REFUSAL }
   }
@@ -320,19 +300,20 @@ export function addAttachmentCandidates(
 }
 
 /**
- * Estimates the tokens the staged images take in the model's context.
+ * Calculates the tokens the staged images are estimated to take in the
+ * model's context.
  *
  * @param attachments - Files the tray holds.
- * @returns The sum of each image's estimate; a text file counts nothing,
- * because the model reads it on request.
+ * @returns The sum of each image's estimate, as `calculateImageTokens` makes
+ * it; a text file counts nothing, because the model reads it on request.
  */
-export function estimateStagedImageTokens(
+export function calculateStagedImageTokens(
   attachments: readonly StagedAttachment[]
 ): number {
   return attachments.reduce(
     (total, { draft }) =>
       draft.kind === "image"
-        ? total + estimateImageTokens(draft.width, draft.height)
+        ? total + calculateImageTokens(draft.width, draft.height)
         : total,
     0
   )

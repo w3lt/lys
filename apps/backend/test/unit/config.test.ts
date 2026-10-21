@@ -286,6 +286,11 @@ describe("backendConfigSchema", () => {
       { ...VALID_RAW_CONFIG, settingsFilePath: "settings.json" },
       "settingsFilePath"
     ],
+    [
+      "a relative attachments directory path",
+      { ...VALID_RAW_CONFIG, attachmentsDirectoryPath: "attachments" },
+      "attachmentsDirectoryPath"
+    ],
     ["a vmo port of 0", { ...VALID_RAW_CONFIG, vmoPort: 0 }, "vmoPort"],
     [
       "a vmo port of 65536",

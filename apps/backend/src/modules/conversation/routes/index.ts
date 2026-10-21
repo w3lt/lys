@@ -25,6 +25,14 @@ type AttachmentFileDeleter = Pick<
   "deleteConversationAttachments"
 >
 
+/** What deleting a conversation needs: its rows' deleter and its files'. */
+type ConversationDeletion = Readonly<{
+  /** Borrowed history deletion access. */
+  history: ConversationDeleter
+  /** Borrowed deletion of the conversation's files. */
+  attachmentFiles: AttachmentFileDeleter
+}>
+
 /**
  * Installs all protocol-defined history endpoints on a configured backend.
  * @param app - Application with validation, conversation persistence, and
@@ -53,7 +61,10 @@ function registerConversationRoutes(app: FastifyInstance): void {
   app.setSerializerCompiler(serializerCompiler)
   const historyReader = app.conversationHistoryReader
   const historyEditor = app.conversationHistoryEditor
-  const attachmentFiles = app.attachmentFileStore
+  const deletion: ConversationDeletion = Object.freeze({
+    history: historyEditor,
+    attachmentFiles: app.attachmentFileStore
+  })
   app.route<ListConversationsApiRoute>({
     method: listConversationsApi.method,
     url: listConversationsApi.path,
@@ -101,7 +112,7 @@ function registerConversationRoutes(app: FastifyInstance): void {
       response: deleteConversationApi.responses
     },
     handler: (request, reply) =>
-      handleDeleteConversation(request, reply, historyEditor, attachmentFiles)
+      handleDeleteConversation(request, reply, deletion)
   })
 }
 
@@ -172,8 +183,8 @@ function handleUpdateConversationTitle(
  * problem.
  * @param request - Validated target identifier.
  * @param reply - HTTP response owner.
- * @param history - Borrowed history deletion access.
- * @param attachmentFiles - Borrowed deletion of the conversation's files.
+ * @param deletion - Borrowed deletion of the conversation's rows and of its
+ * files.
  * @returns Settlement after the response is sent.
  * @throws If storage access fails.
  * @remarks The rows are deleted first; the files are removed once the rows
@@ -185,11 +196,10 @@ function handleUpdateConversationTitle(
 async function handleDeleteConversation(
   request: FastifyRequest<DeleteConversationApiRoute>,
   reply: FastifyReply<DeleteConversationApiRoute>,
-  history: ConversationDeleter,
-  attachmentFiles: AttachmentFileDeleter
+  deletion: ConversationDeletion
 ): Promise<void> {
   const { conversationId } = request.params
-  if (!history.deleteConversation(conversationId)) {
+  if (!deletion.history.deleteConversation(conversationId)) {
     reply
       .type("application/problem+json")
       .code(404)
@@ -197,7 +207,7 @@ async function handleDeleteConversation(
     return
   }
   try {
-    await attachmentFiles.deleteConversationAttachments(conversationId)
+    await deletion.attachmentFiles.deleteConversationAttachments(conversationId)
   } catch (error) {
     request.log.error(
       { err: error },

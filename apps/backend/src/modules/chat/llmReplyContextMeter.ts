@@ -1,4 +1,4 @@
-import { estimateImageTokens, type OpenAIFunctionTool } from "@lys/share"
+import { calculateImageTokens, type OpenAIFunctionTool } from "@lys/share"
 import type {
   ReplyContextMeasurement,
   ReplyContextMeasurementRequest,
@@ -49,7 +49,7 @@ const TOOL_OFFER_TEMPLATE_TOKENS = 160
  * them in the model's chat template, which this class does not render, so a
  * fixed allowance for the template's markup is added to each message, each
  * earlier tool call, and the tool offer. Each image a user message sends is
- * counted as {@link estimateImageTokens} estimates it from the image's
+ * counted as {@link calculateImageTokens} estimates it from the image's
  * sides, since the tokenizer measures text only. Owns no resource: the LLM service's
  * owner releases the runtime, and its queue keeps each accepted measurement
  * until it settles. Concurrency model: reentrant; it keeps no state, and the
@@ -168,7 +168,7 @@ function calculateMessageTokens(
     message.role === "user"
       ? message.images.reduce(
           (total, image) =>
-            total + estimateImageTokens(image.width, image.height),
+            total + calculateImageTokens(image.width, image.height),
           0
         )
       : 0

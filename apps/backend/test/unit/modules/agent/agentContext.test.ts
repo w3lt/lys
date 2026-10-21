@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from "vitest"
 import {
   buildAgentContext,
   calculateAgentContextHistoryMessageCount,
-  loadAgentContextImages,
+  readAgentContextImages,
+  UNSEEN_CONTEXT_IMAGES,
   type AgentContextImages,
   type FindAttachmentImage
 } from "../../../../src/modules/agent/agentContext"
@@ -45,9 +46,6 @@ const FAILED_READ = createToolCallPart(
   { status: "failed", result: "The page did not answer." }
 )
 
-/** Images of a context whose model cannot see images. */
-const UNSEEN_IMAGES: AgentContextImages = Object.freeze({ status: "unseen" })
-
 /** Images of a context whose model sees images but no file was read. */
 const NO_LOADED_IMAGES: AgentContextImages = Object.freeze({
   status: "loaded",
@@ -72,12 +70,17 @@ function createNewMessage(content: string) {
 
 describe("buildAgentContext", () => {
   it("sends the system prompt first and the new message last", () => {
-    expect(buildAgentContext("You are Lys.", [], HELLO, UNSEEN_IMAGES)).toEqual(
-      [
-        { role: "system", content: "You are Lys." },
-        { role: "user", content: "Hello", images: [] }
-      ]
-    )
+    expect(
+      buildAgentContext({
+        systemPrompt: "You are Lys.",
+        history: [],
+        userMessage: HELLO,
+        images: UNSEEN_CONTEXT_IMAGES
+      })
+    ).toEqual([
+      { role: "system", content: "You are Lys." },
+      { role: "user", content: "Hello", images: [] }
+    ])
   })
 
   it("keeps earlier user messages and usable replies in transcript order", () => {
@@ -123,12 +126,12 @@ describe("buildAgentContext", () => {
     ]
 
     expect(
-      buildAgentContext(
-        "You are Lys.",
-        history,
-        createNewMessage("Current question"),
-        UNSEEN_IMAGES
-      )
+      buildAgentContext({
+        systemPrompt: "You are Lys.",
+        history: history,
+        userMessage: createNewMessage("Current question"),
+        images: UNSEEN_CONTEXT_IMAGES
+      })
     ).toEqual([
       { role: "system", content: "You are Lys." },
       { role: "user", content: "First question", images: [] },
@@ -162,12 +165,12 @@ describe("buildAgentContext", () => {
     ]
 
     expect(
-      buildAgentContext(
-        "You are Lys.",
-        history,
-        createNewMessage("More?"),
-        UNSEEN_IMAGES
-      )
+      buildAgentContext({
+        systemPrompt: "You are Lys.",
+        history: history,
+        userMessage: createNewMessage("More?"),
+        images: UNSEEN_CONTEXT_IMAGES
+      })
     ).toEqual([
       { role: "system", content: "You are Lys." },
       { role: "user", content: "Tell me about moths", images: [] },
@@ -212,12 +215,12 @@ describe("buildAgentContext", () => {
     ]
 
     expect(
-      buildAgentContext(
-        "You are Lys.",
-        history,
-        createNewMessage("Why?"),
-        UNSEEN_IMAGES
-      )
+      buildAgentContext({
+        systemPrompt: "You are Lys.",
+        history: history,
+        userMessage: createNewMessage("Why?"),
+        images: UNSEEN_CONTEXT_IMAGES
+      })
     ).toEqual([
       { role: "system", content: "You are Lys." },
       {
@@ -255,12 +258,12 @@ describe("buildAgentContext", () => {
     ]
 
     expect(
-      buildAgentContext(
-        "You are Lys.",
-        history,
-        createNewMessage("Go on"),
-        UNSEEN_IMAGES
-      )
+      buildAgentContext({
+        systemPrompt: "You are Lys.",
+        history: history,
+        userMessage: createNewMessage("Go on"),
+        images: UNSEEN_CONTEXT_IMAGES
+      })
     ).toEqual([
       { role: "system", content: "You are Lys." },
       { role: "assistant", content: "Searching.", toolCalls: [] },
@@ -291,12 +294,12 @@ describe("buildAgentContext", () => {
     ]
 
     expect(
-      buildAgentContext(
-        "You are Lys.",
-        history,
-        createNewMessage("Go on"),
-        UNSEEN_IMAGES
-      )
+      buildAgentContext({
+        systemPrompt: "You are Lys.",
+        history: history,
+        userMessage: createNewMessage("Go on"),
+        images: UNSEEN_CONTEXT_IMAGES
+      })
     ).toEqual([
       { role: "system", content: "You are Lys." },
       {
@@ -354,12 +357,12 @@ describe("buildAgentContext", () => {
     ]
   ])("excludes %s from the context", (_label, reply) => {
     expect(
-      buildAgentContext(
-        "You are Lys.",
-        [createUserMessage(1, "Question"), reply],
-        createNewMessage("Retry"),
-        UNSEEN_IMAGES
-      )
+      buildAgentContext({
+        systemPrompt: "You are Lys.",
+        history: [createUserMessage(1, "Question"), reply],
+        userMessage: createNewMessage("Retry"),
+        images: UNSEEN_CONTEXT_IMAGES
+      })
     ).toEqual([
       { role: "system", content: "You are Lys." },
       { role: "user", content: "Question", images: [] },
@@ -380,29 +383,29 @@ describe("buildAgentContext", () => {
     ]
 
     expect(
-      buildAgentContext(
-        "You are Lys.",
-        history,
-        createNewMessage("Next"),
-        UNSEEN_IMAGES
-      )
+      buildAgentContext({
+        systemPrompt: "You are Lys.",
+        history: history,
+        userMessage: createNewMessage("Next"),
+        images: UNSEEN_CONTEXT_IMAGES
+      })
     ).toStrictEqual([
       { role: "system", content: "You are Lys." },
       { role: "assistant", content: "Answer", toolCalls: [] },
       { role: "user", content: "Next", images: [] }
     ])
     expect(
-      buildAgentContext(
-        "You are Lys.",
-        [
+      buildAgentContext({
+        systemPrompt: "You are Lys.",
+        history: [
           createAssistantMessage(2, [SUCCEEDED_SEARCH], {
             status: "completed",
             finishReason: "stop"
           })
         ],
-        createNewMessage("Next"),
-        UNSEEN_IMAGES
-      )[1]
+        userMessage: createNewMessage("Next"),
+        images: UNSEEN_CONTEXT_IMAGES
+      })[1]
     ).toStrictEqual({
       role: "assistant",
       content: "",
@@ -430,12 +433,12 @@ describe("buildAgentContext", () => {
       }
 
       expect(
-        buildAgentContext(
-          "You are Lys.",
-          history,
-          userMessage,
-          NO_LOADED_IMAGES
-        )
+        buildAgentContext({
+          systemPrompt: "You are Lys.",
+          history: history,
+          userMessage: userMessage,
+          images: NO_LOADED_IMAGES
+        })
       ).toEqual([
         { role: "system", content: "You are Lys." },
         {
@@ -475,18 +478,18 @@ describe("buildAgentContext", () => {
       })
       const otherBytes = new Uint8Array([9])
 
-      const context = buildAgentContext(
-        "You are Lys.",
-        [],
-        { content: "Look", attachments: [first, second, third] },
-        {
+      const context = buildAgentContext({
+        systemPrompt: "You are Lys.",
+        history: [],
+        userMessage: { content: "Look", attachments: [first, second, third] },
+        images: {
           status: "loaded",
           images: new Map([
             [3, otherBytes],
             [1, PHOTO_BYTES]
           ])
         }
-      )
+      })
 
       expect(context[1]).toEqual({
         role: "user",
@@ -507,22 +510,22 @@ describe("buildAgentContext", () => {
     })
 
     it("replaces every image with a sentence when the model cannot see images", () => {
-      const context = buildAgentContext(
-        "You are Lys.",
-        [
+      const context = buildAgentContext({
+        systemPrompt: "You are Lys.",
+        history: [
           createUserMessage(1, "Earlier", [
             createImageAttachment(1, "earlier.png")
           ])
         ],
-        {
+        userMessage: {
           content: "Now",
           attachments: [
             createTextAttachment(2, "notes.md"),
             createImageAttachment(3, "now.png")
           ]
         },
-        UNSEEN_IMAGES
-      )
+        images: UNSEEN_CONTEXT_IMAGES
+      })
 
       expect(context.slice(1)).toEqual([
         {
@@ -553,20 +556,14 @@ describe("buildAgentContext", () => {
   })
 })
 
-describe("loadAgentContextImages", () => {
-  it("reads no file when the model cannot see images", async () => {
-    const findAttachmentImage = vi.fn<FindAttachmentImage>()
-
-    const images = await loadAgentContextImages(
-      [createUserMessage(1, "Look", [createImageAttachment(1, "photo.png")])],
-      false,
-      findAttachmentImage
-    )
-
-    expect(images).toEqual({ status: "unseen" })
-    expect(findAttachmentImage).not.toHaveBeenCalled()
+describe("UNSEEN_CONTEXT_IMAGES", () => {
+  it("stands for the images of a model that cannot see them, so no file is read for it", () => {
+    expect(UNSEEN_CONTEXT_IMAGES).toEqual({ status: "unseen" })
+    expect(Object.isFrozen(UNSEEN_CONTEXT_IMAGES)).toBe(true)
   })
+})
 
+describe("readAgentContextImages", () => {
   it("reads each image of each user message in conversation order and keeps the ones found, by number", async () => {
     const earlierPhoto = createImageAttachment(1, "earlier.png")
     const missingPhoto = createImageAttachment(3, "missing.png")
@@ -581,7 +578,7 @@ describe("loadAgentContextImages", () => {
             : laterBytes
     )
 
-    const images = await loadAgentContextImages(
+    const images = await readAgentContextImages(
       [
         createUserMessage(1, "Earlier", [
           earlierPhoto,
@@ -594,7 +591,6 @@ describe("loadAgentContextImages", () => {
         ),
         createUserMessage(3, "Later", [missingPhoto, laterPhoto])
       ],
-      true,
       findAttachmentImage
     )
 
@@ -616,9 +612,8 @@ describe("loadAgentContextImages", () => {
     const failure = new Error("EACCES")
 
     await expect(
-      loadAgentContextImages(
+      readAgentContextImages(
         [createUserMessage(1, "Look", [createImageAttachment(1, "photo.png")])],
-        true,
         () => Promise.reject(failure)
       )
     ).rejects.toBe(failure)
@@ -647,12 +642,12 @@ describe("calculateAgentContextHistoryMessageCount", () => {
     ]
 
     expect(
-      buildAgentContext(
-        "You are Lys.",
-        history,
-        createNewMessage("Go on"),
-        UNSEEN_IMAGES
-      )
+      buildAgentContext({
+        systemPrompt: "You are Lys.",
+        history: history,
+        userMessage: createNewMessage("Go on"),
+        images: UNSEEN_CONTEXT_IMAGES
+      })
     ).toHaveLength(8)
     expect(calculateAgentContextHistoryMessageCount(history)).toBe(3)
   })

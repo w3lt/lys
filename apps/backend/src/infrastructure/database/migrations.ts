@@ -477,10 +477,11 @@ const databaseMigrations: readonly (string | DatabaseMigrationStep)[] = [
   // conversation, by which the model reads it. The name is unique within its
   // message ignoring ASCII case (NOCASE), as the file systems Lys runs on
   // compare file names; the backend compares names without case in full
-  // Unicode before it writes. SQLite checks the name against the rules every
-  // path component must meet and that an image carries its media type and
-  // size while a text file carries neither; the attachment schema checks the
-  // rest of every row the backend writes and reads.
+  // Unicode before it writes. SQLite checks that the name is not empty, not
+  // `.` or `..`, and holds no slash, and that an image carries its media type
+  // and size while a text file carries neither; the attachment schema checks
+  // the rest of the name rules (no control character, at most 255 UTF-8
+  // bytes) and of every row the backend writes and reads.
   `
     CREATE TABLE conversation_attachments (
       conversation_id TEXT NOT NULL

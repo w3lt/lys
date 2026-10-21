@@ -106,7 +106,9 @@ export type ChatRouteTestApp = TestFastify &
  * go through the `completeChatStream` spy, and every measurement, by their
  * meters and by the title task, through the `findLlmContextMeasurement` spy
  * of the decorated LLM service, whose queue rejects anything else. The
- * decorated history reader reads the same database. The backend tools are
+ * decorated history reader and editor read and edit the same database, so a
+ * case can delete a conversation while a request is in flight. The backend
+ * tools are
  * the scripted `look_up_word` tool, always ready, which numbers the
  * dictionary page of each word it looks up as a source, and
  * `check_spelling`, whose provider is never ready (`api-key-missing`). The
@@ -125,7 +127,7 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
     rmSync(attachmentsDirectoryPath, { recursive: true, force: true })
   })
   const testFastify = await createChatSseTestApp()
-  const { database, turns, replyParts, history } =
+  const { database, turns, replyParts, history, editor } =
     openConversationTestServices()
   const createConversationTurn = vi
     .spyOn(turns, "createConversationTurn")
@@ -187,6 +189,7 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
   testFastify.app.decorate("conversationTurns", turns)
   testFastify.app.decorate("replyParts", replyParts)
   testFastify.app.decorate("conversationHistoryReader", history)
+  testFastify.app.decorate("conversationHistoryEditor", editor)
   testFastify.app.decorate("chatService", chatService)
   testFastify.app.decorate("llmService", llmService)
   testFastify.app.decorate("agentService", agentService)

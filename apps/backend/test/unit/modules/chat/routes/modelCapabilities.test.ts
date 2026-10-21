@@ -2,7 +2,7 @@ import type { LlmInfo } from "@lys/protocol"
 import { describe, expect, it, vi } from "vitest"
 import {
   createModelCapabilitiesLookup,
-  findAttachmentModelCapabilities,
+  findListedModelCapabilities,
   NO_MODEL_CAPABILITIES
 } from "../../../../../src/modules/chat/routes/modelCapabilities"
 import { createDownloadedLlmModel } from "../../../support/llmFixtures"
@@ -33,33 +33,13 @@ describe("NO_MODEL_CAPABILITIES", () => {
   })
 })
 
-describe("findAttachmentModelCapabilities", () => {
-  it("answers with no capability without reading the inventory when the turn involves no attachment", async () => {
-    const findModelCapabilities = vi.fn(async () => ({
-      vision: true,
-      trainedForToolUse: true
-    }))
-
-    await expect(
-      findAttachmentModelCapabilities(
-        "qwen/qwen3-8b",
-        false,
-        findModelCapabilities
-      )
-    ).resolves.toBe(NO_MODEL_CAPABILITIES)
-    expect(findModelCapabilities).not.toHaveBeenCalled()
-  })
-
-  it("reads the model's capabilities when the turn involves an attachment", async () => {
+describe("findListedModelCapabilities", () => {
+  it("answers with the capabilities the inventory lists for the model", async () => {
     const capabilities = { vision: false, trainedForToolUse: true }
     const findModelCapabilities = vi.fn(async () => capabilities)
 
     await expect(
-      findAttachmentModelCapabilities(
-        "qwen/qwen3-8b",
-        true,
-        findModelCapabilities
-      )
+      findListedModelCapabilities("qwen/qwen3-8b", findModelCapabilities)
     ).resolves.toBe(capabilities)
     expect(findModelCapabilities).toHaveBeenCalledExactlyOnceWith(
       "qwen/qwen3-8b"
@@ -68,11 +48,7 @@ describe("findAttachmentModelCapabilities", () => {
 
   it("answers with no capability for a model the inventory does not list", async () => {
     await expect(
-      findAttachmentModelCapabilities(
-        "qwen/qwen3-8b",
-        true,
-        async () => undefined
-      )
+      findListedModelCapabilities("qwen/qwen3-8b", async () => undefined)
     ).resolves.toBe(NO_MODEL_CAPABILITIES)
   })
 
@@ -80,7 +56,7 @@ describe("findAttachmentModelCapabilities", () => {
     const failure = new Error("queue full")
 
     await expect(
-      findAttachmentModelCapabilities("qwen/qwen3-8b", true, () =>
+      findListedModelCapabilities("qwen/qwen3-8b", () =>
         Promise.reject(failure)
       )
     ).rejects.toBe(failure)

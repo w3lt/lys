@@ -596,7 +596,7 @@ export function registerConversationRecordReaderContractSuite(
         ])
       })
 
-      it("projects a user message's stored attachments in number order, each with its kind's values", () => {
+      it("projects a user message's stored attachments in number order, not in name or write order, each with its kind's values", () => {
         const harness = createHarness()
         harness.saveConversation({
           id: CONVERSATION_ID,
@@ -610,7 +610,7 @@ export function registerConversationRecordReaderContractSuite(
           content: "Look",
           createdAt: "2025-01-01T00:00:01.000Z",
           attachments: [
-            createImageAttachment(2, "photo.png", { width: 640, height: 480 }),
+            createImageAttachment(2, "album.png", { width: 640, height: 480 }),
             createTextAttachment(1, "notes.md", 1234)
           ]
         })
@@ -634,7 +634,7 @@ export function registerConversationRecordReaderContractSuite(
             {
               kind: "image",
               number: 2,
-              name: "photo.png",
+              name: "album.png",
               sizeBytes: 33,
               mediaType: "image/png",
               width: 640,

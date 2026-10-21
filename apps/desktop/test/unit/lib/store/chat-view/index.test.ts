@@ -17,6 +17,7 @@ import { NO_CHAT_TOOL_OFFER, type ChatToolOfferResult } from "@/lib/store/tools"
 import {
   buildPngFile,
   buildTextFile,
+  ControlledFile,
   UnreadableFile
 } from "../../../support/attachmentFixtures"
 import {
@@ -465,6 +466,54 @@ describe("createChatViewStore", () => {
         attachmentRefusal: undefined
       })
     })
+
+    it("stages a file whose read finishes later while the conversation stays", async () => {
+      const { store } = createChatHarness()
+      const file = new ControlledFile(["# Notes"], "notes.md")
+      const selection = store.getState().addAttachments([file])
+      await waitForMicrotasks()
+      const whileReading = store.getState().attachments
+
+      await file.resolveRead()
+      await selection
+
+      expect(whileReading).toEqual([])
+      expect(store.getState()).toMatchObject({
+        attachments: [
+          { draft: { kind: "text", name: "notes.md", sizeBytes: 7 } }
+        ],
+        attachmentRefusal: undefined
+      })
+    })
+
+    it("drops a selection whose files were still being read when the conversation was reset", async () => {
+      const { store } = createChatHarness()
+      const file = new ControlledFile(["# Notes"], "notes.md")
+      const selection = store.getState().addAttachments([file])
+      await waitForMicrotasks()
+
+      store.getState().resetConversation()
+      await file.resolveRead()
+      await selection
+
+      expect(store.getState()).toMatchObject({
+        attachments: [],
+        attachmentRefusal: undefined
+      })
+    })
+
+    it("records no refusal for a read that failed after the conversation was reset", async () => {
+      const { store } = createChatHarness()
+      const file = new ControlledFile(["# Notes"], "notes.md")
+      const selection = store.getState().addAttachments([file])
+      await waitForMicrotasks()
+
+      store.getState().resetConversation()
+      file.rejectRead(new Error("The file is gone"))
+      await selection
+
+      expect(store.getState().attachmentRefusal).toBeUndefined()
+    })
   })
 
   describe("sendMessage", () => {
@@ -630,6 +679,28 @@ describe("createChatViewStore", () => {
         attachments: [],
         attachmentRefusal: undefined
       })
+    })
+
+    it("clears the attachment refusal once the turn starts", async () => {
+      const { streams } = startChatBackend()
+      const { store } = createChatHarness()
+      await store
+        .getState()
+        .addAttachments([buildTextFile("notes.md", "# Notes")])
+      await store
+        .getState()
+        .addAttachments([buildTextFile("notes.md", "again")])
+      store.getState().setInputDraft("Summarize the notes")
+
+      void store.getState().sendMessage()
+      await waitForMicrotasks()
+      const whileAwaiting = store.getState().attachmentRefusal
+      await sendStreamEvents(streams[0], NEW_TURN_EVENT)
+
+      expect(whileAwaiting).toMatchObject({
+        message: "The file notes.md is already uploaded"
+      })
+      expect(store.getState().attachmentRefusal).toBeUndefined()
     })
 
     it("keeps a file staged after submitting", async () => {
@@ -1700,6 +1771,25 @@ describe("closeConversation", () => {
     expect(store.getState()).toMatchObject({
       conversation: undefined,
       inputDraft: ""
+    })
+  })
+
+  it("drops a selection whose files were still being read when the shown conversation closed", async () => {
+    startBackendFake(buildStoredConversationRoutes(STORED_CONVERSATION))
+    const { store } = createChatHarness()
+    await store.getState().openConversation(STORED_ID)
+    const file = new ControlledFile(["# Notes"], "notes.md")
+    const selection = store.getState().addAttachments([file])
+    await waitForMicrotasks()
+
+    store.getState().closeConversation(STORED_ID)
+    await file.resolveRead()
+    await selection
+
+    expect(store.getState()).toMatchObject({
+      conversation: undefined,
+      attachments: [],
+      attachmentRefusal: undefined
     })
   })
 

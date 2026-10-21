@@ -1,4 +1,5 @@
 import {
+  buildAttachmentDraft,
   parseAttachmentContent,
   type ConversationAttachmentDraft
 } from "@lys/share"
@@ -49,21 +50,10 @@ function buildParsedAttachment(
 ): ParsedChatAttachment | undefined {
   const classified = parseAttachmentContent(content)
   if (classified.kind === "unsupported") return undefined
-  const draft: ConversationAttachmentDraft =
-    classified.kind === "image"
-      ? {
-          kind: "image",
-          name: attachment.name,
-          sizeBytes: content.length,
-          mediaType: classified.mediaType,
-          width: classified.width,
-          height: classified.height
-        }
-      : { kind: "text", name: attachment.name, sizeBytes: content.length }
   return Object.freeze({
     name: attachment.name,
     content,
-    draft: Object.freeze(draft)
+    draft: buildAttachmentDraft(attachment.name, content.length, classified)
   })
 }
 

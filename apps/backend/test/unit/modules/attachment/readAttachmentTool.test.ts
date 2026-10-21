@@ -1,3 +1,4 @@
+import { READ_ATTACHMENT_TOOL_NAME } from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
 import type { BuiltInToolCallArguments } from "../../../../src/modules/tool/builtIn/builtInTool"
 import ReadAttachmentTool, {
@@ -5,7 +6,6 @@ import ReadAttachmentTool, {
   listReadableAttachments,
   MAXIMUM_READ_CHARACTERS,
   MAXIMUM_READ_LINE_COUNT,
-  READ_ATTACHMENT_TOOL_NAME,
   type ReadableAttachment,
   type ReadAttachmentFile
 } from "../../../../src/modules/attachment/readAttachmentTool"
@@ -224,6 +224,20 @@ describe("ReadAttachmentTool", () => {
     )
   })
 
+  it("splits lines at classic Mac line breaks, mixed with the other kinds", async () => {
+    const tool = new ReadAttachmentTool(
+      [NOTES],
+      createFileReader(new Map([["notes.md", "one\rtwo\r\nthree\nfour\r"]]))
+        .readAttachmentFile
+    )
+
+    const result = await runRead(tool, { number: 1 })
+
+    expect(result.content).toBe(
+      "[attachment 1] notes.md, lines 1–4 of 4 (30 bytes).\none\ntwo\nthree\nfour"
+    )
+  })
+
   it("returns at most the line limit per call, lowering a larger request to it", async () => {
     const lineCount = MAXIMUM_READ_LINE_COUNT + 5
     const tool = new ReadAttachmentTool(
@@ -393,7 +407,7 @@ describe("ReadAttachmentTool", () => {
       [
         "an image",
         { number: 2 },
-        "[attachment 2] photo.png is an image, which you see with the message it was attached to; read_attachment reads text files only."
+        "[attachment 2] photo.png is an image, which is sent with the message it was attached to, or explained there when it is not; read_attachment reads text files only."
       ],
       [
         "a start line below 1",

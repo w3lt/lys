@@ -12,6 +12,7 @@ import {
   MAXIMUM_ATTACHMENT_BYTES,
   MAXIMUM_MESSAGE_ATTACHMENT_BYTES,
   MAXIMUM_MESSAGE_ATTACHMENT_COUNT,
+  READ_ATTACHMENT_TOOL_NAME,
   toolDefinitionSchema,
   toolNameSchema,
   type ToolDefinition
@@ -52,7 +53,7 @@ const BYTES_PER_MEBIBYTE = 1024 * 1024
  * @remarks Holds a message with `MAXIMUM_MESSAGE_ATTACHMENT_BYTES` of
  * attachments: base64 makes content a third longer, and the JSON around it
  * is small. The backend enforces it as the route's body limit and answers a
- * larger body with `413`; other routes keep Fastify's 1 MiB default.
+ * larger body with `413`; every other route keeps its own limit.
  */
 export const MAXIMUM_CHAT_BODY_BYTES = 32 * BYTES_PER_MEBIBYTE
 
@@ -191,20 +192,43 @@ function hasDistinctBackendToolNames(toolNames: readonly string[]): boolean {
   return new Set(toolNames).size === toolNames.length
 }
 
+/** Explanation of a refused offer that names the backend's attachment reader. */
+const RESERVED_TOOL_NAME_MESSAGE = `A request does not offer ${READ_ATTACHMENT_TOOL_NAME}; the backend adds it to a turn itself.`
+
+/**
+ * Answers whether no offered name is the backend's attachment reader, which
+ * the backend adds to a turn itself.
+ *
+ * @param toolNames - Offered tool names.
+ * @returns True when none is `READ_ATTACHMENT_TOOL_NAME`.
+ */
+function hasNoReservedToolName(toolNames: readonly string[]): boolean {
+  return !toolNames.includes(READ_ATTACHMENT_TOOL_NAME)
+}
+
 /**
  * Validates each list of a chat tool offer on its own, before the checks
  * across both lists.
  */
 const chatToolOfferListsSchema = z.strictObject({
-  /** Definitions of the switched-on client tools, each name once; may be empty. */
+  /**
+   * Definitions of the switched-on client tools, each name once and none
+   * named like the backend's attachment reader; may be empty.
+   */
   definitions: z
     .array(toolDefinitionSchema)
     .refine(hasDistinctToolNames, "A request offers each tool name once.")
     .refine(hasOnlyClientTools, "Offered definitions are client tools.")
+    .refine(
+      (definitions) =>
+        hasNoReservedToolName(definitions.map((tool) => tool.name)),
+      RESERVED_TOOL_NAME_MESSAGE
+    )
     .readonly(),
   /**
-   * Names of the switched-on backend tools, each name once. Absence means
-   * the request offers no backend tool.
+   * Names of the switched-on backend tools, each name once and none the
+   * backend's attachment reader. Absence means the request offers no
+   * backend tool.
    */
   backendToolNames: z
     .array(toolNameSchema)
@@ -212,6 +236,7 @@ const chatToolOfferListsSchema = z.strictObject({
       hasDistinctBackendToolNames,
       "A request offers each backend tool name once."
     )
+    .refine(hasNoReservedToolName, RESERVED_TOOL_NAME_MESSAGE)
     .readonly()
     .optional()
 })
@@ -250,10 +275,12 @@ function hasDistinctOfferedToolNames(offer: ChatToolOfferCandidate): boolean {
  * @remarks Lists the client's switched-on tools as complete definitions,
  * because the backend does not know them, and the switched-on tools the
  * backend runs by name, because the backend owns their definitions. At least
- * one tool is offered, and no name is offered twice across the two lists.
- * The backend rejects a backend tool name it does not run (400) and an
- * offered backend tool that cannot run now (409). Offered only to a model
- * trained for tool use.
+ * one tool is offered, no name is offered twice across the two lists, and
+ * neither list names the backend's attachment reader
+ * (`READ_ATTACHMENT_TOOL_NAME`), which the backend adds to a turn itself
+ * when the conversation holds a text attachment. The backend rejects a
+ * backend tool name it does not run (400) and an offered backend tool that
+ * cannot run now (409). Offered only to a model trained for tool use.
  */
 export const chatToolOfferSchema = chatToolOfferListsSchema
   .refine(hasOfferedTool, "A tool offer names at least one tool.")

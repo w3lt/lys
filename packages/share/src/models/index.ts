@@ -19,11 +19,12 @@ export {
 export {
   attachmentImageMediaTypeSchema,
   attachmentNameSchema,
+  buildAttachmentDraft,
   buildAttachmentNameKey,
   parseAttachmentContent,
   conversationAttachmentDraftSchema,
   conversationAttachmentSchema,
-  estimateImageTokens,
+  calculateImageTokens,
   hasDistinctAttachmentNames,
   IMAGE_PATCH_PIXELS,
   MAXIMUM_ATTACHMENT_BYTES,
@@ -31,11 +32,13 @@ export {
   MAXIMUM_IMAGE_TOKENS,
   MAXIMUM_MESSAGE_ATTACHMENT_BYTES,
   MAXIMUM_MESSAGE_ATTACHMENT_COUNT,
+  READ_ATTACHMENT_TOOL_NAME,
   type AttachmentContent,
   type AttachmentImageMediaType,
   type ConversationAttachment,
   type ConversationAttachmentDraft,
-  type ConversationImageAttachment
+  type ConversationImageAttachment,
+  type SupportedAttachmentContent
 } from "./attachment"
 export {
   conversationAssistantMessageSchema,

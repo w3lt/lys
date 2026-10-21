@@ -1,7 +1,7 @@
 import type {
   Conversation,
   ConversationAssistantMessage,
-  ConversationAttachment,
+  ConversationImageAttachment,
   ConversationMetadata,
   ConversationUserMessage
 } from "@lys/share"
@@ -68,7 +68,7 @@ function createMessageAttachments(
 ): void {
   const insertAttachment = statements.getStatement(INSERT_ATTACHMENT_SQL)
   for (const attachment of message.attachments) {
-    const image: ConversationAttachment | undefined =
+    const image: ConversationImageAttachment | undefined =
       attachment.kind === "image" ? attachment : undefined
     insertAttachment.run(
       conversationId,
@@ -76,10 +76,10 @@ function createMessageAttachments(
       attachment.number,
       attachment.name,
       attachment.kind,
-      image?.kind === "image" ? image.mediaType : null,
+      image?.mediaType ?? null,
       attachment.sizeBytes,
-      image?.kind === "image" ? image.width : null,
-      image?.kind === "image" ? image.height : null
+      image?.width ?? null,
+      image?.height ?? null
     )
   }
 }

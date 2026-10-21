@@ -19,7 +19,7 @@ import {
   formatConversationAgentName
 } from "@/lib/store/agents/conversation-agent"
 import { useChatViewStore } from "@/lib/store/chat-view"
-import { estimateStagedImageTokens } from "@/lib/store/chat-view/attachments"
+import { calculateStagedImageTokens } from "@/lib/store/chat-view/attachments"
 import { useConversationHistoryStore } from "@/lib/store/conversation-history"
 import { findShownToolCall, useToolCallStore } from "@/lib/store/tool-calls"
 
@@ -125,9 +125,10 @@ export type ComposerProps = {
  *
  * Files chosen through the add menu or dropped on the field are handed to
  * the store, which reads and admits them and lists them in the tray above
- * the field; they are sent with the next message. A file the store refuses
- * is named in the field's polite status line, which stays in the page while
- * it has nothing to say. Pasted text stays in the draft, however long it is.
+ * the field; they are sent with the next message. Why the store refused a
+ * file is said in the field's polite status line, which stays in the page
+ * while it has nothing to say. Pasted text stays in the draft, however long
+ * it is.
  * One affordance is staged ahead of the capability behind it and is
  * deliberately inert: selecting weights updates settings in memory only,
  * since this view does not persist them. Context figures come from the
@@ -204,7 +205,7 @@ export function Composer({
   )
   const contextMeter = buildContextMeterState(contextMeasurement.outcome, {
     draft: inputDraft,
-    attachmentTokens: estimateStagedImageTokens(attachments),
+    attachmentTokens: calculateStagedImageTokens(attachments),
     reserve: settings.generation.replyCeiling
   })
   const hasAttachedTextFiles = attachments.some(

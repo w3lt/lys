@@ -19,6 +19,16 @@ export const MAXIMUM_MESSAGE_ATTACHMENT_BYTES = 20 * BYTES_PER_MEBIBYTE
 export const MAXIMUM_MESSAGE_ATTACHMENT_COUNT = 8
 
 /**
+ * Name the model calls the backend's attachment reader by.
+ *
+ * @remarks The backend adds the reader to a turn's tools itself when the
+ * conversation holds a text attachment, so a chat request may not offer a
+ * tool of this name: the request contract refuses one before the backend
+ * stores anything.
+ */
+export const READ_ATTACHMENT_TOOL_NAME = "read_attachment"
+
+/**
  * Side, in pixels, of the square patch of an image that a vision model turns
  * into one token.
  *
@@ -57,11 +67,19 @@ function calculateUtf8ByteLength(text: string): number {
 }
 
 /**
+ * Matches a C0 or C1 control character, which a file name never shows and a
+ * model would read as part of the attachment list.
+ */
+const CONTROL_CHARACTER_PATTERN = /[\p{Cc}]/u
+
+/**
  * Validates the name of an attachment, which is also its file name on disk.
  *
  * @remarks A name is non-empty, is neither `.` nor `..`, holds no `/` and no
- * NUL character, and has at most {@link MAXIMUM_ATTACHMENT_NAME_BYTES} UTF-8
- * bytes, so it names exactly one entry of the folder it is stored in.
+ * control character (the C0 and C1 ranges, NUL included), and has at most
+ * {@link MAXIMUM_ATTACHMENT_NAME_BYTES} UTF-8 bytes, so it names exactly one
+ * entry of the folder it is stored in and reads as one line in the
+ * attachment list the model gets.
  */
 export const attachmentNameSchema = z
   .string()
@@ -71,8 +89,8 @@ export const attachmentNameSchema = z
     "An attachment name is neither . nor .."
   )
   .refine(
-    (name) => !name.includes("/") && !name.includes("\0"),
-    "An attachment name holds no slash and no NUL character."
+    (name) => !name.includes("/") && !CONTROL_CHARACTER_PATTERN.test(name),
+    "An attachment name holds no slash and no control character."
   )
   .refine(
     (name) => calculateUtf8ByteLength(name) <= MAXIMUM_ATTACHMENT_NAME_BYTES,
@@ -172,13 +190,50 @@ export type ConversationImageAttachment = Extract<
  * Builds the key duplicate checks compare an attachment name by.
  *
  * @param name - Attachment name as given.
- * @returns The name in Unicode normalization form C and lower case, so two
- * names that differ only in case or in the composition of their accented
+ * @returns The name in Unicode normalization form C with its case folded, so
+ * two names that differ only in case or in the composition of their accented
  * characters get the same key, as the file systems Lys stores attachments
- * on treat them.
+ * on treat them. The fold goes through upper case first, so a letter whose
+ * upper case is several letters, such as `ß` and `SS` or the `ﬁ` ligature
+ * and `fi`, folds to the same key as those letters; case-insensitive file
+ * systems treat them as one name too.
  */
 export function buildAttachmentNameKey(name: string): string {
-  return name.normalize("NFC").toLowerCase()
+  return name.normalize("NFC").toUpperCase().toLowerCase().normalize("NFC")
+}
+
+/** Content of an attachment Lys can send: an image with its sides, or text. */
+export type SupportedAttachmentContent = Exclude<
+  AttachmentContent,
+  Readonly<{ kind: "unsupported" }>
+>
+
+/**
+ * Builds the attachment the conversation stores for a file, before it is
+ * numbered.
+ *
+ * @param name - Validated attachment name.
+ * @param sizeBytes - Size of the file in bytes.
+ * @param content - What the bytes hold, as {@link parseAttachmentContent}
+ * read it.
+ * @returns A frozen image draft with the media type and sides read from the
+ * bytes, or a frozen text draft.
+ */
+export function buildAttachmentDraft(
+  name: string,
+  sizeBytes: number,
+  content: SupportedAttachmentContent
+): ConversationAttachmentDraft {
+  if (content.kind === "text")
+    return Object.freeze({ kind: "text", name, sizeBytes })
+  return Object.freeze({
+    kind: "image",
+    name,
+    sizeBytes,
+    mediaType: content.mediaType,
+    width: content.width,
+    height: content.height
+  })
 }
 
 /**
@@ -194,14 +249,16 @@ export function hasDistinctAttachmentNames(names: readonly string[]): boolean {
 }
 
 /**
- * Estimates the tokens one image takes in a vision model's context.
+ * Calculates the tokens one image is estimated to take in a vision model's
+ * context.
  *
  * @param width - Width in pixels; positive.
  * @param height - Height in pixels; positive.
  * @returns One token per {@link IMAGE_PATCH_PIXELS} square patch, partial
- * patches counted whole, at most {@link MAXIMUM_IMAGE_TOKENS}.
+ * patches counted whole, at most {@link MAXIMUM_IMAGE_TOKENS}. An estimate:
+ * the patch size is one common vision models use, and each model differs.
  */
-export function estimateImageTokens(width: number, height: number): number {
+export function calculateImageTokens(width: number, height: number): number {
   const patches =
     Math.ceil(width / IMAGE_PATCH_PIXELS) *
     Math.ceil(height / IMAGE_PATCH_PIXELS)
@@ -321,6 +378,15 @@ const WEBP_EXTENDED_WIDTH_OFFSET = 24
 
 /** Offset of the canvas height in an extended WebP header. */
 const WEBP_EXTENDED_HEIGHT_OFFSET = 27
+
+/** Bytes an extended WebP header's canvas height takes. */
+const WEBP_EXTENDED_DIMENSION_BYTES = 3
+
+/** Bytes the packed sides of a lossless WebP bitstream take. */
+const WEBP_LOSSLESS_DIMENSIONS_BYTES = 4
+
+/** Bytes a lossy WebP side takes. */
+const WEBP_LOSSY_DIMENSION_BYTES = 2
 
 /**
  * Answers whether bytes hold given bytes at an offset.
@@ -497,16 +563,37 @@ function readJpegContent(bytes: Uint8Array): AttachmentContent {
 }
 
 /**
+ * Answers whether bytes reach the end of a field.
+ *
+ * @param bytes - Bytes to inspect.
+ * @param offset - Position of the field's first byte.
+ * @param length - Bytes the field takes.
+ * @returns True when the field lies within the bytes.
+ */
+function hasFieldAt(
+  bytes: Uint8Array,
+  offset: number,
+  length: number
+): boolean {
+  return bytes.length >= offset + length
+}
+
+/**
  * Reads the size of a WebP image from its first chunk: a lossy or lossless
  * bitstream, or the extended header.
  *
  * @param bytes - Bytes that start with the WebP signature.
  * @returns The image content, or unsupported when the first chunk is none of
- * the three or its bitstream header is damaged.
+ * the three, its bitstream header is damaged, or the bytes end before the
+ * size fields: a file cut short declares no size, and a side read past the
+ * end would be a guess.
  */
 function readWebpContent(bytes: Uint8Array): AttachmentContent {
   if (hasAsciiAt(bytes, WEBP_CHUNK_TYPE_OFFSET, "VP8 ")) {
-    if (!hasBytesAt(bytes, WEBP_LOSSY_START_CODE_OFFSET, WEBP_LOSSY_START_CODE))
+    if (
+      !hasBytesAt(bytes, WEBP_LOSSY_START_CODE_OFFSET, WEBP_LOSSY_START_CODE) ||
+      !hasFieldAt(bytes, WEBP_LOSSY_HEIGHT_OFFSET, WEBP_LOSSY_DIMENSION_BYTES)
+    )
       return UNSUPPORTED_CONTENT
     return buildImageContent(
       "image/webp",
@@ -519,7 +606,12 @@ function readWebpContent(bytes: Uint8Array): AttachmentContent {
   if (hasAsciiAt(bytes, WEBP_CHUNK_TYPE_OFFSET, "VP8L")) {
     if (
       readByte(bytes, WEBP_LOSSLESS_SIGNATURE_OFFSET) !==
-      WEBP_LOSSLESS_SIGNATURE
+        WEBP_LOSSLESS_SIGNATURE ||
+      !hasFieldAt(
+        bytes,
+        WEBP_LOSSLESS_DIMENSIONS_OFFSET,
+        WEBP_LOSSLESS_DIMENSIONS_BYTES
+      )
     )
       return UNSUPPORTED_CONTENT
     const packedSides = readUint32LittleEndian(
@@ -535,6 +627,14 @@ function readWebpContent(bytes: Uint8Array): AttachmentContent {
     )
   }
   if (hasAsciiAt(bytes, WEBP_CHUNK_TYPE_OFFSET, "VP8X")) {
+    if (
+      !hasFieldAt(
+        bytes,
+        WEBP_EXTENDED_HEIGHT_OFFSET,
+        WEBP_EXTENDED_DIMENSION_BYTES
+      )
+    )
+      return UNSUPPORTED_CONTENT
     return buildImageContent(
       "image/webp",
       readUint24LittleEndian(bytes, WEBP_EXTENDED_WIDTH_OFFSET) + 1,

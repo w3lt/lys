@@ -23,7 +23,7 @@ export type FindModelCapabilities = (
 
 /**
  * Capabilities applied when no attachment is involved, so nothing is read
- * from LM Studio, or when the model is not in the inventory: the model sees
+ * from LM Studio, and when the model is not in the inventory: the model sees
  * no image and is offered no attachment reader.
  */
 export const NO_MODEL_CAPABILITIES: ModelCapabilities = Object.freeze({
@@ -32,22 +32,20 @@ export const NO_MODEL_CAPABILITIES: ModelCapabilities = Object.freeze({
 })
 
 /**
- * Finds what the model can do with a turn's attachments.
+ * Finds what a model the inventory lists can do with a turn's attachments.
  *
  * @param model - Model the request names.
- * @param hasAttachments - Whether the turn involves an attachment.
  * @param findModelCapabilities - Inventory lookup.
- * @returns A promise resolving to the model's capabilities; to
- * {@link NO_MODEL_CAPABILITIES} without reading the inventory when the turn
- * involves no attachment, and when the inventory does not list the model.
+ * @returns A promise resolving to the model's capabilities, or to
+ * {@link NO_MODEL_CAPABILITIES} when the inventory does not list the model.
+ * A caller whose turn involves no attachment answers with
+ * {@link NO_MODEL_CAPABILITIES} itself, without calling this.
  * @throws The lookup's failure.
  */
-export async function findAttachmentModelCapabilities(
+export async function findListedModelCapabilities(
   model: string,
-  hasAttachments: boolean,
   findModelCapabilities: FindModelCapabilities
 ): Promise<ModelCapabilities> {
-  if (!hasAttachments) return NO_MODEL_CAPABILITIES
   return (await findModelCapabilities(model)) ?? NO_MODEL_CAPABILITIES
 }
 

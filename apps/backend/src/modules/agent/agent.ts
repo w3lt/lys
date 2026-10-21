@@ -18,7 +18,9 @@ import { ChatCompletionCancelledError } from "../../utils/errors"
 import {
   buildAgentContext,
   calculateAgentContextHistoryMessageCount,
-  loadAgentContextImages,
+  readAgentContextImages,
+  UNSEEN_CONTEXT_IMAGES,
+  type AgentContextImages,
   type AgentContextUserMessage,
   type FindAttachmentImage
 } from "./agentContext"
@@ -154,7 +156,9 @@ export type AgentTurn = Readonly<{
   /**
    * Creates the approval gate of one round of tool calls, which asks the
    * person through every stream following the reply unless the tool is
-   * saved as Just run. Called once per round, when the round's calls arrive.
+   * saved as Just run. Called once per round that has a call to gate, when
+   * the round's calls arrive; a round whose calls all name tools that run
+   * without approval creates none.
    */
   createToolCallGate: CreateToolCallGate
   /**
@@ -343,19 +347,19 @@ export default class Agent {
   public async findContextMeasurement(
     input: AgentContextInput
   ): Promise<AgentContextMeasurement | undefined> {
-    const images = await loadAgentContextImages(
+    const images = await readContextImages(
       input.history,
       input.canSeeImages,
       input.findAttachmentImage
     )
     const measurement =
       await this.#replyContextMeter.findReplyContextMeasurement({
-        messages: buildAgentContext(
-          this.#systemPrompt,
-          input.history,
-          EMPTY_USER_MESSAGE,
+        messages: buildAgentContext({
+          systemPrompt: this.#systemPrompt,
+          history: input.history,
+          userMessage: EMPTY_USER_MESSAGE,
           images
-        ),
+        }),
         tools: buildDefinedToolOffer(input.tools),
         model: input.model
       })
@@ -461,17 +465,17 @@ export default class Agent {
       }),
       sourceCatalog: new SourceCatalog(turn.sources)
     })
-    const images = await loadAgentContextImages(
+    const images = await readContextImages(
       [...turn.history, turn.userMessage],
       turn.canSeeImages,
       turn.findAttachmentImage
     )
-    const messages = buildAgentContext(
-      this.#systemPrompt,
-      turn.history,
-      turn.userMessage,
+    const messages = buildAgentContext({
+      systemPrompt: this.#systemPrompt,
+      history: turn.history,
+      userMessage: turn.userMessage,
       images
-    )
+    })
     const round = await this.#createReplyRound(state, { messages, round: 0 })
     return this.#handleReplyRoundEnd(state, messages, round)
   }
@@ -597,6 +601,30 @@ export default class Agent {
       abortSignal: turn.abortSignal
     })
   }
+}
+
+/**
+ * Reads the images a context sends, for the model that answers it.
+ *
+ * @param messages - Stored messages the context is built from, in
+ * conversation order.
+ * @param canSeeImages - Whether the model sees images.
+ * @param findAttachmentImage - Reads one image's bytes; borrowed until the
+ * returned promise settles.
+ * @returns A promise resolving to {@link UNSEEN_CONTEXT_IMAGES} for a model
+ * without vision, without reading any file; otherwise to the images as
+ * {@link readAgentContextImages} read them.
+ * @throws The reader's failure, for a file that cannot be read although it
+ * is not missing.
+ */
+async function readContextImages(
+  messages: readonly ConversationMessage[],
+  canSeeImages: boolean,
+  findAttachmentImage: FindAttachmentImage
+): Promise<AgentContextImages> {
+  return canSeeImages
+    ? await readAgentContextImages(messages, findAttachmentImage)
+    : UNSEEN_CONTEXT_IMAGES
 }
 
 /**

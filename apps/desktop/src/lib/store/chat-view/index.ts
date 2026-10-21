@@ -336,11 +336,16 @@ export type ChatViewActions = {
    * @remarks Each file is admitted on its own: by its name and size against
    * the tray, then by its content and by what the loaded model can take,
    * which is sampled once per selection. Admitted files join the tray in
-   * selection order; the first refusal of the selection is recorded as the
-   * attachment refusal, which the next selection replaces or clears.
-   * Selections are staged one after another, so a selection is admitted
-   * against the files of the one before it. While no loaded model is
-   * listed, every file is refused with the chat-unavailable sentence.
+   * selection order. One refusal per selection is recorded as the attachment
+   * refusal, which the next selection replaces or clears: the first refusal
+   * by name or size, else the first by content or by the loaded model. A
+   * file that cannot be read keeps its whole selection out of the tray, and
+   * its failure is the refusal recorded. Selections are staged one after
+   * another, so a selection is admitted against the files of the one before
+   * it. While no loaded model is listed, every file is refused with the
+   * chat-unavailable sentence. A selection made before the conversation is
+   * reset or closed and not staged yet is dropped: it joins no tray and
+   * records no refusal.
    */
   addAttachments: (files: readonly File[]) => Promise<void>
   /**
@@ -562,7 +567,9 @@ type OwnedChatStreamOptions<TStreamEvent> = {
  * Converts an unknown value thrown while reading staged files into a refusal.
  *
  * @param error - Value thrown while reading a file of the selection.
- * @returns A non-empty sentence naming the file that could not be read.
+ * @returns The thrown error's message, which names the file that could not
+ * be read when the reader threw it; a sentence saying the files could not be
+ * read when the value is not an error or its message is empty.
  */
 function formatAttachmentReadErrorMessage(error: unknown): string {
   return error instanceof Error && error.message
@@ -780,6 +787,11 @@ export function createChatViewStore(
   let attachmentStaging: Promise<void> = Promise.resolve()
   /** Occurrence number of the next attachment refusal. */
   let nextRefusalOccurrence = 1
+  /**
+   * Generation of the tray; a reset starts the next one, so a selection made
+   * for an earlier generation is dropped instead of joining the reset tray.
+   */
+  let trayGeneration = 0
 
   /**
    * Builds the next attachment refusal.
@@ -1404,10 +1416,14 @@ export function createChatViewStore(
      * staged.
      *
      * @param files - Files of the selection, in selection order.
-     * @returns Settlement once the tray and the refusal are updated.
+     * @param generation - Generation of the tray the selection was made for.
+     * @returns Settlement once the tray and the refusal are updated, or once
+     * the selection is dropped because the conversation was reset after the
+     * selection was made.
      */
     async function addAttachmentSelection(
-      files: readonly File[]
+      files: readonly File[],
+      generation: number
     ): Promise<void> {
       const support = dependencies.readAttachmentModelSupport()
       if (support === undefined) {
@@ -1423,6 +1439,7 @@ export function createChatViewStore(
           admission.admitted.map(readAttachmentCandidate)
         )
       } catch (error) {
+        if (generation !== trayGeneration) return
         set({
           attachmentRefusal: buildAttachmentRefusal(
             formatAttachmentReadErrorMessage(error)
@@ -1430,6 +1447,7 @@ export function createChatViewStore(
         })
         return
       }
+      if (generation !== trayGeneration) return
       const staging = addAttachmentCandidates(
         get().attachments,
         candidates,
@@ -1452,10 +1470,13 @@ export function createChatViewStore(
      * @remarks A selection is admitted against the tray only once the
      * selection before it has read its files and joined the tray, so two
      * selections cannot stage the same name or overfill the tray together.
+     * The selection is made for the tray of this moment: a reset before it
+     * is staged drops it.
      */
     function addAttachments(files: readonly File[]): Promise<void> {
+      const generation = trayGeneration
       const staging = attachmentStaging.then(() =>
-        addAttachmentSelection(files)
+        addAttachmentSelection(files, generation)
       )
       attachmentStaging = staging
 
@@ -1721,15 +1742,17 @@ export function createChatViewStore(
      * @remarks Reset invalidates the request and open tokens before aborting
      * the local transports, clears draft, staged files and their refusal,
      * conversation, request, open, and error together, and reports no
-     * error. The selected agent stays, so the
-     * next conversation starts with it. The backend keeps generating a reply
-     * that was streaming.
+     * error. A selection made before the reset and not staged yet is
+     * dropped: it joins no tray and records no refusal. The selected agent
+     * stays, so the next conversation starts with it. The backend keeps
+     * generating a reply that was streaming.
      */
     function resetConversation(): void {
       const requestResource = activeRequestResource
       const openResource = activeOpenResource
       activeRequestResource = undefined
       activeOpenResource = undefined
+      trayGeneration += 1
       set({
         ...INITIAL_CHAT_VIEW_STATE,
         selectedAgentCode: get().selectedAgentCode

@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest"
 import type { AttachmentModelSupport } from "@/lib/models/attachment-model-support"
 import {
   parseAttachmentSelection,
-  estimateStagedImageTokens,
+  calculateStagedImageTokens,
   readAttachmentCandidate,
   addAttachmentCandidates,
   type AttachmentCandidate,
@@ -174,6 +174,12 @@ describe("parseAttachmentSelection", () => {
       "The file .. has a name Lys cannot store"
     ],
     [
+      "a name with a control character",
+      [],
+      buildTextFile("notes\u0007.md", "x"),
+      "The file notes\u0007.md has a name Lys cannot store"
+    ],
+    [
       "a full tray",
       Array.from({ length: 8 }, (_, index) =>
         buildStagedText(`file-${index + 1}.txt`)
@@ -201,6 +207,37 @@ describe("parseAttachmentSelection", () => {
       admitted: [],
       refusal
     })
+  })
+
+  it("counts the files it admits, so the ninth file of one selection is refused", () => {
+    const admission = parseAttachmentSelection(
+      [],
+      Array.from({ length: 9 }, (_, index) =>
+        buildTextFile(`file-${index + 1}.txt`, "x")
+      )
+    )
+
+    expect(admission.admitted.map((file) => file.name)).toEqual(
+      Array.from({ length: 8 }, (_, index) => `file-${index + 1}.txt`)
+    )
+    expect(admission.refusal).toBe("A message can carry at most 8 files")
+  })
+
+  it("counts the bytes of the files it admits, so the file of one selection that would exceed the total is refused", () => {
+    const admission = parseAttachmentSelection(
+      [],
+      [
+        buildBinaryFile("one.bin", 7 * MEBIBYTE),
+        buildBinaryFile("two.bin", 7 * MEBIBYTE),
+        buildBinaryFile("three.bin", 7 * MEBIBYTE)
+      ]
+    )
+
+    expect(admission.admitted.map((file) => file.name)).toEqual([
+      "one.bin",
+      "two.bin"
+    ])
+    expect(admission.refusal).toBe("A message's files can total at most 20 MB")
   })
 
   it("admits a file that fills the tray exactly", () => {
@@ -302,10 +339,10 @@ describe("addAttachmentCandidates", () => {
   })
 })
 
-describe("estimateStagedImageTokens", () => {
+describe("calculateStagedImageTokens", () => {
   it("sums the images' estimates and counts no text file", () => {
     expect(
-      estimateStagedImageTokens([
+      calculateStagedImageTokens([
         buildStagedText("a.txt", 100_000),
         buildStagedImage("photo.png", 640, 480),
         buildStagedImage("icon.png", 28, 28)
@@ -314,18 +351,18 @@ describe("estimateStagedImageTokens", () => {
   })
 
   it("is zero for an empty tray", () => {
-    expect(estimateStagedImageTokens([])).toBe(0)
+    expect(calculateStagedImageTokens([])).toBe(0)
   })
 
   it("counts a partial patch of an image as a whole token", () => {
     expect(
-      estimateStagedImageTokens([buildStagedImage("icon.png", 29, 29)])
+      calculateStagedImageTokens([buildStagedImage("icon.png", 29, 29)])
     ).toBe(4)
   })
 
   it("caps a large image's estimate", () => {
     expect(
-      estimateStagedImageTokens([buildStagedImage("poster.png", 4000, 3000)])
+      calculateStagedImageTokens([buildStagedImage("poster.png", 4000, 3000)])
     ).toBe(1280)
   })
 })

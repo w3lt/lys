@@ -1,3 +1,5 @@
+import { createControlledPromise } from "./settlement"
+
 /**
  * Creates the bytes of a PNG file as far as the classifier reads them: the
  * signature and the header chunk, without image data.
@@ -70,5 +72,45 @@ export class UnreadableFile extends File {
    */
   override arrayBuffer(): Promise<ArrayBuffer> {
     return Promise.reject(this.failure)
+  }
+}
+
+/**
+ * A file whose read settles only when the case says so, as a large file on a
+ * slow disk reads.
+ *
+ * @remarks Every read returns the same pending promise, so a case can act
+ * while the file is read and then settle the read with
+ * {@link ControlledFile.resolveRead} or {@link ControlledFile.rejectRead}.
+ */
+export class ControlledFile extends File {
+  /** The pending read every call of {@link arrayBuffer} returns. */
+  readonly #read = createControlledPromise<ArrayBuffer>()
+
+  /**
+   * Returns the pending read instead of the bytes at once.
+   *
+   * @returns A promise the case settles.
+   */
+  override arrayBuffer(): Promise<ArrayBuffer> {
+    return this.#read.promise
+  }
+
+  /**
+   * Fulfills the pending read with the file's bytes.
+   *
+   * @returns Settlement once the bytes are read and handed to the read.
+   */
+  async resolveRead(): Promise<void> {
+    this.#read.resolve(await super.arrayBuffer())
+  }
+
+  /**
+   * Rejects the pending read.
+   *
+   * @param reason - Failure the browser would report.
+   */
+  rejectRead(reason: unknown): void {
+    this.#read.reject(reason)
   }
 }

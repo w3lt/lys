@@ -1,4 +1,4 @@
-import { estimateImageTokens } from "@lys/share"
+import { calculateImageTokens } from "@lys/share"
 import { X } from "lucide-react"
 
 import type { StagedAttachment } from "@/lib/store/chat-view/attachments"
@@ -42,7 +42,9 @@ export default function ComposerAttachmentTray({
           {draft.kind === "image" ? (
             <span className="composer__chip-tokens">
               ~
-              {formatTokenCount(estimateImageTokens(draft.width, draft.height))}
+              {formatTokenCount(
+                calculateImageTokens(draft.width, draft.height)
+              )}
             </span>
           ) : null}
           <button

@@ -1,4 +1,5 @@
 import {
+  READ_ATTACHMENT_TOOL_NAME,
   toolDefinitionSchema,
   type ConversationAttachment,
   type ConversationMessage,
@@ -14,9 +15,6 @@ import type {
 } from "../tool/builtIn/builtInTool"
 import { formatAttachmentLabel, formatByteCount } from "./attachmentContext"
 import type { StoredAttachmentLocation } from "./attachmentFileStore"
-
-/** Name the model calls the tool by. */
-export const READ_ATTACHMENT_TOOL_NAME = "read_attachment"
 
 /** Most lines one read returns, inclusive; also the count when it is omitted. */
 export const MAXIMUM_READ_LINE_COUNT = 200
@@ -70,6 +68,9 @@ type AttachmentReadInputResult =
 
 /** Highest code point one UTF-16 code unit holds; a higher one takes a pair of units. */
 const HIGHEST_SINGLE_UNIT_CODE_POINT = 0xff_ff
+
+/** Matches one line break: Windows (`\r\n`), classic Mac (`\r`), or Unix (`\n`). */
+const LINE_BREAK_PATTERN = /\r\n|\r|\n/
 
 /** Lines selected for one read, and how the character limit ended them. */
 type SelectedLines = Readonly<{
@@ -141,7 +142,7 @@ export function hasReadableTextAttachment(
 export function buildReadAttachmentDefinition(): ToolDefinition {
   return toolDefinitionSchema.parse({
     name: READ_ATTACHMENT_TOOL_NAME,
-    description: `Read lines of a text file the person attached to a message of this conversation. Each message lists its attached files as "[attachment N] name"; read a file by its number N. Returns at most ${MAXIMUM_READ_LINE_COUNT} lines or ${MAXIMUM_READ_CHARACTERS.toLocaleString("en-US")} characters per call and reports the file's total lines, so read a long file in parts. Images cannot be read: you see them with their message.`,
+    description: `Read lines of a text file the person attached to a message of this conversation. Each message lists its attached files as "[attachment N] name"; read a file by its number N. Returns at most ${MAXIMUM_READ_LINE_COUNT} lines or ${MAXIMUM_READ_CHARACTERS.toLocaleString("en-US")} characters per call and reports the file's total lines, so read a long file in parts. Images cannot be read with this tool: each is sent with its message, or a sentence under that message says why it is not.`,
     group: "files",
     access: "reads",
     runner: "backend",
@@ -228,7 +229,7 @@ function parseAttachmentReadInput(
   if (readable.attachment.kind === "image")
     return Object.freeze({
       status: "invalid",
-      message: `${formatAttachmentLabel(readable.attachment)} is an image, which you see with the message it was attached to; read_attachment reads text files only.`
+      message: `${formatAttachmentLabel(readable.attachment)} is an image, which is sent with the message it was attached to, or explained there when it is not; ${READ_ATTACHMENT_TOOL_NAME} reads text files only.`
     })
   const startLine = parsePositiveInteger(
     callArguments.start_line,
@@ -255,18 +256,31 @@ function parseAttachmentReadInput(
 }
 
 /**
- * Splits a file's text into its lines.
+ * Parses a file's text into its lines.
  *
  * @param text - Decoded file text.
- * @returns The lines without their line breaks; a trailing line break ends
- * the last line rather than starting an empty one, and an empty file has no
- * lines.
+ * @returns The lines without their line breaks, whichever of the three line
+ * break forms the file uses, as {@link LINE_BREAK_PATTERN} matches them; a
+ * trailing line break ends the last line rather than starting an empty one,
+ * and an empty file has no lines.
  */
-function splitLines(text: string): readonly string[] {
+function parseFileLines(text: string): readonly string[] {
   if (text === "") return []
-  const lines = text.split("\n").map((line) => line.replace(/\r$/, ""))
+  const lines = text.split(LINE_BREAK_PATTERN)
   if (lines.at(-1) === "") lines.pop()
   return lines
+}
+
+/**
+ * Formats a line count for a sentence.
+ *
+ * @param lineCount - Whole number of lines.
+ * @returns The count with comma thousands separators and the unit, singular
+ * for one line, such as `1 line` or `1,200 lines`.
+ */
+function formatLineCount(lineCount: number): string {
+  const unit = lineCount === 1 ? "line" : "lines"
+  return `${lineCount.toLocaleString("en-US")} ${unit}`
 }
 
 /**
@@ -287,7 +301,7 @@ function buildCutLine(line: string): string {
 }
 
 /**
- * Selects the lines one read returns.
+ * Builds the selection of lines one read returns.
  *
  * @param lines - Every line of the file.
  * @param input - The read's start line and line count.
@@ -295,7 +309,7 @@ function buildCutLine(line: string): string {
  * the line that would take the selection past the character limit; a first
  * line longer than the limit is cut within, as {@link buildCutLine} cuts it.
  */
-function selectLines(
+function buildLineSelection(
   lines: readonly string[],
   input: Pick<AttachmentReadInput, "startLine" | "lineCount">
 ): SelectedLines {
@@ -392,15 +406,15 @@ function buildReadResult(
   if (input.startLine > lines.length)
     return buildFailedReadResult(
       input.readable,
-      `it has ${lines.length.toLocaleString("en-US")} lines, so there is no line ${input.startLine.toLocaleString("en-US")}.`
+      `it has ${formatLineCount(lines.length)}, so there is no line ${input.startLine.toLocaleString("en-US")}.`
     )
-  const selection = selectLines(lines, input)
+  const selection = buildLineSelection(lines, input)
   const lastLine = input.startLine + selection.lines.length - 1
   const range = `lines ${input.startLine.toLocaleString("en-US")}–${lastLine.toLocaleString("en-US")} of ${lines.length.toLocaleString("en-US")}`
   const cut = formatCutSentence(selection, input.startLine)
   const next =
     lastLine < lines.length
-      ? ` Call read_attachment with start_line ${(lastLine + 1).toLocaleString("en-US")} to continue.`
+      ? ` Call ${READ_ATTACHMENT_TOOL_NAME} with start_line ${(lastLine + 1).toLocaleString("en-US")} to continue.`
       : ""
   return Object.freeze({
     status: "succeeded",
@@ -432,7 +446,10 @@ async function runAttachmentRead(
       input.readable,
       "its file is missing from this machine."
     )
-  return buildReadResult(input, splitLines(new TextDecoder().decode(content)))
+  return buildReadResult(
+    input,
+    parseFileLines(new TextDecoder().decode(content))
+  )
 }
 
 /**
@@ -444,9 +461,12 @@ async function runAttachmentRead(
  * reach exactly those files and nothing else: a file is found through its
  * stored location, never through a path the model supplies. Parsing refuses
  * a number no attachment has and an image before anything is read; a run
- * reads the file through the borrowed reader and returns the requested
- * lines within the line and character limits, or says the file is missing.
- * Owns no resource. Concurrency model: reentrant.
+ * reads the file through the borrowed reader, as it is on disk at that
+ * moment, and returns the requested lines within the line and character
+ * limits, or says the file is missing. Nothing read is kept between calls,
+ * so a file the person changes is read as it now is, and no file's text
+ * stays in memory for the turn. Owns no resource. Concurrency model:
+ * reentrant.
  */
 export default class ReadAttachmentTool implements BuiltInTool {
   /** The conversation's attachments by number. */

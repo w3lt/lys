@@ -45,6 +45,7 @@ import ToolCallGate, {
   type SendToolApprovalPrompt
 } from "../../../../src/modules/toolApproval/toolCallGate"
 import { ChatCompletionCancelledError } from "../../../../src/utils/errors"
+import { createImageAttachment } from "../../support/attachmentFixtures"
 import {
   openConversationTestServices,
   saveSourceRow,
@@ -104,6 +105,18 @@ const TURN_REQUEST = Object.freeze({
   model: "qwen/qwen3-8b",
   generationOptions: { temperature: 0.4, replyCeiling: 128 }
 })
+
+/** The message of a case whose person attached a photo. */
+const PHOTO_MESSAGE = createUserMessage(100, "Look", [
+  createImageAttachment(1, "photo.png")
+])
+
+/** Bytes of the photo, as a case's reader returns them. */
+const PHOTO_BYTES = new Uint8Array([1, 2, 3])
+
+/** The photo message's text as the model reads it. */
+const PHOTO_MESSAGE_TEXT =
+  "Look\n\nAttached files:\n[attachment 1] photo.png (image/png, 64×32, 33 bytes)"
 
 /**
  * History of an answered question followed by a failed reply; a turn sends
@@ -699,6 +712,64 @@ describe("Agent", () => {
       model: TURN_REQUEST.model,
       generationOptions: TURN_REQUEST.generationOptions,
       abortSignal
+    })
+  })
+
+  it("reads an image once and sends it with its message in every round of a model that sees images", async () => {
+    const { entry } = createLookUpWordTool()
+    const openReplyStream = createRoundStreams(LOOK_UP_MOTH_ROUND, FINISH_ROUND)
+    const findAttachmentImage = vi.fn<AgentTurn["findAttachmentImage"]>(
+      async () => PHOTO_BYTES
+    )
+
+    await getAgentReplyOutcome({
+      openReplyStream,
+      userMessage: PHOTO_MESSAGE,
+      canSeeImages: true,
+      findAttachmentImage,
+      builtInTools: [entry]
+    })
+
+    expect(findAttachmentImage).toHaveBeenCalledExactlyOnceWith(
+      PHOTO_MESSAGE.id,
+      PHOTO_MESSAGE.attachments[0]
+    )
+    expect(
+      openReplyStream.mock.calls.map(([request]) => request.messages[1])
+    ).toEqual([
+      {
+        role: "user",
+        content: PHOTO_MESSAGE_TEXT,
+        images: [
+          { mediaType: "image/png", width: 64, height: 32, data: PHOTO_BYTES }
+        ]
+      },
+      {
+        role: "user",
+        content: PHOTO_MESSAGE_TEXT,
+        images: [
+          { mediaType: "image/png", width: 64, height: 32, data: PHOTO_BYTES }
+        ]
+      }
+    ])
+  })
+
+  it("reads no file for a model that cannot see images and tells it so under the message", async () => {
+    const openReplyStream = createEventStream({
+      type: "finish",
+      finishReason: "stop"
+    })
+
+    await getAgentReplyOutcome({
+      openReplyStream,
+      userMessage: PHOTO_MESSAGE,
+      canSeeImages: false
+    })
+
+    expect(openReplyStream.mock.calls[0]?.[0].messages[1]).toEqual({
+      role: "user",
+      content: `${PHOTO_MESSAGE_TEXT}\n[attachment 1] photo.png is an image that this model cannot see.`,
+      images: []
     })
   })
 
@@ -2176,6 +2247,7 @@ describe("Agent", () => {
       })
 
       expect(sendToolApprovalPrompt).not.toHaveBeenCalled()
+      expect(createToolCallGate).not.toHaveBeenCalled()
       expect(tool.startedWords).toEqual(["moth"])
       const callId = run.parts[0]?.id
       expect(run.events.slice(0, 2)).toEqual([
@@ -2187,6 +2259,43 @@ describe("Agent", () => {
         buildReplyPartEventMatcher({ id: callId, status: "succeeded" })
       ])
       expect(run.parts[0]).toMatchObject({ status: "succeeded" })
+    })
+
+    it("creates the round's gate once when a call that runs without approval shares the round with one that passes the gate", async () => {
+      const { tool, entry } = createLookUpWordTool()
+      const createToolCallGate = vi.fn<AgentTurn["createToolCallGate"]>(
+        async () =>
+          new ToolCallGate(
+            new Set(["read_text_file"]),
+            handleUnexpectedToolCall
+          )
+      )
+      const sendClientToolCall = vi.fn<AgentTurn["sendClientToolCall"]>(
+        async () => ({ status: "succeeded", content: "x" })
+      )
+
+      await getAgentReplyOutcome({
+        openReplyStream: createRoundStreams(
+          [
+            {
+              type: "tool-calls",
+              toolCalls: [
+                { toolName: "look_up_word", argumentText: '{"word":"moth"}' },
+                { toolName: "read_text_file", argumentText: '{"path":"/a"}' }
+              ]
+            }
+          ],
+          FINISH_ROUND
+        ),
+        clientTools: [READ_TEXT_FILE_TOOL],
+        builtInTools: [{ ...entry, runsWithoutApproval: true }],
+        createToolCallGate,
+        sendClientToolCall
+      })
+
+      expect(createToolCallGate).toHaveBeenCalledTimes(1)
+      expect(tool.startedWords).toEqual(["moth"])
+      expect(sendClientToolCall).toHaveBeenCalledTimes(1)
     })
 
     it("answers arguments the tool cannot run without prompting the person", async () => {
@@ -2718,7 +2827,7 @@ describe("Agent", () => {
       ])
     })
 
-    it("asks the model nothing more when the reply ended before a call of an unknown tool was stored", async () => {
+    it("asks the model nothing more when the reply ended before a call of an unknown tool was stored, a round that creates no gate", async () => {
       const store = openAgentTurnStore()
       const openReplyStream = createRoundStreams([
         {
@@ -2731,9 +2840,10 @@ describe("Agent", () => {
         store,
         openReplyStream,
         clientTools: [READ_TEXT_FILE_TOOL],
-        createToolCallGate: async () => {
+        createToolCallGate: handleUnexpectedToolCall,
+        createReplyPart: (stored) => (draft) => {
           updateStoredReplyToInterrupted(store)
-          return new ToolCallGate(new Set(), vi.fn())
+          return stored(draft)
         }
       })
 

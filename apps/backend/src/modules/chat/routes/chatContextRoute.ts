@@ -12,6 +12,7 @@ import type {
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify"
 import type { FindAttachmentImage } from "../../agent/agentContext"
 import type AttachmentFileStore from "../../attachment/attachmentFileStore"
+import { buildAttachmentImageReader } from "../../attachment/attachmentImageReader"
 import {
   buildReadAttachmentDefinition,
   hasReadableTextAttachment,
@@ -22,7 +23,8 @@ import handleLlmServiceRequestFailure from "../../llm/routes/handleLlmServiceReq
 import type { BuiltInToolEntry } from "../../tool/builtIn/builtInTool"
 import {
   createModelCapabilitiesLookup,
-  findAttachmentModelCapabilities,
+  findListedModelCapabilities,
+  NO_MODEL_CAPABILITIES,
   type FindModelCapabilities
 } from "./modelCapabilities"
 import {
@@ -167,11 +169,13 @@ async function handleChatContextRequest(
     storedConversation,
     dependencies.attachmentFiles
   )
-  const capabilities = await findAttachmentModelCapabilities(
-    body.model,
-    measured.attachments.length > 0,
-    dependencies.findModelCapabilities
-  )
+  const capabilities =
+    measured.attachments.length > 0
+      ? await findListedModelCapabilities(
+          body.model,
+          dependencies.findModelCapabilities
+        )
+      : NO_MODEL_CAPABILITIES
   const measurement = await requestedAgent.agent.findContextMeasurement({
     history: measured.history,
     model: body.model,
@@ -219,12 +223,10 @@ function buildMeasuredHistory(
       conversationId,
       storedConversation.messages
     ),
-    findAttachmentImage: (messageId, attachment) =>
-      attachmentFiles.readAttachment({
-        conversationId,
-        messageId,
-        name: attachment.name
-      })
+    findAttachmentImage: buildAttachmentImageReader(
+      conversationId,
+      attachmentFiles
+    )
   }
 }
 

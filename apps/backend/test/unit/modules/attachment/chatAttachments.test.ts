@@ -240,6 +240,18 @@ describe("parseChatAttachments", () => {
       "a lossless WebP without its signature byte",
       createDamagedLosslessWebpBytes()
     ],
+    [
+      "a lossy WebP that ends before its sides",
+      createLossyWebpBytes(64, 32).slice(0, 29)
+    ],
+    [
+      "a lossless WebP that ends before its sides",
+      createLosslessWebpBytes(64, 32).slice(0, 24)
+    ],
+    [
+      "an extended WebP that ends before its canvas sides",
+      createExtendedWebpBytes(64, 32).slice(0, 29)
+    ],
     ["a RIFF file that is not a WebP file", createWaveBytes()],
     ["bytes that are not UTF-8", new Uint8Array([0x41, 0xff, 0xfe, 0x42])],
     ["UTF-8 text with a NUL character", Buffer.from("Buy\u0000milk")],

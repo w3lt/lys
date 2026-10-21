@@ -259,8 +259,9 @@
 
 /*
  * Why the last file was refused. The status line stays in the page while it
- * has nothing to say, so it exists before the sentence it announces, and
- * takes no room then.
+ * has nothing to say, so it exists before the sentence it announces. Empty,
+ * it is taken out of the field's flow so that the column's gap is not spent
+ * on it; hidden with display none, it would leave the accessibility tree too.
  */
 .composer__attachment-refusal {
   font-size: 12px;
@@ -268,7 +269,7 @@
 }
 
 .composer__attachment-refusal:empty {
-  display: none;
+  position: absolute;
 }
 
 /* Meta row */

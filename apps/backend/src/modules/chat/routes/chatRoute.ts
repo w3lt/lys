@@ -16,6 +16,7 @@ import type Agent from "../../agent/agent"
 import type { AgentTurn } from "../../agent/agent"
 import type { FindAttachmentImage } from "../../agent/agentContext"
 import type AttachmentFileStore from "../../attachment/attachmentFileStore"
+import { buildAttachmentImageReader } from "../../attachment/attachmentImageReader"
 import {
   parseChatAttachments,
   type ParsedChatAttachment
@@ -37,8 +38,8 @@ import type ToolApprovalService from "../../toolApproval/toolApprovalService"
 import type { TitleGenerationOptions } from "../chatService"
 import type {
   ConversationTurn,
-  ConversationTurnTarget,
   ConversationTurnWriter,
+  CreateConversationTurnOptions,
   GeneratedConversationTitleWriter,
   ReplyPartWriter
 } from "../persistence"
@@ -52,7 +53,8 @@ import type ReplyGenerationRegistry from "../replyGenerationRegistry"
 import createTitleGenerationTask from "../titleGenerationTask"
 import {
   createModelCapabilitiesLookup,
-  findAttachmentModelCapabilities,
+  findListedModelCapabilities,
+  NO_MODEL_CAPABILITIES,
   type FindModelCapabilities,
   type ModelCapabilities
 } from "./modelCapabilities"
@@ -71,7 +73,8 @@ import {
   findRequestedAgent,
   findRequestedBuiltInTools,
   sendUnansweredTurnProblem,
-  type TurnAgentLookups
+  type TurnAgentLookups,
+  type UnansweredTurnOutcome
 } from "./turnRequest"
 
 /** Backend settings the chat route applies to every request. */
@@ -87,7 +90,10 @@ export type ChatRouteRegistration = ChatRouteOptions &
 /** What the chat route does with attachment files. */
 type AttachmentFiles = Pick<
   AttachmentFileStore,
-  "saveMessageAttachments" | "deleteMessageAttachments" | "readAttachment"
+  | "saveMessageAttachments"
+  | "deleteMessageAttachments"
+  | "deleteConversationAttachments"
+  | "readAttachment"
 >
 
 /**
@@ -113,8 +119,8 @@ type ChatRouteDependencies = Pick<TurnAgentLookups, "findChatAgent"> &
      */
     findModelCapabilities: FindModelCapabilities
     /**
-     * Saves each turn's attachment files, deletes them when the turn cannot
-     * be stored, and reads stored ones.
+     * Saves each turn's attachment files, deletes them when the turn is not
+     * stored, and reads stored ones.
      */
     attachmentFiles: AttachmentFiles
     /** Bound title operation retained separately from chat completion. */
@@ -131,7 +137,10 @@ type ChatRouteDependencies = Pick<TurnAgentLookups, "findChatAgent"> &
     generations: ReplyGenerationRegistry
     /** Every tool the backend runs, which a request may offer by name. */
     builtInTools: readonly BuiltInToolEntry[]
-    /** Approval gateway every tool call of every turn passes. */
+    /**
+     * Approval gateway every tool call passes, except a call of a backend
+     * tool that runs without approval.
+     */
     toolApprovals: ToolApprovalService
   }>
 
@@ -141,7 +150,7 @@ type ChatRouteProblem =
   | ChatBackendToolUnavailableProblem
   | ChatImageNeedsVisionProblem
 
-/** What a request resolved before its turn is stored. */
+/** What a request parsed and looked up before its turn is stored. */
 type AcceptedTurnRequest = Readonly<{
   /**
    * The request's attachments, decoded and classified, in request order;
@@ -150,8 +159,6 @@ type AcceptedTurnRequest = Readonly<{
   attachments: readonly ParsedChatAttachment[]
   /** Backend tools the request offered, found for the turn. */
   builtInTools: readonly TurnBuiltInTool[]
-  /** Agent that answers. */
-  agent: Agent
   /**
    * What the model can do with attachments; both false when neither the
    * request nor the conversation holds any.
@@ -159,12 +166,36 @@ type AcceptedTurnRequest = Readonly<{
   capabilities: ModelCapabilities
 }>
 
-/** The agent that answers a turn, with the continued conversation it was read from. */
-type ResolvedTurnAgent = Readonly<{
-  /** Agent that answers. */
-  agent: Agent
+/**
+ * The conversation a request continues, as stored when an agent was found
+ * for the request.
+ */
+type CheckedTurnConversation = Readonly<{
   /** The continued conversation; undefined for a new one. */
   storedConversation: Conversation | undefined
+}>
+
+/** A stored turn with the agent that answers it. */
+type SavedTurn = Readonly<{
+  /** The turn is stored. */
+  status: "saved"
+  /** Stored turn and prior transcript snapshot. */
+  turn: ConversationTurn
+  /** Agent that answers the turn, found as the turn was stored. */
+  agent: Agent
+}>
+
+/** Outcome of storing a turn: the stored turn, or why no agent answers it. */
+type SavedTurnOutcome = SavedTurn | UnansweredTurnOutcome
+
+/** What the generation input of a stored turn is built from. */
+type TurnGenerationSource = Readonly<{
+  /** Validated chat input and request logger. */
+  request: ChatRouteRequest
+  /** What the request parsed and looked up before the turn was stored. */
+  accepted: AcceptedTurnRequest
+  /** The stored turn and the agent that answers it. */
+  saved: SavedTurn
 }>
 
 /** Warning logged when a round's calls all ask because the choices are unreadable. */
@@ -267,39 +298,45 @@ export default function updateFastifyWithChatRoute(
  * starts, for the route's error boundary. A request answered with one of
  * the chat contract's problems stored nothing.
  * @remarks Closing this stream does not cancel the generation. Everything
- * the turn needs is resolved, as {@link resolveTurnRequest} describes,
- * before the request's attachment files are saved and the turn is stored;
- * the turn, the generation, and this follower are then created in the same
- * synchronous step, so no agent, turn, or conversation changes in between
- * and the follower receives the start event before any generation event.
- * The agent stored with the turn's conversation answers it, with the system
- * prompt it has when the turn starts. The turn keeps the backend tools found
- * for it, so a key saved or removed while it runs applies from the next
- * request.
+ * the turn needs is parsed and looked up, as {@link parseTurnRequest}
+ * describes, before the request's attachment files are saved. The agent is
+ * then found again and the turn is stored in one synchronous step, as
+ * {@link saveTurn} describes, so the agent that answers is the one the
+ * conversation has when the turn is stored, whatever changed while the files
+ * were written or the inventory was read; a conversation or agent deleted by
+ * then refuses the turn with its problem. The generation and this follower
+ * are created right after, and the follower receives the start event before
+ * any generation event. The agent answers with the system prompt it has when
+ * the turn is stored. The turn keeps the backend tools found for it, so a
+ * key saved or removed while it runs applies from the next request.
  */
 async function handleChatRequest(
   request: ChatRouteRequest,
   reply: ChatRouteReply,
   dependencies: ChatRouteDependencies
 ): Promise<void> {
-  const accepted = await resolveTurnRequest(request, reply, dependencies)
+  const accepted = await parseTurnRequest(request, reply, dependencies)
   if (accepted === undefined) return
-  const turn = await saveTurn(request.body, accepted.attachments, dependencies)
+  const saved = await saveTurn(request.body, accepted.attachments, dependencies)
+  if (saved.status !== "saved") {
+    sendUnansweredTurnProblem(reply, saved, request.url)
+    return
+  }
   const generation = startTurnGeneration(
-    buildTurnGenerationInput(request, accepted, turn, dependencies)
+    buildTurnGenerationInput({ request, accepted, saved }, dependencies)
   )
   const subscription = new ReplyEventSubscription<ChatApiStreamEvent>(
     createEventSender<ChatApiStreamEvent>(reply.sse)
   )
-  for (const event of buildTurnStartEvents(turn))
+  for (const event of buildTurnStartEvents(saved.turn))
     subscription.handleStreamEvent(event)
   generation.openSubscription(subscription)
   await openReplyEventStream(reply.sse, subscription)
 }
 
 /**
- * Resolves everything a request needs before its turn is stored, or answers
- * it with the problem that refuses it.
+ * Parses a request and looks up what its turn needs before the turn is
+ * stored, or answers the request with the problem that refuses it.
  *
  * @param request - Validated chat input.
  * @param reply - Response owner; the response has not started.
@@ -315,13 +352,16 @@ async function handleChatRequest(
  * backend does not run; the inventory read's failure; and any persistence
  * failure of a lookup.
  * @remarks The attachments are decoded first, then every offered backend
- * tool is looked up, then the agent is found; a continued conversation is
- * read once, and its agent and its stored attachments both come from that
- * read. The model's capabilities are read from LM Studio only when the
- * request or the conversation holds an attachment, so a turn without any
- * never waits for the model-operation queue.
+ * tool is looked up, then the conversation is read once and an agent is
+ * looked up for the request, so a request no agent answers is refused
+ * before the inventory is read; the conversation's stored attachments come
+ * from that read. The model's capabilities are read from LM Studio only when
+ * the request or the conversation holds an attachment, so a turn without any
+ * never waits for the model-operation queue. The agent found here is not
+ * kept: the lookup that decides who answers runs again when the turn is
+ * stored.
  */
-async function resolveTurnRequest(
+async function parseTurnRequest(
   request: ChatRouteRequest,
   reply: ChatRouteReply,
   dependencies: ChatRouteDependencies
@@ -335,22 +375,23 @@ async function resolveTurnRequest(
     )
     return undefined
   }
-  const builtInTools = await resolveTurnBuiltInTools(
+  const builtInTools = await findOfferedBuiltInTools(
     request,
     reply,
     dependencies.builtInTools
   )
   if (builtInTools === undefined) return undefined
-  const resolvedAgent = resolveTurnAgent(request, reply, dependencies)
-  if (resolvedAgent === undefined) return undefined
-  const capabilities = await findAttachmentModelCapabilities(
-    body.model,
-    hasTurnAttachments(
-      resolvedAgent.storedConversation,
-      attachments.attachments
-    ),
-    dependencies.findModelCapabilities
+  const checked = findTurnConversation(request, reply, dependencies)
+  if (checked === undefined) return undefined
+  const capabilities = hasTurnAttachments(
+    checked.storedConversation,
+    attachments.attachments
   )
+    ? await findListedModelCapabilities(
+        body.model,
+        dependencies.findModelCapabilities
+      )
+    : NO_MODEL_CAPABILITIES
   const unseenImage = findUnseenImage(attachments.attachments, capabilities)
   if (unseenImage !== undefined) {
     sendProblem(
@@ -363,35 +404,33 @@ async function resolveTurnRequest(
     )
     return undefined
   }
-  return {
-    attachments: attachments.attachments,
-    builtInTools,
-    agent: resolvedAgent.agent,
-    capabilities
-  }
+  return { attachments: attachments.attachments, builtInTools, capabilities }
 }
 
 /**
- * Resolves the agent that answers a request's turn, or answers the request
- * with the problem that says why no agent does.
+ * Finds the conversation a request continues, once an agent answers the
+ * request as it stands, or answers the request with the problem that says
+ * why no agent does.
  *
  * @param request - Validated chat input.
  * @param reply - Response owner; the response has not started.
  * @param dependencies - Borrowed agent and conversation lookups.
- * @returns The agent with the continued conversation it was read from, or
- * undefined once the problem that says why no agent answers was sent.
+ * @returns The continued conversation as stored now, undefined inside for a
+ * new one; or undefined once the problem that says why no agent answers was
+ * sent.
  * @throws Any persistence failure of a lookup.
- * @remarks A continued conversation is read once, here; its agent comes
- * from that read, and the caller takes its stored attachments from it.
+ * @remarks The conversation is read once, here; the agent lookup uses that
+ * read, and the caller takes the stored attachments from it. The agent is
+ * not returned, because it is looked up again when the turn is stored.
  */
-function resolveTurnAgent(
+function findTurnConversation(
   request: ChatRouteRequest,
   reply: ChatRouteReply,
   dependencies: Pick<
     ChatRouteDependencies,
     "findChatAgent" | "findConversation"
   >
-): ResolvedTurnAgent | undefined {
+): CheckedTurnConversation | undefined {
   const { conversation } = request.body
   const storedConversation =
     conversation.kind === "existing"
@@ -405,11 +444,11 @@ function resolveTurnAgent(
     sendUnansweredTurnProblem(reply, requestedAgent, request.url)
     return undefined
   }
-  return { agent: requestedAgent.agent, storedConversation }
+  return { storedConversation }
 }
 
 /**
- * Resolves the backend tools a request offers for its turn, or answers the
+ * Finds the backend tools a request offers for its turn, or answers the
  * request with the problem that refuses one.
  *
  * @param request - Validated chat input.
@@ -421,7 +460,7 @@ function resolveTurnAgent(
  * @throws An `UnknownBackendToolError` for an offered backend tool the
  * backend does not run.
  */
-async function resolveTurnBuiltInTools(
+async function findOfferedBuiltInTools(
   request: ChatRouteRequest,
   reply: ChatRouteReply,
   builtInTools: readonly BuiltInToolEntry[]
@@ -491,83 +530,188 @@ function hasTurnAttachments(
 }
 
 /**
- * Saves the request's attachment files, then stores the turn.
+ * Saves the request's attachment files, then finds the agent that answers
+ * and stores the turn.
  *
  * @param body - Validated chat input.
  * @param attachments - The request's decoded attachments in request order.
- * @param dependencies - Borrowed turn persistence and attachment files.
+ * @param dependencies - Borrowed turn persistence, attachment files, and
+ * agent and conversation lookups.
  * @returns The stored turn, whose user message carries the attachments
- * numbered after the conversation's.
+ * numbered after the conversation's, with the agent that answers it; or why
+ * no agent answers, once the files written for the turn are deleted again.
  * @throws The file store's failure, before anything is stored; it deletes
  * what it saved for the message. The turn persistence's failure after the
- * files were saved, once the message's folder is deleted again, or an
- * `AggregateError` holding that failure and the deletion's when the folder
- * cannot be deleted; it then stays, under a message the conversation never
- * stores.
+ * files were saved, once they are deleted again, or an `AggregateError`
+ * holding that failure and the deletion's when they cannot be deleted; they
+ * then stay, under a message the conversation never stores. The deletion's
+ * failure when the files of a turn no agent answers cannot be deleted.
  * @remarks The identities of a new conversation and of the user message are
  * made here, before the files are saved under them, so the files are in
  * place when the turn commits. A request without attachments saves no
- * folder and deletes none.
+ * folder and deletes none. The agent is looked up and the turn is stored in
+ * one synchronous step after the files are saved, as
+ * {@link createAnsweredTurn} describes, so a conversation or agent deleted
+ * while the files were written refuses the turn instead of storing it under
+ * a stale agent. The files of a turn that is not stored go as
+ * {@link deleteWrittenAttachments} describes.
  */
 async function saveTurn(
   body: ChatApiRequestBody,
   attachments: readonly ParsedChatAttachment[],
-  dependencies: Pick<ChatRouteDependencies, "turns" | "attachmentFiles">
-): Promise<ConversationTurn> {
-  const conversation: ConversationTurnTarget =
-    body.conversation.kind === "new"
-      ? { kind: "new", id: uuidv7(), agentCode: body.conversation.agentCode }
-      : body.conversation
-  const userMessageId = uuidv7()
-  const turnOptions = {
-    conversation,
+  dependencies: Pick<
+    ChatRouteDependencies,
+    "turns" | "attachmentFiles" | "findChatAgent" | "findConversation"
+  >
+): Promise<SavedTurnOutcome> {
+  const turnOptions = buildTurnOptions(body, attachments)
+  if (attachments.length === 0)
+    return createAnsweredTurn(body.conversation, turnOptions, dependencies)
+  const { attachmentFiles } = dependencies
+  await attachmentFiles.saveMessageAttachments(
+    turnOptions.conversation.id,
+    turnOptions.userMessage.id,
+    attachments
+  )
+  let saved: SavedTurnOutcome
+  try {
+    saved = createAnsweredTurn(body.conversation, turnOptions, dependencies)
+  } catch (error) {
+    await deleteAttachmentsAfterFailure(attachmentFiles, turnOptions, error)
+    throw error
+  }
+  if (saved.status !== "saved")
+    await deleteWrittenAttachments(
+      attachmentFiles,
+      turnOptions,
+      body.conversation.kind === "existing" &&
+        saved.status !== "conversation-not-found"
+    )
+  return saved
+}
+
+/**
+ * Builds the turn a request stores.
+ *
+ * @param body - Validated chat input.
+ * @param attachments - The request's decoded attachments in request order.
+ * @returns The turn with the identities of a new conversation and of the
+ * user message, made here so the attachment files can be saved under them
+ * before the turn commits, and the attachments' drafts in request order.
+ */
+function buildTurnOptions(
+  body: ChatApiRequestBody,
+  attachments: readonly ParsedChatAttachment[]
+): CreateConversationTurnOptions {
+  return {
+    conversation:
+      body.conversation.kind === "new"
+        ? { kind: "new", id: uuidv7(), agentCode: body.conversation.agentCode }
+        : body.conversation,
     userMessage: {
-      id: userMessageId,
+      id: uuidv7(),
       content: body.message,
       attachments: attachments.map((attachment) => attachment.draft)
     },
     model: body.model
   }
-  if (attachments.length === 0)
-    return dependencies.turns.createConversationTurn(turnOptions)
-  const { attachmentFiles } = dependencies
-  await attachmentFiles.saveMessageAttachments(
-    conversation.id,
-    userMessageId,
-    attachments
-  )
-  try {
-    return dependencies.turns.createConversationTurn(turnOptions)
-  } catch (error) {
-    await deleteAttachmentsAfterFailure(
-      attachmentFiles,
-      { conversationId: conversation.id, messageId: userMessageId },
-      error
-    )
-    throw error
+}
+
+/**
+ * Finds the agent that answers a turn as its request stands now and stores
+ * the turn, in one synchronous step.
+ *
+ * @param requested - Conversation the validated request starts or continues.
+ * @param turnOptions - The turn to store.
+ * @param dependencies - Borrowed turn persistence and agent and conversation
+ * lookups.
+ * @returns The stored turn with its agent; or why no agent answers, with
+ * nothing stored: a new conversation names a code no agent has, the
+ * continued conversation is not stored, or its agent no longer exists.
+ * @throws Any persistence failure of a lookup, and the turn persistence's
+ * failure.
+ * @remarks Nothing awaits between the lookup and the write, so the stored
+ * turn's conversation has the agent that answers it.
+ */
+function createAnsweredTurn(
+  requested: ChatApiRequestBody["conversation"],
+  turnOptions: CreateConversationTurnOptions,
+  dependencies: Pick<
+    ChatRouteDependencies,
+    "turns" | "findChatAgent" | "findConversation"
+  >
+): SavedTurnOutcome {
+  const requestedAgent = findRequestedAgent(requested, {
+    findChatAgent: dependencies.findChatAgent,
+    findConversationAgentCode: (conversationId) =>
+      dependencies.findConversation(conversationId)?.agentCode
+  })
+  if (requestedAgent.status !== "found") return requestedAgent
+  return {
+    status: "saved",
+    turn: dependencies.turns.createConversationTurn(turnOptions),
+    agent: requestedAgent.agent
   }
 }
 
 /**
- * Deletes a message's saved attachment files after its turn could not be
+ * Deletes the files written for a turn that is not stored.
+ *
+ * @param attachmentFiles - Borrowed attachment files.
+ * @param turnOptions - The turn, whose files were written under its
+ * conversation and message.
+ * @param isConversationStored - Whether the turn's conversation is stored:
+ * false for a new conversation, and for a continued one that was deleted
+ * while the turn was prepared.
+ * @returns Settlement once the files are gone: with the conversation's whole
+ * folder when the conversation is not stored, as nothing of it stays; with
+ * the message's folder otherwise, so the conversation's other files stay.
+ * @throws If the folder cannot be removed.
+ */
+async function deleteWrittenAttachments(
+  attachmentFiles: Pick<
+    AttachmentFiles,
+    "deleteMessageAttachments" | "deleteConversationAttachments"
+  >,
+  turnOptions: CreateConversationTurnOptions,
+  isConversationStored: boolean
+): Promise<void> {
+  const { conversation, userMessage } = turnOptions
+  if (isConversationStored)
+    await attachmentFiles.deleteMessageAttachments(
+      conversation.id,
+      userMessage.id
+    )
+  else await attachmentFiles.deleteConversationAttachments(conversation.id)
+}
+
+/**
+ * Deletes a turn's saved attachment files after the turn could not be
  * stored.
  *
  * @param attachmentFiles - Borrowed attachment files.
- * @param message - Conversation and message the files were saved under.
+ * @param turnOptions - The turn, whose files were written under its
+ * conversation and message.
  * @param turnFailure - Failure of the turn's persistence.
- * @returns Settlement once the message's folder is gone.
+ * @returns Settlement once the files are gone, as
+ * {@link deleteWrittenAttachments} removes them for a conversation that is
+ * stored when the turn continues one.
  * @throws An `AggregateError` holding the turn failure and the deletion's
- * failure when the folder cannot be deleted.
+ * failure when the files cannot be deleted.
  */
 async function deleteAttachmentsAfterFailure(
-  attachmentFiles: Pick<AttachmentFiles, "deleteMessageAttachments">,
-  message: Readonly<{ conversationId: string; messageId: string }>,
+  attachmentFiles: Pick<
+    AttachmentFiles,
+    "deleteMessageAttachments" | "deleteConversationAttachments"
+  >,
+  turnOptions: CreateConversationTurnOptions,
   turnFailure: unknown
 ): Promise<void> {
   try {
-    await attachmentFiles.deleteMessageAttachments(
-      message.conversationId,
-      message.messageId
+    await deleteWrittenAttachments(
+      attachmentFiles,
+      turnOptions,
+      turnOptions.conversation.kind === "existing"
     )
   } catch (error) {
     throw new AggregateError(
@@ -581,74 +725,70 @@ async function deleteAttachmentsAfterFailure(
 /**
  * Builds the values a stored turn's tasks keep.
  *
- * @param request - Validated chat input and request logger.
- * @param accepted - What the request resolved before the turn was stored.
- * @param turn - The stored turn.
+ * @param source - The request, what it parsed and looked up, and the stored
+ * turn with its agent.
  * @param dependencies - Route capabilities borrowed for the route lifetime.
  * @returns The turn with its agent, request values, the backend tools of the
- * turn, as {@link buildTurnBuiltInTools} builds them from the attachments of
- * the stored transcript and the new message, whether the model sees images,
- * and the reader of the conversation's stored images.
+ * turn, which are the offered ones followed by the attachment reader as
+ * {@link buildTurnBuiltInTools} adds it for a model trained for tool use,
+ * whether the model sees images, and the reader of the conversation's
+ * stored images.
  */
 function buildTurnGenerationInput(
-  request: ChatRouteRequest,
-  accepted: AcceptedTurnRequest,
-  turn: ConversationTurn,
+  source: TurnGenerationSource,
   dependencies: ChatRouteDependencies
 ): TurnGenerationInput {
+  const { request, accepted, saved } = source
   const { body } = request
+  const { turn } = saved
   const { attachmentFiles } = dependencies
   const conversationId = turn.conversation.id
-  const readableAttachments = listReadableAttachments(conversationId, [
-    ...turn.conversation.messages,
-    turn.userMessage
-  ])
   return {
     turn,
-    agent: accepted.agent,
+    agent: saved.agent,
     model: body.model,
     generationOptions: body.generationOptions,
     clientTools: body.tools?.definitions ?? NO_REQUESTED_TOOLS,
-    builtInTools: buildTurnBuiltInTools(
-      accepted.builtInTools,
-      accepted.capabilities.trainedForToolUse,
-      readableAttachments,
-      (location) => attachmentFiles.readAttachment(location)
-    ),
+    builtInTools: accepted.capabilities.trainedForToolUse
+      ? buildTurnBuiltInTools(
+          accepted.builtInTools,
+          listReadableAttachments(conversationId, [
+            ...turn.conversation.messages,
+            turn.userMessage
+          ]),
+          (location) => attachmentFiles.readAttachment(location)
+        )
+      : accepted.builtInTools,
     canSeeImages: accepted.capabilities.vision,
-    findAttachmentImage: (messageId, attachment) =>
-      attachmentFiles.readAttachment({
-        conversationId,
-        messageId,
-        name: attachment.name
-      }),
+    findAttachmentImage: buildAttachmentImageReader(
+      conversationId,
+      attachmentFiles
+    ),
     logger: request.log,
     dependencies
   }
 }
 
 /**
- * Builds the backend tools of one turn.
+ * Builds the backend tools of a turn whose model is trained for tool use.
  *
  * @param offeredTools - Backend tools the request offered, found for the
  * turn.
- * @param canUseTools - Whether the model is trained for tool use.
  * @param attachments - Every attachment of the conversation, the new
  * message's included.
  * @param readAttachmentFile - Reads an attachment's file; lent for the turn.
- * @returns The offered tools, followed by the attachment reader when the
- * model is trained for tool use and an attachment is a text file; the
- * reader's calls run without approval, as they read only what the person
- * attached to this conversation.
+ * @returns The offered tools, followed by the attachment reader when an
+ * attachment is a text file; the reader's calls run without approval, as
+ * they read only what the person attached to this conversation. A model
+ * that is not trained for tool use gets the offered tools alone, without a
+ * call here.
  */
 function buildTurnBuiltInTools(
   offeredTools: readonly TurnBuiltInTool[],
-  canUseTools: boolean,
   attachments: readonly ReadableAttachment[],
   readAttachmentFile: ReadAttachmentFile
 ): readonly TurnBuiltInTool[] {
-  if (!canUseTools || !hasReadableTextAttachment(attachments))
-    return offeredTools
+  if (!hasReadableTextAttachment(attachments)) return offeredTools
   return [
     ...offeredTools,
     {

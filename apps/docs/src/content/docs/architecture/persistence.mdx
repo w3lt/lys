@@ -12,12 +12,13 @@ images vmo runs its page-reading VMs from.
 
 ## Persistent artifacts
 
-| Artifact         | Owner           | Location                                         | Purpose                                                                                                                                                   |
-| ---------------- | --------------- | ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Backend database | Fastify backend | `$LYS_HOME/lys_db.sqlite`                        | Stores conversations, their messages and reply parts, sources, and agents.                                                                                |
-| Settings JSON    | Tauri host      | `$LYS_HOME/settings.json`                        | Stores the runtime, model, generation, load, secrets, and tools groups.                                                                                   |
-| Theme preference | Desktop UI      | WebView `localStorage`, key `lys.theme`          | Stores `dark` or `light`; invalid or unavailable storage falls back to `dark`.                                                                            |
-| vmo image store  | vmo             | `~/Library/Application Support/com.w3lt.lys-vmo` | Holds `vminit`, the reader image, and running VMs' files; each start deletes every other image. See [vmo's image store](/operate/data/#vmos-image-store). |
+| Artifact         | Owner           | Location                                                      | Purpose                                                                                                                                                                                   |
+| ---------------- | --------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Backend database | Fastify backend | `$LYS_HOME/lys_db.sqlite`                                     | Stores conversations, their messages and reply parts, attachment records, sources, and agents.                                                                                            |
+| Attachment files | Fastify backend | `$LYS_HOME/attachments/<conversation id>/<message id>/<name>` | Stores each file sent with a user message under its own name; written before the turn is stored and removed with the conversation. See [attachments](/architecture/backend/#attachments). |
+| Settings JSON    | Tauri host      | `$LYS_HOME/settings.json`                                     | Stores the runtime, model, generation, load, secrets, and tools groups.                                                                                                                   |
+| Theme preference | Desktop UI      | WebView `localStorage`, key `lys.theme`                       | Stores `dark` or `light`; invalid or unavailable storage falls back to `dark`.                                                                                                            |
+| vmo image store  | vmo             | `~/Library/Application Support/com.w3lt.lys-vmo`              | Holds `vminit`, the reader image, and running VMs' files; each start deletes every other image. See [vmo's image store](/operate/data/#vmos-image-store).                                 |
 
 ## SQLite ownership
 
@@ -39,12 +40,13 @@ transaction the connection refuses every change
 (`PRAGMA query_only`), so a read cannot write and a statement kept beyond its
 operation cannot change data.
 
-| Table                   | Owned by                    | Notes                                                                                                                                                                |
-| ----------------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `conversations`         | SQLite conversation records | One row per conversation, including `title`, `agent_code`, `created_at`, and `updated_at`.                                                                           |
-| `conversation_messages` | SQLite conversation records | Ordered user messages and replies, with each reply's `status`, `finish_reason`, and `model`, and each reply's reasoning, text, and tool-call parts as rows under it. |
-| `conversation_sources`  | SQLite conversation records | One row per numbered web source of a conversation: `number`, `url`, and `title`, each number and URL once.                                                           |
-| `agents`                | SQLite agent records        | One row per agent definition, keyed by its `code`, with `name`, `bio`, `system_prompt`, `created_at`, and `updated_at`.                                              |
+| Table                      | Owned by                    | Notes                                                                                                                                                                                                              |
+| -------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `conversations`            | SQLite conversation records | One row per conversation, including `title`, `agent_code`, `created_at`, and `updated_at`.                                                                                                                         |
+| `conversation_messages`    | SQLite conversation records | Ordered user messages and replies, with each reply's `status`, `finish_reason`, and `model`, and each reply's reasoning, text, and tool-call parts as rows under it.                                               |
+| `conversation_sources`     | SQLite conversation records | One row per numbered web source of a conversation: `number`, `url`, and `title`, each number and URL once.                                                                                                         |
+| `conversation_attachments` | SQLite conversation records | One row per attachment of a user message: `number`, `name`, `kind`, `size_bytes`, and an image's `media_type`, `width`, and `height`; each number once per conversation, each name once per message ignoring case. |
+| `agents`                   | SQLite agent records        | One row per agent definition, keyed by its `code`, with `name`, `bio`, `system_prompt`, `created_at`, and `updated_at`.                                                                                            |
 
 The desktop does not query SQLite directly and the Tauri host does not proxy
 conversation SQL. The backend creates four SQLite record providers over the
@@ -53,6 +55,12 @@ and wraps each in a conversation service in `src/modules/conversation/`. Each
 service keeps the decisions (identities, timestamps, validation, superseding a
 streaming reply, list cursors) behind records it declares in `records.ts`, and
 contains no SQL. Each service is exposed as its own application service.
+`AttachmentFileStore` (`src/modules/attachment/attachmentFileStore.ts`) owns
+the attachment files outside SQLite: the chat route has it write a message's
+files before the turn's transaction, the agent context and the attachment
+reader read them through it, and the delete route removes a conversation's
+folder through it once the rows are gone. Loading a conversation reads only
+the rows.
 The agent service `AgentService` (`src/modules/agent/agentService.ts`) uses
 `SqliteAgentRecordStore` the same way: it validates each definition or change,
 reads the current time once per change, and lists and stores agents through

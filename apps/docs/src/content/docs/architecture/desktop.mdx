@@ -31,14 +31,14 @@ presentation state, not durable conversation storage.
 
 The desktop currently has six separate state systems:
 
-| Store                   | Owns                                                                                                                                                                  |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Chat Zustand store      | Active conversation, the agent selected for a new conversation, request and open tokens, local abort controllers, streamed reply parts and sources, inline error text |
-| History Zustand store   | Dialog visibility, search query, displayed conversation pages, the row being renamed or confirmed, pending renames and deletes                                        |
-| Agent Zustand store     | Every listed built-in and stored agent, the open editor or read-only view and its draft, the save attempt, the pending save or delete, the most recently saved agent  |
-| Tool Zustand store      | The tool list read from the desktop and the backend, tool calls on or off, each tool's switch                                                                         |
-| Tool-call Zustand store | Every approval prompt and tool call held until the backend takes its answer, and the reply follows that deliver them                                                  |
-| Shell Zustand store     | Active top-level view, loaded settings (each tool's saved approval included), backend process status, startup progress                                                |
+| Store                   | Owns                                                                                                                                                                                                                |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Chat Zustand store      | Active conversation, the agent selected for a new conversation, request and open tokens, local abort controllers, streamed reply parts and sources, the staged files and the last refusal of one, inline error text |
+| History Zustand store   | Dialog visibility, search query, displayed conversation pages, the row being renamed or confirmed, pending renames and deletes                                                                                      |
+| Agent Zustand store     | Every listed built-in and stored agent, the open editor or read-only view and its draft, the save attempt, the pending save or delete, the most recently saved agent                                                |
+| Tool Zustand store      | The tool list read from the desktop and the backend, tool calls on or off, each tool's switch                                                                                                                       |
+| Tool-call Zustand store | Every approval prompt and tool call held until the backend takes its answer, and the reply follows that deliver them                                                                                                |
+| Shell Zustand store     | Active top-level view, loaded settings (each tool's saved approval included), backend process status, startup progress                                                                                              |
 
 The transcript shown in the window is built from backend events for the current
 request, or from the stored transcript read when a past conversation is opened.
@@ -49,7 +49,8 @@ Shell state such as backend status is managed independently.
 1. The composer calls `sendMessage`.
 2. The chat store opens `POST /api/v1/chat`. The request offers the
    switched-on tools when tool calls are on and the loaded model was trained
-   for tool use.
+   for tool use, and carries the staged files, each with its name and base64
+   content; the tray loses them once the turn starts.
 3. The desktop parses SSE frames with `EventSourceParserStream`.
 4. Each payload is validated against `chatApiStreamEventSchema`.
 5. The store applies `start-*`, `reply-part`, `reply-part-delta`, `sources`,
@@ -100,8 +101,10 @@ model is loaded with. The panel lists, in send order, the agent instructions,
 tool definitions, earlier messages, your message, the room left or the amount
 over, and the reserve. Counts carry `~`. The meter never claims that earlier
 messages are shortened or summarized: every round sends every message a turn
-includes. Staged attachments are never sent, so they are not counted, and the
-panel says so while files are staged.
+includes. Each staged image is counted as the backend counts a stored one,
+`⌈width ÷ 28⌉ × ⌈height ÷ 28⌉` tokens up to 1,280; staged text files are not
+counted, because the model reads them on request, and the panel says so while
+one is staged.
 
 Send is disabled while the current measurement, the draft, and the reserve
 exceed the window. While a newer measurement is pending, before the first one
@@ -110,6 +113,35 @@ Studio, LM Studio cannot be reached, or the request fails), the meter says so
 and sending stays allowed, because the backend checks every round before sending
 it. "Change the window" opens the Model pane, where the model's load
 configuration sets the context length for its next load.
+
+## Composer attachments
+
+The composer's add menu and drops on the field stage files in the chat store,
+which owns the tray (`lib/store/chat-view/attachments.ts`). A selection is
+admitted in two steps, so a file is read only once its name and size pass: the
+name must satisfy the shared attachment name rules and must not be staged
+already, ignoring case, and a message carries at most 8 files of at most
+10 MiB each and 20 MiB together, the limits of `@lys/share`. Each admitted
+file is then read whole and classified from its bytes, as the backend
+classifies it: an image (PNG, JPEG, or WebP) can be staged only while the
+loaded model has `vision`, a text file only while it is trained for tool use,
+and any other content is refused. The first file a selection refuses sets one
+sentence in the status line under the tray, such as "The file notes.md is
+already uploaded" or "Images need a model with vision"; the rest of the
+selection is still staged, and a repeated refusal is announced again.
+Selections are admitted one after another, so a second drop is checked
+against the first. The tray shows each file's kind and name, and an image's
+estimated tokens; a file can be removed from it.
+
+Sending the draft sends the staged files with it and takes them out of the
+tray once the turn starts; a file staged after Send was pressed stays. A
+starter prompt is sent without the staged files, which stay staged, and a
+request the backend refuses keeps them. Opening another conversation keeps the
+tray; starting a new conversation clears it. A message still needs text:
+files alone do not make it sendable. A long paste stays in the draft and is
+sent as text; nothing turns it into a file. The transcript lists a message's
+attachments under its text, by kind and name, from the turn-start event and
+when the conversation is reopened.
 
 ## Assistant message rendering
 
@@ -665,9 +697,12 @@ are gone and the reply is marked interrupted when the backend next starts.
   backend start, Refresh, and failed model requests; it is not polled. Changes
   made by another LM Studio client between observations are not pushed to the
   desktop.
-- The composer's attachment tray stages files and long pastes, which the
-  context meter does not count. The chat protocol has no attachment field, so
-  staged attachments are never sent.
+- The composer's attachment tray takes only files the loaded model can use: an
+  image only for a model with vision, a text file only for one trained for
+  tool use, and nothing while no loaded model is listed. An image pasted from
+  the clipboard is not staged; images are chosen or dropped as files. The
+  transcript shows an attachment's kind and name only, without a preview or a
+  way to open it.
 - The Tavily API key is stored as plain text in `settings.json`, protected
   only by the file's owner-only permissions; there is no keychain storage.
 - Tool calls on or off and each tool's switch last for the session only; after

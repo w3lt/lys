@@ -37,14 +37,16 @@ Includes:
 
 - full `conversation` metadata, whose `title` is `null` until a title is
   generated
-- one persisted user message
+- one persisted user message, with the records of the files sent with it in
+  `attachments` (empty when none)
 - one persisted assistant message in `streaming` state
 
 ### `start-existing-conversation-turn`
 
 Includes:
 
-- one persisted user message
+- one persisted user message, with the records of the files sent with it in
+  `attachments` (empty when none)
 - one persisted assistant message in `streaming` state
 
 The desktop uses its current active conversation metadata together with these

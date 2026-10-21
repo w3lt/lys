@@ -42,7 +42,12 @@ Terms that mean something specific inside Lys.
   agent is selected.
 - **Stored agent**: an agent the user created, kept in the backend database.
   It answers chats with the system prompt it has when each turn starts.
-- **User message**: a persisted message with role `user` and non-empty content.
+- **User message**: a persisted message with role `user`, non-empty content,
+  and the attachments sent with it.
+- **Attachment**: a file sent with a user message and stored with the
+  conversation under its own name, numbered once per conversation in sending
+  order, as `[attachment 3] notes.md`. An image is seen by a model with
+  vision; a text file is read by the model through `read_attachment`.
 - **Assistant message**: a persisted message with role `assistant`, a model
   name, lifecycle status, an optional finish reason, and its parts.
 - **Reply part**: one piece of a reply in the model round it belongs to:

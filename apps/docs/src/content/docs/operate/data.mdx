@@ -42,8 +42,9 @@ replaces only its own part and preserves the rest already on disk, including a
 ## `$LYS_HOME/lys_db.sqlite`
 
 The backend stores conversations and agent definitions in a SQLite database at
-`$LYS_HOME/lys_db.sqlite`. A conversation holds its messages, each reply's
-reasoning, text, and tool calls, and every web source a succeeded
+`$LYS_HOME/lys_db.sqlite`. A conversation holds its messages, the record of
+each file sent with a message (the file itself is under `attachments/`,
+below), each reply's reasoning, text, and tool calls, and every web source a succeeded
 `web_search` or `read_page` call showed, whether a reply cites it or not.
 Each tool call is stored with its arguments and its full result, such as the
 text of a file `read_text_file` read. All of it is kept until the
@@ -62,6 +63,7 @@ The checked-in schema currently creates:
 - `conversations`
 - `conversation_messages`, which also holds each reply's parts
 - `conversation_sources`
+- `conversation_attachments`
 - `agents`
 - one index on `(conversation_id, created_at, id)`, and one unique index on
   each reply's part positions
@@ -70,6 +72,29 @@ The checked-in schema currently creates:
 SQLite `PRAGMA user_version` tracks the applied migration level. On startup the
 backend applies any missing forward migrations and refuses to open a database
 whose version is newer than the binary understands.
+
+## `$LYS_HOME/attachments/`
+
+The backend keeps every file sent with a message under
+`$LYS_HOME/attachments/<conversation id>/<message id>/<file name>`, with the
+name the person gave it. It creates the directory and the folders under it on
+the first attachment it stores, so a Lys that never received one has no
+`attachments/` directory. A message's folder is written before the message is
+stored and never written again, and the database row of each file records its
+number, name, kind, and size, so opening a conversation reads nothing from the
+directory.
+
+- Deleting a conversation deletes its rows first, then its folder; a folder
+  that cannot be removed is logged and left, and the delete still succeeds.
+- A turn whose files were written but whose database transaction failed
+  deletes its folder again. A folder left by a crash between the two, or
+  whose deletion failed, belongs to a message the database does not hold;
+  nothing reads it, and you can delete it by hand.
+- A file removed or changed by hand after its row was written is not noticed
+  until the model needs it: an image becomes a placeholder sentence in its
+  message, and a read of a text file fails with a message the model reads.
+- The directory belongs with the database: copy, move, or delete the two
+  together, while the backend is stopped.
 
 ## vmo's image store
 
@@ -106,8 +131,9 @@ that space.
   started with `pnpm backend:dev` uses `~/.lys`, which must already exist; the
   desktop creates the Lys home when initializing a missing settings file. See
   [Running Lys locally](/develop/running/).
-- Both files live in the same Lys home directory, so user data and app settings
-  currently share one root. Release builds also start their backend and vmo
+- The settings file, the database, and the attachments directory live in the
+  same Lys home directory, so user data and app settings currently share one
+  root. Release builds also start their backend and vmo
   from the `runtime/` directory there.
 
 ## WebView theme storage

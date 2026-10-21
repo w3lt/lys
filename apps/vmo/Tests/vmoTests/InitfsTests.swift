@@ -17,6 +17,39 @@ private let laterVminitReference = "example.com/vminit:2"
 /// names the image, so a test can tell which vminit a filesystem came from.
 private let vminitdPath = FilePath("/vminitd")
 
+extension Trait where Self == ConditionTrait {
+    /// Runs a test only when the current user isn't root. Root can read and
+    /// write a file or directory whatever its permissions, so a test that
+    /// makes one unreadable or read-only would prove nothing as root.
+    fileprivate static var enabledUnlessRoot: Self {
+        .enabled(if: getuid() != 0, "File permissions don't apply to root")
+    }
+}
+
+/// One version of a file on disk: deleting and recreating the file changes
+/// its number, and rewriting it changes its modification date.
+private struct FileVersion: Equatable {
+    /// The file system's number for the file.
+    let fileNumber: UInt64
+
+    /// When the file's contents last changed.
+    let modificationDate: Date
+}
+
+/// Reads which version of `file` is on disk.
+///
+/// - Parameter file: An existing file.
+/// - Returns: The file's number and modification date.
+/// - Throws: The file system's error when `file` can't be read, or a test
+///   failure when either value is missing.
+private func readFileVersion(of file: URL) throws -> FileVersion {
+    let values = try file.resourceValues(forKeys: [.fileIdentifierKey, .contentModificationDateKey])
+    return FileVersion(
+        fileNumber: try #require(values.fileIdentifier),
+        modificationDate: try #require(values.contentModificationDate)
+    )
+}
+
 /// Checks that ``ImageStore/loadInitfs(reference:)`` gives VMs the filesystem
 /// of the vminit image the reference names, unpacking it only when the store
 /// doesn't hold it unpacked from that image already.
@@ -26,7 +59,7 @@ private let vminitdPath = FilePath("/vminitd")
 /// a gzip tar with one file, `/vminitd`, and each unpacked filesystem is read
 /// back with Containerization's ext4 reader. Nothing is pulled. Tests that
 /// make a file or directory unreadable or read-only need a user whom file
-/// permissions apply to, not root.
+/// permissions apply to, so they are skipped for root.
 @Suite("Loading vminit's filesystem")
 struct InitfsTests {
     /// Directory holding this test's image store and rootfs archives.
@@ -138,19 +171,20 @@ struct InitfsTests {
     }
 
     /// Verifies that a start whose vminit is already unpacked reuses that
-    /// filesystem: with the store read-only, deleting or unpacking anything
-    /// would fail.
+    /// filesystem: the same files stay, neither recreated nor rewritten.
     @Test("Reuses the filesystem already unpacked from the named vminit")
     func reusesUnpackedVminit() async throws {
         try await saveVminitImage(reference: vminitReference)
         let firstInitfs = try await imageStore.loadInitfs(reference: vminitReference)
-        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: imageStore.path.path)
-        defer { restoreWritePermission(of: imageStore.path) }
+        let initfsVersion = try readFileVersion(of: imageStore.initfsFile)
+        let recordVersion = try readFileVersion(of: imageStore.initfsVminitDigestFile)
 
         let initfs = try await imageStore.loadInitfs(reference: vminitReference)
 
         #expect(initfs.source == firstInitfs.source)
         #expect(initfs.options == ["ro"])
+        #expect(try readFileVersion(of: imageStore.initfsFile) == initfsVersion)
+        #expect(try readFileVersion(of: imageStore.initfsVminitDigestFile) == recordVersion)
         #expect(try readVminitd(fromInitfsAt: initfs.source) == vminitReference)
     }
 
@@ -212,7 +246,7 @@ struct InitfsTests {
 
     /// Verifies that a record that exists but can't be read stops the load
     /// before anything is deleted, instead of counting as no record.
-    @Test("An unreadable record throws and keeps the filesystem")
+    @Test("An unreadable record throws and keeps the filesystem", .enabledUnlessRoot)
     func keepsFilesystemWhenRecordIsUnreadable() async throws {
         try await saveVminitImage(reference: vminitReference)
         try await saveVminitImage(reference: laterVminitReference)
@@ -225,5 +259,26 @@ struct InitfsTests {
 
         #expect(error?.code == .fileReadNoPermission)
         #expect(try readVminitd(fromInitfsAt: imageStore.initfsFile.path) == vminitReference)
+    }
+
+    /// Verifies that a deletion that fails for any reason but the file being
+    /// missing stops the load, and that the filesystem and record it couldn't
+    /// delete stay as they were.
+    @Test("A failed deletion throws and keeps the filesystem and its record", .enabledUnlessRoot)
+    func keepsFilesystemWhenDeletionFails() async throws {
+        try await saveVminitImage(reference: vminitReference)
+        try await saveVminitImage(reference: laterVminitReference)
+        _ = try await imageStore.loadInitfs(reference: vminitReference)
+        let vminitDigest = try await imageStore.get(reference: vminitReference).digest
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: imageStore.path.path)
+        defer { restoreWritePermission(of: imageStore.path) }
+
+        let error = await #expect(throws: CocoaError.self) {
+            try await imageStore.loadInitfs(reference: laterVminitReference)
+        }
+
+        #expect(error?.code == .fileWriteNoPermission)
+        #expect(try readVminitd(fromInitfsAt: imageStore.initfsFile.path) == vminitReference)
+        #expect(try Data(contentsOf: imageStore.initfsVminitDigestFile) == Data(vminitDigest.utf8))
     }
 }

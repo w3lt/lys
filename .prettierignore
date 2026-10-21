@@ -3,5 +3,9 @@ build
 coverage
 node_modules
 .superpowers
-apps/desktop/src-tauri/target
 .astro
+
+# Prettier reads the root .gitignore only, so the paths that
+# apps/desktop/src-tauri/.gitignore ignores are listed again here.
+apps/desktop/src-tauri/target
+apps/desktop/src-tauri/gen/schemas

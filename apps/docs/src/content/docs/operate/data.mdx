@@ -98,6 +98,23 @@ directory.
 - The directory belongs with the database: copy, move, or delete the two
   together, while the backend is stopped.
 
+## `$LYS_HOME/logs/`
+
+The Tauri host of the release app keeps the backend's output here; see
+[the release backend log](/operate/logging/#the-release-backend-log).
+
+- `backend.log` receives everything the release backend writes to its standard
+  output and standard error, appended run after run. The host creates the
+  directory, and the file readable only by its owner, the first time it
+  starts a release backend; development runs and standalone
+  `pnpm backend:dev` never create them.
+- `backend.1.log` holds the previous log: when `backend.log` has reached
+  10 MiB as the backend starts, the host renames it, replacing the older
+  `backend.1.log`.
+- Nothing reads these files. Deleting them loses only the log; delete them
+  while Lys is closed, because a running backend keeps writing to the file it
+  started with.
+
 ## vmo's image store
 
 vmo, the page reader `read_page` uses, keeps its images and the files of its
@@ -136,7 +153,7 @@ that space.
 - The settings file, the database, and the attachments directory live in the
   same Lys home directory, so user data and app settings currently share one
   root. Release builds also start their backend and vmo
-  from the `runtime/` directory there.
+  from the `runtime/` directory there and keep the backend's log in `logs/`.
 
 ## WebView theme storage
 

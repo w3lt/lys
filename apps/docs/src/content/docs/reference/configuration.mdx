@@ -31,7 +31,8 @@ means changing all three; see the
 ## Lys home directory
 
 The Lys home directory holds the desktop settings file, the conversation
-database, the attachment files, and the runtime that release builds start. The handbook writes it as
+database, the attachment files, the runtime that release builds start, and the
+release backend's log. The handbook writes it as
 `$LYS_HOME`. The desktop host resolves it once at startup from the `LYS_HOME`
 environment variable:
 
@@ -54,6 +55,8 @@ at startup; loading settings creates it when `settings.json` is missing.
 | `runtime/node/bin/node`       | Release builds | Node.js executable that runs the backend                                                                                                                         |
 | `runtime/backend/backend.mjs` | Release builds | Backend bundle that the release Node.js executable runs                                                                                                          |
 | `runtime/vmo/vmo`             | Release builds | vmo, the page reader the desktop starts, signed with the virtualization entitlement                                                                              |
+| `logs/backend.log`            | Release builds | The release backend's standard output and standard error, appended by each run; see [the release backend log](/operate/logging/#the-release-backend-log)         |
+| `logs/backend.1.log`          | Release builds | The previous backend log, moved there when `backend.log` had reached 10 MiB as a backend started                                                                 |
 
 On macOS, `build.sh` installs the three `runtime/` entries under
 `${LYS_HOME:-$HOME/.lys}`. It treats an empty value as unset but does not reject

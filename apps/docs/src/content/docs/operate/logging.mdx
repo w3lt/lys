@@ -42,12 +42,72 @@ does not prove that a later inference request will succeed.
 
 ## Process logging
 
-The backend enables Fastify's built-in logger, so request and application logs
-are emitted on the backend process's standard output and standard error streams.
+The backend logs requests and the failures it reports through Fastify's
+built-in pino logger, at level `info`, so the `debug` calls in the chat path
+are not written. Each line is one JSON object whose `level` is the level name
+and whose `time` is a UTC ISO-8601 time, shown here across several lines:
 
-The checked-in code also includes explicit request-scoped debug and error calls
-in the chat path, and the Tauri host writes at least one shutdown failure path
-to stderr.
+```json
+{
+  "level": "info",
+  "time": "2026-10-21T08:15:02.123Z",
+  "pid": 4242,
+  "hostname": "mac",
+  "reqId": "req-1",
+  "req": {
+    "method": "GET",
+    "url": "/api/v1/heath",
+    "host": "127.0.0.1:12345",
+    "remoteAddress": "127.0.0.1",
+    "remotePort": 52538
+  },
+  "msg": "incoming request"
+}
+```
+
+The backend writes these lines to its standard output. Where they end up
+depends on what started it:
+
+| Started by                          | Where the output goes                                                                                                                                                     |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm backend:dev`                  | The terminal, through `pino-pretty`: `[10:15:02.123] INFO (4242): incoming request` in local time, with the other fields indented below.                                  |
+| `pnpm dev`, the development desktop | The terminal that runs `pnpm dev`, the same way, because the host runs the backend's `dev` script.                                                                        |
+| The release app                     | `$LYS_HOME/logs/backend.log`, together with the backend's standard error, so Node's own messages, such as the stack trace of a crash at startup, are in the file as well. |
+
+The Tauri host writes its own failures, such as a backend it could not stop at
+exit or a backend log it could not open, to its standard error, which only an
+app started from a terminal shows.
+
+### The release backend log
+
+- The Tauri host opens the log each time it starts the release backend, and
+  the backend appends to it. The host creates `$LYS_HOME/logs/` and the file
+  when they are missing; the file is readable and writable by its owner only.
+- When `backend.log` has reached 10 MiB as the backend starts, the host first
+  renames it to `backend.1.log`, replacing the previous one. The log is not
+  rotated while a backend runs, so one long run can take it past 10 MiB.
+- When the log cannot be opened, the backend still starts, with the app's own
+  standard streams, so an app opened from Finder or the Dock loses that run's
+  output.
+- The file holds request lines (method, URL, host, remote address, status,
+  response time) and the failures the backend reports, whose messages and
+  stacks can name models, files, or page URLs. Nothing is redacted, so read a
+  log before you share it.
+
+To follow the log while Lys runs:
+
+```sh
+tail -f ~/.lys/logs/backend.log
+```
+
+From a checkout, `pino-pretty` shows it the way the development terminal does:
+
+```sh
+pnpm --filter @lys/backend exec pino-pretty < ~/.lys/logs/backend.log
+```
+
+vmo's output is not kept in a release build
+([#229](https://github.com/w3lt/lys/issues/229)).
 
 ## Desktop runtime status
 
@@ -65,13 +125,13 @@ to manage the backend child process.
 
 The repository does not currently prove support for:
 
-- log files or log rotation
+- vmo log files ([#229](https://github.com/w3lt/lys/issues/229))
 - diagnostics bundles
 - redaction policies for exported diagnostics artifacts
 - a documented incident-sharing workflow
 
 :::note[Coming soon]
-File retention, log rotation, diagnostics bundles, and export/redaction rules
+Longer log retention, diagnostics bundles, and export and redaction rules
 should be added to this page only after the repository ships them as supported
 behavior.
 :::

@@ -19,6 +19,7 @@ import {
   replyPartSchema,
   type Conversation,
   type ConversationAssistantMessage,
+  type ConversationAttachment,
   type ConversationMessage,
   type ConversationMetadata,
   type ConversationSource,
@@ -58,17 +59,21 @@ export const FIXTURE_MODEL = "fixture-model"
  *
  * @param sequence - Identity sequence of the message.
  * @param content - Non-empty authored text.
+ * @param attachments - Files sent with the message, in sending order; none
+ * when omitted.
  * @returns A frozen user message validated by the shared schema.
  */
 export function buildUserMessage(
   sequence: number,
-  content: string
+  content: string,
+  attachments: readonly ConversationAttachment[] = []
 ): ConversationUserMessage {
   return Object.freeze(
     conversationUserMessageSchema.parse({
       id: createFixtureUuidV7(sequence),
       role: "user",
       content,
+      attachments,
       createdAt: FIXTURE_TIMESTAMP
     })
   )

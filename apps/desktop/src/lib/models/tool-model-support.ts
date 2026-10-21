@@ -3,6 +3,8 @@ import type {
   ModelRuntimeState
 } from "@/lib/store/model-runtime"
 
+import { findLoadedModel } from "./model-residency"
+
 /** Whether the loaded model can be offered tools. */
 export type ToolModelSupport =
   | {
@@ -40,13 +42,7 @@ export function calculateToolModelSupport(
   modelRuntime: ModelRuntimeState,
   modelInventory: ModelInventoryState
 ): ToolModelSupport {
-  if (modelRuntime.status !== "loaded" || modelInventory.status !== "ready") {
-    return UNKNOWN_TOOL_MODEL_SUPPORT
-  }
-
-  const loadedModel = modelInventory.models.find(
-    (model) => model.modelKey === modelRuntime.modelKey
-  )
+  const loadedModel = findLoadedModel(modelRuntime, modelInventory)
   if (loadedModel === undefined) return UNKNOWN_TOOL_MODEL_SUPPORT
 
   return Object.freeze({

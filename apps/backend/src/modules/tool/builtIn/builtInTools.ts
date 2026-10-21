@@ -175,7 +175,11 @@ export async function findTurnBuiltInTools(
       })
     }
     tools.push(
-      Object.freeze({ definition: entry.definition, tool: lookup.tool })
+      Object.freeze({
+        definition: entry.definition,
+        tool: lookup.tool,
+        runsWithoutApproval: false
+      })
     )
   }
   return Object.freeze({ status: "ready", tools: Object.freeze(tools) })

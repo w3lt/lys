@@ -1,3 +1,4 @@
+import { calculateImageTokens } from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
 import type { ReplyContextMessage } from "../../../../src/modules/agent/replyModel"
 import LlmReplyContextMeter from "../../../../src/modules/chat/llmReplyContextMeter"
@@ -25,7 +26,7 @@ const CONTEXT_LENGTH = 8192
 /** Context of a round after one call of `read_text_file`. */
 const TOOL_ROUND_CONTEXT: readonly ReplyContextMessage[] = Object.freeze([
   { role: "system", content: "You are Lys." },
-  { role: "user", content: "Read /a" },
+  { role: "user", content: "Read /a", images: [] },
   {
     role: "assistant",
     content: "Let me read it.",
@@ -111,6 +112,48 @@ describe("LlmReplyContextMeter", () => {
     expect(Object.isFrozen(measurement?.messageTokenCounts)).toBe(true)
   })
 
+  it("adds each image's estimated tokens to its user message, measuring only the text with the tokenizer", async () => {
+    const findLlmContextMeasurement = createCharacterTokenizer()
+    const meter = new LlmReplyContextMeter(findLlmContextMeasurement)
+    const images = [
+      {
+        mediaType: "image/png",
+        width: 640,
+        height: 480,
+        data: new Uint8Array([1])
+      },
+      {
+        mediaType: "image/jpeg",
+        width: 4000,
+        height: 3000,
+        data: new Uint8Array([2])
+      }
+    ] as const
+
+    const measurement = await meter.findReplyContextMeasurement({
+      messages: [
+        { role: "system", content: "You are Lys." },
+        { role: "user", content: "Look", images }
+      ],
+      tools: [],
+      model: "qwen/qwen3-8b"
+    })
+
+    expect(findLlmContextMeasurement).toHaveBeenCalledExactlyOnceWith(
+      "qwen/qwen3-8b",
+      ["You are Lys.", "Look"]
+    )
+    expect(measurement?.messageTokenCounts).toEqual([
+      "You are Lys.".length + MESSAGE_TEMPLATE_TOKENS,
+      "Look".length +
+        MESSAGE_TEMPLATE_TOKENS +
+        calculateImageTokens(640, 480) +
+        calculateImageTokens(4000, 3000)
+    ])
+    expect(calculateImageTokens(640, 480)).toBe(23 * 18)
+    expect(calculateImageTokens(4000, 3000)).toBe(1280)
+  })
+
   it("counts no tool tokens when no tool is offered", async () => {
     const meter = new LlmReplyContextMeter(createCharacterTokenizer())
 
@@ -160,7 +203,7 @@ describe("LlmReplyContextMeter", () => {
       meter.findReplyContextMeasurement({
         messages: [
           { role: "system", content: "You are Lys." },
-          { role: "user", content: "Hello" }
+          { role: "user", content: "Hello", images: [] }
         ],
         tools: [],
         model: "qwen/qwen3-8b"

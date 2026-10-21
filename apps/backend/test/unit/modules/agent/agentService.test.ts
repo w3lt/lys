@@ -33,6 +33,7 @@ import {
 } from "../../support/agentCreatorContract"
 import { openTestDatabase } from "../../support/conversationDatabase"
 import { createRoomyReplyContextMeter } from "../../support/replyContextMeterFakes"
+import { createUserMessage } from "../../support/conversationFixtures"
 
 /** Time the clock reads when a case starts. */
 const NOW = "2026-05-06T07:08:09.123Z"
@@ -98,7 +99,9 @@ async function createHelloReply(agent: Agent): Promise<void> {
   await agent.createReply({
     history: [],
     sources: [],
-    userMessageContent: "Hello",
+    userMessage: createUserMessage(1, "Hello"),
+    canSeeImages: false,
+    findAttachmentImage: vi.fn(),
     model: "qwen/qwen3-8b",
     generationOptions: { temperature: 0.4 },
     clientTools: [],
@@ -127,7 +130,7 @@ function buildHelloReplyRequest(systemPrompt: string): unknown {
   return expect.objectContaining({
     messages: [
       { role: "system", content: systemPrompt },
-      { role: "user", content: "Hello" }
+      { role: "user", content: "Hello", images: [] }
     ]
   })
 }

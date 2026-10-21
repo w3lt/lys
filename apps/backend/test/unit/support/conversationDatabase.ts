@@ -163,6 +163,23 @@ export function saveUserMessageRow(
       VALUES (?, ?, 'user', ?, ?)`
       )
       .run(row.id, row.conversationId, row.content, row.createdAt)
+    const insertAttachment = statements.getStatement(
+      `INSERT INTO conversation_attachments
+      (conversation_id, message_id, number, name, kind, media_type, size_bytes, width, height)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    for (const attachment of row.attachments ?? [])
+      insertAttachment.run(
+        row.conversationId,
+        row.id,
+        attachment.number,
+        attachment.name,
+        attachment.kind,
+        attachment.kind === "image" ? attachment.mediaType : null,
+        attachment.sizeBytes,
+        attachment.kind === "image" ? attachment.width : null,
+        attachment.kind === "image" ? attachment.height : null
+      )
   })
 }
 

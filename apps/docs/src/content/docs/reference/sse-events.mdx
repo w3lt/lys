@@ -37,14 +37,16 @@ Includes:
 
 - full `conversation` metadata, whose `title` is `null` until a title is
   generated
-- one persisted user message
+- one persisted user message, with the records of the files sent with it in
+  `attachments` (empty when none)
 - one persisted assistant message in `streaming` state
 
 ### `start-existing-conversation-turn`
 
 Includes:
 
-- one persisted user message
+- one persisted user message, with the records of the files sent with it in
+  `attachments` (empty when none)
 - one persisted assistant message in `streaming` state
 
 The desktop uses its current active conversation metadata together with these
@@ -156,7 +158,8 @@ too.
 Carries one tool call the backend shows to the person before anything runs,
 in the same shape as a `tool-call` event's `call`. The backend's tool approval
 service sends it for every call of a tool that is not saved as Just run,
-client and backend tools alike, right after the call's `reply-part` stored it
+client and backend tools alike except `read_attachment`, which runs without
+approval, right after the call's `reply-part` stored it
 as `awaiting-approval`; a call of a tool on Just run gets no prompt. The
 client shows the call and answers with the
 [tool-approval route](/reference/api/#tool-approvals). After `allowed`, a

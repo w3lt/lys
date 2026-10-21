@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import { buildModelDescriptor } from "@/lib/models/inventory"
 import {
   findEligibleChatModel,
+  findLoadedModel,
   formatComposerModelRowTag,
   formatModelResidencyHeading,
   formatModelResidencyMeta,
@@ -10,7 +11,10 @@ import {
   readModelResidencyTone,
   readModelRowTone
 } from "@/lib/models/model-residency"
-import type { ModelRuntimeState } from "@/lib/store/model-runtime"
+import type {
+  ModelInventoryState,
+  ModelRuntimeState
+} from "@/lib/store/model-runtime"
 import { buildLlmInfo } from "../../support/modelFixtures"
 
 /** Row for weights that are resident according to the inventory. */
@@ -41,6 +45,44 @@ describe("readLoadedModelKey", () => {
     { status: "unloading", modelKey: "qwen" }
   ])("names no model while the summary is $status", (modelRuntime) => {
     expect(readLoadedModelKey(modelRuntime)).toBeNull()
+  })
+})
+
+describe("findLoadedModel", () => {
+  it("finds the loaded model's inventory entry", () => {
+    const resident = buildLlmInfo("resident", { loaded: true })
+
+    expect(
+      findLoadedModel(
+        { status: "loaded", modelKey: "resident" },
+        { status: "ready", models: [buildLlmInfo("on-disk"), resident] }
+      )
+    ).toBe(resident)
+  })
+
+  it.each<[string, ModelRuntimeState, ModelInventoryState]>([
+    [
+      "no model is loaded",
+      NONE,
+      { status: "ready", models: [buildLlmInfo("resident", { loaded: true })] }
+    ],
+    [
+      "the inventory cannot be read",
+      { status: "loaded", modelKey: "resident" },
+      { status: "unavailable" }
+    ],
+    [
+      "the inventory failed",
+      { status: "loaded", modelKey: "resident" },
+      { status: "failed" }
+    ],
+    [
+      "the inventory does not list the loaded model",
+      { status: "loaded", modelKey: "resident" },
+      { status: "ready", models: [buildLlmInfo("on-disk")] }
+    ]
+  ])("finds no entry while %s", (_case, modelRuntime, inventory) => {
+    expect(findLoadedModel(modelRuntime, inventory)).toBeUndefined()
   })
 })
 

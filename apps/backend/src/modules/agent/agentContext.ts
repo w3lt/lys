@@ -2,10 +2,81 @@ import {
   isAnsweredToolCall,
   type AnsweredToolCallReplyPart,
   type ConversationAssistantMessage,
+  type ConversationImageAttachment,
   type ConversationMessage,
+  type ConversationUserMessage,
   type ReplyPart
 } from "@lys/share"
-import type { ContextToolCall, ReplyContextMessage } from "./replyModel"
+import {
+  buildUserMessageText,
+  formatMissingImagePlaceholder,
+  formatUnseenImagePlaceholder
+} from "../attachment/attachmentContext"
+import type {
+  ContextToolCall,
+  ReplyContextImage,
+  ReplyContextMessage
+} from "./replyModel"
+
+/**
+ * Reads the stored bytes of one image attachment of a conversation.
+ *
+ * @param messageId - UUIDv7 of the user message the image was sent with.
+ * @param attachment - The stored image attachment.
+ * @returns A promise resolving to the image's bytes as stored, or to
+ * undefined when its file is missing from this machine.
+ * @throws If the file cannot be read for another reason.
+ */
+export type FindAttachmentImage = (
+  messageId: string,
+  attachment: ConversationImageAttachment
+) => Promise<Uint8Array | undefined>
+
+/** The images a context sends, by attachment number. */
+export type AgentContextImages =
+  | Readonly<{
+      /** The model cannot see images; each becomes a sentence saying so. */
+      status: "unseen"
+    }>
+  | Readonly<{
+      /** The model sees images; each read image follows its message's text. */
+      status: "loaded"
+      /**
+       * Bytes of each image whose file was read, by attachment number; an
+       * image absent here becomes a sentence saying its file is missing.
+       */
+      images: ReadonlyMap<number, Uint8Array>
+    }>
+
+/** The message a turn answers, as the context needs it. */
+export type AgentContextUserMessage = Pick<
+  ConversationUserMessage,
+  "content" | "attachments"
+>
+
+/**
+ * Context images of a model without vision: no file is read, and each image
+ * becomes a sentence saying the model cannot see it.
+ */
+export const UNSEEN_CONTEXT_IMAGES: AgentContextImages = Object.freeze({
+  status: "unseen"
+})
+
+/** What the context an agent sends to its model for one turn is built from. */
+export type AgentContextSource = Readonly<{
+  /** The agent's own instructions, sent first. */
+  systemPrompt: string
+  /** Stored transcript before the turn, in conversation order. */
+  history: readonly ConversationMessage[]
+  /** Text and attachments of the message the turn answers, sent last. */
+  userMessage: AgentContextUserMessage
+  /**
+   * The images the context sends: {@link UNSEEN_CONTEXT_IMAGES} for a model
+   * without vision, otherwise as {@link readAgentContextImages} read them for
+   * the history and the new message.
+   */
+  images: AgentContextImages
+}>
 
 /**
  * Selects stored replies that can supply conversation context.
@@ -91,17 +162,14 @@ function buildStoredRoundContextMessages(
 }
 
 /**
- * Builds the context messages of one stored message.
- * @param message - Stored user message or reply.
- * @returns The user message's text; a context reply's rounds as
- * {@link buildStoredRoundContextMessages} builds them; nothing for another
- * reply.
+ * Builds the context messages of one stored reply.
+ * @param message - Stored reply.
+ * @returns A context reply's rounds as {@link buildStoredRoundContextMessages}
+ * builds them; nothing for another reply.
  */
-function buildStoredContextMessages(
-  message: ConversationMessage
+function buildStoredReplyContextMessages(
+  message: ConversationAssistantMessage
 ): readonly ReplyContextMessage[] {
-  if (message.role === "user")
-    return [{ role: "user", content: message.content }]
   if (!isContextReply(message)) return []
   return buildReplyPartRounds(message.parts).flatMap(
     buildStoredRoundContextMessages
@@ -109,26 +177,154 @@ function buildStoredContextMessages(
 }
 
 /**
+ * Builds the context form of one user message.
+ * @param message - The message's text and attachments.
+ * @param images - The images the context sends.
+ * @returns The person's text with the message's attachment list, as
+ * {@link buildUserMessageText} builds it, and the message's images the model
+ * sees in attachment order. An image the model does not see, because the
+ * model cannot see images or the image's file is missing, is a placeholder
+ * sentence in the text instead.
+ */
+function buildUserContextMessage(
+  message: AgentContextUserMessage,
+  images: AgentContextImages
+): ReplyContextMessage {
+  const contextImages: ReplyContextImage[] = []
+  const placeholders: string[] = []
+  for (const attachment of message.attachments) {
+    if (attachment.kind !== "image") continue
+    const data =
+      images.status === "loaded"
+        ? images.images.get(attachment.number)
+        : undefined
+    if (images.status === "unseen")
+      placeholders.push(formatUnseenImagePlaceholder(attachment))
+    else if (data === undefined)
+      placeholders.push(formatMissingImagePlaceholder(attachment))
+    else contextImages.push(buildContextImage(attachment, data))
+  }
+  return {
+    role: "user",
+    content: buildUserMessageText(
+      message.content,
+      message.attachments,
+      placeholders
+    ),
+    images: contextImages
+  }
+}
+
+/**
+ * Builds the context form of one image the model sees.
+ * @param attachment - Stored image attachment.
+ * @param data - The image's bytes as stored.
+ * @returns The image with its media type, sides, and bytes.
+ */
+function buildContextImage(
+  attachment: ConversationImageAttachment,
+  data: Uint8Array
+): ReplyContextImage {
+  return {
+    mediaType: attachment.mediaType,
+    width: attachment.width,
+    height: attachment.height,
+    data
+  }
+}
+
+/**
+ * Builds the context messages of one stored message.
+ * @param message - Stored user message or reply.
+ * @param images - The images the context sends.
+ * @returns The user message as {@link buildUserContextMessage} builds it; a
+ * reply's messages as {@link buildStoredReplyContextMessages} builds them.
+ */
+function buildStoredContextMessages(
+  message: ConversationMessage,
+  images: AgentContextImages
+): readonly ReplyContextMessage[] {
+  if (message.role === "user") return [buildUserContextMessage(message, images)]
+  return buildStoredReplyContextMessages(message)
+}
+
+/**
+ * Reads the images a turn's context sends to a model that sees images.
+ * @param messages - Stored messages the context is built from, in
+ * conversation order, the turn's own user message last.
+ * @param findAttachmentImage - Reads one image's bytes; borrowed until the
+ * returned promise settles.
+ * @returns A promise resolving to `loaded` with the bytes of each image
+ * attachment whose file was found, by attachment number. The files are read
+ * together, requested in conversation order. A model without vision gets
+ * {@link UNSEEN_CONTEXT_IMAGES} instead, without a read.
+ * @throws The reader's failure, for a file that cannot be read although it
+ * is not missing.
+ */
+export async function readAgentContextImages(
+  messages: readonly ConversationMessage[],
+  findAttachmentImage: FindAttachmentImage
+): Promise<AgentContextImages> {
+  const loaded = await Promise.all(
+    listImageAttachments(messages).map(
+      async ({ messageId, attachment }) =>
+        [
+          attachment.number,
+          await findAttachmentImage(messageId, attachment)
+        ] as const
+    )
+  )
+  const images = new Map<number, Uint8Array>()
+  for (const [number, data] of loaded)
+    if (data !== undefined) images.set(number, data)
+  return Object.freeze({ status: "loaded", images })
+}
+
+/**
+ * Lists the image attachments of a transcript's user messages.
+ * @param messages - Stored messages and the new message, in conversation
+ * order.
+ * @returns Each image attachment with its message's identity, in
+ * conversation order; replies have no attachments.
+ */
+function listImageAttachments(
+  messages: readonly ConversationMessage[]
+): readonly Readonly<{
+  messageId: string
+  attachment: ConversationImageAttachment
+}>[] {
+  return messages.flatMap((message) =>
+    message.role === "user"
+      ? message.attachments
+          .filter((attachment) => attachment.kind === "image")
+          .map((attachment) => ({ messageId: message.id, attachment }))
+      : []
+  )
+}
+
+/**
  * Builds the context an agent sends to its model for one turn.
- * @param systemPrompt - The agent's own instructions, sent first.
- * @param history - Stored transcript before the turn, in conversation order.
- * @param userMessageContent - Text of the message the turn answers, sent last.
+ * @param source - The system prompt, the history, the new message, and the
+ * images the context sends.
  * @returns The system prompt, then the history's user messages and the rounds
  * of its completed and interrupted replies in order, then the new message
- * once. Each stored round sends its text and the tool calls that have a
- * result, followed by those results; reasoning, calls without a result, and
- * rounds with neither text nor such a call are left out, and failed and
- * streaming replies are left out whole.
+ * once. Each user message sends its text, the list of its attachments when it
+ * has any, and its images the model sees, with a placeholder sentence for
+ * each image it does not see. Each stored round sends its text and the tool
+ * calls that have a result, followed by those results; reasoning, calls
+ * without a result, and rounds with neither text nor such a call are left
+ * out, and failed and streaming replies are left out whole.
  */
 export function buildAgentContext(
-  systemPrompt: string,
-  history: readonly ConversationMessage[],
-  userMessageContent: string
+  source: AgentContextSource
 ): readonly ReplyContextMessage[] {
+  const { images } = source
   return [
-    { role: "system", content: systemPrompt },
-    ...history.flatMap(buildStoredContextMessages),
-    { role: "user", content: userMessageContent }
+    { role: "system", content: source.systemPrompt },
+    ...source.history.flatMap((message) =>
+      buildStoredContextMessages(message, images)
+    ),
+    buildUserContextMessage(source.userMessage, images)
   ]
 }
 
@@ -144,6 +340,8 @@ export function calculateAgentContextHistoryMessageCount(
   history: readonly ConversationMessage[]
 ): number {
   return history.filter(
-    (message) => buildStoredContextMessages(message).length > 0
+    (message) =>
+      message.role === "user" ||
+      buildStoredReplyContextMessages(message).length > 0
   ).length
 }

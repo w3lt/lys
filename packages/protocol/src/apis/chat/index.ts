@@ -1,10 +1,13 @@
 export {
+  MAXIMUM_CHAT_BODY_BYTES,
   MAXIMUM_GENERATION_TEMPERATURE,
   chatApi,
   chatApiRequestBodySchema,
   chatApiStreamEventSchema,
+  chatAttachmentSchema,
   messageGenerationOptionsSchema,
   type ChatApiRequestBody,
+  type ChatAttachment,
   type ChatApiResponse,
   type ChatApiRoute,
   type ChatApiStreamEvent,

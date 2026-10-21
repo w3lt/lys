@@ -223,6 +223,44 @@
   white-space: pre-wrap;
 }
 
+/* Files sent with a message, listed under its text as chips. */
+.chat-view__attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0;
+  margin: 10px 0 0;
+  list-style: none;
+}
+
+.chat-view__attachment {
+  display: flex;
+  height: 26px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--app-surface-panel);
+}
+
+.chat-view__attachment-kind {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--app-text-faint);
+}
+
+.chat-view__attachment-name {
+  max-width: 240px;
+  overflow: hidden;
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--app-text);
+}
+
 .chat-view__message--lys .markdown-message {
   margin-top: 12px;
   color: var(--app-text);

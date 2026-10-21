@@ -1,12 +1,18 @@
 import type {
   ConversationAssistantMessage,
+  ConversationAttachment,
   ConversationMessage,
   ConversationSource,
   ConversationUserMessage,
   ReplyPart,
   ToolCallReplyPart
 } from "@lys/share"
-import type { ConversationTurn } from "../../../src/modules/chat/persistence"
+import { v7 as uuidv7 } from "uuid"
+import type {
+  ConversationTurn,
+  ConversationTurnTarget,
+  ConversationTurnUserMessage
+} from "../../../src/modules/chat/persistence"
 
 /**
  * Creates a syntactically valid UUIDv7 whose last group encodes `sequence`.
@@ -30,18 +36,46 @@ export const FIXTURE_TIMESTAMP = "2026-01-02T03:04:05.678Z"
  *
  * @param sequence - Identity sequence of the message.
  * @param content - Non-empty authored text.
+ * @param attachments - Stored attachments in number order; none when omitted.
  * @returns A valid user message.
  */
 export function createUserMessage(
   sequence: number,
-  content: string
+  content: string,
+  attachments: readonly ConversationAttachment[] = []
 ): ConversationUserMessage {
   return {
     id: createFixtureUuidV7(sequence),
     role: "user",
     content,
+    attachments,
     createdAt: FIXTURE_TIMESTAMP
   }
+}
+
+/**
+ * Creates the target of a turn that starts a new conversation.
+ *
+ * @param agentCode - Code of the agent that answers it.
+ * @returns The target with a fresh UUIDv7, as the chat route makes one.
+ */
+export function createNewConversationTarget(
+  agentCode: string
+): Extract<ConversationTurnTarget, { kind: "new" }> {
+  return { kind: "new", id: uuidv7(), agentCode }
+}
+
+/**
+ * Creates the user message of a turn before it is stored, without
+ * attachments.
+ *
+ * @param content - Authored text.
+ * @returns The message with a fresh UUIDv7, as the chat route makes one.
+ */
+export function createTurnUserMessage(
+  content: string
+): ConversationTurnUserMessage {
+  return { id: uuidv7(), content, attachments: [] }
 }
 
 /** Lifecycle fields that distinguish assistant-message fixtures. */

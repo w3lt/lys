@@ -10,6 +10,7 @@ import {
 } from "@lys/protocol"
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify"
 import { serializerCompiler } from "fastify-type-provider-zod"
+import type AttachmentFileStore from "../../attachment/attachmentFileStore"
 import type {
   ConversationReader,
   ConversationTitleEditor,
@@ -18,9 +19,24 @@ import type {
 import { parseConversationListOptions } from "../listOptions"
 import { createConversationNotFoundProblem } from "./notFound"
 
+/** What the delete endpoint does with attachment files. */
+type AttachmentFileDeleter = Pick<
+  AttachmentFileStore,
+  "deleteConversationAttachments"
+>
+
+/** What deleting a conversation needs: its rows' deleter and its files'. */
+type ConversationDeletion = Readonly<{
+  /** Borrowed history deletion access. */
+  history: ConversationDeleter
+  /** Borrowed deletion of the conversation's files. */
+  attachmentFiles: AttachmentFileDeleter
+}>
+
 /**
  * Installs all protocol-defined history endpoints on a configured backend.
- * @param app - Application with validation and conversation persistence installed.
+ * @param app - Application with validation, conversation persistence, and
+ * the attachment file store installed.
  * @returns A promise resolving after route registration.
  * @throws If route registration fails. The failure rejects the promise, so
  * `app.register` reports it rather than an uncaught exception.
@@ -37,13 +53,18 @@ export default function updateFastifyWithConversationRoutes(
 /**
  * Registers the list, read, title-update, and delete endpoints and the
  * response serializer they share.
- * @param app - Application with validation and conversation persistence installed.
+ * @param app - Application with validation, conversation persistence, and
+ * the attachment file store installed.
  * @throws If route registration fails.
  */
 function registerConversationRoutes(app: FastifyInstance): void {
   app.setSerializerCompiler(serializerCompiler)
   const historyReader = app.conversationHistoryReader
   const historyEditor = app.conversationHistoryEditor
+  const deletion: ConversationDeletion = Object.freeze({
+    history: historyEditor,
+    attachmentFiles: app.attachmentFileStore
+  })
   app.route<ListConversationsApiRoute>({
     method: listConversationsApi.method,
     url: listConversationsApi.path,
@@ -91,7 +112,7 @@ function registerConversationRoutes(app: FastifyInstance): void {
       response: deleteConversationApi.responses
     },
     handler: (request, reply) =>
-      handleDeleteConversation(request, reply, historyEditor)
+      handleDeleteConversation(request, reply, deletion)
   })
 }
 
@@ -157,29 +178,41 @@ function handleUpdateConversationTitle(
 }
 
 /**
- * Deletes the conversation and transcript before sending a bodyless success,
- * or sends the declared missing-conversation problem.
+ * Deletes the conversation and transcript, then its attachment files, before
+ * sending a bodyless success, or sends the declared missing-conversation
+ * problem.
  * @param request - Validated target identifier.
  * @param reply - HTTP response owner.
- * @param history - Borrowed history deletion access.
+ * @param deletion - Borrowed deletion of the conversation's rows and of its
+ * files.
+ * @returns Settlement after the response is sent.
  * @throws If storage access fails.
+ * @remarks The rows are deleted first; the files are removed once the rows
+ * are gone, so a conversation is never left without its files. When the
+ * files cannot be removed, the failure is logged with its cause and the
+ * deletion still succeeds: the conversation is gone, and the files stay
+ * under the attachments directory.
  */
-function handleDeleteConversation(
+async function handleDeleteConversation(
   request: FastifyRequest<DeleteConversationApiRoute>,
   reply: FastifyReply<DeleteConversationApiRoute>,
-  history: ConversationDeleter
-): void {
-  if (!history.deleteConversation(request.params.conversationId)) {
+  deletion: ConversationDeletion
+): Promise<void> {
+  const { conversationId } = request.params
+  if (!deletion.history.deleteConversation(conversationId)) {
     reply
       .type("application/problem+json")
       .code(404)
-      .send(
-        createConversationNotFoundProblem(
-          request.params.conversationId,
-          request.url
-        )
-      )
+      .send(createConversationNotFoundProblem(conversationId, request.url))
     return
+  }
+  try {
+    await deletion.attachmentFiles.deleteConversationAttachments(conversationId)
+  } catch (error) {
+    request.log.error(
+      { err: error },
+      "The deleted conversation's attachment files could not be removed"
+    )
   }
   reply.code(204).send()
 }

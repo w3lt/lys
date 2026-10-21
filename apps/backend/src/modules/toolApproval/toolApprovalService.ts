@@ -17,11 +17,13 @@ const NO_JUST_RUN_TOOL_NAMES: ReadonlySet<string> = new Set()
  *
  * @remarks This is the backend's approval gateway: every checked call of
  * every turn, client and backend tools alike, passes a {@link ToolCallGate}
- * created here before anything runs. The choices are read once per model
- * round, so a choice saved before a round's calls arrive applies to that
- * round. When the saved choices cannot be read, every call asks (it fails
- * closed). Concurrency model: reentrant; it owns no mutable state, and each
- * gate is independent.
+ * created here before anything runs, except a call of a backend tool that
+ * runs without approval, such as the attachment reader, which only reads
+ * what the person gave Lys for the conversation. The choices are read once
+ * per model round that has a call to gate, so a choice saved before a
+ * round's calls arrive applies to that round. When the saved choices cannot
+ * be read, every call asks (it fails closed). Concurrency model: reentrant;
+ * it owns no mutable state, and each gate is independent.
  */
 export default class ToolApprovalService {
   /** Reads the saved choices; lent by the composition root. */

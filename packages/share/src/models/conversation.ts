@@ -1,5 +1,10 @@
 import * as z from "zod"
 import { agentCodeSchema } from "./agent"
+import {
+  conversationAttachmentSchema,
+  hasDistinctAttachmentNames,
+  type ConversationAttachment
+} from "./attachment"
 
 /** Validates ISO-8601 timestamps persisted with exactly millisecond precision. */
 const timestampSchema = z.iso.datetime({ precision: 3 })
@@ -26,12 +31,38 @@ const conversationMessageBase = {
   createdAt: timestampSchema
 }
 
+/**
+ * Answers whether no two attachments of a message share a name ignoring
+ * case.
+ *
+ * @param attachments - Attachments of one message.
+ * @returns True when every name is distinct by the attachment name rules.
+ */
+function hasDistinctAttachments(
+  attachments: readonly ConversationAttachment[]
+): boolean {
+  return hasDistinctAttachmentNames(
+    attachments.map((attachment) => attachment.name)
+  )
+}
+
 /** Validates a non-empty user-authored message in a persisted conversation. */
 export const conversationUserMessageSchema = z.strictObject({
   ...conversationMessageBase,
   role: z.literal("user"),
   /** Non-empty authored content retained in the conversation transcript. */
-  content: z.string().min(1)
+  content: z.string().min(1),
+  /**
+   * Attachments sent with the message, in the order they were sent, each
+   * name once ignoring case; empty when it has none.
+   */
+  attachments: z
+    .array(conversationAttachmentSchema)
+    .refine(
+      hasDistinctAttachments,
+      "A message names each attachment once, ignoring case."
+    )
+    .readonly()
 })
 
 /**

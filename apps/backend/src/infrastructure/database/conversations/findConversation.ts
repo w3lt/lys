@@ -20,6 +20,70 @@ type StoredRow = Record<string, unknown>
 type StoredReplyParts = ReadonlyMap<unknown, readonly ReplyPart[]>
 
 /**
+ * Untrusted attachments of each user message of one conversation, by message
+ * identity, each in the shape the attachment schema validates.
+ */
+type StoredMessageAttachments = ReadonlyMap<unknown, readonly unknown[]>
+
+/** What the loaded messages of one conversation are built from. */
+type StoredMessageContext = Readonly<{
+  /** Validated parts of the conversation's replies. */
+  partsByReply: StoredReplyParts
+  /** Untrusted attachments of the conversation's user messages. */
+  attachmentsByMessage: StoredMessageAttachments
+}>
+
+/**
+ * Projects one stored attachment row into the shape the attachment schema
+ * validates: an image with its media type and sides, or a text file.
+ * @param row - Untrusted stored attachment row.
+ * @returns The untrusted projection.
+ */
+function buildStoredAttachment(row: StoredRow): unknown {
+  const common = {
+    kind: row.kind,
+    number: row.number,
+    name: row.name,
+    sizeBytes: row.sizeBytes
+  }
+  if (row.kind !== "image") return common
+  return {
+    ...common,
+    mediaType: row.mediaType,
+    width: row.width,
+    height: row.height
+  }
+}
+
+/**
+ * Reads the attachments of every user message of one conversation.
+ * @param statements - Statement compilation lent to the caller's transaction.
+ * @param conversationId - Stored UUIDv7 of the conversation.
+ * @returns Each message's untrusted attachments in number order, by message
+ * id; a message without attachments has no entry.
+ * @throws If SQLite access fails.
+ */
+function listStoredMessageAttachments(
+  statements: DatabaseStatementCompiler,
+  conversationId: string
+): StoredMessageAttachments {
+  const rows = statements
+    .getStatement(
+      `SELECT message_id AS messageId, number, name, kind,
+    media_type AS mediaType, size_bytes AS sizeBytes, width, height
+    FROM conversation_attachments WHERE conversation_id = ? ORDER BY number`
+    )
+    .all(conversationId)
+  const attachmentsByMessage = new Map<unknown, unknown[]>()
+  for (const row of rows) {
+    const attachments = attachmentsByMessage.get(row.messageId) ?? []
+    attachments.push(buildStoredAttachment(row))
+    attachmentsByMessage.set(row.messageId, attachments)
+  }
+  return attachmentsByMessage
+}
+
+/**
  * Reads metadata without changing activity time.
  * @param statements - Statement compilation lent to the caller's transaction.
  * @param conversationId - Stored UUIDv7 to look up.
@@ -134,13 +198,16 @@ function listStoredReplyParts(
 /**
  * Projects role-specific SQLite columns into the strict message contract.
  * @param row - Untrusted stored user or reply row selected by findConversation.
- * @param partsByReply - Validated parts of the conversation's replies.
- * @returns The validated independent message; a reply carries its parts.
- * @throws If the row violates the shared message schema.
+ * @param context - Validated parts of the conversation's replies and the
+ * untrusted attachments of its user messages.
+ * @returns The validated independent message; a user message carries its
+ * attachments and a reply its parts.
+ * @throws If the row, or an attachment of it, violates the shared message
+ * schema.
  */
 function parseConversationMessage(
   row: StoredRow,
-  partsByReply: StoredReplyParts
+  { partsByReply, attachmentsByMessage }: StoredMessageContext
 ): ConversationMessage {
   const common = {
     id: row.id,
@@ -148,7 +215,11 @@ function parseConversationMessage(
     createdAt: row.createdAt
   }
   if (row.role === "user")
-    return conversationMessageSchema.parse({ ...common, content: row.content })
+    return conversationMessageSchema.parse({
+      ...common,
+      content: row.content,
+      attachments: attachmentsByMessage.get(row.id) ?? []
+    })
   return conversationMessageSchema.parse({
     ...common,
     model: row.model,
@@ -180,11 +251,12 @@ function listConversationSources(
 }
 
 /**
- * Reads a full transcript in creation-time and UUID order, with each reply's
- * parts and the conversation's sources.
+ * Reads a full transcript in creation-time and UUID order, with each user
+ * message's attachments, each reply's parts, and the conversation's sources.
  * @param statements - Statement compilation lent to the caller's read or write transaction.
  * @param conversationId - Stored UUIDv7 to look up.
- * @returns Independent conversation data, or undefined when absent.
+ * @returns Independent conversation data, or undefined when absent. Reading
+ * it never touches the attachment files.
  * @throws If SQLite access or persisted validation fails.
  */
 export function findConversation(
@@ -193,7 +265,13 @@ export function findConversation(
 ): Conversation | undefined {
   const metadata = findConversationMetadata(statements, conversationId)
   if (!metadata) return undefined
-  const partsByReply = listStoredReplyParts(statements, conversationId)
+  const context: StoredMessageContext = {
+    partsByReply: listStoredReplyParts(statements, conversationId),
+    attachmentsByMessage: listStoredMessageAttachments(
+      statements,
+      conversationId
+    )
+  }
   const rows = statements
     .getStatement(
       `SELECT id, role, model, content, status,
@@ -204,7 +282,7 @@ export function findConversation(
     .all(conversationId)
   return {
     ...metadata,
-    messages: rows.map((row) => parseConversationMessage(row, partsByReply)),
+    messages: rows.map((row) => parseConversationMessage(row, context)),
     sources: listConversationSources(statements, conversationId)
   }
 }

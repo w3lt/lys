@@ -470,7 +470,52 @@ const databaseMigrations: readonly (string | DatabaseMigrationStep)[] = [
   `
     UPDATE conversations SET agent_code = 'caliginia' WHERE agent_code = 'lys';
   `,
-  migrateRepliesToParts
+  migrateRepliesToParts,
+  // Stores the attachments of user messages: the files sent with a message,
+  // kept on disk under the attachments directory by conversation, message,
+  // and name. Each attachment has a number that is unique within its
+  // conversation, by which the model reads it. The name is unique within its
+  // message ignoring ASCII case (NOCASE), as the file systems Lys runs on
+  // compare file names; the backend compares names without case in full
+  // Unicode before it writes. SQLite checks that the name is not empty, not
+  // `.` or `..`, and holds no slash, and that an image carries its media type
+  // and size while a text file carries neither; the attachment schema checks
+  // the rest of the name rules (no control character, at most 255 UTF-8
+  // bytes) and of every row the backend writes and reads.
+  `
+    CREATE TABLE conversation_attachments (
+      conversation_id TEXT NOT NULL
+        REFERENCES conversations(id) ON DELETE CASCADE,
+      message_id TEXT NOT NULL
+        REFERENCES conversation_messages(id) ON DELETE CASCADE,
+      number INTEGER NOT NULL CHECK (number >= 1),
+      name TEXT NOT NULL COLLATE NOCASE CHECK (
+        name <> '' AND name <> '.' AND name <> '..' AND instr(name, '/') = 0
+      ),
+      kind TEXT NOT NULL CHECK (kind IN ('image', 'text')),
+      media_type TEXT,
+      size_bytes INTEGER NOT NULL CHECK (size_bytes >= 0),
+      width INTEGER,
+      height INTEGER,
+      CHECK (
+        (
+          kind = 'image'
+          AND media_type IS NOT NULL AND media_type <> ''
+          AND width IS NOT NULL AND width >= 1
+          AND height IS NOT NULL AND height >= 1
+        )
+        OR
+        (
+          kind = 'text'
+          AND media_type IS NULL
+          AND width IS NULL
+          AND height IS NULL
+        )
+      ),
+      PRIMARY KEY (message_id, name),
+      UNIQUE (conversation_id, number)
+    ) STRICT
+  `
 ]
 
 /** Latest schema version that the backend database can open and migrate. */

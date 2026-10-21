@@ -75,6 +75,13 @@ repository today; it is not a promise of unreleased work.
   decides for every tool from the saved choices; both web tools start off. Lys's instructions do not
   give her today's date yet
   ([#148](https://github.com/w3lt/lys/issues/148)).
+- A message can carry up to eight files. A model with vision sees an attached
+  image with its message, on that turn and on every later one; every message
+  lists its files for the model, and a model trained for tool use reads an
+  attached text file on request through `read_attachment`, which never asks
+  the person. The files are stored with the conversation under
+  `$LYS_HOME/attachments` and shown on their message; see
+  [attachments](/architecture/backend/#attachments).
 - Generation controls apply to future chat requests and save automatically
   through Tauri to `$LYS_HOME/settings.json`, which contains runtime, model,
   generation, load configuration, secrets, and tools groups. The runtime
@@ -100,8 +107,6 @@ repository today; it is not a promise of unreleased work.
 
 The current repository does not yet provide:
 
-- sending composer attachments; the composer stages files and long pastes only
-  for its local context estimate
 - a Conversation settings pane
 - replay or reconnect semantics for chat streams
 - tool choices that are saved ([#110](https://github.com/w3lt/lys/issues/110))

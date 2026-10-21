@@ -6,6 +6,7 @@ import type {
   ConversationAssistantMessageFinishReason,
   ConversationMessage,
   ConversationSource,
+  ConversationUserMessage,
   OpenAIFunctionTool,
   ReplyPart,
   ToolCallReplyPart,
@@ -16,7 +17,12 @@ import { waitForSettlementOrAbort } from "../../utils/abort"
 import { ChatCompletionCancelledError } from "../../utils/errors"
 import {
   buildAgentContext,
-  calculateAgentContextHistoryMessageCount
+  calculateAgentContextHistoryMessageCount,
+  readAgentContextImages,
+  UNSEEN_CONTEXT_IMAGES,
+  type AgentContextImages,
+  type AgentContextUserMessage,
+  type FindAttachmentImage
 } from "./agentContext"
 import {
   findReplyRoundFitFailure,
@@ -84,8 +90,20 @@ export type AgentTurn = Readonly<{
    * distinct number; the turn numbers new sources after them.
    */
   sources: readonly ConversationSource[]
-  /** Text of the user message this turn answers. */
-  userMessageContent: string
+  /** Stored user message this turn answers, with its attachments. */
+  userMessage: ConversationUserMessage
+  /**
+   * Whether the model sees images: true sends each image attachment's bytes
+   * after its message's text, false a sentence saying the model cannot see
+   * it.
+   */
+  canSeeImages: boolean
+  /**
+   * Reads the stored bytes of one image attachment of the conversation;
+   * borrowed until the reply settles. Not called when the model cannot see
+   * images.
+   */
+  findAttachmentImage: FindAttachmentImage
   /** Model selected by the request. */
   model: string
   /** Caller-provided sampling and reply length controls. */
@@ -138,7 +156,9 @@ export type AgentTurn = Readonly<{
   /**
    * Creates the approval gate of one round of tool calls, which asks the
    * person through every stream following the reply unless the tool is
-   * saved as Just run. Called once per round, when the round's calls arrive.
+   * saved as Just run. Called once per round that has a call to gate, when
+   * the round's calls arrive; a round whose calls all name tools that run
+   * without approval creates none.
    */
   createToolCallGate: CreateToolCallGate
   /**
@@ -187,12 +207,25 @@ const ENDED_REPLY_ROUND = Object.freeze({
   status: "ended"
 } satisfies ReplyRound)
 
+/** The next message as a context measurement sends it: without text or files. */
+const EMPTY_USER_MESSAGE = Object.freeze({
+  content: "",
+  attachments: []
+} satisfies AgentContextUserMessage)
+
 /** What the next message of a conversation would be sent with. */
 export type AgentContextInput = Readonly<{
   /** Stored transcript, in conversation order; empty for a new conversation. */
   history: readonly ConversationMessage[]
   /** Identifier of the model the message would be sent to. */
   model: string
+  /** Whether that model sees images, as {@link AgentTurn.canSeeImages}. */
+  canSeeImages: boolean
+  /**
+   * Reads one stored image's bytes, as {@link AgentTurn.findAttachmentImage};
+   * borrowed until the measurement settles.
+   */
+  findAttachmentImage: FindAttachmentImage
   /**
    * Definitions of the offered tools, each name once: client tools first,
    * then backend tools; empty when none would be offered.
@@ -298,23 +331,35 @@ export default class Agent {
    * Finds how much of the model's context window a conversation takes before
    * its next message.
    *
-   * @param input - Stored transcript, model, and offered tool definitions,
-   * borrowed until the returned promise settles.
+   * @param input - Stored transcript, model, whether it sees images, the
+   * image reader, and offered tool definitions, borrowed until the returned
+   * promise settles.
    * @returns A promise resolving to the window and the tokens of this agent's
    * system prompt, of the tools, of the stored messages a turn would include,
    * and of the new message's markup, measured exactly as a turn's first round
-   * sends them with an empty new message; or to undefined when the model is
-   * not loaded.
+   * sends them with an empty new message without files; or to undefined when
+   * the model is not loaded. The history's images are read first when the
+   * model sees images, so their tokens are counted as a turn sends them.
    * @throws The meter's failure when the model's runtime cannot be reached,
-   * is busy, or fails; and a Zod error for a definition that does not match
-   * `toolDefinitionSchema`.
+   * is busy, or fails; the image reader's failure; and a Zod error for a
+   * definition that does not match `toolDefinitionSchema`.
    */
   public async findContextMeasurement(
     input: AgentContextInput
   ): Promise<AgentContextMeasurement | undefined> {
+    const images = await readContextImages(
+      input.history,
+      input.canSeeImages,
+      input.findAttachmentImage
+    )
     const measurement =
       await this.#replyContextMeter.findReplyContextMeasurement({
-        messages: buildAgentContext(this.#systemPrompt, input.history, ""),
+        messages: buildAgentContext({
+          systemPrompt: this.#systemPrompt,
+          history: input.history,
+          userMessage: EMPTY_USER_MESSAGE,
+          images
+        }),
         tools: buildDefinedToolOffer(input.tools),
         model: input.model
       })
@@ -355,11 +400,14 @@ export default class Agent {
    * that calls tools stores every call and its outcome as a part, has its
    * calls answered, and asks the model again. A client tool's call is
    * answered by the client; a backend tool's call runs here once the client
-   * allows it, under the turn's cancellation, numbering the web sources it
-   * shows after the conversation's. A round whose context, tools, and reply
-   * ceiling exceed the model's context length, or whose model is not loaded,
-   * is not sent: the reply fails, keeping the parts earlier rounds stored, and
-   * its `error` event says why.
+   * allows it, or at once for a tool that runs without approval, under the
+   * turn's cancellation, numbering the web sources it shows after the
+   * conversation's. When the model sees images, the image attachments of the
+   * history and the new message are read from this machine once, before the
+   * first round, and sent with their messages in every round. A round whose
+   * context, tools, and reply ceiling exceed the model's context length, or
+   * whose model is not loaded, is not sent: the reply fails, keeping the
+   * parts earlier rounds stored, and its `error` event says why.
    */
   public async createReply(turn: AgentTurn): Promise<void> {
     try {
@@ -390,7 +438,8 @@ export default class Agent {
    * @param turn - Turn context, tools, reply storage, and cancellation.
    * @returns The supported finish reason, or undefined after cancellation,
    * supersession, or deletion.
-   * @throws If a round does not fit the model's window or its model is not
+   * @throws If an image attachment cannot be read although its file is not
+   * missing, a round does not fit the model's window or its model is not
    * loaded, the model fails, a stream ends without ending its round, a
    * part cannot be stored, the model calls a tool although none was
    * offered, or a backend tool's run fails for a reason other than Stop; and
@@ -416,11 +465,17 @@ export default class Agent {
       }),
       sourceCatalog: new SourceCatalog(turn.sources)
     })
-    const messages = buildAgentContext(
-      this.#systemPrompt,
-      turn.history,
-      turn.userMessageContent
+    const images = await readContextImages(
+      [...turn.history, turn.userMessage],
+      turn.canSeeImages,
+      turn.findAttachmentImage
     )
+    const messages = buildAgentContext({
+      systemPrompt: this.#systemPrompt,
+      history: turn.history,
+      userMessage: turn.userMessage,
+      images
+    })
     const round = await this.#createReplyRound(state, { messages, round: 0 })
     return this.#handleReplyRoundEnd(state, messages, round)
   }
@@ -546,6 +601,30 @@ export default class Agent {
       abortSignal: turn.abortSignal
     })
   }
+}
+
+/**
+ * Reads the images a context sends, for the model that answers it.
+ *
+ * @param messages - Stored messages the context is built from, in
+ * conversation order.
+ * @param canSeeImages - Whether the model sees images.
+ * @param findAttachmentImage - Reads one image's bytes; borrowed until the
+ * returned promise settles.
+ * @returns A promise resolving to {@link UNSEEN_CONTEXT_IMAGES} for a model
+ * without vision, without reading any file; otherwise to the images as
+ * {@link readAgentContextImages} read them.
+ * @throws The reader's failure, for a file that cannot be read although it
+ * is not missing.
+ */
+async function readContextImages(
+  messages: readonly ConversationMessage[],
+  canSeeImages: boolean,
+  findAttachmentImage: FindAttachmentImage
+): Promise<AgentContextImages> {
+  return canSeeImages
+    ? await readAgentContextImages(messages, findAttachmentImage)
+    : UNSEEN_CONTEXT_IMAGES
 }
 
 /**

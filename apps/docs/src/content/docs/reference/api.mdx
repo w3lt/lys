@@ -11,44 +11,47 @@ route definitions.
 
 ## Routes
 
-| Method   | Path                                                                              | Request body                                                                       | Response                                                               |
-| -------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `GET`    | `/api/v1/heath`                                                                   | none                                                                               | `{ ok: true }`                                                         |
-| `GET`    | `/api/v1/llm/list`                                                                | none                                                                               | `{ llms: LlmInfo[] }`                                                  |
-| `GET`    | `/api/v1/llm/:modelId/health`                                                     | none                                                                               | Loaded-state health observation                                        |
-| `POST`   | `/api/v1/llm/load`                                                                | `{ modelId: string, configuration?: ModelLoadConfiguration }`                      | `LlmInfo`                                                              |
-| `PATCH`  | `/api/v1/llm/unload`                                                              | `{ modelId: string }`                                                              | `204` or typed Problem Details                                         |
-| `GET`    | `/api/v1/llm/runtime`                                                             | none                                                                               | `{ status: "connecting" \| "connected" \| "unreachable" }`             |
-| `POST`   | `/api/v1/llm/runtime/connect`                                                     | none                                                                               | Settled `{ status }`, or service-busy Problem Details                  |
-| `GET`    | `/api/v1/conversations`                                                           | none; optional `query`, `cursor`, `limit` query parameters                         | Conversation list page                                                 |
-| `GET`    | `/api/v1/conversations/:conversationId`                                           | none                                                                               | Conversation with ordered messages and numbered sources                |
-| `PATCH`  | `/api/v1/conversations/:conversationId`                                           | `{ title: string }`                                                                | Conversation metadata                                                  |
-| `DELETE` | `/api/v1/conversations/:conversationId`                                           | none                                                                               | Bodyless `204`                                                         |
-| `GET`    | `/api/v1/agents`                                                                  | none; optional `cursor`, `limit` query parameters                                  | Built-in agents and a page of stored agents                            |
-| `POST`   | `/api/v1/agents`                                                                  | `{ code?, name, bio, systemPrompt }`                                               | `201` agent with `Location`, or `409` Problem Details                  |
-| `GET`    | `/api/v1/agents/:agentCode`                                                       | none                                                                               | Agent with its system prompt                                           |
-| `PATCH`  | `/api/v1/agents/:agentCode`                                                       | at least one of `{ name, bio, systemPrompt }`                                      | Changed agent, or `409` for a built-in agent                           |
-| `DELETE` | `/api/v1/agents/:agentCode`                                                       | none                                                                               | Bodyless `204`, or `409` for a built-in agent                          |
-| `GET`    | `/api/v1/tools`                                                                   | none                                                                               | `{ tools: ToolDefinition[], unavailableTools }`                        |
-| `POST`   | `/api/v1/tools/web_search/key-check`                                              | `{}`                                                                               | `{ status: "accepted" \| "rejected" \| "unavailable" \| "failed", … }` |
-| `POST`   | `/api/v1/chat`                                                                    | `conversation`, `message`, `model`, required `generationOptions`, optional `tools` | `text/event-stream`                                                    |
-| `POST`   | `/api/v1/chat/context`                                                            | `conversation`, `model`, optional `tools`                                          | `ChatContextMeasurement`, or typed Problem Details                     |
-| `GET`    | `/api/v1/chat/:conversationId/replies/:assistantMessageId/events`                 | none                                                                               | `text/event-stream` (reply snapshot, then live events)                 |
-| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/stop`                   | none                                                                               | Bodyless `204`, or `409` Problem Details                               |
-| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/tool-results/:callId`   | `{ status, reason?, content? }`                                                    | Bodyless `204`, or `409` Problem Details                               |
-| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/tool-approvals/:callId` | `{ status, reason?, content? }`                                                    | Bodyless `204`, or `409` Problem Details                               |
+| Method   | Path                                                                              | Request body                                                                                         | Response                                                               |
+| -------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `GET`    | `/api/v1/heath`                                                                   | none                                                                                                 | `{ ok: true }`                                                         |
+| `GET`    | `/api/v1/llm/list`                                                                | none                                                                                                 | `{ llms: LlmInfo[] }`                                                  |
+| `GET`    | `/api/v1/llm/:modelId/health`                                                     | none                                                                                                 | Loaded-state health observation                                        |
+| `POST`   | `/api/v1/llm/load`                                                                | `{ modelId: string, configuration?: ModelLoadConfiguration }`                                        | `LlmInfo`                                                              |
+| `PATCH`  | `/api/v1/llm/unload`                                                              | `{ modelId: string }`                                                                                | `204` or typed Problem Details                                         |
+| `GET`    | `/api/v1/llm/runtime`                                                             | none                                                                                                 | `{ status: "connecting" \| "connected" \| "unreachable" }`             |
+| `POST`   | `/api/v1/llm/runtime/connect`                                                     | none                                                                                                 | Settled `{ status }`, or service-busy Problem Details                  |
+| `GET`    | `/api/v1/conversations`                                                           | none; optional `query`, `cursor`, `limit` query parameters                                           | Conversation list page                                                 |
+| `GET`    | `/api/v1/conversations/:conversationId`                                           | none                                                                                                 | Conversation with ordered messages and numbered sources                |
+| `PATCH`  | `/api/v1/conversations/:conversationId`                                           | `{ title: string }`                                                                                  | Conversation metadata                                                  |
+| `DELETE` | `/api/v1/conversations/:conversationId`                                           | none                                                                                                 | Bodyless `204`                                                         |
+| `GET`    | `/api/v1/agents`                                                                  | none; optional `cursor`, `limit` query parameters                                                    | Built-in agents and a page of stored agents                            |
+| `POST`   | `/api/v1/agents`                                                                  | `{ code?, name, bio, systemPrompt }`                                                                 | `201` agent with `Location`, or `409` Problem Details                  |
+| `GET`    | `/api/v1/agents/:agentCode`                                                       | none                                                                                                 | Agent with its system prompt                                           |
+| `PATCH`  | `/api/v1/agents/:agentCode`                                                       | at least one of `{ name, bio, systemPrompt }`                                                        | Changed agent, or `409` for a built-in agent                           |
+| `DELETE` | `/api/v1/agents/:agentCode`                                                       | none                                                                                                 | Bodyless `204`, or `409` for a built-in agent                          |
+| `GET`    | `/api/v1/tools`                                                                   | none                                                                                                 | `{ tools: ToolDefinition[], unavailableTools }`                        |
+| `POST`   | `/api/v1/tools/web_search/key-check`                                              | `{}`                                                                                                 | `{ status: "accepted" \| "rejected" \| "unavailable" \| "failed", … }` |
+| `POST`   | `/api/v1/chat`                                                                    | `conversation`, `message`, `model`, required `generationOptions`, optional `tools` and `attachments` | `text/event-stream`                                                    |
+| `POST`   | `/api/v1/chat/context`                                                            | `conversation`, `model`, optional `tools`                                                            | `ChatContextMeasurement`, or typed Problem Details                     |
+| `GET`    | `/api/v1/chat/:conversationId/replies/:assistantMessageId/events`                 | none                                                                                                 | `text/event-stream` (reply snapshot, then live events)                 |
+| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/stop`                   | none                                                                                                 | Bodyless `204`, or `409` Problem Details                               |
+| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/tool-results/:callId`   | `{ status, reason?, content? }`                                                                      | Bodyless `204`, or `409` Problem Details                               |
+| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/tool-approvals/:callId` | `{ status, reason?, content? }`                                                                      | Bodyless `204`, or `409` Problem Details                               |
 
 `/api/v1/heath` is the current spelling in both the shared protocol package and
 the Fastify route registration.
 
-List, load, health, unload, and chat-context requests answer `503` with
+List, load, health, unload, and chat-context requests, and a chat request
+that reads a model's capabilities for an attachment, answer `503` with
 `urn:lys:problem:llm:runtime-unavailable` while the backend has no connected
 LM Studio runtime. The runtime-status route never contacts LM Studio; the
 runtime-connect route waits for one shared connection attempt.
 
 Every request body is limited to 1 MiB (1,048,576 bytes), Fastify's default,
 except a tool result, which is limited to 8 MiB (8,388,608 bytes) so that a
-1 MiB file read still fits after JSON escaping. A larger body is refused with
+1 MiB file read still fits after JSON escaping, and a chat request, which is
+limited to 32 MiB (33,554,432 bytes) so that a message can carry its
+attachments. A larger body is refused with
 `413 Payload Too Large` before the route runs, so nothing is stored or
 changed. The response is Fastify's JSON error body, with
 `code` `FST_ERR_CTP_BODY_TOO_LARGE`, not Problem Details.
@@ -66,7 +69,8 @@ changed. The response is Fastify's JSON error body, with
   "generationOptions": {
     "temperature": 0.7,
     "replyCeiling": 2048
-  }
+  },
+  "attachments": [{ "name": "notes.md", "content": "SGVsbG8sIHdvcmxkIQ==" }]
 }
 ```
 
@@ -85,6 +89,11 @@ selects one of two forms:
   deleted, returns `409` with `urn:lys:problem:conversation:agent-missing`,
   and nothing is stored; see
   [a conversation whose agent was deleted](#a-conversation-whose-agent-was-deleted).
+
+The agent is looked up when the request arrives and again when the turn is
+stored, after its attachment files are written, so a conversation or agent
+deleted in between gets the same `404` or `409` problem, and the written
+files are deleted again.
 
 `message` and `model` must be non-empty strings. Every turn sends the system
 prompt its agent has when the turn starts, so editing a stored agent changes
@@ -113,6 +122,46 @@ required options or invalid values are rejected with `400` before generation. Th
 a saved zero reply ceiling into omission; API callers should omit the field for
 that behavior, since an explicit API value of `0` is forwarded unchanged. These
 controls affect chat completion; title generation uses a separate request.
+
+### Attachments
+
+`attachments` is optional. When present it lists 1 to 8 files sent with the
+message, each with its `name` and base64 `content`, in the order the person
+attached them. A name is non-empty, neither `.` nor `..`, holds no `/` and no
+control character (NUL included), has at most 255 UTF-8 bytes, and appears
+once in the request ignoring case, which folds `ß` and `SS` together; the
+files decode to at most 10 MiB each and 20 MiB together. The route accepts
+bodies up to 32 MiB and answers a larger one with `413`; every other route
+keeps its own limit, listed above. A request that breaks these rules
+is rejected with `400` before anything is stored. The limits are constants of
+`@lys/share` (`MAXIMUM_ATTACHMENT_BYTES`, `MAXIMUM_MESSAGE_ATTACHMENT_BYTES`,
+and `MAXIMUM_MESSAGE_ATTACHMENT_COUNT`), which the desktop applies before it
+sends.
+
+What a file is comes from its bytes, never from its name: a PNG, JPEG, or
+WebP file with a readable header is an image, bytes that decode as UTF-8
+without a NUL character are a text file, and anything else returns `400` with
+`urn:lys:problem:chat:attachment-unsupported`; see
+[an attachment Lys cannot send](#an-attachment-lys-cannot-send). When the
+request or the conversation holds an attachment, the route reads from LM
+Studio's inventory whether `model` has `vision` and `trainedForToolUse`, so a
+full model-operation queue answers `503` with
+`urn:lys:problem:llm:service-busy` and a missing runtime `503` with
+`urn:lys:problem:llm:runtime-unavailable`, nothing stored; a request without
+attachments in a conversation without any never reads the inventory. An
+image attached for a model without vision, or for a model the inventory does
+not list, returns `409` with `urn:lys:problem:chat:image-needs-vision`; see
+[an image for a model without vision](#an-image-for-a-model-without-vision).
+
+The files are written under
+`$LYS_HOME/attachments/<conversation id>/<message id>/<name>` before the turn
+is stored, and the stored user message carries each file's record, numbered
+after the conversation's earlier attachments. Every turn sends the model each
+user message's text followed by the list of its files; a model with vision
+gets each image with its message, on every turn; a model trained for tool use
+is offered `read_attachment` while the conversation holds a text file, and
+reads it in parts when it needs it. See
+[attachments](/architecture/backend/#attachments).
 
 ### Tools
 
@@ -149,8 +198,10 @@ shape `toolDefinitionSchema` from `@lys/share` validates, each with `runner`
 `client`; it may be empty. `backendToolNames` names switched-on tools the
 backend runs, each once, as [`GET /api/v1/tools`](#tool-list) lists them; it is
 optional. Together they offer at least one tool, and no name appears in both.
-A request that breaks these rules, or names a backend tool the backend does
-not run, returns `400` before anything is stored. A request that offers a
+A request that breaks these rules, names a backend tool the backend does not
+run, or offers `read_attachment` as a client or backend tool, returns `400`
+before anything is stored; the backend adds the reader to a turn itself. A
+request that offers a
 backend tool that cannot run now, such as `web_search` without a usable
 Tavily API key or `read_page` while vmo is not ready, returns `409` with
 `urn:lys:problem:chat:backend-tool-unavailable` before anything is stored; see
@@ -165,9 +216,12 @@ this itself ([#135](https://github.com/w3lt/lys/issues/135)). A reply can make a
 
 Accepted chat turns respond as SSE. A missing conversation, a new
 conversation naming a code no agent has, a stored conversation whose agent no
-longer exists, or an offered backend tool that cannot run now returns JSON
-Problem Details before the stream starts, and nothing is stored: no message, and no failed reply. Each event payload must match one of
-the eight variants documented in [SSE events](/reference/sse-events/).
+longer exists, an offered backend tool that cannot run now, an attachment Lys
+cannot send, an image for a model without vision, or a model-capability read
+LM Studio cannot answer returns JSON Problem Details before the stream
+starts, and nothing is stored or written: no message, no file, and no failed
+reply. Each event payload must match one of
+the eleven variants documented in [SSE events](/reference/sse-events/).
 
 Closing a chat stream stops only that client's observation. The backend keeps
 generating and storing the reply and its title. To stop a reply, send
@@ -208,8 +262,10 @@ meter calls it; nothing is stored and the model generates nothing.
 `generationOptions`. The backend builds the context a turn's first round would
 send, with an empty new message in place of the text: the answering agent's
 current system prompt, the stored messages a turn includes, the empty message,
-and the offered tools, client tools first. It counts them with the loaded
-model's tokenizer and answers `200`:
+and the tools a turn would offer, client tools first, then the backend's,
+then `read_attachment` when the conversation holds a text file for a model
+trained for tool use. It counts them with the loaded model's tokenizer and
+answers `200`:
 
 ```json
 {
@@ -236,10 +292,18 @@ model's tokenizer and answers `200`:
   round, and 160 once when tools are offered. The backend does not render the
   model's template.
 - Messages a turn leaves out, failed and empty replies, are not counted.
+- A stored user message is measured with its attachment list and, when the
+  model sees images, with its images, each counted as
+  `⌈width ÷ 28⌉ × ⌈height ÷ 28⌉` tokens up to 1,280. When a stored message
+  holds a text file and the model is trained for tool use, `read_attachment`
+  is measured after the offered tools, as a turn offers it. Whether the model
+  sees images and is trained for tool use is read from the inventory only
+  when a stored message has an attachment. A client adds the same estimate
+  for each image it would send.
 - An offered backend tool is measured whether or not it can run now; the chat
   request refuses one that cannot.
-- The model is matched like a chat request names it: a loaded instance's
-  identifier or a loaded model's key. A model that is not loaded is never
+- The model is matched like a chat request names it: by its model key, as LM
+  Studio lists it. A model that is not loaded is never
   loaded; the route answers `503` with `urn:lys:problem:llm:model-not-loaded`.
 - The measurement runs through the
   [model operation queue](#model-operation-admission), so it waits behind a
@@ -277,7 +341,9 @@ document). For `read_page`, it is `page-reader-not-ready`: vmo did not answer
 `GET /health` at `127.0.0.1:8080` with `200` within one second. Each name in
 `unavailableTools` is a listed tool, once. The list reads the settings file
 and asks vmo's health route, contacts nothing else, and never contains the
-key.
+key. `read_attachment`, the attachment reader, is not listed and cannot be
+offered by name: the chat route adds it to a turn by itself; see
+[attachments](#attachments).
 
 ### Key check
 
@@ -306,7 +372,8 @@ fraction Tavily reports is rounded up. The answer never contains the key.
 ## Tool approvals
 
 The backend decides which tool calls need the person: every call of a tool
-that is not saved as Just run, client and backend tools alike. It shows such a
+that is not saved as Just run, client and backend tools alike, except
+`read_attachment`, which runs without approval. It shows such a
 call with a `tool-approval` event, and the client answers it with
 `POST /api/v1/chat/:conversationId/replies/:assistantMessageId/tool-approvals/:callId`,
 where `callId` is the `id` of the event's call or of its entry in
@@ -404,16 +471,37 @@ the latest user message or reply text part; conversations without one have
 
 `GET` by identifier returns conversation metadata, including `agentCode`, the
 code of the agent that answers it,
-messages ordered by creation time then identifier, each reply with its `parts`
-in stored order, and `sources`, the conversation's numbered sources in number
-order. The code stays after its
+messages ordered by creation time then identifier, each user message with its
+`attachments` and each reply with its `parts` in stored order, and `sources`,
+the conversation's numbered sources in number order. The code stays after its
 agent is deleted, so it may name no agent. `PATCH` accepts
 only `title`, trims it to 1–120 UTF-16 code units, and returns updated metadata. Repeating
 a rename is idempotent; renaming never changes activity time or list position.
-`DELETE` cascades to messages, reply parts, and sources and returns `204`
-without a body. Late generation
+`DELETE` cascades to messages, reply parts, attachment records, and sources,
+then removes the conversation's attachment folder, and returns `204` without
+a body; a folder that cannot be removed is logged and the delete still
+succeeds. Late generation
 writes after deletion do not recreate the conversation. Allowed development and
 Tauri origins support DELETE preflights.
+
+A user message's `attachments` lists the files sent with it, in sending order,
+empty when none: each with its `number`, which counts up across the
+conversation from 1, its `name`, `kind` (`image` or `text`), and `sizeBytes`,
+and, for an image, its `mediaType` (`image/png`, `image/jpeg`, or
+`image/webp`), `width`, and `height`. The turn-start events carry the same
+records. No route serves the files themselves.
+
+```json
+{
+  "kind": "image",
+  "number": 2,
+  "name": "photo.png",
+  "sizeBytes": 48213,
+  "mediaType": "image/png",
+  "width": 640,
+  "height": 480
+}
+```
 
 Missing conversations on GET, PATCH, DELETE, or chat continuation return `404`
 with `Content-Type: application/problem+json`:
@@ -583,6 +671,51 @@ Lys's page reader, is not ready."
 
 The desktop shows the error and reads the tool list again, so its next
 request leaves the tool out.
+
+### An attachment Lys cannot send
+
+A chat request with an attachment that is neither UTF-8 text nor a PNG,
+JPEG, or WebP image stores nothing: the chat endpoint answers `400` with
+`application/problem+json`, for the first such attachment in request order.
+`fileName` is an extension member.
+
+```json
+{
+  "type": "urn:lys:problem:chat:attachment-unsupported",
+  "title": "Attachment unsupported",
+  "status": 400,
+  "detail": "The file report.pdf is not a text file or an image Lys can send.",
+  "instance": "/api/v1/chat",
+  "fileName": "report.pdf"
+}
+```
+
+The desktop classifies a file the same way when it is chosen and refuses such
+a file with the same sentence, so it does not send this request; it shows the
+sentence if the backend ever answers it.
+
+### An image for a model without vision
+
+A chat request that attaches an image for a model whose inventory entry has
+no `vision`, or that the inventory does not list, stores nothing: the chat
+endpoint answers `409` with `application/problem+json`, for the first image
+in request order. `fileName` and `model` are extension members.
+
+```json
+{
+  "type": "urn:lys:problem:chat:image-needs-vision",
+  "title": "Image needs vision",
+  "status": 409,
+  "detail": "The image photo.png needs a model with vision, and google/gemma-4-12b-qat cannot see images.",
+  "instance": "/api/v1/chat",
+  "fileName": "photo.png",
+  "model": "google/gemma-4-12b-qat"
+}
+```
+
+The desktop stages an image only while the loaded model has vision, so it
+sends this request only when the model changed between staging and sending;
+it then shows the sentence and keeps the files staged.
 
 ## LLM metadata shape
 

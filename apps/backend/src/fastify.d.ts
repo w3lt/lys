@@ -1,6 +1,7 @@
 /// <reference types="fastify" />
 
 import type AgentService from "./modules/agent/agentService"
+import type AttachmentFileStore from "./modules/attachment/attachmentFileStore"
 import type ChatService from "./modules/chat/chatService"
 import type StoredConversationHistoryEditor from "./modules/conversation/historyEditor"
 import type StoredConversationHistoryReader from "./modules/conversation/historyReader"
@@ -43,5 +44,10 @@ declare module "fastify" {
      * run choices, which tool calls ask the person first.
      */
     toolApprovalService: ToolApprovalService
+    /**
+     * Application-scoped attachment files of every conversation, under the
+     * attachments directory.
+     */
+    attachmentFileStore: AttachmentFileStore
   }
 }

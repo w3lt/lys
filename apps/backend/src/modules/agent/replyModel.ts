@@ -1,5 +1,6 @@
 import type { MessageGenerationOptions } from "@lys/protocol"
 import type {
+  AttachmentImageMediaType,
   ConversationAssistantMessageFinishReason,
   OpenAIFunctionTool
 } from "@lys/share"
@@ -22,13 +23,36 @@ export type ContextToolCall = Readonly<{
   argumentText: string
 }>
 
+/** One image a user message sends the model, as the person attached it. */
+export type ReplyContextImage = Readonly<{
+  /** Media type of the bytes. */
+  mediaType: AttachmentImageMediaType
+  /** Width in pixels; a positive integer. */
+  width: number
+  /** Height in pixels; a positive integer. */
+  height: number
+  /** The image's bytes as stored; borrowed by the request. */
+  data: Uint8Array
+}>
+
 /** One message of the context an agent sends to its model. */
 export type ReplyContextMessage =
   | Readonly<{
-      /** The agent's instructions or the person's text. */
-      role: "system" | "user"
+      /** The agent's instructions. */
+      role: "system"
       /** Text sent to the model as written. */
       content: string
+    }>
+  | Readonly<{
+      /** The person's text, with the images the model sees. */
+      role: "user"
+      /** Text sent to the model as written. */
+      content: string
+      /**
+       * Images sent after the text, in attachment order; empty when the
+       * message sends none.
+       */
+      images: readonly ReplyContextImage[]
     }>
   | Readonly<{
       /** Text the agent wrote, and the tools it called in the same round. */

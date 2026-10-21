@@ -382,16 +382,19 @@ export interface ConversationTurnTransaction {
    */
   findConversation(conversationId: string): Conversation | undefined
   /**
-   * Appends a user message exactly as given.
+   * Appends a user message exactly as given, with its attachments.
    *
    * @param conversationId - UUIDv7 of a stored conversation.
-   * @param message - Valid message whose identity is not stored yet.
+   * @param message - Valid message whose identity is not stored yet; its
+   * attachments carry numbers the conversation does not store yet.
    * @throws If the transaction has ended or the write fails.
-   * @throws The store's own error when the conversation is not stored or the
-   * message's identity is, which breaks the precondition.
+   * @throws The store's own error when the conversation is not stored, the
+   * message's identity is, or an attachment's number is stored for the
+   * conversation already, which breaks the precondition.
    * @remarks Moves the conversation's activity time forward: to the message's
    * time when that is later than the stored activity time, and otherwise to a
-   * later time the store chooses.
+   * later time the store chooses. Each attachment is stored under the
+   * message, and is read back with it by `findConversation`.
    */
   createUserMessage(
     conversationId: string,

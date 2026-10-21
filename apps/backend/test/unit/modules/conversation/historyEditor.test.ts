@@ -3,7 +3,11 @@ import { describe, expect, it } from "vitest"
 import * as z from "zod"
 import { parseConversationListOptions } from "../../../../src/modules/conversation/listOptions"
 import { openConversationTestServices } from "../../support/conversationDatabase"
-import { createFixtureUuidV7 } from "../../support/conversationFixtures"
+import {
+  createFixtureUuidV7,
+  createNewConversationTarget,
+  createTurnUserMessage
+} from "../../support/conversationFixtures"
 
 /**
  * Opens isolated in-memory conversation adapters with one committed turn.
@@ -15,8 +19,8 @@ function openEditorWithTurn() {
   const { database, turns, replyParts, editor, history } =
     openConversationTestServices()
   const turn = turns.createConversationTurn({
-    conversation: { kind: "new", agentCode: "lys" },
-    userMessageContent: "Hello",
+    conversation: createNewConversationTarget("lys"),
+    userMessage: createTurnUserMessage("Hello"),
     model: "qwen/qwen3-8b"
   })
   return { database, turns, replyParts, editor, history, turn }

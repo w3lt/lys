@@ -1,4 +1,4 @@
-import { toolNameSchema } from "@lys/share"
+import { attachmentNameSchema, toolNameSchema } from "@lys/share"
 import * as z from "zod"
 import { backendToolUnavailableReasonSchema } from "../../apis/tool/backendToolAvailability"
 
@@ -163,4 +163,89 @@ export const chatBackendToolUnavailableProblemSchema = z
 /** Unavailable-tool Problem Details body inferred from its schema. */
 export type ChatBackendToolUnavailableProblem = z.infer<
   typeof chatBackendToolUnavailableProblemSchema
+>
+
+/** Stable problem category for an attachment whose content Lys cannot send. */
+const CHAT_ATTACHMENT_UNSUPPORTED_PROBLEM_TYPE =
+  "urn:lys:problem:chat:attachment-unsupported"
+
+/** Client-facing summary shared by every unsupported-attachment occurrence. */
+const CHAT_ATTACHMENT_UNSUPPORTED_PROBLEM_TITLE = "Attachment unsupported"
+
+/** HTTP status accompanying an unsupported-attachment problem body. */
+const CHAT_ATTACHMENT_UNSUPPORTED_PROBLEM_STATUS = 400
+
+/**
+ * Validates the RFC 9457 body returned when a chat request carries an
+ * attachment whose content is neither text nor an image Lys sends.
+ *
+ * @remarks The chat endpoint transmits this contract with HTTP 400 before it
+ * stores anything, for the first such attachment. `fileName` is an extension
+ * member a client shows; `detail` is caller-safe text. Changing any fixed
+ * field requires coordinated consumers.
+ */
+export const chatAttachmentUnsupportedProblemSchema = z
+  .strictObject({
+    /** Stable discriminator separating an unsupported attachment from other failures. */
+    type: z.literal(CHAT_ATTACHMENT_UNSUPPORTED_PROBLEM_TYPE),
+    /** Human-readable category summary shared across occurrences. */
+    title: z.literal(CHAT_ATTACHMENT_UNSUPPORTED_PROBLEM_TITLE),
+    /** HTTP status accompanying this problem body. */
+    status: z.literal(CHAT_ATTACHMENT_UNSUPPORTED_PROBLEM_STATUS),
+    /** Caller-safe explanation of this occurrence. */
+    detail: z.string().min(1),
+    /** Optional identifier of this problem occurrence. */
+    instance: z.string().min(1).optional(),
+    /** Name of the attachment whose content cannot be sent. */
+    fileName: attachmentNameSchema
+  })
+  .readonly()
+
+/** Unsupported-attachment Problem Details body inferred from its schema. */
+export type ChatAttachmentUnsupportedProblem = z.infer<
+  typeof chatAttachmentUnsupportedProblemSchema
+>
+
+/** Stable problem category for an image sent to a model without vision. */
+const CHAT_IMAGE_NEEDS_VISION_PROBLEM_TYPE =
+  "urn:lys:problem:chat:image-needs-vision"
+
+/** Client-facing summary shared by every image-needs-vision occurrence. */
+const CHAT_IMAGE_NEEDS_VISION_PROBLEM_TITLE = "Image needs vision"
+
+/** HTTP status accompanying an image-needs-vision problem body. */
+const CHAT_IMAGE_NEEDS_VISION_PROBLEM_STATUS = 409
+
+/**
+ * Validates the RFC 9457 body returned when a chat request attaches an image
+ * for a model that cannot see images.
+ *
+ * @remarks The chat endpoint transmits this contract with HTTP 409 before it
+ * stores anything, for the first image of the request, when the model's
+ * inventory entry reports no vision or the model is not in the inventory.
+ * `fileName` and `model` are extension members a client shows; `detail` is
+ * caller-safe text. Changing any fixed field requires coordinated consumers.
+ */
+export const chatImageNeedsVisionProblemSchema = z
+  .strictObject({
+    /** Stable discriminator separating a refused image from other failures. */
+    type: z.literal(CHAT_IMAGE_NEEDS_VISION_PROBLEM_TYPE),
+    /** Human-readable category summary shared across occurrences. */
+    title: z.literal(CHAT_IMAGE_NEEDS_VISION_PROBLEM_TITLE),
+    /** HTTP status accompanying this problem body. */
+    status: z.literal(CHAT_IMAGE_NEEDS_VISION_PROBLEM_STATUS),
+    /** Caller-safe explanation of this occurrence. */
+    detail: z.string().min(1),
+    /** Optional identifier of this problem occurrence. */
+    instance: z.string().min(1).optional(),
+    /** Name of the image the model cannot see. */
+    fileName: attachmentNameSchema,
+    /** Model the request named. */
+    model: z.string().min(1)
+  })
+  .readonly()
+
+/** Image-needs-vision Problem Details body inferred from its schema. */
+export type ChatImageNeedsVisionProblem = z.infer<
+  typeof chatImageNeedsVisionProblemSchema
 >

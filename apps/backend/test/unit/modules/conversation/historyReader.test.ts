@@ -6,7 +6,11 @@ import {
   openConversationTestServices,
   openSqliteConversationRecords
 } from "../../support/conversationDatabase"
-import { createFixtureUuidV7 } from "../../support/conversationFixtures"
+import {
+  createFixtureUuidV7,
+  createNewConversationTarget,
+  createTurnUserMessage
+} from "../../support/conversationFixtures"
 
 /**
  * Opens isolated in-memory conversation services with one committed turn.
@@ -17,8 +21,8 @@ import { createFixtureUuidV7 } from "../../support/conversationFixtures"
 function openHistoryWithTurn() {
   const { database, turns, history } = openConversationTestServices()
   const turn = turns.createConversationTurn({
-    conversation: { kind: "new", agentCode: "lys" },
-    userMessageContent: "Plan the TRIP",
+    conversation: createNewConversationTarget("lys"),
+    userMessage: createTurnUserMessage("Plan the TRIP"),
     model: "qwen/qwen3-8b"
   })
   return { database, turns, history, turn }
@@ -93,7 +97,7 @@ describe("StoredConversationHistoryReader", () => {
       expect(() =>
         turns.createConversationTurn({
           conversation: { kind: "existing", id: turn.conversation.id },
-          userMessageContent: "Again",
+          userMessage: createTurnUserMessage("Again"),
           model: "qwen/qwen3-8b"
         })
       ).not.toThrow()

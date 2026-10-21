@@ -25,9 +25,11 @@ private let initfsReference = "ghcr.io/apple/containerization/vminit:0.52.0"
 /// - Throws: Containerization's error when vmnet refuses to create the
 ///   network, an image can't be pulled, for example without network access,
 ///   vminit can't be unpacked, or deleting the images vmo no longer uses
-///   fails, or the file system's error when the record of the vminit that
-///   was unpacked can't be read or written; vmo then doesn't start, even when
-///   an earlier pull left the reader image in the store.
+///   fails. The file system's error when the filesystem unpacked from vminit
+///   can't be checked, its record exists but can't be read, either can't be
+///   deleted, or a new unpack or its record can't be saved. Either way, vmo
+///   doesn't start, even when an earlier pull left the reader image in the
+///   store.
 func createProductionContainerManager() async throws -> ContainerManager {
     // TODO(#200): this kernel path only exists on the author's machine, so
     // read-page can't boot its VMs on any other Mac. vmo needs another way to
@@ -40,9 +42,10 @@ func createProductionContainerManager() async throws -> ContainerManager {
     let imageStorePath = URL.applicationSupportDirectory.appending(path: "com.w3lt.lys-vmo", directoryHint: .isDirectory)
     let network = SharedNetwork(try VmnetNetwork())
     let imageStore = try ImageStore(path: imageStorePath)
+    let initfs = try await imageStore.loadInitfs(reference: initfsReference)
     let manager = try ContainerManager(
         kernel: Kernel(path: kernelPath, platform: .linuxArm),
-        initfs: try await imageStore.loadInitfs(reference: initfsReference),
+        initfs: initfs,
         imageStore: imageStore,
         network: network
     )

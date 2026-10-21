@@ -22,13 +22,17 @@ struct ImageReference: Equatable, Sendable {
 ///
 /// Its entrypoint takes the page's URL as its only argument and accepts only
 /// URLs that start with `http://` or `https://`. It loads the page in
-/// headless Chromium, takes the HTML of the DOM the page ends on, with each
-/// open shadow root in place of its host's children and slotted content at
-/// its slot, removes every `script`, `style`, `noscript`, `link`,
-/// and `meta` element and every `class` and `style` attribute, and writes the
-/// remaining HTML to standard output. So until #208, a page's site name and
-/// publication date, which pages give in `meta` elements, don't reach Lys,
-/// and Readability can't use class names to leave out boilerplate.
+/// headless Chromium, dismissing each dialog the page opens, takes the HTML
+/// of the DOM the page ends on, with each open shadow root in place of its
+/// host's children and slotted content at its slot, removes every `script`,
+/// `style`, `noscript`, `link`, and `meta` element and every `class` and
+/// `style` attribute, and writes the remaining HTML to standard output. On a
+/// page with an open shadow root, light content that no slot shows is left
+/// out and each `template` is written without its content; a page without
+/// one is written as Chromium's `--dump-dom` writes it. So until #208, a
+/// page's site name and publication date, which pages give in `meta`
+/// elements, don't reach Lys, and Readability can't use class names to leave
+/// out boilerplate.
 ///
 /// When the reader can't read the page, it exits with a non-zero code.
 /// Chromium's own messages are discarded, so the reader's standard error

@@ -54,14 +54,42 @@ function buildFlattenedCopy(sourceRoot) {
 }
 
 /**
+ * Answers whether an element or one of its descendants has an open shadow
+ * root.
+ *
+ * @param rootElement - Element of the page's document.
+ * @returns Whether a script can read the shadow root of `rootElement` or of an
+ * element below it in the document. A shadow root inside a closed one is not
+ * looked for, because no script can reach its host.
+ */
+function hasOpenShadowRootInTree(rootElement) {
+  const elementWalker = rootElement.ownerDocument.createTreeWalker(
+    rootElement,
+    NodeFilter.SHOW_ELEMENT
+  )
+  for (
+    let element = elementWalker.currentNode;
+    element !== null;
+    element = elementWalker.nextNode()
+  ) {
+    if (element.shadowRoot !== null) return true
+  }
+  return false
+}
+
+/**
  * Builds the HTML of a document as the page renders it.
  *
  * @param sourceDocument - The page's document.
  * @returns The doctype on a line of its own when the document has one, then
- * the HTML of {@link buildFlattenedCopy}'s copy of the root element, written
- * by the browser's HTML serializer, with U+FFFD in place of each lone UTF-16
+ * the HTML of the root element, with U+FFFD in place of each lone UTF-16
  * surrogate so the text can be written as UTF-8; an empty string when the
- * document has no root element.
+ * document has no root element. When an element has an open shadow root, the
+ * root element's HTML is that of {@link buildFlattenedCopy}'s copy, written by
+ * the browser's HTML serializer. Otherwise it is the page's own `outerHTML`,
+ * as `--dump-dom` writes it.
+ * @remarks Only a page with an open shadow root pays for the copy, which
+ * needs about four times the renderer memory that `outerHTML` needs.
  */
 function buildFlattenedPageHtml(sourceDocument) {
   const rootElement = sourceDocument.documentElement
@@ -70,8 +98,10 @@ function buildFlattenedPageHtml(sourceDocument) {
     sourceDocument.doctype === null
       ? ""
       : `${new XMLSerializer().serializeToString(sourceDocument.doctype)}\n`
-  const html = doctypeLine + buildFlattenedCopy(rootElement).outerHTML
-  return html.toWellFormed()
+  const rootHtml = hasOpenShadowRootInTree(rootElement)
+    ? buildFlattenedCopy(rootElement).outerHTML
+    : rootElement.outerHTML
+  return (doctypeLine + rootHtml).toWellFormed()
 }
 
 buildFlattenedPageHtml(document)

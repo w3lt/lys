@@ -90,9 +90,11 @@ directory.
   deletes its folder again. A folder left by a crash between the two, or
   whose deletion failed, belongs to a message the database does not hold;
   nothing reads it, and you can delete it by hand.
-- A file removed or changed by hand after its row was written is not noticed
-  until the model needs it: an image becomes a placeholder sentence in its
-  message, and a read of a text file fails with a message the model reads.
+- A file removed by hand after its row was written is not noticed until the
+  model needs it: an image becomes a placeholder sentence in its message, and
+  a read of a text file fails with a message the model reads. A file changed
+  by hand is sent or read as it now is; its stored size and sides are not
+  checked against it.
 - The directory belongs with the database: copy, move, or delete the two
   together, while the backend is stopped.
 

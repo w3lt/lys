@@ -19,7 +19,7 @@ the services together.
 | Layer                 | Implementation                    | Responsibility                                                                                                                                                                                                                                                                                            |
 | --------------------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | App bootstrap         | `src/app.ts`                      | Registers CORS, SSE support, singleton services, and all routes.                                                                                                                                                                                                                                          |
-| Runtime config        | `src/config.ts`                   | Loads loopback host and port values, the SQLite path under `LYS_HOME`, the system and title prompts, and title limits.                                                                                                                                                                                    |
+| Runtime config        | `src/config.ts`                   | Loads loopback host and port values, the SQLite path and the attachments directory under `LYS_HOME`, the system and title prompts, and title limits.                                                                                                                                                      |
 | Singleton services    | `src/di/singleton.ts`             | Opens the shared database and creates the chat service, conversation services and the agent service over SQLite records, LLM services without contacting LM Studio, the built-in tools, and the tool approval service.                                                                                    |
 | Conversation services | `src/modules/conversation`        | Keep the conversation decisions (identities, timestamps, validation, superseding, cursors) over records declared in `records.ts`; contain no SQL.                                                                                                                                                         |
 | Agent service         | `src/modules/agent`               | Owns the built-in agents, lists them with each page of stored agents, validates agent definitions and changes, derives a code from the name when none is given, stamps each change with the current time over records declared in `records.ts`, and finds the agent that answers a chat; contains no SQL. |
@@ -29,6 +29,7 @@ the services together.
 | Agent routes          | `src/modules/agent/routes`        | Lists the built-in and stored agents, retrieves one, and creates, changes, and deletes stored agents; changing or deleting a built-in agent is refused.                                                                                                                                                   |
 | LLM routes            | `src/modules/llm/routes`          | Lists LM Studio models, checks loaded-model health, loads or unloads a model, and reports or refreshes the LM Studio connection.                                                                                                                                                                          |
 | Built-in tools        | `src/modules/tool/builtIn`        | Tools the backend runs once the desktop allows a call. `read_page` (`web/`) reads one public web page through vmo, which loads it in a micro VM; `web_search` (`web/`) searches the web through Tavily.                                                                                                   |
+| Attachments           | `src/modules/attachment`          | Decodes a chat request's attachments and reads what each is from its bytes, keeps the files under the attachments directory by conversation and message, and runs `read_attachment`, the reader the backend adds to a turn itself; its calls run without approval.                                        |
 | Tool routes           | `src/modules/tool/routes`         | Lists the tools the backend runs.                                                                                                                                                                                                                                                                         |
 | Tool approval service | `src/modules/toolApproval`        | Reads the Just run choices saved in `settings.json` once per round of tool calls and decides, for client and backend tools alike, which calls the person must allow first; every call asks when the file cannot be read.                                                                                  |
 | Health route          | `src/modules/health/routes`       | Returns a simple `{ ok: true }` response.                                                                                                                                                                                                                                                                 |
@@ -60,19 +61,22 @@ the services together.
    attachments in a conversation without any never reads the inventory. The
    route makes the identities of a new conversation and of the user message
    and writes the attachment files under them, so they are in place when the
-   turn commits; see [attachments](#attachments).
-   `StoredConversationTurns` then creates the conversation with that agent or
-   loads the existing one, interrupts a reply still streaming in it, and
-   stores the user message with its numbered attachments and the empty
-   streaming assistant message, all in one
-   write transaction of the SQLite turn records. The lookup and the write run
-   in one synchronous step, so no agent or conversation changes in between.
+   turn commits; see [attachments](#attachments). Once the files are written,
+   the route looks the agent up again and `StoredConversationTurns` creates
+   the conversation with that agent or loads the existing one, interrupts a
+   reply still streaming in it, and stores the user message with its numbered
+   attachments and the empty streaming assistant message, all in one write
+   transaction of the SQLite turn records. That lookup and the write run in
+   one synchronous step, so the agent that answers is the conversation's
+   agent when the turn is stored; a conversation or agent deleted while the
+   files were written or the inventory was read gets its `404` or `409`
+   problem instead, and the written files are deleted again.
 3. The route immediately emits either `start-new-conversation-turn` or
    `start-existing-conversation-turn`.
 4. For an existing conversation with a stored title, the route emits that title
    to reconcile desktop metadata from an earlier missed delivery.
-5. The agent found in step 2 answers with the system prompt it has when the
-   turn starts: a built-in agent's shipped prompt, or a stored agent's current
+5. The agent found when the turn is stored answers with the system prompt it
+   has then: a built-in agent's shipped prompt, or a stored agent's current
    one. The agent's `createReply` opens an
    OpenAI-compatible streaming completion against LM Studio through
    `OpenAiReplyModel`, offers the request's tools (client tools first, then
@@ -107,7 +111,11 @@ meter adds a fixed allowance for the chat template's markup: 8 tokens per
 message, 16 per tool call of an earlier round, and 160 once when tools are
 offered. Each image a user message sends, which the tokenizer cannot count,
 is counted as `⌈width ÷ 28⌉ × ⌈height ÷ 28⌉` tokens up to 1,280
-(`estimateImageTokens` in `@lys/share`).
+(`calculateImageTokens` in `@lys/share`). A file staged in the composer is
+measured only once its message is stored: the desktop adds the image
+estimate for a staged image, while the listing lines of staged files and the
+reader's definition, when a staged text file would make the turn offer it,
+are not counted until then.
 
 A round is sent only when its tokens and the reply ceiling (or zero without
 one) together stay within that context length. Otherwise the round is not
@@ -313,16 +321,20 @@ capability: an image attached for it is refused, and no reader is offered.
 
 `ToolApprovalService` (`src/modules/toolApproval/toolApprovalService.ts`) is the
 approval gateway for every tool call of every turn, client and backend tools
-alike. When a round of tool calls arrives, `createToolCallGate` reads
+alike, except a call of a backend tool that runs without approval:
+`read_attachment` reads only what the person attached to the conversation,
+so its calls are stored as `running` at once and never pass the gate. When a
+round with a call to gate arrives, `createToolCallGate` reads
 `tools.justRun` from the desktop's settings file with `readJustRunToolNames`
 (`src/infrastructure/settings/justRunToolsFile.ts`) and returns a
 `ToolCallGate` for that round. The reader shares the bounded settings-file
 read (`settingsFile.ts`) with the Tavily key reader: at most 1 MiB, UTF-8,
 parse failures dropped unread. A missing file, `tools` group, or `justRun`
-list means no tool is on Just run.
+list means no tool is on Just run. A round whose calls all run without
+approval or name no offered tool creates no gate and does not read the file.
 
-For each checked call, in the model's order, the gate's `startToolCall`
-stores the call and decides how it goes on. A call of a tool on Just run is
+For each checked call that passes the gate, in the model's order, the gate's
+`startToolCall` stores the call and decides how it goes on. A call of a tool on Just run is
 stored as `running` and goes on at once. Any other call is stored as
 `awaiting-approval` first; the gate then sends a `tool-approval` event, and
 the round waits for the person's answer through the tool-approval route,

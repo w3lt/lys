@@ -125,12 +125,16 @@ already, ignoring case, and a message carries at most 8 files of at most
 file is then read whole and classified from its bytes, as the backend
 classifies it: an image (PNG, JPEG, or WebP) can be staged only while the
 loaded model has `vision`, a text file only while it is trained for tool use,
-and any other content is refused. The first file a selection refuses sets one
-sentence in the status line under the tray, such as "The file notes.md is
-already uploaded" or "Images need a model with vision"; the rest of the
-selection is still staged, and a repeated refusal is announced again.
-Selections are admitted one after another, so a second drop is checked
-against the first. The tray shows each file's kind and name, and an image's
+and any other content is refused. Each file is admitted on its own, so a
+refused file does not keep the others of its selection out. One refusal per
+selection is reported in the status line under the tray, such as "The file
+notes.md is already uploaded" or "Images need a model with vision": the first
+refusal by name or size, else the first by content or by the loaded model; a
+repeated refusal is announced again. A file that cannot be read keeps its
+whole selection out of the tray, and its failure is the refusal reported. A
+selection made before the conversation is reset or closed and not staged yet
+is dropped: it joins no tray and reports no refusal. Selections are admitted
+one after another, so a second drop is checked against the first. The tray shows each file's kind and name, and an image's
 estimated tokens; a file can be removed from it.
 
 Sending the draft sends the staged files with it and takes them out of the
@@ -616,8 +620,9 @@ fails with an inline error that says which tool and what to do, and the tool
 list is read again so the next request leaves the tool out.
 
 The backend's tool approval service decides which calls need the person: every
-call of a tool that is not saved as Just run, client and backend tools alike
-(see the [backend's tool approval](/architecture/backend/#tool-approval)). The
+call of a tool that is not saved as Just run, client and backend tools alike,
+except `read_attachment`, which runs without approval (see the
+[backend's tool approval](/architecture/backend/#tool-approval)). The
 desktop does not decide; it reads neither the switches nor the saved Just run
 list when a call arrives.
 

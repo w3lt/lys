@@ -41,14 +41,17 @@ route definitions.
 `/api/v1/heath` is the current spelling in both the shared protocol package and
 the Fastify route registration.
 
-List, load, health, unload, and chat-context requests answer `503` with
+List, load, health, unload, and chat-context requests, and a chat request
+that reads a model's capabilities for an attachment, answer `503` with
 `urn:lys:problem:llm:runtime-unavailable` while the backend has no connected
 LM Studio runtime. The runtime-status route never contacts LM Studio; the
 runtime-connect route waits for one shared connection attempt.
 
 Every request body is limited to 1 MiB (1,048,576 bytes), Fastify's default,
 except a tool result, which is limited to 8 MiB (8,388,608 bytes) so that a
-1 MiB file read still fits after JSON escaping. A larger body is refused with
+1 MiB file read still fits after JSON escaping, and a chat request, which is
+limited to 32 MiB (33,554,432 bytes) so that a message can carry its
+attachments. A larger body is refused with
 `413 Payload Too Large` before the route runs, so nothing is stored or
 changed. The response is Fastify's JSON error body, with
 `code` `FST_ERR_CTP_BODY_TOO_LARGE`, not Problem Details.
@@ -87,6 +90,11 @@ selects one of two forms:
   and nothing is stored; see
   [a conversation whose agent was deleted](#a-conversation-whose-agent-was-deleted).
 
+The agent is looked up when the request arrives and again when the turn is
+stored, after its attachment files are written, so a conversation or agent
+deleted in between gets the same `404` or `409` problem, and the written
+files are deleted again.
+
 `message` and `model` must be non-empty strings. Every turn sends the system
 prompt its agent has when the turn starts, so editing a stored agent changes
 its conversations from their next message. Continuation
@@ -120,10 +128,11 @@ controls affect chat completion; title generation uses a separate request.
 `attachments` is optional. When present it lists 1 to 8 files sent with the
 message, each with its `name` and base64 `content`, in the order the person
 attached them. A name is non-empty, neither `.` nor `..`, holds no `/` and no
-NUL character, has at most 255 UTF-8 bytes, and appears once in the request
-ignoring case; the files decode to at most 10 MiB each and 20 MiB together.
-The route accepts bodies up to 32 MiB and answers a larger one with `413`;
-other routes keep Fastify's 1 MiB default. A request that breaks these rules
+control character (NUL included), has at most 255 UTF-8 bytes, and appears
+once in the request ignoring case, which folds `ß` and `SS` together; the
+files decode to at most 10 MiB each and 20 MiB together. The route accepts
+bodies up to 32 MiB and answers a larger one with `413`; every other route
+keeps its own limit, listed above. A request that breaks these rules
 is rejected with `400` before anything is stored. The limits are constants of
 `@lys/share` (`MAXIMUM_ATTACHMENT_BYTES`, `MAXIMUM_MESSAGE_ATTACHMENT_BYTES`,
 and `MAXIMUM_MESSAGE_ATTACHMENT_COUNT`), which the desktop applies before it
@@ -189,8 +198,10 @@ shape `toolDefinitionSchema` from `@lys/share` validates, each with `runner`
 `client`; it may be empty. `backendToolNames` names switched-on tools the
 backend runs, each once, as [`GET /api/v1/tools`](#tool-list) lists them; it is
 optional. Together they offer at least one tool, and no name appears in both.
-A request that breaks these rules, or names a backend tool the backend does
-not run, returns `400` before anything is stored. A request that offers a
+A request that breaks these rules, names a backend tool the backend does not
+run, or offers `read_attachment` as a client or backend tool, returns `400`
+before anything is stored; the backend adds the reader to a turn itself. A
+request that offers a
 backend tool that cannot run now, such as `web_search` without a usable
 Tavily API key or `read_page` while vmo is not ready, returns `409` with
 `urn:lys:problem:chat:backend-tool-unavailable` before anything is stored; see
@@ -210,7 +221,7 @@ cannot send, an image for a model without vision, or a model-capability read
 LM Studio cannot answer returns JSON Problem Details before the stream
 starts, and nothing is stored or written: no message, no file, and no failed
 reply. Each event payload must match one of
-the eight variants documented in [SSE events](/reference/sse-events/).
+the eleven variants documented in [SSE events](/reference/sse-events/).
 
 Closing a chat stream stops only that client's observation. The backend keeps
 generating and storing the reply and its title. To stop a reply, send
@@ -291,8 +302,8 @@ answers `200`:
   for each image it would send.
 - An offered backend tool is measured whether or not it can run now; the chat
   request refuses one that cannot.
-- The model is matched like a chat request names it: a loaded instance's
-  identifier or a loaded model's key. A model that is not loaded is never
+- The model is matched like a chat request names it: by its model key, as LM
+  Studio lists it. A model that is not loaded is never
   loaded; the route answers `503` with `urn:lys:problem:llm:model-not-loaded`.
 - The measurement runs through the
   [model operation queue](#model-operation-admission), so it waits behind a
@@ -361,7 +372,8 @@ fraction Tavily reports is rounded up. The answer never contains the key.
 ## Tool approvals
 
 The backend decides which tool calls need the person: every call of a tool
-that is not saved as Just run, client and backend tools alike. It shows such a
+that is not saved as Just run, client and backend tools alike, except
+`read_attachment`, which runs without approval. It shows such a
 call with a `tool-approval` event, and the client answers it with
 `POST /api/v1/chat/:conversationId/replies/:assistantMessageId/tool-approvals/:callId`,
 where `callId` is the `id` of the event's call or of its entry in

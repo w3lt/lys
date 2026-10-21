@@ -92,6 +92,13 @@ approve its public surface or establish an exception.
 | `CommandExit`                       | [vmo/Sources/vmo/ContainerizationReaderVmLifecycle/CommandExit.swift](https://github.com/w3lt/lys/blob/main/apps/vmo/Sources/vmo/ContainerizationReaderVmLifecycle/CommandExit.swift)                                             | invariant owner                    |
 | `WebServer`                         | [vmo/Sources/vmo/WebServer/WebServer.swift](https://github.com/w3lt/lys/blob/main/apps/vmo/Sources/vmo/WebServer/WebServer.swift)                                                                                                 | resource owner                     |
 
+## Page reader owners
+
+| Declaration            | Source                                                                                                 | Recorded classification            |
+| ---------------------- | ------------------------------------------------------------------------------------------------------ | ---------------------------------- |
+| `ChromiumDevToolsPipe` | [sandboxes/readpage/dump_dom.py](https://github.com/w3lt/lys/blob/main/sandboxes/readpage/dump_dom.py) | resource owner or boundary adapter |
+| `PageReadError`        | [sandboxes/readpage/dump_dom.py](https://github.com/w3lt/lys/blob/main/sandboxes/readpage/dump_dom.py) | framework adapter                  |
+
 ## Desktop views and feature declarations
 
 | Declaration                     | Source                                                                                                                                                                                                    | Recorded classification |

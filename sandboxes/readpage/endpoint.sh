@@ -11,9 +11,5 @@ http://* | https://*) ;;
   ;;
 esac
 
-timeout 30s chromium-headless-shell \
-  --no-sandbox \
-  --disable-dev-shm-usage \
-  --virtual-time-budget=10000 \
-  --dump-dom "$URL" 2>/dev/null |
+timeout 30s python3 /app/dump_dom.py "$URL" |
   python3 /app/parse_dom.py

@@ -16,6 +16,7 @@ import {
   createNewConversationTarget,
   createTurnUserMessage
 } from "./support/conversationFixtures"
+import { createCapturedLog } from "./support/fastifyTestApp"
 import {
   fakeLmStudio,
   type FakeLmStudioOperations
@@ -74,7 +75,10 @@ describe("buildApp", () => {
     const constructClient = vi.fn<FakeLmStudioOperations["constructClient"]>()
     fakeLmStudio.operations = { ...fakeLmStudio.operations, constructClient }
 
-    const build = buildApp({ config })
+    const build = buildApp({
+      config,
+      logDestination: createCapturedLog().destination
+    })
 
     await expect(build).rejects.toBeInstanceOf(z.ZodError)
     await expect(build).rejects.toMatchObject({
@@ -85,7 +89,10 @@ describe("buildApp", () => {
   })
 
   it("decorates the conversation adapters, the agent service, and the attachment file store and serves history and agents from the configured database", async () => {
-    const app = await buildApp({ config: createOwnedBackendConfig() })
+    const app = await buildApp({
+      config: createOwnedBackendConfig(),
+      logDestination: createCapturedLog().destination
+    })
     onTestFinished(async () => await app.close())
     await app.ready()
 
@@ -122,7 +129,10 @@ describe("buildApp", () => {
   })
 
   it("decorates the reply part store over the configured database", async () => {
-    const app = await buildApp({ config: createOwnedBackendConfig() })
+    const app = await buildApp({
+      config: createOwnedBackendConfig(),
+      logDestination: createCapturedLog().destination
+    })
     onTestFinished(async () => await app.close())
     await app.ready()
     const turn = app.conversationTurns.createConversationTurn({
@@ -143,8 +153,42 @@ describe("buildApp", () => {
     ).toMatchObject({ messages: [turn.userMessage, { parts: [part] }] })
   })
 
+  it("writes each log line to the given destination with its level name and its UTC ISO-8601 time", async () => {
+    const { destination, logs } = createCapturedLog()
+    const app = await buildApp({
+      config: createOwnedBackendConfig(),
+      logDestination: destination
+    })
+    onTestFinished(async () => await app.close())
+    await app.ready()
+    vi.useFakeTimers({ toFake: ["Date"] })
+    onTestFinished(() => {
+      vi.useRealTimers()
+    })
+    vi.setSystemTime(new Date("2026-10-21T08:15:02.123Z"))
+    const logCountBeforeRequest = logs.length
+
+    await app.inject({ method: "GET", url: "/api/v1/heath" })
+
+    expect(logs.slice(logCountBeforeRequest)).toEqual([
+      expect.objectContaining({
+        level: "info",
+        time: "2026-10-21T08:15:02.123Z",
+        msg: "incoming request"
+      }),
+      expect.objectContaining({
+        level: "info",
+        time: "2026-10-21T08:15:02.123Z",
+        msg: "request completed"
+      })
+    ])
+  })
+
   it("accepts a request body at the limit and refuses a larger one before the route runs", async () => {
-    const app = await buildApp({ config: createOwnedBackendConfig() })
+    const app = await buildApp({
+      config: createOwnedBackendConfig(),
+      logDestination: createCapturedLog().destination
+    })
     onTestFinished(async () => await app.close())
     await app.ready()
 

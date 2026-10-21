@@ -1,4 +1,4 @@
-import Fastify from "fastify"
+import Fastify, { type FastifyLoggerOptions } from "fastify"
 import updateFastifyWithAgentRoutes from "./modules/agent/routes"
 import updateFastifyWithConversationRoutes from "./modules/conversation/routes"
 import registerHealthRoutes from "./modules/health/routes"
@@ -18,10 +18,21 @@ export type BuildAppOptions = {
    * parsed, frozen snapshot rather than the supplied object.
    */
   config: BackendConfig
+  /**
+   * Destination of the application's log: one JSON object per line, with the
+   * level name in `level`, such as `"info"`, and the UTC ISO-8601 time in
+   * `time`.
+   *
+   * @remarks Owned by the caller, which decides where the lines go; the
+   * application writes to it but never ends or closes it.
+   */
+  logDestination: NonNullable<FastifyLoggerOptions["stream"]>
 }
 
 /**
  * Builds and configures the backend Fastify application.
+ *
+ * The application logs at level `info` to {@link BuildAppOptions.logDestination}.
  *
  * @param options - Runtime dependencies and configuration for the application.
  * @returns A promise that resolves to the Fastify application after SSE support, singleton services, and all backend routes are registered.
@@ -33,7 +44,12 @@ export type BuildAppOptions = {
 export async function buildApp(options: BuildAppOptions) {
   const config = backendConfigSchema.parse(options.config)
   const app = Fastify({
-    logger: true
+    logger: {
+      level: "info",
+      formatters: { level: (label) => ({ level: label }) },
+      timestamp: () => `,"time":"${new Date().toISOString()}"`,
+      stream: options.logDestination
+    }
   })
 
   await updateFastifyWithHttpTransport(app)

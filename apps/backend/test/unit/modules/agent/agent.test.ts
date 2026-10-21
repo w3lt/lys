@@ -10,6 +10,7 @@ import {
   type ConversationAssistantMessage,
   type ConversationMessage,
   type ConversationSource,
+  type ConversationUserMessage,
   type ReplyPart,
   type ToolDefinition
 } from "@lys/share"
@@ -51,8 +52,10 @@ import {
 } from "../../support/conversationDatabase"
 import {
   createAssistantMessage,
+  createNewConversationTarget,
   createTextPart,
   createToolCallPart,
+  createTurnUserMessage,
   createUserMessage
 } from "../../support/conversationFixtures"
 import {
@@ -97,7 +100,7 @@ const AGENT_PROFILE = Object.freeze({
 
 /** Request values every case's turn carries. */
 const TURN_REQUEST = Object.freeze({
-  userMessageContent: "Hello",
+  userMessage: createUserMessage(100, "Hello"),
   model: "qwen/qwen3-8b",
   generationOptions: { temperature: 0.4, replyCeiling: 128 }
 })
@@ -171,6 +174,12 @@ type AgentReplyScenario = Readonly<{
   updateAssistantMessageState?: ReplyStorageOverride<
     AgentTurn["updateAssistantMessageState"]
   >
+  /** Message the turn answers; `Hello` without attachments by default. */
+  userMessage?: ConversationUserMessage
+  /** Whether the model sees images; false by default. */
+  canSeeImages?: boolean
+  /** Image reader; any read fails the case by default. */
+  findAttachmentImage?: AgentTurn["findAttachmentImage"]
   /** Offered client tools; none by default. */
   clientTools?: readonly ToolDefinition[]
   /** Offered backend tools; none by default. */
@@ -201,8 +210,8 @@ function openAgentTurnStore(
 ): AgentTurnStore {
   const services = openConversationTestServices()
   const turn = services.turns.createConversationTurn({
-    conversation: { kind: "new", agentCode: AGENT_PROFILE.code },
-    userMessageContent: TURN_REQUEST.userMessageContent,
+    conversation: createNewConversationTarget(AGENT_PROFILE.code),
+    userMessage: createTurnUserMessage(TURN_REQUEST.userMessage.content),
     model: TURN_REQUEST.model
   })
   for (const source of sources)
@@ -293,6 +302,15 @@ function createEventStream(...events: ReplyStreamEvent[]) {
  */
 function handleUnexpectedToolCall(): never {
   throw new Error("Unexpected tool call")
+}
+
+/**
+ * Fails an image read that the current case did not arrange.
+ *
+ * @returns A promise that rejects.
+ */
+function handleUnexpectedImageRead(): Promise<never> {
+  return Promise.reject(new Error("Unexpected attachment image read"))
 }
 
 /**
@@ -440,7 +458,11 @@ const FINISH_ROUND: readonly ReplyStreamEvent[] = Object.freeze([
  */
 function createLookUpWordTool(runScript?: BuiltInToolRunScript) {
   const tool = new ScriptedBuiltInTool(runScript)
-  const entry: TurnBuiltInTool = { definition: LOOK_UP_WORD_TOOL, tool }
+  const entry: TurnBuiltInTool = {
+    definition: LOOK_UP_WORD_TOOL,
+    tool,
+    runsWithoutApproval: false
+  }
   return { tool, entry }
 }
 
@@ -546,6 +568,10 @@ async function getAgentReplyOutcome(scenario: AgentReplyScenario) {
   const settlement = await agent
     .createReply({
       ...TURN_REQUEST,
+      userMessage: scenario.userMessage ?? TURN_REQUEST.userMessage,
+      canSeeImages: scenario.canSeeImages ?? false,
+      findAttachmentImage:
+        scenario.findAttachmentImage ?? handleUnexpectedImageRead,
       history: scenario.history ?? [],
       sources: getStoredReply(store).sources,
       clientTools: scenario.clientTools ?? [],
@@ -665,9 +691,9 @@ describe("Agent", () => {
     expect(openReplyStream).toHaveBeenCalledWith({
       messages: [
         { role: "system", content: "You are Lys." },
-        { role: "user", content: "Earlier question" },
+        { role: "user", content: "Earlier question", images: [] },
         { role: "assistant", content: "Earlier answer", toolCalls: [] },
-        { role: "user", content: "Hello" }
+        { role: "user", content: "Hello", images: [] }
       ],
       tools: [],
       model: TURN_REQUEST.model,
@@ -1158,7 +1184,9 @@ describe("Agent", () => {
       builtInTools: [],
       sendClientToolCall: handleUnexpectedToolCall,
       createToolCallGate: handleUnexpectedToolCall,
-      userMessageContent,
+      userMessage: createUserMessage(101, userMessageContent),
+      canSeeImages: false,
+      findAttachmentImage: handleUnexpectedImageRead,
       abortSignal: new AbortController().signal,
       sendEvent: (event) => {
         events.push(event)
@@ -1432,6 +1460,8 @@ describe("Agent", () => {
       const measurement = await agent.findContextMeasurement({
         history: ANSWERED_THEN_FAILED_HISTORY,
         model: TURN_REQUEST.model,
+        canSeeImages: false,
+        findAttachmentImage: handleUnexpectedImageRead,
         tools: [READ_TEXT_FILE_TOOL, LOOK_UP_WORD_TOOL]
       })
 
@@ -1448,9 +1478,9 @@ describe("Agent", () => {
       ).toHaveBeenCalledExactlyOnceWith({
         messages: [
           { role: "system", content: "You are Lys." },
-          { role: "user", content: "Earlier question" },
+          { role: "user", content: "Earlier question", images: [] },
           { role: "assistant", content: "Earlier answer", toolCalls: [] },
-          { role: "user", content: "" }
+          { role: "user", content: "", images: [] }
         ],
         tools: [READ_TEXT_FILE_FORMAT, LOOK_UP_WORD_FORMAT],
         model: TURN_REQUEST.model
@@ -1497,6 +1527,8 @@ describe("Agent", () => {
           )
         ],
         model: TURN_REQUEST.model,
+        canSeeImages: false,
+        findAttachmentImage: handleUnexpectedImageRead,
         tools: []
       })
 
@@ -1522,6 +1554,8 @@ describe("Agent", () => {
         agent.findContextMeasurement({
           history: [],
           model: TURN_REQUEST.model,
+          canSeeImages: false,
+          findAttachmentImage: handleUnexpectedImageRead,
           tools: []
         })
       ).resolves.toBeUndefined()
@@ -2125,6 +2159,34 @@ describe("Agent", () => {
 
       expect(sendToolApprovalPrompt).not.toHaveBeenCalled()
       expect(tool.startedWords).toEqual(["moth"])
+    })
+
+    it("runs a call of a tool that runs without approval at once, never asking the gate or the person", async () => {
+      const { tool, entry } = createLookUpWordTool()
+      const sendToolApprovalPrompt = createAllowingPromptSender()
+      const createToolCallGate = vi.fn<AgentTurn["createToolCallGate"]>(
+        async () => new ToolCallGate(new Set(), sendToolApprovalPrompt)
+      )
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream: createRoundStreams(LOOK_UP_MOTH_ROUND, FINISH_ROUND),
+        builtInTools: [{ ...entry, runsWithoutApproval: true }],
+        createToolCallGate,
+        sendToolApprovalPrompt
+      })
+
+      expect(sendToolApprovalPrompt).not.toHaveBeenCalled()
+      expect(tool.startedWords).toEqual(["moth"])
+      const callId = run.parts[0]?.id
+      expect(run.events.slice(0, 2)).toEqual([
+        buildReplyPartEventMatcher({
+          id: callId,
+          toolName: "look_up_word",
+          status: "running"
+        }),
+        buildReplyPartEventMatcher({ id: callId, status: "succeeded" })
+      ])
+      expect(run.parts[0]).toMatchObject({ status: "succeeded" })
     })
 
     it("answers arguments the tool cannot run without prompting the person", async () => {

@@ -26,15 +26,18 @@ type ContextRow = {
 export type ComposerContextMeterProps = {
   /** What is known about the window. */
   readonly meter: ContextMeterState
-  /** Whether files are staged in the tray; they are never sent. */
-  readonly hasStagedFiles: boolean
+  /**
+   * Whether text files are attached to the next message; the model reads
+   * them on request, so the meter does not count them.
+   */
+  readonly hasAttachedTextFiles: boolean
   /** Invoked once when the user asks to change the window size. */
   readonly onChangeWindow: () => void
 }
 
-/** Sentence added to every note while files are staged. */
-const STAGED_FILES_NOTE =
-  "Staged files are not sent yet, so they are not counted."
+/** Sentence added to every note while text files are attached. */
+const ATTACHED_FILES_NOTE =
+  "Attached files are read on request, so they are not counted."
 
 /**
  * Builds the breakdown row for the stored messages the next turn includes.
@@ -122,7 +125,7 @@ function buildContextRows(usage: ContextUsage): readonly ContextRow[] {
  *
  * @param meter - What is known about the window.
  * @returns The explanation shown beneath the breakdown rows, without the
- * staged-files sentence.
+ * attached-files sentence.
  */
 function formatContextNote(meter: ContextMeterState): string {
   switch (meter.status) {
@@ -187,8 +190,8 @@ function readMeterTone(meter: ContextMeterState): "over" | "tight" | "normal" {
 /**
  * Reports how full the window is and what is occupying it.
  *
- * @remarks The parent owns what is known about the window, whether files are
- * staged, and the request to change the window; this component owns only
+ * @remarks The parent owns what is known about the window, whether text
+ * files are attached, and the request to change the window; this component owns only
  * whether its panel is disclosed. The control is a disclosure: the button
  * carries `aria-expanded` and points at the panel it reveals, the panel closes
  * on Escape and on a pointer press outside it, and focus is returned to the
@@ -199,13 +202,13 @@ function readMeterTone(meter: ContextMeterState): "over" | "tight" | "normal" {
  * are. The meter's fill is accompanied by a text label so the state is never
  * carried by the bar alone.
  *
- * @param props - What is known about the window, whether files are staged,
- * and the window-change callback.
+ * @param props - What is known about the window, whether text files are
+ * attached, and the window-change callback.
  * @returns The composer's context meter and its breakdown panel.
  */
 export default function ComposerContextMeter({
   meter,
-  hasStagedFiles,
+  hasAttachedTextFiles,
   onChangeWindow
 }: ComposerContextMeterProps) {
   const [isOpen, setIsOpen] = useState(false)
@@ -252,8 +255,8 @@ export default function ComposerContextMeter({
 
   const tone = readMeterTone(meter)
   const meterLabel = formatMeterLabel(meter)
-  const note = hasStagedFiles
-    ? `${formatContextNote(meter)} ${STAGED_FILES_NOTE}`
+  const note = hasAttachedTextFiles
+    ? `${formatContextNote(meter)} ${ATTACHED_FILES_NOTE}`
     : formatContextNote(meter)
 
   return (

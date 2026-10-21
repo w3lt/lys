@@ -6,11 +6,16 @@ import * as z from "zod"
 import { buildApp } from "../../src/app"
 import type { BackendConfig } from "../../src/config"
 import AgentService from "../../src/modules/agent/agentService"
+import AttachmentFileStore from "../../src/modules/attachment/attachmentFileStore"
 import StoredConversationHistoryEditor from "../../src/modules/conversation/historyEditor"
 import StoredConversationHistoryReader from "../../src/modules/conversation/historyReader"
 import StoredReplyParts from "../../src/modules/conversation/replyParts"
 import StoredConversationTurns from "../../src/modules/conversation/turns"
 import { TEST_BACKEND_CONFIG } from "./support/backendConfig"
+import {
+  createNewConversationTarget,
+  createTurnUserMessage
+} from "./support/conversationFixtures"
 import {
   fakeLmStudio,
   type FakeLmStudioOperations
@@ -79,7 +84,7 @@ describe("buildApp", () => {
     expect(existsSync(config.databaseFilePath)).toBe(false)
   })
 
-  it("decorates the conversation adapters and the agent service and serves history and agents from the configured database", async () => {
+  it("decorates the conversation adapters, the agent service, and the attachment file store and serves history and agents from the configured database", async () => {
     const app = await buildApp({ config: createOwnedBackendConfig() })
     onTestFinished(async () => await app.close())
     await app.ready()
@@ -101,6 +106,7 @@ describe("buildApp", () => {
       StoredConversationHistoryEditor
     )
     expect(app.agentService).toBeInstanceOf(AgentService)
+    expect(app.attachmentFileStore).toBeInstanceOf(AttachmentFileStore)
     expect(response.statusCode).toBe(200)
     expect(response.json()).toMatchObject({ storedCount: 0 })
     expect(agentsResponse.statusCode).toBe(200)
@@ -120,8 +126,8 @@ describe("buildApp", () => {
     onTestFinished(async () => await app.close())
     await app.ready()
     const turn = app.conversationTurns.createConversationTurn({
-      conversation: { kind: "new", agentCode: "caliginia" },
-      userMessageContent: "Hello",
+      conversation: createNewConversationTarget("caliginia"),
+      userMessage: createTurnUserMessage("Hello"),
       model: "qwen/qwen3-8b"
     })
 

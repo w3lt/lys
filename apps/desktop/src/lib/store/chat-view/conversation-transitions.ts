@@ -652,7 +652,8 @@ function createStoredConversationMessage(
     id: message.id,
     createdAt: message.createdAt,
     role: message.role,
-    content: message.content
+    content: message.content,
+    attachments: message.attachments
   })
 }
 

@@ -257,6 +257,20 @@
   color: var(--app-text-strong);
 }
 
+/*
+ * Why the last file was refused. The status line stays in the page while it
+ * has nothing to say, so it exists before the sentence it announces, and
+ * takes no room then.
+ */
+.composer__attachment-refusal {
+  font-size: 12px;
+  color: var(--app-text-danger);
+}
+
+.composer__attachment-refusal:empty {
+  display: none;
+}
+
 /* Meta row */
 
 .composer__meta {

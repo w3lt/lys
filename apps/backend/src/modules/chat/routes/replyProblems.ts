@@ -1,10 +1,14 @@
 import {
+  chatAttachmentUnsupportedProblemSchema,
   chatBackendToolUnavailableProblemSchema,
+  chatImageNeedsVisionProblemSchema,
   chatReplyNotFoundProblemSchema,
   chatReplyNotGeneratingProblemSchema,
   chatToolCallNotPendingProblemSchema,
   type BackendToolUnavailableReason,
+  type ChatAttachmentUnsupportedProblem,
   type ChatBackendToolUnavailableProblem,
+  type ChatImageNeedsVisionProblem,
   type ChatReplyNotFoundProblem,
   type ChatReplyNotGeneratingProblem,
   type ChatToolCallNotPendingProblem
@@ -108,5 +112,55 @@ export function createChatBackendToolUnavailableProblem(
     instance,
     toolName,
     reason
+  }
+}
+
+/**
+ * Creates the caller-safe response for attaching a file whose content is
+ * neither text nor an image Lys sends.
+ *
+ * @param fileName - Validated name of the first such attachment.
+ * @param instance - Request path identifying this occurrence.
+ * @returns The strict problem accepted by chat consumers; it never holds the
+ * file's content.
+ */
+export function createChatAttachmentUnsupportedProblem(
+  fileName: string,
+  instance: string
+): ChatAttachmentUnsupportedProblem {
+  const { shape } = chatAttachmentUnsupportedProblemSchema.unwrap()
+  return {
+    type: shape.type.value,
+    title: shape.title.value,
+    status: shape.status.value,
+    detail: `The file ${fileName} is not a text file or an image Lys can send.`,
+    instance,
+    fileName
+  }
+}
+
+/**
+ * Creates the caller-safe response for attaching an image for a model that
+ * cannot see images.
+ *
+ * @param fileName - Validated name of the first image of the request.
+ * @param model - Model the request named.
+ * @param instance - Request path identifying this occurrence.
+ * @returns The strict problem accepted by chat consumers.
+ */
+export function createChatImageNeedsVisionProblem(
+  fileName: string,
+  model: string,
+  instance: string
+): ChatImageNeedsVisionProblem {
+  const { shape } = chatImageNeedsVisionProblemSchema.unwrap()
+  return {
+    type: shape.type.value,
+    title: shape.title.value,
+    status: shape.status.value,
+    detail: `The image ${fileName} needs a model with vision, and ${model} cannot see images.`,
+    instance,
+    fileName,
+    model
   }
 }

@@ -1,8 +1,12 @@
 import type { FastifyInstance, LightMyRequestResponse } from "fastify"
 import { validatorCompiler } from "fastify-type-provider-zod"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { onTestFinished, vi, type MockInstance } from "vitest"
 import SqliteAgentRecordStore from "../../../src/infrastructure/database/agents/sqliteAgentRecordStore"
 import AgentService from "../../../src/modules/agent/agentService"
+import AttachmentFileStore from "../../../src/modules/attachment/attachmentFileStore"
 import { buildBuiltInAgents } from "../../../src/modules/agent/builtInAgents"
 import ChatService from "../../../src/modules/chat/chatService"
 import LlmReplyContextMeter from "../../../src/modules/chat/llmReplyContextMeter"
@@ -61,10 +65,21 @@ export type ChatRouteTestApp = TestFastify &
       LlmService["findLlmContextMeasurement"]
     >
     /**
+     * Inventory of `app.llmService`, which the chat route reads for a model's
+     * capabilities when a request or its conversation holds attachments;
+     * rejects until a case configures it.
+     */
+    listLlmModels: MockInstance<LlmService["listLlmModels"]>
+    /**
      * Reader of the saved Just run choices behind `app.toolApprovalService`;
      * rejects until a case configures it.
      */
     readJustRunToolNames: MockInstance<ReadJustRunToolNames>
+    /**
+     * Directory `app.attachmentFileStore` keeps attachment files under,
+     * created for the test and removed when it finishes.
+     */
+    attachmentsDirectoryPath: string
     /**
      * Registry a case passes to the chat route; disposed when the test
      * finishes, before the conversation database closes.
@@ -96,11 +111,19 @@ export type ChatRouteTestApp = TestFastify &
  * dictionary page of each word it looks up as a source, and
  * `check_spelling`, whose provider is never ready (`api-key-missing`). The
  * decorated tool approval service reads the saved Just run choices through
- * the `readJustRunToolNames` spy. When the test finishes, the registry is
- * disposed first, so every generation it holds has stored its final state
- * before the in-memory conversation database is closed.
+ * the `readJustRunToolNames` spy. The decorated attachment file store is
+ * real, over a directory created for the test. When the test finishes, the
+ * registry is disposed first, so every generation it holds has stored its
+ * final state before the in-memory conversation database is closed; the
+ * directory is removed last.
  */
 export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
+  const attachmentsDirectoryPath = mkdtempSync(
+    join(tmpdir(), "lys-chat-route-attachments-")
+  )
+  onTestFinished(() => {
+    rmSync(attachmentsDirectoryPath, { recursive: true, force: true })
+  })
   const testFastify = await createChatSseTestApp()
   const { database, turns, replyParts, history } =
     openConversationTestServices()
@@ -138,6 +161,11 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
         })
       )
     )
+  const listLlmModels = vi
+    .spyOn(llmService, "listLlmModels")
+    .mockImplementation(() =>
+      Promise.reject(createUnexpectedCallError("listLlmModels"))
+    )
   const agentService = new AgentService({
     recordStore: new SqliteAgentRecordStore(database),
     builtInAgents: buildBuiltInAgents(TEST_BUILT_IN_AGENT_PROMPTS),
@@ -167,6 +195,10 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
     new ToolApprovalService(readJustRunToolNames)
   )
   testFastify.app.decorate(
+    "attachmentFileStore",
+    new AttachmentFileStore(attachmentsDirectoryPath)
+  )
+  testFastify.app.decorate(
     "builtInTools",
     Object.freeze([
       Object.freeze({
@@ -191,7 +223,9 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
     completeChatStream,
     generateTitle,
     findLlmContextMeasurement,
+    listLlmModels,
     readJustRunToolNames,
+    attachmentsDirectoryPath,
     generations
   })
 }

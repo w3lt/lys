@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import * as z from "zod"
 import type { ConversationTestServices } from "../../support/conversationDatabase"
 import { openConversationTestServices } from "../../support/conversationDatabase"
-import { createFixtureUuidV7 } from "../../support/conversationFixtures"
+import {
+  createFixtureUuidV7,
+  createNewConversationTarget,
+  createTurnUserMessage
+} from "../../support/conversationFixtures"
 
 /** Wall-clock time observed by every case until it advances the clock. */
 const NOW = "2026-03-04T05:06:07.890Z"
@@ -22,8 +26,8 @@ function startTurn(): ConversationTestServices &
   Readonly<{ replyId: string; conversationId: string }> {
   const services = openConversationTestServices()
   const turn = services.turns.createConversationTurn({
-    conversation: { kind: "new", agentCode: "lys" },
-    userMessageContent: "Hello",
+    conversation: createNewConversationTarget("lys"),
+    userMessage: createTurnUserMessage("Hello"),
     model: "qwen/qwen3-8b"
   })
   return {

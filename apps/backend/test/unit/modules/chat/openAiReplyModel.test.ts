@@ -29,7 +29,7 @@ type CompleteChatStream = ConstructorParameters<typeof OpenAiReplyModel>[0]
 const REPLY_REQUEST = Object.freeze({
   messages: [
     { role: "system", content: "You are Lys." },
-    { role: "user", content: "Hello" }
+    { role: "user", content: "Hello", images: [] }
   ],
   tools: [],
   model: "qwen/qwen3-8b",
@@ -261,7 +261,7 @@ describe("OpenAiReplyModel", () => {
       tools: [readTextFile],
       messages: [
         { role: "system", content: "You are Lys." },
-        { role: "user", content: "What is on my list?" },
+        { role: "user", content: "What is on my list?", images: [] },
         { role: "assistant", content: "Let me look.", toolCalls: [toolCall] },
         { role: "tool", toolCallId: toolCall.id, content: "Buy milk" },
         { role: "assistant", content: "Earlier answer", toolCalls: [] }
@@ -290,6 +290,53 @@ describe("OpenAiReplyModel", () => {
           },
           { role: "tool", tool_call_id: toolCall.id, content: "Buy milk" },
           { role: "assistant", content: "Earlier answer" }
+        ]
+      })
+    )
+  })
+
+  it("sends a user message with images as its text part followed by one data URL part per image", async () => {
+    const completeChatStream = createChunkStream()
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47])
+    const jpeg = new Uint8Array([0xff, 0xd8, 0xff])
+
+    await new OpenAiReplyModel(completeChatStream).openReplyStream({
+      ...REPLY_REQUEST,
+      messages: [
+        { role: "system", content: "You are Lys." },
+        {
+          role: "user",
+          content: "What is this?",
+          images: [
+            { mediaType: "image/png", width: 2, height: 2, data: png },
+            { mediaType: "image/jpeg", width: 3, height: 1, data: jpeg }
+          ]
+        }
+      ]
+    })
+
+    expect(completeChatStream).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages: [
+          { role: "system", content: "You are Lys." },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "What is this?" },
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:image/png;base64,${Buffer.from(png).toString("base64")}`
+                }
+              },
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:image/jpeg;base64,${Buffer.from(jpeg).toString("base64")}`
+                }
+              }
+            ]
+          }
         ]
       })
     )

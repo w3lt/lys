@@ -6,7 +6,9 @@ import { ConversationNotFoundError } from "../../../../src/utils/errors"
 import { openSqliteConversationRecords } from "../../support/conversationDatabase"
 import {
   createFixtureUuidV7,
+  createNewConversationTarget,
   createTextPart,
+  createTurnUserMessage,
   formatMessageText
 } from "../../support/conversationFixtures"
 import type { ConversationRecordsHarness } from "../../support/conversationRecordsContract"
@@ -78,8 +80,8 @@ describe("createConversationTurn", () => {
     const records = openSqliteConversationRecords()
 
     const turn = createCommittedTurn(records, {
-      conversation: { kind: "new", agentCode: "options-agent" },
-      userMessageContent: "Hello",
+      conversation: createNewConversationTarget("options-agent"),
+      userMessage: createTurnUserMessage("Hello"),
       model: "qwen/qwen3-8b"
     })
 
@@ -103,8 +105,8 @@ describe("createConversationTurn", () => {
     const records = openSqliteConversationRecords()
 
     const turn = createCommittedTurn(records, {
-      conversation: { kind: "new", agentCode: "lys" },
-      userMessageContent: "Hello",
+      conversation: createNewConversationTarget("lys"),
+      userMessage: createTurnUserMessage("Hello"),
       model: "qwen/qwen3-8b"
     })
 
@@ -112,6 +114,7 @@ describe("createConversationTurn", () => {
       id: expect.any(String),
       role: "user",
       content: "Hello",
+      attachments: [],
       createdAt: NOW
     })
     expect(turn.assistantMessage).toEqual({
@@ -135,7 +138,7 @@ describe("createConversationTurn", () => {
 
     const turn = createCommittedTurn(records, {
       conversation: { kind: "existing", id: EXISTING_CONVERSATION_ID },
-      userMessageContent: "Next question",
+      userMessage: createTurnUserMessage("Next question"),
       model: "qwen/qwen3-8b"
     })
 
@@ -182,7 +185,7 @@ describe("createConversationTurn", () => {
 
     const turn = createCommittedTurn(records, {
       conversation: { kind: "existing", id: EXISTING_CONVERSATION_ID },
-      userMessageContent: "Next question",
+      userMessage: createTurnUserMessage("Next question"),
       model: "qwen/qwen3-8b"
     })
 
@@ -228,7 +231,7 @@ describe("createConversationTurn", () => {
 
     createCommittedTurn(records, {
       conversation: { kind: "existing", id: EXISTING_CONVERSATION_ID },
-      userMessageContent: "Next question",
+      userMessage: createTurnUserMessage("Next question"),
       model: "qwen/qwen3-8b"
     })
 
@@ -246,7 +249,7 @@ describe("createConversationTurn", () => {
     expect(() =>
       createCommittedTurn(records, {
         conversation: { kind: "existing", id: EXISTING_CONVERSATION_ID },
-        userMessageContent: "Hello",
+        userMessage: createTurnUserMessage("Hello"),
         model: "qwen/qwen3-8b"
       })
     ).toThrow(ConversationNotFoundError)
@@ -261,8 +264,14 @@ describe("createConversationTurn", () => {
   })
 
   it.each([
-    ["empty user content", { userMessageContent: "", model: "qwen/qwen3-8b" }],
-    ["an empty model", { userMessageContent: "Hello", model: "" }]
+    [
+      "empty user content",
+      { userMessage: createTurnUserMessage(""), model: "qwen/qwen3-8b" }
+    ],
+    [
+      "an empty model",
+      { userMessage: createTurnUserMessage("Hello"), model: "" }
+    ]
   ])("rejects %s before any write", (_label, values) => {
     const records = openSqliteConversationRecords()
     saveExistingConversation(records)

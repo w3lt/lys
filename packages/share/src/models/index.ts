@@ -17,6 +17,27 @@ export {
   type BuiltInAgent
 } from "./agent"
 export {
+  attachmentImageMediaTypeSchema,
+  attachmentNameSchema,
+  buildAttachmentNameKey,
+  parseAttachmentContent,
+  conversationAttachmentDraftSchema,
+  conversationAttachmentSchema,
+  estimateImageTokens,
+  hasDistinctAttachmentNames,
+  IMAGE_PATCH_PIXELS,
+  MAXIMUM_ATTACHMENT_BYTES,
+  MAXIMUM_ATTACHMENT_NAME_BYTES,
+  MAXIMUM_IMAGE_TOKENS,
+  MAXIMUM_MESSAGE_ATTACHMENT_BYTES,
+  MAXIMUM_MESSAGE_ATTACHMENT_COUNT,
+  type AttachmentContent,
+  type AttachmentImageMediaType,
+  type ConversationAttachment,
+  type ConversationAttachmentDraft,
+  type ConversationImageAttachment
+} from "./attachment"
+export {
   conversationAssistantMessageSchema,
   conversationMessageSchema,
   conversationMetadataSchema,

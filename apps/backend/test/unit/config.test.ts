@@ -29,6 +29,7 @@ const VALID_RAW_CONFIG = Object.freeze({
   lmstudioPort: LMSTUDIO_PORT,
   databaseFilePath: "/test-home/lys/lys_db.sqlite",
   settingsFilePath: "/test-home/lys/settings.json",
+  attachmentsDirectoryPath: "/test-home/lys/attachments",
   vmoHost: "127.0.0.1",
   vmoPort: 8080,
   caliginiaSystemPrompt: "Fixture Caliginia prompt",
@@ -107,7 +108,7 @@ describe("loadBackendConfig", () => {
     vi.mocked(readPrompt).mockImplementation((type) => FIXTURE_PROMPTS[type])
   })
 
-  it("resolves the shared endpoints, the Lys home database path, vmo's endpoint, every prompt, and the fixed title limits", () => {
+  it("resolves the shared endpoints, the Lys home paths, vmo's endpoint, every prompt, and the fixed title limits", () => {
     expect(loadBackendConfig()).toEqual({
       backendHost: BACKEND_HOST,
       backendPort: BACKEND_PORT,
@@ -115,6 +116,7 @@ describe("loadBackendConfig", () => {
       lmstudioPort: LMSTUDIO_PORT,
       databaseFilePath: "/test-home/lys/lys_db.sqlite",
       settingsFilePath: "/test-home/lys/settings.json",
+      attachmentsDirectoryPath: "/test-home/lys/attachments",
       vmoHost: "127.0.0.1",
       vmoPort: 8080,
       caliginiaSystemPrompt: "Fixture Caliginia prompt",

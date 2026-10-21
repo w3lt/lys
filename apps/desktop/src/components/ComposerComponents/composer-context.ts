@@ -13,16 +13,14 @@ import type { ChatContextMeasurementOutcome } from "@/lib/hooks/chatContextMeasu
  * loaded with. Only the draft's text is estimated here, from its length,
  * because it changes with every keystroke. Labels prefix counts with `~`
  * because the draft is estimated and the backend's counts include an
- * allowance for the chat template. Staged attachments are never sent, so they
- * are not part of the window. The agent editor uses only the text estimate
- * and the token-count format.
+ * allowance for the chat template. Staged images are estimated from their
+ * sides, because the model sees them with the message; staged text files are
+ * read on request, so they take nothing until then. The agent editor uses
+ * only the text estimate and the token-count format.
  */
 
 /** Average characters per token used to estimate text length. */
 const CHARACTERS_PER_TOKEN = 3.7
-
-/** Estimated tokens per byte for an attached file's extracted text. */
-const BYTES_PER_ATTACHMENT_TOKEN = 4
 
 /** Meter before the first measurement settles; it carries no data. */
 const MEASURING_CONTEXT_METER_STATE: ContextMeterState = Object.freeze({
@@ -34,18 +32,6 @@ const MODEL_NOT_LOADED_CONTEXT_METER_STATE: ContextMeterState = Object.freeze({
   status: "unknown",
   reason: "LM Studio has not loaded the model, so the window is unknown."
 })
-
-/** One file staged in the composer's context tray. */
-export type ComposerAttachment = {
-  /** Stable identifier assigned when the file was staged. */
-  readonly id: string
-  /** File name shown on the chip. */
-  readonly name: string
-  /** Lowercase extension shown as the chip's kind marker, without a dot. */
-  readonly kind: string
-  /** Estimated tokens this file would occupy in the window. */
-  readonly estimatedTokens: number
-}
 
 /** Breakdown of the context window the next message would take. */
 export type ContextUsage = {
@@ -63,7 +49,7 @@ export type ContextUsage = {
   readonly historyMessageCount: number
   /**
    * Tokens of the draft as it would be sent: the measured markup around the
-   * new message plus the estimate of its text.
+   * new message plus the estimates of its text and of its images.
    */
   readonly messageTokens: number
   /** Tokens the request would take, without the reply reserve. */
@@ -101,6 +87,8 @@ export type ContextUsageInput = {
   readonly measurement: ChatContextApiResponse
   /** Composer draft; it is sent trimmed. */
   readonly draft: string
+  /** Estimated tokens of the staged images, or zero when none is staged. */
+  readonly attachmentTokens: number
   /** Tokens reserved for the reply, or zero when no ceiling is set. */
   readonly reserve: number
 }
@@ -113,16 +101,6 @@ export type ContextUsageInput = {
  */
 export function estimateTextTokens(text: string): number {
   return Math.ceil(text.length / CHARACTERS_PER_TOKEN)
-}
-
-/**
- * Estimates the token count of an attached file from its byte length.
- *
- * @param sizeBytes - File size in bytes.
- * @returns The estimated token count, at least one.
- */
-export function estimateAttachmentTokens(sizeBytes: number): number {
-  return Math.max(1, Math.ceil(sizeBytes / BYTES_PER_ATTACHMENT_TOKEN))
 }
 
 /**
@@ -140,7 +118,8 @@ export function formatTokenCount(tokenCount: number): string {
 /**
  * Calculates the breakdown of the context window the next message would take.
  *
- * @param input - The backend's measurement, the draft, and the reply reserve.
+ * @param input - The backend's measurement, the draft, the staged images'
+ * estimate, and the reply reserve.
  * @returns The measured parts, the draft's tokens, and what is left or over.
  * @remarks The rule matches the backend's check before every round: the
  * request fits while its tokens and the reserve together do not exceed the
@@ -149,7 +128,9 @@ export function formatTokenCount(tokenCount: number): string {
 export function calculateContextUsage(input: ContextUsageInput): ContextUsage {
   const { measurement, reserve } = input
   const messageTokens =
-    measurement.messageMarkupTokens + estimateTextTokens(input.draft.trim())
+    measurement.messageMarkupTokens +
+    estimateTextTokens(input.draft.trim()) +
+    input.attachmentTokens
   const usedTokens =
     measurement.systemPromptTokens +
     measurement.toolTokens +
@@ -176,7 +157,7 @@ export function calculateContextUsage(input: ContextUsageInput): ContextUsage {
  * Builds what the meter shows from the latest measurement.
  *
  * @param outcome - Latest settled measurement, or undefined before the first.
- * @param input - Draft and reply reserve.
+ * @param input - Draft, staged images' estimate, and reply reserve.
  * @returns `measuring` before the first measurement; `measured` with the
  * breakdown; or `unknown` with why, when the model is not loaded or the
  * measurement failed.

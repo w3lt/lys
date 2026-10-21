@@ -16,8 +16,10 @@ import {
 } from "../../support/conversationDatabase"
 import {
   createFixtureUuidV7,
+  createNewConversationTarget,
   createTextPart,
-  createToolCallPart
+  createToolCallPart,
+  createTurnUserMessage
 } from "../../support/conversationFixtures"
 
 /** Wall-clock time observed by every case until it advances the clock. */
@@ -187,8 +189,8 @@ describe("StoredConversationTurns", () => {
       const { turns, history } = openConversationTestServices()
 
       const turn = turns.createConversationTurn({
-        conversation: { kind: "new", agentCode: "lys" },
-        userMessageContent: "Hello",
+        conversation: createNewConversationTarget("lys"),
+        userMessage: createTurnUserMessage("Hello"),
         model: "qwen/qwen3-8b"
       })
 
@@ -210,8 +212,8 @@ describe("StoredConversationTurns", () => {
 
       expect(() =>
         turns.createConversationTurn({
-          conversation: { kind: "new", agentCode: "lys" },
-          userMessageContent: "",
+          conversation: createNewConversationTarget("lys"),
+          userMessage: createTurnUserMessage(""),
           model: "qwen/qwen3-8b"
         })
       ).toThrow(z.ZodError)
@@ -227,14 +229,14 @@ describe("StoredConversationTurns", () => {
       expect(() =>
         turns.createConversationTurn({
           conversation: { kind: "existing", id: createFixtureUuidV7(1) },
-          userMessageContent: "Hello",
+          userMessage: createTurnUserMessage("Hello"),
           model: "qwen/qwen3-8b"
         })
       ).toThrow(ConversationNotFoundError)
 
       const turn = turns.createConversationTurn({
-        conversation: { kind: "new", agentCode: "lys" },
-        userMessageContent: "Hello",
+        conversation: createNewConversationTarget("lys"),
+        userMessage: createTurnUserMessage("Hello"),
         model: "qwen/qwen3-8b"
       })
       expect(
@@ -247,8 +249,8 @@ describe("StoredConversationTurns", () => {
     it("completes a streaming reply with its finish reason", () => {
       const { turns, history } = openConversationTestServices()
       const turn = turns.createConversationTurn({
-        conversation: { kind: "new", agentCode: "lys" },
-        userMessageContent: "Hello",
+        conversation: createNewConversationTarget("lys"),
+        userMessage: createTurnUserMessage("Hello"),
         model: "qwen/qwen3-8b"
       })
 
@@ -275,8 +277,8 @@ describe("StoredConversationTurns", () => {
       (status) => {
         const { turns, history } = openConversationTestServices()
         const turn = turns.createConversationTurn({
-          conversation: { kind: "new", agentCode: "lys" },
-          userMessageContent: "Hello",
+          conversation: createNewConversationTarget("lys"),
+          userMessage: createTurnUserMessage("Hello"),
           model: "qwen/qwen3-8b"
         })
         vi.setSystemTime(new Date(LATER))
@@ -296,8 +298,8 @@ describe("StoredConversationTurns", () => {
     it("interrupts the reply's open tool calls at the time it finalizes the reply", () => {
       const { turns, replyParts, history } = openConversationTestServices()
       const turn = turns.createConversationTurn({
-        conversation: { kind: "new", agentCode: "lys" },
-        userMessageContent: "Hello",
+        conversation: createNewConversationTarget("lys"),
+        userMessage: createTurnUserMessage("Hello"),
         model: "qwen/qwen3-8b"
       })
       const call = replyParts.createReplyPart(turn.assistantMessage.id, {
@@ -326,8 +328,8 @@ describe("StoredConversationTurns", () => {
     it("finalizes a reply only once", () => {
       const { turns, history } = openConversationTestServices()
       const turn = turns.createConversationTurn({
-        conversation: { kind: "new", agentCode: "lys" },
-        userMessageContent: "Hello",
+        conversation: createNewConversationTarget("lys"),
+        userMessage: createTurnUserMessage("Hello"),
         model: "qwen/qwen3-8b"
       })
       turns.updateAssistantMessageState(turn.assistantMessage.id, {
@@ -361,8 +363,8 @@ describe("StoredConversationTurns", () => {
     it("saves the trimmed title of an untitled conversation", () => {
       const { turns, history } = openConversationTestServices()
       const turn = turns.createConversationTurn({
-        conversation: { kind: "new", agentCode: "lys" },
-        userMessageContent: "Hello",
+        conversation: createNewConversationTarget("lys"),
+        userMessage: createTurnUserMessage("Hello"),
         model: "qwen/qwen3-8b"
       })
 
@@ -381,8 +383,8 @@ describe("StoredConversationTurns", () => {
     it("keeps an existing title and returns undefined", () => {
       const { turns, history, editor } = openConversationTestServices()
       const turn = turns.createConversationTurn({
-        conversation: { kind: "new", agentCode: "lys" },
-        userMessageContent: "Hello",
+        conversation: createNewConversationTarget("lys"),
+        userMessage: createTurnUserMessage("Hello"),
         model: "qwen/qwen3-8b"
       })
       editor.updateConversationTitle(turn.conversation.id, "Renamed")
@@ -407,8 +409,8 @@ describe("StoredConversationTurns", () => {
     it("rejects a blank title without saving it", () => {
       const { turns, history } = openConversationTestServices()
       const turn = turns.createConversationTurn({
-        conversation: { kind: "new", agentCode: "lys" },
-        userMessageContent: "Hello",
+        conversation: createNewConversationTarget("lys"),
+        userMessage: createTurnUserMessage("Hello"),
         model: "qwen/qwen3-8b"
       })
 
@@ -426,8 +428,8 @@ describe("StoredConversationTurns", () => {
   it("rejects every operation after the database closes", () => {
     const { database, turns } = openConversationTestServices()
     const turn = turns.createConversationTurn({
-      conversation: { kind: "new", agentCode: "lys" },
-      userMessageContent: "Hello",
+      conversation: createNewConversationTarget("lys"),
+      userMessage: createTurnUserMessage("Hello"),
       model: "qwen/qwen3-8b"
     })
     expect(
@@ -443,8 +445,8 @@ describe("StoredConversationTurns", () => {
 
     expect(() =>
       turns.createConversationTurn({
-        conversation: { kind: "new", agentCode: "lys" },
-        userMessageContent: "Hello",
+        conversation: createNewConversationTarget("lys"),
+        userMessage: createTurnUserMessage("Hello"),
         model: "qwen/qwen3-8b"
       })
     ).toThrow("Database is closed")

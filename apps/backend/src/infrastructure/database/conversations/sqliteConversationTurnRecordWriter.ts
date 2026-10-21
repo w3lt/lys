@@ -1,6 +1,7 @@
 import type {
   Conversation,
   ConversationAssistantMessage,
+  ConversationAttachment,
   ConversationMetadata,
   ConversationUserMessage
 } from "@lys/share"
@@ -42,6 +43,46 @@ const UPDATE_ALL_OPEN_TOOL_CALLS_TO_INTERRUPTED_SQL = `UPDATE conversation_messa
 const UPDATE_REPLY_OPEN_TOOL_CALLS_TO_INTERRUPTED_SQL = `UPDATE conversation_messages SET status = 'interrupted', updated_at = ?
       WHERE role = 'tool_call' AND status IN ('awaiting-approval', 'running')
         AND reply_id = ?`
+
+/**
+ * Stores one attachment under its message; bound to the conversation, the
+ * message, and the attachment's columns.
+ */
+const INSERT_ATTACHMENT_SQL = `INSERT INTO conversation_attachments
+    (conversation_id, message_id, number, name, kind, media_type, size_bytes, width, height)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+
+/**
+ * Stores the attachments of one user message.
+ *
+ * @param statements - Compilation lent to the running write operation.
+ * @param conversationId - Conversation of the message.
+ * @param message - Message whose row is stored, with its attachments.
+ * @remarks An image stores its media type and sides; a text file stores
+ * NULL for them.
+ */
+function createMessageAttachments(
+  statements: DatabaseStatementCompiler,
+  conversationId: string,
+  message: ConversationUserMessage
+): void {
+  const insertAttachment = statements.getStatement(INSERT_ATTACHMENT_SQL)
+  for (const attachment of message.attachments) {
+    const image: ConversationAttachment | undefined =
+      attachment.kind === "image" ? attachment : undefined
+    insertAttachment.run(
+      conversationId,
+      message.id,
+      attachment.number,
+      attachment.name,
+      attachment.kind,
+      image?.kind === "image" ? image.mediaType : null,
+      attachment.sizeBytes,
+      image?.kind === "image" ? image.width : null,
+      image?.kind === "image" ? image.height : null
+    )
+  }
+}
 
 /**
  * Marks every streaming reply and its waiting and running tool calls as
@@ -171,11 +212,13 @@ class SqliteConversationTurnTransaction implements ConversationTurnTransaction {
   }
 
   /**
-   * Implements {@link ConversationTurnTransaction.createUserMessage}.
+   * Implements {@link ConversationTurnTransaction.createUserMessage}, storing
+   * each attachment of the message under it.
    * @param conversationId - Interface-defined conversation.
-   * @param message - Interface-defined message.
+   * @param message - Interface-defined message with its attachments.
    * @throws The interface-defined failures; an absent conversation fails the
-   * foreign-key constraint and a stored identity the primary-key constraint.
+   * foreign-key constraint, a stored identity the primary-key constraint,
+   * and a stored attachment number the unique constraint.
    */
   public createUserMessage(
     conversationId: string,
@@ -187,6 +230,7 @@ class SqliteConversationTurnTransaction implements ConversationTurnTransaction {
     VALUES (?, ?, 'user', ?, ?)`
       )
       .run(message.id, conversationId, message.content, message.createdAt)
+    createMessageAttachments(this.#statements, conversationId, message)
   }
 
   /**

@@ -1,6 +1,7 @@
 import type {
   Conversation,
   ConversationAssistantMessage,
+  ConversationAttachmentDraft,
   ConversationUserMessage,
   ReplyPart,
   ToolCallReplyPart
@@ -16,6 +17,11 @@ export type ConversationTurnTarget =
   | Readonly<{
       /** The turn creates a conversation. */
       kind: "new"
+      /**
+       * UUIDv7 the new conversation is stored under, made by the caller
+       * before the turn's attachment files are written.
+       */
+      id: string
       /** Valid code of the agent that answers the new conversation. */
       agentCode: string
     }>
@@ -26,12 +32,28 @@ export type ConversationTurnTarget =
       id: string
     }>
 
+/** The user message of a turn before it is stored. */
+export type ConversationTurnUserMessage = Readonly<{
+  /**
+   * UUIDv7 the message is stored under, made by the caller before the
+   * message's attachment files are written.
+   */
+  id: string
+  /** Nonempty user content appended once to the transcript. */
+  content: string
+  /**
+   * Attachments sent with the message, in message order, each name once
+   * ignoring case; the turn numbers them after the conversation's.
+   */
+  attachments: readonly ConversationAttachmentDraft[]
+}>
+
 /** Inputs for atomically creating one persisted user/assistant pair. */
 export type CreateConversationTurnOptions = Readonly<{
   /** Conversation the turn starts or continues. */
   conversation: ConversationTurnTarget
-  /** Nonempty user content appended once to the transcript. */
-  userMessageContent: string
+  /** User message appended once to the transcript, with its attachments. */
+  userMessage: ConversationTurnUserMessage
   /** Nonempty model identity stored on the assistant reply. */
   model: string
 }>
@@ -40,7 +62,7 @@ export type CreateConversationTurnOptions = Readonly<{
 export type ConversationTurn = Readonly<{
   /** Snapshot before this turn, including the code of its agent. */
   conversation: Conversation
-  /** User message committed with this turn. */
+  /** User message committed with this turn, with its numbered attachments. */
   userMessage: ConversationUserMessage
   /** Streaming reply without parts committed with this turn. */
   assistantMessage: ConversationAssistantMessage

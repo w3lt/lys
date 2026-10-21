@@ -8,6 +8,7 @@ import AgentService from "../../../src/modules/agent/agentService"
 import ChatService from "../../../src/modules/chat/chatService"
 import StoredConversationHistoryEditor from "../../../src/modules/conversation/historyEditor"
 import StoredConversationHistoryReader from "../../../src/modules/conversation/historyReader"
+import AttachmentFileStore from "../../../src/modules/attachment/attachmentFileStore"
 import StoredReplyParts from "../../../src/modules/conversation/replyParts"
 import StoredConversationTurns from "../../../src/modules/conversation/turns"
 import LlmRuntimeService, {
@@ -24,7 +25,12 @@ import {
 } from "../../../src/di/singleton"
 import SqliteDatabase from "../../../src/infrastructure/database/sqliteDatabase"
 import { TEST_BACKEND_CONFIG } from "../support/backendConfig"
-import { createFixtureUuidV7 } from "../support/conversationFixtures"
+import {
+  createFixtureUuidV7,
+  createNewConversationTarget,
+  createTurnUserMessage,
+  createUserMessage
+} from "../support/conversationFixtures"
 import { createFakeLlmRuntime } from "../support/fakeLlmRuntime"
 import { writeSettingsFile } from "../support/settingsFile"
 import { answerWithBody, startVmoServer } from "../support/vmoServer"
@@ -80,7 +86,9 @@ function buildHelloAgentTurn(): AgentTurn {
   return {
     history: [],
     sources: [],
-    userMessageContent: "Hello",
+    userMessage: createUserMessage(1, "Hello"),
+    canSeeImages: false,
+    findAttachmentImage: vi.fn(),
     model: "qwen/qwen3-8b",
     generationOptions: { temperature: 0.4 },
     clientTools: [],
@@ -278,6 +286,7 @@ describe("createSingletonServices", () => {
     expect(services.agentService).toBeInstanceOf(AgentService)
     expect(services.llmRuntimeService).toBe(acquisitions.llmRuntime.service)
     expect(services.llmService).toBeInstanceOf(LlmService)
+    expect(services.attachmentFileStore).toBeInstanceOf(AttachmentFileStore)
   })
 
   it("creates the conversation adapters over the acquired database", async () => {
@@ -290,8 +299,8 @@ describe("createSingletonServices", () => {
     onTestFinished(async () => await closeSingletonServices(services))
 
     const turn = services.conversationTurns.createConversationTurn({
-      conversation: { kind: "new", agentCode: "caliginia" },
-      userMessageContent: "Hello",
+      conversation: createNewConversationTarget("caliginia"),
+      userMessage: createTurnUserMessage("Hello"),
       model: "qwen/qwen3-8b"
     })
     services.conversationHistoryEditor.updateConversationTitle(
@@ -497,8 +506,8 @@ describe("createSingletonServices", () => {
     onTestFinished(async () => await closeSingletonServices(services))
     const history = services.conversationHistoryReader
     const turn = services.conversationTurns.createConversationTurn({
-      conversation: { kind: "new", agentCode: "caliginia" },
-      userMessageContent: "Hello",
+      conversation: createNewConversationTarget("caliginia"),
+      userMessage: createTurnUserMessage("Hello"),
       model: "qwen/qwen3-8b"
     })
     expect(history.getConversation(turn.conversation.id)).toBeDefined()

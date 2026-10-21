@@ -1,8 +1,10 @@
 import {
   chatApi,
   chatApiStreamEventSchema,
+  chatAttachmentUnsupportedProblemSchema,
   chatBackendToolUnavailableProblemSchema,
   chatContextApi,
+  chatImageNeedsVisionProblemSchema,
   llmModelNotLoadedProblemSchema,
   llmRuntimeUnavailableProblemSchema,
   llmServiceBusyProblemSchema,
@@ -202,9 +204,12 @@ const MISSING_REPLY_MESSAGE = "The reply is no longer stored."
  * @returns An async generator yielding validated chat protocol events.
  * @throws If the request, stream read, JSON parse, or event validation fails;
  * with {@link DELETED_CONVERSATION_AGENT_MESSAGE} when the backend reports
- * that the continued conversation's agent no longer exists, and a
+ * that the continued conversation's agent no longer exists, a
  * {@link BackendToolUnavailableError} when an offered backend tool cannot run
- * now; neither stored anything.
+ * now, and the backend's own sentence when it refuses an attachment whose
+ * content it cannot send, an image for a model without vision, or the
+ * request while its model runtime is busy or unreachable; none of these
+ * stored anything.
  */
 export async function* readChatEvents(
   payload: ChatApiRequestBody,
@@ -218,10 +223,8 @@ export async function* readChatEvents(
     signal
   })
 
-  if (response.status === 409) {
-    throw buildChatConflictError(await readFailureBody(response))
-  }
-  if (!response.ok || !response.body) {
+  if (!response.ok) throw await buildChatRequestError(response)
+  if (!response.body) {
     throw new Error(`Chat request failed: ${response.status}`)
   }
 
@@ -578,8 +581,9 @@ function isConversationAgentMissingProblem(body: unknown): boolean {
  *
  * @param body - Untrusted problem body.
  * @returns A {@link BackendToolUnavailableError} for an unavailable tool, the
- * deleted-agent error for a missing conversation agent, or a generic error
- * for any other 409 body.
+ * deleted-agent error for a missing conversation agent, an error carrying
+ * the backend's sentence for an image sent to a model without vision, or a
+ * generic error for any other 409 body.
  */
 function buildChatConflictError(body: unknown): Error {
   const toolProblem = chatBackendToolUnavailableProblemSchema.safeParse(body)
@@ -589,7 +593,29 @@ function buildChatConflictError(body: unknown): Error {
   if (isConversationAgentMissingProblem(body)) {
     return new Error(DELETED_CONVERSATION_AGENT_MESSAGE)
   }
+  const visionProblem = chatImageNeedsVisionProblemSchema.safeParse(body)
+  if (visionProblem.success) return new Error(visionProblem.data.detail)
   return new Error("Chat request failed: 409")
+}
+
+/**
+ * Builds the error of a chat request the backend refused.
+ *
+ * @param response - Failed response whose body is consumed here.
+ * @returns For a 409, what {@link buildChatConflictError} builds; an error
+ * carrying the backend's sentence for the declared unsupported-attachment,
+ * busy, and runtime-unavailable problems; and a generic error naming the
+ * status for any other response.
+ */
+async function buildChatRequestError(response: Response): Promise<Error> {
+  const body = await readFailureBody(response)
+  if (response.status === 409) return buildChatConflictError(body)
+  const declaredProblem = chatAttachmentUnsupportedProblemSchema
+    .or(llmServiceBusyProblemSchema)
+    .or(llmRuntimeUnavailableProblemSchema)
+    .safeParse(body)
+  if (declaredProblem.success) return new Error(declaredProblem.data.detail)
+  return new Error(`Chat request failed: ${response.status}`)
 }
 
 /**

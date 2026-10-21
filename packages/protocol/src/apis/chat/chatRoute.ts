@@ -2,21 +2,32 @@ import { apiChatRoute } from "../llm"
 import * as z from "zod"
 import {
   agentCodeSchema,
+  attachmentNameSchema,
   conversationAssistantMessageSchema,
   conversationMetadataSchema,
   conversationUserMessageSchema,
+  hasDistinctAttachmentNames,
   hasDistinctToolNames,
   isEveryToolRunBy,
+  MAXIMUM_ATTACHMENT_BYTES,
+  MAXIMUM_MESSAGE_ATTACHMENT_BYTES,
+  MAXIMUM_MESSAGE_ATTACHMENT_COUNT,
   toolDefinitionSchema,
   toolNameSchema,
   type ToolDefinition
 } from "@lys/share"
 import { agentNotFoundProblemSchema } from "../../http/errors/agent"
-import { chatBackendToolUnavailableProblemSchema } from "../../http/errors/chat"
+import {
+  chatAttachmentUnsupportedProblemSchema,
+  chatBackendToolUnavailableProblemSchema,
+  chatImageNeedsVisionProblemSchema
+} from "../../http/errors/chat"
 import {
   conversationAgentMissingProblemSchema,
   conversationNotFoundProblemSchema
 } from "../../http/errors/conversation"
+import { llmRuntimeUnavailableProblemSchema } from "../../http/errors/llm"
+import { llmServiceBusyProblemSchema } from "../../http/errors/llmServiceBusy"
 import {
   chatReplyPartDeltaEventSchema,
   chatReplyPartEventSchema,
@@ -31,6 +42,106 @@ import {
 
 /** Inclusive maximum sampling temperature accepted by chat requests and their UI. */
 export const MAXIMUM_GENERATION_TEMPERATURE = 1
+
+/** Bytes in one mebibyte. */
+const BYTES_PER_MEBIBYTE = 1024 * 1024
+
+/**
+ * Largest chat request body, in bytes, that the chat endpoint accepts.
+ *
+ * @remarks Holds a message with `MAXIMUM_MESSAGE_ATTACHMENT_BYTES` of
+ * attachments: base64 makes content a third longer, and the JSON around it
+ * is small. The backend enforces it as the route's body limit and answers a
+ * larger body with `413`; other routes keep Fastify's 1 MiB default.
+ */
+export const MAXIMUM_CHAT_BODY_BYTES = 32 * BYTES_PER_MEBIBYTE
+
+/** Base64 characters that encode three bytes. */
+const BASE64_GROUP_LENGTH = 4
+
+/** Bytes three base64 characters stand for, when the group has no padding. */
+const BASE64_GROUP_BYTES = 3
+
+/**
+ * Counts the bytes a padded base64 text decodes to, without decoding it.
+ *
+ * @param content - Valid padded base64 text.
+ * @returns Three bytes per four characters, less one per padding character.
+ */
+function calculateBase64ByteLength(content: string): number {
+  const paddingLength = content.endsWith("==")
+    ? 2
+    : content.endsWith("=")
+      ? 1
+      : 0
+  return (
+    (content.length / BASE64_GROUP_LENGTH) * BASE64_GROUP_BYTES - paddingLength
+  )
+}
+
+/**
+ * Validates one attachment of a chat request: its name and its content.
+ *
+ * @remarks The content is base64 and decodes to at most
+ * `MAXIMUM_ATTACHMENT_BYTES`. What the content is, text or an image, is read
+ * from its bytes by the backend, never from the name.
+ */
+export const chatAttachmentSchema = z.strictObject({
+  /** Name of the attachment, which is also its file name on disk. */
+  name: attachmentNameSchema,
+  /** Base64 of the attachment's bytes. */
+  content: z
+    .base64()
+    .refine(
+      (content) =>
+        calculateBase64ByteLength(content) <= MAXIMUM_ATTACHMENT_BYTES,
+      `An attachment has at most ${MAXIMUM_ATTACHMENT_BYTES} bytes.`
+    )
+})
+
+/** One attachment of a chat request. */
+export type ChatAttachment = z.infer<typeof chatAttachmentSchema>
+
+/**
+ * Answers whether the attachments of a request together decode to at most
+ * the message limit.
+ *
+ * @param attachments - Validated attachments of one request.
+ * @returns True when their decoded sizes sum to at most
+ * `MAXIMUM_MESSAGE_ATTACHMENT_BYTES`.
+ */
+function hasAttachmentsWithinMessageLimit(
+  attachments: readonly ChatAttachment[]
+): boolean {
+  const totalBytes = attachments.reduce(
+    (total, attachment) =>
+      total + calculateBase64ByteLength(attachment.content),
+    0
+  )
+  return totalBytes <= MAXIMUM_MESSAGE_ATTACHMENT_BYTES
+}
+
+/**
+ * Validates the attachments of a chat request: at least one and at most
+ * `MAXIMUM_MESSAGE_ATTACHMENT_COUNT`, each name once ignoring case, together
+ * within `MAXIMUM_MESSAGE_ATTACHMENT_BYTES`.
+ */
+const chatAttachmentsSchema = z
+  .array(chatAttachmentSchema)
+  .min(1)
+  .max(MAXIMUM_MESSAGE_ATTACHMENT_COUNT)
+  .refine(
+    (attachments) =>
+      hasDistinctAttachmentNames(
+        attachments.map((attachment) => attachment.name)
+      ),
+    "A message names each attachment once, ignoring case."
+  )
+  .refine(
+    hasAttachmentsWithinMessageLimit,
+    `A message's attachments have at most ${MAXIMUM_MESSAGE_ATTACHMENT_BYTES} bytes together.`
+  )
+  .readonly()
 
 /** Validates generation controls forwarded to the backend model completion. */
 export const messageGenerationOptionsSchema = z.strictObject({
@@ -169,7 +280,12 @@ export const chatApiRequestBodySchema = z.strictObject({
   /**
    * Tools offered for this turn; absence means one round without tools.
    */
-  tools: chatToolOfferSchema.optional()
+  tools: chatToolOfferSchema.optional(),
+  /**
+   * Files sent with the message, in the order they were attached; absence
+   * means none. Each is stored with the message under its name.
+   */
+  attachments: chatAttachmentsSchema.optional()
 })
 
 /**
@@ -226,18 +342,30 @@ export const chatApiStreamEventSchema = z.discriminatedUnion("type", [
  * Selects the validator of a chat failure sent before the stream starts, by
  * HTTP status.
  *
- * @remarks A 404 is the agent-not-found problem when a new conversation
- * names a code no agent has, and the conversation-not-found problem when a
- * continued conversation is not stored. A 409 is the conversation agent
- * missing problem when the continued conversation is stored but its agent no
- * longer exists, and the backend tool unavailable problem when an offered
- * backend tool cannot run now.
+ * @remarks A 400 is the attachment-unsupported problem when an attachment's
+ * content is neither text nor an image Lys sends; a body that fails
+ * validation is answered with Fastify's own 400. A 404 is the
+ * agent-not-found problem when a new conversation names a code no agent has,
+ * and the conversation-not-found problem when a continued conversation is
+ * not stored. A 409 is the conversation agent missing problem when the
+ * continued conversation is stored but its agent no longer exists, the
+ * backend tool unavailable problem when an offered backend tool cannot run
+ * now, and the image-needs-vision problem when the request attaches an image
+ * for a model without vision. A 503 is the service-busy or
+ * runtime-unavailable problem when the request or the conversation holds
+ * attachments and the model's capabilities cannot be read from LM Studio.
  */
 const chatApiResponseSchemas = Object.freeze({
+  400: chatAttachmentUnsupportedProblemSchema,
   404: z.union([agentNotFoundProblemSchema, conversationNotFoundProblemSchema]),
   409: z.union([
     conversationAgentMissingProblemSchema,
-    chatBackendToolUnavailableProblemSchema
+    chatBackendToolUnavailableProblemSchema,
+    chatImageNeedsVisionProblemSchema
+  ]),
+  503: z.union([
+    llmServiceBusyProblemSchema,
+    llmRuntimeUnavailableProblemSchema
   ])
 })
 
@@ -249,7 +377,10 @@ const chatApiResponseSchemas = Object.freeze({
  * `replyCeiling` remains absent and is translated by the backend runtime.
  * The agent that answers is resolved before anything is stored, so a request
  * answered with one of the declared problems stored no message and started
- * no reply. Every turn sends the agent's current system prompt.
+ * no reply. Every turn sends the agent's current system prompt. The body is
+ * limited to `MAXIMUM_CHAT_BODY_BYTES`, so a message can carry its
+ * attachments; a stored attachment is listed on the user message of the turn
+ * start event and of the conversation.
  * Closing the response stream ends only this client's observation: the
  * backend keeps generating and storing the reply and its title. The
  * reply-stop endpoint stops a reply, and the reply-events endpoint follows it
@@ -260,6 +391,7 @@ const chatApiResponseSchemas = Object.freeze({
 export const chatApi = {
   method: "POST",
   path: apiChatRoute,
+  bodyLimitBytes: MAXIMUM_CHAT_BODY_BYTES,
   body: chatApiRequestBodySchema,
   response: {
     status: 200,

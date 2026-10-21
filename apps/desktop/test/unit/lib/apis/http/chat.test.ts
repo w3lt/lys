@@ -1,10 +1,13 @@
 import {
   chatApiRequestBodySchema,
+  chatAttachmentUnsupportedProblemSchema,
   chatBackendToolUnavailableProblemSchema,
+  chatImageNeedsVisionProblemSchema,
   chatToolApprovalAnswerSchema,
   chatToolCallNotPendingProblemSchema,
   chatToolResultSchema,
   conversationAgentMissingProblemSchema,
+  createLlmRuntimeUnavailableProblem,
   createLlmServiceBusyProblem,
   type BackendToolUnavailableReason
 } from "@lys/protocol"
@@ -139,6 +142,27 @@ function buildBackendToolUnavailableProblem(
     reason
   })
 }
+
+/** Problem the backend sends for an attachment whose content it cannot send. */
+const ATTACHMENT_UNSUPPORTED_PROBLEM =
+  chatAttachmentUnsupportedProblemSchema.parse({
+    type: "urn:lys:problem:chat:attachment-unsupported",
+    title: "Attachment unsupported",
+    status: 400,
+    detail: "The file archive.zip is not a text file or an image Lys can send.",
+    fileName: "archive.zip"
+  })
+
+/** Problem the backend sends for an image attached for a model without vision. */
+const IMAGE_NEEDS_VISION_PROBLEM = chatImageNeedsVisionProblemSchema.parse({
+  type: "urn:lys:problem:chat:image-needs-vision",
+  title: "Image needs vision",
+  status: 409,
+  detail:
+    "The image photo.png needs a model with vision, and qwen3-8b cannot see images.",
+  fileName: "photo.png",
+  model: "qwen3-8b"
+})
 
 /** Problem the backend sends for an answer to a call that is not waiting. */
 const TOOL_CALL_NOT_PENDING_PROBLEM = chatToolCallNotPendingProblemSchema.parse(
@@ -340,6 +364,39 @@ describe("readChatEvents", () => {
     await expect(events).rejects.toThrow("409")
     await expect(events).rejects.not.toThrow(DELETED_CONVERSATION_AGENT_MESSAGE)
     await expect(events).rejects.not.toBeInstanceOf(BackendToolUnavailableError)
+  })
+
+  it.each([
+    ["an attachment it cannot send", ATTACHMENT_UNSUPPORTED_PROBLEM],
+    ["an image for a model without vision", IMAGE_NEEDS_VISION_PROBLEM],
+    ["a busy model-operation queue", createLlmServiceBusyProblem()],
+    [
+      "an unreachable model runtime",
+      createLlmRuntimeUnavailableProblem(
+        "LM Studio is not reachable. Start LM Studio, then try again."
+      )
+    ]
+  ])(
+    "reports a request refused for %s with the backend's sentence",
+    async (_case, problem) => {
+      startBackendFake({
+        [CHAT_ROUTE]: () => buildJsonResponse(problem.status, problem)
+      })
+
+      await expect(
+        listStreamEvents(readChatEvents(NEW_CONVERSATION_REQUEST))
+      ).rejects.toThrow(problem.detail)
+    }
+  )
+
+  it("does not report an undeclared 400 as a refused attachment", async () => {
+    startBackendFake({
+      [CHAT_ROUTE]: () => buildJsonResponse(400, { message: "bad request" })
+    })
+
+    await expect(
+      listStreamEvents(readChatEvents(NEW_CONVERSATION_REQUEST))
+    ).rejects.toThrow("Chat request failed: 400")
   })
 
   it.each([

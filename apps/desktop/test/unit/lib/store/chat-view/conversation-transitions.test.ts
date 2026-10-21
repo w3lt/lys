@@ -167,6 +167,24 @@ describe("startConversationTurn", () => {
     expect(previous.messages).toHaveLength(2)
   })
 
+  it("keeps the files sent with the user message", () => {
+    const userMessage = buildUserMessage(4, "Read the notes", [
+      { kind: "text", number: 1, name: "notes.md", sizeBytes: 18 }
+    ])
+
+    const conversation = startConversationTurn({
+      conversationMetadata: buildConversationMetadata(
+        FIXTURE_CONVERSATION_ID,
+        "Greeting"
+      ),
+      previousConversation: buildChatViewConversation(EARLIER_TURN, []),
+      userMessage,
+      assistantMessage: STREAMING_REPLY
+    })
+
+    expect(conversation.messages.at(-2)).toEqual(userMessage)
+  })
+
   it("starts a fresh transcript without sources for a different conversation", () => {
     const previous = buildChatViewConversation(EARLIER_TURN, [STORED_SOURCE])
 

@@ -1,8 +1,15 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import {
   buildAgentContext,
-  calculateAgentContextHistoryMessageCount
+  calculateAgentContextHistoryMessageCount,
+  loadAgentContextImages,
+  type AgentContextImages,
+  type FindAttachmentImage
 } from "../../../../src/modules/agent/agentContext"
+import {
+  createImageAttachment,
+  createTextAttachment
+} from "../../support/attachmentFixtures"
 import {
   createAssistantMessage,
   createFixtureUuidV7,
@@ -38,12 +45,39 @@ const FAILED_READ = createToolCallPart(
   { status: "failed", result: "The page did not answer." }
 )
 
+/** Images of a context whose model cannot see images. */
+const UNSEEN_IMAGES: AgentContextImages = Object.freeze({ status: "unseen" })
+
+/** Images of a context whose model sees images but no file was read. */
+const NO_LOADED_IMAGES: AgentContextImages = Object.freeze({
+  status: "loaded",
+  images: new Map<number, Uint8Array>()
+})
+
+/** The new message of most cases, without attachments. */
+const HELLO = Object.freeze({ content: "Hello", attachments: [] })
+
+/** Bytes of a stored image, as a case's reader returns them. */
+const PHOTO_BYTES = new Uint8Array([1, 2, 3])
+
+/**
+ * Builds the new message of a case.
+ *
+ * @param content - The person's text.
+ * @returns The message without attachments.
+ */
+function createNewMessage(content: string) {
+  return { content, attachments: [] }
+}
+
 describe("buildAgentContext", () => {
   it("sends the system prompt first and the new message last", () => {
-    expect(buildAgentContext("You are Lys.", [], "Hello")).toEqual([
-      { role: "system", content: "You are Lys." },
-      { role: "user", content: "Hello" }
-    ])
+    expect(buildAgentContext("You are Lys.", [], HELLO, UNSEEN_IMAGES)).toEqual(
+      [
+        { role: "system", content: "You are Lys." },
+        { role: "user", content: "Hello", images: [] }
+      ]
+    )
   })
 
   it("keeps earlier user messages and usable replies in transcript order", () => {
@@ -89,16 +123,21 @@ describe("buildAgentContext", () => {
     ]
 
     expect(
-      buildAgentContext("You are Lys.", history, "Current question")
+      buildAgentContext(
+        "You are Lys.",
+        history,
+        createNewMessage("Current question"),
+        UNSEEN_IMAGES
+      )
     ).toEqual([
       { role: "system", content: "You are Lys." },
-      { role: "user", content: "First question" },
+      { role: "user", content: "First question", images: [] },
       { role: "assistant", content: "Completed answer", toolCalls: [] },
-      { role: "user", content: "Second question" },
+      { role: "user", content: "Second question", images: [] },
       { role: "assistant", content: "Truncated answer", toolCalls: [] },
-      { role: "user", content: "Third question" },
+      { role: "user", content: "Third question", images: [] },
       { role: "assistant", content: "Partial answer", toolCalls: [] },
-      { role: "user", content: "Current question" }
+      { role: "user", content: "Current question", images: [] }
     ])
   })
 
@@ -122,9 +161,16 @@ describe("buildAgentContext", () => {
       )
     ]
 
-    expect(buildAgentContext("You are Lys.", history, "More?")).toEqual([
+    expect(
+      buildAgentContext(
+        "You are Lys.",
+        history,
+        createNewMessage("More?"),
+        UNSEEN_IMAGES
+      )
+    ).toEqual([
       { role: "system", content: "You are Lys." },
-      { role: "user", content: "Tell me about moths" },
+      { role: "user", content: "Tell me about moths", images: [] },
       {
         role: "assistant",
         content: "Let me look.",
@@ -152,7 +198,7 @@ describe("buildAgentContext", () => {
         content: "The page did not answer."
       },
       { role: "assistant", content: "Moths fly at night [1].", toolCalls: [] },
-      { role: "user", content: "More?" }
+      { role: "user", content: "More?", images: [] }
     ])
   })
 
@@ -165,7 +211,14 @@ describe("buildAgentContext", () => {
       createAssistantMessage(2, [rejected], { status: "interrupted" })
     ]
 
-    expect(buildAgentContext("You are Lys.", history, "Why?")).toEqual([
+    expect(
+      buildAgentContext(
+        "You are Lys.",
+        history,
+        createNewMessage("Why?"),
+        UNSEEN_IMAGES
+      )
+    ).toEqual([
       { role: "system", content: "You are Lys." },
       {
         role: "assistant",
@@ -179,7 +232,7 @@ describe("buildAgentContext", () => {
         toolCallId: rejected.id,
         content: "The person did not allow this call."
       },
-      { role: "user", content: "Why?" }
+      { role: "user", content: "Why?", images: [] }
     ])
   })
 
@@ -201,10 +254,17 @@ describe("buildAgentContext", () => {
       )
     ]
 
-    expect(buildAgentContext("You are Lys.", history, "Go on")).toEqual([
+    expect(
+      buildAgentContext(
+        "You are Lys.",
+        history,
+        createNewMessage("Go on"),
+        UNSEEN_IMAGES
+      )
+    ).toEqual([
       { role: "system", content: "You are Lys." },
       { role: "assistant", content: "Searching.", toolCalls: [] },
-      { role: "user", content: "Go on" }
+      { role: "user", content: "Go on", images: [] }
     ])
   })
 
@@ -230,7 +290,14 @@ describe("buildAgentContext", () => {
       )
     ]
 
-    expect(buildAgentContext("You are Lys.", history, "Go on")).toEqual([
+    expect(
+      buildAgentContext(
+        "You are Lys.",
+        history,
+        createNewMessage("Go on"),
+        UNSEEN_IMAGES
+      )
+    ).toEqual([
       { role: "system", content: "You are Lys." },
       {
         role: "assistant",
@@ -248,7 +315,7 @@ describe("buildAgentContext", () => {
         toolCallId: createFixtureUuidV7(21),
         content: "Source [1]\nTitle: Moths"
       },
-      { role: "user", content: "Go on" }
+      { role: "user", content: "Go on", images: [] }
     ])
   })
 
@@ -290,12 +357,13 @@ describe("buildAgentContext", () => {
       buildAgentContext(
         "You are Lys.",
         [createUserMessage(1, "Question"), reply],
-        "Retry"
+        createNewMessage("Retry"),
+        UNSEEN_IMAGES
       )
     ).toEqual([
       { role: "system", content: "You are Lys." },
-      { role: "user", content: "Question" },
-      { role: "user", content: "Retry" }
+      { role: "user", content: "Question", images: [] },
+      { role: "user", content: "Retry", images: [] }
     ])
   })
 
@@ -311,10 +379,17 @@ describe("buildAgentContext", () => {
       )
     ]
 
-    expect(buildAgentContext("You are Lys.", history, "Next")).toStrictEqual([
+    expect(
+      buildAgentContext(
+        "You are Lys.",
+        history,
+        createNewMessage("Next"),
+        UNSEEN_IMAGES
+      )
+    ).toStrictEqual([
       { role: "system", content: "You are Lys." },
       { role: "assistant", content: "Answer", toolCalls: [] },
-      { role: "user", content: "Next" }
+      { role: "user", content: "Next", images: [] }
     ])
     expect(
       buildAgentContext(
@@ -325,7 +400,8 @@ describe("buildAgentContext", () => {
             finishReason: "stop"
           })
         ],
-        "Next"
+        createNewMessage("Next"),
+        UNSEEN_IMAGES
       )[1]
     ).toStrictEqual({
       role: "assistant",
@@ -338,6 +414,214 @@ describe("buildAgentContext", () => {
         }
       ]
     })
+  })
+
+  describe("attachments", () => {
+    it("lists each user message's attachments under its text, with the kind and size of each", () => {
+      const history = [
+        createUserMessage(1, "Earlier files", [
+          createTextAttachment(1, "notes.md", 1234),
+          createImageAttachment(2, "photo.png", { width: 640, height: 480 })
+        ])
+      ]
+      const userMessage = {
+        content: "Now this one",
+        attachments: [createTextAttachment(3, "Plan.txt", 5)]
+      }
+
+      expect(
+        buildAgentContext(
+          "You are Lys.",
+          history,
+          userMessage,
+          NO_LOADED_IMAGES
+        )
+      ).toEqual([
+        { role: "system", content: "You are Lys." },
+        {
+          role: "user",
+          content: [
+            "Earlier files",
+            "",
+            "Attached files:",
+            "[attachment 1] notes.md (text, 1,234 bytes)",
+            "[attachment 2] photo.png (image/png, 640×480, 33 bytes)",
+            "[attachment 2] photo.png is an image whose file is missing from this machine, so it cannot be shown."
+          ].join("\n"),
+          images: []
+        },
+        {
+          role: "user",
+          content: [
+            "Now this one",
+            "",
+            "Attached files:",
+            "[attachment 3] Plan.txt (text, 5 bytes)"
+          ].join("\n"),
+          images: []
+        }
+      ])
+    })
+
+    it("sends the loaded images of a message after its text, in attachment order, and a placeholder for a missing one", () => {
+      const first = createImageAttachment(1, "first.png", {
+        width: 10,
+        height: 20
+      })
+      const second = createImageAttachment(2, "second.png")
+      const third = createImageAttachment(3, "third.png", {
+        width: 30,
+        height: 40
+      })
+      const otherBytes = new Uint8Array([9])
+
+      const context = buildAgentContext(
+        "You are Lys.",
+        [],
+        { content: "Look", attachments: [first, second, third] },
+        {
+          status: "loaded",
+          images: new Map([
+            [3, otherBytes],
+            [1, PHOTO_BYTES]
+          ])
+        }
+      )
+
+      expect(context[1]).toEqual({
+        role: "user",
+        content: [
+          "Look",
+          "",
+          "Attached files:",
+          "[attachment 1] first.png (image/png, 10×20, 33 bytes)",
+          "[attachment 2] second.png (image/png, 64×32, 33 bytes)",
+          "[attachment 3] third.png (image/png, 30×40, 33 bytes)",
+          "[attachment 2] second.png is an image whose file is missing from this machine, so it cannot be shown."
+        ].join("\n"),
+        images: [
+          { mediaType: "image/png", width: 10, height: 20, data: PHOTO_BYTES },
+          { mediaType: "image/png", width: 30, height: 40, data: otherBytes }
+        ]
+      })
+    })
+
+    it("replaces every image with a sentence when the model cannot see images", () => {
+      const context = buildAgentContext(
+        "You are Lys.",
+        [
+          createUserMessage(1, "Earlier", [
+            createImageAttachment(1, "earlier.png")
+          ])
+        ],
+        {
+          content: "Now",
+          attachments: [
+            createTextAttachment(2, "notes.md"),
+            createImageAttachment(3, "now.png")
+          ]
+        },
+        UNSEEN_IMAGES
+      )
+
+      expect(context.slice(1)).toEqual([
+        {
+          role: "user",
+          content: [
+            "Earlier",
+            "",
+            "Attached files:",
+            "[attachment 1] earlier.png (image/png, 64×32, 33 bytes)",
+            "[attachment 1] earlier.png is an image that this model cannot see."
+          ].join("\n"),
+          images: []
+        },
+        {
+          role: "user",
+          content: [
+            "Now",
+            "",
+            "Attached files:",
+            "[attachment 2] notes.md (text, 12 bytes)",
+            "[attachment 3] now.png (image/png, 64×32, 33 bytes)",
+            "[attachment 3] now.png is an image that this model cannot see."
+          ].join("\n"),
+          images: []
+        }
+      ])
+    })
+  })
+})
+
+describe("loadAgentContextImages", () => {
+  it("reads no file when the model cannot see images", async () => {
+    const findAttachmentImage = vi.fn<FindAttachmentImage>()
+
+    const images = await loadAgentContextImages(
+      [createUserMessage(1, "Look", [createImageAttachment(1, "photo.png")])],
+      false,
+      findAttachmentImage
+    )
+
+    expect(images).toEqual({ status: "unseen" })
+    expect(findAttachmentImage).not.toHaveBeenCalled()
+  })
+
+  it("reads each image of each user message in conversation order and keeps the ones found, by number", async () => {
+    const earlierPhoto = createImageAttachment(1, "earlier.png")
+    const missingPhoto = createImageAttachment(3, "missing.png")
+    const laterPhoto = createImageAttachment(4, "later.png")
+    const laterBytes = new Uint8Array([4])
+    const findAttachmentImage = vi.fn<FindAttachmentImage>(
+      async (_messageId, attachment) =>
+        attachment.number === 3
+          ? undefined
+          : attachment.number === 1
+            ? PHOTO_BYTES
+            : laterBytes
+    )
+
+    const images = await loadAgentContextImages(
+      [
+        createUserMessage(1, "Earlier", [
+          earlierPhoto,
+          createTextAttachment(2, "notes.md")
+        ]),
+        createAssistantMessage(
+          2,
+          [createTextPart({ sequence: 12, round: 0, content: "Seen." })],
+          { status: "completed", finishReason: "stop" }
+        ),
+        createUserMessage(3, "Later", [missingPhoto, laterPhoto])
+      ],
+      true,
+      findAttachmentImage
+    )
+
+    expect(findAttachmentImage.mock.calls).toEqual([
+      [createFixtureUuidV7(1), earlierPhoto],
+      [createFixtureUuidV7(3), missingPhoto],
+      [createFixtureUuidV7(3), laterPhoto]
+    ])
+    expect(images).toEqual({
+      status: "loaded",
+      images: new Map([
+        [1, PHOTO_BYTES],
+        [4, laterBytes]
+      ])
+    })
+  })
+
+  it("rejects with the reader's failure for a file that cannot be read", async () => {
+    const failure = new Error("EACCES")
+
+    await expect(
+      loadAgentContextImages(
+        [createUserMessage(1, "Look", [createImageAttachment(1, "photo.png")])],
+        true,
+        () => Promise.reject(failure)
+      )
+    ).rejects.toBe(failure)
   })
 })
 
@@ -362,7 +646,14 @@ describe("calculateAgentContextHistoryMessageCount", () => {
       createUserMessage(3, "Why?")
     ]
 
-    expect(buildAgentContext("You are Lys.", history, "Go on")).toHaveLength(8)
+    expect(
+      buildAgentContext(
+        "You are Lys.",
+        history,
+        createNewMessage("Go on"),
+        UNSEEN_IMAGES
+      )
+    ).toHaveLength(8)
     expect(calculateAgentContextHistoryMessageCount(history)).toBe(3)
   })
 

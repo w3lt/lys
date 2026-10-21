@@ -40,7 +40,12 @@ type OfferedTool =
       agentTool: AgentTool
       /** Parses and runs each allowed call. */
       builtInTool: BuiltInTool
+      /** Whether each call runs at once, without the person being asked. */
+      runsWithoutApproval: boolean
     }>
+
+/** One backend tool offered for a turn. */
+type OfferedBuiltInTool = Extract<OfferedTool, { runner: "backend" }>
 
 /** Tools offered for one turn, by the name the model calls them by, in offer order. */
 export type AgentToolset = ReadonlyMap<string, OfferedTool>
@@ -234,7 +239,8 @@ export function buildAgentToolset(
     tools.set(agentTool.name, {
       runner: "backend",
       agentTool,
-      builtInTool: entry.tool
+      builtInTool: entry.tool,
+      runsWithoutApproval: entry.runsWithoutApproval
     })
   }
   return tools
@@ -292,8 +298,10 @@ export function buildDefinedToolOffer(
  * @remarks Each call gets a new UUIDv7, which is its part's identity. Calls
  * of unknown tools and calls whose arguments do not match are stored as
  * failed with the message the model reads; nobody is asked about them.
- * Every other call passes the round's gate: one created once for the round,
- * so the saved choices are read once. The calls' parts, the gate's prompts,
+ * Every other call passes the round's gate, one created once for the round,
+ * so the saved choices are read once, except a call of a backend tool that
+ * runs without approval, which is stored as running at once. The calls'
+ * parts, the gate's prompts,
  * each after the part of the call it asks about, and the run requests of
  * calls allowed at once are sent before the first wait, in the model's
  * order, because each call's handling runs synchronously up to its first
@@ -404,7 +412,7 @@ async function handleToolCall(
     case "client":
       return handleClientToolCall(checkedToolCall, handling)
     case "backend":
-      return handleBuiltInToolCall(checkedToolCall, tool.builtInTool, handling)
+      return handleBuiltInToolCall(checkedToolCall, tool, handling)
   }
 }
 
@@ -440,7 +448,7 @@ async function handleClientToolCall(
  * Parses one checked call of a backend tool, has it allowed, and runs it.
  *
  * @param toolCall - Checked call.
- * @param builtInTool - Backend tool the call names.
+ * @param tool - Backend tool the call names.
  * @param handling - The round's gate and index, the reply's cancellation
  * and part sequence, and the source catalog.
  * @returns The message carrying the run's text, the tool's explanation of
@@ -449,17 +457,23 @@ async function handleClientToolCall(
  * call.
  * @throws When the run rejects although the reply was not stopped.
  * @remarks Arguments the tool cannot run are answered before the gate is
- * asked, so the person never sees a call that cannot succeed.
+ * asked, so the person never sees a call that cannot succeed. A call of a
+ * tool that runs without approval is stored as running at once, and the
+ * gate is not asked.
  */
 async function handleBuiltInToolCall(
   toolCall: CheckedToolCall,
-  builtInTool: BuiltInTool,
+  tool: OfferedBuiltInTool,
   handling: BuiltInToolCallHandling
 ): Promise<ToolResultMessage | undefined> {
-  const parsedCall = builtInTool.parseToolCall(toolCall.checkedCall.arguments)
+  const parsedCall = tool.builtInTool.parseToolCall(
+    toolCall.checkedCall.arguments
+  )
   if (parsedCall.status === "invalid")
     return createFailedToolCall(toolCall, parsedCall.message, handling)
-  const startedCall = startToolCall(toolCall, handling)
+  const startedCall = tool.runsWithoutApproval
+    ? startUnpromptedToolCall(toolCall, handling)
+    : startToolCall(toolCall, handling)
   const approval =
     startedCall.status === "waiting" ? await startedCall.approval : startedCall
   if (approval.status === "ended") return undefined
@@ -516,6 +530,24 @@ function createStartedToolCall(
     argumentText: toolCall.call.argumentText,
     status
   })
+}
+
+/**
+ * Starts one checked call of a tool that runs without approval: stores it
+ * as running without asking anyone.
+ *
+ * @param toolCall - Checked call.
+ * @param handling - The round's index and the reply's part sequence.
+ * @returns `allowed` once the call is stored as running; `ended` when the
+ * reply refused to store it.
+ */
+function startUnpromptedToolCall(
+  toolCall: CheckedToolCall,
+  handling: ToolCallPartHandling
+): ToolCallApproval {
+  return createStartedToolCall(toolCall, "running", handling)
+    ? ALLOWED_TOOL_CALL_APPROVAL
+    : ENDED_TOOL_CALL_APPROVAL
 }
 
 /**

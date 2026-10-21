@@ -34,7 +34,7 @@ const MEASUREMENT = Object.freeze({
  */
 const FITTING_METER = buildContextMeterState(
   { status: "measured", measurement: MEASUREMENT },
-  { draft: "x".repeat(37), reserve: 1024 }
+  { draft: "x".repeat(37), attachmentTokens: 0, reserve: 1024 }
 )
 
 /** A window the conversation and the reserve overflow by 512 tokens. */
@@ -43,19 +43,23 @@ const OVERFLOWING_METER = buildContextMeterState(
     status: "measured",
     measurement: { ...MEASUREMENT, historyTokens: 4992 }
   },
-  { draft: "x".repeat(37), reserve: 1024 }
+  { draft: "x".repeat(37), attachmentTokens: 0, reserve: 1024 }
 )
 
 /**
  * Renders the meter on its own.
  *
  * @param meter - What is known about the window.
- * @param hasStagedFiles - Whether files are staged; none by default.
+ * @param hasAttachedTextFiles - Whether text files are attached; none by
+ * default.
  */
-function renderMeter(meter: ContextMeterState, hasStagedFiles = false): void {
+function renderMeter(
+  meter: ContextMeterState,
+  hasAttachedTextFiles = false
+): void {
   render(
     <ComposerContextMeter
-      hasStagedFiles={hasStagedFiles}
+      hasAttachedTextFiles={hasAttachedTextFiles}
       meter={meter}
       onChangeWindow={vi.fn()}
     />
@@ -137,7 +141,7 @@ describe("ComposerContextMeter", () => {
             historyMessageCount: 0
           }
         },
-        { draft: "", reserve: 0 }
+        { draft: "", attachmentTokens: 0, reserve: 0 }
       )
     )
 
@@ -161,7 +165,7 @@ describe("ComposerContextMeter", () => {
           status: "measured",
           measurement: { ...MEASUREMENT, historyMessageCount: 1 }
         },
-        { draft: "", reserve: 0 }
+        { draft: "", attachmentTokens: 0, reserve: 0 }
       )
     )
 
@@ -199,14 +203,14 @@ describe("ComposerContextMeter", () => {
     }
   )
 
-  it("says staged files are not counted while files are staged", async () => {
+  it("says attached files are read on request while text files are attached", async () => {
     const user = userEvent.setup()
     renderMeter(FITTING_METER, true)
 
     const { panel } = await openMeterPanel(user)
 
     expect(panel).toHaveTextContent(
-      "Staged files are not sent yet, so they are not counted."
+      "Attached files are read on request, so they are not counted."
     )
   })
 
@@ -247,7 +251,7 @@ describe("ComposerContextMeter", () => {
     const user = userEvent.setup()
     render(
       <ComposerContextMeter
-        hasStagedFiles={false}
+        hasAttachedTextFiles={false}
         meter={FITTING_METER}
         onChangeWindow={onChangeWindow}
       />
@@ -263,7 +267,7 @@ describe("ComposerContextMeter", () => {
     const user = userEvent.setup()
     render(
       <ComposerContextMeter
-        hasStagedFiles={false}
+        hasAttachedTextFiles={false}
         meter={FITTING_METER}
         onChangeWindow={vi.fn()}
       />
@@ -285,7 +289,7 @@ describe("ComposerContextMeter", () => {
     render(
       <>
         <ComposerContextMeter
-          hasStagedFiles={false}
+          hasAttachedTextFiles={false}
           meter={FITTING_METER}
           onChangeWindow={vi.fn()}
         />
@@ -306,7 +310,7 @@ describe("ComposerContextMeter", () => {
     render(
       <>
         <ComposerContextMeter
-          hasStagedFiles={false}
+          hasAttachedTextFiles={false}
           meter={FITTING_METER}
           onChangeWindow={vi.fn()}
         />
@@ -327,7 +331,7 @@ describe("ComposerContextMeter", () => {
     const user = userEvent.setup()
     render(
       <ComposerContextMeter
-        hasStagedFiles={false}
+        hasAttachedTextFiles={false}
         meter={FITTING_METER}
         onChangeWindow={vi.fn()}
       />

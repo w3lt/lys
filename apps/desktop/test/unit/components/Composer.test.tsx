@@ -20,6 +20,7 @@ import { DELETED_CONVERSATION_AGENT_MESSAGE } from "@/lib/conversation-agent-mes
 import { createStoredChatViewConversation } from "@/lib/store/chat-view/conversation-transitions"
 import type { HeldToolCall } from "@/lib/store/tool-calls"
 import { buildAgentListPage, buildBuiltInAgent } from "../support/agentFixtures"
+import { buildPngFile, buildTextFile } from "../support/attachmentFixtures"
 import {
   buildJsonResponse,
   createControlledRoute,
@@ -149,6 +150,24 @@ const LONG_PASTE = Array.from(
 const NOTES_CONTENT = "Renew the passport before March."
 
 /**
+ * {@link READY_RUNTIME} with a loaded `qwen3-8b` that sees images and was
+ * trained for tool use, so both kinds of file can be staged.
+ */
+const ATTACHING_RUNTIME: RuntimeArrangement = Object.freeze({
+  ...READY_RUNTIME,
+  modelInventory: Object.freeze({
+    status: "ready",
+    models: Object.freeze([
+      buildLlmInfo("qwen3-8b", {
+        loaded: true,
+        vision: true,
+        trainedForToolUse: true
+      })
+    ])
+  })
+})
+
+/**
  * Loads fresh application, chat-view, history, and agent stores with the
  * composer that reads them, and arranges the runtime the case needs.
  *
@@ -192,6 +211,19 @@ async function loadFreshComposer(runtime: RuntimeArrangement = READY_RUNTIME) {
  * @remarks The tool-call store is the one the composer reads, loaded with
  * it; it holds the call as it does once the reply's follow delivered it.
  */
+/**
+ * Loads a fresh composer over {@link ATTACHING_RUNTIME}, with tool calls
+ * switched off so the tool-trained model makes no tool list read.
+ *
+ * @returns The same stores and component as {@link loadFreshComposer}.
+ */
+async function loadFreshAttachingComposer() {
+  const loaded = await loadFreshComposer(ATTACHING_RUNTIME)
+  const { useToolStore } = await import("@/lib/store/tools")
+  useToolStore.setState({ areToolCallsOn: false })
+  return loaded
+}
+
 async function loadFreshComposerWithWaitingCall() {
   const loaded = await loadFreshComposer()
   const { useToolCallStore } = await import("@/lib/store/tool-calls")
@@ -589,37 +621,32 @@ describe("Composer", () => {
       }
     )
 
-    // Known defect, tracked by #27 and #105: a paste of 1,200 characters or
-    // more leaves the draft for a tray entry that keeps only its length, so
-    // the chat request carries none of the pasted text. Either fix sends it:
-    // #27 keeps it in the draft, #105 sends it as an attachment.
-    it.fails(
-      "sends the text of a long paste with the message (#27, #105)",
-      async () => {
-        const { backend, streams } = startChatBackend()
-        const { Composer } = await loadFreshComposer()
-        const user = userEvent.setup()
-        render(
-          <Composer
-            messageFieldRef={createRef()}
-            onStartConversation={vi.fn()}
-          />
-        )
-        await user.type(getMessageField(), "Summarize this: ")
+    it("keeps a long paste in the draft and sends it with the message", async () => {
+      const { backend, streams } = startChatBackend()
+      const { Composer } = await loadFreshComposer()
+      const user = userEvent.setup()
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
+      await user.type(getMessageField(), "Summarize this: ")
 
-        await user.paste(LONG_PASTE)
-        await user.keyboard("{Enter}")
-        await waitForRenderedWork()
+      await user.paste(LONG_PASTE)
+      const draftAfterPaste = getMessageField()
+      expect(draftAfterPaste).toHaveValue(`Summarize this: ${LONG_PASTE}`)
+      await user.keyboard("{Enter}")
+      await waitForRenderedWork()
 
-        expect(
-          listChatBodies(backend).map((body) =>
-            isTextInChatBody(body, LONG_PASTE)
-          ),
-          "whether each chat request carries the pasted text"
-        ).toEqual([true])
-        streams[0]?.close()
-      }
-    )
+      expect(
+        screen.queryByRole("list", { name: "Attached to this message" })
+      ).toBeNull()
+      expect(
+        listChatBodies(backend).map((body) =>
+          isTextInChatBody(body, LONG_PASTE)
+        ),
+        "whether each chat request carries the pasted text"
+      ).toEqual([true])
+      streams[0]?.close()
+    })
   })
 
   describe("request phases", () => {
@@ -1468,16 +1495,17 @@ describe("Composer", () => {
 
   describe("attachments", () => {
     it("stages chosen files, marks the add action, and removes a file on request", async () => {
-      const { Composer } = await loadFreshComposer()
+      const { Composer } = await loadFreshAttachingComposer()
       const user = userEvent.setup()
       const { container } = render(
         <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
       )
 
       await user.upload(getFileInput(container), [
-        new File(["# Notes"], "notes.md"),
-        new File(["a,b"], "table.csv")
+        buildTextFile("notes.md", "# Notes"),
+        buildTextFile("table.csv", "a,b")
       ])
+      await waitForRenderedWork()
 
       expect(listStagedNames(["notes.md", "table.csv"])).toEqual([
         "notes.md",
@@ -1496,8 +1524,8 @@ describe("Composer", () => {
       expect(listStagedNames(["notes.md", "table.csv"])).toEqual(["table.csv"])
     })
 
-    it("stages the same file again and survives a cancelled selection under StrictMode", async () => {
-      const { Composer } = await loadFreshComposer()
+    it("stages a chosen file once under StrictMode and survives a cancelled selection", async () => {
+      const { Composer } = await loadFreshAttachingComposer()
       const user = userEvent.setup()
       const { container } = render(
         <StrictMode>
@@ -1507,17 +1535,61 @@ describe("Composer", () => {
           />
         </StrictMode>
       )
-      const notes = new File(["# Notes"], "notes.md")
 
-      await user.upload(getFileInput(container), notes)
-      await user.upload(getFileInput(container), notes)
+      await user.upload(
+        getFileInput(container),
+        buildTextFile("notes.md", "# Notes")
+      )
+      await waitForRenderedWork()
       fireEvent.change(getFileInput(container), { target: { files: [] } })
+      await waitForRenderedWork()
 
-      expect(listStagedNames(["notes.md"])).toEqual(["notes.md", "notes.md"])
+      expect(listStagedNames(["notes.md"])).toEqual(["notes.md"])
+      expect(listStatusTexts()).not.toContainEqual(
+        expect.stringContaining("notes.md")
+      )
+    })
+
+    it("refuses a file whose name is staged already and says so in the status line", async () => {
+      const { Composer } = await loadFreshAttachingComposer()
+      const user = userEvent.setup()
+      const { container } = render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
+      await user.upload(
+        getFileInput(container),
+        buildTextFile("notes.md", "# Notes")
+      )
+      await waitForRenderedWork()
+
+      await user.upload(
+        getFileInput(container),
+        buildTextFile("notes.md", "# Notes again")
+      )
+      await waitForRenderedWork()
+
+      expect(listStagedNames(["notes.md"])).toEqual(["notes.md"])
+      expect(listStatusTexts()).toContain(
+        "The file notes.md is already uploaded"
+      )
+    })
+
+    it("refuses an image for a model without vision and lists nothing", async () => {
+      const { Composer } = await loadFreshComposer()
+      const user = userEvent.setup()
+      const { container } = render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
+
+      await user.upload(getFileInput(container), buildPngFile("photo.png"))
+      await waitForRenderedWork()
+
+      expect(listStagedNames(["photo.png"])).toEqual([])
+      expect(listStatusTexts()).toContain("Images need a model with vision")
     })
 
     it("stages dropped files and shows the drop hint only while dragging", async () => {
-      const { Composer } = await loadFreshComposer()
+      const { Composer } = await loadFreshAttachingComposer()
       render(
         <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
       )
@@ -1526,7 +1598,8 @@ describe("Composer", () => {
       fireEvent.dragOver(field, { dataTransfer: { files: [] } })
       expect(screen.getByText("release to add to context")).toBeInTheDocument()
 
-      sendFileDrop(field, [new File(["x"], "dropped.txt")])
+      sendFileDrop(field, [buildTextFile("dropped.txt", "x")])
+      await waitForRenderedWork()
 
       expect(screen.queryByText("release to add to context")).toBeNull()
       expect(listStagedNames(["dropped.txt"])).toEqual(["dropped.txt"])
@@ -1556,14 +1629,15 @@ describe("Composer", () => {
 
       fireEvent.dragOver(field, { dataTransfer: { files: [] } })
       expect(screen.queryByText("release to add to context")).toBeNull()
-      sendFileDrop(field, [new File(["x"], "dropped.txt")])
+      sendFileDrop(field, [buildTextFile("dropped.txt", "x")])
+      await waitForRenderedWork()
 
       expect(listStagedNames(["dropped.txt"])).toEqual([])
     })
 
-    it("does not count a staged file against the window, because it is not sent", async () => {
+    it("does not count a staged text file against the window, because it is read on request", async () => {
       startChatBackend()
-      const { Composer } = await loadFreshComposer()
+      const { Composer } = await loadFreshAttachingComposer()
       const user = userEvent.setup()
       const { container } = render(
         <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
@@ -1572,7 +1646,7 @@ describe("Composer", () => {
 
       await user.upload(
         getFileInput(container),
-        new File(["x".repeat(130_000)], "export.csv")
+        buildTextFile("export.csv", "x".repeat(130_000))
       )
       await waitForRenderedWork()
 
@@ -1582,42 +1656,82 @@ describe("Composer", () => {
       ).toBeInTheDocument()
     })
 
-    // Known defect, tracked by #27 and #105: the composer lists a chosen file
-    // as attached to the message, but the chat request has no attachment
-    // field, so none of the file's content is sent. The expectation holds
-    // under either fix: #105 sends the content of every listed file, and
-    // #27 lists no file while sending files is unsupported.
-    it.fails(
-      "sends the content of every file it lists as attached to the message (#27, #105)",
-      async () => {
-        const { backend, streams } = startChatBackend()
-        const { Composer } = await loadFreshComposer()
-        const user = userEvent.setup()
-        const { container } = render(
-          <Composer
-            messageFieldRef={createRef()}
-            onStartConversation={vi.fn()}
-          />
-        )
-        await user.upload(
-          getFileInput(container),
-          new File([NOTES_CONTENT], "notes.md")
-        )
-        const isListedAsAttached = listStagedNames(["notes.md"]).includes(
-          "notes.md"
-        )
+    it("counts a staged image against the window", async () => {
+      startChatBackend()
+      const { Composer } = await loadFreshAttachingComposer()
+      const user = userEvent.setup()
+      const { container } = render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
+      await user.type(getMessageField(), "Summarize this")
 
-        await user.type(getMessageField(), "Summarize the notes{Enter}")
-        await waitForRenderedWork()
+      await user.upload(
+        getFileInput(container),
+        buildPngFile("photo.png", 640, 480)
+      )
+      await waitForRenderedWork()
 
-        expect(
-          listChatBodies(backend).map((body) =>
-            isTextInChatBody(body, NOTES_CONTENT)
-          ),
-          "whether each chat request carries the file listed as attached"
-        ).toEqual([isListedAsAttached])
-        streams[0]?.close()
-      }
-    )
+      expect(listStagedNames(["photo.png"])).toEqual(["photo.png"])
+      expect(
+        screen.getByRole("button", { name: "Context window · 2.7k / 8.2k" })
+      ).toBeInTheDocument()
+    })
+
+    it("sends the content of the files it lists as attached to the message", async () => {
+      const { backend, streams } = startChatBackend()
+      const { Composer } = await loadFreshAttachingComposer()
+      const user = userEvent.setup()
+      const { container } = render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
+      await user.upload(
+        getFileInput(container),
+        buildTextFile("notes.md", NOTES_CONTENT)
+      )
+      await waitForRenderedWork()
+      const isListedAsAttached = listStagedNames(["notes.md"]).includes(
+        "notes.md"
+      )
+
+      await user.type(getMessageField(), "Summarize the notes{Enter}")
+      await waitForRenderedWork()
+
+      expect(isListedAsAttached).toBe(true)
+      expect(
+        listChatBodies(backend).map((body) =>
+          isTextInChatBody(body, NOTES_CONTENT)
+        ),
+        "whether each chat request carries the file listed as attached"
+      ).toEqual([isListedAsAttached])
+      expect(listChatBodies(backend)[0]).toMatchObject({
+        attachments: [{ name: "notes.md", content: btoa(NOTES_CONTENT) }]
+      })
+      streams[0]?.close()
+    })
+
+    it("clears the tray once the turn starts", async () => {
+      const { streams } = startChatBackend()
+      const { Composer } = await loadFreshAttachingComposer()
+      const user = userEvent.setup()
+      const { container } = render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
+      await user.upload(
+        getFileInput(container),
+        buildTextFile("notes.md", NOTES_CONTENT)
+      )
+      await waitForRenderedWork()
+      await user.type(getMessageField(), "Summarize the notes{Enter}")
+      await waitForRenderedWork()
+      const whileAwaiting = listStagedNames(["notes.md"])
+
+      await sendStreamEvents(streams[0], NEW_TURN_EVENT)
+
+      expect(whileAwaiting).toEqual(["notes.md"])
+      expect(
+        screen.queryByRole("list", { name: "Attached to this message" })
+      ).toBeNull()
+      streams[0]?.close()
+    })
   })
 })

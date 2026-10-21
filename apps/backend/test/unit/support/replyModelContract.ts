@@ -103,7 +103,7 @@ function createReplyStreamRequest(
   return {
     messages: [
       { role: "system", content: "You are Lys." },
-      { role: "user", content: "Hello" }
+      { role: "user", content: "Hello", images: [] }
     ],
     tools: [],
     model: "qwen/qwen3-8b",

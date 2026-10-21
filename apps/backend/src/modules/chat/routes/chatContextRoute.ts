@@ -10,8 +10,23 @@ import type {
   ToolDefinition
 } from "@lys/share"
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify"
+import type { FindAttachmentImage } from "../../agent/agentContext"
+import type AttachmentFileStore from "../../attachment/attachmentFileStore"
+import { buildAttachmentImageReader } from "../../attachment/attachmentImageReader"
+import {
+  buildReadAttachmentDefinition,
+  hasReadableTextAttachment,
+  listReadableAttachments,
+  type ReadableAttachment
+} from "../../attachment/readAttachmentTool"
 import handleLlmServiceRequestFailure from "../../llm/routes/handleLlmServiceRequestFailure"
 import type { BuiltInToolEntry } from "../../tool/builtIn/builtInTool"
+import {
+  createModelCapabilitiesLookup,
+  findListedModelCapabilities,
+  NO_MODEL_CAPABILITIES,
+  type FindModelCapabilities
+} from "./modelCapabilities"
 import {
   findRequestedAgent,
   findRequestedBuiltInTools,
@@ -23,18 +38,49 @@ import {
 type ChatContextRouteDependencies = Pick<TurnAgentLookups, "findChatAgent"> &
   Readonly<{
     /**
-     * Stored conversation with its messages; undefined means it is not
-     * stored.
+     * Stored conversation with its messages and their attachments; undefined
+     * means it is not stored.
      */
     findConversation: (conversationId: string) => Conversation | undefined
     /** Every tool the backend runs, which a request may offer by name. */
     builtInTools: readonly BuiltInToolEntry[]
+    /**
+     * Capabilities of the model a request names, read from LM Studio's
+     * inventory.
+     */
+    findModelCapabilities: FindModelCapabilities
+    /** Reads stored attachment files. */
+    attachmentFiles: Pick<AttachmentFileStore, "readAttachment">
   }>
+
+/**
+ * Stored transcript of a measured conversation, its attachments, and the
+ * reader of its images.
+ */
+type MeasuredHistory = Readonly<{
+  /** Stored messages in conversation order; empty for a new conversation. */
+  history: readonly ConversationMessage[]
+  /** Every attachment of the stored messages, in conversation order. */
+  attachments: readonly ReadableAttachment[]
+  /** Reads one stored image's bytes from the conversation's files. */
+  findAttachmentImage: FindAttachmentImage
+}>
 
 /** Stored messages of a conversation that has none yet. */
 const NO_CONVERSATION_MESSAGES: readonly ConversationMessage[] = Object.freeze(
   []
 )
+
+/** Attachments of a conversation that has no message yet. */
+const NO_CONVERSATION_ATTACHMENTS: readonly ReadableAttachment[] =
+  Object.freeze([])
+
+/** History of a new conversation: no message, so no attachment to read. */
+const NEW_CONVERSATION_HISTORY: MeasuredHistory = Object.freeze({
+  history: NO_CONVERSATION_MESSAGES,
+  attachments: NO_CONVERSATION_ATTACHMENTS,
+  findAttachmentImage: () => Promise.resolve(undefined)
+})
 
 /** Explanation sent when no loaded instance matches the requested model. */
 const MODEL_NOT_LOADED_DETAIL =
@@ -46,7 +92,7 @@ const MODEL_NOT_LOADED_DETAIL =
  *
  * @param app - Backend with validation, the Zod response serializer, the
  * agent service, the conversation reader, the LLM service behind the agents,
- * and the backend tools installed.
+ * the backend tools, and the attachment file store installed.
  * @throws If route registration fails.
  * @remarks Every response prevents caching, because a measurement observes
  * the loaded model at the moment it ran. A full model-operation queue and a
@@ -57,7 +103,11 @@ export default function registerChatContextRoute(app: FastifyInstance): void {
     findChatAgent: (code: string) => app.agentService.findChatAgent(code),
     findConversation: (conversationId: string) =>
       app.conversationHistoryReader.getConversation(conversationId),
-    builtInTools: app.builtInTools
+    builtInTools: app.builtInTools,
+    findModelCapabilities: createModelCapabilitiesLookup(() =>
+      app.llmService.listLlmModels()
+    ),
+    attachmentFiles: app.attachmentFileStore
   } satisfies ChatContextRouteDependencies
   app.route<ChatContextApiRoute>({
     method: chatContextApi.method,
@@ -79,14 +129,19 @@ export default function registerChatContextRoute(app: FastifyInstance): void {
  *
  * @param request - Validated chat-context input.
  * @param reply - Response owner.
- * @param dependencies - Borrowed agent, conversation, and tool lookups.
+ * @param dependencies - Borrowed agent, conversation, tool, and model
+ * lookups, and the attachment files.
  * @returns Settlement after the measurement or a problem is sent.
  * @throws An `UnknownBackendToolError` for an offered backend tool the
- * backend does not run; and the agent's measurement failure, for the route's
- * error handler.
+ * backend does not run; the inventory read's failure; and the agent's
+ * measurement failure, for the route's error handler.
  * @remarks A continued conversation is read once, and its agent and stored
  * messages both come from that read, before the measurement waits for the
- * model's runtime.
+ * model's runtime. Whether the model sees images and is trained for tool
+ * use is read from LM Studio's inventory only when a stored message has an
+ * attachment, so the history's images and the attachment reader are
+ * measured as a turn would send and offer them; a model the inventory does
+ * not list sees no image and is offered no reader.
  */
 async function handleChatContextRequest(
   request: FastifyRequest<ChatContextApiRoute>,
@@ -110,10 +165,28 @@ async function handleChatContextRequest(
     sendUnansweredTurnProblem(reply, requestedAgent, request.url)
     return
   }
+  const measured = buildMeasuredHistory(
+    storedConversation,
+    dependencies.attachmentFiles
+  )
+  const capabilities =
+    measured.attachments.length > 0
+      ? await findListedModelCapabilities(
+          body.model,
+          dependencies.findModelCapabilities
+        )
+      : NO_MODEL_CAPABILITIES
   const measurement = await requestedAgent.agent.findContextMeasurement({
-    history: storedConversation?.messages ?? NO_CONVERSATION_MESSAGES,
+    history: measured.history,
     model: body.model,
-    tools: buildOfferedDefinitions(body, builtInTools)
+    canSeeImages: capabilities.vision,
+    findAttachmentImage: measured.findAttachmentImage,
+    tools: buildOfferedDefinitions(
+      body,
+      builtInTools,
+      capabilities.trainedForToolUse &&
+        hasReadableTextAttachment(measured.attachments)
+    )
   })
   if (measurement === undefined) {
     const problem = createLlmHealthProblem({
@@ -128,18 +201,54 @@ async function handleChatContextRequest(
 }
 
 /**
- * Builds the definitions of the tools a request offers, as a turn orders them.
+ * Builds the stored transcript a measurement includes, with its attachments
+ * and the reader of its images.
+ *
+ * @param storedConversation - The continued conversation; undefined for a
+ * new one.
+ * @param attachmentFiles - Reads stored attachment files.
+ * @returns The conversation's messages, their attachments, and a reader of
+ * its attachment files; {@link NEW_CONVERSATION_HISTORY} for a new
+ * conversation.
+ */
+function buildMeasuredHistory(
+  storedConversation: Conversation | undefined,
+  attachmentFiles: Pick<AttachmentFileStore, "readAttachment">
+): MeasuredHistory {
+  if (storedConversation === undefined) return NEW_CONVERSATION_HISTORY
+  const conversationId = storedConversation.id
+  return {
+    history: storedConversation.messages,
+    attachments: listReadableAttachments(
+      conversationId,
+      storedConversation.messages
+    ),
+    findAttachmentImage: buildAttachmentImageReader(
+      conversationId,
+      attachmentFiles
+    )
+  }
+}
+
+/**
+ * Builds the definitions of the tools a turn would offer, as it orders them.
  *
  * @param body - Validated chat-context input.
  * @param builtInTools - The offered backend tools, in offer order.
- * @returns The client definitions first, then the backend tools'.
+ * @param offersReader - Whether the turn would offer the attachment reader:
+ * the conversation holds a text attachment and the model is trained for
+ * tool use.
+ * @returns The client definitions first, then the backend tools', then the
+ * reader's when the turn offers it.
  */
 function buildOfferedDefinitions(
   body: ChatContextApiRequestBody,
-  builtInTools: readonly BuiltInToolEntry[]
+  builtInTools: readonly BuiltInToolEntry[],
+  offersReader: boolean
 ): readonly ToolDefinition[] {
   return [
     ...(body.tools?.definitions ?? []),
-    ...builtInTools.map((entry) => entry.definition)
+    ...builtInTools.map((entry) => entry.definition),
+    ...(offersReader ? [buildReadAttachmentDefinition()] : [])
   ]
 }

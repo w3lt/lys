@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest"
 import {
   buildContextMeterState,
   calculateContextUsage,
-  estimateAttachmentTokens,
   estimateTextTokens,
   formatTokenCount
 } from "@/components/ComposerComponents/composer-context"
@@ -29,18 +28,6 @@ describe("estimateTextTokens", () => {
   })
 })
 
-describe("estimateAttachmentTokens", () => {
-  it.each([
-    [0, 1],
-    [1, 1],
-    [4, 1],
-    [5, 2],
-    [4000, 1000]
-  ])("estimates a %d-byte file as %d tokens", (sizeBytes, tokens) => {
-    expect(estimateAttachmentTokens(sizeBytes)).toBe(tokens)
-  })
-})
-
 describe("formatTokenCount", () => {
   it.each([
     [0, "0"],
@@ -60,6 +47,7 @@ describe("calculateContextUsage", () => {
     const usage = calculateContextUsage({
       measurement: MEASUREMENT,
       draft: "x".repeat(370),
+      attachmentTokens: 0,
       reserve: 2048
     })
 
@@ -78,10 +66,25 @@ describe("calculateContextUsage", () => {
     })
   })
 
+  it("adds the staged images' estimate to the message", () => {
+    const usage = calculateContextUsage({
+      measurement: MEASUREMENT,
+      draft: "x".repeat(37),
+      attachmentTokens: 414,
+      reserve: 0
+    })
+
+    expect(usage).toMatchObject({
+      messageTokens: 8 + 10 + 414,
+      usedTokens: 4102
+    })
+  })
+
   it("estimates the draft as it is sent, without surrounding whitespace", () => {
     const usage = calculateContextUsage({
       measurement: MEASUREMENT,
       draft: "  \n" + "x".repeat(37) + "\n  ",
+      attachmentTokens: 0,
       reserve: 0
     })
 
@@ -94,6 +97,7 @@ describe("calculateContextUsage", () => {
     const usage = calculateContextUsage({
       measurement: MEASUREMENT,
       draft: "Thanks!",
+      attachmentTokens: 0,
       reserve
     })
 
@@ -104,6 +108,7 @@ describe("calculateContextUsage", () => {
     const usage = calculateContextUsage({
       measurement: MEASUREMENT,
       draft: "",
+      attachmentTokens: 0,
       reserve: 8192 - 2260 - 410 - 1000 - 8
     })
 
@@ -118,6 +123,7 @@ describe("calculateContextUsage", () => {
     const usage = calculateContextUsage({
       measurement: MEASUREMENT,
       draft: "x".repeat(370),
+      attachmentTokens: 0,
       reserve: 5000
     })
 
@@ -133,7 +139,11 @@ describe("calculateContextUsage", () => {
 describe("buildContextMeterState", () => {
   it("is measuring before the first measurement settles", () => {
     expect(
-      buildContextMeterState(undefined, { draft: "Hi", reserve: 0 })
+      buildContextMeterState(undefined, {
+        draft: "Hi",
+        attachmentTokens: 0,
+        reserve: 0
+      })
     ).toEqual({ status: "measuring" })
   })
 
@@ -141,13 +151,14 @@ describe("buildContextMeterState", () => {
     expect(
       buildContextMeterState(
         { status: "measured", measurement: MEASUREMENT },
-        { draft: "x".repeat(37), reserve: 2048 }
+        { draft: "x".repeat(37), attachmentTokens: 0, reserve: 2048 }
       )
     ).toEqual({
       status: "measured",
       usage: calculateContextUsage({
         measurement: MEASUREMENT,
         draft: "x".repeat(37),
+        attachmentTokens: 0,
         reserve: 2048
       })
     })
@@ -157,7 +168,7 @@ describe("buildContextMeterState", () => {
     expect(
       buildContextMeterState(
         { status: "model-not-loaded" },
-        { draft: "", reserve: 0 }
+        { draft: "", attachmentTokens: 0, reserve: 0 }
       )
     ).toEqual({
       status: "unknown",
@@ -169,7 +180,7 @@ describe("buildContextMeterState", () => {
     expect(
       buildContextMeterState(
         { status: "failed", message: "The backend could not be reached." },
-        { draft: "", reserve: 0 }
+        { draft: "", attachmentTokens: 0, reserve: 0 }
       )
     ).toEqual({
       status: "unknown",

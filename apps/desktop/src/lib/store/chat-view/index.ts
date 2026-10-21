@@ -25,6 +25,10 @@ import {
   getConversation,
   type GetConversationResult
 } from "@/lib/apis/http/conversations"
+import {
+  calculateAttachmentModelSupport,
+  type AttachmentModelSupport
+} from "@/lib/models/attachment-model-support"
 import { findEligibleChatModel } from "@/lib/models/model-residency"
 import { calculateToolModelSupport } from "@/lib/models/tool-model-support"
 import { useLysStore } from "@/lib/store"
@@ -38,6 +42,14 @@ import {
   type ChatToolOfferResult
 } from "@/lib/store/tools"
 
+import {
+  parseAttachmentSelection,
+  NO_STAGED_ATTACHMENTS,
+  readAttachmentCandidate,
+  addAttachmentCandidates,
+  type AttachmentCandidate,
+  type StagedAttachment
+} from "./attachments"
 import {
   type ChatViewConversation,
   createStoredChatViewConversation,
@@ -115,8 +127,9 @@ export type StoredConversationReader = (
  *
  * @remarks The store owns request and open tokens and their abort controllers;
  * these dependencies provide only transport, stored-conversation reads, reply
- * stops, timestamps, model-selection, generation-settings, and tool-offer
- * capabilities, and hand replies to the tool-call store.
+ * stops, timestamps, model-selection, what the loaded model can take as
+ * attachments, generation-settings, and tool-offer capabilities, and hand
+ * replies to the tool-call store.
  * Aborting a store-owned signal ends only the store's observation; the
  * backend keeps generating. The store does not share lifecycle state with
  * another store instance, and does not own the settings it reads.
@@ -142,6 +155,14 @@ export type ChatViewStoreDependencies = {
    * sent. Sampling is owned by {@link ChatViewActions.sendMessage}.
    */
   readonly findEligibleChatModel: () => string | null
+  /**
+   * Reads what the loaded model can take as attachments.
+   *
+   * @returns The support current at call time, or undefined while no loaded
+   * model is listed in a ready inventory, when nothing can be staged.
+   * Sampling is owned by {@link ChatViewActions.addAttachments}.
+   */
+  readonly readAttachmentModelSupport: () => AttachmentModelSupport | undefined
   /**
    * Reads the generation controls applied to the next request.
    *
@@ -197,6 +218,11 @@ export type ChatRequestState =
       readonly token: number
       /** Exact composer draft cleared only if unchanged at start. */
       readonly submittedComposerDraft?: string
+      /**
+       * Staged files the request sent, removed from the tray at start;
+       * absent when the request sent none.
+       */
+      readonly submittedAttachments?: readonly StagedAttachment[]
     }
   | {
       /** The backend-identified reply is accepting parts and fragments. */
@@ -239,17 +265,36 @@ export type ConversationOpenState =
       readonly replacedComposerDraft: string
     }
 
+/** Why the last staging refused a file, as the composer announces it. */
+export type AttachmentRefusal = Readonly<{
+  /** The refusal sentence. */
+  message: string
+  /**
+   * Number of this refusal in the store's lifetime, so a repeated sentence
+   * is a new value and is announced again.
+   */
+  occurrence: number
+}>
+
 /**
  * Observable state rendered by the chat view.
  *
- * @remarks The store owns the draft, conversation snapshot, selected agent,
- * request phase, conversation-open phase, and latest error. Conversation and message values
- * are replaced immutably; the UI may read them but cannot mutate the store's
+ * @remarks The store owns the draft, the staged files and the last refusal,
+ * conversation snapshot, selected agent, request phase, conversation-open
+ * phase, and latest error. Conversation and message values are replaced
+ * immutably; the UI may read them but cannot mutate the store's
  * authoritative values.
  */
 export type ChatViewState = {
   /** Current composer text. */
   readonly inputDraft: string
+  /** Files staged for the next message, in staging order. */
+  readonly attachments: readonly StagedAttachment[]
+  /**
+   * Why the last staging refused a file, or undefined when it refused none,
+   * once a file was removed, and once the turn started.
+   */
+  readonly attachmentRefusal?: AttachmentRefusal
   /** Active conversation, or undefined before a conversation starts. */
   readonly conversation?: ChatViewConversation
   /**
@@ -282,6 +327,35 @@ export type ChatViewActions = {
   /** Replaces the composer draft with user-entered text. */
   setInputDraft: (draft: string) => void
   /**
+   * Adds files to the tray for the next message.
+   *
+   * @param files - Files chosen or dropped by the person, in selection
+   * order.
+   * @returns A promise that resolves once the tray and the refusal are
+   * updated; it never rejects.
+   * @remarks Each file is admitted on its own: by its name and size against
+   * the tray, then by its content and by what the loaded model can take,
+   * which is sampled once per selection. Admitted files join the tray in
+   * selection order. One refusal per selection is recorded as the attachment
+   * refusal, which the next selection replaces or clears: the first refusal
+   * by name or size, else the first by content or by the loaded model. A
+   * file that cannot be read keeps its whole selection out of the tray, and
+   * its failure is the refusal recorded. Selections are staged one after
+   * another, so a selection is admitted against the files of the one before
+   * it. While no loaded model is listed, every file is refused with the
+   * chat-unavailable sentence. A selection made before the conversation is
+   * reset or closed and not staged yet is dropped: it joins no tray and
+   * records no refusal.
+   */
+  addAttachments: (files: readonly File[]) => Promise<void>
+  /**
+   * Removes one staged file from the tray and clears the attachment refusal.
+   *
+   * @param attachmentId - Identity of the staged file; an unknown identity
+   * changes nothing.
+   */
+  removeAttachment: (attachmentId: string) => void
+  /**
    * Selects the agent that answers the next new conversation.
    *
    * @param agentCode - Code of a listed agent.
@@ -308,7 +382,9 @@ export type ChatViewActions = {
    * replaced by Caliginia. The offered tools
    * are sampled once after ownership begins, before the stream opens. A tool
    * list that cannot be read fails the request with an inline error, and
-   * nothing is sent.
+   * nothing is sent. The staged files are sent with the composer draft, not
+   * with a starter prompt, and leave the tray once the turn starts; files
+   * staged after submitting stay, and a request that fails keeps them all.
    */
   sendMessage: (explicitPrompt?: string) => Promise<void>
   /**
@@ -344,6 +420,10 @@ export type ChatViewActions = {
 /** State and actions exposed by one independently owned chat-view store. */
 export type ChatViewStore = ChatViewState & ChatViewActions
 
+/** Error shown when no loaded model can take a message or a staged file. */
+const CHAT_UNAVAILABLE_MESSAGE =
+  "Chat is unavailable. Check the backend and loaded model in Settings → Model, then try again."
+
 /** Error shown when an owned stream closes before its done event. */
 const PREMATURE_STREAM_CLOSE_MESSAGE = "Chat stream ended before completion."
 
@@ -374,6 +454,8 @@ const IDLE_CONVERSATION_OPEN: ConversationOpenState = Object.freeze({
  */
 const INITIAL_CHAT_VIEW_STATE: Readonly<ChatViewState> = Object.freeze({
   inputDraft: "",
+  attachments: NO_STAGED_ATTACHMENTS,
+  attachmentRefusal: undefined,
   conversation: undefined,
   selectedAgentCode: CALIGINIA_AGENT_CODE,
   request: IDLE_CHAT_REQUEST,
@@ -457,6 +539,8 @@ type CreateChatRequestPayloadInput = {
   readonly conversation: ChatApiRequestBody["conversation"]
   /** Trimmed prompt prepared for this turn. */
   readonly submittedPrompt: string
+  /** Staged files sent with the prompt; none with a starter prompt. */
+  readonly attachments: readonly StagedAttachment[]
   /** Loaded model selected for this request. */
   readonly model: string
   /** Settings-owned generation controls for this request. */
@@ -477,6 +561,49 @@ type OwnedChatStreamOptions<TStreamEvent> = {
   readonly incompleteStatus: IncompleteAssistantStatus
   /** Error recorded when the stream closes early without a stream error. */
   readonly prematureCloseMessage: string
+}
+
+/**
+ * Converts an unknown value thrown while reading staged files into a refusal.
+ *
+ * @param error - Value thrown while reading a file of the selection.
+ * @returns The thrown error's message, which names the file that could not
+ * be read when the reader threw it; a sentence saying the files could not be
+ * read when the value is not an error or its message is empty.
+ */
+function formatAttachmentReadErrorMessage(error: unknown): string {
+  return error instanceof Error && error.message
+    ? error.message
+    : "The files could not be read."
+}
+
+/**
+ * Builds the composer state after a started request's submission.
+ *
+ * @param state - Draft and tray when the turn started.
+ * @param request - The request whose turn started.
+ * @returns The draft, emptied only when it is still the submitted text; the
+ * tray without the submitted files, so files staged after submitting stay;
+ * and no attachment refusal.
+ */
+function buildComposerStateAfterSubmission(
+  state: Pick<ChatViewState, "inputDraft" | "attachments">,
+  request: Extract<ChatRequestState, { status: "awaiting-turn" }>
+): Pick<ChatViewState, "inputDraft" | "attachments" | "attachmentRefusal"> {
+  const inputDraft =
+    request.submittedComposerDraft !== undefined &&
+    state.inputDraft === request.submittedComposerDraft
+      ? ""
+      : state.inputDraft
+  const submitted = request.submittedAttachments
+  const attachments =
+    submitted === undefined
+      ? state.attachments
+      : state.attachments.filter(
+          (attachment) => !submitted.includes(attachment)
+        )
+
+  return { inputDraft, attachments, attachmentRefusal: undefined }
 }
 
 /**
@@ -542,16 +669,20 @@ async function* readSnapshotFirstReplyEvents(
  *
  * @param token - Monotonic token assigned by the owning store.
  * @param submittedComposerDraft - Exact composer draft, when applicable.
+ * @param submittedAttachments - Staged files the request sends; recorded
+ * only when there are any.
  * @returns Observable request state awaiting its backend conversation turn.
  */
 function createAwaitingTurnRequest(
   token: number,
-  submittedComposerDraft?: string
+  submittedComposerDraft: string | undefined,
+  submittedAttachments: readonly StagedAttachment[]
 ): Extract<ChatRequestState, { status: "awaiting-turn" }> {
   return {
     status: "awaiting-turn",
     token,
-    ...(submittedComposerDraft === undefined ? {} : { submittedComposerDraft })
+    ...(submittedComposerDraft === undefined ? {} : { submittedComposerDraft }),
+    ...(submittedAttachments.length === 0 ? {} : { submittedAttachments })
   }
 }
 
@@ -568,17 +699,20 @@ function createChatRequestResource(token: number): ChatRequestResource {
 /**
  * Creates the current chat payload for a new or an existing conversation.
  *
- * @param input - Model, prompt, conversation, and generation values sampled for
- * this request.
+ * @param input - Model, prompt, staged files, conversation, and generation
+ * values sampled for this request.
  * @param toolOffer - Tools the request offers; omission sends none, so the
  * reply answers in one round.
  * @returns The complete payload, which starts a conversation the sampled
- * agent answers or continues one with the agent it was started with.
+ * agent answers or continues one with the agent it was started with, and
+ * carries each staged file by name with its base64 content; without staged
+ * files it carries no attachment field.
  */
 function createChatRequestPayload(
   {
     conversation,
     submittedPrompt,
+    attachments,
     model,
     generationOptions
   }: CreateChatRequestPayloadInput,
@@ -587,6 +721,14 @@ function createChatRequestPayload(
   return {
     conversation,
     message: submittedPrompt,
+    ...(attachments.length === 0
+      ? {}
+      : {
+          attachments: attachments.map(({ draft, content }) => ({
+            name: draft.name,
+            content
+          }))
+        }),
     model,
     generationOptions,
     ...(toolOffer === undefined ? {} : { tools: toolOffer })
@@ -641,6 +783,28 @@ export function createChatViewStore(
   let activeOpenResource: ConversationOpenResource | undefined
   /** Request token whose stop was requested before its reply was known. */
   let requestedStopToken: number | undefined
+  /** Staging of the latest selection; the next selection waits for it. */
+  let attachmentStaging: Promise<void> = Promise.resolve()
+  /** Occurrence number of the next attachment refusal. */
+  let nextRefusalOccurrence = 1
+  /**
+   * Generation of the tray; a reset starts the next one, so a selection made
+   * for an earlier generation is dropped instead of joining the reset tray.
+   */
+  let trayGeneration = 0
+
+  /**
+   * Builds the next attachment refusal.
+   *
+   * @param message - The refusal sentence.
+   * @returns The refusal with its own occurrence number.
+   */
+  function buildAttachmentRefusal(message: string): AttachmentRefusal {
+    const occurrence = nextRefusalOccurrence
+    nextRefusalOccurrence += 1
+
+    return { message, occurrence }
+  }
 
   /**
    * Updates an incomplete assistant when its exact message still exists.
@@ -814,11 +978,6 @@ export function createChatViewStore(
         userMessage: event.userMessage,
         assistantMessage: event.assistantMessage
       })
-      const inputDraft =
-        request.submittedComposerDraft !== undefined &&
-        currentState.inputDraft === request.submittedComposerDraft
-          ? ""
-          : currentState.inputDraft
       const streamingRequest = {
         status: "reply-streaming",
         token,
@@ -827,7 +986,7 @@ export function createChatViewStore(
 
       set({
         conversation,
-        inputDraft,
+        ...buildComposerStateAfterSubmission(currentState, request),
         request: streamingRequest
       })
       const replyTarget = Object.freeze({
@@ -1253,6 +1412,96 @@ export function createChatViewStore(
     }
 
     /**
+     * Adds one selection to the tray once the selections before it are
+     * staged.
+     *
+     * @param files - Files of the selection, in selection order.
+     * @param generation - Generation of the tray the selection was made for.
+     * @returns Settlement once the tray and the refusal are updated, or once
+     * the selection is dropped because the conversation was reset after the
+     * selection was made.
+     */
+    async function addAttachmentSelection(
+      files: readonly File[],
+      generation: number
+    ): Promise<void> {
+      const support = dependencies.readAttachmentModelSupport()
+      if (support === undefined) {
+        set({
+          attachmentRefusal: buildAttachmentRefusal(CHAT_UNAVAILABLE_MESSAGE)
+        })
+        return
+      }
+      const admission = parseAttachmentSelection(get().attachments, files)
+      let candidates: readonly AttachmentCandidate[]
+      try {
+        candidates = await Promise.all(
+          admission.admitted.map(readAttachmentCandidate)
+        )
+      } catch (error) {
+        if (generation !== trayGeneration) return
+        set({
+          attachmentRefusal: buildAttachmentRefusal(
+            formatAttachmentReadErrorMessage(error)
+          )
+        })
+        return
+      }
+      if (generation !== trayGeneration) return
+      const staging = addAttachmentCandidates(
+        get().attachments,
+        candidates,
+        support
+      )
+      const refusal = admission.refusal ?? staging.refusal
+      set({
+        attachments: staging.attachments,
+        attachmentRefusal:
+          refusal === undefined ? undefined : buildAttachmentRefusal(refusal)
+      })
+    }
+
+    /**
+     * Implements {@link ChatViewActions.addAttachments} for this store.
+     *
+     * @param files - Files of the selection, in selection order.
+     * @returns Settlement once the selection is staged, after the selections
+     * before it.
+     * @remarks A selection is admitted against the tray only once the
+     * selection before it has read its files and joined the tray, so two
+     * selections cannot stage the same name or overfill the tray together.
+     * The selection is made for the tray of this moment: a reset before it
+     * is staged drops it.
+     */
+    function addAttachments(files: readonly File[]): Promise<void> {
+      const generation = trayGeneration
+      const staging = attachmentStaging.then(() =>
+        addAttachmentSelection(files, generation)
+      )
+      attachmentStaging = staging
+
+      return staging
+    }
+
+    /**
+     * Implements {@link ChatViewActions.removeAttachment} for this store.
+     *
+     * @param attachmentId - Identity of the staged file to remove.
+     */
+    function removeAttachment(attachmentId: string): void {
+      const { attachments } = get()
+      const remaining = attachments.filter(
+        (attachment) => attachment.id !== attachmentId
+      )
+      if (remaining.length === attachments.length) return
+
+      set({
+        attachments: remaining.length === 0 ? NO_STAGED_ATTACHMENTS : remaining,
+        attachmentRefusal: undefined
+      })
+    }
+
+    /**
      * Implements {@link ChatViewActions.selectAgent} for this store.
      *
      * @param agentCode - Code of the agent the next new conversation starts
@@ -1302,6 +1551,29 @@ export function createChatViewStore(
     }
 
     /**
+     * Builds the values one chat request is created from.
+     *
+     * @param submittedPrompt - Trimmed prompt the request sends.
+     * @param attachments - Staged files the request sends.
+     * @param model - Eligible model the request names.
+     * @returns The request's conversation, prompt, files, and model, with
+     * the generation controls sampled now.
+     */
+    function buildChatRequestInput(
+      submittedPrompt: string,
+      attachments: readonly StagedAttachment[],
+      model: string
+    ): CreateChatRequestPayloadInput {
+      return {
+        conversation: buildRequestConversation(),
+        submittedPrompt,
+        attachments,
+        model,
+        generationOptions: dependencies.readGenerationOptions()
+      }
+    }
+
+    /**
      * Implements {@link ChatViewActions.sendMessage} for this store.
      *
      * @param explicitPrompt - Optional starter prompt supplied outside composer.
@@ -1318,24 +1590,25 @@ export function createChatViewStore(
       if (!submittedPrompt) return
       const model = dependencies.findEligibleChatModel()
       if (model === null) {
-        set({
-          error:
-            "Chat is unavailable. Check the backend and loaded model in Settings → Model, then try again."
-        })
+        set({ error: CHAT_UNAVAILABLE_MESSAGE })
         return
       }
 
       const token = nextRequestToken
       nextRequestToken += 1
-      const request = createAwaitingTurnRequest(token, submittedComposerDraft)
+      const attachments =
+        explicitPrompt === undefined ? get().attachments : NO_STAGED_ATTACHMENTS
+      const request = createAwaitingTurnRequest(
+        token,
+        submittedComposerDraft,
+        attachments
+      )
       const resource = createChatRequestResource(token)
-      const conversation = buildRequestConversation()
-      const requestInput = {
-        conversation,
+      const requestInput = buildChatRequestInput(
         submittedPrompt,
-        model,
-        generationOptions: dependencies.readGenerationOptions()
-      } satisfies CreateChatRequestPayloadInput
+        attachments,
+        model
+      )
 
       const supersededRequest = activeRequestResource
       activeRequestResource = resource
@@ -1467,16 +1740,19 @@ export function createChatViewStore(
      * Restores initial chat state and stops following any active stream.
      *
      * @remarks Reset invalidates the request and open tokens before aborting
-     * the local transports, clears draft, conversation, request, open, and
-     * error together, and reports no error. The selected agent stays, so the
-     * next conversation starts with it. The backend keeps generating a reply
-     * that was streaming.
+     * the local transports, clears draft, staged files and their refusal,
+     * conversation, request, open, and error together, and reports no
+     * error. A selection made before the reset and not staged yet is
+     * dropped: it joins no tray and records no refusal. The selected agent
+     * stays, so the next conversation starts with it. The backend keeps
+     * generating a reply that was streaming.
      */
     function resetConversation(): void {
       const requestResource = activeRequestResource
       const openResource = activeOpenResource
       activeRequestResource = undefined
       activeOpenResource = undefined
+      trayGeneration += 1
       set({
         ...INITIAL_CHAT_VIEW_STATE,
         selectedAgentCode: get().selectedAgentCode
@@ -1728,6 +2004,8 @@ export function createChatViewStore(
     return {
       ...INITIAL_CHAT_VIEW_STATE,
       setInputDraft,
+      addAttachments,
+      removeAttachment,
       selectAgent,
       sendMessage,
       stopStreaming,
@@ -1818,8 +2096,10 @@ async function* readChatEventsRefreshingTools(
  * The backend origin for following and stopping a reply is sampled when each
  * request starts. A new conversation's agent is checked against the agent
  * store's list when the request is sent. Tool offers read the Tools pane and
- * the loaded model when each request takes ownership, and every reply the
- * store starts or follows is handed to the tool-call store.
+ * the loaded model when each request takes ownership, what the loaded model
+ * can take as attachments is read from the inventory when each selection is
+ * staged, and every reply the store starts or follows is handed to the
+ * tool-call store.
  */
 export const useChatViewStore: UseBoundStore<StoreApi<ChatViewStore>> =
   createChatViewStore({
@@ -1837,6 +2117,11 @@ export const useChatViewStore: UseBoundStore<StoreApi<ChatViewStore>> =
       const { backendServerInfo, modelRuntime } = useLysStore.getState()
 
       return findEligibleChatModel(backendServerInfo.status, modelRuntime)
+    },
+    readAttachmentModelSupport: () => {
+      const { modelRuntime, modelInventory } = useLysStore.getState()
+
+      return calculateAttachmentModelSupport(modelRuntime, modelInventory)
     },
     readGenerationOptions: () => {
       const { temperature, replyCeiling } =

@@ -11,8 +11,15 @@ import {
   stopChatReply
 } from "@/lib/apis/http/chat"
 import { getConversation } from "@/lib/apis/http/conversations"
+import type { AttachmentModelSupport } from "@/lib/models/attachment-model-support"
 import { createChatViewStore } from "@/lib/store/chat-view"
 import { NO_CHAT_TOOL_OFFER, type ChatToolOfferResult } from "@/lib/store/tools"
+import {
+  buildPngFile,
+  buildTextFile,
+  ControlledFile,
+  UnreadableFile
+} from "../../../support/attachmentFixtures"
 import {
   buildJsonResponse,
   createControlledRoute,
@@ -113,10 +120,21 @@ const TOOLS = Object.freeze([
 /** Tools a request offers when a case switches the offer on. */
 const OFFERED_TOOLS: ChatToolOffer = Object.freeze({ definitions: TOOLS })
 
+/** A model that sees images and calls tools. */
+const FULL_ATTACHMENT_SUPPORT: AttachmentModelSupport = Object.freeze({
+  vision: true,
+  trainedForToolUse: true
+})
+
 /** Answers of the providers a chat harness hands its store; a case may change them. */
 type ChatHarnessProviders = {
   /** Model eligible to answer the next request, or null when none is loaded. */
   eligibleModel: string | null
+  /**
+   * What the loaded model can take as attachments, or undefined while no
+   * loaded model is listed.
+   */
+  attachmentSupport: AttachmentModelSupport | undefined
   /** Generation controls the next request samples. */
   generationOptions: MessageGenerationOptions
   /**
@@ -151,13 +169,15 @@ function calculateListedAgentCode(
  * controls, and a recorder of the replies handed to the tool-call follow.
  *
  * @returns The store; the mutable providers: the eligible model (initially
- * `qwen3-8b`), the generation controls, the listed agents (initially both
- * built-in agents), and the tool offer (initially none); and the reply
- * targets handed to the tool-call follow, in order.
+ * `qwen3-8b`), what it can take as attachments (initially images and files),
+ * the generation controls, the listed agents (initially both built-in
+ * agents), and the tool offer (initially none); and the reply targets handed
+ * to the tool-call follow, in order.
  */
 function createChatHarness() {
   const providers: ChatHarnessProviders = {
     eligibleModel: "qwen3-8b",
+    attachmentSupport: FULL_ATTACHMENT_SUPPORT,
     generationOptions: { temperature: 0.4, replyCeiling: 256 },
     listedAgentCodes: [CALIGINIA_AGENT_CODE, LYSIPTERA_AGENT_CODE],
     toolOffer: NO_CHAT_TOOL_OFFER
@@ -176,6 +196,7 @@ function createChatHarness() {
       }),
     createTimestamp: () => NOW,
     findEligibleChatModel: () => providers.eligibleModel,
+    readAttachmentModelSupport: () => providers.attachmentSupport,
     readGenerationOptions: () => providers.generationOptions,
     readNewConversationAgentCode: (selectedAgentCode) =>
       calculateListedAgentCode(selectedAgentCode, providers.listedAgentCodes),
@@ -243,6 +264,255 @@ describe("createChatViewStore", () => {
       request: { status: "idle" },
       conversationOpen: { status: "idle" },
       error: undefined
+    })
+  })
+
+  describe("addAttachments", () => {
+    it("stages a text file and an image with their content, in selection order", async () => {
+      const { store } = createChatHarness()
+
+      await store
+        .getState()
+        .addAttachments([
+          buildTextFile("notes.md", "# Notes"),
+          buildPngFile("photo.png", 64, 32)
+        ])
+
+      expect(store.getState()).toMatchObject({
+        attachments: [
+          {
+            draft: { kind: "text", name: "notes.md", sizeBytes: 7 },
+            content: btoa("# Notes")
+          },
+          {
+            draft: {
+              kind: "image",
+              name: "photo.png",
+              mediaType: "image/png",
+              width: 64,
+              height: 32
+            }
+          }
+        ],
+        attachmentRefusal: undefined
+      })
+    })
+
+    it("refuses a file whose name is staged already, ignoring case, and keeps the others of the selection", async () => {
+      const { store } = createChatHarness()
+      await store
+        .getState()
+        .addAttachments([buildTextFile("notes.md", "# Notes")])
+
+      await store
+        .getState()
+        .addAttachments([
+          buildTextFile("NOTES.md", "again"),
+          buildTextFile("todo.txt", "Buy milk")
+        ])
+
+      expect(
+        store.getState().attachments.map(({ draft }) => draft.name)
+      ).toEqual(["notes.md", "todo.txt"])
+      expect(store.getState().attachmentRefusal).toEqual({
+        message: "The file NOTES.md is already uploaded",
+        occurrence: 1
+      })
+    })
+
+    it.each<[string, File, AttachmentModelSupport, string]>([
+      [
+        "an image for a model without vision",
+        buildPngFile("photo.png"),
+        { vision: false, trainedForToolUse: true },
+        "Images need a model with vision"
+      ],
+      [
+        "a text file for a model not trained for tool use",
+        buildTextFile("notes.md", "# Notes"),
+        { vision: true, trainedForToolUse: false },
+        "Files need a model trained for tool use"
+      ]
+    ])("refuses %s", async (_case, file, support, message) => {
+      const { store, providers } = createChatHarness()
+      providers.attachmentSupport = support
+
+      await store.getState().addAttachments([file])
+
+      expect(store.getState()).toMatchObject({
+        attachments: [],
+        attachmentRefusal: { message }
+      })
+    })
+
+    it("refuses every file while no loaded model is listed", async () => {
+      const { store, providers } = createChatHarness()
+      providers.attachmentSupport = undefined
+
+      await store
+        .getState()
+        .addAttachments([buildTextFile("notes.md", "# Notes")])
+
+      expect(store.getState()).toMatchObject({
+        attachments: [],
+        attachmentRefusal: {
+          message: expect.stringContaining("Chat is unavailable") as string
+        }
+      })
+    })
+
+    it("gives a repeated refusal a new occurrence, so it is announced again", async () => {
+      const { store } = createChatHarness()
+      await store
+        .getState()
+        .addAttachments([buildTextFile("notes.md", "# Notes")])
+
+      await store
+        .getState()
+        .addAttachments([buildTextFile("notes.md", "again")])
+      const first = store.getState().attachmentRefusal
+      await store
+        .getState()
+        .addAttachments([buildTextFile("notes.md", "and again")])
+
+      expect(first).toEqual({
+        message: "The file notes.md is already uploaded",
+        occurrence: 1
+      })
+      expect(store.getState().attachmentRefusal).toEqual({
+        message: "The file notes.md is already uploaded",
+        occurrence: 2
+      })
+    })
+
+    it("names a file that cannot be read and stages nothing of its selection", async () => {
+      const { store } = createChatHarness()
+
+      await store
+        .getState()
+        .addAttachments([
+          new UnreadableFile(["x"], "gone.txt"),
+          buildTextFile("notes.md", "# Notes")
+        ])
+
+      expect(store.getState()).toMatchObject({
+        attachments: [],
+        attachmentRefusal: { message: "The file gone.txt could not be read" }
+      })
+    })
+
+    it("stages selections one after another, so the second is admitted against the first", async () => {
+      const { store } = createChatHarness()
+
+      const first = store
+        .getState()
+        .addAttachments([buildTextFile("notes.md", "# Notes")])
+      const second = store
+        .getState()
+        .addAttachments([buildTextFile("notes.md", "again")])
+      await Promise.all([first, second])
+
+      expect(
+        store.getState().attachments.map(({ draft }) => draft.name)
+      ).toEqual(["notes.md"])
+      expect(store.getState().attachmentRefusal).toMatchObject({
+        message: "The file notes.md is already uploaded"
+      })
+    })
+
+    it("removes a staged file and clears the refusal", async () => {
+      const { store } = createChatHarness()
+      await store
+        .getState()
+        .addAttachments([
+          buildTextFile("notes.md", "# Notes"),
+          buildTextFile("todo.txt", "Buy milk")
+        ])
+      await store
+        .getState()
+        .addAttachments([buildTextFile("notes.md", "again")])
+      const notes = store.getState().attachments[0]
+
+      store.getState().removeAttachment(notes?.id ?? "")
+
+      expect(store.getState()).toMatchObject({
+        attachments: [{ draft: { name: "todo.txt" } }],
+        attachmentRefusal: undefined
+      })
+    })
+
+    it("changes nothing for an identity that is not staged", async () => {
+      const { store } = createChatHarness()
+      await store
+        .getState()
+        .addAttachments([buildTextFile("notes.md", "# Notes")])
+      const before = store.getState()
+
+      store.getState().removeAttachment("attachment-missing")
+
+      expect(store.getState()).toBe(before)
+    })
+
+    it("clears the tray with the conversation", async () => {
+      const { store } = createChatHarness()
+      await store
+        .getState()
+        .addAttachments([buildTextFile("notes.md", "again")])
+
+      store.getState().resetConversation()
+
+      expect(store.getState()).toMatchObject({
+        attachments: [],
+        attachmentRefusal: undefined
+      })
+    })
+
+    it("stages a file whose read finishes later while the conversation stays", async () => {
+      const { store } = createChatHarness()
+      const file = new ControlledFile(["# Notes"], "notes.md")
+      const selection = store.getState().addAttachments([file])
+      await waitForMicrotasks()
+      const whileReading = store.getState().attachments
+
+      await file.resolveRead()
+      await selection
+
+      expect(whileReading).toEqual([])
+      expect(store.getState()).toMatchObject({
+        attachments: [
+          { draft: { kind: "text", name: "notes.md", sizeBytes: 7 } }
+        ],
+        attachmentRefusal: undefined
+      })
+    })
+
+    it("drops a selection whose files were still being read when the conversation was reset", async () => {
+      const { store } = createChatHarness()
+      const file = new ControlledFile(["# Notes"], "notes.md")
+      const selection = store.getState().addAttachments([file])
+      await waitForMicrotasks()
+
+      store.getState().resetConversation()
+      await file.resolveRead()
+      await selection
+
+      expect(store.getState()).toMatchObject({
+        attachments: [],
+        attachmentRefusal: undefined
+      })
+    })
+
+    it("records no refusal for a read that failed after the conversation was reset", async () => {
+      const { store } = createChatHarness()
+      const file = new ControlledFile(["# Notes"], "notes.md")
+      const selection = store.getState().addAttachments([file])
+      await waitForMicrotasks()
+
+      store.getState().resetConversation()
+      file.rejectRead(new Error("The file is gone"))
+      await selection
+
+      expect(store.getState().attachmentRefusal).toBeUndefined()
     })
   })
 
@@ -379,6 +649,124 @@ describe("createChatViewStore", () => {
         message: "What are you?"
       })
       expect(store.getState().inputDraft).toBe("half-typed")
+    })
+
+    it("sends the staged files with the draft and takes them out of the tray once the turn starts", async () => {
+      const { backend, streams } = startChatBackend()
+      const { store } = createChatHarness()
+      await store
+        .getState()
+        .addAttachments([buildTextFile("notes.md", "# Notes")])
+      store.getState().setInputDraft("Summarize the notes")
+
+      void store.getState().sendMessage()
+      await waitForMicrotasks()
+      const whileAwaiting = store.getState()
+      await sendStreamEvents(streams[0], NEW_TURN_EVENT)
+
+      expect(backend.requests[0]?.body).toMatchObject({
+        message: "Summarize the notes",
+        attachments: [{ name: "notes.md", content: btoa("# Notes") }]
+      })
+      expect(whileAwaiting).toMatchObject({
+        attachments: [{ draft: { name: "notes.md" } }],
+        request: {
+          status: "awaiting-turn",
+          submittedAttachments: [{ draft: { name: "notes.md" } }]
+        }
+      })
+      expect(store.getState()).toMatchObject({
+        attachments: [],
+        attachmentRefusal: undefined
+      })
+    })
+
+    it("clears the attachment refusal once the turn starts", async () => {
+      const { streams } = startChatBackend()
+      const { store } = createChatHarness()
+      await store
+        .getState()
+        .addAttachments([buildTextFile("notes.md", "# Notes")])
+      await store
+        .getState()
+        .addAttachments([buildTextFile("notes.md", "again")])
+      store.getState().setInputDraft("Summarize the notes")
+
+      void store.getState().sendMessage()
+      await waitForMicrotasks()
+      const whileAwaiting = store.getState().attachmentRefusal
+      await sendStreamEvents(streams[0], NEW_TURN_EVENT)
+
+      expect(whileAwaiting).toMatchObject({
+        message: "The file notes.md is already uploaded"
+      })
+      expect(store.getState().attachmentRefusal).toBeUndefined()
+    })
+
+    it("keeps a file staged after submitting", async () => {
+      const { streams } = startChatBackend()
+      const { store } = createChatHarness()
+      await store
+        .getState()
+        .addAttachments([buildTextFile("notes.md", "# Notes")])
+      store.getState().setInputDraft("Summarize the notes")
+      void store.getState().sendMessage()
+      await waitForMicrotasks()
+
+      await store
+        .getState()
+        .addAttachments([buildTextFile("todo.txt", "Buy milk")])
+      await sendStreamEvents(streams[0], NEW_TURN_EVENT)
+
+      expect(
+        store.getState().attachments.map(({ draft }) => draft.name)
+      ).toEqual(["todo.txt"])
+    })
+
+    it("sends a starter prompt without the staged files, which stay staged", async () => {
+      const { backend, streams } = startChatBackend()
+      const { store } = createChatHarness()
+      await store
+        .getState()
+        .addAttachments([buildTextFile("notes.md", "# Notes")])
+
+      void store.getState().sendMessage("What are you?")
+      await waitForMicrotasks()
+      await sendStreamEvents(streams[0], NEW_TURN_EVENT)
+
+      expect(backend.requests[0]?.body).not.toHaveProperty("attachments")
+      expect(
+        store.getState().attachments.map(({ draft }) => draft.name)
+      ).toEqual(["notes.md"])
+    })
+
+    it("keeps the staged files when the backend refuses the request", async () => {
+      const { backend } = startChatBackend({
+        [CHAT_ROUTE]: () =>
+          buildJsonResponse(409, {
+            type: "urn:lys:problem:chat:image-needs-vision",
+            title: "Image needs vision",
+            status: 409,
+            detail:
+              "The image photo.png needs a model with vision, and qwen3-8b cannot see images.",
+            fileName: "photo.png",
+            model: "qwen3-8b"
+          })
+      })
+      const { store } = createChatHarness()
+      await store.getState().addAttachments([buildPngFile("photo.png")])
+      store.getState().setInputDraft("What is this?")
+
+      await store.getState().sendMessage()
+
+      expect(backend.requests).toHaveLength(1)
+      expect(store.getState()).toMatchObject({
+        inputDraft: "What is this?",
+        attachments: [{ draft: { name: "photo.png" } }],
+        request: { status: "idle" },
+        error:
+          "The image photo.png needs a model with vision, and qwen3-8b cannot see images."
+      })
     })
 
     it("continues the shown conversation and appends the new turn", async () => {
@@ -1386,6 +1774,25 @@ describe("closeConversation", () => {
     })
   })
 
+  it("drops a selection whose files were still being read when the shown conversation closed", async () => {
+    startBackendFake(buildStoredConversationRoutes(STORED_CONVERSATION))
+    const { store } = createChatHarness()
+    await store.getState().openConversation(STORED_ID)
+    const file = new ControlledFile(["# Notes"], "notes.md")
+    const selection = store.getState().addAttachments([file])
+    await waitForMicrotasks()
+
+    store.getState().closeConversation(STORED_ID)
+    await file.resolveRead()
+    await selection
+
+    expect(store.getState()).toMatchObject({
+      conversation: undefined,
+      attachments: [],
+      attachmentRefusal: undefined
+    })
+  })
+
   it("abandons opening the closed conversation", async () => {
     const read = createControlledPromise<Response>()
     startBackendFake({
@@ -1578,6 +1985,34 @@ describe("useChatViewStore", () => {
     expect(useToolStore.getState().list).toMatchObject({
       status: "loaded",
       unavailableTools: new Map([["web_search", "api-key-missing"]])
+    })
+  })
+
+  it("stages what the application store's loaded model can take", async () => {
+    const { useLysStore, useChatViewStore } = await loadFreshChatViewStore(0)
+    useLysStore.setState({
+      modelInventory: {
+        status: "ready",
+        models: [
+          buildLlmInfo("resident", {
+            loaded: true,
+            vision: false,
+            trainedForToolUse: true
+          })
+        ]
+      }
+    })
+
+    await useChatViewStore
+      .getState()
+      .addAttachments([
+        buildPngFile("photo.png"),
+        buildTextFile("notes.md", "# Notes")
+      ])
+
+    expect(useChatViewStore.getState()).toMatchObject({
+      attachments: [{ draft: { name: "notes.md" } }],
+      attachmentRefusal: { message: "Images need a model with vision" }
     })
   })
 

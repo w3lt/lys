@@ -3,7 +3,7 @@ import { describe, expect, it, onTestFinished } from "vitest"
 import { migrateDatabase } from "../../../../src/infrastructure/database/migrations"
 
 /** Schema version produced by the current migration list. */
-const CURRENT_SCHEMA_VERSION = 9
+const CURRENT_SCHEMA_VERSION = 10
 
 /**
  * Opens an empty in-memory database owned by the current test.
@@ -151,10 +151,29 @@ function createVersion8Database(): DatabaseSync {
   const database = openEmptyDatabase()
   migrateDatabase(database)
   database.exec(`
+    DROP TABLE conversation_attachments;
     DROP TABLE conversation_sources;
     DROP TABLE conversation_messages;
     ${VERSION_8_MESSAGES_SQL}
     PRAGMA user_version = 8
+  `)
+  return database
+}
+
+/**
+ * Creates a database at version 9: the current schema without the
+ * attachments table.
+ *
+ * @returns A connection at `user_version` 9, closed when the test finishes.
+ * @remarks Migration 10 only adds the attachments table, so dropping it from
+ * a current database leaves exactly the version-9 schema.
+ */
+function createVersion9Database(): DatabaseSync {
+  const database = openEmptyDatabase()
+  migrateDatabase(database)
+  database.exec(`
+    DROP TABLE conversation_attachments;
+    PRAGMA user_version = 9
   `)
   return database
 }
@@ -270,6 +289,7 @@ describe("migrateDatabase", () => {
     expect(readUserVersion(database)).toBe(CURRENT_SCHEMA_VERSION)
     expect(listSchemaObjects(database, "table")).toEqual([
       "agents",
+      "conversation_attachments",
       "conversation_messages",
       "conversation_sources",
       "conversations"
@@ -988,6 +1008,157 @@ describe("migrateDatabase", () => {
       bio: "\u0000Bio",
       systemPrompt: "\u0000Prompt"
     })
+  })
+
+  it("upgrades a version-9 database by adding the attachments table and keeping its messages", () => {
+    const database = createVersion9Database()
+    database.exec(`
+      INSERT INTO conversations (id, title, agent_code, created_at, updated_at)
+      VALUES ('c1', NULL, 'caliginia', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+      INSERT INTO conversation_messages (id, conversation_id, role, content, created_at)
+      VALUES ('u1', 'c1', 'user', 'Hello', '2026-01-02T00:00:00.000Z')
+    `)
+
+    migrateDatabase(database)
+
+    expect(readUserVersion(database)).toBe(CURRENT_SCHEMA_VERSION)
+    expect(listColumns(database, "conversation_attachments")).toEqual([
+      "conversation_id",
+      "message_id",
+      "number",
+      "name",
+      "kind",
+      "media_type",
+      "size_bytes",
+      "width",
+      "height"
+    ])
+    expect(
+      database.prepare("SELECT id, content FROM conversation_messages").all()
+    ).toEqual([{ id: "u1", content: "Hello" }])
+  })
+
+  /** Stores a conversation with one user message for attachment cases. */
+  const ATTACHMENT_PARENTS_SQL = `
+    INSERT INTO conversations (id, title, agent_code, created_at, updated_at)
+    VALUES ('c1', NULL, 'caliginia', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+    INSERT INTO conversation_messages (id, conversation_id, role, content, created_at)
+    VALUES ('u1', 'c1', 'user', 'Hello', '2026-01-02T00:00:00.000Z');
+    INSERT INTO conversation_attachments (conversation_id, message_id, number, name, kind, media_type, size_bytes, width, height)
+    VALUES ('c1', 'u1', 1, 'Notes.md', 'text', NULL, 12, NULL, NULL)
+  `
+
+  it("stores an image and a text attachment under a user message", () => {
+    const database = openEmptyDatabase()
+    migrateDatabase(database)
+    database.exec(ATTACHMENT_PARENTS_SQL)
+
+    database.exec(`
+      INSERT INTO conversation_attachments (conversation_id, message_id, number, name, kind, media_type, size_bytes, width, height)
+      VALUES ('c1', 'u1', 2, 'photo.png', 'image', 'image/png', 2048, 64, 32)
+    `)
+
+    expect(
+      database
+        .prepare(
+          "SELECT number, name, kind FROM conversation_attachments ORDER BY number"
+        )
+        .all()
+    ).toEqual([
+      { number: 1, name: "Notes.md", kind: "text" },
+      { number: 2, name: "photo.png", kind: "image" }
+    ])
+  })
+
+  it.each([
+    [
+      "a number below 1",
+      "('c1', 'u1', 0, 'a.md', 'text', NULL, 1, NULL, NULL)"
+    ],
+    ["an empty name", "('c1', 'u1', 2, '', 'text', NULL, 1, NULL, NULL)"],
+    ["the name .", "('c1', 'u1', 2, '.', 'text', NULL, 1, NULL, NULL)"],
+    ["the name ..", "('c1', 'u1', 2, '..', 'text', NULL, 1, NULL, NULL)"],
+    [
+      "a name holding a slash",
+      "('c1', 'u1', 2, 'a/b.md', 'text', NULL, 1, NULL, NULL)"
+    ],
+    [
+      "an unknown kind",
+      "('c1', 'u1', 2, 'a.pdf', 'document', NULL, 1, NULL, NULL)"
+    ],
+    [
+      "a negative size",
+      "('c1', 'u1', 2, 'a.md', 'text', NULL, -1, NULL, NULL)"
+    ],
+    [
+      "an image without a media type",
+      "('c1', 'u1', 2, 'a.png', 'image', NULL, 1, 64, 32)"
+    ],
+    [
+      "an image without sides",
+      "('c1', 'u1', 2, 'a.png', 'image', 'image/png', 1, NULL, NULL)"
+    ],
+    [
+      "an image with a zero side",
+      "('c1', 'u1', 2, 'a.png', 'image', 'image/png', 1, 0, 32)"
+    ],
+    [
+      "a text file with sides",
+      "('c1', 'u1', 2, 'a.md', 'text', NULL, 1, 64, 32)"
+    ],
+    [
+      "a text file with a media type",
+      "('c1', 'u1', 2, 'a.md', 'text', 'text/plain', 1, NULL, NULL)"
+    ],
+    [
+      "a name the message already stores, in another case",
+      "('c1', 'u1', 2, 'notes.MD', 'text', NULL, 1, NULL, NULL)"
+    ],
+    [
+      "a number the conversation already uses",
+      "('c1', 'u1', 1, 'other.md', 'text', NULL, 1, NULL, NULL)"
+    ],
+    [
+      "a message that is not stored",
+      "('c1', 'u9', 2, 'a.md', 'text', NULL, 1, NULL, NULL)"
+    ]
+  ])("refuses an attachment with %s", (_label, values) => {
+    const database = openEmptyDatabase()
+    migrateDatabase(database)
+    database.exec(ATTACHMENT_PARENTS_SQL)
+
+    expect(() =>
+      database.exec(
+        `INSERT INTO conversation_attachments (conversation_id, message_id, number, name, kind, media_type, size_bytes, width, height) VALUES ${values}`
+      )
+    ).toThrow(/constraint failed/)
+    expect(
+      database
+        .prepare("SELECT COUNT(*) AS count FROM conversation_attachments")
+        .get()
+    ).toEqual({ count: 1 })
+  })
+
+  it("deletes a message's attachments with the message, and a conversation's with the conversation", () => {
+    const database = openEmptyDatabase()
+    migrateDatabase(database)
+    database.exec(ATTACHMENT_PARENTS_SQL)
+    database.exec(`
+      INSERT INTO conversation_messages (id, conversation_id, role, content, created_at)
+      VALUES ('u2', 'c1', 'user', 'Again', '2026-01-03T00:00:00.000Z');
+      INSERT INTO conversation_attachments (conversation_id, message_id, number, name, kind, media_type, size_bytes, width, height)
+      VALUES ('c1', 'u2', 2, 'later.md', 'text', NULL, 3, NULL, NULL)
+    `)
+
+    database.exec("DELETE FROM conversation_messages WHERE id = 'u2'")
+    expect(
+      database.prepare("SELECT name FROM conversation_attachments").all()
+    ).toEqual([{ name: "Notes.md" }])
+
+    database.exec("DELETE FROM conversations WHERE id = 'c1'")
+    expect(
+      database.prepare("SELECT name FROM conversation_attachments").all()
+    ).toEqual([])
   })
 
   it("rejects a database created by a newer version without changing it", () => {

@@ -1,5 +1,6 @@
 import type { BackendConfig } from "../config"
 import SqliteAgentRecordStore from "../infrastructure/database/agents/sqliteAgentRecordStore"
+import AttachmentFileStore from "../modules/attachment/attachmentFileStore"
 import SqliteDatabase from "../infrastructure/database/sqliteDatabase"
 import LmStudioRuntime from "../modules/llm/runtimes/lmStudioRuntime"
 import AgentService from "../modules/agent/agentService"
@@ -121,6 +122,11 @@ export type SingletonServices = Readonly<{
    * choices saved in the settings file; it owns nothing to release.
    */
   toolApprovalService: ToolApprovalService
+  /**
+   * Attachment files of every conversation, under the attachments
+   * directory; it owns nothing to release.
+   */
+  attachmentFileStore: AttachmentFileStore
   /** Module-private cleanup capability for the complete owned service lifetime. */
   [CLOSE_SINGLETON_SERVICES]: CloseSingletonServices
 }>
@@ -146,7 +152,8 @@ type DatabaseServices = Pick<
  * @param config - LM Studio host and port used to derive local service endpoints,
  * the title-generation prompt and title length limit given to the chat
  * service, the built-in agents' system prompts given to the agent service,
- * and vmo's host and port given to the read-page tool.
+ * vmo's host and port given to the read-page tool, and the attachments
+ * directory given to the attachment file store.
  * @param failureReporters - Receive the LLM runtime failures that no caller
  * observes and the causes of read failures the model learns only by kind,
  * for logging.
@@ -166,9 +173,9 @@ type DatabaseServices = Pick<
  * read. The agent service is created after the LLM runtime service, over its
  * Sqlite records, the chat service, and the LLM service; it reads nothing at
  * creation and owns nothing to release.
- * The web search tool provider, the built-in tools, and the tool approval
- * service are created last; they read and contact nothing at creation and
- * own nothing to release.
+ * The web search tool provider, the built-in tools, the tool approval
+ * service, and the attachment file store are created last; they read and
+ * contact nothing at creation and own nothing to release.
  * Creation stops at the first failure. The database is not part of the
  * returned bundle: the bundle's cleanup closes it after the LLM runtime
  * service and before the chat service.
@@ -228,6 +235,9 @@ export async function createSingletonServices(
       ...databaseServices,
       agentService,
       ...toolServices,
+      attachmentFileStore: new AttachmentFileStore(
+        config.attachmentsDirectoryPath
+      ),
       [CLOSE_SINGLETON_SERVICES]: closeOwnedSingletonServices
     })
   } catch (creationError) {

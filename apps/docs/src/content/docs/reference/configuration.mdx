@@ -31,7 +31,7 @@ means changing all three; see the
 ## Lys home directory
 
 The Lys home directory holds the desktop settings file, the conversation
-database, and the runtime that release builds start. The handbook writes it as
+database, the attachment files, and the runtime that release builds start. The handbook writes it as
 `$LYS_HOME`. The desktop host resolves it once at startup from the `LYS_HOME`
 environment variable:
 
@@ -46,13 +46,14 @@ A rejected value stops the desktop app before any window opens and prints
 `Lys cannot start: …` to standard error. The host does not create the directory
 at startup; loading settings creates it when `settings.json` is missing.
 
-| Path under `$LYS_HOME`        | Used by        | Contents                                                                            |
-| ----------------------------- | -------------- | ----------------------------------------------------------------------------------- |
-| `settings.json`               | Tauri host     | [Persisted settings JSON](#persisted-settings-json)                                 |
-| `lys_db.sqlite`               | Backend        | Conversation database                                                               |
-| `runtime/node/bin/node`       | Release builds | Node.js executable that runs the backend                                            |
-| `runtime/backend/backend.mjs` | Release builds | Backend bundle that the release Node.js executable runs                             |
-| `runtime/vmo/vmo`             | Release builds | vmo, the page reader the desktop starts, signed with the virtualization entitlement |
+| Path under `$LYS_HOME`        | Used by        | Contents                                                                                                                                                         |
+| ----------------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `settings.json`               | Tauri host     | [Persisted settings JSON](#persisted-settings-json)                                                                                                              |
+| `lys_db.sqlite`               | Backend        | Conversation database                                                                                                                                            |
+| `attachments/`                | Backend        | One folder per conversation and one per message under it, holding the files sent with that message under their own names; created on the first attachment stored |
+| `runtime/node/bin/node`       | Release builds | Node.js executable that runs the backend                                                                                                                         |
+| `runtime/backend/backend.mjs` | Release builds | Backend bundle that the release Node.js executable runs                                                                                                          |
+| `runtime/vmo/vmo`             | Release builds | vmo, the page reader the desktop starts, signed with the virtualization entitlement                                                                              |
 
 On macOS, `build.sh` installs the three `runtime/` entries under
 `${LYS_HOME:-$HOME/.lys}`. It treats an empty value as unset but does not reject
@@ -82,6 +83,7 @@ not find a runtime that `build.sh` installed under another directory.
 | LM Studio WebSocket base URL   | `ws://${LMSTUDIO_HOST}:${LMSTUDIO_PORT}`                                                                                                                                                                          |
 | SQLite path                    | `$LYS_HOME/lys_db.sqlite`; see [Lys home directory](#lys-home-directory)                                                                                                                                          |
 | Settings file path             | `$LYS_HOME/settings.json`, as `settingsFilePath`; read for the Tavily API key                                                                                                                                     |
+| Attachments directory          | `$LYS_HOME/attachments`, as `attachmentsDirectoryPath`; created with its folders on the first attachment stored                                                                                                   |
 | vmo endpoint                   | `127.0.0.1:8080`, as `vmoHost` and `vmoPort`, from `VMO_HOST` and `VMO_PORT` in `@lys/protocol`; where vmo listens. It reads every `read_page` page, and its `GET /health` decides whether `read_page` is offered |
 | Caliginia system prompt        | `src/utils/prompts/caliginia.txt`, as `caliginiaSystemPrompt`                                                                                                                                                     |
 | Lysiptera system prompt        | `src/utils/prompts/lysiptera.txt`, as `lysipteraSystemPrompt`                                                                                                                                                     |
@@ -108,7 +110,7 @@ and no defaults are applied.
 | `backendPort`, `lmstudioPort`, `vmoPort`                                  | An integer from 1 to 65535                                                                    |
 | `lmstudioHost`                                                            | A host name or IPv4 address, used unbracketed in the `http://` and `ws://` URLs               |
 | `vmoHost`                                                                 | An IPv4 loopback address (`127.x.x.x`); vmo does not authenticate its callers                 |
-| `databaseFilePath`, `settingsFilePath`                                    | An absolute path                                                                              |
+| `databaseFilePath`, `settingsFilePath`, `attachmentsDirectoryPath`        | An absolute path                                                                              |
 | `caliginiaSystemPrompt`, `lysipteraSystemPrompt`, `titleGenerationPrompt` | Non-empty text without leading or trailing whitespace                                         |
 | `titleGenerationMaxAttempts`, `generatedTitleMaxLength`                   | A positive integer                                                                            |
 
@@ -242,6 +244,8 @@ anything. A turn keeps the key it started with.
 The `tools` group holds the approval the person chose for each tool in Settings
 → Tools. `justRun` lists the tools set to Just run; every other tool, network
 tools included, is on Ask me and waits for the person before each call.
+`read_attachment`, which the backend adds to a turn itself, has no entry and
+never asks.
 
 - A name is 1 to 64 ASCII letters, digits, underscores, or hyphens, the rule
   every tool name follows. Any other value, `null` for the group or for

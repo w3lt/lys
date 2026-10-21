@@ -1,4 +1,4 @@
-import type { OpenAIFunctionTool } from "@lys/share"
+import { calculateImageTokens, type OpenAIFunctionTool } from "@lys/share"
 import type {
   ReplyContextMeasurement,
   ReplyContextMeasurementRequest,
@@ -48,7 +48,9 @@ const TOOL_OFFER_TEMPLATE_TOKENS = 160
  * each tool call it carries; each offered tool as its JSON. LM Studio wraps
  * them in the model's chat template, which this class does not render, so a
  * fixed allowance for the template's markup is added to each message, each
- * earlier tool call, and the tool offer. Owns no resource: the LLM service's
+ * earlier tool call, and the tool offer. Each image a user message sends is
+ * counted as {@link calculateImageTokens} estimates it from the image's
+ * sides, since the tokenizer measures text only. Owns no resource: the LLM service's
  * owner releases the runtime, and its queue keeps each accepted measurement
  * until it settles. Concurrency model: reentrant; it keeps no state, and the
  * borrowed query serializes its own work.
@@ -153,7 +155,8 @@ function buildToolText(tool: OpenAIFunctionTool): string {
  * @param message - Context message.
  * @param textTokens - Tokens of the message's text.
  * @returns The text's tokens plus the message's template allowance and, for
- * an assistant message, each of its calls' allowance.
+ * an assistant message, each of its calls' allowance; for a user message,
+ * also the estimated tokens of each image it sends.
  */
 function calculateMessageTokens(
   message: ReplyContextMessage,
@@ -161,10 +164,19 @@ function calculateMessageTokens(
 ): number {
   const toolCallCount =
     message.role === "assistant" ? message.toolCalls.length : 0
+  const imageTokens =
+    message.role === "user"
+      ? message.images.reduce(
+          (total, image) =>
+            total + calculateImageTokens(image.width, image.height),
+          0
+        )
+      : 0
   return (
     textTokens +
     MESSAGE_TEMPLATE_TOKENS +
-    toolCallCount * TOOL_CALL_TEMPLATE_TOKENS
+    toolCallCount * TOOL_CALL_TEMPLATE_TOKENS +
+    imageTokens
   )
 }
 

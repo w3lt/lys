@@ -1,15 +1,26 @@
-import { chatContextApi } from "@lys/protocol"
+import { chatContextApi, type LlmInfo } from "@lys/protocol"
 import type { BuiltInAgent } from "@lys/share"
 import { serializerCompiler } from "fastify-type-provider-zod"
-import { describe, expect, it } from "vitest"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { updateFastifyWithHttpTransport } from "../../../../../src/http"
 import SqliteAgentRecordStore from "../../../../../src/infrastructure/database/agents/sqliteAgentRecordStore"
 import AgentService from "../../../../../src/modules/agent/agentService"
 import type { ReplyModel } from "../../../../../src/modules/agent/replyModel"
+import AttachmentFileStore from "../../../../../src/modules/attachment/attachmentFileStore"
+import { buildReadAttachmentDefinition } from "../../../../../src/modules/attachment/readAttachmentTool"
 import registerChatContextRoute from "../../../../../src/modules/chat/routes/chatContextRoute"
 import { createLlmRuntimeUnavailableError } from "../../../../../src/modules/llm/llmRuntimeUnavailableError"
 import { createLlmServiceBusyError } from "../../../../../src/modules/llm/llmServiceBusyError"
+import LlmService from "../../../../../src/modules/llm/llmService"
 import AgentTool from "../../../../../src/modules/tool/tool"
+import {
+  createImageAttachment,
+  createPngBytes,
+  createTextAttachment
+} from "../../../support/attachmentFixtures"
 import {
   openConversationTestServices,
   saveAssistantMessageRow,
@@ -21,6 +32,7 @@ import {
   createTextPart
 } from "../../../support/conversationFixtures"
 import { createTestFastify } from "../../../support/fastifyTestApp"
+import { createDownloadedLlmModel } from "../../../support/llmFixtures"
 import { createRoomyReplyContextMeter } from "../../../support/replyContextMeterFakes"
 import {
   CHECK_SPELLING_TOOL,
@@ -72,19 +84,49 @@ const FAILED_ANSWER_PART = createTextPart({
   }
 })
 
+/** The model as the inventory lists it when it sees images. */
+const VISION_MODEL_INFO: LlmInfo = Object.freeze({
+  ...createDownloadedLlmModel({ modelKey: MODEL }),
+  vision: true,
+  trainedForToolUse: true,
+  loaded: true
+})
+
 /**
  * Creates an application with the chat-context route over a real agent
  * service and conversation reader on an in-memory database owned by the
  * current test.
  *
- * @returns The application, the database for seeding rows, and the context
- * meter spy every agent measures with; every context fits by default.
+ * @returns The application, the database for seeding rows, the context
+ * meter spy every agent measures with, which every context fits by default,
+ * the inventory spy, which rejects until a case configures it, and the
+ * attachment file store, over a directory removed when the test finishes.
  */
 async function createChatContextRouteApp() {
   const { app } = createTestFastify()
   const { database, history } = openConversationTestServices()
   const replyContextMeter = createRoomyReplyContextMeter()
+  const attachmentsDirectoryPath = mkdtempSync(
+    join(tmpdir(), "lys-chat-context-attachments-")
+  )
+  onTestFinished(() => {
+    rmSync(attachmentsDirectoryPath, { recursive: true, force: true })
+  })
+  const attachmentFileStore = new AttachmentFileStore(attachmentsDirectoryPath)
+  const llmService = new LlmService({
+    llmEngineOperationQueue: Object.freeze({
+      handleLlmEngineOperationRequest: () =>
+        Promise.reject(new Error("Unexpected LLM engine operation"))
+    })
+  })
+  const listLlmModels = vi
+    .spyOn(llmService, "listLlmModels")
+    .mockRejectedValue(
+      new Error("Unexpected context route call: listLlmModels")
+    )
   await updateFastifyWithHttpTransport(app)
+  app.decorate("llmService", llmService)
+  app.decorate("attachmentFileStore", attachmentFileStore)
   app.decorate(
     "agentService",
     new AgentService({
@@ -118,7 +160,38 @@ async function createChatContextRouteApp() {
     scope.setSerializerCompiler(serializerCompiler)
     registerChatContextRoute(scope)
   })
-  return { app, database, replyContextMeter }
+  return {
+    app,
+    database,
+    replyContextMeter,
+    listLlmModels,
+    attachmentFileStore
+  }
+}
+
+/**
+ * Stores a conversation whose only message carries one attachment.
+ *
+ * @param database - Database of the case's application.
+ * @param attachment - The stored attachment.
+ */
+function saveConversationWithAttachment(
+  database: Awaited<ReturnType<typeof createChatContextRouteApp>>["database"],
+  attachment: ReturnType<typeof createImageAttachment>
+): void {
+  saveConversationRow(database, {
+    id: STORED_CONVERSATION_ID,
+    title: null,
+    agentCode: "caliginia",
+    createdAt: "2026-10-15T10:00:00.000Z"
+  })
+  saveUserMessageRow(database, {
+    id: createFixtureUuidV7(2),
+    conversationId: STORED_CONVERSATION_ID,
+    content: "Look at this",
+    createdAt: "2026-10-15T10:00:01.000Z",
+    attachments: [attachment]
+  })
 }
 
 /**
@@ -224,7 +297,7 @@ describe("registerChatContextRoute", () => {
     ).toHaveBeenCalledExactlyOnceWith({
       messages: [
         { role: "system", content: CALIGINIA.systemPrompt },
-        { role: "user", content: "" }
+        { role: "user", content: "", images: [] }
       ],
       tools: [
         new AgentTool(READ_TEXT_FILE_TOOL).buildAgentFormat(),
@@ -263,14 +336,192 @@ describe("registerChatContextRoute", () => {
     ).toHaveBeenCalledExactlyOnceWith({
       messages: [
         { role: "system", content: CALIGINIA.systemPrompt },
-        { role: "user", content: "Earlier question" },
+        { role: "user", content: "Earlier question", images: [] },
         { role: "assistant", content: "Earlier answer", toolCalls: [] },
-        { role: "user", content: "Second question" },
-        { role: "user", content: "" }
+        { role: "user", content: "Second question", images: [] },
+        { role: "user", content: "", images: [] }
       ],
       tools: [],
       model: MODEL
     })
+  })
+
+  it("measures a stored image as a turn sends it, reading from the inventory whether the model sees images", async () => {
+    const {
+      app,
+      database,
+      replyContextMeter,
+      listLlmModels,
+      attachmentFileStore
+    } = await createChatContextRouteApp()
+    saveConversationWithAttachment(
+      database,
+      createImageAttachment(1, "photo.png")
+    )
+    const png = Buffer.from(createPngBytes(64, 32))
+    await attachmentFileStore.saveMessageAttachments(
+      STORED_CONVERSATION_ID,
+      createFixtureUuidV7(2),
+      [{ name: "photo.png", content: png }]
+    )
+    listLlmModels.mockResolvedValue([VISION_MODEL_INFO])
+
+    const response = await sendChatContextRequest(app, {
+      conversation: { kind: "existing", id: STORED_CONVERSATION_ID },
+      model: MODEL
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(replyContextMeter.findReplyContextMeasurement).toHaveBeenCalledOnce()
+    expect(
+      replyContextMeter.findReplyContextMeasurement.mock.calls[0]?.[0].messages
+    ).toEqual([
+      { role: "system", content: CALIGINIA.systemPrompt },
+      {
+        role: "user",
+        content:
+          "Look at this\n\nAttached files:\n[attachment 1] photo.png (image/png, 64×32, 33 bytes)",
+        images: [{ mediaType: "image/png", width: 64, height: 32, data: png }]
+      },
+      { role: "user", content: "", images: [] }
+    ])
+    expect(listLlmModels).toHaveBeenCalledOnce()
+  })
+
+  it.each([
+    [
+      "a model that cannot see images",
+      [{ ...VISION_MODEL_INFO, vision: false }]
+    ],
+    ["a model the inventory does not list", []]
+  ])(
+    "measures a stored image's placeholder for %s",
+    async (_label, inventory) => {
+      const { app, database, replyContextMeter, listLlmModels } =
+        await createChatContextRouteApp()
+      saveConversationWithAttachment(
+        database,
+        createImageAttachment(1, "photo.png")
+      )
+      listLlmModels.mockResolvedValue(inventory)
+
+      const response = await sendChatContextRequest(app, {
+        conversation: { kind: "existing", id: STORED_CONVERSATION_ID },
+        model: MODEL
+      })
+
+      expect(response.statusCode).toBe(200)
+      expect(
+        replyContextMeter.findReplyContextMeasurement.mock.calls[0]?.[0]
+          .messages[1]
+      ).toEqual({
+        role: "user",
+        content:
+          "Look at this\n\nAttached files:\n[attachment 1] photo.png (image/png, 64×32, 33 bytes)\n[attachment 1] photo.png is an image that this model cannot see.",
+        images: []
+      })
+    }
+  )
+
+  it("measures a stored text file's listing and, for a model trained for tool use, the attachment reader after the offered tools, as a turn offers it", async () => {
+    const { app, database, replyContextMeter, listLlmModels } =
+      await createChatContextRouteApp()
+    saveConversationWithAttachment(
+      database,
+      createTextAttachment(1, "notes.md", 18)
+    )
+    listLlmModels.mockResolvedValue([{ ...VISION_MODEL_INFO, vision: false }])
+
+    const response = await sendChatContextRequest(app, {
+      conversation: { kind: "existing", id: STORED_CONVERSATION_ID },
+      model: MODEL,
+      tools: { definitions: [], backendToolNames: ["look_up_word"] }
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(listLlmModels).toHaveBeenCalledOnce()
+    const measured =
+      replyContextMeter.findReplyContextMeasurement.mock.calls[0]?.[0]
+    expect(measured?.messages[1]).toEqual({
+      role: "user",
+      content:
+        "Look at this\n\nAttached files:\n[attachment 1] notes.md (text, 18 bytes)",
+      images: []
+    })
+    expect(measured?.tools).toEqual([
+      new AgentTool(LOOK_UP_WORD_TOOL).buildAgentFormat(),
+      new AgentTool(buildReadAttachmentDefinition()).buildAgentFormat()
+    ])
+  })
+
+  it.each([
+    [
+      "a model not trained for tool use",
+      [{ ...VISION_MODEL_INFO, trainedForToolUse: false }]
+    ],
+    ["a model the inventory does not list", []]
+  ])(
+    "measures a stored text file's listing without the reader for %s",
+    async (_label, inventory) => {
+      const { app, database, replyContextMeter, listLlmModels } =
+        await createChatContextRouteApp()
+      saveConversationWithAttachment(
+        database,
+        createTextAttachment(1, "notes.md", 18)
+      )
+      listLlmModels.mockResolvedValue(inventory)
+
+      const response = await sendChatContextRequest(app, {
+        conversation: { kind: "existing", id: STORED_CONVERSATION_ID },
+        model: MODEL
+      })
+
+      expect(response.statusCode).toBe(200)
+      expect(
+        replyContextMeter.findReplyContextMeasurement.mock.calls[0]?.[0].tools
+      ).toEqual([])
+    }
+  )
+
+  it("measures a stored image without the reader, as no text file is attached", async () => {
+    const { app, database, replyContextMeter, listLlmModels } =
+      await createChatContextRouteApp()
+    saveConversationWithAttachment(
+      database,
+      createImageAttachment(1, "photo.png")
+    )
+    listLlmModels.mockResolvedValue([VISION_MODEL_INFO])
+
+    const response = await sendChatContextRequest(app, {
+      conversation: { kind: "existing", id: STORED_CONVERSATION_ID },
+      model: MODEL
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(
+      replyContextMeter.findReplyContextMeasurement.mock.calls[0]?.[0].tools
+    ).toEqual([])
+  })
+
+  it("responds with the 503 problem of a full model-operation queue met while the inventory is read, without measuring", async () => {
+    const { app, database, replyContextMeter, listLlmModels } =
+      await createChatContextRouteApp()
+    saveConversationWithAttachment(
+      database,
+      createImageAttachment(1, "photo.png")
+    )
+    listLlmModels.mockRejectedValue(createLlmServiceBusyError())
+
+    const response = await sendChatContextRequest(app, {
+      conversation: { kind: "existing", id: STORED_CONVERSATION_ID },
+      model: MODEL
+    })
+
+    expect(response.statusCode).toBe(503)
+    expect(chatContextApi.responses[503].parse(response.json())).toMatchObject({
+      type: "urn:lys:problem:llm:service-busy"
+    })
+    expect(replyContextMeter.findReplyContextMeasurement).not.toHaveBeenCalled()
   })
 
   it("measures an offered backend tool that cannot run now", async () => {

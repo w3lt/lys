@@ -1,7 +1,6 @@
 import { useRef, useState } from "react"
 import type {
   ChangeEvent,
-  ClipboardEvent,
   DragEvent,
   KeyboardEvent,
   ReactElement,
@@ -20,6 +19,7 @@ import {
   formatConversationAgentName
 } from "@/lib/store/agents/conversation-agent"
 import { useChatViewStore } from "@/lib/store/chat-view"
+import { calculateStagedImageTokens } from "@/lib/store/chat-view/attachments"
 import { useConversationHistoryStore } from "@/lib/store/conversation-history"
 import { findShownToolCall, useToolCallStore } from "@/lib/store/tool-calls"
 
@@ -31,16 +31,7 @@ import ComposerModelMenu from "./ComposerComponents/ComposerModelMenu"
 import ComposerOfflineBanner from "./ComposerComponents/ComposerOfflineBanner"
 import ComposerPlusMenu from "./ComposerComponents/ComposerPlusMenu"
 import ComposerToolCallPrompt from "./ComposerComponents/ComposerToolCallPrompt"
-import {
-  PASTED_TEXT_ATTACHMENT_THRESHOLD,
-  removeComposerAttachment,
-  stageComposerFiles,
-  stagePastedText
-} from "./ComposerComponents/composer-attachments"
-import {
-  buildContextMeterState,
-  type ComposerAttachment
-} from "./ComposerComponents/composer-context"
+import { buildContextMeterState } from "./ComposerComponents/composer-context"
 import {
   calculateComposerActivity,
   formatComposerActivity,
@@ -70,18 +61,16 @@ export type ComposerProps = {
   readonly onStartConversation: () => void
 }
 
-/** Empty tray used as the initial value and while nothing is staged. */
-const NO_ATTACHMENTS: readonly ComposerAttachment[] = Object.freeze([])
-
 /**
  * Presents the chat draft editor, its context tray, and the session controls.
  *
  * @remarks The application store owns
  * runtime availability and persisted settings; the chat-view store owns the
- * draft, the conversation, the request lifecycle, and conversation opening;
- * the history store owns whether past conversations are shown. This component
- * owns only transient composer state: the staged attachment tray, whether a
- * drag is over the field, and whether the field has focus. The parent owns the
+ * draft, the staged attachment tray, the conversation, the request
+ * lifecycle, and conversation opening; the history store owns whether past
+ * conversations are shown. This component owns only transient composer
+ * state: whether a drag is over the field and whether the field has focus.
+ * The parent owns the
  * message-field ref. Enter without Shift submits once and suppresses the
  * newline; Shift+Enter keeps it. Sending requires a non-empty draft, and is
  * refused while a reply is awaited or streams, while a past conversation is
@@ -134,13 +123,19 @@ const NO_ATTACHMENTS: readonly ComposerAttachment[] = Object.freeze([])
  * otherwise. A rejection, from the field or the card, clears the draft; Allow
  * anyway keeps it.
  *
- * Two affordances are staged ahead of the capability behind them and are
- * deliberately inert: attachments are held in the renderer and never sent
- * because the chat protocol carries no attachment field; and selecting weights
- * updates settings in memory only, since this view does not persist them.
- * Context figures come from the backend's measurement of the conversation
- * with the loaded model, plus an estimate of the draft, and are marked `~`
- * wherever they appear; staged attachments are not counted.
+ * Files chosen through the add menu or dropped on the field are handed to
+ * the store, which reads and admits them and lists them in the tray above
+ * the field; they are sent with the next message. Why the store refused a
+ * file is said in the field's polite status line, which stays in the page
+ * while it has nothing to say. Pasted text stays in the draft, however long
+ * it is.
+ * One affordance is staged ahead of the capability behind it and is
+ * deliberately inert: selecting weights updates settings in memory only,
+ * since this view does not persist them. Context figures come from the
+ * backend's measurement of the conversation with the loaded model, plus an
+ * estimate of the draft and of the staged images, and are marked `~`
+ * wherever they appear; staged text files are read on request, so they are
+ * not counted.
  *
  * @param props - Parent-owned ref for the message field and the request
  * for a new conversation.
@@ -159,14 +154,18 @@ export function Composer({
   const setSettings = useLysStore((state) => state.setSettings)
   const startBackend = useLysStore((state) => state.startBackend)
 
+  const attachments = useChatViewStore((state) => state.attachments)
+  const attachmentRefusal = useChatViewStore((state) => state.attachmentRefusal)
   const conversation = useChatViewStore((state) => state.conversation)
   const conversationOpen = useChatViewStore((state) => state.conversationOpen)
   const inputDraft = useChatViewStore((state) => state.inputDraft)
   const request = useChatViewStore((state) => state.request)
+  const removeAttachment = useChatViewStore((state) => state.removeAttachment)
   const resetConversation = useChatViewStore((state) => state.resetConversation)
   const selectAgent = useChatViewStore((state) => state.selectAgent)
   const sendMessage = useChatViewStore((state) => state.sendMessage)
   const setInputDraft = useChatViewStore((state) => state.setInputDraft)
+  const addAttachments = useChatViewStore((state) => state.addAttachments)
   const stopStreaming = useChatViewStore((state) => state.stopStreaming)
 
   const agentList = useAgentStore((state) => state.list)
@@ -184,8 +183,6 @@ export function Composer({
     (state) => state.closeConversationHistory
   )
 
-  const [attachments, setAttachments] =
-    useState<readonly ComposerAttachment[]>(NO_ATTACHMENTS)
   const [isDropping, setIsDropping] = useState(false)
   const [isFocused, setIsFocused] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -208,8 +205,12 @@ export function Composer({
   )
   const contextMeter = buildContextMeterState(contextMeasurement.outcome, {
     draft: inputDraft,
+    attachmentTokens: calculateStagedImageTokens(attachments),
     reserve: settings.generation.replyCeiling
   })
+  const hasAttachedTextFiles = attachments.some(
+    (attachment) => attachment.draft.kind === "text"
+  )
   // A pending measurement may describe another conversation, so only a
   // current one refuses the send; the backend still checks every round.
   const isOverWindow =
@@ -280,29 +281,16 @@ export function Composer({
   }
 
   /**
-   * Diverts a long paste into the context tray instead of the draft.
-   *
-   * @param event - Paste event emitted by the composer textarea.
-   */
-  function handlePaste(event: ClipboardEvent<HTMLTextAreaElement>): void {
-    const pastedText = event.clipboardData.getData("text/plain")
-    if (pastedText.length < PASTED_TEXT_ATTACHMENT_THRESHOLD) return
-
-    event.preventDefault()
-    setAttachments((staged) => stagePastedText(staged, pastedText))
-  }
-
-  /**
    * Stages files chosen through the hidden file input.
    *
    * @param event - Change event emitted by the file input.
    * @remarks The chosen files are copied out of the event before staging,
-   * because React may run the state updater after this handler returns, when
-   * the event no longer has a current target and the input has been reset.
+   * because the store reads them after this handler returns, when the input
+   * has been reset.
    */
   function handleFilesChosen(event: ChangeEvent<HTMLInputElement>): void {
     const chosenFiles = Array.from(event.currentTarget.files ?? [])
-    setAttachments((staged) => stageComposerFiles(staged, chosenFiles))
+    void addAttachments(chosenFiles)
     event.currentTarget.value = ""
   }
 
@@ -340,16 +328,15 @@ export function Composer({
    *
    * @param event - Drop event carrying the released files.
    * @remarks The released files are copied out of the event before staging,
-   * because React may run the state updater after this handler returns, when
-   * the browser no longer exposes the drag data.
+   * because the store reads them after this handler returns, when the
+   * browser no longer exposes the drag data.
    */
   function handleDrop(event: DragEvent<HTMLDivElement>): void {
     event.preventDefault()
     setIsDropping(false)
     if (isUnavailable) return
 
-    const droppedFiles = Array.from(event.dataTransfer.files)
-    setAttachments((staged) => stageComposerFiles(staged, droppedFiles))
+    void addAttachments(Array.from(event.dataTransfer.files))
   }
 
   /**
@@ -444,13 +431,20 @@ export function Composer({
           {attachments.length > 0 ? (
             <ComposerAttachmentTray
               attachments={attachments}
-              onRemove={(attachmentId) =>
-                setAttachments((staged) =>
-                  removeComposerAttachment(staged, attachmentId)
-                )
-              }
+              onRemove={removeAttachment}
             />
           ) : null}
+          {/*
+           * Each refusal is keyed by its occurrence, so a repeated sentence
+           * is added to the status line again and announced again.
+           */}
+          <output className="composer__attachment-refusal">
+            {attachmentRefusal === undefined ? null : (
+              <span key={attachmentRefusal.occurrence}>
+                {attachmentRefusal.message}
+              </span>
+            )}
+          </output>
 
           <div className="composer__row">
             <input
@@ -475,7 +469,6 @@ export function Composer({
               onChange={(event) => setInputDraft(event.currentTarget.value)}
               onFocus={() => setIsFocused(true)}
               onKeyDown={handleKeyDown}
-              onPaste={handlePaste}
               placeholder={formatComposerPlaceholder(
                 connection,
                 activity,
@@ -584,7 +577,7 @@ export function Composer({
 
             {!isUnavailable ? (
               <ComposerContextMeter
-                hasStagedFiles={attachments.length > 0}
+                hasAttachedTextFiles={hasAttachedTextFiles}
                 meter={contextMeter}
                 onChangeWindow={handleChangeWindow}
               />

@@ -2,6 +2,7 @@ import { MAXIMUM_CONVERSATION_LIST_PAGE_SIZE } from "@lys/protocol"
 import { describe, expect, it, vi } from "vitest"
 import * as z from "zod"
 import type {
+  ConversationAttachment,
   ConversationSource,
   ReplyPart,
   ToolCallReplyPart
@@ -16,10 +17,15 @@ import type {
   UpdateReplyToolCallInput
 } from "../../../src/modules/conversation/records"
 import {
+  createImageAttachment,
+  createTextAttachment
+} from "./attachmentFixtures"
+import {
   createFixtureUuidV7,
   createReasoningPart,
   createTextPart,
-  createToolCallPart
+  createToolCallPart,
+  createUserMessage
 } from "./conversationFixtures"
 import { getThrownFailure } from "./databaseTransactionsContract"
 
@@ -48,6 +54,8 @@ export type UserMessageRowFixture = Readonly<{
    * than the stored one.
    */
   createdAt: string
+  /** Attachments stored under the message; none when omitted. */
+  attachments?: readonly ConversationAttachment[]
 }>
 
 /** Stored assistant-message columns a harness writes exactly as given. */
@@ -572,6 +580,7 @@ export function registerConversationRecordReaderContractSuite(
             id: createFixtureUuidV7(10),
             role: "user",
             content: "Hello",
+            attachments: [],
             createdAt: "2025-01-01T00:00:01.000Z"
           },
           {
@@ -584,6 +593,55 @@ export function registerConversationRecordReaderContractSuite(
             createdAt: "2025-01-01T00:00:02.000Z",
             updatedAt: "2025-01-01T00:00:03.000Z"
           }
+        ])
+      })
+
+      it("projects a user message's stored attachments in number order, not in name or write order, each with its kind's values", () => {
+        const harness = createHarness()
+        harness.saveConversation({
+          id: CONVERSATION_ID,
+          title: null,
+          agentCode: "lys",
+          createdAt: CREATED_AT
+        })
+        harness.saveUserMessage({
+          id: createFixtureUuidV7(10),
+          conversationId: CONVERSATION_ID,
+          content: "Look",
+          createdAt: "2025-01-01T00:00:01.000Z",
+          attachments: [
+            createImageAttachment(2, "album.png", { width: 640, height: 480 }),
+            createTextAttachment(1, "notes.md", 1234)
+          ]
+        })
+        harness.saveUserMessage({
+          id: createFixtureUuidV7(12),
+          conversationId: CONVERSATION_ID,
+          content: "Again",
+          createdAt: "2025-01-01T00:00:02.000Z",
+          attachments: [createTextAttachment(3, "later.txt", 5)]
+        })
+
+        expect(
+          harness.recordReader
+            .findConversation(CONVERSATION_ID)
+            ?.messages.map((message) =>
+              message.role === "user" ? message.attachments : []
+            )
+        ).toEqual([
+          [
+            { kind: "text", number: 1, name: "notes.md", sizeBytes: 1234 },
+            {
+              kind: "image",
+              number: 2,
+              name: "album.png",
+              sizeBytes: 33,
+              mediaType: "image/png",
+              width: 640,
+              height: 480
+            }
+          ],
+          [{ kind: "text", number: 3, name: "later.txt", sizeBytes: 5 }]
         ])
       })
 
@@ -656,6 +714,7 @@ export function registerConversationRecordReaderContractSuite(
           id: createFixtureUuidV7(99),
           role: "user",
           content: "local only",
+          attachments: [],
           createdAt: "2025-01-01T00:00:09.000Z"
         })
 
@@ -1069,7 +1128,7 @@ export function registerConversationRecordEditorContractSuite(
         ).toBe(0)
       })
 
-      it("removes the transcript, its replies' parts, and its sources with the conversation", () => {
+      it("removes the transcript, its replies' parts, its attachments, and its sources with the conversation", () => {
         const harness = createHarness()
         saveConversationWithReply(harness, CONVERSATION_ID, {
           sequence: 11,
@@ -1083,6 +1142,13 @@ export function registerConversationRecordEditorContractSuite(
           number: 1,
           url: "https://example.com/",
           title: "Example"
+        })
+        harness.saveUserMessage({
+          id: createFixtureUuidV7(12),
+          conversationId: CONVERSATION_ID,
+          content: "Look",
+          createdAt: CHANGED_AT,
+          attachments: [createTextAttachment(1, "notes.md")]
         })
 
         harness.recordEditor.deleteConversation(CONVERSATION_ID)
@@ -1104,6 +1170,16 @@ export function registerConversationRecordEditorContractSuite(
         expect(
           harness.recordReader.findConversation(CONVERSATION_ID)
         ).toMatchObject({ messages: [], sources: [] })
+        harness.saveUserMessage({
+          id: createFixtureUuidV7(12),
+          conversationId: CONVERSATION_ID,
+          content: "Look again",
+          createdAt: CHANGED_AT,
+          attachments: [createTextAttachment(1, "notes.md")]
+        })
+        expect(
+          harness.recordReader.findConversation(CONVERSATION_ID)?.messages
+        ).toMatchObject([{ attachments: [{ number: 1, name: "notes.md" }] }])
       })
     })
 
@@ -1155,6 +1231,7 @@ async function saveConversationAroundAwait(
     id: createFixtureUuidV7(10),
     role: "user",
     content: "after await",
+    attachments: [],
     createdAt: CHANGED_AT
   })
 }
@@ -1303,6 +1380,7 @@ export function registerConversationTurnRecordWriterContractSuite(
             id: createFixtureUuidV7(10),
             role: "user",
             content: "late",
+            attachments: [],
             createdAt: CHANGED_AT
           })
         ).toThrow("Database operation has ended")
@@ -1737,6 +1815,59 @@ export function registerConversationTurnTransactionContractSuite(
       })
     })
 
+    it("stores a user message's attachments that later reads project in number order", () => {
+      const { turnRecordWriter, recordReader } = createHarness()
+      const message = createUserMessage(10, "Look", [
+        createTextAttachment(1, "notes.md", 1234),
+        createImageAttachment(2, "photo.png", { width: 640, height: 480 })
+      ])
+
+      turnRecordWriter.handleConversationTurnWriteRequest((transaction) => {
+        transaction.createConversation(
+          createNewConversationMetadata(CONVERSATION_ID)
+        )
+        transaction.createUserMessage(CONVERSATION_ID, message)
+      })
+
+      expect(recordReader.findConversation(CONVERSATION_ID)?.messages).toEqual([
+        message
+      ])
+    })
+
+    it("refuses a user message whose attachment number the conversation already uses and keeps the turn's writes out", () => {
+      const harness = createHarness()
+      harness.saveConversation({
+        id: CONVERSATION_ID,
+        title: null,
+        agentCode: "lys",
+        createdAt: CREATED_AT
+      })
+      harness.saveUserMessage({
+        id: createFixtureUuidV7(10),
+        conversationId: CONVERSATION_ID,
+        content: "First",
+        createdAt: CREATED_AT,
+        attachments: [createTextAttachment(1, "notes.md")]
+      })
+
+      expect(() =>
+        harness.turnRecordWriter.handleConversationTurnWriteRequest(
+          (transaction) => {
+            transaction.createUserMessage(
+              CONVERSATION_ID,
+              createUserMessage(11, "Second", [
+                createTextAttachment(1, "other.md")
+              ])
+            )
+          }
+        )
+      ).toThrow()
+
+      expect(
+        harness.recordReader.findConversation(CONVERSATION_ID)?.messages
+      ).toHaveLength(1)
+    })
+
     it("finds no conversation that is not stored", () => {
       const { turnRecordWriter } = createHarness()
 
@@ -1801,6 +1932,7 @@ export function registerConversationTurnTransactionContractSuite(
             id: createFixtureUuidV7(10),
             role: "user",
             content: "Hello",
+            attachments: [],
             createdAt: CHANGED_AT
           })
         }
@@ -1857,6 +1989,7 @@ export function registerConversationTurnTransactionContractSuite(
             id: createFixtureUuidV7(10),
             role: "user",
             content: "Hello",
+            attachments: [],
             createdAt: CHANGED_AT
           })
         }
@@ -1897,6 +2030,7 @@ export function registerConversationTurnTransactionContractSuite(
         id: createFixtureUuidV7(10),
         role: "user",
         content: "Hello",
+        attachments: [],
         createdAt: CHANGED_AT
       } as const
       const assistantMessage = {

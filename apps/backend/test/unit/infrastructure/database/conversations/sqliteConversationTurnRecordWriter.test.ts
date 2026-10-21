@@ -69,6 +69,7 @@ describe("SqliteConversationTurnRecordWriter", () => {
             id: createFixtureUuidV7(10),
             role: "user",
             content: "Hello",
+            attachments: [],
             createdAt: "2025-01-01T00:00:01.000Z"
           })
         }

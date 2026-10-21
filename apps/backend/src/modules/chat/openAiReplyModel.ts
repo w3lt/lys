@@ -2,12 +2,15 @@ import type { ConversationAssistantMessageFinishReason } from "@lys/share"
 import type {
   ChatCompletionAssistantMessageParam,
   ChatCompletionChunk,
+  ChatCompletionContentPartImage,
   ChatCompletionMessageFunctionToolCall,
-  ChatCompletionMessageParam
+  ChatCompletionMessageParam,
+  ChatCompletionUserMessageParam
 } from "openai/resources/index.mjs"
 import type {
   ContextToolCall,
   ModelToolCall,
+  ReplyContextImage,
   ReplyContextMessage,
   ReplyModel,
   ReplyStreamEvent,
@@ -31,6 +34,9 @@ type AssistantContextMessage = Extract<
   ReplyContextMessage,
   { role: "assistant" }
 >
+
+/** Context message carrying the person's text and the images the model sees. */
+type UserContextMessage = Extract<ReplyContextMessage, { role: "user" }>
 
 /**
  * Translates a borrowed OpenAI-compatible streamed chat completion into agent
@@ -244,7 +250,7 @@ function buildChatCompletionMessage(
     case "system":
       return { role: "system", content: message.content }
     case "user":
-      return { role: "user", content: message.content }
+      return buildUserCompletionMessage(message)
     case "assistant":
       return buildAssistantCompletionMessage(message)
     case "tool":
@@ -253,6 +259,49 @@ function buildChatCompletionMessage(
         tool_call_id: message.toolCallId,
         content: message.content
       }
+  }
+}
+
+/**
+ * Builds the chat completion message of the person's text and images.
+ *
+ * @param message - User context message.
+ * @returns The text alone when the message sends no image; otherwise a text
+ * part followed by one image part per image, in the message's order, each
+ * carrying the image's bytes as a data URL.
+ */
+function buildUserCompletionMessage(
+  message: UserContextMessage
+): ChatCompletionUserMessageParam {
+  if (message.images.length === 0)
+    return { role: "user", content: message.content }
+  return {
+    role: "user",
+    content: [
+      { type: "text", text: message.content },
+      ...message.images.map(buildImageContentPart)
+    ]
+  }
+}
+
+/**
+ * Builds the request form of one image the model sees.
+ *
+ * @param image - Image from the context.
+ * @returns An image part whose URL is a data URL of the image's media type
+ * and its bytes in base64.
+ */
+function buildImageContentPart(
+  image: ReplyContextImage
+): ChatCompletionContentPartImage {
+  const encodedData = Buffer.from(
+    image.data.buffer,
+    image.data.byteOffset,
+    image.data.byteLength
+  ).toString("base64")
+  return {
+    type: "image_url",
+    image_url: { url: `data:${image.mediaType};base64,${encodedData}` }
   }
 }
 

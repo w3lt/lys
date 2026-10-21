@@ -162,4 +162,10 @@ export type TurnBuiltInTool = Readonly<{
   definition: ToolDefinition
   /** Tool that parses and runs the turn's calls. */
   tool: BuiltInTool
+  /**
+   * Whether the tool's calls run without asking the person: true only for a
+   * tool that reads what the person gave Lys for this conversation, such as
+   * the attachment reader; every other tool's calls pass the approval gate.
+   */
+  runsWithoutApproval: boolean
 }>

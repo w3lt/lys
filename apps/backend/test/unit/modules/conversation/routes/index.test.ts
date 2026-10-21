@@ -3,9 +3,13 @@ import {
   type ListConversationsApiResponse
 } from "@lys/protocol"
 import type { Conversation, ConversationMetadata } from "@lys/share"
-import { describe, expect, it, vi } from "vitest"
+import { existsSync, mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { createConversationListCursor } from "../../../../../src/modules/conversation/listOptions"
 import { updateFastifyWithHttpTransport } from "../../../../../src/http"
+import AttachmentFileStore from "../../../../../src/modules/attachment/attachmentFileStore"
 import updateFastifyWithConversationRoutes from "../../../../../src/modules/conversation/routes"
 import {
   createAssistantMessage,
@@ -88,20 +92,28 @@ function handleUnexpectedHistoryCall(operationName: string): never {
 
 /**
  * Creates an application with the HTTP transport and the conversation routes
- * registered over a stubbed history reader and editor.
+ * registered over a stubbed history reader and editor and a real attachment
+ * file store.
  *
- * @returns The application, captured logs, and a spy for each history
- * operation the routes can call.
+ * @returns The application, captured logs, a spy for each history operation
+ * the routes can call, and the attachment file store with its directory.
  * @remarks The routes read the decorated history reader and editor at
  * registration, so the returned spies control every outcome. Each spy throws
  * until the case configures it; no database row is read or written. The
  * in-memory database behind the decorated adapters is closed when the test
- * finishes.
+ * finishes, and the attachments directory, created for the test, is removed.
  */
 async function createConversationRouteApp() {
   const testFastify = createTestFastify()
   const { history: historyReader, editor: historyEditor } =
     openConversationTestServices()
+  const attachmentsDirectoryPath = mkdtempSync(
+    join(tmpdir(), "lys-conversation-routes-attachments-")
+  )
+  onTestFinished(() => {
+    rmSync(attachmentsDirectoryPath, { recursive: true, force: true })
+  })
+  const attachmentFileStore = new AttachmentFileStore(attachmentsDirectoryPath)
   const historyCalls = {
     listConversations: vi
       .spyOn(historyReader, "listConversations")
@@ -125,8 +137,14 @@ async function createConversationRouteApp() {
   await updateFastifyWithHttpTransport(testFastify.app)
   testFastify.app.decorate("conversationHistoryReader", historyReader)
   testFastify.app.decorate("conversationHistoryEditor", historyEditor)
+  testFastify.app.decorate("attachmentFileStore", attachmentFileStore)
   await updateFastifyWithConversationRoutes(testFastify.app)
-  return { ...testFastify, historyCalls }
+  return {
+    ...testFastify,
+    historyCalls,
+    attachmentFileStore,
+    attachmentsDirectoryPath
+  }
 }
 
 describe("updateFastifyWithConversationRoutes", () => {
@@ -360,9 +378,25 @@ describe("updateFastifyWithConversationRoutes", () => {
   })
 
   describe("DELETE /api/v1/conversations/:conversationId", () => {
-    it("deletes the conversation and responds without a body", async () => {
-      const { app, historyCalls } = await createConversationRouteApp()
+    it("deletes the conversation with its attachment files and responds without a body", async () => {
+      const {
+        app,
+        historyCalls,
+        attachmentFileStore,
+        attachmentsDirectoryPath
+      } = await createConversationRouteApp()
       historyCalls.deleteConversation.mockReturnValue(true)
+      await attachmentFileStore.saveMessageAttachments(
+        CONVERSATION_ID,
+        createFixtureUuidV7(2),
+        [{ name: "notes.md", content: new TextEncoder().encode("Notes") }]
+      )
+      const otherConversationId = createFixtureUuidV7(5)
+      await attachmentFileStore.saveMessageAttachments(
+        otherConversationId,
+        createFixtureUuidV7(6),
+        [{ name: "kept.md", content: new TextEncoder().encode("Kept") }]
+      )
 
       const response = await app.inject({
         method: "DELETE",
@@ -374,11 +408,47 @@ describe("updateFastifyWithConversationRoutes", () => {
       expect(historyCalls.deleteConversation).toHaveBeenCalledWith(
         CONVERSATION_ID
       )
+      expect(existsSync(join(attachmentsDirectoryPath, CONVERSATION_ID))).toBe(
+        false
+      )
+      expect(
+        existsSync(join(attachmentsDirectoryPath, otherConversationId))
+      ).toBe(true)
     })
 
-    it("responds with the missing-conversation problem", async () => {
-      const { app, historyCalls } = await createConversationRouteApp()
+    it("still responds without a body, logging the failure with its cause, when the attachment files cannot be removed", async () => {
+      const { app, logs, historyCalls, attachmentFileStore } =
+        await createConversationRouteApp()
+      historyCalls.deleteConversation.mockReturnValue(true)
+      const removalFailure = new Error("EACCES: permission denied")
+      vi.spyOn(
+        attachmentFileStore,
+        "deleteConversationAttachments"
+      ).mockRejectedValue(removalFailure)
+
+      const response = await app.inject({
+        method: "DELETE",
+        url: `/api/v1/conversations/${CONVERSATION_ID}`
+      })
+
+      expect(response.statusCode).toBe(204)
+      expect(logs).toContainEqual(
+        expect.objectContaining({
+          level: "error",
+          msg: "The deleted conversation's attachment files could not be removed",
+          err: expect.objectContaining({ message: removalFailure.message })
+        })
+      )
+    })
+
+    it("responds with the missing-conversation problem without touching the attachment files", async () => {
+      const { app, historyCalls, attachmentFileStore } =
+        await createConversationRouteApp()
       historyCalls.deleteConversation.mockReturnValue(false)
+      const deleteConversationAttachments = vi.spyOn(
+        attachmentFileStore,
+        "deleteConversationAttachments"
+      )
       const url = `/api/v1/conversations/${MISSING_CONVERSATION_ID}`
 
       const response = await app.inject({ method: "DELETE", url })
@@ -390,6 +460,7 @@ describe("updateFastifyWithConversationRoutes", () => {
       expect(
         conversationNotFoundProblemSchema.parse(response.json())
       ).toMatchObject({ instance: url })
+      expect(deleteConversationAttachments).not.toHaveBeenCalled()
     })
 
     it("responds with a server error when the conversation cannot be deleted", async () => {

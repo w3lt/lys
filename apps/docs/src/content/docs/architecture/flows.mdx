@@ -77,21 +77,30 @@ seconds. Quitting Lys stops vmo and the backend together.
 2. The desktop creates a request token and an `AbortController` that ends
    only its own observation of the stream.
 3. The desktop sends `POST /api/v1/chat` with `conversation`, `message`,
-   `model`, and required `generationOptions`. `conversation` is
+   `model`, required `generationOptions`, and `attachments` when the tray
+   holds files, each with its name and base64 content. `conversation` is
    `{ kind: "new", agentCode }` for a new conversation, naming the agent
    selected in the composer (`caliginia` until another is selected), and
    `{ kind: "existing", id }` to continue one, which keeps its agent. Generation options contain
    the current temperature and an optional reply ceiling; a local zero ceiling
    is omitted from the request.
-4. The backend finds the agent that answers, then creates or reuses the
-   conversation, inserts the user message, and inserts an empty streaming
-   assistant message. When no agent has the requested code, the conversation
-   is not stored, or its agent was deleted, the backend answers with a
-   problem instead and stores nothing.
+4. The backend reads what each attachment is from its bytes and finds the
+   agent that answers. When the request or the conversation holds an
+   attachment, it reads from LM Studio whether the model sees images and is
+   trained for tool use. It then writes the attachment files under
+   `$LYS_HOME/attachments/<conversation id>/<message id>/`, creates or reuses
+   the conversation, inserts the user message with its numbered attachments,
+   and inserts an empty streaming assistant message. When an attachment is
+   neither text nor an image Lys sends, no agent has the requested code, the
+   conversation is not stored, its agent was deleted, an image is attached
+   for a model without vision, or LM Studio cannot answer about the model, the
+   backend answers with a problem instead and stores nothing.
 5. The backend emits a `start-new-conversation-turn` or
    `start-existing-conversation-turn` event.
-6. Before each round of the reply, the backend measures the round's context
-   with the loaded model's tokenizer. A round that does not fit the context
+6. Before each round of the reply, the backend builds the round's context,
+   in which each user message carries its text, the list of its attachments,
+   and the images a model with vision sees, and measures it with the loaded
+   model's tokenizer, counting each image as its estimate. A round that does not fit the context
    length the model is loaded with, together with the reply ceiling, or whose
    model is not loaded, is not sent: the reply is stored failed and the
    backend emits `error` with the reason. Otherwise the backend stores each
@@ -124,13 +133,16 @@ seconds. Quitting Lys stops vmo and the backend together.
    older one.
 3. The backend finds the agent and the conversation as the chat route does,
    builds the system prompt, offered tools, and stored messages a turn's first
-   round would send, with an empty new message for the markup around the
-   text, and measures them with the loaded model's tokenizer through the
-   model operation queue.
+   round would send, their attachment lists and, for a model with vision,
+   their images included, and `read_attachment` among the tools when the
+   conversation holds a text file and the model is trained for tool use, with
+   an empty new message for the markup around the text, and measures them
+   with the loaded model's tokenizer through the model operation queue.
 4. The backend answers with the context length and the tokens of each part,
    or with a `503` problem when the model is not loaded, LM Studio is not
    connected, or the queue is full.
-5. The composer adds an estimate of the draft's text and the reply ceiling,
+5. The composer adds an estimate of the draft's text, the staged images'
+   estimates, and the reply ceiling,
    shows the result in its context meter, and disables Send while the request
    would not fit.
 

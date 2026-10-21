@@ -1,6 +1,11 @@
+import type { LlmInfo } from "@lys/protocol"
+
 import type { BackendServerStatus } from "@/lib/store"
 import type { ModelRuntimeAvailability } from "./lm-studio-connection"
-import type { ModelRuntimeState } from "@/lib/store/model-runtime"
+import type {
+  ModelInventoryState,
+  ModelRuntimeState
+} from "@/lib/store/model-runtime"
 
 import type { LocalModelDescriptor } from "./inventory"
 
@@ -21,6 +26,29 @@ export function readLoadedModelKey(
   modelRuntime: ModelRuntimeState
 ): string | null {
   return modelRuntime.status === "loaded" ? modelRuntime.modelKey : null
+}
+
+/**
+ * Finds the inventory entry of the loaded model.
+ *
+ * @param modelRuntime - Current residency state; only a loaded model counts.
+ * @param modelInventory - Latest inventory, which lists what each model can
+ * do.
+ * @returns The loaded model's entry in a ready inventory, or undefined while
+ * no model is loaded, the inventory cannot be read, or it does not list the
+ * loaded model.
+ */
+export function findLoadedModel(
+  modelRuntime: ModelRuntimeState,
+  modelInventory: ModelInventoryState
+): LlmInfo | undefined {
+  if (modelRuntime.status !== "loaded" || modelInventory.status !== "ready") {
+    return undefined
+  }
+
+  return modelInventory.models.find(
+    (model) => model.modelKey === modelRuntime.modelKey
+  )
 }
 
 /**

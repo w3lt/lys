@@ -75,6 +75,7 @@ const singletonPlugin: FastifyPluginAsync<
   app.decorate("builtInTools", singletonServices.builtInTools)
   app.decorate("webSearchToolProvider", singletonServices.webSearchToolProvider)
   app.decorate("toolApprovalService", singletonServices.toolApprovalService)
+  app.decorate("attachmentFileStore", singletonServices.attachmentFileStore)
 }
 
 /** Fastify plugin that installs application-scoped singleton services. */

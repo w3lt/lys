@@ -88,9 +88,11 @@ the directory at vmo's first start, and only vmo writes it.
   both files and unpacks `vminit` again: after an update that pins another
   `vminit`, when a vmo from before
   [#218](https://github.com/w3lt/lys/issues/218) left `initfs.ext4` without
-  it, or when an unpack did not finish. When `initfs.ext4` exists and
-  `initfs.ext4.vminit-digest` exists but cannot be read, the start stops
-  without deleting either
+  it, or when an unpack did not finish, even because of a power loss. vmo
+  writes `initfs.ext4.vminit-digest` only once `initfs.ext4` is on disk.
+  When vmo cannot check `initfs.ext4`, or `initfs.ext4.vminit-digest` exists
+  but cannot be read, the start stops without deleting either. When it cannot
+  delete them, the start stops too
 - at each start, after it fetches `latest`, vmo deletes every other image in
   the store and the files that only those images used, so a reader image that
   `latest` no longer names does not stay

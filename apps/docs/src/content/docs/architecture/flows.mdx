@@ -46,8 +46,10 @@ A manual Start follows steps 4–8.
    reader image's `latest` tag, pulls the reader image when it does not have
    it yet, and deletes every other image in
    [its image store](/operate/data/#vmos-image-store). On a first start, this
-   can take minutes. vmo then listens at `127.0.0.1:8080`, or exits when a
-   pull, the unpack, or the deletion fails.
+   can take minutes. vmo then listens at `127.0.0.1:8080`. It exits instead
+   when a pull fails; when it cannot read which `vminit` the store holds
+   unpacked, delete that unpack, or unpack and save the new one; or when it
+   cannot delete the other images.
 4. Every second, for up to ten minutes, the store reads `get_vmo_status` and,
    while vmo runs, `get_vmo_health`. vmo becomes `running` once it answers,
    `stopped` when its process exits first, and `unresponsive` after ten

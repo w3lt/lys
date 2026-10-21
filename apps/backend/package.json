@@ -12,7 +12,7 @@
   "dependencies": {
     "@fastify/cors": "^11.3.1",
     "@fastify/sse": "^0.6.1",
-    "@lmstudio/sdk": "^2.0.0",
+    "@lmstudio/sdk": "^2.1.0",
     "@lys/protocol": "workspace:*",
     "@lys/share": "workspace:*",
     "@mozilla/readability": "^0.6.0",

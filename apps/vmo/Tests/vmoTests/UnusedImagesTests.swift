@@ -128,19 +128,6 @@ private func hasContent(_ image: Image, digest: String) async throws -> Bool {
     }
 }
 
-/// Makes `directory` writable again, as a test that made it read-only must
-/// before ``TemporaryContainerRoot`` removes it.
-///
-/// - Parameter directory: A directory the test made read-only. A test issue
-///   is recorded when its permissions can't be set.
-private func restoreWritePermission(of directory: URL) {
-    do {
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: directory.path)
-    } catch {
-        Issue.record(error, "Could not make \(directory.path) writable again")
-    }
-}
-
 /// Checks that ``ImageStore/deleteImages(except:)`` leaves a store holding
 /// the kept images and nothing else, and what it leaves when deleting fails.
 ///

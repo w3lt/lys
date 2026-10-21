@@ -3,7 +3,7 @@ import Foundation
 import Testing
 
 /// Owns one test's temporary directory to hold the files of the container
-/// managers, image stores, and image layouts created in it, while
+/// managers, image stores, image layouts, and archives created in it, while
 /// guaranteeing that the directory is removed when the test releases it.
 ///
 /// Concurrency model: single-owner. One test creates, uses, and releases it.
@@ -44,5 +44,18 @@ final class TemporaryContainerRoot {
             initfs: .block(format: "ext4", source: url.appending(path: "missing-initfs.ext4").path, destination: "/"),
             root: url
         )
+    }
+}
+
+/// Makes `directory` writable again, as a test that made it read-only must
+/// before ``TemporaryContainerRoot`` removes it.
+///
+/// - Parameter directory: A directory the test made read-only. A test issue
+///   is recorded when its permissions can't be set.
+func restoreWritePermission(of directory: URL) {
+    do {
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: directory.path)
+    } catch {
+        Issue.record(error, "Could not make \(directory.path) writable again")
     }
 }

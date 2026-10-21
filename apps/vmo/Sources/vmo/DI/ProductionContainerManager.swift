@@ -9,7 +9,10 @@ private let initfsReference = "ghcr.io/apple/containerization/vminit:0.52.0"
 ///
 /// Its image store is vmo's own, `com.w3lt.lys-vmo` in the user's Application
 /// Support directory, which Containerization creates when it's missing. It
-/// pulls the vminit image when that store doesn't have it yet, and pulls the
+/// pulls the vminit image when that store doesn't have it yet, and unpacks
+/// the filesystem that VMs boot from out of that image unless the store holds
+/// it unpacked from that image already; see
+/// ``ImageStore/loadInitfs(reference:)``. It pulls the
 /// ``readPageImageReference`` image at every start, so vmo reads pages with
 /// the image its `latest` tag names at that time. It then deletes every other
 /// image in the store, such as the reader image `latest` named before, with
@@ -21,8 +24,10 @@ private let initfsReference = "ghcr.io/apple/containerization/vminit:0.52.0"
 /// - Returns: A manager that stores images and VM files in vmo's image store.
 /// - Throws: Containerization's error when vmnet refuses to create the
 ///   network, an image can't be pulled, for example without network access,
-///   or deleting the images vmo no longer uses fails; vmo then doesn't start,
-///   even when an earlier pull left the reader image in the store.
+///   vminit can't be unpacked, or deleting the images vmo no longer uses
+///   fails, or the file system's error when the record of the vminit that
+///   was unpacked can't be read or written; vmo then doesn't start, even when
+///   an earlier pull left the reader image in the store.
 func createProductionContainerManager() async throws -> ContainerManager {
     // TODO(#200): this kernel path only exists on the author's machine, so
     // read-page can't boot its VMs on any other Mac. vmo needs another way to
@@ -33,11 +38,13 @@ func createProductionContainerManager() async throws -> ContainerManager {
     // and deleting what vmo no longer uses there could delete their images or
     // the blobs of a pull they run at the same moment.
     let imageStorePath = URL.applicationSupportDirectory.appending(path: "com.w3lt.lys-vmo", directoryHint: .isDirectory)
-    let manager = try await ContainerManager(
+    let network = SharedNetwork(try VmnetNetwork())
+    let imageStore = try ImageStore(path: imageStorePath)
+    let manager = try ContainerManager(
         kernel: Kernel(path: kernelPath, platform: .linuxArm),
-        initfsReference: initfsReference,
-        root: imageStorePath,
-        network: SharedNetwork(try VmnetNetwork())
+        initfs: try await imageStore.loadInitfs(reference: initfsReference),
+        imageStore: imageStore,
+        network: network
     )
     // Pulled now, even when the store has it: `latest` moves to each main
     // build, and a stored image would never follow it. A read can't pull it

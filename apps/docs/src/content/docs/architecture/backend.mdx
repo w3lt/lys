@@ -338,10 +338,14 @@ machine:
    fetches at each start. The reader loads the page in headless Chromium,
    with the page's scripts running and its redirects followed, for up to 10
    seconds of virtual time, in which the page's timers run without waiting.
-   It writes the HTML of the DOM it ended on, without shadow trees, so text
-   inside a web component's shadow root is not read
-   ([#209](https://github.com/w3lt/lys/issues/209)). It leaves out scripts,
-   styles, `<noscript>`, `<link>`, `<meta>`, and `class` and `style`
+   It writes the HTML of the DOM it ended on as the page renders it, built by
+   a script of the reader's own that the page's scripts cannot reach: a web
+   component's open shadow root stands in place of the component's children,
+   and light content slotted into the component stands at its `<slot>`, so
+   it is read once, where it shows. Light content that no slot shows is left
+   out. A closed shadow root cannot be read, so a component that has one
+   keeps its own children, and a `<template>` is written empty. It leaves out
+   scripts, styles, `<noscript>`, `<link>`, `<meta>`, and `class` and `style`
    attributes. With no stylesheet left, text a stylesheet hides is read like
    any other text. Without `<meta>`, Readability finds no site or publication
    date, and without `class` it cannot use class names to drop boilerplate

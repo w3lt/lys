@@ -205,7 +205,7 @@ struct InitfsTests {
             try await imageStore.loadInitfs(reference: laterVminitReference)
         }
 
-        #expect(!FileManager.default.fileExists(atPath: imageStore.initfsSourceFile.path))
+        #expect(!FileManager.default.fileExists(atPath: imageStore.initfsVminitDigestFile.path))
         let initfs = try await imageStore.loadInitfs(reference: vminitReference)
         #expect(try readVminitd(fromInitfsAt: initfs.source) == vminitReference)
     }
@@ -217,7 +217,7 @@ struct InitfsTests {
         try await saveVminitImage(reference: vminitReference)
         try await saveVminitImage(reference: laterVminitReference)
         _ = try await imageStore.loadInitfs(reference: vminitReference)
-        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: imageStore.initfsSourceFile.path)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: imageStore.initfsVminitDigestFile.path)
 
         let error = await #expect(throws: CocoaError.self) {
             try await imageStore.loadInitfs(reference: laterVminitReference)

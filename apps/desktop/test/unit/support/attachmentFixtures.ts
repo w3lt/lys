@@ -27,7 +27,7 @@ export function createPngBytes(
  * @returns Their base64 text.
  */
 export function buildAttachmentContent(bytes: Uint8Array): string {
-  return btoa(String.fromCharCode(...bytes))
+  return btoa(String.fromCodePoint(...bytes))
 }
 
 /**

@@ -538,13 +538,13 @@ async function saveTurn(
   )
   try {
     return dependencies.turns.createConversationTurn(turnOptions)
-  } catch (turnFailure) {
+  } catch (error) {
     await deleteAttachmentsAfterFailure(
       attachmentFiles,
       { conversationId: conversation.id, messageId: userMessageId },
-      turnFailure
+      error
     )
-    throw turnFailure
+    throw error
   }
 }
 
@@ -569,11 +569,11 @@ async function deleteAttachmentsAfterFailure(
       message.conversationId,
       message.messageId
     )
-  } catch (deletionFailure) {
+  } catch (error) {
     throw new AggregateError(
-      [turnFailure, deletionFailure],
+      [turnFailure, error],
       "Attachment files could not be deleted after the turn failed to store",
-      { cause: deletionFailure }
+      { cause: error }
     )
   }
 }

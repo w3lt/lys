@@ -77,13 +77,15 @@ export default class AttachmentFileStore {
    * @param messageId - UUIDv7 of the user message; its folder must not exist
    * yet.
    * @param files - Files in message order, each name once ignoring case.
-   * @returns Settlement once every file is written.
+   * @returns Settlement once every file is written; the files are written
+   * together.
    * @throws If an identifier or a name is invalid; if the conversation's
    * folder cannot be created or the message's folder already exists
    * (`EEXIST`), before any file is written; or if a file cannot be created,
-   * as when a name repeats: the message's folder and every file written into
-   * it are then deleted first, and an `AggregateError` holds the failure and
-   * the deletion's own failure when that fails too. The conversation's
+   * as when a name repeats: once every write has settled, the message's
+   * folder and every file written into it are deleted, and the first
+   * failure in message order is thrown, or an `AggregateError` holding it
+   * and the deletion's own failure when that fails too. The conversation's
    * folder stays.
    */
   public async saveMessageAttachments(
@@ -104,13 +106,15 @@ export default class AttachmentFileStore {
       recursive: true
     })
     await mkdir(folderPath)
-    try {
-      for (const file of filePaths)
-        await writeFile(file.path, file.content, { flag: "wx" })
-    } catch (error) {
-      await deleteFolderAfterFailure(folderPath, error)
-      throw error
-    }
+    const outcomes = await Promise.allSettled(
+      filePaths.map((file) =>
+        writeFile(file.path, file.content, { flag: "wx" })
+      )
+    )
+    const failure = outcomes.find((outcome) => outcome.status === "rejected")
+    if (failure === undefined) return
+    await deleteFolderAfterFailure(folderPath, failure.reason)
+    throw failure.reason
   }
 
   /**
@@ -248,11 +252,11 @@ async function deleteFolderAfterFailure(
 ): Promise<void> {
   try {
     await rm(folderPath, { recursive: true, force: true })
-  } catch (removalFailure) {
+  } catch (error) {
     throw new AggregateError(
-      [writeFailure, removalFailure],
+      [writeFailure, error],
       "Attachment files could not be deleted after a failed write",
-      { cause: removalFailure }
+      { cause: error }
     )
   }
 }

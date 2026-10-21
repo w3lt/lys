@@ -146,6 +146,10 @@ export function createTextAttachment(
   return { kind: "text", number, name, sizeBytes }
 }
 
+/** Width and height of a stored PNG attachment when a case names none. */
+const DEFAULT_IMAGE_SIDES: Readonly<{ width: number; height: number }> =
+  Object.freeze({ width: 64, height: 32 })
+
 /**
  * Creates a stored PNG attachment.
  *
@@ -157,10 +161,7 @@ export function createTextAttachment(
 export function createImageAttachment(
   number: number,
   name: string,
-  sides: Readonly<{ width: number; height: number }> = {
-    width: 64,
-    height: 32
-  }
+  sides: Readonly<{ width: number; height: number }> = DEFAULT_IMAGE_SIDES
 ): ConversationAttachment {
   return {
     kind: "image",

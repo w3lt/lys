@@ -239,7 +239,7 @@ function buildStoredContextMessages(
  * @returns A promise resolving to `unseen` when the model cannot see images,
  * without reading any file; otherwise to `loaded` with the bytes of each
  * image attachment whose file was found, by attachment number. The files are
- * read one after another, in conversation order.
+ * read together, requested in conversation order.
  * @throws The reader's failure, for a file that cannot be read although it
  * is not missing.
  */
@@ -249,16 +249,41 @@ export async function loadAgentContextImages(
   findAttachmentImage: FindAttachmentImage
 ): Promise<AgentContextImages> {
   if (!canSeeImages) return UNSEEN_CONTEXT_IMAGES
+  const loaded = await Promise.all(
+    listImageAttachments(messages).map(
+      async ({ messageId, attachment }) =>
+        [
+          attachment.number,
+          await findAttachmentImage(messageId, attachment)
+        ] as const
+    )
+  )
   const images = new Map<number, Uint8Array>()
-  for (const message of messages) {
-    if (message.role !== "user") continue
-    for (const attachment of message.attachments) {
-      if (attachment.kind !== "image") continue
-      const data = await findAttachmentImage(message.id, attachment)
-      if (data !== undefined) images.set(attachment.number, data)
-    }
-  }
+  for (const [number, data] of loaded)
+    if (data !== undefined) images.set(number, data)
   return Object.freeze({ status: "loaded", images })
+}
+
+/**
+ * Lists the image attachments of a transcript's user messages.
+ * @param messages - Stored messages and the new message, in conversation
+ * order.
+ * @returns Each image attachment with its message's identity, in
+ * conversation order; replies have no attachments.
+ */
+function listImageAttachments(
+  messages: readonly ConversationMessage[]
+): readonly Readonly<{
+  messageId: string
+  attachment: ConversationImageAttachment
+}>[] {
+  return messages.flatMap((message) =>
+    message.role === "user"
+      ? message.attachments
+          .filter((attachment) => attachment.kind === "image")
+          .map((attachment) => ({ messageId: message.id, attachment }))
+      : []
+  )
 }
 
 /**

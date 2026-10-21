@@ -350,7 +350,7 @@ function hasAsciiAt(bytes: Uint8Array, offset: number, text: string): boolean {
   return hasBytesAt(
     bytes,
     offset,
-    [...text].map((character) => character.charCodeAt(0))
+    [...text].map((character) => character.codePointAt(0) ?? 0)
   )
 }
 

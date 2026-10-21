@@ -782,6 +782,19 @@ export function createChatViewStore(
   let nextRefusalOccurrence = 1
 
   /**
+   * Builds the next attachment refusal.
+   *
+   * @param message - The refusal sentence.
+   * @returns The refusal with its own occurrence number.
+   */
+  function buildAttachmentRefusal(message: string): AttachmentRefusal {
+    const occurrence = nextRefusalOccurrence
+    nextRefusalOccurrence += 1
+
+    return { message, occurrence }
+  }
+
+  /**
    * Updates an incomplete assistant when its exact message still exists.
    *
    * @param conversation - Current conversation, if the backend started one.
@@ -1384,19 +1397,6 @@ export function createChatViewStore(
      */
     function setInputDraft(draft: string): void {
       set({ inputDraft: draft })
-    }
-
-    /**
-     * Builds the next attachment refusal.
-     *
-     * @param message - The refusal sentence.
-     * @returns The refusal with its own occurrence number.
-     */
-    function buildAttachmentRefusal(message: string): AttachmentRefusal {
-      const occurrence = nextRefusalOccurrence
-      nextRefusalOccurrence += 1
-
-      return { message, occurrence }
     }
 
     /**

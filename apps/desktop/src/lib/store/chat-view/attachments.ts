@@ -128,7 +128,7 @@ function formatMegabytes(bytes: number): string {
 function buildBase64Text(bytes: Uint8Array): string {
   let binary = ""
   for (let offset = 0; offset < bytes.length; offset += BASE64_CHUNK_BYTES) {
-    binary += String.fromCharCode(
+    binary += String.fromCodePoint(
       ...bytes.subarray(offset, offset + BASE64_CHUNK_BYTES)
     )
   }

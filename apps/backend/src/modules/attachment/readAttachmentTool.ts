@@ -68,11 +68,8 @@ type AttachmentReadInputResult =
       message: string
     }>
 
-/** First code unit of a surrogate pair, which a cut must not separate from the second. */
-const HIGH_SURROGATE_FIRST = 0xd8_00
-
-/** Last high surrogate code unit. */
-const HIGH_SURROGATE_LAST = 0xdb_ff
+/** Highest code point one UTF-16 code unit holds; a higher one takes a pair of units. */
+const HIGHEST_SINGLE_UNIT_CODE_POINT = 0xff_ff
 
 /** Lines selected for one read, and how the character limit ended them. */
 type SelectedLines = Readonly<{
@@ -276,14 +273,14 @@ function splitLines(text: string): readonly string[] {
  * Builds the start of a line longer than the character limit.
  *
  * @param line - A line longer than the limit.
- * @returns The line cut to the limit, one code unit shorter when the limit
- * would separate a surrogate pair, so the cut never ends in half a
- * character.
+ * @returns The line cut to the limit, one code unit shorter when a character
+ * of two units starts at the limit's last unit, so the cut never ends in
+ * half a character.
  */
 function buildCutLine(line: string): string {
-  const lastCodeUnit = line.charCodeAt(MAXIMUM_READ_CHARACTERS - 1)
+  const lastCodePoint = line.codePointAt(MAXIMUM_READ_CHARACTERS - 1) ?? 0
   const length =
-    lastCodeUnit >= HIGH_SURROGATE_FIRST && lastCodeUnit <= HIGH_SURROGATE_LAST
+    lastCodePoint > HIGHEST_SINGLE_UNIT_CODE_POINT
       ? MAXIMUM_READ_CHARACTERS - 1
       : MAXIMUM_READ_CHARACTERS
   return line.slice(0, length)

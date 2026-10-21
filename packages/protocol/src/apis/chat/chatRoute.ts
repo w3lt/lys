@@ -69,11 +69,9 @@ const BASE64_GROUP_BYTES = 3
  * @returns Three bytes per four characters, less one per padding character.
  */
 function calculateBase64ByteLength(content: string): number {
-  const paddingLength = content.endsWith("==")
-    ? 2
-    : content.endsWith("=")
-      ? 1
-      : 0
+  let paddingLength = 0
+  if (content.endsWith("==")) paddingLength = 2
+  else if (content.endsWith("=")) paddingLength = 1
   return (
     (content.length / BASE64_GROUP_LENGTH) * BASE64_GROUP_BYTES - paddingLength
   )

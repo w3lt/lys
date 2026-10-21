@@ -22,8 +22,9 @@ struct ImageReference: Equatable, Sendable {
 ///
 /// Its entrypoint takes the page's URL as its only argument and accepts only
 /// URLs that start with `http://` or `https://`. It loads the page in
-/// headless Chromium, takes the HTML of the DOM the page ends on, without its
-/// shadow trees (#209), removes every `script`, `style`, `noscript`, `link`,
+/// headless Chromium, takes the HTML of the DOM the page ends on, with each
+/// open shadow root in place of its host's children and slotted content at
+/// its slot, removes every `script`, `style`, `noscript`, `link`,
 /// and `meta` element and every `class` and `style` attribute, and writes the
 /// remaining HTML to standard output. So until #208, a page's site name and
 /// publication date, which pages give in `meta` elements, don't reach Lys,
@@ -31,8 +32,8 @@ struct ImageReference: Equatable, Sendable {
 ///
 /// When the reader can't read the page, it exits with a non-zero code.
 /// Chromium's own messages are discarded, so the reader's standard error
-/// gives a reason only when its scripts find one, such as an unsupported URL
-/// or no HTML from Chromium.
+/// gives a reason only when its scripts find one, such as an unsupported URL,
+/// a page Chromium couldn't load, or no HTML from Chromium.
 ///
 /// The reference names the `latest` tag, which the image workflow moves to
 /// each image it builds from `main`. ``createProductionContainerManager()``

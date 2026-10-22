@@ -27,7 +27,7 @@ export type BuildAppOptions = {
    * level name in `level`, such as `"info"`, and the UTC ISO-8601 time in
    * `time`.
    *
-   * A request's lines name its path without the query string.
+   * A request's lines carry its full URL, query string included.
    *
    * @remarks Owned by the caller, which decides where the lines go; the
    * application writes to it but never ends or closes it. Its `write` must not

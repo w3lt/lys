@@ -207,7 +207,7 @@ describe("buildApp", () => {
     )
   })
 
-  it("logs a request by its path without the query string, so a search is not kept", async () => {
+  it("logs a request by its full URL, query string included", async () => {
     const log = new CapturedLogDestination()
     const app = await buildApp({
       config: createOwnedBackendConfig(),
@@ -219,23 +219,57 @@ describe("buildApp", () => {
 
     const response = await app.inject({
       method: "GET",
-      url: "/api/v1/conversations?query=my%20private%20search&limit=20"
+      url: "/api/v1/conversations?query=trip%20to%20Hanoi&limit=20"
     })
 
-    const requestRecords = log.records.slice(logCountBeforeRequest)
     expect(response.statusCode).toBe(200)
-    expect(requestRecords).toContainEqual(
+    expect(log.records.slice(logCountBeforeRequest)).toContainEqual(
       expect.objectContaining({
         msg: "incoming request",
         req: {
           method: "GET",
-          url: "/api/v1/conversations",
+          url: "/api/v1/conversations?query=trip%20to%20Hanoi&limit=20",
           host: "localhost:80",
           remoteAddress: "127.0.0.1"
         }
       })
     )
-    expect(JSON.stringify(requestRecords)).not.toContain("private")
+  })
+
+  it("logs a request for a route that does not exist with a line of its own", async () => {
+    const log = new CapturedLogDestination()
+    const app = await buildApp({
+      config: createOwnedBackendConfig(),
+      logDestination: log
+    })
+    onTestFinished(async () => await app.close())
+    await app.ready()
+    const logCountBeforeRequest = log.records.length
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/missing?query=trip%20to%20Hanoi"
+    })
+
+    expect(response.statusCode).toBe(404)
+    expect(log.records.slice(logCountBeforeRequest)).toEqual([
+      expect.objectContaining({
+        level: "info",
+        msg: "incoming request",
+        req: expect.objectContaining({
+          url: "/api/v1/missing?query=trip%20to%20Hanoi"
+        })
+      }),
+      expect.objectContaining({
+        level: "info",
+        msg: "Route GET:/api/v1/missing?query=trip%20to%20Hanoi not found"
+      }),
+      expect.objectContaining({
+        level: "info",
+        msg: "request completed",
+        res: { statusCode: 404 }
+      })
+    ])
   })
 
   it("keeps serving when writing its log fails", async () => {

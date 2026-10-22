@@ -1,7 +1,6 @@
 import type { Writable } from "node:stream"
 import type {
   FastifyLoggerOptions,
-  FastifyRequest,
   FastifyServerOptions,
   LogLevel
 } from "fastify"
@@ -21,20 +20,6 @@ type LogLevelField = Readonly<{
   level: string
 }>
 
-/** The `req` object of a request's log lines. */
-type LoggedRequest = Readonly<{
-  /** HTTP method of the request. */
-  method: string
-  /** Path the request asked for, without its query string. */
-  url: string
-  /** Value of the request's `Host` header. */
-  host: string
-  /** Address the request came from. */
-  remoteAddress: string
-  /** Port the request came from; absent once its connection has closed. */
-  remotePort?: number
-}>
-
 /** Name of a backend process output, as its failure report states it. */
 type BackendOutputName = "standard output" | "standard error"
 
@@ -43,9 +28,8 @@ type BackendOutputName = "standard output" | "standard error"
  *
  * Each line is one JSON object whose `level` is the level's name, such as
  * `"info"`, and whose `time` is the UTC ISO-8601 time of the line. A request's
- * lines describe it by method, path, host, and remote address and port; the
- * query string is left out, because it can carry what the person typed, such
- * as a history search.
+ * lines carry its full URL, query string included, such as a history search,
+ * and a request for a route that does not exist gets a line of its own.
  *
  * @param level - Lowest level the logger writes; lines below it are dropped.
  * @param destination - Receives each line; owned by the caller, which handles
@@ -57,11 +41,9 @@ export function buildBackendLoggerOptions(
   destination: NonNullable<FastifyLoggerOptions["stream"]>
 ): BackendLoggerOptions {
   const formatters = Object.freeze({ level: buildLogLevelField })
-  const serializers = Object.freeze({ req: buildLoggedRequest })
   return {
     level,
     formatters,
-    serializers,
     timestamp: formatLogTimeField,
     stream: destination
   }
@@ -86,38 +68,6 @@ function buildLogLevelField(label: string): LogLevelField {
  */
 function formatLogTimeField(): string {
   return `,"time":"${new Date().toISOString()}"`
-}
-
-/**
- * Builds the `req` object that a request's log lines carry.
- *
- * @param request - Request being logged.
- * @returns The request's method, path without its query string, host, and
- * remote address and port.
- */
-function buildLoggedRequest(request: FastifyRequest): LoggedRequest {
-  const loggedRequest = {
-    method: request.method,
-    url: formatRequestPath(request.url),
-    host: request.host,
-    remoteAddress: request.ip
-  }
-  const remotePort = request.socket.remotePort
-  return Object.freeze(
-    remotePort === undefined ? loggedRequest : { ...loggedRequest, remotePort }
-  )
-}
-
-/**
- * Formats a request URL for the log as its path alone.
- *
- * @param url - Path and query string the request asked for.
- * @returns The part before the first `?`, or the whole URL when it has no
- * query string.
- */
-function formatRequestPath(url: string): string {
-  const queryStart = url.indexOf("?")
-  return queryStart === -1 ? url : url.slice(0, queryStart)
 }
 
 /**

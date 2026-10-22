@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, onTestFinished, vi } from "vitest"
 import * as z from "zod"
 import LlmService, {
   type LlmEngineOperation,
@@ -7,9 +7,16 @@ import LlmService, {
 } from "../../../../src/modules/llm/llmService"
 import type { LlmEngine } from "../../../../src/modules/llm/llmEngine"
 import type { LoadedLlmModelInstance } from "../../../../src/modules/llm/llmRuntimeTypes"
+import LmStudioRuntime from "../../../../src/modules/llm/runtimes/lmStudioRuntime"
 import { createFakeLlmRuntime } from "../../support/fakeLlmRuntime"
-import { createDownloadedLlmModel } from "../../support/llmFixtures"
+import {
+  createDownloadedLlmModel,
+  createLmStudioLlmRecord
+} from "../../support/llmFixtures"
+import { fakeLmStudio } from "../../support/lmStudioSdkFake"
 import { waitForMicrotasks } from "../../support/microtasks"
+
+vi.mock("@lmstudio/sdk", () => import("../../support/lmStudioSdkFake"))
 
 /** Service settings a case may vary; the queue is always the case's double. */
 type LlmServiceTestOptions = Omit<
@@ -189,6 +196,48 @@ describe("LlmService", () => {
         { ...createDownloadedLlmModel({ modelKey: "a/model" }), loaded: true }
       ])
       expect(models[0]).not.toHaveProperty("loadedContextLength")
+    })
+
+    it("measures loaded models one at a time, so a runtime that refuses overlapping operations reports each model's length and is idle afterward", async () => {
+      fakeLmStudio.reset()
+      fakeLmStudio.inventory = {
+        downloadedModels: [
+          createLmStudioLlmRecord({ modelKey: "a/model" }),
+          createLmStudioLlmRecord({ modelKey: "b/model" })
+        ],
+        loadedModels: [
+          { modelKey: "a/model", identifier: "a/model" },
+          { modelKey: "b/model", identifier: "b/model" }
+        ]
+      }
+      const contextLengths = new Map([
+        ["a/model", 4096],
+        ["b/model", 16_384]
+      ])
+      fakeLmStudio.operations = {
+        ...fakeLmStudio.operations,
+        getContextLength: async (identifier) =>
+          contextLengths.get(identifier) ?? 0
+      }
+      const runtime = await LmStudioRuntime.create("ws://127.0.0.1:1234")
+      onTestFinished(async () => {
+        await runtime[Symbol.asyncDispose]()
+      })
+      const { queue } = createAdmittingQueue(runtime)
+      const service = new LlmService({ llmEngineOperationQueue: queue })
+
+      const models = await service.listLlmModels()
+
+      expect(
+        models.map(({ modelKey, loadedContextLength }) => ({
+          modelKey,
+          loadedContextLength
+        }))
+      ).toEqual([
+        { modelKey: "a/model", loadedContextLength: 4096 },
+        { modelKey: "b/model", loadedContextLength: 16_384 }
+      ])
+      await expect(runtime.getRuntimeAvailability()).resolves.toBe("available")
     })
 
     it("returns a frozen inventory", async () => {

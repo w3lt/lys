@@ -41,7 +41,8 @@ query per text, all at once. It never loads a model: when none is loaded
 there is no measurement. The counts cover each
 message's text and each tool's JSON; the backend adds a fixed allowance for
 the chat template's markup instead of rendering the template. The model list
-measures each loaded model key with no text in the same queued operation, to
+measures each loaded model key with no text in the same queued operation, one
+key after another because the runtime refuses overlapping operations, to
 report the context length as `loadedContextLength`. This has not been checked
 against a running LM Studio.
 

@@ -321,26 +321,24 @@ async function listLlmModels(
  *
  * @param modelKeys - Canonical keys of the loaded models to measure.
  * @param findLlmContextMeasurement - Measurement query of the engine.
- * @returns A promise resolving to the smallest context length among each
- * model's loaded instances, by model key; a key whose instances are no longer
- * loaded has no entry.
- * @throws If a measurement fails.
- * @remarks Each key is measured without text, so no tokenizer is asked.
+ * @returns A promise resolving, once every measurement has settled, to the
+ * smallest context length among each model's loaded instances, by model key;
+ * a key whose instances are no longer loaded has no entry.
+ * @throws If a measurement fails; no later key is measured.
+ * @remarks Each key is measured without text, so no tokenizer is asked. The
+ * keys are measured one after another, because the LLM runtime admits one
+ * operation at a time and refuses one that overlaps it.
  */
 async function listLoadedContextLengths(
   modelKeys: ReadonlySet<string>,
   findLlmContextMeasurement: LlmEngine["findLlmContextMeasurement"]
 ): Promise<ReadonlyMap<string, number>> {
-  const measurements = await Promise.all(
-    [...modelKeys].map(
-      async (modelKey) =>
-        [modelKey, await findLlmContextMeasurement(modelKey, [])] as const
-    )
-  )
   const contextLengths = new Map<string, number>()
-  for (const [modelKey, measurement] of measurements)
+  for (const modelKey of modelKeys) {
+    const measurement = await findLlmContextMeasurement(modelKey, [])
     if (measurement !== undefined)
       contextLengths.set(modelKey, measurement.contextLength)
+  }
   return contextLengths
 }
 

@@ -12,7 +12,7 @@ Lys currently integrates with one local model runtime: LM Studio.
 
 | Concern          | Current implementation                                                                                                                                   |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Model inventory  | `LlmService.listLlmModels()` lists downloaded models and annotates which model keys have loaded instances.                                               |
+| Model inventory  | `LlmService.listLlmModels()` lists downloaded models, annotates which model keys have loaded instances, and the context length each is loaded with.      |
 | Model health     | `LlmService.getLlmModelHealth()` checks one fresh loaded-inventory snapshot for the requested key without generating text.                               |
 | Model loading    | `POST /api/v1/llm/load` uses the application service to load one model with the request's load settings and return its metadata.                         |
 | Model unloading  | `PATCH /api/v1/llm/unload` stops every observed loaded instance matching one key, then reconciles the loaded-instance inventory.                         |
@@ -40,8 +40,10 @@ and counts each text with the first instance's `countTokens()`, one SDK
 query per text, all at once. It never loads a model: when none is loaded
 there is no measurement. The counts cover each
 message's text and each tool's JSON; the backend adds a fixed allowance for
-the chat template's markup instead of rendering the template. This has not
-been checked against a running LM Studio.
+the chat template's markup instead of rendering the template. The model list
+measures each loaded model key with no text in the same queued operation, to
+report the context length as `loadedContextLength`. This has not been checked
+against a running LM Studio.
 
 Generation temperature and reply-ceiling edits are saved automatically and
 applied to future chat requests. The [API reference](/reference/api/#chat-request-body)

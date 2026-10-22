@@ -419,9 +419,10 @@ Generation edits apply to the next chat request. Temperature uses the API's
 inclusive `0`–`1` range. The optional reply ceiling uses an on/off switch and
 a token slider. Switching it off stores zero and omits `replyCeiling`
 from the request, so the backend does not receive a zero-token limit.
-Switching it back on restores the application default. The local context estimate
-sets the usual slider range, which expands to include an existing saved ceiling
-rather than silently clamping it.
+Switching it back on restores the application default. The slider's usual
+range ends at the `loadedContextLength` the inventory reports for the loaded
+model, or at 32,768 tokens while none is known, and expands to include an
+existing saved ceiling rather than silently clamping it.
 The model's actual context capacity and stopping behavior still apply.
 
 Generation edits automatically persist only the generation group through Tauri.
@@ -465,7 +466,12 @@ and the counters measure the trimmed text, as it is saved. Saving checks the
 draft first: a blank name, bio, or prompt, a name or bio over its limit once
 trimmed, a name another agent has (ignoring case), or a malformed or listed
 code is shown and nothing is sent; built-in agents count among the listed
-names and codes. Once the field is marked invalid, focus moves
+names and codes. Under the system prompt, of a built-in agent as of the
+user's own, a measure states its length in characters, its tokens estimated
+at 3.7 characters per token, and the share of the window they take: the
+`loadedContextLength` the inventory reports for the loaded model, as the
+composer's context meter uses. While no model is loaded, or the inventory
+does not report its context length, the share is left out. Once the field is marked invalid, focus moves
 to it. Names need not be unique to the backend, so a stored agent that keeps
 its own name can be saved even when another agent shares it. The backend still
 refuses a code taken since the list was read. Duplicate opens a copy as a new
@@ -681,17 +687,13 @@ are gone and the reply is marked interrupted when the backend next starts.
 
 ## Current limitations
 
-- Runtime edits other than the two startup switches, and `model.contextSize`
-  edits, remain session-only. Generation settings, load configurations, and
-  the startup switches save automatically; a failed save leaves the edits
-  available for the current session.
+- Runtime edits other than the two startup switches remain session-only.
+  Generation settings, load configurations, and the startup switches save
+  automatically; a failed save leaves the edits available for the current
+  session.
 - The vmo card stops checking once vmo is `running`, so a vmo that crashes
   later still shows `running` until it is stopped or restarted; `read_page`
   is then refused when a turn offers it, and the tool list is read again.
-- The retained local context budget, `model.contextSize`, still sets the
-  reply ceiling slider's usual range and the agent editor's prompt measure. It
-  is separate from the context length in a model's load configuration and does
-  not follow it.
 - The context meter measures again only when its inputs change, so a
   measurement that failed while the model-operation queue was busy stays
   unknown until the conversation, the model, or the tools change.

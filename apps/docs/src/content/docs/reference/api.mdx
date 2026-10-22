@@ -731,8 +731,15 @@ it then shows the sentence and keeps the files staged.
 - `trainedForToolUse`
 - `maxContextLength`
 - `loaded`
+- optional `loadedContextLength`
 
 `GET /api/v1/llm/list` returns `llms` ordered by `modelKey`, then by `path`.
+On a loaded model, `loadedContextLength` is the context length it is loaded
+with, in tokens: the smallest among its loaded instances, the window a chat
+request to it is measured against. It is absent on a model that is not loaded,
+and on a loaded one whose instances were gone by the time the list measured
+them. The [load response](#model-load-request) never carries it, since the
+load does not observe it; the next list read does.
 
 ## Model load request
 

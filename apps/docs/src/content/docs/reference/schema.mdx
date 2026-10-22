@@ -204,17 +204,17 @@ conversation `updated_at`, and history order are preserved.
 
 ## Settings JSON
 
-The Tauri host stores `runtime`, `model`, `generation`, `loadConfiguration`,
-`secrets`, and `tools` groups in `$LYS_HOME/settings.json`. See the
+The Tauri host stores `runtime`, `generation`, `loadConfiguration`, `secrets`,
+and `tools` groups in `$LYS_HOME/settings.json`. See the
 [configuration reference](/reference/configuration/#persisted-settings-json)
 for the current fields, defaults, and validation. Generation and load
 configuration edits and the two runtime startup switches are saved
-automatically; the other runtime edits and `model.contextSize` edits in the
-desktop remain session-only.
+automatically; the other runtime edits in the desktop remain session-only.
 
 The file carries no version marker, and loading converts nothing. A file
 without a `loadConfiguration` group reads it as empty, and one without
-`runtime.autoStartVmo` reads it as `true`; neither is rewritten. The
+`runtime.autoStartVmo` reads it as `true`; neither is rewritten. An older
+file's `model` group is ignored and left out of the next save. The
 missing marker is an approved exception until
 [#146](https://github.com/w3lt/lys/issues/146); see the
 [settings file version exception](/reference/standard-application/#settings-file-version-exception).

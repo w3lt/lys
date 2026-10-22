@@ -1,4 +1,4 @@
-import type { LlmInfo } from "@lys/protocol"
+import type { DownloadedLlmModel } from "../../llm/llmRuntimeTypes"
 
 /** What a turn needs to know about the model that answers it. */
 export type ModelCapabilities = Readonly<{
@@ -50,18 +50,19 @@ export async function findListedModelCapabilities(
 }
 
 /**
- * Creates the capability lookup over an inventory query.
+ * Creates the capability lookup over the downloaded models.
  *
- * @param listLlmModels - Inventory query of the LLM service; borrowed for the
- * lookup's lifetime.
- * @returns The lookup, which reads the whole inventory on each call and
- * matches the model key exactly.
+ * @param listDownloadedLlmModels - Downloaded-model query of the LLM service;
+ * borrowed for the lookup's lifetime.
+ * @returns The lookup, which lists the downloaded models on each call and
+ * matches the model key exactly. It reads no loaded state, which the
+ * capabilities do not depend on.
  */
 export function createModelCapabilitiesLookup(
-  listLlmModels: () => Promise<readonly LlmInfo[]>
+  listDownloadedLlmModels: () => Promise<readonly DownloadedLlmModel[]>
 ): FindModelCapabilities {
   return async (model) => {
-    const info = (await listLlmModels()).find(
+    const info = (await listDownloadedLlmModels()).find(
       (entry) => entry.modelKey === model
     )
     return info === undefined

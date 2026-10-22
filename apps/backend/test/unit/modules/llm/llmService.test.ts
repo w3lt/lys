@@ -80,6 +80,7 @@ function createServiceWithEngine(options: LlmServiceTestOptions = {}) {
 type QueuedLlmServiceOperationName = keyof Pick<
   LlmService,
   | "listLlmModels"
+  | "listDownloadedLlmModels"
   | "loadLlmModel"
   | "getLlmModelHealth"
   | "stopLlmModelsByKey"
@@ -100,6 +101,8 @@ async function sendLlmServiceRequest(
   switch (operationName) {
     case "listLlmModels":
       return await service.listLlmModels()
+    case "listDownloadedLlmModels":
+      return await service.listDownloadedLlmModels()
     case "loadLlmModel":
       return await service.loadLlmModel("a/model", {})
     case "getLlmModelHealth":
@@ -277,6 +280,34 @@ describe("LlmService", () => {
         await expect(service.listLlmModels()).rejects.toBe(failure)
       }
     )
+  })
+
+  describe("listDownloadedLlmModels", () => {
+    it("returns the engine's downloaded models through the queue without listing or measuring loaded instances", async () => {
+      const { service, engine, requests } = createServiceWithEngine()
+      const downloadedModels = Object.freeze([
+        createDownloadedLlmModel({ modelKey: "b/model" }),
+        createDownloadedLlmModel({ modelKey: "a/model" })
+      ])
+      engine.listDownloadedLlmModels.mockResolvedValue(downloadedModels)
+
+      await expect(service.listDownloadedLlmModels()).resolves.toBe(
+        downloadedModels
+      )
+      expect(requests).toHaveBeenCalledOnce()
+      expect(engine.listLoadedLlmModelInstances).not.toHaveBeenCalled()
+      expect(engine.findLlmContextMeasurement).not.toHaveBeenCalled()
+    })
+
+    it("propagates a failed query", async () => {
+      const { service, engine } = createServiceWithEngine()
+      const failure = new Error(
+        "The LLM runtime could not list downloaded models."
+      )
+      engine.listDownloadedLlmModels.mockRejectedValue(failure)
+
+      await expect(service.listDownloadedLlmModels()).rejects.toBe(failure)
+    })
   })
 
   describe("loadLlmModel", () => {
@@ -494,6 +525,7 @@ describe("LlmService", () => {
   describe("queue rejection", () => {
     it.each([
       "listLlmModels",
+      "listDownloadedLlmModels",
       "loadLlmModel",
       "getLlmModelHealth",
       "stopLlmModelsByKey",

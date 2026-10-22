@@ -110,7 +110,7 @@ export default function registerChatContextRoute(app: FastifyInstance): void {
       app.conversationHistoryReader.getConversation(conversationId),
     builtInTools: app.builtInTools,
     findModelCapabilities: createModelCapabilitiesLookup(() =>
-      app.llmService.listLlmModels()
+      app.llmService.listDownloadedLlmModels()
     ),
     attachmentFiles: app.attachmentFileStore
   } satisfies ChatContextRouteDependencies

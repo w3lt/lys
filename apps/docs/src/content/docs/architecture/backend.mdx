@@ -318,8 +318,11 @@ result.
 Whether the model sees images and is trained for tool use is read from LM
 Studio's inventory (`src/modules/chat/routes/modelCapabilities.ts`) only for
 a turn that involves an attachment, so a turn without any never waits for
-the model-operation queue. A model the inventory does not list has neither
-capability: an image attached for it is refused, and no reader is offered.
+the model-operation queue. The read lists the downloaded models only
+(`LlmService.listDownloadedLlmModels()`), without the loaded state and
+context lengths the model list adds. A model the inventory does not list has
+neither capability: an image attached for it is refused, and no reader is
+offered.
 
 ## Tool approval
 

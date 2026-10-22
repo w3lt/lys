@@ -1,4 +1,4 @@
-import { chatContextApi, type LlmInfo } from "@lys/protocol"
+import { chatContextApi } from "@lys/protocol"
 import type { BuiltInAgent } from "@lys/share"
 import { serializerCompiler } from "fastify-type-provider-zod"
 import { mkdtempSync, rmSync } from "node:fs"
@@ -15,6 +15,7 @@ import registerChatContextRoute from "../../../../../src/modules/chat/routes/cha
 import { createLlmRuntimeUnavailableError } from "../../../../../src/modules/llm/llmRuntimeUnavailableError"
 import { createLlmServiceBusyError } from "../../../../../src/modules/llm/llmServiceBusyError"
 import LlmService from "../../../../../src/modules/llm/llmService"
+import type { DownloadedLlmModel } from "../../../../../src/modules/llm/llmRuntimeTypes"
 import AgentTool from "../../../../../src/modules/tool/tool"
 import {
   createImageAttachment,
@@ -85,11 +86,10 @@ const FAILED_ANSWER_PART = createTextPart({
 })
 
 /** The model as the inventory lists it when it sees images. */
-const VISION_MODEL_INFO: LlmInfo = Object.freeze({
+const VISION_MODEL_INFO: DownloadedLlmModel = Object.freeze({
   ...createDownloadedLlmModel({ modelKey: MODEL }),
   vision: true,
-  trainedForToolUse: true,
-  loaded: true
+  trainedForToolUse: true
 })
 
 /**
@@ -99,7 +99,7 @@ const VISION_MODEL_INFO: LlmInfo = Object.freeze({
  *
  * @returns The application, the database for seeding rows, the context
  * meter spy every agent measures with, which every context fits by default,
- * the inventory spy, which rejects until a case configures it, and the
+ * the downloaded-model spy, which rejects until a case configures it, and the
  * attachment file store, over a directory removed when the test finishes.
  */
 async function createChatContextRouteApp() {
@@ -119,10 +119,10 @@ async function createChatContextRouteApp() {
         Promise.reject(new Error("Unexpected LLM engine operation"))
     })
   })
-  const listLlmModels = vi
-    .spyOn(llmService, "listLlmModels")
+  const listDownloadedLlmModels = vi
+    .spyOn(llmService, "listDownloadedLlmModels")
     .mockRejectedValue(
-      new Error("Unexpected context route call: listLlmModels")
+      new Error("Unexpected context route call: listDownloadedLlmModels")
     )
   await updateFastifyWithHttpTransport(app)
   app.decorate("llmService", llmService)
@@ -164,7 +164,7 @@ async function createChatContextRouteApp() {
     app,
     database,
     replyContextMeter,
-    listLlmModels,
+    listDownloadedLlmModels,
     attachmentFileStore
   }
 }
@@ -351,7 +351,7 @@ describe("registerChatContextRoute", () => {
       app,
       database,
       replyContextMeter,
-      listLlmModels,
+      listDownloadedLlmModels,
       attachmentFileStore
     } = await createChatContextRouteApp()
     saveConversationWithAttachment(
@@ -364,7 +364,7 @@ describe("registerChatContextRoute", () => {
       createFixtureUuidV7(2),
       [{ name: "photo.png", content: png }]
     )
-    listLlmModels.mockResolvedValue([VISION_MODEL_INFO])
+    listDownloadedLlmModels.mockResolvedValue([VISION_MODEL_INFO])
     const readAttachment = vi.spyOn(attachmentFileStore, "readAttachment")
 
     const response = await sendChatContextRequest(app, {
@@ -386,18 +386,18 @@ describe("registerChatContextRoute", () => {
       },
       { role: "user", content: "", images: [] }
     ])
-    expect(listLlmModels).toHaveBeenCalledOnce()
+    expect(listDownloadedLlmModels).toHaveBeenCalledOnce()
     expect(readAttachment).not.toHaveBeenCalled()
   })
 
   it("measures a stored image whose file is missing as its placeholder, as a turn sends it", async () => {
-    const { app, database, replyContextMeter, listLlmModels } =
+    const { app, database, replyContextMeter, listDownloadedLlmModels } =
       await createChatContextRouteApp()
     saveConversationWithAttachment(
       database,
       createImageAttachment(1, "photo.png")
     )
-    listLlmModels.mockResolvedValue([VISION_MODEL_INFO])
+    listDownloadedLlmModels.mockResolvedValue([VISION_MODEL_INFO])
 
     const response = await sendChatContextRequest(app, {
       conversation: { kind: "existing", id: STORED_CONVERSATION_ID },
@@ -425,13 +425,13 @@ describe("registerChatContextRoute", () => {
   ])(
     "measures a stored image's placeholder for %s",
     async (_label, inventory) => {
-      const { app, database, replyContextMeter, listLlmModels } =
+      const { app, database, replyContextMeter, listDownloadedLlmModels } =
         await createChatContextRouteApp()
       saveConversationWithAttachment(
         database,
         createImageAttachment(1, "photo.png")
       )
-      listLlmModels.mockResolvedValue(inventory)
+      listDownloadedLlmModels.mockResolvedValue(inventory)
 
       const response = await sendChatContextRequest(app, {
         conversation: { kind: "existing", id: STORED_CONVERSATION_ID },
@@ -452,13 +452,15 @@ describe("registerChatContextRoute", () => {
   )
 
   it("measures a stored text file's listing and, for a model trained for tool use, the attachment reader after the offered tools, as a turn offers it", async () => {
-    const { app, database, replyContextMeter, listLlmModels } =
+    const { app, database, replyContextMeter, listDownloadedLlmModels } =
       await createChatContextRouteApp()
     saveConversationWithAttachment(
       database,
       createTextAttachment(1, "notes.md", 18)
     )
-    listLlmModels.mockResolvedValue([{ ...VISION_MODEL_INFO, vision: false }])
+    listDownloadedLlmModels.mockResolvedValue([
+      { ...VISION_MODEL_INFO, vision: false }
+    ])
 
     const response = await sendChatContextRequest(app, {
       conversation: { kind: "existing", id: STORED_CONVERSATION_ID },
@@ -467,7 +469,7 @@ describe("registerChatContextRoute", () => {
     })
 
     expect(response.statusCode).toBe(200)
-    expect(listLlmModels).toHaveBeenCalledOnce()
+    expect(listDownloadedLlmModels).toHaveBeenCalledOnce()
     const measured =
       replyContextMeter.findReplyContextMeasurement.mock.calls[0]?.[0]
     expect(measured?.messages[1]).toEqual({
@@ -491,13 +493,13 @@ describe("registerChatContextRoute", () => {
   ])(
     "measures a stored text file's listing without the reader for %s",
     async (_label, inventory) => {
-      const { app, database, replyContextMeter, listLlmModels } =
+      const { app, database, replyContextMeter, listDownloadedLlmModels } =
         await createChatContextRouteApp()
       saveConversationWithAttachment(
         database,
         createTextAttachment(1, "notes.md", 18)
       )
-      listLlmModels.mockResolvedValue(inventory)
+      listDownloadedLlmModels.mockResolvedValue(inventory)
 
       const response = await sendChatContextRequest(app, {
         conversation: { kind: "existing", id: STORED_CONVERSATION_ID },
@@ -512,13 +514,13 @@ describe("registerChatContextRoute", () => {
   )
 
   it("measures a stored image without the reader, as no text file is attached", async () => {
-    const { app, database, replyContextMeter, listLlmModels } =
+    const { app, database, replyContextMeter, listDownloadedLlmModels } =
       await createChatContextRouteApp()
     saveConversationWithAttachment(
       database,
       createImageAttachment(1, "photo.png")
     )
-    listLlmModels.mockResolvedValue([VISION_MODEL_INFO])
+    listDownloadedLlmModels.mockResolvedValue([VISION_MODEL_INFO])
 
     const response = await sendChatContextRequest(app, {
       conversation: { kind: "existing", id: STORED_CONVERSATION_ID },
@@ -532,13 +534,13 @@ describe("registerChatContextRoute", () => {
   })
 
   it("responds with the 503 problem of a full model-operation queue met while the inventory is read, without measuring", async () => {
-    const { app, database, replyContextMeter, listLlmModels } =
+    const { app, database, replyContextMeter, listDownloadedLlmModels } =
       await createChatContextRouteApp()
     saveConversationWithAttachment(
       database,
       createImageAttachment(1, "photo.png")
     )
-    listLlmModels.mockRejectedValue(createLlmServiceBusyError())
+    listDownloadedLlmModels.mockRejectedValue(createLlmServiceBusyError())
 
     const response = await sendChatContextRequest(app, {
       conversation: { kind: "existing", id: STORED_CONVERSATION_ID },

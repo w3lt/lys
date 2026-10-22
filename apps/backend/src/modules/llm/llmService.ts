@@ -117,8 +117,9 @@ const LOADED_WITHOUT_CONTEXT_LENGTH: LlmLoadedState = Object.freeze({
  * Concurrency model: reentrant; overlapping calls are serialized by the
  * borrowed queue, not by this class.
  * Implements {@link LlmModelHealthReader}, {@link LlmModelInventory},
- * {@link LlmModelLoader}, and {@link LlmModelStopper}, and measures contexts
- * for chat replies.
+ * {@link LlmModelLoader}, and {@link LlmModelStopper}, measures contexts for
+ * chat replies, and lists the downloaded models whose capabilities a chat
+ * turn reads.
  */
 export default class LlmService
   implements
@@ -218,6 +219,28 @@ export default class LlmService
           async (model, texts) =>
             await llmEngine.findLlmContextMeasurement(model, texts)
         )
+    )
+  }
+
+  /**
+   * Lists the downloaded models through the queue, without their loaded
+   * state.
+   *
+   * @returns A promise resolving to the engine's frozen snapshots, in the
+   * order the engine observed them.
+   * @throws If the query fails, or the queue rejects the operation: the
+   * service-busy failure when it is full, the runtime-unavailable failure
+   * when no runtime is connected or it stopped answering, and
+   * `The LLM runtime is closed.` after cleanup begins.
+   * @remarks One engine query: no loaded instance is listed or measured, so
+   * a reader that needs only what each model can do, such as whether it sees
+   * images, pays for nothing else.
+   */
+  public async listDownloadedLlmModels(): Promise<
+    readonly DownloadedLlmModel[]
+  > {
+    return await this.#llmEngineOperationQueue.handleLlmEngineOperationRequest(
+      async (llmEngine) => await llmEngine.listDownloadedLlmModels()
     )
   }
 

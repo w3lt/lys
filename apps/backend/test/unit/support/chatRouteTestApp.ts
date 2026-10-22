@@ -65,11 +65,11 @@ export type ChatRouteTestApp = TestFastify &
       LlmService["findLlmContextMeasurement"]
     >
     /**
-     * Inventory of `app.llmService`, which the chat route reads for a model's
-     * capabilities when a request or its conversation holds attachments;
-     * rejects until a case configures it.
+     * Downloaded models of `app.llmService`, which the chat route reads for a
+     * model's capabilities when a request or its conversation holds
+     * attachments; rejects until a case configures it.
      */
-    listLlmModels: MockInstance<LlmService["listLlmModels"]>
+    listDownloadedLlmModels: MockInstance<LlmService["listDownloadedLlmModels"]>
     /**
      * Reader of the saved Just run choices behind `app.toolApprovalService`;
      * rejects until a case configures it.
@@ -163,10 +163,10 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
         })
       )
     )
-  const listLlmModels = vi
-    .spyOn(llmService, "listLlmModels")
+  const listDownloadedLlmModels = vi
+    .spyOn(llmService, "listDownloadedLlmModels")
     .mockImplementation(() =>
-      Promise.reject(createUnexpectedCallError("listLlmModels"))
+      Promise.reject(createUnexpectedCallError("listDownloadedLlmModels"))
     )
   const agentService = new AgentService({
     recordStore: new SqliteAgentRecordStore(database),
@@ -226,7 +226,7 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
     completeChatStream,
     generateTitle,
     findLlmContextMeasurement,
-    listLlmModels,
+    listDownloadedLlmModels,
     readJustRunToolNames,
     attachmentsDirectoryPath,
     generations

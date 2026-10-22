@@ -77,9 +77,10 @@ depends on what started it:
 | The release app                     | `$LYS_HOME/logs/backend.log`, together with the backend's standard error, so Node's own messages, such as the stack trace of a crash at startup, are in the file as well. |
 
 When writing to its standard output or standard error fails, such as on a
-full disk or once `pino-pretty` has exited, the backend keeps running. It
-drops what it writes to that stream until it restarts and reports the failure
-once on the other stream.
+full disk or once `pino-pretty` has exited, the backend keeps running. The
+lines it cannot write are lost, and it writes again once the stream works,
+such as after space has been freed. The first failure of each stream is
+reported on the other stream; later failures of that stream are not.
 
 The Tauri host writes its own failures, such as a backend it could not stop at
 exit or a backend log it could not open, to its standard error, which only an

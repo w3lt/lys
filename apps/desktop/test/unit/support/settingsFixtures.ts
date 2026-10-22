@@ -6,7 +6,6 @@ import {
 import type {
   GenerationSettings,
   LysSettings,
-  ModelSettings,
   RuntimeSettings,
   SecretsSettings,
   ToolSettings
@@ -16,7 +15,7 @@ import type {
  * Settings document as the Tauri settings commands exchange it: the JSON form
  * of Rust's `LysSettings`.
  *
- * @remarks The runtime, model, generation, and secrets groups are the
+ * @remarks The runtime, generation, and secrets groups are the
  * renderer's groups field for field; the saved key is plain text in JSON and
  * branded only in the renderer. JSON has no map or set, so the per-model load
  * settings are one object whose keys are model keys, where the renderer holds
@@ -59,11 +58,6 @@ const STORED_RUNTIME_SETTINGS: RuntimeSettings = Object.freeze({
   autoStartVmo: false,
   defaultModel: "qwen3-8b",
   backendAddress: "http://127.0.0.1:23456"
-})
-
-/** Model group on disk, distinct from the default. */
-const STORED_MODEL_SETTINGS: ModelSettings = Object.freeze({
-  contextSize: 4096
 })
 
 /** Generation group on disk, distinct from the default. */
@@ -111,7 +105,6 @@ const STORED_TOOL_SETTINGS: ToolSettings = Object.freeze({
  */
 export const STORED_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
   runtime: STORED_RUNTIME_SETTINGS,
-  model: STORED_MODEL_SETTINGS,
   generation: STORED_GENERATION_SETTINGS,
   loadConfiguration: Object.freeze({
     default: STORED_DEFAULT_LOAD_CONFIGURATION,
@@ -132,7 +125,6 @@ export const STORED_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
  */
 export const STORED_SETTINGS: LysSettings = Object.freeze({
   runtime: STORED_RUNTIME_SETTINGS,
-  model: STORED_MODEL_SETTINGS,
   generation: STORED_GENERATION_SETTINGS,
   loadConfiguration: Object.freeze({
     default: STORED_DEFAULT_LOAD_CONFIGURATION,

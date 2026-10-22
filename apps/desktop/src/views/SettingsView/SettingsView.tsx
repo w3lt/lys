@@ -272,8 +272,9 @@ export type SettingsViewProps = {
  * selected pane and the settings value; this view provides `SettingsContext` so
  * the runtime, model, and generation panes read one authority and propose
  * patches back through it. Patches
- * apply in memory immediately. Generation and load configuration edits are
- * saved automatically; runtime and model edits remain session-only.
+ * apply in memory immediately. Generation, load configuration, and startup
+ * switch edits are saved automatically; other runtime edits remain
+ * session-only.
  *
  * Inventory, load, unload, reload, and health requests belong to the application store.
  * Entering settings refreshes inventory; leaving the view does not cancel work.
@@ -338,8 +339,6 @@ export default function SettingsView({
           ...settings,
           runtime: { ...settings.runtime, ...patch }
         }),
-      onModelChange: (patch) =>
-        setSettings({ ...settings, model: { ...settings.model, ...patch } }),
       onGenerationChange: (patch) =>
         setSettings({
           ...settings,

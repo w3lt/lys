@@ -6,7 +6,6 @@ import type { ModelState } from "@/lib/store/model-runtime"
 import type {
   GenerationSettings,
   LysSettings,
-  ModelSettings,
   RuntimeSettings
 } from "@/lib/store/settings"
 
@@ -35,12 +34,6 @@ export type SettingsContextValue = ModelState & {
    * @param patch - Runtime fields to change; omitted fields are unaffected.
    */
   onRuntimeChange: (patch: Partial<RuntimeSettings>) => void
-  /**
-   * Proposes a model settings patch to the provider.
-   *
-   * @param patch - Model fields to change; omitted fields are unaffected.
-   */
-  onModelChange: (patch: Partial<ModelSettings>) => void
   /**
    * Proposes a generation settings patch to the provider.
    *

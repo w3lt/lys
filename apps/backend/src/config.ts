@@ -91,17 +91,6 @@ export const backendConfigSchema = z
       .string()
       .refine(isAbsolute, "Attachments directory path must be absolute."),
     /**
-     * Absolute filesystem path of the directory that holds the backend's log
-     * files, one per UTC day.
-     *
-     * @remarks The backend creates it, but not the `LYS_HOME` directory,
-     * whenever it is missing as it writes a line, and each day's file there
-     * with that day's first line.
-     */
-    logsDirectoryPath: z
-      .string()
-      .refine(isAbsolute, "Logs directory path must be absolute."),
-    /**
      * IPv4 loopback address of vmo, which reads every `read_page` page in a
      * micro VM.
      *
@@ -167,9 +156,8 @@ export type BackendConfig = z.infer<typeof backendConfigSchema>
  *
  * @returns A frozen configuration snapshot that satisfies the complete backend
  * configuration schema, whose database path is `lys_db.sqlite`, whose
- * settings file path is `settings.json`, whose attachments directory is
- * `attachments`, and whose logs directory is `logs` in the `LYS_HOME`
- * directory, whose vmo endpoint is
+ * settings file path is `settings.json`, and whose attachments directory is
+ * `attachments` in the `LYS_HOME` directory, whose vmo endpoint is
  * `127.0.0.1:8080`, and whose prompts were read once during this call.
  * @throws If `LYS_HOME` is unset, empty, or not an absolute path, as
  * described by {@link parseLysHome}.
@@ -190,7 +178,6 @@ export function loadBackendConfig(): BackendConfig {
     databaseFilePath: join(lysHome, "lys_db.sqlite"),
     settingsFilePath: join(lysHome, "settings.json"),
     attachmentsDirectoryPath: join(lysHome, "attachments"),
-    logsDirectoryPath: join(lysHome, "logs"),
     vmoHost: VMO_HOST,
     vmoPort: VMO_PORT,
     caliginiaSystemPrompt: readPrompt("caliginia-system"),
@@ -199,6 +186,24 @@ export function loadBackendConfig(): BackendConfig {
     titleGenerationMaxAttempts: TITLE_GENERATION_MAX_ATTEMPTS,
     generatedTitleMaxLength: GENERATED_TITLE_MAX_LENGTH
   } satisfies z.input<typeof backendConfigSchema>)
+}
+
+/**
+ * Loads the path of the directory that holds the backend's log files, one per
+ * UTC day, from the `LYS_HOME` environment variable.
+ *
+ * It is loaded apart from {@link loadBackendConfig}, before it, so the backend
+ * can log a failure to load the rest of its configuration.
+ *
+ * @returns The absolute path of the `logs` directory in the `LYS_HOME`
+ * directory. Neither directory is required to exist.
+ * @throws If `LYS_HOME` is unset, empty, or not an absolute path, as
+ * described by {@link parseLysHome}.
+ * @remarks The backend creates the logs directory whenever it is missing as
+ * it writes a line, but never the `LYS_HOME` directory.
+ */
+export function loadBackendLogsDirectoryPath(): string {
+  return join(parseLysHome(process.env.LYS_HOME), "logs")
 }
 
 /**

@@ -1,7 +1,7 @@
 import Fastify, { type FastifyInstance } from "fastify"
 import { onTestFinished } from "vitest"
 import * as z from "zod"
-import { buildBackendLoggerOptions } from "../../../src/log"
+import { createBackendLogger } from "../../../src/log"
 
 /** Pino fields read by backend log assertions; other fields are retained. */
 const capturedLogRecordSchema = z.looseObject({
@@ -25,8 +25,8 @@ function parseCapturedLogRecord(line: string): CapturedLogRecord {
 }
 
 /**
- * Owns the lines a test application's logger writes, serving as the `stream`
- * of that logger.
+ * Owns the lines a test application's logger writes, serving as the
+ * destination of that logger.
  *
  * @remarks A malformed line fails the test that logged it: {@link write}
  * throws for a line that is not JSON or has no string `level`, and keeps
@@ -82,8 +82,8 @@ export type TestFastify = Readonly<{
  */
 export function createTestFastify(): TestFastify {
   const log = new CapturedLogDestination()
-  const loggerOptions = buildBackendLoggerOptions("trace", log)
-  const app = Fastify({ logger: loggerOptions })
+  const logger = createBackendLogger(log).child({}, { level: "trace" })
+  const app = Fastify({ loggerInstance: logger })
   onTestFinished(async () => {
     await app.close()
   })

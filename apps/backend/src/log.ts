@@ -2,21 +2,8 @@ import type { EventEmitter } from "node:events"
 import { appendFileSync, mkdirSync } from "node:fs"
 import { join } from "node:path"
 import type { Writable } from "node:stream"
-import type {
-  FastifyBaseLogger,
-  FastifyLoggerOptions,
-  FastifyServerOptions,
-  LogLevel
-} from "fastify"
-
-/**
- * Options of a Fastify application's own logger, in the form
- * `Fastify({ logger })` accepts them.
- */
-export type BackendLoggerOptions = Exclude<
-  FastifyServerOptions["logger"],
-  boolean | undefined
->
+import type { FastifyBaseLogger } from "fastify"
+import { pino, type DestinationStream } from "pino"
 
 /** The `level` field of a log line, holding the level's name. */
 type LogLevelField = Readonly<{
@@ -28,29 +15,32 @@ type LogLevelField = Readonly<{
 type BackendOutputName = "standard output" | "standard error" | "log file"
 
 /**
- * Builds the options of a backend application's logger.
+ * Creates the backend's logger, at level `info`.
  *
  * Each line is one JSON object whose `level` is the level's name, such as
- * `"info"`, and whose `time` is the UTC ISO-8601 time of the line. A request's
- * lines carry its full URL, query string included, such as a history search,
- * and a request for a route that does not exist gets a line of its own.
+ * `"info"`, and whose `time` is the UTC ISO-8601 time of the line. An
+ * application built with this logger also logs each request, with its full
+ * URL, query string included, such as a history search, and a request for a
+ * route that does not exist gets a line of its own.
  *
- * @param level - Lowest level the logger writes; lines below it are dropped.
- * @param destination - Receives each line; owned by the caller, which handles
- * its write failures. The logger never ends or closes it.
- * @returns New logger options for `Fastify({ logger })`.
+ * @param destination - Receives each line, newline included, through a
+ * synchronous `write` that must not throw; owned by the caller, which handles
+ * its write failures, as {@link BackendLogDestination} does. The logger never
+ * ends or closes it.
+ * @returns A new logger that writes lines at level `info` and above, and leaves
+ * out `debug` and `trace` lines.
  */
-export function buildBackendLoggerOptions(
-  level: LogLevel,
-  destination: NonNullable<FastifyLoggerOptions["stream"]>
-): BackendLoggerOptions {
-  const formatters = Object.freeze({ level: buildLogLevelField })
-  return {
-    level,
-    formatters,
-    timestamp: formatLogTimeField,
-    stream: destination
-  }
+export function createBackendLogger(
+  destination: DestinationStream
+): FastifyBaseLogger {
+  return pino(
+    {
+      level: "info",
+      formatters: { level: buildLogLevelField },
+      timestamp: formatLogTimeField
+    },
+    destination
+  )
 }
 
 /**
@@ -109,7 +99,7 @@ function createLogsDirectory(logsDirectoryPath: string): void {
  * Owns where the backend's log lines go: each line is written to the
  * backend's standard output and appended to the log file of the UTC day on
  * which it is written, `backend-YYYY-MM-DD.log` in the logs directory, so
- * each day has one file. It serves as the `stream` of the application's
+ * each day has one file. It serves as the destination of the backend's
  * logger.
  *
  * @remarks Invariant: a line is appended only to the file named by the UTC
@@ -190,27 +180,30 @@ export class BackendLogDestination {
 }
 
 /**
- * Logs the uncaught failure that is ending the backend, at level `fatal`,
- * with the failure in `err` and Node's `origin` of it.
+ * Logs what Node reports about the backend process: the uncaught failure that
+ * is ending it, at level `fatal`, and each warning, at level `warn`.
  *
  * Node emits `uncaughtExceptionMonitor` for an uncaught exception and for an
- * unhandled rejection, including a rejected top-level `await` of the entry
- * point, such as a port already in use. The listener only observes: Node
- * still reports the failure on standard error and ends the process, as it
- * would without the listener.
+ * unhandled rejection, including a failure of the entry point's top level,
+ * such as an unreadable prompt file, a database that cannot be opened, or a
+ * port already in use. Its line carries the failure in `err` and Node's
+ * `origin` of it. Node emits `warning` for each process warning, such as a
+ * deprecation, and its line carries the warning in `err`. Both listeners only
+ * observe: Node still prints the failure or the warning on standard error,
+ * and ends the process after an uncaught failure, as it would without them.
  *
  * @param backendProcess - The backend process, whose
- * `uncaughtExceptionMonitor` events are logged; borrowed.
- * @param logger - The application's logger; borrowed. Its destination must
- * write synchronously, as {@link BackendLogDestination} does, for the line to
+ * `uncaughtExceptionMonitor` and `warning` events are logged; borrowed.
+ * @param logger - The backend's logger; borrowed. Its destination must write
+ * synchronously, as {@link BackendLogDestination} does, for the fatal line to
  * be written before the process ends.
- * @remarks Call once per process, once the application has been built.
- * `buildApp` logs a failure to build the application itself; any other
- * failure before this call has no log line, and Node reports it on standard
- * error only. Calling again adds a second listener, which logs each failure a
- * second time.
+ * @remarks Call once per process, as soon as the logger exists, so a failure
+ * of anything after it is logged. A failure before the call, such as
+ * `LYS_HOME` not set, has no log line, and Node reports it on standard error
+ * only. Calling again adds a second pair of listeners, which logs each
+ * failure and warning a second time.
  */
-export function registerCrashLogging(
+export function registerProcessLogging(
   backendProcess: EventEmitter,
   logger: FastifyBaseLogger
 ): void {
@@ -223,6 +216,9 @@ export function registerCrashLogging(
       )
     }
   )
+  backendProcess.on("warning", (warning: Error) => {
+    logger.warn({ err: warning }, "Node reported a warning")
+  })
 }
 
 /**

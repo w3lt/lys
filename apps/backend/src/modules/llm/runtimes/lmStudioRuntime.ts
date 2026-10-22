@@ -1,7 +1,8 @@
 import {
   LMStudioClient,
   type LLM,
-  type LLMLoadModelConfig
+  type LLMLoadModelConfig,
+  type LoggerInterface
 } from "@lmstudio/sdk"
 import type { ModelLoadConfiguration } from "@lys/share"
 import * as z from "zod"
@@ -88,6 +89,8 @@ export default class LmStudioRuntime implements LlmRuntime {
    * Acquires a ready SDK adapter for an available configured endpoint.
    *
    * @param lmsBaseUrl - WebSocket endpoint validated by the SDK before acquisition.
+   * @param sdkLogger - Receives the messages the SDK client logs, such as why
+   * it could not connect; borrowed for the runtime's lifetime.
    * @returns A ready runtime whose cleanup ownership transfers to the caller.
    * @throws `The LLM runtime is unavailable.` with the SDK query failure as its
    * cause, or an SDK construction failure. Acquired resources are released before
@@ -97,11 +100,14 @@ export default class LmStudioRuntime implements LlmRuntime {
    * @remarks Acquisition completes only after the SDK readiness query settles.
    * The SDK offers no safe deadline or cancellation for this query.
    */
-  public static async create(lmsBaseUrl: string): Promise<LmStudioRuntime> {
+  public static async create(
+    lmsBaseUrl: string,
+    sdkLogger: LoggerInterface
+  ): Promise<LmStudioRuntime> {
     const clientLifetime = new AsyncDisposableStack()
     try {
       const client = clientLifetime.use(
-        new LMStudioClient({ baseUrl: lmsBaseUrl })
+        new LMStudioClient({ baseUrl: lmsBaseUrl, logger: sdkLogger })
       )
       const availabilityQuery = client.system.getLMStudioVersion()
       try {

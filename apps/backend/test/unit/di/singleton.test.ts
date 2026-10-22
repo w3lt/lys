@@ -18,7 +18,7 @@ import LlmService from "../../../src/modules/llm/llmService"
 import {
   closeSingletonServices,
   createSingletonServices,
-  type SingletonFailureReporters,
+  type SingletonLogReporters,
   type SingletonServiceAcquisition,
   type SingletonServiceFactories,
   type SingletonServices
@@ -39,17 +39,27 @@ import { answerWithBody, startVmoServer } from "../support/vmoServer"
 type AcquisitionName = "chat" | "database" | "llm-runtime"
 
 /**
- * Creates failure reporters that record what they receive.
+ * Creates log reporters that record what they receive.
  *
  * @returns Reporters whose calls each case can inspect.
  */
-function createFailureReporters() {
+function createLogReporters() {
   const llmRuntime = {
     reportLlmRuntimeAcquisitionFailure: vi.fn(),
     reportLlmRuntimeAvailabilityCheckFailure: vi.fn()
   } satisfies LlmRuntimeFailureReporters
   const pageRendering = { reportPageReaderFailure: vi.fn() }
-  return { llmRuntime, pageRendering } satisfies SingletonFailureReporters
+  const lmStudioSdk = {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn()
+  }
+  return {
+    llmRuntime,
+    pageRendering,
+    lmStudioSdk
+  } satisfies SingletonLogReporters
 }
 
 /**
@@ -134,7 +144,7 @@ function createRecordedFactories() {
     database: createAcquisition(database, "database", closeLog),
     llmRuntime: createAcquisition(
       new LlmRuntimeService({
-        ...createFailureReporters().llmRuntime,
+        ...createLogReporters().llmRuntime,
         acquireLlmRuntime: async () => {
           throw new Error("Unexpected LLM runtime acquisition")
         }
@@ -160,7 +170,7 @@ function createRecordedFactories() {
 describe("createSingletonServices", () => {
   it("derives each acquisition from the configuration", async () => {
     const { factories } = createRecordedFactories()
-    const reporters = createFailureReporters()
+    const reporters = createLogReporters()
 
     const services = await createSingletonServices(
       TEST_BACKEND_CONFIG,
@@ -179,7 +189,8 @@ describe("createSingletonServices", () => {
     )
     expect(factories.createLlmRuntimeService).toHaveBeenCalledWith(
       "ws://lmstudio.test:4321",
-      reporters.llmRuntime
+      reporters.llmRuntime,
+      reporters.lmStudioSdk
     )
   })
 
@@ -188,7 +199,7 @@ describe("createSingletonServices", () => {
 
     const services = await createSingletonServices(
       TEST_BACKEND_CONFIG,
-      createFailureReporters(),
+      createLogReporters(),
       factories
     )
     onTestFinished(async () => await closeSingletonServices(services))
@@ -214,7 +225,7 @@ describe("createSingletonServices", () => {
 
     const services = await createSingletonServices(
       { ...TEST_BACKEND_CONFIG, vmoPort },
-      createFailureReporters(),
+      createLogReporters(),
       factories
     )
     onTestFinished(async () => await closeSingletonServices(services))
@@ -238,7 +249,7 @@ describe("createSingletonServices", () => {
 
     const services = await createSingletonServices(
       { ...TEST_BACKEND_CONFIG, settingsFilePath },
-      createFailureReporters(),
+      createLogReporters(),
       factories
     )
     onTestFinished(async () => await closeSingletonServices(services))
@@ -268,7 +279,7 @@ describe("createSingletonServices", () => {
 
     const services = await createSingletonServices(
       TEST_BACKEND_CONFIG,
-      createFailureReporters(),
+      createLogReporters(),
       factories
     )
     onTestFinished(async () => await closeSingletonServices(services))
@@ -293,7 +304,7 @@ describe("createSingletonServices", () => {
     const { factories, acquisitions } = createRecordedFactories()
     const services = await createSingletonServices(
       TEST_BACKEND_CONFIG,
-      createFailureReporters(),
+      createLogReporters(),
       factories
     )
     onTestFinished(async () => await closeSingletonServices(services))
@@ -329,7 +340,7 @@ describe("createSingletonServices", () => {
     const { factories, acquisitions } = createRecordedFactories()
     const services = await createSingletonServices(
       TEST_BACKEND_CONFIG,
-      createFailureReporters(),
+      createLogReporters(),
       factories
     )
     onTestFinished(async () => await closeSingletonServices(services))
@@ -359,7 +370,7 @@ describe("createSingletonServices", () => {
       const { factories, acquisitions } = createRecordedFactories()
       const services = await createSingletonServices(
         TEST_BACKEND_CONFIG,
-        createFailureReporters(),
+        createLogReporters(),
         factories
       )
       onTestFinished(async () => await closeSingletonServices(services))
@@ -405,7 +416,7 @@ describe("createSingletonServices", () => {
       .mockRejectedValue(refusal)
     const services = await createSingletonServices(
       TEST_BACKEND_CONFIG,
-      createFailureReporters(),
+      createLogReporters(),
       factories
     )
     onTestFinished(async () => await closeSingletonServices(services))
@@ -425,7 +436,7 @@ describe("createSingletonServices", () => {
     await expect(
       createSingletonServices(
         TEST_BACKEND_CONFIG,
-        createFailureReporters(),
+        createLogReporters(),
         factories
       )
     ).rejects.toBe(creationFailure)
@@ -441,7 +452,7 @@ describe("createSingletonServices", () => {
     await expect(
       createSingletonServices(
         TEST_BACKEND_CONFIG,
-        createFailureReporters(),
+        createLogReporters(),
         factories
       )
     ).rejects.toThrow("Database is closed")
@@ -460,7 +471,7 @@ describe("createSingletonServices", () => {
     await expect(
       createSingletonServices(
         TEST_BACKEND_CONFIG,
-        createFailureReporters(),
+        createLogReporters(),
         factories
       )
     ).rejects.toBe(creationFailure)
@@ -479,7 +490,7 @@ describe("createSingletonServices", () => {
 
     const failure = await createSingletonServices(
       TEST_BACKEND_CONFIG,
-      createFailureReporters(),
+      createLogReporters(),
       factories
     ).catch((error: unknown) => error)
 
@@ -499,10 +510,7 @@ describe("createSingletonServices", () => {
       ...TEST_BACKEND_CONFIG,
       databaseFilePath: join(directory, "lys_db.sqlite")
     })
-    const services = await createSingletonServices(
-      config,
-      createFailureReporters()
-    )
+    const services = await createSingletonServices(config, createLogReporters())
     onTestFinished(async () => await closeSingletonServices(services))
     const history = services.conversationHistoryReader
     const turn = services.conversationTurns.createConversationTurn({
@@ -530,7 +538,7 @@ describe("closeSingletonServices", () => {
     const recorded = createRecordedFactories()
     const services: SingletonServices = await createSingletonServices(
       TEST_BACKEND_CONFIG,
-      createFailureReporters(),
+      createLogReporters(),
       recorded.factories
     )
     return { services, ...recorded }

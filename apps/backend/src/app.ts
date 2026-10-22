@@ -1,7 +1,4 @@
-import Fastify, {
-  type FastifyInstance,
-  type FastifyLoggerOptions
-} from "fastify"
+import Fastify, { type FastifyBaseLogger, type FastifyInstance } from "fastify"
 import updateFastifyWithAgentRoutes from "./modules/agent/routes"
 import updateFastifyWithConversationRoutes from "./modules/conversation/routes"
 import registerHealthRoutes from "./modules/health/routes"
@@ -11,7 +8,6 @@ import registerToolRoutes from "./modules/tool/routes"
 import { backendConfigSchema, type BackendConfig } from "./config"
 import singletonServicesPlugin from "./di/fastify"
 import { updateFastifyWithHttpTransport } from "./http"
-import { buildBackendLoggerOptions } from "./log"
 
 /** Options used to construct the backend Fastify application. */
 export type BuildAppOptions = {
@@ -23,25 +19,21 @@ export type BuildAppOptions = {
    */
   config: BackendConfig
   /**
-   * Destination of the application's log: one JSON object per line, with the
-   * level name in `level`, such as `"info"`, and the UTC ISO-8601 time in
-   * `time`.
+   * The backend's logger, which the application, its requests, and its
+   * services log to.
    *
-   * A request's lines carry its full URL, query string included.
-   *
-   * @remarks Owned by the caller, which decides where the lines go; the
-   * application writes to it but never ends or closes it. Its `write` must not
-   * throw. The destination handles its own failed writes, as
-   * `BackendLogDestination` does for the backend; the application keeps
-   * serving either way.
+   * @remarks Borrowed: the application logs through a child of it and never
+   * changes or closes it. Its level decides which lines are written; the
+   * backend's logger, from `createBackendLogger`, writes `info` and above,
+   * with request lines that carry the full URL, query string included.
    */
-  logDestination: NonNullable<FastifyLoggerOptions["stream"]>
+  logger: FastifyBaseLogger
 }
 
 /**
  * Builds and configures the backend Fastify application.
  *
- * The application logs at level `info` to {@link BuildAppOptions.logDestination}.
+ * The application logs to {@link BuildAppOptions.logger}.
  *
  * @param options - Runtime dependencies and configuration for the application.
  * @returns A promise that resolves to the Fastify application after SSE support, singleton services, and all backend routes are registered.
@@ -49,43 +41,29 @@ export type BuildAppOptions = {
  * {@link backendConfigSchema}; each issue names the failing key, and no
  * application or service has been created, so nothing is logged.
  * @throws If a plugin or route cannot be registered, such as when the
- * database cannot be opened. The failure is first logged at level `fatal`,
- * with the failure in `err`, since the backend cannot run without its
- * application.
+ * database cannot be opened.
  */
 export async function buildApp(
   options: BuildAppOptions
 ): Promise<FastifyInstance> {
   const config = backendConfigSchema.parse(options.config)
-  const loggerOptions = buildBackendLoggerOptions(
-    "info",
-    options.logDestination
-  )
-  const app = Fastify({ logger: loggerOptions })
+  const app = Fastify({ loggerInstance: options.logger })
 
-  try {
-    await updateFastifyWithHttpTransport(app)
-    await app.register(singletonServicesPlugin, {
-      config
-    })
+  await updateFastifyWithHttpTransport(app)
+  await app.register(singletonServicesPlugin, {
+    config
+  })
 
-    // =============== REGISTER THE ROUTES =============== //
-    await app.register(registerHealthRoutes)
-    await app.register(updateFastifyWithLlmRoutes)
-    await app.register(registerChatRoutes, {
-      titleGenerationMaxAttempts: config.titleGenerationMaxAttempts
-    })
-    await app.register(updateFastifyWithConversationRoutes)
-    await app.register(updateFastifyWithAgentRoutes)
-    await app.register(registerToolRoutes)
-    // =============== REGISTER THE ROUTES =============== //
-  } catch (error) {
-    app.log.fatal(
-      { err: error },
-      "The Lys backend application could not be built"
-    )
-    throw error
-  }
+  // =============== REGISTER THE ROUTES =============== //
+  await app.register(registerHealthRoutes)
+  await app.register(updateFastifyWithLlmRoutes)
+  await app.register(registerChatRoutes, {
+    titleGenerationMaxAttempts: config.titleGenerationMaxAttempts
+  })
+  await app.register(updateFastifyWithConversationRoutes)
+  await app.register(updateFastifyWithAgentRoutes)
+  await app.register(registerToolRoutes)
+  // =============== REGISTER THE ROUTES =============== //
 
   return app
 }

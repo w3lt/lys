@@ -14,10 +14,11 @@ import { dirname, join } from "node:path"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import {
   BackendLogDestination,
-  registerCrashLogging,
-  registerOutputFailureListeners
+  createBackendLogger,
+  registerOutputFailureListeners,
+  registerProcessLogging
 } from "../../src/log"
-import { createTestFastify } from "./support/fastifyTestApp"
+import { CapturedLogDestination } from "./support/fastifyTestApp"
 import { createFailingOutput, createWorkingOutput } from "./support/testOutputs"
 
 /** Failure a write reports on a full disk. */
@@ -68,6 +69,21 @@ function stopClockAt(time: string): void {
     vi.useRealTimers()
   })
   vi.setSystemTime(new Date(time))
+}
+
+/**
+ * Creates a warning shaped as Node creates one for `process.emitWarning`: an
+ * `Error` whose `name` is the warning's type, with its code.
+ *
+ * @param type - Type of the warning, such as `DeprecationWarning`.
+ * @param code - Code of the warning, such as `DEP0005`.
+ * @param message - Text of the warning.
+ * @returns A new warning.
+ */
+function createNodeWarning(type: string, code: string, message: string): Error {
+  const warning = new Error(message)
+  warning.name = type
+  return Object.assign(warning, { code })
 }
 
 /**
@@ -223,11 +239,48 @@ describe("BackendLogDestination", () => {
   })
 })
 
-describe("registerCrashLogging", () => {
+describe("createBackendLogger", () => {
+  it("writes each line as one JSON object with its level name and its UTC ISO-8601 time", () => {
+    stopClockAt("2026-10-21T08:15:02.123Z")
+    const log = new CapturedLogDestination()
+    const logger = createBackendLogger(log)
+
+    logger.info("Server listening at http://127.0.0.1:12345")
+
+    expect(log.records).toEqual([
+      expect.objectContaining({
+        level: "info",
+        time: "2026-10-21T08:15:02.123Z",
+        msg: "Server listening at http://127.0.0.1:12345"
+      })
+    ])
+  })
+
+  it("writes info lines and above and leaves out debug and trace lines", () => {
+    const log = new CapturedLogDestination()
+    const logger = createBackendLogger(log)
+
+    logger.trace("Detail written at trace level")
+    logger.debug("Detail written at debug level")
+    logger.info("Detail written at info level")
+    logger.warn("Detail written at warn level")
+    logger.error("Detail written at error level")
+    logger.fatal("Detail written at fatal level")
+
+    expect(log.records.map((record) => record.level)).toEqual([
+      "info",
+      "warn",
+      "error",
+      "fatal"
+    ])
+  })
+})
+
+describe("registerProcessLogging", () => {
   it("logs a failure nothing caught at level fatal with the failure and its origin", () => {
     const backendProcess = new EventEmitter()
-    const { app, log } = createTestFastify()
-    registerCrashLogging(backendProcess, app.log)
+    const log = new CapturedLogDestination()
+    registerProcessLogging(backendProcess, createBackendLogger(log))
 
     backendProcess.emit(
       "uncaughtExceptionMonitor",
@@ -250,8 +303,8 @@ describe("registerCrashLogging", () => {
 
   it("logs a thrown value that is not an Error as it is", () => {
     const backendProcess = new EventEmitter()
-    const { app, log } = createTestFastify()
-    registerCrashLogging(backendProcess, app.log)
+    const log = new CapturedLogDestination()
+    registerProcessLogging(backendProcess, createBackendLogger(log))
 
     backendProcess.emit(
       "uncaughtExceptionMonitor",
@@ -264,6 +317,50 @@ describe("registerCrashLogging", () => {
         level: "fatal",
         origin: "uncaughtException",
         err: "a thrown string"
+      })
+    ])
+  })
+
+  it("logs each warning Node reports at level warn with its type, code, and text", () => {
+    const backendProcess = new EventEmitter()
+    const log = new CapturedLogDestination()
+    registerProcessLogging(backendProcess, createBackendLogger(log))
+
+    backendProcess.emit(
+      "warning",
+      createNodeWarning(
+        "DeprecationWarning",
+        "DEP0005",
+        "Buffer() is deprecated due to security and usability issues."
+      )
+    )
+    backendProcess.emit(
+      "warning",
+      createNodeWarning(
+        "MaxListenersExceededWarning",
+        "MAX_LISTENERS",
+        "Possible EventEmitter memory leak detected."
+      )
+    )
+
+    expect(log.records).toEqual([
+      expect.objectContaining({
+        level: "warn",
+        msg: "Node reported a warning",
+        err: expect.objectContaining({
+          name: "DeprecationWarning",
+          code: "DEP0005",
+          message:
+            "Buffer() is deprecated due to security and usability issues."
+        })
+      }),
+      expect.objectContaining({
+        level: "warn",
+        msg: "Node reported a warning",
+        err: expect.objectContaining({
+          name: "MaxListenersExceededWarning",
+          message: "Possible EventEmitter memory leak detected."
+        })
       })
     ])
   })

@@ -1,21 +1,25 @@
-import { loadBackendConfig } from "./config"
+import { loadBackendConfig, loadBackendLogsDirectoryPath } from "./config"
 import { buildApp } from "./app"
 import {
   BackendLogDestination,
-  registerCrashLogging,
-  registerOutputFailureListeners
+  createBackendLogger,
+  registerOutputFailureListeners,
+  registerProcessLogging
 } from "./log"
 
 registerOutputFailureListeners(process.stdout, process.stderr)
 
-const config = loadBackendConfig()
-const logDestination = new BackendLogDestination(
-  process.stdout,
-  process.stderr,
-  config.logsDirectoryPath
+const logger = createBackendLogger(
+  new BackendLogDestination(
+    process.stdout,
+    process.stderr,
+    loadBackendLogsDirectoryPath()
+  )
 )
-const app = await buildApp({ config, logDestination })
-registerCrashLogging(process, app.log)
+registerProcessLogging(process, logger)
+
+const config = loadBackendConfig()
+const app = await buildApp({ config, logger })
 
 await app.listen({
   host: config.backendHost,

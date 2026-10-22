@@ -34,9 +34,15 @@ export const llmLoadModelApiRequestBodySchema = z
   })
   .readonly()
 
-/** Validates model metadata returned only after a successful load. */
+/**
+ * Validates model metadata returned only after a successful load.
+ *
+ * @remarks The load does not observe the context length the model was loaded
+ * with, so the response has no `loadedContextLength`; the inventory reports it.
+ */
 export const llmLoadModelApiResponseBodySchema = llmInfoSchema
   .unwrap()
+  .omit({ loadedContextLength: true })
   .safeExtend({
     /** A successful load response always describes a loaded model. */
     loaded: z.literal(true)

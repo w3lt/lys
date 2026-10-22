@@ -5,10 +5,14 @@ import type {
   LoadedLlmModelInstance
 } from "../llmRuntimeTypes"
 
-/** Application metadata shape with the runtime's non-empty canonical key invariant. */
+/**
+ * Application metadata shape with the runtime's non-empty canonical key
+ * invariant, without the loaded state and loaded context length that loaded
+ * instances supply.
+ */
 const downloadedLlmMetadataSchema = llmInfoSchema
   .unwrap()
-  .omit({ loaded: true })
+  .omit({ loaded: true, loadedContextLength: true })
   .extend({ modelKey: z.string().min(1) })
 
 /** Validates the external LM Studio discriminator and consumed metadata fields. */

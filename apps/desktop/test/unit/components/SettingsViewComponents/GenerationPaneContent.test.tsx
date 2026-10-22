@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest"
 import type { GenerationSettings } from "@/lib/store/settings"
 import { initialSettingsState } from "@/lib/store/settings"
 import { startBackendFake } from "../../support/backendFake"
+import { buildLlmInfo } from "../../support/modelFixtures"
 import { startNativeHostFake } from "../../support/nativeHostFake"
 import { STORED_SETTINGS_DOCUMENT } from "../../support/settingsFixtures"
 import {
@@ -12,6 +13,10 @@ import {
   loadFreshSettingsView
 } from "../../support/settingsViewFixtures"
 import { waitForRenderedWork } from "../../support/rendering"
+import {
+  READY_RUNTIME,
+  type RuntimeArrangement
+} from "../../support/runtimeFixtures"
 
 /**
  * Starts a native host whose settings file holds
@@ -46,14 +51,19 @@ function buildGenerationSave(generation: GenerationSettings) {
  * Renders the settings view on the Generation pane and waits for the pane.
  *
  * @param generation - Generation settings in effect.
+ * @param runtime - Backend, LM Studio, and model facts; by default a loaded
+ * model with an 8,192-token context.
  * @returns The application store.
  */
 async function startGenerationPane(
-  generation: GenerationSettings = initialSettingsState.generation
+  generation: GenerationSettings = initialSettingsState.generation,
+  runtime: RuntimeArrangement = READY_RUNTIME
 ) {
-  startBackendFake({ [INVENTORY_ROUTE]: buildInventoryRoute() })
-  const { useLysStore, SettingsView } =
-    await loadFreshSettingsView("generation")
+  startBackendFake({ [INVENTORY_ROUTE]: buildInventoryRoute(runtime) })
+  const { useLysStore, SettingsView } = await loadFreshSettingsView(
+    "generation",
+    runtime
+  )
   const { settings } = useLysStore.getState()
   useLysStore.setState({ settings: { ...settings, generation } })
   render(<SettingsView onDone={vi.fn()} />)
@@ -151,11 +161,11 @@ describe("GenerationPaneContent", () => {
   })
 
   it.each([
-    ["a ceiling within the window", 2048, "64", "32768"],
+    ["a ceiling within the window", 2048, "64", "8192"],
     ["a ceiling above the window", 40_000, "64", "40000"],
-    ["a ceiling below one step", 32, "32", "32768"]
+    ["a ceiling below one step", 32, "32", "8192"]
   ])(
-    "ranges the slider to keep %s visible without clamping it",
+    "ranges the slider to the context length the loaded model reports, keeping %s visible without clamping it",
     async (_case, replyCeiling, minimum, maximum) => {
       await startGenerationPane({ temperature: 0.7, replyCeiling })
 
@@ -165,6 +175,18 @@ describe("GenerationPaneContent", () => {
       expect(ceiling).toHaveAttribute("max", maximum)
     }
   )
+
+  it("ranges the slider to 32,768 tokens while no model is loaded", async () => {
+    await startGenerationPane(
+      { temperature: 0.7, replyCeiling: 2048 },
+      {
+        ...READY_RUNTIME,
+        modelInventory: { status: "ready", models: [buildLlmInfo("qwen3-8b")] }
+      }
+    )
+
+    expect(getSlider("Ceiling")).toHaveAttribute("max", "32768")
+  })
 
   it("announces a failed save, keeps the edit, and retries on request", async () => {
     let isSaveFailing = true

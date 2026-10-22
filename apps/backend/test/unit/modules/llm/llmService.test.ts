@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, onTestFinished, vi } from "vitest"
 import * as z from "zod"
 import LlmService, {
   type LlmEngineOperation,
@@ -7,9 +7,16 @@ import LlmService, {
 } from "../../../../src/modules/llm/llmService"
 import type { LlmEngine } from "../../../../src/modules/llm/llmEngine"
 import type { LoadedLlmModelInstance } from "../../../../src/modules/llm/llmRuntimeTypes"
+import LmStudioRuntime from "../../../../src/modules/llm/runtimes/lmStudioRuntime"
 import { createFakeLlmRuntime } from "../../support/fakeLlmRuntime"
-import { createDownloadedLlmModel } from "../../support/llmFixtures"
+import {
+  createDownloadedLlmModel,
+  createLmStudioLlmRecord
+} from "../../support/llmFixtures"
+import { fakeLmStudio } from "../../support/lmStudioSdkFake"
 import { waitForMicrotasks } from "../../support/microtasks"
+
+vi.mock("@lmstudio/sdk", () => import("../../support/lmStudioSdkFake"))
 
 /** Service settings a case may vary; the queue is always the case's double. */
 type LlmServiceTestOptions = Omit<
@@ -73,6 +80,7 @@ function createServiceWithEngine(options: LlmServiceTestOptions = {}) {
 type QueuedLlmServiceOperationName = keyof Pick<
   LlmService,
   | "listLlmModels"
+  | "listDownloadedLlmModels"
   | "loadLlmModel"
   | "getLlmModelHealth"
   | "stopLlmModelsByKey"
@@ -93,6 +101,8 @@ async function sendLlmServiceRequest(
   switch (operationName) {
     case "listLlmModels":
       return await service.listLlmModels()
+    case "listDownloadedLlmModels":
+      return await service.listDownloadedLlmModels()
     case "loadLlmModel":
       return await service.loadLlmModel("a/model", {})
     case "getLlmModelHealth":
@@ -117,6 +127,10 @@ describe("LlmService", () => {
         createLoadedInstance("b/model"),
         createLoadedInstance("unknown/model")
       ])
+      engine.findLlmContextMeasurement.mockResolvedValue({
+        contextLength: 8192,
+        textTokenCounts: []
+      })
 
       const models = await service.listLlmModels()
 
@@ -129,8 +143,104 @@ describe("LlmService", () => {
       ])
       expect(models[2]).toEqual({
         ...createDownloadedLlmModel({ modelKey: "b/model" }),
-        loaded: true
+        loaded: true,
+        loadedContextLength: 8192
       })
+    })
+
+    it("gives every entry of a loaded model the context length one measurement of its key reports, without text, and none to a model that is not loaded", async () => {
+      const { service, engine } = createServiceWithEngine()
+      engine.listDownloadedLlmModels.mockResolvedValue([
+        createDownloadedLlmModel({ modelKey: "a/model", path: "a/path.gguf" }),
+        createDownloadedLlmModel({ modelKey: "a/model", path: "z/path.gguf" }),
+        createDownloadedLlmModel({ modelKey: "b/model" })
+      ])
+      engine.listLoadedLlmModelInstances.mockResolvedValue([
+        createLoadedInstance("a/model"),
+        createLoadedInstance("unknown/model")
+      ])
+      engine.findLlmContextMeasurement.mockResolvedValue({
+        contextLength: 4096,
+        textTokenCounts: []
+      })
+
+      const models = await service.listLlmModels()
+
+      expect(
+        models.map(({ modelKey, loadedContextLength }) => ({
+          modelKey,
+          loadedContextLength
+        }))
+      ).toEqual([
+        { modelKey: "a/model", loadedContextLength: 4096 },
+        { modelKey: "a/model", loadedContextLength: 4096 },
+        { modelKey: "b/model", loadedContextLength: undefined }
+      ])
+      expect(models[2]).not.toHaveProperty("loadedContextLength")
+      expect(engine.findLlmContextMeasurement).toHaveBeenCalledExactlyOnceWith(
+        "a/model",
+        []
+      )
+    })
+
+    it("leaves the context length out of a loaded model whose instances were gone when it was measured", async () => {
+      const { service, engine } = createServiceWithEngine()
+      engine.listDownloadedLlmModels.mockResolvedValue([
+        createDownloadedLlmModel({ modelKey: "a/model" })
+      ])
+      engine.listLoadedLlmModelInstances.mockResolvedValue([
+        createLoadedInstance("a/model")
+      ])
+      engine.findLlmContextMeasurement.mockResolvedValue(undefined)
+
+      const models = await service.listLlmModels()
+
+      expect(models).toEqual([
+        { ...createDownloadedLlmModel({ modelKey: "a/model" }), loaded: true }
+      ])
+      expect(models[0]).not.toHaveProperty("loadedContextLength")
+    })
+
+    it("measures loaded models one at a time, so a runtime that refuses overlapping operations reports each model's length and is idle afterward", async () => {
+      fakeLmStudio.reset()
+      fakeLmStudio.inventory = {
+        downloadedModels: [
+          createLmStudioLlmRecord({ modelKey: "a/model" }),
+          createLmStudioLlmRecord({ modelKey: "b/model" })
+        ],
+        loadedModels: [
+          { modelKey: "a/model", identifier: "a/model" },
+          { modelKey: "b/model", identifier: "b/model" }
+        ]
+      }
+      const contextLengths = new Map([
+        ["a/model", 4096],
+        ["b/model", 16_384]
+      ])
+      fakeLmStudio.operations = {
+        ...fakeLmStudio.operations,
+        getContextLength: async (identifier) =>
+          contextLengths.get(identifier) ?? 0
+      }
+      const runtime = await LmStudioRuntime.create("ws://127.0.0.1:1234")
+      onTestFinished(async () => {
+        await runtime[Symbol.asyncDispose]()
+      })
+      const { queue } = createAdmittingQueue(runtime)
+      const service = new LlmService({ llmEngineOperationQueue: queue })
+
+      const models = await service.listLlmModels()
+
+      expect(
+        models.map(({ modelKey, loadedContextLength }) => ({
+          modelKey,
+          loadedContextLength
+        }))
+      ).toEqual([
+        { modelKey: "a/model", loadedContextLength: 4096 },
+        { modelKey: "b/model", loadedContextLength: 16_384 }
+      ])
+      await expect(runtime.getRuntimeAvailability()).resolves.toBe("available")
     })
 
     it("returns a frozen inventory", async () => {
@@ -148,19 +258,56 @@ describe("LlmService", () => {
 
     it.each([
       ["downloaded", "listDownloadedLlmModels"],
-      ["loaded", "listLoadedLlmModelInstances"]
+      ["loaded", "listLoadedLlmModelInstances"],
+      ["context length", "findLlmContextMeasurement"]
     ] as const)(
       "propagates a failed %s inventory query",
       async (_label, failingQuery) => {
         const { service, engine } = createServiceWithEngine()
-        engine.listDownloadedLlmModels.mockResolvedValue([])
-        engine.listLoadedLlmModelInstances.mockResolvedValue([])
+        engine.listDownloadedLlmModels.mockResolvedValue([
+          createDownloadedLlmModel({ modelKey: "a/model" })
+        ])
+        engine.listLoadedLlmModelInstances.mockResolvedValue([
+          createLoadedInstance("a/model")
+        ])
+        engine.findLlmContextMeasurement.mockResolvedValue({
+          contextLength: 4096,
+          textTokenCounts: []
+        })
         const failure = new Error("The LLM runtime could not list models.")
         engine[failingQuery].mockRejectedValue(failure)
 
         await expect(service.listLlmModels()).rejects.toBe(failure)
       }
     )
+  })
+
+  describe("listDownloadedLlmModels", () => {
+    it("returns the engine's downloaded models through the queue without listing or measuring loaded instances", async () => {
+      const { service, engine, requests } = createServiceWithEngine()
+      const downloadedModels = Object.freeze([
+        createDownloadedLlmModel({ modelKey: "b/model" }),
+        createDownloadedLlmModel({ modelKey: "a/model" })
+      ])
+      engine.listDownloadedLlmModels.mockResolvedValue(downloadedModels)
+
+      await expect(service.listDownloadedLlmModels()).resolves.toBe(
+        downloadedModels
+      )
+      expect(requests).toHaveBeenCalledOnce()
+      expect(engine.listLoadedLlmModelInstances).not.toHaveBeenCalled()
+      expect(engine.findLlmContextMeasurement).not.toHaveBeenCalled()
+    })
+
+    it("propagates a failed query", async () => {
+      const { service, engine } = createServiceWithEngine()
+      const failure = new Error(
+        "The LLM runtime could not list downloaded models."
+      )
+      engine.listDownloadedLlmModels.mockRejectedValue(failure)
+
+      await expect(service.listDownloadedLlmModels()).rejects.toBe(failure)
+    })
   })
 
   describe("loadLlmModel", () => {
@@ -378,6 +525,7 @@ describe("LlmService", () => {
   describe("queue rejection", () => {
     it.each([
       "listLlmModels",
+      "listDownloadedLlmModels",
       "loadLlmModel",
       "getLlmModelHealth",
       "stopLlmModelsByKey",

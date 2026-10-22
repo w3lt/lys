@@ -52,7 +52,6 @@ const NOTHING_LOADED: RuntimeArrangement = {
  */
 const FIRST_RUN_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
   runtime: initialSettingsState.runtime,
-  model: initialSettingsState.model,
   generation: initialSettingsState.generation,
   loadConfiguration: Object.freeze({ default: {}, models: {} }),
   secrets: initialSettingsState.secrets,

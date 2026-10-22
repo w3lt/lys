@@ -4,6 +4,7 @@ import { MAXIMUM_GENERATION_TEMPERATURE } from "@lys/protocol"
 import { Button } from "@/components/ui/button"
 import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
+import { findLoadedModel } from "@/lib/models/model-residency"
 import { useLysStore } from "@/lib/store"
 import type { GenerationSaveState } from "@/lib/store/generation-settings"
 import { initialSettingsState } from "@/lib/store/settings"
@@ -15,6 +16,12 @@ const TEMPERATURE_STEP = 0.05
 
 /** Reply-ceiling increment used by the slider, in tokens. */
 const REPLY_CEILING_STEP = 64
+
+/**
+ * Upper end of the reply-ceiling slider's usual range, in tokens, while no
+ * loaded model reports its context length.
+ */
+const UNKNOWN_WINDOW_REPLY_CEILING_RANGE = 32_768
 
 /**
  * Presents the API's inclusive sampling-temperature range.
@@ -104,17 +111,23 @@ function GenerationReplyCeilingField(): ReactElement {
  * Edits an enabled reply ceiling in tokens through a keyboard-operable slider.
  * @returns The labeled ceiling slider and its accepted numeric value.
  * @remarks Requires SettingsContext and a
- * positive ceiling. The local context estimate sets the usual slider range;
- * existing ceilings outside that range remain visible without clamping. Actual
- * model capacity remains runtime-owned. Empty slider emissions are ignored.
+ * positive ceiling. The usual slider range ends at the context length the
+ * loaded model reports, or at {@link UNKNOWN_WINDOW_REPLY_CEILING_RANGE} while
+ * none is known; existing ceilings outside that range remain visible without
+ * clamping. Empty slider emissions are ignored.
  */
 function GenerationReplyLimitField(): ReactElement {
-  const { settings, onGenerationChange } = useSettingsContext()
+  const { settings, modelRuntime, modelInventory, onGenerationChange } =
+    useSettingsContext()
   const replyCeiling = settings.generation.replyCeiling
+  const loadedContextLength = findLoadedModel(
+    modelRuntime,
+    modelInventory
+  )?.loadedContextLength
   const minimumReplyCeiling = Math.min(REPLY_CEILING_STEP, replyCeiling)
   const maximumReplyCeiling = Math.max(
     REPLY_CEILING_STEP * 2,
-    settings.model.contextSize,
+    loadedContextLength ?? UNKNOWN_WINDOW_REPLY_CEILING_RANGE,
     replyCeiling
   )
   const labelId = useId()

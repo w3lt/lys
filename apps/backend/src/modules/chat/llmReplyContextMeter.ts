@@ -4,7 +4,10 @@ import type {
   ReplyContextMeasurementRequest,
   ReplyContextMeter
 } from "../agent/replyContextMeter"
-import type { ReplyContextMessage } from "../agent/replyModel"
+import type {
+  ReplyContextImageSides,
+  ReplyContextMessage
+} from "../agent/replyModel"
 import type { LlmContextMeasurement } from "../llm/llmRuntimeTypes"
 
 /** Measures texts with a loaded model's tokenizer; the LLM service's query. */
@@ -129,7 +132,9 @@ function getTextTokenCount(
  * @returns Its content; for an assistant message, followed by the name and
  * argument text of each call it carries, one call per line.
  */
-function buildMessageText(message: ReplyContextMessage): string {
+function buildMessageText(
+  message: ReplyContextMessage<ReplyContextImageSides>
+): string {
   if (message.role !== "assistant") return message.content
   return [
     message.content,
@@ -159,7 +164,7 @@ function buildToolText(tool: OpenAIFunctionTool): string {
  * also the estimated tokens of each image it sends.
  */
 function calculateMessageTokens(
-  message: ReplyContextMessage,
+  message: ReplyContextMessage<ReplyContextImageSides>,
   textTokens: number
 ): number {
   const toolCallCount =

@@ -138,7 +138,10 @@ stored messages a turn's first round would send, with an empty new message
 that measures the markup around the text. When a stored message holds an
 attachment, it reads the model's capabilities as the chat route does, so the
 images a model with vision sees are counted and `read_attachment` is among
-the measured tools when a turn would offer it. See the
+the measured tools when a turn would offer it. It never reads an image's
+bytes: `getAgentContextImageSides` asks the attachment file store whether
+each file is still there, and the measured context carries a stored image's
+sides, or a missing one's placeholder, where a turn sends the image. See the
 [route contract](/reference/api/#chat-context-measurement).
 
 Each completion receives the system prompt of the conversation's agent, prior
@@ -297,12 +300,13 @@ conversation never reads the disk.
 the image's media type and sides, and its size; a message without
 attachments sends its text alone. For a model with vision, each image follows
 its message's text as an `image_url` part carrying the file as a data URL, on
-the turn it was sent and on every later turn; `loadAgentContextImages` reads
+the turn it was sent and on every later turn; `readAgentContextImages` reads
 the files once per turn, in conversation order. An image the model does not
 get is one more line of the text instead: "is an image that this model
 cannot see." for a model without vision, which reads no file, or "is an
 image whose file is missing from this machine, so it cannot be shown." when
-the file is gone. The context meter counts each image sent as its estimate.
+the file is gone. The context meter counts each image sent as its estimate
+from the image's stored sides, so it needs no bytes.
 
 A text file is never sent whole. When the conversation holds one and the
 model is trained for tool use, the turn offers
@@ -314,8 +318,11 @@ result.
 Whether the model sees images and is trained for tool use is read from LM
 Studio's inventory (`src/modules/chat/routes/modelCapabilities.ts`) only for
 a turn that involves an attachment, so a turn without any never waits for
-the model-operation queue. A model the inventory does not list has neither
-capability: an image attached for it is refused, and no reader is offered.
+the model-operation queue. The read lists the downloaded models only
+(`LlmService.listDownloadedLlmModels()`), without the loaded state and
+context lengths the model list adds. A model the inventory does not list has
+neither capability: an image attached for it is refused, and no reader is
+offered.
 
 ## Tool approval
 

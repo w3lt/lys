@@ -2,11 +2,14 @@ import { describe, expect, it, vi } from "vitest"
 import {
   buildAgentContext,
   calculateAgentContextHistoryMessageCount,
+  getAgentContextImageSides,
   readAgentContextImages,
   UNSEEN_CONTEXT_IMAGES,
   type AgentContextImages,
-  type FindAttachmentImage
+  type FindAttachmentImage,
+  type GetAttachmentImageFileStatus
 } from "../../../../src/modules/agent/agentContext"
+import type { ReplyContextImage } from "../../../../src/modules/agent/replyModel"
 import {
   createImageAttachment,
   createTextAttachment
@@ -46,10 +49,10 @@ const FAILED_READ = createToolCallPart(
   { status: "failed", result: "The page did not answer." }
 )
 
-/** Images of a context whose model sees images but no file was read. */
-const NO_LOADED_IMAGES: AgentContextImages = Object.freeze({
-  status: "loaded",
-  images: new Map<number, Uint8Array>()
+/** Images of a context whose model sees images but no file was found. */
+const NO_SEEN_IMAGES: AgentContextImages = Object.freeze({
+  status: "seen",
+  images: new Map()
 })
 
 /** The new message of most cases, without attachments. */
@@ -437,7 +440,7 @@ describe("buildAgentContext", () => {
           systemPrompt: "You are Lys.",
           history: history,
           userMessage: userMessage,
-          images: NO_LOADED_IMAGES
+          images: NO_SEEN_IMAGES
         })
       ).toEqual([
         { role: "system", content: "You are Lys." },
@@ -466,7 +469,7 @@ describe("buildAgentContext", () => {
       ])
     })
 
-    it("sends the loaded images of a message after its text, in attachment order, and a placeholder for a missing one", () => {
+    it("sends the found images of a message after its text, in attachment order, and a placeholder for a missing one", () => {
       const first = createImageAttachment(1, "first.png", {
         width: 10,
         height: 20
@@ -477,16 +480,28 @@ describe("buildAgentContext", () => {
         height: 40
       })
       const otherBytes = new Uint8Array([9])
+      const firstImage: ReplyContextImage = {
+        mediaType: "image/png",
+        width: 10,
+        height: 20,
+        data: PHOTO_BYTES
+      }
+      const thirdImage: ReplyContextImage = {
+        mediaType: "image/png",
+        width: 30,
+        height: 40,
+        data: otherBytes
+      }
 
       const context = buildAgentContext({
         systemPrompt: "You are Lys.",
         history: [],
         userMessage: { content: "Look", attachments: [first, second, third] },
         images: {
-          status: "loaded",
+          status: "seen",
           images: new Map([
-            [3, otherBytes],
-            [1, PHOTO_BYTES]
+            [3, thirdImage],
+            [1, firstImage]
           ])
         }
       })
@@ -502,10 +517,7 @@ describe("buildAgentContext", () => {
           "[attachment 3] third.png (image/png, 30×40, 33 bytes)",
           "[attachment 2] second.png is an image whose file is missing from this machine, so it cannot be shown."
         ].join("\n"),
-        images: [
-          { mediaType: "image/png", width: 10, height: 20, data: PHOTO_BYTES },
-          { mediaType: "image/png", width: 30, height: 40, data: otherBytes }
-        ]
+        images: [firstImage, thirdImage]
       })
     })
 
@@ -600,10 +612,13 @@ describe("readAgentContextImages", () => {
       [createFixtureUuidV7(3), laterPhoto]
     ])
     expect(images).toEqual({
-      status: "loaded",
+      status: "seen",
       images: new Map([
-        [1, PHOTO_BYTES],
-        [4, laterBytes]
+        [
+          1,
+          { mediaType: "image/png", width: 64, height: 32, data: PHOTO_BYTES }
+        ],
+        [4, { mediaType: "image/png", width: 64, height: 32, data: laterBytes }]
       ])
     })
   })
@@ -613,6 +628,100 @@ describe("readAgentContextImages", () => {
 
     await expect(
       readAgentContextImages(
+        [createUserMessage(1, "Look", [createImageAttachment(1, "photo.png")])],
+        () => Promise.reject(failure)
+      )
+    ).rejects.toBe(failure)
+  })
+})
+
+describe("getAgentContextImageSides", () => {
+  it("looks up each image of each user message in conversation order and keeps the sides of the stored ones, by number", async () => {
+    const earlierPhoto = createImageAttachment(1, "earlier.png", {
+      width: 10,
+      height: 20
+    })
+    const missingPhoto = createImageAttachment(3, "missing.png")
+    const laterPhoto = createImageAttachment(4, "later.png")
+    const getAttachmentImageFileStatus = vi.fn<GetAttachmentImageFileStatus>(
+      async (_messageId, attachment) =>
+        attachment.number === 3 ? "missing" : "stored"
+    )
+
+    const images = await getAgentContextImageSides(
+      [
+        createUserMessage(1, "Earlier", [
+          earlierPhoto,
+          createTextAttachment(2, "notes.md")
+        ]),
+        createAssistantMessage(
+          2,
+          [createTextPart({ sequence: 12, round: 0, content: "Seen." })],
+          { status: "completed", finishReason: "stop" }
+        ),
+        createUserMessage(3, "Later", [missingPhoto, laterPhoto])
+      ],
+      getAttachmentImageFileStatus
+    )
+
+    expect(getAttachmentImageFileStatus.mock.calls).toEqual([
+      [createFixtureUuidV7(1), earlierPhoto],
+      [createFixtureUuidV7(3), missingPhoto],
+      [createFixtureUuidV7(3), laterPhoto]
+    ])
+    expect(images).toEqual({
+      status: "seen",
+      images: new Map([
+        [1, { width: 10, height: 20 }],
+        [4, { width: 64, height: 32 }]
+      ])
+    })
+  })
+
+  it("gives the context the placeholders a turn's read would give it", async () => {
+    const storedPhoto = createImageAttachment(1, "stored.png")
+    const missingPhoto = createImageAttachment(2, "missing.png")
+    const history = [createUserMessage(1, "Look", [storedPhoto, missingPhoto])]
+
+    const measured = buildAgentContext({
+      systemPrompt: "You are Lys.",
+      history,
+      userMessage: HELLO,
+      images: await getAgentContextImageSides(
+        history,
+        (_messageId, attachment) =>
+          Promise.resolve(attachment.number === 1 ? "stored" : "missing")
+      )
+    })
+    const sent = buildAgentContext({
+      systemPrompt: "You are Lys.",
+      history,
+      userMessage: HELLO,
+      images: await readAgentContextImages(history, (_messageId, attachment) =>
+        Promise.resolve(attachment.number === 1 ? PHOTO_BYTES : undefined)
+      )
+    })
+
+    expect(measured).toEqual(
+      sent.map((message) =>
+        message.role === "user"
+          ? {
+              ...message,
+              images: message.images.map(({ width, height }) => ({
+                width,
+                height
+              }))
+            }
+          : message
+      )
+    )
+  })
+
+  it("rejects with the lookup's failure for a path that cannot be examined", async () => {
+    const failure = new Error("EACCES")
+
+    await expect(
+      getAgentContextImageSides(
         [createUserMessage(1, "Look", [createImageAttachment(1, "photo.png")])],
         () => Promise.reject(failure)
       )

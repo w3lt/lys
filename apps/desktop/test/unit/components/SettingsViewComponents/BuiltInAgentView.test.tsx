@@ -3,6 +3,12 @@ import userEvent from "@testing-library/user-event"
 import { CALIGINIA_AGENT_CODE } from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
 import { buildBuiltInAgent } from "../../support/agentFixtures"
+import { buildLlmInfo } from "../../support/modelFixtures"
+import {
+  READY_RUNTIME,
+  updateStoreRuntime,
+  type RuntimeArrangement
+} from "../../support/runtimeFixtures"
 
 /** Built-in agent the view shows, with a 23-character system prompt. */
 const CALIGINIA = buildBuiltInAgent(CALIGINIA_AGENT_CODE, {
@@ -15,19 +21,18 @@ const CALIGINIA = buildBuiltInAgent(CALIGINIA_AGENT_CODE, {
  * Loads a fresh application store and the view that reads it, and renders
  * the view of {@link CALIGINIA}.
  *
- * @param contextSize - Context-window estimate the prompt is measured
- * against, in tokens.
+ * @param runtime - Backend, LM Studio, and model facts in the store; by
+ * default a loaded model with an 8,192-token context.
  * @returns The recorders of the two requests.
  */
-async function startBuiltInAgentView(contextSize = 8192) {
+async function startBuiltInAgentView(
+  runtime: RuntimeArrangement = READY_RUNTIME
+) {
   vi.resetModules()
   const { useLysStore } = await import("@/lib/store")
   const { default: BuiltInAgentView } =
     await import("@/components/SettingsViewComponents/BuiltInAgentView")
-  const { settings } = useLysStore.getState()
-  useLysStore.setState({
-    settings: { ...settings, model: { ...settings.model, contextSize } }
-  })
+  updateStoreRuntime(useLysStore, runtime)
   const requests = { onCloseAgentView: vi.fn(), onDuplicateAgent: vi.fn() }
   render(<BuiltInAgentView agent={CALIGINIA} {...requests} />)
   return requests
@@ -67,14 +72,33 @@ describe("BuiltInAgentView", () => {
     expect(screen.getByRole("button", { name: "agents list" })).toHaveFocus()
   })
 
-  it("measures the prompt against the context window, as the prompt field's description", async () => {
-    await startBuiltInAgentView(4096)
+  it("measures the prompt against the context length the loaded model reports, as the prompt field's description", async () => {
+    await startBuiltInAgentView({
+      ...READY_RUNTIME,
+      modelInventory: {
+        status: "ready",
+        models: [
+          buildLlmInfo("qwen3-8b", { loaded: true, loadedContextLength: 4096 })
+        ]
+      }
+    })
 
     expect(
       screen.getByRole("textbox", { name: "system prompt" })
     ).toHaveAccessibleDescription(
       /^23 chars · ~\d+ tokens · \d+\.\d% of 4\.1k$/
     )
+  })
+
+  it("leaves the window share out of the measure while no model is loaded", async () => {
+    await startBuiltInAgentView({
+      ...READY_RUNTIME,
+      modelInventory: { status: "ready", models: [buildLlmInfo("qwen3-8b")] }
+    })
+
+    expect(
+      screen.getByRole("textbox", { name: "system prompt" })
+    ).toHaveAccessibleDescription(/^23 chars · ~\d+ tokens$/)
   })
 
   it("lets no field be typed into, and does not spell-check the prompt", async () => {

@@ -56,10 +56,13 @@ export interface LlmModelHealthReader {
  */
 export interface LlmModelInventory {
   /**
-   * Lists the latest known models and their loaded state.
+   * Lists the latest known models, their loaded state, and the context length
+   * each loaded model is loaded with.
    *
    * @returns A promise resolving to immutable snapshots ordered by ascending
-   * canonical model key, then by ascending path.
+   * canonical model key, then by ascending path. A loaded model's snapshots
+   * carry the smallest context length among its loaded instances, unless its
+   * instances were gone by the time they were measured.
    * @throws If the provider cannot query or validate its model inventory, or
    * its application lifetime has begun cleanup.
    * @throws A service-busy error if the shared model-operation queue is full;

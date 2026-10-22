@@ -120,7 +120,7 @@ const SETTINGS_PANES: readonly SettingsPaneDescriptor[] = [
     ordinal: "02",
     note: "Every model on disk, which one is default, and what it is loaded with.",
     footNote:
-      "Model operations use the backend. A load configuration is saved for each model and applies when that model is loaded, not per request. The composer's context meter uses its own estimate, not the context length set here. Default selection lasts for this session.",
+      "Model operations use the backend. A load configuration is saved for each model and applies when that model is loaded, not per request. The composer's context meter and the Agents pane measure against the context length the model is loaded with. Default selection lasts for this session.",
     contentComponent: ModelPaneContent
   },
   {
@@ -272,16 +272,17 @@ export type SettingsViewProps = {
  * selected pane and the settings value; this view provides `SettingsContext` so
  * the runtime, model, and generation panes read one authority and propose
  * patches back through it. Patches
- * apply in memory immediately. Generation and load configuration edits are
- * saved automatically; runtime and model edits remain session-only.
+ * apply in memory immediately. Generation, load configuration, and startup
+ * switch edits are saved automatically; other runtime edits remain
+ * session-only.
  *
  * Inventory, load, unload, reload, and health requests belong to the application store.
  * Entering settings refreshes inventory; leaving the view does not cancel work.
  * Request errors and loaded-state health observations are rendered by the panes.
  * Agents are managed through the agent store, which the Agents pane reads
  * directly rather than through `SettingsContext`; its prompt measure reads the
- * context-window estimate from the application store, and it proposes no
- * settings patch. The Tools pane likewise reads the tool store directly; it
+ * loaded model's context length from the application store's model inventory,
+ * and it proposes no settings patch. The Tools pane likewise reads the tool store directly; it
  * lists the tools the desktop and the backend report. Its switches last for
  * the session, and each tool's approval is saved by the application store.
  *
@@ -338,8 +339,6 @@ export default function SettingsView({
           ...settings,
           runtime: { ...settings.runtime, ...patch }
         }),
-      onModelChange: (patch) =>
-        setSettings({ ...settings, model: { ...settings.model, ...patch } }),
       onGenerationChange: (patch) =>
         setSettings({
           ...settings,

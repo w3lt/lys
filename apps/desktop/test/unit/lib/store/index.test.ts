@@ -718,7 +718,7 @@ describe("useLysStore", () => {
       })
     })
 
-    it("keeps default model and model edits in memory without saving them", async () => {
+    it("keeps default model edits in memory without saving them", async () => {
       const host = startDesktopHost(DISK_SETTINGS_DOCUMENT)
       const useLysStore = await loadFreshLysStore()
       await useLysStore.getState().initialize()
@@ -727,11 +727,12 @@ describe("useLysStore", () => {
         ...DISK_RUNTIME_SETTINGS,
         defaultModel: "resident"
       }
-      const model: LysSettings["model"] = { contextSize: 8192 }
-      useLysStore.getState().setSettings({ ...DISK_SETTINGS, runtime, model })
+      useLysStore.getState().setSettings({ ...DISK_SETTINGS, runtime })
       await waitForMicrotasks()
 
-      expect(useLysStore.getState().settings.model.contextSize).toBe(8192)
+      expect(useLysStore.getState().settings.runtime.defaultModel).toBe(
+        "resident"
+      )
       expect(listCommandNames(host)).not.toContain("save_settings")
     })
 

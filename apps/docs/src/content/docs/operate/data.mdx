@@ -36,8 +36,8 @@ The desktop host owns a JSON settings file at `$LYS_HOME/settings.json`.
 The desktop loads this file at initialization and autosaves generation, load
 configuration, tool approval, and runtime startup switch edits. Each save
 replaces only its own part and preserves the rest already on disk, including a
-`loadConfiguration.default` written by hand; the other runtime edits and
-`model.contextSize` edits in the UI remain session-only.
+`loadConfiguration.default` written by hand; the other runtime edits in the
+UI remain session-only.
 
 ## `$LYS_HOME/lys_db.sqlite`
 
@@ -92,7 +92,10 @@ directory.
   nothing reads it, and you can delete it by hand.
 - A file removed by hand after its row was written is not noticed until the
   model needs it: an image becomes a placeholder sentence in its message, and
-  a read of a text file fails with a message the model reads. A file changed
+  a read of a text file fails with a message the model reads. The composer's
+  context meter counts the same placeholder as soon as it measures the
+  conversation again; it checks that each image file is there without reading
+  it. A file changed
   by hand is sent or read as it now is; its stored size and sides are not
   checked against it.
 - The directory belongs with the database: copy, move, or delete the two

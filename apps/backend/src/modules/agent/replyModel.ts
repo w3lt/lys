@@ -35,8 +35,21 @@ export type ReplyContextImage = Readonly<{
   data: Uint8Array
 }>
 
-/** One message of the context an agent sends to its model. */
-export type ReplyContextMessage =
+/**
+ * Sides of one image a user message sends, which its tokens are estimated
+ * from; all a context measurement needs of the image.
+ */
+export type ReplyContextImageSides = Pick<ReplyContextImage, "width" | "height">
+
+/**
+ * One message of the context an agent sends to its model.
+ *
+ * @typeParam TImage - What the context holds of each image a user message
+ * sends: the whole image for a request, its sides for a measurement.
+ */
+export type ReplyContextMessage<
+  TImage extends ReplyContextImageSides = ReplyContextImage
+> =
   | Readonly<{
       /** The agent's instructions. */
       role: "system"
@@ -52,7 +65,7 @@ export type ReplyContextMessage =
        * Images sent after the text, in attachment order; empty when the
        * message sends none.
        */
-      images: readonly ReplyContextImage[]
+      images: readonly TImage[]
     }>
   | Readonly<{
       /** Text the agent wrote, and the tools it called in the same round. */

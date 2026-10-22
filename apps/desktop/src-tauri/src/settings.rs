@@ -8,14 +8,12 @@
 pub mod commands;
 pub mod generation;
 pub mod load_configuration;
-pub mod model;
 pub mod runtime;
 pub mod secrets;
 pub mod tools;
 
 use generation::GenerationSettings;
 use load_configuration::LoadConfigurationSettings;
-use model::ModelSettings;
 use runtime::RunTimeSettings;
 use secrets::SecretsSettings;
 use tools::ToolSettings;
@@ -41,17 +39,17 @@ static TEMPORARY_FILE_COUNT: AtomicU64 = AtomicU64::new(0);
 #[serde(default, rename_all = "camelCase")]
 /// Complete persisted Lys settings value.
 ///
-/// The private fields group runtime, model, generation, load configuration,
-/// secrets, and tools settings in the serialized JSON representation while
-/// keeping those groups behind the settings module's API boundary. A missing
-/// group takes that group's defaults; the load configuration group's default
-/// is empty, the secrets group's default holds no key, and the tools group's
-/// default puts no tool on Just run.
+/// The private fields group runtime, generation, load configuration, secrets,
+/// and tools settings in the serialized JSON representation while keeping
+/// those groups behind the settings module's API boundary. A missing group
+/// takes that group's defaults; the load configuration group's default is
+/// empty, the secrets group's default holds no key, and the tools group's
+/// default puts no tool on Just run. A group the value does not hold, such as
+/// the `model` group of files written before the local context estimate was
+/// removed, is ignored when loading and left out of the next save.
 pub struct LysSettings {
     /// Process settings and default-model selection in the `runtime` object.
     runtime: RunTimeSettings,
-    /// Local context estimate in the serialized `model` object.
-    model: ModelSettings,
     /// Generation parameters in the serialized `generation` object.
     generation: GenerationSettings,
     /// Default and per-model load settings in the `loadConfiguration` object.
@@ -296,7 +294,6 @@ mod tests {
                 "defaultModel": "qwen/qwen3-8b",
                 "backendAddress": "http://127.0.0.1:23456"
             },
-            "model": { "contextSize": 4096 },
             "generation": { "temperature": 0.2, "replyCeiling": 512 }
         })
     }
@@ -410,6 +407,21 @@ mod tests {
         let runtime = &get_settings_json(&settings)["runtime"];
         assert_eq!(runtime["autoStartVmo"], json!(true));
         assert_eq!(runtime["autoStartBackend"], json!(false));
+    }
+
+    #[test]
+    fn ignores_the_retired_model_group_and_saves_without_it() {
+        let directory = TestDirectory::create("settings-retired-model-group");
+        let mut stored = get_complete_settings();
+        stored["model"] = json!({ "contextSize": 4096 });
+        let path = directory.create_file("settings.json", stored.to_string());
+        let saved_path = directory.path().join("saved.json");
+
+        let settings = load_settings_file(&path).expect("settings for an older file");
+        save_settings_file(&settings, &saved_path).expect("save the settings");
+
+        assert_eq!(get_settings_json(&settings), get_complete_settings());
+        assert_eq!(read_settings_json(&saved_path), get_complete_settings());
     }
 
     #[test]

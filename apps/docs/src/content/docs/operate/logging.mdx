@@ -42,8 +42,10 @@ does not prove that a later inference request will succeed.
 
 ## Process logging
 
-The backend logs requests and the failures it reports through Fastify's
-built-in pino logger, at level `info`, so the `debug` calls in the chat path
+The backend logs requests, the failures it reports, Node's warnings, and the
+LM Studio SDK's messages through one pino logger, which it creates before it
+loads the rest of its configuration and which Fastify uses for requests. The
+logger writes level `info` and above, so the `debug` calls in the chat path
 are not written. Each line is one JSON object whose `level` is the level name
 and whose `time` is a UTC ISO-8601 time. The log keeps everything: a
 request's lines carry its full URL, query string included, so a history
@@ -107,18 +109,28 @@ an app started from a terminal shows.
   it is still written to standard output. The backend keeps running, reports
   the first such failure on its standard error, and appends again once writing
   works.
-- When the backend stops on a failure nothing caught, such as a port already
-  in use, it logs the failure at level `fatal`, with Node's `origin` of it,
-  before Node ends it. When it cannot build its application, such as when its
-  database cannot be opened, it logs that at level `fatal` too.
+- When the backend stops on a failure nothing caught, it logs the failure at
+  level `fatal`, with Node's `origin` of it, before Node ends it. This
+  includes a prompt file it cannot read, a database that cannot be opened,
+  and a port already in use.
+- Each warning Node reports, such as a deprecation, is logged at level `warn`
+  as `Node reported a warning`, with the warning's type, code, and text in
+  `err`.
+- Each message of the LM Studio SDK, such as why it could not connect to LM
+  Studio, is logged at the level the SDK gave it, with the text the SDK would
+  have printed in `msg`, its `[LMStudioClient]…` prefix first, an error with
+  its stack, and no terminal colors. Its `debug` messages are left out like
+  the backend's own. When LM Studio cannot be reached, the backend also logs
+  its own `LM Studio runtime acquisition failed` line.
 - Some output never reaches the files, only the backend's standard error:
-  a failure before the backend has loaded its configuration, such as
-  `LYS_HOME` not set or a prompt file it cannot read; Node's own messages,
-  such as a missing backend bundle or a warning; and what libraries print
-  themselves, such as the LM Studio SDK's connection messages. The release
-  app opened from Finder or the Dock does not keep its standard error. When
-  LM Studio cannot be reached, the backend also logs its own
-  `LM Studio runtime acquisition failed` line.
+  a failure before the backend has created its logger, which only `LYS_HOME`
+  not set or not an absolute path causes; Node's messages before the
+  backend's code runs, such as a missing backend bundle; and the few messages
+  the LM Studio SDK prints itself instead of through its logger, such as
+  `writeUpstream called when not subscribed`. Node also still prints each
+  warning, and the failure that stops the backend, on standard error. The
+  release app opened from Finder or the Dock does not keep its standard
+  error.
 - The files hold request lines (method, full URL with its query string,
   host, remote address and port, status, response time), so they keep the
   text of history searches, and the failures the backend reports, whose

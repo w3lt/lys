@@ -634,8 +634,8 @@ reviews.
 
 - **Scope:** the URL in the backend's request lines: Fastify's
   `incoming request` line and its `Route <method>:<url> not found` line for a
-  route that does not exist, written with the options `buildBackendLoggerOptions`
-  in `apps/backend/src/log.ts` builds. The only query parameter that carries
+  route that does not exist, written by the logger `createBackendLogger` in
+  `apps/backend/src/log.ts` creates. The only query parameter that carries
   text the person typed is `query` of `GET /api/v1/conversations`; the others
   are page cursors and limits. Request bodies, such as messages and
   attachments, and request headers are not logged.

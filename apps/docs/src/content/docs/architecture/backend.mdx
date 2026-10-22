@@ -18,9 +18,9 @@ the services together.
 
 | Layer                 | Implementation                    | Responsibility                                                                                                                                                                                                                                                                                            |
 | --------------------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| App bootstrap         | `src/app.ts`                      | Registers CORS, SSE support, singleton services, and all routes, and sets up the logger from `src/log.ts`, writing to the destination the entry point passes; logs a failure to build at level `fatal`.                                                                                                   |
-| Logging               | `src/log.ts`                      | Builds the logger options (level names, UTC ISO-8601 times, full request URLs); `BackendLogDestination` writes each line to standard output and the day's file in `$LYS_HOME/logs/`; logs uncaught failures at level `fatal`; keeps the backend running when an output fails.                             |
-| Runtime config        | `src/config.ts`                   | Loads loopback host and port values, the SQLite path, the attachments directory, and the logs directory under `LYS_HOME`, the system and title prompts, and title limits.                                                                                                                                 |
+| App bootstrap         | `src/app.ts`                      | Registers CORS, SSE support, singleton services, and all routes, and logs through the logger the entry point passes, as Fastify's logger.                                                                                                                                                                 |
+| Logging               | `src/log.ts`                      | Creates the logger (level `info`, level names, UTC ISO-8601 times); `BackendLogDestination` writes each line to standard output and the day's file in `$LYS_HOME/logs/`; logs uncaught failures at `fatal` and Node's warnings at `warn`; keeps the backend running when an output fails.                 |
+| Runtime config        | `src/config.ts`                   | Loads loopback host and port values, the SQLite path and the attachments directory under `LYS_HOME`, the system and title prompts, and title limits; loads the logs directory under `LYS_HOME` on its own, before the rest.                                                                               |
 | Singleton services    | `src/di/singleton.ts`             | Opens the shared database and creates the chat service, conversation services and the agent service over SQLite records, LLM services without contacting LM Studio, the built-in tools, and the tool approval service.                                                                                    |
 | Conversation services | `src/modules/conversation`        | Keep the conversation decisions (identities, timestamps, validation, superseding, cursors) over records declared in `records.ts`; contain no SQL.                                                                                                                                                         |
 | Agent service         | `src/modules/agent`               | Owns the built-in agents, lists them with each page of stored agents, validates agent definitions and changes, derives a code from the name when none is given, stamps each change with the current time over records declared in `records.ts`, and finds the agent that answers a chat; contains no SQL. |
@@ -669,6 +669,11 @@ makes one connection attempt; later attempts happen only through
 `POST /api/v1/llm/runtime/connect`. The runtime service drains accepted
 operations before releasing its runtime; releasing it closes the SDK client
 without unloading models or stopping LM Studio.
+
+Each SDK client logs through `PinoLmStudioSdkLogger`, which the composition
+root creates over the application's logger, so the SDK's messages, such as
+why it could not connect, are lines of the backend's log; see
+[process logging](/operate/logging/#process-logging).
 
 The connection status is `connecting` until the first attempt settles,
 `connected` while a runtime is held, and `unreachable` after a failed attempt

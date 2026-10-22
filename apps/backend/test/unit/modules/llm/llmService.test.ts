@@ -13,7 +13,10 @@ import {
   createDownloadedLlmModel,
   createLmStudioLlmRecord
 } from "../../support/llmFixtures"
-import { fakeLmStudio } from "../../support/lmStudioSdkFake"
+import {
+  DISCARDING_SDK_LOGGER,
+  fakeLmStudio
+} from "../../support/lmStudioSdkFake"
 import { waitForMicrotasks } from "../../support/microtasks"
 
 vi.mock("@lmstudio/sdk", () => import("../../support/lmStudioSdkFake"))
@@ -222,7 +225,10 @@ describe("LlmService", () => {
         getContextLength: async (identifier) =>
           contextLengths.get(identifier) ?? 0
       }
-      const runtime = await LmStudioRuntime.create("ws://127.0.0.1:1234")
+      const runtime = await LmStudioRuntime.create(
+        "ws://127.0.0.1:1234",
+        DISCARDING_SDK_LOGGER
+      )
       onTestFinished(async () => {
         await runtime[Symbol.asyncDispose]()
       })

@@ -80,6 +80,17 @@ export type FakeLmStudioLoadedHandle = FakeLoadedLlmHandle &
     countTokens: (text: string) => Promise<number>
   }>
 
+/**
+ * SDK logger for cases that do not observe the SDK's messages; it drops every
+ * message.
+ */
+export const DISCARDING_SDK_LOGGER: LoggerInterface = Object.freeze({
+  info: () => undefined,
+  warn: () => undefined,
+  error: () => undefined,
+  debug: () => undefined
+})
+
 /** Context length the default `getContextLength` reports for every instance. */
 export const FAKE_LOADED_CONTEXT_LENGTH = 4096
 

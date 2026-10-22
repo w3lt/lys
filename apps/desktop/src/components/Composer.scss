@@ -622,8 +622,7 @@
 }
 
 .composer__meter-track {
-  position: relative;
-  display: block;
+  display: flex;
   width: 34px;
   height: 3px;
   flex: none;
@@ -633,14 +632,26 @@
 }
 
 .composer__meter-fill {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
+  flex: none;
   background-image: var(--gradient-primary);
   transition:
     width 420ms var(--ease-standard),
     background-color 320ms var(--ease-standard);
+}
+
+/*
+ * The reply reserve is striped in the label's color rather than drawn as a
+ * paler fill, which would be as dark as the dark theme's fill; the stripes
+ * turn amber or red with the label.
+ */
+.composer__meter-reserve {
+  flex: none;
+  background-image: repeating-linear-gradient(
+    90deg,
+    currentColor 0 1px,
+    transparent 1px 2px
+  );
+  transition: width 420ms var(--ease-standard);
 }
 
 [data-tone="tight"] .composer__meter-fill {
@@ -755,6 +766,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .composer__meter-fill,
+  .composer__meter-reserve,
   .composer__plus,
   .composer__caret {
     transition: none;

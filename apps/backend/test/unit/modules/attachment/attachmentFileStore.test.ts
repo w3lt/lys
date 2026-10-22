@@ -2,14 +2,22 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { describe, expect, it, onTestFinished, vi } from "vitest"
+import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
 import * as z from "zod"
 import AttachmentFileStore from "../../../../src/modules/attachment/attachmentFileStore"
 import { createFixtureUuidV7 } from "../../support/conversationFixtures"
 
 vi.mock("node:fs/promises", async (importOriginal) => {
-  const actual = await importOriginal<Readonly<{ rm: typeof rm }>>()
-  return { ...actual, rm: vi.fn(actual.rm) }
+  const actual =
+    await importOriginal<
+      Readonly<{ readFile: typeof readFile; rm: typeof rm; stat: typeof stat }>
+    >()
+  return {
+    ...actual,
+    readFile: vi.fn(actual.readFile),
+    rm: vi.fn(actual.rm),
+    stat: vi.fn(actual.stat)
+  }
 })
 
 /** Conversation most cases write under. */
@@ -299,6 +307,100 @@ describe("AttachmentFileStore", () => {
           name: "../../etc/passwd"
         })
       ).rejects.toBeInstanceOf(z.ZodError)
+    })
+  })
+
+  describe("getAttachmentFileStatus", () => {
+    beforeEach(() => {
+      vi.clearAllMocks()
+    })
+
+    it("answers stored for a stored file without reading it", async () => {
+      const { store } = createOwnedStore()
+      await store.saveMessageAttachments(CONVERSATION_ID, MESSAGE_ID, [
+        { name: "photo.png", content: PHOTO }
+      ])
+
+      const status = await store.getAttachmentFileStatus({
+        conversationId: CONVERSATION_ID,
+        messageId: MESSAGE_ID,
+        name: "photo.png"
+      })
+
+      expect(status).toBe("stored")
+      expect(readFile).not.toHaveBeenCalled()
+    })
+
+    it("answers missing for a file, a message, or a conversation that is not there", async () => {
+      const { store } = createOwnedStore()
+      await store.saveMessageAttachments(CONVERSATION_ID, MESSAGE_ID, [
+        { name: "photo.png", content: PHOTO }
+      ])
+
+      await expect(
+        store.getAttachmentFileStatus({
+          conversationId: CONVERSATION_ID,
+          messageId: MESSAGE_ID,
+          name: "other.png"
+        })
+      ).resolves.toBe("missing")
+      await expect(
+        store.getAttachmentFileStatus({
+          conversationId: CONVERSATION_ID,
+          messageId: createFixtureUuidV7(3),
+          name: "photo.png"
+        })
+      ).resolves.toBe("missing")
+      await expect(
+        store.getAttachmentFileStatus({
+          conversationId: createFixtureUuidV7(4),
+          messageId: MESSAGE_ID,
+          name: "photo.png"
+        })
+      ).resolves.toBe("missing")
+    })
+
+    it("answers missing when a folder on the way is a file", async () => {
+      const { store, directory } = createOwnedStore()
+      await mkdir(join(directory, CONVERSATION_ID), { recursive: true })
+      await writeFile(join(directory, CONVERSATION_ID, MESSAGE_ID), "a file")
+
+      await expect(
+        store.getAttachmentFileStatus({
+          conversationId: CONVERSATION_ID,
+          messageId: MESSAGE_ID,
+          name: "photo.png"
+        })
+      ).resolves.toBe("missing")
+    })
+
+    it("rejects with the failure of a path that cannot be examined for another reason", async () => {
+      const { store } = createOwnedStore()
+      const failure = Object.assign(new Error("Permission denied"), {
+        code: "EACCES"
+      })
+      vi.mocked(stat).mockRejectedValueOnce(failure)
+
+      await expect(
+        store.getAttachmentFileStatus({
+          conversationId: CONVERSATION_ID,
+          messageId: MESSAGE_ID,
+          name: "photo.png"
+        })
+      ).rejects.toBe(failure)
+    })
+
+    it("refuses a name that breaks the attachment name rules before touching the disk", async () => {
+      const { store } = createOwnedStore()
+
+      await expect(
+        store.getAttachmentFileStatus({
+          conversationId: CONVERSATION_ID,
+          messageId: MESSAGE_ID,
+          name: "../../etc/passwd"
+        })
+      ).rejects.toBeInstanceOf(z.ZodError)
+      expect(stat).not.toHaveBeenCalled()
     })
   })
 

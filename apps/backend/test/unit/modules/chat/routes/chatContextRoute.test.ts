@@ -346,7 +346,7 @@ describe("registerChatContextRoute", () => {
     })
   })
 
-  it("measures a stored image as a turn sends it, reading from the inventory whether the model sees images", async () => {
+  it("measures a stored image from its sides without reading its file, reading from the inventory whether the model sees images", async () => {
     const {
       app,
       database,
@@ -365,6 +365,7 @@ describe("registerChatContextRoute", () => {
       [{ name: "photo.png", content: png }]
     )
     listLlmModels.mockResolvedValue([VISION_MODEL_INFO])
+    const readAttachment = vi.spyOn(attachmentFileStore, "readAttachment")
 
     const response = await sendChatContextRequest(app, {
       conversation: { kind: "existing", id: STORED_CONVERSATION_ID },
@@ -381,11 +382,38 @@ describe("registerChatContextRoute", () => {
         role: "user",
         content:
           "Look at this\n\nAttached files:\n[attachment 1] photo.png (image/png, 64×32, 33 bytes)",
-        images: [{ mediaType: "image/png", width: 64, height: 32, data: png }]
+        images: [{ width: 64, height: 32 }]
       },
       { role: "user", content: "", images: [] }
     ])
     expect(listLlmModels).toHaveBeenCalledOnce()
+    expect(readAttachment).not.toHaveBeenCalled()
+  })
+
+  it("measures a stored image whose file is missing as its placeholder, as a turn sends it", async () => {
+    const { app, database, replyContextMeter, listLlmModels } =
+      await createChatContextRouteApp()
+    saveConversationWithAttachment(
+      database,
+      createImageAttachment(1, "photo.png")
+    )
+    listLlmModels.mockResolvedValue([VISION_MODEL_INFO])
+
+    const response = await sendChatContextRequest(app, {
+      conversation: { kind: "existing", id: STORED_CONVERSATION_ID },
+      model: MODEL
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(
+      replyContextMeter.findReplyContextMeasurement.mock.calls[0]?.[0]
+        .messages[1]
+    ).toEqual({
+      role: "user",
+      content:
+        "Look at this\n\nAttached files:\n[attachment 1] photo.png (image/png, 64×32, 33 bytes)\n[attachment 1] photo.png is an image whose file is missing from this machine, so it cannot be shown.",
+      images: []
+    })
   })
 
   it.each([

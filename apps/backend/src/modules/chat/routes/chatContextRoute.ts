@@ -10,9 +10,10 @@ import type {
   ToolDefinition
 } from "@lys/share"
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify"
-import type { FindAttachmentImage } from "../../agent/agentContext"
+import type { GetAttachmentImageFileStatus } from "../../agent/agentContext"
 import type AttachmentFileStore from "../../attachment/attachmentFileStore"
-import { buildAttachmentImageReader } from "../../attachment/attachmentImageReader"
+import type { AttachmentFileStatus } from "../../attachment/attachmentFileStore"
+import { buildAttachmentImageFileStatusLookup } from "../../attachment/attachmentImageReader"
 import {
   buildReadAttachmentDefinition,
   hasReadableTextAttachment,
@@ -49,21 +50,24 @@ type ChatContextRouteDependencies = Pick<TurnAgentLookups, "findChatAgent"> &
      * inventory.
      */
     findModelCapabilities: FindModelCapabilities
-    /** Reads stored attachment files. */
-    attachmentFiles: Pick<AttachmentFileStore, "readAttachment">
+    /** Examines stored attachment files without reading them. */
+    attachmentFiles: Pick<AttachmentFileStore, "getAttachmentFileStatus">
   }>
 
 /**
  * Stored transcript of a measured conversation, its attachments, and the
- * reader of its images.
+ * lookup of its image files.
  */
 type MeasuredHistory = Readonly<{
   /** Stored messages in conversation order; empty for a new conversation. */
   history: readonly ConversationMessage[]
   /** Every attachment of the stored messages, in conversation order. */
   attachments: readonly ReadableAttachment[]
-  /** Reads one stored image's bytes from the conversation's files. */
-  findAttachmentImage: FindAttachmentImage
+  /**
+   * Finds whether one stored image's file is among the conversation's
+   * files, without reading it.
+   */
+  getAttachmentImageFileStatus: GetAttachmentImageFileStatus
 }>
 
 /** Stored messages of a conversation that has none yet. */
@@ -75,11 +79,12 @@ const NO_CONVERSATION_MESSAGES: readonly ConversationMessage[] = Object.freeze(
 const NO_CONVERSATION_ATTACHMENTS: readonly ReadableAttachment[] =
   Object.freeze([])
 
-/** History of a new conversation: no message, so no attachment to read. */
+/** History of a new conversation: no message, so no attachment to look up. */
 const NEW_CONVERSATION_HISTORY: MeasuredHistory = Object.freeze({
   history: NO_CONVERSATION_MESSAGES,
   attachments: NO_CONVERSATION_ATTACHMENTS,
-  findAttachmentImage: () => Promise.resolve(undefined)
+  getAttachmentImageFileStatus: () =>
+    Promise.resolve<AttachmentFileStatus>("missing")
 })
 
 /** Explanation sent when no loaded instance matches the requested model. */
@@ -141,7 +146,8 @@ export default function registerChatContextRoute(app: FastifyInstance): void {
  * use is read from LM Studio's inventory only when a stored message has an
  * attachment, so the history's images and the attachment reader are
  * measured as a turn would send and offer them; a model the inventory does
- * not list sees no image and is offered no reader.
+ * not list sees no image and is offered no reader. Image files are looked
+ * up, never read: an image counts from its stored sides.
  */
 async function handleChatContextRequest(
   request: FastifyRequest<ChatContextApiRoute>,
@@ -180,7 +186,7 @@ async function handleChatContextRequest(
     history: measured.history,
     model: body.model,
     canSeeImages: capabilities.vision,
-    findAttachmentImage: measured.findAttachmentImage,
+    getAttachmentImageFileStatus: measured.getAttachmentImageFileStatus,
     tools: buildOfferedDefinitions(
       body,
       builtInTools,
@@ -202,18 +208,17 @@ async function handleChatContextRequest(
 
 /**
  * Builds the stored transcript a measurement includes, with its attachments
- * and the reader of its images.
+ * and the lookup of its image files.
  *
  * @param storedConversation - The continued conversation; undefined for a
  * new one.
- * @param attachmentFiles - Reads stored attachment files.
- * @returns The conversation's messages, their attachments, and a reader of
- * its attachment files; {@link NEW_CONVERSATION_HISTORY} for a new
- * conversation.
+ * @param attachmentFiles - Examines stored attachment files.
+ * @returns The conversation's messages, their attachments, and a lookup of
+ * its image files; {@link NEW_CONVERSATION_HISTORY} for a new conversation.
  */
 function buildMeasuredHistory(
   storedConversation: Conversation | undefined,
-  attachmentFiles: Pick<AttachmentFileStore, "readAttachment">
+  attachmentFiles: Pick<AttachmentFileStore, "getAttachmentFileStatus">
 ): MeasuredHistory {
   if (storedConversation === undefined) return NEW_CONVERSATION_HISTORY
   const conversationId = storedConversation.id
@@ -223,7 +228,7 @@ function buildMeasuredHistory(
       conversationId,
       storedConversation.messages
     ),
-    findAttachmentImage: buildAttachmentImageReader(
+    getAttachmentImageFileStatus: buildAttachmentImageFileStatusLookup(
       conversationId,
       attachmentFiles
     )

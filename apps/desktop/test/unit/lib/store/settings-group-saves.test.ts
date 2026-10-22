@@ -169,6 +169,29 @@ describe("createSettingsGroupSaves", () => {
     })
   })
 
+  it("applies a location save after a secrets save sent before it, keeping both groups", async () => {
+    const { writes, readStoredDocument } = startSettingsFileHost()
+    const saves = createSettingsGroupSaves()
+    const noLocation = { city: null, region: null, country: null }
+
+    const secretsSave = saves.saveSecretsSettings({ tavilyApiKey: null })
+    const locationSave = saves.saveLocationSettings(noLocation)
+    await waitForMicrotasks()
+    const writesDuringFirst = writes.length
+    writes[0]?.resolve(null)
+    await secretsSave
+    await waitForMicrotasks()
+    writes[1]?.resolve(null)
+    await locationSave
+
+    expect(writesDuringFirst).toBe(1)
+    expect(readStoredDocument()).toEqual({
+      ...STORED_SETTINGS_DOCUMENT,
+      secrets: { tavilyApiKey: null },
+      location: noLocation
+    })
+  })
+
   it("applies a runtime startup save after a tools save sent before it, keeping both groups", async () => {
     const { writes, readStoredDocument } = startSettingsFileHost()
     const saves = createSettingsGroupSaves()

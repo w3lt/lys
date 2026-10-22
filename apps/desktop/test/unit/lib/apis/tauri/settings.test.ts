@@ -4,6 +4,7 @@ import {
   loadSettings,
   saveGenerationSettings,
   saveLoadConfigurationSettings,
+  saveLocationSettings,
   saveRuntimeAutoStartSettings,
   saveSecretsSettings,
   saveSettings,
@@ -134,6 +135,43 @@ describe("loadSettings", () => {
       message: "The settings file holds an invalid Tavily API key."
     })
     expect(String(failure)).not.toContain(spacedKey)
+  })
+
+  it("reads a settings file without a saved location as no location", async () => {
+    const noLocation = { city: null, region: null, country: null }
+    startNativeHostFake({
+      load_settings: () => ({
+        ...STORED_SETTINGS_DOCUMENT,
+        location: noLocation
+      })
+    })
+
+    const settings = await loadSettings()
+
+    expect(settings.location).toEqual(noLocation)
+  })
+
+  it("rejects a place name that fails the name rule without naming the place", async () => {
+    const paddedCity = " Villeurbanne"
+    startNativeHostFake({
+      load_settings: () => ({
+        ...STORED_SETTINGS_DOCUMENT,
+        location: { city: paddedCity, region: null, country: "France" }
+      })
+    })
+
+    const failure = await loadSettings().then(
+      () => {
+        throw new Error("The settings loaded")
+      },
+      (rejection: unknown) => rejection
+    )
+
+    expect(failure).toBeInstanceOf(Error)
+    expect(failure).toMatchObject({
+      message: "The settings file holds an invalid location."
+    })
+    expect(String(failure)).not.toContain("Villeurbanne")
   })
 
   it("reads the tools on Just run as a set, and an empty list as none", async () => {
@@ -371,6 +409,53 @@ describe("saveSecretsSettings", () => {
     })
 
     await expect(saveSecretsSettings({ tavilyApiKey: null })).rejects.toBe(
+      "Disk full"
+    )
+  })
+})
+
+describe("saveLocationSettings", () => {
+  it("replaces only the location group of the document on disk", async () => {
+    const noLocation = { city: null, region: null, country: null }
+    const host = startNativeHostFake({
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => null
+    })
+
+    await saveLocationSettings(noLocation)
+
+    expect(host.commands).toEqual([
+      { command: "load_settings", args: {} },
+      {
+        command: "save_settings",
+        args: {
+          newSettings: { ...STORED_SETTINGS_DOCUMENT, location: noLocation }
+        }
+      }
+    ])
+  })
+
+  it("writes nothing when the document cannot be loaded", async () => {
+    const host = startNativeHostFake({
+      load_settings: () => Promise.reject("Failed to read settings.json"),
+      save_settings: () => null
+    })
+
+    await expect(saveLocationSettings(STORED_SETTINGS.location)).rejects.toBe(
+      "Failed to read settings.json"
+    )
+    expect(host.commands.map((invoked) => invoked.command)).toEqual([
+      "load_settings"
+    ])
+  })
+
+  it("rejects when the merged document cannot be written", async () => {
+    startNativeHostFake({
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => Promise.reject("Disk full")
+    })
+
+    await expect(saveLocationSettings(STORED_SETTINGS.location)).rejects.toBe(
       "Disk full"
     )
   })

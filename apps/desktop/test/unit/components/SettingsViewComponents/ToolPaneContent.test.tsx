@@ -113,7 +113,12 @@ describe("ToolPaneContent", () => {
 
     expect(
       screen.getAllByRole("status").map((status) => status.textContent)
-    ).toEqual(["", "Reading tools settings", ""])
+    ).toEqual([
+      "",
+      "Reading tools settings",
+      "",
+      "No location saved. get_location fails until you save one."
+    ])
 
     tools.resolve(TOOLS)
     await waitForRenderedWork()
@@ -123,6 +128,21 @@ describe("ToolPaneContent", () => {
     expect(
       screen.getByRole("switch", { name: "Tool calls" })
     ).toBeInTheDocument()
+  })
+
+  it("shows the location section, with its labelled fields, while the tools cannot be read", async () => {
+    startNativeHostFake({
+      list_tools: () => Promise.reject("command list_tools failed")
+    })
+    await startToolPane()
+
+    const section = screen.getByRole("region", { name: "your location" })
+    expect(section).toHaveTextContent(/Lys never detects where you are/)
+    for (const label of ["City", "Region", "Country"]) {
+      expect(screen.getByLabelText(label)).toHaveAccessibleDescription(
+        "Each field is optional and holds up to 100 characters."
+      )
+    }
   })
 
   it("shows a failed read with Retry, which reads the tools again", async () => {

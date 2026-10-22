@@ -1,6 +1,6 @@
 import type { BackendToolUnavailableReason } from "@lys/protocol"
 import type { ToolDefinition } from "@lys/share"
-import { useEffect, useRef, useState, type ReactElement } from "react"
+import { useEffect, useId, useRef, useState, type ReactElement } from "react"
 
 import { Button } from "@/components/ui/button"
 import { calculateToolModelSupport } from "@/lib/models/tool-model-support"
@@ -11,6 +11,7 @@ import {
   type ToolListState
 } from "@/lib/store/tools"
 
+import LocationCard from "./LocationCard"
 import PaneSkeleton from "./PaneSkeleton"
 import { ToolCallsCard } from "./ToolCallsCard"
 import { ToolGroupSection } from "./ToolList"
@@ -198,6 +199,42 @@ function ToolApprovalSaveFeedback(): ReactElement {
   )
 }
 
+/**
+ * Presents the location the person saves for the `get_location` tool.
+ *
+ * @remarks The application store owns the saved location and its save; the
+ * section owns no state or effects. It stays mounted while the pane is shown,
+ * also while the tools are read again or cannot be read, and it is not locked
+ * with the tool controls, because the location is a setting, not a tool
+ * choice. A saved change applies to the next `get_location` call, because the
+ * tool reads the settings file.
+ * @returns The section with its heading, note, and card.
+ */
+function LocationSection(): ReactElement {
+  const headingId = useId()
+  const savedLocation = useLysStore((state) => state.settings.location)
+  const saveState = useLysStore((state) => state.locationSave)
+  const saveLocation = useLysStore((state) => state.saveLocation)
+
+  return (
+    <section aria-labelledby={headingId} className="settings-view__section">
+      <div className="settings-view__section-heading">
+        <h2 id={headingId}>your location</h2>
+      </div>
+      <p className="settings-view__note">
+        The <code>get_location</code> tool gives a model what you save here when
+        it calls the tool. Lys never detects where you are, so save only what
+        you want models to know.
+      </p>
+      <LocationCard
+        onSaveLocation={saveLocation}
+        saveState={saveState}
+        savedLocation={savedLocation}
+      />
+    </section>
+  )
+}
+
 /** Properties accepted by {@link ToolWorkspace}. */
 type ToolWorkspaceProps = {
   /** Every tool, the app's then the backend's, in the order Settings lists them. */
@@ -318,6 +355,7 @@ function ToolListBody({ list }: ToolListBodyProps): ReactElement | null {
  * either list, shows the failure and offers Retry. The save status of the
  * Just run choices stays mounted below them, so a failed save and its
  * Retry saving stay shown while the tools are read again or cannot be read.
+ * The location section follows, also shown whatever the state of the list.
  * The pane accepts no props and is loaded lazily by the settings view.
  * @returns The tools pane body.
  */
@@ -340,6 +378,7 @@ export default function ToolPane(): ReactElement {
       <div className="settings-view__stack">
         <ToolListBody list={list} />
         <ToolApprovalSaveFeedback />
+        <LocationSection />
       </div>
     </div>
   )

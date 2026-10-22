@@ -62,7 +62,23 @@ describe("calculateContextUsage", () => {
       usedTokens: 3778,
       overflowTokens: 0,
       freeTokens: 2366,
+      usedFraction: 3778 / 8192,
       filledFraction: (3778 + 2048) / 8192
+    })
+  })
+
+  it("keeps the request's share of the window apart from a reply reserve larger than the request", () => {
+    const usage = calculateContextUsage({
+      measurement: { ...MEASUREMENT, contextLength: 32_768 },
+      draft: "",
+      attachmentTokens: 0,
+      reserve: 16_384
+    })
+
+    expect(usage).toMatchObject({
+      usedTokens: 3678,
+      usedFraction: 3678 / 32_768,
+      filledFraction: (3678 + 16_384) / 32_768
     })
   })
 
@@ -131,6 +147,22 @@ describe("calculateContextUsage", () => {
       usedTokens: 3778,
       overflowTokens: 3778 + 5000 - 8192,
       freeTokens: 0,
+      usedFraction: 3778 / 8192,
+      filledFraction: 1
+    })
+  })
+
+  it("clamps the request's share once the request alone exceeds the window", () => {
+    const usage = calculateContextUsage({
+      measurement: { ...MEASUREMENT, historyTokens: 8000 },
+      draft: "",
+      attachmentTokens: 0,
+      reserve: 1024
+    })
+
+    expect(usage).toMatchObject({
+      usedTokens: 10_678,
+      usedFraction: 1,
       filledFraction: 1
     })
   })

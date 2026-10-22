@@ -39,6 +39,9 @@ export type ComposerContextMeterProps = {
 const ATTACHED_FILES_NOTE =
   "Attached files are read on request, so they are not counted."
 
+/** Sentence added to the note while the bar draws the reply reserve. */
+const RESERVE_NOTE = "The striped part of the bar is held back for the reply."
+
 /**
  * Builds the breakdown row for the stored messages the next turn includes.
  *
@@ -125,7 +128,7 @@ function buildContextRows(usage: ContextUsage): readonly ContextRow[] {
  *
  * @param meter - What is known about the window.
  * @returns The explanation shown beneath the breakdown rows, without the
- * attached-files sentence.
+ * sentences about the bar's striped part and attached files.
  */
 function formatContextNote(meter: ContextMeterState): string {
   switch (meter.status) {
@@ -138,6 +141,41 @@ function formatContextNote(meter: ContextMeterState): string {
         ? "This message would not fit. Lys sends every earlier message with each new one and never shortens them, so start a new conversation, shorten your message, or load the model with a longer context."
         : "Counted with the model's tokenizer; your message is estimated. Lys sends every earlier message with each new one and never shortens them."
   }
+}
+
+/**
+ * Reports whether the bar draws the reply reserve.
+ *
+ * @param meter - What is known about the window.
+ * @returns Whether the window is measured and the reserve takes room the
+ * request leaves, so the bar's striped part has a width.
+ */
+function isReserveDrawn(meter: ContextMeterState): boolean {
+  return (
+    meter.status === "measured" &&
+    meter.usage.filledFraction > meter.usage.usedFraction
+  )
+}
+
+/**
+ * Writes the note shown beneath the breakdown rows.
+ *
+ * @param meter - What is known about the window.
+ * @param hasAttachedTextFiles - Whether text files are attached to the next
+ * message.
+ * @returns The explanation of what the meter shows, followed by a sentence
+ * naming the bar's striped part while the reserve is drawn and one about
+ * attached files while any are attached.
+ */
+function formatMeterNote(
+  meter: ContextMeterState,
+  hasAttachedTextFiles: boolean
+): string {
+  const sentences = [formatContextNote(meter)]
+  if (isReserveDrawn(meter)) sentences.push(RESERVE_NOTE)
+  if (hasAttachedTextFiles) sentences.push(ATTACHED_FILES_NOTE)
+
+  return sentences.join(" ")
 }
 
 /**
@@ -160,16 +198,42 @@ function formatMeterLabel(meter: ContextMeterState): string {
 }
 
 /**
- * Calculates how much of the meter's bar is filled.
+ * Formats a share of the window as a CSS width of the meter's bar.
+ *
+ * @param fraction - Share of the window, from `0` to `1`.
+ * @returns The width as a percentage with one decimal, such as `57.3%`.
+ */
+function formatMeterWidth(fraction: number): string {
+  return `${(fraction * 100).toFixed(1)}%`
+}
+
+/**
+ * Calculates how much of the meter's bar the request fills.
  *
  * @param meter - What is known about the window.
  * @returns The CSS width of the fill: the share of the window the request
- * and the reserve take, or `0%` until the window is measured.
+ * takes without the reserve, as the label counts it, or `0%` until the window
+ * is measured.
  */
 function calculateMeterFillWidth(meter: ContextMeterState): string {
-  const filledFraction =
-    meter.status === "measured" ? meter.usage.filledFraction : 0
-  return `${(filledFraction * 100).toFixed(1)}%`
+  const usedFraction =
+    meter.status === "measured" ? meter.usage.usedFraction : 0
+  return formatMeterWidth(usedFraction)
+}
+
+/**
+ * Calculates how much of the meter's bar the reply reserve fills after the
+ * request.
+ *
+ * @param meter - What is known about the window.
+ * @returns The CSS width of the striped part: the share of the window the
+ * reserve takes within the room the request leaves, or `0%` until the window
+ * is measured.
+ */
+function calculateMeterReserveWidth(meter: ContextMeterState): string {
+  if (meter.status !== "measured") return formatMeterWidth(0)
+
+  return formatMeterWidth(meter.usage.filledFraction - meter.usage.usedFraction)
 }
 
 /**
@@ -199,8 +263,11 @@ function readMeterTone(meter: ContextMeterState): "over" | "tight" | "normal" {
  * loaded with. Counts are prefixed with `~`, because the draft is estimated and
  * the backend's counts include an allowance for the chat template; no state
  * claims that earlier messages are shortened or summarized, because they never
- * are. The meter's fill is accompanied by a text label so the state is never
- * carried by the bar alone.
+ * are. The bar fills first with the request's share of the window, which the
+ * label counts while the request fits, and then, striped, with the reply
+ * reserve's share; the note names the striped part while it is drawn. The bar
+ * is accompanied by a text
+ * label so the state is never carried by the bar alone.
  *
  * @param props - What is known about the window, whether text files are
  * attached, and the window-change callback.
@@ -255,9 +322,7 @@ export default function ComposerContextMeter({
 
   const tone = readMeterTone(meter)
   const meterLabel = formatMeterLabel(meter)
-  const note = hasAttachedTextFiles
-    ? `${formatContextNote(meter)} ${ATTACHED_FILES_NOTE}`
-    : formatContextNote(meter)
+  const note = formatMeterNote(meter, hasAttachedTextFiles)
 
   return (
     <div className="composer__meter" ref={containerRef}>
@@ -281,6 +346,10 @@ export default function ComposerContextMeter({
           <span
             className="composer__meter-fill"
             style={{ width: calculateMeterFillWidth(meter) }}
+          />
+          <span
+            className="composer__meter-reserve"
+            style={{ width: calculateMeterReserveWidth(meter) }}
           />
         </span>
         <span aria-hidden="true">{meterLabel}</span>

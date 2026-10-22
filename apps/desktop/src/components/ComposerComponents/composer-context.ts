@@ -58,6 +58,8 @@ export type ContextUsage = {
   readonly overflowTokens: number
   /** Tokens still available after the reserve; zero once the window is full. */
   readonly freeTokens: number
+  /** Fraction of the window the request takes without the reserve, at most `1`. */
+  readonly usedFraction: number
   /** Fraction of the window the request and the reserve take, at most `1`. */
   readonly filledFraction: number
 }
@@ -149,6 +151,7 @@ export function calculateContextUsage(input: ContextUsageInput): ContextUsage {
     usedTokens,
     overflowTokens: Math.max(0, requiredTokens - measurement.contextLength),
     freeTokens: Math.max(0, measurement.contextLength - requiredTokens),
+    usedFraction: Math.min(1, usedTokens / measurement.contextLength),
     filledFraction: Math.min(1, requiredTokens / measurement.contextLength)
   }
 }

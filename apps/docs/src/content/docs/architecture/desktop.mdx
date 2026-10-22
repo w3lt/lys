@@ -99,7 +99,11 @@ draft's text at 3.7 characters per token and the reply ceiling as the
 reserve. The window is the context length the
 model is loaded with. The panel lists, in send order, the agent instructions,
 tool definitions, earlier messages, your message, the room left or the amount
-over, and the reserve. Counts carry `~`. The meter never claims that earlier
+over, and the reserve. While the request fits, the label counts what it takes
+against the window. The bar fills with the request's share and then, striped,
+with the reserve's share, and the panel names the striped part while it is
+drawn. Counts carry
+`~`. The meter never claims that earlier
 messages are shortened or summarized: every round sends every message a turn
 includes. Each staged image is counted as the backend counts a stored one,
 `⌈width ÷ 28⌉ × ⌈height ÷ 28⌉` tokens up to 1,280; staged text files are not

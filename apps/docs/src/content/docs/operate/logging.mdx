@@ -68,14 +68,16 @@ line of its own. A line, shown here across several lines:
 }
 ```
 
-The backend writes these lines to its standard output. Where they end up
-depends on what started it:
+The backend writes each line to two places, whatever started it: it appends
+the line to its log file for the day, `$LYS_HOME/logs/backend-YYYY-MM-DD.log`
+(see [the backend log files](#the-backend-log-files)), and writes it to its
+standard output, which shows the line where the backend was started:
 
-| Started by                          | Where the output goes                                                                                                                                                     |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm backend:dev`                  | The terminal, through `pino-pretty`: `[10:15:02.123] INFO (4242): incoming request` in local time, with the other fields indented below.                                  |
-| `pnpm dev`, the development desktop | The terminal that runs `pnpm dev`, the same way, because the host runs the backend's `dev` script.                                                                        |
-| The release app                     | `$LYS_HOME/logs/backend.log`, together with the backend's standard error, so Node's own messages, such as the stack trace of a crash at startup, are in the file as well. |
+| Started by                          | Where the standard output goes                                                                                                           |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm backend:dev`                  | The terminal, through `pino-pretty`: `[10:15:02.123] INFO (4242): incoming request` in local time, with the other fields indented below. |
+| `pnpm dev`, the development desktop | The terminal that runs `pnpm dev`, the same way, because the host runs the backend's `dev` script.                                       |
+| The release app                     | The app's own standard output, which only an app started from a terminal shows.                                                          |
 
 When writing to its standard output or standard error fails, such as on a
 full disk or once `pino-pretty` has exited, the backend keeps running. The
@@ -83,39 +85,59 @@ lines it cannot write are lost, and it writes again once the stream works,
 such as after space has been freed. The first failure of each stream is
 reported on the other stream; later failures of that stream are not.
 
-The Tauri host writes its own failures, such as a backend it could not stop at
-exit or a backend log it could not open, to its standard error, which only an
-app started from a terminal shows.
+The Tauri host does not keep the backend's output. It writes its own failures,
+such as a backend it could not stop at exit, to its standard error, which only
+an app started from a terminal shows.
 
-### The release backend log
+### The backend log files
 
-- The Tauri host opens the log each time it starts the release backend, and
-  the backend appends to it. The host creates `$LYS_HOME/logs/` and the file
-  when they are missing; the file is readable and writable by its owner only.
-- When `backend.log` has reached 10 MiB as the backend starts, the host first
-  renames it to `backend.1.log`, replacing the previous one. The log is not
-  rotated while a backend runs, so one long run can take it past 10 MiB.
-- When the log cannot be opened, the backend still starts, with the app's own
-  standard streams, so an app opened from Finder or the Dock loses that run's
-  output.
-- The file holds request lines (method, full URL with its query string,
-  host, remote address and port, status, response time), so it keeps the
+- The backend appends each line to the file of the UTC day on which it writes
+  the line, so each day has one file, which every run of that day adds to. A
+  running backend moves to the next day's file with its first line after
+  midnight UTC.
+- Lys never deletes or rewrites a log file, so the files add up over time;
+  delete old ones yourself when you no longer need them.
+- The backend creates `$LYS_HOME/logs/` whenever it is missing, but never a
+  missing Lys home, and each day's file with that day's first line; a new
+  file is readable and writable by its owner only. Development runs and
+  standalone `pnpm backend:dev` write their files too, in the Lys home they
+  run with.
+- When a line cannot be appended, such as on a full disk, it is lost from the
+  file, or only its start is kept when the disk fills partway through it, but
+  it is still written to standard output. The backend keeps running, reports
+  the first such failure on its standard error, and appends again once writing
+  works.
+- When the backend stops on a failure nothing caught, such as a port already
+  in use, it logs the failure at level `fatal`, with Node's `origin` of it,
+  before Node ends it. When it cannot build its application, such as when its
+  database cannot be opened, it logs that at level `fatal` too.
+- Some output never reaches the files, only the backend's standard error:
+  a failure before the backend has loaded its configuration, such as
+  `LYS_HOME` not set or a prompt file it cannot read; Node's own messages,
+  such as a missing backend bundle or a warning; and what libraries print
+  themselves, such as the LM Studio SDK's connection messages. The release
+  app opened from Finder or the Dock does not keep its standard error. When
+  LM Studio cannot be reached, the backend also logs its own
+  `LM Studio runtime acquisition failed` line.
+- The files hold request lines (method, full URL with its query string,
+  host, remote address and port, status, response time), so they keep the
   text of history searches, and the failures the backend reports, whose
   messages and stacks can name models, files, or page URLs. Nothing is
   redacted
   ([request log exception](/reference/standard-application/#request-log-exception)),
   so read a log before you share it.
 
-To follow the log while Lys runs:
+To follow today's log while Lys runs:
 
 ```sh
-tail -f ~/.lys/logs/backend.log
+tail -f ~/.lys/logs/backend-$(date -u +%F).log
 ```
 
-From a checkout, `pino-pretty` shows it the way the development terminal does:
+From a checkout, `pino-pretty` shows a file the way the development terminal
+does:
 
 ```sh
-pnpm --filter @lys/backend exec pino-pretty < ~/.lys/logs/backend.log
+pnpm --filter @lys/backend exec pino-pretty < ~/.lys/logs/backend-$(date -u +%F).log
 ```
 
 vmo's output is not kept in a release build
@@ -138,12 +160,13 @@ to manage the backend child process.
 The repository does not currently prove support for:
 
 - vmo log files ([#229](https://github.com/w3lt/lys/issues/229))
+- removing old backend log files
 - diagnostics bundles
 - redaction policies for exported diagnostics artifacts
 - a documented incident-sharing workflow
 
 :::note[Coming soon]
-Longer log retention, diagnostics bundles, and export and redaction rules
+Removing old log files, diagnostics bundles, and export and redaction rules
 should be added to this page only after the repository ships them as supported
 behavior.
 :::

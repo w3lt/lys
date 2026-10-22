@@ -649,13 +649,13 @@ reviews.
   - Leaving out only the `query` parameter was not taken for the same reason.
   - Replacing Fastify's not-found line with one that names only the path, or
     with none, was not taken.
-- **Risk and control:** history searches stay on disk in `backend.log` and
-  `backend.1.log` until rotation replaces them, and in the terminal of a
-  development run. The release log is created readable and writable by its
+- **Risk and control:** history searches stay on disk in the day files under
+  `$LYS_HOME/logs/`, which Lys never deletes, and in the terminal of a
+  development run. Each log file is created readable and writable by its
   owner only, stays in the Lys home on the person's machine, next to the
   conversation database the searches look through, and Lys never sends it
-  anywhere. The [logging page](/operate/logging/#the-release-backend-log)
-  tells the person to read a log before sharing it.
+  anywhere. The [logging page](/operate/logging/#the-backend-log-files) tells
+  the person to read a log before sharing it.
 - **Removal condition:** permanent by the maintainer's decision, unless a
   log-redaction policy, listed as coming soon on the
   [security page](/architecture/security/#coming-soon), replaces it.

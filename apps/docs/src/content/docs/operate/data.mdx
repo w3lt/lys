@@ -100,20 +100,18 @@ directory.
 
 ## `$LYS_HOME/logs/`
 
-The Tauri host of the release app keeps the backend's output here; see
-[the release backend log](/operate/logging/#the-release-backend-log).
+The backend keeps its log here, one file per UTC day; see
+[the backend log files](/operate/logging/#the-backend-log-files).
 
-- `backend.log` receives everything the release backend writes to its standard
-  output and standard error, appended run after run. The host creates the
-  directory, and the file readable only by its owner, the first time it
-  starts a release backend; development runs and standalone
-  `pnpm backend:dev` never create them.
-- `backend.1.log` holds the previous log: when `backend.log` has reached
-  10 MiB as the backend starts, the host renames it, replacing the older
-  `backend.1.log`.
-- Nothing reads these files. Deleting them loses only the log; delete them
-  while Lys is closed, because a running backend keeps writing to the file it
-  started with.
+- `backend-YYYY-MM-DD.log` holds every line the backend logged on that UTC
+  day, appended run after run. The backend creates the directory whenever it
+  is missing, but never a missing Lys home, and each day's file, readable
+  only by its owner, with that day's first line. Development runs and standalone `pnpm backend:dev` write
+  here too, in the Lys home they run with.
+- Lys never deletes these files, so they add up over time. Nothing reads
+  them; deleting one loses only that day's log. The backend opens the day's
+  file for each line, so a file deleted while Lys runs is created again with
+  the next line.
 
 ## vmo's image store
 
@@ -153,7 +151,8 @@ that space.
 - The settings file, the database, and the attachments directory live in the
   same Lys home directory, so user data and app settings currently share one
   root. Release builds also start their backend and vmo
-  from the `runtime/` directory there and keep the backend's log in `logs/`.
+  from the `runtime/` directory there, and the backend keeps its log in
+  `logs/`.
 
 ## WebView theme storage
 

@@ -113,13 +113,11 @@ Command::new("pnpm")
 Both children run in their own process group, with `LYS_HOME` set to the Lys
 home the host resolved, so the backend uses the same directory as the host.
 
-A development child writes to the terminal that runs the app. The host gives a
-release child `$LYS_HOME/logs/backend.log` as its standard output and standard
-error, opened for appending; when that log has reached 10 MiB, the host first
-renames it to `backend.1.log`. When the log cannot be opened, the release child
-starts with the app's own streams and the host writes the failure to its
-standard error. See
-[the release backend log](/operate/logging/#the-release-backend-log).
+The host does not redirect either child's output: a development child writes
+to the terminal that runs the app, and a release child's standard output and
+standard error are the app's own. The backend keeps its own log files under
+`$LYS_HOME/logs/`; see
+[the backend log files](/operate/logging/#the-backend-log-files).
 
 When the direct child is still running, stopping the backend sends `SIGKILL`
 to its whole process group and waits for that child. If the direct child has

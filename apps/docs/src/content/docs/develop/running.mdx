@@ -30,10 +30,12 @@ pnpm dev
 - `pnpm docs:dev`: starts the Astro/Starlight docs app.
 - `pnpm backend:dev`: runs `tsx watch src/index.ts | pino-pretty` in
   `apps/backend` with `LYS_HOME` set to `$HOME/.lys`, so the backend's log
-  lines appear in the terminal as readable text.
+  lines appear in the terminal as readable text. The backend also appends
+  them to its day's file in `$HOME/.lys/logs/`.
 - `pnpm dev`: runs `pnpm --filter @lys/desktop run tauri dev`, which starts the
   desktop Vite app and the Tauri shell. The backend the desktop starts runs the
-  same `dev` script, so its log lines appear in this terminal the same way.
+  same `dev` script, so its log lines appear in this terminal the same way, and
+  in its day's file under the Lys home's `logs/`.
 
 For standalone backend development, create the Lys home directory before
 starting the watcher:

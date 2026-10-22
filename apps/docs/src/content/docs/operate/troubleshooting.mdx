@@ -30,9 +30,12 @@ For the desktop-managed path:
   not responding**. Press **Stop**, then **Start**
 - verify `GET /api/v1/heath` responds at `http://127.0.0.1:12345`
 
-If the listener is unavailable, inspect the backend output: the terminal for a
-development build, or `logs/backend.log` in the Lys home for the release app
-(see [the release backend log](/operate/logging/#the-release-backend-log)).
+If the listener is unavailable, inspect the backend's log: the day's file
+`logs/backend-YYYY-MM-DD.log` in the Lys home, named by the UTC date, or the
+terminal of a development build (see
+[the backend log files](/operate/logging/#the-backend-log-files)). A backend
+that stopped on a failure, such as a port already in use, logs it there at
+level `fatal`.
 LM Studio is not required for the backend to listen. For standalone startup,
 also ensure `LYS_HOME` is set to an absolute path and its directory exists as
 described in [Running Lys locally](/develop/running/).

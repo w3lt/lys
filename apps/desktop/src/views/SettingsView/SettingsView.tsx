@@ -280,8 +280,8 @@ export type SettingsViewProps = {
  * Request errors and loaded-state health observations are rendered by the panes.
  * Agents are managed through the agent store, which the Agents pane reads
  * directly rather than through `SettingsContext`; its prompt measure reads the
- * context-window estimate from the application store, and it proposes no
- * settings patch. The Tools pane likewise reads the tool store directly; it
+ * loaded model's context length from the application store's model inventory,
+ * and it proposes no settings patch. The Tools pane likewise reads the tool store directly; it
  * lists the tools the desktop and the backend report. Its switches last for
  * the session, and each tool's approval is saved by the application store.
  *

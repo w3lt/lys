@@ -248,6 +248,11 @@ describe("getLocation", () => {
   it.each([
     ["no saved part", { city: null, region: null, country: null }],
     ["a padded name", { city: " Lyon", region: null, country: null }],
+    [
+      "a name ending in a no-break space",
+      { city: null, region: null, country: "France\u00a0" }
+    ],
+    ["a tab in a name", { city: "Lyon\tCentre", region: null, country: null }],
     ["coordinates", { city: "Lyon", region: null, country: null, latitude: 1 }]
   ])("rejects a location with %s", async (_label, location) => {
     startNativeHostFake({ get_location: () => location })

@@ -14,8 +14,11 @@ export const MAXIMUM_PLACE_NAME_LENGTH = 100
 /** Finds a control character (Unicode general category Cc), such as a line break. */
 const CONTROL_CHARACTER_PATTERN = /\p{Cc}/u
 
-/** Finds white space (Unicode White_Space) at the start or the end of a text. */
-const OUTER_WHITE_SPACE_PATTERN = /^\p{White_Space}|\p{White_Space}$/u
+/** Finds white space (Unicode White_Space) at the start of a text. */
+const LEADING_WHITE_SPACE_PATTERN = /^\p{White_Space}/u
+
+/** Finds white space (Unicode White_Space) at the end of a text. */
+const TRAILING_WHITE_SPACE_PATTERN = /\p{White_Space}$/u
 
 /**
  * Answers whether a text follows the place name rule: 1 to
@@ -32,7 +35,8 @@ function isPlaceName(value: string): boolean {
     length >= 1 &&
     length <= MAXIMUM_PLACE_NAME_LENGTH &&
     !CONTROL_CHARACTER_PATTERN.test(value) &&
-    !OUTER_WHITE_SPACE_PATTERN.test(value)
+    !LEADING_WHITE_SPACE_PATTERN.test(value) &&
+    !TRAILING_WHITE_SPACE_PATTERN.test(value)
   )
 }
 

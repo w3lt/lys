@@ -219,6 +219,7 @@ describe("buildToolGroups", () => {
 describe("tool labels", () => {
   it("names the group, its count, and the access level in lowercase", () => {
     expect(formatToolGroupLabel("files")).toBe("files")
+    expect(formatToolGroupLabel("timeAndPlace")).toBe("time & place")
     expect(formatToolGroupCount(1, 2)).toBe("1 of 2 on")
     expect(formatToolAccessLabel("reads")).toBe("reads")
   })

@@ -77,7 +77,8 @@ const TOOL_UNAVAILABLE_NOTES = Object.freeze({
 /** Lowercase heading text of every tool group; a new group must add one. */
 const TOOL_GROUP_LABELS = Object.freeze({
   files: "files",
-  network: "web"
+  network: "web",
+  timeAndPlace: "time & place"
 } satisfies Readonly<Record<ToolGroup, string>>)
 
 /** Lowercase badge text of every access level; a new level must add one. */

@@ -70,6 +70,13 @@ export {
   modelLoadConfigurationSchema,
   type ModelLoadConfiguration
 } from "./modelLoadConfiguration"
+export {
+  locationSettingsSchema,
+  MAXIMUM_PLACE_NAME_LENGTH,
+  placeNameSchema,
+  type LocationSettings,
+  type PlaceName
+} from "./location"
 export { tavilyApiKeySchema, type TavilyApiKey } from "./secrets"
 export {
   buildToolFunctionFormat,

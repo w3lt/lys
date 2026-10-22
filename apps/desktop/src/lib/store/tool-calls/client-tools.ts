@@ -1,4 +1,6 @@
 import {
+  getCurrentTimeInputSchema,
+  getLocationInputSchema,
   readTextFileInputSchema,
   searchFilesFilterSchema,
   type ChatToolCall,
@@ -8,6 +10,8 @@ import {
 } from "@lys/protocol"
 
 import type {
+  GetCurrentTimeResult,
+  GetLocationResult,
   ReadTextFileResult,
   SearchFilesResult
 } from "@/lib/apis/tauri/tools"
@@ -30,6 +34,15 @@ export type ClientToolInput =
       /** Root, query, target, and limits of the search. */
       readonly filter: SearchFilesFilter
     }
+  | {
+      /** The desktop runs the tool. */
+      readonly runner: "client"
+      /** A tool that takes no arguments. */
+      readonly toolName: ArgumentFreeClientToolName
+    }
+
+/** Names of the client tools that take no arguments. */
+type ArgumentFreeClientToolName = "get_current_time" | "get_location"
 
 /** Outcome of checking one call's tool name and arguments. */
 export type ClientToolInputResult =
@@ -54,6 +67,10 @@ export type ClientToolCommands = {
   ) => Promise<ReadTextFileResult>
   /** Runs the search-files tool; see `findFiles`. */
   readonly findFiles: (filter: SearchFilesFilter) => Promise<SearchFilesResult>
+  /** Runs the get-current-time tool; see `getCurrentTime`. */
+  readonly getCurrentTime: () => Promise<GetCurrentTimeResult>
+  /** Runs the get-location tool; see `getLocation`. */
+  readonly getLocation: () => Promise<GetLocationResult>
 }
 
 /** Model-readable start of every answer to a call the person rejected. */
@@ -163,6 +180,34 @@ function parseSearchFilesInput(call: ChatToolCall): ClientToolInputResult {
 }
 
 /**
+ * Parses the arguments of a call to a tool that takes no arguments.
+ *
+ * @param call - Call naming the tool.
+ * @param toolName - The tool, whose input schema accepts only an empty
+ * object.
+ * @returns `parsed` with the tool, or `rejected` when the call has any
+ * argument.
+ */
+function parseArgumentFreeInput(
+  call: ChatToolCall,
+  toolName: ArgumentFreeClientToolName
+): ClientToolInputResult {
+  const inputSchema =
+    toolName === "get_current_time"
+      ? getCurrentTimeInputSchema
+      : getLocationInputSchema
+  const parsed = inputSchema.safeParse(call.arguments)
+  if (!parsed.success) {
+    return buildRejectedInput(
+      formatArgumentsMismatch(call.toolName, parsed.error.issues)
+    )
+  }
+
+  const input: ClientToolInput = Object.freeze({ runner: "client", toolName })
+  return buildParsedInput(input)
+}
+
+/**
  * Parses one call into the input of a client tool the desktop can run.
  *
  * @param call - Call whose arguments the backend checked against the offered
@@ -178,6 +223,9 @@ export function parseClientToolInput(
       return parseReadTextFileInput(call)
     case "search_files":
       return parseSearchFilesInput(call)
+    case "get_current_time":
+    case "get_location":
+      return parseArgumentFreeInput(call, call.toolName)
     default:
       return buildRejectedInput(
         `The desktop has no tool named "${call.toolName}".`
@@ -267,6 +315,38 @@ function buildSearchFilesToolResult(result: SearchFilesResult): ChatToolResult {
 }
 
 /**
+ * Builds the answer of a finished current-time read.
+ *
+ * @param result - Outcome the get-current-time command returned.
+ * @returns The current time as JSON, or the declared failure as JSON.
+ */
+function buildGetCurrentTimeToolResult(
+  result: GetCurrentTimeResult
+): ChatToolResult {
+  switch (result.status) {
+    case "succeeded":
+      return buildSucceededToolResult(JSON.stringify(result.currentTime))
+    case "failed":
+      return buildToolFailedToolResult(result.error)
+  }
+}
+
+/**
+ * Builds the answer of a finished location read.
+ *
+ * @param result - Outcome the get-location command returned.
+ * @returns The saved location as JSON, or the declared failure as JSON.
+ */
+function buildGetLocationToolResult(result: GetLocationResult): ChatToolResult {
+  switch (result.status) {
+    case "succeeded":
+      return buildSucceededToolResult(JSON.stringify(result.location))
+    case "failed":
+      return buildToolFailedToolResult(result.error)
+  }
+}
+
+/**
  * Formats a value thrown while running a tool.
  *
  * @param error - Untrusted thrown value.
@@ -299,6 +379,10 @@ export async function runClientTool(
         return buildSearchFilesToolResult(
           await commands.findFiles(input.filter)
         )
+      case "get_current_time":
+        return buildGetCurrentTimeToolResult(await commands.getCurrentTime())
+      case "get_location":
+        return buildGetLocationToolResult(await commands.getLocation())
     }
   } catch (error) {
     return buildRunFailedToolResult(

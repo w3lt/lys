@@ -53,6 +53,24 @@ describe("formatToolCallSummary", () => {
     }
   )
 
+  it.each([
+    [
+      "get_current_time",
+      "Read the date, time, and time zone of this machine. Nothing is changed."
+    ],
+    [
+      "get_location",
+      "Read the location you saved in Settings → Tools. Nothing is changed."
+    ]
+  ] as const)(
+    "says what a %s call reads and that nothing is changed",
+    (toolName, summary) => {
+      expect(formatToolCallSummary({ runner: "client", toolName })).toBe(
+        summary
+      )
+    }
+  )
+
   it("names the full URL a page read reads", () => {
     expect(
       formatToolCallSummary({

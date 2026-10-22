@@ -92,7 +92,10 @@ directory.
   nothing reads it, and you can delete it by hand.
 - A file removed by hand after its row was written is not noticed until the
   model needs it: an image becomes a placeholder sentence in its message, and
-  a read of a text file fails with a message the model reads. A file changed
+  a read of a text file fails with a message the model reads. The composer's
+  context meter counts the same placeholder as soon as it measures the
+  conversation again; it checks that each image file is there without reading
+  it. A file changed
   by hand is sent or read as it now is; its stored size and sides are not
   checked against it.
 - The directory belongs with the database: copy, move, or delete the two

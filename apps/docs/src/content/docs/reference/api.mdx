@@ -293,8 +293,11 @@ answers `200`:
   model's template.
 - Messages a turn leaves out, failed and empty replies, are not counted.
 - A stored user message is measured with its attachment list and, when the
-  model sees images, with its images, each counted as
-  `⌈width ÷ 28⌉ × ⌈height ÷ 28⌉` tokens up to 1,280. When a stored message
+  model sees images, with its images, each counted from its stored sides as
+  `⌈width ÷ 28⌉ × ⌈height ÷ 28⌉` tokens up to 1,280. The measurement only
+  checks that each image's file is still on disk, without reading it; an
+  image whose file is gone is measured as the placeholder sentence a turn
+  sends instead. When a stored message
   holds a text file and the model is trained for tool use, `read_attachment`
   is measured after the offered tools, as a turn offers it. Whether the model
   sees images and is trained for tool use is read from the inventory only

@@ -113,8 +113,8 @@ function handleUnexpectedHistoryCall(operationName: string): never {
  * Creates an application with the HTTP transport and the reply routes
  * registered over a stubbed history reader and a real registry.
  *
- * @returns The application, captured logs, the registry, and a spy for the
- * history read the routes perform.
+ * @returns The application, the destination of its log, the registry, and a
+ * spy for the history read the routes perform.
  * @remarks The routes read the decorated history reader at registration, so
  * the returned spy controls every snapshot; it throws until the case
  * configures it and no database row is read. When the test finishes, the
@@ -377,7 +377,7 @@ describe("updateFastifyWithChatReplyRoutes", () => {
     )
 
     it("responds with a server error before any stream starts when the conversation cannot be read", async () => {
-      const { app, getConversation, logs } = await createReplyRouteApp()
+      const { app, getConversation, log } = await createReplyRouteApp()
       getConversation.mockImplementation(() => {
         throw new Error("database is locked")
       })
@@ -389,7 +389,7 @@ describe("updateFastifyWithChatReplyRoutes", () => {
 
       expect(response.statusCode).toBe(500)
       expect(response.headers["content-type"]).toMatch(/^application\/json/)
-      expect(logs).toContainEqual(
+      expect(log.records).toContainEqual(
         expect.objectContaining({
           level: "error",
           err: expect.objectContaining({ message: "database is locked" })
@@ -809,20 +809,20 @@ describe("updateFastifyWithChatReplyRoutes", () => {
     )
 
     it("fails with a server error once the registry is closed for shutdown", async () => {
-      const { app, generations, logs } = await createReplyRouteApp()
+      const { app, generations, log } = await createReplyRouteApp()
       await generations[Symbol.asyncDispose]()
 
       const response = await sendToolResult(app, TOOL_CALL.id, SUCCEEDED_RESULT)
 
       expect(response.statusCode).toBe(500)
       expect(response.headers["content-type"]).toMatch(/^application\/json/)
-      expect(logs).toContainEqual(
+      expect(log.records).toContainEqual(
         expect.objectContaining({ level: "error", err: expect.any(Object) })
       )
     })
 
     it("logs why the client could not answer, at debug level", async () => {
-      const { app, generations, logs } = await createReplyRouteApp()
+      const { app, generations, log } = await createReplyRouteApp()
       const generation = startControlledGeneration(generations, REPLY_TARGET)
       await waitForMicrotasks()
       void generation.replyTask.context.sendClientToolCall(TOOL_CALL)
@@ -833,7 +833,7 @@ describe("updateFastifyWithChatReplyRoutes", () => {
         content: "The file no longer exists."
       })
 
-      expect(logs).toContainEqual(
+      expect(log.records).toContainEqual(
         expect.objectContaining({
           level: "debug",
           toolCallId: TOOL_CALL.id,
@@ -992,7 +992,7 @@ describe("updateFastifyWithChatReplyRoutes", () => {
     })
 
     it("logs why the call was not allowed, at debug level", async () => {
-      const { app, generations, logs } = await createReplyRouteApp()
+      const { app, generations, log } = await createReplyRouteApp()
       const generation = startControlledGeneration(generations, REPLY_TARGET)
       await waitForMicrotasks()
       void generation.replyTask.context.sendToolApprovalPrompt(
@@ -1001,7 +1001,7 @@ describe("updateFastifyWithChatReplyRoutes", () => {
 
       await sendToolApproval(app, BACKEND_TOOL_CALL.id, DECLINED_APPROVAL)
 
-      expect(logs).toContainEqual(
+      expect(log.records).toContainEqual(
         expect.objectContaining({
           level: "debug",
           toolCallId: BACKEND_TOOL_CALL.id,
@@ -1137,7 +1137,7 @@ describe("updateFastifyWithChatReplyRoutes", () => {
     )
 
     it("fails with a server error once the registry is closed for shutdown", async () => {
-      const { app, generations, getConversation, logs } =
+      const { app, generations, getConversation, log } =
         await createReplyRouteApp()
       getConversation.mockReturnValue(CONVERSATION)
       await generations[Symbol.asyncDispose]()
@@ -1153,7 +1153,7 @@ describe("updateFastifyWithChatReplyRoutes", () => {
 
       expect(response.statusCode).toBe(500)
       expect(response.headers["content-type"]).toMatch(/^application\/json/)
-      expect(logs).toContainEqual(
+      expect(log.records).toContainEqual(
         expect.objectContaining({ level: "error", err: expect.any(Object) })
       )
     })

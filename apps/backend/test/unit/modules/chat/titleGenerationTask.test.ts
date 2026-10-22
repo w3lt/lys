@@ -73,11 +73,11 @@ function createScriptedTitleGenerator(...outcomes: (string | Error)[]) {
  * Runs one title task to settlement and records its effects.
  *
  * @param scenario - Generator, limit, cancellation, and storage behavior.
- * @returns The sent events, storage calls, and captured logs.
+ * @returns The sent events, storage calls, and the destination of the log.
  * @throws If the task rejects, which its contract forbids.
  */
 async function getTitleTaskOutcome(scenario: TitleTaskScenario) {
-  const { app, logs } = createTestFastify()
+  const { app, log } = createTestFastify()
   const events: ChatGenerationEvent[] = []
   const updateConversationTitle = vi.fn(
     scenario.updateConversationTitle ?? ((title: string) => title)
@@ -96,7 +96,7 @@ async function getTitleTaskOutcome(scenario: TitleTaskScenario) {
     titleGenerationMaxAttempts: scenario.titleGenerationMaxAttempts ?? 3,
     updateConversationTitle
   })
-  return { events, updateConversationTitle, logs }
+  return { events, updateConversationTitle, log }
 }
 
 describe("createTitleGenerationTask", () => {
@@ -137,7 +137,7 @@ describe("createTitleGenerationTask", () => {
 
     expect(generateTitle).toHaveBeenCalledTimes(3)
     expect(run.events).toEqual([{ type: "title", title: "Hanoi trip" }])
-    expect(findOutcomeRecords(run.logs, "retrying")).toEqual([
+    expect(findOutcomeRecords(run.log.records, "retrying")).toEqual([
       expect.objectContaining({
         level: "debug",
         titleGenerationOutcome: "retrying",
@@ -166,7 +166,7 @@ describe("createTitleGenerationTask", () => {
     expect(generateTitle).toHaveBeenCalledTimes(2)
     expect(run.updateConversationTitle).not.toHaveBeenCalled()
     expect(run.events).toEqual([])
-    expect(findOutcomeRecords(run.logs, "title-not-generated")).toEqual([
+    expect(findOutcomeRecords(run.log.records, "title-not-generated")).toEqual([
       expect.objectContaining({
         level: "warn",
         titleGenerationOutcome: "title-not-generated",
@@ -187,8 +187,10 @@ describe("createTitleGenerationTask", () => {
     })
 
     expect(generateTitle).toHaveBeenCalledOnce()
-    expect(findOutcomeRecords(run.logs, "retrying")).toEqual([])
-    expect(findOutcomeRecords(run.logs, "title-not-generated")).toHaveLength(1)
+    expect(findOutcomeRecords(run.log.records, "retrying")).toEqual([])
+    expect(
+      findOutcomeRecords(run.log.records, "title-not-generated")
+    ).toHaveLength(1)
   })
 
   it("does not retry a request failure that is not unusable output", async () => {
@@ -199,7 +201,7 @@ describe("createTitleGenerationTask", () => {
     const run = await getTitleTaskOutcome({ generateTitle })
 
     expect(generateTitle).toHaveBeenCalledOnce()
-    expect(findOutcomeRecords(run.logs, "title-not-generated")).toEqual([
+    expect(findOutcomeRecords(run.log.records, "title-not-generated")).toEqual([
       expect.objectContaining({
         titleGenerationOutcome: "title-not-generated",
         titleGenerationAttempts: 1,
@@ -220,7 +222,7 @@ describe("createTitleGenerationTask", () => {
     })
 
     expect(generateTitle).not.toHaveBeenCalled()
-    expect(findOutcomeRecords(run.logs, "abandoned")).toEqual([
+    expect(findOutcomeRecords(run.log.records, "abandoned")).toEqual([
       expect.objectContaining({
         level: "debug",
         titleGenerationOutcome: "abandoned",
@@ -244,14 +246,16 @@ describe("createTitleGenerationTask", () => {
     })
 
     expect(generateTitle).toHaveBeenCalledOnce()
-    expect(findOutcomeRecords(run.logs, "abandoned")).toEqual([
+    expect(findOutcomeRecords(run.log.records, "abandoned")).toEqual([
       expect.objectContaining({
         titleGenerationOutcome: "abandoned",
         titleGenerationAttempts: 1,
         err: expect.objectContaining({ message: "blank" })
       })
     ])
-    expect(findOutcomeRecords(run.logs, "title-not-generated")).toEqual([])
+    expect(findOutcomeRecords(run.log.records, "title-not-generated")).toEqual(
+      []
+    )
   })
 
   it("sends no title request when the model is not loaded, so the request cannot load it", async () => {
@@ -269,7 +273,7 @@ describe("createTitleGenerationTask", () => {
     expect(generateTitle).not.toHaveBeenCalled()
     expect(run.updateConversationTitle).not.toHaveBeenCalled()
     expect(run.events).toEqual([])
-    expect(findOutcomeRecords(run.logs, "model-not-loaded")).toEqual([
+    expect(findOutcomeRecords(run.log.records, "model-not-loaded")).toEqual([
       expect.objectContaining({
         level: "debug",
         titleGenerationOutcome: "model-not-loaded",
@@ -277,7 +281,7 @@ describe("createTitleGenerationTask", () => {
       })
     ])
     expect(
-      findOutcomeRecords(run.logs, "model-not-loaded")[0]
+      findOutcomeRecords(run.log.records, "model-not-loaded")[0]
     ).not.toHaveProperty("err")
   })
 
@@ -303,10 +307,12 @@ describe("createTitleGenerationTask", () => {
     })
 
     expect(order).toEqual(["check", "request", "check"])
-    expect(findOutcomeRecords(run.logs, "model-not-loaded")).toEqual([
+    expect(findOutcomeRecords(run.log.records, "model-not-loaded")).toEqual([
       expect.objectContaining({ titleGenerationAttempts: 1 })
     ])
-    expect(findOutcomeRecords(run.logs, "title-not-generated")).toEqual([])
+    expect(findOutcomeRecords(run.log.records, "title-not-generated")).toEqual(
+      []
+    )
   })
 
   it("sends no title request and logs the failure when the loaded check fails", async () => {
@@ -320,7 +326,7 @@ describe("createTitleGenerationTask", () => {
     })
 
     expect(generateTitle).not.toHaveBeenCalled()
-    expect(findOutcomeRecords(run.logs, "title-not-generated")).toEqual([
+    expect(findOutcomeRecords(run.log.records, "title-not-generated")).toEqual([
       expect.objectContaining({
         level: "warn",
         titleGenerationAttempts: 0,
@@ -349,7 +355,7 @@ describe("createTitleGenerationTask", () => {
     await check.promise
 
     expect(generateTitle).not.toHaveBeenCalled()
-    expect(findOutcomeRecords(run.logs, "abandoned")).toEqual([
+    expect(findOutcomeRecords(run.log.records, "abandoned")).toEqual([
       expect.objectContaining({
         titleGenerationAttempts: 0,
         err: expect.objectContaining({ message: "backend shutting down" })
@@ -364,7 +370,7 @@ describe("createTitleGenerationTask", () => {
     })
 
     expect(run.events).toEqual([])
-    expect(findOutcomeRecords(run.logs, "already-titled")).toEqual([
+    expect(findOutcomeRecords(run.log.records, "already-titled")).toEqual([
       expect.objectContaining({
         level: "debug",
         titleGenerationOutcome: "already-titled",
@@ -383,7 +389,7 @@ describe("createTitleGenerationTask", () => {
     })
 
     expect(run.events).toEqual([])
-    expect(findOutcomeRecords(run.logs, "title-not-saved")).toEqual([
+    expect(findOutcomeRecords(run.log.records, "title-not-saved")).toEqual([
       expect.objectContaining({
         level: "error",
         titleGenerationAttempts: 1,

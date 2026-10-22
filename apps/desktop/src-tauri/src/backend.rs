@@ -9,8 +9,10 @@
 //!
 //! A development child writes to the terminal that runs the app. A release
 //! child's standard output and standard error are appended to `backend.log` in
-//! the Lys home's `logs` directory; when that log has reached 10 MiB as a
-//! release backend starts, the host first moves it to `backend.1.log`.
+//! the Lys home's `logs` directory when that log can be opened, and otherwise
+//! go to the host's own streams. When the log has reached
+//! [`BACKEND_LOG_ROTATION_THRESHOLD_BYTES`] as a release backend starts, the
+//! host first moves it to `backend.1.log`.
 
 use std::{
     fs::{self, File, OpenOptions},
@@ -30,17 +32,9 @@ use tauri::State;
 
 use crate::utils::lys_home::LysHome;
 
-/// Name of the file in the logs directory that receives the release backend's
-/// standard output and standard error.
-const BACKEND_LOG_FILE_NAME: &str = "backend.log";
-
-/// Name of the file in the logs directory that keeps the previous backend log
-/// after a rotation; the next rotation replaces it.
-const PREVIOUS_BACKEND_LOG_FILE_NAME: &str = "backend.1.log";
-
 /// Size, 10 MiB, from which the backend log is rotated when the release
 /// backend starts. The log can grow past it while one backend runs.
-const BACKEND_LOG_ROTATION_SIZE_BYTES: u64 = 10 * 1024 * 1024;
+const BACKEND_LOG_ROTATION_THRESHOLD_BYTES: u64 = 10 * 1024 * 1024;
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -276,21 +270,29 @@ fn spawn_dev_backend_process(
 /// Opens the backend log in `logs_dir` for appending, creating the directory
 /// and the log when they are missing.
 ///
-/// A log that has reached [`BACKEND_LOG_ROTATION_SIZE_BYTES`] is first renamed
-/// to the previous log, replacing it, so the returned file starts empty. A new
-/// log is created readable and writable by its owner only; an existing log
-/// keeps its permissions, and the directory is created with the default ones.
+/// A log that has reached [`BACKEND_LOG_ROTATION_THRESHOLD_BYTES`] is first
+/// renamed to the previous log, replacing it, so the returned file starts
+/// empty. A new log is created readable and writable by its owner only; an
+/// existing log keeps its permissions, and the directory is created with the
+/// default ones.
 ///
 /// # Errors
 ///
 /// Returns the I/O error of creating the directory, reading the log's size,
 /// renaming it, or opening it. A missing log is not an error.
 fn open_backend_log(logs_dir: &Path) -> io::Result<File> {
+    /// Name of the file in the logs directory that receives the release
+    /// backend's standard output and standard error.
+    const BACKEND_LOG_FILE_NAME: &str = "backend.log";
+    /// Name of the file in the logs directory that keeps the previous backend
+    /// log after a rotation; the next rotation replaces it.
+    const PREVIOUS_BACKEND_LOG_FILE_NAME: &str = "backend.1.log";
+
     fs::create_dir_all(logs_dir)?;
     let log_path = logs_dir.join(BACKEND_LOG_FILE_NAME);
 
     let is_log_full = match fs::metadata(&log_path) {
-        Ok(metadata) => metadata.len() >= BACKEND_LOG_ROTATION_SIZE_BYTES,
+        Ok(metadata) => metadata.len() >= BACKEND_LOG_ROTATION_THRESHOLD_BYTES,
         Err(err) if err.kind() == io::ErrorKind::NotFound => false,
         Err(err) => return Err(err),
     };
@@ -327,10 +329,7 @@ fn start_backend_with_log(mut command: Command, logs_dir: &Path) -> Result<Child
         Ok((stdout_log, stderr_log)) => {
             command.stdout(stdout_log).stderr(stderr_log);
         }
-        Err(err) => eprintln!(
-            "Failed to open the backend log in {}, so the backend's output is not saved: {err}",
-            logs_dir.display()
-        ),
+        Err(err) => eprintln!("{}", format_backend_log_open_problem(logs_dir, &err)),
     }
 
     command
@@ -338,17 +337,42 @@ fn start_backend_with_log(mut command: Command, logs_dir: &Path) -> Result<Child
         .map_err(|err| format!("Failed to start backend: {err}"))
 }
 
+/// Formats the host's report that the backend log in `logs_dir` could not be
+/// opened, so the backend's output is not saved; `err` is the failure
+/// [`open_backend_log`] returned.
+fn format_backend_log_open_problem(logs_dir: &Path, err: &io::Error) -> String {
+    format!(
+        "Failed to open the backend log in {}, so the backend's output is not saved: {err}",
+        logs_dir.display()
+    )
+}
+
+/// Builds the command that runs the installed release backend: the Node.js
+/// executable from the Lys home's runtime directory with the installed backend
+/// bundle, in its own Unix process group and with `LYS_HOME` set to
+/// `lys_home`.
+///
+/// Nothing is checked or started here. A missing executable is reported when
+/// the command is spawned, and a missing bundle by Node.js once it runs.
+fn build_prod_backend_command(lys_home: &LysHome) -> Command {
+    let mut command = Command::new(lys_home.node_executable_path());
+    command
+        .arg(lys_home.backend_script_path())
+        .env("LYS_HOME", lys_home.as_path())
+        .process_group(0);
+    command
+}
+
 /// Starts the installed release backend and stores it as the owned child.
 ///
-/// Runs the Node.js executable from the Lys home's runtime directory with the
-/// installed backend bundle, in its own Unix process group and with `LYS_HOME`
-/// set to `lys_home`. Its standard output and standard error go to the backend
-/// log in the Lys home's logs directory, as [`start_backend_with_log`]
-/// describes. Locking occurs before the log is opened and the child spawned,
-/// so a successfully created child can always be stored; the returned status
-/// comes from a non-blocking inspection of the stored child. A missing backend
-/// bundle is not detected here: Node.js starts, reports the missing file in
-/// the log, and exits.
+/// Runs the command [`build_prod_backend_command`] builds. Its standard output
+/// and standard error go to the backend log in the Lys home's logs directory,
+/// as [`start_backend_with_log`] describes. Locking occurs before the log is
+/// opened and the child spawned, so a successfully created child can always be
+/// stored; the returned status comes from a non-blocking inspection of the
+/// stored child. A missing backend bundle is not detected here: Node.js
+/// starts, reports the missing file on its standard error, which is the backend
+/// log when the log could be opened, and exits.
 ///
 /// # Errors
 ///
@@ -359,11 +383,7 @@ fn spawn_prod_backend_process(
     backend: &Backend,
     lys_home: &LysHome,
 ) -> Result<BackendProcessStatus, String> {
-    let mut command = Command::new(lys_home.node_executable_path());
-    command
-        .arg(lys_home.backend_script_path())
-        .env("LYS_HOME", lys_home.as_path())
-        .process_group(0);
+    let command = build_prod_backend_command(lys_home);
 
     // Lock before spawning so we never create a process that we cannot store.
     let mut process = backend
@@ -466,14 +486,17 @@ pub fn get_backend_status(backend: State<'_, Backend>) -> Result<BackendProcessS
 #[cfg(test)]
 mod tests {
     use std::{
-        fs,
-        io::Write,
+        fs::{self, Permissions},
+        io::{self, Write},
         os::unix::fs::PermissionsExt,
         path::{Path, PathBuf},
         process::Command,
     };
 
-    use super::{open_backend_log, start_backend_with_log, BACKEND_LOG_ROTATION_SIZE_BYTES};
+    use super::{
+        format_backend_log_open_problem, open_backend_log, start_backend_with_log,
+        BACKEND_LOG_ROTATION_THRESHOLD_BYTES,
+    };
     use crate::tools::test_directory::TestDirectory;
 
     /// Creates `logs/backend.log` in `case` with a length of `size_bytes`
@@ -524,33 +547,87 @@ mod tests {
     }
 
     #[test]
-    fn opening_the_log_keeps_a_log_smaller_than_the_rotation_size() {
+    fn opening_the_log_keeps_a_log_smaller_than_the_rotation_threshold() {
         let case = TestDirectory::create("backend-log-below-rotation");
-        let log_path = create_backend_log_of_size(&case, BACKEND_LOG_ROTATION_SIZE_BYTES - 1);
+        let log_path = create_backend_log_of_size(&case, BACKEND_LOG_ROTATION_THRESHOLD_BYTES - 1);
 
         open_backend_log(&case.path().join("logs")).expect("open the backend log");
 
         assert_eq!(
             read_file_size(&log_path),
-            BACKEND_LOG_ROTATION_SIZE_BYTES - 1
+            BACKEND_LOG_ROTATION_THRESHOLD_BYTES - 1
         );
         assert!(!case.path().join("logs/backend.1.log").exists());
     }
 
     #[test]
-    fn opening_the_log_moves_a_log_of_the_rotation_size_over_the_previous_log() {
+    fn opening_the_log_moves_a_log_of_the_rotation_threshold_over_the_previous_log() {
         let case = TestDirectory::create("backend-log-rotation");
         let previous_log_path = case.create_file("logs/backend.1.log", "oldest run\n");
-        let log_path = create_backend_log_of_size(&case, BACKEND_LOG_ROTATION_SIZE_BYTES);
+        let log_path = create_backend_log_of_size(&case, BACKEND_LOG_ROTATION_THRESHOLD_BYTES);
 
         let log = open_backend_log(&case.path().join("logs")).expect("open the backend log");
 
         assert_eq!(
             read_file_size(&previous_log_path),
-            BACKEND_LOG_ROTATION_SIZE_BYTES
+            BACKEND_LOG_ROTATION_THRESHOLD_BYTES
         );
         assert_eq!(read_file_size(&log_path), 0);
         assert_eq!(log.metadata().expect("read metadata").len(), 0);
+    }
+
+    #[test]
+    fn opening_the_log_keeps_the_permissions_of_an_existing_log() {
+        let case = TestDirectory::create("backend-log-existing-mode");
+        let log_path = case.create_file("logs/backend.log", "earlier run\n");
+        fs::set_permissions(&log_path, Permissions::from_mode(0o644)).expect("set the log mode");
+
+        open_backend_log(&case.path().join("logs")).expect("open the backend log");
+
+        let mode = fs::metadata(&log_path)
+            .expect("read metadata")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o644);
+    }
+
+    #[test]
+    fn opening_the_log_fails_and_keeps_the_log_when_it_cannot_be_moved() {
+        let case = TestDirectory::create("backend-log-rotation-failure");
+        case.create_subdirectory("logs/backend.1.log");
+        let log_path = create_backend_log_of_size(&case, BACKEND_LOG_ROTATION_THRESHOLD_BYTES);
+
+        let opened = open_backend_log(&case.path().join("logs"));
+
+        assert!(opened.is_err());
+        assert_eq!(
+            read_file_size(&log_path),
+            BACKEND_LOG_ROTATION_THRESHOLD_BYTES
+        );
+    }
+
+    #[test]
+    fn opening_the_log_fails_when_the_size_of_the_log_cannot_be_read() {
+        let case = TestDirectory::create("backend-log-metadata-failure");
+        let log_path = case.create_file("logs/backend.log", "earlier run\n");
+        let logs_dir = case.path().join("logs");
+        fs::set_permissions(&logs_dir, Permissions::from_mode(0o000))
+            .expect("lock the logs directory");
+        let is_reading_denied = fs::metadata(&log_path).is_err();
+
+        let opened = open_backend_log(&logs_dir);
+        fs::set_permissions(&logs_dir, Permissions::from_mode(0o700))
+            .expect("unlock the logs directory");
+
+        assert!(
+            is_reading_denied,
+            "this test needs a user whose access to a mode-000 directory is denied"
+        );
+        assert!(opened.is_err());
+        assert_eq!(
+            fs::read_to_string(log_path).expect("read the backend log"),
+            "earlier run\n"
+        );
     }
 
     #[test]
@@ -593,5 +670,31 @@ mod tests {
             .expect("wait for the child");
 
         assert_eq!(exit_status.code(), Some(3));
+    }
+
+    #[test]
+    fn starting_fails_when_the_backend_executable_is_missing() {
+        let case = TestDirectory::create("backend-missing-executable");
+        let command = Command::new(case.path().join("runtime/node/bin/node"));
+
+        let started = start_backend_with_log(command, &case.path().join("logs"));
+
+        let message = started.expect_err("the child must not start");
+        assert!(
+            message.starts_with("Failed to start backend: "),
+            "unexpected message: {message}"
+        );
+    }
+
+    #[test]
+    fn the_log_open_problem_names_the_logs_directory_and_the_failure() {
+        let failure = io::Error::new(io::ErrorKind::PermissionDenied, "Permission denied");
+
+        let problem = format_backend_log_open_problem(Path::new("/Users/lys/.lys/logs"), &failure);
+
+        assert_eq!(
+            problem,
+            "Failed to open the backend log in /Users/lys/.lys/logs, so the backend's output is not saved: Permission denied"
+        );
     }
 }

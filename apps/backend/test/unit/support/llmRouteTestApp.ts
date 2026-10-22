@@ -24,7 +24,8 @@ export type LlmRouteTestApp = TestFastify &
  * Creates a test application decorated with LLM services that never reach a
  * runtime.
  *
- * @returns The application, captured logs, and both decorated LLM services.
+ * @returns The application, the destination of its log, and both decorated
+ * LLM services.
  * @remarks `app.llmService` borrows an operation queue that rejects every
  * operation with `Unexpected LLM engine operation`, so a route outcome comes
  * only from the capability method a case stubs with `vi.spyOn`.

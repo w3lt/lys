@@ -118,3 +118,17 @@ impl LysHome {
         self.0.join("settings.json")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+
+    use super::LysHome;
+
+    #[test]
+    fn the_logs_directory_is_logs_under_the_lys_home() {
+        let lys_home = LysHome(PathBuf::from("/Users/lys/.lys"));
+
+        assert_eq!(lys_home.logs_dir(), Path::new("/Users/lys/.lys/logs"));
+    }
+}

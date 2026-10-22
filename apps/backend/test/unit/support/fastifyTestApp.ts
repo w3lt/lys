@@ -1,9 +1,7 @@
-import Fastify, {
-  type FastifyInstance,
-  type FastifyLoggerOptions
-} from "fastify"
+import Fastify, { type FastifyInstance } from "fastify"
 import { onTestFinished } from "vitest"
 import * as z from "zod"
+import { buildBackendLoggerOptions } from "../../../src/log"
 
 /** Pino fields read by backend log assertions; other fields are retained. */
 const capturedLogRecordSchema = z.looseObject({
@@ -14,61 +12,80 @@ const capturedLogRecordSchema = z.looseObject({
 /** One structured line written by the logger of a test application. */
 export type CapturedLogRecord = z.infer<typeof capturedLogRecordSchema>
 
-/** Log destination of a test application, with the records written to it. */
-export type CapturedLog = Readonly<{
-  /** Destination that parses each line it receives into {@link logs}. */
-  destination: NonNullable<FastifyLoggerOptions["stream"]>
-  /** Parsed log records in write order; grows while the application logs. */
-  logs: readonly CapturedLogRecord[]
-}>
+/**
+ * Parses one line a Fastify logger wrote.
+ *
+ * @param line - JSON line as the logger wrote it.
+ * @returns A new record holding every field of the line.
+ * @throws {SyntaxError} If the line is not JSON.
+ * @throws {z.ZodError} If the record has no string `level`.
+ */
+function parseCapturedLogRecord(line: string): CapturedLogRecord {
+  return capturedLogRecordSchema.parse(JSON.parse(line))
+}
 
 /**
- * Creates a log destination that keeps each JSON line a Fastify logger writes.
+ * Owns the lines a test application's logger writes, serving as the `stream`
+ * of that logger.
  *
- * @returns The destination and its live record list.
- * @remarks The destination's `write` throws a `SyntaxError` for a line that is
- * not JSON and a `z.ZodError` for a record without a string `level`, so a
- * malformed line fails the test that logged it.
+ * @remarks A malformed line fails the test that logged it: {@link write}
+ * throws for a line that is not JSON or has no string `level`, and keeps
+ * nothing. The destination is never closed; it is released with the test.
+ * Concurrency model: single-owner, in one test.
  */
-export function createCapturedLog(): CapturedLog {
-  const logs: CapturedLogRecord[] = []
-  const destination = {
-    write: (line: string) => {
-      logs.push(capturedLogRecordSchema.parse(JSON.parse(line)))
-    }
+export class CapturedLogDestination {
+  /** Lines written so far, in write order. */
+  readonly #lines: string[] = []
+
+  /**
+   * Records written so far, in write order.
+   *
+   * @returns A frozen list of records parsed anew on every read, so changing
+   * one never changes the log.
+   */
+  public get records(): readonly CapturedLogRecord[] {
+    return Object.freeze(this.#lines.map(parseCapturedLogRecord))
   }
-  return Object.freeze({ destination, logs })
+
+  /**
+   * Keeps one line the logger wrote.
+   *
+   * @param line - JSON line as the logger wrote it.
+   * @throws {SyntaxError} If the line is not JSON; the line is not kept.
+   * @throws {z.ZodError} If the record has no string `level`; the line is not
+   * kept.
+   */
+  public write(line: string): void {
+    parseCapturedLogRecord(line)
+    this.#lines.push(line)
+  }
 }
 
 /** Fastify application owned by one test case, with its captured log lines. */
 export type TestFastify = Readonly<{
   /** Application closed automatically when the owning test finishes. */
   app: FastifyInstance
-  /** Parsed log records in write order; grows while the application logs. */
-  logs: readonly CapturedLogRecord[]
+  /** Destination of the application's log; owned by the test. */
+  log: CapturedLogDestination
 }>
 
 /**
  * Creates a Fastify application whose trace-level logs are captured in memory.
  *
- * Captured records carry the level label instead of pino's numeric level.
+ * Lines use the backend's log format, so a record carries the level name
+ * instead of pino's number.
  *
- * @returns The application and its live log record list.
+ * @returns The application and the destination of its log.
  * @remarks Must be called while a test is running. Closing is registered with
  * the runner before the caller can perform any further setup, so a failed
  * registration or assertion still releases the application and its hooks.
  */
 export function createTestFastify(): TestFastify {
-  const { destination, logs } = createCapturedLog()
-  const app = Fastify({
-    logger: {
-      level: "trace",
-      formatters: { level: (label) => ({ level: label }) },
-      stream: destination
-    }
-  })
+  const log = new CapturedLogDestination()
+  const loggerOptions = buildBackendLoggerOptions("trace", log)
+  const app = Fastify({ logger: loggerOptions })
   onTestFinished(async () => {
     await app.close()
   })
-  return Object.freeze({ app, logs })
+  return Object.freeze({ app, log })
 }

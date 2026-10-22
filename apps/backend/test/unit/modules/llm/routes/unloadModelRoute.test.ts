@@ -47,7 +47,9 @@ describe("updateFastifyWithLlmModelUnloadRoute", () => {
     expect(response.body).toBe("")
     expect(stopLlmModelsByKey).toHaveBeenCalledExactlyOnceWith(MODEL_KEY)
     expect(
-      testApp.logs.filter(({ level }) => level === "warn" || level === "error")
+      testApp.log.records.filter(
+        ({ level }) => level === "warn" || level === "error"
+      )
     ).toEqual([])
   })
 
@@ -69,9 +71,9 @@ describe("updateFastifyWithLlmModelUnloadRoute", () => {
     const response = await sendUnloadRequest(testApp)
 
     expect(response.statusCode).toBe(204)
-    expect(testApp.logs.filter(({ level }) => level === "warn")).toEqual([
-      expect.objectContaining({ modelKey: MODEL_KEY, diagnostics })
-    ])
+    expect(testApp.log.records.filter(({ level }) => level === "warn")).toEqual(
+      [expect.objectContaining({ modelKey: MODEL_KEY, diagnostics })]
+    )
   })
 
   it("responds with the model-not-found problem when the model is not loaded", async () => {
@@ -114,9 +116,9 @@ describe("updateFastifyWithLlmModelUnloadRoute", () => {
       llmRuntimeUnavailableProblemSchema.safeParse(response.json()).success
     ).toBe(true)
     expect(response.body).not.toContain("socket closed")
-    expect(testApp.logs.filter(({ level }) => level === "error")).toEqual([
-      expect.objectContaining({ modelKey: MODEL_KEY, diagnostics })
-    ])
+    expect(
+      testApp.log.records.filter(({ level }) => level === "error")
+    ).toEqual([expect.objectContaining({ modelKey: MODEL_KEY, diagnostics })])
   })
 
   it("responds with the unload-failed problem and logs the remaining instances", async () => {
@@ -144,7 +146,9 @@ describe("updateFastifyWithLlmModelUnloadRoute", () => {
     expect(
       llmUnloadFailedProblemSchema.safeParse(response.json()).success
     ).toBe(true)
-    expect(testApp.logs.filter(({ level }) => level === "error")).toEqual([
+    expect(
+      testApp.log.records.filter(({ level }) => level === "error")
+    ).toEqual([
       expect.objectContaining({
         modelKey: MODEL_KEY,
         remainingModelIdentifiers: [MODEL_KEY],

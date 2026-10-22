@@ -1,4 +1,7 @@
-import Fastify, { type FastifyLoggerOptions } from "fastify"
+import Fastify, {
+  type FastifyInstance,
+  type FastifyLoggerOptions
+} from "fastify"
 import updateFastifyWithAgentRoutes from "./modules/agent/routes"
 import updateFastifyWithConversationRoutes from "./modules/conversation/routes"
 import registerHealthRoutes from "./modules/health/routes"
@@ -8,6 +11,7 @@ import registerToolRoutes from "./modules/tool/routes"
 import { backendConfigSchema, type BackendConfig } from "./config"
 import singletonServicesPlugin from "./di/fastify"
 import { updateFastifyWithHttpTransport } from "./http"
+import { buildBackendLoggerOptions } from "./log"
 
 /** Options used to construct the backend Fastify application. */
 export type BuildAppOptions = {
@@ -23,8 +27,14 @@ export type BuildAppOptions = {
    * level name in `level`, such as `"info"`, and the UTC ISO-8601 time in
    * `time`.
    *
+   * A request's lines name its path without the query string.
+   *
    * @remarks Owned by the caller, which decides where the lines go; the
-   * application writes to it but never ends or closes it.
+   * application writes to it but never ends or closes it. Its `write` must not
+   * throw. A stream destination reports a failed write through its `error`
+   * event, which its owner handles, such as the backend entry point through
+   * `registerOutputFailureListeners`; the application keeps serving either
+   * way.
    */
   logDestination: NonNullable<FastifyLoggerOptions["stream"]>
 }
@@ -41,16 +51,15 @@ export type BuildAppOptions = {
  * application or service has been created.
  * @throws If a plugin or route cannot be registered.
  */
-export async function buildApp(options: BuildAppOptions) {
+export async function buildApp(
+  options: BuildAppOptions
+): Promise<FastifyInstance> {
   const config = backendConfigSchema.parse(options.config)
-  const app = Fastify({
-    logger: {
-      level: "info",
-      formatters: { level: (label) => ({ level: label }) },
-      timestamp: () => `,"time":"${new Date().toISOString()}"`,
-      stream: options.logDestination
-    }
-  })
+  const loggerOptions = buildBackendLoggerOptions(
+    "info",
+    options.logDestination
+  )
+  const app = Fastify({ logger: loggerOptions })
 
   await updateFastifyWithHttpTransport(app)
   await app.register(singletonServicesPlugin, {

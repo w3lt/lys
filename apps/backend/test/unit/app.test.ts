@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
 import * as z from "zod"
 import { buildApp } from "../../src/app"
 import type { BackendConfig } from "../../src/config"
+import { registerOutputFailureListeners } from "../../src/log"
 import AgentService from "../../src/modules/agent/agentService"
 import AttachmentFileStore from "../../src/modules/attachment/attachmentFileStore"
 import StoredConversationHistoryEditor from "../../src/modules/conversation/historyEditor"
@@ -16,11 +17,12 @@ import {
   createNewConversationTarget,
   createTurnUserMessage
 } from "./support/conversationFixtures"
-import { createCapturedLog } from "./support/fastifyTestApp"
+import { CapturedLogDestination } from "./support/fastifyTestApp"
 import {
   fakeLmStudio,
   type FakeLmStudioOperations
 } from "./support/lmStudioSdkFake"
+import { createFailingOutput, createWorkingOutput } from "./support/testOutputs"
 
 vi.mock("@lmstudio/sdk", () => import("./support/lmStudioSdkFake"))
 
@@ -77,7 +79,7 @@ describe("buildApp", () => {
 
     const build = buildApp({
       config,
-      logDestination: createCapturedLog().destination
+      logDestination: new CapturedLogDestination()
     })
 
     await expect(build).rejects.toBeInstanceOf(z.ZodError)
@@ -91,7 +93,7 @@ describe("buildApp", () => {
   it("decorates the conversation adapters, the agent service, and the attachment file store and serves history and agents from the configured database", async () => {
     const app = await buildApp({
       config: createOwnedBackendConfig(),
-      logDestination: createCapturedLog().destination
+      logDestination: new CapturedLogDestination()
     })
     onTestFinished(async () => await app.close())
     await app.ready()
@@ -131,7 +133,7 @@ describe("buildApp", () => {
   it("decorates the reply part store over the configured database", async () => {
     const app = await buildApp({
       config: createOwnedBackendConfig(),
-      logDestination: createCapturedLog().destination
+      logDestination: new CapturedLogDestination()
     })
     onTestFinished(async () => await app.close())
     await app.ready()
@@ -154,10 +156,10 @@ describe("buildApp", () => {
   })
 
   it("writes each log line to the given destination with its level name and its UTC ISO-8601 time", async () => {
-    const { destination, logs } = createCapturedLog()
+    const log = new CapturedLogDestination()
     const app = await buildApp({
       config: createOwnedBackendConfig(),
-      logDestination: destination
+      logDestination: log
     })
     onTestFinished(async () => await app.close())
     await app.ready()
@@ -165,29 +167,114 @@ describe("buildApp", () => {
     onTestFinished(() => {
       vi.useRealTimers()
     })
-    vi.setSystemTime(new Date("2026-10-21T08:15:02.123Z"))
-    const logCountBeforeRequest = logs.length
+    const requestTime = "2026-10-21T08:15:02.123Z"
+    vi.setSystemTime(new Date(requestTime))
+    const logCountBeforeRequest = log.records.length
 
     await app.inject({ method: "GET", url: "/api/v1/heath" })
 
-    expect(logs.slice(logCountBeforeRequest)).toEqual([
+    expect(log.records.slice(logCountBeforeRequest)).toEqual([
       expect.objectContaining({
         level: "info",
-        time: "2026-10-21T08:15:02.123Z",
+        time: requestTime,
         msg: "incoming request"
       }),
       expect.objectContaining({
         level: "info",
-        time: "2026-10-21T08:15:02.123Z",
+        time: requestTime,
         msg: "request completed"
       })
+    ])
+  })
+
+  it("writes info lines and leaves out debug lines", async () => {
+    const log = new CapturedLogDestination()
+    const app = await buildApp({
+      config: createOwnedBackendConfig(),
+      logDestination: log
+    })
+    onTestFinished(async () => await app.close())
+    await app.ready()
+
+    app.log.debug("Detail written at debug level")
+    app.log.info("Detail written at info level")
+
+    expect(log.records).toContainEqual(
+      expect.objectContaining({ msg: "Detail written at info level" })
+    )
+    expect(log.records).not.toContainEqual(
+      expect.objectContaining({ msg: "Detail written at debug level" })
+    )
+  })
+
+  it("logs a request by its path without the query string, so a search is not kept", async () => {
+    const log = new CapturedLogDestination()
+    const app = await buildApp({
+      config: createOwnedBackendConfig(),
+      logDestination: log
+    })
+    onTestFinished(async () => await app.close())
+    await app.ready()
+    const logCountBeforeRequest = log.records.length
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/conversations?query=my%20private%20search&limit=20"
+    })
+
+    const requestRecords = log.records.slice(logCountBeforeRequest)
+    expect(response.statusCode).toBe(200)
+    expect(requestRecords).toContainEqual(
+      expect.objectContaining({
+        msg: "incoming request",
+        req: {
+          method: "GET",
+          url: "/api/v1/conversations",
+          host: "localhost:80",
+          remoteAddress: "127.0.0.1"
+        }
+      })
+    )
+    expect(JSON.stringify(requestRecords)).not.toContain("private")
+  })
+
+  it("keeps serving when writing its log fails", async () => {
+    const logWrites: string[] = []
+    const errorWrites: string[] = []
+    const logDestination = createFailingOutput(
+      new Error("ENOSPC: no space left on device, write"),
+      (text) => {
+        logWrites.push(text)
+      }
+    )
+    const standardError = createWorkingOutput((text) => {
+      errorWrites.push(text)
+    })
+    registerOutputFailureListeners(logDestination, standardError)
+    const app = await buildApp({
+      config: createOwnedBackendConfig(),
+      logDestination
+    })
+    onTestFinished(async () => await app.close())
+    await app.ready()
+
+    const first = await app.inject({ method: "GET", url: "/api/v1/heath" })
+    const second = await app.inject({ method: "GET", url: "/api/v1/heath" })
+
+    expect(first.statusCode).toBe(200)
+    expect(second.statusCode).toBe(200)
+    expect(logWrites).toHaveLength(1)
+    expect(errorWrites).toEqual([
+      expect.stringContaining(
+        "The Lys backend could not write to its standard output"
+      )
     ])
   })
 
   it("accepts a request body at the limit and refuses a larger one before the route runs", async () => {
     const app = await buildApp({
       config: createOwnedBackendConfig(),
-      logDestination: createCapturedLog().destination
+      logDestination: new CapturedLogDestination()
     })
     onTestFinished(async () => await app.close())
     await app.ready()

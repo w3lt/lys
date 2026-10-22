@@ -1,5 +1,9 @@
+import type { EventEmitter } from "node:events"
+import { appendFileSync, mkdirSync } from "node:fs"
+import { join } from "node:path"
 import type { Writable } from "node:stream"
 import type {
+  FastifyBaseLogger,
   FastifyLoggerOptions,
   FastifyServerOptions,
   LogLevel
@@ -20,8 +24,8 @@ type LogLevelField = Readonly<{
   level: string
 }>
 
-/** Name of a backend process output, as its failure report states it. */
-type BackendOutputName = "standard output" | "standard error"
+/** Name of a backend output, as its failure report states it. */
+type BackendOutputName = "standard output" | "standard error" | "log file"
 
 /**
  * Builds the options of a backend application's logger.
@@ -71,6 +75,157 @@ function formatLogTimeField(): string {
 }
 
 /**
+ * Names the backend's log file for the UTC day of a moment.
+ *
+ * @param now - Moment whose UTC date names the file.
+ * @returns `backend-YYYY-MM-DD.log`, such as `backend-2026-10-21.log`.
+ */
+function formatLogFileName(now: Date): string {
+  return `backend-${now.toISOString().slice(0, 10)}.log`
+}
+
+/**
+ * Creates the backend's logs directory unless it already exists. Its parent,
+ * the Lys home, is never created, so a Lys home that is missing stays
+ * missing.
+ *
+ * @param logsDirectoryPath - Absolute path of the logs directory.
+ * @throws The failure of creating the directory, such as `ENOENT` when the
+ * Lys home is missing; not `EEXIST`, which means the directory, or a file
+ * in its place, is already there.
+ */
+function createLogsDirectory(logsDirectoryPath: string): void {
+  try {
+    mkdirSync(logsDirectoryPath)
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "EEXIST") {
+      return
+    }
+    throw error
+  }
+}
+
+/**
+ * Owns where the backend's log lines go: each line is written to the
+ * backend's standard output and appended to the log file of the UTC day on
+ * which it is written, `backend-YYYY-MM-DD.log` in the logs directory, so
+ * each day has one file. It serves as the `stream` of the application's
+ * logger.
+ *
+ * @remarks Invariant: a line is appended only to the file named by the UTC
+ * date read as that line is written, so a running backend moves to the next
+ * day's file with its first line after midnight UTC, and no file is ever
+ * removed or rewritten. The logs directory is created whenever it is missing,
+ * but never the Lys home that holds it, and a day's file is created with that
+ * day's first line; a new file is readable and
+ * writable by its owner only, and an existing file keeps its permissions. A
+ * line that cannot be appended, such as on a full disk, is lost from the
+ * files, or only its start is kept when the disk fills partway through it;
+ * only the first such failure is reported, on standard error, and later
+ * lines are appended again once writing works.
+ * Resource ownership: borrows both standard streams from the process; opens
+ * the day's file for each line and closes it before that line's write
+ * returns, so it keeps no handle and has nothing to release.
+ * Concurrency model: single-owner; the backend entry point retains the
+ * instance on the backend's one event loop, and every write is synchronous.
+ */
+export class BackendLogDestination {
+  /** Receives every line; borrowed from the process. */
+  readonly #standardOutput: Writable
+  /** Absolute path of the directory that holds the day files. */
+  readonly #logsDirectoryPath: string
+  /** Reports the first failure to append a line; owned. */
+  readonly #fileFailureReporter: OutputFailureReporter
+
+  /**
+   * Creates a destination that has written nothing yet, without touching the
+   * disk.
+   *
+   * @param standardOutput - The backend's standard output, which receives
+   * every line; borrowed. Its own write failures are reported through its
+   * `error` event, as {@link registerOutputFailureListeners} handles them.
+   * @param standardError - The backend's standard error, which receives the
+   * report of the first line that could not be appended; borrowed.
+   * @param logsDirectoryPath - Absolute path of the directory that holds the
+   * day files.
+   */
+  public constructor(
+    standardOutput: Writable,
+    standardError: Writable,
+    logsDirectoryPath: string
+  ) {
+    this.#standardOutput = standardOutput
+    this.#logsDirectoryPath = logsDirectoryPath
+    this.#fileFailureReporter = new OutputFailureReporter(
+      "log file",
+      standardError
+    )
+  }
+
+  /**
+   * Writes one line to the standard output, then appends it to the file of
+   * the current UTC day, creating the logs directory and the file when they
+   * are missing.
+   *
+   * @param line - One line as the logger wrote it, newline included.
+   * @remarks Never throws, so logging never fails the code that logs. A line
+   * that cannot be appended is lost from the files, and the first such
+   * failure is reported on standard error. The line is in the file once this
+   * returns, so a line logged just before the process ends is kept.
+   */
+  public write(line: string): void {
+    this.#standardOutput.write(line)
+    const now = new Date()
+    try {
+      createLogsDirectory(this.#logsDirectoryPath)
+      appendFileSync(
+        join(this.#logsDirectoryPath, formatLogFileName(now)),
+        line,
+        { mode: 0o600 }
+      )
+    } catch (error) {
+      this.#fileFailureReporter.reportFailure(error)
+    }
+  }
+}
+
+/**
+ * Logs the uncaught failure that is ending the backend, at level `fatal`,
+ * with the failure in `err` and Node's `origin` of it.
+ *
+ * Node emits `uncaughtExceptionMonitor` for an uncaught exception and for an
+ * unhandled rejection, including a rejected top-level `await` of the entry
+ * point, such as a port already in use. The listener only observes: Node
+ * still reports the failure on standard error and ends the process, as it
+ * would without the listener.
+ *
+ * @param backendProcess - The backend process, whose
+ * `uncaughtExceptionMonitor` events are logged; borrowed.
+ * @param logger - The application's logger; borrowed. Its destination must
+ * write synchronously, as {@link BackendLogDestination} does, for the line to
+ * be written before the process ends.
+ * @remarks Call once per process, once the application has been built.
+ * `buildApp` logs a failure to build the application itself; any other
+ * failure before this call has no log line, and Node reports it on standard
+ * error only. Calling again adds a second listener, which logs each failure a
+ * second time.
+ */
+export function registerCrashLogging(
+  backendProcess: EventEmitter,
+  logger: FastifyBaseLogger
+): void {
+  backendProcess.on(
+    "uncaughtExceptionMonitor",
+    (failure: unknown, origin: NodeJS.UncaughtExceptionOrigin) => {
+      logger.fatal(
+        { err: failure, origin },
+        "The Lys backend is stopping on a failure nothing caught"
+      )
+    }
+  )
+}
+
+/**
  * Keeps the backend running when writing to its standard output or standard
  * error fails, such as on a full disk or when the reader of a pipe has exited.
  *
@@ -110,8 +265,9 @@ export function registerOutputFailureListeners(
 }
 
 /**
- * Owns whether the failure of one backend output has been reported, and
- * reports its first failure on another output.
+ * Owns whether the failure of one backend output, a standard stream or the
+ * log file, has been reported, and reports its first failure on another
+ * output.
  *
  * @remarks Borrows the report output and never ends or closes it. Concurrency
  * model: single-owner, on the event loop, called from the failed output's
@@ -143,17 +299,19 @@ class OutputFailureReporter {
    * Reports a failure of the output on the report output, unless a failure
    * has already been reported.
    *
-   * @param error - Failure the output reported.
+   * @param failure - Failure the output reported or the write threw; its
+   * message is reported, or the value itself when it is not an `Error`.
    * @remarks A report the report output cannot write is lost, and that output
    * reports the failure through its own `error` event.
    */
-  public reportFailure(error: Error): void {
+  public reportFailure(failure: unknown): void {
     if (this.#isFailureReported) {
       return
     }
     this.#isFailureReported = true
+    const reason = failure instanceof Error ? failure.message : String(failure)
     this.#reportOutput.write(
-      `The Lys backend could not write to its ${this.#failedOutputName}, so what it writes there is lost while writing fails: ${error.message}\n`
+      `The Lys backend could not write to its ${this.#failedOutputName}, so what it writes there is lost while writing fails: ${reason}\n`
     )
   }
 }

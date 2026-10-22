@@ -1,6 +1,6 @@
 import { existsSync, mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
 import * as z from "zod"
 import { buildApp } from "../../src/app"
@@ -77,10 +77,9 @@ describe("buildApp", () => {
     const constructClient = vi.fn<FakeLmStudioOperations["constructClient"]>()
     fakeLmStudio.operations = { ...fakeLmStudio.operations, constructClient }
 
-    const build = buildApp({
-      config,
-      logDestination: new CapturedLogDestination()
-    })
+    const log = new CapturedLogDestination()
+
+    const build = buildApp({ config, logDestination: log })
 
     await expect(build).rejects.toBeInstanceOf(z.ZodError)
     await expect(build).rejects.toMatchObject({
@@ -88,6 +87,35 @@ describe("buildApp", () => {
     })
     expect(constructClient).not.toHaveBeenCalled()
     expect(existsSync(config.databaseFilePath)).toBe(false)
+    expect(log.records).toEqual([])
+  })
+
+  it("logs a failure to build the application at level fatal before rejecting with it", async () => {
+    const ownedConfig = createOwnedBackendConfig()
+    // SQLite does not create a missing directory, so opening the database
+    // fails while the services are registered.
+    const config = {
+      ...ownedConfig,
+      databaseFilePath: join(
+        dirname(ownedConfig.databaseFilePath),
+        "missing",
+        "lys_db.sqlite"
+      )
+    }
+    const log = new CapturedLogDestination()
+
+    const build = buildApp({ config, logDestination: log })
+
+    await expect(build).rejects.toThrow("unable to open database file")
+    expect(log.records).toEqual([
+      expect.objectContaining({
+        level: "fatal",
+        msg: "The Lys backend application could not be built",
+        err: expect.objectContaining({
+          message: "unable to open database file"
+        })
+      })
+    ])
   })
 
   it("decorates the conversation adapters, the agent service, and the attachment file store and serves history and agents from the configured database", async () => {

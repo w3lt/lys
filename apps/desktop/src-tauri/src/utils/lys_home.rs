@@ -7,8 +7,7 @@ use std::{
 };
 
 /// Lys home directory: the root for the desktop settings file, the backend's
-/// conversation database, the runtime that release builds start, and the logs
-/// of the backend that release builds run.
+/// conversation database, and the runtime that release builds start.
 ///
 /// Values are created only by [`LysHome::resolve`]. The directory is not
 /// created or required to exist, and the derived paths below are computed
@@ -107,28 +106,8 @@ impl LysHome {
         self.prod_runtime_dir().join("vmo/vmo")
     }
 
-    /// Returns the `logs` directory under the Lys home, where release builds
-    /// keep the backend's output.
-    pub fn logs_dir(&self) -> PathBuf {
-        self.0.join("logs")
-    }
-
     /// Returns the desktop settings file, `settings.json` under the Lys home.
     pub fn settings_path(&self) -> PathBuf {
         self.0.join("settings.json")
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::path::{Path, PathBuf};
-
-    use super::LysHome;
-
-    #[test]
-    fn the_logs_directory_is_logs_under_the_lys_home() {
-        let lys_home = LysHome(PathBuf::from("/Users/lys/.lys"));
-
-        assert_eq!(lys_home.logs_dir(), Path::new("/Users/lys/.lys/logs"));
     }
 }

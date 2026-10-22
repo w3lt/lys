@@ -45,9 +45,10 @@ does not prove that a later inference request will succeed.
 The backend logs requests and the failures it reports through Fastify's
 built-in pino logger, at level `info`, so the `debug` calls in the chat path
 are not written. Each line is one JSON object whose `level` is the level name
-and whose `time` is a UTC ISO-8601 time. A request's lines name its path
-without the query string, so a history search or a page cursor is not written.
-A line, shown here across several lines:
+and whose `time` is a UTC ISO-8601 time. The log keeps everything: a
+request's lines carry its full URL, query string included, so a history
+search is written too, and a request for a route that does not exist gets a
+line of its own. A line, shown here across several lines:
 
 ```json
 {
@@ -97,12 +98,13 @@ app started from a terminal shows.
 - When the log cannot be opened, the backend still starts, with the app's own
   standard streams, so an app opened from Finder or the Dock loses that run's
   output.
-- The file holds request lines (method, path without the query string, host,
-  remote address and port, status, response time) and the failures the
-  backend reports, whose messages and stacks can name models, files, or page
-  URLs. Fastify's line for a request to a route that does not exist,
-  `Route GET:<url> not found`, names the whole URL, query string included.
-  Nothing else is redacted, so read a log before you share it.
+- The file holds request lines (method, full URL with its query string,
+  host, remote address and port, status, response time), so it keeps the
+  text of history searches, and the failures the backend reports, whose
+  messages and stacks can name models, files, or page URLs. Nothing is
+  redacted
+  ([request log exception](/reference/standard-application/#request-log-exception)),
+  so read a log before you share it.
 
 To follow the log while Lys runs:
 

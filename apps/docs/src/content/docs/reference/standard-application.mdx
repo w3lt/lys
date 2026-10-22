@@ -620,6 +620,46 @@ following finding I-10 of its
   `ReaderVmLifecycleHarness`, which runs the two suites, and this exception is
   removed.
 
+## Request log exception
+
+The backend's log has an approved exception to
+[API-017](https://github.com/w3lt/lys/blob/main/docs/code_standards/API.md): a
+request's log lines carry its full URL, so the text a person types into the
+history search reaches the log. The exception was approved by the maintainer
+on 2026-10-22 for [PR #230](https://github.com/w3lt/lys/pull/230), reversing
+finding I-2 of its
+[first](https://github.com/w3lt/lys/pull/230#issuecomment-6323411155) and
+[second](https://github.com/w3lt/lys/pull/230#issuecomment-6347403375)
+reviews.
+
+- **Scope:** the URL in the backend's request lines: Fastify's
+  `incoming request` line and its `Route <method>:<url> not found` line for a
+  route that does not exist, written with the options `buildBackendLoggerOptions`
+  in `apps/backend/src/log.ts` builds. The only query parameter that carries
+  text the person typed is `query` of `GET /api/v1/conversations`; the others
+  are page cursors and limits. Request bodies, such as messages and
+  attachments, and request headers are not logged.
+- **Constraint:** the maintainer requires the log to keep everything that
+  happens, unusual requests included, so that a problem can be traced from
+  the log alone. A log without the query string cannot show which search or
+  page a request asked for.
+- **Alternatives considered:**
+  - Logging the path without the query string, as the first fix for I-2 did,
+    was not taken: the log would no longer show what a request asked for.
+  - Leaving out only the `query` parameter was not taken for the same reason.
+  - Replacing Fastify's not-found line with one that names only the path, or
+    with none, was not taken.
+- **Risk and control:** history searches stay on disk in `backend.log` and
+  `backend.1.log` until rotation replaces them, and in the terminal of a
+  development run. The release log is created readable and writable by its
+  owner only, stays in the Lys home on the person's machine, next to the
+  conversation database the searches look through, and Lys never sends it
+  anywhere. The [logging page](/operate/logging/#the-release-backend-log)
+  tells the person to read a log before sharing it.
+- **Removal condition:** permanent by the maintainer's decision, unless a
+  log-redaction policy, listed as coming soon on the
+  [security page](/architecture/security/#coming-soon), replaces it.
+
 ## API boundaries
 
 Canonical rules: [API-004, API-020, API-034](https://github.com/w3lt/lys/blob/main/docs/code_standards/API.md).

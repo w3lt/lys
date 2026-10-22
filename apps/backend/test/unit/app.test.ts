@@ -263,7 +263,12 @@ describe("buildApp", () => {
 
     expect(first.statusCode).toBe(200)
     expect(second.statusCode).toBe(200)
-    expect(logWrites).toHaveLength(1)
+    expect(logWrites).toEqual([
+      expect.stringContaining('"msg":"incoming request"'),
+      expect.stringContaining('"msg":"request completed"'),
+      expect.stringContaining('"msg":"incoming request"'),
+      expect.stringContaining('"msg":"request completed"')
+    ])
     expect(errorWrites).toEqual([
       expect.stringContaining(
         "The Lys backend could not write to its standard output"

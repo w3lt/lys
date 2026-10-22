@@ -124,10 +124,12 @@ function formatRequestPath(url: string): string {
  * Keeps the backend running when writing to its standard output or standard
  * error fails, such as on a full disk or when the reader of a pipe has exited.
  *
- * A failed stream is closed by Node and drops whatever is written to it later,
- * so the backend loses that output until it restarts. The failure is reported
- * once on the other stream. A report that cannot be written either is dropped,
- * so a failure never leads to more than one report per stream.
+ * A line that cannot be written is lost. Node keeps the process's standard
+ * streams open after a failure, so later lines are written again once writing
+ * works, as when space has been freed on a full disk; after a pipe's reader
+ * has exited, every later line fails too. The first failure of each stream is
+ * reported on the other stream, and later failures of that stream are not, so
+ * two failing streams cannot report each other's failures without end.
  *
  * @param standardOutput - The backend's standard output, which receives its
  * log lines; borrowed from the process.
@@ -135,35 +137,73 @@ function formatRequestPath(url: string): string {
  * own messages, such as a crash trace; borrowed from the process.
  * @remarks Call once per process, before anything is written. The listeners
  * stay registered for the life of the process; calling again adds a second
- * pair, which reports each failure a second time.
+ * pair, which reports each stream's first failure a second time.
  */
 export function registerOutputFailureListeners(
   standardOutput: Writable,
   standardError: Writable
 ): void {
+  const standardOutputReporter = new OutputFailureReporter(
+    "standard output",
+    standardError
+  )
+  const standardErrorReporter = new OutputFailureReporter(
+    "standard error",
+    standardOutput
+  )
   standardOutput.on("error", (error: Error) => {
-    handleOutputError("standard output", error, standardError)
+    standardOutputReporter.reportFailure(error)
   })
   standardError.on("error", (error: Error) => {
-    handleOutputError("standard error", error, standardOutput)
+    standardErrorReporter.reportFailure(error)
   })
 }
 
 /**
- * Reports on another output that writing to one of the backend's outputs
- * failed.
+ * Owns whether the failure of one backend output has been reported, and
+ * reports its first failure on another output.
  *
- * @param failedOutputName - Output whose write failed.
- * @param error - Failure that output reported.
- * @param reportOutput - Output that receives the one-line report; a report it
- * cannot write is dropped.
+ * @remarks Borrows the report output and never ends or closes it. Concurrency
+ * model: single-owner, on the event loop, called from the failed output's
+ * `error` events.
  */
-function handleOutputError(
-  failedOutputName: BackendOutputName,
-  error: Error,
-  reportOutput: Writable
-): void {
-  reportOutput.write(
-    `The Lys backend could not write to its ${failedOutputName}, so it drops what it writes there until it restarts: ${error.message}\n`
-  )
+class OutputFailureReporter {
+  /** Output whose failures this reporter reports. */
+  readonly #failedOutputName: BackendOutputName
+  /** Output that receives the report; borrowed. */
+  readonly #reportOutput: Writable
+  /** Whether the first failure has been reported; never reset. */
+  #isFailureReported = false
+
+  /**
+   * Creates a reporter that has reported nothing yet.
+   *
+   * @param failedOutputName - Output whose failures it reports.
+   * @param reportOutput - Output that receives the one-line report; borrowed.
+   */
+  public constructor(
+    failedOutputName: BackendOutputName,
+    reportOutput: Writable
+  ) {
+    this.#failedOutputName = failedOutputName
+    this.#reportOutput = reportOutput
+  }
+
+  /**
+   * Reports a failure of the output on the report output, unless a failure
+   * has already been reported.
+   *
+   * @param error - Failure the output reported.
+   * @remarks A report the report output cannot write is lost, and that output
+   * reports the failure through its own `error` event.
+   */
+  public reportFailure(error: Error): void {
+    if (this.#isFailureReported) {
+      return
+    }
+    this.#isFailureReported = true
+    this.#reportOutput.write(
+      `The Lys backend could not write to its ${this.#failedOutputName}, so what it writes there is lost while writing fails: ${error.message}\n`
+    )
+  }
 }

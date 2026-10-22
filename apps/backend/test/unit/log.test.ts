@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { registerOutputFailureListeners } from "../../src/log"
-import {
-  createFailingOutput,
-  createWorkingOutput,
-  waitForOutputClose
-} from "./support/testOutputs"
+import { createFailingOutput, createWorkingOutput } from "./support/testOutputs"
 
 /** Failure a write reports on a full disk. */
 const DISK_FULL = new Error("ENOSPC: no space left on device, write")
@@ -12,9 +8,13 @@ const DISK_FULL = new Error("ENOSPC: no space left on device, write")
 /** Failure a write reports once the reader of a pipe has exited. */
 const PIPE_CLOSED = new Error("write EPIPE")
 
+/** Report written when the standard output fails on a full disk. */
+const STANDARD_OUTPUT_DISK_FULL_REPORT =
+  "The Lys backend could not write to its standard output, so what it writes there is lost while writing fails: ENOSPC: no space left on device, write\n"
+
 /**
- * Waits until Node has run every callback queued so far, so a failure a write
- * would have reported has been emitted.
+ * Waits until Node has run every callback queued so far, so each failure the
+ * writes so far report has been emitted and handled.
  *
  * @returns A promise settled on the next turn of the event loop.
  */
@@ -25,8 +25,8 @@ function waitForPendingCallbacks(): Promise<void> {
 }
 
 describe("registerOutputFailureListeners", () => {
-  it("reports a failed standard output once on standard error and drops what is written to it later", async () => {
-    // Without a listener, Node would end the process at the failure.
+  it("reports the first failure of the standard output on standard error and keeps writing to it", async () => {
+    // Without a listener, Node would end the process at the first failure.
     const outputWrites: string[] = []
     const errorWrites: string[] = []
     const standardOutput = createFailingOutput(DISK_FULL, (text) => {
@@ -38,17 +38,18 @@ describe("registerOutputFailureListeners", () => {
     registerOutputFailureListeners(standardOutput, standardError)
 
     standardOutput.write('{"msg":"incoming request"}\n')
-    await waitForOutputClose(standardOutput)
+    await waitForPendingCallbacks()
     standardOutput.write('{"msg":"request completed"}\n')
     await waitForPendingCallbacks()
 
-    expect(outputWrites).toEqual(['{"msg":"incoming request"}\n'])
-    expect(errorWrites).toEqual([
-      "The Lys backend could not write to its standard output, so it drops what it writes there until it restarts: ENOSPC: no space left on device, write\n"
+    expect(outputWrites).toEqual([
+      '{"msg":"incoming request"}\n',
+      '{"msg":"request completed"}\n'
     ])
+    expect(errorWrites).toEqual([STANDARD_OUTPUT_DISK_FULL_REPORT])
   })
 
-  it("reports a failed standard error once on standard output", async () => {
+  it("reports the first failure of standard error on the standard output", async () => {
     const outputWrites: string[] = []
     const errorWrites: string[] = []
     const standardOutput = createWorkingOutput((text) => {
@@ -60,17 +61,20 @@ describe("registerOutputFailureListeners", () => {
     registerOutputFailureListeners(standardOutput, standardError)
 
     standardError.write("Warning: something Node reports\n")
-    await waitForOutputClose(standardError)
+    await waitForPendingCallbacks()
     standardError.write("Warning: something else\n")
     await waitForPendingCallbacks()
 
-    expect(errorWrites).toEqual(["Warning: something Node reports\n"])
+    expect(errorWrites).toEqual([
+      "Warning: something Node reports\n",
+      "Warning: something else\n"
+    ])
     expect(outputWrites).toEqual([
-      "The Lys backend could not write to its standard error, so it drops what it writes there until it restarts: write EPIPE\n"
+      "The Lys backend could not write to its standard error, so what it writes there is lost while writing fails: write EPIPE\n"
     ])
   })
 
-  it("drops the report when both outputs fail, so each failure is reported at most once", async () => {
+  it("reports each output's first failure once when both fail, instead of reporting back and forth", async () => {
     const outputWrites: string[] = []
     const errorWrites: string[] = []
     const standardOutput = createFailingOutput(DISK_FULL, (text) => {
@@ -82,15 +86,15 @@ describe("registerOutputFailureListeners", () => {
     registerOutputFailureListeners(standardOutput, standardError)
 
     standardOutput.write('{"msg":"incoming request"}\n')
-    await Promise.all([
-      waitForOutputClose(standardOutput),
-      waitForOutputClose(standardError)
-    ])
+    await waitForPendingCallbacks()
+    standardOutput.write('{"msg":"request completed"}\n')
     await waitForPendingCallbacks()
 
-    expect(outputWrites).toEqual(['{"msg":"incoming request"}\n'])
-    expect(errorWrites).toEqual([
-      "The Lys backend could not write to its standard output, so it drops what it writes there until it restarts: ENOSPC: no space left on device, write\n"
+    expect(outputWrites).toEqual([
+      '{"msg":"incoming request"}\n',
+      "The Lys backend could not write to its standard error, so what it writes there is lost while writing fails: ENOSPC: no space left on device, write\n",
+      '{"msg":"request completed"}\n'
     ])
+    expect(errorWrites).toEqual([STANDARD_OUTPUT_DISK_FULL_REPORT])
   })
 })

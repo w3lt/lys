@@ -17,14 +17,16 @@ export function createWorkingOutput(receive: (text: string) => void): Writable {
 }
 
 /**
- * Creates an output whose every write fails, standing in for a standard output
- * or standard error on a full disk or a closed pipe.
+ * Creates an output whose every write fails, standing in for the process's
+ * standard output or standard error on a full disk or a closed pipe.
  *
- * @param failure - Failure each write reports through the output's `error`
- * event.
- * @param receive - Receives the text of each write the output attempts, in
- * write order; a write after the output closed is never attempted.
- * @returns A new output; Node closes it at its first failure.
+ * Like those streams, the output stays open after a failure: each later write
+ * is attempted and fails again, and each failure is emitted as an `error`
+ * event once the current callbacks have run.
+ *
+ * @param failure - Failure each write reports.
+ * @param receive - Receives the text of each attempted write, in write order.
+ * @returns A new output; an `error` event without a listener ends the process.
  */
 export function createFailingOutput(
   failure: Error,
@@ -33,21 +35,10 @@ export function createFailingOutput(
   return new Writable({
     write(chunk: Buffer, _encoding, callback) {
       receive(chunk.toString("utf8"))
-      callback(failure)
+      callback()
+      process.nextTick(() => {
+        this.emit("error", failure)
+      })
     }
-  })
-}
-
-/**
- * Waits until an output has closed.
- *
- * @param output - Output to watch; it must still be open.
- * @returns A promise settled once the output emits `close`.
- */
-export function waitForOutputClose(output: Writable): Promise<void> {
-  return new Promise((resolve) => {
-    output.once("close", () => {
-      resolve()
-    })
   })
 }

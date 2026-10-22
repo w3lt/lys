@@ -312,8 +312,8 @@ function buildContextImageSides(
  * @returns A promise resolving to `seen` with each image attachment whose
  * file was found, with its media type, sides, and bytes, by attachment
  * number. The files are read together, requested in conversation order. A
- * model without vision gets {@link UNSEEN_CONTEXT_IMAGES} instead, without a
- * read.
+ * caller whose model cannot see images uses {@link UNSEEN_CONTEXT_IMAGES}
+ * instead of calling this, so no file is read.
  * @throws The reader's failure, for a file that cannot be read although it
  * is not missing.
  */
@@ -338,8 +338,8 @@ export async function readAgentContextImages(
  * attachment whose file is stored, by attachment number: the images, and
  * the missing-file placeholders, that {@link readAgentContextImages} would
  * give a turn. The files are looked up together, in conversation order. A
- * model without vision gets {@link UNSEEN_CONTEXT_IMAGES} instead, without a
- * lookup.
+ * caller whose model cannot see images uses {@link UNSEEN_CONTEXT_IMAGES}
+ * instead of calling this, so no file is looked up.
  * @throws The lookup's failure, for a path that cannot be examined although
  * it is not missing.
  */

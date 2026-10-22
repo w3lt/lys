@@ -36,8 +36,8 @@ The desktop host owns a JSON settings file at `$LYS_HOME/settings.json`.
 The desktop loads this file at initialization and autosaves generation, load
 configuration, tool approval, and runtime startup switch edits. Each save
 replaces only its own part and preserves the rest already on disk, including a
-`loadConfiguration.default` written by hand; the other runtime edits and
-`model.contextSize` edits in the UI remain session-only.
+`loadConfiguration.default` written by hand; the other runtime edits in the
+UI remain session-only.
 
 ## `$LYS_HOME/lys_db.sqlite`
 
@@ -92,7 +92,10 @@ directory.
   nothing reads it, and you can delete it by hand.
 - A file removed by hand after its row was written is not noticed until the
   model needs it: an image becomes a placeholder sentence in its message, and
-  a read of a text file fails with a message the model reads. A file changed
+  a read of a text file fails with a message the model reads. The composer's
+  context meter counts the same placeholder as soon as it measures the
+  conversation again; it checks that each image file is there without reading
+  it. A file changed
   by hand is sent or read as it now is; its stored size and sides are not
   checked against it.
 - The directory belongs with the database: copy, move, or delete the two
@@ -120,11 +123,21 @@ VMs in `~/Library/Application Support/com.w3lt.lys-vmo`, outside the Lys home,
 because vmo does not read `LYS_HOME`. Containerization creates and lays out
 the directory at vmo's first start, and only vmo writes it.
 
-- it holds the `vminit` image; `initfs.ext4`, unpacked from the first
-  `vminit` vmo pulled into the store and not replaced when a later vmo pins
-  another ([#218](https://github.com/w3lt/lys/issues/218)); the reader image
-  that `ghcr.io/w3lt/lys-readpage:latest` named at vmo's last start; and,
-  while a read runs, that read's VM under `containers/`
+- it holds the `vminit` image; `initfs.ext4`, the filesystem vmo's VMs boot
+  from, unpacked from that `vminit`; `initfs.ext4.vminit-digest`, which names
+  the `vminit` that `initfs.ext4` was unpacked from; the reader image that
+  `ghcr.io/w3lt/lys-readpage:latest` named at vmo's last start; and, while a
+  read runs, that read's VM under `containers/`
+- at each start, vmo reuses `initfs.ext4` only when
+  `initfs.ext4.vminit-digest` names the `vminit` it pins. Otherwise it deletes
+  both files and unpacks `vminit` again: after an update that pins another
+  `vminit`, when a vmo from before
+  [#218](https://github.com/w3lt/lys/issues/218) left `initfs.ext4` without
+  it, or when an unpack did not finish, even because of a power loss. vmo
+  writes `initfs.ext4.vminit-digest` only once `initfs.ext4` is on disk.
+  When vmo cannot check `initfs.ext4`, or `initfs.ext4.vminit-digest` exists
+  but cannot be read, the start stops without deleting either. When it cannot
+  delete them, the start stops too
 - at each start, after it fetches `latest`, vmo deletes every other image in
   the store and the files that only those images used, so a reader image that
   `latest` no longer names does not stay

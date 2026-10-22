@@ -13,14 +13,15 @@ import { createLlmRouteTestApp } from "../../../support/llmRouteTestApp"
 /** Published path of the inventory route. */
 const LIST_MODELS_PATH = "/api/v1/llm/list"
 
-/** Valid inventory snapshot of one loaded model. */
+/** Valid inventory snapshot of one loaded model with its context length. */
 const LOADED_MODEL = llmInfoSchema.parse({
   ...createDownloadedLlmModel({ modelKey: "qwen/qwen3-8b" }),
-  loaded: true
+  loaded: true,
+  loadedContextLength: 8192
 })
 
 describe("updateFastifyWithLlmListModelsRoute", () => {
-  it("responds with the service inventory", async () => {
+  it("responds with the service inventory, with each loaded model's context length", async () => {
     const testApp = createLlmRouteTestApp()
     const listLlmModels = vi
       .spyOn(testApp.service, "listLlmModels")

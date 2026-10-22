@@ -134,9 +134,6 @@ defaults:
     "defaultModel": null,
     "backendAddress": "http://127.0.0.1:12345"
   },
-  "model": {
-    "contextSize": 32768
-  },
   "generation": {
     "temperature": 0.7,
     "replyCeiling": 2048
@@ -160,7 +157,6 @@ defaults:
 | `runtime.autoStartVmo`     | `boolean`               | Whether desktop initialization should ask Tauri to start vmo, the page reader `read_page` uses                   |
 | `runtime.defaultModel`     | `string \| null`        | Preferred model used when it is loaded; otherwise the first loaded inventory entry is the fallback               |
 | `runtime.backendAddress`   | `string`                | Backend address displayed in settings; HTTP clients still target the fixed loopback address                      |
-| `model.contextSize`        | unsigned 32-bit integer | Context-size estimate displayed in the Model pane; not forwarded by the load API                                 |
 | `generation.temperature`   | number in `[0, 1]`      | Sampling temperature sent with each new chat request                                                             |
 | `generation.replyCeiling`  | unsigned 32-bit integer | Maximum reply tokens; the desktop omits the request limit when this is `0`                                       |
 | `loadConfiguration`        | object                  | Settings sent with each model load; see [Load configuration](#load-configuration)                                |
@@ -169,7 +165,9 @@ defaults:
 
 A missing group, or a missing field in one of them, uses the host defaults;
 for `loadConfiguration` that default is empty, for `secrets` it holds no
-key, and for `tools` it puts no tool on Just run. Loading never rewrites an
+key, and for `tools` it puts no tool on Just run. A `model` group, which
+older files hold for a context-size estimate Lys no longer has, is ignored,
+and the next save leaves it out. Loading never rewrites an
 existing file. Invalid JSON or invalid field values, including a temperature
 outside `[0, 1]`, cause loading to fail, and the file is left as it is. Loading
 a missing file creates the parent directory and writes the default document.
@@ -315,8 +313,8 @@ saved, the pane says so, and changing a switch tries the save again. A file
 saved before `autoStartVmo` existed loads with it on.
 
 The other runtime edits, such as default-model selection, remain in memory for
-the current session. Edits to `model.contextSize` also remain session-only.
-A save of another group does not persist those unsaved edits.
+the current session. A save of another group does not persist those unsaved
+edits.
 
 ## Desktop theme preference
 
@@ -327,13 +325,8 @@ the value is missing, invalid, or unavailable.
 ## Current caveats
 
 - The React shell loads runtime settings from Tauri, but runtime edits other
-  than the two startup switches, including `runtime.defaultModel`, and model
-  edits are not persisted back through `save_settings`.
-- `model.contextSize` is still a separate local estimate, used by the
-  generation controls and the agent editor's prompt measure. It does not
-  follow the context length a model is loaded with. The composer's context
-  meter does not use it: it shows the context length the loaded model reports
-  through [`POST /api/v1/chat/context`](/reference/api/#chat-context-measurement).
+  than the two startup switches, including `runtime.defaultModel`, are not
+  persisted back through `save_settings`.
 - LM Studio applies its own settings when it loads a model by itself, for
   example when a chat request names a model that is not loaded. The load
   configuration applies only to loads Lys starts. The backend checks that the

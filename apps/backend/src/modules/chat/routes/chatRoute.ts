@@ -258,7 +258,7 @@ export default function updateFastifyWithChatRoute(
     findConversation: (conversationId: string) =>
       app.conversationHistoryReader.getConversation(conversationId),
     findModelCapabilities: createModelCapabilitiesLookup(() =>
-      app.llmService.listLlmModels()
+      app.llmService.listDownloadedLlmModels()
     ),
     attachmentFiles: app.attachmentFileStore,
     generateTitle: (options: TitleGenerationOptions) =>

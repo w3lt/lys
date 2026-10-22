@@ -78,14 +78,15 @@ The vmo card in Settings → Runtime says why:
   without the kernel described there
   ([#200](https://github.com/w3lt/lys/issues/200)).
 - **vmo stopped** right after Start: the process exited before it answered,
-  for example because it could not reach `ghcr.io` for its images, could not
-  delete the images it no longer uses from
-  [its image store](/operate/data/#vmos-image-store), or, in a development
-  build, did not compile. In development, vmo's build and error output appear
-  in the terminal that runs `pnpm dev`. When every start stops this way
-  although `ghcr.io` is reachable and the disk has room for vmo's images,
-  delete `~/Library/Application Support/com.w3lt.lys-vmo` while vmo is
-  stopped; the next start downloads its images again.
+  for example because it could not reach `ghcr.io` for its images; could not
+  read which `vminit` [its image store](/operate/data/#vmos-image-store)
+  holds unpacked, delete that unpack, or unpack and save the new one; could
+  not delete the images it no longer uses from the store; or, in a
+  development build, did not compile. In development, vmo's build and error
+  output appear in the terminal that runs `pnpm dev`. When every start stops
+  this way although `ghcr.io` is reachable and the disk has room for vmo's
+  images, delete `~/Library/Application Support/com.w3lt.lys-vmo` while vmo
+  is stopped; the next start downloads its images again.
 - **Lys couldn't start vmo: Failed to run …/vmo: No such file or directory**:
   vmo is not installed. Run `build.sh`; see
   [Packaging and releases](/operate/releases/).

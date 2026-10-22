@@ -6,8 +6,7 @@ import {
   chatApiStreamEventSchema,
   chatImageNeedsVisionProblemSchema,
   conversationAgentMissingProblemSchema,
-  conversationNotFoundProblemSchema,
-  type LlmInfo
+  conversationNotFoundProblemSchema
 } from "@lys/protocol"
 import {
   MAXIMUM_ATTACHMENT_BYTES,
@@ -21,6 +20,7 @@ import type ReplyGeneration from "../../../../../src/modules/chat/replyGeneratio
 import updateFastifyWithChatRoute, {
   type ChatRouteOptions
 } from "../../../../../src/modules/chat/routes/chatRoute"
+import type { DownloadedLlmModel } from "../../../../../src/modules/llm/llmRuntimeTypes"
 import { createLlmRuntimeUnavailableError } from "../../../../../src/modules/llm/llmRuntimeUnavailableError"
 import { createLlmServiceBusyError } from "../../../../../src/modules/llm/llmServiceBusyError"
 import { ChatCompletionCancelledError } from "../../../../../src/utils/errors"
@@ -1114,15 +1114,14 @@ describe("updateFastifyWithChatRoute", () => {
 
   describe("attachments", () => {
     /** The request model as the inventory lists a text-only model that uses tools. */
-    const TEXT_MODEL_INFO: LlmInfo = Object.freeze({
+    const TEXT_MODEL_INFO: DownloadedLlmModel = Object.freeze({
       ...createDownloadedLlmModel({ modelKey: NEW_CONVERSATION_REQUEST.model }),
       vision: false,
-      trainedForToolUse: true,
-      loaded: true
+      trainedForToolUse: true
     })
 
     /** The request model as the inventory lists a model that sees images. */
-    const VISION_MODEL_INFO: LlmInfo = Object.freeze({
+    const VISION_MODEL_INFO: DownloadedLlmModel = Object.freeze({
       ...TEXT_MODEL_INFO,
       vision: true
     })
@@ -1253,7 +1252,7 @@ describe("updateFastifyWithChatRoute", () => {
       expect(
         chatAttachmentUnsupportedProblemSchema.parse(response.json())
       ).toMatchObject({ fileName: "clip.gif", instance: chatApi.path })
-      expect(testApp.listLlmModels).not.toHaveBeenCalled()
+      expect(testApp.listDownloadedLlmModels).not.toHaveBeenCalled()
       expect(testApp.completeChatStream).not.toHaveBeenCalled()
       expect(listStoredFiles(testApp)).toEqual([])
       expect(
@@ -1291,7 +1290,7 @@ describe("updateFastifyWithChatRoute", () => {
             "A request does not offer read_attachment; the backend adds it to a turn itself."
           )
         })
-        expect(testApp.listLlmModels).not.toHaveBeenCalled()
+        expect(testApp.listDownloadedLlmModels).not.toHaveBeenCalled()
         expect(testApp.completeChatStream).not.toHaveBeenCalled()
         expect(readdirSync(testApp.attachmentsDirectoryPath)).toEqual([])
       }
@@ -1332,7 +1331,7 @@ describe("updateFastifyWithChatRoute", () => {
         expect(response.json()).toMatchObject({
           message: expect.stringContaining(message)
         })
-        expect(testApp.listLlmModels).not.toHaveBeenCalled()
+        expect(testApp.listDownloadedLlmModels).not.toHaveBeenCalled()
         expect(testApp.completeChatStream).not.toHaveBeenCalled()
         expect(readdirSync(testApp.attachmentsDirectoryPath)).toEqual([])
       }
@@ -1341,7 +1340,7 @@ describe("updateFastifyWithChatRoute", () => {
     it("stores a text attachment of exactly the per-file limit", async () => {
       const testApp = await createChatRouteTestApp()
       registerStoringChatRoute(testApp)
-      testApp.listLlmModels.mockResolvedValue([TEXT_MODEL_INFO])
+      testApp.listDownloadedLlmModels.mockResolvedValue([TEXT_MODEL_INFO])
 
       const response = await sendChatRequest(testApp.app, {
         ...NEW_CONVERSATION_REQUEST,
@@ -1379,7 +1378,7 @@ describe("updateFastifyWithChatRoute", () => {
       })
 
       expect(response.statusCode).toBe(413)
-      expect(testApp.listLlmModels).not.toHaveBeenCalled()
+      expect(testApp.listDownloadedLlmModels).not.toHaveBeenCalled()
       expect(testApp.completeChatStream).not.toHaveBeenCalled()
       expect(readdirSync(testApp.attachmentsDirectoryPath)).toEqual([])
     })
@@ -1392,7 +1391,7 @@ describe("updateFastifyWithChatRoute", () => {
       async (_label, inventory) => {
         const testApp = await createChatRouteTestApp()
         registerStoringChatRoute(testApp)
-        testApp.listLlmModels.mockResolvedValue(inventory)
+        testApp.listDownloadedLlmModels.mockResolvedValue(inventory)
 
         const response = await sendChatRequest(testApp.app, {
           ...NEW_CONVERSATION_REQUEST,
@@ -1431,7 +1430,7 @@ describe("updateFastifyWithChatRoute", () => {
       async (_label, failure, problemType) => {
         const testApp = await createChatRouteTestApp()
         registerStoringChatRoute(testApp)
-        testApp.listLlmModels.mockRejectedValue(failure)
+        testApp.listDownloadedLlmModels.mockRejectedValue(failure)
 
         const response = await sendChatRequest(testApp.app, NOTES_REQUEST)
 
@@ -1455,7 +1454,7 @@ describe("updateFastifyWithChatRoute", () => {
       )
 
       expect(response.statusCode).toBe(200)
-      expect(testApp.listLlmModels).not.toHaveBeenCalled()
+      expect(testApp.listDownloadedLlmModels).not.toHaveBeenCalled()
       expect(listOfferedToolNames(testApp, 0)).toEqual([])
       expect(readdirSync(testApp.attachmentsDirectoryPath)).toEqual([])
     })
@@ -1463,10 +1462,10 @@ describe("updateFastifyWithChatRoute", () => {
     it("refuses a turn whose conversation was deleted while the inventory was read, and leaves no file of it", async () => {
       const testApp = await createChatRouteTestApp()
       registerStoringChatRoute(testApp)
-      testApp.listLlmModels.mockResolvedValue([TEXT_MODEL_INFO])
+      testApp.listDownloadedLlmModels.mockResolvedValue([TEXT_MODEL_INFO])
       const first = await sendChatRequest(testApp.app, NOTES_REQUEST)
       const conversationId = readNewConversationStart(first).conversation.id
-      testApp.listLlmModels.mockImplementationOnce(async () => {
+      testApp.listDownloadedLlmModels.mockImplementationOnce(async () => {
         testApp.app.conversationHistoryEditor.deleteConversation(conversationId)
         return [TEXT_MODEL_INFO]
       })
@@ -1489,7 +1488,7 @@ describe("updateFastifyWithChatRoute", () => {
     it("refuses a turn whose agent was deleted while the inventory was read, keeping the conversation's other files", async () => {
       const testApp = await createChatRouteTestApp()
       registerStoringChatRoute(testApp)
-      testApp.listLlmModels.mockResolvedValue([TEXT_MODEL_INFO])
+      testApp.listDownloadedLlmModels.mockResolvedValue([TEXT_MODEL_INFO])
       testApp.app.agentService.createAgent(WEB_RESEARCHER_DEFINITION)
       const first = await sendChatRequest(testApp.app, {
         ...WEB_RESEARCHER_REQUEST,
@@ -1497,7 +1496,7 @@ describe("updateFastifyWithChatRoute", () => {
       })
       const conversationId = readNewConversationStart(first).conversation.id
       const storedFiles = listStoredFiles(testApp)
-      testApp.listLlmModels.mockImplementationOnce(async () => {
+      testApp.listDownloadedLlmModels.mockImplementationOnce(async () => {
         testApp.app.agentService.deleteAgent(WEB_RESEARCHER_DEFINITION.code)
         return [TEXT_MODEL_INFO]
       })
@@ -1526,7 +1525,7 @@ describe("updateFastifyWithChatRoute", () => {
       const testApp = await createChatRouteTestApp()
       registerStoringChatRoute(testApp)
       const textOnlyModel = "qwen/qwen3-8b-text"
-      testApp.listLlmModels.mockResolvedValue([
+      testApp.listDownloadedLlmModels.mockResolvedValue([
         VISION_MODEL_INFO,
         { ...TEXT_MODEL_INFO, modelKey: textOnlyModel }
       ])
@@ -1559,7 +1558,7 @@ describe("updateFastifyWithChatRoute", () => {
       const testApp = await createChatRouteTestApp()
       registerStoringChatRoute(testApp)
       arrangeAttachmentReadingModel(testApp)
-      testApp.listLlmModels.mockResolvedValue([TEXT_MODEL_INFO])
+      testApp.listDownloadedLlmModels.mockResolvedValue([TEXT_MODEL_INFO])
       testApp.readJustRunToolNames.mockResolvedValue({
         status: "read",
         toolNames: new Set()
@@ -1619,7 +1618,7 @@ describe("updateFastifyWithChatRoute", () => {
     it("offers no reader to a model that is not trained for tool use, and still lists the file for it", async () => {
       const testApp = await createChatRouteTestApp()
       registerStoringChatRoute(testApp)
-      testApp.listLlmModels.mockResolvedValue([
+      testApp.listDownloadedLlmModels.mockResolvedValue([
         { ...TEXT_MODEL_INFO, trainedForToolUse: false }
       ])
 
@@ -1635,7 +1634,7 @@ describe("updateFastifyWithChatRoute", () => {
     it("sends an image the model sees after the message's text, and sends it again on the conversation's next turn", async () => {
       const testApp = await createChatRouteTestApp()
       registerStoringChatRoute(testApp)
-      testApp.listLlmModels.mockResolvedValue([VISION_MODEL_INFO])
+      testApp.listDownloadedLlmModels.mockResolvedValue([VISION_MODEL_INFO])
       const imageMessage = {
         role: "user",
         content: [
@@ -1684,13 +1683,13 @@ describe("updateFastifyWithChatRoute", () => {
         { role: "assistant", content: "Hi" },
         { role: "user", content: "And now?" }
       ])
-      expect(testApp.listLlmModels).toHaveBeenCalledTimes(2)
+      expect(testApp.listDownloadedLlmModels).toHaveBeenCalledTimes(2)
     })
 
     it("numbers a later turn's attachments after the conversation's, and offers the reader on a turn without new attachments", async () => {
       const testApp = await createChatRouteTestApp()
       registerStoringChatRoute(testApp)
-      testApp.listLlmModels.mockResolvedValue([TEXT_MODEL_INFO])
+      testApp.listDownloadedLlmModels.mockResolvedValue([TEXT_MODEL_INFO])
 
       const first = await sendChatRequest(testApp.app, NOTES_REQUEST)
       const conversation = {
@@ -1732,7 +1731,7 @@ describe("updateFastifyWithChatRoute", () => {
         testApp.completeChatStream.mock.calls[2]?.[0].messages.at(-1)
       ).toEqual({ role: "user", content: "Read them" })
       expect(listStoredFiles(testApp)).toHaveLength(2)
-      expect(testApp.listLlmModels).toHaveBeenCalledTimes(3)
+      expect(testApp.listDownloadedLlmModels).toHaveBeenCalledTimes(3)
     })
 
     it("deletes the written files and responds with a server error when the turn cannot be stored", async () => {
@@ -1741,7 +1740,7 @@ describe("updateFastifyWithChatRoute", () => {
       testApp.createConversationTurn.mockImplementation(() => {
         throw storageFailure
       })
-      testApp.listLlmModels.mockResolvedValue([TEXT_MODEL_INFO])
+      testApp.listDownloadedLlmModels.mockResolvedValue([TEXT_MODEL_INFO])
       updateFastifyWithChatRoute(testApp.app, {
         ...CHAT_ROUTE_OPTIONS,
         generations: testApp.generations
@@ -1763,7 +1762,7 @@ describe("updateFastifyWithChatRoute", () => {
     it("deletes only the message's files when a continued conversation's turn cannot be stored", async () => {
       const testApp = await createChatRouteTestApp()
       registerStoringChatRoute(testApp)
-      testApp.listLlmModels.mockResolvedValue([TEXT_MODEL_INFO])
+      testApp.listDownloadedLlmModels.mockResolvedValue([TEXT_MODEL_INFO])
       const first = await sendChatRequest(testApp.app, NOTES_REQUEST)
       const conversationId = readNewConversationStart(first).conversation.id
       const storedFiles = listStoredFiles(testApp)
@@ -1800,7 +1799,7 @@ describe("updateFastifyWithChatRoute", () => {
         testApp.app.attachmentFileStore,
         "deleteConversationAttachments"
       ).mockRejectedValue(deletionFailure)
-      testApp.listLlmModels.mockResolvedValue([TEXT_MODEL_INFO])
+      testApp.listDownloadedLlmModels.mockResolvedValue([TEXT_MODEL_INFO])
       updateFastifyWithChatRoute(testApp.app, {
         ...CHAT_ROUTE_OPTIONS,
         generations: testApp.generations

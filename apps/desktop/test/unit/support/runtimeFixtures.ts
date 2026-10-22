@@ -18,13 +18,18 @@ export type RuntimeArrangement = Readonly<{
   defaultModel: string | null
 }>
 
-/** Backend running, LM Studio connected, and `qwen3-8b` loaded and chosen. */
+/**
+ * Backend running, LM Studio connected, and `qwen3-8b` loaded with an
+ * 8,192-token context and chosen.
+ */
 export const READY_RUNTIME: RuntimeArrangement = Object.freeze({
   backendStatus: "running",
   lmStudioStatus: "connected",
   modelInventory: Object.freeze({
     status: "ready",
-    models: Object.freeze([buildLlmInfo("qwen3-8b", { loaded: true })])
+    models: Object.freeze([
+      buildLlmInfo("qwen3-8b", { loaded: true, loadedContextLength: 8192 })
+    ])
   }),
   defaultModel: "qwen3-8b"
 })

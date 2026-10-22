@@ -7,6 +7,11 @@ import {
 } from "../../support/agentBackend"
 import { buildAgent } from "../../support/agentFixtures"
 import { buildJsonResponse } from "../../support/backendFake"
+import { buildLlmInfo } from "../../support/modelFixtures"
+import {
+  READY_RUNTIME,
+  type RuntimeArrangement
+} from "../../support/runtimeFixtures"
 import {
   buildInventoryRoute,
   INVENTORY_ROUTE,
@@ -30,14 +35,22 @@ const RESEARCHER_SAVED_AT = "2026-02-03T04:05:07.789Z"
  * stores the researcher.
  *
  * @param options - Backend options; the inventory read is always answered.
+ * @param runtime - Backend, LM Studio, and model facts; by default a loaded
+ * model with an 8,192-token context.
  * @returns The agent backend.
  */
-async function startAgentPane(options: AgentBackendOptions = {}) {
+async function startAgentPane(
+  options: AgentBackendOptions = {},
+  runtime: RuntimeArrangement = READY_RUNTIME
+) {
   const agentBackend = startAgentBackend([RESEARCHER], {
     ...options,
-    routes: { [INVENTORY_ROUTE]: buildInventoryRoute(), ...options.routes }
+    routes: {
+      [INVENTORY_ROUTE]: buildInventoryRoute(runtime),
+      ...options.routes
+    }
   })
-  const { SettingsView } = await loadFreshSettingsView("agents")
+  const { SettingsView } = await loadFreshSettingsView("agents", runtime)
   render(<SettingsView onDone={vi.fn()} />)
   await screen.findByText(/^Saved by the backend in Lys's database/)
   await waitForRenderedWork()
@@ -363,13 +376,32 @@ describe("AgentEditor", () => {
       ).toBeInTheDocument()
     })
 
-    it("measures the system prompt as an estimate of the context window", async () => {
+    it("measures the system prompt against the context length the loaded model reports", async () => {
       await startAgentPane()
       const user = userEvent.setup()
       await openResearcherEditor(user)
 
       expect(getField("system prompt")).toHaveAccessibleDescription(
-        "19 chars · ~6 tokens · 0.0% of 33k"
+        "19 chars · ~6 tokens · 0.1% of 8.2k"
+      )
+    })
+
+    it("leaves the window share out of the prompt measure while no model is loaded", async () => {
+      await startAgentPane(
+        {},
+        {
+          ...READY_RUNTIME,
+          modelInventory: {
+            status: "ready",
+            models: [buildLlmInfo("qwen3-8b")]
+          }
+        }
+      )
+      const user = userEvent.setup()
+      await openResearcherEditor(user)
+
+      expect(getField("system prompt")).toHaveAccessibleDescription(
+        "19 chars · ~6 tokens"
       )
     })
 

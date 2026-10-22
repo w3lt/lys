@@ -84,7 +84,14 @@ export const llmInfoSchema = z
     /**
      * Whether the model is loaded or not (into lmstudio)
      */
-    loaded: z.boolean()
+    loaded: z.boolean(),
+    /**
+     * Context length the model is loaded with, in tokens: the smallest among
+     * its loaded instances, the window a chat request to the model is measured
+     * against. Present only on a loaded model whose instances were observed
+     * when the inventory was read.
+     */
+    loadedContextLength: z.int().positive().optional()
   })
   .readonly()
 

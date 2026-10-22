@@ -23,7 +23,6 @@ function buildSettingsContext(
     ...modelState,
     settings: initialSettingsState,
     onRuntimeChange: vi.fn(),
-    onModelChange: vi.fn(),
     onGenerationChange: vi.fn(),
     onAssignModelLoadSettings: vi.fn(),
     onRemoveModelExpertCount: vi.fn(),

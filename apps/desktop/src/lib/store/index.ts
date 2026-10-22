@@ -99,7 +99,7 @@ type LysActions = {
    * configuration, tools, and startup switch edits.
    *
    * @param settings - Complete settings value applied in memory immediately.
-   * Default model, backend address, and model edits remain session-only;
+   * Default model and backend address edits remain session-only;
    * generationSave, loadConfigurationSave, toolSettingsSave, and
    * runtimeAutoStartSave report persistence.
    */

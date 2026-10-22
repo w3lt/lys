@@ -34,19 +34,6 @@ export type RuntimeAutoStartSettings = Readonly<
 >
 
 /**
- * Local model context estimate persisted under the `model` JSON object.
- *
- * @remarks Mirrors Rust's `ModelSettings`. The context budget supports composer
- * estimates and generation controls. It is separate from the context length a
- * model is loaded with, which belongs to the load configuration.
- * Model edits in the desktop UI remain session-only.
- */
-export type ModelSettings = {
-  /** Context budget in tokens used for local estimates, not sent when loading weights. */
-  contextSize: number
-}
-
-/**
  * Generation settings persisted under the `generation` JSON object.
  *
  * @remarks Mirrors Rust's `GenerationSettings`. Rust rejects a temperature
@@ -139,9 +126,9 @@ export type ToolSettings = {
 /**
  * Renderer projection of the complete Tauri-persisted settings document.
  *
- * @remarks Holds the six groups of Rust's `LysSettings` under the same
+ * @remarks Holds the five groups of Rust's `LysSettings` under the same
  * names, so a saved value cannot silently drop a persisted group. The
- * runtime, model, and generation groups match Rust field for field. The load
+ * runtime and generation groups match Rust field for field. The load
  * configuration group differs only in its per-model settings, a map here and
  * one object in the document, and the tools group in its names, a set here
  * and one array in the document; the Tauri settings adapter converts between
@@ -150,8 +137,6 @@ export type ToolSettings = {
 export type LysSettings = {
   /** Backend process and default-model settings. */
   runtime: RuntimeSettings
-  /** Local model context estimate. */
-  model: ModelSettings
   /** Sampling settings applied to the next request. */
   generation: GenerationSettings
   /** Default and per-model settings sent with each model load. */
@@ -211,9 +196,6 @@ export const initialSettingsState: LysSettings = {
     autoStartVmo: true,
     defaultModel: null,
     backendAddress: "http://127.0.0.1:12345"
-  },
-  model: {
-    contextSize: 32_768
   },
   generation: {
     temperature: 0.7,

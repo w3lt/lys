@@ -70,22 +70,24 @@ export function formatCustomAgentCount(agentCount: number): string {
  * Formats the measure shown under the system prompt.
  *
  * @param systemPrompt - Prompt as typed.
- * @param contextSize - Local estimate of the context window, in tokens.
+ * @param contextLength - Context length the loaded model is loaded with, in
+ * tokens; undefined while no model is loaded or its context length is not
+ * known.
  * @returns The prompt's length in characters, its estimated tokens, and,
- * when the window is not empty, the share of it those tokens take, such as
- * `412 chars · ~112 tokens · 1.4% of 8.2k`. Every token figure is an
+ * when the context length is known, the share of it those tokens take, such
+ * as `412 chars · ~112 tokens · 1.4% of 8.2k`. The token count is an
  * estimate.
  */
 export function formatAgentPromptMeasure(
   systemPrompt: string,
-  contextSize: number
+  contextLength: number | undefined
 ): string {
   const tokenCount = estimateTextTokens(systemPrompt)
   const measure = `${systemPrompt.length} chars · ~${tokenCount} tokens`
-  if (contextSize <= 0) return measure
+  if (contextLength === undefined) return measure
 
-  const windowShare = ((tokenCount / contextSize) * 100).toFixed(1)
-  return `${measure} · ${windowShare}% of ${formatTokenCount(contextSize)}`
+  const windowShare = ((tokenCount / contextLength) * 100).toFixed(1)
+  return `${measure} · ${windowShare}% of ${formatTokenCount(contextLength)}`
 }
 
 /**

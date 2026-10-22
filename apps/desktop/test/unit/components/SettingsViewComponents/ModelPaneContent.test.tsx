@@ -257,12 +257,12 @@ describe("ModelPaneContent", () => {
     expect(getRefreshButton()).not.toHaveAttribute("aria-describedby")
   })
 
-  it("states that a load configuration is saved per model and applies at load, apart from the composer's estimate", async () => {
+  it("states that a load configuration is saved per model and applies at load, and that the meters measure against the loaded context length", async () => {
     await startModelPane()
 
     expect(
       screen.getByText(
-        "Model operations use the backend. A load configuration is saved for each model and applies when that model is loaded, not per request. The composer's context meter uses its own estimate, not the context length set here. Default selection lasts for this session."
+        "Model operations use the backend. A load configuration is saved for each model and applies when that model is loaded, not per request. The composer's context meter and the Agents pane measure against the context length the model is loaded with. Default selection lasts for this session."
       )
     ).toBeInTheDocument()
   })

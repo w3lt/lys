@@ -30,17 +30,17 @@ the Dock does not see a `LYS_HOME` exported in a shell profile.
 The Tauri desktop host reads and writes one JSON settings file at
 `$LYS_HOME/settings.json`.
 
-The current schema contains `runtime`, `model`, `generation`,
-`loadConfiguration`, `secrets`, and `tools` groups. Rust
+The current schema contains `runtime`, `generation`, `loadConfiguration`,
+`secrets`, and `tools` groups. Rust
 and the TypeScript settings projection use the same camelCase field names. See
 the [configuration reference](/reference/configuration/) for the complete field
 list, defaults, and accepted values.
 
-The stored `model.contextSize` is a local token budget used by the generation
-controls and the agent editor's prompt measure. It is separate from the
-context length a model is loaded with, which belongs to that model's load
-configuration. The composer's context meter does not use it: it shows the
-context length the loaded model reports.
+The composer's context meter, the Agents pane's prompt measure, and the reply
+ceiling slider's usual range use the context length the loaded model is
+loaded with, as LM Studio reports it, which a model's load configuration can
+set. Files saved by earlier versions also hold a `model` group with a local
+context-size estimate; Lys ignores it, and the next save leaves it out.
 
 The `tools` group lists, in `justRun`, the tools set to Just run in Settings →
 Tools; every other tool asks before each call. The backend reads the list when
@@ -120,8 +120,7 @@ the rest of the `runtime` group as it is on disk; after a failed save, the
 pane says that the next launch follows the switches last saved, and changing a
 switch tries the save again.
 
-The other runtime edits, such as the default model, and `model.contextSize`
-edits remain session-only. Changing those controls does not persist them, and
+The other runtime edits, such as the default model, remain session-only. Changing those controls does not persist them, and
 a later automatic save does not save their in-memory values.
 
 ## Fixed runtime addresses

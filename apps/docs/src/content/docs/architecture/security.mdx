@@ -127,8 +127,10 @@ backend decides which calls ask; the desktop shows the prompts.
   text it hides from view included, such as a closed accordion, text moved
   off-screen, or white text on white, because the content is what a read is
   for. Instructions a page hides from the person therefore reach the model as
-  page content, inside the untrusted framing. The content of a shadow root
-  ([#209](https://github.com/w3lt/lys/issues/209)) or an iframe is not read.
+  page content, inside the untrusted framing. That includes the text a web
+  component keeps in an open shadow root, even for its controls, such as a
+  copy button's label. The content of a closed shadow root or an iframe is
+  not read.
 - Removing invisible characters removes a few visible signs too, such as the
   Arabic number signs (U+0600–U+0605) and the end-of-ayah sign (U+06DD),
   turns the England, Scotland, and Wales flags into a plain black flag, and

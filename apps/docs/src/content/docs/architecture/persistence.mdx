@@ -12,13 +12,13 @@ images vmo runs its page-reading VMs from.
 
 ## Persistent artifacts
 
-| Artifact         | Owner           | Location                                                      | Purpose                                                                                                                                                                                   |
-| ---------------- | --------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Backend database | Fastify backend | `$LYS_HOME/lys_db.sqlite`                                     | Stores conversations, their messages and reply parts, attachment records, sources, and agents.                                                                                            |
-| Attachment files | Fastify backend | `$LYS_HOME/attachments/<conversation id>/<message id>/<name>` | Stores each file sent with a user message under its own name; written before the turn is stored and removed with the conversation. See [attachments](/architecture/backend/#attachments). |
-| Settings JSON    | Tauri host      | `$LYS_HOME/settings.json`                                     | Stores the runtime, model, generation, load, secrets, and tools groups.                                                                                                                   |
-| Theme preference | Desktop UI      | WebView `localStorage`, key `lys.theme`                       | Stores `dark` or `light`; invalid or unavailable storage falls back to `dark`.                                                                                                            |
-| vmo image store  | vmo             | `~/Library/Application Support/com.w3lt.lys-vmo`              | Holds `vminit`, the reader image, and running VMs' files; each start deletes every other image. See [vmo's image store](/operate/data/#vmos-image-store).                                 |
+| Artifact         | Owner           | Location                                                      | Purpose                                                                                                                                                                                              |
+| ---------------- | --------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Backend database | Fastify backend | `$LYS_HOME/lys_db.sqlite`                                     | Stores conversations, their messages and reply parts, attachment records, sources, and agents.                                                                                                       |
+| Attachment files | Fastify backend | `$LYS_HOME/attachments/<conversation id>/<message id>/<name>` | Stores each file sent with a user message under its own name; written before the turn is stored and removed with the conversation. See [attachments](/architecture/backend/#attachments).            |
+| Settings JSON    | Tauri host      | `$LYS_HOME/settings.json`                                     | Stores the runtime, model, generation, load, secrets, and tools groups.                                                                                                                              |
+| Theme preference | Desktop UI      | WebView `localStorage`, key `lys.theme`                       | Stores `dark` or `light`; invalid or unavailable storage falls back to `dark`.                                                                                                                       |
+| vmo image store  | vmo             | `~/Library/Application Support/com.w3lt.lys-vmo`              | Holds `vminit`, the VMs' boot filesystem unpacked from it, the reader image, and running VMs' files; each start deletes every other image. See [vmo's image store](/operate/data/#vmos-image-store). |
 
 ## SQLite ownership
 
@@ -139,8 +139,7 @@ replaces the `generation` group, a load configuration save replaces
 hand edit changes, a tool approval save replaces the `tools` group, and a
 startup switch save replaces `runtime.autoStartBackend` and
 `runtime.autoStartVmo` and keeps the rest of `runtime`. The other runtime
-edits, such as default-model selection, and `model.contextSize` edits remain
-session-only in the desktop.
+edits, such as default-model selection, remain session-only in the desktop.
 See the [configuration reference](/reference/configuration/#persisted-settings-json)
 for the current shape and defaults.
 

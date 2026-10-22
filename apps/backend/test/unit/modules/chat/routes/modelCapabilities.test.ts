@@ -1,26 +1,24 @@
-import type { LlmInfo } from "@lys/protocol"
 import { describe, expect, it, vi } from "vitest"
 import {
   createModelCapabilitiesLookup,
   findListedModelCapabilities,
   NO_MODEL_CAPABILITIES
 } from "../../../../../src/modules/chat/routes/modelCapabilities"
+import type { DownloadedLlmModel } from "../../../../../src/modules/llm/llmRuntimeTypes"
 import { createDownloadedLlmModel } from "../../../support/llmFixtures"
 
 /** A downloaded model that sees images and uses tools. */
-const VISION_MODEL: LlmInfo = Object.freeze({
+const VISION_MODEL: DownloadedLlmModel = Object.freeze({
   ...createDownloadedLlmModel({ modelKey: "qwen/qwen2.5-vl-7b" }),
   vision: true,
-  trainedForToolUse: true,
-  loaded: false
+  trainedForToolUse: true
 })
 
 /** A downloaded text-only model. */
-const TEXT_MODEL: LlmInfo = Object.freeze({
+const TEXT_MODEL: DownloadedLlmModel = Object.freeze({
   ...createDownloadedLlmModel({ modelKey: "qwen/qwen3-8b" }),
   vision: false,
-  trainedForToolUse: true,
-  loaded: true
+  trainedForToolUse: true
 })
 
 describe("NO_MODEL_CAPABILITIES", () => {
@@ -64,9 +62,14 @@ describe("findListedModelCapabilities", () => {
 })
 
 describe("createModelCapabilitiesLookup", () => {
-  it("reads the inventory on each call and answers with the matching model's capabilities", async () => {
-    const listLlmModels = vi.fn(async () => [TEXT_MODEL, VISION_MODEL])
-    const findModelCapabilities = createModelCapabilitiesLookup(listLlmModels)
+  it("lists the downloaded models on each call and answers with the matching model's capabilities", async () => {
+    const listDownloadedLlmModels = vi.fn(async () => [
+      TEXT_MODEL,
+      VISION_MODEL
+    ])
+    const findModelCapabilities = createModelCapabilitiesLookup(
+      listDownloadedLlmModels
+    )
 
     const vision = await findModelCapabilities("qwen/qwen2.5-vl-7b")
     const text = await findModelCapabilities("qwen/qwen3-8b")
@@ -74,7 +77,7 @@ describe("createModelCapabilitiesLookup", () => {
     expect(vision).toEqual({ vision: true, trainedForToolUse: true })
     expect(Object.isFrozen(vision)).toBe(true)
     expect(text).toEqual({ vision: false, trainedForToolUse: true })
-    expect(listLlmModels).toHaveBeenCalledTimes(2)
+    expect(listDownloadedLlmModels).toHaveBeenCalledTimes(2)
   })
 
   it("resolves to undefined for a model the inventory does not list, matching the key exactly", async () => {

@@ -214,6 +214,44 @@ describe("ComposerContextMeter", () => {
     )
   })
 
+  it("names the bar's striped part while the reply reserve takes room", async () => {
+    const user = userEvent.setup()
+    renderMeter(FITTING_METER)
+
+    const { panel } = await openMeterPanel(user)
+
+    expect(panel).toHaveTextContent(
+      "The striped part of the bar is held back for the reply."
+    )
+  })
+
+  it.each([
+    [
+      "no reply reserve is set",
+      buildContextMeterState(
+        { status: "measured", measurement: MEASUREMENT },
+        { draft: "", attachmentTokens: 0, reserve: 0 }
+      )
+    ],
+    [
+      "the request alone fills the window",
+      buildContextMeterState(
+        {
+          status: "measured",
+          measurement: { ...MEASUREMENT, historyTokens: 8000 }
+        },
+        { draft: "", attachmentTokens: 0, reserve: 1024 }
+      )
+    ]
+  ])("names no striped part when %s", async (_scenario, meter) => {
+    const user = userEvent.setup()
+    renderMeter(meter)
+
+    const { panel } = await openMeterPanel(user)
+
+    expect(panel).not.toHaveTextContent(/striped part/)
+  })
+
   it("says it is measuring before the first measurement settles", async () => {
     const user = userEvent.setup()
     renderMeter({ status: "measuring" })

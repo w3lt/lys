@@ -101,8 +101,8 @@ describe("formatAgentPromptMeasure", () => {
     )
   })
 
-  it("omits the share without a window", () => {
-    expect(formatAgentPromptMeasure("x".repeat(37), 0)).toBe(
+  it("omits the share while the loaded context length is not known", () => {
+    expect(formatAgentPromptMeasure("x".repeat(37), undefined)).toBe(
       "37 chars · ~10 tokens"
     )
   })

@@ -18,11 +18,13 @@ import { ChatCompletionCancelledError } from "../../utils/errors"
 import {
   buildAgentContext,
   calculateAgentContextHistoryMessageCount,
+  getAgentContextImageSides,
   readAgentContextImages,
   UNSEEN_CONTEXT_IMAGES,
   type AgentContextImages,
   type AgentContextUserMessage,
-  type FindAttachmentImage
+  type FindAttachmentImage,
+  type GetAttachmentImageFileStatus
 } from "./agentContext"
 import {
   findReplyRoundFitFailure,
@@ -34,6 +36,7 @@ import type {
   ReplyContextMeter
 } from "./replyContextMeter"
 import type {
+  ReplyContextImageSides,
   ReplyContextMessage,
   ReplyModel,
   ReplyStreamEvent
@@ -222,10 +225,11 @@ export type AgentContextInput = Readonly<{
   /** Whether that model sees images, as {@link AgentTurn.canSeeImages}. */
   canSeeImages: boolean
   /**
-   * Reads one stored image's bytes, as {@link AgentTurn.findAttachmentImage};
-   * borrowed until the measurement settles.
+   * Finds whether one stored image's file is on this machine, without
+   * reading it; borrowed until the measurement settles. Not called when the
+   * model cannot see images.
    */
-  findAttachmentImage: FindAttachmentImage
+  getAttachmentImageFileStatus: GetAttachmentImageFileStatus
   /**
    * Definitions of the offered tools, each name once: client tools first,
    * then backend tools; empty when none would be offered.
@@ -332,26 +336,30 @@ export default class Agent {
    * its next message.
    *
    * @param input - Stored transcript, model, whether it sees images, the
-   * image reader, and offered tool definitions, borrowed until the returned
-   * promise settles.
+   * image file lookup, and offered tool definitions, borrowed until the
+   * returned promise settles.
    * @returns A promise resolving to the window and the tokens of this agent's
    * system prompt, of the tools, of the stored messages a turn would include,
    * and of the new message's markup, measured exactly as a turn's first round
    * sends them with an empty new message without files; or to undefined when
-   * the model is not loaded. The history's images are read first when the
-   * model sees images, so their tokens are counted as a turn sends them.
+   * the model is not loaded. When the model sees images, the history's image
+   * files are looked up first without reading them, so a stored image counts
+   * the tokens of its sides and a missing one its placeholder, as a turn
+   * sends them.
    * @throws The meter's failure when the model's runtime cannot be reached,
-   * is busy, or fails; the image reader's failure; and a Zod error for a
+   * is busy, or fails; the image file lookup's failure; and a Zod error for a
    * definition that does not match `toolDefinitionSchema`.
    */
   public async findContextMeasurement(
     input: AgentContextInput
   ): Promise<AgentContextMeasurement | undefined> {
-    const images = await readContextImages(
-      input.history,
-      input.canSeeImages,
-      input.findAttachmentImage
-    )
+    const images: AgentContextImages<ReplyContextImageSides> =
+      input.canSeeImages
+        ? await getAgentContextImageSides(
+            input.history,
+            input.getAttachmentImageFileStatus
+          )
+        : UNSEEN_CONTEXT_IMAGES
     const measurement =
       await this.#replyContextMeter.findReplyContextMeasurement({
         messages: buildAgentContext({

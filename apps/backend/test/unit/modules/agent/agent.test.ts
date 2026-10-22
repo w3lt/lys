@@ -6,6 +6,7 @@ import type {
   ChatToolResult
 } from "@lys/protocol"
 import {
+  calculateImageTokens,
   toolDefinitionSchema,
   type ConversationAssistantMessage,
   type ConversationMessage,
@@ -27,6 +28,7 @@ import Agent, {
   type AgentTurn,
   type AssistantMessageCompletion
 } from "../../../../src/modules/agent/agent"
+import type { GetAttachmentImageFileStatus } from "../../../../src/modules/agent/agentContext"
 import {
   ReplyContextOverflowError,
   ReplyModelNotLoadedError
@@ -40,6 +42,7 @@ import type {
   ReplyModel,
   ReplyStreamEvent
 } from "../../../../src/modules/agent/replyModel"
+import LlmReplyContextMeter from "../../../../src/modules/chat/llmReplyContextMeter"
 import type { TurnBuiltInTool } from "../../../../src/modules/tool/builtIn/builtInTool"
 import ToolCallGate, {
   type SendToolApprovalPrompt
@@ -61,7 +64,8 @@ import {
 } from "../../support/conversationFixtures"
 import {
   createRoomyReplyContextMeter,
-  createUnloadedReplyContextMeter
+  createUnloadedReplyContextMeter,
+  ROOMY_CONTEXT_LENGTH
 } from "../../support/replyContextMeterFakes"
 import {
   runLookUpWordWithSource,
@@ -324,6 +328,40 @@ function handleUnexpectedToolCall(): never {
  */
 function handleUnexpectedImageRead(): Promise<never> {
   return Promise.reject(new Error("Unexpected attachment image read"))
+}
+
+/**
+ * Fails an image file lookup that the current case did not arrange.
+ *
+ * @returns A promise that rejects.
+ */
+function handleUnexpectedImageFileLookup(): Promise<never> {
+  return Promise.reject(new Error("Unexpected attachment image file lookup"))
+}
+
+/**
+ * Creates the backend's own meter over a tokenizer that counts one token per
+ * character, recording each measurement it resolves with.
+ *
+ * @returns The meter, and its measurements in request order.
+ */
+function createCharacterCountingReplyContextMeter() {
+  const countingMeter = new LlmReplyContextMeter((_model, texts) =>
+    Promise.resolve({
+      contextLength: ROOMY_CONTEXT_LENGTH,
+      textTokenCounts: texts.map((text) => text.length)
+    })
+  )
+  const measurements: (ReplyContextMeasurement | undefined)[] = []
+  const meter: ReplyContextMeter = {
+    findReplyContextMeasurement: async (request) => {
+      const measurement =
+        await countingMeter.findReplyContextMeasurement(request)
+      measurements.push(measurement)
+      return measurement
+    }
+  }
+  return { meter, measurements }
 }
 
 /**
@@ -1532,7 +1570,7 @@ describe("Agent", () => {
         history: ANSWERED_THEN_FAILED_HISTORY,
         model: TURN_REQUEST.model,
         canSeeImages: false,
-        findAttachmentImage: handleUnexpectedImageRead,
+        getAttachmentImageFileStatus: handleUnexpectedImageFileLookup,
         tools: [READ_TEXT_FILE_TOOL, LOOK_UP_WORD_TOOL]
       })
 
@@ -1599,7 +1637,7 @@ describe("Agent", () => {
         ],
         model: TURN_REQUEST.model,
         canSeeImages: false,
-        findAttachmentImage: handleUnexpectedImageRead,
+        getAttachmentImageFileStatus: handleUnexpectedImageFileLookup,
         tools: []
       })
 
@@ -1626,10 +1664,110 @@ describe("Agent", () => {
           history: [],
           model: TURN_REQUEST.model,
           canSeeImages: false,
-          findAttachmentImage: handleUnexpectedImageRead,
+          getAttachmentImageFileStatus: handleUnexpectedImageFileLookup,
           tools: []
         })
       ).resolves.toBeUndefined()
+    })
+
+    describe("history images of a model that sees images", () => {
+      const storedPhoto = createImageAttachment(1, "stored.png", {
+        width: 640,
+        height: 480
+      })
+      const missingPhoto = createImageAttachment(2, "missing.png")
+      const photoHistory: readonly ConversationMessage[] = Object.freeze([
+        createUserMessage(1, "Look", [storedPhoto, missingPhoto]),
+        createAssistantMessage(
+          2,
+          [createTextPart({ sequence: 12, round: 0, content: "A moth." })],
+          { status: "completed", finishReason: "stop" }
+        )
+      ])
+
+      /**
+       * Answers that the stored photo's file is on this machine and the
+       * missing photo's is not.
+       */
+      const getPhotoFileStatus: GetAttachmentImageFileStatus = (
+        _messageId,
+        attachment
+      ) => Promise.resolve(attachment.number === 1 ? "stored" : "missing")
+
+      it("looks up each image's file without reading it, and sends a stored image as its sides and a missing one as its placeholder", async () => {
+        const replyContextMeter = createRoomyReplyContextMeter()
+        const getAttachmentImageFileStatus =
+          vi.fn<GetAttachmentImageFileStatus>(getPhotoFileStatus)
+        const agent = new Agent(
+          AGENT_PROFILE,
+          { openReplyStream: createEventStream() },
+          replyContextMeter
+        )
+
+        await agent.findContextMeasurement({
+          history: photoHistory,
+          model: TURN_REQUEST.model,
+          canSeeImages: true,
+          getAttachmentImageFileStatus,
+          tools: []
+        })
+
+        expect(getAttachmentImageFileStatus.mock.calls).toEqual([
+          [photoHistory[0]?.id, storedPhoto],
+          [photoHistory[0]?.id, missingPhoto]
+        ])
+        expect(
+          replyContextMeter.findReplyContextMeasurement.mock.calls[0]?.[0]
+            .messages[1]
+        ).toEqual({
+          role: "user",
+          content: expect.stringContaining(
+            "[attachment 2] missing.png is an image whose file is missing from this machine"
+          ),
+          images: [{ width: 640, height: 480 }]
+        })
+      })
+
+      it("counts the history as a turn's first round sends it, with the stored image's tokens", async () => {
+        const measured = createCharacterCountingReplyContextMeter()
+        const turn = createCharacterCountingReplyContextMeter()
+        const agent = new Agent(
+          AGENT_PROFILE,
+          { openReplyStream: createEventStream() },
+          measured.meter
+        )
+
+        const measurement = await agent.findContextMeasurement({
+          history: photoHistory,
+          model: TURN_REQUEST.model,
+          canSeeImages: true,
+          getAttachmentImageFileStatus: getPhotoFileStatus,
+          tools: []
+        })
+        await getAgentReplyOutcome({
+          openReplyStream: createEventStream({
+            type: "finish",
+            finishReason: "stop"
+          }),
+          history: photoHistory,
+          canSeeImages: true,
+          findAttachmentImage: (_messageId, attachment) =>
+            Promise.resolve(attachment.number === 1 ? PHOTO_BYTES : undefined),
+          replyContextMeter: turn.meter
+        })
+
+        const [systemPromptTokens, ...laterTokenCounts] =
+          turn.measurements[0]?.messageTokenCounts ?? []
+        expect(measurement).toMatchObject({
+          systemPromptTokens,
+          historyTokens: laterTokenCounts
+            .slice(0, -1)
+            .reduce((total, messageTokens) => total + messageTokens, 0)
+        })
+        expect(measurement?.historyTokens).toBeGreaterThan(
+          calculateImageTokens(640, 480)
+        )
+      })
     })
   })
 

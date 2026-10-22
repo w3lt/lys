@@ -77,6 +77,36 @@ export type LlmServiceCreationOptions = {
 }
 
 /**
+ * Loaded state the service adds to a downloaded model's metadata; only a
+ * loaded model can carry a context length.
+ */
+type LlmLoadedState =
+  | Readonly<{
+      /** No loaded instance belongs to the model. */
+      loaded: false
+    }>
+  | Readonly<{
+      /** At least one loaded instance belongs to the model. */
+      loaded: true
+      /**
+       * Smallest context length among its loaded instances, in tokens;
+       * absent when it was not observed.
+       */
+      loadedContextLength?: number
+    }>
+
+/** State of a model no loaded instance belongs to. */
+const NOT_LOADED: LlmLoadedState = Object.freeze({ loaded: false })
+
+/**
+ * State of a loaded model whose context length was not observed: after a
+ * load, or when its instances were gone by the time they were measured.
+ */
+const LOADED_WITHOUT_CONTEXT_LENGTH: LlmLoadedState = Object.freeze({
+  loaded: true
+})
+
+/**
  * Applies model policy to operations serialized by the LLM runtime queue.
  *
  * @remarks Owns no mutable state or resource. It borrows the operation queue,
@@ -87,8 +117,9 @@ export type LlmServiceCreationOptions = {
  * Concurrency model: reentrant; overlapping calls are serialized by the
  * borrowed queue, not by this class.
  * Implements {@link LlmModelHealthReader}, {@link LlmModelInventory},
- * {@link LlmModelLoader}, and {@link LlmModelStopper}, and measures contexts
- * for chat replies.
+ * {@link LlmModelLoader}, and {@link LlmModelStopper}, measures contexts for
+ * chat replies, and lists the downloaded models whose capabilities a chat
+ * turn reads.
  */
 export default class LlmService
   implements
@@ -173,16 +204,43 @@ export default class LlmService
    * Implements {@link LlmModelInventory.listLlmModels} through the queue.
    *
    * @returns A promise resolving to snapshots in the order defined by
-   * {@link LlmModelInventory.listLlmModels}.
+   * {@link LlmModelInventory.listLlmModels}, each loaded model with the
+   * context length its instances are loaded with.
    * @throws If an inventory query fails or the queue rejects the operation.
+   * @remarks The downloaded models, the loaded instances, and each loaded
+   * model's context length are observed in one queued operation.
    */
   public async listLlmModels(): Promise<readonly LlmInfo[]> {
     return await this.#llmEngineOperationQueue.handleLlmEngineOperationRequest(
       async (llmEngine) =>
         await listLlmModels(
           async () => await llmEngine.listDownloadedLlmModels(),
-          async () => await llmEngine.listLoadedLlmModelInstances()
+          async () => await llmEngine.listLoadedLlmModelInstances(),
+          async (model, texts) =>
+            await llmEngine.findLlmContextMeasurement(model, texts)
         )
+    )
+  }
+
+  /**
+   * Lists the downloaded models through the queue, without their loaded
+   * state.
+   *
+   * @returns A promise resolving to the engine's frozen snapshots, in the
+   * order the engine observed them.
+   * @throws If the query fails, or the queue rejects the operation: the
+   * service-busy failure when it is full, the runtime-unavailable failure
+   * when no runtime is connected or it stopped answering, and
+   * `The LLM runtime is closed.` after cleanup begins.
+   * @remarks One engine query: no loaded instance is listed or measured, so
+   * a reader that needs only what each model can do, such as whether it sees
+   * images, pays for nothing else.
+   */
+  public async listDownloadedLlmModels(): Promise<
+    readonly DownloadedLlmModel[]
+  > {
+    return await this.#llmEngineOperationQueue.handleLlmEngineOperationRequest(
+      async (llmEngine) => await llmEngine.listDownloadedLlmModels()
     )
   }
 
@@ -239,28 +297,72 @@ export default class LlmService
  *
  * @param listDownloadedLlmModels - Query for normalized immutable runtime metadata.
  * @param listLoadedLlmModelInstances - Query for immutable loaded-instance records.
- * @returns A promise resolving to a transitively immutable, newly owned model inventory.
- * @throws If either inventory query fails.
+ * @param findLlmContextMeasurement - Query for the context length a loaded
+ * model is loaded with.
+ * @returns A promise resolving to a transitively immutable, newly owned model
+ * inventory in which each loaded model carries the context length that
+ * {@link LlmEngine.findLlmContextMeasurement} reports for its key, the window a
+ * chat request to it is measured against; a model whose instances were gone
+ * by the time they were measured carries none.
+ * @throws If an inventory query or a context length query fails.
  */
 async function listLlmModels(
   listDownloadedLlmModels: LlmEngine["listDownloadedLlmModels"],
-  listLoadedLlmModelInstances: ListLoadedLlmModelInstances
+  listLoadedLlmModelInstances: ListLoadedLlmModelInstances,
+  findLlmContextMeasurement: LlmEngine["findLlmContextMeasurement"]
 ): Promise<readonly LlmInfo[]> {
   const downloadedLlmModels = await listDownloadedLlmModels()
   const loadedLlmModelInstances = await listLoadedLlmModelInstances()
   const loadedModelKeys = new Set(
     loadedLlmModelInstances.map(({ modelKey }) => modelKey)
   )
+  const loadedContextLengths = await listLoadedContextLengths(
+    new Set(
+      downloadedLlmModels
+        .map(({ modelKey }) => modelKey)
+        .filter((modelKey) => loadedModelKeys.has(modelKey))
+    ),
+    findLlmContextMeasurement
+  )
   const llmModels = downloadedLlmModels
     .map((downloadedLlmModel) =>
       createLlmInfoSnapshot(
         downloadedLlmModel,
-        loadedModelKeys.has(downloadedLlmModel.modelKey)
+        buildLlmLoadedState(
+          loadedModelKeys.has(downloadedLlmModel.modelKey),
+          loadedContextLengths.get(downloadedLlmModel.modelKey)
+        )
       )
     )
     .toSorted(calculateLlmInfoOrder)
 
   return Object.freeze(llmModels)
+}
+
+/**
+ * Lists the context length each loaded model is loaded with.
+ *
+ * @param modelKeys - Canonical keys of the loaded models to measure.
+ * @param findLlmContextMeasurement - Measurement query of the engine.
+ * @returns A promise resolving, once every measurement has settled, to the
+ * smallest context length among each model's loaded instances, by model key;
+ * a key whose instances are no longer loaded has no entry.
+ * @throws If a measurement fails; no later key is measured.
+ * @remarks Each key is measured without text, so no tokenizer is asked. The
+ * keys are measured one after another, because the LLM runtime admits one
+ * operation at a time and refuses one that overlaps it.
+ */
+async function listLoadedContextLengths(
+  modelKeys: ReadonlySet<string>,
+  findLlmContextMeasurement: LlmEngine["findLlmContextMeasurement"]
+): Promise<ReadonlyMap<string, number>> {
+  const contextLengths = new Map<string, number>()
+  for (const modelKey of modelKeys) {
+    const measurement = await findLlmContextMeasurement(modelKey, [])
+    if (measurement !== undefined)
+      contextLengths.set(modelKey, measurement.contextLength)
+  }
+  return contextLengths
 }
 
 /**
@@ -290,23 +392,43 @@ async function loadRuntimeLlmModel(
   }
 
   return llmLoadModelApiResponseBodySchema.parse(
-    createLlmInfoSnapshot(downloadedLlmModel, true)
+    createLlmInfoSnapshot(downloadedLlmModel, LOADED_WITHOUT_CONTEXT_LENGTH)
   )
+}
+
+/**
+ * Builds the loaded state of one downloaded model.
+ *
+ * @param isLoaded - Whether a loaded-instance snapshot contains its key.
+ * @param loadedContextLength - Context length its instances are loaded with,
+ * or undefined when it was not measured.
+ * @returns Not loaded; or loaded, with the context length when one was
+ * measured.
+ */
+function buildLlmLoadedState(
+  isLoaded: boolean,
+  loadedContextLength: number | undefined
+): LlmLoadedState {
+  if (!isLoaded) return NOT_LOADED
+  return loadedContextLength === undefined
+    ? LOADED_WITHOUT_CONTEXT_LENGTH
+    : Object.freeze({ loaded: true, loadedContextLength })
 }
 
 /**
  * Adds application loaded state to normalized runtime metadata.
  *
  * @param downloadedLlmModel - Trusted immutable metadata returned by the runtime.
- * @param isLoaded - Whether a loaded-instance snapshot contains this model key.
+ * @param loadedState - Whether a loaded-instance snapshot contains this model
+ * key, with the context length its instances are loaded with when known.
  * @returns A newly owned transitively immutable protocol snapshot.
  * @throws If the resulting application response does not satisfy its schema.
  */
 function createLlmInfoSnapshot(
   downloadedLlmModel: DownloadedLlmModel,
-  isLoaded: boolean
+  loadedState: LlmLoadedState
 ): LlmInfo {
-  return llmInfoSchema.parse({ ...downloadedLlmModel, loaded: isLoaded })
+  return llmInfoSchema.parse({ ...downloadedLlmModel, ...loadedState })
 }
 
 /**

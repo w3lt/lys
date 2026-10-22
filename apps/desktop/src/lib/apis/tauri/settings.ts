@@ -4,7 +4,6 @@ import type {
   GenerationSettings,
   LoadConfigurationSettings,
   LysSettings,
-  ModelSettings,
   RuntimeAutoStartSettings,
   RuntimeSettings,
   SecretsSettings,
@@ -61,8 +60,6 @@ type SettingsDocumentTools = {
 type SettingsDocument = {
   /** Backend process and default-model settings. */
   readonly runtime: RuntimeSettings
-  /** Local model context estimate. */
-  readonly model: ModelSettings
   /** Sampling settings applied to the next request. */
   readonly generation: GenerationSettings
   /** Default and per-model load settings, the latter as one object. */
@@ -128,7 +125,6 @@ function buildLysSettings(settingsDocument: SettingsDocument): LysSettings {
   }
   return {
     runtime: settingsDocument.runtime,
-    model: settingsDocument.model,
     generation: settingsDocument.generation,
     loadConfiguration,
     secrets: buildSecretsSettings(settingsDocument.secrets),
@@ -153,7 +149,6 @@ function buildSettingsDocument(settings: LysSettings): SettingsDocument {
   }
   return {
     runtime: settings.runtime,
-    model: settings.model,
     generation: settings.generation,
     loadConfiguration,
     secrets: { tavilyApiKey: settings.secrets.tavilyApiKey },

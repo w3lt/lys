@@ -1,5 +1,5 @@
 import { attachmentNameSchema } from "@lys/share"
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { join, relative, resolve, isAbsolute } from "node:path"
 import * as z from "zod"
 
@@ -21,6 +21,12 @@ export type StoredAttachmentLocation = Readonly<{
   name: string
 }>
 
+/**
+ * Whether one stored attachment's file is on disk: `stored` when an entry is
+ * at its path, `missing` when none is.
+ */
+export type AttachmentFileStatus = "stored" | "missing"
+
 /** Validates an identifier that names one folder of the store. */
 const folderIdentitySchema = z.uuidv7()
 
@@ -41,8 +47,8 @@ function isMissingPathFailure(failure: unknown): boolean {
 /**
  * Owns the attachments directory, under which every attachment file of every
  * conversation is kept at `<conversation id>/<message id>/<name>`, and
- * saves, reads, and deletes those files for the chat and conversation
- * routes.
+ * saves, reads, examines, and deletes those files for the chat and
+ * conversation routes.
  *
  * @remarks Invariant: every path it touches is built only from a validated
  * UUIDv7 and a validated attachment name, and lies under the directory it
@@ -133,6 +139,29 @@ export default class AttachmentFileStore {
       return await readFile(filePath)
     } catch (error) {
       if (isMissingPathFailure(error)) return undefined
+      throw error
+    }
+  }
+
+  /**
+   * Finds whether one stored attachment's file is on disk, without reading
+   * it.
+   *
+   * @param location - The attachment's conversation, message, and name.
+   * @returns `stored` when an entry is at the file's path, `missing` when
+   * none is. Whether the file can be read is not checked.
+   * @throws If an identifier or the name is invalid, or the path cannot be
+   * examined for a reason other than being missing.
+   */
+  public async getAttachmentFileStatus(
+    location: StoredAttachmentLocation
+  ): Promise<AttachmentFileStatus> {
+    const filePath = this.#buildAttachmentFilePath(location)
+    try {
+      await stat(filePath)
+      return "stored"
+    } catch (error) {
+      if (isMissingPathFailure(error)) return "missing"
       throw error
     }
   }

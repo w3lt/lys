@@ -8,9 +8,13 @@ export type LlmRuntimeAvailability = "available" | "unavailable"
  *
  * @remarks Snapshots and nested quantization values are newly owned and frozen.
  * Keys identify models only within the attached runtime. No SDK handle or model
- * ownership is transferred. Optional metadata is omitted when unavailable.
+ * ownership is transferred. Optional metadata is omitted when unavailable. The
+ * loaded state and the loaded context length belong to the loaded instances,
+ * not to the download.
  */
-export type DownloadedLlmModel = Readonly<Omit<LlmInfo, "loaded">>
+export type DownloadedLlmModel = Readonly<
+  Omit<LlmInfo, "loaded" | "loadedContextLength">
+>
 
 /** Immutable observation of one loaded instance in the attached runtime. */
 export type LoadedLlmModelInstance = Readonly<{

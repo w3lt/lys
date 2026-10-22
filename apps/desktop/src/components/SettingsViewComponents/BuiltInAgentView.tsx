@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
+import { findLoadedModel } from "@/lib/models/model-residency"
 import { useLysStore } from "@/lib/store"
 
 import { formatAgentPromptMeasure } from "./agent-presentation"
@@ -130,26 +131,31 @@ function BuiltInAgentTextField({
 type BuiltInAgentPromptFieldProps = {
   /** System prompt the built-in agent ships with. */
   readonly systemPrompt: string
-  /** Context window in tokens the prompt is measured against. */
-  readonly contextSize: number
+  /**
+   * Context length the loaded model is loaded with, in tokens, which the
+   * prompt is measured against; undefined while no model is loaded or its
+   * context length is not known.
+   */
+  readonly contextLength: number | undefined
   /** Requests that the parent return to the agent list. */
   readonly onCloseAgentView: () => void
 }
 
 /**
  * Presents a built-in agent's system prompt in a labeled read-only field
- * with its measure against the context window.
+ * with its measure against the loaded model's context length.
  *
- * @remarks The parent owns the prompt, the context size, and the action; the
- * field owns no state. The prompt can be selected and copied but not typed
- * into, and is not spell-checked. The measure below it describes the field.
+ * @remarks The parent owns the prompt, the context length, and the action;
+ * the field owns no state. The prompt can be selected and copied but not
+ * typed into, and is not spell-checked. The measure below it describes the
+ * field; it leaves out the share while the context length is not known.
  * Escape pressed in the field returns to the agent list.
- * @param props - System prompt, context size, and the parent-owned action.
+ * @param props - System prompt, context length, and the parent-owned action.
  * @returns The labeled read-only prompt field and its measure.
  */
 function BuiltInAgentPromptField({
   systemPrompt,
-  contextSize,
+  contextLength,
   onCloseAgentView
 }: BuiltInAgentPromptFieldProps): ReactElement {
   const fieldId = useId()
@@ -172,7 +178,7 @@ function BuiltInAgentPromptField({
       />
       <div className="settings-view__agent-field-top">
         <span id={measureId}>
-          {formatAgentPromptMeasure(systemPrompt, contextSize)}
+          {formatAgentPromptMeasure(systemPrompt, contextLength)}
         </span>
       </div>
     </div>
@@ -253,11 +259,11 @@ export type BuiltInAgentViewProps = {
  * can be changed.
  *
  * @remarks The parent owns the agent and both actions; the view owns no
- * state. It reads the context size from the application store to measure the
- * prompt against the window. Each text is a read-only field, so it can be
- * selected and copied but not typed into. Focus starts on the back button
- * when the view appears, and Escape pressed on any of the view's fields or
- * buttons returns to the list. A built-in agent offers no save and no delete:
+ * state. It reads the loaded model's context length from the application
+ * store's model inventory to measure the prompt against the window. Each
+ * text is a read-only field, so it can be selected and copied but not typed
+ * into. Focus starts on the back button when the view appears, and Escape
+ * pressed on any of the view's fields or buttons returns to the list. A built-in agent offers no save and no delete:
  * Duplicate is how the user gets a version they can change.
  * @param props - Agent and the parent-owned actions.
  * @returns The read-only view of the agent.
@@ -267,7 +273,11 @@ export default function BuiltInAgentView({
   onCloseAgentView,
   onDuplicateAgent
 }: BuiltInAgentViewProps): ReactElement {
-  const contextSize = useLysStore((state) => state.settings.model.contextSize)
+  const contextLength = useLysStore(
+    (state) =>
+      findLoadedModel(state.modelRuntime, state.modelInventory)
+        ?.loadedContextLength
+  )
   const backButtonRef = useRef<HTMLButtonElement>(null)
 
   useLayoutEffect(() => {
@@ -292,7 +302,7 @@ export default function BuiltInAgentView({
         text={agent.bio}
       />
       <BuiltInAgentPromptField
-        contextSize={contextSize}
+        contextLength={contextLength}
         onCloseAgentView={onCloseAgentView}
         systemPrompt={agent.systemPrompt}
       />

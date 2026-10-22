@@ -19,6 +19,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
+import { findLoadedModel } from "@/lib/models/model-residency"
 import { useLysStore } from "@/lib/store"
 import {
   calculateAgentCodeFromName,
@@ -332,8 +333,11 @@ function AgentCodeField({
 type AgentPromptFieldProps = {
   /** System prompt as typed, owned by the parent. */
   readonly systemPrompt: string
-  /** Local estimate of the context window, in tokens. */
-  readonly contextSize: number
+  /**
+   * Context length the loaded model is loaded with, in tokens; undefined
+   * while no model is loaded or its context length is not known.
+   */
+  readonly contextLength: number | undefined
   /**
    * Identifier of the message explaining the prompt's problem; omitted while
    * the prompt has none.
@@ -353,14 +357,16 @@ type AgentPromptFieldProps = {
  * @remarks The parent owns the prompt and accepts or ignores each proposal;
  * the field owns no state or effects. The textarea is labeled
  * `system prompt`, marked required visibly and programmatically, and
- * described by its estimated size and, while invalid, by the problem
+ * described by its estimated size, with its share of the loaded model's
+ * context length when that is known, and, while invalid, by the problem
  * message. The size is a local estimate.
- * @param props - Prompt, window estimate, problem relationship, and action.
+ * @param props - Prompt, the loaded model's context length, problem
+ * relationship, and action.
  * @returns The labeled prompt field.
  */
 function AgentPromptField({
   systemPrompt,
-  contextSize,
+  contextLength,
   problemId,
   isReadOnly,
   fieldRef,
@@ -393,7 +399,7 @@ function AgentPromptField({
       />
       <div className="settings-view__agent-field-top">
         <span id={measureId}>
-          {formatAgentPromptMeasure(systemPrompt, contextSize)}
+          {formatAgentPromptMeasure(systemPrompt, contextLength)}
         </span>
         <span>⌘ enter saves</span>
       </div>
@@ -429,7 +435,8 @@ type AgentDraftFieldsProps = {
  * Edits the draft's name, code, bio, and system prompt.
  *
  * @remarks The agent store owns the draft and accepts each edit; the
- * application store supplies the context estimate for the prompt measure.
+ * application store's model inventory supplies the loaded model's context
+ * length for the prompt measure.
  * The parent owns the shown problem, its message, and the field hosts; only
  * the field the problem concerns is marked invalid. The code field appears
  * only for a new agent. While a change is pending, every field is read-only.
@@ -443,7 +450,11 @@ function AgentDraftFields({
   problemId,
   fieldRefs
 }: AgentDraftFieldsProps): ReactElement {
-  const contextSize = useLysStore((state) => state.settings.model.contextSize)
+  const contextLength = useLysStore(
+    (state) =>
+      findLoadedModel(state.modelRuntime, state.modelInventory)
+        ?.loadedContextLength
+  )
   const updateAgentDraft = useAgentStore((state) => state.updateAgentDraft)
   const updateNewAgentCode = useAgentStore((state) => state.updateNewAgentCode)
   const isReadOnly = isAgentActivityPending(editor.activity)
@@ -495,7 +506,7 @@ function AgentDraftFields({
         text={editor.draft.bio}
       />
       <AgentPromptField
-        contextSize={contextSize}
+        contextLength={contextLength}
         fieldRef={fieldRefs.systemPrompt}
         isReadOnly={isReadOnly}
         onSystemPromptChange={(systemPrompt) =>

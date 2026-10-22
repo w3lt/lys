@@ -145,6 +145,11 @@ defaults:
   },
   "tools": {
     "justRun": []
+  },
+  "location": {
+    "city": null,
+    "region": null,
+    "country": null
   }
 }
 ```
@@ -160,10 +165,14 @@ defaults:
 | `loadConfiguration`        | object                  | Settings sent with each model load; see [Load configuration](#load-configuration)                                |
 | `secrets.tavilyApiKey`     | `string \| null`        | Tavily API key of `web_search`, 1 to 256 visible ASCII characters, stored as plain text; see [Secrets](#secrets) |
 | `tools.justRun`            | array of tool names     | Tools that run without asking when a model calls them; every other tool asks; see [Tools](#tools)                |
+| `location.city`            | `string \| null`        | City the person saved for `get_location`; see [Location](#location)                                              |
+| `location.region`          | `string \| null`        | State, province, or other region the person saved; see [Location](#location)                                     |
+| `location.country`         | `string \| null`        | Country the person saved; see [Location](#location)                                                              |
 
 A missing group, or a missing field in one of them, uses the host defaults;
 for `loadConfiguration` that default is empty, for `secrets` it holds no
-key, and for `tools` it puts no tool on Just run. A `model` group, which
+key, for `tools` it puts no tool on Just run, and for `location` it saves no
+location. A `model` group, which
 older files hold for a context-size estimate Lys no longer has, is ignored,
 and the next save leaves it out. Loading never rewrites an
 existing file. Invalid JSON or invalid field values, including a temperature
@@ -267,6 +276,29 @@ An older Lys build does not know the group. It ignores it and removes it the
 next time it saves settings, so every tool asks again after going back to an
 older build.
 
+### Location
+
+The `location` group holds the location the person typed in Settings → Tools,
+which the `get_location` client tool returns; Lys never detects it. Each part
+is optional.
+
+- A part is `null` or 1 to 100 characters, counted as Unicode code points,
+  with no control character and no white space at either end. Any other
+  value, `null` for the group, or an unknown field makes loading the settings
+  fail; the error never quotes the value.
+- A missing group or part, and a group whose parts are all `null`, mean no
+  location is saved, and `get_location` fails with `locationNotSet`.
+- The host's `get_location` command reads the group from this file at each
+  call, without creating a missing file, so a saved change, or a hand edit,
+  applies to the next call. The backend never reads it.
+- The location is personal data stored as plain text, protected by the file's
+  owner-only permissions. A call's result is stored with its reply; see
+  [Data locations](/operate/data/).
+
+An older Lys build does not know the group. It ignores it and removes it the
+next time it saves settings, so the location must be saved again after going
+back to an older build.
+
 ## Settings updates
 
 The settings view provides Runtime, Model, Generation, Agents, Tools, and
@@ -300,6 +332,12 @@ calls once saved, because the backend reads the file. After a failed save, tool
 calls keep following the choices last saved, and the pane exposes a retry
 action. Tool calls on or off and each tool's switch remain session-only and
 apply to the next chat request.
+
+The Tools pane saves the location only when the person presses Save or
+Enter, replacing only the `location` group in the same serialized way;
+emptying every field and saving writes `null` for each part. After a failed
+save, `get_location` keeps returning the location last saved, and the pane
+says the save failed.
 
 The Runtime pane's two startup switches, "Start it when Lys opens" for the
 backend and "Start vmo when Lys opens", are saved automatically the same way

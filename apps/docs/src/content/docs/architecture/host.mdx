@@ -25,6 +25,8 @@ exposes a few native commands to the React UI.
 | `save_settings`      | Replaces `$LYS_HOME/settings.json` atomically, owner-only, with a new settings JSON document. |
 | `read_text_file`     | Returns the complete text of one UTF-8 file of at most 1 MiB.                                 |
 | `find_files`         | Searches a directory tree for regular files by name or by text content.                       |
+| `get_current_time`   | Returns the machine's local date and time, UTC offset, weekday, and time zone.                |
+| `get_location`       | Returns the location the person saved in Settings → Tools, read from the settings file.       |
 | `list_tools`         | Returns the definition of every client tool, for the Tools settings pane.                     |
 
 ## File tools
@@ -59,6 +61,34 @@ Expected failures reject with a JSON object whose `code` names the failure,
 such as `{ "code": "fileNotFound" }`. Any other rejection, such as an
 unregistered command, is thrown by the TypeScript wrappers as an error.
 
+## Time and location tools
+
+`get_current_time` and `get_location` take no arguments and run synchronously
+on Tauri's main thread, like `load_settings`, since each reads a few bytes. The renderer reaches them
+through `getCurrentTime` and `getLocation` in
+`apps/desktop/src/lib/apis/tauri/tools.ts`, which validate results and
+declared failures with the schemas exported by `@lys/protocol`. Neither
+command reaches the network.
+
+- `get_current_time` reads the system clock and the machine's time zone, from
+  `TZ` or else `/etc/localtime`, through the `jiff` crate. It returns
+  `dateTime` (local time to the second with its offset, such as
+  `2026-10-22T21:30:05+02:00`; fractions of a second are dropped),
+  `weekday` (English name), `utcOffset` (`+HH:MM`, or `+HH:MM:SS` for a
+  historical offset with seconds), and `timeZone`, the IANA name, or `null`
+  for a zone without one, such as one a POSIX `TZ` rule sets. When the time
+  zone cannot be determined it rejects with `{ "code": "timeZoneUnknown" }`
+  rather than assume UTC.
+- `get_location` reads the `location` group of the settings file, without
+  creating the file when it is missing, so a saved change applies to the next
+  call. It returns `city`, `region`, and `country`, each a string or `null`,
+  at least one a string. It rejects with `{ "code": "locationNotSet" }` when
+  there is no file or no part is saved, and with
+  `{ "code": "settingsUnreadable" }` when the file cannot be read or parsed;
+  neither failure carries the path or the operating system's message. Lys
+  never detects the location: no Location Services, no network lookup, no
+  guess from the time zone.
+
 ## Client tool list
 
 `list_tools` returns `CLIENT_TOOLS` from `src-tauri/src/tools/client_tools.rs`:
@@ -74,9 +104,10 @@ caller-safe message "The app returned an invalid tool list.", and the
 decoding failure is kept as its cause.
 
 Each tool builds its own definition next to the limits it enforces, so a
-description states the current limits. The tools are named `read_text_file`
-and `search_files`; the search-files tool keeps its name although its command
-is `find_files`. Its arguments are the exact keys of the `find_files` filter,
+description states the current limits. The tools are named `read_text_file`,
+`search_files`, `get_current_time`, and `get_location`; the search-files tool
+keeps its name although its command is `find_files`, and the last two, in
+the `timeAndPlace` group, take no arguments. Its arguments are the exact keys of the `find_files` filter,
 and `target` is an enum of `name`, `content`, and `nameAndContent`. The command
 reads nothing and never fails.
 
@@ -191,6 +222,11 @@ The host creates the following defaults when the settings file is missing:
   },
   "tools": {
     "justRun": []
+  },
+  "location": {
+    "city": null,
+    "region": null,
+    "country": null
   }
 }
 ```
@@ -214,6 +250,12 @@ The `secrets` group holds the Tavily API key as plain text, validated on load
 (1 to 256 visible ASCII characters); an invalid key makes loading fail. Its
 `Debug` output never shows the key.
 
+The `location` group holds the location the person typed, validated on load:
+each part is `null` or 1 to 100 characters with no control character and no
+white space at either end. An invalid part, an unknown field, or a `null`
+group makes loading fail, and the error never quotes the value. Its `Debug`
+output never shows the location.
+
 The host only stores the `loadConfiguration` group. A settings file written
 before load configurations existed has no such group; `load_settings` reads it
 as empty and does not rewrite the file. The committed default load
@@ -223,8 +265,9 @@ configuration belongs to the renderer, which applies it when it resolves a load
 The desktop automatically saves generation edits by reading this document,
 replacing its generation group, and saving the complete document. Load
 configuration edits are saved the same way, and so are each tool's Ask me or
-Just run choice and the Tavily API key when the person saves or removes it in
-the Secrets pane. A change of either startup switch in the Runtime pane saves
+Just run choice, the Tavily API key when the person saves or removes it in
+the Secrets pane, and the location when the person saves it in the Tools
+pane. A change of either startup switch in the Runtime pane saves
 `autoStartBackend` and `autoStartVmo` and keeps the rest of the `runtime`
 group as stored; a file without `autoStartVmo` loads it as `true`. The other
 runtime edits in the UI remain session-only; the automatic saves preserve
@@ -245,7 +288,7 @@ the next save.
 
 - Credential management and secure secret storage
 - Richer native tooling beyond backend and vmo lifecycle, settings I/O, and
-  the file tools
+  the file, clock, and location tools
 - Portable backend lifecycle support beyond the current Unix implementation
 
 ## Related pages

@@ -56,6 +56,7 @@ backend decides which calls ask; the desktop shows the prompts.
 | Search key handling         | The key goes only into the `authorization` header sent to Tavily; it never appears in results, the model's context, events, API answers, logs, or errors.                                                                                                                                                                                                                                                                    |
 | Owner-only settings file    | `settings.json` is replaced atomically and is readable only by its owner on Unix.                                                                                                                                                                                                                                                                                                                                            |
 | Owner-only backend log      | The release backend's `logs/backend.log` is created readable only by its owner.                                                                                                                                                                                                                                                                                                                                              |
+| Query strings not logged    | A request's log lines name its path without the query string, so history searches and page cursors are not written.                                                                                                                                                                                                                                                                                                          |
 | Untrusted result framing    | Result titles, URLs, and snippets reach the model between delimiters it cannot forge, with a notice never to obey them.                                                                                                                                                                                                                                                                                                      |
 
 ## Candid limits
@@ -141,8 +142,9 @@ backend decides which calls ask; the desktop shows the prompts.
 - The backend currently uses a dummy API key value when talking to local
   OpenAI-compatible LM Studio endpoints that expect an API key field.
 - Runtime settings and conversation data live on disk in user-space files.
-- The release backend's log keeps request URLs and reported failures on disk
-  without redaction.
+- The release backend's log keeps request paths and reported failures on disk
+  without redaction. A request to a route that does not exist is logged with
+  its whole URL, query string included.
 
 ## Web reads
 

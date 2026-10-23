@@ -31,7 +31,7 @@ The Tauri desktop host reads and writes one JSON settings file at
 `$LYS_HOME/settings.json`.
 
 The current schema contains `runtime`, `generation`, `loadConfiguration`,
-`secrets`, and `tools` groups. Rust
+`secrets`, `tools`, and `location` groups. Rust
 and the TypeScript settings projection use the same camelCase field names. See
 the [configuration reference](/reference/configuration/) for the complete field
 list, defaults, and accepted values.
@@ -49,6 +49,12 @@ back on Ask me from the next round; the Tools pane shows the change the next
 time Lys starts, and a save from the pane before then writes back the names it
 holds. If the backend cannot read the file, every tool call asks.
 
+The `location` group holds the city, region, and country you type in Settings
+→ Tools, each optional, which the `get_location` tool gives a model when it
+calls the tool. Lys never detects your location. The tool reads the group
+from the file at each call, so a saved change or a hand edit applies to the
+next call; with no part saved, the tool fails.
+
 The `loadConfiguration` group holds the load settings written to the file: a
 `default` for every model, which starts empty and is edited only by hand, and
 the values changed for each model, which the Model settings pane edits. A load
@@ -63,7 +69,8 @@ paragraph above and [Tavily API key](#tavily-api-key) describe. A save from a
 settings pane writes the values Lys holds over a hand edit of its group made
 while Lys runs: the Generation pane replaces `generation`, the Model pane
 replaces `loadConfiguration.models` and leaves `default` as it is in the file,
-the Secrets pane replaces `secrets`, the Tools pane replaces `tools`, and the
+the Secrets pane replaces `secrets`, the Tools pane replaces `tools` and, on
+Save, `location`, and the
 Runtime pane replaces `runtime.autoStartBackend` and `runtime.autoStartVmo`
 and leaves the rest of `runtime` as it is in the file.
 

@@ -15,7 +15,12 @@ import {
   sendChatToolResult,
   type SendChatToolCallAnswerResult
 } from "@/lib/apis/http/chat"
-import { findFiles, readTextFile } from "@/lib/apis/tauri/tools"
+import {
+  findFiles,
+  getCurrentTime,
+  getLocation,
+  readTextFile
+} from "@/lib/apis/tauri/tools"
 import { useLysStore } from "@/lib/store"
 import { useToolStore, type ToolListState } from "@/lib/store/tools"
 
@@ -986,7 +991,9 @@ function createToolCallStore(
 /** Tauri commands that run the client tools. */
 const CLIENT_TOOL_COMMANDS: ClientToolCommands = Object.freeze({
   readTextFile,
-  findFiles
+  findFiles,
+  getCurrentTime,
+  getLocation
 })
 
 /**

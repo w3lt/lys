@@ -527,14 +527,14 @@ under its code.
 ## Tool settings
 
 The Tools pane lists Lys's tools. Client tools run in the desktop app and work
-with files on the user's machine; the tool store reads them from the
+with files, the clock, and the saved location on the user's machine; the tool store reads them from the
 [`list_tools` command](/architecture/host/#client-tool-list). Backend tools run
 in the backend and reach the web; the store reads them from
 [`GET /api/v1/tools`](/reference/api/#tool-list). Both lists are read when the pane
 first appears, client tools first; a failed read of either list, or a name both
 lists share, shows the failure above the pane with Retry. Tools are grouped by
-their `group` (`files`, `web`), and each group says how many of its tools are
-on.
+their `group` (`files`, `web`, `time & place`), and each group says how many of
+its tools are on.
 
 Each row shows the tool's name, what it does with the machine (`reads` or
 `network`), where it runs (`in Lys` for a client tool, `in backend` for a
@@ -594,6 +594,22 @@ and shows no button: the host cannot load either file at startup, and a save
 from the pane would replace the file with the settings loaded earlier. The
 person's choice is kept and applies again once the tool can run; group counts
 and the offered totals count only tools that are on and can run.
+
+Below the tools, a "your location" section holds the location `get_location`
+returns: City, Region, and Country fields, each labelled, described by the
+hint "Each field is optional and holds up to 100 characters.", and filled
+with the saved location. The section stays shown while the tools are read or
+cannot be read, and the tool lock does not apply to it. Enter or Save stores
+the trimmed fields, a blank field as `null`, only when they are valid and
+differ from the saved location; emptying every field and saving removes the
+location, and Escape discards the edit. Fields changed while a save runs
+keep that newer edit once the save succeeds. A field whose text is too long or
+holds a control character is marked invalid and described by what to change.
+A polite status line says first that a save runs or failed, which keeps the
+edit; otherwise that the edit is invalid or unsaved; otherwise whether a
+location is saved. The application store's location slice owns the save,
+serialized with the other group saves, and changes its location only once the
+file holds the new one, because the tool reads the file.
 
 ## Secrets
 
@@ -660,7 +676,8 @@ so a snapshot built before the answer arrived does not bring it back:
 
 A waiting call shows a card above the composer field: the tool, what it does
 with the machine, where it runs, a plain sentence such as "Read
-/Users/me/notes/todo.md. Nothing is changed.", "Read
+/Users/me/notes/todo.md. Nothing is changed.", "Read the location you saved in
+Settings → Tools. Nothing is changed.", "Read
 https://example.com/page.", with the full URL,
 or "Search the web for “latest Node.js release”. Sends the query to Tavily
 (api.tavily.com).", with the full query, and its arguments on request. Reject sends the composer's text as the reason;

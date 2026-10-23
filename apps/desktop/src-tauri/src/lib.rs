@@ -78,6 +78,8 @@ pub fn run() {
             settings::commands::load_settings,
             settings::commands::save_settings,
             tools::client_tools::list_tools,
+            tools::get_current_time::get_current_time,
+            tools::get_location::get_location,
             tools::read_text_file::read_text_file,
             tools::search_files::find_files
         ])

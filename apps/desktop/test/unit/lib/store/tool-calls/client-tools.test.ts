@@ -1,6 +1,8 @@
-import { chatToolResultSchema } from "@lys/protocol"
+import { chatToolResultSchema, savedLocationSchema } from "@lys/protocol"
 import { describe, expect, it } from "vitest"
 import type {
+  GetCurrentTimeResult,
+  GetLocationResult,
   ReadTextFileResult,
   SearchFilesResult
 } from "@/lib/apis/tauri/tools"
@@ -52,36 +54,51 @@ const SEARCH_INPUT: ClientToolInput = Object.freeze({
   filter: SEARCH_FILTER
 })
 
+/** Validated input of a current-time read. */
+const CURRENT_TIME_INPUT: ClientToolInput = Object.freeze({
+  runner: "client",
+  toolName: "get_current_time"
+})
+
+/** Validated input of a location read. */
+const LOCATION_INPUT: ClientToolInput = Object.freeze({
+  runner: "client",
+  toolName: "get_location"
+})
+
+/**
+ * Desktop commands that each reject, so a command a case did not expect
+ * becomes a run-failed answer instead of passing.
+ */
+const UNEXPECTED_COMMANDS: ClientToolCommands = Object.freeze({
+  readTextFile: () => Promise.reject(new Error("unexpected read")),
+  findFiles: () => Promise.reject(new Error("unexpected search")),
+  getCurrentTime: () => Promise.reject(new Error("unexpected time read")),
+  getLocation: () => Promise.reject(new Error("unexpected location read"))
+})
+
 /**
  * Builds desktop commands in which only the read settles as the case says.
  *
  * @param readTextFile - Outcome of the read-text-file command.
- * @returns Commands whose search rejects, so a search the case did not expect
- * becomes a run-failed answer instead of passing.
+ * @returns Commands whose others reject.
  */
 function buildReadCommands(
   readTextFile: ClientToolCommands["readTextFile"]
 ): ClientToolCommands {
-  return {
-    readTextFile,
-    findFiles: () => Promise.reject(new Error("unexpected search"))
-  }
+  return { ...UNEXPECTED_COMMANDS, readTextFile }
 }
 
 /**
  * Builds desktop commands in which only the search settles as the case says.
  *
  * @param findFiles - Outcome of the search-files command.
- * @returns Commands whose read rejects, so a read the case did not expect
- * becomes a run-failed answer instead of passing.
+ * @returns Commands whose others reject.
  */
 function buildSearchCommands(
   findFiles: ClientToolCommands["findFiles"]
 ): ClientToolCommands {
-  return {
-    readTextFile: () => Promise.reject(new Error("unexpected read")),
-    findFiles
-  }
+  return { ...UNEXPECTED_COMMANDS, findFiles }
 }
 
 describe("parseClientToolInput", () => {
@@ -109,6 +126,16 @@ describe("parseClientToolInput", () => {
     })
   })
 
+  it.each(["get_current_time", "get_location"] as const)(
+    "parses a %s call that has no arguments",
+    (toolName) => {
+      expect(parseClientToolInput(buildToolCall(1, toolName, {}))).toEqual({
+        status: "parsed",
+        input: { runner: "client", toolName }
+      })
+    }
+  )
+
   it("rejects a tool the desktop has no runner for", () => {
     expect(parseClientToolInput(buildToolCall(1, "delete_file"))).toEqual({
       status: "rejected",
@@ -123,7 +150,9 @@ describe("parseClientToolInput", () => {
       "search_files",
       { root: "/Users/fixture", query: "TODO", target: "everything" },
       /: target: /
-    ]
+    ],
+    ["get_current_time", { timeZone: "UTC" }, /: arguments: /],
+    ["get_location", { precision: "street" }, /: arguments: /]
   ])(
     "rejects a %s call whose arguments are %o, naming the argument",
     (toolName, callArguments, argumentPattern) => {
@@ -263,6 +292,79 @@ describe("runClientTool", () => {
     expect(result).toMatchObject({ status: "failed", reason: "toolFailed" })
     expect(JSON.parse(result.content)).toEqual(failure.error)
   })
+
+  it("reads the current time and answers with it as JSON", async () => {
+    const currentTime = {
+      dateTime: "2026-10-22T21:30:05+02:00",
+      weekday: "Thursday",
+      utcOffset: "+02:00",
+      timeZone: "Europe/Paris"
+    } as const
+    const commands: ClientToolCommands = {
+      ...UNEXPECTED_COMMANDS,
+      getCurrentTime: () =>
+        Promise.resolve({ status: "succeeded", currentTime })
+    }
+
+    const result = await runClientTool(CURRENT_TIME_INPUT, commands)
+
+    expect(result.status).toBe("succeeded")
+    expect(JSON.parse(result.content)).toEqual(currentTime)
+  })
+
+  it("reads the saved location and answers with it as JSON", async () => {
+    const location = { city: "Lyon", region: null, country: "France" }
+    const commands: ClientToolCommands = {
+      ...UNEXPECTED_COMMANDS,
+      getLocation: () =>
+        Promise.resolve({
+          status: "succeeded",
+          location: savedLocationSchema.parse(location)
+        })
+    }
+
+    const result = await runClientTool(LOCATION_INPUT, commands)
+
+    expect(result.status).toBe("succeeded")
+    expect(JSON.parse(result.content)).toEqual(location)
+  })
+
+  it.each([
+    [
+      "get_current_time",
+      CURRENT_TIME_INPUT,
+      {
+        ...UNEXPECTED_COMMANDS,
+        getCurrentTime: () =>
+          Promise.resolve<GetCurrentTimeResult>({
+            status: "failed",
+            error: { code: "timeZoneUnknown" }
+          })
+      },
+      { code: "timeZoneUnknown" }
+    ],
+    [
+      "get_location",
+      LOCATION_INPUT,
+      {
+        ...UNEXPECTED_COMMANDS,
+        getLocation: () =>
+          Promise.resolve<GetLocationResult>({
+            status: "failed",
+            error: { code: "locationNotSet" }
+          })
+      },
+      { code: "locationNotSet" }
+    ]
+  ])(
+    "answers a %s call the desktop declared failed with that failure as JSON",
+    async (_toolName, input, commands, failure) => {
+      const result = await runClientTool(input, commands)
+
+      expect(result).toMatchObject({ status: "failed", reason: "toolFailed" })
+      expect(JSON.parse(result.content)).toEqual(failure)
+    }
+  )
 
   it("answers that the tool could not run, with the reason, when its command throws", async () => {
     const commands = buildReadCommands(() =>

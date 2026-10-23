@@ -1585,7 +1585,8 @@
   line-height: 1.5;
 }
 
-.settings-view__secret-card {
+.settings-view__secret-card,
+.settings-view__location-card {
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -1597,7 +1598,8 @@
 
 .settings-view__secret-card-header,
 .settings-view__secret-label-line,
-.settings-view__secret-footer {
+.settings-view__secret-footer,
+.settings-view__location-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1666,7 +1668,8 @@
   }
 }
 
-.settings-view__secret-status {
+.settings-view__secret-status,
+.settings-view__location-status {
   margin: 0;
   color: var(--app-text-muted);
   font-family: var(--font-mono);
@@ -1685,6 +1688,31 @@
   &[data-tone="danger"] {
     color: var(--app-text-danger);
   }
+}
+
+.settings-view__location-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.settings-view__location-field {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 6px;
+
+  label {
+    font-size: 12px;
+  }
+}
+
+.settings-view__location-field-error {
+  margin: 0;
+  color: var(--app-text-danger);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .settings-view__secret-actions {

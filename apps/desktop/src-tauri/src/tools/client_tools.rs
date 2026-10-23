@@ -4,7 +4,8 @@
 use std::sync::LazyLock;
 
 use super::{
-    definition::ToolDefinition, read_text_file::build_read_text_file_definition,
+    definition::ToolDefinition, get_current_time::build_get_current_time_definition,
+    get_location::build_get_location_definition, read_text_file::build_read_text_file_definition,
     search_files::build_search_files_definition,
 };
 
@@ -13,10 +14,12 @@ use super::{
 /// Each tool builds its own definition next to the limits it enforces, so a
 /// description always states the current limits. The list is built once, on
 /// first use; building it reads nothing and has no side effect.
-static CLIENT_TOOLS: LazyLock<[ToolDefinition; 2]> = LazyLock::new(|| {
+static CLIENT_TOOLS: LazyLock<[ToolDefinition; 4]> = LazyLock::new(|| {
     [
         build_read_text_file_definition(),
         build_search_files_definition(),
+        build_get_current_time_definition(),
+        build_get_location_definition(),
     ]
 });
 
@@ -96,6 +99,22 @@ mod tests {
                             "type": "integer"
                         }
                     ]
+                },
+                {
+                    "name": "get_current_time",
+                    "description": "Get the current local date and time of the person's machine, to the second, with its UTC offset, weekday, and IANA time zone.",
+                    "group": "timeAndPlace",
+                    "access": "reads",
+                    "runner": "client",
+                    "arguments": []
+                },
+                {
+                    "name": "get_location",
+                    "description": "Get the location the person saved in Lys's settings: a city, a region, and a country, any of which may be null. The person typed it; it is never detected, so it may be out of date. Fails when no location is saved.",
+                    "group": "timeAndPlace",
+                    "access": "reads",
+                    "runner": "client",
+                    "arguments": []
                 }
             ])
         );

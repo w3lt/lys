@@ -1,6 +1,7 @@
 import {
   saveGenerationSettings,
   saveLoadConfigurationSettings,
+  saveLocationSettings,
   saveRuntimeAutoStartSettings,
   saveSecretsSettings,
   saveToolSettings
@@ -9,6 +10,7 @@ import {
 import type {
   GenerationSettings,
   LoadConfigurationSettings,
+  LocationSettings,
   RuntimeAutoStartSettings,
   SecretsSettings,
   ToolSettings
@@ -57,6 +59,14 @@ export type SettingsGroupSaves = {
    * the native load or save rejection.
    */
   readonly saveToolSettings: (tools: ToolSettings) => Promise<void>
+  /**
+   * Saves the location group after every save sent earlier has settled.
+   *
+   * @param location - Location to persist.
+   * @returns Resolves after the settings file is written, and rejects with
+   * the native load or save rejection.
+   */
+  readonly saveLocationSettings: (location: LocationSettings) => Promise<void>
   /**
    * Saves the two startup switches of the runtime group after every save
    * sent earlier has settled.
@@ -127,6 +137,8 @@ export function createSettingsGroupSaves(): SettingsGroupSaves {
       saveSettingsGroupInOrder(() => saveSecretsSettings(secrets)),
     saveToolSettings: (tools) =>
       saveSettingsGroupInOrder(() => saveToolSettings(tools)),
+    saveLocationSettings: (location) =>
+      saveSettingsGroupInOrder(() => saveLocationSettings(location)),
     saveRuntimeAutoStartSettings: (autoStart) =>
       saveSettingsGroupInOrder(() => saveRuntimeAutoStartSettings(autoStart))
   }

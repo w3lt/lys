@@ -18,6 +18,7 @@ import { ChatCompletionCancelledError } from "../../utils/errors"
 import {
   buildAgentContext,
   calculateAgentContextHistoryMessageCount,
+  formatSystemPrompt,
   getAgentContextImageSides,
   readAgentContextImages,
   UNSEEN_CONTEXT_IMAGES,
@@ -56,6 +57,7 @@ import {
   type SendClientToolCall,
   type ToolCallRound
 } from "./toolCallRound"
+import type { UnofferedTools } from "./unofferedTools"
 
 /** What an agent knows about itself to answer turns. */
 export type AgentProfile = Readonly<{
@@ -118,6 +120,14 @@ export type AgentTurn = Readonly<{
    * client tool; empty when none are offered.
    */
   builtInTools: readonly TurnBuiltInTool[]
+  /**
+   * What the request names about the tools the turn does not offer: that
+   * tool calls are off, or the switched-off tools and the switched-on
+   * backend tools that cannot run now, none of them offered. Every round's
+   * instructions end with the notes about them, and a call of one is
+   * answered as not run without asking or running it.
+   */
+  unofferedTools: UnofferedTools
   /** Generation-owned cancellation, aborted by Stop or shutdown. */
   abortSignal: AbortSignal
   /**
@@ -235,6 +245,11 @@ export type AgentContextInput = Readonly<{
    * then backend tools; empty when none would be offered.
    */
   tools: readonly ToolDefinition[]
+  /**
+   * What the request names about the tools the message would not offer, as
+   * {@link AgentTurn.unofferedTools}.
+   */
+  unofferedTools: UnofferedTools
 }>
 
 /**
@@ -244,7 +259,10 @@ export type AgentContextInput = Readonly<{
 export type AgentContextMeasurement = Readonly<{
   /** Context length the model is loaded with; a positive integer. */
   contextLength: number
-  /** Tokens of the agent's system prompt. */
+  /**
+   * Tokens of the agent's system prompt, with the notes about the tools the
+   * message would not offer when there are any.
+   */
   systemPromptTokens: number
   /** Tokens of the offered tool definitions; 0 when none are offered. */
   toolTokens: number
@@ -273,6 +291,8 @@ type ReplyRoundState = Readonly<{
   turn: AgentTurn
   /** Tools offered for the turn, by name. */
   tools: AgentToolset
+  /** What the request names about the tools the turn does not offer. */
+  unofferedTools: UnofferedTools
   /** Function tools the model is offered in every round. */
   offeredTools: readonly OpenAIFunctionTool[]
   /** Stores and sends the reply's parts. */
@@ -286,7 +306,8 @@ type ReplyRoundState = Readonly<{
  * conversation turns as that agent.
  *
  * @remarks Every context the agent builds starts with its own system prompt,
- * never one stored with the conversation. It keeps no state between turns; a
+ * never one stored with the conversation, followed by the notes about the
+ * tools the turn does not offer when there are any. It keeps no state between turns; a
  * turn's rounds and context live only in that turn's `createReply` call, so
  * one instance answers overlapping turns, each through its own
  * {@link AgentTurn}, as long as the model access permits overlapping streams.
@@ -336,10 +357,12 @@ export default class Agent {
    * its next message.
    *
    * @param input - Stored transcript, model, whether it sees images, the
-   * image file lookup, and offered tool definitions, borrowed until the
-   * returned promise settles.
+   * image file lookup, offered tool definitions, and what the request names
+   * about the tools it would not offer, borrowed until the returned promise
+   * settles.
    * @returns A promise resolving to the window and the tokens of this agent's
-   * system prompt, of the tools, of the stored messages a turn would include,
+   * system prompt with the notes about the tools the message would not
+   * offer, of the tools, of the stored messages a turn would include,
    * and of the new message's markup, measured exactly as a turn's first round
    * sends them with an empty new message without files; or to undefined when
    * the model is not loaded. When the model sees images, the history's image
@@ -363,7 +386,10 @@ export default class Agent {
     const measurement =
       await this.#replyContextMeter.findReplyContextMeasurement({
         messages: buildAgentContext({
-          systemPrompt: this.#systemPrompt,
+          systemPrompt: formatSystemPrompt(
+            this.#systemPrompt,
+            input.unofferedTools
+          ),
           history: input.history,
           userMessage: EMPTY_USER_MESSAGE,
           images
@@ -406,7 +432,10 @@ export default class Agent {
    * `reportReplyFailure` otherwise. Each round's reasoning and text are stored
    * and sent as parts of their round. When the turn offers tools, each round
    * that calls tools stores every call and its outcome as a part, has its
-   * calls answered, and asks the model again. A client tool's call is
+   * calls answered, and asks the model again; a call of a tool the turn
+   * does not offer because the request names it, or of any tool not offered
+   * while tool calls are off, is stored as failed with a result saying why
+   * it did not run, and never runs. A client tool's call is
    * answered by the client; a backend tool's call runs here once the client
    * allows it, or at once for a tool that runs without approval, under the
    * turn's cancellation, numbering the web sources it shows after the
@@ -464,6 +493,7 @@ export default class Agent {
     const state: ReplyRoundState = Object.freeze({
       turn,
       tools,
+      unofferedTools: turn.unofferedTools,
       offeredTools: buildOfferedTools(tools),
       replyParts: new ReplyPartSequence({
         createReplyPart: turn.createReplyPart,
@@ -479,7 +509,7 @@ export default class Agent {
       turn.findAttachmentImage
     )
     const messages = buildAgentContext({
-      systemPrompt: this.#systemPrompt,
+      systemPrompt: formatSystemPrompt(this.#systemPrompt, turn.unofferedTools),
       history: turn.history,
       userMessage: turn.userMessage,
       images
@@ -512,6 +542,7 @@ export default class Agent {
     const { turn } = state
     const roundMessages = await handleToolCallRound(round, {
       tools: state.tools,
+      unofferedTools: state.unofferedTools,
       sendClientToolCall: turn.sendClientToolCall,
       createToolCallGate: turn.createToolCallGate,
       abortSignal: turn.abortSignal,

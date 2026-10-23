@@ -8,6 +8,8 @@ import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { updateFastifyWithHttpTransport } from "../../../../../src/http"
 import SqliteAgentRecordStore from "../../../../../src/infrastructure/database/agents/sqliteAgentRecordStore"
 import AgentService from "../../../../../src/modules/agent/agentService"
+import { formatSystemPrompt } from "../../../../../src/modules/agent/agentContext"
+import { TOOL_CALLS_OFF } from "../../../../../src/modules/agent/unofferedTools"
 import type { ReplyModel } from "../../../../../src/modules/agent/replyModel"
 import AttachmentFileStore from "../../../../../src/modules/attachment/attachmentFileStore"
 import { buildReadAttachmentDefinition } from "../../../../../src/modules/attachment/readAttachmentTool"
@@ -264,6 +266,16 @@ async function sendChatContextRequest(
   })
 }
 
+/**
+ * Builds distinct valid tool names.
+ *
+ * @param count - Number of names.
+ * @returns `tool_0`, `tool_1`, and so on, `count` names in all.
+ */
+function buildToolNames(count: number): string[] {
+  return Array.from({ length: count }, (_, index) => `tool_${index}`)
+}
+
 describe("registerChatContextRoute", () => {
   it("measures a new conversation with its agent's system prompt and the offered tools, as a turn sends them", async () => {
     const { app, replyContextMeter } = await createChatContextRouteApp()
@@ -305,6 +317,128 @@ describe("registerChatContextRoute", () => {
       ],
       model: MODEL
     })
+  })
+
+  it("measures the note that names the switched-off tools with the agent's system prompt, as a turn sends it", async () => {
+    const { app, replyContextMeter } = await createChatContextRouteApp()
+    replyContextMeter.findReplyContextMeasurement.mockResolvedValue({
+      contextLength: 8192,
+      messageTokenCounts: [2310, 9],
+      toolTokenCount: 205
+    })
+
+    const response = await sendChatContextRequest(app, {
+      conversation: { kind: "new", agentCode: "caliginia" },
+      model: MODEL,
+      tools: { definitions: [READ_TEXT_FILE_TOOL] },
+      switchedOffToolNames: ["web_search", "search_files"]
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(chatContextApi.responses[200].parse(response.json())).toMatchObject({
+      systemPromptTokens: 2310
+    })
+    expect(
+      replyContextMeter.findReplyContextMeasurement
+    ).toHaveBeenCalledExactlyOnceWith({
+      messages: [
+        {
+          role: "system",
+          content: formatSystemPrompt(CALIGINIA.systemPrompt, {
+            status: "tool-calls-on",
+            switchedOffToolNames: ["web_search", "search_files"],
+            unavailableTools: []
+          })
+        },
+        { role: "user", content: "", images: [] }
+      ],
+      tools: [new AgentTool(READ_TEXT_FILE_TOOL).buildAgentFormat()],
+      model: MODEL
+    })
+  })
+
+  it("measures the note that names the switched-on tools that cannot run, with why, as a turn sends it", async () => {
+    const { app, replyContextMeter } = await createChatContextRouteApp()
+    replyContextMeter.findReplyContextMeasurement.mockResolvedValue({
+      contextLength: 8192,
+      messageTokenCounts: [2330, 9],
+      toolTokenCount: 205
+    })
+
+    const response = await sendChatContextRequest(app, {
+      conversation: { kind: "new", agentCode: "caliginia" },
+      model: MODEL,
+      tools: { definitions: [READ_TEXT_FILE_TOOL] },
+      unavailableTools: [{ name: "check_spelling", reason: "api-key-missing" }]
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(
+      replyContextMeter.findReplyContextMeasurement
+    ).toHaveBeenCalledExactlyOnceWith({
+      messages: [
+        {
+          role: "system",
+          content: formatSystemPrompt(CALIGINIA.systemPrompt, {
+            status: "tool-calls-on",
+            switchedOffToolNames: [],
+            unavailableTools: [
+              { name: "check_spelling", reason: "api-key-missing" }
+            ]
+          })
+        },
+        { role: "user", content: "", images: [] }
+      ],
+      tools: [new AgentTool(READ_TEXT_FILE_TOOL).buildAgentFormat()],
+      model: MODEL
+    })
+  })
+
+  it("measures the note that says tool calls are off, with no tool offered", async () => {
+    const { app, replyContextMeter } = await createChatContextRouteApp()
+    replyContextMeter.findReplyContextMeasurement.mockResolvedValue({
+      contextLength: 8192,
+      messageTokenCounts: [2290, 9],
+      toolTokenCount: 0
+    })
+
+    const response = await sendChatContextRequest(app, {
+      conversation: { kind: "new", agentCode: "caliginia" },
+      model: MODEL,
+      areToolCallsSwitchedOff: true
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(
+      replyContextMeter.findReplyContextMeasurement
+    ).toHaveBeenCalledExactlyOnceWith({
+      messages: [
+        {
+          role: "system",
+          content: formatSystemPrompt(CALIGINIA.systemPrompt, TOOL_CALLS_OFF)
+        },
+        { role: "user", content: "", images: [] }
+      ],
+      tools: [],
+      model: MODEL
+    })
+  })
+
+  it("accepts 64 switched-off tools, the most a request names", async () => {
+    const { app, replyContextMeter } = await createChatContextRouteApp()
+    replyContextMeter.findReplyContextMeasurement.mockResolvedValue({
+      contextLength: 8192,
+      messageTokenCounts: [2900, 9],
+      toolTokenCount: 0
+    })
+
+    const response = await sendChatContextRequest(app, {
+      conversation: { kind: "new", agentCode: "caliginia" },
+      model: MODEL,
+      switchedOffToolNames: buildToolNames(64)
+    })
+
+    expect(response.statusCode).toBe(200)
   })
 
   it("measures the stored messages a continued conversation's next turn would include", async () => {
@@ -688,6 +822,147 @@ describe("registerChatContextRoute", () => {
         conversation: { kind: "new", agentCode: "caliginia" },
         model: MODEL,
         message: "Hello"
+      }
+    ],
+    [
+      "a switched-off tool it also offers as a client tool",
+      {
+        conversation: { kind: "new", agentCode: "caliginia" },
+        model: MODEL,
+        tools: { definitions: [READ_TEXT_FILE_TOOL] },
+        switchedOffToolNames: ["read_text_file"]
+      }
+    ],
+    [
+      "a switched-off tool it also offers as a backend tool",
+      {
+        conversation: { kind: "new", agentCode: "caliginia" },
+        model: MODEL,
+        tools: { definitions: [], backendToolNames: ["look_up_word"] },
+        switchedOffToolNames: ["look_up_word"]
+      }
+    ],
+    [
+      "the attachment reader switched off",
+      {
+        conversation: { kind: "new", agentCode: "caliginia" },
+        model: MODEL,
+        switchedOffToolNames: ["read_attachment"]
+      }
+    ],
+    [
+      "a switched-off tool named twice",
+      {
+        conversation: { kind: "new", agentCode: "caliginia" },
+        model: MODEL,
+        switchedOffToolNames: ["web_search", "web_search"]
+      }
+    ],
+    [
+      "an empty switched-off list",
+      {
+        conversation: { kind: "new", agentCode: "caliginia" },
+        model: MODEL,
+        switchedOffToolNames: []
+      }
+    ],
+    [
+      "65 switched-off tools",
+      {
+        conversation: { kind: "new", agentCode: "caliginia" },
+        model: MODEL,
+        switchedOffToolNames: buildToolNames(65)
+      }
+    ],
+    [
+      "a switched-off tool name that is not a tool name",
+      {
+        conversation: { kind: "new", agentCode: "caliginia" },
+        model: MODEL,
+        switchedOffToolNames: ["web search"]
+      }
+    ],
+    [
+      "a tool that cannot run that the backend does not run",
+      {
+        conversation: { kind: "new", agentCode: "caliginia" },
+        model: MODEL,
+        unavailableTools: [{ name: "fetch_url", reason: "api-key-missing" }]
+      }
+    ],
+    [
+      "a tool that cannot run it also offers",
+      {
+        conversation: { kind: "new", agentCode: "caliginia" },
+        model: MODEL,
+        tools: { definitions: [], backendToolNames: ["check_spelling"] },
+        unavailableTools: [
+          { name: "check_spelling", reason: "api-key-missing" }
+        ]
+      }
+    ],
+    [
+      "a tool that cannot run it also names as switched off",
+      {
+        conversation: { kind: "new", agentCode: "caliginia" },
+        model: MODEL,
+        switchedOffToolNames: ["check_spelling"],
+        unavailableTools: [
+          { name: "check_spelling", reason: "api-key-missing" }
+        ]
+      }
+    ],
+    [
+      "a tool that cannot run with a reason the contract does not have",
+      {
+        conversation: { kind: "new", agentCode: "caliginia" },
+        model: MODEL,
+        unavailableTools: [{ name: "check_spelling", reason: "offline" }]
+      }
+    ],
+    [
+      "an empty list of tools that cannot run",
+      {
+        conversation: { kind: "new", agentCode: "caliginia" },
+        model: MODEL,
+        unavailableTools: []
+      }
+    ],
+    [
+      "tool calls switched off with a tool offered",
+      {
+        conversation: { kind: "new", agentCode: "caliginia" },
+        model: MODEL,
+        tools: { definitions: [READ_TEXT_FILE_TOOL] },
+        areToolCallsSwitchedOff: true
+      }
+    ],
+    [
+      "tool calls switched off with a switched-off tool named",
+      {
+        conversation: { kind: "new", agentCode: "caliginia" },
+        model: MODEL,
+        switchedOffToolNames: ["web_search"],
+        areToolCallsSwitchedOff: true
+      }
+    ],
+    [
+      "tool calls switched off with a tool that cannot run named",
+      {
+        conversation: { kind: "new", agentCode: "caliginia" },
+        model: MODEL,
+        unavailableTools: [
+          { name: "check_spelling", reason: "api-key-missing" }
+        ],
+        areToolCallsSwitchedOff: true
+      }
+    ],
+    [
+      "tool calls named as switched on",
+      {
+        conversation: { kind: "new", agentCode: "caliginia" },
+        model: MODEL,
+        areToolCallsSwitchedOff: false
       }
     ]
   ])(

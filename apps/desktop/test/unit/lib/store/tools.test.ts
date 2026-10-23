@@ -6,9 +6,14 @@ import type { ToolDefinition } from "@lys/share"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import type { BackendServerInfo, BackendServerStatus } from "@/lib/store"
 import {
+  buildChatToolFields,
   buildChatToolOffer,
   getToolChoice,
   isToolOn,
+  NO_CHAT_TOOL_OFFER,
+  TOOL_CALLS_OFF_OFFER,
+  type ChatToolFields,
+  type ChatToolOfferResult,
   type ToolListState
 } from "@/lib/store/tools"
 import type { VmoProblem, VmoServerInfo } from "@/lib/store/vmo-runtime"
@@ -129,7 +134,7 @@ describe("isToolOn", () => {
 })
 
 describe("getToolChoice", () => {
-  it("combines the session switch with the saved approval", () => {
+  it("combines the saved switch with the saved approval", () => {
     const findFiles = buildToolDefinition("find_files")
     const toolChoices = {
       switches: new Map([["find_files", false]]),
@@ -165,7 +170,7 @@ const UNREAD_TOOL_LISTS: readonly ToolListState[] = Object.freeze([
 ])
 
 describe("buildChatToolOffer", () => {
-  it("offers every desktop tool the person has not switched off, in list order", () => {
+  it("offers every desktop tool the person has not switched off, in list order, and names every tool that is off", () => {
     const readTextFile = buildToolDefinition("read_text_file")
     const findFiles = buildToolDefinition("find_files")
     const searchFiles = buildToolDefinition("search_files")
@@ -177,11 +182,14 @@ describe("buildChatToolOffer", () => {
           tools: [readTextFile, findFiles, searchFiles, READ_PAGE],
           unavailableTools: ALL_TOOLS_AVAILABLE
         },
+        areToolCallsOn: true,
         toolSwitches: new Map([["read_text_file", false]])
       })
     ).toEqual({
       status: "offered",
-      offer: { definitions: [findFiles, searchFiles] }
+      offer: { definitions: [findFiles, searchFiles] },
+      switchedOffToolNames: ["read_text_file", "read_page"],
+      unavailableTools: []
     })
   })
 
@@ -195,15 +203,18 @@ describe("buildChatToolOffer", () => {
           tools: [findFiles, READ_PAGE],
           unavailableTools: ALL_TOOLS_AVAILABLE
         },
+        areToolCallsOn: true,
         toolSwitches: new Map([["read_page", true]])
       })
     ).toEqual({
       status: "offered",
-      offer: { definitions: [findFiles], backendToolNames: ["read_page"] }
+      offer: { definitions: [findFiles], backendToolNames: ["read_page"] },
+      switchedOffToolNames: [],
+      unavailableTools: []
     })
   })
 
-  it("leaves out a switched-on backend tool that cannot run now", () => {
+  it("leaves out a switched-on backend tool that cannot run now and names it with the list's reason, not as off", () => {
     expect(
       buildChatToolOffer({
         list: {
@@ -211,6 +222,7 @@ describe("buildChatToolOffer", () => {
           tools: [READ_PAGE, WEB_SEARCH],
           unavailableTools: new Map([["web_search", "api-key-missing"]])
         },
+        areToolCallsOn: true,
         toolSwitches: new Map([
           ["read_page", true],
           ["web_search", true]
@@ -218,28 +230,66 @@ describe("buildChatToolOffer", () => {
       })
     ).toEqual({
       status: "offered",
-      offer: { definitions: [], backendToolNames: ["read_page"] }
+      offer: { definitions: [], backendToolNames: ["read_page"] },
+      switchedOffToolNames: [],
+      unavailableTools: [{ name: "web_search", reason: "api-key-missing" }]
     })
   })
 
-  it("offers no tools when the only switched-on tool cannot run now", () => {
+  it("names a switched-off backend tool that cannot run now as off only", () => {
     expect(
       buildChatToolOffer({
         list: {
           status: "loaded",
           tools: [WEB_SEARCH],
-          unavailableTools: new Map([["web_search", "settings-unreadable"]])
+          unavailableTools: new Map([["web_search", "api-key-missing"]])
         },
-        toolSwitches: new Map([["web_search", true]])
+        areToolCallsOn: true,
+        toolSwitches: new Map()
       })
-    ).toEqual({ status: "not-offered" })
+    ).toEqual({
+      status: "not-offered",
+      switchedOffToolNames: ["web_search"],
+      unavailableTools: []
+    })
+  })
+
+  it("offers no tools and names each switched-on tool that cannot run now, in list order, when none can run", () => {
+    expect(
+      buildChatToolOffer({
+        list: {
+          status: "loaded",
+          tools: [READ_PAGE, WEB_SEARCH],
+          unavailableTools: new Map<string, BackendToolUnavailableReason>([
+            ["web_search", "settings-unreadable"],
+            ["read_page", "page-reader-not-ready"]
+          ])
+        },
+        areToolCallsOn: true,
+        toolSwitches: new Map([
+          ["read_page", true],
+          ["web_search", true]
+        ])
+      })
+    ).toEqual({
+      status: "not-offered",
+      switchedOffToolNames: [],
+      unavailableTools: [
+        READ_PAGE_NOT_READY,
+        { name: "web_search", reason: "settings-unreadable" }
+      ]
+    })
   })
 
   it.each([
-    ["every listed tool is switched off", [...CLIENT_TOOLS, READ_PAGE]],
-    ["only an unchanged backend tool is listed", [READ_PAGE]],
-    ["no tool is listed", []]
-  ])("offers no tools when %s", (_label, tools) => {
+    [
+      "every listed tool is switched off",
+      [...CLIENT_TOOLS, READ_PAGE],
+      ["read_text_file", "find_files", "read_page"]
+    ],
+    ["only an unchanged backend tool is listed", [READ_PAGE], ["read_page"]],
+    ["no tool is listed", [], []]
+  ])("offers no tools when %s", (_label, tools, switchedOffToolNames) => {
     expect(
       buildChatToolOffer({
         list: {
@@ -247,13 +297,44 @@ describe("buildChatToolOffer", () => {
           tools,
           unavailableTools: ALL_TOOLS_AVAILABLE
         },
+        areToolCallsOn: true,
         toolSwitches: new Map([
           ["read_text_file", false],
           ["find_files", false]
         ])
       })
-    ).toEqual({ status: "not-offered" })
+    ).toEqual({
+      status: "not-offered",
+      switchedOffToolNames,
+      unavailableTools: []
+    })
   })
+
+  it.each([
+    ...UNREAD_TOOL_LISTS,
+    Object.freeze({ status: "failed", error: "Lys couldn't read it." }),
+    Object.freeze({
+      status: "loaded",
+      tools: [buildToolDefinition("find_files"), READ_PAGE, WEB_SEARCH],
+      unavailableTools: new Map<string, BackendToolUnavailableReason>([
+        ["web_search", "api-key-missing"]
+      ])
+    })
+  ] satisfies readonly ToolListState[])(
+    "offers and names no tool but says tool calls are off while they are off and the list is $status, whatever each tool's switch says",
+    (list) => {
+      expect(
+        buildChatToolOffer({
+          list,
+          areToolCallsOn: false,
+          toolSwitches: new Map([
+            ["read_page", true],
+            ["web_search", true]
+          ])
+        })
+      ).toBe(TOOL_CALLS_OFF_OFFER)
+    }
+  )
 
   it("reports the failed read's reason and how to chat without tools", () => {
     const reason = "Lys couldn't read its tool list: bad name."
@@ -261,6 +342,7 @@ describe("buildChatToolOffer", () => {
     expect(
       buildChatToolOffer({
         list: { status: "failed", error: reason },
+        areToolCallsOn: true,
         toolSwitches: new Map()
       })
     ).toEqual({
@@ -274,7 +356,13 @@ describe("buildChatToolOffer", () => {
   it.each(UNREAD_TOOL_LISTS)(
     "reports the tool list unavailable while it is $status",
     (list) => {
-      expect(buildChatToolOffer({ list, toolSwitches: new Map() })).toEqual({
+      expect(
+        buildChatToolOffer({
+          list,
+          areToolCallsOn: true,
+          toolSwitches: new Map()
+        })
+      ).toEqual({
         status: "unavailable",
         error: expect.stringMatching(
           /^Lys couldn't read its tool list\. .*Turn tool calls off in Settings → Tools/
@@ -284,14 +372,75 @@ describe("buildChatToolOffer", () => {
   )
 })
 
+describe("buildChatToolFields", () => {
+  const offer = Object.freeze({ definitions: CLIENT_TOOLS })
+
+  it.each<[string, ChatToolOfferResult, ChatToolFields]>([
+    [
+      "offered tools, switched-off tools, and tools that cannot run",
+      {
+        status: "offered",
+        offer,
+        switchedOffToolNames: ["read_page"],
+        unavailableTools: [{ name: "web_search", reason: "api-key-missing" }]
+      },
+      {
+        tools: offer,
+        switchedOffToolNames: ["read_page"],
+        unavailableTools: [{ name: "web_search", reason: "api-key-missing" }]
+      }
+    ],
+    [
+      "offered tools alone",
+      {
+        status: "offered",
+        offer,
+        switchedOffToolNames: [],
+        unavailableTools: []
+      },
+      { tools: offer }
+    ],
+    [
+      "switched-off tools alone",
+      {
+        status: "not-offered",
+        switchedOffToolNames: ["read_page"],
+        unavailableTools: []
+      },
+      { switchedOffToolNames: ["read_page"] }
+    ],
+    [
+      "tools that cannot run alone",
+      {
+        status: "not-offered",
+        switchedOffToolNames: [],
+        unavailableTools: [READ_PAGE_NOT_READY]
+      },
+      { unavailableTools: [READ_PAGE_NOT_READY] }
+    ],
+    ["no tool field", NO_CHAT_TOOL_OFFER, {}],
+    [
+      "only that tool calls are off",
+      TOOL_CALLS_OFF_OFFER,
+      { areToolCallsSwitchedOff: true }
+    ],
+    [
+      "nothing for an unavailable list",
+      { status: "unavailable", error: "x" },
+      {}
+    ]
+  ])("sends %s", (_label, toolOffer, fields) => {
+    expect(buildChatToolFields(toolOffer)).toStrictEqual(fields)
+  })
+})
+
 describe("useToolStore", () => {
-  it("starts with no list, tool calls on, and no changed switch", async () => {
+  it("starts with no list and tool calls on", async () => {
     const useToolStore = await loadFreshToolStore()
 
     expect(useToolStore.getState()).toMatchObject({
       list: { status: "idle" },
-      areToolCallsOn: true,
-      toolSwitches: new Map()
+      areToolCallsOn: true
     })
   })
 
@@ -441,36 +590,6 @@ describe("useToolStore", () => {
     useToolStore.getState().updateToolCallsOn(false)
 
     expect(useToolStore.getState().areToolCallsOn).toBe(false)
-  })
-
-  it("switches one tool off, and a backend tool on", async () => {
-    const useToolStore = await loadFreshToolStore()
-    const findFiles = buildToolDefinition("find_files")
-
-    useToolStore.getState().updateToolOn(findFiles, false)
-    useToolStore.getState().updateToolOn(READ_PAGE, true)
-
-    const { toolSwitches } = useToolStore.getState()
-    expect(isToolOn(toolSwitches, findFiles)).toBe(false)
-    expect(isToolOn(toolSwitches, READ_PAGE)).toBe(true)
-  })
-
-  it("leaves other tools and earlier switch snapshots unchanged", async () => {
-    const useToolStore = await loadFreshToolStore()
-    const before = useToolStore.getState().toolSwitches
-
-    useToolStore
-      .getState()
-      .updateToolOn(buildToolDefinition("find_files"), false)
-    await waitForMicrotasks()
-
-    expect(
-      isToolOn(
-        useToolStore.getState().toolSwitches,
-        buildToolDefinition("read_text_file")
-      )
-    ).toBe(true)
-    expect(before.size).toBe(0)
   })
 
   describe("loadToolsAgain", () => {

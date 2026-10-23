@@ -19,6 +19,7 @@ import type {
   ReplyContextImageSides,
   ReplyContextMessage
 } from "./replyModel"
+import { listUnofferedToolNotes, type UnofferedTools } from "./unofferedTools"
 
 /**
  * Reads the stored bytes of one image attachment of a conversation.
@@ -405,6 +406,22 @@ function listImageAttachments(
           .map((attachment) => ({ messageId: message.id, attachment }))
       : []
   )
+}
+
+/**
+ * Formats the system prompt a context sends.
+ * @param systemPrompt - The agent's own instructions.
+ * @param unofferedTools - What the request names about the tools the turn
+ * does not offer.
+ * @returns The instructions unchanged when there is nothing to say about
+ * those tools; otherwise the instructions followed by each note
+ * {@link listUnofferedToolNotes} lists, each after a blank line.
+ */
+export function formatSystemPrompt(
+  systemPrompt: string,
+  unofferedTools: UnofferedTools
+): string {
+  return [systemPrompt, ...listUnofferedToolNotes(unofferedTools)].join("\n\n")
 }
 
 /**

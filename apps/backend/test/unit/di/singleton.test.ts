@@ -5,6 +5,7 @@ import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { backendConfigSchema } from "../../../src/config"
 import type { AgentTurn } from "../../../src/modules/agent/agent"
 import AgentService from "../../../src/modules/agent/agentService"
+import { NO_UNOFFERED_TOOLS } from "../../../src/modules/agent/unofferedTools"
 import ChatService from "../../../src/modules/chat/chatService"
 import StoredConversationHistoryEditor from "../../../src/modules/conversation/historyEditor"
 import StoredConversationHistoryReader from "../../../src/modules/conversation/historyReader"
@@ -103,6 +104,7 @@ function buildHelloAgentTurn(): AgentTurn {
     generationOptions: { temperature: 0.4 },
     clientTools: [],
     builtInTools: [],
+    unofferedTools: NO_UNOFFERED_TOOLS,
     abortSignal: new AbortController().signal,
     updateAssistantMessageState: () => true,
     createReplyPart: vi.fn(),

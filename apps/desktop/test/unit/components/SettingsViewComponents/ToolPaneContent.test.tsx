@@ -181,8 +181,12 @@ describe("ToolPaneContent", () => {
     expect(host.commands).toHaveLength(1)
   })
 
-  it("states what a trained model is offered and updates it as tools are switched", async () => {
-    startNativeHostFake({ list_tools: () => TOOLS })
+  it("states what a trained model is offered, updates it as tools are switched, and saves the switch", async () => {
+    const host = startNativeHostFake({
+      list_tools: () => TOOLS,
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => null
+    })
     await startToolPane()
     const user = userEvent.setup()
     const toolCalls = screen.getByRole("switch", { name: "Tool calls" })
@@ -191,6 +195,7 @@ describe("ToolPaneContent", () => {
       `qwen3-8b · ${formatOffer(TOOLS)}`
     )
     await user.click(screen.getByRole("switch", { name: "Use find_files" }))
+    await waitForRenderedWork()
 
     expect(toolCalls).toHaveAccessibleDescription(
       `qwen3-8b · ${formatOffer([TOOLS[0]])}`
@@ -198,10 +203,57 @@ describe("ToolPaneContent", () => {
     expect(screen.getByRole("region", { name: "files" })).toHaveTextContent(
       /^files1 of 2 on/
     )
+    expect(host.commands.at(-1)).toEqual({
+      command: "save_settings",
+      args: {
+        newSettings: {
+          ...STORED_SETTINGS_DOCUMENT,
+          tools: { justRun: [], switches: { find_files: false } }
+        }
+      }
+    })
+  })
+
+  it("shows the saved switches, a tool without one at its default", async () => {
+    startNativeHostFake({ list_tools: () => TOOLS })
+    const useLysStore = await startToolPane()
+    const { settings } = useLysStore.getState()
+
+    act(() => {
+      useLysStore.setState({
+        settings: {
+          ...settings,
+          tools: {
+            justRunToolNames: new Set(),
+            switches: new Map([
+              ["read_page", true],
+              ["find_files", false]
+            ])
+          }
+        }
+      })
+    })
+
+    expect(screen.getByRole("switch", { name: "Use read_page" })).toBeChecked()
+    expect(
+      screen.getByRole("switch", { name: "Use find_files" })
+    ).not.toBeChecked()
+    expect(
+      screen.getByRole("switch", { name: "Use read_text_file" })
+    ).toBeChecked()
+    expect(
+      screen.getByRole("switch", { name: "Tool calls" })
+    ).toHaveAccessibleDescription(
+      `qwen3-8b · ${formatOffer([TOOLS[0], READ_PAGE])}`
+    )
   })
 
   it("leaves the backend's tool out of the offer until it is switched on", async () => {
-    startNativeHostFake({ list_tools: () => TOOLS })
+    startNativeHostFake({
+      list_tools: () => TOOLS,
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => null
+    })
     await startToolPane()
     const user = userEvent.setup()
     const toolCalls = screen.getByRole("switch", { name: "Tool calls" })
@@ -290,7 +342,7 @@ describe("ToolPaneContent", () => {
 
     await user.click(screen.getByRole("button", { name: "Just run" }))
     const saveStatus = screen.getByRole("status", {
-      name: "Just run choices save"
+      name: "Tool choices save"
     })
     const whileSaving = saveStatus.textContent
     write.resolve(null)
@@ -301,14 +353,14 @@ describe("ToolPaneContent", () => {
     ).toHaveAccessibleDescription(
       "Runs the moment the model asks, without showing you the call."
     )
-    expect(whileSaving).toBe("Saving Just run choices…")
+    expect(whileSaving).toBe("Saving tool choices…")
     expect(saveStatus).toHaveTextContent(/^$/)
     expect(host.commands.at(-1)).toEqual({
       command: "save_settings",
       args: {
         newSettings: {
           ...STORED_SETTINGS_DOCUMENT,
-          tools: { justRun: ["read_text_file"] }
+          tools: { justRun: ["read_text_file"], switches: {} }
         }
       }
     })
@@ -328,9 +380,9 @@ describe("ToolPaneContent", () => {
     await waitForRenderedWork()
 
     expect(
-      screen.getByRole("status", { name: "Just run choices save" })
+      screen.getByRole("status", { name: "Tool choices save" })
     ).toHaveTextContent(
-      "Couldn't save your Just run choices. Tool calls keep following the choices Lys last saved until a save works."
+      "Couldn't save your tool choices. Each switch applies until Lys quits, but Just run keeps following the choices Lys last saved until a save works."
     )
     expect(screen.getByRole("button", { name: "Just run" })).toHaveAttribute(
       "aria-pressed",
@@ -343,7 +395,7 @@ describe("ToolPaneContent", () => {
       host.commands.filter((invoked) => invoked.command === "save_settings")
     ).toHaveLength(2)
     expect(
-      screen.getByRole("status", { name: "Just run choices save" })
+      screen.getByRole("status", { name: "Tool choices save" })
     ).toHaveTextContent(/^$/)
     expect(screen.queryByRole("button", { name: "Retry saving" })).toBeNull()
   })
@@ -363,12 +415,12 @@ describe("ToolPaneContent", () => {
     await waitForRenderedWork()
     const { useToolStore } = await import("@/lib/store/tools")
     const saveFailure =
-      "Couldn't save your Just run choices. Tool calls keep following the choices Lys last saved until a save works."
+      "Couldn't save your tool choices. Each switch applies until Lys quits, but Just run keeps following the choices Lys last saved until a save works."
 
     act(() => void useToolStore.getState().loadTools())
     await waitForRenderedWork()
     const whileReading = screen.getByRole("status", {
-      name: "Just run choices save"
+      name: "Tool choices save"
     }).textContent
     const retryWhileReading = screen.queryByRole("button", {
       name: "Retry saving"
@@ -380,7 +432,7 @@ describe("ToolPaneContent", () => {
     expect(retryWhileReading).toBeInTheDocument()
     expect(screen.getByText("Lys couldn't read its tool list.")).toBeVisible()
     expect(
-      screen.getByRole("status", { name: "Just run choices save" })
+      screen.getByRole("status", { name: "Tool choices save" })
     ).toHaveTextContent(saveFailure)
     expect(
       screen.getByRole("button", { name: "Retry saving" })

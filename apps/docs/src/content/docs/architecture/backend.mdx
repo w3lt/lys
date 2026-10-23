@@ -134,7 +134,9 @@ setting.
 `POST /api/v1/chat/context` makes the same measurement for the composer's
 context meter. It resolves the agent and the conversation as the chat route
 does, through the same lookups, reads a continued conversation once, and
-asks the agent's `findContextMeasurement` for the system prompt, tools, and
+asks the agent's `findContextMeasurement` for the system prompt, with the
+notes about the tools the request does not offer when it names any or
+switches tool calls off, the tools, and
 stored messages a turn's first round would send, with an empty new message
 that measures the markup around the text. When a stored message holds an
 attachment, it reads the model's capabilities as the chat route does, so the
@@ -147,7 +149,17 @@ sides, or a missing one's placeholder, where a turn sends the image. See the
 
 Each completion receives the system prompt of the conversation's agent, prior
 user messages, the rounds of completed or interrupted replies, and the current
-user message once. Each user message sends its text followed by the list of
+user message once. When the request names
+[tools the turn does not offer](/reference/api/#tools-the-turn-does-not-offer)
+or switches tool calls off, `findUnofferedTools` in
+`src/modules/chat/routes/turnRequest.ts` turns those fields into one
+`UnofferedTools` value, checking that every tool named as unable to run is one
+the backend runs, and `formatSystemPrompt` adds the notes
+`src/modules/agent/unofferedTools.ts` writes after the system prompt, in every
+round: that tool calls are off, or which tools are switched off and which
+switched-on tools cannot run now, why, and what fixes it. Each note tells the
+model to say why a needed tool cannot be used instead of guessing what it
+would return. Each user message sends its text followed by the list of
 its attachments and, for a model with vision, its images; see
 [attachments](#attachments). `buildAgentContext` sends each stored round as one
 assistant message with the round's text and its tool calls that have a
@@ -182,7 +194,11 @@ superseded, deleted, or finalized, and ends it as interrupted.
 
 The tool-call round stores each call as a part in the model's order, under
 the UUIDv7 it sends: a call of an unknown tool, or with arguments that do not
-match, as `failed` with the message the model reads; a checked call as
+match, as `failed` with the message the model reads, which for a tool the
+request names as switched off or unable to run, or for any tool while tool
+calls are off, says why it did not run; a turn that offers no tool answers
+such calls the same way when the request names any tool or switches tool
+calls off, and otherwise fails the reply; a checked call as
 `running` when the gate allows it at once, or otherwise as
 `awaiting-approval` before its prompt is sent, in the same step. A call the
 store refuses because its reply has ended is never prompted. An allowed call

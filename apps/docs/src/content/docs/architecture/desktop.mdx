@@ -19,9 +19,9 @@ presentation state, not durable conversation storage.
 | Chat state          | `src/lib/store/chat-view` owns the active conversation, the agent selected for a new one, request lifecycle, conversation opening, and error presentation.                                                                                         |
 | History state       | `src/lib/store/conversation-history` owns the past-conversations dialog, its search and pages, and rename and delete calls.                                                                                                                        |
 | Agent state         | `src/lib/store/agents` owns the list of built-in and stored agents, the Agents pane's editor and draft, and the agent create, update, and delete calls.                                                                                            |
-| Tool state          | `src/lib/store/tools.ts` owns the Tools pane's list of every tool, the app's and the backend's, and the session-only switches that decide which tools a request offers.                                                                            |
+| Tool state          | `src/lib/store/tools.ts` owns the Tools pane's list of every tool, the app's and the backend's, the session-only Tool calls switch, and the offer each request makes from them.                                                                    |
 | Tool calls          | `src/lib/store/tool-calls` follows each running reply, shows the backend's approval prompts, runs the client tools' calls the backend sends, and sends every answer.                                                                               |
-| Tool approvals      | `src/lib/store/tool-settings.ts` owns each tool's Ask me or Just run, saved as the `tools` group of `settings.json` for the backend to read, and its automatic save.                                                                               |
+| Tool approvals      | `src/lib/store/tool-settings.ts` owns each tool's switch and its Ask me or Just run, saved as the `tools` group of `settings.json`, and their automatic save.                                                                                      |
 | Shell/runtime state | `src/lib/store/index.ts` tracks which view is open, whether the backend and vmo run, and settings loaded from Tauri; `vmo-runtime.ts` owns vmo's state and its start and stop, and `runtime-autostart-settings.ts` saves the two startup switches. |
 | Model lifecycle     | `src/lib/store/model-actions.ts` owns real inventory, load, unload, and health requests shared by settings and the composer.                                                                                                                       |
 | SSE consumption     | `src/lib/apis/http/chat.ts` opens chat and reply-events SSE streams, validates events with Zod, and sends reply stops, approval answers, and tool results.                                                                                         |
@@ -557,7 +557,10 @@ Tool calls on or off and each tool's switch apply to the next chat request,
 because they decide only which tools a request offers; switching a tool off
 while a reply runs does not stop that reply's calls. A tool that only reads
 this machine starts on; a tool that sends requests off the machine (`network`)
-starts off. Tool calls on or off and each tool's switch last for the session
+starts off. Switching a tool saves its choice in the `tools.switches` object
+of `settings.json`, alongside its approval, so it holds after a restart; a
+tool the person never switched has no entry and stays at its default, also
+when a later build adds it. The Tool calls switch lasts for the session
 only.
 
 Every tool, network tools included, offers both approvals and starts on Ask
@@ -568,14 +571,15 @@ without showing you the call.", and a `network` tool "Sends its request off
 this machine the moment the model asks, without showing you what it sends."
 Choosing Just run saves the tool's name in the `tools.justRun` list of
 `settings.json`, and choosing Ask me removes it, so the approval holds after a
-restart. The application store owns that list: a change shows at once and is
-saved automatically, serialized with the other group saves. The backend reads
-the saved list when each round of tool calls arrives, so a change applies from
-the next round once it is saved. A status line under the tools says "Saving
-Just run choices…" while a save runs; when one fails, it says that tool calls
-keep following the choices last saved until a save works, and offers Retry
-saving. A name in the list that Lys does not list now, such as a backend tool
-whose list could not be read, is kept and has no effect.
+restart. The application store owns that list and the switches: a change
+shows at once and is saved automatically, serialized with the other group
+saves. The backend reads the saved list when each round of tool calls arrives,
+so an approval applies from the next round once it is saved. A status line
+under the tools says "Saving tool choices…" while a save runs; when one fails,
+it says that each switch applies until Lys quits but Just run keeps following
+the choices last saved until a save works, and offers Retry saving. A name
+that Lys does not list now, such as a backend tool whose list could not be
+read, is kept and has no effect.
 
 A backend tool that cannot run now, such as `web_search` without a saved
 Tavily API key or `read_page` while vmo is not ready, keeps its row: its
@@ -639,8 +643,16 @@ a polite live region that describes the field.
 A chat request offers the switched-on tools when tool calls are on and the
 loaded model's `trainedForToolUse` is true: client tools by their definitions,
 backend tools by name in `backendToolNames`, leaving out every backend tool
-that cannot run now. If the tool list cannot be read, the request fails with an
-inline error and nothing is sent. When the backend still refuses an offered
+that cannot run now. For such a model it also names, in
+`switchedOffToolNames`, every listed tool whose switch is off, and, in
+`unavailableTools`, every switched-on backend tool that cannot run now with
+the list's reason, so the backend can tell the model why a tool it needs
+cannot be used instead of letting it guess. While tool calls are off, the
+request names no tool and sends `areToolCallsSwitchedOff` instead, without
+reading the tool list, so the backend tells the model tool calls are off. If
+the tool list cannot be read while tool calls are on, the request fails with
+an inline error and nothing is sent. A model that is not trained for tool use
+gets none of these fields. The composer's context meter measures the same fields. When the backend still refuses an offered
 tool that cannot run (its key was removed since the list was read), the request
 fails with an inline error that says which tool and what to do, and the tool
 list is read again so the next request leaves the tool out.
@@ -733,10 +745,8 @@ are gone and the reply is marked interrupted when the backend next starts.
   way to open it.
 - The Tavily API key is stored as plain text in `settings.json`, protected
   only by the file's owner-only permissions; there is no keychain storage.
-- Tool calls on or off and each tool's switch last for the session only; after
-  a restart they return to their defaults
-  ([#110](https://github.com/w3lt/lys/issues/110)). Only each tool's approval
-  is saved.
+- The Tool calls switch lasts for the session only; after a restart it is on
+  again. Each tool's switch and approval are saved.
 - There is no "Allow for this chat": each call on Ask me is asked about.
 - Switching a tool or tool calls off does not stop a reply already running;
   it applies from the next message.

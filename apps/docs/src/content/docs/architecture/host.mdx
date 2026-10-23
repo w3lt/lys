@@ -232,7 +232,8 @@ The host creates the following defaults when the settings file is missing:
     "tavilyApiKey": null
   },
   "tools": {
-    "justRun": []
+    "justRun": [],
+    "switches": {}
   },
   "location": {
     "city": null,
@@ -275,10 +276,10 @@ configuration belongs to the renderer, which applies it when it resolves a load
 
 The desktop automatically saves generation edits by reading this document,
 replacing its generation group, and saving the complete document. Load
-configuration edits are saved the same way, and so are each tool's Ask me or
-Just run choice, the Tavily API key when the person saves or removes it in
-the Secrets pane, and the location when the person saves it in the Tools
-pane. A change of either startup switch in the Runtime pane saves
+configuration edits are saved the same way, and so are each tool's switch and
+its Ask me or Just run choice, the Tavily API key when the person saves or
+removes it in the Secrets pane, and the location when the person saves it in
+the Tools pane. A change of either startup switch in the Runtime pane saves
 `autoStartBackend` and `autoStartVmo` and keeps the rest of the `runtime`
 group as stored; a file without `autoStartVmo` loads it as `true`. The other
 runtime edits in the UI remain session-only; the automatic saves preserve

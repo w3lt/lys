@@ -31,6 +31,7 @@ import {
 import {
   findRequestedAgent,
   findRequestedBuiltInTools,
+  findUnofferedTools,
   sendUnansweredTurnProblem,
   type TurnAgentLookups
 } from "./turnRequest"
@@ -138,6 +139,7 @@ export default function registerChatContextRoute(app: FastifyInstance): void {
  * lookups, and the attachment files.
  * @returns Settlement after the measurement or a problem is sent.
  * @throws An `UnknownBackendToolError` for an offered backend tool the
+ * backend does not run, or for a tool named as unable to run that the
  * backend does not run; the inventory read's failure; and the agent's
  * measurement failure, for the route's error handler.
  * @remarks A continued conversation is read once, and its agent and stored
@@ -159,6 +161,7 @@ async function handleChatContextRequest(
     dependencies.builtInTools,
     body.tools
   )
+  const unofferedTools = findUnofferedTools(dependencies.builtInTools, body)
   const storedConversation =
     body.conversation.kind === "existing"
       ? dependencies.findConversation(body.conversation.id)
@@ -192,7 +195,8 @@ async function handleChatContextRequest(
       builtInTools,
       capabilities.trainedForToolUse &&
         hasReadableTextAttachment(measured.attachments)
-    )
+    ),
+    unofferedTools
   })
   if (measurement === undefined) {
     const problem = createLlmHealthProblem({

@@ -24,7 +24,7 @@ type ToolSettingsStore = ToolSettingsSlice & { settings: LysSettings }
 
 /**
  * Creates a store holding the stored settings, in which `read_page` is on
- * Just run.
+ * Just run and `search_files` is switched off.
  *
  * @returns A store owning one tool-settings slice, whose saves run through
  * the application's settings-group saves over the native host.
@@ -76,10 +76,17 @@ function listSettingsWrites(
  * replaces its tools group.
  *
  * @param justRun - Names on Just run, in the order the write lists them.
+ * @param switches - Saved switches; by default the stored ones, in which
+ * `search_files` is off.
  * @returns The expected `save_settings` arguments.
  */
-function buildToolsWrite(justRun: readonly string[]) {
-  return { newSettings: { ...STORED_SETTINGS_DOCUMENT, tools: { justRun } } }
+function buildToolsWrite(
+  justRun: readonly string[],
+  switches: Readonly<Record<string, boolean>> = { search_files: false }
+) {
+  return {
+    newSettings: { ...STORED_SETTINGS_DOCUMENT, tools: { justRun, switches } }
+  }
 }
 
 describe("getToolApproval", () => {
@@ -94,19 +101,73 @@ describe("getToolApproval", () => {
 
 describe("isToolSettingsEqual", () => {
   it("compares the names on Just run, whatever their order", () => {
-    const first = { justRunToolNames: new Set(["read_page", "find_files"]) }
+    const switches = new Map<string, boolean>()
+    const first = {
+      justRunToolNames: new Set(["read_page", "find_files"]),
+      switches
+    }
 
     expect(
       isToolSettingsEqual(first, {
-        justRunToolNames: new Set(["find_files", "read_page"])
+        justRunToolNames: new Set(["find_files", "read_page"]),
+        switches
       })
     ).toBe(true)
     expect(
-      isToolSettingsEqual(first, { justRunToolNames: new Set(["read_page"]) })
+      isToolSettingsEqual(first, {
+        justRunToolNames: new Set(["read_page"]),
+        switches
+      })
     ).toBe(false)
     expect(
       isToolSettingsEqual(first, {
-        justRunToolNames: new Set(["read_page", "web_search"])
+        justRunToolNames: new Set(["read_page", "web_search"]),
+        switches
+      })
+    ).toBe(false)
+  })
+
+  it("compares the switches by tool and value, whatever their order", () => {
+    const justRunToolNames = new Set<string>()
+    const first = {
+      justRunToolNames,
+      switches: new Map([
+        ["web_search", true],
+        ["find_files", false]
+      ])
+    }
+
+    expect(
+      isToolSettingsEqual(first, {
+        justRunToolNames,
+        switches: new Map([
+          ["find_files", false],
+          ["web_search", true]
+        ])
+      })
+    ).toBe(true)
+    expect(
+      isToolSettingsEqual(first, {
+        justRunToolNames,
+        switches: new Map([
+          ["web_search", true],
+          ["find_files", true]
+        ])
+      })
+    ).toBe(false)
+    expect(
+      isToolSettingsEqual(first, {
+        justRunToolNames,
+        switches: new Map([["web_search", true]])
+      })
+    ).toBe(false)
+    expect(
+      isToolSettingsEqual(first, {
+        justRunToolNames,
+        switches: new Map([
+          ["web_search", true],
+          ["read_page", false]
+        ])
       })
     ).toBe(false)
   })
@@ -200,6 +261,106 @@ describe("createToolSettingsSlice", () => {
       expect(listSettingsWrites(host.commands)).toEqual([
         buildToolsWrite(["read_page", "find_files"]),
         buildToolsWrite(["find_files"])
+      ])
+      expect(store.getState().toolSettingsSave).toEqual({ status: "saved" })
+    })
+  })
+
+  describe("updateToolOn", () => {
+    it("switches a tool at once, then saves it with the choices already saved", async () => {
+      const { host, writes } = startControlledSettingsHost()
+      const store = createToolSettingsStore()
+
+      store.getState().updateToolOn("web_search", true)
+      const appliedAtOnce = store.getState().settings.tools.switches
+      await waitForMicrotasks()
+      const whileWriting = store.getState().toolSettingsSave
+      writes[0]?.resolve(null)
+      await waitForMicrotasks()
+
+      expect(appliedAtOnce).toEqual(
+        new Map([
+          ["search_files", false],
+          ["web_search", true]
+        ])
+      )
+      expect(whileWriting).toEqual({ status: "saving" })
+      expect(store.getState().toolSettingsSave).toEqual({ status: "saved" })
+      expect(listSettingsWrites(host.commands)).toEqual([
+        buildToolsWrite(["read_page"], {
+          search_files: false,
+          web_search: true
+        })
+      ])
+    })
+
+    it("keeps a tool switched back to its default as a saved switch", async () => {
+      const { host, writes } = startControlledSettingsHost()
+      const store = createToolSettingsStore()
+
+      store.getState().updateToolOn("search_files", true)
+      await waitForMicrotasks()
+      writes[0]?.resolve(null)
+      await waitForMicrotasks()
+
+      expect(store.getState().settings.tools.switches).toEqual(
+        new Map([["search_files", true]])
+      )
+      expect(listSettingsWrites(host.commands)).toEqual([
+        buildToolsWrite(["read_page"], { search_files: true })
+      ])
+    })
+
+    it("changes and saves nothing when the tool's saved switch already has that value", async () => {
+      const { host } = startControlledSettingsHost()
+      const store = createToolSettingsStore()
+      const before = store.getState().settings
+
+      store.getState().updateToolOn("search_files", false)
+      await waitForMicrotasks()
+
+      expect(store.getState().settings).toBe(before)
+      expect(store.getState().toolSettingsSave).toEqual({ status: "idle" })
+      expect(host.commands).toEqual([])
+    })
+
+    it("keeps the switch and reports the failure when it cannot be saved", async () => {
+      const { writes } = startControlledSettingsHost()
+      const store = createToolSettingsStore()
+
+      store.getState().updateToolOn("web_search", true)
+      await waitForMicrotasks()
+      writes[0]?.reject("Disk full")
+      await waitForMicrotasks()
+
+      expect(store.getState().toolSettingsSave).toEqual({ status: "failed" })
+      expect(store.getState().settings.tools.switches.get("web_search")).toBe(
+        true
+      )
+    })
+
+    it("saves an approval and a switch changed during one write together, after it", async () => {
+      const { host, writes } = startControlledSettingsHost()
+      const store = createToolSettingsStore()
+
+      store.getState().updateToolOn("web_search", true)
+      await waitForMicrotasks()
+      store.getState().updateToolApproval("web_search", "run")
+      store.getState().updateToolOn("search_files", true)
+      writes[0]?.resolve(null)
+      await waitForMicrotasks()
+      writes[1]?.resolve(null)
+      await waitForMicrotasks()
+
+      expect(listSettingsWrites(host.commands)).toEqual([
+        buildToolsWrite(["read_page"], {
+          search_files: false,
+          web_search: true
+        }),
+        buildToolsWrite(["read_page", "web_search"], {
+          search_files: true,
+          web_search: true
+        })
       ])
       expect(store.getState().toolSettingsSave).toEqual({ status: "saved" })
     })

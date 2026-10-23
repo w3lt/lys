@@ -129,7 +129,8 @@ export function calculateToolTokenEstimate(tool: ToolDefinition): number {
  * Calculates how many tools are offered and what they add to a request.
  *
  * @param tools - Every listed tool.
- * @param toolSwitches - Switches the person changed, keyed by tool name.
+ * @param toolSwitches - Saved switches the person changed, keyed by tool
+ * name.
  * @param unavailableTools - Why each tool that cannot run now cannot, by
  * name; such a tool is never offered, whatever its switch says.
  * @returns The count and summed token estimate of the tools that are
@@ -364,22 +365,23 @@ export function formatToolApprovalNote(
 }
 
 /**
- * Formats the outcome of the latest save of the Just run choices.
+ * Formats the outcome of the latest save of the tool choices.
  *
  * @param save - Latest application-owned save lifecycle state.
  * @returns The saving or failure message, or an empty string while idle or
  * after a successful save, which leave nothing to announce. The failure
- * message says that tool calls follow the saved choices, because the
- * backend reads them from the settings file.
+ * message says that each switch still applies, because the desktop builds
+ * each request's offer, while Just run follows the saved choices, because
+ * the backend reads them from the settings file.
  */
 export function formatToolSettingsSaveStatus(
   save: ToolSettingsSaveState
 ): string {
   switch (save.status) {
     case "saving":
-      return "Saving Just run choices…"
+      return "Saving tool choices…"
     case "failed":
-      return "Couldn't save your Just run choices. Tool calls keep following the choices Lys last saved until a save works."
+      return "Couldn't save your tool choices. Each switch applies until Lys quits, but Just run keeps following the choices Lys last saved until a save works."
     case "idle":
     case "saved":
       return ""

@@ -11,6 +11,11 @@ import {
   createAgentNotFoundProblem,
   createConversationAgentMissingProblem
 } from "../../agent/routes/agentProblems"
+import {
+  NO_UNOFFERED_TOOLS,
+  TOOL_CALLS_OFF,
+  type UnofferedTools
+} from "../../agent/unofferedTools"
 import { createConversationNotFoundProblem } from "../../conversation/routes/notFound"
 import type { BuiltInToolEntry } from "../../tool/builtIn/builtInTool"
 import { findBuiltInTools } from "../../tool/builtIn/builtInTools"
@@ -41,11 +46,12 @@ export class UnknownBackendToolError extends Error {
   /**
    * Creates the error for one request.
    *
-   * @param toolNames - Offered names that belong to no backend tool.
+   * @param toolNames - Names the request offers as backend tools, or names
+   * as backend tools that cannot run now, that belong to no backend tool.
    */
   public constructor(toolNames: readonly string[]) {
     super(
-      `The request offers backend tools the backend does not run: ${toolNames.join(", ")}`
+      `The request names backend tools the backend does not run: ${toolNames.join(", ")}`
     )
   }
 
@@ -113,6 +119,43 @@ export function findRequestedBuiltInTools(
     case "unknown":
       throw new UnknownBackendToolError(selection.toolNames)
   }
+}
+
+/**
+ * Finds what a chat or chat-context request names about the tools its turn
+ * does not offer.
+ *
+ * @param builtInTools - Every tool the backend runs.
+ * @param body - Validated request body.
+ * @returns `TOOL_CALLS_OFF` when the request switches tool calls off;
+ * otherwise the switched-off names and the unavailable tools in request
+ * order, none of them offered, each list empty when the request names none.
+ * @throws An {@link UnknownBackendToolError} naming every tool named as
+ * unable to run that belongs to no backend tool.
+ * @remarks The reason given for an unavailable tool is the client's reading
+ * of the tool list and is not checked again.
+ */
+export function findUnofferedTools(
+  builtInTools: readonly BuiltInToolEntry[],
+  body: Pick<
+    ChatApiRequestBody,
+    "switchedOffToolNames" | "unavailableTools" | "areToolCallsSwitchedOff"
+  >
+): UnofferedTools {
+  if (body.areToolCallsSwitchedOff === true) return TOOL_CALLS_OFF
+  const { switchedOffToolNames, unavailableTools } = body
+  const selection = findBuiltInTools(
+    builtInTools,
+    unavailableTools?.map((tool) => tool.name)
+  )
+  if (selection.status === "unknown")
+    throw new UnknownBackendToolError(selection.toolNames)
+  return Object.freeze({
+    status: "tool-calls-on",
+    switchedOffToolNames:
+      switchedOffToolNames ?? NO_UNOFFERED_TOOLS.switchedOffToolNames,
+    unavailableTools: unavailableTools ?? NO_UNOFFERED_TOOLS.unavailableTools
+  })
 }
 
 /**

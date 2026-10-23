@@ -23,8 +23,9 @@ export type ToolApproval = (typeof TOOL_APPROVALS)[number]
 
 /**
  * Application-owned lifecycle of the latest tool-choice save; a choice whose
- * save fails stays selected in the pane, while tool calls keep following the
- * choices last saved.
+ * save fails stays selected in the pane. A switch applies to chat requests
+ * at once, saved or not, while approvals keep following the choices last
+ * saved.
  */
 export type ToolSettingsSaveState =
   | { readonly status: "idle" }
@@ -32,7 +33,7 @@ export type ToolSettingsSaveState =
   | { readonly status: "saved" }
   | { readonly status: "failed" }
 
-/** Tool approval commands and the autosave of the tools group. */
+/** Tool approval and switch commands and the autosave of the tools group. */
 export type ToolSettingsSlice = {
   /** Latest save outcome, retained across settings-pane unmounts. */
   readonly toolSettingsSave: ToolSettingsSaveState
@@ -51,6 +52,18 @@ export type ToolSettingsSlice = {
     toolName: string,
     approval: ToolApproval
   ) => void
+  /**
+   * Switches one tool on or off and saves the tools group.
+   *
+   * @param toolName - Name of a listed tool.
+   * @param isOn - Whether the tool is offered to the model.
+   * @remarks The pane and the next chat request follow the switch at once,
+   * because the desktop builds each request's offer; the save keeps it for
+   * the next launch. A tool whose saved switch already has the value
+   * changes and saves nothing. `toolSettingsSave` reports the save; after a
+   * failed save, the switch still applies until Lys quits.
+   */
+  readonly updateToolOn: (toolName: string, isOn: boolean) => void
   /**
    * Persists the current tool choices, preserving the other groups on disk.
    * @returns Resolves after the latest change is saved or fails; it never
@@ -86,7 +99,8 @@ export function getToolApproval(
  *
  * @param first - One tool-choice value.
  * @param second - The other tool-choice value.
- * @returns Whether both put the same tools on Just run, in any order.
+ * @returns Whether both put the same tools on Just run and give the same
+ * tools the same switch, in any order.
  */
 export function isToolSettingsEqual(
   first: ToolSettings,
@@ -96,6 +110,10 @@ export function isToolSettingsEqual(
     first.justRunToolNames.size === second.justRunToolNames.size &&
     [...first.justRunToolNames].every((toolName) =>
       second.justRunToolNames.has(toolName)
+    ) &&
+    first.switches.size === second.switches.size &&
+    [...first.switches].every(
+      ([toolName, isOn]) => second.switches.get(toolName) === isOn
     )
   )
 }
@@ -107,7 +125,8 @@ export function isToolSettingsEqual(
  * @param toolName - Name of the tool whose approval is replaced.
  * @param approval - New approval of the tool.
  * @returns A new frozen value whose set holds the tool's name only on Just
- * run, keeping every other name, also names Lys does not list.
+ * run, keeping every other name, also names Lys does not list, and every
+ * switch.
  */
 function buildToolSettings(
   tools: ToolSettings,
@@ -124,17 +143,38 @@ function buildToolSettings(
       break
   }
 
-  return Object.freeze({ justRunToolNames })
+  return Object.freeze({ justRunToolNames, switches: tools.switches })
 }
 
 /**
- * Creates the application-owned tool approval commands and initial state.
+ * Builds the tool choices with one tool's switch replaced.
+ *
+ * @param tools - Current choices, left unchanged.
+ * @param toolName - Name of the tool whose switch is replaced.
+ * @param isOn - Whether the tool is offered to the model.
+ * @returns A new frozen value holding every current approval and switch and
+ * the replacement.
+ */
+function buildToolSwitchSettings(
+  tools: ToolSettings,
+  toolName: string,
+  isOn: boolean
+): ToolSettings {
+  const switches = new Map(tools.switches)
+  switches.set(toolName, isOn)
+
+  return Object.freeze({ justRunToolNames: tools.justRunToolNames, switches })
+}
+
+/**
+ * Creates the application-owned tool approval and switch commands and
+ * initial state.
  * @param set - Owning store's atomic state updater.
  * @param get - Reads the current settings and save lifecycle.
  * @param dependencies - Save operation that the application serializes with
  * the other settings-group saves.
- * @returns A slice that applies each approval at once and saves the tools
- * group, coalescing pending changes to the latest value.
+ * @returns A slice that applies each approval and switch at once and saves
+ * the tools group, coalescing pending changes to the latest value.
  * @remarks Native writes are not cancellable. Pane unmount does not cancel
  * work; completion never overwrites a change made after the save began. A
  * newer change is saved after the active write settles, including after
@@ -175,7 +215,26 @@ export function createToolSettingsSlice(
     const { tools } = get().settings
     if (getToolApproval(tools.justRunToolNames, toolName) === approval) return
 
-    const nextTools = buildToolSettings(tools, toolName, approval)
+    updateToolSettings(buildToolSettings(tools, toolName, approval))
+  }
+
+  /**
+   * Implements {@link ToolSettingsSlice.updateToolOn}.
+   * @param toolName - Name of a listed tool.
+   * @param isOn - Whether the tool is offered to the model.
+   */
+  function updateToolOn(toolName: string, isOn: boolean): void {
+    const { tools } = get().settings
+    if (tools.switches.get(toolName) === isOn) return
+
+    updateToolSettings(buildToolSwitchSettings(tools, toolName, isOn))
+  }
+
+  /**
+   * Replaces the tool choices and starts saving them.
+   * @param nextTools - Complete replacement choices.
+   */
+  function updateToolSettings(nextTools: ToolSettings): void {
     set((state) => {
       const settings: LysSettings = { ...state.settings, tools: nextTools }
       return { settings }
@@ -188,6 +247,7 @@ export function createToolSettingsSlice(
   return {
     toolSettingsSave: idleSave,
     updateToolApproval,
+    updateToolOn,
     saveToolSettings
   }
 }

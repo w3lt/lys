@@ -18,6 +18,7 @@ import type {
   ReplyModel,
   ReplyStreamEvent
 } from "../../../../src/modules/agent/replyModel"
+import { NO_UNOFFERED_TOOLS } from "../../../../src/modules/agent/unofferedTools"
 import SqliteAgentRecordStore from "../../../../src/infrastructure/database/agents/sqliteAgentRecordStore"
 import {
   registerAgentDeleterContractSuite,
@@ -106,6 +107,7 @@ async function createHelloReply(agent: Agent): Promise<void> {
     generationOptions: { temperature: 0.4 },
     clientTools: [],
     builtInTools: [],
+    unofferedTools: NO_UNOFFERED_TOOLS,
     abortSignal: new AbortController().signal,
     updateAssistantMessageState: () => true,
     createReplyPart: vi.fn(),

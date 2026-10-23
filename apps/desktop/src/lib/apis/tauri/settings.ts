@@ -45,14 +45,17 @@ type SettingsDocumentSecrets = {
 /**
  * The `tools` group as the settings document holds it.
  *
- * @remarks Matches Rust's `ToolSettings`. JSON has no set, so the names are
- * one array, which Rust stores in ascending order with each name once. That
- * array stays inside this adapter; the rest of the renderer reads the set of
- * {@link ToolSettings}.
+ * @remarks Matches Rust's `ToolSettings`. JSON has no set or map, so the
+ * Just run names are one array, which Rust stores in ascending order with
+ * each name once, and the switches one object keyed by tool name, which Rust
+ * stores in ascending name order. Both stay inside this adapter; the rest of
+ * the renderer reads the set and the map of {@link ToolSettings}.
  */
 type SettingsDocumentTools = {
   /** Names of the tools on Just run. */
   readonly justRun: readonly string[]
+  /** Whether each tool the person switched is on, keyed by tool name. */
+  readonly switches: Readonly<Record<string, boolean>>
 }
 
 /**
@@ -133,13 +136,33 @@ function buildLocationSettings(
  * Builds the document group that stores the renderer's tool choices.
  *
  * @param tools - Tool choices owned by the desktop store.
- * @returns A newly owned group listing the names in the set's order; Rust
- * stores them in ascending order.
+ * @returns A newly owned group listing the Just run names in the set's
+ * order, and the switches as an object with one property of its own per map
+ * entry, also for a tool name that names a member of the object prototype;
+ * Rust stores both in ascending name order.
  */
 function buildSettingsDocumentTools(
   tools: ToolSettings
 ): SettingsDocumentTools {
-  return { justRun: [...tools.justRunToolNames] }
+  return {
+    justRun: [...tools.justRunToolNames],
+    switches: Object.fromEntries(tools.switches)
+  }
+}
+
+/**
+ * Builds the renderer's tool choices from the document group.
+ *
+ * @param tools - Group Rust validated.
+ * @returns Newly owned choices: the Just run names as a set, and the
+ * switches as a map with one entry per property of the document's object,
+ * whatever the text of the name.
+ */
+function buildToolSettings(tools: SettingsDocumentTools): ToolSettings {
+  return {
+    justRunToolNames: new Set(tools.justRun),
+    switches: new Map(Object.entries(tools.switches))
+  }
 }
 
 /**
@@ -149,8 +172,8 @@ function buildSettingsDocumentTools(
  * already validated by Rust.
  * @returns Settings holding the document's groups. The per-model load
  * settings are a newly owned map with one entry per key of the document's
- * object, whatever the text of the key, and the tools on Just run are a
- * newly owned set.
+ * object, whatever the text of the key, and the tool choices are newly
+ * owned, as {@link buildToolSettings} builds them.
  */
 function buildLysSettings(settingsDocument: SettingsDocument): LysSettings {
   const models = new Map(
@@ -160,15 +183,12 @@ function buildLysSettings(settingsDocument: SettingsDocument): LysSettings {
     default: settingsDocument.loadConfiguration.default,
     models
   }
-  const tools: ToolSettings = {
-    justRunToolNames: new Set(settingsDocument.tools.justRun)
-  }
   return {
     runtime: settingsDocument.runtime,
     generation: settingsDocument.generation,
     loadConfiguration,
     secrets: buildSecretsSettings(settingsDocument.secrets),
-    tools,
+    tools: buildToolSettings(settingsDocument.tools),
     location: buildLocationSettings(settingsDocument.location)
   }
 }
@@ -179,8 +199,9 @@ function buildLysSettings(settingsDocument: SettingsDocument): LysSettings {
  * @param settings - Complete settings value owned by the desktop store.
  * @returns A document holding the same groups. The per-model load settings
  * are a newly owned object with one property of its own per map entry, also
- * for a model key that names a member of the object prototype, and the tools
- * on Just run are an array.
+ * for a model key that names a member of the object prototype, and the tool
+ * choices are an array and an object, as
+ * {@link buildSettingsDocumentTools} builds them.
  */
 function buildSettingsDocument(settings: LysSettings): SettingsDocument {
   const models = Object.fromEntries(settings.loadConfiguration.models)
@@ -202,8 +223,9 @@ function buildSettingsDocument(settings: LysSettings): SettingsDocument {
  * Loads desktop settings from the Tauri-persisted settings file.
  *
  * @returns The settings of the complete document after Rust validation and
- * defaulting, with the per-model load settings as a map keyed by model key
- * and the tools on Just run as a set.
+ * defaulting, with the per-model load settings as a map keyed by model key,
+ * the tools on Just run as a set, and the tool switches as a map keyed by
+ * tool name.
  * @throws The Tauri invoke rejection when the settings path cannot be read or parsed.
  */
 export async function loadSettings(): Promise<LysSettings> {
@@ -220,8 +242,8 @@ export async function loadSettings(): Promise<LysSettings> {
  * or file-writing failures.
  * @remarks The named newSettings argument matches Rust's new_settings
  * parameter. The per-model load settings are sent as one object keyed by
- * model key, and the tools on Just run as one array, the forms the settings
- * file keeps.
+ * model key, the tools on Just run as one array, and the tool switches as
+ * one object keyed by tool name, the forms the settings file keeps.
  */
 export async function saveSettings(settings: LysSettings): Promise<void> {
   const newSettings = buildSettingsDocument(settings)
@@ -292,8 +314,8 @@ export async function saveSecretsSettings(
 
 /**
  * Persists the tool choices while preserving everything else already on disk.
- * @param tools - Tool choices to save; every name in the set is written, also
- * one Lys does not list now.
+ * @param tools - Tool choices to save; every name in the set and every
+ * switch in the map is written, also for a tool Lys does not list now.
  * @returns Resolves after the merged settings document is written by Tauri.
  * @throws The native load or save rejection; no replacement is written if
  * loading fails.

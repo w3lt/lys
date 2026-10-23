@@ -208,6 +208,22 @@ async function loadFreshComposer(runtime: RuntimeArrangement = READY_RUNTIME) {
 }
 
 /**
+ * Loads a fresh composer over {@link ATTACHING_RUNTIME}, with an empty tool
+ * list already read, so the tool-trained model makes no tool list read and
+ * is offered and told about no tool.
+ *
+ * @returns The same stores and component as {@link loadFreshComposer}.
+ */
+async function loadFreshAttachingComposer() {
+  const loaded = await loadFreshComposer(ATTACHING_RUNTIME)
+  const { useToolStore } = await import("@/lib/store/tools")
+  useToolStore.setState({
+    list: { status: "loaded", tools: [], unavailableTools: new Map() }
+  })
+  return loaded
+}
+
+/**
  * Loads a fresh composer whose shown conversation has a reply that waits for
  * the person to answer {@link READ_CALL}.
  *
@@ -215,19 +231,6 @@ async function loadFreshComposer(runtime: RuntimeArrangement = READY_RUNTIME) {
  * @remarks The tool-call store is the one the composer reads, loaded with
  * it; it holds the call as it does once the reply's follow delivered it.
  */
-/**
- * Loads a fresh composer over {@link ATTACHING_RUNTIME}, with tool calls
- * switched off so the tool-trained model makes no tool list read.
- *
- * @returns The same stores and component as {@link loadFreshComposer}.
- */
-async function loadFreshAttachingComposer() {
-  const loaded = await loadFreshComposer(ATTACHING_RUNTIME)
-  const { useToolStore } = await import("@/lib/store/tools")
-  useToolStore.setState({ areToolCallsOn: false })
-  return loaded
-}
-
 async function loadFreshComposerWithWaitingCall() {
   const loaded = await loadFreshComposer()
   const { useToolCallStore } = await import("@/lib/store/tool-calls")

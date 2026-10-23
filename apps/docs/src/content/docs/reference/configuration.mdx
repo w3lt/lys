@@ -146,7 +146,8 @@ defaults:
     "tavilyApiKey": null
   },
   "tools": {
-    "justRun": []
+    "justRun": [],
+    "switches": {}
   },
   "location": {
     "city": null,
@@ -156,25 +157,26 @@ defaults:
 }
 ```
 
-| Key                        | Type                    | Meaning                                                                                                          |
-| -------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `runtime.autoStartBackend` | `boolean`               | Whether desktop initialization should ask Tauri to start the backend automatically                               |
-| `runtime.autoStartVmo`     | `boolean`               | Whether desktop initialization should ask Tauri to start vmo, the page reader `read_page` uses                   |
-| `runtime.defaultModel`     | `string \| null`        | Preferred model used when it is loaded; otherwise the first loaded inventory entry is the fallback               |
-| `runtime.backendAddress`   | `string`                | Backend address displayed in settings; HTTP clients still target the fixed loopback address                      |
-| `generation.temperature`   | number in `[0, 1]`      | Sampling temperature sent with each new chat request                                                             |
-| `generation.replyCeiling`  | unsigned 32-bit integer | Maximum reply tokens; the desktop omits the request limit when this is `0`                                       |
-| `loadConfiguration`        | object                  | Settings sent with each model load; see [Load configuration](#load-configuration)                                |
-| `secrets.tavilyApiKey`     | `string \| null`        | Tavily API key of `web_search`, 1 to 256 visible ASCII characters, stored as plain text; see [Secrets](#secrets) |
-| `tools.justRun`            | array of tool names     | Tools that run without asking when a model calls them; every other tool asks; see [Tools](#tools)                |
-| `location.city`            | `string \| null`        | City the person saved for `get_location`; see [Location](#location)                                              |
-| `location.region`          | `string \| null`        | State, province, or other region the person saved; see [Location](#location)                                     |
-| `location.country`         | `string \| null`        | Country the person saved; see [Location](#location)                                                              |
+| Key                        | Type                    | Meaning                                                                                                              |
+| -------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `runtime.autoStartBackend` | `boolean`               | Whether desktop initialization should ask Tauri to start the backend automatically                                   |
+| `runtime.autoStartVmo`     | `boolean`               | Whether desktop initialization should ask Tauri to start vmo, the page reader `read_page` uses                       |
+| `runtime.defaultModel`     | `string \| null`        | Preferred model used when it is loaded; otherwise the first loaded inventory entry is the fallback                   |
+| `runtime.backendAddress`   | `string`                | Backend address displayed in settings; HTTP clients still target the fixed loopback address                          |
+| `generation.temperature`   | number in `[0, 1]`      | Sampling temperature sent with each new chat request                                                                 |
+| `generation.replyCeiling`  | unsigned 32-bit integer | Maximum reply tokens; the desktop omits the request limit when this is `0`                                           |
+| `loadConfiguration`        | object                  | Settings sent with each model load; see [Load configuration](#load-configuration)                                    |
+| `secrets.tavilyApiKey`     | `string \| null`        | Tavily API key of `web_search`, 1 to 256 visible ASCII characters, stored as plain text; see [Secrets](#secrets)     |
+| `tools.justRun`            | array of tool names     | Tools that run without asking when a model calls them; every other tool asks; see [Tools](#tools)                    |
+| `tools.switches`           | object of `boolean`     | Whether each tool the person switched is on, by tool name; any other tool starts at its default; see [Tools](#tools) |
+| `location.city`            | `string \| null`        | City the person saved for `get_location`; see [Location](#location)                                                  |
+| `location.region`          | `string \| null`        | State, province, or other region the person saved; see [Location](#location)                                         |
+| `location.country`         | `string \| null`        | Country the person saved; see [Location](#location)                                                                  |
 
 A missing group, or a missing field in one of them, uses the host defaults;
 for `loadConfiguration` that default is empty, for `secrets` it holds no
-key, for `tools` it puts no tool on Just run, and for `location` it saves no
-location. A `model` group, which
+key, for `tools` it puts no tool on Just run and switches no tool, and for
+`location` it saves no location. A `model` group, which
 older files hold for a context-size estimate Lys no longer has, is ignored,
 and the next save leaves it out. Loading never rewrites an
 existing file. Invalid JSON or invalid field values, including a temperature
@@ -250,16 +252,22 @@ anything. A turn keeps the key it started with.
 
 ### Tools
 
-The `tools` group holds the approval the person chose for each tool in Settings
-→ Tools. `justRun` lists the tools set to Just run; every other tool, network
-tools included, is on Ask me and waits for the person before each call.
-`read_attachment`, which the backend adds to a turn itself, has no entry and
-never asks.
+The `tools` group holds the approval and the switch the person chose for each
+tool in Settings → Tools. `justRun` lists the tools set to Just run; every
+other tool, network tools included, is on Ask me and waits for the person
+before each call. `switches` holds each tool the person switched on or off,
+`true` for on and `false` for off. A tool without an entry starts on when it
+only reads this machine and off when it sends requests off it (`network`), so
+a tool a later build adds starts at its own default; a tool switched back to
+its default keeps its entry. `read_attachment`, which the backend adds to a
+turn itself, has neither entry: it never asks and cannot be switched off.
 
 - A name is 1 to 64 ASCII letters, digits, underscores, or hyphens, the rule
-  every tool name follows. Any other value, `null` for the group or for
-  `justRun`, or an unknown field makes loading the settings fail.
-- A name listed twice counts once, and Lys writes the names in ascending order.
+  every tool name follows. Any other name, `null` for the group, `justRun`, or
+  `switches`, a switch that is not `true` or `false`, or an unknown field
+  makes loading the settings fail.
+- A name listed twice in `justRun` counts once, and a name given twice in
+  `switches` keeps the last value. Lys writes both in ascending name order.
 - A name Lys does not list, such as a tool from another build or a backend tool
   whose list could not be read, is kept and has no effect.
 - The backend's tool approval service enforces the approval for the desktop's
@@ -269,14 +277,21 @@ never asks.
   writes the file. When the file cannot be read, or `tools`, `justRun`, or a
   name in it is invalid, no tool is on Just run, every call asks, and the
   backend logs a warning.
+- The backend never reads `switches`. The desktop applies them when it builds
+  each chat request: it offers only the tools that are on and can run, names
+  the ones that are off and the switched-on ones that cannot run now, or says
+  tool calls are off, so the backend can tell the model (see the
+  [chat request](/reference/api/#tools-the-turn-does-not-offer)).
 - The desktop reads `settings.json` when it starts. A save from the Tools pane
-  replaces `justRun` with the names the desktop holds, so a hand edit of
-  `justRun` made while Lys runs takes effect at the next round of tool calls
-  but is lost at the next save from the pane.
+  replaces `justRun` and `switches` with the choices the desktop holds, so a
+  hand edit of `justRun` made while Lys runs takes effect at the next round of
+  tool calls but is lost at the next save from the pane, and a hand edit of
+  `switches` takes effect only at the next start and is likewise lost at the
+  next save.
 
 An older Lys build does not know the group. It ignores it and removes it the
-next time it saves settings, so every tool asks again after going back to an
-older build.
+next time it saves settings, so every tool asks again and every switch returns
+to its default after going back to an older build.
 
 ### Location
 
@@ -328,12 +343,14 @@ The Secrets pane saves the Tavily API key only when the person presses Save or
 Enter, replacing only the `secrets` group in the same serialized way; Remove
 saves `null`.
 
-Choosing Ask me or Just run in the Tools pane is saved automatically the same
-way, replacing only the `tools` group, and applies from the next round of tool
-calls once saved, because the backend reads the file. After a failed save, tool
-calls keep following the choices last saved, and the pane exposes a retry
-action. Tool calls on or off and each tool's switch remain session-only and
-apply to the next chat request.
+Choosing Ask me or Just run in the Tools pane, and switching a tool on or off,
+is saved automatically the same way, replacing only the `tools` group. An
+approval applies from the next round of tool calls once saved, because the
+backend reads the file; a tool's switch applies to the next chat request at
+once, because the desktop builds the request. After a failed save, approvals
+keep following the choices last saved, each switch still applies until Lys
+quits, and the pane exposes a retry action. The Tool calls switch remains
+session-only and applies to the next chat request.
 
 The Tools pane saves the location only when the person presses Save or
 Enter, replacing only the `location` group in the same serialized way;

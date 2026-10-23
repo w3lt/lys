@@ -656,7 +656,7 @@ describe("updateFastifyWithChatRoute", () => {
     expect(response.statusCode).toBe(400)
     expect(response.json()).toMatchObject({
       message:
-        "The request offers backend tools the backend does not run: fetch_url"
+        "The request names backend tools the backend does not run: fetch_url"
     })
     expect(testApp.createConversationTurn).not.toHaveBeenCalled()
     expect(testApp.completeChatStream).not.toHaveBeenCalled()
@@ -714,6 +714,179 @@ describe("updateFastifyWithChatRoute", () => {
 
     expect(response.statusCode).toBe(400)
   })
+
+  it("tells the model which tools the person switched off, after the agent's instructions, in the turn it sends", async () => {
+    const testApp = await createChatRouteTestApp()
+    testApp.createConversationTurn.mockRestore()
+    testApp.completeChatStream.mockImplementation(async () =>
+      (async function* () {
+        yield createChatCompletionChunk({ content: "Hi", finishReason: "stop" })
+      })()
+    )
+    testApp.generateTitle.mockResolvedValue("Trip plan")
+    updateFastifyWithChatRoute(testApp.app, {
+      ...CHAT_ROUTE_OPTIONS,
+      generations: testApp.generations
+    })
+
+    const response = await sendChatRequest(testApp.app, {
+      ...NEW_CONVERSATION_REQUEST,
+      tools: { definitions: [READ_TEXT_FILE_TOOL] },
+      switchedOffToolNames: ["web_search", "search_files"]
+    })
+
+    expect(response.statusCode).toBe(200)
+    const [modelRequest] = testApp.completeChatStream.mock.calls[0] ?? []
+    expect(modelRequest?.messages[0]).toEqual({
+      role: "system",
+      content: expect.stringMatching(
+        /\n\nThese tools are turned off in Settings → Tools, so you cannot call them now: web_search, search_files\. /
+      )
+    })
+    expect(modelRequest?.tools).toEqual([READ_TEXT_FILE_FORMAT])
+  })
+
+  it("tells the model which switched-on tools cannot run now and why, after the agent's instructions, in the turn it sends", async () => {
+    const testApp = await createChatRouteTestApp()
+    testApp.createConversationTurn.mockRestore()
+    testApp.completeChatStream.mockImplementation(async () =>
+      (async function* () {
+        yield createChatCompletionChunk({ content: "Hi", finishReason: "stop" })
+      })()
+    )
+    testApp.generateTitle.mockResolvedValue("Trip plan")
+    updateFastifyWithChatRoute(testApp.app, {
+      ...CHAT_ROUTE_OPTIONS,
+      generations: testApp.generations
+    })
+
+    const response = await sendChatRequest(testApp.app, {
+      ...NEW_CONVERSATION_REQUEST,
+      tools: { definitions: [READ_TEXT_FILE_TOOL] },
+      unavailableTools: [{ name: "check_spelling", reason: "api-key-missing" }]
+    })
+
+    expect(response.statusCode).toBe(200)
+    const [modelRequest] = testApp.completeChatStream.mock.calls[0] ?? []
+    expect(modelRequest?.messages[0]).toEqual({
+      role: "system",
+      content: expect.stringMatching(
+        /\n\nThese tools are turned on in Settings → Tools but cannot run now, so you cannot call them: check_spelling, because no Tavily API key is saved \(one can be added in Settings → Secrets\)\. /
+      )
+    })
+    expect(modelRequest?.tools).toEqual([READ_TEXT_FILE_FORMAT])
+  })
+
+  it("tells the model tool calls are off, after the agent's instructions, and offers it no tool", async () => {
+    const testApp = await createChatRouteTestApp()
+    testApp.createConversationTurn.mockRestore()
+    testApp.completeChatStream.mockImplementation(async () =>
+      (async function* () {
+        yield createChatCompletionChunk({ content: "Hi", finishReason: "stop" })
+      })()
+    )
+    testApp.generateTitle.mockResolvedValue("Trip plan")
+    updateFastifyWithChatRoute(testApp.app, {
+      ...CHAT_ROUTE_OPTIONS,
+      generations: testApp.generations
+    })
+
+    const response = await sendChatRequest(testApp.app, {
+      ...NEW_CONVERSATION_REQUEST,
+      areToolCallsSwitchedOff: true
+    })
+
+    expect(response.statusCode).toBe(200)
+    const [modelRequest] = testApp.completeChatStream.mock.calls[0] ?? []
+    expect(modelRequest?.messages[0]).toEqual({
+      role: "system",
+      content: expect.stringMatching(
+        /\n\nTool calls are turned off in Settings → Tools\. /
+      )
+    })
+    expect(modelRequest?.tools).toEqual([])
+  })
+
+  it.each([
+    [
+      "a switched-off tool it also offers",
+      {
+        tools: { definitions: [READ_TEXT_FILE_TOOL] },
+        switchedOffToolNames: ["read_text_file"]
+      },
+      "A request names each tool once across its offered, switched-off, and unable-to-run tools."
+    ],
+    [
+      "a tool that cannot run it also names as switched off",
+      {
+        switchedOffToolNames: ["check_spelling"],
+        unavailableTools: [
+          { name: "check_spelling", reason: "api-key-missing" }
+        ]
+      },
+      "A request names each tool once across its offered, switched-off, and unable-to-run tools."
+    ],
+    [
+      "the attachment reader switched off",
+      { switchedOffToolNames: ["read_attachment"] },
+      "A request does not name read_attachment as switched off or unable to run; it has no switch and the backend adds it to a turn itself."
+    ],
+    [
+      "the attachment reader named as unable to run",
+      {
+        unavailableTools: [
+          { name: "read_attachment", reason: "page-reader-not-ready" }
+        ]
+      },
+      "A request does not name read_attachment as switched off or unable to run; it has no switch and the backend adds it to a turn itself."
+    ],
+    [
+      "65 switched-off tools",
+      {
+        switchedOffToolNames: Array.from(
+          { length: 65 },
+          (_, index) => `tool_${index}`
+        )
+      },
+      "Too big: expected array to have <=64 items"
+    ],
+    [
+      "tool calls switched off with a tool offered",
+      {
+        tools: { definitions: [READ_TEXT_FILE_TOOL] },
+        areToolCallsSwitchedOff: true
+      },
+      "A request with tool calls switched off offers no tool and names none as switched off or unable to run."
+    ],
+    [
+      "a tool that cannot run that the backend does not run",
+      {
+        unavailableTools: [{ name: "fetch_url", reason: "api-key-missing" }]
+      },
+      "The request names backend tools the backend does not run: fetch_url"
+    ]
+  ])(
+    "rejects a request with %s before storing a turn",
+    async (_label, fields, message) => {
+      const testApp = await createChatRouteTestApp()
+      updateFastifyWithChatRoute(testApp.app, {
+        ...CHAT_ROUTE_OPTIONS,
+        generations: testApp.generations
+      })
+
+      const response = await sendChatRequest(testApp.app, {
+        ...NEW_CONVERSATION_REQUEST,
+        ...fields
+      })
+
+      expect(response.statusCode).toBe(400)
+      expect(response.json()).toMatchObject({
+        message: expect.stringContaining(message)
+      })
+      expect(testApp.createConversationTurn).not.toHaveBeenCalled()
+      expect(testApp.completeChatStream).not.toHaveBeenCalled()
+    }
+  )
 
   it.each([
     [

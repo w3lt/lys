@@ -1,4 +1,4 @@
-import type { ChatContextApiRequestBody, ChatToolOffer } from "@lys/protocol"
+import type { ChatContextApiRequestBody } from "@lys/protocol"
 import type { ConversationMessage } from "@lys/share"
 import { useEffect, useMemo, useState } from "react"
 
@@ -13,8 +13,11 @@ import { useAgentStore } from "@/lib/store/agents"
 import { calculateNewConversationAgentCode } from "@/lib/store/agents/conversation-agent"
 import { useChatViewStore } from "@/lib/store/chat-view"
 import {
+  buildChatToolFields,
   buildChatToolOffer,
+  NO_CHAT_TOOL_OFFER,
   useToolStore,
+  type ChatToolOfferResult,
   type ToolListState
 } from "@/lib/store/tools"
 
@@ -56,7 +59,7 @@ type MeasuredToolOfferInput = {
   readonly isTrainedForToolUse: boolean
   /** Tool list as last read. */
   readonly list: ToolListState
-  /** Switches the person changed, keyed by tool name. */
+  /** Saved switches the person changed, keyed by tool name. */
   readonly toolSwitches: ReadonlyMap<string, boolean>
 }
 
@@ -68,8 +71,11 @@ type ChatContextRequestInput = {
   readonly newConversationAgentCode: string
   /** Loaded model the message would be sent to, or null when none is. */
   readonly model: string | null
-  /** Tools the message would offer, or undefined for none. */
-  readonly tools: ChatToolOffer | undefined
+  /**
+   * Tools the message would offer and what it would name about the others;
+   * an `unavailable` offer is measured without tools.
+   */
+  readonly toolOffer: ChatToolOfferResult
 }
 
 /**
@@ -88,9 +94,10 @@ type ChatContextRequestInput = {
  * conversation's stored messages changed since the last one started; the
  * backend counts it with the model's tokenizer. A change abandons the
  * previous measurement, whose result is then never published; unmounting
- * abandons it too. When tool calls are on for a model trained for tool use
+ * abandons it too. When the model is trained for tool use, tool calls are on,
  * and the tool list was never read, the hook starts reading it, as sending
- * would. A failed measurement is reported as `failed` and is not retried
+ * would. A failed
+ * measurement is reported as `failed` and is not retried
  * until an input changes.
  */
 export function useChatContextMeasurement(
@@ -151,7 +158,7 @@ function useChatContextRequest(): ChatContextApiRequestBody | undefined {
   const agentList = useAgentStore((state) => state.list)
   const areToolCallsOn = useToolStore((state) => state.areToolCallsOn)
   const list = useToolStore((state) => state.list)
-  const toolSwitches = useToolStore((state) => state.toolSwitches)
+  const toolSwitches = useLysStore((state) => state.settings.tools.switches)
   const loadTools = useToolStore((state) => state.loadTools)
   const isTrainedForToolUse =
     calculateToolModelSupport(modelRuntime, modelInventory).status === "trained"
@@ -161,13 +168,13 @@ function useChatContextRequest(): ChatContextApiRequestBody | undefined {
     agentList
   )
   const isToolListNeeded =
-    areToolCallsOn && isTrainedForToolUse && list.status === "idle"
+    isTrainedForToolUse && areToolCallsOn && list.status === "idle"
 
   useEffect(() => {
     if (isToolListNeeded) void loadTools()
   }, [isToolListNeeded, loadTools])
 
-  const tools = useMemo(
+  const toolOffer = useMemo(
     () =>
       buildMeasuredToolOffer({
         areToolCallsOn,
@@ -183,9 +190,9 @@ function useChatContextRequest(): ChatContextApiRequestBody | undefined {
         conversationId,
         newConversationAgentCode,
         model,
-        tools
+        toolOffer
       }),
-    [conversationId, newConversationAgentCode, model, tools]
+    [conversationId, newConversationAgentCode, model, toolOffer]
   )
 }
 
@@ -193,29 +200,30 @@ function useChatContextRequest(): ChatContextApiRequestBody | undefined {
  * Builds the tool offer the next message would carry.
  *
  * @param input - The Tools pane's choices, the model's training, and the list.
- * @returns The offer sending would build from the same list; undefined when
- * tool calls are off, the model is not known to be trained for tool use, the
- * list is not read, or no tool is on.
+ * @returns The offer sending would build from the same list, with what it
+ * would name about the tools it does not offer; {@link NO_CHAT_TOOL_OFFER}
+ * when the model is not known to be trained for tool use.
  * @remarks Sending reads an unread list first and then offers what it holds;
  * the hook reads it too, so the measurement follows once the list arrives.
  */
 function buildMeasuredToolOffer(
   input: MeasuredToolOfferInput
-): ChatToolOffer | undefined {
-  if (!input.areToolCallsOn || !input.isTrainedForToolUse) return undefined
-  const offer = buildChatToolOffer({
+): ChatToolOfferResult {
+  if (!input.isTrainedForToolUse) return NO_CHAT_TOOL_OFFER
+  return buildChatToolOffer({
     list: input.list,
+    areToolCallsOn: input.areToolCallsOn,
     toolSwitches: input.toolSwitches
   })
-  return offer.status === "offered" ? offer.offer : undefined
 }
 
 /**
  * Builds the measurement request of the next message.
  *
- * @param input - Conversation, agent, model, and tools.
+ * @param input - Conversation, agent, model, and tool offer.
  * @returns The request for the shown conversation, or for a new one its agent
- * would start; undefined when no model is loaded.
+ * would start, with the tool fields {@link buildChatToolFields} builds;
+ * undefined when no model is loaded.
  */
 function buildChatContextRequest(
   input: ChatContextRequestInput
@@ -225,9 +233,11 @@ function buildChatContextRequest(
     input.conversationId === undefined
       ? { kind: "new", agentCode: input.newConversationAgentCode }
       : { kind: "existing", id: input.conversationId }
-  return input.tools === undefined
-    ? { conversation, model: input.model }
-    : { conversation, model: input.model, tools: input.tools }
+  return {
+    conversation,
+    model: input.model,
+    ...buildChatToolFields(input.toolOffer)
+  }
 }
 
 /**

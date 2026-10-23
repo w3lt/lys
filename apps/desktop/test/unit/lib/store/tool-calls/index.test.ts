@@ -688,9 +688,19 @@ describe("useToolCallStore", () => {
       const { backend, replyStreams } = startReplyBackend(
         buildAcceptingToolCallRoutes(READ_CALL)
       )
-      const { useToolStore, useToolCallStore } = await loadFreshToolCallStore()
+      const { useLysStore, useToolStore, useToolCallStore } =
+        await loadFreshToolCallStore()
       useToolStore.getState().updateToolCallsOn(false)
-      useToolStore.getState().updateToolOn(READ_TEXT_FILE, false)
+      const { settings } = useLysStore.getState()
+      useLysStore.setState({
+        settings: {
+          ...settings,
+          tools: {
+            ...settings.tools,
+            switches: new Map([[READ_TEXT_FILE.name, false]])
+          }
+        }
+      })
 
       await startFollowWithEvents(useToolCallStore, replyStreams, [
         buildStreamingSnapshot(),

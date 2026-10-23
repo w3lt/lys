@@ -21,6 +21,7 @@
     "fastify-type-provider-zod": "^7.0.0",
     "linkedom": "^0.18.13",
     "openai": "6.49.0",
+    "pino": "^10.4.0",
     "uuid": "^14.0.3",
     "zod": "^4.6.7"
   },

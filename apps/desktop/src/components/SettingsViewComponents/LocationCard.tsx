@@ -68,7 +68,9 @@ type LocationFieldProps = {
  *
  * @remarks The card owns the text; the field owns no state or effects. The
  * input is described by its problem, when it has one, then by the hint that
- * states the constraints. Escape proposes discarding the card's edit.
+ * states the constraints. Escape proposes discarding the card's edit, except
+ * an Escape that ends text composition, such as cancelling a name typed
+ * through an input method.
  * @param props - Part, identifiers, text, problem, and the proposals.
  * @returns The field.
  */
@@ -84,12 +86,13 @@ function LocationField({
   const problemId = `${fieldId}-problem`
 
   /**
-   * Proposes discarding the edit on Escape.
+   * Proposes discarding the edit on an Escape that does not end text
+   * composition.
    *
    * @param event - Key pressed in the input.
    */
   function handleFieldKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
-    if (event.key !== "Escape") return
+    if (event.key !== "Escape" || event.nativeEvent.isComposing) return
     event.preventDefault()
     onDiscardEdit()
   }

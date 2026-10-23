@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactElement } from "react"
-import { act, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { locationSettingsSchema } from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
@@ -189,6 +189,22 @@ describe("LocationCard", () => {
 
     expect(getField("City")).toHaveValue("Lyon")
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+  })
+
+  it("keeps the edit on an Escape that ends text composition", async () => {
+    startLocationCard()
+    const user = userEvent.setup()
+
+    await user.clear(getField("City"))
+    await user.type(getField("City"), "東京都")
+    const isNotPrevented = fireEvent.keyDown(getField("City"), {
+      key: "Escape",
+      isComposing: true
+    })
+
+    expect(isNotPrevented).toBe(true)
+    expect(getField("City")).toHaveValue("東京都")
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()
   })
 
   it("shows the saved location once the save succeeds", async () => {

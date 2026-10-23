@@ -101,8 +101,8 @@ const STORED_TOOL_SETTINGS: ToolSettings = Object.freeze({
 })
 
 /**
- * Location group on disk: a made-up city and country, with no region, distinct
- * from the first-run group, which saves no location.
+ * Location group on disk: a city and a country, with no region, distinct from
+ * the first-run group, which saves no location.
  */
 export const STORED_LOCATION_SETTINGS: LocationSettings =
   locationSettingsSchema.parse({

@@ -604,8 +604,9 @@ the trimmed fields, a blank field as `null`, only when they are valid and
 differ from the saved location; emptying every field and saving removes the
 location, and Escape discards the edit. A field whose text is too long or
 holds a control character is marked invalid and described by what to change.
-A polite status line says whether the edit is unsaved, a save runs or failed,
-or a location is saved. The application store's location slice owns the save,
+A polite status line says first that a save runs or failed, which keeps the
+edit; otherwise that the edit is invalid or unsaved; otherwise whether a
+location is saved. The application store's location slice owns the save,
 serialized with the other group saves, and changes its location only once the
 file holds the new one, because the tool reads the file.
 

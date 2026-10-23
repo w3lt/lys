@@ -1,14 +1,23 @@
-import type { ComponentProps } from "react"
-import { render, screen } from "@testing-library/react"
+import type { ComponentProps, ReactElement } from "react"
+import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { locationSettingsSchema } from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
+import { useStore } from "zustand"
+import { createStore } from "zustand/vanilla"
 import LocationCard from "@/components/SettingsViewComponents/LocationCard"
-import type { LocationSaveOutcome } from "@/lib/store/location-settings"
+import {
+  createLocationSettingsSlice,
+  type LocationSaveOutcome,
+  type LocationSettingsSlice
+} from "@/lib/store/location-settings"
+import type { LysSettings } from "@/lib/store/settings"
 import {
   createControlledPromise,
-  waitForMicrotasks
+  waitForMicrotasks,
+  type ControlledPromise
 } from "../../support/settlement"
+import { STORED_SETTINGS } from "../../support/settingsFixtures"
 
 /** Location saved on disk: a city and a country, no region. */
 const SAVED_LOCATION = locationSettingsSchema.parse({
@@ -22,6 +31,9 @@ const FIELDS_HINT = "Each field is optional and holds up to 100 characters."
 
 /** Properties accepted by the card. */
 type LocationCardProps = ComponentProps<typeof LocationCard>
+
+/** Store state the location slice borrows: the current settings and the slice. */
+type LocationStore = LocationSettingsSlice & { readonly settings: LysSettings }
 
 /**
  * Renders the card for a saved location with no save, and a spy for the save
@@ -42,6 +54,44 @@ function startLocationCard(props: Partial<LocationCardProps> = {}) {
   }
   const rendered = render(<LocationCard {...cardProps} />)
   return { onSaveLocation, rendered }
+}
+
+/**
+ * Renders the card on a store that owns the application's location slice, as
+ * the Tools pane does. The stored location is {@link SAVED_LOCATION}.
+ *
+ * @returns The settings write of the first save, which stays pending until
+ * the case settles it.
+ */
+function startLocationCardOnStore(): ControlledPromise<void> {
+  const settingsWrite = createControlledPromise<void>()
+  const store = createStore<LocationStore>()((set, get) => ({
+    settings: STORED_SETTINGS,
+    ...createLocationSettingsSlice(set, get, {
+      saveLocationSettings: () => settingsWrite.promise
+    })
+  }))
+
+  /**
+   * Presents the card with the store's location, save, and command.
+   *
+   * @returns The card.
+   */
+  function StoreLocationCard(): ReactElement {
+    const savedLocation = useStore(store, (state) => state.settings.location)
+    const saveState = useStore(store, (state) => state.locationSave)
+    const saveLocation = useStore(store, (state) => state.saveLocation)
+    return (
+      <LocationCard
+        onSaveLocation={saveLocation}
+        saveState={saveState}
+        savedLocation={savedLocation}
+      />
+    )
+  }
+
+  render(<StoreLocationCard />)
+  return settingsWrite
 }
 
 /**
@@ -169,17 +219,26 @@ describe("LocationCard", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
   })
 
-  it("keeps the edit when the save fails", async () => {
-    const { onSaveLocation } = startLocationCard()
-    onSaveLocation.mockResolvedValue("failed")
+  it("says a save runs, then that it failed, and keeps the edit", async () => {
+    const settingsWrite = startLocationCardOnStore()
     const user = userEvent.setup()
 
     await user.clear(getField("City"))
-    await user.type(getField("City"), "Grenoble")
-    await user.keyboard("{Enter}")
-    await waitForMicrotasks()
+    await user.type(getField("City"), "Grenoble{Enter}")
 
+    expect(screen.getByRole("status")).toHaveTextContent("saving…")
     expect(getField("City")).toHaveValue("Grenoble")
+
+    await act(async () => {
+      settingsWrite.reject(new Error("The settings file is read-only."))
+      await waitForMicrotasks()
+    })
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Lys couldn't write your location to its settings file."
+    )
+    expect(getField("City")).toHaveValue("Grenoble")
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()
   })
 
   it("asks for no save while one runs", async () => {

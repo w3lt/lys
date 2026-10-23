@@ -97,15 +97,33 @@ describe("formatPlaceNameProblem", () => {
 describe("formatLocationMessage", () => {
   it.each([
     [
-      "an invalid edit",
+      "a running save, over the edit it saves,",
+      { status: "changed", location: NO_LOCATION },
+      { status: "saving" },
+      { text: "saving…", tone: "pending" }
+    ],
+    [
+      "a failed save, over the edit it kept,",
+      { status: "changed", location: NO_LOCATION },
+      { status: "failed", error: "Lys couldn't write your location." },
+      { text: "Lys couldn't write your location.", tone: "danger" }
+    ],
+    [
+      "a failed save, over an invalid edit,",
       { status: "invalid", problems: { city: "tooLong" } },
       { status: "failed", error: "Lys couldn't write your location." },
+      { text: "Lys couldn't write your location.", tone: "danger" }
+    ],
+    [
+      "an invalid edit",
+      { status: "invalid", problems: { city: "tooLong" } },
+      { status: "saved" },
       { text: "can't save yet · fix the marked field", tone: "danger" }
     ],
     [
       "an unsaved edit",
       { status: "changed", location: SAVED_LOCATION },
-      { status: "saving" },
+      { status: "saved" },
       { text: "unsaved · enter to save, esc to discard", tone: "attention" }
     ],
     [
@@ -116,18 +134,6 @@ describe("formatLocationMessage", () => {
         text: "unsaved · enter to remove your location, esc to discard",
         tone: "attention"
       }
-    ],
-    [
-      "a running save",
-      { status: "unchanged" },
-      { status: "saving" },
-      { text: "saving…", tone: "pending" }
-    ],
-    [
-      "a failed save",
-      { status: "unchanged" },
-      { status: "failed", error: "Lys couldn't write your location." },
-      { text: "Lys couldn't write your location.", tone: "danger" }
     ]
   ] as const)(
     "puts %s before the saved location",

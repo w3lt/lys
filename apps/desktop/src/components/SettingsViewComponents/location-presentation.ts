@@ -189,14 +189,18 @@ export function formatPlaceNameProblem(problem: PlaceNameProblem): string {
  * Formats the line under the location fields.
  *
  * @param input - Saved location, the fields, and the latest save.
- * @returns, in order of precedence: what an edit means (invalid, or unsaved
- * with how to save or discard, naming a removal as one); a running or failed
- * save; then whether a location is saved.
+ * @returns, in order of precedence: a running or failed save, which keeps
+ * the edit it saves; what an edit means (invalid, or unsaved with how to
+ * save or discard, naming a removal as one); then whether a location is
+ * saved.
  */
 export function formatLocationMessage(
   input: LocationStatusInput
 ): LocationMessage {
   const { draftParse, saveState } = input
+  if (saveState.status === "saving") return { text: "saving…", tone: "pending" }
+  if (saveState.status === "failed")
+    return { text: saveState.error, tone: "danger" }
   if (draftParse.status === "invalid") {
     return { text: "can't save yet · fix the marked field", tone: "danger" }
   }
@@ -208,9 +212,6 @@ export function formatLocationMessage(
       tone: "attention"
     }
   }
-  if (saveState.status === "saving") return { text: "saving…", tone: "pending" }
-  if (saveState.status === "failed")
-    return { text: saveState.error, tone: "danger" }
   return hasSavedLocationPart(input.savedLocation)
     ? SAVED_LOCATION_MESSAGE
     : NO_LOCATION_MESSAGE

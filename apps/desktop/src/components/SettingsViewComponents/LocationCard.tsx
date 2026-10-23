@@ -125,7 +125,8 @@ function LocationField({
  *
  * @remarks The application store owns the saved location and the save; the
  * card owns only the person's edit, which starts from the saved location and
- * resets after a save that succeeded or on Escape. Enter or Save asks the
+ * resets on Escape, and after a save that succeeded unless the person changed
+ * the fields while it ran. Enter or Save asks the
  * parent to save the trimmed fields, a blank field as null, only when they
  * are valid, differ from the saved location, and no save runs; Save is
  * disabled otherwise. Emptying every field and saving removes the location.
@@ -152,12 +153,19 @@ export default function LocationCard({
   })
 
   /**
-   * Saves the location and resets the edit once it is saved.
+   * Saves the location and, once it is saved, resets the edit when the
+   * fields still hold the draft it was read from.
    *
    * @param location - Valid location that differs from the saved one.
+   * @param submittedDraft - Edit the location was read from; any later change
+   * to the fields is a new edit, which the save keeps.
    */
-  async function handleSaveLocation(location: LocationSettings): Promise<void> {
-    if ((await onSaveLocation(location)) === "saved") setEditedDraft(null)
+  async function handleSaveLocation(
+    location: LocationSettings,
+    submittedDraft: LocationDraft | null
+  ): Promise<void> {
+    if ((await onSaveLocation(location)) !== "saved") return
+    setEditedDraft((current) => (current === submittedDraft ? null : current))
   }
 
   /**
@@ -168,7 +176,7 @@ export default function LocationCard({
   function handleSubmitLocation(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault()
     if (draftParse.status !== "changed" || isSaving) return
-    void handleSaveLocation(draftParse.location)
+    void handleSaveLocation(draftParse.location, editedDraft)
   }
 
   return (

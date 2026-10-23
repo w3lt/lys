@@ -602,7 +602,8 @@ with the saved location. The section stays shown while the tools are read or
 cannot be read, and the tool lock does not apply to it. Enter or Save stores
 the trimmed fields, a blank field as `null`, only when they are valid and
 differ from the saved location; emptying every field and saving removes the
-location, and Escape discards the edit. A field whose text is too long or
+location, and Escape discards the edit. Fields changed while a save runs
+keep that newer edit once the save succeeds. A field whose text is too long or
 holds a control character is marked invalid and described by what to change.
 A polite status line says first that a save runs or failed, which keeps the
 edit; otherwise that the edit is invalid or unsaved; otherwise whether a

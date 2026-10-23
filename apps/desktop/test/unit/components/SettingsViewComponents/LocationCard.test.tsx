@@ -241,6 +241,26 @@ describe("LocationCard", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()
   })
 
+  it("keeps an edit typed while the save ran once the save succeeds", async () => {
+    const settingsWrite = startLocationCardOnStore()
+    const user = userEvent.setup()
+
+    await user.clear(getField("City"))
+    await user.type(getField("City"), "Grenoble{Enter}")
+    await user.type(getField("Region"), "Isère")
+    await act(async () => {
+      settingsWrite.resolve()
+      await waitForMicrotasks()
+    })
+
+    expect(getField("City")).toHaveValue("Grenoble")
+    expect(getField("Region")).toHaveValue("Isère")
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "unsaved · enter to save, esc to discard"
+    )
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()
+  })
+
   it("asks for no save while one runs", async () => {
     const { onSaveLocation } = startLocationCard({
       saveState: { status: "saving" }

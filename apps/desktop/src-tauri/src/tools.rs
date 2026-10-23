@@ -8,8 +8,9 @@
 //! the person saved in Settings. The file commands accept any absolute
 //! path that the desktop process can read. No command decides whether Lys may
 //! use a tool or a path; that decision belongs to the caller that runs tool
-//! requests. File work runs on Tauri's blocking-task pool so the window stays
-//! responsive.
+//! requests. `read_text_file` and `find_files` run on Tauri's blocking-task
+//! pool so the window stays responsive; `get_current_time` and `get_location`
+//! read a few bytes and run on the main thread, like `load_settings`.
 //!
 //! `list_tools` returns the definition of every client tool, which the Tools
 //! settings pane lists and a model will be offered.

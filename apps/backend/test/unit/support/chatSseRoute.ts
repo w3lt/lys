@@ -31,7 +31,7 @@ export type ChatSseRouteResponse = Readonly<{
 /**
  * Creates a test application with the SSE plugin used by the chat route.
  *
- * @returns The application and its captured logs.
+ * @returns The application and the destination of its log.
  * @throws If the SSE plugin cannot be registered.
  * @remarks The plugin keeps its default serializer, which writes each event's
  * data as JSON.

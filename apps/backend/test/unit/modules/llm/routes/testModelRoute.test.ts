@@ -93,7 +93,9 @@ describe("updateFastifyWithLlmTestModelRoute", () => {
     expect(response.statusCode).toBe(200)
     expect(response.json()).toEqual(outcome.health)
     expect(response.body).not.toContain("ECONNREFUSED")
-    expect(testApp.logs.filter(({ level }) => level === "error")).toEqual([
+    expect(
+      testApp.log.records.filter(({ level }) => level === "error")
+    ).toEqual([
       expect.objectContaining({
         modelKey: MODEL_KEY,
         err: expect.objectContaining({ message: failure.message })

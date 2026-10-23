@@ -68,7 +68,7 @@ describe("handleLlmServiceRequestFailure", () => {
   })
 
   it("answers a runtime refusal without runtime work with the runtime-unavailable problem and no log", async () => {
-    const { app, logs } = createFailingRouteApp(
+    const { app, log } = createFailingRouteApp(
       createLlmRuntimeUnavailableError([])
     )
 
@@ -81,17 +81,17 @@ describe("handleLlmServiceRequestFailure", () => {
     expect(
       llmRuntimeUnavailableProblemSchema.safeParse(response.json()).success
     ).toBe(true)
-    expect(logs.filter((record) => "err" in record)).toEqual([])
+    expect(log.records.filter((record) => "err" in record)).toEqual([])
   })
 
   it("logs retained runtime failures at warn before answering with the runtime-unavailable problem", async () => {
     const runtimeFailure = new Error("connect ECONNREFUSED /private/lms.sock")
-    const { app, logs } = createFailingRouteApp(
+    const { app, log } = createFailingRouteApp(
       createLlmRuntimeUnavailableError([runtimeFailure])
     )
     let logCountAtSend: number | undefined = undefined
     app.addHook("onSend", async () => {
-      logCountAtSend = logs.length
+      logCountAtSend = log.records.length
     })
 
     const response = await app.inject({ method: "GET", url: "/failing" })
@@ -101,7 +101,7 @@ describe("handleLlmServiceRequestFailure", () => {
       llmRuntimeUnavailableProblemSchema.safeParse(response.json()).success
     ).toBe(true)
     expect(response.body).not.toContain("ECONNREFUSED")
-    const warnings = logs.filter(({ level }) => level === "warn")
+    const warnings = log.records.filter(({ level }) => level === "warn")
     expect(warnings).toEqual([
       expect.objectContaining({
         err: expect.objectContaining({
@@ -111,7 +111,7 @@ describe("handleLlmServiceRequestFailure", () => {
         })
       })
     ])
-    const warningIndex = logs.findIndex(({ level }) => level === "warn")
+    const warningIndex = log.records.findIndex(({ level }) => level === "warn")
     expect(logCountAtSend).toBeGreaterThan(warningIndex)
   })
 })

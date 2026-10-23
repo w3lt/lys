@@ -1,9 +1,15 @@
-import type { LLMInfo, LLMLoadModelConfig } from "@lmstudio/sdk"
+import type {
+  LLMInfo,
+  LLMLoadModelConfig,
+  LoggerInterface
+} from "@lmstudio/sdk"
 
 /** Constructor options the backend passes to the SDK client. */
 type FakeLmStudioClientOptions = Readonly<{
   /** WebSocket endpoint of the LM Studio server. */
   baseUrl?: string
+  /** Receives the messages the client logs. */
+  logger?: LoggerInterface
 }>
 
 /** Load options the backend passes to `llm.load`. */
@@ -73,6 +79,17 @@ export type FakeLmStudioLoadedHandle = FakeLoadedLlmHandle &
     /** Forwards to the engine's `countTokens` operation. */
     countTokens: (text: string) => Promise<number>
   }>
+
+/**
+ * SDK logger for cases that do not observe the SDK's messages; it drops every
+ * message.
+ */
+export const DISCARDING_SDK_LOGGER: LoggerInterface = Object.freeze({
+  info: () => undefined,
+  warn: () => undefined,
+  error: () => undefined,
+  debug: () => undefined
+})
 
 /** Context length the default `getContextLength` reports for every instance. */
 export const FAKE_LOADED_CONTEXT_LENGTH = 4096

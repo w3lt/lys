@@ -6,7 +6,11 @@ import {
 } from "@lys/protocol"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import * as z from "zod"
-import { backendConfigSchema, loadBackendConfig } from "../../src/config"
+import {
+  backendConfigSchema,
+  loadBackendConfig,
+  loadBackendLogsDirectoryPath
+} from "../../src/config"
 import { readPrompt, type PromptType } from "../../src/utils/prompts"
 
 vi.mock("../../src/utils/prompts", () => ({ readPrompt: vi.fn() }))
@@ -172,6 +176,37 @@ describe("loadBackendConfig", () => {
     vi.stubEnv("LYS_HOME", "relative-home")
 
     expect(() => loadBackendConfig()).toThrow(
+      'LYS_HOME must be an absolute path, got "relative-home"'
+    )
+  })
+})
+
+describe("loadBackendLogsDirectoryPath", () => {
+  beforeEach(() => {
+    vi.stubEnv("LYS_HOME", "/test-home/lys")
+  })
+
+  it("returns the logs directory in the Lys home, even when a prompt file cannot be read", () => {
+    vi.mocked(readPrompt).mockImplementation(() => {
+      throw new Error("ENOENT: no such file or directory")
+    })
+
+    expect(loadBackendLogsDirectoryPath()).toBe("/test-home/lys/logs")
+  })
+
+  it.each([
+    ["unset", undefined],
+    ["empty", ""]
+  ])("rejects an %s Lys home directory", (_label, lysHome) => {
+    vi.stubEnv("LYS_HOME", lysHome)
+
+    expect(() => loadBackendLogsDirectoryPath()).toThrow("LYS_HOME is not set")
+  })
+
+  it("rejects a relative Lys home directory", () => {
+    vi.stubEnv("LYS_HOME", "relative-home")
+
+    expect(() => loadBackendLogsDirectoryPath()).toThrow(
       'LYS_HOME must be an absolute path, got "relative-home"'
     )
   })

@@ -2,6 +2,7 @@ import fastifyPlugin from "fastify-plugin"
 import { type FastifyPluginAsync } from "fastify"
 import type { BackendConfig } from "../config"
 import type { LlmRuntimeFailureReporters } from "../modules/llm/llmRuntimeService"
+import PinoLmStudioSdkLogger from "../modules/llm/runtimes/pinoLmStudioSdkLogger"
 import type { PageRenderingFailureReporters } from "../modules/tool/builtIn/web/pageRendering"
 import { closeSingletonServices, createSingletonServices } from "./singleton"
 
@@ -22,7 +23,9 @@ type SingletonServicePluginOptions = {
  * Fastify closes. After the HTTP listener opens, an `onListen` hook performs
  * the first LLM runtime connection attempt. Fastify resolves `listen()` before
  * running the hook and logs a hook rejection, so LM Studio never delays or
- * prevents listening. `inject()` and `ready()` do not run the hook.
+ * prevents listening. `inject()` and `ready()` do not run the hook. The
+ * services' failures that no caller observes, and the messages of the LM
+ * Studio SDK, are logged through the application's logger.
  */
 const singletonPlugin: FastifyPluginAsync<
   SingletonServicePluginOptions
@@ -48,7 +51,8 @@ const singletonPlugin: FastifyPluginAsync<
   }
   const singletonServices = await createSingletonServices(config, {
     llmRuntime,
-    pageRendering
+    pageRendering,
+    lmStudioSdk: new PinoLmStudioSdkLogger(app.log)
   })
 
   app.addHook("onClose", async () => {

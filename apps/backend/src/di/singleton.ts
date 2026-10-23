@@ -1,3 +1,4 @@
+import type { LoggerInterface } from "@lmstudio/sdk"
 import type { BackendConfig } from "../config"
 import SqliteAgentRecordStore from "../infrastructure/database/agents/sqliteAgentRecordStore"
 import AttachmentFileStore from "../modules/attachment/attachmentFileStore"
@@ -63,16 +64,25 @@ export type SingletonServiceFactories = Readonly<{
    */
   createLlmRuntimeService: (
     lmsBaseUrl: string,
-    llmRuntimeFailureReporters: LlmRuntimeFailureReporters
+    llmRuntimeFailureReporters: LlmRuntimeFailureReporters,
+    lmStudioSdkLogger: LoggerInterface
   ) => SingletonServiceAcquisition<LlmRuntimeService>
 }>
 
-/** Receive the failures of the services that no caller observes in full, for logging. */
-export type SingletonFailureReporters = Readonly<{
+/**
+ * Receive, for logging, what the services report that no caller observes in
+ * full: their failures and the LM Studio SDK's own messages.
+ */
+export type SingletonLogReporters = Readonly<{
   /** Receive the LLM runtime failures that no caller observes. */
   llmRuntime: LlmRuntimeFailureReporters
   /** Receive the causes of read failures the model learns only by kind. */
   pageRendering: PageRenderingFailureReporters
+  /**
+   * Receives the messages of every LM Studio SDK client, such as why it
+   * could not connect.
+   */
+  lmStudioSdk: LoggerInterface
 }>
 
 /** Production factories used when the composition root supplies no substitutes. */
@@ -154,9 +164,9 @@ type DatabaseServices = Pick<
  * service, the built-in agents' system prompts given to the agent service,
  * vmo's host and port given to the read-page tool, and the attachments
  * directory given to the attachment file store.
- * @param failureReporters - Receive the LLM runtime failures that no caller
- * observes and the causes of read failures the model learns only by kind,
- * for logging.
+ * @param logReporters - Receive, for logging, the LLM runtime failures that
+ * no caller observes, the causes of read failures the model learns only by
+ * kind, and the LM Studio SDK's messages.
  * @param factories - Service factories owned by the composition root.
  * @returns A promise resolving to the frozen bundle of owned services,
  * configured with the HTTP `/v1` chat endpoint and WebSocket LM Studio
@@ -182,7 +192,7 @@ type DatabaseServices = Pick<
  */
 export async function createSingletonServices(
   config: BackendConfig,
-  failureReporters: SingletonFailureReporters,
+  logReporters: SingletonLogReporters,
   factories: SingletonServiceFactories = DEFAULT_SINGLETON_SERVICE_FACTORIES
 ): Promise<SingletonServices> {
   const serviceLifetime = new AsyncDisposableStack()
@@ -202,7 +212,8 @@ export async function createSingletonServices(
 
     const llmRuntimeServiceAcquisition = factories.createLlmRuntimeService(
       `ws://${config.lmstudioHost}:${config.lmstudioPort}`,
-      failureReporters.llmRuntime
+      logReporters.llmRuntime,
+      logReporters.lmStudioSdk
     )
     serviceLifetime.defer(llmRuntimeServiceAcquisition.closeService)
     const llmService = new LlmService({
@@ -216,10 +227,7 @@ export async function createSingletonServices(
         llmService
       }
     )
-    const toolServices = createToolServices(
-      config,
-      failureReporters.pageRendering
-    )
+    const toolServices = createToolServices(config, logReporters.pageRendering)
     let closeCompletion: Promise<void> | undefined = undefined
 
     /** Joins every close request to one complete service-lifetime disposal. */
@@ -409,16 +417,20 @@ function createDatabase(
  *
  * @param lmsBaseUrl - WebSocket endpoint used by each acquired SDK client.
  * @param llmRuntimeFailureReporters - Receive failures that no caller observes.
+ * @param lmStudioSdkLogger - Receives the messages of each acquired SDK
+ * client.
  * @returns The newly owned runtime service and its cleanup capability. No
  * connection is attempted until the service is asked to connect.
  */
 function createLlmRuntimeService(
   lmsBaseUrl: string,
-  llmRuntimeFailureReporters: LlmRuntimeFailureReporters
+  llmRuntimeFailureReporters: LlmRuntimeFailureReporters,
+  lmStudioSdkLogger: LoggerInterface
 ): SingletonServiceAcquisition<LlmRuntimeService> {
   const llmRuntimeService = new LlmRuntimeService({
     ...llmRuntimeFailureReporters,
-    acquireLlmRuntime: async () => await LmStudioRuntime.create(lmsBaseUrl)
+    acquireLlmRuntime: async () =>
+      await LmStudioRuntime.create(lmsBaseUrl, lmStudioSdkLogger)
   })
   return Object.freeze({
     service: llmRuntimeService,

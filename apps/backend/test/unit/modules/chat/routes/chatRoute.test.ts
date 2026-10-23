@@ -203,7 +203,7 @@ describe("updateFastifyWithChatRoute", () => {
     )
 
     expect(response.statusCode).toBe(500)
-    expect(testApp.logs).toContainEqual(
+    expect(testApp.log.records).toContainEqual(
       expect.objectContaining({
         level: "error",
         err: expect.objectContaining({ message: storageFailure.message })
@@ -524,7 +524,7 @@ describe("updateFastifyWithChatRoute", () => {
     expect(
       parseSseEvents(response.body).map(({ event }) => event)
     ).not.toContain("title")
-    expect(testApp.logs).toContainEqual(
+    expect(testApp.log.records).toContainEqual(
       expect.objectContaining({
         level: "debug",
         titleGenerationOutcome: "model-not-loaded",
@@ -793,7 +793,7 @@ describe("updateFastifyWithChatRoute", () => {
       )
 
       expect(response.statusCode).toBe(200)
-      expect(testApp.logs).toContainEqual(
+      expect(testApp.log.records).toContainEqual(
         expect.objectContaining({
           level,
           msg,
@@ -818,7 +818,7 @@ describe("updateFastifyWithChatRoute", () => {
     )
 
     expect(response.statusCode).toBe(200)
-    expect(testApp.logs).toContainEqual(
+    expect(testApp.log.records).toContainEqual(
       expect.objectContaining({
         level: "debug",
         msg: "Chat round was not sent to the model",
@@ -828,7 +828,7 @@ describe("updateFastifyWithChatRoute", () => {
         })
       })
     )
-    expect(testApp.logs).not.toContainEqual(
+    expect(testApp.log.records).not.toContainEqual(
       expect.objectContaining({ level: "error" })
     )
   })
@@ -966,7 +966,7 @@ describe("updateFastifyWithChatRoute", () => {
       })
       await responsePromise
 
-      expect(testApp.logs).toContainEqual(
+      expect(testApp.log.records).toContainEqual(
         expect.objectContaining({
           level: "warn",
           reqId: expect.any(String),
@@ -1750,7 +1750,7 @@ describe("updateFastifyWithChatRoute", () => {
 
       expect(response.statusCode).toBe(500)
       expect(readdirSync(testApp.attachmentsDirectoryPath)).toEqual([])
-      expect(testApp.logs).toContainEqual(
+      expect(testApp.log.records).toContainEqual(
         expect.objectContaining({
           level: "error",
           err: expect.objectContaining({ message: storageFailure.message })
@@ -1811,7 +1811,7 @@ describe("updateFastifyWithChatRoute", () => {
       expect(listStoredFiles(testApp)).toEqual([
         expect.stringMatching(/^[0-9a-f-]{36}\/[0-9a-f-]{36}\/notes\.md$/)
       ])
-      expect(testApp.logs).toContainEqual(
+      expect(testApp.log.records).toContainEqual(
         expect.objectContaining({
           level: "error",
           err: expect.objectContaining({

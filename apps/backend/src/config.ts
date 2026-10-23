@@ -189,6 +189,24 @@ export function loadBackendConfig(): BackendConfig {
 }
 
 /**
+ * Loads the path of the directory that holds the backend's log files, one per
+ * UTC day, from the `LYS_HOME` environment variable.
+ *
+ * It is loaded apart from {@link loadBackendConfig}, before it, so the backend
+ * can log a failure to load the rest of its configuration.
+ *
+ * @returns The absolute path of the `logs` directory in the `LYS_HOME`
+ * directory. Neither directory is required to exist.
+ * @throws If `LYS_HOME` is unset, empty, or not an absolute path, as
+ * described by {@link parseLysHome}.
+ * @remarks The backend creates the logs directory whenever it is missing as
+ * it writes a line, but never the `LYS_HOME` directory.
+ */
+export function loadBackendLogsDirectoryPath(): string {
+  return join(parseLysHome(process.env.LYS_HOME), "logs")
+}
+
+/**
  * Validates the raw `LYS_HOME` environment value as the Lys home directory.
  *
  * @param value - Raw `LYS_HOME` value, or `undefined` when the variable is

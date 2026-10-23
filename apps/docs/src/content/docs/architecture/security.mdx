@@ -55,6 +55,7 @@ backend decides which calls ask; the desktop shows the prompts.
 | Fixed search destination    | Every search goes to `https://api.tavily.com` with certificate verification forced on, TLS 1.2 or later, no redirects, and the address rule on every resolved address and the connected socket.                                                                                                                                                                                                                              |
 | Search key handling         | The key goes only into the `authorization` header sent to Tavily; it never appears in results, the model's context, events, API answers, logs, or errors.                                                                                                                                                                                                                                                                    |
 | Owner-only settings file    | `settings.json` is replaced atomically and is readable only by its owner on Unix.                                                                                                                                                                                                                                                                                                                                            |
+| Owner-only backend log      | Each of the backend's log files in `logs/` is created readable and writable only by its owner.                                                                                                                                                                                                                                                                                                                               |
 | Untrusted result framing    | Result titles, URLs, and snippets reach the model between delimiters it cannot forge, with a notice never to obey them.                                                                                                                                                                                                                                                                                                      |
 
 ## Candid limits
@@ -142,6 +143,10 @@ backend decides which calls ask; the desktop shows the prompts.
 - The backend currently uses a dummy API key value when talking to local
   OpenAI-compatible LM Studio endpoints that expect an API key field.
 - Runtime settings and conversation data live on disk in user-space files.
+- The backend's log files keep every request's full URL, history searches
+  included, and the failures the backend reports on disk without redaction,
+  and Lys never deletes them, under the
+  [request log exception](/reference/standard-application/#request-log-exception).
 
 ## Web reads
 

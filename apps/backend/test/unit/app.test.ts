@@ -1,10 +1,14 @@
 import { existsSync, mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
 import * as z from "zod"
 import { buildApp } from "../../src/app"
 import type { BackendConfig } from "../../src/config"
+import {
+  createBackendLogger,
+  registerOutputFailureListeners
+} from "../../src/log"
 import AgentService from "../../src/modules/agent/agentService"
 import AttachmentFileStore from "../../src/modules/attachment/attachmentFileStore"
 import StoredConversationHistoryEditor from "../../src/modules/conversation/historyEditor"
@@ -16,10 +20,12 @@ import {
   createNewConversationTarget,
   createTurnUserMessage
 } from "./support/conversationFixtures"
+import { CapturedLogDestination } from "./support/fastifyTestApp"
 import {
   fakeLmStudio,
   type FakeLmStudioOperations
 } from "./support/lmStudioSdkFake"
+import { createFailingOutput, createWorkingOutput } from "./support/testOutputs"
 
 vi.mock("@lmstudio/sdk", () => import("./support/lmStudioSdkFake"))
 
@@ -74,7 +80,9 @@ describe("buildApp", () => {
     const constructClient = vi.fn<FakeLmStudioOperations["constructClient"]>()
     fakeLmStudio.operations = { ...fakeLmStudio.operations, constructClient }
 
-    const build = buildApp({ config })
+    const log = new CapturedLogDestination()
+
+    const build = buildApp({ config, logger: createBackendLogger(log) })
 
     await expect(build).rejects.toBeInstanceOf(z.ZodError)
     await expect(build).rejects.toMatchObject({
@@ -82,10 +90,35 @@ describe("buildApp", () => {
     })
     expect(constructClient).not.toHaveBeenCalled()
     expect(existsSync(config.databaseFilePath)).toBe(false)
+    expect(log.records).toEqual([])
+  })
+
+  it("rejects with the failure of a service that cannot be created, such as a database that cannot be opened", async () => {
+    const ownedConfig = createOwnedBackendConfig()
+    // SQLite does not create a missing directory, so opening the database
+    // fails while the services are registered.
+    const config = {
+      ...ownedConfig,
+      databaseFilePath: join(
+        dirname(ownedConfig.databaseFilePath),
+        "missing",
+        "lys_db.sqlite"
+      )
+    }
+
+    const build = buildApp({
+      config,
+      logger: createBackendLogger(new CapturedLogDestination())
+    })
+
+    await expect(build).rejects.toThrow("unable to open database file")
   })
 
   it("decorates the conversation adapters, the agent service, and the attachment file store and serves history and agents from the configured database", async () => {
-    const app = await buildApp({ config: createOwnedBackendConfig() })
+    const app = await buildApp({
+      config: createOwnedBackendConfig(),
+      logger: createBackendLogger(new CapturedLogDestination())
+    })
     onTestFinished(async () => await app.close())
     await app.ready()
 
@@ -122,7 +155,10 @@ describe("buildApp", () => {
   })
 
   it("decorates the reply part store over the configured database", async () => {
-    const app = await buildApp({ config: createOwnedBackendConfig() })
+    const app = await buildApp({
+      config: createOwnedBackendConfig(),
+      logger: createBackendLogger(new CapturedLogDestination())
+    })
     onTestFinished(async () => await app.close())
     await app.ready()
     const turn = app.conversationTurns.createConversationTurn({
@@ -143,8 +179,144 @@ describe("buildApp", () => {
     ).toMatchObject({ messages: [turn.userMessage, { parts: [part] }] })
   })
 
+  it("logs a request by its full URL, query string included", async () => {
+    const log = new CapturedLogDestination()
+    const app = await buildApp({
+      config: createOwnedBackendConfig(),
+      logger: createBackendLogger(log)
+    })
+    onTestFinished(async () => await app.close())
+    await app.ready()
+    const logCountBeforeRequest = log.records.length
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/conversations?query=trip%20to%20Hanoi&limit=20"
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(log.records.slice(logCountBeforeRequest)).toContainEqual(
+      expect.objectContaining({
+        msg: "incoming request",
+        req: {
+          method: "GET",
+          url: "/api/v1/conversations?query=trip%20to%20Hanoi&limit=20",
+          host: "localhost:80",
+          remoteAddress: "127.0.0.1"
+        }
+      })
+    )
+  })
+
+  it("logs a request for a route that does not exist with a line of its own", async () => {
+    const log = new CapturedLogDestination()
+    const app = await buildApp({
+      config: createOwnedBackendConfig(),
+      logger: createBackendLogger(log)
+    })
+    onTestFinished(async () => await app.close())
+    await app.ready()
+    const logCountBeforeRequest = log.records.length
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/missing?query=trip%20to%20Hanoi"
+    })
+
+    expect(response.statusCode).toBe(404)
+    expect(log.records.slice(logCountBeforeRequest)).toEqual([
+      expect.objectContaining({
+        level: "info",
+        msg: "incoming request",
+        req: expect.objectContaining({
+          url: "/api/v1/missing?query=trip%20to%20Hanoi"
+        })
+      }),
+      expect.objectContaining({
+        level: "info",
+        msg: "Route GET:/api/v1/missing?query=trip%20to%20Hanoi not found"
+      }),
+      expect.objectContaining({
+        level: "info",
+        msg: "request completed",
+        res: { statusCode: 404 }
+      })
+    ])
+  })
+
+  it("logs the messages of the LM Studio SDK client it connects with to the given logger", async () => {
+    fakeLmStudio.operations = {
+      ...fakeLmStudio.operations,
+      constructClient: (options) => {
+        // The SDK logs through the logger it was given, as when LM Studio
+        // refuses its connection.
+        options.logger?.warn(
+          "[LMStudioClient][System]",
+          "WebSocket connection refused."
+        )
+      }
+    }
+    const log = new CapturedLogDestination()
+    const app = await buildApp({
+      config: createOwnedBackendConfig(),
+      logger: createBackendLogger(log)
+    })
+    onTestFinished(async () => await app.close())
+    await app.ready()
+
+    await app.llmRuntimeService.connectLlmRuntime()
+
+    expect(log.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        msg: "[LMStudioClient][System] WebSocket connection refused."
+      })
+    )
+  })
+
+  it("keeps serving when writing its log fails", async () => {
+    const logWrites: string[] = []
+    const errorWrites: string[] = []
+    const standardOutput = createFailingOutput(
+      new Error("ENOSPC: no space left on device, write"),
+      (text) => {
+        logWrites.push(text)
+      }
+    )
+    const standardError = createWorkingOutput((text) => {
+      errorWrites.push(text)
+    })
+    registerOutputFailureListeners(standardOutput, standardError)
+    const app = await buildApp({
+      config: createOwnedBackendConfig(),
+      logger: createBackendLogger(standardOutput)
+    })
+    onTestFinished(async () => await app.close())
+    await app.ready()
+
+    const first = await app.inject({ method: "GET", url: "/api/v1/heath" })
+    const second = await app.inject({ method: "GET", url: "/api/v1/heath" })
+
+    expect(first.statusCode).toBe(200)
+    expect(second.statusCode).toBe(200)
+    expect(logWrites).toEqual([
+      expect.stringContaining('"msg":"incoming request"'),
+      expect.stringContaining('"msg":"request completed"'),
+      expect.stringContaining('"msg":"incoming request"'),
+      expect.stringContaining('"msg":"request completed"')
+    ])
+    expect(errorWrites).toEqual([
+      expect.stringContaining(
+        "The Lys backend could not write to its standard output"
+      )
+    ])
+  })
+
   it("accepts a request body at the limit and refuses a larger one before the route runs", async () => {
-    const app = await buildApp({ config: createOwnedBackendConfig() })
+    const app = await buildApp({
+      config: createOwnedBackendConfig(),
+      logger: createBackendLogger(new CapturedLogDestination())
+    })
     onTestFinished(async () => await app.close())
     await app.ready()
 

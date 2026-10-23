@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
 import LmStudioRuntime from "../../../../../src/modules/llm/runtimes/lmStudioRuntime"
 import { createLmStudioLlmRecord } from "../../../support/llmFixtures"
 import {
+  DISCARDING_SDK_LOGGER,
   FAKE_LOADED_CONTEXT_LENGTH,
   fakeLmStudio,
   type FakeLmStudioOperations
@@ -20,7 +21,10 @@ const LM_STUDIO_URL = "ws://127.0.0.1:1234"
  * already began disposal.
  */
 async function createOwnedRuntime(): Promise<LmStudioRuntime> {
-  const runtime = await LmStudioRuntime.create(LM_STUDIO_URL)
+  const runtime = await LmStudioRuntime.create(
+    LM_STUDIO_URL,
+    DISCARDING_SDK_LOGGER
+  )
   onTestFinished(async () => {
     await runtime[Symbol.asyncDispose]().catch(() => undefined)
   })
@@ -78,7 +82,7 @@ describe("LmStudioRuntime", () => {
   })
 
   describe("create", () => {
-    it("connects to the endpoint and returns a ready runtime after the readiness query", async () => {
+    it("connects to the endpoint with the given SDK logger and returns a ready runtime after the readiness query", async () => {
       const constructClient = vi.fn<FakeLmStudioOperations["constructClient"]>()
       const disposeClient = vi.fn(async () => undefined)
       fakeLmStudio.operations = {
@@ -91,7 +95,8 @@ describe("LmStudioRuntime", () => {
 
       await expectOperationAdmitted(runtime)
       expect(constructClient).toHaveBeenCalledExactlyOnceWith({
-        baseUrl: LM_STUDIO_URL
+        baseUrl: LM_STUDIO_URL,
+        logger: DISCARDING_SDK_LOGGER
       })
       expect(disposeClient).not.toHaveBeenCalled()
     })
@@ -107,7 +112,9 @@ describe("LmStudioRuntime", () => {
         disposeClient
       }
 
-      const failure = await getRejection(LmStudioRuntime.create(LM_STUDIO_URL))
+      const failure = await getRejection(
+        LmStudioRuntime.create(LM_STUDIO_URL, DISCARDING_SDK_LOGGER)
+      )
 
       expect(failure).toMatchObject({
         message: "The LLM runtime is unavailable.",
@@ -129,7 +136,9 @@ describe("LmStudioRuntime", () => {
         }
       }
 
-      const failure = await getRejection(LmStudioRuntime.create(LM_STUDIO_URL))
+      const failure = await getRejection(
+        LmStudioRuntime.create(LM_STUDIO_URL, DISCARDING_SDK_LOGGER)
+      )
 
       expect(failure).toBeInstanceOf(AggregateError)
       expect(failure).toMatchObject({
@@ -154,9 +163,9 @@ describe("LmStudioRuntime", () => {
         disposeClient
       }
 
-      await expect(LmStudioRuntime.create("not a url")).rejects.toBe(
-        constructionFailure
-      )
+      await expect(
+        LmStudioRuntime.create("not a url", DISCARDING_SDK_LOGGER)
+      ).rejects.toBe(constructionFailure)
       expect(disposeClient).not.toHaveBeenCalled()
     })
   })

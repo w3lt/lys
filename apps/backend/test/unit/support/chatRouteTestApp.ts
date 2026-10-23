@@ -92,7 +92,7 @@ export type ChatRouteTestApp = TestFastify &
  * turns and chat service are real instances with every call the chat route
  * can reach replaced by a spy.
  *
- * @returns The application, captured logs, and the spies.
+ * @returns The application, the destination of its log, and the spies.
  * @throws If the SSE plugin cannot be registered.
  * @remarks The chat route is not registered; each case calls the registrar
  * under test. Unconfigured turn creation throws and both chat-service calls

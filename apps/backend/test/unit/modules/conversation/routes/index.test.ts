@@ -95,8 +95,9 @@ function handleUnexpectedHistoryCall(operationName: string): never {
  * registered over a stubbed history reader and editor and a real attachment
  * file store.
  *
- * @returns The application, captured logs, a spy for each history operation
- * the routes can call, and the attachment file store with its directory.
+ * @returns The application, the destination of its log, a spy for each
+ * history operation the routes can call, and the attachment file store with
+ * its directory.
  * @remarks The routes read the decorated history reader and editor at
  * registration, so the returned spies control every outcome. Each spy throws
  * until the case configures it; no database row is read or written. The
@@ -417,7 +418,7 @@ describe("updateFastifyWithConversationRoutes", () => {
     })
 
     it("still responds without a body, logging the failure with its cause, when the attachment files cannot be removed", async () => {
-      const { app, logs, historyCalls, attachmentFileStore } =
+      const { app, log, historyCalls, attachmentFileStore } =
         await createConversationRouteApp()
       historyCalls.deleteConversation.mockReturnValue(true)
       const removalFailure = new Error("EACCES: permission denied")
@@ -432,7 +433,7 @@ describe("updateFastifyWithConversationRoutes", () => {
       })
 
       expect(response.statusCode).toBe(204)
-      expect(logs).toContainEqual(
+      expect(log.records).toContainEqual(
         expect.objectContaining({
           level: "error",
           msg: "The deleted conversation's attachment files could not be removed",

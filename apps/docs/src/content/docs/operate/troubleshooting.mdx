@@ -30,10 +30,16 @@ For the desktop-managed path:
   not responding**. Press **Stop**, then **Start**
 - verify `GET /api/v1/heath` responds at `http://127.0.0.1:12345`
 
-If the listener is unavailable, inspect the backend output. LM Studio is not
-required for the backend to listen. For standalone startup, also ensure
-`LYS_HOME` is set to an absolute path and its directory exists as described in
-[Running Lys locally](/develop/running/).
+If the listener is unavailable, inspect the backend's log: the day's file
+`logs/backend-YYYY-MM-DD.log` in the Lys home, named by the UTC date, or the
+terminal of a development build (see
+[the backend log files](/operate/logging/#the-backend-log-files)). A backend
+that stopped on a failure, such as a prompt file it cannot read or a port
+already in use, logs it there at level `fatal`; only a missing or relative
+`LYS_HOME` stops it before it can log, with the reason on standard error.
+LM Studio is not required for the backend to listen. For standalone startup,
+also ensure `LYS_HOME` is set to an absolute path and its directory exists as
+described in [Running Lys locally](/develop/running/).
 
 ## LM Studio is not reachable
 
@@ -161,7 +167,8 @@ The repository does not currently include evidenced support for:
 
 - automated store repair commands
 - diagnostics bundles
-- packaged log collection and rotation
+- vmo log files in the release app
+  ([#229](https://github.com/w3lt/lys/issues/229))
 - a published operator escalation path
 
 Those workflows should be documented here only after the product ships them.

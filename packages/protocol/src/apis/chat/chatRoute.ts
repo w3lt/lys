@@ -183,12 +183,12 @@ function hasOnlyClientTools(definitions: readonly ToolDefinition[]): boolean {
 }
 
 /**
- * Answers whether no backend tool name is offered twice.
+ * Answers whether no tool name is listed twice.
  *
- * @param toolNames - Offered backend tool names in offer order.
+ * @param toolNames - Tool names in request order.
  * @returns True when every name appears once.
  */
-function hasDistinctBackendToolNames(toolNames: readonly string[]): boolean {
+function hasDistinctNames(toolNames: readonly string[]): boolean {
   return new Set(toolNames).size === toolNames.length
 }
 
@@ -232,10 +232,7 @@ const chatToolOfferListsSchema = z.strictObject({
    */
   backendToolNames: z
     .array(toolNameSchema)
-    .refine(
-      hasDistinctBackendToolNames,
-      "A request offers each backend tool name once."
-    )
+    .refine(hasDistinctNames, "A request offers each backend tool name once.")
     .refine(hasNoReservedToolName, RESERVED_TOOL_NAME_MESSAGE)
     .readonly()
     .optional()
@@ -292,26 +289,101 @@ export const chatToolOfferSchema = chatToolOfferListsSchema
 /** Client and backend tools one chat request offers to the model. */
 export type ChatToolOffer = z.infer<typeof chatToolOfferSchema>
 
-/** Validates a chat request for a new or an existing conversation. */
-export const chatApiRequestBodySchema = z.strictObject({
-  /** Conversation the turn starts or continues. */
-  conversation: chatConversationTargetSchema,
-  /** Non-empty user-authored prompt sent to the selected model. */
-  message: z.string().min(1),
-  /** Non-empty model identifier resolved by the backend runtime. */
-  model: z.string().min(1),
-  /** Required generation controls; absence is not represented by this contract. */
-  generationOptions: messageGenerationOptionsSchema,
-  /**
-   * Tools offered for this turn; absence means one round without tools.
-   */
-  tools: chatToolOfferSchema.optional(),
-  /**
-   * Files sent with the message, in the order they were attached; absence
-   * means none. Each is stored with the message under its name.
-   */
-  attachments: chatAttachmentsSchema.optional()
-})
+/**
+ * Most tools one request names as switched off.
+ *
+ * @remarks Far more than Lys lists, so it never limits a real request, while
+ * bounding the note the backend adds to the turn's instructions to 64 names
+ * of at most 64 characters each.
+ */
+const MAXIMUM_SWITCHED_OFF_TOOL_COUNT = 64
+
+/**
+ * Explanation of a refused switched-off list that names the backend's
+ * attachment reader.
+ */
+const RESERVED_SWITCHED_OFF_TOOL_NAME_MESSAGE = `A request does not switch off ${READ_ATTACHMENT_TOOL_NAME}; it has no switch.`
+
+/**
+ * Validates the names of the tools the person switched off in the client.
+ *
+ * @remarks One to {@link MAXIMUM_SWITCHED_OFF_TOOL_COUNT} names, each
+ * passing the shared tool-name rule, each once, and none the backend's
+ * attachment reader, which has no switch. A name need not be a tool the
+ * backend runs, because the client's own tools are named too. The backend
+ * tells the model these tools are off and answers a call of one as off;
+ * it never runs one.
+ */
+export const switchedOffToolNamesSchema = z
+  .array(toolNameSchema)
+  .min(1)
+  .max(MAXIMUM_SWITCHED_OFF_TOOL_COUNT)
+  .refine(hasDistinctNames, "A request names each switched-off tool once.")
+  .refine(hasNoReservedToolName, RESERVED_SWITCHED_OFF_TOOL_NAME_MESSAGE)
+  .readonly()
+
+/** Offered and switched-off tools of one request, before their joint check. */
+type ToolChoiceCandidate = Readonly<{
+  /** Offered tools; absent or undefined when none are. */
+  tools?: ChatToolOffer | undefined
+  /** Switched-off tool names; absent or undefined when none are. */
+  switchedOffToolNames?: readonly string[] | undefined
+}>
+
+/**
+ * Answers whether no switched-off tool is also offered.
+ *
+ * @param candidate - The request's offer and switched-off names.
+ * @returns True when no switched-off name is an offered client or backend
+ * tool, also when either part is absent.
+ */
+export function hasNoOfferedSwitchedOffTool(
+  candidate: ToolChoiceCandidate
+): boolean {
+  const offeredNames = new Set([
+    ...(candidate.tools?.definitions ?? []).map((tool) => tool.name),
+    ...(candidate.tools?.backendToolNames ?? [])
+  ])
+  return (candidate.switchedOffToolNames ?? []).every(
+    (toolName) => !offeredNames.has(toolName)
+  )
+}
+
+/** Explanation of a refused request that offers a switched-off tool. */
+export const OFFERED_SWITCHED_OFF_TOOL_MESSAGE =
+  "A request does not offer a tool it names as switched off."
+
+/**
+ * Validates a chat request for a new or an existing conversation.
+ *
+ * @remarks A tool named as switched off is never also offered.
+ */
+export const chatApiRequestBodySchema = z
+  .strictObject({
+    /** Conversation the turn starts or continues. */
+    conversation: chatConversationTargetSchema,
+    /** Non-empty user-authored prompt sent to the selected model. */
+    message: z.string().min(1),
+    /** Non-empty model identifier resolved by the backend runtime. */
+    model: z.string().min(1),
+    /** Required generation controls; absence is not represented by this contract. */
+    generationOptions: messageGenerationOptionsSchema,
+    /**
+     * Tools offered for this turn; absence means one round without tools.
+     */
+    tools: chatToolOfferSchema.optional(),
+    /**
+     * Tools the person switched off, by name, none of them offered; absence
+     * means none is. The backend tells the model they are off.
+     */
+    switchedOffToolNames: switchedOffToolNamesSchema.optional(),
+    /**
+     * Files sent with the message, in the order they were attached; absence
+     * means none. Each is stored with the message under its name.
+     */
+    attachments: chatAttachmentsSchema.optional()
+  })
+  .refine(hasNoOfferedSwitchedOffTool, OFFERED_SWITCHED_OFF_TOOL_MESSAGE)
 
 /**
  * Validates the discriminated SSE event variants emitted by the chat route.

@@ -715,6 +715,84 @@ describe("updateFastifyWithChatRoute", () => {
     expect(response.statusCode).toBe(400)
   })
 
+  it("tells the model which tools the person switched off, after the agent's instructions, in the turn it sends", async () => {
+    const testApp = await createChatRouteTestApp()
+    testApp.createConversationTurn.mockRestore()
+    testApp.completeChatStream.mockImplementation(async () =>
+      (async function* () {
+        yield createChatCompletionChunk({ content: "Hi", finishReason: "stop" })
+      })()
+    )
+    testApp.generateTitle.mockResolvedValue("Trip plan")
+    updateFastifyWithChatRoute(testApp.app, {
+      ...CHAT_ROUTE_OPTIONS,
+      generations: testApp.generations
+    })
+
+    const response = await sendChatRequest(testApp.app, {
+      ...NEW_CONVERSATION_REQUEST,
+      tools: { definitions: [READ_TEXT_FILE_TOOL] },
+      switchedOffToolNames: ["web_search", "search_files"]
+    })
+
+    expect(response.statusCode).toBe(200)
+    const [modelRequest] = testApp.completeChatStream.mock.calls[0] ?? []
+    expect(modelRequest?.messages[0]).toEqual({
+      role: "system",
+      content: expect.stringMatching(
+        /\n\nThese tools are turned off in Settings → Tools, so you cannot call them now: web_search, search_files\. /
+      )
+    })
+    expect(modelRequest?.tools).toEqual([READ_TEXT_FILE_FORMAT])
+  })
+
+  it.each([
+    [
+      "a switched-off tool it also offers",
+      {
+        tools: { definitions: [READ_TEXT_FILE_TOOL] },
+        switchedOffToolNames: ["read_text_file"]
+      },
+      "A request does not offer a tool it names as switched off."
+    ],
+    [
+      "the attachment reader switched off",
+      { switchedOffToolNames: ["read_attachment"] },
+      "A request does not switch off read_attachment; it has no switch."
+    ],
+    [
+      "65 switched-off tools",
+      {
+        switchedOffToolNames: Array.from(
+          { length: 65 },
+          (_, index) => `tool_${index}`
+        )
+      },
+      "switchedOffToolNames"
+    ]
+  ])(
+    "rejects a request with %s before storing a turn",
+    async (_label, fields, message) => {
+      const testApp = await createChatRouteTestApp()
+      updateFastifyWithChatRoute(testApp.app, {
+        ...CHAT_ROUTE_OPTIONS,
+        generations: testApp.generations
+      })
+
+      const response = await sendChatRequest(testApp.app, {
+        ...NEW_CONVERSATION_REQUEST,
+        ...fields
+      })
+
+      expect(response.statusCode).toBe(400)
+      expect(response.json()).toMatchObject({
+        message: expect.stringContaining(message)
+      })
+      expect(testApp.createConversationTurn).not.toHaveBeenCalled()
+      expect(testApp.completeChatStream).not.toHaveBeenCalled()
+    }
+  )
+
   it.each([
     [
       "offers the request's client tools to the model",

@@ -115,6 +115,22 @@ export function findRequestedBuiltInTools(
   }
 }
 
+/** Switched-off tool names of a request that names none. */
+const NO_SWITCHED_OFF_TOOL_NAMES: readonly string[] = Object.freeze([])
+
+/**
+ * Lists the tools a chat or chat-context request names as switched off.
+ *
+ * @param body - Validated request body.
+ * @returns The named tools in request order, none of them offered; empty
+ * when the request names none.
+ */
+export function listSwitchedOffToolNames(
+  body: Pick<ChatApiRequestBody, "switchedOffToolNames">
+): readonly string[] {
+  return body.switchedOffToolNames ?? NO_SWITCHED_OFF_TOOL_NAMES
+}
+
 /**
  * Finds the agent that answers the requested turn.
  *

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 import {
   buildAgentContext,
   calculateAgentContextHistoryMessageCount,
+  formatSystemPrompt,
   getAgentContextImageSides,
   readAgentContextImages,
   UNSEEN_CONTEXT_IMAGES,
@@ -565,6 +566,20 @@ describe("buildAgentContext", () => {
         }
       ])
     })
+  })
+})
+
+describe("formatSystemPrompt", () => {
+  it("leaves the agent's instructions unchanged when no tool is switched off", () => {
+    expect(formatSystemPrompt("You are Lys.", [])).toBe("You are Lys.")
+  })
+
+  it("adds a note after the instructions that names each switched-off tool in request order", () => {
+    expect(
+      formatSystemPrompt("You are Lys.", ["web_search", "read_text_file"])
+    ).toBe(
+      "You are Lys.\n\nThese tools are turned off in Settings → Tools, so you cannot call them now: web_search, read_text_file. If a request needs one of them, say that it is turned off and can be turned on in Settings → Tools; do not guess what it would return or claim to have used it."
+    )
   })
 })
 

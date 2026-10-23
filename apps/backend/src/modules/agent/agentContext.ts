@@ -408,6 +408,25 @@ function listImageAttachments(
 }
 
 /**
+ * Formats the system prompt a context sends.
+ * @param systemPrompt - The agent's own instructions.
+ * @param switchedOffToolNames - Names of the tools the person switched off,
+ * each once; empty when none is.
+ * @returns The instructions unchanged when no tool is switched off;
+ * otherwise the instructions followed, after a blank line, by a note naming
+ * the switched-off tools in request order and telling the model to say a
+ * needed one is off instead of guessing what it would return.
+ */
+export function formatSystemPrompt(
+  systemPrompt: string,
+  switchedOffToolNames: readonly string[]
+): string {
+  if (switchedOffToolNames.length === 0) return systemPrompt
+  const toolNames = switchedOffToolNames.join(", ")
+  return `${systemPrompt}\n\nThese tools are turned off in Settings → Tools, so you cannot call them now: ${toolNames}. If a request needs one of them, say that it is turned off and can be turned on in Settings → Tools; do not guess what it would return or claim to have used it.`
+}
+
+/**
  * Builds the context an agent sends to its model for one turn.
  * @typeParam TImage - What the context holds of each image the model sees:
  * the whole image for a turn, its sides for a measurement.

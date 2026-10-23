@@ -106,6 +106,7 @@ async function createHelloReply(agent: Agent): Promise<void> {
     generationOptions: { temperature: 0.4 },
     clientTools: [],
     builtInTools: [],
+    switchedOffToolNames: [],
     abortSignal: new AbortController().signal,
     updateAssistantMessageState: () => true,
     createReplyPart: vi.fn(),

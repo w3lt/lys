@@ -103,6 +103,7 @@ function buildHelloAgentTurn(): AgentTurn {
     generationOptions: { temperature: 0.4 },
     clientTools: [],
     builtInTools: [],
+    switchedOffToolNames: [],
     abortSignal: new AbortController().signal,
     updateAssistantMessageState: () => true,
     createReplyPart: vi.fn(),

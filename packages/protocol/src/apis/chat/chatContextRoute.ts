@@ -9,25 +9,39 @@ import {
   llmRuntimeUnavailableProblemSchema
 } from "../../http/errors/llm"
 import { llmServiceBusyProblemSchema } from "../../http/errors/llmServiceBusy"
-import { chatConversationTargetSchema, chatToolOfferSchema } from "./chatRoute"
+import {
+  chatConversationTargetSchema,
+  chatToolOfferSchema,
+  hasNoOfferedSwitchedOffTool,
+  OFFERED_SWITCHED_OFF_TOOL_MESSAGE,
+  switchedOffToolNamesSchema
+} from "./chatRoute"
 import { apiChatContextRoute } from "./routes"
 
 /**
  * Validates a request to measure the context a conversation's next message
  * would be sent with.
  *
- * @remarks Names the conversation, model, and tools exactly as the chat
- * request that would send the message names them; the message's text is not
- * part of the measurement.
+ * @remarks Names the conversation, model, offered tools, and switched-off
+ * tools exactly as the chat request that would send the message names them;
+ * the message's text is not part of the measurement. A tool named as
+ * switched off is never also offered.
  */
-export const chatContextApiRequestBodySchema = z.strictObject({
-  /** Conversation the next message would start or continue. */
-  conversation: chatConversationTargetSchema,
-  /** Non-empty identifier of the model the message would be sent to. */
-  model: z.string().min(1),
-  /** Tools the message would offer; absence means none. */
-  tools: chatToolOfferSchema.optional()
-})
+export const chatContextApiRequestBodySchema = z
+  .strictObject({
+    /** Conversation the next message would start or continue. */
+    conversation: chatConversationTargetSchema,
+    /** Non-empty identifier of the model the message would be sent to. */
+    model: z.string().min(1),
+    /** Tools the message would offer; absence means none. */
+    tools: chatToolOfferSchema.optional(),
+    /**
+     * Tools the person switched off, by name; absence means none is. The
+     * measurement counts the note that tells the model they are off.
+     */
+    switchedOffToolNames: switchedOffToolNamesSchema.optional()
+  })
+  .refine(hasNoOfferedSwitchedOffTool, OFFERED_SWITCHED_OFF_TOOL_MESSAGE)
 
 /** Validates a whole number of tokens. */
 const tokenCountSchema = z.int().nonnegative()
@@ -43,7 +57,10 @@ export const chatContextApiResponseSchema = z
   .strictObject({
     /** Context length the model is loaded with; a positive integer. */
     contextLength: z.int().positive(),
-    /** Tokens of the answering agent's system prompt. */
+    /**
+     * Tokens of the answering agent's system prompt, with the note naming
+     * the switched-off tools when the request names any.
+     */
     systemPromptTokens: tokenCountSchema,
     /** Tokens of the offered tool definitions; 0 when none are offered. */
     toolTokens: tokenCountSchema,

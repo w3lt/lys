@@ -81,6 +81,11 @@ export type CreateToolCallGate = () => Promise<ToolCallGate>
 export type ToolCallRoundContext = Readonly<{
   /** Tools offered for the turn. */
   tools: AgentToolset
+  /**
+   * Names of the tools the person switched off, none of them offered; a
+   * call of one is answered as switched off.
+   */
+  switchedOffToolNames: ReadonlySet<string>
   /** Sends one allowed call of a client tool to run. */
   sendClientToolCall: SendClientToolCall
   /**
@@ -101,6 +106,8 @@ export type ToolCallRoundContext = Readonly<{
 type ToolCallHandling = Readonly<{
   /** Tools offered for the turn. */
   tools: AgentToolset
+  /** Names of the tools the person switched off, none of them offered. */
+  switchedOffToolNames: ReadonlySet<string>
   /**
    * Approval gate of the round; undefined when no call of the round passes
    * one, because every call names a tool that runs without approval or no
@@ -305,8 +312,9 @@ export function buildDefinedToolOffer(
  * throws when the gate cannot be created, or a backend tool's run fails for
  * a reason other than Stop.
  * @remarks Each call gets a new UUIDv7, which is its part's identity. Calls
- * of unknown tools and calls whose arguments do not match are stored as
- * failed with the message the model reads; nobody is asked about them. A
+ * of switched-off tools, of unknown tools, and calls whose arguments do not
+ * match are stored as failed with the message the model reads; nobody is
+ * asked about them, and a switched-off tool never runs. A
  * call of a backend tool that runs without approval is stored as running at
  * once. Every other call passes the round's gate, created once for a round
  * that has such a call, so the saved choices are read at most once per
@@ -332,6 +340,7 @@ export async function handleToolCallRound(
   if (context.abortSignal.aborted) return undefined
   const handling: ToolCallHandling = Object.freeze({
     tools: context.tools,
+    switchedOffToolNames: context.switchedOffToolNames,
     gate,
     round: round.round,
     sendClientToolCall: context.sendClientToolCall,
@@ -423,7 +432,7 @@ async function handleToolCall(
   if (tool === undefined)
     return createFailedToolCall(
       handledCall,
-      formatUnknownToolMessage(toolCall, handling.tools),
+      formatMissingToolMessage(toolCall, handling),
       handling
     )
   const checkedArguments = tool.agentTool.parseCallArguments(
@@ -768,15 +777,20 @@ function formatToolCallResult(
 /**
  * Formats what the model reads when it called a tool that was not offered.
  *
- * @param toolCall - Call naming the unknown tool.
- * @param tools - Tools offered for the turn.
- * @returns A sentence naming the unknown tool and every offered tool.
+ * @param toolCall - Call naming a tool that was not offered.
+ * @param handling - Tools offered for the turn and the switched-off names.
+ * @returns For a switched-off tool, a sentence saying it is turned off and
+ * did not run; otherwise a sentence naming the unknown tool and every
+ * offered tool.
  */
-function formatUnknownToolMessage(
+function formatMissingToolMessage(
   toolCall: ContextToolCall,
-  tools: AgentToolset
+  handling: Pick<ToolCallHandling, "tools" | "switchedOffToolNames">
 ): string {
-  const offeredNames = [...tools.keys()].join(", ")
+  if (handling.switchedOffToolNames.has(toolCall.toolName)) {
+    return `"${toolCall.toolName}" is turned off in Settings → Tools, so it did not run. Say that it is turned off instead of guessing what it would return.`
+  }
+  const offeredNames = [...handling.tools.keys()].join(", ")
   return `No tool is named "${toolCall.toolName}". The tools you can call are: ${offeredNames}.`
 }
 

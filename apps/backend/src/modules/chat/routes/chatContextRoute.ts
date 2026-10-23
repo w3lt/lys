@@ -31,6 +31,7 @@ import {
 import {
   findRequestedAgent,
   findRequestedBuiltInTools,
+  listSwitchedOffToolNames,
   sendUnansweredTurnProblem,
   type TurnAgentLookups
 } from "./turnRequest"
@@ -192,7 +193,8 @@ async function handleChatContextRequest(
       builtInTools,
       capabilities.trainedForToolUse &&
         hasReadableTextAttachment(measured.attachments)
-    )
+    ),
+    switchedOffToolNames: listSwitchedOffToolNames(body)
   })
   if (measurement === undefined) {
     const problem = createLlmHealthProblem({

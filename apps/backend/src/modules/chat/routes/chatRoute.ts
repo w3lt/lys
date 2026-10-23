@@ -72,6 +72,7 @@ import {
 import {
   findRequestedAgent,
   findRequestedBuiltInTools,
+  listSwitchedOffToolNames,
   sendUnansweredTurnProblem,
   type TurnAgentLookups,
   type UnansweredTurnOutcome
@@ -222,6 +223,8 @@ type TurnGenerationInput = Readonly<{
    * then the attachment reader when the turn offers it; empty when none.
    */
   builtInTools: readonly TurnBuiltInTool[]
+  /** Tools the request named as switched off; empty when it named none. */
+  switchedOffToolNames: readonly string[]
   /** Whether the model sees images. */
   canSeeImages: boolean
   /** Reads the bytes of one stored image attachment of the conversation. */
@@ -759,6 +762,7 @@ function buildTurnGenerationInput(
           (location) => attachmentFiles.readAttachment(location)
         )
       : accepted.builtInTools,
+    switchedOffToolNames: listSwitchedOffToolNames(body),
     canSeeImages: accepted.capabilities.vision,
     findAttachmentImage: buildAttachmentImageReader(
       conversationId,
@@ -919,6 +923,7 @@ function buildAgentTurn(
     generationOptions: input.generationOptions,
     clientTools: input.clientTools,
     builtInTools: input.builtInTools,
+    switchedOffToolNames: input.switchedOffToolNames,
     abortSignal,
     createReplyPart: (draft) =>
       replyParts.createReplyPart(assistantMessageId, draft),

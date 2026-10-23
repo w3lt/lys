@@ -84,19 +84,6 @@ impl LysSettings {
         load_settings_file(&lys_home.settings_path())
     }
 
-    /// Reads the settings file under `lys_home` without creating it.
-    ///
-    /// Returns `None` when there is no file; nothing is ever written. An
-    /// existing file is read as [`LysSettings::load_settings`] reads it.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error naming the settings path when the file cannot be read
-    /// or JSON cannot be parsed.
-    pub fn find_settings(lys_home: &LysHome) -> Result<Option<Self>, String> {
-        find_settings_file(&lys_home.settings_path())
-    }
-
     /// Returns the location the person saved, which may hold no part.
     pub fn location(&self) -> &LocationSettings {
         &self.location
@@ -130,13 +117,15 @@ fn load_settings_file(path: &Path) -> Result<LysSettings, String> {
     }
 }
 
-/// Reads the settings stored at `path`, or `None` when there is no file.
+/// Reads the settings stored at `path`, such as the settings file of the Lys
+/// home, without creating it, or `None` when there is no file. An existing
+/// file is read as [`LysSettings::load_settings`] reads it.
 ///
 /// # Errors
 ///
-/// Returns an error when the file cannot be read or parsed. Nothing is
-/// written.
-fn find_settings_file(path: &Path) -> Result<Option<LysSettings>, String> {
+/// Returns an error naming `path` when the file cannot be read or JSON cannot
+/// be parsed. Nothing is written.
+pub fn find_settings_file(path: &Path) -> Result<Option<LysSettings>, String> {
     match fs::read_to_string(path) {
         Ok(contents) => serde_json::from_str(&contents)
             .map(Some)

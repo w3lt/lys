@@ -4,12 +4,14 @@
 //! The location is never detected: no Location Services, no network lookup,
 //! no guess from the time zone. Without a saved location the tool fails.
 
+use std::path::Path;
+
 use serde::Serialize;
 use tauri::State;
 
 use super::definition::{ToolAccess, ToolDefinition, ToolGroup, ToolRunner};
 use crate::{
-    settings::{location::LocationSettings, LysSettings},
+    settings::{find_settings_file, location::LocationSettings, LysSettings},
     utils::lys_home::LysHome,
 };
 
@@ -40,12 +42,22 @@ pub enum GetLocationError {
 ///
 /// # Errors
 ///
-/// Rejects with [`GetLocationError::LocationNotSet`] when no location is
-/// saved, and with [`GetLocationError::SettingsUnreadable`] when the settings
-/// file cannot be read or parsed.
+/// Rejects as [`get_saved_location`] does.
 pub fn get_location(lys_home: State<'_, LysHome>) -> Result<LocationSettings, GetLocationError> {
+    get_saved_location(&lys_home.settings_path())
+}
+
+/// Gets the location saved in the settings file at `settings_path`, without
+/// creating or changing the file.
+///
+/// # Errors
+///
+/// Returns [`GetLocationError::LocationNotSet`] when there is no file or no
+/// location is saved, and [`GetLocationError::SettingsUnreadable`] when the
+/// file cannot be read or parsed.
+fn get_saved_location(settings_path: &Path) -> Result<LocationSettings, GetLocationError> {
     let settings =
-        LysSettings::find_settings(&lys_home).map_err(|_| GetLocationError::SettingsUnreadable)?;
+        find_settings_file(settings_path).map_err(|_| GetLocationError::SettingsUnreadable)?;
 
     find_saved_location(settings.as_ref())
 }
@@ -84,36 +96,47 @@ pub(super) fn build_get_location_definition() -> ToolDefinition {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use serde_json::{json, Value};
 
-    use super::{find_saved_location, GetLocationError};
-    use crate::settings::LysSettings;
+    use super::{get_saved_location, GetLocationError};
+    use crate::tools::test_directory::TestDirectory;
 
-    /// Reads `stored` as a settings file.
-    fn parse_settings(stored: Value) -> LysSettings {
-        serde_json::from_value(stored).expect("valid settings")
-    }
+    /// Name of the settings file each test writes in its own directory.
+    const SETTINGS_FILE_NAME: &str = "settings.json";
 
     #[test]
-    fn gives_every_saved_part_and_null_for_the_others() {
-        let settings = parse_settings(json!({
+    fn gives_every_saved_part_and_null_for_the_others_without_changing_the_file() {
+        let directory = TestDirectory::create("location-saved");
+        let stored_text = json!({
             "location": { "city": "Lyon", "region": null, "country": "France" }
-        }));
+        })
+        .to_string();
+        let settings_path = directory.create_file(SETTINGS_FILE_NAME, &stored_text);
 
-        let location = find_saved_location(Some(&settings)).expect("a saved location");
+        let location = get_saved_location(&settings_path).expect("a saved location");
 
         assert_eq!(
             serde_json::to_value(location).expect("serialize"),
             json!({ "city": "Lyon", "region": null, "country": "France" })
         );
+        assert_eq!(
+            fs::read_to_string(&settings_path).expect("read the settings file"),
+            stored_text
+        );
     }
 
     #[test]
-    fn fails_without_a_settings_file() {
+    fn fails_without_a_settings_file_and_creates_none() {
+        let directory = TestDirectory::create("location-missing");
+        let settings_path = directory.path().join("lys-home").join(SETTINGS_FILE_NAME);
+
         assert_eq!(
-            find_saved_location(None),
+            get_saved_location(&settings_path),
             Err(GetLocationError::LocationNotSet)
         );
+        assert!(!directory.path().join("lys-home").exists());
     }
 
     #[test]
@@ -123,12 +146,44 @@ mod tests {
             json!({ "location": {} }),
             json!({ "location": { "city": null, "region": null, "country": null } }),
         ] {
-            let settings = parse_settings(stored.clone());
+            let directory = TestDirectory::create("location-not-set");
+            let settings_path = directory.create_file(SETTINGS_FILE_NAME, stored.to_string());
 
             assert_eq!(
-                find_saved_location(Some(&settings)),
+                get_saved_location(&settings_path),
                 Err(GetLocationError::LocationNotSet),
                 "{stored}"
+            );
+        }
+    }
+
+    #[test]
+    fn fails_when_the_settings_file_cannot_be_read() {
+        let directory = TestDirectory::create("location-unreadable");
+        let settings_path = directory.create_subdirectory(SETTINGS_FILE_NAME);
+
+        assert_eq!(
+            get_saved_location(&settings_path),
+            Err(GetLocationError::SettingsUnreadable)
+        );
+    }
+
+    #[test]
+    fn fails_when_the_settings_file_is_not_valid_settings_json() {
+        let padded_city: Value = json!({ "location": { "city": "Lyon " } });
+
+        for stored_text in [String::from("{ not json"), padded_city.to_string()] {
+            let directory = TestDirectory::create("location-unusable");
+            let settings_path = directory.create_file(SETTINGS_FILE_NAME, &stored_text);
+
+            assert_eq!(
+                get_saved_location(&settings_path),
+                Err(GetLocationError::SettingsUnreadable),
+                "{stored_text}"
+            );
+            assert_eq!(
+                fs::read_to_string(&settings_path).expect("read the settings file"),
+                stored_text
             );
         }
     }

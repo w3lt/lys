@@ -212,6 +212,30 @@ only to a model whose `trainedForToolUse` is true; the backend does not check
 this itself ([#135](https://github.com/w3lt/lys/issues/135)). A reply can make any number of tool calls
 ([#136](https://github.com/w3lt/lys/issues/136)).
 
+### Switched-off tools
+
+A request can name the tools the person switched off, so the model can say
+that a tool it needs is off instead of guessing what the tool would return:
+
+```json
+{ "switchedOffToolNames": ["web_search", "search_files"] }
+```
+
+`switchedOffToolNames` is optional; when sent, it lists 1 to 64 tool names,
+each once, in the tool name format. A name the backend does not list is
+allowed. It never names `read_attachment`, which has no switch, or a tool the
+request offers in `tools`; a request that breaks these rules returns `400`
+before anything is stored. For a request that names any, every round of the
+turn sends the agent's system prompt followed by a blank line and a note that
+names them in request order, and that asks the model to say a needed tool is
+turned off and can be turned on in Settings → Tools, without guessing what it
+would return or claiming to have used it. When the turn offers any tool, a
+call the model still makes to a named tool is neither asked about nor run: its
+step fails with a result saying the tool is turned off, which the model reads
+in the next round. The desktop names every listed tool whose switch is off,
+or every listed tool while tool calls are off, and sends the field only to a
+model whose `trainedForToolUse` is true.
+
 ## Chat response shape
 
 Accepted chat turns respond as SSE. A missing conversation, a new
@@ -257,11 +281,13 @@ meter calls it; nothing is stored and the model generates nothing.
 }
 ```
 
-`conversation`, `model`, and `tools` follow the
+`conversation`, `model`, `tools`, and `switchedOffToolNames` follow the
 [chat request body](#chat-request-body); there is no `message` and no
 `generationOptions`. The backend builds the context a turn's first round would
 send, with an empty new message in place of the text: the answering agent's
-current system prompt, the stored messages a turn includes, the empty message,
+current system prompt, followed by the note naming the
+[switched-off tools](#switched-off-tools) when the request names any, the
+stored messages a turn includes, the empty message,
 and the tools a turn would offer, client tools first, then the backend's,
 then `read_attachment` when the conversation holds a text file for a model
 trained for tool use. It counts them with the loaded model's tokenizer and
@@ -281,7 +307,7 @@ answers `200`:
 | Field                 | Meaning                                                                       |
 | --------------------- | ----------------------------------------------------------------------------- |
 | `contextLength`       | Context length the model is loaded with; the smallest of its loaded instances |
-| `systemPromptTokens`  | Tokens of the agent's system prompt                                           |
+| `systemPromptTokens`  | Tokens of the agent's system prompt, with the switched-off tools' note        |
 | `toolTokens`          | Tokens of the offered tool definitions; `0` when none are offered             |
 | `historyTokens`       | Tokens of the stored messages the next turn would include                     |
 | `historyMessageCount` | Number of those messages                                                      |

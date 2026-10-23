@@ -60,8 +60,9 @@ repository today; it is not a promise of unreleased work.
   and Lysiptera, which can be read and duplicated but not changed or deleted,
   and creates, edits, duplicates, and deletes the user's agents through the
   backend. The Tools pane lists the desktop's file tools and the backend's
-  `read_page` and `web_search`; each tool's Ask me or Just run choice is
-  saved, and the other switches last for the session only. `read_page` is
+  `read_page` and `web_search`; each tool's switch and its Ask me or Just run
+  choice are saved, and the Tool calls switch lasts for the session only.
+  `read_page` is
   off and cannot be switched on while vmo is not ready. The
   Secrets pane saves the Tavily API key `web_search` needs, and checks it.
 - A chat offers the switched-on tools to a model trained for tool use and
@@ -109,7 +110,6 @@ The current repository does not yet provide:
 
 - a Conversation settings pane
 - replay or reconnect semantics for chat streams
-- tool choices that are saved ([#110](https://github.com/w3lt/lys/issues/110))
 - a production desktop release workflow
 - evidenced ADR and RFC records, and a canonical release log
 
